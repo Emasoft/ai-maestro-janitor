@@ -53,6 +53,3 @@ htmlcov/
 docs_dev/
 .tldr/
 llm_externalizer_output/
-
-# uv lock file (not shipped with a plugin)
-uv.lock
