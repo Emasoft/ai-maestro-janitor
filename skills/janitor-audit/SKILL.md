@@ -106,6 +106,8 @@ This skill READS drift state. It NEVER performs remediation itself. The remediat
 
 ## Checklist
 
+Copy this checklist and track your progress:
+
 - [ ] Run all five monitors in `--one-shot` mode
 - [ ] Group findings by category (PRs, Worktrees, TRDDs, Task/PR mismatches)
 - [ ] Include stderr tail for any monitor that returned non-zero

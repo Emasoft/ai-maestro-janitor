@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# pre-push quality gate for ai-maestro-janitor
+# Runs CPV strict validation before every push.
+set -euo pipefail
+
+PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+
+echo "[pre-push] Running CPV strict validation..."
+uvx --from "git+https://github.com/Emasoft/claude-plugins-validation" \
+    --with pyyaml \
+    cpv-remote-validate plugin "$PLUGIN_DIR" --strict
+
+echo "[pre-push] Validation passed."
