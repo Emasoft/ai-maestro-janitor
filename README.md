@@ -1,5 +1,8 @@
 # ai-maestro-janitor
 
+<!--BADGES-START-->
+<!--BADGES-END-->
+
 Session-scoped janitor plugin for Claude Code. Reconciles drift between what
 the repo actually contains and what the todo list / open PRs / worktrees /
 TRDDs claim, and handles rate-limit auto-resume plus prompt-cache keep-alive —

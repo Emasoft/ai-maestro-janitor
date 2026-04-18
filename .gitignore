@@ -1,0 +1,47 @@
+# Build artifacts and caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Node / npm
+node_modules/
+.npm/
+
+# Secrets and local config
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Plugin runtime state (per-project, not tracked)
+.janitor/
+
+# Test and coverage artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+*.log
+
+# Distribution packages
+*.tar.gz
+*.zip
+*.whl

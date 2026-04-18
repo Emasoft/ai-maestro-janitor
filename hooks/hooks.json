@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start.sh",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit.sh",
             "timeout": 2
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.sh",
             "timeout": 2
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-failure.sh",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-failure.sh",
             "timeout": 2
           }
         ]
