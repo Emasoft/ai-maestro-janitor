@@ -2,13 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.2] - 2026-04-18
+## [0.1.3] - 2026-04-18
 
 ### Bug Fixes
 
-- Use uvx ruff instead of uv sync --extra dev (no dev deps defined in pyproject)
-- Remove trailing spaces and fix heading indent in cliff template
+- Add required userConfig.type fields (unblocks claude plugin install)
+- Collapse double blanks in cliff template + regen CHANGELOG.md
 
 ### Miscellaneous
 
 - Update uv.lock
+

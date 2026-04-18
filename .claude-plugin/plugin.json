@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDD drift, task/PR mismatch; handles rate-limit auto-resume and prompt-cache keep-alive via Monitors + hooks. No external daemons.",
   "author": {
     "name": "Emasoft",
