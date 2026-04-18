@@ -1,0 +1,69 @@
+{
+  "name": "ai-maestro-janitor",
+  "version": "0.1.0",
+  "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDD drift, task/PR mismatch; handles rate-limit auto-resume and prompt-cache keep-alive via Monitors + hooks. No external daemons.",
+  "author": {
+    "name": "Emasoft",
+    "email": "713559+Emasoft@users.noreply.github.com"
+  },
+  "repository": "https://github.com/Emasoft/ai-maestro-janitor",
+  "homepage": "https://github.com/Emasoft/ai-maestro-janitor#readme",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "monitors",
+    "janitor",
+    "pr-reconciliation",
+    "rate-limit",
+    "cache-keepalive"
+  ],
+  "monitors": "./monitors/monitors.json",
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills/",
+  "userConfig": {
+    "github_repo": {
+      "description": "GitHub repo slug for PR reconciliation (owner/repo). Defaults to the origin remote when unset.",
+      "sensitive": false
+    },
+    "trdd_path": {
+      "description": "Relative path from project root to the TRDD directory. Default: design/tasks/",
+      "sensitive": false
+    },
+    "pr_reconciler_interval": {
+      "description": "Seconds between PR reconciliation passes. Default: 900 (15 min).",
+      "sensitive": false
+    },
+    "worktree_janitor_interval": {
+      "description": "Seconds between worktree scans. Default: 900 (15 min).",
+      "sensitive": false
+    },
+    "trdd_drift_interval": {
+      "description": "Seconds between TRDD drift checks. Default: 3600 (1 h).",
+      "sensitive": false
+    },
+    "trdd_reminder_interval": {
+      "description": "Seconds between in-progress TRDD reminders. Default: 14400 (4 h).",
+      "sensitive": false
+    },
+    "task_pr_mismatch_interval": {
+      "description": "Seconds between task/PR cross-checks. Default: 1800 (30 min).",
+      "sensitive": false
+    },
+    "rate_limit_retry_interval": {
+      "description": "Seconds between rate-limit resume prompts. Default: 120 (2 min).",
+      "sensitive": false
+    },
+    "cache_keepalive_threshold": {
+      "description": "Idle seconds before emitting a cache keep-alive. Default: 270 (4m30s) for the 5-min cache; raise to 3600 for the 1-h cache.",
+      "sensitive": false
+    },
+    "trdd_staleness_days": {
+      "description": "Days a TRDD can sit 'In progress' before it counts as drift. Default: 14.",
+      "sensitive": false
+    },
+    "stale_pr_days": {
+      "description": "Days an open PR can sit without new commits before it counts as stale. Default: 14.",
+      "sensitive": false
+    }
+  }
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "name": "pr-reconciler",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/monitors/pr-reconciler.sh",
+    "description": "Detects open PRs whose HEAD is already on main (no-op candidates) and long-idle PRs.",
+    "when": "always"
+  },
+  {
+    "name": "worktree-janitor",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/monitors/worktree-janitor.sh",
+    "description": "Detects git worktrees whose branch was deleted or merged upstream.",
+    "when": "always"
+  },
+  {
+    "name": "trdd-drift",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/monitors/trdd-drift.sh",
+    "description": "Detects TRDD documents marked 'In progress' whose files have not been touched for a long time.",
+    "when": "always"
+  },
+  {
+    "name": "trdd-reminder",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/monitors/trdd-reminder.sh",
+    "description": "Periodic consolidated reminder of all TRDDs currently 'In progress'.",
+    "when": "always"
+  },
+  {
+    "name": "task-pr-mismatch",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/monitors/task-pr-mismatch.sh",
+    "description": "Detects session tasks whose status disagrees with the referenced PR state.",
+    "when": "always"
+  },
+  {
+    "name": "rate-limit-retry",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/monitors/rate-limit-retry.sh",
+    "description": "Emits a resume prompt every 2 minutes while the StopFailure flag is set.",
+    "when": "always"
+  },
+  {
+    "name": "cache-keepalive",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/monitors/cache-keepalive.sh",
+    "description": "Emits a keep-alive nudge when the session has been idle for longer than the prompt-cache TTL.",
+    "when": "always"
+  }
+]

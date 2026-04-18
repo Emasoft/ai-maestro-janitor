@@ -1,0 +1,58 @@
+name: Weekly janitor audit
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Make monitor scripts executable
+        run: chmod +x scripts/monitors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
+
+      - name: Run drift monitors (one-shot)
+        id: audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDE_PLUGIN_ROOT: ${{ github.workspace }}
+          CLAUDE_PROJECT_DIR: ${{ github.workspace }}
+          CLAUDE_PLUGIN_OPTION_GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -o pipefail
+          mkdir -p .janitor/state .janitor/logs
+          REPORT=$(
+            ./scripts/monitors/pr-reconciler.sh --one-shot
+            ./scripts/monitors/worktree-janitor.sh --one-shot
+            ./scripts/monitors/trdd-drift.sh --one-shot
+            ./scripts/monitors/trdd-reminder.sh --one-shot
+          )
+          printf '%s\n' "$REPORT" | tee audit-report.txt
+          if [ -s audit-report.txt ]; then
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open issue if drift found
+        if: steps.audit.outputs.has_findings == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY=$(cat audit-report.txt)
+          gh issue create \
+            --title "Weekly janitor audit found drift ($(date -u +%Y-%m-%d))" \
+            --body "$BODY" \
+            --label janitor
