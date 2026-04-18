@@ -22,56 +22,77 @@
     "github_repo": {
       "title": "GitHub Repository",
       "description": "GitHub repo slug for PR reconciliation (owner/repo). Defaults to the origin remote when unset.",
+      "type": "string",
       "sensitive": false
     },
     "trdd_path": {
       "title": "TRDD Directory Path",
       "description": "Relative path from project root to the TRDD directory. Default: design/tasks/",
+      "type": "string",
+      "default": "design/tasks/",
       "sensitive": false
     },
     "pr_reconciler_interval": {
       "title": "PR Reconciler Interval (seconds)",
       "description": "Seconds between PR reconciliation passes. Default: 900 (15 min).",
+      "type": "number",
+      "default": 900,
       "sensitive": false
     },
     "worktree_janitor_interval": {
       "title": "Worktree Janitor Interval (seconds)",
       "description": "Seconds between worktree scans. Default: 900 (15 min).",
+      "type": "number",
+      "default": 900,
       "sensitive": false
     },
     "trdd_drift_interval": {
       "title": "TRDD Drift Check Interval (seconds)",
       "description": "Seconds between TRDD drift checks. Default: 3600 (1 h).",
+      "type": "number",
+      "default": 3600,
       "sensitive": false
     },
     "trdd_reminder_interval": {
       "title": "TRDD Reminder Interval (seconds)",
       "description": "Seconds between in-progress TRDD reminders. Default: 14400 (4 h).",
+      "type": "number",
+      "default": 14400,
       "sensitive": false
     },
     "task_pr_mismatch_interval": {
       "title": "Task/PR Mismatch Check Interval (seconds)",
       "description": "Seconds between task/PR cross-checks. Default: 1800 (30 min).",
+      "type": "number",
+      "default": 1800,
       "sensitive": false
     },
     "rate_limit_retry_interval": {
       "title": "Rate-Limit Retry Interval (seconds)",
       "description": "Seconds between rate-limit resume prompts. Default: 120 (2 min).",
+      "type": "number",
+      "default": 120,
       "sensitive": false
     },
     "cache_keepalive_threshold": {
       "title": "Cache Keep-Alive Threshold (seconds)",
       "description": "Idle seconds before emitting a cache keep-alive. Default: 270 (4m30s) for the 5-min cache; raise to 3600 for the 1-h cache.",
+      "type": "number",
+      "default": 270,
       "sensitive": false
     },
     "trdd_staleness_days": {
       "title": "TRDD Staleness Threshold (days)",
       "description": "Days a TRDD can sit 'In progress' before it counts as drift. Default: 14.",
+      "type": "number",
+      "default": 14,
       "sensitive": false
     },
     "stale_pr_days": {
       "title": "Stale PR Threshold (days)",
       "description": "Days an open PR can sit without new commits before it counts as stale. Default: 14.",
+      "type": "number",
+      "default": 14,
       "sensitive": false
     }
   }
