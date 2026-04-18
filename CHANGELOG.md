@@ -7,6 +7,7 @@ All notable changes to `ai-maestro-janitor` follow [Semantic Versioning](https:/
 Initial release.
 
 ### Added
+
 - Seven background Monitors: `pr-reconciler`, `worktree-janitor`, `trdd-drift`,
   `trdd-reminder`, `task-pr-mismatch`, `rate-limit-retry`, `cache-keepalive`.
 - Four hooks: `SessionStart`, `UserPromptSubmit`, `Stop`, `StopFailure`.
@@ -16,5 +17,6 @@ Initial release.
 - `userConfig` entries for every cadence and threshold.
 
 ### Requirements
+
 - Claude Code v2.1.105+ (plugin Monitors).
 - `gh`, `jq`, git `origin` remote on GitHub.

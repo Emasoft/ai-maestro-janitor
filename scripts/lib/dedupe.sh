@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Dedupe helper: emits a message to stdout the FIRST time a given key is seen,
 # stays silent on repeats. Keys persist in a per-monitor seen-file so dedupe
 # survives session restarts.

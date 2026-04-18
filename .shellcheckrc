@@ -1,0 +1,7 @@
+# shellcheck project configuration
+# SC1091: don't follow dynamic source paths (CLAUDE_PLUGIN_ROOT is a runtime var)
+disable=SC1091
+# SC2012: ls is fine for this project's non-adversarial task-file listings
+disable=SC2012
+# Enable following sourced files when paths are resolvable
+external-sources=true

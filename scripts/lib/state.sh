@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Shared state helpers for ai-maestro-janitor hooks and monitors.
 # Resolves the project-local state/log dirs from $CLAUDE_PROJECT_DIR, or $PWD as
 # a last-resort fallback when the env var is unset (e.g. --one-shot mode in CI).
