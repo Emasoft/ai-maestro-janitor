@@ -79,6 +79,9 @@ run_detector worktree-janitor "${CLAUDE_PLUGIN_OPTION_WORKTREE_JANITOR_INTERVAL:
 run_detector trdd-drift       "${CLAUDE_PLUGIN_OPTION_TRDD_DRIFT_INTERVAL:-3600}"
 run_detector trdd-reminder    "${CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL:-14400}"
 run_detector task-pr-mismatch "${CLAUDE_PLUGIN_OPTION_TASK_PR_MISMATCH_INTERVAL:-1800}"
+run_detector stale-task       "${CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL:-1800}"
+run_detector dirty-tree       "${CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL:-300}"
+run_detector subagent-report  "${CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL:-3600}"
 
 rotate_log_if_big dispatch
 exit 0

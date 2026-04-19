@@ -1,7 +1,7 @@
 {
   "name": "ai-maestro-janitor",
   "version": "0.2.2",
-  "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDD drift, task/PR mismatch; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons, no Monitors.",
+  "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
     "email": "713559+Emasoft@users.noreply.github.com"
@@ -85,6 +85,55 @@
       "description": "Days an open PR can sit without new commits before it counts as stale. Default: 14.",
       "type": "number",
       "default": 14,
+      "sensitive": false
+    },
+    "stale_task_interval": {
+      "title": "Stale Task Detector Cadence (seconds)",
+      "description": "Minimum seconds between stale-task scans. Default: 1800 (30 min).",
+      "type": "number",
+      "default": 1800,
+      "sensitive": false
+    },
+    "stale_in_progress_threshold": {
+      "title": "Stale in_progress Threshold (seconds)",
+      "description": "Seconds an in_progress task can sit with no update before nudging. Default: 14400 (4 h).",
+      "type": "number",
+      "default": 14400,
+      "sensitive": false
+    },
+    "stale_pending_threshold": {
+      "title": "Stale pending Threshold (seconds)",
+      "description": "Seconds a pending task can sit with no update before nudging. Default: 86400 (24 h).",
+      "type": "number",
+      "default": 86400,
+      "sensitive": false
+    },
+    "dirty_tree_interval": {
+      "title": "Dirty Tree Detector Cadence (seconds)",
+      "description": "Minimum seconds between dirty-tree checks. Default: 300 (5 min).",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
+    "dirty_tree_threshold": {
+      "title": "Dirty Tree Threshold (seconds)",
+      "description": "Seconds the working tree can stay dirty before nudging to commit. Default: 1800 (30 min). Commit often — each commit is a recovery point.",
+      "type": "number",
+      "default": 1800,
+      "sensitive": false
+    },
+    "subagent_report_interval": {
+      "title": "Subagent Report Detector Cadence (seconds)",
+      "description": "Minimum seconds between subagent-report scans. Default: 3600 (1 h).",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "subagent_report_lookback": {
+      "title": "Subagent Report Lookback Window (seconds)",
+      "description": "Age cutoff for reports considered 'fresh' and needing action. Default: 86400 (24 h).",
+      "type": "number",
+      "default": 86400,
       "sensitive": false
     }
   }

@@ -44,7 +44,7 @@ main() {
 
         if ! git show-ref --verify --quiet "refs/heads/$current_branch" 2>/dev/null; then
           emit_once "$SEEN" "gone@${current_path}@${current_branch}" \
-            "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' no longer exists — prunable."
+            "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' no longer exists — prunable. Run: git worktree remove --force ${current_path} && git worktree prune"
         fi
 
         if [ -n "$main_sha" ]; then
@@ -52,7 +52,7 @@ main() {
           branch_sha=$(git rev-parse "refs/heads/$current_branch" 2>/dev/null) || branch_sha=""
           if [ -n "$branch_sha" ] && git merge-base --is-ancestor "$branch_sha" "$main_sha" 2>/dev/null; then
             emit_once "$SEEN" "merged@${current_path}@${current_branch}" \
-              "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' is merged into main — prunable."
+              "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' is merged into main — prunable. Run: git worktree remove --force ${current_path} && git update-ref -d refs/heads/${current_branch} && git worktree prune"
           fi
         fi
         ;;
