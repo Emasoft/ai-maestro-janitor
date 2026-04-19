@@ -2,13 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.1] - 2026-04-19
+## [0.2.2] - 2026-04-19
 
-### Bug Fixes
+### Documentation
 
-- Rename scripts/monitors → scripts/detectors + add dispatch.sh, drop monitors.json check (v0.2.0 refactor follow-up)
-
-### Miscellaneous
-
-- Update uv.lock
+- Verify end-to-end rate-limit recovery (89s offline → [janitor-resume] cue)
 
