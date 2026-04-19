@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -117,7 +117,7 @@
     },
     "dirty_tree_threshold": {
       "title": "Dirty Tree Threshold (seconds)",
-      "description": "Seconds the working tree can stay dirty before nudging to commit. Default: 1800 (30 min). Commit often — each commit is a recovery point.",
+      "description": "Seconds the working tree can stay dirty before nudging to commit. Default: 1800 (30 min). Commit often \u2014 each commit is a recovery point.",
       "type": "number",
       "default": 1800,
       "sensitive": false

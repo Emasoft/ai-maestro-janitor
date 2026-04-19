@@ -2,9 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.2] - 2026-04-19
+## [0.3.0] - 2026-04-19
 
-### Documentation
+### Bug Fixes
 
-- Verify end-to-end rate-limit recovery (89s offline → [janitor-resume] cue)
+- Quote $root inside ${..} to silence shellcheck SC2295
+
+### Features
+
+- Add stale-task + dirty-tree + subagent-report detectors
 
