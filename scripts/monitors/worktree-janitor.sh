@@ -30,7 +30,12 @@ run_once() {
       "branch "*)
         current_branch="${line#branch refs/heads/}"
         # Skip the primary worktree — that's our active working dir.
-        if [ "$current_path" = "$(resolve_project_root)" ]; then
+        # Canonicalize both paths with `pwd -P` so macOS /tmp vs /private/tmp
+        # symlink asymmetry doesn't break the comparison.
+        local canonical_current canonical_root
+        canonical_current=$(cd "$current_path" 2>/dev/null && pwd -P) || canonical_current="$current_path"
+        canonical_root=$(cd "$(resolve_project_root)" 2>/dev/null && pwd -P) || canonical_root=$(resolve_project_root)
+        if [ "$canonical_current" = "$canonical_root" ]; then
           continue
         fi
 

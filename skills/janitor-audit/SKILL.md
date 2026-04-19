@@ -19,7 +19,7 @@ Invokes each ai-maestro-janitor monitor in `--one-shot` mode, aggregates output 
 
 1. Resolve `JANITOR_ROOT` = `${CLAUDE_PROJECT_DIR}/.janitor` (fall back to `$(pwd)/.janitor` if the env var is unset).
 
-2. Run each drift-detection monitor in one-shot mode, capturing stdout and stderr separately. Do NOT rely on the monitors' seen-files — pass `--one-shot --fresh` semantics by temporarily redirecting the seen-file env (see Tips). Each run is a single synchronous pass.
+2. Run each drift-detection monitor in one-shot mode, capturing stdout and stderr separately. To guarantee a fresh pass (the running-background monitors' dedupe seen-files would otherwise silence previously-reported drift), pre-rename each `*-seen.txt` file before invoking the monitor and restore it afterwards — see Tips. Each run is a single synchronous pass.
 
    ```
    ${CLAUDE_PLUGIN_ROOT}/scripts/monitors/pr-reconciler.sh --one-shot
