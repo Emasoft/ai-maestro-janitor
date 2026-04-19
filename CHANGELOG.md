@@ -2,14 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.3] - 2026-04-18
+## [0.1.4] - 2026-04-19
 
 ### Bug Fixes
 
-- Add required userConfig.type fields (unblocks claude plugin install)
-- Collapse double blanks in cliff template + regen CHANGELOG.md
+- Worktree-janitor primary-worktree skip on macOS
+
+### Documentation
+
+- Tighten janitor-audit SKILL.md under 5000-char limit
 
 ### Miscellaneous
 
 - Update uv.lock
+- Disable MD012 to accept cliff-generated multi-blank lines
 
