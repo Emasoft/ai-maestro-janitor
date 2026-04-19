@@ -96,9 +96,9 @@
     },
     "stale_in_progress_threshold": {
       "title": "Stale in_progress Threshold (seconds)",
-      "description": "Seconds an in_progress task can sit with no update before nudging. Default: 14400 (4 h).",
+      "description": "Seconds an in_progress task can sit with no update before nudging. Default: 7200 (2 h).",
       "type": "number",
-      "default": 14400,
+      "default": 7200,
       "sensitive": false
     },
     "stale_pending_threshold": {

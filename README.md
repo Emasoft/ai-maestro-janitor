@@ -40,7 +40,7 @@ window clears.
 | `trdd-drift` | 1 h | TRDDs marked `In progress` that have not been touched in >14 days. |
 | `trdd-reminder` | 4 h | Consolidated reminder of all TRDDs currently `In progress`. |
 | `task-pr-mismatch` | 30 min | Session tasks whose status contradicts the state of a referenced PR. |
-| `stale-task` | 30 min | Tasks stuck `in_progress` >4h or `pending` >24h with no TaskUpdate. Nudges to resume, close, or defer. |
+| `stale-task` | 30 min | Tasks stuck `in_progress` >2h or `pending` >24h with no TaskUpdate. Nudges to resume, close, or defer. |
 | `dirty-tree` | 5 min | Working tree left uncommitted for >30 min. Reminds to commit often (every commit is a recovery point) and lists safe alternatives when `git_safety_guard.py` blocks a destructive op: move files to `_dev/`, use `git rm`, `git stash`, or a backup branch. |
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
 
