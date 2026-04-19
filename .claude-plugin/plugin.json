@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -33,7 +33,7 @@
     },
     "heartbeat_cron": {
       "title": "Heartbeat Cron Expression",
-      "description": "Standard 5-field cron for the janitor heartbeat. Default: \"*/5 * * * *\" (every 5 min — aligned with the prompt-cache TTL, low token cost per fire). Raise to e.g. \"*/20 * * * *\" if you are using the 1-hour cache and accept longer idle gaps.",
+      "description": "Standard 5-field cron for the janitor heartbeat. Default: \"*/5 * * * *\" (every 5 min \u2014 aligned with the prompt-cache TTL, low token cost per fire). Raise to e.g. \"*/20 * * * *\" if you are using the 1-hour cache and accept longer idle gaps.",
       "type": "string",
       "default": "*/5 * * * *",
       "sensitive": false
