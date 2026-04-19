@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
+# TRDD reminder — consolidated reminder of all TRDDs currently "In progress".
+# Uses a time-bucket key for dedupe so the reminder fires at most once per
+# configured interval even when the heartbeat cron fires more often.
 set -euo pipefail
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/dedupe.sh"
-init_state
 
-ONE_SHOT=0
-[ "${1:-}" = "--one-shot" ] && ONE_SHOT=1
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=../lib/state.sh
+source "$HERE/../lib/state.sh"
+# shellcheck source=../lib/dedupe.sh
+source "$HERE/../lib/dedupe.sh"
+init_state
 
 INTERVAL="${CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL:-14400}"
 
 session_key() {
-  # Pick a stable session-scoped key: prefer CLAUDE_SESSION_ID, fall back to
-  # hostname+pid hash so the dedupe file still rotates across sessions.
+  # Prefer CLAUDE_SESSION_ID; fall back to hostname+pid hash so the dedupe
+  # file still rotates across sessions.
   if [ -n "${CLAUDE_SESSION_ID:-}" ]; then
     echo "$CLAUDE_SESSION_ID"
   else
@@ -19,13 +23,13 @@ session_key() {
   fi
 }
 
-run_once() {
+main() {
   local root trdd_dir
   root=$(resolve_project_root)
   trdd_dir="$root/${CLAUDE_PLUGIN_OPTION_TRDD_PATH:-design/tasks}"
   trdd_dir="${trdd_dir%/}"
 
-  [ -d "$trdd_dir" ] || { log_line trdd-reminder "TRDD dir $trdd_dir not present — skipping tick"; return; }
+  [ -d "$trdd_dir" ] || { log_line trdd-reminder "TRDD dir $trdd_dir not present — skipping"; return; }
 
   local now
   now=$(date +%s)
@@ -67,14 +71,5 @@ run_once() {
   rotate_log_if_big trdd-reminder
 }
 
-if [ "$ONE_SHOT" = "1" ]; then
-  run_once
-  exit 0
-fi
-
-# First fire happens 10s after monitor start so hooks have initialized state.
-sleep 10
-while true; do
-  run_once
-  sleep "$INTERVAL"
-done
+main
+exit 0

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
+# Task/PR mismatch detector — one-shot cross-check between Claude Code task
+# entries and the current state of referenced GitHub PRs.
 set -euo pipefail
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/dedupe.sh"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=../lib/state.sh
+source "$HERE/../lib/state.sh"
+# shellcheck source=../lib/dedupe.sh
+source "$HERE/../lib/dedupe.sh"
 init_state
 
-ONE_SHOT=0
-[ "${1:-}" = "--one-shot" ] && ONE_SHOT=1
-
-INTERVAL="${CLAUDE_PLUGIN_OPTION_TASK_PR_MISMATCH_INTERVAL:-1800}"
 SEEN="$STATE_DIR/task-pr-mismatch-seen.txt"
 
 # Resolve the team UUID under ~/.claude/tasks/. Claude Code uses one dir per
@@ -22,18 +24,18 @@ resolve_team_uuid() {
   echo "$newest"
 }
 
-run_once() {
+main() {
   local repo="${CLAUDE_PLUGIN_OPTION_GITHUB_REPO:-}"
   if [ -z "$repo" ]; then
     repo=$(git remote get-url origin 2>/dev/null \
       | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?|\1|' | head -1) || true
   fi
-  [ -z "$repo" ] && { log_line task-pr-mismatch "no github_repo — skipping tick"; return; }
+  [ -z "$repo" ] && { log_line task-pr-mismatch "no github_repo — skipping"; return; }
 
   local team
-  team=$(resolve_team_uuid) || { log_line task-pr-mismatch "no task directory under ~/.claude/tasks — skipping tick"; return; }
+  team=$(resolve_team_uuid) || { log_line task-pr-mismatch "no task directory under ~/.claude/tasks — skipping"; return; }
   local tasks_dir="$HOME/.claude/tasks/$team"
-  [ -d "$tasks_dir" ] || { log_line task-pr-mismatch "team dir $tasks_dir missing — skipping tick"; return; }
+  [ -d "$tasks_dir" ] || { log_line task-pr-mismatch "team dir $tasks_dir missing — skipping"; return; }
 
   shopt -s nullglob
   local t
@@ -79,12 +81,5 @@ run_once() {
   rotate_log_if_big task-pr-mismatch
 }
 
-if [ "$ONE_SHOT" = "1" ]; then
-  run_once
-  exit 0
-fi
-
-while true; do
-  run_once
-  sleep "$INTERVAL"
-done
+main
+exit 0

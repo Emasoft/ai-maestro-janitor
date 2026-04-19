@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
+# PR reconciler — one-shot drift detector.
+# Invoked by scripts/dispatch.sh (the cron heartbeat) or by the /janitor-audit
+# skill. Accepts --one-shot for backward compatibility; runs once either way.
 set -euo pipefail
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/dedupe.sh"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=../lib/state.sh
+source "$HERE/../lib/state.sh"
+# shellcheck source=../lib/dedupe.sh
+source "$HERE/../lib/dedupe.sh"
 init_state
 
-ONE_SHOT=0
-[ "${1:-}" = "--one-shot" ] && ONE_SHOT=1
-
-INTERVAL="${CLAUDE_PLUGIN_OPTION_PR_RECONCILER_INTERVAL:-900}"
 STALE_DAYS="${CLAUDE_PLUGIN_OPTION_STALE_PR_DAYS:-14}"
 SEEN="$STATE_DIR/pr-reconciler-seen.txt"
 
-run_once() {
+main() {
   local repo="${CLAUDE_PLUGIN_OPTION_GITHUB_REPO:-}"
   if [ -z "$repo" ]; then
     repo=$(git remote get-url origin 2>/dev/null \
@@ -19,13 +22,13 @@ run_once() {
       | head -1) || true
   fi
   if [ -z "$repo" ]; then
-    log_line pr-reconciler "no github_repo and no origin remote — skipping tick"
+    log_line pr-reconciler "no github_repo and no origin remote — skipping"
     return
   fi
 
   local main_sha
   main_sha=$(git rev-parse origin/main 2>/dev/null) || {
-    log_line pr-reconciler "origin/main not resolvable — skipping tick"
+    log_line pr-reconciler "origin/main not resolvable — skipping"
     return
   }
 
@@ -35,7 +38,7 @@ run_once() {
           --json number,title,headRefOid,updatedAt \
           --jq '.[] | [.number, .headRefOid, (.title | gsub("\\s+"; " ")), ((now - (.updatedAt | fromdateiso8601)) | floor)] | @tsv' \
         2>> "$LOG_DIR/pr-reconciler.log") || {
-    log_line pr-reconciler "gh pr list failed (auth? offline?) — skipping tick"
+    log_line pr-reconciler "gh pr list failed (auth? offline?) — skipping"
     return
   }
 
@@ -59,12 +62,5 @@ run_once() {
   rotate_log_if_big pr-reconciler
 }
 
-if [ "$ONE_SHOT" = "1" ]; then
-  run_once
-  exit 0
-fi
-
-while true; do
-  run_once
-  sleep "$INTERVAL"
-done
+main
+exit 0

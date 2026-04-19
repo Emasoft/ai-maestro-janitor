@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
+# SessionStart hook — initializes .janitor state and reminds Claude to arm the
+# heartbeat cron if this is a fresh session. Runs as part of the plugin's hook
+# lifecycle, NOT at cron-fire time.
 set -euo pipefail
 source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
 
 init_state
 
-# Clear any stale flags from prior session crashes.
-rm -f "$STATE_DIR/rate-limited.flag" \
-      "$STATE_DIR/rate-limited-since.ts" \
-      "$STATE_DIR/keepalive-sent.flag"
+# Clear any stale flag from a prior session crash. If the last session ended
+# mid-rate-limit, the flag is preserved and the heartbeat cron will emit a
+# resume cue on its next fire — which is what we want. So only clear flags that
+# cannot represent valid cross-session state.
+rm -f "$STATE_DIR/keepalive-sent.flag"
 
 atomic_write "$STATE_DIR/last-activity.ts" "$(date +%s)"
-atomic_write "$STATE_DIR/retry-count" "0"
 
 log_line session-start "state initialized at $STATE_DIR"
+
+# Stdout from this hook becomes additional context for the first user turn.
+# Remind Claude to arm the heartbeat cron. /janitor-arm is idempotent, so even
+# if the durable cron survived a previous session, re-arming is safe.
+cat <<'EOS'
+[ai-maestro-janitor] The janitor heartbeat keeps drift detection and rate-limit recovery running in this session. If you have not done so yet (or if the previous cron hit its 7-day auto-expiry), run /janitor-arm to arm it. The skill is idempotent — safe to re-run.
+EOS

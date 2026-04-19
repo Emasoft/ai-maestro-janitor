@@ -7,29 +7,29 @@ description: Runs an on-demand audit of open PRs, git worktrees, TRDD drift, and
 
 ## Overview
 
-Invokes each ai-maestro-janitor monitor in `--one-shot` mode, aggregates output into a single markdown report, and proposes — but does not execute — remediation commands for each drift item found.
+Invokes each ai-maestro-janitor detector synchronously, aggregates output into a single markdown report, and proposes — but does not execute — remediation commands for each drift item found. Independent of the heartbeat cron armed by `/janitor-arm`: this skill runs the same detectors on demand.
 
 ## Prerequisites
 
-- `ai-maestro-janitor` plugin installed and monitors present at `${CLAUDE_PLUGIN_ROOT}/scripts/monitors/`
-- Project has a `.janitor/state/` directory (created automatically on first run)
-- `gh` CLI authenticated (for GitHub repo slug lookup if `github_repo` userConfig is unset)
+- `ai-maestro-janitor` plugin installed, detectors present at `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/`.
+- Project has a `.janitor/state/` directory (created automatically on first run).
+- `gh` CLI authenticated (for GitHub repo slug lookup if `github_repo` userConfig is unset).
 
 ## Instructions
 
 1. Resolve `JANITOR_ROOT` = `${CLAUDE_PROJECT_DIR}/.janitor` (fall back to `$(pwd)/.janitor` if the env var is unset).
 
-2. Run each drift-detection monitor in one-shot mode, capturing stdout and stderr separately. To guarantee a fresh pass (the running-background monitors' dedupe seen-files would otherwise silence previously-reported drift), pre-rename each `*-seen.txt` file before invoking the monitor and restore it afterwards — see Tips. Each run is a single synchronous pass.
+2. Run each detector once, capturing stdout and stderr separately. To guarantee a fresh pass (the dedupe seen-files would otherwise silence previously-reported drift), pre-rename each `*-seen.txt` file before invoking the detector and restore it afterwards — see Tips.
 
    ```
-   ${CLAUDE_PLUGIN_ROOT}/scripts/monitors/pr-reconciler.sh --one-shot
-   ${CLAUDE_PLUGIN_ROOT}/scripts/monitors/worktree-janitor.sh --one-shot
-   ${CLAUDE_PLUGIN_ROOT}/scripts/monitors/trdd-drift.sh --one-shot
-   ${CLAUDE_PLUGIN_ROOT}/scripts/monitors/trdd-reminder.sh --one-shot
-   ${CLAUDE_PLUGIN_ROOT}/scripts/monitors/task-pr-mismatch.sh --one-shot
+   ${CLAUDE_PLUGIN_ROOT}/scripts/detectors/pr-reconciler.sh
+   ${CLAUDE_PLUGIN_ROOT}/scripts/detectors/worktree-janitor.sh
+   ${CLAUDE_PLUGIN_ROOT}/scripts/detectors/trdd-drift.sh
+   ${CLAUDE_PLUGIN_ROOT}/scripts/detectors/trdd-reminder.sh
+   ${CLAUDE_PLUGIN_ROOT}/scripts/detectors/task-pr-mismatch.sh
    ```
 
-3. Parse each script's stdout — lines are formatted as `[monitor-name] <message>` — and group by monitor.
+3. Parse each script's stdout — lines are formatted as `[detector-name] <message>` — and group by detector.
 
 4. Build a single markdown report of this shape:
 
@@ -39,27 +39,23 @@ Invokes each ai-maestro-janitor monitor in `--one-shot` mode, aggregates output 
    ## PRs (N findings)
    - PR #10 '<title>' — HEAD abcd1234 is already on main. Close with:
      `gh pr close 10 --repo <repo> --delete-branch --comment "superseded"`
-   ...
 
    ## Worktrees (N findings)
    - /path/to/wt — branch 'foo' is merged. Prune with:
      `git worktree remove /path/to/wt && git branch -d foo`
-   ...
 
    ## TRDDs (N findings)
    - TRDD-abc12345 'Mesh chat' — In progress, untouched 34 days. Review: `code design/tasks/TRDD-abc12345-*.md`
-   ...
 
    ## Task/PR mismatches (N findings)
    - Task #143 marked completed but PR #11 is still open. Reconcile the task status or close the PR.
-   ...
 
    ## Summary
    - Total drift items: N
    - High-confidence close candidates: M
    ```
 
-5. Present the report. DO NOT execute any of the remediation commands — the user must run them explicitly.
+5. Present the report. DO NOT execute any remediation commands — the user must run them explicitly.
 
 ## Output
 
@@ -67,8 +63,8 @@ A single markdown audit report grouping findings by category (PRs, Worktrees, TR
 
 ## Error Handling
 
-- If a monitor returns non-zero exit status, include the stderr log tail in the report so the user can diagnose.
-- If a monitor has no output, state "No drift detected" for that category rather than leaving the section blank.
+- If a detector returns non-zero exit status, include the stderr log tail in the report so the user can diagnose.
+- If a detector has no output, state "No drift detected" for that category rather than leaving the section blank.
 - If `${CLAUDE_PLUGIN_ROOT}` is unset, abort with a clear message asking the user to verify the plugin is installed.
 
 ## Examples
@@ -82,21 +78,23 @@ User: audit pending PRs and worktrees
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/monitors/` — the five drift-detection monitor scripts
-- `${CLAUDE_PLUGIN_ROOT}/scripts/hooks/` — the four lifecycle hook scripts
-- `.janitor/state/` — per-project state directory for deduplication seen-files
+- `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` — the five drift detector scripts.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh` — the cron-fire dispatcher that runs the same detectors on each heartbeat.
+- `.janitor/state/` — per-project state directory for deduplication seen-files.
 
 ## Tips
 
-- The monitors' dedupe files (`$JANITOR_ROOT/state/*-seen.txt`) prevent the same drift from being re-emitted in the running-background path. In one-shot mode, if a previous run already saw the drift, the monitor will stay silent. To guarantee a fresh pass, pre-rename the seen-files:
+- The detectors' dedupe files (`$JANITOR_ROOT/state/*-seen.txt`) prevent the same drift from being re-emitted. If a prior heartbeat fire already saw the drift, the detector will stay silent on this audit. To guarantee a fresh pass, pre-rename the seen-files:
+
   ```bash
   mv "$JANITOR_ROOT/state/pr-reconciler-seen.txt" "$JANITOR_ROOT/state/pr-reconciler-seen.txt.bak"
-  <run monitor>
+  <run detector>
   mv "$JANITOR_ROOT/state/pr-reconciler-seen.txt.bak" "$JANITOR_ROOT/state/pr-reconciler-seen.txt"
   ```
-  Do NOT delete the original seen-files — the running monitors rely on them.
 
-- Always use the exact GitHub repo slug from the `github_repo` user config (or `gh repo view --json nameWithOwner -q .nameWithOwner` if unset).
+  Do NOT delete the original seen-files — the heartbeat relies on them.
+
+- Use the GitHub repo slug from the `github_repo` user config (or `gh repo view --json nameWithOwner -q .nameWithOwner` if unset).
 
 ## Scope
 
@@ -106,7 +104,7 @@ This skill READS drift state. It NEVER performs remediation itself. The remediat
 
 Copy this checklist and track your progress:
 
-- [ ] Run all five monitors in `--one-shot` mode
+- [ ] Run all five detectors in sequence
 - [ ] Group findings by category (PRs, Worktrees, TRDDs, Task/PR mismatches)
-- [ ] Include stderr tail for any monitor that returned non-zero
+- [ ] Include stderr tail for any detector that returned non-zero
 - [ ] Present report with proposed remediation commands (do not execute)

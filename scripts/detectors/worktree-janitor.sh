@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
+# Worktree janitor — one-shot drift detector.
+# Scans `git worktree list --porcelain` and reports worktrees whose branch
+# has been deleted or merged into origin/main.
 set -euo pipefail
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/dedupe.sh"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=../lib/state.sh
+source "$HERE/../lib/state.sh"
+# shellcheck source=../lib/dedupe.sh
+source "$HERE/../lib/dedupe.sh"
 init_state
 
-ONE_SHOT=0
-[ "${1:-}" = "--one-shot" ] && ONE_SHOT=1
-
-INTERVAL="${CLAUDE_PLUGIN_OPTION_WORKTREE_JANITOR_INTERVAL:-900}"
 SEEN="$STATE_DIR/worktree-janitor-seen.txt"
 
-run_once() {
+main() {
   git rev-parse --git-dir >/dev/null 2>&1 || {
-    log_line worktree-janitor "not a git repo — skipping tick"
+    log_line worktree-janitor "not a git repo — skipping"
     return
   }
 
@@ -63,12 +66,5 @@ run_once() {
   rotate_log_if_big worktree-janitor
 }
 
-if [ "$ONE_SHOT" = "1" ]; then
-  run_once
-  exit 0
-fi
-
-while true; do
-  run_once
-  sleep "$INTERVAL"
-done
+main
+exit 0

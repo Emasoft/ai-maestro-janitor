@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
+# TRDD drift detector — one-shot scan for stale "In progress" / "Not started" TRDDs.
 set -euo pipefail
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
-source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/dedupe.sh"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=../lib/state.sh
+source "$HERE/../lib/state.sh"
+# shellcheck source=../lib/dedupe.sh
+source "$HERE/../lib/dedupe.sh"
 init_state
 
-ONE_SHOT=0
-[ "${1:-}" = "--one-shot" ] && ONE_SHOT=1
-
-INTERVAL="${CLAUDE_PLUGIN_OPTION_TRDD_DRIFT_INTERVAL:-3600}"
 STALE_DAYS="${CLAUDE_PLUGIN_OPTION_TRDD_STALENESS_DAYS:-14}"
 SEEN="$STATE_DIR/trdd-drift-seen.txt"
 
-run_once() {
+main() {
   local root trdd_dir
   root=$(resolve_project_root)
   trdd_dir="$root/${CLAUDE_PLUGIN_OPTION_TRDD_PATH:-design/tasks}"
   trdd_dir="${trdd_dir%/}"
 
-  [ -d "$trdd_dir" ] || { log_line trdd-drift "TRDD dir $trdd_dir not present — skipping tick"; return; }
+  [ -d "$trdd_dir" ] || { log_line trdd-drift "TRDD dir $trdd_dir not present — skipping"; return; }
 
   local now
   now=$(date +%s)
@@ -54,12 +55,5 @@ run_once() {
   rotate_log_if_big trdd-drift
 }
 
-if [ "$ONE_SHOT" = "1" ]; then
-  run_once
-  exit 0
-fi
-
-while true; do
-  run_once
-  sleep "$INTERVAL"
-done
+main
+exit 0
