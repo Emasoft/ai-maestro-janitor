@@ -2,18 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.4] - 2026-04-19
-
-### Bug Fixes
-
-- Worktree-janitor primary-worktree skip on macOS
+## [0.2.0] - 2026-04-19
 
 ### Documentation
 
-- Tighten janitor-audit SKILL.md under 5000-char limit
+- Trim janitor-arm SKILL.md for CPV strict (5124→4034 chars, desc 338→220, add Resources)
+- Satisfy CPV strict (Use when phrase + checklist boilerplate)
 
-### Miscellaneous
+### Features
 
-- Update uv.lock
-- Disable MD012 to accept cliff-generated multi-blank lines
+- Pivot to CronCreate heartbeat architecture (v0.2.0 prep)
 
