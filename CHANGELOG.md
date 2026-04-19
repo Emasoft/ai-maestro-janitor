@@ -2,13 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.0] - 2026-04-19
+## [0.3.1] - 2026-04-19
 
 ### Bug Fixes
 
-- Quote $root inside ${..} to silence shellcheck SC2295
+- Lower in_progress staleness threshold from 4h to 2h
 
-### Features
+### Miscellaneous
 
-- Add stale-task + dirty-tree + subagent-report detectors
+- Update uv.lock
 
