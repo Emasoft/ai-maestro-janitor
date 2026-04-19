@@ -24,8 +24,8 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
-      - name: Lint shell scripts (monitors)
-        run: shellcheck scripts/monitors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
+      - name: Lint shell scripts
+        run: shellcheck scripts/dispatch.sh scripts/detectors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
 
       - name: Install uv
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
@@ -72,18 +72,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Make scripts executable
-        run: chmod +x scripts/monitors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
+        run: chmod +x scripts/dispatch.sh scripts/detectors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
 
       - name: Syntax check all shell scripts
         run: |
-          for f in scripts/monitors/*.sh scripts/hooks/*.sh scripts/lib/*.sh; do
+          for f in scripts/dispatch.sh scripts/detectors/*.sh scripts/hooks/*.sh scripts/lib/*.sh; do
             bash -n "$f" && echo "OK: $f" || { echo "FAIL: $f"; exit 1; }
           done
 
-      - name: Validate monitors.json
-        run: |
-          jq empty monitors/monitors.json && echo "monitors.json is valid JSON"
-
       - name: Validate hooks.json
-        run: |
-          jq empty hooks/hooks.json && echo "hooks.json is valid JSON"
+        run: jq empty hooks/hooks.json && echo "hooks.json is valid JSON"
