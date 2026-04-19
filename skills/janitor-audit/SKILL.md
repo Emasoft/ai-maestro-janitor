@@ -80,8 +80,6 @@ User: janitor audit
 User: audit pending PRs and worktrees
 ```
 
-The skill runs all five monitors and returns a consolidated report. The user then decides which remediation commands to execute.
-
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/monitors/` — the five drift-detection monitor scripts
