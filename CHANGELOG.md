@@ -2,14 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.0] - 2026-04-19
+## [0.2.1] - 2026-04-19
 
-### Documentation
+### Bug Fixes
 
-- Trim janitor-arm SKILL.md for CPV strict (5124→4034 chars, desc 338→220, add Resources)
-- Satisfy CPV strict (Use when phrase + checklist boilerplate)
+- Rename scripts/monitors → scripts/detectors + add dispatch.sh, drop monitors.json check (v0.2.0 refactor follow-up)
 
-### Features
+### Miscellaneous
 
-- Pivot to CronCreate heartbeat architecture (v0.2.0 prep)
+- Update uv.lock
 
