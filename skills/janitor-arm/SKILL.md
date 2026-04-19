@@ -21,7 +21,7 @@ This skill is the ONLY way to start the janitor. Hooks cannot call CronCreate; o
 
 1. Resolve `DISPATCH_PATH` = `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh`. The env var is set by Claude Code when the skill runs.
 
-2. Read the heartbeat cron from `${CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON}`, defaulting to `"*/4 * * * *"`.
+2. Read the heartbeat cron from `${CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON}`, defaulting to `"*/5 * * * *"`.
 
 3. Call `CronList`. For each job whose prompt begins with `[janitor-heartbeat]`, call `CronDelete`. This guarantees exactly one heartbeat after arming, even on re-runs.
 
@@ -29,14 +29,8 @@ This skill is the ONLY way to start the janitor. Hooks cannot call CronCreate; o
 
    ```text
    [janitor-heartbeat]
-
-   Silently run `bash {{DISPATCH_PATH}}` and process its stdout:
-
-   - `[janitor-resume]`: rate-limit cleared. Resume the previous pending task without further prompting.
-   - `[pr-reconciler]` / `[worktree-janitor]` / `[trdd-drift]` / `[trdd-reminder]` / `[task-pr-mismatch]`: surface verbatim and suggest `/janitor-audit` for a consolidated report with remediation.
-   - No output: respond with nothing and end the turn.
-
-   Do not spawn sub-agents. Do not start long tasks. Process in one pass and stop.
+   bash {{DISPATCH_PATH}}
+   Surface stdout verbatim. `[janitor-resume]` = resume prior task. No output = silent. One pass, no sub-agents.
    ```
 
 5. Call `CronCreate` with `cron` from step 2, `prompt` from step 4, `durable: true`, `recurring: true`.

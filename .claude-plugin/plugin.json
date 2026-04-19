@@ -33,9 +33,9 @@
     },
     "heartbeat_cron": {
       "title": "Heartbeat Cron Expression",
-      "description": "Standard 5-field cron for the janitor heartbeat. Default: \"*/4 * * * *\" (every 4 min, inside the 5-min prompt-cache TTL). Raise to e.g. \"*/20 * * * *\" if you are using the 1-hour cache and accept longer idle gaps.",
+      "description": "Standard 5-field cron for the janitor heartbeat. Default: \"*/5 * * * *\" (every 5 min — aligned with the prompt-cache TTL, low token cost per fire). Raise to e.g. \"*/20 * * * *\" if you are using the 1-hour cache and accept longer idle gaps.",
       "type": "string",
-      "default": "*/4 * * * *",
+      "default": "*/5 * * * *",
       "sensitive": false
     },
     "pr_reconciler_interval": {

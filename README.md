@@ -44,9 +44,10 @@ window clears.
 | `dirty-tree` | 5 min | Working tree left uncommitted for >30 min. Reminds to commit often (every commit is a recovery point) and lists safe alternatives when `git_safety_guard.py` blocks a destructive op: move files to `_dev/`, use `git rm`, `git stash`, or a backup branch. |
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
 
-The heartbeat cron runs every 4 minutes by default (`*/4 * * * *`), so the
+The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
 detectors fire at roughly their configured cadence without any additional
-bookkeeping.
+bookkeeping. The heartbeat prompt is intentionally minimal (~20 tokens of
+user text) to keep per-fire overhead low.
 
 ## Hooks
 
