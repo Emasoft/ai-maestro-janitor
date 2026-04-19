@@ -120,6 +120,27 @@ All state and logs live at `$CLAUDE_PROJECT_DIR/.janitor/`:
 Each project has its own drift registry. Running the plugin in project A
 doesn't affect dedupe state in project B.
 
+## Verified behaviour
+
+End-to-end rate-limit recovery was validated on 2026-04-19 against a live
+network outage (WiFi off for ~90 seconds, then back on):
+
+1. In-flight turn failed during the outage → `StopFailure` hook wrote
+   `.janitor/state/rate-limited.flag` and `rate-limited-since.ts`.
+2. The durable heartbeat cron kept ticking inside Claude Code; the fires that
+   landed during the outage were enqueued.
+3. When the network came back, the next queued fire delivered. `dispatch.sh`
+   saw the flag, emitted
+   `[janitor-resume] rate-limit cleared after 89s — API is reachable again.`,
+   and cleared the flag.
+4. Claude Code processed that line as a fresh user turn and resumed the
+   previous pending task.
+
+No bot, no polling loop, no supervisor wrapper — the session never died, only
+the interrupted turn did. The three-component pattern (passive account
+switcher + durable recurring cron + idempotent state file) documented in
+`SCENARIOS_TESTS_RULES.md` Rule 13 works identically here.
+
 ## Configuration
 
 All knobs are `userConfig` entries in `plugin.json`. Set them at install time
