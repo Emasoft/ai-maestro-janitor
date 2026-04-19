@@ -1,6 +1,6 @@
 ---
 name: janitor-arm
-description: Arms the ai-maestro-janitor heartbeat cron in the current session. Use on first install, after a plugin update, or when the 7-day recurring-cron expiry has hit. Trigger with `/janitor-arm` or "arm the janitor heartbeat".
+description: Arms the ai-maestro-janitor heartbeat cron in the current session. Use when first installing the plugin, after a plugin update, or when the 7-day recurring-cron expiry has hit. Trigger with `/janitor-arm` or "arm the janitor heartbeat".
 ---
 
 # Janitor arm
@@ -73,6 +73,8 @@ This skill ONLY arms the heartbeat cron. It does NOT run detectors (that is `/ja
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — per-project state and dedupe seen-files.
 
 ## Checklist
+
+Copy this checklist and track your progress:
 
 - [ ] Resolve `DISPATCH_PATH` from `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh`
 - [ ] `CronList` + `CronDelete` any existing `[janitor-heartbeat]` job
