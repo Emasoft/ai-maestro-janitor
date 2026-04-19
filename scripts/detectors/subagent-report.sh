@@ -75,7 +75,7 @@ main() {
         continue
       fi
 
-      local rel="${f#$root/}"
+      local rel="${f#"$root"/}"
       local age_h=$(( age / 3600 ))
       local bucket=$(( age / 86400 ))
       emit_once "$SEEN" "report@${rel}@d${bucket}" \
