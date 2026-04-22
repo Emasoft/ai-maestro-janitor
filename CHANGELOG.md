@@ -2,13 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.2] - 2026-04-19
+## [0.3.3] - 2026-04-22
 
 ### Miscellaneous
 
 - Update uv.lock
 
-### Performance
+### Ci
 
-- 5-min cadence + compact prompt (~80 tokens saved per fire)
+- Pin third-party actions by SHA and sanitise audit issue body
 
