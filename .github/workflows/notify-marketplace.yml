@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout plugin
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
       - name: Extract plugin name and version
         id: plugin
@@ -45,7 +45,7 @@ jobs:
           echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch plugin-updated to marketplace
-        uses: peter-evans/repository-dispatch@v4
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697  # v4.0.1
         with:
           token: ${{ secrets.MARKETPLACE_PAT }}
           repository: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}
