@@ -37,6 +37,7 @@ node_modules/
 
 # Plugin runtime state (per-project, not tracked)
 .janitor/
+.rechecker/
 
 # Test and coverage artifacts
 .coverage
