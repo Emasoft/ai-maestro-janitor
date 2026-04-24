@@ -67,12 +67,25 @@ user text) to keep per-fire overhead low.
 
 ## Skills
 
-- `/janitor-arm` — arms the heartbeat cron. Idempotent: replaces any existing
-  `[janitor-heartbeat]` job. Run this once per session (or after a 7-day
-  auto-expiry).
+- `/janitor-arm` — arms (or renews) the heartbeat cron. Idempotent: replaces
+  any existing `[janitor-heartbeat]` job. Run once per session to start, and
+  whenever Claude surfaces a `[janitor-renew]` nudge — the skill also writes
+  the arm-timestamp that feeds the auto-renewal check.
+- `/janitor-disarm` — stops the heartbeat cron. Deletes every
+  `[janitor-heartbeat]` job, clears the arm-timestamp, and suppresses the
+  renewal nudge. Use to pause janitor activity without uninstalling.
 - `/janitor-audit` — on-demand aggregate scan. Runs every detector
   synchronously and prints a consolidated markdown report with proposed
   remediation commands (never executed automatically).
+
+### Auto-renewal of the 7-day cron
+
+Durable recurring `CronCreate` jobs auto-expire after 7 days. dispatch.sh
+tracks the arm time in `.janitor/state/heartbeat-armed-at.ts`, and once the
+cron is 6+ days old emits a single `[janitor-renew]` line per day. Claude
+reads the line, runs `/janitor-arm` (which is idempotent), and the cron is
+refreshed back to a fresh 7-day window before the old one dies. The nudge
+threshold is tunable via `heartbeat_renewal_threshold_days`.
 
 ## Install
 
@@ -177,6 +190,7 @@ via the `/plugin configure` interface or edit the project's
 | `dirty_tree_threshold` | 1800 | Seconds the tree can stay dirty before nudging to commit. |
 | `subagent_report_interval` | 3600 | Min seconds between subagent-report scans. |
 | `subagent_report_lookback` | 86400 | Age cutoff for reports considered fresh and needing action. |
+| `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.sh emits `[janitor-renew]` so Claude re-arms before the 7-day expiry. |
 
 ## Weekly fallback
 
@@ -197,8 +211,10 @@ Monday at 09:00 UTC and opens a GitHub issue if anything is found.
 - **No drift lines surfaced after install**: did you run `/janitor-arm`? The
   heartbeat is not armed automatically — the SessionStart hook prints a
   reminder, but you (or Claude responding to the reminder) must run the skill.
-- **Heartbeat stopped firing after 7 days**: recurring crons auto-expire. Run
-  `/janitor-arm` again — it replaces any stale heartbeat in `CronList`.
+- **Heartbeat stopped firing after 7 days**: auto-renewal should have caught
+  this — check `.janitor/state/heartbeat-armed-at.ts` and
+  `heartbeat-renew-seen.txt`. If Claude was rate-limited or offline during
+  the entire renewal window, just run `/janitor-arm` again (idempotent).
 - **`pr-reconciler` silent**: inspect
   `$CLAUDE_PROJECT_DIR/.janitor/logs/pr-reconciler.log`. Most common cause is
   `gh` auth expired — `gh auth status` to check.

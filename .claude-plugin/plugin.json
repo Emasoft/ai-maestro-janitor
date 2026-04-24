@@ -135,6 +135,13 @@
       "type": "number",
       "default": 86400,
       "sensitive": false
+    },
+    "heartbeat_renewal_threshold_days": {
+      "title": "Heartbeat Auto-Renewal Threshold (days)",
+      "description": "Days after arming before dispatch.sh emits a [janitor-renew] nudge. Claude re-runs /janitor-arm in response, which idempotently replaces the cron before the 7-day auto-expiry. Default: 6. Lower = earlier nudge / safer. Higher = later nudge and risks missing the 7-day window if Claude is rate-limited or offline.",
+      "type": "number",
+      "default": 6,
+      "sensitive": false
     }
   }
 }

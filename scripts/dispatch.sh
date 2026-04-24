@@ -10,14 +10,19 @@
 #   1. If rate-limited.flag exists, emit a single [janitor-resume] line and
 #      clear the flag. The cron fire itself proves the API is reachable again,
 #      so the model treats the line as a cue to resume the prior task.
-#   2. Otherwise run each drift detector in --one-shot mode, respecting its
+#   2. If the heartbeat cron is approaching its 7-day auto-expiry, emit a
+#      single [janitor-renew] line so Claude re-runs /janitor-arm before the
+#      cron dies. The skill is idempotent (CronDelete old + CronCreate new).
+#   3. Otherwise run each drift detector in --one-shot mode, respecting its
 #      configured internal cadence via per-detector last-run state files.
-#   3. Emit only new findings — the detectors' seen-files handle dedupe.
+#   4. Emit only new findings — the detectors' seen-files handle dedupe.
 #
 # State:
 #   $PROJECT_ROOT/.janitor/state/rate-limited.flag
 #   $PROJECT_ROOT/.janitor/state/rate-limited-since.ts
 #   $PROJECT_ROOT/.janitor/state/last-run-<detector>.ts
+#   $PROJECT_ROOT/.janitor/state/heartbeat-armed-at.ts   # written by /janitor-arm
+#   $PROJECT_ROOT/.janitor/state/heartbeat-renew-seen.txt
 #
 # Exit code: 0 on normal completion (including no drift). Non-zero only on
 # unrecoverable errors (missing state lib, malformed detector).
@@ -28,6 +33,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=./lib/state.sh
 source "$HERE/lib/state.sh"
+# shellcheck source=./lib/dedupe.sh
+source "$HERE/lib/dedupe.sh"
 
 init_state
 
@@ -50,6 +57,33 @@ if [ -f "$STATE_DIR/rate-limited.flag" ]; then
   log_line dispatch "rate-limit cleared after ${age}s, resume cue emitted"
   # Skip drift detectors this fire so resume gets clean attention.
   exit 0
+fi
+
+# --- Phase 1.5: heartbeat auto-renew ---------------------------------------
+# Durable recurring CronCreate jobs auto-expire after 7 days. dispatch.sh
+# can't call CronCreate itself (that's session-tool territory), so we emit a
+# renewal nudge at day 6, the model notices, and re-runs /janitor-arm which
+# idempotently replaces the cron with a fresh 7-day one. Dedupe by day bucket
+# so repeated heartbeat fires don't spam the line.
+#
+# armed-at.ts is written by /janitor-arm on every successful CronCreate. If
+# the file is missing (e.g. a plugin upgrade or a user-deleted state dir),
+# skip the renew check — the SessionStart hook will still nudge the user to
+# /janitor-arm on the next session, which recreates both the cron and the
+# timestamp.
+renew_threshold_days=$(coerce_int "${CLAUDE_PLUGIN_OPTION_HEARTBEAT_RENEWAL_THRESHOLD_DAYS:-}" 6)
+renew_threshold_sec=$(( renew_threshold_days * 86400 ))
+armed_at_file="$STATE_DIR/heartbeat-armed-at.ts"
+if [ -f "$armed_at_file" ]; then
+  armed_at=$(read_int_state "$armed_at_file" 0)
+  now=$(date +%s)
+  age=$(( now - armed_at ))
+  if [ "$armed_at" -gt 0 ] && [ "$age" -ge "$renew_threshold_sec" ]; then
+    age_days=$(( age / 86400 ))
+    bucket=$(( age / 86400 ))  # one emit per day once we pass the threshold
+    emit_once "$STATE_DIR/heartbeat-renew-seen.txt" "renew@day${bucket}" \
+      "[janitor-renew] heartbeat cron is ${age_days} day(s) old, approaching the 7-day auto-expiry. Run /janitor-arm to renew — it is idempotent (deletes the old cron and creates a fresh one)."
+  fi
 fi
 
 # --- Phase 2: drift detectors ----------------------------------------------
