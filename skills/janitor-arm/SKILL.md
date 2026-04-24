@@ -63,7 +63,7 @@ This skill ONLY arms the heartbeat cron. It does NOT run detectors (that is `/ja
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh` — the cron-fire entry point.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` — the 5 drift detectors dispatch invokes.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` — the drift detectors dispatch invokes (iterate the directory rather than hard-coding the list).
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — per-project state and dedupe seen-files.
 
 ## Checklist

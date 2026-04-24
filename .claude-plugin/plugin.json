@@ -26,9 +26,9 @@
     },
     "trdd_path": {
       "title": "TRDD Directory Path",
-      "description": "Relative path from project root to the TRDD directory. Default: design/tasks/",
+      "description": "Relative path from project root to the TRDD directory. Default: design/tasks",
       "type": "string",
-      "default": "design/tasks/",
+      "default": "design/tasks",
       "sensitive": false
     },
     "heartbeat_cron": {

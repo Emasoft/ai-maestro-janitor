@@ -7,7 +7,10 @@ Session-scoped janitor plugin for Claude Code. Reconciles drift between what
 the repo actually contains and what the todo list / open PRs / worktrees /
 TRDDs claim, and handles rate-limit auto-resume plus prompt-cache keep-alive —
 all through a single durable `CronCreate` heartbeat and hooks. No external
-daemons, no Monitors.
+daemons, no monitors.
+
+**Platform:** macOS and Linux. Bash, `gh`, `jq`, and POSIX `stat`/`date` are
+required. Windows is not supported natively; use WSL2.
 
 ## How it works
 
@@ -21,7 +24,7 @@ skill. Each cron fire is a fresh user turn that runs `scripts/dispatch.sh`:
 2. Otherwise dispatch invokes each due detector in sequence. Each detector has
    a configurable minimum internal cadence that dispatch guards via
    `.janitor/state/last-run-<detector>.ts` files — the heartbeat may fire
-   every 4 minutes, but `trdd-drift` still only runs once an hour.
+   every 5 minutes, but `trdd-drift` still only runs once an hour.
 3. Each detector emits drift lines (deduped via per-detector `*-seen.txt`
    files) to stdout. Dispatch passes them through to the cron prompt, where
    Claude surfaces them to the user.
@@ -41,7 +44,7 @@ window clears.
 | `trdd-reminder` | 4 h | Consolidated reminder of all TRDDs currently `In progress`. |
 | `task-pr-mismatch` | 30 min | Session tasks whose status contradicts the state of a referenced PR. |
 | `stale-task` | 30 min | Tasks stuck `in_progress` >2h or `pending` >24h with no TaskUpdate. Nudges to resume, close, or defer. |
-| `dirty-tree` | 5 min | Working tree left uncommitted for >30 min. Reminds to commit often (every commit is a recovery point) and lists safe alternatives when `git_safety_guard.py` blocks a destructive op: move files to `_dev/`, use `git rm`, `git stash`, or a backup branch. |
+| `dirty-tree` | 5 min | Working tree left uncommitted for >30 min. Reminds to commit often (every commit is a recovery point) and lists safe alternatives when a git safety guard blocks a destructive op: move files to `_dev/`, use `git rm`, `git stash`, or a backup branch. |
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
 
 The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
@@ -98,31 +101,29 @@ the 7-day recurring-cron expiry has hit.
 
 All state and logs live at `$CLAUDE_PROJECT_DIR/.janitor/`:
 
+All state files are created at runtime on the first heartbeat fire; none of
+them are tracked in git.
+
 ```text
 <project-root>/.janitor/
 ├── state/
-│   ├── rate-limited.flag                 # set by StopFailure, cleared by dispatch on recovery
-│   ├── rate-limited-since.ts             # unix ts of rate-limit start
+│   ├── rate-limited.flag                 # set by StopFailure, cleared by dispatch on recovery (runtime)
+│   ├── rate-limited-since.ts             # unix ts of rate-limit start (runtime)
 │   ├── last-activity.ts                  # unix ts of last user/claude activity
 │   ├── last-run-<detector>.ts            # one per detector, guards internal cadence
-│   ├── pr-reconciler-seen.txt            # dedupe key per (PR, SHA)
-│   ├── worktree-janitor-seen.txt         # dedupe key per (path, branch)
-│   ├── trdd-drift-seen.txt               # dedupe key per (uuid, staleness-bucket)
-│   ├── trdd-reminder-session-<hash>.txt  # dedupe key per session+tick
-│   └── task-pr-mismatch-seen.txt         # dedupe key per (task, pr, state-transition)
+│   ├── dirty-tree-since.ts               # unix ts the tree first went dirty
+│   └── <detector>-seen.txt               # one per detector, dedupe key log
+│       # plus: trdd-reminder-session-<hash>.txt (dedupe key per session+day)
 └── logs/
-    ├── dispatch.log
-    ├── pr-reconciler.log
-    ├── worktree-janitor.log
-    ├── trdd-drift.log
-    ├── trdd-reminder.log
-    ├── task-pr-mismatch.log
-    ├── session-start.log
-    └── stop-failure.log
+    └── <detector>.log                    # one per detector, plus dispatch.log,
+                                          # session-start.log, stop-failure.log
 ```
 
 Each project has its own drift registry. Running the plugin in project A
-doesn't affect dedupe state in project B.
+doesn't affect dedupe state in project B. The detector set is discovered by
+iterating `scripts/detectors/`, so `<detector>` above expands to all eight
+scripts currently shipped (and automatically covers any new ones added in
+future releases).
 
 ## Verified behaviour
 
@@ -141,9 +142,11 @@ network outage (WiFi off for ~90 seconds, then back on):
    previous pending task.
 
 No bot, no polling loop, no supervisor wrapper — the session never died, only
-the interrupted turn did. The three-component pattern (passive account
-switcher + durable recurring cron + idempotent state file) documented in
-`SCENARIOS_TESTS_RULES.md` Rule 13 works identically here.
+the interrupted turn did. The three-component pattern — passive account
+switcher, durable recurring cron, and idempotent state file read each fire —
+is the design the plugin embodies: dispatch.sh treats the flag file as the
+single source of truth, so whether the turn that clears it runs 5 seconds or
+5 hours after `StopFailure` wrote it, the user-facing effect is identical.
 
 ## Configuration
 
@@ -154,8 +157,8 @@ via the `/plugin configure` interface or edit the project's
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `github_repo` | derived from `origin` remote | Repo slug for `gh pr list`. |
-| `trdd_path` | `design/tasks/` | Relative path to the TRDD directory. |
-| `heartbeat_cron` | `*/4 * * * *` | Cron expression for the heartbeat. |
+| `trdd_path` | `design/tasks` | Relative path to the TRDD directory. |
+| `heartbeat_cron` | `*/5 * * * *` | Cron expression for the heartbeat. |
 | `pr_reconciler_interval` | 900 | Min seconds between PR reconciliation passes. |
 | `worktree_janitor_interval` | 900 | Min seconds between worktree scans. |
 | `trdd_drift_interval` | 3600 | Min seconds between TRDD drift checks. |
@@ -163,6 +166,13 @@ via the `/plugin configure` interface or edit the project's
 | `task_pr_mismatch_interval` | 1800 | Min seconds between task/PR cross-checks. |
 | `trdd_staleness_days` | 14 | Days a TRDD can sit `In progress` before drift. |
 | `stale_pr_days` | 14 | Days an open PR can sit idle before flagged stale. |
+| `stale_task_interval` | 1800 | Min seconds between stale-task scans. |
+| `stale_in_progress_threshold` | 7200 | Seconds an `in_progress` task can sit before nudging. |
+| `stale_pending_threshold` | 86400 | Seconds a `pending` task can sit before nudging. |
+| `dirty_tree_interval` | 300 | Min seconds between dirty-tree checks. |
+| `dirty_tree_threshold` | 1800 | Seconds the tree can stay dirty before nudging to commit. |
+| `subagent_report_interval` | 3600 | Min seconds between subagent-report scans. |
+| `subagent_report_lookback` | 86400 | Age cutoff for reports considered fresh and needing action. |
 
 ## Weekly fallback
 
