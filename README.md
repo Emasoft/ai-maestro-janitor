@@ -1,5 +1,9 @@
 # ai-maestro-janitor
 
+<p align="center">
+  <img src="assets/logo.jpg" alt="ai-maestro-janitor" width="600">
+</p>
+
 <!--BADGES-START-->
 <!--BADGES-END-->
 
