@@ -16,7 +16,6 @@ on:
     paths:
       - '.claude-plugin/plugin.json'
       - 'hooks/**'
-      - 'monitors/**'
       - 'skills/**'
       - 'scripts/**'
 

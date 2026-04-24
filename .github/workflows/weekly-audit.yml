@@ -20,10 +20,10 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Make monitor scripts executable
-        run: chmod +x scripts/monitors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
+      - name: Make detector scripts executable
+        run: chmod +x scripts/dispatch.sh scripts/detectors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
 
-      - name: Run drift monitors (one-shot)
+      - name: Run drift detectors (one-shot)
         id: audit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -34,10 +34,9 @@ jobs:
           set -o pipefail
           mkdir -p .janitor/state .janitor/logs
           REPORT=$(
-            ./scripts/monitors/pr-reconciler.sh --one-shot
-            ./scripts/monitors/worktree-janitor.sh --one-shot
-            ./scripts/monitors/trdd-drift.sh --one-shot
-            ./scripts/monitors/trdd-reminder.sh --one-shot
+            for d in ./scripts/detectors/*.sh; do
+              "$d" || true
+            done
           )
           printf '%s\n' "$REPORT" | tee audit-report.txt
           if [ -s audit-report.txt ]; then
