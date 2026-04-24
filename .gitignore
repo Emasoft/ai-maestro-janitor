@@ -54,6 +54,8 @@ htmlcov/
 docs_dev/
 .tldr/
 llm_externalizer_output/
+/reports/
+/reports_dev/
 
 # git-cliff scratch — ephemeral release notes between bump and push
 .git-cliff-release-notes.md
