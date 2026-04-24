@@ -27,11 +27,14 @@ find_publish_ancestor() {
         #            python3.12 scripts/publish.py
         #            /usr/bin/env python3 scripts/publish.py
         #            /abs/path/to/python scripts/publish.py
-        # Rejects:   bash -c "touch scripts/publish.py && git push"
+        # Rejects:   bash -c "echo nothing"
         #            git push
         #            any shell where publish.py is not the actual interpreter target
+        # The glob `*python*scripts/publish.py*` already subsumes the variant
+        # with a `/` right before `scripts/`, so no second alternative is
+        # needed (shellcheck SC2221/SC2222).
         case "${cmd}" in
-            *python*scripts/publish.py*|*python*/scripts/publish.py*)
+            *python*scripts/publish.py*)
                 return 0
                 ;;
         esac

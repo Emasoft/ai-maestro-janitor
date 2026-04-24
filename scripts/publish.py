@@ -44,16 +44,19 @@ from pathlib import Path
 
 # ── ANSI colors ──────────────────────────────────────────────────────────────
 
-_USE_COLOR = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+# Respect NO_COLOR=1 (de-facto standard) and FORCE_COLOR=1 overrides in addition
+# to the tty check.
+_USE_COLOR = (
+    hasattr(sys.stdout, "isatty")
+    and sys.stdout.isatty()
+    and not os.environ.get("NO_COLOR")
+) or bool(os.environ.get("FORCE_COLOR"))
 RED = "\033[0;31m" if _USE_COLOR else ""
 GREEN = "\033[0;32m" if _USE_COLOR else ""
 YELLOW = "\033[1;33m" if _USE_COLOR else ""
 BLUE = "\033[0;34m" if _USE_COLOR else ""
 BOLD = "\033[1m" if _USE_COLOR else ""
 NC = "\033[0m" if _USE_COLOR else ""
-
-# Lazy-initialized gitignore filter for file scanning
-_gi = None
 
 
 # ── pre-push hook (strict publish enforcement) ──────────────────────────────
@@ -100,11 +103,14 @@ find_publish_ancestor() {
         #            python3.12 scripts/publish.py
         #            /usr/bin/env python3 scripts/publish.py
         #            /abs/path/to/python scripts/publish.py
-        # Rejects:   bash -c "touch scripts/publish.py && git push"
+        # Rejects:   bash -c "echo nothing"
         #            git push
         #            any shell where publish.py is not the actual interpreter target
+        # The glob `*python*scripts/publish.py*` already subsumes the variant
+        # with a `/` right before `scripts/`, so no second alternative is
+        # needed (shellcheck SC2221/SC2222).
         case "${cmd}" in
-            *python*scripts/publish.py*|*python*/scripts/publish.py*)
+            *python*scripts/publish.py*)
                 return 0
                 ;;
         esac
@@ -170,17 +176,27 @@ def ensure_pre_push_hook(git_root: Path) -> None:
     print(f"{GREEN}ok pre-push hook installed + core.hooksPath activated{NC}")
 
 
-def _get_gi(root: Path):  # noqa: ANN202
-    """Get or create GitignoreFilter for the given root."""
-    global _gi  # noqa: PLW0603
-    if _gi is None:
-        try:
-            from gitignore_filter import GitignoreFilter
-            _gi = GitignoreFilter(root)
-        except ImportError:
-            # Fallback: return a simple walker that skips common dirs
-            return None
-    return _gi
+_PYFILE_EXCLUDE_PARTS = frozenset({
+    "node_modules", "__pycache__", "dist", "build", ".git",
+})
+
+
+def _list_project_py_files(root: Path) -> list[Path]:
+    """Walk the plugin root for tracked *.py files, skipping hidden and build dirs.
+
+    We previously tried to use a third-party `gitignore_filter` package here,
+    but it was never declared as a dependency — the import silently failed
+    and the fallback walker below ran every time. The plugin has no tracked
+    Python outside `scripts/`, so an exact-gitignore walk is overkill;
+    skipping hidden dirs and the usual build-artifact directories is enough.
+    """
+    return [
+        p for p in root.rglob("*.py")
+        if not any(
+            part.startswith(".") or part in _PYFILE_EXCLUDE_PARTS
+            for part in p.relative_to(root).parts
+        )
+    ]
 
 
 # ── Auto-detection ───────────────────────────────────────────────────────────
@@ -795,7 +811,7 @@ commit_parsers = [
   { message = "^refactor", group = "Refactor" },
   { message = "^style", group = "Styling" },
   { message = "^test", group = "Tests" },
-  { message = "^chore\\\\(release\\\\): prepare for", skip = true },
+  { message = "^chore\\\\(release\\\\)", skip = true },
   { message = "^chore", group = "Miscellaneous" },
   { message = "^security", group = "Security" },
   { body = ".*security", group = "Security" },
@@ -989,18 +1005,8 @@ def update_pyproject_toml(plugin_root: Path, new_version: str) -> tuple[bool, st
 
 def update_python_versions(plugin_root: Path, new_version: str) -> list[tuple[bool, str]]:
     """Update __version__ = 'X.Y.Z' in all Python files."""
-    gi = _get_gi(plugin_root)
     results: list[tuple[bool, str]] = []
-
-    # Use gitignore filter if available, else walk manually
-    if gi is not None:
-        py_files = list(gi.rglob("*.py"))
-    else:
-        py_files = [
-            p for p in plugin_root.rglob("*.py")
-            if not any(part.startswith(".") or part in ("node_modules", "__pycache__", "dist", "build", ".git")
-                       for part in p.relative_to(plugin_root).parts)
-        ]
+    py_files = _list_project_py_files(plugin_root)
 
     for py_file in py_files:
         try:
@@ -1049,12 +1055,7 @@ def check_version_consistency(plugin_root: Path) -> tuple[bool, str]:
         except Exception:
             pass
 
-    gi = _get_gi(plugin_root)
-    py_files = list(gi.rglob("*.py")) if gi else [
-        p for p in plugin_root.rglob("*.py")
-        if not any(part.startswith(".") or part in ("node_modules", "__pycache__", "dist", "build", ".git")
-                   for part in p.relative_to(plugin_root).parts)
-    ]
+    py_files = _list_project_py_files(plugin_root)
     for py_file in py_files:
         try:
             content = py_file.read_text(encoding="utf-8")
