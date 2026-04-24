@@ -2,11 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.6] - 2026-04-24
+## [0.3.7] - 2026-04-24
 
-### Documentation
+### Features
 
-- Add centered logo to README header
+- Auto-renew before 7-day expiry + /janitor-disarm skill
 
 ### Miscellaneous
 
