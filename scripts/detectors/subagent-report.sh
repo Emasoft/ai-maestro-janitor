@@ -14,7 +14,7 @@ init_state
 
 SEEN="$STATE_DIR/subagent-report-seen.txt"
 
-LOOKBACK="${CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_LOOKBACK:-86400}"
+LOOKBACK=$(coerce_int "${CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_LOOKBACK:-}" 86400)
 MAX_EMIT_PER_FIRE=5
 
 SCAN_DIRS=(
@@ -22,23 +22,6 @@ SCAN_DIRS=(
   "tests/scenarios/reports"
   "scripts_dev"
 )
-
-file_mtime() {
-  local m
-  # GNU stat (Linux, macOS + coreutils) first.
-  m=$(stat -c '%Y' -- "$1" 2>/dev/null)
-  if [ -n "$m" ] && [ "$m" -eq "$m" ] 2>/dev/null; then
-    printf '%s' "$m"
-    return 0
-  fi
-  # BSD stat fallback (plain macOS).
-  m=$(stat -f '%m' -- "$1" 2>/dev/null)
-  if [ -n "$m" ] && [ "$m" -eq "$m" ] 2>/dev/null; then
-    printf '%s' "$m"
-    return 0
-  fi
-  return 1
-}
 
 main() {
   git rev-parse --git-dir >/dev/null 2>&1 || {
@@ -65,17 +48,19 @@ main() {
       [ "$count" -ge "$MAX_EMIT_PER_FIRE" ] && break 2
 
       local mtime age
-      mtime=$(file_mtime "$f") || continue
+      mtime=$(file_mtime "$f")
+      [ "$mtime" = "0" ] && continue
       [ "$mtime" -lt "$cutoff" ] && continue
       age=$(( now - mtime ))
 
-      local name="${f##*/}"
-      # Skip files whose filename already shows up in a recent commit body.
-      if [ -n "$commit_bodies" ] && printf '%s' "$commit_bodies" | grep -qF -- "$name"; then
+      local rel="${f#"$root"/}"
+      # Match the full project-relative path against recent commit messages
+      # (not just the basename — a short filename like "notes.md" would
+      # false-match commit bodies that mention "notes" in any unrelated way).
+      if [ -n "$commit_bodies" ] && printf '%s' "$commit_bodies" | grep -qF -- "$rel"; then
         continue
       fi
 
-      local rel="${f#"$root"/}"
       local age_h=$(( age / 3600 ))
       local bucket=$(( age / 86400 ))
       emit_once "$SEEN" "report@${rel}@d${bucket}" \

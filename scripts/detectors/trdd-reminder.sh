@@ -11,15 +11,27 @@ source "$HERE/../lib/state.sh"
 source "$HERE/../lib/dedupe.sh"
 init_state
 
-INTERVAL="${CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL:-14400}"
+INTERVAL=$(coerce_int "${CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL:-}" 14400)
+
+# Prefer a sha1 tool that's always present; shasum is Perl-based and absent
+# on minimal Alpine images, sha1sum is GNU coreutils.
+sha1_stream() {
+  if command -v sha1sum >/dev/null 2>&1; then
+    sha1sum | awk '{print $1}'
+  else
+    shasum | awk '{print $1}'
+  fi
+}
 
 session_key() {
-  # Prefer CLAUDE_SESSION_ID; fall back to hostname+pid hash so the dedupe
-  # file still rotates across sessions.
+  # Prefer CLAUDE_SESSION_ID for true session scoping. Otherwise fall back to
+  # hostname + date (NOT PPID — inside a cron-fire subshell PPID is the hook's
+  # short-lived shell, different on every fire, so the dedupe file rotated
+  # every 5 minutes and the reminder re-emitted on every heartbeat).
   if [ -n "${CLAUDE_SESSION_ID:-}" ]; then
     echo "$CLAUDE_SESSION_ID"
   else
-    printf '%s@%s' "$(hostname -s)" "$PPID" | shasum | awk '{print $1}' | cut -c1-12
+    printf '%s@%s' "$(hostname -s)" "$(date +%Y-%m-%d)" | sha1_stream | cut -c1-12
   fi
 }
 
@@ -50,10 +62,13 @@ main() {
 
     local touched_epoch
     touched_epoch=$(git -C "$root" log -1 --format=%ct -- "$f" 2>/dev/null) || touched_epoch=""
-    [ -z "$touched_epoch" ] && touched_epoch=$(date -r "$f" +%s 2>/dev/null || echo "$now")
+    [[ "$touched_epoch" =~ ^[0-9]+$ ]] || touched_epoch=""
+    [ -z "$touched_epoch" ] && touched_epoch=$(file_mtime "$f")
+    [ "$touched_epoch" = "0" ] && touched_epoch="$now"
     local age_days=$(( (now - touched_epoch) / 86400 ))
     local uuid
-    uuid=$(basename "$f" | sed -E 's/^TRDD-([0-9a-f-]+)-.*/\1/')
+    uuid=$(basename "$f" | sed -nE 's/^TRDD-([0-9a-f-]{36})-.+\.md$/\1/p')
+    [ -z "$uuid" ] && continue
 
     entries+="TRDD-${uuid:0:8} (${age_days}d), "
     count=$(( count + 1 ))

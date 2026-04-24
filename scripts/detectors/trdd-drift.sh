@@ -9,7 +9,7 @@ source "$HERE/../lib/state.sh"
 source "$HERE/../lib/dedupe.sh"
 init_state
 
-STALE_DAYS="${CLAUDE_PLUGIN_OPTION_TRDD_STALENESS_DAYS:-14}"
+STALE_DAYS=$(coerce_int "${CLAUDE_PLUGIN_OPTION_TRDD_STALENESS_DAYS:-}" 14)
 SEEN="$STATE_DIR/trdd-drift-seen.txt"
 
 main() {
@@ -36,16 +36,24 @@ main() {
       *) continue ;;
     esac
 
-    # Prefer git last-commit timestamp, fall back to mtime for uncommitted files.
+    # Prefer git last-commit timestamp, fall back to mtime for uncommitted
+    # files. `date -r <path>` is GNU-only — BSD uses `-r <epoch>` — so
+    # file_mtime from state.sh is the portable helper.
     local touched_epoch
     touched_epoch=$(git -C "$root" log -1 --format=%ct -- "$f" 2>/dev/null) || touched_epoch=""
-    [ -z "$touched_epoch" ] && touched_epoch=$(date -r "$f" +%s 2>/dev/null || echo 0)
+    [[ "$touched_epoch" =~ ^[0-9]+$ ]] || touched_epoch=""
+    [ -z "$touched_epoch" ] && touched_epoch=$(file_mtime "$f")
+    [ "$touched_epoch" = "0" ] && continue
 
     local age_days=$(( (now - touched_epoch) / 86400 ))
     [ "$age_days" -lt "$STALE_DAYS" ] && continue
 
+    # Require a full 36-char UUID and a non-empty slug. Older regex was too
+    # permissive — files like `TRDD-deadbeef.md` landed uuid="" and collided
+    # on the shared dedupe key `drift@@bucket-N`.
     local uuid
-    uuid=$(basename "$f" | sed -E 's/^TRDD-([0-9a-f-]+)-.*/\1/')
+    uuid=$(basename "$f" | sed -nE 's/^TRDD-([0-9a-f-]{36})-.+\.md$/\1/p')
+    [ -z "$uuid" ] && continue
     local bucket=$(( age_days / 7 ))
     emit_once "$SEEN" "drift@${uuid}@bucket-${bucket}" \
       "[trdd-drift] TRDD-${uuid:0:8} status='${status}' but file untouched for ${age_days}d."

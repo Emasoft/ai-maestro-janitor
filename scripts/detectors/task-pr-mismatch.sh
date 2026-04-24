@@ -37,12 +37,22 @@ main() {
   local tasks_dir="$HOME/.claude/tasks/$team"
   [ -d "$tasks_dir" ] || { log_line task-pr-mismatch "team dir $tasks_dir missing — skipping"; return; }
 
+  local project_dir
+  project_dir=$(resolve_project_root)
+
   shopt -s nullglob
   local t
   for t in "$tasks_dir"/*.json; do
-    local id status subject description
+    local id status subject description task_project
     id=$(jq -r '.id // empty' "$t" 2>/dev/null) || continue
     [ -z "$id" ] && continue
+    # ls -t heuristic picks the newest team dir, which may belong to a
+    # different session. Filter on the task's recorded project_dir so we
+    # never nudge about PRs from an unrelated project.
+    task_project=$(jq -r '.project_dir // empty' "$t" 2>/dev/null)
+    if [ -n "$task_project" ] && [ "$task_project" != "$project_dir" ]; then
+      continue
+    fi
     status=$(jq -r '.status // "pending"' "$t")
     subject=$(jq -r '.subject // ""' "$t")
     description=$(jq -r '.description // ""' "$t")

@@ -42,9 +42,18 @@ main() {
           continue
         fi
 
+        # Shell-escape path and branch for the emitted remediation command.
+        # Worktree paths can contain spaces (macOS: "My Project") and git's
+        # check-ref-format accepts branch names containing `;`, `&`, `|`, and
+        # `$(...)`. Unquoted use of those strings in the suggested command
+        # would create a paste-and-run shell injection vector.
+        local safe_path safe_branch
+        safe_path=$(printf '%q' "$current_path")
+        safe_branch=$(printf '%q' "$current_branch")
+
         if ! git show-ref --verify --quiet "refs/heads/$current_branch" 2>/dev/null; then
           emit_once "$SEEN" "gone@${current_path}@${current_branch}" \
-            "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' no longer exists — prunable. Run: git worktree remove --force ${current_path} && git worktree prune"
+            "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' no longer exists — prunable. Run: git worktree remove --force ${safe_path} && git worktree prune"
         fi
 
         if [ -n "$main_sha" ]; then
@@ -52,7 +61,7 @@ main() {
           branch_sha=$(git rev-parse "refs/heads/$current_branch" 2>/dev/null) || branch_sha=""
           if [ -n "$branch_sha" ] && git merge-base --is-ancestor "$branch_sha" "$main_sha" 2>/dev/null; then
             emit_once "$SEEN" "merged@${current_path}@${current_branch}" \
-              "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' is merged into main — prunable. Run: git worktree remove --force ${current_path} && git update-ref -d refs/heads/${current_branch} && git worktree prune"
+              "[worktree-janitor] worktree ${current_path} — branch '${current_branch}' is merged into main — prunable. Run: git worktree remove --force ${safe_path} && git update-ref -d refs/heads/${safe_branch} && git worktree prune"
           fi
         fi
         ;;

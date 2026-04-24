@@ -11,7 +11,7 @@ source "$HERE/../lib/state.sh"
 source "$HERE/../lib/dedupe.sh"
 init_state
 
-STALE_DAYS="${CLAUDE_PLUGIN_OPTION_STALE_PR_DAYS:-14}"
+STALE_DAYS=$(coerce_int "${CLAUDE_PLUGIN_OPTION_STALE_PR_DAYS:-}" 14)
 SEEN="$STATE_DIR/pr-reconciler-seen.txt"
 
 main() {
@@ -42,9 +42,19 @@ main() {
     return
   }
 
+  if [ -z "$prs" ]; then
+    # Distinguish "no stale PRs" from "lost access" in the log — silent
+    # no-output otherwise makes this detector look broken when it is in fact
+    # just idle (empty repo, private repo without token, or all PRs closed).
+    log_line pr-reconciler "no open PRs returned for $repo — nothing to do"
+    return
+  fi
+
   while IFS=$'\t' read -r num head title age_sec; do
     [ -z "$num" ] && continue
     title=${title:0:80}
+    # Guard against malformed jq output landing a non-integer in age_sec.
+    [[ "$age_sec" =~ ^[0-9]+$ ]] || age_sec=0
     local age_days=$(( age_sec / 86400 ))
 
     if git merge-base --is-ancestor "$head" "$main_sha" 2>/dev/null; then

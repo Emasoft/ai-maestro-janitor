@@ -5,6 +5,11 @@
 # since a successful turn after a rate-limit is exactly the signal that triggers
 # the dispatch.sh [janitor-resume] emission on the next fire.
 set -euo pipefail
+
+if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  printf '[on-stop] CLAUDE_PLUGIN_ROOT unset; skipping\n' >&2
+  exit 0
+fi
 source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
 
 init_state

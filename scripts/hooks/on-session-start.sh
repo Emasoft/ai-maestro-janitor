@@ -3,6 +3,14 @@
 # heartbeat cron if this is a fresh session. Runs as part of the plugin's hook
 # lifecycle, NOT at cron-fire time.
 set -euo pipefail
+
+# Claude Code always sets CLAUDE_PLUGIN_ROOT for plugin hooks, but guard under
+# `set -u` anyway so direct-shell invocations or future harness changes fail
+# softly rather than aborting with "unbound variable".
+if [ -z "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  printf '[on-session-start] CLAUDE_PLUGIN_ROOT unset; skipping\n' >&2
+  exit 0
+fi
 source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/state.sh"
 
 init_state
