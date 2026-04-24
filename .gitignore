@@ -53,6 +53,7 @@ htmlcov/
 # Dev-only directories (local reports, scratch, validation output)
 docs_dev/
 .tldr/
+.tldrignore
 llm_externalizer_output/
 /reports/
 /reports_dev/
