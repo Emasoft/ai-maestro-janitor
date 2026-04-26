@@ -12,16 +12,23 @@ init_state
 
 SEEN="$STATE_DIR/task-pr-mismatch-seen.txt"
 
-# Resolve the team UUID under ~/.claude/tasks/. Claude Code uses one dir per
-# running team/session; we pick the most recently modified one since that's
-# almost always the current session's own task directory.
+# Resolve the team UUID under ~/.claude/tasks/ that belongs to the CURRENT
+# project's most-recently-active session. Claude Code writes per-session logs
+# to ~/.claude/projects/<project-slug>/<session-uuid>.jsonl, where
+# <project-slug> is the project root with `/` rewritten to `-` (so a leading
+# `/` becomes a leading `-`). The basename of the latest .jsonl in that dir
+# matches the session UUID, which is also the directory name under
+# ~/.claude/tasks/. Picking that dir scopes the detector to this project's
+# tasks and avoids the cross-project bleed of `ls -t ~/.claude/tasks/`.
 resolve_team_uuid() {
-  local tasks_root="$HOME/.claude/tasks"
-  [ -d "$tasks_root" ] || return 1
-  local newest
-  newest=$(ls -t "$tasks_root" 2>/dev/null | head -1) || return 1
-  [ -z "$newest" ] && return 1
-  echo "$newest"
+  local project_root project_slug session_root newest_jsonl
+  project_root=$(resolve_project_root)
+  project_slug=$(printf '%s' "$project_root" | sed 's|/|-|g')
+  session_root="$HOME/.claude/projects/${project_slug}"
+  [ -d "$session_root" ] || return 1
+  newest_jsonl=$(ls -t "$session_root"/*.jsonl 2>/dev/null | head -1) || return 1
+  [ -z "$newest_jsonl" ] && return 1
+  basename "$newest_jsonl" .jsonl
 }
 
 main() {
@@ -37,22 +44,12 @@ main() {
   local tasks_dir="$HOME/.claude/tasks/$team"
   [ -d "$tasks_dir" ] || { log_line task-pr-mismatch "team dir $tasks_dir missing — skipping"; return; }
 
-  local project_dir
-  project_dir=$(resolve_project_root)
-
   shopt -s nullglob
   local t
   for t in "$tasks_dir"/*.json; do
-    local id status subject description task_project
+    local id status subject description
     id=$(jq -r '.id // empty' "$t" 2>/dev/null) || continue
     [ -z "$id" ] && continue
-    # ls -t heuristic picks the newest team dir, which may belong to a
-    # different session. Filter on the task's recorded project_dir so we
-    # never nudge about PRs from an unrelated project.
-    task_project=$(jq -r '.project_dir // empty' "$t" 2>/dev/null)
-    if [ -n "$task_project" ] && [ "$task_project" != "$project_dir" ]; then
-      continue
-    fi
     status=$(jq -r '.status // "pending"' "$t")
     subject=$(jq -r '.subject // ""' "$t")
     description=$(jq -r '.description // ""' "$t")
