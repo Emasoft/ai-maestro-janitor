@@ -1,6 +1,6 @@
 [project]
 name = "ai-maestro-janitor"
-version = "0.3.8"
+version = "0.3.9"
 description = "Session-scoped janitor for Claude Code"
 requires-python = ">=3.11"
 license = "MIT"
