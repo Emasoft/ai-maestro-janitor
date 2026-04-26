@@ -2,11 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.7] - 2026-04-24
+## [0.3.8] - 2026-04-26
 
-### Features
+### Bug Fixes
 
-- Auto-renew before 7-day expiry + /janitor-disarm skill
+- Scope task UUID to current project's session log
+- Stage uv.lock in release commit
 
 ### Miscellaneous
 
