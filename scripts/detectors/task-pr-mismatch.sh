@@ -68,6 +68,25 @@ main() {
            | tr -d '# ' | sort -u) || refs=""
     [ -z "$refs" ] && continue
 
+    # Filter out tokens that point at a sibling TaskCreate task in the same
+    # local task directory. TaskCreate metadata routinely uses `#N` for
+    # sibling task IDs (e.g., "blocked by #287") and `#N` shares its
+    # namespace with GitHub PR numbers, so without this filter every such
+    # reference would be cross-checked against a real PR with the same
+    # number — producing a false [task-pr-mismatch] alert whenever the
+    # configured repo happens to have a PR with that ID. The local task
+    # dir is authoritative for sibling-task references; if a user wants
+    # to refer to a real GitHub PR they should use a `/pull/N` URL or the
+    # `owner/repo#N` form (neither of which the bare `#N` matcher above
+    # captures, so they are not affected by this filter).
+    local filtered_refs="" ref
+    for ref in $refs; do
+      [ -f "$tasks_dir/${ref}.json" ] && continue
+      filtered_refs+="$ref "
+    done
+    refs=$(printf '%s' "$filtered_refs" | tr -s ' ' '\n' | grep -v '^$' | sort -u)
+    [ -z "$refs" ] && continue
+
     local pr_num
     for pr_num in $refs; do
       local pr_state
