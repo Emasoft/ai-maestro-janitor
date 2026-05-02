@@ -114,6 +114,12 @@ This arms the durable heartbeat. Because `durable: true` is set, the cron
 survives session restarts — you do not need to re-arm on each launch unless
 the 7-day recurring-cron expiry has hit.
 
+On Claude Code v2.1.110+, `claude --resume <session-id>` and
+`claude --continue` also resurrect unexpired scheduled tasks, so the
+heartbeat survives explicit resume too. On older versions those commands
+could leave the cron behind — re-run `/janitor-arm` if no drift lines
+surface after an explicit resume.
+
 ## Data layout
 
 All state and logs live at `$CLAUDE_PROJECT_DIR/.janitor/`:
