@@ -32,7 +32,22 @@ jobs:
             exit $exit_code
           fi
 
+      - name: Check if release already exists
+        id: release_exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists (created by scripts/publish.py) — skipping create step"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG not yet present — workflow will create it"
+          fi
+
       - name: Generate changelog
+        if: steps.release_exists.outputs.exists == 'false'
         id: changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
@@ -44,6 +59,7 @@ jobs:
           echo "$CHANGELOG" > changelog.txt
 
       - name: Create GitHub Release
+        if: steps.release_exists.outputs.exists == 'false'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
         with:
           body_path: changelog.txt
