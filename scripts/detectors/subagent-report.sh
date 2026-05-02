@@ -23,6 +23,38 @@ SCAN_DIRS=(
   "scripts_dev"
 )
 
+# Return 0 (true) if the project-relative path $1 OR any of its parent
+# directories (walked up to but not including the scan dir $2) appears as
+# a fixed substring in the commit-bodies blob $3. Returns 1 otherwise.
+#
+# This handles the common case where a commit references a parent
+# directory (e.g. a timestamped backup snapshot folder) as a single
+# logical artifact, rather than listing every file inside it. Without
+# the walk-up, every file under such a directory was reported as
+# unreferenced even though the parent was explicitly committed.
+#
+# We stop before reaching the scan dir itself because bare names like
+# "docs_dev" are too generic — any unrelated commit message that
+# happens to mention "docs_dev" would suppress legitimate orphan alerts.
+path_or_parent_referenced() {
+  local rel="$1"
+  local scan_dir="$2"
+  local commits="$3"
+  [ -z "$commits" ] && return 1
+  local p="$rel"
+  while :; do
+    if printf '%s' "$commits" | grep -qF -- "$p"; then
+      return 0
+    fi
+    local parent="${p%/*}"
+    # No more separators, walked up to the scan dir, or empty → stop.
+    if [ "$parent" = "$p" ] || [ "$parent" = "$scan_dir" ] || [ -z "$parent" ]; then
+      return 1
+    fi
+    p="$parent"
+  done
+}
+
 main() {
   git rev-parse --git-dir >/dev/null 2>&1 || {
     log_line subagent-report "not a git repo — skipping"
@@ -54,10 +86,15 @@ main() {
       age=$(( now - mtime ))
 
       local rel="${f#"$root"/}"
-      # Match the full project-relative path against recent commit messages
-      # (not just the basename — a short filename like "notes.md" would
-      # false-match commit bodies that mention "notes" in any unrelated way).
-      if [ -n "$commit_bodies" ] && printf '%s' "$commit_bodies" | grep -qF -- "$rel"; then
+      # Match the full project-relative path against recent commit messages,
+      # walking up parent directories so a commit that references a parent
+      # (e.g. a timestamped backup snapshot folder) suppresses per-file
+      # alerts for everything inside it. Walk stops before the scan dir
+      # itself, so generic mentions of "docs_dev" don't silence real
+      # orphan reports. Full paths are matched (not basenames) — a short
+      # name like "notes.md" would false-match commit bodies that mention
+      # "notes" in any unrelated way.
+      if path_or_parent_referenced "$rel" "$d" "$commit_bodies"; then
         continue
       fi
 
