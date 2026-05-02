@@ -50,6 +50,7 @@ window clears.
 | `stale-task` | 30 min | Tasks stuck `in_progress` >2h or `pending` >24h with no TaskUpdate. Nudges to resume, close, or defer. |
 | `dirty-tree` | 5 min | Working tree left uncommitted for >30 min. Reminds to commit often (every commit is a recovery point) and lists safe alternatives when a git safety guard blocks a destructive op: move files to `_dev/`, use `git rm`, `git stash`, or a backup branch. |
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
+| `version-update` | 24 h | Newer plugin release published on GitHub. Emits one nudge per new version with the `/plugin update` + `/janitor-arm` recipe, then dedupes. Silent on network/auth failures. |
 
 The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
 detectors fire at roughly their configured cadence without any additional
@@ -144,7 +145,7 @@ them are tracked in git.
 
 Each project has its own drift registry. Running the plugin in project A
 doesn't affect dedupe state in project B. The detector set is discovered by
-iterating `scripts/detectors/`, so `<detector>` above expands to all eight
+iterating `scripts/detectors/`, so `<detector>` above expands to all nine
 scripts currently shipped (and automatically covers any new ones added in
 future releases).
 
@@ -197,6 +198,7 @@ via the `/plugin configure` interface or edit the project's
 | `subagent_report_interval` | 3600 | Min seconds between subagent-report scans. |
 | `subagent_report_lookback` | 86400 | Age cutoff for reports considered fresh and needing action. |
 | `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.sh emits `[janitor-renew]` so Claude re-arms before the 7-day expiry. |
+| `version_check_interval` | 86400 | Min seconds between checks against `api.github.com` for a newer plugin release. |
 
 ## Weekly fallback
 

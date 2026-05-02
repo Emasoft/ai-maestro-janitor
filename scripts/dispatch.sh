@@ -126,6 +126,7 @@ run_detector task-pr-mismatch "$(coerce_int "${CLAUDE_PLUGIN_OPTION_TASK_PR_MISM
 run_detector stale-task       "$(coerce_int "${CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL:-}"       1800)"
 run_detector dirty-tree       "$(coerce_int "${CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL:-}"       300)"
 run_detector subagent-report  "$(coerce_int "${CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL:-}"  3600)"
+run_detector version-update   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL:-}"   86400)"
 
 rotate_log_if_big dispatch
 exit 0
