@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.13] - 2026-05-02
+## [0.3.14] - 2026-05-02
 
-### Bug Fixes
+### Ci
 
-- Worktree-janitor — guard against fresh and locked worktrees
+- Skip Create-GitHub-Release step when release already exists
 
