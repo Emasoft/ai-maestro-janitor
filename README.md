@@ -50,7 +50,7 @@ window clears.
 | `stale-task` | 30 min | Tasks stuck `in_progress` >2h or `pending` >24h with no TaskUpdate. Nudges to resume, close, or defer. |
 | `dirty-tree` | 5 min | Working tree left uncommitted for >30 min. Reminds to commit often (every commit is a recovery point) and lists safe alternatives when a git safety guard blocks a destructive op: move files to `_dev/`, use `git rm`, `git stash`, or a backup branch. |
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
-| `version-update` | 24 h | Newer plugin release published on GitHub. Emits one nudge per new version with the `/plugin update` + `/janitor-arm` recipe, then dedupes. Silent on network/auth failures. |
+| `version-update` | 24 h | Keeps three versions in sync: the version embedded in the running cron's dispatch path, the highest version installed in the plugin cache, and the latest GitHub release. When the cache is behind GitHub it auto-runs `claude plugin marketplace update` + `claude plugin update --scope <auto>` (gated by `auto_update_on_new_release`, default on); the user is then nudged to `/reload-plugins` + `/janitor-arm` to apply. When the cache is up-to-date but the cron still points at an older installed version (because `/janitor-arm` bakes the path in at arm time), it nudges to `/janitor-arm`. Silent on network/CLI failures and when everything is in sync. |
 
 The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
 detectors fire at roughly their configured cadence without any additional
@@ -199,6 +199,7 @@ via the `/plugin configure` interface or edit the project's
 | `subagent_report_lookback` | 86400 | Age cutoff for reports considered fresh and needing action. |
 | `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.sh emits `[janitor-renew]` so Claude re-arms before the 7-day expiry. |
 | `version_check_interval` | 86400 | Min seconds between checks against `api.github.com` for a newer plugin release. |
+| `auto_update_on_new_release` | true | When true, the version-update detector runs `claude plugin marketplace update` + `claude plugin update` itself when a newer release is found, then nudges to `/reload-plugins` + `/janitor-arm`. When false, only the manual-update nudge is emitted. |
 
 ## Weekly fallback
 

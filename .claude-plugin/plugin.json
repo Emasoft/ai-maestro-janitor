@@ -149,6 +149,13 @@
       "type": "number",
       "default": 86400,
       "sensitive": false
+    },
+    "auto_update_on_new_release": {
+      "title": "Auto-update on new plugin release",
+      "description": "When true (default), the version-update detector runs `claude plugin marketplace update ai-maestro-plugins` + `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` whenever a newer release is found on GitHub, then nudges the user to run /reload-plugins + /janitor-arm. When false, only the nudge is emitted and the user updates manually. Auto-update is best-effort: any CLI failure falls back silently to the manual-nudge path.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
     }
   }
 }
