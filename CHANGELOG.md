@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.9] - 2026-04-26
+## [0.3.10] - 2026-05-02
 
 ### Bug Fixes
 
-- Skip sibling TaskCreate IDs when scanning #N PR refs
+- Walk parent dirs when matching subagent-report files
 
