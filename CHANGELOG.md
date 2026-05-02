@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.12] - 2026-05-02
+## [0.3.13] - 2026-05-02
 
-### Features
+### Bug Fixes
 
-- Version-update auto-updates plugin + detects stale cron
+- Worktree-janitor — guard against fresh and locked worktrees
 
