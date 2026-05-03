@@ -127,6 +127,7 @@ run_detector stale-task       "$(coerce_int "${CLAUDE_PLUGIN_OPTION_STALE_TASK_I
 run_detector dirty-tree       "$(coerce_int "${CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL:-}"       300)"
 run_detector subagent-report  "$(coerce_int "${CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL:-}"  3600)"
 run_detector version-update   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL:-}"   86400)"
+run_detector trashcan-purge   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_INTERVAL:-}"  86400)"
 
 rotate_log_if_big dispatch
 exit 0

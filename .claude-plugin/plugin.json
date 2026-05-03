@@ -156,6 +156,27 @@
       "type": "boolean",
       "default": true,
       "sensitive": false
+    },
+    "trashcan_purge_enabled": {
+      "title": "Trashcan auto-purge enabled",
+      "description": "When true (default), the trashcan-purge detector auto-removes timestamped batches in <project_root>/.trashcan/ whose age exceeds trashcan_max_age_days. When false, batches accumulate indefinitely until cleared by hand. Age is computed from the folder-name timestamp (YYYYMMDD_HHMMSS±HHMM), not file mtimes — touching a file inside an old batch does not extend its life.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "trashcan_max_age_days": {
+      "title": "Trashcan Max Age (days)",
+      "description": "Auto-purge threshold for safe-delete batches in .trashcan/. Default: 90. Batches whose folder-name timestamp is older than this are removed in full (folder + sibling .txt manifest). Markers (.gitkeep, README.txt) are never touched.",
+      "type": "number",
+      "default": 90,
+      "sensitive": false
+    },
+    "trashcan_purge_interval": {
+      "title": "Trashcan Purge Cadence (seconds)",
+      "description": "Minimum seconds between trashcan-purge passes. Default: 86400 (24 h). Lower values waste cycles since the threshold is measured in days.",
+      "type": "number",
+      "default": 86400,
+      "sensitive": false
     }
   }
 }

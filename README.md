@@ -51,6 +51,7 @@ window clears.
 | `dirty-tree` | 5 min | Working tree left uncommitted for >30 min. Reminds to commit often (every commit is a recovery point) and lists safe alternatives when a git safety guard blocks a destructive op: move files to `_dev/`, use `git rm`, `git stash`, or a backup branch. |
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
 | `version-update` | 24 h | Keeps three versions in sync: the version embedded in the running cron's dispatch path, the highest version installed in the plugin cache, and the latest GitHub release. When the cache is behind GitHub it auto-runs `claude plugin marketplace update` + `claude plugin update --scope <auto>` (gated by `auto_update_on_new_release`, default on); the user is then nudged to `/reload-plugins` + `/janitor-arm` to apply. When the cache is up-to-date but the cron still points at an older installed version (because `/janitor-arm` bakes the path in at arm time), it nudges to `/janitor-arm`. Silent on network/CLI failures and when everything is in sync. |
+| `trashcan-purge` | 24 h | Auto-removes timestamped batches in `<project_root>/.trashcan/` whose age exceeds `trashcan_max_age_days` (default 90). Age is computed from the folder-name timestamp (`YYYYMMDD_HHMMSS±HHMM`), not file mtimes — `touch`-ing a file inside an old batch does not extend its life. Markers (`.gitkeep`, `README.txt`) are never touched, so the directory itself persists. Disable via `trashcan_purge_enabled: false`. Emits a single line whenever it actually purges something; silent otherwise. |
 
 The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
 detectors fire at roughly their configured cadence without any additional
@@ -256,6 +257,9 @@ via the `/plugin configure` interface or edit the project's
 | `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.sh emits `[janitor-renew]` so Claude re-arms before the 7-day expiry. |
 | `version_check_interval` | 86400 | Min seconds between checks against `api.github.com` for a newer plugin release. |
 | `auto_update_on_new_release` | true | When true, the version-update detector runs `claude plugin marketplace update` + `claude plugin update` itself when a newer release is found, then nudges to `/reload-plugins` + `/janitor-arm`. When false, only the manual-update nudge is emitted. |
+| `trashcan_purge_enabled` | true | When true, the trashcan-purge detector auto-removes safe-delete batches older than `trashcan_max_age_days`. Set false to disable. |
+| `trashcan_max_age_days` | 90 | Days after which a safe-delete batch is auto-purged. Computed from the folder-name timestamp; mtimes inside the batch are ignored. |
+| `trashcan_purge_interval` | 86400 | Min seconds between trashcan-purge passes. |
 
 ## Weekly fallback
 
