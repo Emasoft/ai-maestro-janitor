@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -159,7 +159,7 @@
     },
     "trashcan_purge_enabled": {
       "title": "Trashcan auto-purge enabled",
-      "description": "When true (default), the trashcan-purge detector auto-removes timestamped batches in <project_root>/.trashcan/ whose age exceeds trashcan_max_age_days. When false, batches accumulate indefinitely until cleared by hand. Age is computed from the folder-name timestamp (YYYYMMDD_HHMMSS±HHMM), not file mtimes — touching a file inside an old batch does not extend its life.",
+      "description": "When true (default), the trashcan-purge detector auto-removes timestamped batches in <project_root>/.trashcan/ whose age exceeds trashcan_max_age_days. When false, batches accumulate indefinitely until cleared by hand. Age is computed from the folder-name timestamp (YYYYMMDD_HHMMSS\u00b1HHMM), not file mtimes \u2014 touching a file inside an old batch does not extend its life.",
       "type": "boolean",
       "default": true,
       "sensitive": false
