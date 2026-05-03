@@ -78,6 +78,62 @@ user text) to keep per-fire overhead low.
 - `/janitor-audit` — on-demand aggregate scan. Runs every detector
   synchronously and prints a consolidated markdown report with proposed
   remediation commands (never executed automatically).
+- `/janitor-safe-delete <path>...` — recoverable alternative to `rm` for
+  any agent. Moves the named paths into
+  `<project_root>/.trashcan/<YYYYMMDD_HHMMSS±HHMM>/` (mirroring the original
+  layout) plus a sibling `<timestamp>.txt` manifest listing the original
+  project-relative paths. Nothing is deleted, the move is reversible on any
+  platform via `cp -R` or a manifest-driven `mv` loop. Refuses paths outside
+  the project root, the project root itself, and anything inside `.git/`,
+  `.claude/`, `.claude-plugin/`, or `.trashcan/`. Reachable via the Skill
+  channel or directly via
+  `bash $CLAUDE_PLUGIN_ROOT/scripts/safe-delete.sh -- <path>...` for agents
+  whose tool surface excludes Skill but includes Bash.
+
+### The `.trashcan/` directory
+
+The first call to `/janitor-safe-delete` in a project bootstraps a
+permanent `<project_root>/.trashcan/` directory plus three `.gitignore`
+rules:
+
+```text
+/.trashcan/*
+!/.trashcan/.gitkeep
+!/.trashcan/README.txt
+```
+
+The trashcan's contents are gitignored so trashed files never leak into a
+commit, but `.gitkeep` and `README.txt` are tracked. Tracked files survive
+`git clean -fdx` and re-appear on a fresh clone, so the directory itself
+remains as permanent infrastructure even though every batch inside it is
+ignored. The first-time setup nudges the user to:
+
+```bash
+git add .gitignore .trashcan/.gitkeep .trashcan/README.txt
+git commit -m "track .trashcan markers"
+```
+
+After that commit, the trashcan is bullet-proof against `git clean -fdx`,
+clones, and cache-prune sweeps.
+
+To restore a batch:
+
+```bash
+# Whole batch (overwrites if names collide at the destination):
+cp -R .trashcan/<timestamp>/. ./
+
+# Selective, manifest-driven (works on macOS/Linux/WSL2):
+while IFS= read -r p; do
+  [ -z "$p" ] || [ "${p#\#}" != "$p" ] && continue
+  mv ".trashcan/<timestamp>/${p#./}" "$p"
+done < ".trashcan/<timestamp>.txt"
+```
+
+To purge a batch permanently:
+
+```bash
+rm -rf .trashcan/<timestamp>/ .trashcan/<timestamp>.txt
+```
 
 ### Auto-renewal of the 7-day cron
 
