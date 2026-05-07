@@ -76,3 +76,51 @@ is_squash_merged() {
     *)     return 1 ;;
   esac
 }
+
+# scope_tracking_status <relative-path-from-project-root>
+#
+# Probes the git tracking status of a file inside the project. Prints
+# exactly one of these tokens to stdout (always exits 0):
+#
+#   tracked     — file is in `git ls-files`
+#   gitignored  — file is matched by a `.gitignore` rule
+#   ambiguous   — file exists on disk but is neither tracked nor ignored
+#                 (the case the janitor's tracking-ambiguity detectors flag)
+#   missing     — file does not exist on disk (no nudge needed)
+#   no-repo     — project root is not a git repo (no tracking signal)
+#
+# This is the primitive shared by every "scope drift" detector
+# (mcp-config-drift, settings-scope-drift, subagent-scope-drift,
+# claude-md-scope-drift). Each detector applies its own policy on top:
+#
+#   * `.mcp.json` and subagent files: either tracked OR gitignored is
+#     fine — only `ambiguous` is a problem.
+#   * `.claude/settings.json` / `CLAUDE.md`: SHOULD be tracked. Flag
+#     `gitignored` AND `ambiguous`.
+#   * `.claude/settings.local.json` / `CLAUDE.local.md`: SHOULD be
+#     gitignored. Flag `tracked` AND `ambiguous`.
+#
+# Implementation note: the `cd` happens in a subshell so the caller's
+# cwd is never disturbed. This matters because the heartbeat fires from
+# whatever directory dispatch.sh was launched in, and detectors are
+# expected to be cwd-agnostic.
+scope_tracking_status() {
+  local rel="$1"
+  (
+    local root
+    root=$(resolve_project_root) 2>/dev/null
+    cd "$root" 2>/dev/null || { printf 'no-repo'; exit 0; }
+    git rev-parse --git-dir >/dev/null 2>&1 || { printf 'no-repo'; exit 0; }
+    # `-e` covers files, dirs, and symlinks — we don't constrain to
+    # regular files because subagent .md files are regular but a future
+    # caller might pass a directory (e.g. `.claude/agents/`).
+    [ -e "$rel" ] || { printf 'missing'; exit 0; }
+    if git ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
+      printf 'tracked'
+    elif git check-ignore -q -- "$rel" 2>/dev/null; then
+      printf 'gitignored'
+    else
+      printf 'ambiguous'
+    fi
+  )
+}

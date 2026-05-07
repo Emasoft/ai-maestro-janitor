@@ -75,7 +75,8 @@ check_detectors_executable() {
   for d in pr-reconciler worktree-janitor trdd-drift trdd-reminder task-pr-mismatch \
            stale-task dirty-tree subagent-report version-update trashcan-purge \
            remote-credentials stale-stash nested-git-safety tracked-ignored \
-           plugin-updates mcp-config-drift; do
+           plugin-updates mcp-config-drift \
+           settings-scope-drift subagent-scope-drift claude-md-scope-drift; do
     if [ ! -x "$PLUGIN_ROOT/scripts/detectors/${d}.sh" ]; then
       missing="${missing}${missing:+, }${d}"
     fi

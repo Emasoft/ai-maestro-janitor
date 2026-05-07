@@ -177,6 +177,9 @@ run_detector nested-git-safety   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_NESTED_GI
 run_detector tracked-ignored     "$(coerce_int "${CLAUDE_PLUGIN_OPTION_TRACKED_IGNORED_INTERVAL:-}"     3600)"
 run_detector plugin-updates      "$(coerce_int "${CLAUDE_PLUGIN_OPTION_PLUGIN_UPDATES_INTERVAL:-}"     86400)"
 run_detector mcp-config-drift    "$(coerce_int "${CLAUDE_PLUGIN_OPTION_MCP_CONFIG_DRIFT_INTERVAL:-}"   3600)"
+run_detector settings-scope-drift   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_SETTINGS_SCOPE_DRIFT_INTERVAL:-}"   3600)"
+run_detector subagent-scope-drift   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_SUBAGENT_SCOPE_DRIFT_INTERVAL:-}"   3600)"
+run_detector claude-md-scope-drift  "$(coerce_int "${CLAUDE_PLUGIN_OPTION_CLAUDE_MD_SCOPE_DRIFT_INTERVAL:-}"  3600)"
 
 rotate_log_if_big dispatch
 exit 0

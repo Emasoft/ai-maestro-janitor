@@ -62,6 +62,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$HERE/../lib/state.sh"
 # shellcheck source=../lib/dedupe.sh
 source "$HERE/../lib/dedupe.sh"
+# shellcheck source=../lib/git-utils.sh
+source "$HERE/../lib/git-utils.sh"
 init_state
 
 SEEN="$STATE_DIR/mcp-config-drift-seen.txt"
@@ -200,32 +202,20 @@ iterate_inline_servers() {
 }
 
 # Tracking-status check: `.mcp.json` should be either git-tracked OR
-# explicitly gitignored. Anything else is an ambiguous configuration that
-# typically results in either (a) a teammate not getting the server they
-# expected (it never made it into the repo) or (b) a personal token
-# accidentally being committed on the next `git add .`.
+# explicitly gitignored — never ambiguous. Per the docs, project-scope
+# MCP servers live in `.mcp.json` (typically tracked), and Claude Code
+# does not provide a separate "local" .mcp.json (local-scope MCP lives
+# in ~/.claude.json), so a gitignored `.mcp.json` is unusual but legal
+# (the user has decided their `.mcp.json` is personal). We only flag
+# the genuinely-ambiguous case.
 check_mcp_json_tracking() {
-  local file="$1"
-  local rel
-  rel=$(basename "$file")
-  [ -f "$file" ] || return 0
-
-  cd "$(resolve_project_root)" 2>/dev/null || return 0
-  git rev-parse --git-dir >/dev/null 2>&1 || {
-    log_line mcp-config-drift "not a git repo — skipping tracking check for $rel"
-    return 0
-  }
-
-  if git ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
-    return 0   # tracked → project scope, clear
-  fi
-
-  if git check-ignore -q -- "$rel" 2>/dev/null; then
-    return 0   # gitignored → local scope, clear
-  fi
+  local rel="$1"   # ".mcp.json"
+  local status
+  status=$(scope_tracking_status "$rel")
+  [ "$status" = "ambiguous" ] || return 0
 
   emit "tracking-ambig@${rel}" \
-    "[mcp-config-drift] ${rel} exists but is neither git-tracked nor gitignored — its scope is ambiguous. Decide: 'git add ${rel}' to share with the team (project scope), or add '/${rel}' to .gitignore for personal MCP config (local scope, won't leak personal tokens)."
+    "[mcp-config-drift] ${rel} exists but is neither git-tracked nor gitignored — its scope is ambiguous. Decide: 'git add ${rel}' to share with the team (project scope), or add '/${rel}' to .gitignore for personal MCP config (won't leak personal tokens)."
 }
 
 main() {
@@ -246,7 +236,7 @@ main() {
     else
       iterate_servers "$mcp_json" '.mcpServers'
     fi
-    check_mcp_json_tracking "$mcp_json"
+    check_mcp_json_tracking ".mcp.json"
   fi
 
   # 2. Local-scope MCP servers in ~/.claude.json under .projects.<root>

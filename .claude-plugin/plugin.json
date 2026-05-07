@@ -250,7 +250,28 @@
     },
     "mcp_config_drift_interval": {
       "title": "MCP Config Drift Detector Cadence (seconds)",
-      "description": "Minimum seconds between mcp-config-drift passes. Default: 3600 (1 h). The detector inspects `<project>/.mcp.json`, `<project>/.claude/settings.json`, and `<project>/.claude/settings.local.json` for: (a) invalid JSON; (b) `.mcp.json` that is on disk but neither git-tracked nor gitignored (its scope is ambiguous — should be one or the other); (c) per-server problems: missing transport (no `command` and no `url`), and `$VAR`/`${VAR}` env-var references that are unset in the current shell. Like all janitor detectors, it never inspects user-scope (~/.claude/settings.json) or managed-scope MCP config — those live outside the project's mandate.",
+      "description": "Minimum seconds between mcp-config-drift passes. Default: 3600 (1 h). The detector inspects `<project>/.mcp.json` (project-scope MCP) and `~/.claude.json` `.projects[<root>].mcpServers` (local-scope MCP for THIS project only). Checks: (a) invalid JSON; (b) `.mcp.json` ambiguous tracking status (neither git-tracked nor gitignored); (c) per-server problems: missing transport, unset `$VAR`/`${VAR}` env-var references. Never inspects user-scope MCP (top-level `~/.claude.json` `.mcpServers`).",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "settings_scope_drift_interval": {
+      "title": "Settings Scope Drift Detector Cadence (seconds)",
+      "description": "Minimum seconds between settings-scope-drift passes. Default: 3600 (1 h). The detector flags `.claude/settings.json` that is gitignored (project-scope settings won't reach the team) and `.claude/settings.local.json` that is git-tracked (personal local-scope settings leak to the team). Ambiguous tracking status is also flagged. Cheap — just two `git check-ignore` calls.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "subagent_scope_drift_interval": {
+      "title": "Subagent Scope Drift Detector Cadence (seconds)",
+      "description": "Minimum seconds between subagent-scope-drift passes. Default: 3600 (1 h). The detector walks `.claude/agents/**/*.md` and flags any agent file that is neither git-tracked nor gitignored. Subagents have no formal local scope, so the git status IS the scope signal: tracked → project (team-shared), gitignored → personal. Findings are batched into a single drift line listing the first 5 + a count.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "claude_md_scope_drift_interval": {
+      "title": "CLAUDE.md Scope Drift Detector Cadence (seconds)",
+      "description": "Minimum seconds between claude-md-scope-drift passes. Default: 3600 (1 h). The detector flags `CLAUDE.md` and `.claude/CLAUDE.md` that are gitignored (project memory should be tracked, team-shared) and `CLAUDE.local.md` that is git-tracked (personal memory should be gitignored). Ambiguous tracking status is also flagged.",
       "type": "number",
       "default": 3600,
       "sensitive": false
