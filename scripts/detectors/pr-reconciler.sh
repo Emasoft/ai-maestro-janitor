@@ -9,6 +9,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$HERE/../lib/state.sh"
 # shellcheck source=../lib/dedupe.sh
 source "$HERE/../lib/dedupe.sh"
+# shellcheck source=../lib/git-utils.sh
+source "$HERE/../lib/git-utils.sh"
 init_state
 
 STALE_DAYS=$(coerce_int "${CLAUDE_PLUGIN_OPTION_STALE_PR_DAYS:-}" 14)
@@ -57,9 +59,17 @@ main() {
     [[ "$age_sec" =~ ^[0-9]+$ ]] || age_sec=0
     local age_days=$(( age_sec / 86400 ))
 
+    # Detect both regular merge (PR's head SHA appears in main's history) and
+    # squash-merge (PR's tree-equivalent landed on main as a single commit
+    # with a new SHA). Without the squash check, every squash-merged PR
+    # stayed flagged as "open and unmerged" forever, producing persistent
+    # false-positive drift for any GitHub repo using "Squash and merge".
     if git merge-base --is-ancestor "$head" "$main_sha" 2>/dev/null; then
       emit_once "$SEEN" "noop@PR#${num}@${head}" \
         "[pr-reconciler] PR #${num} '${title}' HEAD ${head:0:8} is already on main — candidate for close."
+    elif is_squash_merged "$head" "$main_sha"; then
+      emit_once "$SEEN" "squashed@PR#${num}@${head}" \
+        "[pr-reconciler] PR #${num} '${title}' HEAD ${head:0:8} appears squash-merged into main — candidate for close."
     fi
 
     if [ "$age_days" -ge "$STALE_DAYS" ]; then

@@ -26,6 +26,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$HERE/../lib/state.sh"
 # shellcheck source=../lib/dedupe.sh
 source "$HERE/../lib/dedupe.sh"
+# shellcheck source=../lib/git-utils.sh
+source "$HERE/../lib/git-utils.sh"
 init_state
 
 SEEN="$STATE_DIR/worktree-janitor-seen.txt"
@@ -83,14 +85,70 @@ process_block() {
   # yet. `git merge-base --is-ancestor A B` is true when A == B, so without
   # the equality guard the "no work done yet" steady state is conflated
   # with "fully merged".
+  #
+  # Two additional safety gates run BEFORE we emit a removal recommendation
+  # (issue #1376 — port from worktree-manager-main):
+  #
+  #   * uncommitted_changes — the worktree has dirty working-tree state.
+  #     `git worktree remove --force` would discard that work without
+  #     warning. Skip the recommendation; let dirty-tree surface the dirt.
+  #
+  #   * unpushed_commits — the branch has commits past its upstream that
+  #     haven't been pushed. Even if the branch is "merged" into main
+  #     locally, the unpushed commits would be lost on remove --force.
+  #
+  # Either condition is a hard skip (logged but no nudge). The /janitor-pause
+  # / /janitor-resume mechanism doesn't help here — the user needs to commit
+  # and push, not silence the detector.
   if [ -n "$main_sha" ]; then
     local branch_sha
     branch_sha=$(git rev-parse "refs/heads/$branch" 2>/dev/null) || branch_sha=""
-    if [ -n "$branch_sha" ] \
-       && [ "$branch_sha" != "$main_sha" ] \
-       && git merge-base --is-ancestor "$branch_sha" "$main_sha" 2>/dev/null; then
-      emit_once "$SEEN" "merged@${path}@${branch}" \
-        "[worktree-janitor] worktree ${path} — branch '${branch}' is merged into main — prunable. Run: git worktree remove --force ${safe_path} && git update-ref -d refs/heads/${safe_branch} && git worktree prune"
+    [ -z "$branch_sha" ] && return 0
+    [ "$branch_sha" = "$main_sha" ] && return 0
+
+    local merged="" merge_kind=""
+    if git merge-base --is-ancestor "$branch_sha" "$main_sha" 2>/dev/null; then
+      merged=1; merge_kind="merged"
+    elif is_squash_merged "refs/heads/$branch" "$main_sha"; then
+      merged=1; merge_kind="squash-merged"
+    fi
+
+    if [ -n "$merged" ]; then
+      # Safety gate 1: uncommitted changes inside the worktree.
+      local porcelain
+      porcelain=$(git -C "$path" status --porcelain 2>/dev/null) || porcelain=""
+      if [ -n "$porcelain" ]; then
+        log_line worktree-janitor "skipping ${merge_kind} worktree '$path' — has uncommitted changes"
+        return 0
+      fi
+
+      # Safety gate 2: unpushed commits. We compare branch tip against its
+      # configured upstream (if any). If no upstream is configured, we fall
+      # back to comparing against origin/<branch>; if that also doesn't
+      # exist, we conservatively skip (better a false silent than a data
+      # loss). `git rev-list --count upstream..HEAD` counts the unpushed.
+      local upstream unpushed=""
+      upstream=$(git -C "$path" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
+        || upstream=""
+      if [ -z "$upstream" ]; then
+        if git show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+          upstream="origin/$branch"
+        fi
+      fi
+      if [ -n "$upstream" ]; then
+        unpushed=$(git -C "$path" rev-list --count "${upstream}..HEAD" 2>/dev/null) || unpushed=""
+      else
+        # No upstream and no origin/<branch>: skip removal nudge entirely.
+        log_line worktree-janitor "skipping ${merge_kind} worktree '$path' — branch '${branch}' has no upstream tracking and no origin/<branch> — cannot verify all commits are safe"
+        return 0
+      fi
+      if [ -n "$unpushed" ] && [ "$unpushed" != "0" ]; then
+        log_line worktree-janitor "skipping ${merge_kind} worktree '$path' — has ${unpushed} unpushed commit(s) past ${upstream}"
+        return 0
+      fi
+
+      emit_once "$SEEN" "${merge_kind}@${path}@${branch}" \
+        "[worktree-janitor] worktree ${path} — branch '${branch}' is ${merge_kind} into main — prunable. Run: git worktree remove --force ${safe_path} && git update-ref -d refs/heads/${safe_branch} && git worktree prune"
     fi
   fi
 }
