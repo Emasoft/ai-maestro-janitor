@@ -30,16 +30,31 @@
 #           Claude Code) but the dominant case is "I forgot to add the
 #           token to my .env" — worth surfacing.
 #
-# Three config locations are checked, all bound to the project:
-#   * `<root>/.mcp.json`                       — top-level, used for
-#                                                project-shared servers
-#   * `<root>/.claude/settings.json`           — `.mcpServers` key,
-#                                                project-scope (committed)
-#   * `<root>/.claude/settings.local.json`     — `.mcpServers` key,
-#                                                local-scope (gitignored)
+# MCP scope storage layout (per https://code.claude.com/docs/en/mcp.md):
 #
-# Per the janitor's project-scope-only mandate (matching plugin-updates),
-# the user-scope `~/.claude/settings.json` is NEVER inspected here.
+#   ┌──────────┬──────────────────────────────────────────┬────────────┐
+#   │ scope    │ file & jq path                           │ inspected? │
+#   ├──────────┼──────────────────────────────────────────┼────────────┤
+#   │ project  │ <root>/.mcp.json    .mcpServers          │ YES        │
+#   │ local    │ ~/.claude.json      .projects[<root>]    │ YES (ours  │
+#   │          │                       .mcpServers        │  only)     │
+#   │ user     │ ~/.claude.json      .mcpServers          │ NEVER      │
+#   └──────────┴──────────────────────────────────────────┴────────────┘
+#
+# IMPORTANT: MCP server configs are NOT in `.claude/settings.json` or
+# `.claude/settings.local.json`. Those are general settings; MCP has its
+# own storage. An earlier draft of this detector incorrectly inspected
+# them — corrected here.
+#
+# `~/.claude.json` is the user's main Claude Code config and contains
+# both the user-scope `mcpServers` (cross-project) AND the per-project
+# local-scope `mcpServers` (under `projects[<absolute-path>]`). Per the
+# janitor's project-scope-only mandate, we read ONLY the entry for the
+# current project's path under `.projects` — the top-level `.mcpServers`
+# (user-scope) is never touched. We also avoid logging or echoing
+# arbitrary content from `~/.claude.json` because that file holds
+# secrets (apiKey, OAuth tokens, etc.); only structural facts about
+# the current project's local-scope servers reach the heartbeat.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -162,6 +177,28 @@ iterate_servers() {
   done <<< "$entries"
 }
 
+# Iterate servers from an inline JSON object (already extracted via jq
+# from a larger file). Used for the local-scope subtree of
+# ~/.claude.json, where we never want the home-file path to appear in
+# any drift line — the caller passes a stable synthetic label instead.
+iterate_inline_servers() {
+  local source_label="$1" servers_json="$2"
+  local entries
+  entries=$(printf '%s' "$servers_json" \
+    | jq -c 'to_entries[]' 2>/dev/null) || return 0
+  [ -z "$entries" ] && return 0
+
+  while IFS= read -r entry; do
+    [ -z "$entry" ] && continue
+    local name config
+    name=$(printf '%s' "$entry" | jq -r '.key' 2>/dev/null) || continue
+    config=$(printf '%s' "$entry" | jq -c '.value' 2>/dev/null) || continue
+    [ -z "$name" ] && continue
+    [ "$config" = "null" ] && continue
+    check_server "$source_label" "$name" "$config"
+  done <<< "$entries"
+}
+
 # Tracking-status check: `.mcp.json` should be either git-tracked OR
 # explicitly gitignored. Anything else is an ambiguous configuration that
 # typically results in either (a) a teammate not getting the server they
@@ -212,25 +249,39 @@ main() {
     check_mcp_json_tracking "$mcp_json"
   fi
 
-  # 2. Project-scope .claude/settings.json (committed)
-  local proj_settings="$root/.claude/settings.json"
-  if [ -f "$proj_settings" ]; then
-    if jq empty "$proj_settings" 2>/dev/null; then
-      iterate_servers "$proj_settings" '.mcpServers'
+  # 2. Local-scope MCP servers in ~/.claude.json under .projects.<root>
+  #
+  # `~/.claude.json` holds Claude Code's user-state (incl. apiKey and
+  # OAuth tokens — sensitive). We read ONLY the local-scope subtree for
+  # this project, never the top-level `.mcpServers` (user-scope) and
+  # never any other top-level field. To avoid leaking the absolute
+  # project path through error messages we use a stable label
+  # ("local-scope MCP") rather than echoing the home file path.
+  local home_json="$HOME/.claude.json"
+  if [ -f "$home_json" ]; then
+    if ! jq empty "$home_json" 2>/dev/null; then
+      # Don't try to fix this — ~/.claude.json is Claude Code's own
+      # state file and editing it manually is risky. Just surface the
+      # condition; the user should restart Claude Code or contact
+      # support.
+      emit "invalid-json@~/.claude.json" \
+        "[mcp-config-drift] ~/.claude.json is invalid JSON. This is Claude Code's own user-state file — do NOT edit it manually. Restart Claude Code or restore from a recent backup. (Local-scope MCP audit skipped this fire.)"
     else
-      emit "invalid-json@.claude/settings.json" \
-        "[mcp-config-drift] .claude/settings.json is invalid JSON. Run 'jq . .claude/settings.json' to find the parse error."
-    fi
-  fi
+      # Extract just our project's local-scope mcpServers — ABSOLUTE
+      # path keying. The jq `--arg` form prevents any shell-level
+      # interpolation of the path.
+      local local_servers_json
+      local_servers_json=$(jq -c --arg root "$root" \
+        '.projects[$root].mcpServers // {}' "$home_json" 2>/dev/null \
+        || printf '{}')
 
-  # 3. Local-scope .claude/settings.local.json (gitignored)
-  local local_settings="$root/.claude/settings.local.json"
-  if [ -f "$local_settings" ]; then
-    if jq empty "$local_settings" 2>/dev/null; then
-      iterate_servers "$local_settings" '.mcpServers'
-    else
-      emit "invalid-json@.claude/settings.local.json" \
-        "[mcp-config-drift] .claude/settings.local.json is invalid JSON. Run 'jq . .claude/settings.local.json' to find the parse error."
+      # Only iterate when we actually have entries. Pass through a
+      # synthetic file label rather than the home-config path, so any
+      # downstream logging never accidentally surfaces ~/.claude.json
+      # in a drift line.
+      if [ "$local_servers_json" != "{}" ] && [ -n "$local_servers_json" ]; then
+        iterate_inline_servers "local-scope (~/.claude.json projects.<this>)" "$local_servers_json"
+      fi
     fi
   fi
 
