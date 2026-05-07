@@ -5,25 +5,39 @@
 # is handled by version-update.sh; this detector covers all OTHER plugins
 # whose configuration lives inside the project's own `.claude/` directory.
 #
-# Claude Code's four configuration scopes (see docs/en/settings.md):
+# Claude Code's four configuration scopes (see docs/en/settings.md). The
+# scope of an installed plugin is determined by which settings file
+# pins it; the simple rule of thumb is "git-tracked = project, gitignored
+# = local":
 #
-#   ┌──────────┬───────────────────────────────────┬──────────────────────────┐
-#   │ scope    │ file path                         │ sharing                  │
-#   ├──────────┼───────────────────────────────────┼──────────────────────────┤
-#   │ managed  │ /etc/claude-code/managed-...      │ admin-deployed           │
-#   │ project  │ <repo>/.claude/settings.json      │ COMMITTED — shared       │
-#   │ local    │ <repo>/.claude/settings.local.json│ GITIGNORED — per-machine │
-#   │ user     │ ~/.claude/settings.json           │ per-machine, ALL projects│
-#   └──────────┴───────────────────────────────────┴──────────────────────────┘
+#   ┌──────────┬─────────────────────────────────────┬─────────────────────┐
+#   │ scope    │ file the install reference lives in │ git status          │
+#   ├──────────┼─────────────────────────────────────┼─────────────────────┤
+#   │ managed  │ /etc/claude-code/managed-...        │ admin-deployed      │
+#   │ project  │ <repo>/.claude/settings.json        │ TRACKED  → shared   │
+#   │ local    │ <repo>/.claude/settings.local.json  │ GITIGNORED → personal│
+#   │ user     │ ~/.claude/settings.json             │ outside any repo    │
+#   └──────────┴─────────────────────────────────────┴─────────────────────┘
 #
-#   * `project` = team-wide settings, checked into git, every collaborator
-#     sees them. Updates here move version pins for the whole team.
-#   * `local` = personal overrides for THIS project on THIS machine,
-#     gitignored. Only this user's checkout is affected.
+#   * `project` scope = the install reference is committed to the repo,
+#     so every collaborator's checkout sees the same plugin pin. Updating
+#     here moves the version pin for the whole team. The same convention
+#     applies to direct-in-repo content under .claude/ (skills, agents,
+#     commands, rules) — git-tracked → effectively shared with the team.
+#   * `local` scope = the install reference is in settings.local.json
+#     (gitignored), so only this user's checkout sees it. Updating only
+#     affects this machine's personal pin.
 #
 # Both `project` and `local` live inside the project's `.claude/` and
-# carry a `projectPath` field in the installed-plugins manifest. They are
-# what we mean by "the project the janitor was armed in".
+# carry a `projectPath` field in the installed-plugins manifest, which is
+# how we filter them to the project the janitor was armed in.
+#
+# The PLUGIN'S ACTUAL CONTENT (cache + manifest) sits in
+# ~/.claude/plugins/cache/ regardless of scope; only the per-scope
+# settings file's pin differs. That is why a multi-scope plugin needs
+# multiple `claude plugin update` calls (one per scope) — each call
+# advances ONE settings file's pointer, even though they all share the
+# same cache slot.
 #
 # DESIGN PRINCIPLE: the janitor is project-scoped infrastructure. It must
 # NEVER touch `user`-scope (global, every project on this machine) or
