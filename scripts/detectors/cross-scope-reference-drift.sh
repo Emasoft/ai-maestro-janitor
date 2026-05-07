@@ -1,58 +1,72 @@
 #!/usr/bin/env bash
-# Cross-scope reference drift — catches the silent-clone-break bug:
+# Cross-scope reference drift — enforces SCOPE PARITY between a source
+# (agent/skill/command/CLAUDE.md) and the targets it references. Per the
+# project-wide rule:
 #
-#   A tracked agent (or skill, or CLAUDE.md, or command) references a
-#   slash-command or Skill() target whose definition lives in a project
-#   file that is GITIGNORED or has AMBIGUOUS tracking status. On the
-#   author's machine everything works (the target is on disk). On a
-#   teammate's clone — or in CI — the source file ships but the target
-#   doesn't, so every invocation of the reference dangles.
+#   "If a skill or agent under <proj>/.claude/{skills,agents}/ references
+#    a skill or agent under <proj>/.claude/{skills,agents}/, then BOTH
+#    must be either git-tracked (project scope) OR gitignored (local
+#    scope). They must travel together as one bundle."
 #
-# Concrete example from the user that motivated this detector:
+# Two classes of drift fall out of this rule, both flagged here:
 #
-#   .claude/agents/reviewer.md   (tracked) — body says "use /lint-helper"
-#   .claude/skills/lint-helper/  (gitignored)
+#   1. SILENT-CLONE-BREAK — tracked source → gitignored or ambiguous
+#      target. The source ships to the repo on push; the target
+#      doesn't. Teammates' clones see the source reference a target
+#      that isn't there, the slash-command silently no-ops, and the
+#      bug is invisible in code review.
 #
-#   git push → reviewer.md goes to GitHub. Teammate clones → lint-helper/
-#   is not in the repo. Reviewer agent fires `/lint-helper` → silent
-#   failure (skill not found, falls through to default behavior, no
-#   loud error). The bug is invisible until someone reads the agent
-#   body and notices the reference doesn't work.
+#      Example:
+#        .claude/agents/reviewer.md   (tracked)  — "use /lint-helper"
+#        .claude/skills/lint-helper/  (gitignored)
+#        → reviewer.md ships, lint-helper/ doesn't, reviewer breaks.
 #
-# Scope of the v1 detector (kept small, high-signal):
+#   2. SCOPE-MISMATCH — gitignored source → tracked target. The
+#      personal/local source has a hidden dependency on a team-shared
+#      target. Locally everything works; if the team later renames or
+#      removes the target, the local source silently breaks (with no
+#      visibility for the team because they never see the source).
+#      Either elevate the source to project scope ('git add'), or
+#      copy the target into a local-scope skill so the dependency is
+#      contained.
 #
-#   SOURCES we scan (only tracked files in scope-anchored locations):
-#     * .claude/agents/**/*.md
-#     * .claude/skills/**/SKILL.md
-#     * .claude/commands/**/*.md     (Claude Code custom commands)
-#     * CLAUDE.md  and  .claude/CLAUDE.md
+# Sources scanned (regardless of their own tracking status — we need to
+# see local sources to flag class 2):
+#   * .claude/agents/**/*.md
+#   * .claude/skills/**/SKILL.md  and  Skill.md
+#   * .claude/commands/**/*.md
+#   * CLAUDE.md  and  .claude/CLAUDE.md
 #
-#   REFERENCES we extract:
-#     * `/<name>`  — slash-command shape (skills, commands, built-ins).
-#                    Loosely matched; non-local names are dropped during
-#                    resolution so URLs and built-ins (/help, /clear)
-#                    produce no nudge.
-#     * `Skill('<name>')` / `Skill("<name>")` — explicit invocation.
+# References we extract:
+#   * `/<name>`           — slash-command (skill, command, or built-in)
+#   * `Skill('<name>')` / `Skill("<name>")` — explicit invocation
 #
-#   TARGETS we resolve a reference to (in this priority order):
-#     * .claude/skills/<name>/SKILL.md
-#     * .claude/skills/<name>/Skill.md
-#     * .claude/agents/<name>.md
-#     * .claude/commands/<name>.md
+# Targets we resolve to (in priority order):
+#   * .claude/skills/<name>/SKILL.md
+#   * .claude/skills/<name>/Skill.md
+#   * .claude/agents/<name>.md
+#   * .claude/commands/<name>.md
 #
-#   DRIFT we emit:
-#     * Source is tracked AND target is gitignored OR ambiguous → flag.
-#     * Source is tracked AND target is tracked → fine.
-#     * Source is tracked AND target doesn't exist locally → silently
-#       skipped (could be a plugin command, a built-in, or a typo —
-#       different drift class, not our concern here).
+# Status pair → verdict (where status ∈ {tracked, gitignored, ambiguous,
+# missing, no-repo}):
 #
-# Out of scope for v1 (potential follow-ups):
-#   * User-scope references (~/.claude/skills/<name>/). Detecting these
-#     requires distinguishing "user skill we'd lose on clone" from
-#     "plugin skill the team also has installed", which is hard.
-#   * Plugin-provided skills/agents the team's settings disagree on.
-#   * Plain-prose mentions ("see the foo skill") — too lossy to detect.
+#   tracked/tracked         OK — both ship together
+#   gitignored/gitignored   OK — both stay personal
+#   tracked/gitignored      → silent-clone-break (class 1)
+#   tracked/ambiguous       → silent-clone-break (target won't ship)
+#   gitignored/tracked      → scope-mismatch    (class 2)
+#   ambiguous/anything      → handled by subagent-scope-drift /
+#                             claude-md-scope-drift (source itself
+#                             needs a tracking decision first)
+#   anything/missing        → reference is dangling (different drift
+#                             class — not our concern here)
+#   anything/no-repo        → not a git repo (no scope signal)
+#
+# Out of scope (good follow-ups):
+#   * User-scope references (~/.claude/skills/<name>/) — needs a way
+#     to distinguish "user skill we'd lose on clone" from "plugin
+#     skill the team also has installed".
+#   * Plain-prose mentions ("see the foo skill") — too lossy.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -114,28 +128,44 @@ main() {
     return
   }
 
-  # Collect tracked sources via `git ls-files`. Restricting to *.md
-  # avoids scanning binary or unrelated files. Multiple paths are
-  # accepted by ls-files; non-existent paths are silently dropped.
-  local tracked_sources
-  tracked_sources=$(git ls-files -- \
-      ':(glob).claude/agents/**/*.md' \
-      ':(glob).claude/skills/**/SKILL.md' \
-      ':(glob).claude/skills/**/Skill.md' \
-      ':(glob).claude/commands/**/*.md' \
-      'CLAUDE.md' \
-      '.claude/CLAUDE.md' \
-      2>/dev/null \
-      || true)
-  [ -z "$tracked_sources" ] && return 0
+  # Collect ALL .md sources in scope-anchored locations — tracked,
+  # gitignored, and ambiguous. We need the gitignored ones to detect
+  # class-2 drift (gitignored source → tracked target). `find -print0`
+  # so paths with whitespace survive, then read into a NUL-delimited
+  # while loop.
+  local sources_buf="" src
+  while IFS= read -r -d '' src; do
+    sources_buf="${sources_buf}${src}"$'\n'
+  done < <(
+    {
+      [ -d .claude/agents ]   && find .claude/agents   -type f -name '*.md' -print0
+      [ -d .claude/skills ]   && find .claude/skills   -type f \( -name 'SKILL.md' -o -name 'Skill.md' \) -print0
+      [ -d .claude/commands ] && find .claude/commands -type f -name '*.md' -print0
+      [ -f CLAUDE.md ]         && printf 'CLAUDE.md\0'
+      [ -f .claude/CLAUDE.md ] && printf '.claude/CLAUDE.md\0'
+    } 2>/dev/null
+  )
 
-  # Process each tracked source. We dedup the (source, target) pair so a
-  # single source referencing the same target multiple times produces ONE
-  # drift line, but two different sources referencing the same target
-  # both fire (each owner needs to know).
+  [ -z "$sources_buf" ] && return 0
+
+  # Process each source. The dedup key is (src, target, src_status,
+  # target_status) so a status flip on either side rotates the key
+  # naturally and re-emits with the new advice.
   while IFS= read -r src; do
     [ -z "$src" ] && continue
     [ -f "$src" ] || continue
+
+    local src_status
+    src_status=$(scope_tracking_status "$src")
+    # Source must have a clear scope to participate in the parity
+    # check. ambiguous sources are flagged by subagent-scope-drift
+    # (or claude-md-scope-drift / settings-scope-drift) — once the
+    # user resolves them to tracked or gitignored, this detector
+    # picks up any resulting parity violation on the next fire.
+    case "$src_status" in
+      tracked|gitignored) ;;
+      *) continue ;;
+    esac
 
     local refs
     refs=$(extract_refs "$src")
@@ -147,28 +177,50 @@ main() {
       local target_rel
       target_rel=$(resolve_ref "$ref" "$root") || continue
 
-      # `scope_tracking_status` is the shared primitive in
-      # scripts/lib/git-utils.sh. The same helper drives the four
-      # scope-drift detectors and now this one.
       local target_status
       target_status=$(scope_tracking_status "$target_rel")
-      case "$target_status" in
-        tracked|missing|no-repo) ;;   # nothing to flag
-        gitignored|ambiguous)
-          local safe_src safe_target
-          safe_src=$(sanitize_for_drift_line "$src")
-          safe_target=$(sanitize_for_drift_line "$target_rel")
-          # Dedup key: stable hash of (src, target) so swapping the
-          # tracking status of either re-emits naturally.
-          local fp
-          fp=$(printf '%s\t%s\t%s' "$src" "$target_rel" "$target_status" \
-                 | cksum | awk '{print $1}')
-          emit_once "$SEEN" "xref@${fp}" \
-            "[cross-scope-reference-drift] '${safe_src}' is git-tracked but references '/${ref}' → '${safe_target}' (${target_status}, not in repo). On clone or push the source ships without its target — the reference will dangle. Fix: 'git add ${safe_target}' to ship the target with the team, OR 'git rm --cached ${safe_src}' to keep the source private too."
+
+      local pair="${src_status}/${target_status}"
+      local drift_class="" drift_msg=""
+
+      case "$pair" in
+        tracked/tracked|gitignored/gitignored)
+          continue
+          ;;
+        tracked/gitignored|tracked/ambiguous)
+          drift_class="silent-clone-break"
+          ;;
+        gitignored/tracked)
+          drift_class="scope-mismatch"
+          ;;
+        *)
+          # ambiguous target with gitignored source, or unexpected
+          # combination — let the dedicated scope-drift detector
+          # surface the underlying ambiguity. Not our concern here.
+          continue
           ;;
       esac
+
+      local safe_src safe_target
+      safe_src=$(sanitize_for_drift_line "$src")
+      safe_target=$(sanitize_for_drift_line "$target_rel")
+
+      case "$drift_class" in
+        silent-clone-break)
+          drift_msg="[cross-scope-reference-drift] '${safe_src}' is git-tracked but references '/${ref}' → '${safe_target}' (${target_status}, not in repo). On clone or push the source ships without its target — the reference will dangle in every teammate's checkout and in CI. Fix: 'git add ${safe_target}' to ship the target with the team, OR 'git rm --cached ${safe_src}' to keep both files private."
+          ;;
+        scope-mismatch)
+          drift_msg="[cross-scope-reference-drift] '${safe_src}' is gitignored (local scope) but references '/${ref}' → '${safe_target}' (git-tracked, project scope). The reference works locally but creates a hidden dependency: if the team renames or removes the target, your local source silently breaks. Either 'git add ${safe_src}' to elevate the source to project scope, OR copy the target into a local-scope sibling and reference that copy instead so the dependency is self-contained."
+          ;;
+      esac
+
+      local fp
+      fp=$(printf '%s\t%s\t%s' "$src" "$target_rel" "$pair" \
+             | cksum | awk '{print $1}')
+
+      emit_once "$SEEN" "${drift_class}@${fp}" "$drift_msg"
     done <<< "$refs"
-  done <<< "$tracked_sources"
+  done <<< "$sources_buf"
 
   rotate_log_if_big cross-scope-reference-drift
 }
