@@ -76,7 +76,8 @@ check_detectors_executable() {
            stale-task dirty-tree subagent-report version-update trashcan-purge \
            remote-credentials stale-stash nested-git-safety tracked-ignored \
            plugin-updates mcp-config-drift \
-           settings-scope-drift subagent-scope-drift claude-md-scope-drift; do
+           settings-scope-drift subagent-scope-drift claude-md-scope-drift \
+           cross-scope-reference-drift; do
     if [ ! -x "$PLUGIN_ROOT/scripts/detectors/${d}.sh" ]; then
       missing="${missing}${missing:+, }${d}"
     fi

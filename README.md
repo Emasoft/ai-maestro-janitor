@@ -61,6 +61,7 @@ window clears.
 | `settings-scope-drift` | 1 h | Audits the tracking status of `.claude/settings.json` and `.claude/settings.local.json` against their documented purposes. Flags: `.claude/settings.json` is gitignored (project-scope settings won't reach the team), `.claude/settings.local.json` is tracked (personal local-scope settings leak to the team), or either file in ambiguous tracking state. |
 | `subagent-scope-drift` | 1 h | Walks `.claude/agents/**/*.md` (Claude Code subagents have no formal local scope, so the git status IS the scope signal: tracked → project, gitignored → personal) and flags every agent file that's neither tracked nor gitignored. Findings are batched into a single drift line with the first 5 + a count, dedup'd by the set of ambiguous files. |
 | `claude-md-scope-drift` | 1 h | Audits `CLAUDE.md` / `.claude/CLAUDE.md` (project memory, should be tracked) and `CLAUDE.local.md` (personal memory, should be gitignored) for the same drift classes as `settings-scope-drift`. |
+| `cross-scope-reference-drift` | 1 h | Catches the silent-clone-break bug: a TRACKED agent/skill/command/CLAUDE.md that references `/<name>` or `Skill('<name>')` whose definition resolves to a project-local file (`.claude/skills/<name>/SKILL.md`, `.claude/agents/<name>.md`, `.claude/commands/<name>.md`) that is GITIGNORED or AMBIGUOUSLY tracked. On clone or push, the tracked source ships without its target — the reference dangles silently in every teammate's checkout and in CI. The drift line includes both fix paths (`git add` the target to ship it, OR `git rm --cached` the source to keep both private). References that don't resolve to a local file (built-ins like `/help`, plugin commands, URLs) are silently skipped — no false positives. |
 
 The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
 detectors fire at roughly their configured cadence without any additional
@@ -297,6 +298,7 @@ via the `/plugin configure` interface or edit the project's
 | `settings_scope_drift_interval` | 3600 | Min seconds between `settings-scope-drift` passes. Two `git check-ignore` calls. |
 | `subagent_scope_drift_interval` | 3600 | Min seconds between `subagent-scope-drift` passes. One `find` plus one `git check-ignore` per agent file. |
 | `claude_md_scope_drift_interval` | 3600 | Min seconds between `claude-md-scope-drift` passes. Three `git check-ignore` calls. |
+| `cross_scope_reference_drift_interval` | 3600 | Min seconds between `cross-scope-reference-drift` passes. A few `grep` per tracked source + one `git check-ignore` per resolved reference. |
 
 ## Weekly fallback
 

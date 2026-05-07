@@ -180,6 +180,7 @@ run_detector mcp-config-drift    "$(coerce_int "${CLAUDE_PLUGIN_OPTION_MCP_CONFI
 run_detector settings-scope-drift   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_SETTINGS_SCOPE_DRIFT_INTERVAL:-}"   3600)"
 run_detector subagent-scope-drift   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_SUBAGENT_SCOPE_DRIFT_INTERVAL:-}"   3600)"
 run_detector claude-md-scope-drift  "$(coerce_int "${CLAUDE_PLUGIN_OPTION_CLAUDE_MD_SCOPE_DRIFT_INTERVAL:-}"  3600)"
+run_detector cross-scope-reference-drift "$(coerce_int "${CLAUDE_PLUGIN_OPTION_CROSS_SCOPE_REFERENCE_DRIFT_INTERVAL:-}"  3600)"
 
 rotate_log_if_big dispatch
 exit 0

@@ -275,6 +275,13 @@
       "type": "number",
       "default": 3600,
       "sensitive": false
+    },
+    "cross_scope_reference_drift_interval": {
+      "title": "Cross-Scope Reference Drift Detector Cadence (seconds)",
+      "description": "Minimum seconds between cross-scope-reference-drift passes. Default: 3600 (1 h). The detector catches the silent-clone-break bug: a tracked file (agent, skill, command, CLAUDE.md) that references `/<name>` or `Skill('<name>')` whose definition resolves to a project-local file that is GITIGNORED or has AMBIGUOUS tracking. On clone, the source ships but the target doesn't, so the reference dangles. Cost: a few `grep` calls per tracked source plus one `scope_tracking_status` per resolved reference; bounded by the number of tracked agents + skills + commands.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
     }
   }
 }
