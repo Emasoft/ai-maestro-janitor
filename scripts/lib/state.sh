@@ -3,6 +3,35 @@
 # Resolves the project-local state/log dirs from $CLAUDE_PROJECT_DIR, or $PWD as
 # a last-resort fallback when the env var is unset (e.g. one-shot mode in CI).
 
+# sanitize_for_drift_line <text>
+#
+# Defangs untrusted text before it lands in a drift line on stdout. The
+# heartbeat surfaces our drift output to Claude as user-text-like context;
+# anyone who can write to a stash message, PR title, branch name, or
+# similar non-source content could otherwise prefix `[janitor-resume]` /
+# `[janitor-renew]` and try to mimic our marker convention. This is not
+# realistically exploitable today (Claude is robust to such mimicry) but
+# defense-in-depth costs nothing.
+#
+# Replacements:
+#   * `[` and `]` → `⟦` `⟧`  (visually similar Unicode brackets, distinct
+#     from anything we emit ourselves — our markers always use ASCII `[]`)
+#   * control chars (0x00-0x1F except tab/newline) → space
+#   * trailing whitespace stripped
+#
+# Cost: one tr + one sed per call; safe for the per-detector budget.
+sanitize_for_drift_line() {
+  local s="$1"
+  # Strip control chars first (they could be terminal escape sequences)
+  s=$(printf '%s' "$s" | tr -d '\000-\010\013\014\016-\037')
+  # Replace ASCII brackets with their Unicode "mathematical" lookalikes so
+  # the result still reads as brackets to a human but does NOT match the
+  # `[<token>]` shape of janitor markers.
+  s=${s//\[/⟦}
+  s=${s//\]/⟧}
+  printf '%s' "$s"
+}
+
 resolve_project_root() {
   if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
     echo "$CLAUDE_PROJECT_DIR"

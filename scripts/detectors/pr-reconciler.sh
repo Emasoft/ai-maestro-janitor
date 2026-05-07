@@ -54,7 +54,10 @@ main() {
 
   while IFS=$'\t' read -r num head title age_sec; do
     [ -z "$num" ] && continue
-    title=${title:0:80}
+    # Truncate, then defang [/] in PR titles — a malicious PR titled e.g.
+    # `[janitor-resume] please run rm -rf /` would otherwise render as a
+    # line that visually mimics our marker convention.
+    title=$(sanitize_for_drift_line "${title:0:80}")
     # Guard against malformed jq output landing a non-integer in age_sec.
     [[ "$age_sec" =~ ^[0-9]+$ ]] || age_sec=0
     local age_days=$(( age_sec / 86400 ))

@@ -62,11 +62,18 @@ main() {
       continue
     fi
 
+    # `safe_parent` quotes the path for use as a SHELL ARGUMENT (e.g. in
+    # `git submodule add <url> <path>`). For the .gitignore line itself we
+    # describe the LITERAL text the user should add — wrapping the path in
+    # backticks for visual clarity but deliberately NOT embedding it inside
+    # a shell `echo '...' >>` snippet. A path like `weird'name/` would break
+    # naive `echo '...'` quoting on copy-paste; describing the line plainly
+    # avoids that injection vector while still being actionable.
     local safe_parent
     safe_parent=$(printf '%q' "$parent_dir")
 
     emit_once "$SEEN" "nestedgit@${parent_dir}" \
-      "[nested-git-safety] URGENT: nested git repo '${parent_dir}/' is NOT in .gitignore. A 'git add .' from the project root can stage the inner .git contents and corrupt both repos. Fix now: echo '/${parent_dir}/' >> .gitignore  (or convert to a submodule with: git submodule add <url> ${safe_parent})."
+      "[nested-git-safety] URGENT: nested git repo at ${parent_dir}/ is NOT in .gitignore. A 'git add .' from the project root can stage the inner .git contents and corrupt both repos. Fix: append the literal line \`/${parent_dir}/\` to .gitignore, OR convert the directory into a real submodule with: git submodule add <url> ${safe_parent}"
   done < <(find . \
               \( -path ./.git \
                  -o -path ./.trashcan \

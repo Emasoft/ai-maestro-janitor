@@ -57,10 +57,16 @@ if [ -f "$PAUSED_FILE" ]; then
 fi
 
 # --- Phase 0.5: log retention ----------------------------------------------
-# Bound .janitor/logs/ growth. Fires at most once per UTC day via a state
-# stamp so successive heartbeats stay cheap. `find ... -mtime +N -delete`
-# is safe-by-design: it only deletes regular files older than N days inside
-# our own log dir; the dir itself is never removed.
+# Bound .janitor/logs/ growth. Fires at most once per LOCAL day via a stamp
+# (`%Y%m%d` in the user's timezone — consistent with the rest of the plugin's
+# local-time convention). Successive heartbeats inside the same day re-read
+# the stamp and skip the find call; the cost per fire is one stat() + one
+# string compare.
+#
+# `find ... -mtime +N -delete` is safe-by-design: GNU and BSD find both
+# expand the path argument before evaluating tests, so we only ever delete
+# regular files older than N days INSIDE our own log dir; the dir itself
+# is never targeted by `-type f`.
 log_retention_days=$(coerce_int "${CLAUDE_PLUGIN_OPTION_LOG_RETENTION_DAYS:-}" 30)
 if [ "$log_retention_days" -gt 0 ]; then
   log_retention_stamp="$STATE_DIR/log-retention-last-day.txt"

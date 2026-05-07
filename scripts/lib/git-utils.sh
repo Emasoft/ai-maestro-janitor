@@ -21,9 +21,11 @@
 #   2. Construct a synthetic commit S with the BRANCH's tree, parented at
 #      the merge base. S represents "what a squash of <branch> onto mb
 #      would look like as a single commit".
-#   3. Run `git cherry <base> S` — git compares S's patch-id against every
-#      commit in <base>..mb. If a matching patch-id is found, cherry's
-#      output line for S starts with '-'; otherwise '+'.
+#   3. Run `git cherry <base> S` — git lists each commit reachable from S
+#      but not from <base> (so just S itself) and prefixes each line with
+#      '-' if a commit with the SAME patch-id already exists in <base>'s
+#      history, '+' otherwise. A '-' means S's diff is already in <base>,
+#      i.e. <branch> was squash-merged.
 #
 # This works even when <base> has additional commits AFTER the squash
 # merge (the tree-equality approach in earlier drafts of this helper

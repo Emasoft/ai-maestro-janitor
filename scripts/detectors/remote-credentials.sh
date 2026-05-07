@@ -28,15 +28,37 @@ strip_userinfo() {
   printf '%s' "$url" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@]*@)?#\1#'
 }
 
-# Match `scheme://...:something@host` where `something` is non-empty. Plain
-# user-only (`scheme://user@host`) is allowed because that is the standard
-# SSH form for the user component (e.g. `git@github.com`); it carries no
-# secret. The userinfo regex below requires a `:` followed by at least one
-# non-`@` char before the `@`, which matches passwords/tokens but not bare
-# usernames.
+# Decide whether a remote URL embeds a credential. We flag two patterns:
+#
+#   Pattern A — explicit basic-auth: `scheme://user:secret@host/...`
+#               with a non-empty password component after the `:`.
+#               Matches the historical "username + password" format.
+#
+#   Pattern B — token-as-username over HTTP(S):
+#               `https://<token>@host/...` or `http://<token>@host/...`.
+#               This is the canonical GitHub Personal Access Token form
+#               (`https://ghp_xxxxxx@github.com/owner/repo.git`) and the
+#               GitHub Apps installation-token form
+#               (`https://x-access-token:<token>@github.com/...` — that
+#               variant is already caught by Pattern A). Some Bitbucket
+#               and GitLab token flows also use this shape.
+#
+# We deliberately do NOT flag Pattern B for `ssh://` because `ssh://git@host`
+# is the legitimate SSH form (the `git` user component carries no secret).
+# Pattern A still catches `ssh://user:password@host/` (rare but a real leak).
 has_password_in_url() {
   local url="$1"
-  [[ "$url" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*://[^/@]*:[^@/]+@[^/]+ ]]
+  # Pattern A: any URL with `:non-empty-password@` in the userinfo
+  if [[ "$url" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*://[^/@]*:[^@/]+@[^/]+ ]]; then
+    return 0
+  fi
+  # Pattern B: HTTP(S)-only — any non-empty userinfo without a colon. The
+  # userinfo character class excludes `:` (so we don't double-match A) and
+  # `@` and `/` (so we stop at the userinfo→host boundary).
+  if [[ "$url" =~ ^https?://[^:@/]+@[^/]+ ]]; then
+    return 0
+  fi
+  return 1
 }
 
 main() {

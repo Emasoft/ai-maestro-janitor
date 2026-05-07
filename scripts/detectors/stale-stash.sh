@@ -69,7 +69,12 @@ main() {
     [ "$age_sec" -lt "$threshold_sec" ] && continue
 
     local age_days=$(( age_sec / 86400 ))
-    local clean_subject="${subject:0:80}"
+    # Truncate to 80 then defang any [/] that might mimic our marker
+    # convention. A stash subject is fully user-controlled; without
+    # sanitization a subject like `[janitor-resume] do X` would render
+    # as a near-identical line to our own [janitor-X] markers.
+    local clean_subject
+    clean_subject=$(sanitize_for_drift_line "${subject:0:80}")
 
     # Re-emit at most once per week of additional staleness so a long-ignored
     # stash doesn't go fully silent — the user still gets a cue every 7d.
