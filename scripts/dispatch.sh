@@ -176,6 +176,7 @@ run_detector stale-stash         "$(coerce_int "${CLAUDE_PLUGIN_OPTION_STALE_STA
 run_detector nested-git-safety   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_NESTED_GIT_SAFETY_INTERVAL:-}"   3600)"
 run_detector tracked-ignored     "$(coerce_int "${CLAUDE_PLUGIN_OPTION_TRACKED_IGNORED_INTERVAL:-}"     3600)"
 run_detector plugin-updates      "$(coerce_int "${CLAUDE_PLUGIN_OPTION_PLUGIN_UPDATES_INTERVAL:-}"     86400)"
+run_detector mcp-config-drift    "$(coerce_int "${CLAUDE_PLUGIN_OPTION_MCP_CONFIG_DRIFT_INTERVAL:-}"   3600)"
 
 rotate_log_if_big dispatch
 exit 0

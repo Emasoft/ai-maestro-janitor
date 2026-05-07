@@ -247,6 +247,13 @@
       "type": "number",
       "default": 86400,
       "sensitive": false
+    },
+    "mcp_config_drift_interval": {
+      "title": "MCP Config Drift Detector Cadence (seconds)",
+      "description": "Minimum seconds between mcp-config-drift passes. Default: 3600 (1 h). The detector inspects `<project>/.mcp.json`, `<project>/.claude/settings.json`, and `<project>/.claude/settings.local.json` for: (a) invalid JSON; (b) `.mcp.json` that is on disk but neither git-tracked nor gitignored (its scope is ambiguous — should be one or the other); (c) per-server problems: missing transport (no `command` and no `url`), and `$VAR`/`${VAR}` env-var references that are unset in the current shell. Like all janitor detectors, it never inspects user-scope (~/.claude/settings.json) or managed-scope MCP config — those live outside the project's mandate.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
     }
   }
 }
