@@ -38,8 +38,16 @@
 #   * CLAUDE.md  and  .claude/CLAUDE.md
 #
 # References we extract:
-#   * `/<name>`           — slash-command (skill, command, or built-in)
-#   * `Skill('<name>')` / `Skill("<name>")` — explicit invocation
+#   FROM THE BODY:
+#     * `/<name>`           — slash-command (skill, command, built-in)
+#     * `Skill('<name>')` / `Skill("<name>")` — explicit invocation
+#   FROM THE YAML FRONTMATTER:
+#     * `agent: <name>`     — names a custom subagent (skills/commands
+#                             with `context: fork`)
+#     * `Skill(<name>...)`  — pre-approved skill names in `allowed-tools:`
+#     * `skills: [<a>...]`  — preloaded skills for subagents (full body
+#                             injected at startup; see /en/sub-agents
+#                             frontmatter table)
 #
 # Targets we resolve to (in priority order):
 #   * .claude/skills/<name>/SKILL.md
@@ -80,10 +88,11 @@ init_state
 
 SEEN="$STATE_DIR/cross-scope-reference-drift-seen.txt"
 
-# Pull slash-command and Skill() references from a markdown file. Always
-# returns 0 (the `|| true` on the outer block handles the zero-match
-# case under set -o pipefail; same gotcha as in mcp-config-drift).
-extract_refs() {
+# Pull slash-command and Skill() references from a markdown file's BODY
+# (post-frontmatter). Always returns 0 (the outer `|| true` handles the
+# zero-match case under set -o pipefail; same gotcha as in
+# mcp-config-drift).
+extract_body_refs() {
   local file="$1"
   {
     # Slash-command shape: `/<lowercase-ident>` of length ≥3 (avoids
@@ -92,13 +101,111 @@ extract_refs() {
     # `/<name>` substring.
     grep -hoE '/[a-z][a-z0-9-]{2,}' "$file" 2>/dev/null \
       | sed 's|^/||'
-    # Explicit Skill('<name>') / Skill("<name>") invocations. The
-    # outer single quotes around the regex contain a Bash-escaped
-    # literal single quote (`'"'"'`) inside a character class so jq /
-    # bash both pass it through to grep correctly.
+    # Explicit Skill('<name>') / Skill("<name>") invocations.
     grep -hoE 'Skill\(["'"'"'][a-zA-Z][a-zA-Z0-9_-]+["'"'"']\)' "$file" 2>/dev/null \
       | sed -E 's/.*\(["'"'"']([^"'"'"']+)["'"'"']\).*/\1/'
   } 2>/dev/null | sort -u | grep -v '^$' || true
+}
+
+# Pull references from the YAML frontmatter (the block between the
+# first pair of `---` markers at the top of the file). Three named-by-
+# value fields are scanned, all documented in
+# https://code.claude.com/docs/en/skills#frontmatter-reference and
+# https://code.claude.com/docs/en/sub-agents (the schema table):
+#
+#   1. `agent: <name>`              (skills/commands with context: fork)
+#                                   → resolves to `.claude/agents/<name>.md`
+#   2. `Skill(<name>...)` patterns  (anywhere in the frontmatter, but
+#                                   `allowed-tools:` is the canonical
+#                                   place — pre-approved skill names)
+#                                   → resolves to `.claude/skills/<name>/`
+#   3. `skills: [<a>, <b>]`         (subagents — preloads skill content
+#                                   into the subagent at startup)
+#                                   → resolves to `.claude/skills/<name>/`
+#
+# YAML parsing in pure bash is fragile, so we limit ourselves to the
+# common forms documented in the official examples (single-line scalar,
+# inline flow list `[a, b]`, and indented block list `\n  - a\n  - b`).
+# Comments (`#` to end of line) and surrounding quotes are stripped.
+# Less common forms (multi-line strings, anchors, &refs) silently
+# produce no matches — better a false negative than a false positive.
+extract_frontmatter_refs() {
+  local file="$1"
+  awk '
+    /^---[[:space:]]*$/ {
+      delim_count++
+      if (delim_count == 1) { in_fm = 1; next }
+      if (delim_count >= 2) { exit }
+    }
+    !in_fm { next }
+    {
+      # Strip trailing YAML comment.
+      sub(/[[:space:]]*#.*$/, "")
+
+      # Pattern 1: agent: <name>
+      if (match($0, /^agent:[[:space:]]+/)) {
+        v = substr($0, RLENGTH + 1)
+        gsub(/["\047]/, "", v)
+        gsub(/[[:space:]]+/, "", v)
+        if (v ~ /^[a-zA-Z][a-zA-Z0-9_-]*$/) print v
+      }
+
+      # Pattern 2: any Skill(<name>...) in the line — multiple per line
+      # supported (a typical allowed-tools line lists several).
+      tmp = $0
+      while (match(tmp, /Skill\([a-zA-Z][a-zA-Z0-9_-]+/)) {
+        s = substr(tmp, RSTART + 6, RLENGTH - 6)
+        print s
+        tmp = substr(tmp, RSTART + RLENGTH)
+      }
+
+      # Pattern 3a: skills: a b  OR  skills: [a, b]  (inline forms)
+      if (match($0, /^skills:[[:space:]]*/)) {
+        rest = substr($0, RLENGTH + 1)
+        if (rest ~ /^\[/) {
+          gsub(/[\[\]"\047 ]/, "", rest)
+          n = split(rest, arr, ",")
+          for (i = 1; i <= n; i++) {
+            if (arr[i] ~ /^[a-zA-Z][a-zA-Z0-9_-]*$/) print arr[i]
+          }
+          in_skills_block = 0
+        } else if (rest ~ /^[a-zA-Z]/) {
+          gsub(/["\047]/, "", rest)
+          n = split(rest, arr, /[[:space:]]+/)
+          for (i = 1; i <= n; i++) {
+            if (arr[i] ~ /^[a-zA-Z][a-zA-Z0-9_-]*$/) print arr[i]
+          }
+          in_skills_block = 0
+        } else {
+          # No same-line value → expect indented block list below.
+          in_skills_block = 1
+          next
+        }
+      }
+
+      # Pattern 3b: indented `- item` lines under skills:
+      if (in_skills_block) {
+        if (match($0, /^[[:space:]]+-[[:space:]]+/)) {
+          v = substr($0, RLENGTH + 1)
+          gsub(/["\047]/, "", v)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+          if (v ~ /^[a-zA-Z][a-zA-Z0-9_-]*$/) print v
+        } else if ($0 !~ /^[[:space:]]/ && $0 != "") {
+          # Non-indented non-empty line ends the list.
+          in_skills_block = 0
+        }
+      }
+    }
+  ' "$file" 2>/dev/null | sort -u | grep -v '^$' || true
+}
+
+# Combined ref extraction: frontmatter + body, deduped.
+extract_refs() {
+  local file="$1"
+  {
+    extract_frontmatter_refs "$file"
+    extract_body_refs "$file"
+  } | sort -u | grep -v '^$' || true
 }
 
 # Resolve a reference name to a project-local file. Echoes the relative
