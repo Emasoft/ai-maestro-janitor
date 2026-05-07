@@ -72,10 +72,24 @@ file_mtime() {
 # ±HHMM form) to the detector's log file. UTC-only timestamps force humans to
 # do timezone arithmetic when debugging; local+offset lets them match their own
 # workday at a glance and still recover the absolute time.
+#
+# When Claude Code 2.1.132+ is running, $CLAUDE_CODE_SESSION_ID is exported into
+# Bash subprocess and hook environments. We prepend an `[s:<8-char-prefix>]`
+# tag so that .janitor/logs/<detector>.log entries can be correlated across
+# concurrent or successive sessions in the same project. Older Claude Code
+# versions (and direct shell invocations) leave the var unset and the line
+# format degrades gracefully to the original `[ts] msg` shape — no diff.
 # Usage: log_line <detector-name> <message...>
 log_line() {
   local name="$1"; shift
-  printf '[%s] %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" >> "$LOG_DIR/$name.log"
+  local sid="${CLAUDE_CODE_SESSION_ID:-}"
+  local ts
+  ts=$(date +%Y-%m-%dT%H:%M:%S%z)
+  if [ -n "$sid" ]; then
+    printf '[%s] [s:%s] %s\n' "$ts" "${sid:0:8}" "$*" >> "$LOG_DIR/$name.log"
+  else
+    printf '[%s] %s\n' "$ts" "$*" >> "$LOG_DIR/$name.log"
+  fi
 }
 
 # Rotate a log file when it exceeds 1 MB.
