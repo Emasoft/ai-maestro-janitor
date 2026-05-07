@@ -42,8 +42,8 @@ window clears.
 
 | Detector | Internal cadence | What it surfaces |
 | --- | --- | --- |
-| `pr-reconciler` | 15 min | Open PRs whose HEAD is already on main (no-op candidates); PRs idle >14 days. |
-| `worktree-janitor` | 15 min | Worktrees whose branch no longer exists or is already merged into main — emits the exact `git worktree remove` command to run. |
+| `pr-reconciler` | 15 min | Open PRs whose HEAD is already on main (no-op candidates), PRs that look squash-merged into main, and PRs idle >14 days. Squash-merge detection uses `git commit-tree` + `git cherry` patch-id matching so PRs landed via "Squash and merge" no longer stay flagged forever. |
+| `worktree-janitor` | 15 min | Worktrees whose branch no longer exists or has been merged (regular OR squash) into main — emits the exact `git worktree remove` command. Before flagging, requires (a) zero uncommitted changes inside the worktree AND (b) zero unpushed commits past the upstream — either condition is a hard skip with a log line, never a silent removal recommendation. |
 | `trdd-drift` | 1 h | TRDDs marked `In progress` that have not been touched in >14 days. |
 | `trdd-reminder` | 4 h | Consolidated reminder of all TRDDs currently `In progress`. |
 | `task-pr-mismatch` | 30 min | Session tasks whose status contradicts the state of a referenced PR. |
@@ -52,6 +52,10 @@ window clears.
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
 | `version-update` | 24 h | Keeps three versions in sync: the version embedded in the running cron's dispatch path, the highest version installed in the plugin cache, and the latest GitHub release. When the cache is behind GitHub it auto-runs `claude plugin marketplace update` + `claude plugin update --scope <auto>` (gated by `auto_update_on_new_release`, default on); the user is then nudged to `/reload-plugins` + `/janitor-arm` to apply. When the cache is up-to-date but the cron still points at an older installed version (because `/janitor-arm` bakes the path in at arm time), it nudges to `/janitor-arm`. Silent on network/CLI failures and when everything is in sync. |
 | `trashcan-purge` | 24 h | Auto-removes timestamped batches in `<project_root>/.trashcan/` whose age exceeds `trashcan_max_age_days` (default 90). Age is computed from the folder-name timestamp (`YYYYMMDD_HHMMSS±HHMM`), not file mtimes — `touch`-ing a file inside an old batch does not extend its life. Markers (`.gitkeep`, `README.txt`) are never touched, so the directory itself persists. Disable via `trashcan_purge_enabled: false`. Emits a single line whenever it actually purges something; silent otherwise. |
+| `remote-credentials` | 1 h | URGENT: parses `git remote -v` and flags any remote URL with an embedded password (`https://user:secret@host/...`). Always-on, no userConfig knob to disable — credential leaks via remote URLs are never legitimate. The nudge includes the exact `git remote set-url` command to strip the secret. Always rotate the leaked credential afterwards. |
+| `stale-stash` | 24 h | Surfaces git stashes older than `stash_stale_days` (default 30). A forgotten stash is invisible to `git status` and `git log` until a stash conflict on `git pull` reminds you it exists. Emits one line per stash with `git stash show -p <ref>` to inspect and `git stash pop` / `git stash drop` to act. Cross-platform date parsing (GNU + BSD) so it works on Linux CI and macOS dev. |
+| `nested-git-safety` | 1 h | URGENT: detects nested `.git` directories (or files, for submodule layout) that are NOT in the parent's `.gitignore`. An unignored nested `.git` can let `git add .` from the parent stage the inner repo's objects, silently corrupting both repos. Emits the exact `.gitignore` line to add or the `git submodule add` command to convert into a proper submodule. Depth-limited (`mindepth 2 maxdepth 4`) and prunes `node_modules/`, `.trashcan/`, etc. so it stays well under the detector budget on large projects. |
+| `tracked-ignored` | 1 h | Catches files that are CURRENTLY tracked by git BUT ALSO match a rule in the active `.gitignore`. Typically: a `.env` committed before the rule was added, build artifacts (`dist/`, `*.pyc`), IDE files (`.idea/`, `.vscode/`), OS noise (`.DS_Store`). The list is invisible to plain `git status`. Caches by HEAD SHA so it only re-shells `git ls-files --ignored --cached` when HEAD has moved — saves ~50ms per heartbeat on large repos. |
 
 The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
 detectors fire at roughly their configured cadence without any additional
@@ -76,6 +80,20 @@ user text) to keep per-fire overhead low.
 - `/janitor-disarm` — stops the heartbeat cron. Deletes every
   `[janitor-heartbeat]` job, clears the arm-timestamp, and suppresses the
   renewal nudge. Use to pause janitor activity without uninstalling.
+- `/janitor-pause [duration]` — suppresses heartbeat output without
+  removing the cron. Writes `.janitor/state/paused` with an optional epoch
+  expiry; while present, dispatch.sh exits silently. Lighter than
+  `/janitor-disarm` — use when starting a focus block or large refactor.
+  `/janitor-resume` lifts the pause; if a duration was supplied
+  (`/janitor-pause 2h`, `/janitor-pause until 18:00`), the next heartbeat
+  after expiry auto-clears the sentinel.
+- `/janitor-resume` — removes the paused sentinel. Idempotent (no-op when
+  not paused). Does NOT arm the cron — for that, use `/janitor-arm`.
+- `/janitor-doctor` — pre-flight health check. Runs ~10 named pass/fail
+  checks (state-dir writable, detectors executable, git/gh/jq available,
+  `/reports/` + `/reports_dev/` gitignored, plugin.json valid) and prints
+  a unicode-bordered table with fix hints for any failures. Read-only —
+  safe to run during any session, including paused or disarmed.
 - `/janitor-audit` — on-demand aggregate scan. Runs every detector
   synchronously and prints a consolidated markdown report with proposed
   remediation commands (never executed automatically).
@@ -260,6 +278,12 @@ via the `/plugin configure` interface or edit the project's
 | `trashcan_purge_enabled` | true | When true, the trashcan-purge detector auto-removes safe-delete batches older than `trashcan_max_age_days`. Set false to disable. |
 | `trashcan_max_age_days` | 90 | Days after which a safe-delete batch is auto-purged. Computed from the folder-name timestamp; mtimes inside the batch are ignored. |
 | `trashcan_purge_interval` | 86400 | Min seconds between trashcan-purge passes. |
+| `stash_stale_days` | 30 | Days a git stash can sit untouched before stale-stash flags it. |
+| `stale_stash_interval` | 86400 | Min seconds between stale-stash scans. |
+| `remote_credentials_interval` | 3600 | Min seconds between remote-credentials checks. The detector is cheap; the failure mode (credential leak) is severe enough to warrant a relatively fast cadence. |
+| `nested_git_safety_interval` | 3600 | Min seconds between nested-`.git` scans. |
+| `tracked_ignored_interval` | 3600 | Min seconds between tracked-ignored scans. (HEAD-cached: only re-runs when HEAD has moved since the last check.) |
+| `log_retention_days` | 30 | Days of `.janitor/logs/<detector>.log` history to keep. Pruned at most once per UTC day at the top of `dispatch.sh`. Set to `0` to disable retention. |
 
 ## Weekly fallback
 
