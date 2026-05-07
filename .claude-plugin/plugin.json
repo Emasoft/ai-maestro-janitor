@@ -177,6 +177,48 @@
       "type": "number",
       "default": 86400,
       "sensitive": false
+    },
+    "stash_stale_days": {
+      "title": "Stale Stash Threshold (days)",
+      "description": "Days a git stash can sit untouched before stale-stash flags it. Default: 30. Stashes are typically forgotten WIP — surfacing them on a 30-day cadence catches lost work without spamming on the same day a stash was created.",
+      "type": "number",
+      "default": 30,
+      "sensitive": false
+    },
+    "stale_stash_interval": {
+      "title": "Stale Stash Detector Cadence (seconds)",
+      "description": "Minimum seconds between stale-stash scans. Default: 86400 (24 h). The threshold is measured in days, so finer granularity wastes heartbeats.",
+      "type": "number",
+      "default": 86400,
+      "sensitive": false
+    },
+    "remote_credentials_interval": {
+      "title": "Remote Credentials Detector Cadence (seconds)",
+      "description": "Minimum seconds between remote-credentials checks. Default: 3600 (1 h). The detector is cheap (single git remote -v parse) but the failure mode (credential leak) is severe enough to want a relatively fast cadence.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "nested_git_safety_interval": {
+      "title": "Nested Git Safety Detector Cadence (seconds)",
+      "description": "Minimum seconds between nested-.git scans. Default: 3600 (1 h). The check is depth-limited (mindepth 2 maxdepth 4) and prunes node_modules / .trashcan, so it stays well under the 10s detector budget on typical projects.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "tracked_ignored_interval": {
+      "title": "Tracked-Ignored Detector Cadence (seconds)",
+      "description": "Minimum seconds between tracked-ignored scans. Default: 3600 (1 h). The detector is HEAD-cached: it only re-shells `git ls-files` when HEAD has moved since the last check, so this interval mainly bounds the worst case after many commits.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "log_retention_days": {
+      "title": "Log Retention (days)",
+      "description": "Days of .janitor/logs/<detector>.log history to keep. Default: 30. Files older than this are pruned at most once per UTC day at the top of dispatch.sh. Set to 0 to disable retention entirely (logs grow unbounded — only useful for short-lived debugging).",
+      "type": "number",
+      "default": 30,
+      "sensitive": false
     }
   }
 }

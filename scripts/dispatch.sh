@@ -38,6 +38,41 @@ source "$HERE/lib/dedupe.sh"
 
 init_state
 
+# --- Phase 0: paused sentinel ----------------------------------------------
+# /janitor-pause writes $STATE_DIR/paused with an optional epoch-second
+# expiry on its first line. Empty file = pause indefinitely. We exit early
+# with no output, leaving the cron itself in place — the user can resume
+# without re-running /janitor-arm.
+PAUSED_FILE="$STATE_DIR/paused"
+if [ -f "$PAUSED_FILE" ]; then
+  paused_until=$(read_int_state "$PAUSED_FILE" 0)
+  now_ts=$(date +%s)
+  if [ "$paused_until" = "0" ] || [ "$now_ts" -lt "$paused_until" ]; then
+    log_line dispatch "skipped: paused (until=${paused_until})"
+    exit 0
+  fi
+  # Expiry passed → auto-resume. Remove the sentinel and continue.
+  rm -f "$PAUSED_FILE"
+  log_line dispatch "auto-resumed: pause expiry passed (was ${paused_until})"
+fi
+
+# --- Phase 0.5: log retention ----------------------------------------------
+# Bound .janitor/logs/ growth. Fires at most once per UTC day via a state
+# stamp so successive heartbeats stay cheap. `find ... -mtime +N -delete`
+# is safe-by-design: it only deletes regular files older than N days inside
+# our own log dir; the dir itself is never removed.
+log_retention_days=$(coerce_int "${CLAUDE_PLUGIN_OPTION_LOG_RETENTION_DAYS:-}" 30)
+if [ "$log_retention_days" -gt 0 ]; then
+  log_retention_stamp="$STATE_DIR/log-retention-last-day.txt"
+  today=$(date +%Y%m%d)
+  prev_day=""
+  [ -f "$log_retention_stamp" ] && prev_day=$(cat "$log_retention_stamp" 2>/dev/null || true)
+  if [ "$prev_day" != "$today" ]; then
+    find "$LOG_DIR" -type f \( -name '*.log' -o -name '*.log.1' \) -mtime "+${log_retention_days}" -delete 2>/dev/null || true
+    atomic_write "$log_retention_stamp" "$today"
+  fi
+fi
+
 # --- Phase 1: rate-limit recovery ------------------------------------------
 # State-file reads are coerced to int via read_int_state: a corrupted or
 # hand-edited since-file otherwise aborts the whole heartbeat under `set -u`
@@ -128,6 +163,12 @@ run_detector dirty-tree       "$(coerce_int "${CLAUDE_PLUGIN_OPTION_DIRTY_TREE_I
 run_detector subagent-report  "$(coerce_int "${CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL:-}"  3600)"
 run_detector version-update   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL:-}"   86400)"
 run_detector trashcan-purge   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_INTERVAL:-}"  86400)"
+
+# Detectors added in v0.4.0 from the high-fit catalogue ideas:
+run_detector remote-credentials  "$(coerce_int "${CLAUDE_PLUGIN_OPTION_REMOTE_CREDENTIALS_INTERVAL:-}"  3600)"
+run_detector stale-stash         "$(coerce_int "${CLAUDE_PLUGIN_OPTION_STALE_STASH_INTERVAL:-}"        86400)"
+run_detector nested-git-safety   "$(coerce_int "${CLAUDE_PLUGIN_OPTION_NESTED_GIT_SAFETY_INTERVAL:-}"   3600)"
+run_detector tracked-ignored     "$(coerce_int "${CLAUDE_PLUGIN_OPTION_TRACKED_IGNORED_INTERVAL:-}"     3600)"
 
 rotate_log_if_big dispatch
 exit 0
