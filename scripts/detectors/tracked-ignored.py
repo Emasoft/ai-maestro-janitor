@@ -88,7 +88,10 @@ def main() -> int:
     # the count and the first 10; the user can run
     # `git ls-files -i -c -X .gitignore` to see the full set.
     count = len(offenders)
-    sample_lines = [f"  - {p}" for p in offenders[:10]]
+    # Defense-in-depth: filenames are paths from `git ls-files` so they
+    # SHOULD be plain strings, but git's index can technically hold
+    # filenames with `[`/`]` and control chars. Sanitize before printing.
+    sample_lines = [f"  - {state.sanitize_for_drift_line(p)}" for p in offenders[:10]]
     if count > 10:
         sample_lines.append(f"  - …and {count - 10} more")
     sample = "\n".join(sample_lines)

@@ -128,13 +128,19 @@ def main() -> int:
         # `echo '...'` quoting on copy-paste; describing the line plainly
         # avoids that injection vector while still being actionable.
         safe_parent = shlex.quote(parent_dir)
+        # Sanitize the path for the human-readable / .gitignore-text part
+        # of the message — defangs `[`/`]` so a directory name like
+        # `[janitor-resume]` cannot mimic our marker convention. The
+        # `safe_parent` form (shell-quoted) stays untouched so the
+        # `git submodule add` snippet remains paste-and-run safe.
+        display_parent = state.sanitize_for_drift_line(parent_dir)
 
         line = dedupe.emit_once(
             seen,
             f"nestedgit@{parent_dir}",
-            f"[nested-git-safety] URGENT: nested git repo at {parent_dir}/ is NOT in .gitignore. "
+            f"[nested-git-safety] URGENT: nested git repo at {display_parent}/ is NOT in .gitignore. "
             f"A 'git add .' from the project root can stage the inner .git contents and corrupt both repos. "
-            f"Fix: append the literal line `/{parent_dir}/` to .gitignore, OR convert the directory into a "
+            f"Fix: append the literal line `/{display_parent}/` to .gitignore, OR convert the directory into a "
             f"real submodule with: git submodule add <url> {safe_parent}",
         )
         if line is not None:

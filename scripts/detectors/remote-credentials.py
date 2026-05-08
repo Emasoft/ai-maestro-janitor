@@ -107,6 +107,12 @@ def main() -> int:
         clean_url = _strip_userinfo(url)
         safe_name = shlex.quote(name)
         safe_clean = shlex.quote(clean_url)
+        # Sanitize the remote name for human-readable rendering. Git
+        # remote names can legitimately contain weird chars (control
+        # bytes, `[`/`]`) via a manually-edited config; without this
+        # defang a remote literally named `[janitor-resume]` would mimic
+        # our marker convention in the cron-forwarded line.
+        display_name = state.sanitize_for_drift_line(name)
 
         # Use a hash of url+name as the dedup key so rotating the secret
         # (which changes the URL) re-fires the alert with the new value.
@@ -115,7 +121,7 @@ def main() -> int:
         out = dedupe.emit_once(
             seen,
             f"creds@{name}@{fp}",
-            f"[remote-credentials] URGENT: git remote '{name}' embeds a secret in its URL — anyone with read "
+            f"[remote-credentials] URGENT: git remote '{display_name}' embeds a secret in its URL — anyone with read "
             f"access to the repo, CI logs, or your screen can see it. Strip with: git remote set-url {safe_name} "
             f"{safe_clean}. Then rotate the leaked credential immediately.",
         )

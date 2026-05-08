@@ -104,7 +104,11 @@ def main() -> int:
             continue
 
         bucket = age // 86400  # re-emit once per day the task stays stale
-        clean_subject = subject[:60]
+        # Subject is fully user-controlled (anything the user / agent
+        # passed to TaskCreate). Truncate first to bound the output, then
+        # defang `[`/`]` and strip control chars so a subject like
+        # `[janitor-resume] do X` cannot mimic our own marker.
+        clean_subject = state.sanitize_for_drift_line(subject[:60])
         age_h = age // 3600
 
         line = dedupe.emit_once(

@@ -96,8 +96,16 @@ def _process_block(
     # branch names with `;`, `&`, `|`, and `$(...)`. Unquoted use of those
     # strings in the printed command would be a paste-and-run injection
     # vector for anyone who copies the suggestion blindly.
+    # Two distinct hardenings on the SAME path/branch strings:
+    #   * `safe_path` / `safe_branch` use `shlex.quote` so a paste-and-run
+    #     of the suggested shell command is safe under spaces / `;` / `$(...)`.
+    #   * `display_path` / `display_branch` use sanitize_for_drift_line so
+    #     a path or branch containing `[janitor-resume]`-shaped text can't
+    #     mimic our marker convention in the cron-forwarded prose.
     safe_path = shlex.quote(path_str)
     safe_branch = shlex.quote(branch)
+    display_path = state.sanitize_for_drift_line(path_str)
+    display_branch = state.sanitize_for_drift_line(branch)
 
     # Branch ref deleted out from under the worktree.
     show_ref = subprocess.run(
@@ -108,7 +116,7 @@ def _process_block(
         line = dedupe.emit_once(
             seen,
             f"gone@{path_str}@{branch}",
-            f"[worktree-janitor] worktree {path_str} — branch '{branch}' no longer exists — prunable. "
+            f"[worktree-janitor] worktree {display_path} — branch '{display_branch}' no longer exists — prunable. "
             f"Run: git worktree remove --force {safe_path} && git worktree prune",
         )
         if line is not None:
@@ -179,7 +187,7 @@ def _process_block(
     line = dedupe.emit_once(
         seen,
         f"{merge_kind}@{path_str}@{branch}",
-        f"[worktree-janitor] worktree {path_str} — branch '{branch}' is {merge_kind} into main — prunable. "
+        f"[worktree-janitor] worktree {display_path} — branch '{display_branch}' is {merge_kind} into main — prunable. "
         f"Run: git worktree remove --force {safe_path} && git update-ref -d refs/heads/{safe_branch} && git worktree prune",
     )
     if line is not None:

@@ -93,10 +93,16 @@ def main() -> int:
         uuid = m.group(1)
         bucket = age_days // 7
 
+        # `status` is whatever the human author wrote in the **Status:**
+        # line — fully untrusted text. The narrowing membership check
+        # above limits the value to exactly two strings in normal
+        # operation, but a future detector that emits free-form status
+        # would expose the same surface — defang here for safety.
+        display_status = state.sanitize_for_drift_line(status)
         line = dedupe.emit_once(
             seen,
             f"drift@{uuid}@bucket-{bucket}",
-            f"[trdd-drift] TRDD-{uuid[:8]} status='{status}' but file untouched for {age_days}d.",
+            f"[trdd-drift] TRDD-{uuid[:8]} status='{display_status}' but file untouched for {age_days}d.",
         )
         if line is not None:
             print(line)

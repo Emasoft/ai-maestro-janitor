@@ -141,7 +141,10 @@ def main() -> int:
         if not refs:
             continue
 
-        clean_subject = subject[:60]
+        # Subject is user-controlled (TaskCreate-supplied). Defang `[`/`]`
+        # so a subject like `[janitor-resume] please do X` can't mimic our
+        # own marker in the cron-forwarded drift line.
+        clean_subject = state.sanitize_for_drift_line(subject[:60])
         for pr_num in sorted(refs, key=int):
             pr_state = _pr_state(repo, pr_num)
             if not pr_state:

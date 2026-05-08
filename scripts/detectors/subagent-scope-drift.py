@@ -63,7 +63,10 @@ def main() -> int:
         return 0
 
     # Build summary: first 5 lines indented, plus a count line if more.
-    sample_lines = [f"  - {p}" for p in ambiguous[:5]]
+    # Defense-in-depth: agent file paths are project-local and normally
+    # trusted, but POSIX permits `[`/`]` in filenames. Sanitize before
+    # printing so a path can't mimic our marker convention.
+    sample_lines = [f"  - {state.sanitize_for_drift_line(p)}" for p in ambiguous[:5]]
     if len(ambiguous) > 5:
         sample_lines.append(f"  - …and {len(ambiguous) - 5} more")
     sample = "\n".join(sample_lines)

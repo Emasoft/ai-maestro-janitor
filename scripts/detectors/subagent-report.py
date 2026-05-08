@@ -121,10 +121,15 @@ def main() -> int:
 
             age_h = age // 3600
             bucket = age // 86400
+            # `rel` comes from the project's filesystem (any user with
+            # write access to docs_dev/ or scripts_dev/ controls it).
+            # Defang `[`/`]` for the prose; keep raw `rel` in the dedup
+            # key so dedup behaviour is unaffected.
+            display_rel = state.sanitize_for_drift_line(rel)
             line = dedupe.emit_once(
                 seen,
                 f"report@{rel}@d{bucket}",
-                f"[subagent-report] {rel} ({age_h}h old) has not been referenced in any commit — review and act on it, or commit a note explaining why it's deferred.",
+                f"[subagent-report] {display_rel} ({age_h}h old) has not been referenced in any commit — review and act on it, or commit a note explaining why it's deferred.",
             )
             if line is not None:
                 print(line)
