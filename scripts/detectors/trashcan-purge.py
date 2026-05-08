@@ -56,17 +56,10 @@ def _parse_ts_to_epoch(ts: str) -> Optional[int]:
     return int(dt.timestamp())
 
 
-def _is_truthy_env(name: str, default: bool) -> bool:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    return raw.lower() not in ("false", "0", "no", "off")
-
-
 def main() -> int:
     state.init_state()
 
-    if not _is_truthy_env("CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_ENABLED", True):
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_ENABLED", True):
         return 0
 
     max_age_days = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TRASHCAN_MAX_AGE_DAYS"), 90)

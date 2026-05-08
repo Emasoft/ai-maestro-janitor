@@ -104,17 +104,54 @@ def read_int_state(path: Path | str, default: int = 0) -> int:
     return default
 
 
-def coerce_int(value: Optional[str], default: int = 0) -> int:
+def is_truthy_env(name: str, default: bool) -> bool:
+    """Read a yes/no env var with friendly false-spellings.
+
+    Empty / unset → `default`. Otherwise: `false`/`0`/`no`/`off`
+    (case-insensitive) → False; anything else → True.
+
+    Three detectors duplicated this function byte-for-byte; promoting it
+    here keeps the spelling-of-false rules in one place so a future
+    addition (e.g. `disabled`) doesn't drift between callers.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    return raw.lower() not in ("false", "0", "no", "off")
+
+
+def coerce_int(
+    value: Optional[str],
+    default: int = 0,
+    *,
+    detector_name: Optional[str] = None,
+    var_name: Optional[str] = None,
+) -> int:
     """Coerce a (possibly user-supplied) value to a non-negative int.
 
     Accepts None, empty string, and non-numeric text — all return
     `default`. Used for `CLAUDE_PLUGIN_OPTION_*` env vars where a typo
     like "900 seconds" should not crash the heartbeat.
+
+    If `detector_name` is provided AND a non-empty value failed to
+    coerce, log a one-line note so the user can see in the detector
+    log that their config knob is being ignored. The log fires only
+    on the "had a value but it wasn't a number" case — empty/unset
+    values (the common path) stay silent. `var_name` lets the log
+    point at the offending env var.
     """
     if value is None:
         return default
     s = value.strip()
+    if not s:
+        return default
     if not s.isdigit():
+        if detector_name:
+            label = var_name or "config value"
+            log_line(
+                detector_name,
+                f"coerce_int: {label}={s!r} is not a non-negative integer — using default {default}",
+            )
         return default
     return int(s)
 
@@ -236,16 +273,37 @@ def sanitize_for_drift_line(text: str) -> str:
     impersonate a janitor marker like `[janitor-resume]`. Replacements:
 
       * 0x00–0x1F (except tab + newline) → stripped
+      * 0x7F (DEL) → stripped
+      * U+202A–U+202E (Unicode bidi-override LRE/RLE/PDF/LRO/RLO) → stripped
+      * U+2066–U+2069 (LRI/RLI/FSI/PDI isolate controls) → stripped
       * `[` → `⟦` (U+27E6 MATHEMATICAL LEFT WHITE SQUARE BRACKET)
       * `]` → `⟧` (U+27E7 MATHEMATICAL RIGHT WHITE SQUARE BRACKET)
+
+    Bidi-override and isolate controls let attacker-controlled text
+    visually reorder a downstream rendering — a PR title or stash subject
+    that embeds them could disguise its real content from a human
+    skimming the heartbeat output. Stripping them is safe: drift lines
+    are short, single-direction prose; nobody's PR title legitimately
+    needs to flip script direction.
 
     The Unicode lookalikes still read as brackets but are visually
     distinct from anything we emit ourselves (our markers always use
     ASCII `[]`).
     """
-    cleaned = "".join(
-        c for c in text
-        if c in ("\t", "\n") or ord(c) >= 0x20
-    )
+    def _keep(c: str) -> bool:
+        if c in ("\t", "\n"):
+            return True
+        cp = ord(c)
+        if cp < 0x20:
+            return False
+        if cp == 0x7F:                  # DEL
+            return False
+        if 0x202A <= cp <= 0x202E:      # bidi-override LRE/RLE/PDF/LRO/RLO
+            return False
+        if 0x2066 <= cp <= 0x2069:      # LRI/RLI/FSI/PDI
+            return False
+        return True
+
+    cleaned = "".join(c for c in text if _keep(c))
     cleaned = cleaned.replace("[", "⟦").replace("]", "⟧")
     return cleaned

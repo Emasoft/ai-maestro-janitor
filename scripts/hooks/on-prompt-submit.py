@@ -4,15 +4,17 @@
 # ///
 """UserPromptSubmit hook — Python port of on-prompt-submit.sh.
 
-Fires when the user types a prompt. Refreshes the idle timer so the
-heartbeat doesn't emit stale keepalive cues.
+Fires when the user types a prompt. Currently a no-op: the previous
+implementation refreshed a `last-activity.ts` timestamp, but no
+detector ever reads it (the heartbeat doesn't gate on user activity).
+The hook is kept registered so reintroducing prompt-submit-driven
+behaviour later doesn't require a settings.json edit.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 
 _PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
@@ -22,12 +24,8 @@ if not _PLUGIN_ROOT:
 
 sys.path.insert(0, str(Path(_PLUGIN_ROOT) / "scripts" / "lib"))
 
-import state  # noqa: E402
-
 
 def main() -> int:
-    state.init_state()
-    state.atomic_write(state.state_dir() / "last-activity.ts", str(int(time.time())))
     return 0
 
 

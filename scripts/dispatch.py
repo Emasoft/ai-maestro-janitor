@@ -216,11 +216,12 @@ def _phase_heartbeat_renew() -> None:
     age = now - armed_at
     if armed_at <= 0 or age < threshold_sec:
         return
+    # Single calculation — `age_days` for display, same value as the
+    # dedup bucket so we emit at most once per day past the threshold.
     age_days = age // 86400
-    bucket = age // 86400  # one emit per day once we pass the threshold
     line = dedupe.emit_once(
         state.state_dir() / "heartbeat-renew-seen.txt",
-        f"renew@day{bucket}",
+        f"renew@day{age_days}",
         f"[janitor-renew] heartbeat cron is {age_days} day(s) old, approaching the 7-day auto-expiry. "
         f"Run /janitor-arm to renew — it is idempotent (deletes the old cron and creates a fresh one).",
     )

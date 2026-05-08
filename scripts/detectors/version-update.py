@@ -204,13 +204,6 @@ def _resolve_latest_published(plugin_root: Path) -> Optional[str]:
     return tag.lstrip("v") if tag else None
 
 
-def _is_truthy_env(name: str, default: bool) -> bool:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    return raw.lower() not in ("false", "0", "no", "off")
-
-
 def main() -> int:
     state.init_state()
 
@@ -245,7 +238,7 @@ def main() -> int:
     # Branch A: newer published than locally installed?
     if latest_published and latest_installed and latest_published != latest_installed:
         if _semver_tuple(latest_installed) < _semver_tuple(latest_published):
-            auto_enabled = _is_truthy_env("CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE", True)
+            auto_enabled = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE", True)
             if auto_enabled and _attempt_auto_update():
                 auto_updated = True
                 # Re-list cache parent so latest_installed reflects the

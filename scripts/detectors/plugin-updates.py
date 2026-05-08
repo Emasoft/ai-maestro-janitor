@@ -63,13 +63,6 @@ def _semver_tuple(s: str) -> tuple[int, ...]:
         return (-1,)
 
 
-def _is_truthy_env(name: str, default: bool) -> bool:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    return raw.lower() not in ("false", "0", "no", "off")
-
-
 def _scope_allowed(scope: str) -> bool:
     """user/managed are NEVER allowed regardless of user config."""
     if scope in ("user", "managed"):
@@ -212,7 +205,7 @@ def main() -> int:
     updates_applied = 0
     update_errors = 0
 
-    auto_enabled = _is_truthy_env("CLAUDE_PLUGIN_OPTION_PLUGIN_AUTO_UPDATE_ENABLED", True)
+    auto_enabled = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_PLUGIN_AUTO_UPDATE_ENABLED", True)
 
     for plugin_id, current_version, scope, project_path in candidates:
         plugin_name = plugin_id.split("@", 1)[0]

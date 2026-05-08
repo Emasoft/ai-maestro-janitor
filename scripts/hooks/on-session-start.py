@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 
 _PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
@@ -39,7 +38,9 @@ def main() -> int:
     except FileNotFoundError:
         pass
 
-    state.atomic_write(state.state_dir() / "last-activity.ts", str(int(time.time())))
+    # `last-activity.ts` was previously written here too, but no detector
+    # ever read it — dropped to avoid carrying dead state. The
+    # session-start nudge below is what callers actually rely on.
     state.log_line("session-start", f"state initialized at {state.state_dir()}")
 
     # Stdout from this hook becomes additional context for the first user

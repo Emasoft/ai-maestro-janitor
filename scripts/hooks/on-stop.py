@@ -4,19 +4,20 @@
 # ///
 """Stop hook — Python port of on-stop.sh.
 
-Fires when Claude completes a turn successfully. Resets the idle timer
-so the heartbeat's cache-keepalive semantics track the latest activity.
-Does NOT clear rate-limited.flag here — that belongs to the heartbeat
-itself, since a successful turn after a rate-limit is exactly the
-signal that triggers the dispatch [janitor-resume] emission on the
-next fire.
+Fires when Claude completes a turn successfully. Currently a no-op: the
+previous implementation refreshed a `last-activity.ts` timestamp, but
+no detector ever reads it. The hook intentionally does NOT clear
+`rate-limited.flag` either — that belongs to the heartbeat itself,
+since a successful turn after a rate-limit is exactly the signal that
+triggers the dispatch [janitor-resume] emission on the next fire. The
+hook is kept registered so future stop-driven behaviour doesn't
+require a settings.json edit.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-import time
 from pathlib import Path
 
 _PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
@@ -26,12 +27,8 @@ if not _PLUGIN_ROOT:
 
 sys.path.insert(0, str(Path(_PLUGIN_ROOT) / "scripts" / "lib"))
 
-import state  # noqa: E402
-
 
 def main() -> int:
-    state.init_state()
-    state.atomic_write(state.state_dir() / "last-activity.ts", str(int(time.time())))
     return 0
 
 
