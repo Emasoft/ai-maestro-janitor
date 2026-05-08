@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 # Match `#NN` PR references. The leading anchor (start-of-string OR
 # whitespace) prevents false matches on hash-prefixed tokens that aren't
 # PR references (e.g. SHA fragments embedded in URLs).

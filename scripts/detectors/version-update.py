@@ -43,7 +43,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 PLUGIN_NAME = "ai-maestro-janitor"
 MARKETPLACE_NAME = "ai-maestro-plugins"
 

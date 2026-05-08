@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 # Matches `TRDD-<full UUID>-<slug>.md`. The 36-char UUID enforcement
 # prevents collisions on the dedupe key — older regex was too permissive
 # and let `TRDD-deadbeef.md` land uuid="" and collide on `drift@@bucket-N`.

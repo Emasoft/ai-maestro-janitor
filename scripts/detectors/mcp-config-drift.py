@@ -53,7 +53,6 @@ import dedupe  # noqa: E402
 import git_utils  # noqa: E402
 import state  # noqa: E402
 
-
 # Match `${VAR}` or `$VAR`. Var names are uppercase + digits + underscore,
 # starting with a letter or underscore. Lowercase / numeric-prefixed names
 # are skipped (they're often coincidental matches like `$1` in sample

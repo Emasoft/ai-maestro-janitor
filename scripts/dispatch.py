@@ -46,7 +46,6 @@ sys.path.insert(0, str(_HERE / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 # Detector roster: (name, default cadence in seconds, env-var override).
 # Order matches dispatch.sh — detectors with shorter cadences run first
 # only because that order is human-readable (cadence is enforced

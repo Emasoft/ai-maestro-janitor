@@ -14,7 +14,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-
 # --- path resolution -------------------------------------------------------
 
 def _resolve_project_root() -> Path:

@@ -45,7 +45,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 SELF_PLUGIN_NAME = "ai-maestro-janitor"
 _SEMVER_PREFIX_RE = re.compile(r"^\d+\.\d+\.\d+")
 _UPDATED_FROM_RE = re.compile(r"updated from \S+ to (\S+?)[. ]?$", re.MULTILINE)

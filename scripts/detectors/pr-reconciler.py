@@ -25,7 +25,6 @@ import dedupe  # noqa: E402
 import git_utils  # noqa: E402
 import state  # noqa: E402
 
-
 # Origin-URL → owner/repo slug. Repo segment allows dots (e.g.
 # `Emasoft/dotfiles.config`, `org/site.com`) — the older regex
 # excluded `.` and silently failed to match those repos. The lazy

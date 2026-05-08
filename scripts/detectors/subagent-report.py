@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 _SCAN_DIRS = ("docs_dev", "tests/scenarios/reports", "scripts_dev")
 _MAX_EMIT_PER_FIRE = 5
 

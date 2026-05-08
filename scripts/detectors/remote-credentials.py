@@ -31,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 # Pattern A — explicit basic-auth: `scheme://user:secret@host/...` with a
 # non-empty password component after the `:`. Matches the historical
 # "username + password" format. Userinfo char class excludes `@` and `/`

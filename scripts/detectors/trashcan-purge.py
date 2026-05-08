@@ -38,7 +38,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import state  # noqa: E402
 
-
 # Folder/manifest patterns. Either `+HHMM` or `-HHMM` offset. Manifest
 # variants carry a trailing `.txt`. Anything else is left alone — that's
 # how .gitkeep, README.txt, and any human-added file or folder stay safe.

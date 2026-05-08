@@ -33,7 +33,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 _PRUNE_NAMES = {".git", ".trashcan", "node_modules", "dist", "build", ".venv", "venv"}
 _MIN_DEPTH = 2
 _MAX_DEPTH = 4

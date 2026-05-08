@@ -25,7 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-
 _TRDD_NAME_RE = re.compile(r"^TRDD-([0-9a-f-]{36})-.+\.md$")
 _STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*(.+)$")
 
