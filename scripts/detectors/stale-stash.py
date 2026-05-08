@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # ///
 """Stale-stash detector — Python port of stale-stash.sh.
 

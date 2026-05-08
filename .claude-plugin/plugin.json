@@ -138,7 +138,7 @@
     },
     "heartbeat_renewal_threshold_days": {
       "title": "Heartbeat Auto-Renewal Threshold (days)",
-      "description": "Days after arming before dispatch.sh emits a [janitor-renew] nudge. Claude re-runs /janitor-arm in response, which idempotently replaces the cron before the 7-day auto-expiry. Default: 6. Lower = earlier nudge / safer. Higher = later nudge and risks missing the 7-day window if Claude is rate-limited or offline.",
+      "description": "Days after arming before dispatch.py emits a [janitor-renew] nudge. Claude re-runs /janitor-arm in response, which idempotently replaces the cron before the 7-day auto-expiry. Default: 6. Lower = earlier nudge / safer. Higher = later nudge and risks missing the 7-day window if Claude is rate-limited or offline.",
       "type": "number",
       "default": 6,
       "sensitive": false
@@ -215,7 +215,7 @@
     },
     "log_retention_days": {
       "title": "Log Retention (days)",
-      "description": "Days of .janitor/logs/<detector>.log history to keep. Default: 30. Files older than this are pruned at most once per UTC day at the top of dispatch.sh. Set to 0 to disable retention entirely (logs grow unbounded — only useful for short-lived debugging).",
+      "description": "Days of .janitor/logs/<detector>.log history to keep. Default: 30. Files older than this are pruned at most once per UTC day at the top of dispatch.py. Set to 0 to disable retention entirely (logs grow unbounded — only useful for short-lived debugging).",
       "type": "number",
       "default": 30,
       "sensitive": false

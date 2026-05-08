@@ -7,7 +7,7 @@ description: Suppresses ai-maestro-janitor heartbeat output without removing the
 
 ## Overview
 
-Writes a sentinel file `.janitor/state/paused` that `dispatch.sh` checks at the top of every heartbeat. While the file exists (and its expiry has not passed), all heartbeat fires exit silently with a single log entry — detectors do not run, drift lines are not emitted, the rate-limit resume cue is suppressed.
+Writes a sentinel file `.janitor/state/paused` that `dispatch.py` checks at the top of every heartbeat. While the file exists (and its expiry has not passed), all heartbeat fires exit silently with a single log entry — detectors do not run, drift lines are not emitted, the rate-limit resume cue is suppressed.
 
 The cron itself stays armed. No `CronDelete` happens. When the pause expires (or `/janitor-resume` runs), the next heartbeat fires normally.
 
@@ -42,7 +42,7 @@ One line confirming the pause and its expiry. The next heartbeat will emit nothi
 
 ## Error Handling
 
-- `$CLAUDE_PROJECT_DIR` unset → fall back to `$(pwd)`. The sentinel still works because `dispatch.sh` resolves the same path.
+- `$CLAUDE_PROJECT_DIR` unset → fall back to `$(pwd)`. The sentinel still works because `dispatch.py` resolves the same path.
 - Cannot create `$STATE_DIR` (permission denied) → abort with the error verbatim. Report `Janitor pause failed: <error>`.
 - User asks for a past-time expiry → refuse, report `Janitor pause refused: expiry <ts> is in the past.`
 - User asks to pause an already-paused janitor → overwrite the sentinel with the new expiry and report the new value.
@@ -60,11 +60,11 @@ User: quiet the heartbeat for the rest of today
 
 ## Scope
 
-This skill ONLY writes the paused sentinel. It does not delete the cron, clear detector seen-files, modify state, or remove logs. To re-enable normal heartbeat behaviour, run `/janitor-resume` (or wait for the expiry to pass — `dispatch.sh` auto-cleans the sentinel on the first heartbeat after expiry).
+This skill ONLY writes the paused sentinel. It does not delete the cron, clear detector seen-files, modify state, or remove logs. To re-enable normal heartbeat behaviour, run `/janitor-resume` (or wait for the expiry to pass — `dispatch.py` auto-cleans the sentinel on the first heartbeat after expiry).
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh` — checks for `paused` sentinel and exits early when present and not expired.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — checks for `paused` sentinel and exits early when present and not expired.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/paused` — the sentinel file itself; first line is the expiry epoch (or `0` for indefinite).
 
 ## Checklist

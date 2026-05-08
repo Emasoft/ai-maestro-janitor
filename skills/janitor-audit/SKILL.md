@@ -22,7 +22,7 @@ Invokes each ai-maestro-janitor detector synchronously, aggregates output into a
 2. Run every detector under `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` once, capturing stdout and stderr separately. Iterate the directory rather than hard-coding a list — that way the skill stays in sync with the dispatcher as detectors are added.
 
    ```bash
-   for d in "${CLAUDE_PLUGIN_ROOT}"/scripts/detectors/*.sh; do
+   for d in "${CLAUDE_PLUGIN_ROOT}"/scripts/detectors/*.py; do
      "$d"
    done
    ```
@@ -57,7 +57,7 @@ User: audit pending PRs and worktrees
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` — the drift detector scripts (iterate the directory; do not hard-code the list).
-- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh` — the cron-fire dispatcher that runs the same detectors on each heartbeat.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — the cron-fire dispatcher that runs the same detectors on each heartbeat.
 - `.janitor/state/` — per-project state directory for deduplication seen-files.
 
 ## Tips
@@ -74,7 +74,7 @@ This skill READS drift state. It NEVER performs remediation itself. The remediat
 
 Copy this checklist and track your progress:
 
-- [ ] Iterate `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/*.sh` and run each one
+- [ ] Iterate `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/*.py` and run each one
 - [ ] Group findings by category (PRs, Worktrees, TRDDs, Task/PR mismatches, Stale tasks, Dirty tree, Subagent reports)
 - [ ] Include stderr tail for any detector that returned non-zero
 - [ ] Present report with proposed remediation commands (do not execute)

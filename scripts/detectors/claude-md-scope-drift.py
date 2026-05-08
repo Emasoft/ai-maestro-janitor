@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # ///
 """CLAUDE.md scope drift — Python port of claude-md-scope-drift.sh.
 

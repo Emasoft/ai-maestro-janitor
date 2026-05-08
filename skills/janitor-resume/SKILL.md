@@ -62,7 +62,7 @@ This skill ONLY removes the paused sentinel. It does not arm the cron, restart a
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh` — no longer skips early once the sentinel is removed.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — no longer skips early once the sentinel is removed.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/paused` — the sentinel removed by this skill.
 
 ## Checklist

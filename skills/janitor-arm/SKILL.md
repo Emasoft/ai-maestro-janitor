@@ -7,9 +7,9 @@ description: Arms or renews the ai-maestro-janitor heartbeat cron. Use when firs
 
 ## Overview
 
-Creates (or replaces) the single durable CronCreate heartbeat that drives the ai-maestro-janitor plugin. Each cron fire is a fresh user turn that runs `scripts/dispatch.sh` and surfaces drift lines. Also keeps the Anthropic prompt cache warm during idle (every fire inside the 5-min TTL refreshes the cache) and recovers from rate-limit windows (fires queue during 429 and deliver in batch when the window clears).
+Creates (or replaces) the single durable CronCreate heartbeat that drives the ai-maestro-janitor plugin. Each cron fire is a fresh user turn that runs `scripts/dispatch.py` and surfaces drift lines. Also keeps the Anthropic prompt cache warm during idle (every fire inside the 5-min TTL refreshes the cache) and recovers from rate-limit windows (fires queue during 429 and deliver in batch when the window clears).
 
-This skill is the ONLY way to start or renew the janitor. Hooks and dispatch.sh cannot call CronCreate; only an in-session turn can. That's why dispatch.sh emits `[janitor-renew]` one day before the 7-day expiry — the model sees the nudge, runs this skill, and the cron is refreshed. Re-running the skill at any time is safe.
+This skill is the ONLY way to start or renew the janitor. Hooks and dispatch.py cannot call CronCreate; only an in-session turn can. That's why dispatch.py emits `[janitor-renew]` one day before the 7-day expiry — the model sees the nudge, runs this skill, and the cron is refreshed. Re-running the skill at any time is safe.
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ This skill is the ONLY way to start or renew the janitor. Hooks and dispatch.sh 
 
 ## Instructions
 
-1. Resolve `DISPATCH_PATH` = `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh`. The env var is set by Claude Code when the skill runs.
+1. Resolve `DISPATCH_PATH` = `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py`. The env var is set by Claude Code when the skill runs.
 
 2. Read the heartbeat cron from `${CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON}`, defaulting to `"*/5 * * * *"`.
 
@@ -29,13 +29,15 @@ This skill is the ONLY way to start or renew the janitor. Hooks and dispatch.sh 
 
    ```text
    [janitor-heartbeat]
-   bash {{DISPATCH_PATH}}
+   {{DISPATCH_PATH}}
    Surface stdout verbatim. `[janitor-resume]` = resume prior task. No output = silent. One pass, no sub-agents.
    ```
 
+   No `bash` prefix — `dispatch.py` is a `uv run --script` shebang and is invoked directly. Existing armed crons that still say `bash <path>/dispatch.sh` keep working through the back-compat wrapper, but new arms should use the .py path.
+
 5. Call `CronCreate` with `cron` from step 2, `prompt` from step 4, `durable: true`, `recurring: true`.
 
-6. Record the arm timestamp so dispatch.sh can compute age and emit `[janitor-renew]` before the 7-day expiry. Resolve `STATE_DIR` as `$CLAUDE_PROJECT_DIR/.janitor/state` (or `$(pwd)/.janitor/state` if the env var is unset), `mkdir -p` it, then write the current epoch into `heartbeat-armed-at.ts` using an atomic tmp+rename. Also clear any prior `heartbeat-renew-seen.txt` so the next renew cycle starts fresh.
+6. Record the arm timestamp so dispatch.py can compute age and emit `[janitor-renew]` before the 7-day expiry. Resolve `STATE_DIR` as `$CLAUDE_PROJECT_DIR/.janitor/state` (or `$(pwd)/.janitor/state` if the env var is unset), `mkdir -p` it, then write the current epoch into `heartbeat-armed-at.ts` using an atomic tmp+rename. Also clear any prior `heartbeat-renew-seen.txt` so the next renew cycle starts fresh.
 
    ```bash
    STATE_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state"
@@ -46,7 +48,7 @@ This skill is the ONLY way to start or renew the janitor. Hooks and dispatch.sh 
    rm -f "$STATE_DIR/heartbeat-renew-seen.txt"
    ```
 
-7. Report one line to the user: `Janitor armed: <cron> → runs dispatch.sh each fire. Heartbeat ID: <returned-id>. Auto-renewal nudge at ~6 days.` If step 3 deleted existing heartbeats, append `(replaced <N>)`.
+7. Report one line to the user: `Janitor armed: <cron> → runs dispatch.py each fire. Heartbeat ID: <returned-id>. Auto-renewal nudge at ~6 days.` If step 3 deleted existing heartbeats, append `(replaced <N>)`.
 
 ## Output
 
@@ -55,7 +57,7 @@ One line describing what was armed and the heartbeat ID from `CronCreate`. No fi
 ## Error Handling
 
 - `${CLAUDE_PLUGIN_ROOT}` unset → abort: "ai-maestro-janitor not installed in this session. Run `claude plugin install ai-maestro-janitor@ai-maestro-plugins --scope project` first."
-- `CronList` fails → skip step 3 and proceed. A duplicate heartbeat is harmless (dispatch.sh is idempotent, seen-files dedupe).
+- `CronList` fails → skip step 3 and proceed. A duplicate heartbeat is harmless (dispatch.py is idempotent, seen-files dedupe).
 - `CronCreate` fails → surface the error verbatim; do NOT retry automatically.
 - Dispatch script missing at `DISPATCH_PATH` → abort; the plugin cache is in an unexpected state.
 
@@ -73,7 +75,7 @@ This skill ONLY arms (or renews) the heartbeat cron. It does NOT run detectors (
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh` — the cron-fire entry point.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — the cron-fire entry point.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` — the drift detectors dispatch invokes (iterate the directory rather than hard-coding the list).
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — per-project state and dedupe seen-files.
 
@@ -81,7 +83,7 @@ This skill ONLY arms (or renews) the heartbeat cron. It does NOT run detectors (
 
 Copy this checklist and track your progress:
 
-- [ ] Resolve `DISPATCH_PATH` from `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh`
+- [ ] Resolve `DISPATCH_PATH` from `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py`
 - [ ] `CronList` + `CronDelete` any existing `[janitor-heartbeat]` job
 - [ ] `CronCreate` with durable=true, recurring=true, and the heartbeat prompt
 - [ ] Write `.janitor/state/heartbeat-armed-at.ts` + clear `heartbeat-renew-seen.txt`

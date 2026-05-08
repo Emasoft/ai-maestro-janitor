@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # ///
 """/janitor-doctor backing script — Python port of doctor.sh.
 

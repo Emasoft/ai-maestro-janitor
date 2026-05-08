@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # ///
 """Cron-fire entry point for the janitor heartbeat — Python port of dispatch.sh.
 

@@ -7,7 +7,7 @@ description: Stops the ai-maestro-janitor heartbeat cron. Use when pausing janit
 
 ## Overview
 
-Removes the janitor heartbeat entirely. After this skill runs, no further cron fires of `[janitor-heartbeat]` will occur, no drift lines will be emitted from dispatch.sh, and the auto-renewal nudge chain stops. Detectors can still be invoked manually via `/janitor-audit`.
+Removes the janitor heartbeat entirely. After this skill runs, no further cron fires of `[janitor-heartbeat]` will occur, no drift lines will be emitted from dispatch.py, and the auto-renewal nudge chain stops. Detectors can still be invoked manually via `/janitor-audit`.
 
 Use this when you want to pause janitor activity without uninstalling the plugin, when debugging heartbeat behaviour, or when moving to another project and want the current project's janitor silenced.
 
@@ -58,7 +58,7 @@ This skill ONLY removes heartbeat crons and clears the arm-timestamp. It does NO
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.sh` — the cron-fire entry point; will no longer be invoked by any `[janitor-heartbeat]` cron once this skill completes.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — the cron-fire entry point; will no longer be invoked by any `[janitor-heartbeat]` cron once this skill completes.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/heartbeat-armed-at.ts` — arm timestamp, removed by this skill.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/heartbeat-renew-seen.txt` — renewal-nudge dedupe file, removed by this skill.
 

@@ -60,7 +60,7 @@ This skill ONLY runs read-only checks. It writes no files, modifies no state, do
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/commands/doctor.sh` — the backing script that runs the checks.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/commands/doctor.py` — the backing script that runs the checks.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — checked for write access; not modified.
 - `$CLAUDE_PROJECT_DIR/.janitor/logs/` — checked for write access; not modified.
 

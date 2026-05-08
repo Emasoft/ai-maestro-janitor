@@ -45,6 +45,22 @@ jobs:
             echo "has_findings=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # `gh issue create --label janitor` returns HTTP 422 if the label
+      # doesn't exist on the repo, and the entire step would fail silently
+      # from the user's POV (the audit ran, the issue never opened).
+      # `gh label create --force` is idempotent: creates the label on
+      # first run, no-ops on subsequent runs. The `|| true` swallows any
+      # other transient error (the issue-creation step still tries).
+      - name: Ensure janitor label exists
+        if: steps.audit.outputs.has_findings == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create janitor \
+            --description "Drift surfaced by ai-maestro-janitor weekly audit" \
+            --color "fbca04" \
+            --force || true
+
       - name: Open issue if drift found
         if: steps.audit.outputs.has_findings == 'true'
         env:

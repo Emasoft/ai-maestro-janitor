@@ -2,9 +2,14 @@
 name = "ai-maestro-janitor"
 version = "0.4.0"
 description = "Session-scoped janitor for Claude Code"
+# Project tooling (ruff, mypy, the publish.py pipeline) needs ≥3.11
+# because cliff config + tomllib usage. The standalone PEP 723 scripts
+# under scripts/ also pin ≥3.11 for parity — see scripts/**/*.py headers.
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["pyyaml"]
+# No runtime deps: every script is stdlib-only at runtime, and any
+# uv-injected `--with <pkg>` (publish.py linters) is self-contained.
+dependencies = []
 
 [tool.ruff]
 line-length = 320
@@ -12,9 +17,7 @@ line-length = 320
 [tool.mypy]
 ignore_missing_imports = true
 
-# Pyright treats scripts/lib/ as an extra search root so detectors that
-# bootstrap sys.path at runtime still type-check cleanly. Without this
-# every detector raises "Import 'state' could not be resolved" because
-# pyright can't follow the sys.path.insert idiom.
-[tool.pyright]
-extraPaths = ["scripts/lib"]
+# Pyright config lives in pyrightconfig.json (canonical location). When
+# both files declare [tool.pyright]/pyrightconfig.json, pyright IGNORES
+# pyproject.toml — so any [tool.pyright] block here would be dead config.
+# Keep all pyright settings in pyrightconfig.json for a single source of truth.

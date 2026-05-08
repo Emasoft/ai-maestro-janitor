@@ -98,8 +98,8 @@ user text) to keep per-fire overhead low.
   after expiry auto-clears the sentinel.
 - `/janitor-resume` — removes the paused sentinel. Idempotent (no-op when
   not paused). Does NOT arm the cron — for that, use `/janitor-arm`.
-- `/janitor-doctor` — pre-flight health check. Runs ~10 named pass/fail
-  checks (state-dir writable, detectors executable, git/gh/jq available,
+- `/janitor-doctor` — pre-flight health check. Runs ~12 named pass/fail
+  checks (state-dir writable, detectors executable, uv/git/gh available,
   `/reports/` + `/reports_dev/` gitignored, plugin.json valid) and prints
   a unicode-bordered table with fix hints for any failures. Read-only —
   safe to run during any session, including paused or disarmed.
@@ -229,9 +229,9 @@ them are tracked in git.
 
 Each project has its own drift registry. Running the plugin in project A
 doesn't affect dedupe state in project B. The detector set is discovered by
-iterating `scripts/detectors/`, so `<detector>` above expands to all nine
-scripts currently shipped (and automatically covers any new ones added in
-future releases).
+iterating `scripts/detectors/`, so `<detector>` above expands to every
+detector script at HEAD (20 at v0.4.0; the dispatcher auto-discovers any
+new ones added in future releases).
 
 ## Verified behaviour
 
@@ -314,7 +314,6 @@ Monday at 09:00 UTC and opens a GitHub issue if anything is found.
 
 - Claude Code v2.1.98 or later (`CronCreate` / `CronDelete` / `CronList`).
 - `gh` CLI authenticated (`gh auth login`).
-- `jq` on `$PATH` (standard on macOS, `apt install jq` on Debian/Ubuntu).
 - A git repo with an `origin` remote pointing at GitHub.
 
 ## Troubleshooting
