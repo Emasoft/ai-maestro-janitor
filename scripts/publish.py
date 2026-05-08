@@ -615,19 +615,110 @@ def language_test_step(info: ProjectInfo) -> None:
         )
 
 
-def language_lint_step(info: ProjectInfo) -> None:
-    """Run every applicable language's native linter. Any failure exits."""
-    if info.has_kind(ProjectKind.PYTHON) or info.kind == ProjectKind.CLAUDE_PLUGIN:
-        # Ruff is the project's canonical Python linter (declared in dev deps)
-        if (info.root / "pyproject.toml").exists():
-            run(["uv", "run", "--with", "ruff", "ruff", "check", "."], cwd=info.root)
-            print(f"{GREEN}ok ruff passed{NC}")
+def _tracked_files_by_ext(root: Path) -> dict[str, list[Path]]:
+    """Run `git ls-files` and group tracked files by lowercase extension.
 
-    if info.has_kind(ProjectKind.NODEJS):
-        pj = info.root / "package.json"
+    `git ls-files` honors `.gitignore`, submodule boundaries, and the index
+    in one shot — no manual walker can match it on a real codebase. We
+    fall back to an empty map if the call fails (non-git tree, missing
+    git, etc.) so every per-extension dispatch in `language_lint_step`
+    just sees an empty bucket and skips itself.
+    """
+    proc = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=str(root), capture_output=True, check=False,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        return {}
+    by_ext: dict[str, list[Path]] = {}
+    # `-z` prints NUL-separated paths so filenames with newlines/spaces are safe.
+    for raw in proc.stdout.split(b"\x00"):
+        if not raw:
+            continue
         try:
-            data = json.loads(pj.read_text(encoding="utf-8"))
-            scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+            rel = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        p = root / rel
+        if not p.is_file():
+            continue
+        ext = p.suffix.lower()
+        by_ext.setdefault(ext, []).append(p)
+    return by_ext
+
+
+def _has_command(name: str) -> bool:
+    """Check if `name` is on PATH. Cheap; cached by the OS pathwalker."""
+    import shutil
+    return shutil.which(name) is not None
+
+
+def language_lint_step(info: ProjectInfo) -> None:
+    """Run every linter that has matching files in the tree.
+
+    Driver is FILE-EXTENSION presence (via `git ls-files`), NOT the
+    `info.kind` field. A repo with one stray Bash script in
+    `tools/release.sh` gets `shellcheck`'d even if its primary kind is
+    Python; a repo with a single tracked YAML file gets `yamllint`'d
+    even if it's mostly Rust. This matches user-stated semantics
+    ("any .X file? run linter for X") and keeps drift across mixed
+    repos visible.
+
+    Linters with project-wide invocations (`ruff check .`, `cargo
+    clippy`, `go vet ./...`, `yamllint .`) get one call regardless of
+    file count; per-file linters (shellcheck, json) get the explicit
+    file list so they can pinpoint failures without scanning the world.
+
+    Any failure exits — no skip flags, per the script's NO SKIP POLICY.
+    Missing linters (e.g. `shellcheck` not in PATH while .sh files
+    exist) ABORT the publish: a missing linter is a missing validation
+    step, and the policy says zero validation gaps.
+    """
+    by_ext = _tracked_files_by_ext(info.root)
+    have: dict[str, bool] = {ext: bool(files) for ext, files in by_ext.items()}
+
+    # ── Python ──────────────────────────────────────────────────────────
+    # Ruff respects `.gitignore` and `[tool.ruff]` excludes, so a single
+    # project-wide invocation covers everything tracked.
+    if have.get(".py") and (info.root / "pyproject.toml").exists():
+        run(["uv", "run", "--with", "ruff", "ruff", "check", "."], cwd=info.root)
+        print(f"{GREEN}ok ruff passed{NC}")
+
+    # ── Bash / sh ───────────────────────────────────────────────────────
+    sh_files = sorted({*by_ext.get(".sh", []), *by_ext.get(".bash", [])})
+    if sh_files:
+        if not _has_command("shellcheck"):
+            print(f"{RED}fail shellcheck missing — install via 'brew install shellcheck' / 'apt install shellcheck'{NC}")
+            sys.exit(1)
+        run(["shellcheck", *[str(p) for p in sh_files]], cwd=info.root)
+        print(f"{GREEN}ok shellcheck passed ({len(sh_files)} file(s)){NC}")
+
+    # ── JavaScript / TypeScript ─────────────────────────────────────────
+    js_files = sorted({
+        *by_ext.get(".ts", []), *by_ext.get(".tsx", []),
+        *by_ext.get(".js", []), *by_ext.get(".jsx", []),
+        *by_ext.get(".mjs", []), *by_ext.get(".cjs", []),
+    })
+    if js_files:
+        # Prefer biome (single binary, fast); fall back to npm `lint` script.
+        biome_config = any((info.root / n).exists()
+                           for n in ("biome.json", "biome.jsonc"))
+        eslint_config = any((info.root / n).exists() for n in (
+            "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs",
+            "eslint.config.ts", ".eslintrc", ".eslintrc.js", ".eslintrc.cjs",
+            ".eslintrc.json", ".eslintrc.yml", ".eslintrc.yaml",
+        ))
+        ran_js_lint = False
+        if biome_config and _has_command("npx"):
+            run(["npx", "--yes", "@biomejs/biome", "check", "."], cwd=info.root)
+            print(f"{GREEN}ok biome check passed ({len(js_files)} file(s)){NC}")
+            ran_js_lint = True
+        elif (info.root / "package.json").exists():
+            try:
+                data = json.loads((info.root / "package.json").read_text(encoding="utf-8"))
+                scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+            except Exception:
+                scripts = {}
             if "lint" in scripts:
                 if (info.root / "pnpm-lock.yaml").exists():
                     run(["pnpm", "run", "lint"], cwd=info.root)
@@ -635,26 +726,128 @@ def language_lint_step(info: ProjectInfo) -> None:
                     run(["yarn", "lint"], cwd=info.root)
                 else:
                     run(["npm", "run", "lint"], cwd=info.root)
-                print(f"{GREEN}ok Node.js lint passed{NC}")
-        except Exception:
-            pass
+                print(f"{GREEN}ok npm/pnpm/yarn lint passed{NC}")
+                ran_js_lint = True
+            elif eslint_config and _has_command("npx"):
+                run(["npx", "--yes", "eslint", "."], cwd=info.root)
+                print(f"{GREEN}ok eslint passed ({len(js_files)} file(s)){NC}")
+                ran_js_lint = True
+        if not ran_js_lint:
+            print(
+                f"{RED}fail {len(js_files)} JS/TS file(s) tracked but no biome.json, "
+                f"eslint config, or `lint` script found — configure a linter or remove the files{NC}"
+            )
+            sys.exit(1)
 
-    if info.has_kind(ProjectKind.RUST):
+    # ── Rust ────────────────────────────────────────────────────────────
+    if have.get(".rs"):
+        if not _has_command("cargo"):
+            print(f"{RED}fail cargo missing — Rust files tracked but Rust toolchain not installed{NC}")
+            sys.exit(1)
         run(["cargo", "clippy", "--", "-D", "warnings"], cwd=info.root)
         print(f"{GREEN}ok cargo clippy passed{NC}")
 
-    if info.has_kind(ProjectKind.GO):
+    # ── Go ──────────────────────────────────────────────────────────────
+    if have.get(".go"):
+        if not _has_command("go"):
+            print(f"{RED}fail go missing — Go files tracked but Go toolchain not installed{NC}")
+            sys.exit(1)
         run(["go", "vet", "./..."], cwd=info.root)
         print(f"{GREEN}ok go vet passed{NC}")
 
-    if info.has_kind(ProjectKind.BASH):
-        # ShellCheck every shell script under scripts/
-        scripts = info.root / "scripts"
-        if scripts.is_dir():
-            shell_files = sorted(scripts.rglob("*.sh"))
-            if shell_files:
-                run(["shellcheck", *[str(p) for p in shell_files]], cwd=info.root)
-                print(f"{GREEN}ok shellcheck passed{NC}")
+    # ── Markdown ────────────────────────────────────────────────────────
+    md_files = sorted({*by_ext.get(".md", []), *by_ext.get(".markdown", [])})
+    if md_files:
+        # `pymarkdownlnt` is uv-installable, pure-Python, and ships the
+        # `pymarkdown` CLI. We pass each file explicitly so the linter
+        # never traverses untracked content.
+        #
+        # Disabled rules are stylistic preferences that no project on
+        # earth uniformly follows (atx vs setext, line length, raw
+        # HTML in tech docs, bare URLs, etc.). What stays enabled is
+        # the SEMANTIC set: broken images / empty links / duplicate
+        # headings / hard tabs / trailing whitespace / mismatched
+        # fence styles. Those are real bugs, the rest is taste.
+        run(
+            ["uv", "run", "--with", "pymarkdownlnt", "pymarkdown",
+             "--disable-rules",
+             "MD003,MD012,MD013,MD022,MD026,MD032,MD033,MD034,MD036,MD040,MD041",
+             "scan", *[str(p) for p in md_files]],
+            cwd=info.root,
+        )
+        print(f"{GREEN}ok pymarkdown passed ({len(md_files)} file(s)){NC}")
+
+    # ── JSON ────────────────────────────────────────────────────────────
+    json_files = by_ext.get(".json", [])
+    if json_files:
+        # Use stdlib for syntactic validity. No third-party dep, no extra
+        # config to maintain. Aborts on the first malformed file.
+        for jf in json_files:
+            try:
+                json.loads(jf.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                print(f"{RED}fail invalid JSON in {jf}: {exc}{NC}")
+                sys.exit(1)
+            except OSError as exc:
+                print(f"{RED}fail could not read {jf}: {exc}{NC}")
+                sys.exit(1)
+        print(f"{GREEN}ok JSON syntax check passed ({len(json_files)} file(s)){NC}")
+
+    # ── YAML ────────────────────────────────────────────────────────────
+    yaml_files = sorted({*by_ext.get(".yaml", []), *by_ext.get(".yml", [])})
+    if yaml_files:
+        # `yamllint` is uv-installable. If the project has its own
+        # `.yamllint` / `.yamllint.yaml`, yamllint picks it up
+        # automatically. Otherwise we pass an inline config tuned for
+        # the typical GitHub-Actions / docker-compose / k8s manifest
+        # style: keep semantic checks, drop the noisy stylistic ones.
+        #
+        #   * line-length disabled — GH Actions one-liners routinely
+        #     exceed 80; any number we pick is arbitrary.
+        #   * document-start disabled — GH Actions / k8s manifests
+        #     conventionally omit the `---` marker.
+        #   * truthy disabled — the GH Actions `on:` key parses as
+        #     boolean True in YAML 1.1, which yamllint flags as a
+        #     "truthy" violation. The whole GH ecosystem uses it.
+        #   * comments-indentation / indentation kept on default —
+        #     those catch real misalignment bugs.
+        has_local_config = any(
+            (info.root / n).exists()
+            for n in (".yamllint", ".yamllint.yaml", ".yamllint.yml")
+        )
+        cmd = ["uv", "run", "--with", "yamllint", "yamllint"]
+        if not has_local_config:
+            cmd += [
+                "-d",
+                "{extends: default, rules: {line-length: disable, "
+                "document-start: disable, truthy: disable}}",
+            ]
+        cmd += [str(p) for p in yaml_files]
+        run(cmd, cwd=info.root)
+        print(f"{GREEN}ok yamllint passed ({len(yaml_files)} file(s)){NC}")
+
+    # ── TOML ────────────────────────────────────────────────────────────
+    toml_files = by_ext.get(".toml", [])
+    if toml_files:
+        # `tomllib` is stdlib in Python 3.11+ and only does syntactic
+        # parsing — exactly what the user wants for a smoke-check. We
+        # invoke a fresh `uv run python -c` so we don't depend on the
+        # caller's interpreter version.
+        check_src = (
+            "import sys, tomllib\n"
+            "for p in sys.argv[1:]:\n"
+            "    try:\n"
+            "        tomllib.load(open(p, 'rb'))\n"
+            "    except tomllib.TOMLDecodeError as exc:\n"
+            "        print(f'invalid TOML in {p}: {exc}', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+        )
+        run(
+            ["uv", "run", "--python", ">=3.11", "python", "-c", check_src,
+             *[str(p) for p in toml_files]],
+            cwd=info.root,
+        )
+        print(f"{GREEN}ok TOML syntax check passed ({len(toml_files)} file(s)){NC}")
 
 
 def language_bump_version(info: ProjectInfo, new_version: str) -> list[tuple[bool, str]]:

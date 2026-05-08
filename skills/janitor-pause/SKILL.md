@@ -46,7 +46,7 @@ One line confirming the pause and its expiry. The next heartbeat will emit nothi
 - Cannot create `$STATE_DIR` (permission denied) → abort with the error verbatim. Report `Janitor pause failed: <error>`.
 - User asks for a past-time expiry → refuse, report `Janitor pause refused: expiry <ts> is in the past.`
 - User asks to pause an already-paused janitor → overwrite the sentinel with the new expiry and report the new value.
-- Heartbeat not armed (no `$STATE_DIR/heartbeat-armed-at.ts`) → still write the sentinel, but append to the report: ` Note: heartbeat is not armed; the pause will only take effect after /janitor-arm.` This way the sentinel survives a future `/janitor-arm` rather than silently doing nothing now.
+- Heartbeat not armed (no `$STATE_DIR/heartbeat-armed-at.ts`) → still write the sentinel, but append to the report: `Note: heartbeat is not armed; the pause will only take effect after /janitor-arm.` This way the sentinel survives a future `/janitor-arm` rather than silently doing nothing now.
 
 ## Examples
 
