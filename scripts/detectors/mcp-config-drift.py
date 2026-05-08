@@ -177,7 +177,19 @@ def main() -> int:
         try:
             with mcp_json.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            _iterate_servers(seen, str(mcp_json), data.get("mcpServers"))
+            # Top-level must be a JSON object — a list/scalar/null
+            # would crash `data.get(...)` with AttributeError. The MCP
+            # schema requires an object, but a hand-edited file might
+            # accidentally start with `[`; treat it as a parse error.
+            if isinstance(data, dict):
+                _iterate_servers(seen, str(mcp_json), data.get("mcpServers"))
+            else:
+                _emit(
+                    seen,
+                    "invalid-shape@.mcp.json",
+                    "[mcp-config-drift] .mcp.json parsed as JSON but the top-level is not an object — "
+                    "Claude Code expects `{ \"mcpServers\": ... }`. Fix the file shape and retry.",
+                )
         except json.JSONDecodeError:
             _emit(
                 seen,
@@ -218,9 +230,42 @@ def main() -> int:
             state.log_line("mcp-config-drift", f"~/.claude.json read failed: {exc}")
             return 0
 
+        # Top-level guard: a corrupted ~/.claude.json could parse as a
+        # list or scalar (e.g. truncated/half-restored backup). The
+        # `.get("projects")` below would then AttributeError and crash
+        # the heartbeat; bail with a friendly message instead.
+        if not isinstance(home_data, dict):
+            _emit(
+                seen,
+                "invalid-shape@~/.claude.json",
+                "[mcp-config-drift] ~/.claude.json parsed as JSON but the top-level is not an object — "
+                "Claude Code expects `{ ... }`. (Local-scope MCP audit skipped this fire.)",
+            )
+            return 0
+
         projects = home_data.get("projects")
         if isinstance(projects, dict):
-            project_entry = projects.get(str(root))
+            # Claude Code keys `projects.<absolute-path>` with whatever
+            # path it was launched from. If the user usually opens the
+            # project via a symlinked path (e.g. `/Volumes/Data/proj`)
+            # but `git rev-parse --show-toplevel` returns the canonical
+            # path (`/Users/me/proj`), a literal `projects.get(str(root))`
+            # silently misses the local-scope subtree. Try both forms
+            # and stop at the first hit.
+            candidates = [str(root)]
+            try:
+                resolved = str(root.resolve())
+            except OSError:
+                resolved = str(root)
+            if resolved != candidates[0]:
+                candidates.append(resolved)
+
+            project_entry = None
+            for cand in candidates:
+                entry = projects.get(cand)
+                if isinstance(entry, dict):
+                    project_entry = entry
+                    break
             if isinstance(project_entry, dict):
                 local_servers = project_entry.get("mcpServers")
                 if isinstance(local_servers, dict) and local_servers:

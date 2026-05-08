@@ -26,7 +26,12 @@ import git_utils  # noqa: E402
 import state  # noqa: E402
 
 
-_ORIGIN_RE = re.compile(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?/?$")
+# Origin-URL → owner/repo slug. Repo segment allows dots (e.g.
+# `Emasoft/dotfiles.config`, `org/site.com`) — the older regex
+# excluded `.` and silently failed to match those repos. The lazy
+# `+?` plus the optional `\.git` and end-anchor still strip the
+# `.git` suffix without eating dots inside the repo name.
+_ORIGIN_RE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
 
 
 def _resolve_repo() -> Optional[str]:

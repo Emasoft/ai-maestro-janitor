@@ -70,6 +70,23 @@ def main() -> int:
     trdd_subpath = os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
     trdd_dir = root / trdd_subpath
 
+    # Containment check: a misconfigured `CLAUDE_PLUGIN_OPTION_TRDD_PATH`
+    # like `/etc`, `../../../etc`, or a symlink that escapes the project
+    # root must NOT cause the detector to scan outside the project.
+    # Resolve both paths (resolves symlinks too) and require the TRDD dir
+    # to live under root. The user's well-formed default is `design/tasks`
+    # which always passes; only adversarial / typo'd values fail.
+    try:
+        resolved_trdd = trdd_dir.resolve()
+        resolved_root = root.resolve()
+        resolved_trdd.relative_to(resolved_root)
+    except (ValueError, OSError):
+        state.log_line(
+            "trdd-drift",
+            f"TRDD path {trdd_subpath!r} resolves outside project root — refusing to scan",
+        )
+        return 0
+
     if not trdd_dir.is_dir():
         state.log_line("trdd-drift", f"TRDD dir {trdd_dir} not present — skipping")
         return 0

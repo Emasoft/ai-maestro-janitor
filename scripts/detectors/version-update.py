@@ -58,21 +58,29 @@ def _semver_tuple(s: str) -> tuple[int, ...]:
     return tuple(int(p) for p in s.split("."))
 
 
-def _detect_install_scope() -> str:
-    """Return 'user', 'local', 'project', or '' if not detectable.
+def _detect_install_scopes() -> list[str]:
+    """Return every scope where the plugin is referenced.
 
-    Order matters: user → local → project; first match wins. Tests for
-    PLUGIN_NAME mentioned in each settings file. The bash port searched
-    for the literal string; we do the same so a `disabledPlugins` mention
-    is not distinguished — for our purposes any reference is enough since
-    `claude plugin update --scope` validates the actual install state.
+    A plugin can be installed simultaneously in multiple scopes (e.g.
+    `user` AND `local`). The previous implementation returned only the
+    first match found, so `claude plugin update --scope user` would
+    silently leave a `local` install on the old version. We collect
+    every match and the caller iterates over them.
+
+    Order in the list matters for the auto-updater: user → local →
+    project, so the broadest scope is updated first. Tests for
+    PLUGIN_NAME mentioned in each settings file — `disabledPlugins`
+    mentions are not distinguished, since `claude plugin update`
+    validates the actual install state itself.
     """
+    scopes: list[str] = []
+
     # User scope.
     f = Path.home() / ".claude" / "settings.json"
     if f.is_file():
         try:
             if PLUGIN_NAME in f.read_text():
-                return "user"
+                scopes.append("user")
         except OSError:
             pass
 
@@ -84,10 +92,10 @@ def _detect_install_scope() -> str:
             if f.is_file():
                 try:
                     if PLUGIN_NAME in f.read_text():
-                        return scope
+                        scopes.append(scope)
                 except OSError:
                     pass
-    return ""
+    return scopes
 
 
 def _list_installed_versions(parent: Path) -> list[str]:
@@ -125,27 +133,45 @@ def _attempt_auto_update() -> bool:
         state.log_line("version-update", "auto-update: marketplace refresh failed")
         return False
 
-    scope = _detect_install_scope()
-    state.log_line("version-update", f"auto-update: detected install scope='{scope}'")
+    scopes = _detect_install_scopes()
+    state.log_line("version-update", f"auto-update: detected install scopes={scopes or '[none]'}")
 
-    cmd = ["claude", "plugin", "update", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"]
-    if scope:
-        cmd += ["--scope", scope]
-        state.log_line("version-update", f"auto-update: {' '.join(cmd)}")
+    # Iterate every detected scope. A failure in one scope does NOT
+    # short-circuit the others — a partial update is still better than
+    # nothing, and the next heartbeat will retry whatever is still
+    # behind. If no scope was detected we fall back to a single
+    # bare-call `claude plugin update` (legacy behaviour) so the user
+    # at least sees a meaningful nudge in the log.
+    targets: list[list[str]] = []
+    base_cmd = ["claude", "plugin", "update", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"]
+    if scopes:
+        for scope in scopes:
+            targets.append(base_cmd + ["--scope", scope])
     else:
-        state.log_line("version-update", f"auto-update: {' '.join(cmd)} (no scope detected)")
+        targets.append(base_cmd)
+        state.log_line("version-update", f"auto-update: {' '.join(base_cmd)} (no scope detected)")
 
-    try:
-        with log_path.open("a", encoding="utf-8") as logf:
-            proc = subprocess.run(
-                cmd, stdout=logf, stderr=subprocess.STDOUT,
-                timeout=120, check=False,
+    any_success = False
+    for cmd in targets:
+        state.log_line("version-update", f"auto-update: {' '.join(cmd)}")
+        try:
+            with log_path.open("a", encoding="utf-8") as logf:
+                proc = subprocess.run(
+                    cmd, stdout=logf, stderr=subprocess.STDOUT,
+                    timeout=120, check=False,
+                )
+        except subprocess.TimeoutExpired:
+            state.log_line("version-update", f"auto-update: plugin update timed out ({' '.join(cmd[-2:])})")
+            continue
+        if proc.returncode != 0:
+            state.log_line(
+                "version-update",
+                f"auto-update: plugin update failed (rc={proc.returncode}, cmd={' '.join(cmd[-2:])})",
             )
-    except subprocess.TimeoutExpired:
-        state.log_line("version-update", "auto-update: plugin update timed out")
-        return False
-    if proc.returncode != 0:
-        state.log_line("version-update", f"auto-update: plugin update failed (rc={proc.returncode})")
+            continue
+        any_success = True
+
+    if not any_success:
         return False
 
     state.log_line("version-update", "auto-update: success")

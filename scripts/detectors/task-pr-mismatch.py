@@ -28,8 +28,12 @@ import state  # noqa: E402
 # whitespace) prevents false matches on hash-prefixed tokens that aren't
 # PR references (e.g. SHA fragments embedded in URLs).
 _PR_REF_RE = re.compile(r"(?:^|\s)#(\d+)")
-# Origin-URL → owner/repo slug.
-_ORIGIN_RE = re.compile(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?/?$")
+# Origin-URL → owner/repo slug. Repo segment allows dots (e.g.
+# `Emasoft/dotfiles.config`, `org/site.com`) — the older regex
+# excluded `.` and silently failed to match those repos. The lazy
+# `+?` plus the optional `\.git` and end-anchor still strip the
+# `.git` suffix without eating dots inside the repo name.
+_ORIGIN_RE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
 
 
 def _resolve_team_uuid(project_root: Path) -> Optional[str]:

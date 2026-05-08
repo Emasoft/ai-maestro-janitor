@@ -87,6 +87,18 @@ def main() -> int:
     trdd_subpath = os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
     trdd_dir = root / trdd_subpath
 
+    # Containment check — see trdd-drift.py for the rationale.
+    try:
+        resolved_trdd = trdd_dir.resolve()
+        resolved_root = root.resolve()
+        resolved_trdd.relative_to(resolved_root)
+    except (ValueError, OSError):
+        state.log_line(
+            "trdd-reminder",
+            f"TRDD path {trdd_subpath!r} resolves outside project root — refusing to scan",
+        )
+        return 0
+
     if not trdd_dir.is_dir():
         state.log_line("trdd-reminder", f"TRDD dir {trdd_dir} not present — skipping")
         return 0
@@ -113,7 +125,16 @@ def main() -> int:
     if not entries:
         return 0
 
-    tick_key = f"tick-{now // interval}"
+    # Mix the entries set into the tick_key so a NEW TRDD that flips to
+    # 'In progress' mid-tick produces a fresh key and a fresh reminder
+    # (instead of being suppressed by the existing tick's dedup entry).
+    # The age component (`(Nd)` suffix) is intentionally kept out of the
+    # key — re-keying every day for the same TRDD set would defeat the
+    # purpose of the time bucket. Sort first so the order TRDDs appear
+    # in the directory listing doesn't change the hash.
+    entries_signature = ",".join(sorted(e.split(" ", 1)[0] for e in entries))
+    entries_hash = hashlib.sha1(entries_signature.encode("utf-8")).hexdigest()[:8]
+    tick_key = f"tick-{now // interval}-{entries_hash}"
     line = dedupe.emit_once(
         seen,
         tick_key,

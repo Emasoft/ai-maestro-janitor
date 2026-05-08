@@ -690,7 +690,10 @@ def language_lint_step(info: ProjectInfo) -> None:
         if not _has_command("shellcheck"):
             print(f"{RED}fail shellcheck missing — install via 'brew install shellcheck' / 'apt install shellcheck'{NC}")
             sys.exit(1)
-        run(["shellcheck", *[str(p) for p in sh_files]], cwd=info.root)
+        # `--` end-of-options sentinel guards against tracked filenames
+        # that start with `-` being parsed as flags (shellcheck respects
+        # the convention; same fix applied to yamllint / pymarkdown below).
+        run(["shellcheck", "--", *[str(p) for p in sh_files]], cwd=info.root)
         print(f"{GREEN}ok shellcheck passed ({len(sh_files)} file(s)){NC}")
 
     # ── JavaScript / TypeScript ─────────────────────────────────────────
@@ -772,7 +775,7 @@ def language_lint_step(info: ProjectInfo) -> None:
             ["uv", "run", "--with", "pymarkdownlnt", "pymarkdown",
              "--disable-rules",
              "MD003,MD012,MD013,MD022,MD026,MD032,MD033,MD034,MD036,MD040,MD041",
-             "scan", *[str(p) for p in md_files]],
+             "scan", "--", *[str(p) for p in md_files]],
             cwd=info.root,
         )
         print(f"{GREEN}ok pymarkdown passed ({len(md_files)} file(s)){NC}")
@@ -822,6 +825,7 @@ def language_lint_step(info: ProjectInfo) -> None:
                 "{extends: default, rules: {line-length: disable, "
                 "document-start: disable, truthy: disable}}",
             ]
+        cmd.append("--")
         cmd += [str(p) for p in yaml_files]
         run(cmd, cwd=info.root)
         print(f"{GREEN}ok yamllint passed ({len(yaml_files)} file(s)){NC}")

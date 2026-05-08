@@ -60,7 +60,12 @@ _SKILL_BODY_RE = re.compile(r'Skill\(["\']([a-zA-Z][a-zA-Z0-9_-]+)["\']\)')
 
 _FM_DELIM_RE = re.compile(r"^---\s*$")
 _AGENT_LINE_RE = re.compile(r"^agent:\s+(.+?)\s*(?:#.*)?$")
-_SKILL_FM_RE = re.compile(r"Skill\(([a-zA-Z][a-zA-Z0-9_-]+)")
+# Frontmatter Skill(...) refs. Allow an optional opening quote so
+# YAML strings like `Skill('foo')` and `Skill("foo")` are recognised
+# alongside the bare `Skill(foo)` form. Without the optional quote
+# the older regex started looking at `'` (or `"`) and silently
+# missed every quoted invocation in a skills:-block frontmatter.
+_SKILL_FM_RE = re.compile(r"""Skill\(["']?([a-zA-Z][a-zA-Z0-9_-]+)""")
 _SKILLS_LINE_RE = re.compile(r"^skills:\s*(.*?)\s*(?:#.*)?$")
 _BLOCK_ITEM_RE = re.compile(r"^\s+-\s+(.+?)\s*(?:#.*)?$")
 _IDENT_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")

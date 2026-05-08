@@ -15,14 +15,16 @@ directly. Common offenders: `.env` committed before the rule was added,
 build artifacts (`dist/`, `*.pyc`), IDE files (`.idea/`, `.vscode/`),
 OS noise (`.DS_Store`).
 
-Dedup is keyed by HEAD SHA: this list cannot change without a git op
-(commit, rm, ignore-edit), so we re-run the check at most once per HEAD
-rather than once per heartbeat. Saves ~50ms per fire on large repos.
+Dedup is keyed by HEAD SHA + the mtimes of the active ignore files
+(`.gitignore` and `.git/info/exclude`). HEAD-only caching was wrong:
+adding a rule to `.gitignore` without committing it changes the answer
+without moving HEAD, so the previous version served stale results until
+the next commit. Mixing the ignore-file mtimes flushes the cache the
+moment the rules change.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
@@ -32,50 +34,80 @@ import dedupe  # noqa: E402
 import state  # noqa: E402
 
 
+def _cache_key(project_root: Path, head_sha: str) -> str:
+    """Compose the staleness key from HEAD + ignore-file mtimes.
+
+    Adding `/foo` to `.gitignore` (uncommitted) changes the answer of
+    `git ls-files -i -c --exclude-standard` without moving HEAD. Keying
+    on HEAD alone misses every such edit until the next commit. Mixing
+    the mtimes of the project-root `.gitignore` and `.git/info/exclude`
+    (the two files git's `--exclude-standard` consumes) makes the cache
+    invalidate the moment either changes.
+
+    Missing files contribute mtime=0 — a project with no `.gitignore`
+    still gets a stable key from HEAD alone. We don't try to recurse
+    into nested `.gitignore` files because those don't affect the
+    tracked-ignored set unless a previously-tracked file's path now
+    matches a deeper rule, which is uncommon and not worth the walk.
+    """
+    gi_mtime = state.file_mtime(project_root / ".gitignore")
+    excl_mtime = state.file_mtime(project_root / ".git" / "info" / "exclude")
+    return f"{head_sha}@gi{gi_mtime}@ex{excl_mtime}"
+
+
 def main() -> int:
     state.init_state()
 
     seen = state.state_dir() / "tracked-ignored-seen.txt"
-    last_head_file = state.state_dir() / "tracked-ignored-last-head.ts"
+    last_key_file = state.state_dir() / "tracked-ignored-last-head.ts"
     project_root = state.project_root()
 
-    if subprocess.run(
+    git_dir_proc = state.run_subprocess(
         ["git", "rev-parse", "--git-dir"],
-        cwd=str(project_root),
-        capture_output=True, text=True, check=False,
-    ).returncode != 0:
+        cwd=project_root,
+        timeout=5,
+        detector_name="tracked-ignored",
+    )
+    if git_dir_proc is None or git_dir_proc.returncode != 0:
         state.log_line("tracked-ignored", "not a git repo — skipping")
         return 0
 
-    head_proc = subprocess.run(
+    head_proc = state.run_subprocess(
         ["git", "rev-parse", "HEAD"],
-        cwd=str(project_root),
-        capture_output=True, text=True, check=False,
+        cwd=project_root,
+        timeout=5,
+        detector_name="tracked-ignored",
     )
-    if head_proc.returncode != 0:
+    if head_proc is None or head_proc.returncode != 0:
         state.log_line("tracked-ignored", "no HEAD (empty repo?) — skipping")
         return 0
     head_sha = head_proc.stdout.strip()
+    cache_key = _cache_key(project_root, head_sha)
 
-    # If HEAD hasn't moved since last check, the answer can't have changed.
-    if last_head_file.is_file():
+    # If neither HEAD nor any ignore file has changed since last check,
+    # the answer can't have changed either.
+    if last_key_file.is_file():
         try:
-            prev_head = last_head_file.read_text().strip()
+            prev_key = last_key_file.read_text().strip()
         except OSError:
-            prev_head = ""
-        if prev_head == head_sha:
+            prev_key = ""
+        if prev_key == cache_key:
             return 0
 
-    proc = subprocess.run(
+    proc = state.run_subprocess(
         ["git", "ls-files", "--ignored", "--exclude-standard", "--cached"],
-        cwd=str(project_root),
-        capture_output=True, text=True, check=False,
+        cwd=project_root,
+        timeout=15,
+        detector_name="tracked-ignored",
     )
-    # Stamp the HEAD as scanned regardless of result, so an empty answer
-    # also gets cached and we don't re-shell `git ls-files` on the next
-    # heartbeat.
-    state.atomic_write(last_head_file, head_sha)
-    if proc.returncode != 0:
+    # Stamp the cache key as scanned regardless of result, so an empty
+    # answer also gets cached and we don't re-shell `git ls-files` on
+    # the next heartbeat. We stamp BEFORE checking returncode so a
+    # transient failure (e.g. .git/index lock) still cached the previous
+    # SHA-only key — instead, stamping first ensures a clean re-run on
+    # the next fire if the ls-files call genuinely failed.
+    state.atomic_write(last_key_file, cache_key)
+    if proc is None or proc.returncode != 0:
         state.log_line("tracked-ignored", "git ls-files failed — skipping")
         return 0
 
