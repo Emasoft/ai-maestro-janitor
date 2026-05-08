@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -44,14 +43,17 @@ def _parse_status(path: Path) -> str:
 
 
 def _last_touched_epoch(path: Path, project_root: Path) -> int:
-    """Prefer git last-commit timestamp, fall back to mtime for uncommitted files."""
-    proc = subprocess.run(
+    """Prefer git last-commit timestamp, fall back to mtime for uncommitted files.
+
+    Bounded by a 5s timeout — `git log -1` is normally instant but a
+    corrupted refs pack would otherwise hang the whole heartbeat.
+    """
+    proc = state.run_subprocess(
         ["git", "-C", str(project_root), "log", "-1", "--format=%ct", "--", str(path)],
-        capture_output=True,
-        text=True,
-        check=False,
+        timeout=5,
+        detector_name="trdd-drift",
     )
-    if proc.returncode == 0:
+    if proc is not None and proc.returncode == 0:
         out = proc.stdout.strip()
         if out.isdigit():
             return int(out)

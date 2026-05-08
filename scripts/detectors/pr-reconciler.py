@@ -74,16 +74,19 @@ def main() -> int:
     # Asking for raw `updatedAt` and converting locally also keeps the
     # error path obvious — a malformed timestamp surfaces as `age=0`
     # rather than aborting the whole heartbeat.
-    pr_proc = subprocess.run(
+    # gh pr list hits the GitHub API — bound it with a 30s timeout so a
+    # network-stuck call can't park the whole heartbeat.
+    pr_proc = state.run_subprocess(
         [
             "gh", "pr", "list", "--repo", repo, "--state", "open",
             "--json", "number,title,headRefOid,updatedAt",
             "--jq", '.[] | [.number, .headRefOid, (.title | gsub("\\\\s+"; " ")), .updatedAt] | @tsv',
         ],
-        capture_output=True,
-        text=True,
-        check=False,
+        timeout=30,
+        detector_name="pr-reconciler",
     )
+    if pr_proc is None:
+        return 0  # logged by run_subprocess
     if pr_proc.returncode != 0:
         # Capture stderr to the detector log to aid debugging gh auth /
         # offline failures without polluting heartbeat stdout.

@@ -15,7 +15,6 @@ import hashlib
 import os
 import re
 import socket
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -44,13 +43,17 @@ def _parse_status(path: Path) -> str:
 
 
 def _last_touched_epoch(path: Path, project_root: Path, fallback: int) -> int:
-    proc = subprocess.run(
+    """Prefer git last-commit timestamp, fall back to mtime then to `fallback`.
+
+    Bounded by a 5s timeout — `git log -1` is normally instant but a
+    corrupted refs pack would otherwise hang the heartbeat.
+    """
+    proc = state.run_subprocess(
         ["git", "-C", str(project_root), "log", "-1", "--format=%ct", "--", str(path)],
-        capture_output=True,
-        text=True,
-        check=False,
+        timeout=5,
+        detector_name="trdd-reminder",
     )
-    if proc.returncode == 0:
+    if proc is not None and proc.returncode == 0:
         out = proc.stdout.strip()
         if out.isdigit():
             return int(out)

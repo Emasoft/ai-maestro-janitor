@@ -76,14 +76,17 @@ def _read_task_json(path: Path) -> Optional[dict]:
 
 
 def _pr_state(repo: str, pr_num: str) -> Optional[str]:
-    """Return one of OPEN/CLOSED/MERGED, or None on any error."""
-    proc = subprocess.run(
+    """Return one of OPEN/CLOSED/MERGED, or None on any error.
+
+    Bounded by a 15s timeout — a single hung gh call would otherwise
+    multiply by N referenced PRs in a single fire.
+    """
+    proc = state.run_subprocess(
         ["gh", "pr", "view", pr_num, "--repo", repo, "--json", "state", "--jq", ".state"],
-        capture_output=True,
-        text=True,
-        check=False,
+        timeout=15,
+        detector_name="task-pr-mismatch",
     )
-    if proc.returncode != 0:
+    if proc is None or proc.returncode != 0:
         return None
     out = proc.stdout.strip()
     return out or None

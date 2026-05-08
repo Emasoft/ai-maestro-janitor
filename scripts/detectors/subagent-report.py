@@ -74,16 +74,19 @@ def main() -> int:
     now = int(time.time())
     cutoff = now - lookback
 
-    # Collect last-7-days commit messages once so we can match filenames
-    # cheaply via substring search inside the loop.
-    log_proc = subprocess.run(
-        ["git", "log", "--since=7 days ago", "--pretty=format:%s %b"],
-        cwd=str(root),
-        capture_output=True,
-        text=True,
-        check=False,
+    # Collect commit messages within the lookback window once. Use the
+    # epoch-syntax `--since=@<ts>` because the locale-dependent
+    # `--since="7 days ago"` form fails on non-English LC_TIME and was
+    # also hardcoded to 7d regardless of the lookback knob. Bound by a
+    # 15s timeout so a corrupted ref doesn't park the heartbeat.
+    since_epoch = max(0, now - max(lookback, 7 * 86400))
+    log_proc = state.run_subprocess(
+        ["git", "log", f"--since=@{since_epoch}", "--pretty=format:%s %b"],
+        cwd=root,
+        timeout=15,
+        detector_name="subagent-report",
     )
-    commit_bodies = log_proc.stdout if log_proc.returncode == 0 else ""
+    commit_bodies = log_proc.stdout if (log_proc is not None and log_proc.returncode == 0) else ""
 
     count = 0
     for d in _SCAN_DIRS:

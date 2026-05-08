@@ -170,6 +170,64 @@ def rotate_log_if_big(name: str, max_bytes: int = 1_048_576) -> None:
         return
 
 
+def run_subprocess(
+    cmd: list[str],
+    *,
+    timeout: float = 10.0,
+    cwd: Path | str | None = None,
+    capture: bool = True,
+    detector_name: Optional[str] = None,
+) -> Optional[subprocess.CompletedProcess[str]]:
+    """Run a subprocess with a default timeout, never propagate exceptions.
+
+    Returns the CompletedProcess on success, None on:
+      * `subprocess.TimeoutExpired` — the command ran past `timeout` seconds.
+        A network-stuck `gh` call is the canonical case; without a timeout
+        the heartbeat would block forever.
+      * `FileNotFoundError` — the binary isn't on PATH (e.g. `gh` not
+        installed on a CI runner). doctor.py surfaces this upstream as
+        WARN/FAIL; detectors can short-circuit on None and continue.
+      * `OSError` — any other OS-level failure (permission, ENOMEM, etc.).
+
+    Why None and not raise: detectors run in the cron-fire hot path and
+    a single hung subprocess would park the whole heartbeat for 5 minutes.
+    Returning None lets each call site decide whether to log + skip the
+    branch or log + abort the detector.
+
+    `detector_name` (optional): if provided, a one-line failure log goes
+    to `<detector_name>.log` via `log_line`. Pass the detector's own name
+    so post-mortem debugging can correlate the timeout to the right detector.
+
+    Always passes `check=False` and `text=True`; never sets `shell=True`.
+    Capture defaults on (`capture_output=True`); pass `capture=False` for
+    detectors whose stdout must flow through to the cron prompt
+    (dispatch.py's detector-invocation path uses that direct form).
+    """
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd is not None else None,
+            capture_output=capture,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        if detector_name:
+            cmd_short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
+            log_line(detector_name, f"subprocess timed out after {timeout}s: {cmd_short}")
+        return None
+    except FileNotFoundError:
+        if detector_name:
+            log_line(detector_name, f"binary not in PATH: {cmd[0]}")
+        return None
+    except OSError as exc:
+        if detector_name:
+            cmd_short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
+            log_line(detector_name, f"subprocess OSError ({exc}): {cmd_short}")
+        return None
+
+
 def sanitize_for_drift_line(text: str) -> str:
     """Defang `[` `]` and strip control characters from untrusted text.
 
