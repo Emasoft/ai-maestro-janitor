@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start.sh",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start.py",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit.sh",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit.py",
             "timeout": 2
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.sh",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.py",
             "timeout": 2
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-failure.sh",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-failure.py",
             "timeout": 2
           }
         ]

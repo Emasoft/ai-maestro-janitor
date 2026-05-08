@@ -13,13 +13,16 @@ TRDDs claim, and handles rate-limit auto-resume plus prompt-cache keep-alive —
 all through a single durable `CronCreate` heartbeat and hooks. No external
 daemons, no monitors.
 
-**Platform:** macOS and Linux. Bash, `gh`, `jq`, and POSIX `stat`/`date` are
-required. Windows is not supported natively; use WSL2.
+**Platform:** macOS, Linux, and Windows (everywhere `uv` runs). Required:
+[`uv`](https://docs.astral.sh/uv/) (every script is a `uv run --script`
+PEP 723 file with `requires-python = ">=3.10"`), `git`, and `gh` (for the
+detectors that talk to GitHub). No `bash`-specific syntax left in the hot
+path; the only remaining shell wrapper is the cron back-compat shim.
 
 ## How it works
 
 One durable recurring cron is armed on session start via the `/janitor-arm`
-skill. Each cron fire is a fresh user turn that runs `scripts/dispatch.sh`:
+skill. Each cron fire is a fresh user turn that runs `scripts/dispatch.py`:
 
 1. If the `rate-limited.flag` is set (meaning a prior `StopFailure` captured a
    rate-limit window), dispatch emits `[janitor-resume]` and clears the flag.
@@ -88,7 +91,7 @@ user text) to keep per-fire overhead low.
   renewal nudge. Use to pause janitor activity without uninstalling.
 - `/janitor-pause [duration]` — suppresses heartbeat output without
   removing the cron. Writes `.janitor/state/paused` with an optional epoch
-  expiry; while present, dispatch.sh exits silently. Lighter than
+  expiry; while present, dispatch.py exits silently. Lighter than
   `/janitor-disarm` — use when starting a focus block or large refactor.
   `/janitor-resume` lifts the pause; if a duration was supplied
   (`/janitor-pause 2h`, `/janitor-pause until 18:00`), the next heartbeat
@@ -112,7 +115,7 @@ user text) to keep per-fire overhead low.
   the project root, the project root itself, and anything inside `.git/`,
   `.claude/`, `.claude-plugin/`, or `.trashcan/`. Reachable via the Skill
   channel or directly via
-  `bash $CLAUDE_PLUGIN_ROOT/scripts/safe-delete.sh -- <path>...` for agents
+  `bash $CLAUDE_PLUGIN_ROOT/scripts/safe_delete.py -- <path>...` for agents
   whose tool surface excludes Skill but includes Bash.
 
 ### The `.trashcan/` directory
@@ -162,7 +165,7 @@ rm -rf .trashcan/<timestamp>/ .trashcan/<timestamp>.txt
 
 ### Auto-renewal of the 7-day cron
 
-Durable recurring `CronCreate` jobs auto-expire after 7 days. dispatch.sh
+Durable recurring `CronCreate` jobs auto-expire after 7 days. dispatch.py
 tracks the arm time in `.janitor/state/heartbeat-armed-at.ts`, and once the
 cron is 6+ days old emits a single `[janitor-renew]` line per day. Claude
 reads the line, runs `/janitor-arm` (which is idempotent), and the cron is
@@ -239,7 +242,7 @@ network outage (WiFi off for ~90 seconds, then back on):
    `.janitor/state/rate-limited.flag` and `rate-limited-since.ts`.
 2. The durable heartbeat cron kept ticking inside Claude Code; the fires that
    landed during the outage were enqueued.
-3. When the network came back, the next queued fire delivered. `dispatch.sh`
+3. When the network came back, the next queued fire delivered. `dispatch.py`
    saw the flag, emitted
    `[janitor-resume] rate-limit cleared after 89s — API is reachable again.`,
    and cleared the flag.
@@ -249,7 +252,7 @@ network outage (WiFi off for ~90 seconds, then back on):
 No bot, no polling loop, no supervisor wrapper — the session never died, only
 the interrupted turn did. The three-component pattern — passive account
 switcher, durable recurring cron, and idempotent state file read each fire —
-is the design the plugin embodies: dispatch.sh treats the flag file as the
+is the design the plugin embodies: dispatch.py treats the flag file as the
 single source of truth, so whether the turn that clears it runs 5 seconds or
 5 hours after `StopFailure` wrote it, the user-facing effect is identical.
 
@@ -278,7 +281,7 @@ via the `/plugin configure` interface or edit the project's
 | `dirty_tree_threshold` | 1800 | Seconds the tree can stay dirty before nudging to commit. |
 | `subagent_report_interval` | 3600 | Min seconds between subagent-report scans. |
 | `subagent_report_lookback` | 86400 | Age cutoff for reports considered fresh and needing action. |
-| `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.sh emits `[janitor-renew]` so Claude re-arms before the 7-day expiry. |
+| `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.py emits `[janitor-renew]` so Claude re-arms before the 7-day expiry. |
 | `version_check_interval` | 86400 | Min seconds between checks against `api.github.com` for a newer plugin release. |
 | `auto_update_on_new_release` | true | When true, the version-update detector runs `claude plugin marketplace update` + `claude plugin update` itself when a newer release is found, then nudges to `/reload-plugins` + `/janitor-arm`. When false, only the manual-update nudge is emitted. |
 | `trashcan_purge_enabled` | true | When true, the trashcan-purge detector auto-removes safe-delete batches older than `trashcan_max_age_days`. Set false to disable. |
@@ -289,7 +292,7 @@ via the `/plugin configure` interface or edit the project's
 | `remote_credentials_interval` | 3600 | Min seconds between remote-credentials checks. The detector is cheap; the failure mode (credential leak) is severe enough to warrant a relatively fast cadence. |
 | `nested_git_safety_interval` | 3600 | Min seconds between nested-`.git` scans. |
 | `tracked_ignored_interval` | 3600 | Min seconds between tracked-ignored scans. (HEAD-cached: only re-runs when HEAD has moved since the last check.) |
-| `log_retention_days` | 30 | Days of `.janitor/logs/<detector>.log` history to keep. Pruned at most once per UTC day at the top of `dispatch.sh`. Set to `0` to disable retention. |
+| `log_retention_days` | 30 | Days of `.janitor/logs/<detector>.log` history to keep. Pruned at most once per UTC day at the top of `dispatch.py`. Set to `0` to disable retention. |
 | `plugin_auto_update_enabled` | true | When true, `plugin-updates` runs `claude plugin update <id> --scope <scope>` automatically. When false, the detector only emits an informational drift line per available update — the user runs the command manually. |
 | `plugin_auto_update_scopes` | `local,project` | Comma-separated subset of `{local, project}`. The janitor HARD-REFUSES to touch `user` or `managed` scopes regardless of this value. `project` = `.claude/settings.json` (committed, team-shared); `local` = `.claude/settings.local.json` (gitignored, your personal overrides for this project). |
 | `plugin_auto_update_exclude` | `""` | Comma-separated `plugin@marketplace` IDs to skip entirely — useful to pin a specific plugin to its current version when a regression is suspected. |

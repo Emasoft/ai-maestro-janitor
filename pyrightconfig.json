@@ -1,0 +1,25 @@
+{
+  "include": [
+    "scripts"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.venv",
+    "INPUT_DEV",
+    "**/INPUT_DEV",
+    "design",
+    "reports_dev",
+    "reports",
+    "docs_dev",
+    "scripts_dev",
+    "tests_dev",
+    "samples_dev",
+    "examples_dev",
+    "downloads_dev",
+    "libs_dev",
+    "builds_dev"
+  ],
+  "extraPaths": ["scripts/lib"],
+  "pythonVersion": "3.11",
+  "reportMissingImports": "error"
+}

@@ -11,9 +11,9 @@ Runs a series of named pass/fail checks against the project and the plugin insta
 
 The checks cover three layers:
 
-1. **Plugin install** — dispatch.sh executable, detectors executable, plugin.json valid.
+1. **Plugin install** — dispatch.py executable, detectors executable, plugin.json valid.
 2. **Project state** — `.janitor/state/` and `.janitor/logs/` writable, project is a git repo, `/reports/` and `/reports_dev/` are gitignored.
-3. **External dependencies** — `git`, `gh` (authenticated), `jq` available in PATH.
+3. **External dependencies** — `uv` (required — every detector uses `uv run --script`), `git`, `gh` (authenticated). `jq` is informational only.
 
 Use this when the heartbeat seems silent for too long, when `pr-reconciler` or `task-pr-mismatch` keep skipping, or as the first step of any "the janitor is broken" investigation.
 
@@ -27,7 +27,7 @@ Use this when the heartbeat seems silent for too long, when `pr-reconciler` or `
 1. Invoke the backing script via Bash:
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/scripts/commands/doctor.sh"
+   "${CLAUDE_PLUGIN_ROOT}/scripts/commands/doctor.py"
    ```
 
 2. Surface the table verbatim — the unicode borders are intentional and render correctly in Claude Code's terminal.
@@ -68,7 +68,7 @@ This skill ONLY runs read-only checks. It writes no files, modifies no state, do
 
 Copy this checklist and track your progress:
 
-- [ ] Invoke `bash "${CLAUDE_PLUGIN_ROOT}/scripts/commands/doctor.sh"`
+- [ ] Invoke `"${CLAUDE_PLUGIN_ROOT}/scripts/commands/doctor.py"`
 - [ ] Surface the unicode-bordered table verbatim
 - [ ] If any FAIL rows, summarize them in plain prose after the table
 - [ ] Exit with the same code the backing script returned (0 all-pass, 1 any-fail)

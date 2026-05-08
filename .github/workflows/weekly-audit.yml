@@ -17,11 +17,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
 
       - name: Make detector scripts executable
-        run: chmod +x scripts/dispatch.sh scripts/detectors/*.sh scripts/hooks/*.sh scripts/lib/*.sh
+        run: chmod +x scripts/dispatch.py scripts/detectors/*.py scripts/hooks/*.py
 
       - name: Run drift detectors (one-shot)
         id: audit
@@ -34,7 +34,7 @@ jobs:
           set -o pipefail
           mkdir -p .janitor/state .janitor/logs
           REPORT=$(
-            for d in ./scripts/detectors/*.sh; do
+            for d in ./scripts/detectors/*.py; do
               "$d" || true
             done
           )

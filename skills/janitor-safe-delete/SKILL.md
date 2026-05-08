@@ -17,14 +17,16 @@ survival-against-`git clean -fdx` mechanism, and restore recipes.
 ## Prerequisites
 
 - `ai-maestro-janitor` plugin installed (project scope).
-- `${CLAUDE_PLUGIN_ROOT}/scripts/safe-delete.sh` resolvable from the
+- `${CLAUDE_PLUGIN_ROOT}/scripts/safe_delete.py` resolvable from the
   current session (Claude Code sets `CLAUDE_PLUGIN_ROOT`).
-- Bash for invocation. Skill access is not required — agents with no
-  Skill tool can call the script directly through Bash.
+- `uv` in PATH (the script uses a `#!/usr/bin/env -S uv run --script`
+  shebang — invocation is platform-agnostic and dependency-pinned).
+  Skill access is not required — agents with no Skill tool can call
+  the script directly through Bash.
 
 ## Instructions
 
-1. Resolve `SCRIPT_PATH` = `${CLAUDE_PLUGIN_ROOT}/scripts/safe-delete.sh`.
+1. Resolve `SCRIPT_PATH` = `${CLAUDE_PLUGIN_ROOT}/scripts/safe_delete.py`.
 
 2. Parse `$ARGUMENTS` into a whitespace-separated list of paths. Treat
    quoted paths as single tokens. Do not glob — the shell will, and the
@@ -36,10 +38,11 @@ survival-against-`git clean -fdx` mechanism, and restore recipes.
 4. Invoke the script via Bash, forwarding paths after `--`:
 
    ```bash
-   bash "$SCRIPT_PATH" -- path1 path2 ...
+   "$SCRIPT_PATH" -- path1 path2 ...
    ```
 
-   The leading `--` ensures paths starting with `-` are treated as
+   The script is a `uv run --script` shebang — no `bash` wrapper. The
+   leading `--` ensures paths starting with `-` are treated as
    positional arguments. Hoist `--dry-run` or `-n` before `--` if the
    user passed it.
 
@@ -74,7 +77,7 @@ the safe paths and report refusals on stderr.
 Two channels — every agent has at least one:
 
 - Skill: `Skill({skill: "janitor-safe-delete", args: "p1 p2"})`
-- Bash: `bash "$CLAUDE_PLUGIN_ROOT/scripts/safe-delete.sh" -- p1 p2`
+- Bash: `"$CLAUDE_PLUGIN_ROOT/scripts/safe_delete.py" -- p1 p2`
 
 When briefing a subagent, mention the Bash channel — it works
 regardless of tool surface.
@@ -83,7 +86,7 @@ regardless of tool surface.
 
 - `${CLAUDE_PLUGIN_ROOT}` unset → abort: "ai-maestro-janitor not
   installed in this session."
-- `safe-delete.sh` missing at `SCRIPT_PATH` → abort; reinstall via
+- `safe_delete.py` missing at `SCRIPT_PATH` → abort; reinstall via
   `claude plugin install`.
 - Non-zero exit with at least one moved item → surface both the
   success report and the per-path refusals.
@@ -111,7 +114,7 @@ restore recipes.
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/safe-delete.sh` — backing script.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/safe_delete.py` — backing script.
   Self-contained, callable from any Bash context.
 - README.md — full explanation of the trashcan layout and restore
   options.
@@ -120,8 +123,8 @@ restore recipes.
 
 Copy this checklist and track your progress:
 
-- [ ] Resolve `SCRIPT_PATH` from `${CLAUDE_PLUGIN_ROOT}/scripts/safe-delete.sh`
+- [ ] Resolve `SCRIPT_PATH` from `${CLAUDE_PLUGIN_ROOT}/scripts/safe_delete.py`
 - [ ] Parse user arguments (treat `--dry-run`/`-n` as a flag if present)
-- [ ] Invoke `bash "$SCRIPT_PATH" [--dry-run] -- <paths>`
+- [ ] Invoke `"$SCRIPT_PATH" [--dry-run] -- <paths>`
 - [ ] Surface stdout (including any first-time NOTE) verbatim
 - [ ] On non-zero exit, surface refusal lines for path correction
