@@ -1510,32 +1510,30 @@ Examples:
     print(f"\n{BLUE}=== Step 3: Language-native lint (mandatory) ==={NC}")
     language_lint_step(info)
 
-    # ── Step 4: CPV lint — applies when the repo is a claude-plugin ──
-    # cpv-remote-validate lint runs markdownlint/ruff/mypy/yamllint/toml
-    # across the whole tree. Any non-zero exit fails the pipeline. NO bypass.
-    if info.has_kind(ProjectKind.CLAUDE_PLUGIN):
-        print(f"\n{BLUE}=== Step 4: CPV lint (mandatory for claude plugins) ==={NC}")
-        run([
-            "uvx", "--from", "git+https://github.com/Emasoft/claude-plugins-validation",
-            "--with", "pyyaml", "cpv-remote-validate", "lint", str(plugin_root),
-        ], cwd=git_root)
-        print(f"{GREEN}ok CPV lint passed with zero errors{NC}")
-    else:
-        print(f"\n{YELLOW}=== Step 4: CPV lint — skipped (not a claude plugin){NC}")
-
-    # ── Step 5: CPV strict plugin validation ──
+    # ── Step 4: CPV strict plugin validation ──
     # Runs the full plugin validator in --strict mode. NO bypass. NO skip.
     # If the strict ruleset flags something, fix the plugin — do not lower
     # the strictness or work around the validator.
+    #
+    # The previous separate "Step 4: CPV lint" used `cpv-remote-validate
+    # lint`, which CPV v2.71.0+ retired (the gitignore-walk bug — CPV
+    # issue #19 — was fixed by removing the broken-walk lint subcommand).
+    # `cpv-remote-validate plugin --strict` covers the same rule set plus
+    # the full plugin schema check, so we only invoke it once now. Step 3
+    # has already linted every tracked source file by extension (ruff,
+    # shellcheck, pymarkdown, yamllint, json, toml), so dropping the
+    # duplicate CPV pass loses nothing. Step numbers below are kept on
+    # their original sequence (Step 6 follows Step 4 — there is no Step 5)
+    # so log greps for any existing release-history line still hit.
     if info.has_kind(ProjectKind.CLAUDE_PLUGIN):
-        print(f"\n{BLUE}=== Step 5: CPV strict validate plugin (mandatory) ==={NC}")
+        print(f"\n{BLUE}=== Step 4: CPV strict validate plugin (mandatory) ==={NC}")
         run([
             "uvx", "--from", "git+https://github.com/Emasoft/claude-plugins-validation",
             "--with", "pyyaml", "cpv-remote-validate", "plugin", str(plugin_root), "--strict",
         ], cwd=git_root)
         print(f"{GREEN}ok CPV strict validation passed{NC}")
     else:
-        print(f"\n{YELLOW}=== Step 5: CPV strict validate — skipped (not a claude plugin){NC}")
+        print(f"\n{YELLOW}=== Step 4: CPV strict validate — skipped (not a claude plugin){NC}")
 
     # ── Step 6: Version consistency ──
     print(f"\n{BLUE}=== Step 6: Check version consistency ==={NC}")
