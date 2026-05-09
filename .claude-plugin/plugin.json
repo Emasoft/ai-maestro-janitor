@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -180,7 +180,7 @@
     },
     "stash_stale_days": {
       "title": "Stale Stash Threshold (days)",
-      "description": "Days a git stash can sit untouched before stale-stash flags it. Default: 30. Stashes are typically forgotten WIP — surfacing them on a 30-day cadence catches lost work without spamming on the same day a stash was created.",
+      "description": "Days a git stash can sit untouched before stale-stash flags it. Default: 30. Stashes are typically forgotten WIP \u2014 surfacing them on a 30-day cadence catches lost work without spamming on the same day a stash was created.",
       "type": "number",
       "default": 30,
       "sensitive": false
@@ -215,7 +215,7 @@
     },
     "log_retention_days": {
       "title": "Log Retention (days)",
-      "description": "Days of .janitor/logs/<detector>.log history to keep. Default: 30. Files older than this are pruned at most once per UTC day at the top of dispatch.py. Set to 0 to disable retention entirely (logs grow unbounded — only useful for short-lived debugging).",
+      "description": "Days of .janitor/logs/<detector>.log history to keep. Default: 30. Files older than this are pruned at most once per UTC day at the top of dispatch.py. Set to 0 to disable retention entirely (logs grow unbounded \u2014 only useful for short-lived debugging).",
       "type": "number",
       "default": 30,
       "sensitive": false
@@ -229,14 +229,14 @@
     },
     "plugin_auto_update_scopes": {
       "title": "Plugin Auto-Update Scopes",
-      "description": "Comma-separated list of project-scoped plugin scopes the auto-updater will touch. Default: \"local,project\". The janitor distinguishes Claude Code's four scopes (managed, project, local, user — see https://code.claude.com/docs/en/settings.md): `project` = `.claude/settings.json` (committed to the repo, shared with the team), `local` = `.claude/settings.local.json` (gitignored, your personal overrides for THIS project on THIS machine). The janitor HARD-REFUSES to touch `user` (`~/.claude/settings.json`, your global preferences across ALL projects) or `managed` (admin-deployed) scopes regardless of this setting — a project-armed janitor has no mandate over global or admin-managed plugins. `local`/`project` plugins are also filtered to those whose `projectPath` matches the current project, so a janitor running in project A will not touch project B's installs. Set to just \"local\" to skip the team-shared `.claude/settings.json` updates and only act on your personal `.claude/settings.local.json`.",
+      "description": "Comma-separated list of project-scoped plugin scopes the auto-updater will touch. Default: \"local,project\". The janitor distinguishes Claude Code's four scopes (managed, project, local, user \u2014 see https://code.claude.com/docs/en/settings.md): `project` = `.claude/settings.json` (committed to the repo, shared with the team), `local` = `.claude/settings.local.json` (gitignored, your personal overrides for THIS project on THIS machine). The janitor HARD-REFUSES to touch `user` (`~/.claude/settings.json`, your global preferences across ALL projects) or `managed` (admin-deployed) scopes regardless of this setting \u2014 a project-armed janitor has no mandate over global or admin-managed plugins. `local`/`project` plugins are also filtered to those whose `projectPath` matches the current project, so a janitor running in project A will not touch project B's installs. Set to just \"local\" to skip the team-shared `.claude/settings.json` updates and only act on your personal `.claude/settings.local.json`.",
       "type": "string",
       "default": "local,project",
       "sensitive": false
     },
     "plugin_auto_update_exclude": {
       "title": "Plugin Auto-Update Exclude List",
-      "description": "Comma-separated list of `plugin@marketplace` IDs that the auto-updater will skip entirely. Use this to pin specific plugins to their current version (e.g. when a known-good version exists and a newer release has a regression). Example: \"foo-plugin@some-marketplace,bar@another\". Empty by default — every plugin (except ai-maestro-janitor itself) is eligible.",
+      "description": "Comma-separated list of `plugin@marketplace` IDs that the auto-updater will skip entirely. Use this to pin specific plugins to their current version (e.g. when a known-good version exists and a newer release has a regression). Example: \"foo-plugin@some-marketplace,bar@another\". Empty by default \u2014 every plugin (except ai-maestro-janitor itself) is eligible.",
       "type": "string",
       "default": "",
       "sensitive": false
@@ -257,14 +257,14 @@
     },
     "settings_scope_drift_interval": {
       "title": "Settings Scope Drift Detector Cadence (seconds)",
-      "description": "Minimum seconds between settings-scope-drift passes. Default: 3600 (1 h). The detector flags `.claude/settings.json` that is gitignored (project-scope settings won't reach the team) and `.claude/settings.local.json` that is git-tracked (personal local-scope settings leak to the team). Ambiguous tracking status is also flagged. Cheap — just two `git check-ignore` calls.",
+      "description": "Minimum seconds between settings-scope-drift passes. Default: 3600 (1 h). The detector flags `.claude/settings.json` that is gitignored (project-scope settings won't reach the team) and `.claude/settings.local.json` that is git-tracked (personal local-scope settings leak to the team). Ambiguous tracking status is also flagged. Cheap \u2014 just two `git check-ignore` calls.",
       "type": "number",
       "default": 3600,
       "sensitive": false
     },
     "subagent_scope_drift_interval": {
       "title": "Subagent Scope Drift Detector Cadence (seconds)",
-      "description": "Minimum seconds between subagent-scope-drift passes. Default: 3600 (1 h). The detector walks `.claude/agents/**/*.md` and flags any agent file that is neither git-tracked nor gitignored. Subagents have no formal local scope, so the git status IS the scope signal: tracked → project (team-shared), gitignored → personal. Findings are batched into a single drift line listing the first 5 + a count.",
+      "description": "Minimum seconds between subagent-scope-drift passes. Default: 3600 (1 h). The detector walks `.claude/agents/**/*.md` and flags any agent file that is neither git-tracked nor gitignored. Subagents have no formal local scope, so the git status IS the scope signal: tracked \u2192 project (team-shared), gitignored \u2192 personal. Findings are batched into a single drift line listing the first 5 + a count.",
       "type": "number",
       "default": 3600,
       "sensitive": false
@@ -285,6 +285,8 @@
     }
   },
   "cpv": {
-    "allow_root_dirs": ["INPUT_DEV"]
+    "allow_root_dirs": [
+      "INPUT_DEV"
+    ]
   }
 }
