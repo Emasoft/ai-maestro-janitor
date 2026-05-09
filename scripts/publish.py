@@ -176,27 +176,38 @@ def ensure_pre_push_hook(git_root: Path) -> None:
     print(f"{GREEN}ok pre-push hook installed + core.hooksPath activated{NC}")
 
 
-_PYFILE_EXCLUDE_PARTS = frozenset({
-    "node_modules", "__pycache__", "dist", "build", ".git",
-})
-
-
 def _list_project_py_files(root: Path) -> list[Path]:
-    """Walk the plugin root for tracked *.py files, skipping hidden and build dirs.
+    """Return tracked *.py files. Uses `git ls-files` so `.gitignore` is honored.
 
-    We previously tried to use a third-party `gitignore_filter` package here,
-    but it was never declared as a dependency — the import silently failed
-    and the fallback walker below ran every time. The plugin has no tracked
-    Python outside `scripts/`, so an exact-gitignore walk is overkill;
-    skipping hidden dirs and the usual build-artifact directories is enough.
+    The previous implementation walked `root.rglob("*.py")` with a manual
+    skip-list of hidden / build directories. That happily walked into
+    gitignored content like `INPUT_DEV/_extracted/<other-repo>/...`, which
+    in turn made `check_version_consistency` and `update_python_versions`
+    pick up `__init__.py` files from completely unrelated projects and
+    report them as version-mismatch sources. `git ls-files -z` honors
+    every `.gitignore` rule, submodule boundary, and the index — exactly
+    what the publisher needs. Empty list on error (non-git tree, missing
+    git, etc.) — the caller treats "no .py files" as "nothing to check",
+    which is the right behaviour for a non-Python plugin.
     """
-    return [
-        p for p in root.rglob("*.py")
-        if not any(
-            part.startswith(".") or part in _PYFILE_EXCLUDE_PARTS
-            for part in p.relative_to(root).parts
-        )
-    ]
+    proc = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.py"],
+        cwd=str(root), capture_output=True, check=False,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        return []
+    files: list[Path] = []
+    for raw in proc.stdout.split(b"\x00"):
+        if not raw:
+            continue
+        try:
+            rel = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        p = root / rel
+        if p.is_file():
+            files.append(p)
+    return files
 
 
 # ── Auto-detection ───────────────────────────────────────────────────────────
