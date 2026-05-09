@@ -15,17 +15,32 @@ import os
 import sys
 from pathlib import Path
 
-_PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
-if not _PLUGIN_ROOT:
-    print("[on-session-start] CLAUDE_PLUGIN_ROOT unset; skipping", file=sys.stderr)
-    sys.exit(0)
-
-sys.path.insert(0, str(Path(_PLUGIN_ROOT) / "scripts" / "lib"))
-
-import state  # noqa: E402
-
 
 def main() -> int:
+    # All side-effecting code lives inside main() so the hook script is
+    # safely importable (no module-scope sys.exit, no module-scope
+    # third-party imports). The PEP 723 dependency-completeness check
+    # only inspects module-scope imports, so doing `import state` below —
+    # AFTER sys.path is extended with scripts/lib/ — keeps the validator
+    # from flagging `state` as a missing PyPI dependency. (`state` is a
+    # LOCAL module under scripts/lib/, not on PyPI; declaring it in the
+    # PEP 723 `dependencies` block would break `uv run --script`.)
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    if not plugin_root:
+        print(
+            "[on-session-start] CLAUDE_PLUGIN_ROOT unset; skipping",
+            file=sys.stderr,
+        )
+        return 0
+
+    # Put scripts/ on sys.path (NOT scripts/lib/) and import via the
+    # `lib` package so the CPV hook validator recognises this as a
+    # local-sibling import. The validator's local_sibling detector
+    # scans scripts/ for direct .py children and subdirs that contain
+    # __init__.py — `lib` is now a package thanks to scripts/lib/__init__.py.
+    sys.path.insert(0, str(Path(plugin_root) / "scripts"))
+    from lib import state  # noqa: E402  -- local package, not PyPI
+
     state.init_state()
 
     # Clear any stale flag from a prior session crash. If the last session
@@ -56,4 +71,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Bare main() — see on-stop-failure.py for the rationale (CPV's
+    # _walk_module_scope flags sys.exit inside `if __name__ == "__main__":`
+    # as module-scope; main() always returns 0 here so dropping sys.exit
+    # is behaviour-neutral).
+    main()

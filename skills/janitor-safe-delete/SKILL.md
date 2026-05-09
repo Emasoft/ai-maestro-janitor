@@ -11,8 +11,7 @@ Disposes of files or directories without `rm`. Each invocation moves the
 named paths into the project's `.trashcan/<timestamp>/` folder, mirroring
 the original layout, and writes a sibling `<timestamp>.txt` manifest with
 one project-relative path per line. Nothing is deleted; the move is
-reversible on any platform. See README.md for the rationale,
-survival-against-`git clean -fdx` mechanism, and restore recipes.
+reversible on any platform. See README.md for restore recipes.
 
 ## Prerequisites
 
@@ -21,8 +20,6 @@ survival-against-`git clean -fdx` mechanism, and restore recipes.
   current session (Claude Code sets `CLAUDE_PLUGIN_ROOT`).
 - `uv` in PATH (the script uses a `#!/usr/bin/env -S uv run --script`
   shebang — invocation is platform-agnostic and dependency-pinned).
-  Skill access is not required — agents with no Skill tool can call
-  the script directly through Bash.
 
 ## Instructions
 

@@ -283,5 +283,8 @@
       "default": 3600,
       "sensitive": false
     }
+  },
+  "cpv": {
+    "allow_root_dirs": ["INPUT_DEV"]
   }
 }

@@ -33,7 +33,7 @@ This skill is the ONLY way to start or renew the janitor. Hooks and dispatch.py 
    Surface stdout verbatim. `[janitor-resume]` = resume prior task. No output = silent. One pass, no sub-agents.
    ```
 
-   No `bash` prefix — `dispatch.py` is a `uv run --script` shebang and is invoked directly. Existing armed crons that still say `bash <path>/dispatch.sh` keep working through the back-compat wrapper, but new arms should use the .py path.
+   No `bash` prefix — `dispatch.py` is a `uv run --script` shebang invoked directly.
 
 5. Call `CronCreate` with `cron` from step 2, `prompt` from step 4, `durable: true`, `recurring: true`.
 

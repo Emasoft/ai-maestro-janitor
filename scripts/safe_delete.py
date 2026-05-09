@@ -44,13 +44,19 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
-# state.py is optional — script runs out-of-tree without logging.
+# state.py is optional — script runs out-of-tree without logging. The
+# annotation is on the SAME statement that imports the module so mypy
+# treats it as a single binding (declaration + assignment) and the
+# fallback `None` in the except branch only re-binds the same name —
+# no `[no-redef]` warning, no `[assignment]` complaint.
 try:
-    import state as _state_mod  # noqa: E402
+    import state  # noqa: E402  -- local module, not PyPI
+    _state_mod: Optional[ModuleType] = state
 except Exception:  # pragma: no cover - defensive
     _state_mod = None
 

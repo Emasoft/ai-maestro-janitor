@@ -24,20 +24,29 @@ import sys
 import time
 from pathlib import Path
 
-_PLUGIN_ROOT = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
-if not _PLUGIN_ROOT:
-    print(
-        "[on-stop-failure] CLAUDE_PLUGIN_ROOT unset; resume cue will not be captured for this turn",
-        file=sys.stderr,
-    )
-    sys.exit(0)
-
-sys.path.insert(0, str(Path(_PLUGIN_ROOT) / "scripts" / "lib"))
-
-import state  # noqa: E402
-
 
 def main() -> int:
+    # All side-effecting code lives inside main() so the hook script is
+    # safely importable. We put scripts/ (NOT scripts/lib/) on sys.path
+    # and `from lib import state` so the CPV hook validator recognises
+    # this as a local-sibling import. The validator's local_sibling
+    # detector scans scripts/ for direct .py children and for subdirs
+    # that contain __init__.py — `lib` is now a package thanks to
+    # scripts/lib/__init__.py, so it counts as a local sibling and the
+    # validator no longer demands a PEP 723 declaration for `state`.
+    # (state is NOT on PyPI; declaring it in the `# /// script` block's
+    # dependencies = [...] would break `uv run --script`.)
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    if not plugin_root:
+        print(
+            "[on-stop-failure] CLAUDE_PLUGIN_ROOT unset; resume cue will not be captured for this turn",
+            file=sys.stderr,
+        )
+        return 0
+
+    sys.path.insert(0, str(Path(plugin_root) / "scripts"))
+    from lib import state  # noqa: E402  -- local package, not PyPI
+
     state.init_state()
     flag = state.state_dir() / "rate-limited.flag"
     flag.touch()
@@ -50,4 +59,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Bare main() rather than sys.exit(main()) — main() always returns 0
+    # on this hook (the early CLAUDE_PLUGIN_ROOT guard returns 0 too), so
+    # the natural exit code is 0. The CPV validator's _walk_module_scope
+    # treats the body of `if __name__ == "__main__":` as module scope and
+    # flags any sys.exit / raise SystemExit there as "kills the hook
+    # process at import time". Dropping sys.exit silences the false
+    # positive without changing exit-code behaviour for our hooks.
+    main()
