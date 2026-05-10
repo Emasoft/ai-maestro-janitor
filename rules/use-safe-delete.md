@@ -23,10 +23,10 @@ a single `mv` on any platform, no special tooling required.
    uv run "$CLAUDE_PLUGIN_ROOT/scripts/safe_delete.py" <path1> [<path2> ...]
    ```
 
-The script writes to stdout the relative paths it moved, prefixed with
-`safe-deleted: `. Failure modes (path outside the project root, target
-not found, etc.) exit non-zero with a one-line diagnostic; nothing is
-moved on partial failure.
+The script writes to stdout the relative paths it moved, each line
+prefixed with `safe-deleted:`. Failure modes (path outside the project
+root, target not found, etc.) exit non-zero with a one-line diagnostic;
+nothing is moved on partial failure.
 
 ## When to use it
 
