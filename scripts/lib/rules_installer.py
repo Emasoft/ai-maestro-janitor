@@ -14,11 +14,20 @@ detector and pull `state` / `dedupe` into the import graph), so the
 detection logic is duplicated here. If the version-update detector's
 heuristic is ever revised, mirror the change here too.
 
-Idempotency:
-  * Files that already exist at the destination are LEFT ALONE — the
-    user may have edited the rule and we don't want to silently
-    overwrite. To force a refresh, delete the destination copy and
-    the next session-start fires a fresh install.
+Idempotency (size-based):
+  * If the destination file already exists AND has the same byte
+    size as the plugin's source copy, it is left alone — same size
+    is treated as "already up to date".
+  * If the destination exists with a DIFFERENT size, the plugin's
+    copy overwrites it. Rationale: the plugin author ships rule
+    updates by editing `<plugin_root>/rules/*.md` and bumping the
+    release; without overwrite-on-size-mismatch, every user who
+    saw the previous version would be stuck on it forever (the
+    hook would silently skip them). Size-based detection is a
+    cheap heuristic: real plugin updates almost always change the
+    byte count, and a user who genuinely customised the rule and
+    happened to land on the exact same size will be surprised once
+    — a price we accept to keep the rule fleet in sync.
   * Empty `<plugin_root>/rules/` directory is a silent no-op.
   * No installed scope (e.g. fresh checkout outside a Claude Code
     session) is also a silent no-op — the hook degrades gracefully
@@ -92,10 +101,12 @@ def _target_rules_dir(scope: str) -> Path | None:
 def install_rules(plugin_root: Path) -> list[str]:
     """Copy <plugin_root>/rules/*.md to every active scope's rules dir.
 
-    Returns a list of `<dst-path>` strings for files that were actually
-    copied on this call (so the caller can log them). Files that
-    already exist at the destination are skipped — see the module
-    docstring for the no-overwrite rationale.
+    Returns a list of `<dst-path>` strings for files that were
+    actually copied on this call (so the caller can log them).
+    Existing destination files are kept when their byte size matches
+    the source (treated as "already up to date") and overwritten
+    when the size differs — see the module docstring for the
+    size-based-idempotency rationale.
     """
     src_dir = plugin_root / "rules"
     if not src_dir.is_dir():
@@ -131,7 +142,16 @@ def install_rules(plugin_root: Path) -> list[str]:
         for src in rule_files:
             dst = td / src.name
             if dst.exists():
-                continue  # don't overwrite — user may have edited
+                try:
+                    # Same size ⇒ treat as up-to-date and skip. Different
+                    # size ⇒ fall through to the copy below, which
+                    # shutil.copyfile will perform as an overwrite.
+                    if dst.stat().st_size == src.stat().st_size:
+                        continue
+                except OSError:
+                    # Can't stat (race, permission). Bail rather than
+                    # risk an overwrite based on incomplete info.
+                    continue
             try:
                 shutil.copyfile(src, dst)
                 copied.append(str(dst))
