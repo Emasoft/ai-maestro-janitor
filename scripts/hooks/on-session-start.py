@@ -39,7 +39,7 @@ def main() -> int:
     # scans scripts/ for direct .py children and subdirs that contain
     # __init__.py — `lib` is now a package thanks to scripts/lib/__init__.py.
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
-    from lib import state  # noqa: E402  -- local package, not PyPI
+    from lib import rules_installer, state  # noqa: E402  -- local package, not PyPI
 
     state.init_state()
 
@@ -52,6 +52,20 @@ def main() -> int:
         keepalive.unlink()
     except FileNotFoundError:
         pass
+
+    # Propagate the plugin's shipped rules (rules/*.md) into the active
+    # scope's .claude/rules/ directory so Claude Code's rule loader picks
+    # them up on the next session-start. `install_rules` is idempotent:
+    # files already present at the destination are LEFT ALONE so a user
+    # who edited the rule keeps their version. Adding new rule files to
+    # the plugin and shipping a release is enough to roll them out — no
+    # explicit migration step required.
+    copied = rules_installer.install_rules(Path(plugin_root))
+    if copied:
+        state.log_line(
+            "session-start",
+            f"installed plugin rule(s): {', '.join(copied)}",
+        )
 
     # `last-activity.ts` was previously written here too, but no detector
     # ever read it — dropped to avoid carrying dead state. The

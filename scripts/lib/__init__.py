@@ -11,5 +11,8 @@
 # `[attr-defined] Module "lib" has no attribute "state"` because it
 # does not auto-discover submodules of an empty package.
 
-__all__ = ["state"]
-from . import state  # noqa: F401  -- re-export for `from lib import state`
+__all__ = ["rules_installer", "state"]
+from . import (
+    rules_installer,
+    state,
+)
