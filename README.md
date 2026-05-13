@@ -316,6 +316,32 @@ Monday at 09:00 UTC and opens a GitHub issue if anything is found.
 - `gh` CLI authenticated (`gh auth login`).
 - A git repo with an `origin` remote pointing at GitHub.
 
+### Recent Claude Code fixes the janitor benefits from
+
+These are CC-side improvements that affect janitor reliability without
+any plugin-side change — staying on a recent CC build is recommended:
+
+- **v2.1.136** fixed plugin `Stop` / `UserPromptSubmit` hooks failing
+  when CC's plugin cache cleanup deleted a plugin version still in use
+  by a running session. Before this fix, a long-running janitor session
+  that survived a CC autoupdate could silently lose its
+  `on-stop-failure.py` rate-limit capture — the very signal that drives
+  resume-from-rate-limit. From v2.1.136 onward, the hooks survive the
+  cache GC.
+- **v2.1.133** fixed a bug where subagents in OTHER plugins could not
+  discover the janitor's skills (e.g. `/janitor-safe-delete`) through
+  the `Skill` tool. Subagents now see plugin skills regardless of which
+  plugin they belong to.
+- **v2.1.139** added a hook `args: string[]` exec form that spawns
+  hook commands directly without a shell, removing the need to quote
+  path placeholders like `${CLAUDE_PLUGIN_ROOT}`. The janitor still
+  ships the legacy `command:` shell form to preserve the ≥ v2.1.98
+  floor; if your `${CLAUDE_PLUGIN_ROOT}` resolves to a path with
+  spaces and you are on v2.1.139+, you can convert each hook in
+  `hooks/hooks.json` from `command: "uv run --script ..."` to
+  `args: ["uv", "run", "--script", ...]` locally — both forms read
+  the same plugin code.
+
 ## Troubleshooting
 
 - **No drift lines surfaced after install**: did you run `/janitor-arm`? The
