@@ -2,18 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.3] - 2026-05-10
-
-### Bug Fixes
-
-- Drop trailing space inside `safe-deleted:` code span (MD038)
-- Refresh on size mismatch, not just on first install
+## [0.4.4] - 2026-05-13
 
 ### Documentation
 
-- Rewrite use-safe-delete around risk judgement
+- Note Claude Code 2.1.133/136/139 fixes the janitor benefits from
 
-### Features
+### Miscellaneous
 
-- Ship use-safe-delete rule + scope-aware installer hook
+- Preprocess trailing space inside inline-code spans
 
