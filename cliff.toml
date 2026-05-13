@@ -27,6 +27,17 @@ footer = ""
 conventional_commits = true
 filter_unconventional = true
 split_commits = false
+# Strip leading/trailing spaces inside inline-code spans so the rendered
+# CHANGELOG doesn't trip pymarkdown MD038. A commit subject like
+# `fix(rules): drop trailing space inside ` + "`safe-deleted: `" + ` code span`
+# would otherwise propagate the trailing-space backtick literally into
+# CHANGELOG.md and re-fail the publish-pipeline lint forever. Two passes:
+# (1) trailing space inside a backtick pair; (2) leading space. Both regex
+# patterns require a non-backtick run so neither matches "` ` ` `" runs.
+commit_preprocessors = [
+  { pattern = '`([^`]+) `', replace = '`$1`' },
+  { pattern = '` ([^`]+)`', replace = '`$1`' },
+]
 commit_parsers = [
   { message = "^feat", group = "Features" },
   { message = "^fix", group = "Bug Fixes" },
