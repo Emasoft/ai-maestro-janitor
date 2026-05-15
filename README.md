@@ -22,7 +22,19 @@ path; the only remaining shell wrapper is the cron back-compat shim.
 ## How it works
 
 One durable recurring cron is armed on session start via the `/janitor-arm`
-skill. Each cron fire is a fresh user turn that runs `scripts/dispatch.py`:
+skill. From v0.4.11 the cron prompt points at an **auto-rolling stub** in
+`${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` — a stable path that lives
+OUTSIDE the version-stamped plugin cache. The stub re-resolves the
+highest cached plugin version on every fire and `os.execv`'s into its
+`scripts/dispatch.py`, so plugin updates roll forward automatically:
+the cache picks up the new version, the next heartbeat targets it,
+no `/janitor-arm` re-run needed. Re-arming is now only required (1)
+on first install, (2) once when upgrading from pre-stub (≤ v0.4.10)
+to v0.4.11+, and (3) before the 7-day cron auto-expiry in response to
+the `[janitor-renew]` nudge.
+
+Each cron fire is a fresh user turn that runs `dispatcher-stub.py` →
+`scripts/dispatch.py`:
 
 1. If the `rate-limited.flag` is set (meaning a prior `StopFailure` captured a
    rate-limit window), dispatch emits `[janitor-resume]` and clears the flag.

@@ -30,7 +30,13 @@ Use this when you want to pause janitor activity without uninstalling the plugin
          "$STATE_DIR/heartbeat-renew-seen.txt"
    ```
 
-4. Report one line: `Janitor disarmed: <N> heartbeat(s) deleted.` If any `CronDelete` failed, append `; <M> deletion(s) failed — check CronList and retry`.
+4. Remove the auto-rolling stub from the plugin data dir (installed by `/janitor-arm` in v0.4.11+). The data directory itself is preserved — CC's `/plugin uninstall` flow handles full data-dir cleanup; we just remove the stub so disarm is a clean inverse of arm:
+
+   ```bash
+   rm -f "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/dispatcher-stub.py"
+   ```
+
+5. Report one line: `Janitor disarmed: <N> heartbeat(s) deleted, stub removed.` If any `CronDelete` failed, append `; <M> deletion(s) failed — check CronList and retry`.
 
 ## Output
 
@@ -69,4 +75,5 @@ Copy this checklist and track your progress:
 - [ ] `CronList` and filter prompts starting with `[janitor-heartbeat]`
 - [ ] `CronDelete` each matched job, continue past per-job errors
 - [ ] Remove `.janitor/state/heartbeat-armed-at.ts` and `heartbeat-renew-seen.txt`
+- [ ] Remove `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (best-effort)
 - [ ] Report the deletion count (plus failure count if any) in one line
