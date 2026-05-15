@@ -2,15 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.11] - 2026-05-15
+## [0.4.12] - 2026-05-15
 
 ### Bug Fixes
 
-- Remove MD038 leading-space inside inline-code span
-- Trim SKILL.md under CPV 5000-char threshold
-- Restore 'Use when...' phrase + Resources section for CPV strict mode
+- Use markdown link format for references/janitor-architecture.md (CPV TOC discovery)
+- Add TOC to references/janitor-architecture.md (CPV progressive discovery)
+- Consolidate reference-file TOC to 3 sections + embed in SKILL.md (CPV progressive discovery)
+- Further trim SKILL.md to fit 5000-char CPV cap with TOC embed
+- Restore required Examples section (CPV strict mode)
 
-### Features
+### Documentation
 
-- Install auto-rolling dispatcher stub in ${CLAUDE_PLUGIN_DATA}
+- Move dispatcher architecture detail to references/janitor-architecture.md
 
