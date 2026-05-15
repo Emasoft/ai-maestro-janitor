@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -145,7 +145,7 @@
     },
     "version_check_interval": {
       "title": "Version Update Check Cadence (seconds)",
-      "description": "Minimum seconds between checks against api.github.com for a newer plugin release. Default: 300 (5 min — runs every heartbeat by default). The detector queries the repo declared in plugin.json's `repository` field, so forks check against their own releases. Silent on network/auth failures. The GitHub query short-circuits when nothing changed; a 5-min cadence costs ~12 cheap requests/hour, well inside both the unauthenticated (60/h) and `gh`-authenticated (5000/h) API limits.",
+      "description": "Minimum seconds between checks against api.github.com for a newer plugin release. Default: 300 (5 min \u2014 runs every heartbeat by default). The detector queries the repo declared in plugin.json's `repository` field, so forks check against their own releases. Silent on network/auth failures. The GitHub query short-circuits when nothing changed; a 5-min cadence costs ~12 cheap requests/hour, well inside both the unauthenticated (60/h) and `gh`-authenticated (5000/h) API limits.",
       "type": "number",
       "default": 300,
       "sensitive": false
@@ -243,7 +243,7 @@
     },
     "plugin_updates_interval": {
       "title": "Plugin Updates Detector Cadence (seconds)",
-      "description": "Minimum seconds between plugin-updates passes. Default: 300 (5 min — runs every heartbeat by default). Each fire refreshes every marketplace that has an installed plugin (one `claude plugin marketplace update` call per marketplace) and then attempts an update for each plugin where the manifest version exceeds the installed one. The marketplace refresh and per-plugin update are both cheap idempotent shell commands that no-op when nothing has changed, so a 5-minute cadence keeps every installed plugin in sync with at most a 5-minute lag while costing a few subprocess invocations per heartbeat when there is no work to do.",
+      "description": "Minimum seconds between plugin-updates passes. Default: 300 (5 min \u2014 runs every heartbeat by default). Each fire refreshes every marketplace that has an installed plugin (one `claude plugin marketplace update` call per marketplace) and then attempts an update for each plugin where the manifest version exceeds the installed one. The marketplace refresh and per-plugin update are both cheap idempotent shell commands that no-op when nothing has changed, so a 5-minute cadence keeps every installed plugin in sync with at most a 5-minute lag while costing a few subprocess invocations per heartbeat when there is no work to do.",
       "type": "number",
       "default": 300,
       "sensitive": false
