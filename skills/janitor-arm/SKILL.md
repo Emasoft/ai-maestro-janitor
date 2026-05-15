@@ -72,6 +72,14 @@ One line: cron expression, heartbeat ID, current stub target version. The stub f
 - `CronList` fails → skip step 3. Duplicates are harmless (dedupe).
 - `CronCreate` fails → surface verbatim; do not retry automatically.
 
+## Examples
+
+```text
+User: /janitor-arm
+User: arm the janitor heartbeat
+User: re-arm after the plugin update
+```
+
 ## Scope
 
 ONLY installs the stub and arms the heartbeat cron. Does NOT run detectors (use `/janitor-audit`), install the plugin, or modify userConfig. To stop: `/janitor-disarm`.
