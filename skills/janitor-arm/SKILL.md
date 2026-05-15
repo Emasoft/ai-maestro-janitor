@@ -11,7 +11,7 @@ Creates (or replaces) the single durable CronCreate heartbeat. From v0.4.11 the 
 
 Re-arming is needed only on: first install, upgrade from pre-stub (≤ v0.4.10) once, or `[janitor-renew]` nudge before the 7-day cron auto-expiry. Re-running this skill at any time is safe and idempotent.
 
-For the full design rationale, atomic install reasoning, path-traversal safety analysis, stub-vs-dispatch responsibility split, and survival contract for future versions, read [janitor-architecture](references/janitor-architecture.md).
+For the full design rationale, atomic install reasoning, path-traversal safety analysis, stub-vs-dispatch responsibility split, and survival contract for future versions, read [janitor-architecture](references/janitor-architecture.md): [Why the stub exists](references/janitor-architecture.md#why-the-stub-exists), [Operational rules](references/janitor-architecture.md#operational-rules), [Responsibility split and safety](references/janitor-architecture.md#responsibility-split-and-safety).
 
 ## Prerequisites
 
@@ -91,6 +91,9 @@ ONLY installs the stub and arms the heartbeat cron. Does NOT run detectors (use 
 ## Resources
 
 - [janitor-architecture](references/janitor-architecture.md) — full design rationale, stub indirection, atomic install, path-traversal safety, survival contract.
+  - [Why the stub exists](references/janitor-architecture.md#why-the-stub-exists)
+  - [Operational rules](references/janitor-architecture.md#operational-rules)
+  - [Responsibility split and safety](references/janitor-architecture.md#responsibility-split-and-safety)
 - `${CLAUDE_PLUGIN_ROOT}/scripts/dispatcher-stub.py` — auto-rolling stub source.
 - `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` — installed stub the cron fires.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — per-version dispatcher the stub `execv`'s into.
