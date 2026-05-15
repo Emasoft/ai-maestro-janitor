@@ -66,9 +66,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("stale-stash",             86400, "CLAUDE_PLUGIN_OPTION_STALE_STASH_INTERVAL"),
     ("nested-git-safety",       3600,  "CLAUDE_PLUGIN_OPTION_NESTED_GIT_SAFETY_INTERVAL"),
     ("tracked-ignored",         3600,  "CLAUDE_PLUGIN_OPTION_TRACKED_IGNORED_INTERVAL"),
-    # marketplace-refresh runs BEFORE plugin-updates so the marketplace
-    # cache is fresh by the time plugin-updates consults the manifest.
+    # marketplace-refresh runs BEFORE the plugin-* detectors so the
+    # marketplace cache is fresh by the time those consult the manifest.
     ("marketplace-refresh",     300,   "CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_INTERVAL"),
+    # user-plugins-update is Track 1 of the auto-update directive — cron-
+    # global, project-agnostic, no enabled filter (all user-scope plugins).
+    ("user-plugins-update",     300,   "CLAUDE_PLUGIN_OPTION_USER_PLUGINS_UPDATE_INTERVAL"),
     ("plugin-updates",          300,   "CLAUDE_PLUGIN_OPTION_PLUGIN_UPDATES_INTERVAL"),
     ("mcp-config-drift",        3600,  "CLAUDE_PLUGIN_OPTION_MCP_CONFIG_DRIFT_INTERVAL"),
     ("settings-scope-drift",    3600,  "CLAUDE_PLUGIN_OPTION_SETTINGS_SCOPE_DRIFT_INTERVAL"),
