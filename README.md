@@ -341,6 +341,16 @@ any plugin-side change — staying on a recent CC build is recommended:
   `hooks/hooks.json` from `command: "uv run --script ..."` to
   `args: ["uv", "run", "--script", ...]` locally — both forms read
   the same plugin code.
+- **v2.1.142** hardened two failure modes the durable heartbeat
+  depends on. First, plugin cache cleanup no longer deletes the
+  *active* plugin version directory when install metadata is
+  missing — `/janitor-arm` bakes the running version's absolute
+  `dispatch.py` path into the cron prompt, so deleting that
+  directory would break every later heartbeat fire; this extends
+  the v2.1.136 cache-GC protection above. Second, the background
+  daemon now detects system clock jumps across macOS sleep/wake
+  instead of counting them as elapsed idle time, so a laptop
+  closed overnight no longer drops background sessions on wake.
 
 ## Troubleshooting
 
