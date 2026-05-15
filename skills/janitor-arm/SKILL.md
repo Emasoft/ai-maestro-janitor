@@ -70,7 +70,7 @@ This skill is the ONLY way to start or renew the janitor. Hooks and dispatch.py 
    rm -f "$STATE_DIR/heartbeat-renew-seen.txt"
    ```
 
-8. Report one line to the user: `Janitor armed: <cron> → runs auto-rolling stub each fire (current target: <latest-version>). Heartbeat ID: <returned-id>. Auto-renewal nudge at ~6 days; future plugin updates roll forward without re-arming.` If step 4 deleted existing heartbeats, append ` (replaced <N>)`.
+8. Report one line to the user: `Janitor armed: <cron> → runs auto-rolling stub each fire (current target: <latest-version>). Heartbeat ID: <returned-id>. Auto-renewal nudge at ~6 days; future plugin updates roll forward without re-arming.` If step 4 deleted existing heartbeats, append `(replaced <N>)` at the end.
 
 ## Output
 
