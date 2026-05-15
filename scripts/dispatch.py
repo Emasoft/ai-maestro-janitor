@@ -72,6 +72,10 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # user-plugins-update is Track 1 of the auto-update directive — cron-
     # global, project-agnostic, no enabled filter (all user-scope plugins).
     ("user-plugins-update",     300,   "CLAUDE_PLUGIN_OPTION_USER_PLUGINS_UPDATE_INTERVAL"),
+    # local-plugins-update is Track 2a — per-project, reads
+    # .claude/settings.local.json, filters to enabled, no git mutation
+    # (settings.local.json is gitignored by convention).
+    ("local-plugins-update",    300,   "CLAUDE_PLUGIN_OPTION_LOCAL_PLUGINS_UPDATE_INTERVAL"),
     ("plugin-updates",          300,   "CLAUDE_PLUGIN_OPTION_PLUGIN_UPDATES_INTERVAL"),
     ("mcp-config-drift",        3600,  "CLAUDE_PLUGIN_OPTION_MCP_CONFIG_DRIFT_INTERVAL"),
     ("settings-scope-drift",    3600,  "CLAUDE_PLUGIN_OPTION_SETTINGS_SCOPE_DRIFT_INTERVAL"),

@@ -262,6 +262,13 @@
       "default": 300,
       "sensitive": false
     },
+    "local_plugins_update_interval": {
+      "title": "Local-scope Plugins Auto-Update Cadence (seconds)",
+      "description": "Minimum seconds between local-plugins-update passes. Default: 300 (5 min \u2014 runs every heartbeat by default). This is Track 2a of the auto-update directive: keep local-scope plugins enabled in `<project>/.claude/settings.local.json` (gitignored, personal overrides for this project) fresh. Each pass reads settings.local.json, filters `enabledPlugins` to entries with value=true (only those enabled locally), then spawns a detached worker that runs `claude plugin update <id> --scope local` per plugin. The worker PID is tracked so overlapping fires skip cleanly. Bails in <100ms when settings.local.json doesn't exist (most projects). Per-project: a janitor armed in project A only updates project A's local-scope plugins. No git mutation (settings.local.json is gitignored). Silent on stdout.",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
     "mcp_config_drift_interval": {
       "title": "MCP Config Drift Detector Cadence (seconds)",
       "description": "Minimum seconds between mcp-config-drift passes. Default: 3600 (1 h). The detector inspects `<project>/.mcp.json` (project-scope MCP) and `~/.claude.json` `.projects[<root>].mcpServers` (local-scope MCP for THIS project only). Checks: (a) invalid JSON; (b) `.mcp.json` ambiguous tracking status (neither git-tracked nor gitignored); (c) per-server problems: missing transport, unset `$VAR`/`${VAR}` env-var references. Never inspects user-scope MCP (top-level `~/.claude.json` `.mcpServers`).",
