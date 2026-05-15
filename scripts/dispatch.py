@@ -76,6 +76,11 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # .claude/settings.local.json, filters to enabled, no git mutation
     # (settings.local.json is gitignored by convention).
     ("local-plugins-update",    300,   "CLAUDE_PLUGIN_OPTION_LOCAL_PLUGINS_UPDATE_INTERVAL"),
+    # project-plugins-update is Track 2b — per-project, reads
+    # .claude/settings.json (git-tracked), filters to enabled. On
+    # settings.json drift, emits a [project-plugins-commit-needed]
+    # drift line for Claude to commit via porcelain `git commit`.
+    ("project-plugins-update",  300,   "CLAUDE_PLUGIN_OPTION_PROJECT_PLUGINS_UPDATE_INTERVAL"),
     ("plugin-updates",          300,   "CLAUDE_PLUGIN_OPTION_PLUGIN_UPDATES_INTERVAL"),
     ("mcp-config-drift",        3600,  "CLAUDE_PLUGIN_OPTION_MCP_CONFIG_DRIFT_INTERVAL"),
     ("settings-scope-drift",    3600,  "CLAUDE_PLUGIN_OPTION_SETTINGS_SCOPE_DRIFT_INTERVAL"),

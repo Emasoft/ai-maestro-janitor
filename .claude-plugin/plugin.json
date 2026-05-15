@@ -269,6 +269,13 @@
       "default": 300,
       "sensitive": false
     },
+    "project_plugins_update_interval": {
+      "title": "Project-scope Plugins Auto-Update Cadence (seconds)",
+      "description": "Minimum seconds between project-plugins-update passes. Default: 300 (5 min \u2014 runs every heartbeat by default). This is Track 2b of the auto-update directive: keep project-scope plugins enabled in `<project>/.claude/settings.json` (git-tracked, team-shared) fresh. Each pass reads settings.json, filters `enabledPlugins` to entries with value=true, then spawns a detached worker that runs `claude plugin update <id> --scope project` per plugin. After the sweep, if `.claude/settings.json` is now dirty in git, the worker writes a commit-pending sentinel; the next heartbeat's parent run reads the sentinel and emits a `[project-plugins-commit-needed]` drift line containing the EXACT `git commit --only -- .claude/settings.json -m ...` command for Claude to execute. Signing, pre-commit hooks, and branch protection rules are honored automatically because the commit uses porcelain `git commit` with the user's git config. Whitelist is enforced: ONLY `.claude/settings.json` is ever named in the drift line \u2014 the user's other staged/unstaged files are untouched.",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
     "mcp_config_drift_interval": {
       "title": "MCP Config Drift Detector Cadence (seconds)",
       "description": "Minimum seconds between mcp-config-drift passes. Default: 3600 (1 h). The detector inspects `<project>/.mcp.json` (project-scope MCP) and `~/.claude.json` `.projects[<root>].mcpServers` (local-scope MCP for THIS project only). Checks: (a) invalid JSON; (b) `.mcp.json` ambiguous tracking status (neither git-tracked nor gitignored); (c) per-server problems: missing transport, unset `$VAR`/`${VAR}` env-var references. Never inspects user-scope MCP (top-level `~/.claude.json` `.mcpServers`).",
