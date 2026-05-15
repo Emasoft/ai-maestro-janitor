@@ -1,6 +1,6 @@
 ---
 name: janitor-arm
-description: Arms or renews the ai-maestro-janitor heartbeat cron. Use on first install, when upgrading from pre-stub (≤ v0.4.10) janitor, or in response to a [janitor-renew] nudge. Trigger with /janitor-arm.
+description: Arms or renews the ai-maestro-janitor heartbeat cron. Use when first installing the plugin, upgrading from pre-stub (≤ v0.4.10), or in response to a [janitor-renew] nudge before the 7-day auto-expiry. Trigger with /janitor-arm or "arm the janitor heartbeat".
 ---
 
 # Janitor arm
@@ -85,3 +85,10 @@ User: re-arm after the plugin update
 ## Scope
 
 ONLY installs the stub and arms the heartbeat cron. Does NOT run detectors (use `/janitor-audit`), install the plugin, or modify userConfig. To stop: `/janitor-disarm`.
+
+## Resources
+
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatcher-stub.py` — auto-rolling stub source.
+- `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` — installed stub the cron fires.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — per-version dispatcher the stub `execv`'s into.
+- `$CLAUDE_PROJECT_DIR/.janitor/state/` — per-project state and dedupe seen-files.
