@@ -248,6 +248,13 @@
       "default": 300,
       "sensitive": false
     },
+    "marketplace_refresh_interval": {
+      "title": "Marketplace Bulk-Refresh Cadence (seconds)",
+      "description": "Minimum seconds between bulk marketplace refreshes. Default: 300 (5 min \u2014 runs every heartbeat by default). The detector spawns `claude plugin marketplace update` (no arguments) DETACHED in the background; the bare form refreshes every configured Claude Code marketplace in one CLI call, which is the only Claude Code primitive that handles bulk plugin metadata refresh. Spawning detached and tracking the child PID prevents successive heartbeats from piling up concurrent fetches on the same git indices (the previous run is allowed to finish before the next one starts). Decouples freshness from `plugin-updates` so marketplaces of user/managed-scope plugins (which the janitor never touches) still stay fresh, and so marketplaces whose plugins are not yet installed in this project are also kept current.",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
     "mcp_config_drift_interval": {
       "title": "MCP Config Drift Detector Cadence (seconds)",
       "description": "Minimum seconds between mcp-config-drift passes. Default: 3600 (1 h). The detector inspects `<project>/.mcp.json` (project-scope MCP) and `~/.claude.json` `.projects[<root>].mcpServers` (local-scope MCP for THIS project only). Checks: (a) invalid JSON; (b) `.mcp.json` ambiguous tracking status (neither git-tracked nor gitignored); (c) per-server problems: missing transport, unset `$VAR`/`${VAR}` env-var references. Never inspects user-scope MCP (top-level `~/.claude.json` `.mcpServers`).",

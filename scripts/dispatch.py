@@ -59,14 +59,17 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("stale-task",       1800,  "CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL"),
     ("dirty-tree",       300,   "CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL"),
     ("subagent-report",  3600,  "CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL"),
-    ("version-update",   86400, "CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL"),
+    ("version-update",   300,   "CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL"),
     ("trashcan-purge",   86400, "CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_INTERVAL"),
     # v0.4.0 additions:
     ("remote-credentials",      3600,  "CLAUDE_PLUGIN_OPTION_REMOTE_CREDENTIALS_INTERVAL"),
     ("stale-stash",             86400, "CLAUDE_PLUGIN_OPTION_STALE_STASH_INTERVAL"),
     ("nested-git-safety",       3600,  "CLAUDE_PLUGIN_OPTION_NESTED_GIT_SAFETY_INTERVAL"),
     ("tracked-ignored",         3600,  "CLAUDE_PLUGIN_OPTION_TRACKED_IGNORED_INTERVAL"),
-    ("plugin-updates",          86400, "CLAUDE_PLUGIN_OPTION_PLUGIN_UPDATES_INTERVAL"),
+    # marketplace-refresh runs BEFORE plugin-updates so the marketplace
+    # cache is fresh by the time plugin-updates consults the manifest.
+    ("marketplace-refresh",     300,   "CLAUDE_PLUGIN_OPTION_MARKETPLACE_REFRESH_INTERVAL"),
+    ("plugin-updates",          300,   "CLAUDE_PLUGIN_OPTION_PLUGIN_UPDATES_INTERVAL"),
     ("mcp-config-drift",        3600,  "CLAUDE_PLUGIN_OPTION_MCP_CONFIG_DRIFT_INTERVAL"),
     ("settings-scope-drift",    3600,  "CLAUDE_PLUGIN_OPTION_SETTINGS_SCOPE_DRIFT_INTERVAL"),
     ("subagent-scope-drift",    3600,  "CLAUDE_PLUGIN_OPTION_SUBAGENT_SCOPE_DRIFT_INTERVAL"),
