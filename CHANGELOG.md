@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.6] - 2026-05-15
+## [0.4.7] - 2026-05-15
 
 ### Features
 
-- Default version-update + plugin-updates to 5-min cadence
+- Add marketplace-refresh — bulk update every heartbeat
 
