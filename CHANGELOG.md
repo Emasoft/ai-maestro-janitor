@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.4.8] - 2026-05-15
+## [0.4.9] - 2026-05-15
 
 ### Features
 
-- Add user-plugins-update — Phase 1 of auto-update directive
+- Add local-plugins-update — Phase 2 of auto-update directive
 
