@@ -6,6 +6,17 @@ plugin updates. Load this file when the SKILL.md summary isn't enough —
 e.g. when debugging "why didn't the cron pick up the new version?" or
 when designing a follow-up change to the dispatcher contract.
 
+## Table of Contents
+
+- [The problem the stub solves](#the-problem-the-stub-solves)
+- [The stub indirection](#the-stub-indirection)
+- [Survival contract](#survival-contract)
+- [When re-arming is still needed](#when-re-arming-is-still-needed)
+- [Path-traversal safety](#path-traversal-safety)
+- [Atomic stub install](#atomic-stub-install)
+- [Stub vs. dispatch.py — division of responsibility](#stub-vs-dispatchpy--division-of-responsibility)
+- [See also](#see-also)
+
 ## The problem the stub solves
 
 Before v0.4.11, `/janitor-arm` baked an absolute, version-stamped path
