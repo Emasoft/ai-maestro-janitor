@@ -371,6 +371,25 @@ any plugin-side change — staying on a recent CC build is recommended:
   daemon now detects system clock jumps across macOS sleep/wake
   instead of counting them as elapsed idle time, so a laptop
   closed overnight no longer drops background sessions on wake.
+- **v2.1.143** added plugin dependency enforcement: `claude plugin
+  disable` now refuses when another enabled plugin depends on the
+  target (with a copy-pasteable disable-chain hint), and `claude
+  plugin enable` force-enables transitive dependencies. The
+  janitor's auto-update detectors (`marketplace-refresh`,
+  `user-plugins-update`, `local-plugins-update`,
+  `project-plugins-update`) drive **`claude plugin update`**, which
+  only refreshes cached versions and never invokes
+  enable/disable — so bulk auto-updates pass through the new guard
+  cleanly. The implication is for *manual* disable steps in your
+  own workflow: if you `claude plugin disable` a plugin the janitor
+  depends on (e.g. `ai-maestro-plugin` for inter-agent messaging),
+  the new refusal will tell you which dependents to disable first.
+  v2.1.143 also dropped CC's internal `rm -rf` fallback when its
+  own worktree cleanup hits an error — uncommitted scratch in
+  CC-spawned worktrees is now safe. This does *not* change the
+  janitor's `worktree-janitor` detector advice (it suggests
+  `git worktree remove --force` on user-owned stale worktrees,
+  which is independent of CC's internal cleanup path).
 
 ## Troubleshooting
 
