@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.4.13",
+  "version": "0.5.0",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -176,6 +176,41 @@
       "description": "Minimum seconds between trashcan-purge passes. Default: 86400 (24 h). Lower values waste cycles since the threshold is measured in days.",
       "type": "number",
       "default": 86400,
+      "sensitive": false
+    },
+    "screenshot_purge_enabled": {
+      "title": "Screenshot auto-purge enabled",
+      "description": "When true (default), the screenshot-purge detector removes browser-UI test screenshots from <project_root>/reports/screenshots/ that exceed screenshot_max_age_hours, AND when free disk space drops below screenshot_lowdisk_min_free_gb it deletes the oldest screenshots first until free space recovers above screenshot_lowdisk_target_free_gb. Only files with screenshot extensions (.png .jpg .jpeg .webp .gif) inside reports/screenshots/ are touched — anything else (including .gitkeep, README files, and the directory itself) is left alone. The folder is gitignored per the reports rule, so screenshots are short-lived cache; bypassing safe-delete is correct here.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "screenshot_max_age_hours": {
+      "title": "Screenshot Max Age (hours)",
+      "description": "Hours a screenshot can live in reports/screenshots/ before screenshot-purge removes it. Default: 72 (3 days). Age is computed from file mtime — test runners that re-screenshot the same name reset the clock automatically.",
+      "type": "number",
+      "default": 72,
+      "sensitive": false
+    },
+    "screenshot_lowdisk_min_free_gb": {
+      "title": "Screenshot Low-Disk Trigger (GiB)",
+      "description": "When free space on the disk holding reports/screenshots/ drops below this many GiB, screenshot-purge enters low-disk mode and deletes oldest screenshots first (regardless of age) until free space recovers above screenshot_lowdisk_target_free_gb. Default: 5. Set to 0 to disable low-disk override (age-only mode).",
+      "type": "number",
+      "default": 5,
+      "sensitive": false
+    },
+    "screenshot_lowdisk_target_free_gb": {
+      "title": "Screenshot Low-Disk Recovery Target (GiB)",
+      "description": "Free-space target screenshot-purge tries to reach during a low-disk pass. Default: 10. The min/target hysteresis (5 → 10 GiB) prevents the detector from oscillating right at the threshold. If misconfigured to ≤ min_free_gb, the detector forces a 1 GiB gap at runtime.",
+      "type": "number",
+      "default": 10,
+      "sensitive": false
+    },
+    "screenshot_purge_interval": {
+      "title": "Screenshot Purge Cadence (seconds)",
+      "description": "Minimum seconds between screenshot-purge passes. Default: 3600 (1 h). With a 72 h default age threshold, hourly is the right balance — fast enough to catch newly-expired files and low-disk events, slow enough to be effectively free on idle projects.",
+      "type": "number",
+      "default": 3600,
       "sensitive": false
     },
     "stash_stale_days": {

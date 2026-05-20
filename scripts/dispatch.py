@@ -61,6 +61,11 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("subagent-report",  3600,  "CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL"),
     ("version-update",   300,   "CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL"),
     ("trashcan-purge",   86400, "CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_INTERVAL"),
+    # screenshot-purge runs hourly: 72h is the default age threshold so a
+    # 1h cadence catches expiries promptly AND re-probes free disk while
+    # the user is mid-task. Skipped silently when reports/screenshots/ is
+    # absent, which is the common case on non-UI projects.
+    ("screenshot-purge", 3600,  "CLAUDE_PLUGIN_OPTION_SCREENSHOT_PURGE_INTERVAL"),
     # v0.4.0 additions:
     ("remote-credentials",      3600,  "CLAUDE_PLUGIN_OPTION_REMOTE_CREDENTIALS_INTERVAL"),
     ("stale-stash",             86400, "CLAUDE_PLUGIN_OPTION_STALE_STASH_INTERVAL"),
