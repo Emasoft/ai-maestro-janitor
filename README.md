@@ -390,6 +390,36 @@ any plugin-side change — staying on a recent CC build is recommended:
   janitor's `worktree-janitor` detector advice (it suggests
   `git worktree remove --force` on user-owned stale worktrees,
   which is independent of CC's internal cleanup path).
+- **v2.1.144** capped the side-channel "is api.anthropic.com
+  reachable" probe at 15s — previously a captive portal / firewall /
+  VPN block could hang CC startup for up to 75s. Because the durable
+  heartbeat fires every 5 minutes, a 60s startup tax on every fire
+  would cripple the rate-limit recovery loop; v2.1.144 keeps the loop
+  responsive on flaky networks. v2.1.144 also fixed completed/stopped
+  background sessions briefly failing to wake being marked as
+  permanent startup crashes — the rate-limit recovery directive
+  depends on a paused session resuming cleanly, and the previous
+  misclassification could lose work. Finally, session titles now come
+  from the user's first prompt instead of plugin-monitor output —
+  the janitor IS a plugin-monitor, so before this fix a session that
+  opened on a `[janitor-heartbeat]` fire would get titled "janitor
+  heartbeat" instead of whatever the user actually asked about.
+- **v2.1.145** added `session_crons` (and `background_tasks`) to
+  the `Stop` and `SubagentStop` hook input payloads. The janitor's
+  `on-stop` / `on-stop-failure` hooks previously could not introspect
+  the registered cron set without re-scanning
+  `.claude/scheduled_tasks.json` by hand — now the list arrives
+  inline. This unlocks future rate-limit-class diagnostics ("which
+  cron last fired? when is the next one due?") without a filesystem
+  round-trip on every stop. v2.1.145 also closed a permission-prompt
+  bypass where bare variable assignments to non-allowlisted env vars
+  in Bash commands were auto-approved — relevant because some
+  janitor hooks set `CLAUDE_PROJECT_DIR=...` inline. Finally, `claude
+  plugin validate` now flags `skills:` entries that point at a file
+  instead of a directory (the janitor's
+  `.claude-plugin/plugin.json` declares skill directories
+  correctly — this is forward-looking insurance for any future skill
+  refactor that touches the manifest shape).
 
 ## Troubleshooting
 
