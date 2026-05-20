@@ -2,7 +2,10 @@ name: Weekly janitor audit
 
 on:
   schedule:
-    - cron: "0 9 * * 1"
+    # Mondays 09:11 UTC. The previous "0 9 * * 1" landed in the global
+    # Monday-9am pile-up; ~/.claude/rules/gh-actions.md asks every
+    # weekly job to pick an off-minute that is NOT 00 or 30.
+    - cron: "11 9 * * 1"
   workflow_dispatch: {}
 
 permissions:
@@ -16,9 +19,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
+          # `gh` calls below use GH_TOKEN from env explicitly — the
+          # persisted git extraheader credential would be exfiltrable by
+          # any later step uploading artifacts. zizmor: artipacked.
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8
+        # SHA-pinned per ~/.claude/rules/gh-actions.md + zizmor's
+        # unpinned-uses error. Same SHA as ci.yml and release.yml.
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57  # v8.0.0
 
       - name: Make detector scripts executable
         run: chmod +x scripts/dispatch.py scripts/detectors/*.py scripts/hooks/*.py

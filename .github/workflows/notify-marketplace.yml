@@ -32,6 +32,11 @@ jobs:
     steps:
       - name: Checkout plugin
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          # Only reads plugin.json; the marketplace dispatch step uses
+          # secrets.MARKETPLACE_PAT explicitly, not the persisted git
+          # extraheader. zizmor: artipacked.
+          persist-credentials: false
 
       - name: Extract plugin name and version
         id: plugin
@@ -59,12 +64,23 @@ jobs:
             }
 
       - name: Job summary
+        # Step-output values come from plugin.json (in-repo content) so
+        # they're not attacker-controllable in the strict sense — but
+        # zizmor's template-injection audit flags ${{ ... }} expansion
+        # in `run:` blocks regardless of source. Routing through env
+        # vars closes the audit, and is a defense-in-depth measure
+        # against any future code path that introduces user input into
+        # plugin.json.
+        env:
+          PLUGIN_NAME: ${{ steps.plugin.outputs.name }}
+          PLUGIN_VERSION: ${{ steps.plugin.outputs.version }}
+          PLUGIN_REF: ${{ steps.plugin.outputs.ref }}
         run: |
           {
             echo "## Marketplace Notification"
             echo ""
-            echo "- Plugin: ${{ steps.plugin.outputs.name }}"
-            echo "- Version: ${{ steps.plugin.outputs.version }}"
-            echo "- Ref: ${{ steps.plugin.outputs.ref }}"
-            echo "- Target: ${{ env.MARKETPLACE_OWNER }}/${{ env.MARKETPLACE_REPO }}"
+            echo "- Plugin: $PLUGIN_NAME"
+            echo "- Version: $PLUGIN_VERSION"
+            echo "- Ref: $PLUGIN_REF"
+            echo "- Target: $MARKETPLACE_OWNER/$MARKETPLACE_REPO"
           } >> "$GITHUB_STEP_SUMMARY"

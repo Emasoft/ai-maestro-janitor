@@ -1,0 +1,70 @@
+# Static security analysis of every workflow under .github/workflows/.
+# Runs on PR + main pushes so a bad change gets blocked before merge,
+# plus a weekly schedule that catches new zizmor releases finding things
+# the version-at-PR-time missed.
+#
+# Findings land in the GitHub Code Scanning / Advanced Security tab as
+# SARIF — the action itself does NOT fail the workflow on findings (per
+# zizmorcore/zizmor-action#docs §"Advanced Security Limitation"); gate
+# merges via Code Scanning required-check + branch protection if you want
+# the build to fail.
+
+name: zizmor security audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Tuesdays 06:17 UTC. Odd minute on purpose per
+    # ~/.claude/rules/gh-actions.md — every workflow that asks for
+    # "weekly" gets `0 9 * * 1` and lands in the global noon pile-up.
+    # Anything off the :00 / :30 marks is cheap insurance against that.
+    - cron: "17 6 * * 2"
+  workflow_dispatch: {}
+
+# Default deny — every job opts in to the exact scope it needs.
+permissions: {}
+
+# Skip in-flight runs for the same ref. Branch protection rerun on the
+# winner is enough.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: Audit .github/workflows
+    runs-on: ubuntu-latest
+    # zizmor on this tiny workflow set finishes in well under a minute.
+    # A 10-minute ceiling exists only to surface stalls, not as a budget.
+    timeout-minutes: 10
+    permissions:
+      # SARIF upload to Code Scanning / Advanced Security.
+      security-events: write
+      # Read repo content so zizmor can see the YAML.
+      contents: read
+      # Online audits read other-repo action metadata via the GitHub API.
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          # `persist-credentials: false` is mandatory per zizmor's own
+          # artipacked audit — the implicit `extraheader` git config the
+          # default leaves behind can be exfiltrated by any later step
+          # that uploads artifacts.
+          persist-credentials: false
+
+      - name: Run zizmor (Advanced Security mode, SARIF to Code Scanning)
+        uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d  # v0.5.6
+        with:
+          # Scan only the workflows we own.
+          inputs: .github/workflows
+          # Pin zizmor's own version too. Latest is checked weekly via the
+          # schedule above; bump this string when a new zizmor surfaces
+          # something interesting.
+          version: '1.25.2'
+          # Upload SARIF to Code Scanning (default true). Findings live in
+          # the GitHub Security tab; merge gating is via branch protection.
+          advanced-security: true
