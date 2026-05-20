@@ -1633,12 +1633,14 @@ Examples:
     ):
         if (plugin_root / name).exists():
             staged.append(name)
-    # Also stage any Python files whose __version__ was updated. Strict typing:
-    # iterate Path objects in py_path, then convert to str for staging.
-    for py_path in plugin_root.rglob("*.py"):
+    # Also stage any Python files whose __version__ was updated. Reuse the
+    # gitignore-aware enumerator from _list_project_py_files — using
+    # rglob("*.py") here happily walks into INPUT_DEV/_extracted/<vendor>/
+    # and any other gitignored scratch tree, and git refuses to stage
+    # gitignored paths so the whole pipeline aborts mid-publish. The
+    # canonical "what's a project file" list lives in git ls-files; honor it.
+    for py_path in _list_project_py_files(plugin_root):
         rel_path = py_path.relative_to(plugin_root)
-        if any(part.startswith(".") or part in ("node_modules", "__pycache__", "dist", "build", ".git") for part in rel_path.parts):
-            continue
         try:
             py_content = py_path.read_text(encoding="utf-8")
             if re.search(r'^__version__\s*=\s*["\']' + re.escape(new_version) + r'["\']', py_content, re.MULTILINE):
