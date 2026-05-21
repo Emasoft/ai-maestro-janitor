@@ -51,9 +51,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           # `persist-credentials: false` is mandatory per zizmor's own
-          # artipacked audit — the implicit `extraheader` git config the
-          # default leaves behind can be exfiltrated by any later step
-          # that uploads artifacts.
+          # artipacked audit — without it, the implicit `extraheader`
+          # git config leaks into any later artifact upload step.
           persist-credentials: false
 
       - name: Run zizmor (Advanced Security mode, SARIF to Code Scanning)
