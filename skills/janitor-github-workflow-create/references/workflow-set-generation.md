@@ -2,6 +2,16 @@
 
 Detail for the create skill's project-shape detection (step 1) and workflow-set composition (step 4).
 
+## Table of contents
+
+- [Project-shape signals](#project-shape-signals) — language / package-manager / test-runner detection.
+- [Workflow set composition](#workflow-set-composition) — ci.yml / release.yml / zizmor-scan.yml / optional notify-marketplace.yml / weekly-audit.yml.
+- [Generation invariants](#generation-invariants) — the hard rules every generated workflow MUST satisfy.
+- [SHA-pinning helper](#sha-pinning-helper) — `resolve_sha` function that bakes `<sha>  # v<X.Y.Z>` into every `uses:` line.
+- [Repo bootstrap](#repo-bootstrap) — `gh repo create` flow when the GitHub repo does not exist.
+- [Secret installation](#secret-installation) — env-var indirection loop; value never leaves the shell's existing env.
+- [Branch protection (best-effort, non-fatal)](#branch-protection-best-effort-non-fatal) — `gh api` PUT payload for required status checks + linear history.
+
 ## Project-shape signals
 
 The skill inspects the repo for these signals and records every match in `$REPORT_DIR/<TS>-project-shape.md`. Multiple signals may apply at once.
