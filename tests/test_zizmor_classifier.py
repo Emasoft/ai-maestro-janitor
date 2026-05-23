@@ -6,17 +6,16 @@
 from __future__ import annotations
 
 import sys
+import unittest
 from pathlib import Path
 
 # Allow running from project root with `python -m unittest tests.test_zizmor_classifier`.
+# The lib.* imports MUST come after this sys.path mutation, hence the noqa.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-import unittest
-
 from lib.zizmor_classifier import Classifier, Finding  # noqa: E402
 from lib.zizmor_patterns import PATTERNS  # noqa: E402
-
 
 JQ_ARG_TRAP_WORKFLOW = """\
 name: bad-jq
