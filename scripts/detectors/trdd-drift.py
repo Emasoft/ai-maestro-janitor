@@ -69,12 +69,12 @@ def main() -> int:
     trdd_subpath = os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
     trdd_dir = root / trdd_subpath
 
-    # Containment check: a misconfigured `CLAUDE_PLUGIN_OPTION_TRDD_PATH`
-    # like `/etc`, `../../../etc`, or a symlink that escapes the project
-    # root must NOT cause the detector to scan outside the project.
-    # Resolve both paths (resolves symlinks too) and require the TRDD dir
-    # to live under root. The user's well-formed default is `design/tasks`
-    # which always passes; only adversarial / typo'd values fail.
+    # Containment check: a misconfigured CLAUDE_PLUGIN_OPTION_TRDD_PATH
+    # (absolute system path, parent-escape sequence, or a symlink that
+    # escapes the project root) must NOT cause the detector to scan
+    # outside the project. Resolve both paths (resolves symlinks too)
+    # and require the TRDD dir to live under root. The well-formed
+    # default design/tasks always passes; only typo'd values fail.
     try:
         resolved_trdd = trdd_dir.resolve()
         resolved_root = root.resolve()

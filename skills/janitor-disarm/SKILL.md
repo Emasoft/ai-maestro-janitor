@@ -60,7 +60,7 @@ User: kill the janitor cron
 
 ## Scope
 
-This skill ONLY removes heartbeat crons and clears the arm-timestamp. It does NOT uninstall the plugin, delete `.janitor/state/` data, remove logs, or affect drift-detector seen-files. To re-arm, run `/janitor-arm`.
+This skill ONLY withdraws heartbeat crons and clears the arm-timestamp. It does NOT uninstall the plugin, touch `.janitor/state/` data, prune logs, or affect drift-detector seen-files. To re-arm, run `/janitor-arm`.
 
 ## Resources
 

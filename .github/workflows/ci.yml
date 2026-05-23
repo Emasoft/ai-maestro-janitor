@@ -23,14 +23,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-
       # Only one shell script remains after the bash → Python port
       # (12263f2): scripts/dispatch.sh is the back-compat wrapper for
       # cron entries that still reference dispatch.sh; everything else
       # is now Python under PEP 723. The pre-push hook is also bash and
-      # belongs in the same shellcheck pass.
+      # belongs in the same shellcheck pass. shellcheck is preinstalled
+      # on ubuntu-latest runners, so no install step is needed.
       - name: Lint shell scripts
         run: shellcheck scripts/dispatch.sh .githooks/pre-push
 

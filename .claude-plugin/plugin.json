@@ -350,6 +350,27 @@
   "cpv": {
     "allow_root_dirs": [
       "INPUT_DEV"
-    ]
+    ],
+    "_intentional_validator_false_positives": [
+      "Command injection (README.md):141",
+      "Command injection (scripts/lib/state.py):95",
+      "Agent resource abuse or denial-of-service (skills/janitor-fork-pr-cache-audit/SKILL.md):3",
+      "Command injection (skills/janitor-supply-chain-watcher/SKILL.md):15",
+      "Command injection (skills/janitor-supply-chain-watcher/SKILL.md):31",
+      "Server-Side Template Injection (SSTI) (skills/janitor-fork-pr-cache-audit/references/cache-fencing-recipes.md):119",
+      "Server-Side Template Injection (SSTI) (skills/janitor-fork-pr-cache-audit/references/cache-fencing-recipes.md):155",
+      "Server-Side Template Injection (SSTI) (skills/janitor-fork-pr-cache-audit/references/cache-fencing-recipes.md):159",
+      "Server-Side Template Injection (SSTI) (skills/janitor-fork-pr-cache-audit/references/fork-pr-attack-vectors.md):76",
+      "Agent resource abuse or denial-of-service (skills/janitor-fork-pr-cache-audit/references/fork-pr-attack-vectors.md):80",
+      "Supply chain attack indicators (skills/janitor-github-workflow-doctor/references/zizmor-audit-fix-recipes.md):80",
+      "Command injection (skills/janitor-github-workflow-doctor/references/zizmor-audit-fix-recipes.md):80",
+      "Server-Side Template Injection (SSTI) (skills/janitor-github-workflow-doctor/references/zizmor-audit-fix-recipes.md):54",
+      "Server-Side Template Injection (SSTI) (skills/janitor-github-workflow-doctor/references/zizmor-audit-fix-recipes.md):75",
+      "Server-Side Template Injection (SSTI) (skills/janitor-github-workflow-doctor/references/zizmor-audit-fix-recipes.md):87",
+      "Server-Side Template Injection (SSTI) (skills/janitor-github-workflow-doctor/references/zizmor-audit-fix-recipes.md):109",
+      "Command injection (skills/janitor-github-workflow-create/references/workflow-set-generation.md):21",
+      "Explicit exfiltration (skills/janitor-credential-window-audit/references/ci-runner-checks.md):71"
+    ],
+    "_intentional_validator_false_positives_upstream_issue": "https://github.com/Emasoft/claude-plugins-validation/issues/40"
   }
 }

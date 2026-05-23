@@ -60,7 +60,7 @@ User: quiet the heartbeat for the rest of today
 
 ## Scope
 
-This skill ONLY writes the paused sentinel. It does not delete the cron, clear detector seen-files, modify state, or remove logs. To re-enable normal heartbeat behaviour, run `/janitor-resume` (or wait for the expiry to pass — `dispatch.py` auto-cleans the sentinel on the first heartbeat after expiry).
+This skill ONLY writes the paused sentinel. It does not affect the cron, touch detector seen-files, modify state, or prune logs. To re-enable normal heartbeat behaviour, run `/janitor-resume` (or wait for the expiry to pass — `dispatch.py` auto-cleans the sentinel on the first heartbeat after expiry).
 
 ## Resources
 

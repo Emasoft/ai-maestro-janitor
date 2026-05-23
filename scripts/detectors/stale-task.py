@@ -35,7 +35,7 @@ def _resolve_team_uuid(project_root: Path) -> Optional[str]:
     which is also the directory name under ~/.claude/tasks/.
 
     Picking that dir scopes the detector to this project's tasks and avoids
-    the cross-project bleed of `ls -t ~/.claude/tasks/`.
+    the cross-project bleed of enumerating all session task dirs by mtime.
     """
     slug = str(project_root).replace("/", "-")
     session_root = Path.home() / ".claude" / "projects" / slug

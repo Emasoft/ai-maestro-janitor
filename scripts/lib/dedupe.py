@@ -10,10 +10,10 @@
 # partial state), so we use it as a mutex around the read-then-append
 # sequence — no `flock` dependency, works on macOS default userland.
 #
-# API differs slightly from the bash original: bash's `emit_once` printed
-# the message to stdout; Python's returns it (or None) so the caller has
-# explicit control over routing. Detectors append to drift output via
-# regular `print()`.
+# API differs slightly from the bash original: the bash emit_once helper
+# printed the message to stdout; the Python version returns it (or None)
+# so the caller has explicit control over routing. Detectors append to
+# drift output via the regular print function.
 
 from __future__ import annotations
 

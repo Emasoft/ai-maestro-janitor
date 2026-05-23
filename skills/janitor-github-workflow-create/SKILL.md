@@ -1,6 +1,6 @@
 ---
 name: janitor-github-workflow-create
-description: Analyzes a project and creates a zizmor-clean set of GitHub Actions workflows from scratch, including bootstrapping the GitHub repo via `gh repo create` if it does not yet exist. Use when starting a new project, when a project has no .github/workflows/ directory, when the user asks to "set up CI", "create the GitHub workflows", "scaffold CI", "bootstrap github actions", or "set up the repo". Trigger with /janitor-github-workflow-create or "create github workflows for this project".
+description: Analyzes a project and creates a zizmor-clean set of GitHub Actions workflows from scratch, including bootstrapping the GitHub repo via `gh repo create` if it does not yet exist. Use when starting a new project, when a project has no .github/workflows/ directory, when the user asks to "set up CI", "create the GitHub workflows", "scaffold CI", "bootstrap github actions", or "set up the repo". Trigger with /janitor-github-workflow-create.
 ---
 
 # Janitor github-workflow-create
@@ -18,19 +18,19 @@ Pairs with `/janitor-github-workflow-doctor`.
 
 ## Instructions
 
-Detail for every numbered step (signal table, full bash blocks, generation invariants, helper functions) lives in [references/workflow-set-generation.md](references/workflow-set-generation.md) — links below jump to the matching section.
+Detail for every numbered step (signal table, full bash blocks, generation invariants, helper functions) lives in references/workflow-set-generation.md.
 
-1. **Detect the project shape.** Inspect for language / package-manager / test-runner signals. Map: [project-shape-signals](references/workflow-set-generation.md#project-shape-signals). Record matches in `$REPORT_DIR/<TS>-project-shape.md`.
+1. **Detect the project shape.** Inspect for language / package-manager / test-runner signals. Record matches in `$REPORT_DIR/<TS>-project-shape.md`.
 
-2. **Bootstrap the repo if missing.** If `gh repo view <owner>/<name>` fails, run `gh repo create --public --source . --remote origin --push`. See [repo-bootstrap](references/workflow-set-generation.md#repo-bootstrap).
+2. **Bootstrap the repo if missing.** If `gh repo view <owner>/<name>` fails, run `gh repo create --public --source . --remote origin --push`.
 
-3. **Resolve action SHAs.** Every third-party action SHA-pinned with a `# v<X.Y.Z>` comment. See [sha-pinning-helper](references/workflow-set-generation.md#sha-pinning-helper). Cache lookups.
+3. **Resolve action SHAs.** Every third-party action SHA-pinned with a `# v<X.Y.Z>` comment. Cache lookups.
 
-4. **Generate the workflow set** in `.github/workflows/`. Standard: `ci.yml`, `release.yml`, `zizmor-scan.yml`; optional `notify-marketplace.yml`, `weekly-audit.yml`. Composition: [workflow-set-composition](references/workflow-set-generation.md#workflow-set-composition). Every file MUST satisfy the [generation-invariants](references/workflow-set-generation.md#generation-invariants) (`permissions: {}`, `persist-credentials: false`, SHA-pinned actions, env-var indirection, off-minute crons, no `pull_request_target` without consent, `@sha256:<digest>`, `timeout-minutes`, concurrency).
+4. **Generate the workflow set** in `.github/workflows/`. Standard: `ci.yml`, `release.yml`, `zizmor-scan.yml`; optional `notify-marketplace.yml`, `weekly-audit.yml`. Every file MUST satisfy the generation invariants (`permissions: {}`, `persist-credentials: false`, SHA-pinned actions, env-var indirection, off-minute crons, no `pull_request_target` without consent, `@sha256:<digest>`, `timeout-minutes`, concurrency).
 
-5. **Install required secrets.** Iterate the env-var list. Loop: [secret-installation](references/workflow-set-generation.md#secret-installation). Missing vars → one warning each; commit still lands.
+5. **Install required secrets.** Iterate the env-var list and `gh secret set` for each one. Missing vars → one warning each; commit still lands.
 
-6. **Initialise branch protection** (best-effort, non-fatal). Payload: [branch-protection](references/workflow-set-generation.md#branch-protection-best-effort-non-fatal). Failure → `[warn]`, continue.
+6. **Initialise branch protection** (best-effort, non-fatal). Failure → `[warn]`, continue.
 
 7. **Final validation — zero findings required:**
 
@@ -83,7 +83,14 @@ ONLY writes `.github/workflows/` + optional repo / branch-protection bootstrap. 
 
 ## Resources
 
-- [references/workflow-set-generation.md](references/workflow-set-generation.md) — full detail for every step.
+- [workflow-set-generation](references/workflow-set-generation.md) — full detail for every step.
+  - [Project-shape signals](references/workflow-set-generation.md#project-shape-signals)
+  - [Workflow set composition](references/workflow-set-generation.md#workflow-set-composition)
+  - [Generation invariants](references/workflow-set-generation.md#generation-invariants)
+  - [SHA-pinning helper](references/workflow-set-generation.md#sha-pinning-helper)
+  - [Repo bootstrap](references/workflow-set-generation.md#repo-bootstrap)
+  - [Secret installation](references/workflow-set-generation.md#secret-installation)
+  - [Branch protection (best-effort, non-fatal)](references/workflow-set-generation.md#branch-protection-best-effort-non-fatal)
 - [zizmor](https://zizmor.sh) / [audit catalogue](https://docs.zizmor.sh/audits/).
 - `~/.claude/rules/gh-actions.md`.
 - Companion: `/janitor-github-workflow-doctor`.

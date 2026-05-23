@@ -13,14 +13,14 @@ Runtime contract: `gh` installed and authenticated; secrets exported as env vars
 
 ## Prerequisites
 
-- `.github/workflows/` with ≥ 1 `.yml`. Otherwise route to `/janitor-github-workflow-create`.
+- `.github/workflows/` with at least one `.yml`. Otherwise route to `/janitor-github-workflow-create`.
 - `uv` and `gh` on PATH, `gh auth status` zero, working tree clean.
 
 ## Instructions
 
 1. **Install / refresh zizmor.** `uv tool install --quiet zizmor`. Re-run with `--upgrade` if `zizmor --version` lags `gh api repos/zizmorcore/zizmor/releases/latest --jq .tag_name`.
 
-2. **Snapshot the workflow set.** `ls -1 .github/workflows/*.yml` → `$REPORT_DIR` for loop-termination on mid-run changes. Abort if zero files.
+2. **Snapshot the workflow set.** Enumerate every workflow file path and record into `$REPORT_DIR` so the fix loop terminates if the set changes mid-run. Abort if zero files.
 
 3. **Scan with zizmor.** Capture text + SARIF:
 
@@ -32,7 +32,7 @@ Runtime contract: `gh` installed and authenticated; secrets exported as env vars
    zizmor .github/workflows --format sarif --output "$REPORT_DIR/$TS-scan.sarif" 2>&1 | tee "$REPORT_DIR/$TS-scan.txt"
    ```
 
-4. **Classify and fix.** Parse SARIF, group by `ruleId`, look up the surgical fix in [references/zizmor-audit-fix-recipes.md](references/zizmor-audit-fix-recipes.md). Findings whose `ruleId` is not in the recipe table → `[NEEDS-HUMAN-REVIEW]`, stop.
+4. **Classify and fix.** Parse SARIF, group by `ruleId`, then run a second pass: for every workflow file apply the janitor-side regex matchers from the recipes reference (e.g. `jq-arg-trap` flags any `run:` block containing `jq`, `--arg`, and a templated expression). Look up the surgical fix in the zizmor-audit-fix-recipes reference — covers every zizmor `ruleId` AND janitor-extension recipes. Findings with no recipe → `[NEEDS-HUMAN-REVIEW]`, stop.
 
 5. **Apply fixes file by file** using the Edit tool — never `sed`/`awk` automation (every change is reviewable). After each edit, validate YAML: `python3 -c "import yaml; yaml.safe_load(open('<file>'))" || exit 1`.
 
@@ -79,7 +79,11 @@ Pairs with `/janitor-github-workflow-create`.
 
 ## Resources
 
-- [references/zizmor-audit-fix-recipes.md](references/zizmor-audit-fix-recipes.md) — every `ruleId` ↔ surgical fix + the secret-handling contract.
+- [zizmor-audit-fix-recipes](references/zizmor-audit-fix-recipes.md) — every `ruleId` ↔ surgical fix + the secret-handling contract + janitor-extension recipes.
+  - [Zizmor recipe table](references/zizmor-audit-fix-recipes.md#zizmor-recipe-table)
+  - [Secret handling rule](references/zizmor-audit-fix-recipes.md#secret-handling-rule-applies-to-every-fix-that-introduces-a-secret)
+  - [Janitor-extension recipes (not in zizmor catalogue)](references/zizmor-audit-fix-recipes.md#janitor-extension-recipes-not-in-zizmor-catalogue)
+  - [`jq-arg-trap`](references/zizmor-audit-fix-recipes.md#jq-arg-trap)
 - [zizmor](https://zizmor.sh) / [audit catalogue](https://docs.zizmor.sh/audits/) — upstream.
 - `~/.claude/rules/gh-actions.md` — project-wide GitHub Actions conventions.
 - `.github/workflows/zizmor-scan.yml` — CI job; doctor and CI share the matcher.

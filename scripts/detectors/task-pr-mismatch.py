@@ -39,8 +39,8 @@ def _resolve_team_uuid(project_root: Path) -> Optional[str]:
     """Resolve the team UUID for the CURRENT project's most-recent session.
 
     Mirrors stale-task.py's resolver. Picking the latest jsonl scopes the
-    detector to this project's tasks and avoids cross-project bleed of
-    `ls -t ~/.claude/tasks/`.
+    detector to this project's tasks and avoids cross-project bleed when
+    enumerating all session task dirs by mtime.
     """
     slug = str(project_root).replace("/", "-")
     session_root = Path.home() / ".claude" / "projects" / slug
