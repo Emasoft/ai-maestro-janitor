@@ -32,7 +32,7 @@ Runtime contract: `gh` installed and authenticated; secrets exported as env vars
    zizmor .github/workflows --format sarif --output "$REPORT_DIR/$TS-scan.sarif" 2>&1 | tee "$REPORT_DIR/$TS-scan.txt"
    ```
 
-4. **Classify and fix.** Parse SARIF, group by `ruleId`, then run a second pass: for every workflow file apply the janitor-side regex matchers from the recipes reference (e.g. `jq-arg-trap` flags any `run:` block containing `jq`, `--arg`, and a templated expression). Look up the surgical fix in the zizmor-audit-fix-recipes reference — covers every zizmor `ruleId` AND janitor-extension recipes. Findings with no recipe → `[NEEDS-HUMAN-REVIEW]`, stop.
+4. **Classify and fix.** Parse SARIF, group by `ruleId`, then run a second pass via `uv run scripts/doctor_classify.py` — a google-re2 RegexSet automaton over the janitor's pattern catalog (one DFA walk per workflow, not one per pattern). Emits JSON-lines (one per finding) the doctor parses. Look up the surgical fix in the zizmor-audit-fix-recipes reference — covers every zizmor `ruleId` AND janitor-extension recipes (`jq-arg-trap` and friends). Findings with no recipe → `[NEEDS-HUMAN-REVIEW]`, stop.
 
 5. **Apply fixes file by file** using the Edit tool — never `sed`/`awk` automation (every change is reviewable). After each edit, validate YAML: `python3 -c "import yaml; yaml.safe_load(open('<file>'))" || exit 1`.
 
