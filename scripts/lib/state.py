@@ -90,10 +90,9 @@ def read_int_state(path: Path | str, default: int = 0) -> int:
 
     Falls back to `default` on any read error or non-numeric content.
     Detector arithmetic runs under guard rails — a corrupted state file
-    must NOT abort the whole heartbeat. The bash port crashed when an
-    unset-strict shell tried to subtract a non-numeric value from a
-    timestamp; Python doesn't have that footgun, but we still want
-    graceful degradation.
+    must NOT abort the whole heartbeat. The earlier bash port crashed on
+    timestamp subtraction when the stored value was non-numeric; the
+    Python rewrite avoids that footgun and degrades gracefully.
     """
     try:
         content = Path(path).read_text().strip()

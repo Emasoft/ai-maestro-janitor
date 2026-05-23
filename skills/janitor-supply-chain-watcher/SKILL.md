@@ -12,7 +12,7 @@ Protects against the published-then-discovered-malicious shape (Shai-Hulud npm/P
 ## Prerequisites
 
 - `gh` on PATH, authenticated.
-- `curl` on PATH.
+- curl on PATH (for OSV.dev HTTPS queries).
 - `uv` for Python parsers.
 - Project is a git repo.
 
@@ -28,7 +28,7 @@ Protects against the published-then-discovered-malicious shape (Shai-Hulud npm/P
    CURSOR_FILE="$STATE_DIR/sca-cursor.json"
    ```
 
-2. Validate prerequisites. `gh auth status` non-zero → `[FAILED] gh CLI not authenticated`. `curl` missing → `[FAILED] curl not on PATH`. Fail fast.
+2. Validate prerequisites. `gh auth status` non-zero → `[FAILED] gh CLI not authenticated`. No curl on PATH → `[FAILED] curl not on PATH`. Fail fast.
 
 3. Discover lock files at project root (skip `node_modules/`, `.venv/`, `vendor/`, `.git/`): `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `requirements.txt`, `uv.lock`, `poetry.lock`, `Cargo.lock`. Zero found → `[skip] no lock files found`, exit 0.
 

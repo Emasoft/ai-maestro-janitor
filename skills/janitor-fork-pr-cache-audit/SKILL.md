@@ -1,6 +1,6 @@
 ---
 name: janitor-fork-pr-cache-audit
-description: Audits .github/workflows/*.yml for the fork-PR cache-poisoning and pull_request_target checkout patterns from the TanStack supply-chain incident. Use when the user asks to "audit cache poisoning", "scan for fork PR cache attacks", "check pull_request_target workflows", "TanStack-style audit", or after touching any workflow that uses actions/cache or pull_request_target. Trigger with /janitor-fork-pr-cache-audit.
+description: Audits .github/workflows/*.yml for the fork-PR cache-poisoning and pull_request_target checkout patterns from the TanStack supply-chain incident. Use when the user asks to "audit cache poisoning", "scan for cache-poisoning PRs", "check pull_request_target workflows", "TanStack-style audit", or after touching any workflow that uses actions/cache or pull_request_target. Trigger with /janitor-fork-pr-cache-audit.
 ---
 
 # Janitor fork-pr-cache-audit
