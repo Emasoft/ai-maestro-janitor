@@ -35,11 +35,11 @@ PATTERNS: dict[str, tuple[str, str, str]] = {
         "a full commit SHA. Resolve via 'gh api repos/<repo>/commits/<tag>' "
         "and replace with the SHA, preserving '# v<tag>' as a comment.",
     ),
-    "hardcoded-container-latest": (
-        r"image:\s+[\w./-]+:latest\b",
+    "unpinned-docker-image": (
+        r"(?:docker://[^\n]*:latest|image:[^\n]*:latest|uses:[^\n]*:latest|container:[^\n]*:latest)",
         "MAJOR",
-        "container image pinned to :latest — replace with @sha256:<digest> "
-        "via 'docker buildx imagetools inspect <image>'.",
+        "a Docker image pinned to the mutable :latest tag — pin to "
+        "@sha256:<digest>.",
     ),
     "dangerous-triggers-pr-target": (
         r"^\s*pull_request_target\s*:",
@@ -85,6 +85,46 @@ PATTERNS: dict[str, tuple[str, str, str]] = {
         "HIGH",
         "Writing to $GITHUB_ENV / $GITHUB_OUTPUT with a ${{ }} expression "
         "embedded in the value. Route the expression through env: first.",
+    ),
+    # Sentinel-port regex-tier rules (mirrors of the security-scanner
+    # detection corpus). All RE2-safe: no lookaround, no backrefs; only
+    # inline (?i:...) scoped flags where case-insensitivity is needed.
+    "hardcoded-secrets": (
+        r"(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----|hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+|(?i:api[_-]?key|apikey|secret[_-]?key|auth[_-]?token)\s*[:=]\s*['\"][A-Za-z0-9]{30,}['\"])",
+        "CRITICAL",
+        "a hardcoded AWS key / GitHub token / private key / Slack webhook / "
+        "API key — move it to ${{ secrets.NAME }}.",
+    ),
+    "ide-config-injection": (
+        r"(?:echo|cat|tee|printf|cp|mv|install|sed|>|>>)[^\n]*\.(?:claude|vscode|cursor)/",
+        "CRITICAL",
+        "workflow writes to an IDE/AI agent config dir (.claude/.vscode/"
+        ".cursor) — these auto-execute code on project open; remove or "
+        "validate before writing.",
+    ),
+    "curl-pipe-shell": (
+        r"(?:curl\s[^\n]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|source|\.)|wget\s[^\n]*-O\s*-\s*\|\s*(?:sudo\s+)?(?:sh|bash|zsh))",
+        "HIGH",
+        "remote script piped to a shell with no integrity check — download, "
+        "verify checksum, then run, or use a pinned action.",
+    ),
+    "git-config-global": (
+        r"git config --global[^\n]*(?:insteadOf|url\.|credential)",
+        "MINOR",
+        "git config --global writes credentials to ~/.gitconfig (visible to "
+        "every later git op) — use --local.",
+    ),
+    "github-dependency-refs": (
+        r"(?:npm|pnpm|yarn|bun)\s+(?:install|add)\s+[^\n]*(?:github:|git\+https://github\.com)",
+        "MAJOR",
+        "package installed from a GitHub commit/branch ref bypasses registry "
+        "integrity — install from the registry.",
+    ),
+    "jq-arg-escape-sequences": (
+        r"jq\s[^\n]*--arg\s+\w+\s+\"[^\"]*\\[nt\\][^\"]*\"",
+        "MAJOR",
+        "jq --arg treats the value as a raw literal, so \\n/\\t stay literal "
+        "backslash sequences — use real newlines or --argjson.",
     ),
 }
 

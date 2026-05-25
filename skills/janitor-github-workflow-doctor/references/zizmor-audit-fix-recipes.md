@@ -110,3 +110,7 @@ Now the shell substitutes `$PR_TITLE` from the process environment as a single a
 ```
 
 The comment makes future readers (and future automated matchers) aware that this is the documented safe pattern, not an accidental hardcode.
+
+---
+
+**Sentinel-derived rule set:** beyond `jq-arg-trap`, the doctor's second pass (`scripts/doctor_classify.py`) also runs ~25 rules ported from the Sentinel GitHub-Actions scanner — hardcoded-secrets, ide-config-injection, curl-pipe-shell, shell-injection-expr/jq, github-script-injection, workflow-dispatch-injection, dangerous-triggers, missing-permissions/timeouts, excessive-permissions, missing-persist-credentials, missing-env-protection, static-aws-credentials, build-publish-same-job, allow-forks-artifact, dangerous-lifecycle-scripts, and more. Their before/after fix recipes live in [sentinel-rules-recipes.md](sentinel-rules-recipes.md). Three Sentinel rules are handled by dedicated janitor skills instead: cache-poisoning → `janitor-fork-pr-cache-audit`, credential-window → `janitor-credential-window-audit`, missing-dependabot → `janitor-dependabot-doctor`.

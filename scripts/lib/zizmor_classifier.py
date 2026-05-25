@@ -32,7 +32,7 @@ from typing import Iterator
 from .zizmor_patterns import PATTERN_FALLBACK_FLAGS, PATTERNS
 
 try:
-    import re2 as _re2  # google-re2 binding
+    import re2 as _re2  # type: ignore[import-not-found]  # google-re2 binding (optional)
     _RE2_AVAILABLE = True
 except ImportError:
     _re2 = None  # type: ignore[assignment]

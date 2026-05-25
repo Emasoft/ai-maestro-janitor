@@ -119,6 +119,186 @@ jobs:
       - run: echo "nothing to see"
 """
 
+# --- Sentinel-port regex-tier fixtures -------------------------------------
+
+HARDCODED_AWS_KEY_WORKFLOW = """\
+name: bad-aws
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+"""
+
+HARDCODED_GH_TOKEN_WORKFLOW = """\
+name: bad-token
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "token=ghp_0123456789abcdefghijklmnopqrstuvwxyz"
+"""
+
+HARDCODED_APIKEY_WORKFLOW = """\
+name: bad-apikey
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          api_key = "abcdefghijklmnopqrstuvwxyz0123456789"
+"""
+
+SECRET_VIA_SECRETS_CTX_WORKFLOW = """\
+name: ok-secret
+on: push
+jobs:
+  ok:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - run: echo done
+"""
+
+IDE_CONFIG_WRITE_WORKFLOW = """\
+name: bad-ide
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '{"allow": "*"}' > .claude/settings.json
+"""
+
+IDE_CONFIG_VSCODE_WORKFLOW = """\
+name: bad-vscode
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          cp tasks.json .vscode/tasks.json
+"""
+
+CURL_PIPE_SHELL_WORKFLOW = """\
+name: bad-curl
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -sSL https://example.test/install.sh | sudo bash
+"""
+
+WGET_PIPE_SHELL_WORKFLOW = """\
+name: bad-wget
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          wget https://example.test/x.sh -O - | sh
+"""
+
+CURL_DOWNLOAD_THEN_VERIFY_WORKFLOW = """\
+name: ok-curl
+on: push
+jobs:
+  ok:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -sSL https://example.test/install.sh -o install.sh
+          sha256sum -c install.sh.sha256
+          bash install.sh
+"""
+
+GIT_CONFIG_GLOBAL_WORKFLOW = """\
+name: bad-gitconfig
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          git config --global url."https://token@github.com/".insteadOf "https://github.com/"
+"""
+
+GIT_CONFIG_LOCAL_WORKFLOW = """\
+name: ok-gitconfig
+on: push
+jobs:
+  ok:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          git config --local user.name "ci-bot"
+"""
+
+GH_DEP_REF_WORKFLOW = """\
+name: bad-dep
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          npm install github:expressjs/express#abc1234
+"""
+
+GH_DEP_REF_GITPLUS_WORKFLOW = """\
+name: bad-dep-git
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          pnpm add git+https://github.com/lodash/lodash.git
+"""
+
+REGISTRY_INSTALL_WORKFLOW = """\
+name: ok-dep
+on: push
+jobs:
+  ok:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          npm install express@4.18.2
+"""
+
+JQ_ARG_ESCAPE_WORKFLOW = """\
+name: bad-jq-escape
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '{}' | jq --arg body "line1\\nline2" '.b = $body'
+"""
+
+DOCKER_LATEST_USES_WORKFLOW = """\
+name: bad-docker-uses
+on: push
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker://alpine:latest
+"""
+
 
 class ClassifierTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -142,8 +322,89 @@ class ClassifierTest(unittest.TestCase):
         self.assertIn("unpinned-uses-tag", rules)
 
     def test_container_latest_fires(self) -> None:
+        """Container image on the mutable :latest tag fires unpinned-docker-image."""
         rules = self._find_rules(CONTAINER_LATEST_WORKFLOW)
-        self.assertIn("hardcoded-container-latest", rules)
+        self.assertIn("unpinned-docker-image", rules)
+
+    def test_docker_latest_uses_fires(self) -> None:
+        """A docker:// uses pinned to :latest also fires unpinned-docker-image."""
+        rules = self._find_rules(DOCKER_LATEST_USES_WORKFLOW)
+        self.assertIn("unpinned-docker-image", rules)
+
+    def test_hardcoded_aws_key_fires(self) -> None:
+        """An inline AKIA AWS access key fires hardcoded-secrets."""
+        rules = self._find_rules(HARDCODED_AWS_KEY_WORKFLOW)
+        self.assertIn("hardcoded-secrets", rules)
+
+    def test_hardcoded_gh_token_fires(self) -> None:
+        """An inline ghp_ GitHub token fires hardcoded-secrets."""
+        rules = self._find_rules(HARDCODED_GH_TOKEN_WORKFLOW)
+        self.assertIn("hardcoded-secrets", rules)
+
+    def test_hardcoded_apikey_assignment_fires(self) -> None:
+        """A quoted api_key = "<30+ chars>" assignment fires hardcoded-secrets."""
+        rules = self._find_rules(HARDCODED_APIKEY_WORKFLOW)
+        self.assertIn("hardcoded-secrets", rules)
+
+    def test_secret_via_secrets_context_does_not_fire(self) -> None:
+        """A secret routed through ${{ secrets.* }} must NOT fire hardcoded-secrets."""
+        rules = self._find_rules(SECRET_VIA_SECRETS_CTX_WORKFLOW)
+        self.assertNotIn("hardcoded-secrets", rules)
+
+    def test_ide_config_write_fires(self) -> None:
+        """Redirecting output into .claude/ fires ide-config-injection."""
+        rules = self._find_rules(IDE_CONFIG_WRITE_WORKFLOW)
+        self.assertIn("ide-config-injection", rules)
+
+    def test_ide_config_vscode_copy_fires(self) -> None:
+        """Copying a file into .vscode/ fires ide-config-injection."""
+        rules = self._find_rules(IDE_CONFIG_VSCODE_WORKFLOW)
+        self.assertIn("ide-config-injection", rules)
+
+    def test_curl_pipe_shell_fires(self) -> None:
+        """curl ... | sudo bash fires curl-pipe-shell."""
+        rules = self._find_rules(CURL_PIPE_SHELL_WORKFLOW)
+        self.assertIn("curl-pipe-shell", rules)
+
+    def test_wget_pipe_shell_fires(self) -> None:
+        """wget ... -O - | sh fires curl-pipe-shell."""
+        rules = self._find_rules(WGET_PIPE_SHELL_WORKFLOW)
+        self.assertIn("curl-pipe-shell", rules)
+
+    def test_curl_download_then_verify_does_not_fire(self) -> None:
+        """Download-to-file, checksum, then run must NOT fire curl-pipe-shell."""
+        rules = self._find_rules(CURL_DOWNLOAD_THEN_VERIFY_WORKFLOW)
+        self.assertNotIn("curl-pipe-shell", rules)
+
+    def test_git_config_global_fires(self) -> None:
+        """git config --global ... insteadOf fires git-config-global."""
+        rules = self._find_rules(GIT_CONFIG_GLOBAL_WORKFLOW)
+        self.assertIn("git-config-global", rules)
+
+    def test_git_config_local_does_not_fire(self) -> None:
+        """git config --local must NOT fire git-config-global."""
+        rules = self._find_rules(GIT_CONFIG_LOCAL_WORKFLOW)
+        self.assertNotIn("git-config-global", rules)
+
+    def test_github_dependency_ref_fires(self) -> None:
+        """npm install github:owner/repo#ref fires github-dependency-refs."""
+        rules = self._find_rules(GH_DEP_REF_WORKFLOW)
+        self.assertIn("github-dependency-refs", rules)
+
+    def test_github_dependency_gitplus_ref_fires(self) -> None:
+        """pnpm add git+https://github.com/... fires github-dependency-refs."""
+        rules = self._find_rules(GH_DEP_REF_GITPLUS_WORKFLOW)
+        self.assertIn("github-dependency-refs", rules)
+
+    def test_registry_install_does_not_fire(self) -> None:
+        """npm install from the registry must NOT fire github-dependency-refs."""
+        rules = self._find_rules(REGISTRY_INSTALL_WORKFLOW)
+        self.assertNotIn("github-dependency-refs", rules)
+
+    def test_jq_arg_escape_sequences_fires(self) -> None:
+        """jq --arg with a literal \\n in the value fires jq-arg-escape-sequences."""
+        rules = self._find_rules(JQ_ARG_ESCAPE_WORKFLOW)
+        self.assertIn("jq-arg-escape-sequences", rules)
 
     def test_pr_target_fires(self) -> None:
         rules = self._find_rules(PR_TARGET_WORKFLOW)
