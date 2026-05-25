@@ -59,6 +59,7 @@ def main() -> int:
     from lib.sentinel.rules_absence import RULES as _ABSENCE_RULES  # noqa: E402
     from lib.sentinel.rules_context import RULES as _CONTEXT_RULES  # noqa: E402
     from lib.sentinel.rules_injection import RULES as _INJECTION_RULES  # noqa: E402
+    from lib.sentinel.rules_repo import REPO_RULES  # noqa: E402
     from lib.zizmor_classifier import Classifier  # noqa: E402
 
     structural_rules = [*_ABSENCE_RULES, *_CONTEXT_RULES, *_INJECTION_RULES]
@@ -76,8 +77,10 @@ def main() -> int:
 
     classifier = Classifier()
     finding_count = 0
+    all_texts: list[str] = []
     for path in files:
         text = path.read_text(encoding="utf-8")
+        all_texts.append(text)
         rel = path.relative_to(project_root)
 
         # Tier 1 — regex RegexSet.
@@ -100,10 +103,19 @@ def main() -> int:
                 emit(rel, finding)
                 finding_count += 1
 
+    # Tier 3 — repo-level rules run once over every workflow's text
+    # (e.g. missing-zizmor: no workflow runs the analyzer anywhere).
+    workflows_rel = workflows_dir.relative_to(project_root)
+    for repo_rule in REPO_RULES:
+        for finding in repo_rule(all_texts):
+            emit(workflows_rel, finding)
+            finding_count += 1
+
     # Diagnostic to stderr — surfaces whether the RE2 fast path was active.
     print(
         f"[doctor-classify] {finding_count} finding(s) across {len(files)} workflow(s); "
-        f"re2_active={classifier.re2_active}; structural_rules={len(structural_rules)}",
+        f"re2_active={classifier.re2_active}; "
+        f"structural_rules={len(structural_rules)}; repo_rules={len(REPO_RULES)}",
         file=sys.stderr,
     )
     return 1 if finding_count > 0 else 0

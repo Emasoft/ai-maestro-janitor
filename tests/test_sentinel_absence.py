@@ -260,6 +260,40 @@ jobs:
         """Using npm ci instead of npm install does not trip the rule."""
         self.assertNotIn("missing-frozen-lockfile", fired(HARDENED))
 
+    def test_no_fp_on_webpack_bundle_flag(self):
+        """`webpack --bundle` / `bundle.js` are not Ruby bundler — must not fire."""
+        wf = """\
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - run: webpack --bundle && node bundle.js
+"""
+        self.assertNotIn("missing-frozen-lockfile", fired(wf))
+
+    def test_fires_on_real_bundle_install(self):
+        """A real `bundle install` (no --frozen) still trips the rule."""
+        wf = """\
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - run: bundle install
+"""
+        self.assertIn("missing-frozen-lockfile", fired(wf))
+
 
 class TestNoFalsePositives(unittest.TestCase):
     def test_hardened_workflow_fires_nothing(self):

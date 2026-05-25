@@ -31,6 +31,7 @@ Fix recipes for the Sentinel-derived rules in the janitor `janitor-github-workfl
 - [github-script-injection](#github-script-injection)
 - [workflow-dispatch-injection](#workflow-dispatch-injection)
 - [dangerous-triggers](#dangerous-triggers)
+- [missing-zizmor](#missing-zizmor)
 
 ## hardcoded-secrets
 
@@ -644,3 +645,27 @@ jobs:
 ```
 
 Severity: CRITICAL — full base-repo secret exposure to untrusted fork contributors.
+
+## missing-zizmor
+
+This is a repo-level finding: no workflow in `.github/workflows/` runs the [zizmor](https://zizmor.sh) static analyzer. Without a persistent CI job, workflow-security regressions are only caught on a manual audit — add a job that runs zizmor on every pull request so new issues fail the check automatically.
+
+```yaml
+# Add a dedicated workflow: .github/workflows/zizmor.yml
+name: zizmor
+on:
+  pull_request:
+    paths: ['.github/workflows/**']
+permissions:
+  contents: read
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<sha>  # pin to a commit SHA
+        with:
+          persist-credentials: false
+      - run: uvx zizmor --persona=pedantic .
+```
+
+Severity: MINOR — a process/automation gap rather than a vulnerability in any single workflow.

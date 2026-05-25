@@ -146,6 +146,30 @@ user text) to keep per-fire overhead low.
   12 API calls/hour. Findings land in
   `$MAIN_ROOT/reports/janitor-supply-chain-watcher/<TS>-findings.md`
   with the exact upgrade command per package.
+- `/janitor-github-workflow-doctor` — audits `.github/workflows/*.yml` for
+  security issues and emits surgical fix recipes. Runs zizmor (when present)
+  then a native Python second pass (`scripts/doctor_classify.py`) covering
+  the full Sentinel rule set — 32 GitHub-Actions checks across three tiers:
+  a google-re2 RegexSet for single-line patterns (hardcoded secrets,
+  IDE-config injection, curl-pipe-shell, unpinned images, …), a structural
+  YAML walker for context/absence rules (shell- and github-script injection
+  via a precise attacker-context allowlist, `pull_request_target` + fork
+  checkout, missing permissions/timeouts, excessive permissions,
+  build-publish-same-job, …), and a repo-level pass (missing-zizmor).
+  Recipes in `references/sentinel-rules-recipes.md`.
+- `/janitor-github-workflow-create` — scaffolds hardened
+  `.github/workflows/` from project shape (Python/Node/Rust/Go/plugin) with
+  least-privilege `permissions:`, SHA-pinned actions,
+  `persist-credentials: false`, `timeout-minutes`, and a zizmor job baked in.
+- `/janitor-fork-pr-cache-audit` — detects the TanStack-class fork-PR
+  cache-poisoning and `pull_request_target` checkout patterns (D1–D4) across
+  every workflow; report-only, with cache-fencing recipes.
+- `/janitor-dependabot-doctor` — scaffolds or audits `dependabot.yml` /
+  `renovate.json` so the `github-actions` (and other) ecosystems get
+  automated dependency-update PRs.
+- `/janitor-credential-window-audit` — scans the repo, shell-env variable
+  *names*, and CI config for the window during which credentials are live
+  and reachable; reports findings without ever echoing secret values.
 
 ### The `.trashcan/` directory
 

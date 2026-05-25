@@ -99,16 +99,11 @@ class Workflow:
         self.filename = filename
         self.raw = content
         self.raw_lines = content.splitlines()
-        self._parse_error: Optional[str] = None
         try:
             loaded = yaml.safe_load(content)
             self.data = loaded if isinstance(loaded, dict) else {}
-        except yaml.YAMLError as exc:  # malformed YAML → empty model, not a crash
+        except yaml.YAMLError:  # malformed YAML → empty model, not a crash
             self.data = {}
-            self._parse_error = str(exc)
-
-    def parse_error(self) -> bool:
-        return self._parse_error is not None
 
     def triggers(self):
         # PyYAML parses the bare key `on` as the boolean True (YAML 1.1), so
@@ -137,15 +132,6 @@ class Workflow:
             j = self.jobs().get(job) if isinstance(job, str) else job
             return j.get("permissions") if isinstance(j, dict) else None
         return None
-
-    def env(self, scope: str = "workflow", step=None) -> dict:
-        if scope == "workflow":
-            e = self.data.get("env")
-            return e if isinstance(e, dict) else {}
-        if scope == "step":
-            e = step.get("env") if isinstance(step, dict) else None
-            return e if isinstance(e, dict) else {}
-        return {}
 
     def line_of(self, pattern) -> Optional[int]:
         rx = _compile(pattern)
@@ -177,23 +163,6 @@ class Workflow:
                 line = all_lines[idx] if idx < len(all_lines) else (all_lines[-1] if all_lines else 0)
                 seen[uses] = idx + 1
                 results.append({"uses": uses, "step": step, "line": line})
-        return results
-
-    def run_blocks(self) -> list:
-        """List of {run, step, env, line} for every step with a `run:` key."""
-        results = []
-        all_run_lines = self.lines_of(r"^\s+-?\s*run:\s*[|>]?\s*")
-        run_idx = 0
-        for job_hash in self.jobs().values():
-            for step in self.steps(job_hash):
-                if not isinstance(step, dict) or "run" not in step:
-                    continue
-                line = all_run_lines[run_idx] if run_idx < len(all_run_lines) else (all_run_lines[-1] if all_run_lines else 0)
-                run_idx += 1
-                results.append({
-                    "run": step["run"], "step": step,
-                    "env": step.get("env") or {}, "line": line,
-                })
         return results
 
 

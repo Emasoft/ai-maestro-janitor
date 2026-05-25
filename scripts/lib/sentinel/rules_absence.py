@@ -371,8 +371,11 @@ class MissingFrozenLockfile(Rule):
     _PIP_INSTALL = re.compile(r"\b(?:pip3?|uv\s+pip)\s+install\b")
     _PIP_SAFE = re.compile(r"-r\b|--requirement\b|-c\b|--constraint\b|--require-hashes")
     _PIP_LOCAL = re.compile(r"\binstall\s+(?:-e\s+)?\.(?:\s|$|\[)")
-    # Ruby
-    _BUNDLE_INSTALL = re.compile(r"\bbundle\b(?:\s+install\b)?")
+    # Ruby. Tightened vs the Sentinel source: require `bundle` to be a real
+    # command token — a negative lookbehind drops `--bundle` / `webpack-bundle`
+    # and the trailing `(?!\.)` drops `bundle.js`, both of which the bare
+    # `\bbundle\b` form would have flagged as false positives.
+    _BUNDLE_INSTALL = re.compile(r"(?<![\w.-])bundle\b(?!\.)(?:\s+install\b)?")
     _BUNDLE_SAFE = re.compile(r"--frozen|--deployment|BUNDLE_FROZEN\s*=\s*(?:true|1)")
     _BUNDLE_OTHER = re.compile(
         r"\bbundle\s+(?:exec|add|update|show|list|info|outdated|check|config|"
