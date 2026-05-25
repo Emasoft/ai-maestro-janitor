@@ -345,6 +345,34 @@
       "type": "number",
       "default": 3600,
       "sensitive": false
+    },
+    "workflow_security_enabled": {
+      "title": "Workflow Security Scan Enabled",
+      "description": "When true (default), the workflow-security detector runs the janitor's native Sentinel scanner (regex + structural + repo tiers) over .github/workflows/ on every heartbeat and surfaces NEW CRITICAL/HIGH findings as a single drift line pointing to /janitor-github-workflow-doctor. READ-ONLY — it never edits a workflow or calls the GitHub API. Set false to disable heartbeat workflow scanning (the on-demand /janitor-github-workflow-doctor skill still works).",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "workflow_security_interval": {
+      "title": "Workflow Security Scan Cadence (seconds)",
+      "description": "Minimum seconds between workflow-security scans. Default: 300 (5 min — runs every heartbeat). The detector content-hashes all workflow files and returns immediately when nothing changed, so an unchanged-workflows fire costs only a few small file reads; a workflow edit forces a fresh scan and re-surfaces the current CRITICAL/HIGH set within one cadence, so a newly-introduced injection or secret-leak cannot sit unnoticed.",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
+    "branch_protection_enabled": {
+      "title": "Branch Protection Check Enabled",
+      "description": "When true (default), the branch-protection detector asks the GitHub API (read-only) whether the default branch is covered by classic branch protection OR an active branch ruleset (inherited org/enterprise rulesets count), and surfaces an URGENT drift line only when it can DEFINITIVELY confirm neither is present. It NEVER configures protection itself. Skips silently when gh is absent/unauthenticated, the viewer is not a repo admin, the repo has no GitHub remote, or any probe is indeterminate. Set false to disable.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "branch_protection_interval": {
+      "title": "Branch Protection Check Cadence (seconds)",
+      "description": "Minimum seconds between branch-protection checks. Default: 21600 (6 h). Branch rulesets change rarely and each pass makes a few gh API calls, so a slow cadence is correct; the detector nags once until fixed (seen-file dedupe) and re-arms automatically (emit_forget) if protection is later removed so a regression re-alerts.",
+      "type": "number",
+      "default": 21600,
+      "sensitive": false
     }
   },
   "cpv": {

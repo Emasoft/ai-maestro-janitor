@@ -92,6 +92,17 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("subagent-scope-drift",    3600,  "CLAUDE_PLUGIN_OPTION_SUBAGENT_SCOPE_DRIFT_INTERVAL"),
     ("claude-md-scope-drift",   3600,  "CLAUDE_PLUGIN_OPTION_CLAUDE_MD_SCOPE_DRIFT_INTERVAL"),
     ("cross-scope-reference-drift", 3600, "CLAUDE_PLUGIN_OPTION_CROSS_SCOPE_REFERENCE_DRIFT_INTERVAL"),
+    # v0.5.1 additions — security monitoring (CI/CD + repo hardening). Both
+    # are READ-ONLY: they surface findings, they never mutate the repo.
+    #   workflow-security runs every heartbeat — the detector content-hashes
+    #   the workflow files and short-circuits when nothing changed, so an
+    #   unchanged-workflows fire is ~free, while a newly-introduced injection
+    #   or secret-leak surfaces within one cadence.
+    ("workflow-security",   300,   "CLAUDE_PLUGIN_OPTION_WORKFLOW_SECURITY_INTERVAL"),
+    #   branch-protection polls the GitHub API (gh), so it runs on a slow 6h
+    #   cadence — branch rulesets change rarely; its seen-file nags once until
+    #   fixed and re-arms (emit_forget) if protection is later removed.
+    ("branch-protection",   21600, "CLAUDE_PLUGIN_OPTION_BRANCH_PROTECTION_INTERVAL"),
 ]
 
 
