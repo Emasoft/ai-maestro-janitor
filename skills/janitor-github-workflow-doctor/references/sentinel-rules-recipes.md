@@ -1,6 +1,6 @@
 # Sentinel-derived rule fix recipes
 
-Fix recipes for the Sentinel-derived rules in the janitor `janitor-github-workflow-doctor` auditor. These ~26 rules were ported from the "Sentinel" GitHub-Actions security scanner and cover supply-chain, injection, permission, and secret-handling weaknesses that the upstream zizmor catalogue does not match. Each section below names a rule id, explains in 1-2 sentences why the pattern is dangerous, shows a **Before** (vulnerable) and **After** (fixed) YAML snippet, and ends with a one-line severity note. Findings whose rule id is not in this reference are surfaced verbatim with `[NEEDS-HUMAN-REVIEW]` — the doctor never silences a matcher with a suppression comment.
+Fix recipes for the Sentinel-derived rules in the janitor `janitor-github-workflow-doctor` auditor. These 28 rules were ported from the "Sentinel" GitHub-Actions security scanner and cover supply-chain, injection, permission, and secret-handling weaknesses that the upstream zizmor catalogue does not match. Each section below names a rule id, explains in 1-2 sentences why the pattern is dangerous, shows a **Before** (vulnerable) and **After** (fixed) YAML snippet, and ends with a one-line severity note. Findings whose rule id is not in this reference are surfaced verbatim with `[NEEDS-HUMAN-REVIEW]` — the doctor never silences a matcher with a suppression comment.
 
 ## Table of contents
 
@@ -67,7 +67,7 @@ A workflow step that writes to IDE/agent config directories (`.claude/`, `.vscod
 # review changes to them with extra scrutiny, and gitignore generated configs.
 ```
 
-Severity: HIGH — escapes the CI sandbox to achieve code execution on developer machines.
+Severity: CRITICAL — escapes the CI sandbox to achieve code execution on developer machines.
 
 ## curl-pipe-shell
 
@@ -102,7 +102,7 @@ Severity: HIGH — arbitrary remote code execution in a context that holds secre
 - run: git config --local url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 ```
 
-Severity: MEDIUM — credential over-exposure to other actions, scripts, and submodules in the same job.
+Severity: MINOR — credential over-exposure to other actions, scripts, and submodules in the same job.
 
 ## github-dependency-refs
 
@@ -118,7 +118,7 @@ Installing packages from GitHub refs (`github:owner/repo#ref`, `git+https://...`
 - run: npm install @scope/package@1.2.3
 ```
 
-Severity: HIGH — registry integrity guarantees are silently lost; refs can be force-pushed or transferred.
+Severity: MAJOR — registry integrity guarantees are silently lost; refs can be force-pushed or transferred.
 
 ## jq-arg-escape-sequences
 
@@ -140,7 +140,7 @@ run: |
   jq -nc --arg msg "$MSG" '{text: $msg}'
 ```
 
-Severity: LOW — no failure or security breach, but silent data corruption that is hard to spot in logs.
+Severity: MAJOR — no failure or security breach, but silent data corruption that is hard to spot in logs.
 
 ## unpinned-docker-image
 
@@ -158,7 +158,7 @@ container:
   image: node@sha256:abc123...
 ```
 
-Severity: MEDIUM — non-reproducible builds and exposure to registry/maintainer compromise.
+Severity: MAJOR — non-reproducible builds and exposure to registry/maintainer compromise.
 
 ## missing-permissions
 
@@ -188,7 +188,7 @@ jobs:
       - run: npm test
 ```
 
-Severity: MEDIUM — every job runs with a broadly-privileged token, widening the blast radius of any compromise.
+Severity: MAJOR — every job runs with a broadly-privileged token, widening the blast radius of any compromise.
 
 ## missing-timeouts
 
@@ -213,7 +213,7 @@ jobs:
       - run: npm test
 ```
 
-Severity: LOW — resource waste and a larger abuse window on a compromised runner.
+Severity: MINOR — resource waste and a larger abuse window on a compromised runner.
 
 ## excessive-permissions
 
@@ -241,7 +241,7 @@ jobs:
       - run: npm test
 ```
 
-Severity: MEDIUM — an over-privileged token lets a compromised step push code or alter releases.
+Severity: MINOR — an over-privileged token lets a compromised step push code or alter releases.
 
 ## missing-persist-credentials
 
@@ -259,7 +259,7 @@ By default `actions/checkout` stores the GitHub token in `.git/config`, where ev
     persist-credentials: false
 ```
 
-Severity: MEDIUM — every post-checkout step gains implicit repository write credentials.
+Severity: HIGH — every post-checkout step gains implicit repository write credentials.
 
 ## missing-env-protection
 
@@ -284,7 +284,7 @@ jobs:
       - run: npm publish
 ```
 
-Severity: HIGH — environment protection is the last gate before a malicious artifact reaches users.
+Severity: MAJOR — environment protection is the last gate before a malicious artifact reaches users.
 
 ## overly-broad-triggers
 
@@ -309,7 +309,7 @@ on:
     branches: [main]
 ```
 
-Severity: LOW — wasted resources and a broader attack surface across untrusted branches.
+Severity: MINOR — wasted resources and a broader attack surface across untrusted branches.
 
 ## missing-frozen-lockfile
 
@@ -327,7 +327,7 @@ Running a package manager without lockfile enforcement (`npm install` instead of
 - run: pnpm install --frozen-lockfile
 ```
 
-Severity: MEDIUM — a yanked or compromised version can silently enter the build.
+Severity: MAJOR — a yanked or compromised version can silently enter the build.
 
 ## static-aws-credentials
 
@@ -354,7 +354,7 @@ steps:
       aws-region: us-east-1
 ```
 
-Severity: HIGH — static keys are the leading cause of AWS account compromise.
+Severity: MAJOR — static keys are the leading cause of AWS account compromise.
 
 ## unscoped-app-token
 
@@ -378,7 +378,7 @@ Severity: HIGH — static keys are the leading cause of AWS account compromise.
     permission-pull-requests: read
 ```
 
-Severity: MEDIUM — an over-broad token magnifies the impact of any leak or compromised step.
+Severity: MAJOR — an over-broad token magnifies the impact of any leak or compromised step.
 
 ## docker-build-arg-secrets
 
@@ -400,7 +400,7 @@ Docker `--build-arg` values are baked into image-layer metadata and recoverable 
       npm_token=${{ secrets.NPM_TOKEN }}
 ```
 
-Severity: HIGH — the secret is extractable in plaintext by anyone who pulls the image.
+Severity: MAJOR — the secret is extractable in plaintext by anyone who pulls the image.
 
 ## unpinned-artifact
 
@@ -418,7 +418,7 @@ Severity: HIGH — the secret is extractable in plaintext by anyone who pulls th
     name: build-output
 ```
 
-Severity: MEDIUM — an opening for code injection from fork-originated artifacts in privileged contexts.
+Severity: MINOR — an opening for code injection from fork-originated artifacts in privileged contexts.
 
 ## self-hosted-runner-fork
 
@@ -516,7 +516,7 @@ Downloading artifacts with `allow_forks: true` in a `workflow_run` job processes
     # Prefer a label-gated workflow over processing fork artifacts at all.
 ```
 
-Severity: HIGH — untrusted input processed with base-branch secrets.
+Severity: MAJOR — untrusted input processed with base-branch secrets.
 
 ## dangerous-lifecycle-scripts
 
@@ -534,7 +534,7 @@ Installing without `--ignore-scripts` lets every dependency's `preinstall`/`post
     npm rebuild sharp esbuild  # only trusted native deps
 ```
 
-Severity: HIGH — a single compromised dependency executes code in CI with access to secrets.
+Severity: MAJOR — a single compromised dependency executes code in CI with access to secrets.
 
 ## shell-injection-expr
 
