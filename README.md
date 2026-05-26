@@ -312,14 +312,23 @@ To purge a batch permanently:
 rm -rf .trashcan/<timestamp>/ .trashcan/<timestamp>.txt
 ```
 
-### Auto-renewal of the 7-day cron
+### Auto-renewal of the 7-day cron (silent since v0.5.2)
 
 Durable recurring `CronCreate` jobs auto-expire after 7 days. dispatch.py
 tracks the arm time in `.janitor/state/heartbeat-armed-at.ts`, and once the
-cron is 6+ days old emits a single `[janitor-renew]` line per day. Claude
-reads the line, runs `/janitor-arm` (which is idempotent), and the cron is
-refreshed back to a fresh 7-day window before the old one dies. The nudge
-threshold is tunable via `heartbeat_renewal_threshold_days`.
+cron is 6+ days old it emits a bare `[janitor-renew]` marker on stdout.
+The cron prompt installed by `/janitor-arm` (since v0.5.2) teaches Claude
+to **silently** run `/janitor-arm` on that marker WITHOUT echoing it — so
+the renewal happens behind the scenes; you never see a "your cron is about
+to expire" reminder. `/janitor-arm` is idempotent (it replaces the cron
+with a fresh 7-day one and clears the renew-seen dedupe).
+
+**Upgrade path (one-time):** existing crons armed with the pre-v0.5.2
+prompt do NOT carry the silent-execute clause. After installing v0.5.2
+you'll see the bare `[janitor-renew]` line ONCE per session — Claude still
+acts on it (the token is documented), the cron is replaced with a fresh
+new-prompt one, and from then on future renewals are silent forever. The
+nudge threshold remains tunable via `heartbeat_renewal_threshold_days`.
 
 ## Install
 
@@ -430,7 +439,7 @@ via the `/plugin configure` interface or edit the project's
 | `dirty_tree_threshold` | 1800 | Seconds the tree can stay dirty before nudging to commit. |
 | `subagent_report_interval` | 3600 | Min seconds between subagent-report scans. |
 | `subagent_report_lookback` | 86400 | Age cutoff for reports considered fresh and needing action. |
-| `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.py emits `[janitor-renew]` so Claude re-arms before the 7-day expiry. |
+| `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.py emits a bare `[janitor-renew]` marker. Since v0.5.2 the cron prompt installed by `/janitor-arm` teaches Claude to silently run `/janitor-arm` on that marker — renewal is automatic + invisible. Existing crons armed with the pre-v0.5.2 prompt will surface the marker once before the first silent-prompt re-arm. |
 | `version_check_interval` | 300 | Min seconds between checks against `api.github.com` for a newer plugin release. 5 min by default — runs every heartbeat. ~12 cheap GitHub requests/hour, well under both API limits (60/h unauth, 5000/h `gh`-auth). |
 | `auto_update_on_new_release` | **false** (since v0.5.2) | When true, the version-update detector runs `claude plugin marketplace update` + `claude plugin update` itself when a newer release is found, then nudges to `/reload-plugins` + `/janitor-arm`. When false (DEFAULT since v0.5.2 — prevents the per-session pile-up in [issue #7](https://github.com/Emasoft/ai-maestro-janitor/issues/7) until version-update's auto-update branch moves to the global daemon), only the manual-update nudge is emitted. |
 | `daemon_enabled` | true | When true, per-session heartbeats lazy-spawn the global janitor daemon (`scripts/daemon.py`) on `~/.claude/janitor-global-state/`, which owns every machine-global auto-update task (marketplace-refresh, user-scope plugin updates). Singleton via exclusive flock — N sessions = ONE daemon. Manual kill switch: `touch ~/.claude/janitor-global-state/kill-switch.flag` (running daemon exits on next loop tick). |

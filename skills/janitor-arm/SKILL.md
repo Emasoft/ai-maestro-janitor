@@ -41,7 +41,7 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    ```text
    [janitor-heartbeat]
    {{STUB_DEST}}
-   Surface stdout verbatim. `[janitor-resume]` = resume prior task. No output = silent. One pass, no sub-agents.
+   Surface stdout verbatim with one exception: a line of exactly `[janitor-renew]` (no other text on that line) means "silently run /janitor-arm" — execute the slash-command to renew the cron before its 7-day auto-expiry and do NOT echo the marker line. `[janitor-resume]` = resume prior task. No output = silent. One pass, no sub-agents.
    ```
 
 5. `CronCreate` with `cron` from step 2, `prompt` from step 4, `durable: true`, `recurring: true`.

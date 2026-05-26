@@ -232,14 +232,23 @@ def _phase_rate_limit_recovery() -> bool:
 
 
 def _phase_heartbeat_renew() -> None:
-    """Emit a [janitor-renew] line when the cron is approaching 7-day expiry.
+    """Emit a bare `[janitor-renew]` marker when the cron approaches 7-day expiry.
 
     Durable recurring CronCreate jobs auto-expire after 7 days. dispatch
-    can't call CronCreate itself (that's session-tool territory), so we
-    emit a renewal nudge at day 6, the model notices, and re-runs
-    /janitor-arm which idempotently replaces the cron with a fresh 7-day
-    one. Dedupe by day bucket so repeated heartbeat fires don't spam the
-    line.
+    can't call CronCreate itself (that's session-tool territory), so the
+    renewal goes through a protocol token: dispatch prints a single line of
+    exactly `[janitor-renew]`, the cron prompt teaches Claude to execute
+    /janitor-arm SILENTLY when it sees that token (do NOT echo the marker),
+    and /janitor-arm idempotently replaces the cron with a fresh 7-day one.
+    Result: zero user-visible noise; renewal happens behind the scenes.
+
+    Backward compat: existing crons armed with the pre-v0.5.2 prompt do NOT
+    have the silent-execute clause — they will surface the bare marker once,
+    Claude still acts on it (the token is documented), the user re-arms once,
+    and from then on the new prompt makes future renewals silent. So the
+    upgrade path is "one visible line per session, ever."
+
+    Dedupe by day bucket so repeated heartbeat fires don't spam the marker.
     """
     threshold_days = state.coerce_int(
         os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_RENEWAL_THRESHOLD_DAYS"), 6
@@ -253,14 +262,11 @@ def _phase_heartbeat_renew() -> None:
     age = now - armed_at
     if armed_at <= 0 or age < threshold_sec:
         return
-    # Single calculation — `age_days` for display, same value as the
-    # dedup bucket so we emit at most once per day past the threshold.
-    age_days = age // 86400
+    age_days = age // 86400  # dedup key only — not user-visible in v0.5.2+
     line = dedupe.emit_once(
         state.state_dir() / "heartbeat-renew-seen.txt",
         f"renew@day{age_days}",
-        f"[janitor-renew] heartbeat cron is {age_days} day(s) old, approaching the 7-day auto-expiry. "
-        f"Run /janitor-arm to renew — it is idempotent (deletes the old cron and creates a fresh one).",
+        "[janitor-renew]",  # bare marker — the cron prompt's silent-execute clause handles it
     )
     if line is not None:
         print(line)
