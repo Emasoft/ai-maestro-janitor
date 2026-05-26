@@ -408,6 +408,20 @@
       "type": "boolean",
       "default": false,
       "sensitive": false
+    },
+    "pkg_manager_policy_enabled": {
+      "title": "Package-Manager Policy Detector Enabled",
+      "description": "When true (default), the `package-manager-policy` detector scans the project's package-manager config (.npmrc, package.json#pnpm, pnpm-workspace.yaml, .yarnrc.yml, bunfig.toml) for missing or weakened supply-chain knobs and surfaces a ONE-line drift summary listing every gap. Detection complement to the `pre-tool-pkg-guard` PreToolUse hook (the hook prevents weakening live; the detector reports pre-existing gaps). Also flags when neither `sfw` nor `safe-chain` is on PATH (no install-time malware firewall). Set false to disable scanning entirely.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "pkg_manager_policy_interval": {
+      "title": "Package-Manager Policy Detector Cadence (seconds)",
+      "description": "Minimum seconds between `package-manager-policy` scans. Default: 21600 (6 h). Package-manager config rarely changes, and the detector content-hashes the files anyway so an unchanged-config fire costs only a few file stats; cadence mostly bounds the worst case when the firewall presence on PATH changes (install/uninstall of sfw or safe-chain).",
+      "type": "number",
+      "default": 21600,
+      "sensitive": false
     }
   },
   "cpv": {

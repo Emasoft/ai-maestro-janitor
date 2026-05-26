@@ -104,6 +104,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     #   cadence — branch rulesets change rarely; its seen-file nags once until
     #   fixed and re-arms (emit_forget) if protection is later removed.
     ("branch-protection",   21600, "CLAUDE_PLUGIN_OPTION_BRANCH_PROTECTION_INTERVAL"),
+    # package-manager-policy is the DETECTION complement to the
+    # pre-tool-pkg-guard PreToolUse hook: the hook PREVENTS weakening at
+    # call-time, this detector REPORTS missing hardening at fire-time so
+    # a project can be hardened before the next supply-chain attack lands.
+    # Content-hash short-circuit keeps no-op fires near-free.
+    ("package-manager-policy", 21600, "CLAUDE_PLUGIN_OPTION_PKG_MANAGER_POLICY_INTERVAL"),
 ]
 
 

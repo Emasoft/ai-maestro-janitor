@@ -83,6 +83,7 @@ window clears.
 | `cross-scope-reference-drift` | 1 h | Enforces SCOPE PARITY between a source (agent/skill/command/CLAUDE.md) and the targets it references. Reference points scanned: BODY → `/<name>` slash-commands and `Skill('<name>')` invocations. FRONTMATTER → `agent: <name>` (skills/commands with `context: fork`), `Skill(<name>...)` patterns inside `allowed-tools:`, and `skills: [<a>, <b>]` lists in subagent frontmatter (preloaded skills). Two drift classes: **(a) silent-clone-break** — tracked source → gitignored or ambiguous target (source ships, target doesn't, reference dangles). **(b) scope-mismatch** — gitignored source → tracked target (local source has a hidden dependency on team-shared infrastructure). Each drift line includes both possible fix paths. References that don't resolve to a project-local file (built-ins, plugin commands, URLs) are silently skipped — no false positives. |
 | `workflow-security` | 5 min | URGENT: runs the janitor's native Sentinel scanner (regex + structural + repo tiers — the same engine `/janitor-github-workflow-doctor` drives) over `.github/workflows/` and surfaces NEW CRITICAL/HIGH findings (template injection, secret leaks, unpinned third-party actions, dangerous `pull_request_target` checkout, …) as a single drift line pointing at the doctor skill for the full report + per-finding fixes. MAJOR/MINOR hardening is left to the on-demand skill so the heartbeat stays signal-dense. Content-hashes every workflow file and short-circuits when nothing changed, so an unchanged-workflows fire is ~free while a freshly-introduced vulnerability surfaces within one cadence (≤5 min) — reverting a fix back to a vulnerable version re-alerts (it is a hash transition). READ-ONLY — never edits a workflow. Disable via `workflow_security_enabled: false`. |
 | `branch-protection` | 6 h | URGENT: asks the GitHub API (READ-ONLY) whether the default branch is covered by classic branch protection OR an active branch ruleset (inherited org/enterprise rulesets count). Surfaces a drift line — with the exact `Settings → Rules → Rulesets` remediation — ONLY when it can DEFINITIVELY confirm neither is present, so an unprotected repo where anyone with write access can force-push, rewrite history, or delete the branch can never go unnoticed. Skips silently when `gh` is absent/unauthenticated, the viewer is not a repo admin (can't fix it anyway), there's no GitHub remote, or any probe is indeterminate (no false alarms). Nags once until fixed and re-arms automatically (`emit_forget`) if protection is later removed. NEVER configures protection itself — it surfaces, you (or an explicitly-authorised guard mode) act. Disable via `branch_protection_enabled: false`. |
+| `package-manager-policy` | 6 h | Detection complement to the `pre-tool-pkg-guard` PreToolUse hook — where the hook PREVENTS weakening at call-time, this detector REPORTS pre-existing gaps so a project can be hardened before the next supply-chain attack lands. Scans `.npmrc`, `package.json#pnpm`, `pnpm-workspace.yaml`, `.yarnrc.yml`, `bunfig.toml` for missing or weakened safety knobs (`minimumReleaseAge` < threshold, `trustPolicy != no-downgrade`, `blockExoticSubdeps != true`, `audit-level` lowered, yarn `enableScripts: true`, bun `[install].verify = false`). Also flags when **neither `sfw` nor `safe-chain` is on PATH** (no install-time malware firewall). Silent on non-node projects. Content-hashed: unchanged config → silent. Disable via `pkg_manager_policy_enabled: false`. |
 
 The heartbeat cron runs every 5 minutes by default (`*/5 * * * *`), so the
 detectors fire at roughly their configured cadence without any additional
@@ -166,6 +167,30 @@ modifies your repos — it only operates on `~/.claude/plugins/`.
   CLAUDE_PLUGIN_OPTION_PKG_MANAGER_HOOK_ALLOW_USER_OVERRIDE=true to confirm
   per call, or raise CLAUDE_PLUGIN_OPTION_PKG_MANAGER_MIN_RELEASE_AGE_MINUTES
   if the threshold is wrong.`
+
+## Supply-chain defense stack
+
+After the 2026-05 `art-template` npm compromise (25k weekly downloads, ~5
+days from malicious publish to detection), defense in depth across four
+distinct layers is the documented best practice. The janitor covers three
+layers natively and cross-links to two external tools for the fourth (the
+malware-DB layer, which cannot be defended without a continuously-curated
+threat feed).
+
+| # | Layer | What it stops | Provided by |
+| --- | --- | --- | --- |
+| 1 | **CI workflow hardening** — static analysis | Template-injection, unpinned actions, missing permissions, `pull_request_target` checkout-from-fork, secret leaks in workflow YAML | `workflow-security` detector (every heartbeat) + `/janitor-github-workflow-doctor` (deep, on-demand) — both shell out to [`zizmor`](https://github.com/zizmorcore/zizmor) and run the janitor's native Sentinel rule set |
+| 2 | **Repo hardening** — branch protection | Force-push to default branch, branch deletion, merge-without-review, history rewrite | `branch-protection` detector (read-only `gh api` check) |
+| 3a | **Config hardening — prevention** | Agent silently lowers `minimumReleaseAge`, disables integrity checks, re-enables postinstall scripts to bypass a stuck install | `pre-tool-pkg-guard` PreToolUse hook (every Bash/Edit/Write) |
+| 3b | **Config hardening — detection** | Project never set the safety knobs in the first place (`minimumReleaseAge` missing / weak `trustPolicy` / `blockExoticSubdeps` off / no install-time firewall on PATH) | `package-manager-policy` detector (every 6 h) |
+| 4 | **Install-time malware DB** | A package published to npm/yarn/pnpm/pip/poetry IS confirmed malicious — blocks the download before it lands in `node_modules/` | **External** — install one of: [Socket Firewall Free (`sfw`)](https://docs.socket.dev/docs/socket-firewall-free) (prefix-based wrapper, no global shim; safest for uv-heavy environments), [Aikido `safe-chain`](https://github.com/AikidoSec/safe-chain) (PATH shim; broadest ecosystem incl. poetry/uv) |
+| 5 | **Action-ref hygiene** | GHA workflows using floating tags (`@v4`) instead of pinned SHAs | Detection: `workflow-security` (Sentinel `github-dependency-refs`). Bulk fix: [`actions-up`](https://github.com/azat-io/actions-up) (`npx actions-up`) |
+| 6 | **Advisory matching** — installed deps vs. known-bad list | A previously-fine version is now disclosed as malicious (Shai-Hulud-class worm); your lockfile pins a vulnerable version | `/janitor-supply-chain-watcher` (queries GHSA + OSV.dev; on-demand) |
+
+The hook (3a) and the detector (3b) share the same `pkg_manager_min_release_age_minutes`
+threshold (default 7200 = ~5 days). Layers 1, 2, 3a, 3b, 6 run unattended at
+their cadences; layer 4 needs ONE explicit install action by you; layer 5 is
+on-demand when the doctor flags unpinned refs.
 
 ## Skills
 
@@ -439,6 +464,8 @@ via the `/plugin configure` interface or edit the project's
 | `branch_protection_interval` | 21600 | Min seconds between `branch-protection` checks. 6 h by default — branch rulesets change rarely and each pass makes a few `gh` API calls. Nags once until fixed and re-arms automatically if protection is later removed. |
 | `pkg_manager_min_release_age_minutes` | 7200 | Minimum age (minutes) the `pre-tool-pkg-guard` hook will accept for `pnpm config set minimumReleaseAge`, `minimum-release-age` in `.npmrc`, and `pnpm.minimumReleaseAge` in `package.json` / `pnpm-workspace.yaml`. 7200 ≈ 5 days, matches safedep's recommendation after the art-template compromise. |
 | `pkg_manager_hook_allow_user_override` | false | When false (default), the `pre-tool-pkg-guard` hook hard-denies every detected bypass. When true, it downgrades to `ask` — per-call user confirmation instead of a block. Every block is logged regardless to `~/.claude/janitor-global-state/pkg-manager-guard.log`. |
+| `pkg_manager_policy_enabled` | true | When true (default), the `package-manager-policy` detector scans the project's package-manager config for missing or weak safety knobs and flags when no install-time malware firewall is on PATH. |
+| `pkg_manager_policy_interval` | 21600 | Min seconds between `package-manager-policy` scans. 6 h by default — package-manager config rarely changes, and the detector content-hashes the files anyway so an unchanged-config fire costs only file stats. |
 
 ## Weekly fallback
 
