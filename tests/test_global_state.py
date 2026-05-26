@@ -171,3 +171,88 @@ def test_daemon_pid_malformed_returns_none(state_dir: Path) -> None:
     gs.init_global_state()
     (state_dir / "daemon.pid").write_text("not-a-pid", encoding="utf-8")
     assert gs.daemon_pid() is None
+
+
+# ---------- reload-flag helpers (Phase 1.6 of dispatch reads/clears these) --
+
+def test_reload_flag_round_trip(state_dir: Path) -> None:
+    """set → present, clear → absent. The flag survives until cleared."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.reload_flag_present() is False
+    gs.set_reload_flag("test-plugin@mp")
+    assert gs.reload_flag_present() is True
+    gs.clear_reload_flag()
+    assert gs.reload_flag_present() is False
+
+
+def test_reload_flag_clear_idempotent(state_dir: Path) -> None:
+    """clear_reload_flag on a missing flag is a silent no-op."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.clear_reload_flag()  # must not raise
+    gs.clear_reload_flag()  # nor on the second call
+    assert gs.reload_flag_present() is False
+
+
+def test_reload_flag_stores_reason(state_dir: Path) -> None:
+    """The flag body holds the reason for diagnostic logs."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.set_reload_flag("plugin-a@mp,plugin-b@mp")
+    body = (state_dir / "reload-needed.flag").read_text(encoding="utf-8")
+    assert body == "plugin-a@mp,plugin-b@mp"
+
+
+# ---------- daemon-restart staleness check ---------------------------------
+
+def test_daemon_needs_restart_false_when_no_daemon(state_dir: Path) -> None:
+    """No PID file → no daemon to restart → False."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.daemon_needs_restart() is False
+
+
+def test_daemon_needs_restart_false_when_pid_dead(state_dir: Path) -> None:
+    """A stale pid file (process gone) means there's nothing to restart."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.write_daemon_pid(999_999)
+    assert gs.daemon_needs_restart() is False
+
+
+def test_daemon_needs_restart_false_when_cmdline_matches(state_dir: Path) -> None:
+    """Live PID whose cmdline contains the expected daemon path → no restart needed.
+
+    Uses the pytest process itself as the "daemon": we cannot make pytest's
+    argv contain daemon.py, so we monkey-patch _read_process_cmdline to
+    return a synthetic argv that DOES include the expected path. The
+    comparison logic is what's under test.
+    """
+    gs = _gs()
+    gs.init_global_state()
+    gs.write_daemon_pid(os.getpid())
+    expected = str(gs.daemon_script_path().resolve())
+    # Synthesize a matching argv around the expected path.
+    gs._read_process_cmdline = lambda _pid: f"uv run --script --quiet {expected}"  # type: ignore[attr-defined]
+    assert gs.daemon_needs_restart() is False
+
+
+def test_daemon_needs_restart_true_when_cmdline_mismatches(state_dir: Path) -> None:
+    """Live PID whose cmdline points at a different cache version → restart needed."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.write_daemon_pid(os.getpid())
+    # Synthesize a stale-version argv (different path than the current cache).
+    gs._read_process_cmdline = lambda _pid: (  # type: ignore[attr-defined]
+        "uv run --script --quiet "
+        "/Users/x/.claude/plugins/cache/x/ai-maestro-janitor/0.4.13/scripts/daemon.py"
+    )
+    assert gs.daemon_needs_restart() is True
+
+
+def test_request_daemon_restart_no_daemon_returns_false(state_dir: Path) -> None:
+    """Asking to restart a non-running daemon is a silent no-op (False)."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.request_daemon_restart() is False

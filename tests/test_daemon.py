@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -29,7 +30,9 @@ assert _DAEMON.is_file(), f"daemon not found at {_DAEMON}"
 
 
 # Stub `claude`: dispatches on argv, logs every invocation, returns canned
-# responses for the three subcommands the daemon uses.
+# responses for the three subcommands the daemon uses. Setting CLAUDE_STUB_FORCE_UPDATE=1
+# makes every `plugin update` emit the "Updated from vX to vY" marker so the
+# daemon's stdout-parser routes to set_reload_flag.
 _CLAUDE_STUB = '''#!/usr/bin/env python3
 import json, os, sys
 a = sys.argv[1:]
@@ -49,6 +52,8 @@ if a[:3] == ["plugin", "list", "--json"]:
     sys.stdout.write(json.dumps(payload))
     raise SystemExit(0)
 if a[:2] == ["plugin", "update"]:
+    if os.environ.get("CLAUDE_STUB_FORCE_UPDATE") == "1":
+        sys.stdout.write("Updated from v0.4.13 to v0.5.0\\n")
     raise SystemExit(0)
 sys.stderr.write("claude-stub: unhandled %r\\n" % (a,))
 raise SystemExit(99)
@@ -264,3 +269,84 @@ def test_daemon_marks_last_run_after_task(harness: dict) -> None:
     for p in (mr_path, up_path):
         ts = int(p.read_text(encoding="utf-8").strip())
         assert abs(now - ts) < 60, f"stamp {ts} unreasonably far from now {now}"
+
+
+# ---------- reload-flag integration tests ----------------------------------
+#
+# These exercise the daemon's stdout-parser + set_reload_flag wiring end-to-end
+# through the subprocess interface, complementing the unit tests for the
+# regex below and the global_state helpers in test_global_state.py.
+
+
+def test_daemon_writes_reload_flag_when_plugin_updated(harness: dict) -> None:
+    """When `claude plugin update` stdout shows an "Updated from ... to ..." line,
+    the daemon must set reload-needed.flag for dispatch to surface."""
+    harness["env"]["CLAUDE_STUB_FORCE_UPDATE"] = "1"
+    harness["spawn"]()
+    flag = harness["state_dir"] / "reload-needed.flag"
+    assert _wait_for(lambda: flag.is_file(), timeout=10.0), \
+        "reload-needed.flag must be written after a real plugin update"
+    body = flag.read_text(encoding="utf-8")
+    assert "test-plugin-a@mp" in body, \
+        f"flag body must record the updated plugin id, got {body!r}"
+
+
+def test_daemon_does_not_write_reload_flag_when_nothing_updated(harness: dict) -> None:
+    """A clean `plugin update` (no "Updated" marker in stdout) → no flag.
+
+    The stub returns rc=0 with empty stdout by default, simulating "already
+    up to date". The daemon must NOT set the reload flag in that case —
+    spurious [janitor-reload] markers would force /reload-plugins on every
+    no-op cadence.
+    """
+    # Note: CLAUDE_STUB_FORCE_UPDATE is NOT set here (default behavior).
+    harness["spawn"]()
+    # Wait until at least one user-plugins-update completes so the daemon
+    # has had its chance to set the flag.
+    up_path = harness["state_dir"] / "user-plugins-update.last-run.ts"
+    assert _wait_for(lambda: up_path.is_file(), timeout=10.0)
+    # Now the flag must NOT exist.
+    flag = harness["state_dir"] / "reload-needed.flag"
+    assert not flag.is_file(), "reload flag must not be set when no plugin actually updated"
+
+
+# ---------- in-process unit test for the stdout parser ---------------------
+
+sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
+sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+
+
+def _import_daemon_module():
+    """Import scripts/daemon.py as a module so we can call its helpers directly.
+
+    The shebang line + PEP 723 block is harmless inside Python's import path;
+    only the `if __name__ == '__main__'` guard prevents main() from running.
+    """
+    import importlib.util as _u
+    spec = _u.spec_from_file_location("janitor_daemon_under_test", str(_DAEMON))
+    assert spec is not None and spec.loader is not None
+    mod = _u.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("stdout,expected", [
+    ("Updated from v0.4.13 to v0.5.0\n",                                True),
+    ("Updated to v0.5.0\n",                                             True),
+    ("v0.4.13 -> v0.5.0\n",                                             True),
+    ("v0.4.13 → v0.5.0\n",                                              True),
+    ("Installed version 0.5.0\n",                                       True),
+    ("Already up to date.\n",                                           False),
+    ("already up-to-date\n",                                            False),
+    ("",                                                                False),
+    # Real update line co-existing with an "already up to date" line is still
+    # a real update — the parser walks lines and ignores no-change ones.
+    ("Updated to v1.0.0\nAlready up to date.\n",                        True),
+    # The plain word "updated" without the from/to structural keywords is NOT
+    # treated as a version transition — false positives are worse than misses.
+    ("nothing was updated\n",                                           False),
+])
+def test_stdout_parser_classifies_correctly(stdout: str, expected: bool) -> None:
+    """The stdout parser must distinguish real version changes from no-ops."""
+    daemon = _import_daemon_module()
+    assert daemon._stdout_proves_plugin_updated(stdout) is expected

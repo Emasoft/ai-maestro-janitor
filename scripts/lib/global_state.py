@@ -72,6 +72,7 @@ def _pid_path() -> Path: return global_state_dir() / "daemon.pid"
 def _heartbeat_path() -> Path: return global_state_dir() / "daemon.heartbeat.ts"
 def _killswitch_path() -> Path: return global_state_dir() / "kill-switch.flag"
 def _spawn_marker_path() -> Path: return global_state_dir() / "daemon.spawn-attempt.ts"
+def _reload_flag_path() -> Path: return global_state_dir() / "reload-needed.flag"
 
 
 def daemon_pid() -> Optional[int]:
@@ -276,6 +277,117 @@ def spawn_daemon_detached() -> Optional[int]:
     except OSError as exc:
         state.log_line("daemon", f"spawn failed: {exc}")
         return None
+
+
+# ---------- reload flag (Claude /reload-plugins after plugin auto-update) ----
+#
+# The daemon writes this flag when `claude plugin update` actually changed a
+# plugin's version on disk. The dispatch phase reads it, emits a bare
+# `[janitor-reload]` marker, and clears it — the cron prompt's silent-execute
+# clause then runs `/reload-plugins` to pick up the new hook/skill code
+# without user involvement. Together with the daemon-restart logic below,
+# this closes the last manual-touch gap: plugin updates are fully autonomous
+# across version bumps.
+
+def reload_flag_present() -> bool:
+    return _reload_flag_path().is_file()
+
+
+def set_reload_flag(reason: str = "") -> None:
+    """Mark that a `/reload-plugins` is needed before the next user turn."""
+    state.atomic_write(_reload_flag_path(), reason or "1")
+
+
+def clear_reload_flag() -> None:
+    try:
+        _reload_flag_path().unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
+# ---------- daemon-script staleness (self-restart on plugin upgrade) ---------
+
+def _read_process_cmdline(pid: int) -> str:
+    """Best-effort read of a running process's full command line.
+
+    Uses `ps -p PID -o args=` which is POSIX-portable (works identically on
+    macOS and every Linux). Returns "" on any failure — callers treat empty
+    as "can't tell" and skip the staleness check rather than guess.
+    """
+    if pid <= 0:
+        return ""
+    try:
+        proc = subprocess.run(  # noqa: S603 - explicit args, no shell
+            ["ps", "-p", str(pid), "-o", "args="],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return (proc.stdout or "").strip()
+
+
+def daemon_needs_restart() -> bool:
+    """True iff the running daemon's script path doesn't match the current cache.
+
+    Detects the autonomy gap that survives plugin updates without it: when
+    the janitor plugin itself is auto-updated to a new cache version, the
+    OLD daemon process is still running its OLD daemon.py from the old
+    cache. Hooks/skills reload via `/reload-plugins` but the daemon's
+    Python interpreter still holds the old code — bugs fixed in the new
+    version remain unfixed in the running daemon.
+
+    Comparison rule: the running process's argv contains a path to
+    `.../<plugin-cache-version>/scripts/daemon.py`. Our `daemon_script_path()`
+    (called from dispatch — same `scripts/` directory as the version of the
+    plugin currently driving the heartbeat) gives the EXPECTED path. If they
+    differ, the daemon is from a stale cache version and needs to be
+    restarted.
+
+    Returns False when the daemon isn't running, when we can't read its
+    argv (foreign uid, race, ps unavailable), or when the paths match.
+    A False return is always safe — the daemon will be restarted next
+    time it actually crashes or stalls.
+    """
+    pid = daemon_pid()
+    if pid is None or not _process_exists(pid):
+        return False
+    cmdline = _read_process_cmdline(pid)
+    if not cmdline:
+        return False
+    expected = str(daemon_script_path().resolve())
+    # The argv may have `uv run --script --quiet /path/to/daemon.py` OR
+    # `python /path/to/daemon.py` — we just check that the EXPECTED path is
+    # a substring. If not, the running daemon is from a different cache
+    # version (or a different install entirely → also stale by definition).
+    return expected not in cmdline
+
+
+def request_daemon_restart() -> bool:
+    """Send SIGTERM to a stale daemon so the next heartbeat lazy-spawns a new one.
+
+    Returns True iff a SIGTERM was successfully delivered. The daemon's
+    graceful-shutdown handler will release the singleton flock; the very
+    next `ensure_daemon_running()` call (from this dispatch fire or the
+    next one) will spawn a fresh daemon from the current cache version.
+
+    Never raises — a failed signal is logged and ignored; the next fire
+    will try again.
+    """
+    pid = daemon_pid()
+    if pid is None or not _process_exists(pid):
+        return False
+    import signal as _signal
+    try:
+        os.kill(pid, _signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError) as exc:
+        state.log_line("daemon", f"daemon-restart SIGTERM failed for pid={pid}: {exc}")
+        return False
+    state.log_line("daemon", f"daemon-restart: SIGTERM sent to pid={pid} (stale cache version)")
+    return True
 
 
 def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:

@@ -231,6 +231,52 @@ def _phase_rate_limit_recovery() -> bool:
     return True
 
 
+def _phase_plugin_reload() -> None:
+    """Emit a bare `[janitor-reload]` marker once when the daemon flags a reload.
+
+    The global daemon writes `reload-needed.flag` after a `claude plugin update`
+    actually changes a plugin's version. This phase reads + clears that flag and
+    surfaces a single bare marker line; the cron prompt's silent-execute clause
+    runs `/reload-plugins` without echoing the marker. Together with the
+    daemon-restart phase below, plugin auto-updates are fully autonomous: new
+    hook/skill code is in effect within one heartbeat cadence of an update.
+
+    No dedupe stamp — the flag itself is the source of truth, and clearing it
+    immediately after emission is enough. If a second update lands in the same
+    heartbeat window the daemon re-arms the flag and we emit again next fire.
+    """
+    if not gs.reload_flag_present():
+        return
+    gs.clear_reload_flag()
+    print("[janitor-reload]")
+    state.log_line("dispatch", "reload-needed.flag → [janitor-reload] emitted, flag cleared")
+
+
+def _phase_daemon_restart_if_stale() -> None:
+    """SIGTERM the daemon when its script path no longer matches the live cache.
+
+    Symptom this defends against: janitor plugin auto-updates land while the
+    daemon process is alive. Hook/skill reload via `/reload-plugins` swaps the
+    plugin's surface, but the daemon's Python interpreter keeps running the
+    OLD daemon.py from the previous cache version. Detector code shipped in
+    the new version would be invisible to that daemon. The fix: detect the
+    mismatch by reading the running process's argv, SIGTERM the stale one,
+    let `ensure_daemon_running()` (next phase) lazy-spawn a fresh daemon from
+    the current cache. Phase order matters: restart-if-stale precedes the
+    ensure_daemon call so the spawn happens this same fire.
+
+    Wrapped defensively — a ps failure, a foreign-uid permission denial, or a
+    flaky filesystem must never crash the heartbeat. Worst case the stale
+    daemon keeps running until it dies on its own (then ensure-daemon spawns
+    the new one from current cache).
+    """
+    try:
+        if gs.daemon_needs_restart():
+            gs.request_daemon_restart()
+    except Exception as exc:  # noqa: BLE001
+        state.log_line("dispatch", f"daemon-restart-if-stale failed: {exc}")
+
+
 def _phase_heartbeat_renew() -> None:
     """Emit a bare `[janitor-renew]` marker when the cron approaches 7-day expiry.
 
@@ -287,8 +333,19 @@ def main() -> int:
     if _phase_rate_limit_recovery():
         return 0
 
-    # Phase 1.5: heartbeat auto-renew (one line on old crons).
+    # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons).
     _phase_heartbeat_renew()
+
+    # Phase 1.6: plugin-reload signal — emit [janitor-reload] once when the
+    # daemon's user-plugins-update task reports a real version change. The
+    # cron prompt's silent-execute clause runs /reload-plugins.
+    _phase_plugin_reload()
+
+    # Phase 1.65: daemon staleness — if the running daemon's script path
+    # doesn't match the current cache version, SIGTERM it so Phase 1.7 can
+    # lazy-spawn a fresh one. Must precede ensure_daemon_running for the
+    # respawn to happen this fire instead of next.
+    _phase_daemon_restart_if_stale()
 
     # Phase 1.7: lazy-spawn the global janitor daemon (issue #7 fix). Cheap
     # no-op when the daemon is already alive; otherwise spawns it detached.

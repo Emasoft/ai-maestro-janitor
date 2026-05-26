@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -78,6 +79,39 @@ _WORKLOAD_TIMEOUT_SEC = 1800  # 30 min
 
 # How often to tick the heartbeat WHILE a workload is running.
 _WORKLOAD_HEARTBEAT_TICK_SEC = 10
+
+# Patterns that prove a `claude plugin update` subprocess actually changed
+# something on disk (vs. "already up to date"). Conservative: any reasonably-
+# unambiguous "moved from version X to version Y" phrase. False negatives are
+# tolerable (we just wait until the next plugin update to reload); false
+# positives would set the reload flag spuriously and surface `[janitor-reload]`
+# on no-op fires, which is noisy. The "already" guard short-circuits the
+# common "already up to date" line some CLIs emit alongside an "Updated" word.
+# `\b` only applies to word-based alternatives — the symbolic arrows are
+# non-word chars and a leading `\b` would prevent matches in "v0.4.13 → v0.5.0"
+# where the preceding char is a space (also non-word, so no boundary).
+_PLUGIN_UPDATED_RX = re.compile(
+    r"(?i)(?:\bupdated\s+(?:from|to)\b|→\s*v?\d|->\s*v?\d|\binstalled\s+version\s+\S+)"
+)
+_PLUGIN_NO_CHANGE_RX = re.compile(r"(?i)\balready\s+(?:up[-\s]?to[-\s]?date|installed)\b")
+
+
+def _stdout_proves_plugin_updated(stdout: str) -> bool:
+    """True iff a `claude plugin update` stdout shows a real version change.
+
+    Designed to be conservative: it's better to miss a reload trigger
+    (and wait for the next plugin update) than to fire `[janitor-reload]`
+    after a no-op. The match is line-by-line so an "already up to date"
+    line elsewhere in stdout doesn't suppress a real "updated to vX" line.
+    """
+    if not stdout:
+        return False
+    for ln in stdout.splitlines():
+        if _PLUGIN_NO_CHANGE_RX.search(ln):
+            continue
+        if _PLUGIN_UPDATED_RX.search(ln):
+            return True
+    return False
 
 _running = True  # flipped to False by SIGTERM/SIGINT — read by the main loop
 
@@ -179,10 +213,11 @@ def task_user_plugins_update() -> None:
                   if isinstance(p, dict) and p.get("scope") == "user" and p.get("id")]
     total = len(user_scope)
     state.log_line("daemon", f"  user-plugins-update: {total} user-scope plugin(s)")
+    updated_ids: list[str] = []
     for i, p in enumerate(user_scope, start=1):
         if not _running or gs.kill_switch_present():
             state.log_line("daemon", f"  user-plugins-update: aborted at {i-1}/{total}")
-            return
+            break
         pid = str(p["id"])
         update = _run_workload(
             ["claude", "plugin", "update", pid, "--scope", "user"],
@@ -190,8 +225,24 @@ def task_user_plugins_update() -> None:
         )
         if update is None:
             state.log_line("daemon", f"    ({i}/{total}) {pid} — TIMED OUT / spawn failed")
-        elif update.returncode != 0:
+            continue
+        if update.returncode != 0:
             state.log_line("daemon", f"    ({i}/{total}) {pid} — rc={update.returncode}")
+            continue
+        # Only on rc==0 do we look at stdout for the "actually updated" markers.
+        if _stdout_proves_plugin_updated(update.stdout or ""):
+            updated_ids.append(pid)
+            state.log_line("daemon", f"    ({i}/{total}) {pid} — UPDATED")
+
+    # If any plugin actually changed on disk, request a one-shot
+    # `/reload-plugins` so Claude picks up the new hooks/skills without a
+    # session restart. The dispatch reload-phase reads + clears the flag.
+    if updated_ids:
+        gs.set_reload_flag(",".join(updated_ids[:10]))
+        state.log_line(
+            "daemon",
+            f"  user-plugins-update: reload-needed.flag SET ({len(updated_ids)} plugin(s) updated)",
+        )
 
 
 class Task:
