@@ -132,6 +132,40 @@ modifies your repos — it only operates on `~/.claude/plugins/`.
 - `Stop` refreshes the idle timer after a successful turn.
 - `StopFailure` writes `rate-limited.flag`; the next heartbeat fire picks it
   up and emits `[janitor-resume]`.
+- `PreToolUse` (since v0.5.2): `pre-tool-pkg-guard.py` refuses
+  package-manager safety-bypass attempts on `Bash` / `Edit` / `Write` calls.
+  Closes [issue #8](https://github.com/Emasoft/ai-maestro-janitor/issues/8) —
+  the user-scope guardrail Atai Barkai called for after the 2026-05
+  art-template npm supply-chain compromise. Two classes of violation:
+  - **Class A — Bash bypass flags.** Whitespace-normalised regex match
+    over the full command. Catches `pnpm install --no-frozen-lockfile`,
+    `pnpm install --no-verify-store-integrity`, `pnpm config set
+    minimumReleaseAge N` where N is below the threshold, `npm install
+    --no-integrity`, `npm config set audit-level none|info|low`,
+    `yarn config set enableScripts true`, `bun install --no-verify`,
+    `corepack disable`, etc. Backslash-newline continuations cannot
+    evade the match.
+  - **Class B — Weakening edits.** Parses the before-state on disk and
+    the after-state after applying the Edit / Write, compares guarded
+    keys in `.npmrc`, `package.json#pnpm`, `pnpm-workspace.yaml`,
+    `.yarnrc.yml`, `bunfig.toml`. Denies when `minimum-release-age` /
+    `minimumReleaseAge` is lowered or removed, when `trust-policy` /
+    `trustPolicy` is set to anything other than `no-downgrade`, when
+    `blockExoticSubdeps` flips from true to false, when `audit-level`
+    is lowered below `moderate`, when yarn `enableScripts` flips
+    false→true, or when bun `[install].verify=true` is removed.
+
+  Default behaviour is **hard deny** with a one-line reason naming the
+  bypass and the userConfig knob to relax it; set
+  `pkg_manager_hook_allow_user_override: true` to downgrade to per-call
+  `ask` instead. Every block lands in
+  `~/.claude/janitor-global-state/pkg-manager-guard.log`.
+
+  Sample deny reason: `[pkg-manager-guard] pnpm --no-frozen-lockfile
+  permits lockfile drift (use a real lockfile update + commit). Set
+  CLAUDE_PLUGIN_OPTION_PKG_MANAGER_HOOK_ALLOW_USER_OVERRIDE=true to confirm
+  per call, or raise CLAUDE_PLUGIN_OPTION_PKG_MANAGER_MIN_RELEASE_AGE_MINUTES
+  if the threshold is wrong.`
 
 ## Skills
 
@@ -403,6 +437,8 @@ via the `/plugin configure` interface or edit the project's
 | `workflow_security_interval` | 300 | Min seconds between `workflow-security` scans. 5 min by default — runs every heartbeat. Content-hashed: an unchanged-workflows fire costs only a few small file reads; a workflow edit forces a fresh scan so a newly-introduced injection or secret-leak surfaces within one cadence. |
 | `branch_protection_enabled` | true | When true, the `branch-protection` detector asks the GitHub API (read-only) whether the default branch has classic protection OR an active ruleset, and surfaces an URGENT drift line only when it can DEFINITIVELY confirm neither. NEVER configures protection itself. Skips silently when `gh` is absent/unauthenticated, the viewer is not a repo admin, or any probe is indeterminate. Set false to disable. |
 | `branch_protection_interval` | 21600 | Min seconds between `branch-protection` checks. 6 h by default — branch rulesets change rarely and each pass makes a few `gh` API calls. Nags once until fixed and re-arms automatically if protection is later removed. |
+| `pkg_manager_min_release_age_minutes` | 7200 | Minimum age (minutes) the `pre-tool-pkg-guard` hook will accept for `pnpm config set minimumReleaseAge`, `minimum-release-age` in `.npmrc`, and `pnpm.minimumReleaseAge` in `package.json` / `pnpm-workspace.yaml`. 7200 ≈ 5 days, matches safedep's recommendation after the art-template compromise. |
+| `pkg_manager_hook_allow_user_override` | false | When false (default), the `pre-tool-pkg-guard` hook hard-denies every detected bypass. When true, it downgrades to `ask` — per-call user confirmation instead of a block. Every block is logged regardless to `~/.claude/janitor-global-state/pkg-manager-guard.log`. |
 
 ## Weekly fallback
 

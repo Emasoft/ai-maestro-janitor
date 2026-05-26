@@ -394,6 +394,20 @@
       "type": "number",
       "default": 21600,
       "sensitive": false
+    },
+    "pkg_manager_min_release_age_minutes": {
+      "title": "Package-Manager Minimum Release Age (minutes)",
+      "description": "Minimum age (in minutes) a package must reach before the pkg-manager-guard PreToolUse hook will accept it in pnpm/npm config or .npmrc / package.json#pnpm edits. Default: 7200 (~5 days) — matches the safedep.io recommendation following the 2026-05 art-template npm supply-chain compromise (~5 days between malicious publish and detection). Raising this is hardening; lowering it widens the exposure window. The hook applies this threshold to: `pnpm config set minimumReleaseAge`, `minimum-release-age` in .npmrc, and `pnpm.minimumReleaseAge` in package.json / pnpm-workspace.yaml.",
+      "type": "number",
+      "default": 7200,
+      "sensitive": false
+    },
+    "pkg_manager_hook_allow_user_override": {
+      "title": "Package-Manager Guard Allow User Override",
+      "description": "When false (DEFAULT), the pkg-manager-guard PreToolUse hook HARD-DENIES every detected bypass (CLI flag in Bash or weakening edit in a package-manager config file) — closes issue #8. When true, the hook downgrades 'deny' to 'ask', so each block becomes a per-call confirmation. The default is false because the article's warning (\"Claude will automatically use the CLI options to forcefully set the min age to 0 when he finds out that he cannot install or update something\") describes precisely the failure mode an ask-style prompt cannot prevent — an agent that 'just clicks yes'. Every block is logged regardless to ~/.claude/janitor-global-state/pkg-manager-guard.log.",
+      "type": "boolean",
+      "default": false,
+      "sensitive": false
     }
   },
   "cpv": {
