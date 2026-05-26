@@ -44,6 +44,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
 
 import dedupe  # noqa: E402
+import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
 # Detector roster: (name, default cadence in seconds, env-var override).
@@ -276,6 +277,17 @@ def main() -> int:
 
     # Phase 1.5: heartbeat auto-renew (one line on old crons).
     _phase_heartbeat_renew()
+
+    # Phase 1.7: lazy-spawn the global janitor daemon (issue #7 fix). Cheap
+    # no-op when the daemon is already alive; otherwise spawns it detached.
+    # The daemon owns every machine-global auto-update task (marketplace
+    # refresh, user-scope plugin updates), replacing the per-session pile-up
+    # the pre-daemon design produced. Wrapped defensively so a global-state
+    # filesystem error never crashes the heartbeat.
+    try:
+        gs.ensure_daemon_running()
+    except Exception as exc:  # noqa: BLE001
+        state.log_line("dispatch", f"ensure_daemon_running failed: {exc}")
 
     # Phase 2: drift detectors.
     for name, default_interval, env_var in _DETECTORS:
