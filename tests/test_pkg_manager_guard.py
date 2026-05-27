@@ -20,8 +20,6 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
-import pytest
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _HOOK = _PROJECT_ROOT / "scripts" / "hooks" / "pre-tool-pkg-guard.py"
 

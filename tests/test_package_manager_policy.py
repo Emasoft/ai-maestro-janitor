@@ -16,8 +16,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "package-manager-policy.py"
 
