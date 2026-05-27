@@ -16,7 +16,7 @@ updated: 2026-05-25T15:22:13+0200
 > "we must also evaluate the possibility of the janitor acting to fix security
 > risks in situations where the risk is too high, configuring github and editing
 > yaml files if needed."
-
+>
 > "the user must be able to safely entrust the projects to the janitor plugin,
 > and be sure that it will guard the plugin from any security danger."
 
@@ -163,8 +163,8 @@ genuinely *safe to entrust* rather than *a liability that edits your repo*.
 
 ## 9. Open decision for the user (blocking — pick before implementing)
 
-- **Option A (recommended):** Tier 1 skills only — extend doctor with apply-fix
-  + add `/janitor-branch-protection-setup`. No autonomous mutation anywhere.
+- **Option A (recommended):** Tier 1 skills only — extend doctor with apply-fix,
+  add `/janitor-branch-protection-setup`. No autonomous mutation anywhere.
 - **Option B (recommended + 1):** Option A PLUS Tier 2 limited to the
   branch-protection baseline behind `guard_mode_enabled` (default off). No
   autonomous YAML editing.

@@ -52,7 +52,7 @@ doctor never silently skips a finding.
 | `db-ecosystem-missing` | Detected ecosystem (signal table) has no matching `updates:` block | Append a new `updates:` block from the per-ecosystem template, using the next stagger slot. |
 | `db-duplicate-ecosystem-dir` | Two blocks share `package-ecosystem` + `directory` | Surface as `[NEEDS-HUMAN-REVIEW] — duplicate block`. |
 | `db-schedule-collision` | Two blocks share `day:` + `time:` | Shift the second block to the next stagger slot. |
-| `db-allow-too-broad` | `allow:` block has `dependency-type: all` with no further filter | Surface as `[NEEDS-HUMAN-REVIEW] — `allow: all` defeats the safety gate`. |
+| `db-allow-too-broad` | `allow:` block has `dependency-type: all` with no further filter | Surface as `[NEEDS-HUMAN-REVIEW]` — `allow: all` defeats the safety gate. |
 | `db-rebase-strategy-wrong` | `rebase-strategy: "disabled"` | Surface as `[NEEDS-HUMAN-REVIEW]` — disabling rebase usually means a CI conflict, not a config bug. |
 
 ### Renovate findings
