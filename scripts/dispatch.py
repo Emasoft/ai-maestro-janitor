@@ -277,6 +277,31 @@ def _phase_daemon_restart_if_stale() -> None:
         state.log_line("dispatch", f"daemon-restart-if-stale failed: {exc}")
 
 
+def _phase_autofix_mode_reminder() -> None:
+    """One drift line per day when /janitor-autofix-off is in effect.
+
+    The user can opt out of the "act, don't ask" policy by running
+    `/janitor-autofix-off`. When that sentinel is set the janitor still
+    reports findings but no longer applies fixes — easy to forget. This
+    phase emits a once-per-day reminder so the project author doesn't
+    silently lose the autofix safety net for weeks.
+
+    Dedup key is the local-date bucket; the reminder fires at most once
+    every 24 h regardless of cron cadence. When autofix is back ON (the
+    default), this phase is a near-free no-op (one file stat).
+    """
+    if not state.autofix_disabled():
+        return
+    today = datetime.now().astimezone().strftime("%Y%m%d")
+    line = dedupe.emit_once(
+        state.state_dir() / "autofix-off-seen.txt",
+        f"autofix-off@{today}",
+        "[autofix-off] Janitor autofix is OFF in this project — findings will surface but no fixes will be applied without confirmation. Run /janitor-autofix-on to re-enable.",
+    )
+    if line is not None:
+        print(line)
+
+
 def _phase_heartbeat_renew() -> None:
     """Emit a bare `[janitor-renew]` marker when the cron approaches 7-day expiry.
 
@@ -335,6 +360,9 @@ def main() -> int:
 
     # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons).
     _phase_heartbeat_renew()
+
+    # Phase 1.55: autofix-OFF daily reminder. Free no-op when ON (default).
+    _phase_autofix_mode_reminder()
 
     # Phase 1.6: plugin-reload signal — emit [janitor-reload] once when the
     # daemon's user-plugins-update task reports a real version change. The

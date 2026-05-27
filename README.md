@@ -210,6 +210,13 @@ on-demand when the doctor flags unpinned refs.
   after expiry auto-clears the sentinel.
 - `/janitor-resume` — removes the paused sentinel. Idempotent (no-op when
   not paused). Does NOT arm the cron — for that, use `/janitor-arm`.
+- `/janitor-autofix-off` — opt out of the "act, don't ask" policy in this
+  project. After running, the janitor still surfaces security / CI / publish
+  findings but Claude must ASK before applying fixes. Writes
+  `.janitor/state/autofix-mode.txt = off`. The heartbeat emits a once-per-day
+  `[autofix-off]` reminder so the silence is visible.
+- `/janitor-autofix-on` — flip autofix back to the default. Removes the
+  sentinel (or overwrites with `on`). Idempotent; no-op when already on.
 - `/janitor-doctor` — pre-flight health check. Runs ~12 named pass/fail
   checks (state-dir writable, detectors executable, uv/git/gh available,
   `/reports/` + `/reports_dev/` gitignored, plugin.json valid) and prints

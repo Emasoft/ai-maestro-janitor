@@ -155,6 +155,37 @@ def coerce_int(
     return int(s)
 
 
+def autofix_mode() -> str:
+    """Return the current autofix mode for this project — "on" or "off".
+
+    The sentinel file `.janitor/state/autofix-mode.txt` (one of "on" /
+    "off", any case, optional whitespace) is the source of truth. When
+    the file is absent OR unreadable OR contains anything else, the
+    default `"on"` applies — matching the standing "act, don't ask"
+    policy the user set for security/CI/publish hardening.
+
+    Helpers `autofix_enabled()` and `autofix_disabled()` are the
+    boolean conveniences callers should reach for; this string variant
+    exists for the heartbeat's drift-line text.
+    """
+    path = state_dir() / "autofix-mode.txt"
+    try:
+        raw = path.read_text(encoding="utf-8").strip().lower()
+    except (FileNotFoundError, OSError):
+        return "on"
+    return "off" if raw == "off" else "on"
+
+
+def autofix_enabled() -> bool:
+    """True iff the "act, don't ask" autofix policy is active."""
+    return autofix_mode() == "on"
+
+
+def autofix_disabled() -> bool:
+    """True iff `/janitor-autofix-off` has been run in this project."""
+    return autofix_mode() == "off"
+
+
 def file_mtime(path: Path | str) -> int:
     """Return file mtime in epoch seconds, or 0 on error.
 
