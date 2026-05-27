@@ -145,14 +145,14 @@ in any way. The Tier 2 path is a separate opt-in via plugin.json.
 
 Copy this checklist and track your progress:
 
-- [ ] Resolve `slug` from `.claude-plugin/plugin.json` (or ask user to
+* [ ] Resolve `slug` from `.claude-plugin/plugin.json` (or ask user to
       paste it if the manifest is missing)
-- [ ] Resolve the default branch via `gh api repos/<slug>` `.default_branch`
-- [ ] Render the baseline payload JSON for user review
-- [ ] Confirm the user wants to apply (DO NOT skip this step — Tier 1
+* [ ] Resolve the default branch via `gh api repos/<slug>` `.default_branch`
+* [ ] Render the baseline payload JSON for user review
+* [ ] Confirm the user wants to apply (DO NOT skip this step — Tier 1
       is human-in-the-loop by definition)
-- [ ] Check viewer is admin (`gh api repos/<slug>` `.permissions.admin`)
-- [ ] Idempotency check (`is_baseline_present(slug)`) — bail with NOOP
+* [ ] Check viewer is admin (`gh api repos/<slug>` `.permissions.admin`)
+* [ ] Idempotency check (`is_baseline_present(slug)`) — bail with NOOP
       if the baseline is already in place
-- [ ] POST via `bpl.create_baseline_ruleset(slug, default_branch)`
-- [ ] Report `OK`, `NOOP`, or `FAIL <reason>` in a single line
+* [ ] POST via `bpl.create_baseline_ruleset(slug, default_branch)`
+* [ ] Report `OK`, `NOOP`, or `FAIL <reason>` in a single line
