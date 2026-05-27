@@ -402,6 +402,34 @@
       "default": 21600,
       "sensitive": false
     },
+    "guard_mode_enabled": {
+      "title": "Guarded Auto-Remediation Mode Enabled",
+      "description": "When true, the janitor's Tier 2 guard path runs ONE specific autonomous action without a human in the loop: posting the baseline branch ruleset to the default branch (force-push block + deletion block + linear-history + 1-approval PR review). Default: false. Every other 'acting' remains in user-invoked skills (Tier 1). Even when enabled, the guard refuses unless `/janitor-autofix-off` is NOT set AND the authenticated viewer is admin on the repo AND the baseline isn't already present. The Tier 1 user-invoked surface (`/janitor-branch-protection-setup`) works regardless of this knob — it's the human-in-the-loop alternative for users who want one-shot review-and-apply.",
+      "type": "boolean",
+      "default": false,
+      "sensitive": false
+    },
+    "guard_actions": {
+      "title": "Guarded Auto-Remediation Action Allow-List",
+      "description": "Comma-separated list of guard actions that may run autonomously when `guard_mode_enabled` is true. Default: \"branch-protection\". Only listed actions are eligible; any action absent from this list is treated as opt-out even with guard_mode on. Today the only legal value is `branch-protection` — the list exists so future Tier 2 actions (e.g. `dependabot-config`, `codeowners-skeleton`) can be opted into without re-flipping `guard_mode_enabled`.",
+      "type": "string",
+      "default": "branch-protection",
+      "sensitive": false
+    },
+    "guard_min_severity": {
+      "title": "Guarded Auto-Remediation Minimum Severity",
+      "description": "Severity threshold the underlying finding must reach before guard mode acts. Default: \"critical\". Valid: critical, high, medium, low. Branch-protection baseline is always critical (a default branch with no force-push block is a single-keystroke disaster), so this knob exists for future actions where the severity is variable.",
+      "type": "string",
+      "default": "critical",
+      "sensitive": false
+    },
+    "guard_branch_protection_interval": {
+      "title": "Guard Branch-Protection Cadence (seconds)",
+      "description": "Minimum seconds between guard-path branch-protection apply attempts. Default: 21600 (6 h). The applier is idempotent (returns NOOP when the baseline is already present) and runs `gh api` per attempt, so cadence is mostly a budget guard rather than a freshness knob.",
+      "type": "number",
+      "default": 21600,
+      "sensitive": false
+    },
     "pkg_manager_min_release_age_minutes": {
       "title": "Package-Manager Minimum Release Age (minutes)",
       "description": "Minimum age (in minutes) a package must reach before the pkg-manager-guard PreToolUse hook will accept it in pnpm/npm config or .npmrc / package.json#pnpm edits. Default: 7200 (~5 days) — matches the safedep.io recommendation following the 2026-05 art-template npm supply-chain compromise (~5 days between malicious publish and detection). Raising this is hardening; lowering it widens the exposure window. The hook applies this threshold to: `pnpm config set minimumReleaseAge`, `minimum-release-age` in .npmrc, and `pnpm.minimumReleaseAge` in package.json / pnpm-workspace.yaml.",

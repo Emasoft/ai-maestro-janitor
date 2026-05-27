@@ -217,6 +217,18 @@ on-demand when the doctor flags unpinned refs.
   `[autofix-off]` reminder so the silence is visible.
 - `/janitor-autofix-on` — flip autofix back to the default. Removes the
   sentinel (or overwrites with `on`). Idempotent; no-op when already on.
+- `/janitor-branch-protection-setup` — one-shot interactive setup of the
+  janitor's baseline branch ruleset on the project's default branch
+  (force-push block + deletion block + linear-history + 1-approval PR
+  review with dismiss-stale + thread-resolution). Tier 1 user-invoked
+  surface for TRDD-631fa3de Option B: the skill shows the EXACT JSON
+  payload before posting and waits for confirmation. Idempotent — a
+  ruleset named `janitor-baseline` is recognised by name so re-running
+  produces NOOP. Refuses when `gh` is missing, the viewer is not admin
+  on the repo, or no `repository` URL is declared. For the silent
+  Tier 2 auto path (no human in the loop), flip
+  `guard_mode_enabled = true` in plugin.json — same baseline, applied
+  by `scripts/guard/branch_protection_apply.py` on the heartbeat.
 - `/janitor-doctor` — pre-flight health check. Runs ~12 named pass/fail
   checks (state-dir writable, detectors executable, uv/git/gh available,
   `/reports/` + `/reports_dev/` gitignored, plugin.json valid) and prints

@@ -1,0 +1,178 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""Tier 2 GUARDED AUTO-REMEDIATION — branch-protection baseline applier.
+
+Per TRDD-631fa3de Option B (recommended + 1): the janitor takes ONE
+specific autonomous action — creating the baseline branch ruleset on
+the default branch — WITHOUT a human in the loop. Every other "acting"
+remains in user-invoked skills.
+
+The path is deliberately separate from `scripts/detectors/` (which are
+read-only by contract). Dispatch calls this module from a dedicated
+phase ONLY when `guard_mode_enabled` is true AND the
+branch-protection detector has surfaced a "missing baseline" finding
+AT LEAST ONCE (an autofix-mode check in dispatch coordinates the two).
+
+Safety gates (any one false → no action, surface verbatim instead):
+  * guard_mode_enabled == true
+  * scripts/lib/state.autofix_enabled() == true (the per-project toggle
+    from /janitor-autofix-off also vetoes guarded actions — one fewer
+    switch for users to remember)
+  * the repo's default branch is discoverable via `gh api`
+  * the authenticated viewer is admin on the repo
+  * baseline ruleset is NOT already present (idempotency)
+
+On success:
+  * appends to `.janitor/logs/branch-protection-apply.log` with the
+    timestamp, repo, ruleset id, and the exact payload (audit trail).
+  * appends a ledger line to `.janitor/state/branch-protection-acted.txt`
+    so a second invocation never double-applies (also detected by
+    is_baseline_present(), but the ledger is defence-in-depth + cheap
+    to inspect from the human side).
+  * prints ONE loud announcement line to stdout — the heartbeat
+    surfaces it to the user with full context.
+
+Failure modes (each surfaces a single line, never half-applies):
+  * gh missing / network failure / non-admin viewer / 403 / 422 →
+    one drift line explaining what blocked the action.
+
+Exit codes:
+  0 — completed cleanly (acted OR a precondition correctly vetoed).
+  1 — unrecoverable error (e.g. cannot write the audit log).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+
+import branch_protection_lib as bpl  # noqa: E402
+import state  # noqa: E402
+
+_LEDGER_FILE = "branch-protection-acted.txt"
+_LOG_FILE = "branch-protection-apply.log"
+
+
+def _audit_append(line: str) -> None:
+    log_path = state.log_dir() / _LOG_FILE
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(f"{ts}\t{line}\n")
+
+
+def _ledger_append(slug: str, default_branch: str, msg: str) -> None:
+    ledger = state.state_dir() / _LEDGER_FILE
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+    with ledger.open("a", encoding="utf-8") as f:
+        f.write(f"{ts}\t{slug}\t{default_branch}\t{msg}\n")
+
+
+def main() -> int:
+    state.init_state()
+
+    # Gate 1: master switch.
+    if not bpl.guard_mode_enabled():
+        return 0  # silent — the user has not opted in
+
+    # Gate 2: project-scope autofix toggle. /janitor-autofix-off vetoes
+    # guarded actions too — one fewer switch for the user to remember.
+    if not state.autofix_enabled():
+        state.log_line(
+            "branch-protection-apply",
+            "skip: /janitor-autofix-off is set — guard mode honours the project toggle",
+        )
+        return 0
+
+    # Gate 3: resolve repo slug from this project's plugin.json (if any).
+    plugin_root_env = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if not plugin_root_env:
+        # Fall back to project root when CLAUDE_PLUGIN_ROOT is unset
+        # (e.g. dispatch.py was invoked outside a plugin context).
+        plugin_root_env = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    plugin_root = Path(plugin_root_env or ".")
+    slug = bpl.detect_repo_slug(plugin_root)
+    if not slug:
+        state.log_line(
+            "branch-protection-apply",
+            "skip: cannot resolve owner/repo slug from plugin.json",
+        )
+        return 0
+
+    # Gate 4: gh availability.
+    if not bpl.gh_available():
+        print(
+            "[branch-protection] guard mode ON but `gh` CLI not in PATH — "
+            "install GitHub CLI to apply the baseline ruleset.",
+        )
+        return 0
+
+    # Gate 5: default branch discovery.
+    default_branch = bpl.detect_default_branch(slug)
+    if not default_branch:
+        state.log_line(
+            "branch-protection-apply",
+            f"skip: could not resolve default branch of {slug}",
+        )
+        return 0
+
+    # Gate 6: idempotency.
+    present = bpl.is_baseline_present(slug)
+    if present is None:
+        state.log_line(
+            "branch-protection-apply",
+            f"skip: ruleset list lookup failed for {slug}",
+        )
+        return 0
+    if present:
+        # Already protected — ledger this once so the human can see the
+        # baseline was confirmed-in-place, then exit silently on
+        # subsequent runs (ledger file becomes the dedupe signal).
+        ledger = state.state_dir() / _LEDGER_FILE
+        if not ledger.is_file():
+            _ledger_append(slug, default_branch, "already-present")
+        return 0
+
+    # Gate 7: admin permission (can't configure what we can't administer).
+    if not bpl.viewer_is_admin(slug):
+        print(
+            f"[branch-protection] guard mode ON for {slug}@{default_branch} but the "
+            "authenticated viewer is not an admin — surface for human review.",
+        )
+        return 0
+
+    # All gates passed → apply.
+    ok, msg = bpl.create_baseline_ruleset(slug, default_branch)
+    if not ok:
+        print(
+            f"[branch-protection] guard-mode ruleset POST failed for "
+            f"{slug}@{default_branch}: {msg}",
+        )
+        _audit_append(f"FAIL\t{slug}\t{default_branch}\t{msg}")
+        return 0
+
+    # Loud + auditable announcement.
+    payload = bpl.baseline_ruleset_payload(default_branch)
+    payload_json = json.dumps(payload, separators=(",", ":"))
+    _audit_append(f"OK\t{slug}\t{default_branch}\t{msg}\t{payload_json}")
+    _ledger_append(slug, default_branch, f"created ({msg})")
+    print(
+        f"[guard] created branch-protection baseline on {slug}@{default_branch} "
+        f"({msg}). Rules: deletion + non_fast_forward + required_linear_history "
+        f"+ pull_request (1 approval, dismiss-stale, thread-resolution). "
+        f"Audit log: .janitor/logs/{_LOG_FILE}. Ledger: .janitor/state/{_LEDGER_FILE}.",
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

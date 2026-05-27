@@ -277,6 +277,44 @@ def _phase_daemon_restart_if_stale() -> None:
         state.log_line("dispatch", f"daemon-restart-if-stale failed: {exc}")
 
 
+def _phase_guard_branch_protection() -> None:
+    """Tier 2 guarded auto-apply for the branch-protection baseline.
+
+    Runs scripts/guard/branch_protection_apply.py at the configured
+    cadence (default 21600 = 6 h). The applier itself enforces every
+    safety gate (guard_mode_enabled, admin viewer, default branch,
+    idempotency). When any gate fails the applier exits 0 silently —
+    so this phase is near-free on every fire that doesn't actually
+    need to act.
+
+    The whole phase is wrapped defensively so a guard-side fault never
+    crashes the heartbeat — RULE-0 baseline.
+    """
+    interval = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_GUARD_BRANCH_PROTECTION_INTERVAL"),
+        21600,
+    )
+    last_file = state.state_dir() / "last-run-guard-branch-protection.ts"
+    last = state.read_int_state(last_file, 0)
+    if (int(time.time()) - last) < interval:
+        return
+    script = _HERE / "guard" / "branch_protection_apply.py"
+    if not script.is_file() or not os.access(script, os.X_OK):
+        return
+    try:
+        subprocess.run(  # noqa: S603 - explicit args, no shell
+            [str(script)],
+            capture_output=False,
+            check=False,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        state.log_line("dispatch", "guard branch-protection apply timed out")
+    except OSError as exc:
+        state.log_line("dispatch", f"guard branch-protection apply spawn failed: {exc}")
+    state.atomic_write(last_file, str(int(time.time())))
+
+
 def _phase_autofix_mode_reminder() -> None:
     """One drift line per day when /janitor-autofix-off is in effect.
 
@@ -363,6 +401,11 @@ def main() -> int:
 
     # Phase 1.55: autofix-OFF daily reminder. Free no-op when ON (default).
     _phase_autofix_mode_reminder()
+
+    # Phase 1.56: Tier 2 guarded action — branch-protection baseline applier.
+    # No-op unless guard_mode_enabled AND autofix_enabled AND every safety
+    # gate inside the applier passes. Cadence-throttled (default 6 h).
+    _phase_guard_branch_protection()
 
     # Phase 1.6: plugin-reload signal — emit [janitor-reload] once when the
     # daemon's user-plugins-update task reports a real version change. The
