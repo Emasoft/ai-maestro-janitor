@@ -152,9 +152,9 @@
     },
     "auto_update_on_new_release": {
       "title": "Auto-update on new plugin release",
-      "description": "When true, the version-update detector runs `claude plugin marketplace update ai-maestro-plugins` + `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` whenever a newer release is found on GitHub, then nudges the user to run /reload-plugins + /janitor-arm. When false (DEFAULT since v0.5.2), only the nudge is emitted and the user updates manually — this prevents the per-session pile-up that issue #7 documents, until version-update's auto-update branch moves to the global daemon (TRDD-be2efa56). Auto-update is best-effort: any CLI failure falls back silently to the manual-nudge path.",
+      "description": "When true (DEFAULT since v0.5.3), the global janitor daemon runs `claude plugin marketplace update ai-maestro-plugins` + `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` whenever a newer release is found on GitHub. On success the daemon sets reload-needed.flag → the next heartbeat emits [janitor-reload] → Claude silently runs /reload-plugins → the auto-rolling cron stub picks up the new version on the next fire. Fully autonomous; no human in the loop. When false, the version-update detector instead surfaces a manual nudge for the user to run /plugin update by hand. Single-writer semantics are guaranteed by the daemon's flock (closes issue #7). Auto-update is best-effort: any CLI failure falls back silently to the manual-nudge path.",
       "type": "boolean",
-      "default": false,
+      "default": true,
       "sensitive": false
     },
     "daemon_enabled": {
@@ -176,6 +176,13 @@
       "description": "Minimum seconds the daemon waits between full user-scope plugin sweeps. Default: 3600 (1 h). Each sweep enumerates `claude plugin list --json`, filters to scope==user, and runs `claude plugin update <id> --scope user` sequentially per plugin. Hourly is the right balance for ~80 plugins × ~5 s each (~7 min per sweep) — fresh enough without burning CPU. The per-session shim emits a stale-daemon drift line when the actual last-run is older than 2× this value.",
       "type": "number",
       "default": 3600,
+      "sensitive": false
+    },
+    "daemon_version_update_interval": {
+      "title": "Daemon Janitor-Self-Update Cadence (seconds)",
+      "description": "Minimum seconds the daemon waits between janitor self-update checks. Default: 21600 (6 h). Each cycle reads the local cache's highest installed version, queries the latest GitHub release of the plugin repo (via `gh api releases/latest`), and — when behind — runs `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` per discovered scope. GitHub releases land at human-day granularity so 6 h cadence keeps everything fresh without churning the network. Gated additionally by auto_update_on_new_release — when that knob is false this cycle is a no-op.",
+      "type": "number",
+      "default": 21600,
       "sensitive": false
     },
     "trashcan_purge_enabled": {

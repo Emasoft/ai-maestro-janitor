@@ -16,11 +16,16 @@ sessions (issue #7):
   * user-plugins-update — enumerate user-scope plugins via
     `claude plugin list --json` and run `claude plugin update <id> --scope user`
     on each sequentially.
-  * (Reserved) version-update auto-update — currently still handled by the
-    per-session `version-update.py` detector; will be folded in here in a
-    follow-up. The daemon's mere existence already prevents the worst of the
-    pile-up because the per-session marketplace-refresh / user-plugins-update
-    are now refactored no-ops.
+  * version-update — janitor self-update. Compares the local cache's highest
+    installed version against the latest GitHub release of the
+    `ai-maestro-janitor` repo declared in plugin.json; when behind, runs
+    `claude plugin update ai-maestro-janitor@... --scope <auto>` for every
+    settings file that mentions the plugin. On success, sets the
+    reload-needed.flag (sibling to TRDD-be2efa56's daemon plumbing) so the
+    next heartbeat surfaces [janitor-reload] and Claude routes that to a
+    silent /reload-plugins via the cron prompt's silent-execute clause.
+    Moved here from `scripts/detectors/version-update.py` per TRDD-be2efa56
+    §9 follow-up — the detector now SURFACES drift lines only.
 
 Lifecycle:
   1. Acquire the singleton flock; exit 0 if another daemon is alive.
@@ -57,6 +62,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
+import version_update_lib as vu  # noqa: E402
 
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
@@ -66,6 +72,10 @@ _INTERVAL_MARKETPLACE_REFRESH = int(
 _INTERVAL_USER_PLUGINS_UPDATE = int(
     os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", "3600")
 )  # 1 h — full sweep takes ~7 min; hourly cadence keeps everything fresh.
+_INTERVAL_VERSION_UPDATE = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", "21600")
+)  # 6 h — janitor self-update cadence. GitHub releases land at human-day
+#  granularity; checking every 6 h is plenty and keeps the load light.
 
 # Loop ceiling — heartbeat tick interval upper bound. Must be << the
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
@@ -245,6 +255,46 @@ def task_user_plugins_update() -> None:
         )
 
 
+def task_version_update() -> None:
+    """Auto-update the janitor plugin itself when GitHub is ahead of the
+    local cache. Moved here from `scripts/detectors/version-update.py`
+    per TRDD-be2efa56 §9 follow-up — the detector now SURFACES drift
+    lines only; the daemon is the single global writer that actually
+    runs `claude plugin update`.
+
+    Gated on `CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE`
+    (default true; the userConfig knob). When the update succeeds, the
+    daemon sets the reload-needed.flag so the next heartbeat surfaces
+    `[janitor-reload]` (which Claude silently routes to /reload-plugins
+    via the cron-prompt clause).
+
+    The follow-up dispatcher phase 1.65 (`_phase_daemon_restart_if_stale`)
+    then SIGTERMs this daemon so the next `ensure_daemon_running()`
+    spawns the new daemon from the new cache version. Full auto-roll,
+    no human in the loop.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_AUTO_UPDATE_ON_NEW_RELEASE", True):
+        return
+
+    # The daemon lives in `<cache>/<version>/scripts/daemon.py`, so its
+    # parent's parent is the version dir we need to pass through.
+    plugin_root = Path(__file__).resolve().parent.parent
+
+    def _log(msg: str) -> None:
+        state.log_line("daemon", f"  {msg}")
+
+    updated, new_latest = vu.do_auto_update_if_needed(
+        plugin_root, _log, update_log_path=None,
+    )
+    if updated:
+        gs.set_reload_flag(f"janitor-self-update@{new_latest}")
+        state.log_line(
+            "daemon",
+            f"  version-update: janitor self-updated to {new_latest}; "
+            f"reload-needed.flag SET (heartbeat will emit [janitor-reload])",
+        )
+
+
 class Task:
     """One periodic unit of work owned by the daemon.
 
@@ -286,6 +336,7 @@ def _build_tasks() -> list[Task]:
     return [
         Task("marketplace-refresh", _INTERVAL_MARKETPLACE_REFRESH, task_marketplace_refresh),
         Task("user-plugins-update", _INTERVAL_USER_PLUGINS_UPDATE, task_user_plugins_update),
+        Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update),
     ]
 
 
@@ -306,7 +357,8 @@ def main() -> int:
     state.log_line(
         "daemon",
         f"started (pid={pid}, tasks={[t.name for t in tasks]}, "
-        f"intervals=[{_INTERVAL_MARKETPLACE_REFRESH}, {_INTERVAL_USER_PLUGINS_UPDATE}])",
+        f"intervals=[{_INTERVAL_MARKETPLACE_REFRESH}, "
+        f"{_INTERVAL_USER_PLUGINS_UPDATE}, {_INTERVAL_VERSION_UPDATE}])",
     )
 
     signal.signal(signal.SIGTERM, _on_signal)
