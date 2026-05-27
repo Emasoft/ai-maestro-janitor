@@ -404,7 +404,7 @@
     },
     "guard_mode_enabled": {
       "title": "Guarded Auto-Remediation Mode Enabled",
-      "description": "When true, the janitor's Tier 2 guard path runs ONE specific autonomous action without a human in the loop: posting the baseline branch ruleset to the default branch (force-push block + deletion block + linear-history + 1-approval PR review). Default: false. Every other 'acting' remains in user-invoked skills (Tier 1). Even when enabled, the guard refuses unless `/janitor-autofix-off` is NOT set AND the authenticated viewer is admin on the repo AND the baseline isn't already present. The Tier 1 user-invoked surface (`/janitor-branch-protection-setup`) works regardless of this knob — it's the human-in-the-loop alternative for users who want one-shot review-and-apply.",
+      "description": "Opt-in master switch for the Tier 2 guarded auto-apply path (default: false). When true, the heartbeat applies the baseline branch ruleset to the default branch automatically — force-push block, deletion block, required linear history, pull-request requirement (1 approval, dismiss stale reviews, thread resolution). Every other janitor remediation stays in user-invoked skills. Even with this on, the apply path no-ops unless every safety gate passes: /janitor-autofix-off NOT set, the authenticated gh viewer is repo admin, and the baseline ruleset is not already present. The Tier 1 user-invoked surface (/janitor-branch-protection-setup) works regardless of this knob.",
       "type": "boolean",
       "default": false,
       "sensitive": false
