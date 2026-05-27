@@ -74,11 +74,14 @@ def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except OSError as exc:
-        # ESRCH = no such process; EPERM = exists but ours not, still alive
-        # for our purposes (no point overlapping). Anything else: treat as
-        # absent so we don't wedge forever.
-        if exc.errno == errno.EPERM:
-            return True
+        # ESRCH = no such process. EPERM = a process with that PID exists
+        # but we don't own it — which for a per-session detector means the
+        # PID was recycled to a stranger after our previous worker exited;
+        # treat it as "not our worker" so we don't wedge waiting for an
+        # unrelated process to finish. Matches the sibling detectors
+        # (local-plugins-update, project-plugins-update).
+        if exc.errno in (errno.ESRCH, errno.EPERM):
+            return False
         return False
     return True
 

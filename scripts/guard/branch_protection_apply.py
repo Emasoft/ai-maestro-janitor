@@ -11,18 +11,22 @@ remains in user-invoked skills.
 
 The path is deliberately separate from `scripts/detectors/` (which are
 read-only by contract). Dispatch calls this module from a dedicated
-phase ONLY when `guard_mode_enabled` is true AND the
-branch-protection detector has surfaced a "missing baseline" finding
-AT LEAST ONCE (an autofix-mode check in dispatch coordinates the two).
+phase (`_phase_guard_branch_protection`) on its own cadence
+(`guard_branch_protection_interval`, default 6 h). Every safety gate
+listed below lives inside this module so the dispatch wiring stays
+trivial — no coordination with the read-only branch-protection detector
+is needed; the module's own idempotency check is the source of truth.
 
 Safety gates (any one false → no action, surface verbatim instead):
-  * guard_mode_enabled == true
-  * scripts/lib/state.autofix_enabled() == true (the per-project toggle
-    from /janitor-autofix-off also vetoes guarded actions — one fewer
+  * `guard_mode_enabled` env-var is truthy
+  * `state.autofix_enabled()` is true (the per-project toggle from
+    `/janitor-autofix-off` also vetoes guarded actions — one fewer
     switch for users to remember)
+  * the repo slug is resolvable from `<plugin-root>/.claude-plugin/plugin.json`
+  * `gh` CLI is on PATH
   * the repo's default branch is discoverable via `gh api`
+  * the baseline ruleset is NOT already present (idempotency)
   * the authenticated viewer is admin on the repo
-  * baseline ruleset is NOT already present (idempotency)
 
 On success:
   * appends to `.janitor/logs/branch-protection-apply.log` with the

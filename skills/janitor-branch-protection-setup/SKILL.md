@@ -36,16 +36,21 @@ produces no double-apply.
   ruleset endpoint requires it). The skill checks before posting.
 * `.claude-plugin/plugin.json` declares `"repository"` as a
   `https://github.com/owner/repo` URL.
+* `CLAUDE_PLUGIN_ROOT` env var is set (Claude Code sets it
+  automatically for every plugin-shipped skill invocation; only
+  matters if you call the helpers manually outside the slash command).
 
 ## Instructions
 
-1. Resolve the repo slug from `.claude-plugin/plugin.json`'s
-   `repository` field:
+1. Resolve the repo slug from this project's `.claude-plugin/plugin.json`
+   `repository` field (the helper lives in the plugin's installed
+   source tree at `${CLAUDE_PLUGIN_ROOT}/scripts/lib/`, never the
+   target project's source tree):
 
    ```bash
    uv run --python 3.12 -c "
-   import sys
-   sys.path.insert(0, 'scripts/lib')
+   import sys, os
+   sys.path.insert(0, os.environ['CLAUDE_PLUGIN_ROOT'] + '/scripts/lib')
    import branch_protection_lib as bpl
    from pathlib import Path
    print(bpl.detect_repo_slug(Path.cwd()) or '')
@@ -57,8 +62,8 @@ produces no double-apply.
 
    ```bash
    uv run --python 3.12 -c "
-   import json, sys
-   sys.path.insert(0, 'scripts/lib')
+   import json, sys, os
+   sys.path.insert(0, os.environ['CLAUDE_PLUGIN_ROOT'] + '/scripts/lib')
    import branch_protection_lib as bpl
    default_branch = bpl.detect_default_branch('<slug>') or '<default>'
    print(json.dumps(bpl.baseline_ruleset_payload(default_branch), indent=2))
@@ -73,8 +78,8 @@ produces no double-apply.
 
    ```bash
    uv run --python 3.12 -c "
-   import sys
-   sys.path.insert(0, 'scripts/lib')
+   import sys, os
+   sys.path.insert(0, os.environ['CLAUDE_PLUGIN_ROOT'] + '/scripts/lib')
    import branch_protection_lib as bpl
    slug = '<slug>'
    default_branch = bpl.detect_default_branch(slug)
