@@ -402,7 +402,7 @@ class BuildPublishSameJob(Rule):
                     matched_text=f"job: {job_id}",
                     description=(
                         "Build and publish in same job — a compromised "
-                        "dependency could exfiltrate publish credentials. "
+                        "dependency could leak publish credentials. "
                         "Split into separate build (read-only) and publish "
                         "(with secrets) jobs connected via artifacts"
                     ),
@@ -467,7 +467,7 @@ class DangerousLifecycleScripts(Rule):
                     matched_text=line.strip(),
                     description=(
                         f"{eco} install runs lifecycle scripts in a workflow "
-                        "with secrets — a compromised dependency can exfiltrate "
+                        "with secrets — a compromised dependency can leak "
                         f"credentials. Add --ignore-scripts, then explicitly "
                         f"rebuild trusted native deps: {eco} rebuild sharp esbuild"
                     ),

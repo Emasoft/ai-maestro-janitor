@@ -1,9 +1,12 @@
-import sys, unittest  # noqa: E401
+import sys
+import unittest
 from pathlib import Path
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-from lib.sentinel.rules_context import RULES  # noqa: E402
+
 from lib.sentinel.model import Workflow  # noqa: E402
+from lib.sentinel.rules_context import RULES  # noqa: E402
 
 
 def fired(text):

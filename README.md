@@ -252,7 +252,7 @@ on-demand when the doctor flags unpinned refs.
   via a precise attacker-context allowlist, `pull_request_target` + fork
   checkout, missing permissions/timeouts, excessive permissions,
   build-publish-same-job, …), and a repo-level pass (missing-zizmor).
-  Recipes in `references/sentinel-rules-recipes.md`.
+  Recipes in `skills/janitor-github-workflow-doctor/references/sentinel-rules-recipes.md`.
 - `/janitor-github-workflow-create` — scaffolds hardened
   `.github/workflows/` from project shape (Python/Node/Rust/Go/plugin) with
   least-privilege `permissions:`, SHA-pinned actions,

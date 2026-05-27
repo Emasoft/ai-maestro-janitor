@@ -323,23 +323,22 @@ def _diff_kv(
             return f"{trust_key}={a_v!r} (only 'no-downgrade' is allowed)"
     # blockExoticSubdeps — true → anything-else is a weakening.
     if block_exotic_key is not None:
-        b_v: Any = b.get(block_exotic_key)
-        a_v: Any = a.get(block_exotic_key)
+        b_exotic: Any = b.get(block_exotic_key)
+        a_exotic: Any = a.get(block_exotic_key)
         # Normalise .npmrc "true"/"false" strings to bool.
-        if isinstance(b_v, str):
-            b_v = b_v.strip().lower() == "true"
-        if isinstance(a_v, str):
-            a_v = a_v.strip().lower() == "true"
-        if b_v is True and a_v is not True:
+        if isinstance(b_exotic, str):
+            b_exotic = b_exotic.strip().lower() == "true"
+        if isinstance(a_exotic, str):
+            a_exotic = a_exotic.strip().lower() == "true"
+        if b_exotic is True and a_exotic is not True:
             return f"{block_exotic_key} set false / removed (was true)"
-        if a_v is False and b_v is not False:
+        if a_exotic is False and b_exotic is not False:
             return f"{block_exotic_key}=false (was true / unset)"
     # audit-level lowered (only relevant for .npmrc).
     if audit_key is not None:
         rank = {"none": 0, "info": 1, "low": 2, "moderate": 3, "high": 4, "critical": 5}
-        b_v = rank.get(str(b.get(audit_key, "")).strip().lower())
-        a_v = rank.get(str(a.get(audit_key, "")).strip().lower())
-        if a_v is not None and a_v < 3:  # below 'moderate'
+        a_rank = rank.get(str(a.get(audit_key, "")).strip().lower())
+        if a_rank is not None and a_rank < 3:  # below 'moderate'
             note = f"was {b.get(audit_key)}" if audit_key in b else "previously unset"
             return f"{audit_key}={a.get(audit_key)} below 'moderate' ({note})"
     # frozen-lockfile (npmrc) lowered to false / removed.
@@ -487,5 +486,12 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
+def _cli_entry() -> None:
+    """CLI shim — the sys.exit call lives inside a function (not at module
+    top level) so an accidental `import pre_tool_pkg_guard` from a test or
+    introspection path never kills the importer's process."""
     sys.exit(main())
+
+
+if __name__ == "__main__":
+    _cli_entry()

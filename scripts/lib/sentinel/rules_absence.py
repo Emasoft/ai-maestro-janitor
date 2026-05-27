@@ -24,7 +24,6 @@ from lib.sentinel.model import (
     Workflow,
 )
 
-
 # --- 1. missing-permissions (Sentinel medium → MAJOR) ----------------------
 
 class MissingPermissions(Rule):

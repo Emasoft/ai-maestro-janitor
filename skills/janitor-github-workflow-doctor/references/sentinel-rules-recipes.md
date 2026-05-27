@@ -1,7 +1,5 @@
 # Sentinel-derived rule fix recipes
 
-Fix recipes for the Sentinel-derived rules in the janitor `janitor-github-workflow-doctor` auditor. These 28 rules were ported from the "Sentinel" GitHub-Actions security scanner and cover supply-chain, injection, permission, and secret-handling weaknesses that the upstream zizmor catalogue does not match. Each section below names a rule id, explains in 1-2 sentences why the pattern is dangerous, shows a **Before** (vulnerable) and **After** (fixed) YAML snippet, and ends with a one-line severity note. Findings whose rule id is not in this reference are surfaced verbatim with `[NEEDS-HUMAN-REVIEW]` — the doctor never silences a matcher with a suppression comment.
-
 ## Table of contents
 
 - [hardcoded-secrets](#hardcoded-secrets)
@@ -32,6 +30,10 @@ Fix recipes for the Sentinel-derived rules in the janitor `janitor-github-workfl
 - [workflow-dispatch-injection](#workflow-dispatch-injection)
 - [dangerous-triggers](#dangerous-triggers)
 - [missing-zizmor](#missing-zizmor)
+
+## Overview
+
+Fix recipes for the 28 Sentinel-derived rules in the janitor `janitor-github-workflow-doctor` auditor — supply-chain, injection, permission, and secret-handling weaknesses that the upstream zizmor catalogue does not match. Each section names a rule id, explains in 1-2 sentences why the pattern is dangerous, shows a **Before** (vulnerable) and **After** (fixed) YAML snippet, and ends with a one-line severity note. Findings whose rule id is not listed here are surfaced verbatim with `[NEEDS-HUMAN-REVIEW]` — the doctor never silences a matcher with a suppression comment.
 
 ## hardcoded-secrets
 
