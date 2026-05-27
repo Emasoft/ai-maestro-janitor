@@ -62,10 +62,12 @@ def main() -> int:
     out = dedupe.emit_once(
         seen,
         key,
-        f"[user-plugins-update] daemon has not swept user-scope plugins in "
-        f"~{age // 60} min (cadence {cadence}s) — daemon may be stuck. "
-        f"Inspect: ~/.claude/janitor-global-state/daemon.log. "
-        f"Restart: kill $(cat ~/.claude/janitor-global-state/daemon.pid).",
+        gs.build_worker_stale_message(
+            worker_tag="user-plugins-update",
+            worker_action="swept user-scope plugins",
+            age_s=age,
+            cadence_s=cadence,
+        ),
     )
     if out is not None:
         print(out)

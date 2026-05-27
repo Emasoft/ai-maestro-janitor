@@ -217,10 +217,12 @@ def _emit_daemon_stale_drift_if_needed() -> None:
     out = dedupe.emit_once(
         seen,
         key,
-        f"[marketplace-refresh] daemon has not refreshed global marketplaces in "
-        f"~{age // 60} min (cadence {cadence}s) — daemon may be stuck. "
-        f"Inspect: ~/.claude/janitor-global-state/daemon.log. "
-        f"Restart: kill $(cat ~/.claude/janitor-global-state/daemon.pid).",
+        gs.build_worker_stale_message(
+            worker_tag="marketplace-refresh",
+            worker_action="refreshed global marketplaces",
+            age_s=age,
+            cadence_s=cadence,
+        ),
     )
     if out is not None:
         print(out)

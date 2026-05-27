@@ -161,6 +161,81 @@ def daemon_is_alive(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
     return (int(time.time()) - hb) <= max_silence_s
 
 
+# ---------- worker-staleness reporting ------------------------------------
+
+def _daemon_log_path() -> Path:
+    """Path the daemon writes its log to (when log rotation is enabled).
+
+    Currently the daemon doesn't open a real log file — only the per-worker
+    rotating logs live under `state_dir()/<worker-name>.log`. Issue #9: the
+    detector messages used to recommend `Inspect: <this path>` unconditionally,
+    sending users at a file that has never existed. Now the message-builders
+    below check `path.exists()` before referencing it."""
+    return global_state_dir() / "daemon.log"
+
+
+def build_worker_stale_message(
+    *,
+    worker_tag: str,
+    worker_action: str,
+    age_s: int,
+    cadence_s: int,
+) -> str:
+    """Build the user-facing 'worker is stale' heartbeat message.
+
+    Issue #9: the original messages said "daemon may be stuck" and recommended
+    inspecting `~/.claude/janitor-global-state/daemon.log` even when the
+    daemon **process** was healthy (just one of its workers had wedged) and
+    the log file had never existed. This builder distinguishes three cases:
+
+    1. **Daemon process dead / heartbeat stale** → the daemon itself stopped.
+       Recommend restart only (no point inspecting a log if there's no
+       process to dump state).
+    2. **Daemon process alive, worker wedged** → the worker subroutine hung
+       inside an otherwise-healthy daemon. Make that distinction explicit so
+       the user doesn't go looking at the daemon process when the process
+       is fine. Restart still works (re-initialises every worker).
+    3. **Log file actually exists** → only then mention "Inspect: <path>".
+
+    `worker_tag` is the bracketed label (e.g. `"marketplace-refresh"`).
+    `worker_action` is the verb phrase the worker performs in English
+    (e.g. `"refreshed global marketplaces"`)."""
+    pid = daemon_pid()
+    hb = read_heartbeat()
+    now = int(time.time())
+    hb_age_s = (now - hb) if hb > 0 else -1
+    daemon_alive = (
+        pid is not None
+        and _process_exists(pid)
+        and 0 <= hb_age_s <= DEFAULT_DAEMON_STALE_SECONDS
+    )
+
+    age_min = age_s // 60
+    head = (
+        f"[{worker_tag}] worker has not {worker_action} in "
+        f"~{age_min} min (cadence {cadence_s}s) — "
+    )
+    if daemon_alive:
+        diagnosis = (
+            f"the daemon process is alive (PID {pid}, last heartbeat "
+            f"{hb_age_s}s ago) but the {worker_tag} worker has likely wedged. "
+        )
+    else:
+        diagnosis = (
+            "the daemon process itself is not responding "
+            "(no recent heartbeat) — daemon may have crashed or hung. "
+        )
+
+    # Only point at the daemon log if it actually exists on disk.
+    inspect_clause = ""
+    log_path = _daemon_log_path()
+    if log_path.exists():
+        inspect_clause = f"Inspect: {log_path}. "
+
+    restart_clause = "Restart: kill $(cat ~/.claude/janitor-global-state/daemon.pid)."
+    return head + diagnosis + inspect_clause + restart_clause
+
+
 # ---------- singleton flock ----------------------------------------------
 
 def acquire_singleton_flock() -> Optional[int]:
