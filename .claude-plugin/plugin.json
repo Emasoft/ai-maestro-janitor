@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -152,35 +152,35 @@
     },
     "auto_update_on_new_release": {
       "title": "Auto-update on new plugin release",
-      "description": "When true (DEFAULT since v0.5.3), the global janitor daemon runs `claude plugin marketplace update ai-maestro-plugins` + `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` whenever a newer release is found on GitHub. On success the daemon sets reload-needed.flag → the next heartbeat emits [janitor-reload] → Claude silently runs /reload-plugins → the auto-rolling cron stub picks up the new version on the next fire. Fully autonomous; no human in the loop. When false, the version-update detector instead surfaces a manual nudge for the user to run /plugin update by hand. Single-writer semantics are guaranteed by the daemon's flock (closes issue #7). Auto-update is best-effort: any CLI failure falls back silently to the manual-nudge path.",
+      "description": "When true (DEFAULT since v0.5.3), the global janitor daemon runs `claude plugin marketplace update ai-maestro-plugins` + `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` whenever a newer release is found on GitHub. On success the daemon sets reload-needed.flag \u2192 the next heartbeat emits [janitor-reload] \u2192 Claude silently runs /reload-plugins \u2192 the auto-rolling cron stub picks up the new version on the next fire. Fully autonomous; no human in the loop. When false, the version-update detector instead surfaces a manual nudge for the user to run /plugin update by hand. Single-writer semantics are guaranteed by the daemon's flock (closes issue #7). Auto-update is best-effort: any CLI failure falls back silently to the manual-nudge path.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "daemon_enabled": {
       "title": "Global janitor daemon enabled",
-      "description": "When true (default), per-session heartbeats lazy-spawn a single OS-wide daemon (scripts/daemon.py) on ~/.claude/janitor-global-state/ that owns every machine-global auto-update task — marketplace-refresh and user-plugins-update. Singleton enforced via exclusive flock so N concurrent Claude Code sessions across N projects produce ONE worker, not N (closes issue #7). When false, the daemon is never spawned AND the per-session shims for the global tasks become silent no-ops. Manual kill switch: `touch ~/.claude/janitor-global-state/kill-switch.flag` (running daemon exits on next loop tick).",
+      "description": "When true (default), per-session heartbeats lazy-spawn a single OS-wide daemon (scripts/daemon.py) on ~/.claude/janitor-global-state/ that owns every machine-global auto-update task \u2014 marketplace-refresh and user-plugins-update. Singleton enforced via exclusive flock so N concurrent Claude Code sessions across N projects produce ONE worker, not N (closes issue #7). When false, the daemon is never spawned AND the per-session shims for the global tasks become silent no-ops. Manual kill switch: `touch ~/.claude/janitor-global-state/kill-switch.flag` (running daemon exits on next loop tick).",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "daemon_marketplace_refresh_interval": {
       "title": "Daemon Marketplace Refresh Cadence (seconds)",
-      "description": "Minimum seconds the daemon waits between bulk `claude plugin marketplace update` runs (no args = every configured marketplace). Default: 1200 (20 min). The daemon is the only writer of the GLOBAL refresh, so a moderate cadence is enough — there is no per-session contention to compensate for. Narrower per-session refreshes of just the local+project plugins' marketplaces still run every 5 min (see marketplace_refresh_interval), so newly-installed marketplaces in `.claude/settings.json` / `.claude/settings.local.json` reach the catalog quickly even while the daemon is between fires. Heartbeat per-session shim emits a stale-daemon drift line when the actual last-run is older than 2× this value.",
+      "description": "Minimum seconds the daemon waits between bulk `claude plugin marketplace update` runs (no args = every configured marketplace). Default: 1200 (20 min). The daemon is the only writer of the GLOBAL refresh, so a moderate cadence is enough \u2014 there is no per-session contention to compensate for. Narrower per-session refreshes of just the local+project plugins' marketplaces still run every 5 min (see marketplace_refresh_interval), so newly-installed marketplaces in `.claude/settings.json` / `.claude/settings.local.json` reach the catalog quickly even while the daemon is between fires. Heartbeat per-session shim emits a stale-daemon drift line when the actual last-run is older than 2\u00d7 this value.",
       "type": "number",
       "default": 1200,
       "sensitive": false
     },
     "daemon_user_plugins_update_interval": {
       "title": "Daemon User-scope Plugins Update Cadence (seconds)",
-      "description": "Minimum seconds the daemon waits between full user-scope plugin sweeps. Default: 3600 (1 h). Each sweep enumerates `claude plugin list --json`, filters to scope==user, and runs `claude plugin update <id> --scope user` sequentially per plugin. Hourly is the right balance for ~80 plugins × ~5 s each (~7 min per sweep) — fresh enough without burning CPU. The per-session shim emits a stale-daemon drift line when the actual last-run is older than 2× this value.",
+      "description": "Minimum seconds the daemon waits between full user-scope plugin sweeps. Default: 3600 (1 h). Each sweep enumerates `claude plugin list --json`, filters to scope==user, and runs `claude plugin update <id> --scope user` sequentially per plugin. Hourly is the right balance for ~80 plugins \u00d7 ~5 s each (~7 min per sweep) \u2014 fresh enough without burning CPU. The per-session shim emits a stale-daemon drift line when the actual last-run is older than 2\u00d7 this value.",
       "type": "number",
       "default": 3600,
       "sensitive": false
     },
     "daemon_version_update_interval": {
       "title": "Daemon Janitor-Self-Update Cadence (seconds)",
-      "description": "Minimum seconds the daemon waits between janitor self-update checks. Default: 21600 (6 h). Each cycle reads the local cache's highest installed version, queries the latest GitHub release of the plugin repo (via `gh api releases/latest`), and — when behind — runs `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` per discovered scope. GitHub releases land at human-day granularity so 6 h cadence keeps everything fresh without churning the network. Gated additionally by auto_update_on_new_release — when that knob is false this cycle is a no-op.",
+      "description": "Minimum seconds the daemon waits between janitor self-update checks. Default: 21600 (6 h). Each cycle reads the local cache's highest installed version, queries the latest GitHub release of the plugin repo (via `gh api releases/latest`), and \u2014 when behind \u2014 runs `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto-detected>` per discovered scope. GitHub releases land at human-day granularity so 6 h cadence keeps everything fresh without churning the network. Gated additionally by auto_update_on_new_release \u2014 when that knob is false this cycle is a no-op.",
       "type": "number",
       "default": 21600,
       "sensitive": false
@@ -376,14 +376,14 @@
     },
     "workflow_security_enabled": {
       "title": "Workflow Security Scan Enabled",
-      "description": "When true (default), the workflow-security detector runs the janitor's native Sentinel scanner (regex + structural + repo tiers) over .github/workflows/ on every heartbeat and surfaces NEW CRITICAL/HIGH findings as a single drift line pointing to /janitor-github-workflow-doctor. READ-ONLY — it never edits a workflow or calls the GitHub API. Set false to disable heartbeat workflow scanning (the on-demand /janitor-github-workflow-doctor skill still works).",
+      "description": "When true (default), the workflow-security detector runs the janitor's native Sentinel scanner (regex + structural + repo tiers) over .github/workflows/ on every heartbeat and surfaces NEW CRITICAL/HIGH findings as a single drift line pointing to /janitor-github-workflow-doctor. READ-ONLY \u2014 it never edits a workflow or calls the GitHub API. Set false to disable heartbeat workflow scanning (the on-demand /janitor-github-workflow-doctor skill still works).",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "workflow_security_interval": {
       "title": "Workflow Security Scan Cadence (seconds)",
-      "description": "Minimum seconds between workflow-security scans. Default: 300 (5 min — runs every heartbeat). The detector content-hashes all workflow files and returns immediately when nothing changed, so an unchanged-workflows fire costs only a few small file reads; a workflow edit forces a fresh scan and re-surfaces the current CRITICAL/HIGH set within one cadence, so a newly-introduced injection or secret-leak cannot sit unnoticed.",
+      "description": "Minimum seconds between workflow-security scans. Default: 300 (5 min \u2014 runs every heartbeat). The detector content-hashes all workflow files and returns immediately when nothing changed, so an unchanged-workflows fire costs only a few small file reads; a workflow edit forces a fresh scan and re-surfaces the current CRITICAL/HIGH set within one cadence, so a newly-introduced injection or secret-leak cannot sit unnoticed.",
       "type": "number",
       "default": 300,
       "sensitive": false
@@ -404,14 +404,14 @@
     },
     "guard_mode_enabled": {
       "title": "Guarded Auto-Remediation Mode Enabled",
-      "description": "Opt-in master switch for the Tier 2 guarded auto-apply path (default: false). When true, the heartbeat applies the baseline branch ruleset to the default branch automatically — force-push block, deletion block, required linear history, pull-request requirement (1 approval, dismiss stale reviews, thread resolution). Every other janitor remediation stays in user-invoked skills. Even with this on, the apply path no-ops unless every safety gate passes: /janitor-autofix-off NOT set, the authenticated gh viewer is repo admin, and the baseline ruleset is not already present. The Tier 1 user-invoked surface (/janitor-branch-protection-setup) works regardless of this knob.",
+      "description": "Opt-in master switch for the Tier 2 guarded auto-apply path (default: false). When true, the heartbeat applies the baseline branch ruleset to the default branch automatically \u2014 force-push block, deletion block, required linear history, pull-request requirement (1 approval, dismiss stale reviews, thread resolution). Every other janitor remediation stays in user-invoked skills. Even with this on, the apply path no-ops unless every safety gate passes: /janitor-autofix-off NOT set, the authenticated gh viewer is repo admin, and the baseline ruleset is not already present. The Tier 1 user-invoked surface (/janitor-branch-protection-setup) works regardless of this knob.",
       "type": "boolean",
       "default": false,
       "sensitive": false
     },
     "guard_actions": {
       "title": "Guarded Auto-Remediation Action Allow-List",
-      "description": "Comma-separated list of guard actions that may run autonomously when `guard_mode_enabled` is true. Default: \"branch-protection\". Only listed actions are eligible; any action absent from this list is treated as opt-out even with guard_mode on. Today the only legal value is `branch-protection` — the list exists so future Tier 2 actions (e.g. `dependabot-config`, `codeowners-skeleton`) can be opted into without re-flipping `guard_mode_enabled`.",
+      "description": "Comma-separated list of guard actions that may run autonomously when `guard_mode_enabled` is true. Default: \"branch-protection\". Only listed actions are eligible; any action absent from this list is treated as opt-out even with guard_mode on. Today the only legal value is `branch-protection` \u2014 the list exists so future Tier 2 actions (e.g. `dependabot-config`, `codeowners-skeleton`) can be opted into without re-flipping `guard_mode_enabled`.",
       "type": "string",
       "default": "branch-protection",
       "sensitive": false
@@ -432,14 +432,14 @@
     },
     "pkg_manager_min_release_age_minutes": {
       "title": "Package-Manager Minimum Release Age (minutes)",
-      "description": "Minimum age (in minutes) a package must reach before the pkg-manager-guard PreToolUse hook will accept it in pnpm/npm config or .npmrc / package.json#pnpm edits. Default: 7200 (~5 days) — matches the safedep.io recommendation following the 2026-05 art-template npm supply-chain compromise (~5 days between malicious publish and detection). Raising this is hardening; lowering it widens the exposure window. The hook applies this threshold to: `pnpm config set minimumReleaseAge`, `minimum-release-age` in .npmrc, and `pnpm.minimumReleaseAge` in package.json / pnpm-workspace.yaml.",
+      "description": "Minimum age (in minutes) a package must reach before the pkg-manager-guard PreToolUse hook will accept it in pnpm/npm config or .npmrc / package.json#pnpm edits. Default: 7200 (~5 days) \u2014 matches the safedep.io recommendation following the 2026-05 art-template npm supply-chain compromise (~5 days between malicious publish and detection). Raising this is hardening; lowering it widens the exposure window. The hook applies this threshold to: `pnpm config set minimumReleaseAge`, `minimum-release-age` in .npmrc, and `pnpm.minimumReleaseAge` in package.json / pnpm-workspace.yaml.",
       "type": "number",
       "default": 7200,
       "sensitive": false
     },
     "pkg_manager_hook_allow_user_override": {
       "title": "Package-Manager Guard Allow User Override",
-      "description": "When false (DEFAULT), the pkg-manager-guard PreToolUse hook HARD-DENIES every detected bypass (CLI flag in Bash or weakening edit in a package-manager config file) — closes issue #8. When true, the hook downgrades 'deny' to 'ask', so each block becomes a per-call confirmation. The default is false because the article's warning (\"Claude will automatically use the CLI options to forcefully set the min age to 0 when he finds out that he cannot install or update something\") describes precisely the failure mode an ask-style prompt cannot prevent — an agent that 'just clicks yes'. Every block is logged regardless to ~/.claude/janitor-global-state/pkg-manager-guard.log.",
+      "description": "When false (DEFAULT), the pkg-manager-guard PreToolUse hook HARD-DENIES every detected bypass (CLI flag in Bash or weakening edit in a package-manager config file) \u2014 closes issue #8. When true, the hook downgrades 'deny' to 'ask', so each block becomes a per-call confirmation. The default is false because the article's warning (\"Claude will automatically use the CLI options to forcefully set the min age to 0 when he finds out that he cannot install or update something\") describes precisely the failure mode an ask-style prompt cannot prevent \u2014 an agent that 'just clicks yes'. Every block is logged regardless to ~/.claude/janitor-global-state/pkg-manager-guard.log.",
       "type": "boolean",
       "default": false,
       "sensitive": false
