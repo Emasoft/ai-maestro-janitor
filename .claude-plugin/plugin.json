@@ -166,9 +166,9 @@
     },
     "daemon_marketplace_refresh_interval": {
       "title": "Daemon Marketplace Refresh Cadence (seconds)",
-      "description": "Minimum seconds the daemon waits between `claude plugin marketplace update` runs. Default: 1800 (30 min). Aggressive cadences are unnecessary because the daemon is the only writer system-wide — no session contention to compensate for. Heartbeat per-session shim emits a stale-daemon drift line when the actual last-run is older than 2× this value.",
+      "description": "Minimum seconds the daemon waits between bulk `claude plugin marketplace update` runs (no args = every configured marketplace). Default: 1200 (20 min). The daemon is the only writer of the GLOBAL refresh, so a moderate cadence is enough — there is no per-session contention to compensate for. Narrower per-session refreshes of just the local+project plugins' marketplaces still run every 5 min (see marketplace_refresh_interval), so newly-installed marketplaces in `.claude/settings.json` / `.claude/settings.local.json` reach the catalog quickly even while the daemon is between fires. Heartbeat per-session shim emits a stale-daemon drift line when the actual last-run is older than 2× this value.",
       "type": "number",
-      "default": 1800,
+      "default": 1200,
       "sensitive": false
     },
     "daemon_user_plugins_update_interval": {
@@ -312,8 +312,8 @@
       "sensitive": false
     },
     "marketplace_refresh_interval": {
-      "title": "Marketplace Bulk-Refresh Cadence (seconds)",
-      "description": "Minimum seconds between bulk marketplace refreshes. Default: 300 (5 min \u2014 runs every heartbeat by default). The detector spawns `claude plugin marketplace update` (no arguments) DETACHED in the background; the bare form refreshes every configured Claude Code marketplace in one CLI call, which is the only Claude Code primitive that handles bulk plugin metadata refresh. Spawning detached and tracking the child PID prevents successive heartbeats from piling up concurrent fetches on the same git indices (the previous run is allowed to finish before the next one starts). Decouples freshness from `plugin-updates` so marketplaces of user/managed-scope plugins (which the janitor never touches) still stay fresh, and so marketplaces whose plugins are not yet installed in this project are also kept current.",
+      "title": "Per-Session Local+Project Marketplace Refresh Cadence (seconds)",
+      "description": "Minimum seconds between per-session marketplace refreshes. Default: 300 (5 min \u2014 runs every heartbeat). Scoped: refreshes ONLY the marketplaces hosting plugins enabled in `<project>/.claude/settings.local.json` (local scope) and `<project>/.claude/settings.json` (project scope). Global / user-scope marketplaces are owned by the central daemon (see daemon_marketplace_refresh_interval, default 20 min) \u2014 the per-session detector deliberately stays narrow so N concurrent Claude Code sessions across N projects do not pile up overlapping bulk refreshes (the bug GitHub issue #7 documented). Spawns `claude plugin marketplace update <name>` once per unique marketplace, sequentially, in a detached background worker. The worker PID is tracked so successive heartbeats that find a prior worker alive skip cleanly. Also keeps the daemon-staleness watchdog (drift line when the daemon\u2019s own refresh hasn\u2019t finished for >2\u00d7 its cadence).",
       "type": "number",
       "default": 300,
       "sensitive": false

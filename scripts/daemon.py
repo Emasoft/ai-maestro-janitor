@@ -67,8 +67,11 @@ import version_update_lib as vu  # noqa: E402
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
 _INTERVAL_MARKETPLACE_REFRESH = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", "1800")
-)  # 30 min — daemon is the only writer; aggressive cadence is unnecessary.
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", "1200")
+)  # 20 min — daemon is the only writer of GLOBAL marketplace refresh
+#  (refreshes every configured marketplace in one CLI call). The per-session
+#  detector handles narrower local+project marketplaces at 5 min, so the
+#  daemon doesn't need to be aggressive here.
 _INTERVAL_USER_PLUGINS_UPDATE = int(
     os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", "3600")
 )  # 1 h — full sweep takes ~7 min; hourly cadence keeps everything fresh.
