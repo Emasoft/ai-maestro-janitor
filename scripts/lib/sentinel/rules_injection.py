@@ -119,10 +119,14 @@ class ShellInjectionJq(Rule):
         "ISSUE_BODY", "COMMENT_BODY", "PR_HEAD_REF", "BRANCH_NAME",
     )
 
-    # Restructured to eliminate the nested-quantifier ReDoS pattern
-    # `([a-zA-Z-]+\s+)*` — the leading `\s+` now lives inside the optional
-    # repetition, so adjacent matches share no ambiguous boundary.
-    JQ_PATTERN = re.compile(r'jq(?:\s+[a-zA-Z-]+)*\s+--arg\s+\w+\s+"[^"]*\$\{')
+    # Bounded repetition + dash-prefix anchor on each optional flag fully
+    # kills the original ReDoS path (`([a-zA-Z-]+\s+)*`): every iteration
+    # now requires `\s+-`, no two iterations can overlap, and {0,10} caps
+    # any pathological input. Real jq commands rarely carry > 5 flags
+    # ahead of --arg, so 10 is comfortably above legitimate usage.
+    JQ_PATTERN = re.compile(
+        r'jq(?:\s+--?[a-zA-Z][a-zA-Z-]*){0,10}\s+--arg\s+\w+\s+"[^"]*\$\{'
+    )
     CURL_JSON_PATTERN = re.compile(r'curl\s.*-d\s+"[^"]*\$\{')
     # Only the braced ${VAR} form, exactly as the Ruby reference matches.
     VAR_PATTERN = re.compile(r"\$\{(\w+)\}")
