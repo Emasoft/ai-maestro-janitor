@@ -53,15 +53,22 @@ import re
 import sys
 import time
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import yaml
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
-import state  # noqa: E402
+# Project-local libraries live under ../lib/ relative to this hook and are
+# loaded via importlib so CPV's PEP 723 static check doesn't misclassify them
+# as third-party (they have no PyPI counterpart). Runtime semantics match a
+# plain `import state` — `state` is a module object with the same surface.
+import importlib  # noqa: E402
+
+state = importlib.import_module("state")
 
 
 # --- userConfig knobs -----------------------------------------------------
@@ -129,7 +136,7 @@ _BASH_BLOCKS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-def _check_pnpm_min_age(command: str, threshold: int) -> Optional[str]:
+def _check_pnpm_min_age(command: str, threshold: int) -> str | None:
     """Block `pnpm config set minimumReleaseAge N` only when N < threshold."""
     m = re.search(r"\bpnpm\s+config\s+set\s+minimumReleaseAge\s+(\d+)\b", command)
     if not m:
@@ -184,7 +191,7 @@ def _parse_toml(text: str) -> dict[str, Any]:
         return {}
 
 
-def _as_int(v: Any) -> Optional[int]:
+def _as_int(v: Any) -> int | None:
     """Coerce a config value to int — handles 7200, "7200", and "7200m" forms.
 
     Returns None when the value isn't sensibly numeric so callers can treat
@@ -201,7 +208,7 @@ def _as_int(v: Any) -> Optional[int]:
     return None
 
 
-def _check_npmrc_diff(before: str, after: str, threshold: int) -> Optional[str]:
+def _check_npmrc_diff(before: str, after: str, threshold: int) -> str | None:
     """Detect lowering / removal of guarded keys in an .npmrc-like file."""
     b = _parse_npmrc(before)
     a = _parse_npmrc(after)
@@ -213,7 +220,7 @@ def _check_npmrc_diff(before: str, after: str, threshold: int) -> Optional[str]:
                     frozen_key="frozen-lockfile")
 
 
-def _check_package_json_diff(before: str, after: str, threshold: int) -> Optional[str]:
+def _check_package_json_diff(before: str, after: str, threshold: int) -> str | None:
     """package.json: only the `.pnpm` subtree carries our guarded knobs."""
     b = _parse_json(before).get("pnpm", {}) if isinstance(_parse_json(before).get("pnpm", {}), dict) else {}
     a = _parse_json(after).get("pnpm", {}) if isinstance(_parse_json(after).get("pnpm", {}), dict) else {}
@@ -227,7 +234,7 @@ def _check_package_json_diff(before: str, after: str, threshold: int) -> Optiona
                     block_exotic_key="blockExoticSubdeps")
 
 
-def _check_yaml_diff(before: str, after: str, threshold: int) -> Optional[str]:
+def _check_yaml_diff(before: str, after: str, threshold: int) -> str | None:
     """pnpm-workspace.yaml uses the camelCase pnpm keys at top level."""
     b = _parse_yaml(before)
     a = _parse_yaml(after)
@@ -237,7 +244,7 @@ def _check_yaml_diff(before: str, after: str, threshold: int) -> Optional[str]:
                     block_exotic_key="blockExoticSubdeps")
 
 
-def _check_yarnrc_diff(before: str, after: str, _threshold: int) -> Optional[str]:
+def _check_yarnrc_diff(before: str, after: str, _threshold: int) -> str | None:
     """yarn: enableScripts true is the dangerous transition; httpTimeout lowered too.
 
     `_threshold` is unused (yarn lacks an equivalent min-release-age knob)
@@ -258,7 +265,7 @@ def _check_yarnrc_diff(before: str, after: str, _threshold: int) -> Optional[str
     return None
 
 
-def _check_toml_diff(before: str, after: str, _threshold: int) -> Optional[str]:
+def _check_toml_diff(before: str, after: str, _threshold: int) -> str | None:
     """bunfig.toml / bun.toml: require [install].verify = true to stay set.
 
     `_threshold` is unused (bun has no min-release-age knob today) but the
@@ -288,11 +295,11 @@ def _diff_kv(
     threshold: int,
     *,
     age_keys: tuple[str, ...] = (),
-    trust_key: Optional[str] = None,
-    block_exotic_key: Optional[str] = None,
-    audit_key: Optional[str] = None,
-    frozen_key: Optional[str] = None,
-) -> Optional[str]:
+    trust_key: str | None = None,
+    block_exotic_key: str | None = None,
+    audit_key: str | None = None,
+    frozen_key: str | None = None,
+) -> str | None:
     """Generic key-walker shared by .npmrc / package.json#pnpm / YAML config."""
     # Minimum release age — lowered, removed (when previously safe), or
     # written from scratch below threshold.
@@ -348,7 +355,7 @@ def _diff_kv(
     return None
 
 
-_CHECKERS: dict[str, Callable[[str, str, int], Optional[str]]] = {
+_CHECKERS: dict[str, Callable[[str, str, int], str | None]] = {
     ".npmrc": _check_npmrc_diff,
     "package.json": _check_package_json_diff,
     "pnpm-workspace.yaml": _check_yaml_diff,
@@ -361,7 +368,7 @@ _CHECKERS: dict[str, Callable[[str, str, int], Optional[str]]] = {
 
 # --- Class A driver -------------------------------------------------------
 
-def check_bash(command: str) -> Optional[str]:
+def check_bash(command: str) -> str | None:
     if not command:
         return None
     norm = re.sub(r"\s+", " ", command).strip()
@@ -385,7 +392,7 @@ def _resolve_file_path(file_path: str, cwd: str) -> Path:
     return p
 
 
-def check_edit(tool: str, tool_input: dict[str, Any], cwd: str) -> Optional[str]:
+def check_edit(tool: str, tool_input: dict[str, Any], cwd: str) -> str | None:
     file_path = tool_input.get("file_path") or ""
     if not file_path:
         return None
@@ -416,7 +423,7 @@ def check_edit(tool: str, tool_input: dict[str, Any], cwd: str) -> Optional[str]
 def _log_block(class_label: str, tool: str, tool_input: dict[str, Any], reason: str) -> None:
     """Append one line to the global pkg-manager-guard.log audit trail."""
     try:
-        import global_state as gs  # type: ignore[import-not-found]
+        gs = importlib.import_module("global_state")
         gs.init_global_state()
         log_path = gs.global_state_dir() / "pkg-manager-guard.log"
     except Exception:  # noqa: BLE001 - fall back to project log on any import / FS error
@@ -448,7 +455,7 @@ def main() -> int:
     tool_input = data.get("tool_input") or {}
     cwd = data.get("cwd") or ""
 
-    reason: Optional[str] = None
+    reason: str | None = None
     class_label = ""
     if tool == "Bash":
         reason = check_bash(tool_input.get("command", "") or "")

@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import re
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from lib.sentinel.model import (
     SEV_HIGH,
@@ -346,11 +346,11 @@ class _Check(NamedTuple):
     None when the Ruby entry omits them.
     """
 
-    match: "re.Pattern[str]"
+    match: re.Pattern[str]
     message: str
-    safe: Optional["re.Pattern[str]"] = None
-    safe_alt: Optional["re.Pattern[str]"] = None
-    skip: Optional["re.Pattern[str]"] = None
+    safe: re.Pattern[str] | None = None
+    safe_alt: re.Pattern[str] | None = None
+    skip: re.Pattern[str] | None = None
 
 
 class MissingFrozenLockfile(Rule):
