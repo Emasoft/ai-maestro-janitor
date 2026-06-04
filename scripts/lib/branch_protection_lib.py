@@ -372,8 +372,15 @@ def detect_required_status_checks(project_root: Path) -> list[dict]:
 def _post_or_patch_ruleset(
     slug: str, payload: dict, existing_id: int | None,
 ) -> tuple[bool, str]:
-    """POST a new ruleset, or PATCH an existing one when `existing_id` is
-    set (idempotent-by-name). Returns (success, message)."""
+    """POST a new ruleset, or PUT (update) an existing one when `existing_id`
+    is set (idempotent-by-name). Returns (success, message).
+
+    NOTE: GitHub's "Update a repository ruleset" endpoint is **PUT**
+    `/repos/{owner}/{repo}/rulesets/{id}` — NOT PATCH. A PATCH returns 404 on
+    real GitHub (verified on the live repo, janitor#14); an earlier PATCH here
+    only ever passed because the test gh-stub answers any method. The update
+    path is rarely hit (the apply short-circuits once both baselines are
+    present), which is why the bug stayed latent."""
     if not gh_available():
         return (False, "gh CLI not in PATH")
     if existing_id is None:
@@ -385,7 +392,7 @@ def _post_or_patch_ruleset(
         verb = "created"
     else:
         argv = [
-            "gh", "api", "--method", "PATCH",
+            "gh", "api", "--method", "PUT",
             f"repos/{slug}/rulesets/{existing_id}",
             "--input", "-",
         ]

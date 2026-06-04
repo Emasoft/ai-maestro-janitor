@@ -43,7 +43,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 #   * gh api repos/o/r                  --jq .permissions.admin  → GH_ADMIN
 #   * gh api repos/o/r/rulesets                                  → GH_RULESETS_BODY/RC
 #   * gh api --method POST   repos/o/r/rulesets       --input -  → GH_POST_BODY/RC
-#   * gh api --method PATCH  repos/o/r/rulesets/<id>  --input -  → GH_PATCH_BODY/RC
+#   * gh api --method PUT    repos/o/r/rulesets/<id>  --input -  → GH_PUT_BODY/RC
 #   * gh api --method DELETE repos/o/r/rulesets/<id>            → GH_DELETE_BODY/RC
 _GH_STUB = '''#!/usr/bin/env python3
 import json, os, sys
@@ -66,8 +66,8 @@ if argv[:2] == ["api", "--method"]:
             pass
     if verb == "POST":
         out(os.environ.get("GH_POST_BODY", "{}"), int(os.environ.get("GH_POST_RC", "0")), os.environ.get("GH_POST_STDERR", ""))
-    if verb == "PATCH":
-        out(os.environ.get("GH_PATCH_BODY", "{}"), int(os.environ.get("GH_PATCH_RC", "0")), os.environ.get("GH_PATCH_STDERR", ""))
+    if verb == "PUT":  # ruleset UPDATE is PUT (not PATCH) on real GitHub — janitor#14
+        out(os.environ.get("GH_PUT_BODY", "{}"), int(os.environ.get("GH_PUT_RC", "0")), os.environ.get("GH_PUT_STDERR", ""))
     if verb == "DELETE":
         out(os.environ.get("GH_DELETE_BODY", "{}"), int(os.environ.get("GH_DELETE_RC", "0")), os.environ.get("GH_DELETE_STDERR", ""))
     sys.stderr.write("gh-stub: unhandled method %r\\n" % (verb,))
@@ -554,9 +554,9 @@ def test_apply_noop_when_both_baselines_already_present(project_env: Path) -> No
 def test_apply_acts_when_only_one_baseline_present(project_env: Path) -> None:
     """Only ONE ratified ruleset present → NOT converged → apply proceeds.
 
-    The history ruleset already exists (so it is PATCHed by id), the
-    pr/checks ruleset is missing (so it is POSTed). Both succeed → loud
-    apply announcement.
+    The history ruleset already exists (so it is PUT/updated by id — GitHub's
+    update-ruleset endpoint is PUT, not PATCH, janitor#14), the pr/checks ruleset
+    is missing (so it is POSTed). Both succeed → loud apply announcement.
     """
     _make_plugin_manifest(project_env)
     gh = _make_gh_stub(project_env)
@@ -566,13 +566,13 @@ def test_apply_acts_when_only_one_baseline_present(project_env: Path) -> None:
             "GH_RULESETS_BODY": json.dumps([
                 {"id": 42, "name": "baseline-history-protect", "target": "branch"},
             ]),
-            "GH_PATCH_BODY": json.dumps({"id": 42, "name": "baseline-history-protect"}),
+            "GH_PUT_BODY": json.dumps({"id": 42, "name": "baseline-history-protect"}),
             "GH_POST_BODY": json.dumps({"id": 99, "name": "baseline-pr-and-checks"}),
         },
     )
     assert r.returncode == 0, r.stderr
     assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
-    # PATCH path reports "updated", POST path reports "created".
+    # PUT (update) path reports "updated", POST path reports "created".
     assert "updated id=42" in r.stdout
     assert "created id=99" in r.stdout
 
