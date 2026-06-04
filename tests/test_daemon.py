@@ -383,9 +383,12 @@ def test_oauth_rotator_tick_noop_when_not_opted_in(monkeypatch: pytest.MonkeyPat
     assert calls == [], "tick must be a total no-op when not opted in"
 
 
-def test_oauth_rotator_tick_runs_rotator_when_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_oauth_rotator_tick_runs_rotator_when_opted_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Opt-in flag present → the tick runs `rotator.py tick --only-if-claude-running`
     via _run_workload (a TIMED subprocess, never in-process)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))  # isolate the flock
     daemon = _import_daemon_module()
     calls: list[list[str]] = []
     monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)
@@ -395,6 +398,30 @@ def test_oauth_rotator_tick_runs_rotator_when_opted_in(monkeypatch: pytest.Monke
     cmd = calls[0]
     assert cmd[1].endswith("rotator.py")
     assert cmd[-2:] == ["tick", "--only-if-claude-running"]
+
+
+def test_oauth_rotator_tick_does_not_gate_on_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SINGLE-WRITER lives in the SUBPROCESS, not the daemon wrapper (P3, audit §3.4):
+    even when the rotator-tick flock is HELD, the daemon STILL spawns `rotator.py tick`
+    — the rotator's own main() self-locks and skips internally. A daemon-side lock would
+    instead block the daemon's OWN subprocess from ever acquiring the flock (and would
+    never see a human's manual `rotator.py` run), so the daemon must NOT gate on it."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    daemon = _import_daemon_module()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)
+    monkeypatch.setattr(daemon, "_run_workload", lambda cmd, **_k: calls.append(cmd))
+    # Hold the real flock — the daemon must STILL spawn the subprocess (which self-locks).
+    held = daemon.gs.acquire_oauth_rotator_lock()
+    assert held is not None
+    try:
+        daemon.task_oauth_rotator_tick()
+        assert len(calls) == 1, "daemon must spawn rotator.py regardless of the lock"
+        assert calls[0][-2:] == ["tick", "--only-if-claude-running"]
+    finally:
+        daemon.gs.release_oauth_rotator_lock(held)
 
 
 # ---------- _run_workload kill-path reap (audit finding 4) -----------------

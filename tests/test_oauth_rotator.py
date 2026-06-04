@@ -142,6 +142,65 @@ def test_write_slot_file_fallback_is_0600_and_roundtrips(tmp_path: Path, monkeyp
     assert rotator.read_slot("nobody@x.com") is None
 
 
+def test_slot_keychain_write_returns_sentinel_on_called_process_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SECURITY (P1): `security` PRESENT but the write FAILS (CalledProcessError) must NOT be
+    confused with `security` ABSENT (FileNotFoundError). The former returns the distinct
+    KEYCHAIN_WRITE_FAILED sentinel (fail-closed); the latter returns plain False (off-mac, the
+    Linux keyring / plaintext fallback is legitimate)."""
+    # security present but the add fails (locked keychain, declined ACL, non-zero exit).
+    def _raise_called(*_a, **_k):
+        raise rotator.subprocess.CalledProcessError(1, ["security"])
+    monkeypatch.setattr(rotator, "_security_add_password_via_stdin", _raise_called)
+    res = rotator._slot_keychain_write("a@x.com", _blob("t"))
+    assert res is rotator.KEYCHAIN_WRITE_FAILED         # distinct sentinel, NOT False
+    assert res != False                                 # noqa: E712 — sentinel is not falsy-False
+
+    # security ABSENT → FileNotFoundError → falls through to the Linux keyring, which is also
+    # absent here → plain False (so the plaintext fallback is reachable off-mac).
+    def _raise_notfound(*_a, **_k):
+        raise FileNotFoundError("security")
+    monkeypatch.setattr(rotator, "_security_add_password_via_stdin", _raise_notfound)
+    monkeypatch.setattr(rotator.subprocess, "run", lambda *_a, **_k: (_ for _ in ()).throw(FileNotFoundError("secret-tool")))
+    assert rotator._slot_keychain_write("a@x.com", _blob("t")) is False
+
+
+def test_write_slot_fails_closed_on_keychain_write_error_no_plaintext(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SECURITY (P1): on a simulated-mac path where `security` is PRESENT but the keychain write
+    FAILS, write_slot must FAIL CLOSED — it raises and does NOT drop a 0600 plaintext slot file
+    (the exact regression the P4a migration + delete-plaintext-slots eliminated)."""
+    slots = tmp_path / "slots"
+    slots.mkdir()
+    monkeypatch.setattr(rotator, "SLOTS", slots)
+    # Keychain present-but-failing: the primary write returns the fail-closed sentinel.
+    monkeypatch.setattr(rotator, "_slot_keychain_write",
+                        lambda *a, **k: rotator.KEYCHAIN_WRITE_FAILED)
+    with pytest.raises(rotator.SlotKeychainWriteError):
+        rotator.write_slot("a@x.com", _blob("must-not-leak-to-disk"))
+    # The whole point: NO plaintext token file was created on the mac path.
+    assert not (slots / "a@x.com.json").exists()
+    assert list(slots.glob("*.json")) == []
+
+
+def test_cmd_tick_survives_fail_closed_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P1 fail-closed must NOT crash the unattended tick: a SlotKeychainWriteError from
+    cmd_capture is swallowed (the live cred is safe; the slot just isn't mirrored this beat),
+    and the tick still proceeds to cmd_auto. The standalone `capture` command still raises."""
+    monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    monkeypatch.setattr(rotator, "migrate_root_to_canonical", lambda: None)
+    monkeypatch.setattr(rotator, "_keepalive_refresh", lambda: None)
+    monkeypatch.setattr(rotator, "_repair_integrity", lambda: None)
+    monkeypatch.setattr(rotator, "_bootstrap_seeded_slots", lambda: None)
+
+    def _boom(_only: bool) -> int:
+        raise rotator.SlotKeychainWriteError("keychain locked")
+    monkeypatch.setattr(rotator, "cmd_capture", _boom)
+    auto_ran: list[bool] = []
+    monkeypatch.setattr(rotator, "cmd_auto", lambda: auto_ran.append(True) or 0)
+    rc = rotator.cmd_tick(only_if_running=True)   # must NOT raise
+    assert rc == 0
+    assert auto_ran == [True], "cmd_auto must still run after a fail-closed capture"
+
+
 def _isolate_slot_keychain(monkeypatch: pytest.MonkeyPatch) -> None:
     """Point BOTH the primary and backup slot keychain services at throwaway names so a
     test never touches the production slot items (write_slot mirrors to both, Pillar 2)."""

@@ -90,6 +90,7 @@ def _killswitch_path() -> Path: return global_state_dir() / "kill-switch.flag"
 def _spawn_marker_path() -> Path: return global_state_dir() / "daemon.spawn-attempt.ts"
 def _reload_flag_path() -> Path: return global_state_dir() / "reload-needed.flag"
 def _marketplace_lock_path() -> Path: return global_state_dir() / "marketplace-op.lock"
+def _oauth_rotator_lock_path() -> Path: return global_state_dir() / "oauth-rotator-tick.lock"
 
 
 def daemon_pid() -> Optional[int]:
@@ -300,6 +301,83 @@ def marketplace_lock() -> Iterator[bool]:
     finally:
         if fd is not None:
             release_marketplace_lock(fd)
+
+
+# ---------- oauth-rotator-tick lock --------------------------------------
+#
+# A SEPARATE cross-process flock (distinct from the singleton daemon flock AND
+# the marketplace lock) that serialises every OAuth-rotator TICK against every
+# other tick-class mutation. The daemon's 60 s `oauth-rotator-tick` and a human's
+# manual `rotator.py tick`/`switch`/`migrate-slots` are different PROCESSES that
+# both write state.json + the live/slot keychain; without a shared lock they race
+# on a lost `last_switch_at`/`live_429_streak` update or two near-simultaneous
+# switches that split the live credential from `state.live_email` (audit §3.4).
+# Per-project PID dedup cannot prevent that cross-session race — only a shared
+# OS-level lock can. The rotator is a machine-wide single-writer, exactly like the
+# marketplace ops.
+#
+# Non-blocking BY DESIGN: a loser SKIPS its tick rather than waiting. The daemon
+# re-fires every 60 s and a manual tick is a one-shot the user re-runs, so skipping
+# is always safe; blocking would risk wedging a session's heartbeat turn or
+# tripping the daemon's workload timeout. Skip-and-retry is deadlock-proof.
+
+def acquire_oauth_rotator_lock() -> Optional[int]:
+    """Non-blocking exclusive flock on oauth-rotator-tick.lock.
+
+    Return the fd on success — the caller MUST release it via
+    release_oauth_rotator_lock() once the rotator tick finishes. Return None when
+    another process already holds it; the caller MUST then SKIP the tick this round
+    (never block on it).
+    """
+    init_global_state()
+    fd = os.open(str(_oauth_rotator_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except (BlockingIOError, OSError) as exc:
+        try:
+            os.close(fd)
+        finally:
+            pass
+        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
+            return None
+        # Unexpected — surface to logs but don't crash the caller.
+        state.log_line("daemon", f"unexpected oauth-rotator-lock flock error: {exc}")
+        return None
+
+
+def release_oauth_rotator_lock(fd: int) -> None:
+    """Release the oauth-rotator-tick flock and close the fd. Best-effort."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def oauth_rotator_lock() -> Iterator[bool]:
+    """Serialise an OAuth-rotator tick against every other tick-class process.
+
+    Yields True when the lock was acquired (run the tick), or False when another
+    process holds it (SKIP this round — the caller re-fires on its normal cadence).
+    Releases the lock on exit iff it was held.
+
+        with gs.oauth_rotator_lock() as got:
+            if not got:
+                # log "deferred (another rotator tick in progress)"; return
+                ...
+            # safe to run the rotator tick
+    """
+    fd = acquire_oauth_rotator_lock()
+    try:
+        yield fd is not None
+    finally:
+        if fd is not None:
+            release_oauth_rotator_lock(fd)
 
 
 # ---------- spawn ---------------------------------------------------------

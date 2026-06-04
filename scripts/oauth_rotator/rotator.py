@@ -56,6 +56,7 @@ from pathlib import Path
 # already puts scripts/lib on sys.path); the insert below makes the import work in the
 # standalone case too. janitor_integrity is pure-stdlib, so it adds no PEP-723 deps.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
 
 KEYCHAIN_SERVICE = "Claude Code-credentials"
@@ -82,6 +83,26 @@ SLOT_BACKUP_KEYCHAIN_SERVICE = os.environ.get(
 # Env-overridable for tests only.
 LIVE_BACKUP_KEYCHAIN_SERVICE = os.environ.get(
     "CLAUDE_ROTATOR_LIVE_BACKUP_KEYCHAIN_SERVICE", "Claude Code-credentials-livebak")
+
+
+class SlotKeychainWriteError(RuntimeError):
+    """A keychain/keyring was PRESENT but refused a slot write — fail CLOSED.
+
+    Raised by write_slot when _slot_keychain_write reports KEYCHAIN_WRITE_FAILED
+    (a locked keychain, a declined ACL prompt, a `security` non-zero exit). The
+    caller must NOT fall back to a plaintext slot file in this case — that would
+    silently re-create exactly the plaintext token files the P4a migration +
+    delete-plaintext-slots removed. The plaintext fallback is reachable ONLY when
+    the keychain is genuinely ABSENT (off-mac, no keyring)."""
+
+
+# Distinct, truthy sentinel returned by _slot_keychain_write when a keychain that
+# IS present FAILS the write (vs plain False = "no keychain accepted it, the
+# off-mac plaintext fallback is legitimate"). A unique object so callers can tell
+# the three outcomes apart: True (stored), False (no keychain → fallback OK), and
+# KEYCHAIN_WRITE_FAILED (keychain present but failed → fail closed). SECURITY-critical
+# (audit §3.1): it stops a transient keychain hiccup from dropping a plaintext token.
+KEYCHAIN_WRITE_FAILED = object()
 ROLES_URL = "https://api.anthropic.com/api/oauth/claude_cli/roles"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 OAUTH_BETA = "oauth-2025-04-20"
@@ -423,17 +444,30 @@ def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dic
     return None
 
 
-def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SERVICE) -> bool:
-    """Store an account's slot token ENCRYPTED in the OS keychain under `service`. True
-    iff a keychain/keyring accepted it (macOS `security`, then Linux `secret-tool`)."""
+def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SERVICE):
+    """Store an account's slot token ENCRYPTED in the OS keychain under `service`.
+
+    Three-valued result so callers can distinguish "no keychain" from "keychain
+    failed" (SECURITY-critical — audit §3.1):
+      * True                  — a keychain/keyring accepted the write.
+      * False                 — NO keychain/keyring is present (off-mac, no
+                                `secret-tool`); the plaintext-file fallback is legitimate.
+      * KEYCHAIN_WRITE_FAILED — macOS `security` IS present but the write FAILED
+                                (CalledProcessError: locked keychain, declined ACL,
+                                non-zero exit). The caller MUST fail closed and must
+                                NOT drop a plaintext token file.
+    """
     data = json.dumps(blob, separators=(",", ":"))
     try:
         _security_add_password_via_stdin(service, email, data)
         return True
     except FileNotFoundError:
-        pass  # not macOS — try the Linux keyring
+        pass  # `security` ABSENT → not macOS — try the Linux keyring below
     except subprocess.CalledProcessError:
-        return False
+        # `security` PRESENT but the write FAILED. Do NOT fall through to the Linux
+        # keyring (we ARE on macOS) and do NOT let write_slot drop a plaintext file —
+        # surface a distinct sentinel so the caller fails closed.
+        return KEYCHAIN_WRITE_FAILED
     try:
         r = subprocess.run(
             ["secret-tool", "store", "--label", "Claude Code rotator slot",
@@ -468,8 +502,19 @@ def write_slot(email: str, blob: dict) -> None:
     """Persist an account's slot token ENCRYPTED in the OS keychain — to BOTH the primary
     and the redundant backup service (Pillar 2, Decision 2), so a deleted/corrupt primary
     keychain item is recoverable from the mirror. Only when no keychain/keyring is present
-    (Linux desktop without one) does it fall back to a 0600 plaintext file — never on macOS."""
+    (Linux desktop without one) does it fall back to a 0600 plaintext file — never on macOS.
+
+    FAIL CLOSED (audit §3.1): if the keychain IS present but the write FAILS
+    (KEYCHAIN_WRITE_FAILED — locked keychain, declined ACL, `security` non-zero exit),
+    raise SlotKeychainWriteError instead of dropping a 0600 plaintext token file. Returning
+    False (no keychain at all) is the ONLY case that reaches the plaintext fallback, so a
+    momentary keychain hiccup can never silently re-create the plaintext slots P4a removed."""
     primary_ok = _slot_keychain_write(email, blob)
+    if primary_ok is KEYCHAIN_WRITE_FAILED:
+        # macOS keychain present but refused the write — do NOT write plaintext.
+        raise SlotKeychainWriteError(
+            "keychain write failed for slot %s — refusing to drop a plaintext token "
+            "(unlock the keychain / approve the access prompt, then retry)" % email)
     if primary_ok:
         _slot_keychain_write(email, blob, service=SLOT_BACKUP_KEYCHAIN_SERVICE)  # mirror
         return
@@ -1013,7 +1058,15 @@ def _keepalive_refresh() -> list[str]:
         fresh = refresh_oauth_token(blob)
         if fresh is None:
             continue  # refresh failed — keep the old token; F2a rotates away if it lapses
-        write_slot(email, fresh)
+        try:
+            write_slot(email, fresh)
+        except SlotKeychainWriteError as exc:
+            # FAIL CLOSED (P1): a locked/declined keychain refused the write. Do NOT drop a
+            # plaintext token and do NOT crash the unattended tick — keep the old slot token
+            # (F2a rotates away if it lapses) and skip the state update for this slot.
+            print("[keepalive] %s: keychain write refused (%s) — kept old token, skipped"
+                  % (email, exc), file=sys.stderr)
+            continue
         meta = slots.get(email)
         if isinstance(meta, dict):
             meta["fp"] = fingerprint(fresh)
@@ -1067,35 +1120,121 @@ def _profile_has_session_key(email: str, *, now: float | None = None) -> bool:
     return any(exp > chrome_now for (exp,) in rows)
 
 
-def _invoke_slot_capture(email: str) -> bool:
-    """Mint a refresh-bearing slot for `email` by driving its SEEDED Chrome session.
+def _env_truthy(val: str | None) -> bool:
+    """True iff `val` is a recognised affirmative (`1/true/yes/on`, case-insensitive).
 
-    Shells the sibling slot_capture_browser.py as a TIMED subprocess (headless;
-    180s cap so a wedged Playwright never stalls the tick). True iff it exited 0.
-    This is the ONE external-process seam — tests monkeypatch it so no real browser
-    / network is ever touched."""
+    Mirrors scripts/lib/state.is_truthy_env so the rotator (which imports only
+    janitor_integrity, not state) agrees on env-flag parsing — an unset/empty/garbage
+    value is False, so CLAUDE_ROTATOR_BOOTSTRAP_HEADLESS defaults OFF (headful)."""
+    return (val or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _bootstrap_pid_path(email: str) -> Path:
+    """Per-email PID lockfile for the detached capture (``<ROOT>/.bootstrap-<email>.pid``).
+
+    Sanitises the email the same way slot_path does (`/`→`_`) so the filename is safe."""
+    safe = email.replace("/", "_")
+    return ROOT / (".bootstrap-%s.pid" % safe)
+
+
+def _bootstrap_pid_alive(pid: int) -> bool:
+    """True iff `pid` is a live process (so a prior capture for this email is still
+    running). Any OSError (ESRCH = gone, EPERM = recycled to a stranger we don't own)
+    means "not our live worker" → False, so we never wedge waiting on it. Mirrors the
+    detached-worker detectors' _pid_alive."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _invoke_slot_capture(email: str) -> bool:
+    """LAUNCH (detached) a capture that mints a refresh-bearing slot for `email` from its
+    SEEDED Chrome session. Returns True iff a capture was LAUNCHED this call, False if one
+    was SKIPPED because a prior capture for the same email is still running.
+
+    Why DETACHED + a PID lock (audit §2, §3.5):
+      * A VISIBLE (headful) capture can take tens of seconds and polls the consent page up
+        to 300 s. Run inline under the daemon's 120 s tick cap it would be SIGKILLed and,
+        worse, STARVE real rotation. So we fire-and-forget via subprocess.Popen (no wait):
+        the tick returns immediately and the slot appears on a LATER tick once the capture
+        finishes and writes it (at which point the slot has a refreshToken and is no longer
+        bootstrap-eligible — that absence IS the success signal).
+      * A per-email PID lockfile (`<ROOT>/.bootstrap-<email>.pid`) makes it skip-if-running,
+        so a slow capture spanning several 60 s ticks is launched ONCE, not re-spawned every
+        minute (mirrors the janitor's detached-PID-worker detectors).
+
+    Invocation (audit §2(b).1): run via `uv run --with playwright python …` so Playwright is
+    PROVISIONED — the daemon's own `uv run --script` interpreter declares no playwright, so a
+    bare `sys.executable` crash-on-imports every tick. HEADFUL by default (the mode the user
+    tested working — the consent page's "log in in the window" affordance is impossible
+    headless, and the project's STATE block records automation-flagged HEADLESS Chrome as
+    CF-blocked); `--headless` is appended ONLY when CLAUDE_ROTATOR_BOOTSTRAP_HEADLESS is truthy.
+    The child INHERITS the current env (we deliberately do NOT strip CLAUDE_PLUGIN_DATA) so it
+    resolves the SAME rotator ROOT the daemon did — slots written where the daemon reads them.
+
+    This is the ONE external-process seam — tests monkeypatch it so no real browser / network /
+    keychain is ever touched."""
     script = Path(__file__).resolve().parent / "slot_capture_browser.py"
-    timeout = float(os.environ.get("CLAUDE_ROTATOR_BOOTSTRAP_TIMEOUT_S", "180"))
-    proc = subprocess.run(
-        [sys.executable, str(script), email, "--headless"],
-        capture_output=True, text=True, timeout=timeout,
-    )
-    return proc.returncode == 0
+    pid_path = _bootstrap_pid_path(email)
+    try:
+        prior = int(pid_path.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, OSError, ValueError):
+        prior = 0
+    if prior and _bootstrap_pid_alive(prior):
+        # A capture for this email is already in flight — skip (don't double-launch).
+        return False
+    ROOT.mkdir(parents=True, exist_ok=True)
+    cmd = ["uv", "run", "--with", "playwright", "python", str(script), email]
+    if _env_truthy(os.environ.get("CLAUDE_ROTATOR_BOOTSTRAP_HEADLESS")):
+        cmd.append("--headless")  # opt-in only — the daemon path runs VISIBLE by default
+    log_path = ROOT / ("bootstrap-%s.log" % email.replace("/", "_"))
+    logf = log_path.open("a", encoding="utf-8")
+    try:
+        # Detached: own session (immune to the daemon's SIGHUP/terminal), stdout+stderr to a
+        # logfile under ROOT, no wait(). Env INHERITED (Popen default) — CLAUDE_PLUGIN_DATA
+        # intact so the child resolves the daemon's ROOT.
+        proc = subprocess.Popen(  # noqa: S603 - explicit argv list, no shell
+            cmd,
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    finally:
+        logf.close()
+    try:
+        tmp = pid_path.with_suffix(pid_path.suffix + ".tmp.%d" % os.getpid())
+        tmp.write_text(str(proc.pid), encoding="utf-8")
+        os.replace(tmp, pid_path)
+    except OSError:
+        pass  # pid-file write is best-effort; worst case the next tick re-launches
+    return True
 
 
 def _bootstrap_seeded_slots() -> list[str]:
     """Post-login auto-bootstrap (P4d): for every indexed slot that was SEEDED by a
     human login (a live claude.ai Chrome session) but cannot yet self-renew (no
-    refreshToken), mint a full refresh-bearing slot via slot_capture_browser. This is
-    what lets the "log me in once, the rotator manages the rest" UX work — the human
-    runs open-login.sh per dead account, and the next tick converts those seeded
+    refreshToken), LAUNCH a detached slot_capture_browser to mint a full refresh-bearing
+    slot. This is what lets the "log me in once, the rotator manages the rest" UX work —
+    the human runs open-login.sh per dead account, and a later tick converts those seeded
     sessions into self-renewing slots with NO further human action.
 
-    Best-effort and defensive: each capture is wrapped so a Playwright crash / timeout
-    / missing-profile failure is logged and SKIPPED, never aborting the loop or the
-    tick (a non-fatal helper must not crash the beat it runs in). Returns the list of
-    emails that were successfully bootstrapped."""
-    bootstrapped: list[str] = []
+    LAUNCH contract (audit §2): _invoke_slot_capture fires the capture DETACHED and returns
+    immediately — it does NOT wait for the (visible, up-to-300 s) browser flow. So this
+    returns the list of emails for which a capture was LAUNCHED this call, NOT "succeeded".
+    Success is observed on a LATER tick: a successful capture writes a refresh-bearing slot,
+    which then fails _bootstrap_eligible (has_refresh) and is no longer launched. An email
+    whose capture is still in flight is skipped by _invoke_slot_capture's PID lock (so it is
+    NOT in the returned list while a prior capture for it runs).
+
+    Best-effort and defensive: each launch is wrapped so a spawn failure (uv/Playwright
+    missing, bad env, missing profile) is logged and SKIPPED, never aborting the loop or the
+    tick (a non-fatal helper must not crash the beat it runs in)."""
+    launched: list[str] = []
     state = load_state()
     now = time.time()
     for email in list((state.get("slots") or {}).keys()):
@@ -1106,17 +1245,17 @@ def _bootstrap_seeded_slots() -> list[str]:
         if not _bootstrap_eligible(has_refresh, has_session):
             continue
         try:
-            if _invoke_slot_capture(email):
-                bootstrapped.append(email)
+            if _invoke_slot_capture(email):  # True = LAUNCHED, False = skipped (already running)
+                launched.append(email)
         except Exception as exc:  # noqa: BLE001 — documented best-effort contract
-            # Best-effort by design: a capture failure (Playwright crash, subprocess
-            # timeout, missing profile, bad env) must NOT abort the remaining slots or
-            # the daemon tick this runs inside. We deliberately swallow EVERY exception
-            # here (the one place fail-fast is wrong — this is a last-line convenience,
-            # not a correctness gate) and continue to the next eligible slot.
-            print("[bootstrap] %s: capture failed (%r) — skipped" % (email, exc),
+            # Best-effort by design: a launch failure (uv/Playwright spawn error, missing
+            # profile, bad env) must NOT abort the remaining slots or the daemon tick this
+            # runs inside. We deliberately swallow EVERY exception here (the one place
+            # fail-fast is wrong — this is a last-line convenience, not a correctness gate)
+            # and continue to the next eligible slot.
+            print("[bootstrap] %s: capture launch failed (%r) — skipped" % (email, exc),
                   file=sys.stderr)
-    return bootstrapped
+    return launched
 
 
 def _repair_integrity() -> list[str]:
@@ -1162,8 +1301,13 @@ def _repair_integrity() -> list[str]:
 def cmd_tick(only_if_running: bool) -> int:
     """One daemon beat: migrate the legacy root once, keepalive-refresh slot tokens nearing
     expiry (F2b), run the Pillar-2 integrity-repair pass (verify/restore state + slots + live
-    before any decision), refresh the index, then auto-rotate if needed. No-ops entirely unless
-    the real Claude Code binary is running.
+    before any decision), refresh the index, auto-rotate if needed, and LAST launch any
+    seeded-slot bootstrap captures. No-ops entirely unless the real Claude Code binary is running.
+
+    Ordering note (audit §2(b).2): bootstrap runs DEAD LAST — AFTER cmd_auto — so the
+    usage-based rotation that keeps the user's session alive overnight is NEVER starved by a
+    bootstrap launch, and the detached capture (fire-and-forget) can't delay the beat. (The
+    launch itself returns immediately; this ordering is belt-and-braces.)
     """
     if only_if_running and not claude_running():
         return 0
@@ -1173,10 +1317,19 @@ def cmd_tick(only_if_running: bool) -> int:
     # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
     migrate_root_to_canonical()
     _keepalive_refresh()      # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
-    _bootstrap_seeded_slots()  # P4d: mint refresh-bearing slots from human-seeded sessions (best-effort)
     _repair_integrity()       # Pillar 2: verify/restore state + slots + live BEFORE deciding
-    cmd_capture(False)
-    return cmd_auto()
+    try:
+        cmd_capture(False)
+    except SlotKeychainWriteError as exc:
+        # FAIL CLOSED (P1) without crashing the unattended tick: a locked/declined keychain
+        # refused the slot write. The LIVE credential is untouched (Claude owns it); we simply
+        # don't mirror it into a slot this beat (and never drop a plaintext token). The
+        # standalone `rotator.py capture` still surfaces this error to the present human.
+        print("[capture] keychain write refused (%s) — slot not filed this tick" % exc,
+              file=sys.stderr)
+    rc = cmd_auto()           # usage-based rotation FIRST — never starved by bootstrap
+    _bootstrap_seeded_slots()  # P4d (LAST): launch detached captures from human-seeded sessions
+    return rc
 
 
 def cmd_live_email() -> int:
@@ -1221,12 +1374,7 @@ def main(argv: list[str]) -> int:
               "delete-plaintext-slots | migrate-root}")
         return 2
     cmd = argv[0]
-    if cmd == "capture":
-        return cmd_capture("--only-if-claude-running" in argv[1:])
-    if cmd == "tick":
-        return cmd_tick("--only-if-claude-running" in argv[1:])
-    if cmd == "auto":
-        return cmd_auto()
+    # ── Read-only commands: no lock needed (they never write state.json / keychain). ──
     if cmd == "usage":
         return cmd_usage()
     if cmd == "live-email":
@@ -1235,33 +1383,58 @@ def main(argv: list[str]) -> int:
         return cmd_known_emails()
     if cmd == "list":
         return cmd_list()
-    if cmd == "switch":
-        if len(argv) < 2:
-            print("usage: rotator.py switch <email>")
-            return 2
-        return cmd_switch(argv[1])
-    if cmd == "migrate-slots":
-        res = migrate_slots_to_keychain()
-        if not res:
-            print("migrate-slots: no legacy plaintext slot files to migrate")
+
+    # ── Mutating commands: serialise EVERY rotator write (state.json + the live/slot
+    # keychain) behind the machine-wide rotator-tick flock so the daemon's 60 s tick and
+    # a human's manual `rotator.py …` can NEVER race (audit §3.4 — a lost state update or
+    # a live credential split from state.live_email). Non-blocking: a loser SKIPS (the
+    # daemon re-fires next tick; a human re-runs). The lock lives HERE, in the subprocess
+    # every invocation runs — NOT in the daemon's task wrapper. A daemon-side lock would
+    # only block the daemon's OWN rotator.py subprocess and would never see a manual run,
+    # so it could not prevent the daemon-vs-manual race it was meant to. ──
+    _MUTATING = {"capture", "tick", "auto", "switch",
+                 "migrate-slots", "delete-plaintext-slots", "migrate-root"}
+    if cmd not in _MUTATING:
+        print("unknown command: %s" % cmd)
+        return 2
+    with gs.oauth_rotator_lock() as got:
+        if not got:
+            print("rotator: another rotator operation is in progress — skipped this run "
+                  "(safe to retry).", file=sys.stderr)
             return 0
-        for email, ok in res:
-            print("migrate-slots: %s -> keychain %s" % (email, "VERIFIED" if ok else "FAILED"))
-        return 0 if all(ok for _, ok in res) else 1
-    if cmd == "delete-plaintext-slots":
-        # SECURITY cleanup — only AFTER migrate-slots verified. Refuse if any
-        # plaintext slot is not yet readable from the keychain (would lose a token).
-        legacy = sorted(SLOTS.glob("*.json")) if SLOTS.is_dir() else []
-        unsafe = [f.stem for f in legacy if _slot_keychain_read(f.stem) is None]
-        if unsafe:
-            print("delete-plaintext-slots REFUSED — not yet in the keychain (run "
-                  "migrate-slots first): %s" % ", ".join(unsafe))
-            return 1
-        removed = delete_plaintext_slot_files()
-        print("delete-plaintext-slots: removed %d plaintext file(s): %s"
-              % (len(removed), ", ".join(removed) or "(none)"))
-        return 0
-    if cmd == "migrate-root":
+        if cmd == "capture":
+            return cmd_capture("--only-if-claude-running" in argv[1:])
+        if cmd == "tick":
+            return cmd_tick("--only-if-claude-running" in argv[1:])
+        if cmd == "auto":
+            return cmd_auto()
+        if cmd == "switch":
+            if len(argv) < 2:
+                print("usage: rotator.py switch <email>")
+                return 2
+            return cmd_switch(argv[1])
+        if cmd == "migrate-slots":
+            res = migrate_slots_to_keychain()
+            if not res:
+                print("migrate-slots: no legacy plaintext slot files to migrate")
+                return 0
+            for email, ok in res:
+                print("migrate-slots: %s -> keychain %s" % (email, "VERIFIED" if ok else "FAILED"))
+            return 0 if all(ok for _, ok in res) else 1
+        if cmd == "delete-plaintext-slots":
+            # SECURITY cleanup — only AFTER migrate-slots verified. Refuse if any
+            # plaintext slot is not yet readable from the keychain (would lose a token).
+            legacy = sorted(SLOTS.glob("*.json")) if SLOTS.is_dir() else []
+            unsafe = [f.stem for f in legacy if _slot_keychain_read(f.stem) is None]
+            if unsafe:
+                print("delete-plaintext-slots REFUSED — not yet in the keychain (run "
+                      "migrate-slots first): %s" % ", ".join(unsafe))
+                return 1
+            removed = delete_plaintext_slot_files()
+            print("delete-plaintext-slots: removed %d plaintext file(s): %s"
+                  % (len(removed), ", ".join(removed) or "(none)"))
+            return 0
+        # cmd == "migrate-root"
         legacy, canonical, moved = migrate_root_to_canonical()
         if legacy == canonical:
             print("migrate-root: canonical and legacy root are identical (%s) — no-op" % canonical)
@@ -1272,8 +1445,6 @@ def main(argv: list[str]) -> int:
         else:
             print("migrate-root: nothing to migrate (no state.json in %s)" % legacy)
         return 0
-    print("unknown command: %s" % cmd)
-    return 2
 
 
 if __name__ == "__main__":

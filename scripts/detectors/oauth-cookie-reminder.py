@@ -32,10 +32,13 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain-aware slot facts)
 
 # Chrome stores expires_utc as microseconds since 1601-01-01.
 _EPOCH_OFFSET_SEC = 11644473600
@@ -80,27 +83,21 @@ def _cookie_days(profiles_root: Path, email: str, now: float) -> float | None:
     return None
 
 
-def _oauth_info(home: Path, email: str, now: float) -> tuple[bool, float | None]:
-    """(has_refresh_token, token_expiry_days) from the slot file."""
-    f = home / "slots" / f"{email}.json"
-    if not f.is_file():
-        return (False, None)
-    try:
-        data = json.loads(f.read_text())
-    except (json.JSONDecodeError, OSError):
-        return (False, None)
-    if not isinstance(data, dict):
-        return (False, None)
-    inner = data.get("claudeAiOauth", data)
-    if not isinstance(inner, dict):
-        return (False, None)
-    has_refresh = bool(inner.get("refreshToken") or inner.get("refresh_token"))
-    exp = inner.get("expiresAt") or inner.get("expires_at")
-    days: float | None = None
-    if isinstance(exp, (int, float)):
-        secs = exp / 1000 if exp > 1e12 else exp
-        days = (secs - now) / 86400.0
-    return (has_refresh, days)
+def _oauth_map(home: Path, now: float) -> dict[str, tuple[bool, float | None]]:
+    """email -> (has_refresh_token, token_expiry_days), read KEYCHAIN-FIRST.
+
+    Delegates to supervisor._slot_facts — the SAME keychain-aware reader
+    oauth-login-needed uses — instead of reading the plaintext slot files
+    directly (audit §3.2). Since P4a the slot blobs live ENCRYPTED in the OS
+    keychain and the plaintext files were DELETED, so the old direct read
+    always returned (False, None) and made every account look unhealthy. The
+    legacy plaintext file is still honoured as a fallback INSIDE _slot_facts for
+    any not-yet-migrated slot, so this strictly widens what classifies as
+    healthy — it never narrows it."""
+    return {
+        f.email: (f.has_refresh, f.expires_days)
+        for f in supervisor._slot_facts(home, now)
+    }
 
 
 def main() -> int:
@@ -124,10 +121,15 @@ def main() -> int:
         return 0
 
     now = time.time()
+    # Read every slot's OAuth facts ONCE, keychain-first (audit §3.2). The map is
+    # keyed by email; an account with no resolvable slot blob (neither keychain nor
+    # legacy file) defaults to (False, None) — same "unhealthy/login-needed" signal
+    # the old per-file reader produced for a missing file.
+    oauth = _oauth_map(home, now)
     at_risk: list[str] = []
     any_healthy_oauth = False
     for email in slots:
-        has_refresh, oauth_days = _oauth_info(home, email, now)
+        has_refresh, oauth_days = oauth.get(email, (False, None))
         if has_refresh or (oauth_days is not None and oauth_days > 1):
             any_healthy_oauth = True
         cd = _cookie_days(profiles_root, email, now)

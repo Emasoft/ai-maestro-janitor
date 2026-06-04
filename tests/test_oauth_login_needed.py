@@ -65,6 +65,15 @@ def test_has_session_is_bootstrap_case_not_login() -> None:
     assert det.slot_needs_login(False, -10.0, True, 1.0) is False
 
 
+def test_capture_stalled_truth_table() -> None:
+    """B3: slot_capture_stalled is True iff logged-in (has session) but no refreshToken yet —
+    the 'capture launched but never completed' case. has_refresh OR no-session → not stalled."""
+    assert det.slot_capture_stalled(False, True) is True     # logged in, capture not done
+    assert det.slot_capture_stalled(True, True) is False      # already self-renews
+    assert det.slot_capture_stalled(False, False) is False    # no session → that's a LOGIN nudge
+    assert det.slot_capture_stalled(True, False) is False
+
+
 def test_no_refresh_token_has_runway_no_login() -> None:
     """No refresh, no session, but the setup-token still has runway (> grace) → no nudge yet."""
     assert det.slot_needs_login(False, 10.0, False, 1.0) is False
@@ -96,7 +105,9 @@ def _make_cookies(profile_dir: Path, session_expiry_days: float | None) -> None:
     default = profile_dir / "Default"
     default.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(default / "Cookies")
-    con.execute("CREATE TABLE cookies (host_key TEXT, name TEXT, expires_utc INTEGER)")
+    # IF NOT EXISTS so the helper is idempotent — a second _run against the same tmp_path
+    # (the daily-dedupe tests) must not crash on an already-created Cookies db.
+    con.execute("CREATE TABLE IF NOT EXISTS cookies (host_key TEXT, name TEXT, expires_utc INTEGER)")
     exp = int((time.time() + session_expiry_days * 86400 + _EPOCH_OFFSET) * 1_000_000)
     con.execute("INSERT INTO cookies VALUES (?, ?, ?)", ("claude.ai", "sessionKey", exp))
     con.commit()
@@ -157,20 +168,40 @@ def _run(
     return r.stdout, r.returncode
 
 
+def _login_line(out: str) -> str:
+    """The single [oauth-login-needed] line (the LOGIN nudge), or '' if absent."""
+    for ln in out.splitlines():
+        if ln.startswith("[oauth-login-needed]"):
+            return ln
+    return ""
+
+
+def _stalled_line(out: str) -> str:
+    """The single [oauth-capture-stalled] line (the B3 nudge), or '' if absent."""
+    for ln in out.splitlines():
+        if ln.startswith("[oauth-capture-stalled]"):
+            return ln
+    return ""
+
+
 def test_surfaces_only_no_refresh_no_session_slot(tmp_path: Path) -> None:
-    """Three slots: refreshable (skip), no-refresh+live-session (bootstrap, skip),
-    no-refresh+no-session (the ONLY one that needs a human login)."""
+    """Three slots: refreshable (skip), no-refresh+live-session (B3 stalled nudge, NOT login),
+    no-refresh+no-session (the ONLY one that needs a human LOGIN)."""
     out, rc = _run(
         tmp_path,
         {"refresh@x.com": True, "session@x.com": False, "login@x.com": False},
         {"refresh@x.com": 30.0, "session@x.com": 20.0, "login@x.com": None},
     )
     assert rc == 0
-    assert "[oauth-login-needed]" in out
-    assert "login@x.com" in out
-    assert "refresh@x.com" not in out  # daemon refreshes it
-    assert "session@x.com" not in out  # bootstrap-eligible, no login nudge
-    assert "1 account(s) need a one-time login" in out
+    login = _login_line(out)
+    assert "login@x.com" in login
+    assert "refresh@x.com" not in login   # daemon refreshes it
+    assert "session@x.com" not in login   # bootstrap-eligible → not a LOGIN nudge
+    assert "1 account(s) need a one-time login" in login
+    # The live-session-but-no-refresh account surfaces in the SECONDARY stalled nudge instead.
+    stalled = _stalled_line(out)
+    assert "session@x.com" in stalled
+    assert "refresh@x.com" not in stalled  # self-renews → never stalled
 
 
 def test_nudge_names_open_login_and_reassures_default_browser(tmp_path: Path) -> None:
@@ -190,15 +221,31 @@ def test_expired_session_counts_as_no_session(tmp_path: Path) -> None:
     assert "login@x.com" in out
 
 
-def test_silent_when_all_refreshable_or_seeded(tmp_path: Path) -> None:
-    """Every slot either self-renews or has a live session → nothing needs a login."""
+def test_no_login_nudge_when_all_refreshable_or_seeded(tmp_path: Path) -> None:
+    """Every slot either self-renews or has a live session → NO account needs a LOGIN.
+    The seeded-but-no-refresh account still gets the B3 stalled nudge, but the LOGIN line
+    is silent."""
     out, rc = _run(
         tmp_path,
         {"refresh@x.com": True, "session@x.com": False},
         {"refresh@x.com": None, "session@x.com": 25.0},
     )
     assert rc == 0
+    assert "[oauth-login-needed]" not in out          # no LOGIN needed
+    assert "[oauth-capture-stalled]" in out           # but the seeded slot is capture-stalled
+    assert "session@x.com" in _stalled_line(out)
+
+
+def test_fully_silent_when_all_refreshable(tmp_path: Path) -> None:
+    """Every slot self-renews (has refreshToken) → BOTH nudges silent (nothing to do)."""
+    out, rc = _run(
+        tmp_path,
+        {"a@x.com": True, "b@x.com": True},
+        {"a@x.com": None, "b@x.com": 25.0},
+    )
+    assert rc == 0
     assert "[oauth-login-needed]" not in out
+    assert "[oauth-capture-stalled]" not in out
 
 
 def test_daily_dedupe_second_run_silent(tmp_path: Path) -> None:
@@ -210,6 +257,36 @@ def test_daily_dedupe_second_run_silent(tmp_path: Path) -> None:
     second, rc = _run(tmp_path, slots, profiles)
     assert rc == 0
     assert "[oauth-login-needed]" not in second  # deduped within the same day
+
+
+def test_capture_stalled_nudge_points_to_log_and_reseed(tmp_path: Path) -> None:
+    """B3: a logged-in account whose OAuth capture hasn't completed (no refresh + live
+    session) gets the SECONDARY '[oauth-capture-stalled]' nudge pointing at the bootstrap
+    LOG and the open-login.sh re-seed — both paths that ACTUALLY EXIST (the earlier manual
+    capture command referenced ~/.claude/account-rotator/slot_capture_browser.py, which the
+    standalone install does not ship)."""
+    out, rc = _run(tmp_path, {"seed@x.com": False}, {"seed@x.com": 20.0})
+    assert rc == 0
+    stalled = _stalled_line(out)
+    assert "[oauth-capture-stalled]" in stalled
+    assert "seed@x.com" in stalled
+    assert "logged in but their OAuth capture hasn't completed" in stalled
+    assert "bootstrap-<email>.log" in stalled
+    assert "open-login.sh <email>" in stalled
+    # It must NOT be misclassified as a LOGIN nudge.
+    assert _login_line(out) == ""
+
+
+def test_capture_stalled_daily_dedupe(tmp_path: Path) -> None:
+    """B3: the stalled nudge is machine-scoped daily-deduped (separate seen-file from the
+    login nudge) — the same stalled set emits once/day."""
+    slots = {"seed@x.com": False}
+    profiles: dict[str, float | None] = {"seed@x.com": 20.0}
+    first, _ = _run(tmp_path, slots, profiles)
+    assert "[oauth-capture-stalled]" in first
+    second, rc = _run(tmp_path, slots, profiles)
+    assert rc == 0
+    assert "[oauth-capture-stalled]" not in second  # deduped within the same day
 
 
 def test_opt_in_noop_without_rotator(tmp_path: Path) -> None:

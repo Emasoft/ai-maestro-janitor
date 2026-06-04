@@ -89,6 +89,19 @@ def slot_needs_login(
     return token_days is None or token_days <= grace_days
 
 
+def slot_capture_stalled(has_refresh: bool, has_session_key: bool) -> bool:
+    """PURE (B3): is this account LOGGED IN but its OAuth capture has NOT completed?
+
+    True iff it has a live claude.ai session (so it IS bootstrap-eligible — the human
+    already did the one thing only they can do) yet STILL has no refreshToken. The
+    automatic detached capture launches every tick, but if it keeps failing (CF
+    challenge, missing playwright, a wedged consent page) the slot stays stuck in this
+    state forever. That stuck-ness is itself the signal to nudge the user to run the
+    capture MANUALLY once. A slot that already self-renews (has_refresh) or has no
+    session (that's slot_needs_login's LOGIN nudge, not this one) is NOT stalled."""
+    return (not has_refresh) and has_session_key
+
+
 def _cookie_days(profiles_root: Path, email: str, now: float) -> float | None:
     """Days until the persistent claude.ai session cookie expires, or None.
 
@@ -160,32 +173,54 @@ def main() -> int:
         state.rotate_log_if_big("oauth-login-needed")
         return 0
 
-    needing: list[str] = []
+    needing: list[str] = []   # need a one-time human LOGIN (no refresh, no session, expired)
+    stalled: list[str] = []   # B3: logged in (has session) but OAuth capture not yet completed
     for f in facts:
         has_session = _has_live_session(profiles_root, f.email, now)
         if slot_needs_login(f.has_refresh, f.expires_days, has_session, grace):
             needing.append(f.email)
+        elif slot_capture_stalled(f.has_refresh, has_session):
+            stalled.append(f.email)
 
-    if not needing:
-        state.rotate_log_if_big("oauth-login-needed")
-        return 0
+    day = int(now // 86400)
 
-    needing = sorted(needing)
-    # Machine-scoped daily dedupe — the rotator is machine-wide, not per-project,
-    # so one nudge/day regardless of how many projects/sessions fire heartbeats.
-    seen = home / ".oauth-login-needed-seen.txt"
-    sig = hashlib.sha1(",".join(needing).encode("utf-8")).hexdigest()[:8]
-    key = f"due-{int(now // 86400)}-{sig}"
-    emails = ", ".join(needing)
-    msg = (
-        f"[oauth-login-needed] {len(needing)} account(s) need a one-time login: "
-        f"{emails} — run `~/.claude/account-rotator/open-login.sh <email>` for each "
-        f"(opens a DEDICATED Chrome window; your default browser is untouched). "
-        f"The rotator auto-bootstraps the rest."
-    )
-    line = dedupe.emit_once(seen, key, msg)
-    if line is not None:
-        print(line)
+    # PRIMARY nudge — accounts that need a fresh human sign-in. Machine-scoped daily
+    # dedupe (the rotator is machine-wide, not per-project) so one nudge/day regardless
+    # of how many sessions fire heartbeats.
+    if needing:
+        needing = sorted(needing)
+        seen = home / ".oauth-login-needed-seen.txt"
+        sig = hashlib.sha1(",".join(needing).encode("utf-8")).hexdigest()[:8]
+        emails = ", ".join(needing)
+        msg = (
+            f"[oauth-login-needed] {len(needing)} account(s) need a one-time login: "
+            f"{emails} — run `~/.claude/account-rotator/open-login.sh <email>` for each "
+            f"(opens a DEDICATED Chrome window; your default browser is untouched). "
+            f"The rotator auto-bootstraps the rest."
+        )
+        line = dedupe.emit_once(seen, f"due-{day}-{sig}", msg)
+        if line is not None:
+            print(line)
+
+    # SECONDARY nudge (B3) — accounts that ARE logged in but whose automatic OAuth capture
+    # hasn't completed (the detached bootstrap keeps launching but never succeeds: CF
+    # challenge, missing playwright, a wedged consent page). Tell the user to run the
+    # capture MANUALLY once. Separate seen-file + signature so it dedupes independently of
+    # the login nudge (the two sets are disjoint by construction).
+    if stalled:
+        stalled = sorted(stalled)
+        seen2 = home / ".oauth-capture-stalled-seen.txt"
+        sig2 = hashlib.sha1(",".join(stalled).encode("utf-8")).hexdigest()[:8]
+        emails2 = ", ".join(stalled)
+        msg2 = (
+            f"[oauth-capture-stalled] {len(stalled)} account(s) are logged in but their OAuth "
+            f"capture hasn't completed: {emails2} — the rotator retries the capture every tick; "
+            f"if it keeps failing, check the log `~/.claude/account-rotator/bootstrap-<email>.log`, "
+            f"and if the session has lapsed re-run `~/.claude/account-rotator/open-login.sh <email>`."
+        )
+        line2 = dedupe.emit_once(seen2, f"stalled-{day}-{sig2}", msg2)
+        if line2 is not None:
+            print(line2)
 
     state.rotate_log_if_big("oauth-login-needed")
     return 0

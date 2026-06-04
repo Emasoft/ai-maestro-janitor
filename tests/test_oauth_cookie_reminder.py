@@ -8,6 +8,8 @@ emit/silent behaviour. Read-only detector; no network, no real keychain.
 
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
 import os
 import sqlite3
@@ -16,9 +18,26 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 _HERE = Path(__file__).resolve().parent
 _DETECTOR = _HERE.parent / "scripts" / "detectors" / "oauth-cookie-reminder.py"
 _EPOCH_OFFSET = 11644473600  # seconds between 1601-01-01 and 1970-01-01
+
+
+def _load_detector():
+    """Import the hyphenated detector module by path (for in-process monkeypatching).
+
+    scripts/oauth_rotator must be on sys.path first so the detector's
+    `import supervisor` resolves (the detector adds it itself, but importing by
+    spec runs that top-level code, so the path has to exist when exec'd)."""
+    sys.path.insert(0, str(_HERE.parent / "scripts" / "lib"))
+    sys.path.insert(0, str(_HERE.parent / "scripts" / "oauth_rotator"))
+    spec = importlib.util.spec_from_file_location("oauth_cookie_reminder_under_test", _DETECTOR)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _make_cookies(profile_dir: Path, session_expiry_days: float | None) -> None:
@@ -121,6 +140,66 @@ def test_setup_token_near_expiry_reminds(tmp_path: Path) -> None:
     )
     assert "[oauth-cookie-refresh]" in out
     assert "setup-token" in out
+
+
+def test_keychain_backed_refresh_slot_is_seen_healthy_no_plaintext(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P2 (audit §3.2): the detector reads slot OAuth facts KEYCHAIN-FIRST via
+    supervisor._slot_facts, NOT the deleted plaintext slots/<email>.json. A
+    refresh-capable slot that lives ONLY in the keychain (no plaintext file on disk)
+    must classify as healthy → the near-expiry cookie reminder carries the SAFE-window
+    tail, never the URGENT 'no account has healthy OAuth' tail."""
+    mod = _load_detector()
+    home = tmp_path / "rotator"
+    (home / "slots").mkdir(parents=True, exist_ok=True)
+    (home / "state.json").write_text(json.dumps({"slots": {"a@x.com": {}}}))
+    # NO plaintext slot file — the slot lives only in the (faked) keychain.
+    assert not (home / "slots" / "a@x.com.json").exists()
+    prof_root = tmp_path / "profiles"
+    _make_cookies(prof_root / "chrome-profile-a@x.com", 3.0)  # cookie near expiry → reminder fires
+
+    # The keychain-aware reader the detector now delegates to. Returns a
+    # refresh-capable slot for a@x.com — the exact thing the old plaintext reader
+    # could never see (the files were deleted post-migration).
+    fact = mod.supervisor.SlotFact(email="a@x.com", has_refresh=True, expires_days=None)
+    monkeypatch.setattr(mod.supervisor, "_slot_facts", lambda _home, _now: (fact,))
+
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(home))
+    monkeypatch.setenv("CLAUDE_ROTATOR_PROFILES", str(prof_root))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    (tmp_path / "proj").mkdir(exist_ok=True)
+    (tmp_path / "home").mkdir(exist_ok=True)
+
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    rc = mod.main()
+    out = buf.getvalue()
+    assert rc == 0
+    assert "[oauth-cookie-refresh]" in out          # cookie 3d < 7d → reminder fired
+    assert "a@x.com" in out
+    assert "safe window" in out                      # healthy OAuth seen via the keychain reader
+    assert "no account has healthy OAuth" not in out  # NOT the urgent/unhealthy tail
+
+
+def test_oauth_map_delegates_to_slot_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_oauth_map is a thin adapter over supervisor._slot_facts (single keychain-aware
+    source of truth) — it forwards (has_refresh, expires_days) per email verbatim."""
+    mod = _load_detector()
+    home = tmp_path / "rotator"
+    home.mkdir()
+    now = 1_780_000_000.0
+    facts = (
+        mod.supervisor.SlotFact(email="full@x.com", has_refresh=True, expires_days=2.0),
+        mod.supervisor.SlotFact(email="setup@x.com", has_refresh=False, expires_days=5.0),
+    )
+    monkeypatch.setattr(mod.supervisor, "_slot_facts", lambda _home, _now: facts)
+    got = mod._oauth_map(home, now)
+    assert got == {"full@x.com": (True, 2.0), "setup@x.com": (False, 5.0)}
 
 
 def test_opt_in_noop_without_rotator(tmp_path: Path) -> None:

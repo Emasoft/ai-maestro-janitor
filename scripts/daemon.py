@@ -375,6 +375,15 @@ def task_oauth_rotator_tick() -> None:
     (dispatcher-stub re-execs the latest cached version), so
     `_HERE/oauth_rotator/rotator.py` is always the current rotator and no
     separate auto-roll stub is needed.
+
+    SINGLE-WRITER (audit §3.4): the rotator SUBPROCESS self-locks via
+    `gs.oauth_rotator_lock()` inside `rotator.py main()` (skip-if-held), so the
+    daemon's tick and a human's manual `rotator.py tick`/`switch`/`migrate-slots`
+    contend on the SAME machine-wide flock and can never race state.json + the live
+    keychain. The lock lives in the subprocess, NOT here: a daemon-side lock would
+    only block the daemon's OWN subprocess (the manual run never checks it), so it
+    could not prevent the daemon-vs-manual race. The daemon is already a singleton,
+    so there is no daemon-vs-daemon race for a wrapper lock to guard anyway.
     """
     if not oauth_supervisor.opt_in_present():
         return  # rotator not activated on this machine -> silent no-op
