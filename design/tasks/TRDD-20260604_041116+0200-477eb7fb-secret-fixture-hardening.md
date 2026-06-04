@@ -1,9 +1,9 @@
 ---
 trdd-id: 477eb7fb-a16d-40af-b199-5055d9c555a4
 title: Harden the janitor's own secret-shaped test fixtures — fragment at rest
-column: dev
+column: published
 created: 2026-06-04T04:11:16+0200
-updated: 2026-06-04T04:11:16+0200
+updated: 2026-06-04T19:18:52+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -21,13 +21,36 @@ audit-requirements: [secret-scan]
 impacts: [ci-pipeline]
 runtime-targets: [macos, linux]
 last-test-result: pass
-last-test-at: 2026-06-04T04:11:00+0200
-implementation-commits: []
+last-test-at: 2026-06-04T19:13:00+0200
+implementation-commits: [be57abd, c124f49]
+published-version: 0.6.0
+published-at: 2026-06-04T19:15:07+0200
 ---
 
 # TRDD-477eb7fb — Harden the janitor's own secret-shaped test fixtures
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-04
+
+**✅ PUBLISHED v0.6.0 (2026-06-04T19:15:07+0200).** User chose **B2 (squash)**.
+HEAD `be57abd` (squash) + `c124f49` (release) pushed to origin/main; tag
+`v0.6.0`; GH release live. publish.py gates all green: 10492 tests, ruff,
+CPV strict (0 CRIT/MAJ/MIN/NIT). **Post-publish filesystem TruffleHog on the
+shipped tree = 0.** Backups kept: branch `backup-pre-squash-133` + tarball
+`~/janitor-pre-squash-20260604_190040+0200.tar.gz` (local-only, never pushed).
+
+**KEY CORRECTION discovered during the squash** (the TRDD/summary were WRONG):
+of the 116 pre-squash TruffleHog git-history findings, **only 2 were in the
+133 unpushed commits — 110 were backup-branch-only after squash, and 4 URI
+findings were ALREADY-PUBLISHED in v0.5.1** (`remote-credentials.py/.sh` +
+`README.md` — `user:secret@host` doc placeholders, on GitHub ~1mo, no ban).
+The squash removed all 10 Stripe + 4 Slack-webhook + Google/Atlassian/Infura
+partner-patterns + all 35 JDBC/36 Postgres/7 Mongo conn-strings from the
+pushable line. My squash commit introduced **0** findings. The 4 pre-existing
+public URI placeholders in deep history were deliberately NOT force-rewritten
+(disproportionate + destructive for already-public doc placeholders; user
+chose squash, not full-history filter-repo). One working-tree occurrence
+(`README.md` L70) was fixed `user:secret`→`user:****` so the shipped-tree
+filesystem scan is 0.
 
 **Current state:**
 - **Working-tree hardening: DONE & verified, smart-scanner-proof.** Every
