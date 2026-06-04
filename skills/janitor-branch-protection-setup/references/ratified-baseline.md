@@ -109,6 +109,17 @@ for a one-person repo while still enforcing the PR flow for everyone
 else. History protection (`baseline-history-protect`) has NO bypass — a
 force-push or branch deletion is never acceptable, admin or not.
 
+**Emergency history-scrub path (the one exception, out-of-band).** Because
+`baseline-history-protect` has `bypass_actors: []` on `non_fast_forward`, a
+legitimate history rewrite (e.g. scrubbing a leaked secret from `main`) is
+**never reachable via a push** — not even by an admin. The only sanctioned path
+is an out-of-band owner toggle: temporarily set the ruleset's `enforcement` to
+`disabled` (or `evaluate`) in **Settings → Rules → Rulesets**, perform the
+rewrite + `--force-with-lease` push, then immediately re-enable `active`. This
+is a deliberate, audited, human-only operation — documented here so a future
+agent reads "history is protected, scrubbing is owner-toggle-then-rewrite," not
+"history is permanently immutable."
+
 ## Required status checks — auto-detection
 
 The exact shape the GitHub rulesets API wants for `required_status_checks`

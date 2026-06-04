@@ -50,9 +50,27 @@ import yaml
 HISTORY_RULESET_NAME = "baseline-history-protect"
 PR_CHECKS_RULESET_NAME = "baseline-pr-and-checks"
 
-# The pre-migration single-ruleset name. Kept ONLY so the apply path can
-# delete the orphan on re-apply (the ratified model splits it in two).
-LEGACY_RULESET_NAME = "janitor-baseline"
+# Every pre-ratification ruleset name in the COMBINED lineage of BOTH the janitor
+# and the maintainer-agent plugins — the shared orphan-delete UNION agreed on
+# janitor#14 / maintainer#7. The apply path deletes ALL of these by EXACT NAME once
+# the ratified baseline-* pair is confirmed in place, so a repo either plugin ever
+# touched converges to EXACTLY {baseline-history-protect, baseline-pr-and-checks}
+# with no straggler left behind. Name-based ONLY — we NEVER delete a ruleset we did
+# not create (that would nuke an owner's own custom ruleset). This list MUST stay
+# byte-identical to the maintainer plugin's union so whichever applies last fully
+# converges the repo.
+LEGACY_RULESET_NAMES: tuple[str, ...] = (
+    # janitor lineage
+    "janitor-baseline",                  # janitor v0.5.x single ruleset
+    "main-hardening",                    # janitor live split-pair (manual, pre-rename)
+    "main-ci-gate",                      # janitor live split-pair (manual, pre-rename)
+    # maintainer-agent lineage (workflow-protect-branch, pre-ratification)
+    "default-branch-ruleset",
+    "default-branch-no-force-no-delete",
+    "default-branch-required-checks",
+)
+# Back-compat alias: some callers/tests import the singular legacy name.
+LEGACY_RULESET_NAME = LEGACY_RULESET_NAMES[0]
 
 # The GitHub magic ref that resolves to the repo's default branch at apply
 # time. Using this (instead of refs/heads/<name>) keeps the payload byte-
@@ -440,20 +458,23 @@ def apply_baseline_rulesets(
         if not ok:
             rulesets_ok = False
 
-    # Only remove the pre-migration single-ruleset orphan once BOTH
-    # ratified rulesets are confirmed in place — otherwise a failed apply
-    # would strip the legacy protection and leave the branch unprotected.
-    # (idempotent — a missing legacy ruleset reports success "absent".)
+    # Only remove the pre-ratification orphans once BOTH ratified rulesets are
+    # confirmed in place — otherwise a failed apply would strip the legacy
+    # protection and leave the branch unprotected. The baseline-* pair is created
+    # FIRST (above), so there is no unprotected window during the rename. Deletes
+    # the SHARED UNION (janitor + maintainer lineage) by exact name so a repo
+    # either plugin ever touched fully converges. Idempotent — a missing legacy
+    # ruleset reports success "absent".
     all_ok = rulesets_ok
     if rulesets_ok:
-        legacy_ok, legacy_msg = delete_ruleset_by_name(slug, LEGACY_RULESET_NAME)
-        results.append((LEGACY_RULESET_NAME, legacy_ok, legacy_msg))
-        if not legacy_ok:
-            all_ok = False
+        for legacy_name in LEGACY_RULESET_NAMES:
+            legacy_ok, legacy_msg = delete_ruleset_by_name(slug, legacy_name)
+            results.append((legacy_name, legacy_ok, legacy_msg))
+            if not legacy_ok:
+                all_ok = False
     else:
-        results.append(
-            (LEGACY_RULESET_NAME, True, "kept (ratified apply incomplete)"),
-        )
+        for legacy_name in LEGACY_RULESET_NAMES:
+            results.append((legacy_name, True, "kept (ratified apply incomplete)"))
 
     return (all_ok, results, checks)
 

@@ -174,7 +174,14 @@ def test_baseline_payloads_return_exactly_two_named_rulesets(project_env: Path) 
     assert names == ["baseline-history-protect", "baseline-pr-and-checks"]
     assert bpl.HISTORY_RULESET_NAME == "baseline-history-protect"
     assert bpl.PR_CHECKS_RULESET_NAME == "baseline-pr-and-checks"
-    assert bpl.LEGACY_RULESET_NAME == "janitor-baseline"
+    assert bpl.LEGACY_RULESET_NAME == "janitor-baseline"  # back-compat alias
+    # The shared orphan-delete UNION (janitor#14 / maintainer#7) — every
+    # pre-ratification name in BOTH plugins' lineage, so a shared repo converges.
+    assert set(bpl.LEGACY_RULESET_NAMES) == {
+        "janitor-baseline", "main-hardening", "main-ci-gate",
+        "default-branch-ruleset", "default-branch-no-force-no-delete",
+        "default-branch-required-checks",
+    }
 
 
 def test_history_protect_ruleset_shape(project_env: Path) -> None:
@@ -612,6 +619,36 @@ def test_apply_deletes_legacy_orphan_after_applying(project_env: Path) -> None:
     assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
     # The summary names the legacy ruleset with its delete result.
     assert "janitor-baseline=deleted id=7" in r.stdout
+
+
+def test_apply_deletes_full_orphan_union_after_applying(project_env: Path) -> None:
+    """The shared orphan-delete UNION (janitor#14 / maintainer#7): EVERY
+    pre-ratification ruleset name in BOTH plugins' lineage that is present on the
+    repo is DELETEd after the ratified pair lands, so a repo either plugin ever
+    touched converges to exactly {baseline-history-protect, baseline-pr-and-checks}
+    with no straggler."""
+    _make_plugin_manifest(project_env)
+    gh = _make_gh_stub(project_env)
+    union = {
+        "janitor-baseline": 7, "main-hardening": 8, "main-ci-gate": 9,
+        "default-branch-ruleset": 10, "default-branch-no-force-no-delete": 11,
+        "default-branch-required-checks": 12,
+    }
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={
+            "GH_RULESETS_BODY": json.dumps(
+                [{"id": i, "name": n, "target": "branch"} for n, i in union.items()]
+            ),
+            "GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"}),
+            "GH_DELETE_BODY": "",
+            "GH_DELETE_RC": "0",
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    for name, rid in union.items():
+        assert f"{name}=deleted id={rid}" in r.stdout, name
 
 
 def test_apply_reports_auto_detected_checks_in_announcement(project_env: Path) -> None:
