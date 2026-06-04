@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -460,7 +460,7 @@
     },
     "ai_context_poisoning_enabled": {
       "title": "AI-Context-Poisoning Detector Enabled",
-      "description": "When true (default), the `ai-context-poisoning` detector scans the project's installed packages (node_modules/* + every site-packages under .venv/ / venv/ / env/) for source files that write to an agent-context file (CLAUDE.md, .cursorrules, AGENTS.md, .claude/*, .mcp.json, .aider.conf.yml, etc.). This catches the supply-chain attack shape where a postinstall script silently rewrites the user's IDE-bound agent instructions on install. Read-only — never edits a package. Allowlists known config-loader packages (dotenv-cli et al.) so legitimate rewrites are silent. Set false to disable.",
+      "description": "When true (default), the `ai-context-poisoning` detector scans the project's installed packages (node_modules/* + every site-packages under .venv/ / venv/ / env/) for source files that write to an agent-context file (CLAUDE.md, .cursorrules, AGENTS.md, .claude/*, .mcp.json, .aider.conf.yml, etc.). This catches the supply-chain attack shape where a postinstall script silently rewrites the user's IDE-bound agent instructions on install. Read-only \u2014 never edits a package. Allowlists known config-loader packages (dotenv-cli et al.) so legitimate rewrites are silent. Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -481,21 +481,21 @@
     },
     "mcp_rugpull_enabled": {
       "title": "MCP Rug-Pull Detector Enabled",
-      "description": "When true (default), the `mcp-rugpull` detector fingerprints every installed MCP server's identity (transport, command, args, URL, header keys, env-var keys, local-script content hash, npx-resolved package@version) on first run and alerts on every subsequent drift. Catches the rug-pull attack shape where a previously-trusted MCP server silently rewrites its source, endpoint, or tool surface — disclosed attacks have used this to swap a `bash`-tool's spec to exfiltrate $HOME/.ssh on the next agent fire. Read-only. Set false to disable.",
+      "description": "When true (default), the `mcp-rugpull` detector fingerprints every installed MCP server's identity (transport, command, args, URL, header keys, env-var keys, local-script content hash, npx-resolved package@version) on first run and alerts on every subsequent drift. Catches the rug-pull attack shape where a previously-trusted MCP server silently rewrites its source, endpoint, or tool surface \u2014 disclosed attacks have used this to swap a `bash`-tool's spec to exfiltrate $HOME/.ssh on the next agent fire. Read-only. Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "mcp_rugpull_interval": {
       "title": "MCP Rug-Pull Detector Cadence (seconds)",
-      "description": "Minimum seconds between `mcp-rugpull` scans. Default: 3600 (1 h). Server inventory changes are rare and the fingerprint diff is near-free, but a malicious update must surface fast — keep the cadence tight so a freshly-rolled rug-pull is visible within one heartbeat window.",
+      "description": "Minimum seconds between `mcp-rugpull` scans. Default: 3600 (1 h). Server inventory changes are rare and the fingerprint diff is near-free, but a malicious update must surface fast \u2014 keep the cadence tight so a freshly-rolled rug-pull is visible within one heartbeat window.",
       "type": "number",
       "default": 3600,
       "sensitive": false
     },
     "typosquat_watcher_enabled": {
       "title": "Typosquat-Watcher Detector Enabled",
-      "description": "When true (default), the `typosquat-watcher` detector walks every supported lockfile (package-lock.json, yarn.lock, pnpm-lock.yaml, requirements.txt, uv.lock, poetry.lock) and flags any dependency name within Levenshtein distance ≤ 1 of a curated popular-package list. Catches the canonical typosquat shape (react/reactt, ethers/ethersr, web3/web33) BEFORE an advisory feed surfaces it. Read-only — never edits a lockfile. Set false to disable.",
+      "description": "When true (default), the `typosquat-watcher` detector walks every supported lockfile (package-lock.json, yarn.lock, pnpm-lock.yaml, requirements.txt, uv.lock, poetry.lock) and flags any dependency name within Levenshtein distance \u2264 1 of a curated popular-package list. Catches the canonical typosquat shape (react/reactt, ethers/ethersr, web3/web33) BEFORE an advisory feed surfaces it. Read-only \u2014 never edits a lockfile. Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -509,14 +509,14 @@
     },
     "typosquat_max_distance": {
       "title": "Typosquat Max Levenshtein Distance",
-      "description": "Maximum edit distance between a dependency name and a curated popular-package name that still counts as a typosquat. Default: 1 (matches every disclosed campaign — react/reactt, lodash/lodahz, web3/web33). Raise to 2 to also catch transposition typosquats like lodash/lodahs, but expect a higher false-positive rate. Hard-capped at 2 — distance ≥ 3 produces too much noise to be useful.",
+      "description": "Maximum edit distance between a dependency name and a curated popular-package name that still counts as a typosquat. Default: 1 (matches every disclosed campaign \u2014 react/reactt, lodash/lodahz, web3/web33). Raise to 2 to also catch transposition typosquats like lodash/lodahs, but expect a higher false-positive rate. Hard-capped at 2 \u2014 distance \u2265 3 produces too much noise to be useful.",
       "type": "number",
       "default": 1,
       "sensitive": false
     },
     "repo_trust_score_enabled": {
       "title": "Repo Trust-Score Detector Enabled",
-      "description": "When true (default), the `repo-trust-score` detector audits the current project tree for the dropper-shape pattern shared by the two known-malicious repos found in our github-monitoring study (snakebite, Pipeline-Sentinel-CI-CD-Failure-Analysis). Combines five signals into a trust-deficit score: suspicious binaries in promo dirs (image/, samples/, etc.), README download-funnel language pointing at a local binary, SEO-keyword stuffing in README paragraphs, camouflage ratio (heavy README vs thin source), and missing essentials (no CI / tests / LICENSE). Read-only — never edits a file. Set false to disable.",
+      "description": "When true (default), the `repo-trust-score` detector audits the current project tree for the dropper-shape pattern shared by the two known-malicious repos found in our github-monitoring study (snakebite, Pipeline-Sentinel-CI-CD-Failure-Analysis). Combines five signals into a trust-deficit score: suspicious binaries in promo dirs (image/, samples/, etc.), README download-funnel language pointing at a local binary, SEO-keyword stuffing in README paragraphs, camouflage ratio (heavy README vs thin source), and missing essentials (no CI / tests / LICENSE). Read-only \u2014 never edits a file. Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -537,21 +537,21 @@
     },
     "pre_bash_safety_allow_override": {
       "title": "Pre-Bash-Safety Allow-Override Mode",
-      "description": "When true, the `pre-bash-safety` hook returns `permissionDecision: ask` instead of `deny` for every blocked call — so the user can confirm individual legitimate commands per call. Default: false (hard deny).",
+      "description": "When true, the `pre-bash-safety` hook returns `permissionDecision: ask` instead of `deny` for every blocked call \u2014 so the user can confirm individual legitimate commands per call. Default: false (hard deny).",
       "type": "boolean",
       "default": false,
       "sensitive": false
     },
     "context_watchdog_enabled": {
       "title": "Context-Compact Watchdog Enabled (OPT-IN)",
-      "description": "When true, the `pre-tool-context-usage` PreToolUse hook fires on every tool call and injects the live context-window % (read from the statusline's project-local snapshot at <project>/.claude/janitor/context-usage.<session>.json) into the agent's context via additionalContext — advisory only, never altering the tool's permission flow. At or above context_compact_suggest_pct it appends a nudge to run /janitor-compact-context so the agent can compact its own context before the 1M window fills (native auto-compact is unreliable on this window). OPT-IN by default (false) because it fires on EVERY tool call. Part of the context-compact watchdog (TRDD-31095269); pairs with the post-compact-resume PostCompact hook and the /janitor-compact-context skill for an auto-resuming compaction loop for unattended overnight work.",
+      "description": "When true, the `pre-tool-context-usage` PreToolUse hook fires on every tool call and injects the live context-window % (read from the statusline's project-local snapshot at <project>/.claude/janitor/context-usage.<session>.json) into the agent's context via additionalContext \u2014 advisory only, never altering the tool's permission flow. At or above context_compact_suggest_pct it appends a nudge to run /janitor-compact-context so the agent can compact its own context before the 1M window fills (native auto-compact is unreliable on this window). OPT-IN by default (false) because it fires on EVERY tool call. Part of the context-compact watchdog (TRDD-31095269); pairs with the post-compact-resume PostCompact hook and the /janitor-compact-context skill for an auto-resuming compaction loop for unattended overnight work.",
       "type": "boolean",
       "default": false,
       "sensitive": false
     },
     "context_compact_suggest_pct": {
       "title": "Context-Compact Suggest Threshold (%)",
-      "description": "Context-window usage % at or above which the watchdog's PreToolUse hook appends a suggestion to run /janitor-compact-context. Default 60 — leaves ~40% headroom so /compact can still run (wait too long, e.g. to ~999k on the 1M window, and /compact itself fails, forcing a total-loss /clear). Only consulted when context_watchdog_enabled is true.",
+      "description": "Context-window usage % at or above which the watchdog's PreToolUse hook appends a suggestion to run /janitor-compact-context. Default 60 \u2014 leaves ~40% headroom so /compact can still run (wait too long, e.g. to ~999k on the 1M window, and /compact itself fails, forcing a total-loss /clear). Only consulted when context_watchdog_enabled is true.",
       "type": "number",
       "default": 60,
       "sensitive": false
@@ -572,7 +572,7 @@
     },
     "historical_cache_scan_enabled": {
       "title": "Historical-Cache-Scan Detector Enabled",
-      "description": "When true (default), the `historical-cache-scan` detector walks every machine-wide npm/pnpm/yarn cache + every global node_modules path (nvm/fnm/volta/system) checking whether any known-malicious package@version listed in `.janitor/incidents.txt` was ever fetched on this machine. Crucial because removing the bad version from package.json is not enough — `npm install` from the same cache can silently re-fetch. The user maintains `.janitor/incidents.txt` (one `name@version` per line) from OSV.dev MAL-* advisories that supply-chain-watcher surfaces. Read-only — never modifies a cache. Set false to disable. From npm-chainsaw sweep-A.",
+      "description": "When true (default), the `historical-cache-scan` detector walks every machine-wide npm/pnpm/yarn cache + every global node_modules path (nvm/fnm/volta/system) checking whether any known-malicious package@version listed in `.janitor/incidents.txt` was ever fetched on this machine. Crucial because removing the bad version from package.json is not enough \u2014 `npm install` from the same cache can silently re-fetch. The user maintains `.janitor/incidents.txt` (one `name@version` per line) from OSV.dev MAL-* advisories that supply-chain-watcher surfaces. Read-only \u2014 never modifies a cache. Set false to disable. From npm-chainsaw sweep-A.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -593,7 +593,7 @@
     },
     "binary_magic_scanner_enabled": {
       "title": "Binary Magic-Byte Scanner Enabled",
-      "description": "When true (default), the `binary-magic-scanner` detector walks `.github/`, `scripts/`, `docs/`, `tests/`, `examples/`, `image*/`, `download*/`, `release*/` and surfaces any file whose first 8 bytes match an ELF / PE / Mach-O / Java-class / Wasm / Zip magic-byte signature. Catches the dropper-shape malware corpus (snakebite, Pipeline-Sentinel, Sentinel-main-3) from a different angle than `repo-trust-score`. Read-only — never modifies a file. Set false to disable.",
+      "description": "When true (default), the `binary-magic-scanner` detector walks `.github/`, `scripts/`, `docs/`, `tests/`, `examples/`, `image*/`, `download*/`, `release*/` and surfaces any file whose first 8 bytes match an ELF / PE / Mach-O / Java-class / Wasm / Zip magic-byte signature. Catches the dropper-shape malware corpus (snakebite, Pipeline-Sentinel, Sentinel-main-3) from a different angle than `repo-trust-score`. Read-only \u2014 never modifies a file. Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -614,7 +614,7 @@
     },
     "supply_chain_fingerprints_enabled": {
       "title": "Supply-Chain-Fingerprints Detector Enabled",
-      "description": "When true (default), the `supply-chain-fingerprints` heartbeat detector runs six aggregated sub-checks: import-cluster pairing in setup.py + package.json scripts (obfuscation + network/exec clusters), maintainer-join-vs-publish gap on locked deps, wheel-absence heuristic for PyPI deps, fresh-publisher first-release shape, HTTP 451 npm security-hold surfacing, ghost-publisher reawake (long-quiet → sudden republish). Default cadence 6h; live registry calls are opt-in via the per-sub-check flags inside the detector. Read-only — never modifies a file. Set false to disable.",
+      "description": "When true (default), the `supply-chain-fingerprints` heartbeat detector runs six aggregated sub-checks: import-cluster pairing in setup.py + package.json scripts (obfuscation + network/exec clusters), maintainer-join-vs-publish gap on locked deps, wheel-absence heuristic for PyPI deps, fresh-publisher first-release shape, HTTP 451 npm security-hold surfacing, ghost-publisher reawake (long-quiet \u2192 sudden republish). Default cadence 6h; live registry calls are opt-in via the per-sub-check flags inside the detector. Read-only \u2014 never modifies a file. Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -628,7 +628,7 @@
     },
     "provenance_audit_enabled": {
       "title": "Provenance-Audit Detector Enabled",
-      "description": "When true (default), the `provenance-audit` detector scans the project's release infrastructure for SBOM presence, cosign-verify steps, npm provenance flag, in-toto attestation chain, SLSA-level floor, and XZ-style release-vs-git divergence. Read-only — never modifies a file. Set false to disable.",
+      "description": "When true (default), the `provenance-audit` detector scans the project's release infrastructure for SBOM presence, cosign-verify steps, npm provenance flag, in-toto attestation chain, SLSA-level floor, and XZ-style release-vs-git divergence. Read-only \u2014 never modifies a file. Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -642,7 +642,7 @@
     },
     "janitor_self_integrity_enabled": {
       "title": "Janitor Self-Integrity Detector Enabled (OPT-IN)",
-      "description": "When true, the `janitor-self-integrity` detector verifies the janitor's own scripts/ + skills/ + CLAUDE.md against a checked-in SHA-256 manifest, and maintains an HMAC-chained append-only audit log of every heartbeat fire. OPT-IN by default (false) because the verifier produces a drift line on EVERY change to the janitor's own files — useful for the maintainer, noisy for normal users. Flip to true if you want tamper-evidence on the janitor itself.",
+      "description": "When true, the `janitor-self-integrity` detector verifies the janitor's own scripts/ + skills/ + CLAUDE.md against a checked-in SHA-256 manifest, and maintains an HMAC-chained append-only audit log of every heartbeat fire. OPT-IN by default (false) because the verifier produces a drift line on EVERY change to the janitor's own files \u2014 useful for the maintainer, noisy for normal users. Flip to true if you want tamper-evidence on the janitor itself.",
       "type": "boolean",
       "default": false,
       "sensitive": false
