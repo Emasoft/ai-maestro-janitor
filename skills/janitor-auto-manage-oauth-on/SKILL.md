@@ -41,6 +41,39 @@ Code performs anyway. Rotating accounts to extend past a rate limit may still
 conflict with Max usage terms — by running this you accept the account-flagging
 risk. Nothing here touches any account that is not yours.
 
+### Self-healing logins — log in once, the rotator manages the rest
+
+Some accounts can't self-renew on their own: a `setup-token` has no refresh
+token, or a refresh chain is revoked. The rotator closes that gap with two
+heartbeat-driven pieces (TRDD-32acd15f P4c/P4d), so you only ever do the one
+thing a machine can't: the human sign-in.
+
+- **Ask-to-login** — the opt-in `oauth-login-needed` detector surfaces, on the
+  janitor heartbeat, *exactly* the accounts that need a one-time human login —
+  the ones that can neither self-renew (no refresh token) nor auto-bootstrap (no
+  live claude.ai session). The nudge names
+  `~/.claude/account-rotator/open-login.sh <email>` and is explicit that it
+  opens a **dedicated Chrome window**: your default browser (e.g. Safari) stays
+  untouched, and you do **not** need to make Chrome your default — Chrome only
+  needs to be installed. Accounts that already self-renew are never nudged.
+- **Auto-bootstrap** — once you've signed in (a live session now exists in that
+  account's Chrome profile), the daemon's next `oauth-rotator-tick` runs
+  `slot_capture_browser.py` (via `uv run --with playwright`) to mint a
+  refresh-bearing slot from the seeded session, with **no further human action**.
+  It runs **visible** (a real Chrome window appears briefly — Cloudflare blocks
+  headless on the consent page; opt into headless with
+  `CLAUDE_ROTATOR_BOOTSTRAP_HEADLESS=1` only if your environment allows it) and
+  **detached** so it never blocks or starves the keep-alive rotation. From then
+  on the account self-renews like any other. If the capture keeps failing, a
+  secondary `[oauth-capture-stalled]` nudge points you at the bootstrap log and
+  an `open-login.sh` re-seed.
+
+Maturity: both pieces are implemented and unit-tested; full unattended
+end-to-end verification (a live headful capture clearing Cloudflare on the
+consent page) is tracked as TRDD-32acd15f #142 — until that lands, treat the
+auto-bootstrap as best-effort (a failed capture is logged and re-attempted next
+tick, and the stalled nudge tells you when to step in).
+
 ## Prerequisites
 
 - **macOS** — the credential swap uses the macOS `security` keychain CLI. On
@@ -123,7 +156,10 @@ and does NOT touch per-project state. To deactivate, run
 
 ## Resources
 
-- `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/rotator.py` — the rotator engine (`tick`/`auto`/`capture`/`usage`); the daemon's `oauth-rotator-tick` Task runs its `tick`.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/rotator.py` — the rotator engine (`tick`/`auto`/`capture`/`usage`); the daemon's `oauth-rotator-tick` Task runs its `tick`. `tick` also runs the post-login auto-bootstrap (`_bootstrap_seeded_slots`).
+- `${CLAUDE_PLUGIN_ROOT}/scripts/oauth_rotator/slot_capture_browser.py` — mints a refresh-bearing slot from a human-seeded Chrome session (the auto-bootstrap subprocess).
+- `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/oauth-login-needed.py` — the heartbeat detector that nudges you to run `open-login.sh` for accounts that need a one-time login (opens a dedicated Chrome window; default browser untouched).
+- `~/.claude/account-rotator/open-login.sh <email>` — opens the dedicated Chrome for the one-time human sign-in (no default-browser change needed).
 - `${CLAUDE_PLUGIN_ROOT}/scripts/daemon.py` — the always-on daemon that owns the 60s `oauth-rotator-tick`.
 - `${CLAUDE_PLUGIN_DATA}/oauth-rotator/` — persistent state: `opt-in.flag`, `slots/`, `state.json`, `rotator.log`.
 - `design/tasks/TRDD-20260528_131132+0200-32acd15f-account-rotator.md` — full design.
