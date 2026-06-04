@@ -284,6 +284,25 @@ def baselines_present(slug: str) -> bool | None:
     return HISTORY_RULESET_NAME in names and PR_CHECKS_RULESET_NAME in names
 
 
+def _workflow_triggers(wf: dict) -> set[str]:
+    """The set of event names in a workflow's ``on:`` trigger.
+
+    LOAD-BEARING: GitHub's ``on:`` key parses as the YAML 1.1 boolean ``True``
+    under PyYAML, so we look it up under BOTH ``True`` and the literal ``"on"`` —
+    without the ``True`` lookup ``wf.get("on")`` is ``None`` and EVERY workflow
+    would be (wrongly) treated as having no PR trigger, dropping every check.
+    Byte-identical to the maintainer-agent plugin's `triggers()` (janitor#14 /
+    maintainer cde65eb) so both plugins auto-detect the SAME contexts."""
+    on = wf.get(True, wf.get("on"))
+    if isinstance(on, str):
+        return {on}
+    if isinstance(on, list):
+        return set(on)
+    if isinstance(on, dict):
+        return set(on.keys())
+    return set()
+
+
 def detect_required_status_checks(project_root: Path) -> list[dict]:
     """Discover the repo's CI check contexts from its WORKFLOW FILES.
 
@@ -330,6 +349,15 @@ def detect_required_status_checks(project_root: Path) -> list[dict]:
             # applier — skip it and keep collecting from the rest.
             continue
         if not isinstance(wf, dict):
+            continue
+        # Only a PR-triggered workflow can produce a check on a PR. A push-only
+        # workflow's jobs (release / notify / tag-deploy) NEVER report on a PR, so
+        # requiring one as a required_status_checks context would wedge every
+        # non-admin PR forever in "expected, not reported" (admins bypass — which is
+        # exactly why it's invisible on a 1-person repo). Filter to PR-triggered
+        # workflows only — the shared fix coordinated on janitor#14 / maintainer
+        # cde65eb; both plugins MUST detect the same set to stay byte-identical.
+        if not ({"pull_request", "pull_request_target"} & _workflow_triggers(wf)):
             continue
         jobs = wf.get("jobs", {})
         if not isinstance(jobs, dict):

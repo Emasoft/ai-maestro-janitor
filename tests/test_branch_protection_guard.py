@@ -289,7 +289,7 @@ def test_detect_required_status_checks_single_job_uses_job_id(
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     _write_workflow(
         project_env, "ci.yml",
-        "name: CI\non: [push]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n",
+        "name: CI\non: [pull_request]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n",
     )
     assert bpl.detect_required_status_checks(project_env) == [{"context": "validate"}]
 
@@ -301,14 +301,14 @@ def test_detect_required_status_checks_multiple_jobs_sorted_and_unique(
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     _write_workflow(
         project_env, "ci.yml",
-        "on: [push]\njobs:\n"
+        "on: [pull_request]\njobs:\n"
         "  validate:\n    runs-on: ubuntu-latest\n"
         "  lint:\n    runs-on: ubuntu-latest\n",
     )
     # A second file repeats `validate` (must collapse) and adds `test`.
     _write_workflow(
         project_env, "extra.yml",
-        "on: [push]\njobs:\n"
+        "on: [pull_request]\njobs:\n"
         "  test:\n    runs-on: ubuntu-latest\n"
         "  validate:\n    runs-on: ubuntu-latest\n",
     )
@@ -327,7 +327,7 @@ def test_detect_required_status_checks_uses_custom_job_name(
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     _write_workflow(
         project_env, "ci.yml",
-        "on: [push]\njobs:\n"
+        "on: [pull_request]\njobs:\n"
         "  build_job:\n    name: Build & Test\n    runs-on: ubuntu-latest\n",
     )
     assert bpl.detect_required_status_checks(project_env) == [
@@ -342,7 +342,7 @@ def test_detect_required_status_checks_finds_yaml_extension(
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     _write_workflow(
         project_env, "release.yaml",
-        "on: [push]\njobs:\n  publish:\n    runs-on: ubuntu-latest\n",
+        "on: [pull_request]\njobs:\n  publish:\n    runs-on: ubuntu-latest\n",
     )
     assert bpl.detect_required_status_checks(project_env) == [{"context": "publish"}]
 
@@ -357,7 +357,7 @@ def test_detect_required_status_checks_skips_malformed_yaml(
     _write_workflow(project_env, "broken.yml", "jobs: {validate: [unclosed\n")
     _write_workflow(
         project_env, "good.yml",
-        "on: [push]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n",
+        "on: [pull_request]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n",
     )
     # Does not raise; the broken file is silently skipped.
     assert bpl.detect_required_status_checks(project_env) == [{"context": "lint"}]
@@ -370,6 +370,38 @@ def test_detect_required_status_checks_all_malformed_returns_empty(
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     _write_workflow(project_env, "broken.yml", "jobs: {a: [unclosed\n")
     assert bpl.detect_required_status_checks(project_env) == []
+
+
+def test_detect_required_status_checks_filters_push_only_workflows(
+    project_env: Path,
+) -> None:
+    """Push-only workflows are SKIPPED — their jobs NEVER report on a PR, so
+    requiring one as a status check would wedge every non-admin PR forever
+    (janitor#14 / maintainer cde65eb). Only jobs from PR-triggered workflows
+    (`on:` includes pull_request / pull_request_target) are detected. Also
+    exercises the load-bearing YAML `on:`->True parse via the dict form."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    # PR-triggered (list form) → its job IS a required check.
+    _write_workflow(
+        project_env, "ci.yml",
+        "on: [pull_request]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n",
+    )
+    # Push-only → DROPPED (a release job can't report on a PR).
+    _write_workflow(
+        project_env, "release.yml",
+        "on: [push]\njobs:\n  release:\n    runs-on: ubuntu-latest\n",
+    )
+    # Dict-form `on:` with a pull_request key (parsed under the YAML boolean
+    # True) → kept; the schedule key alongside does not matter.
+    _write_workflow(
+        project_env, "audit.yml",
+        "on:\n  pull_request:\n  schedule:\n    - cron: '0 0 * * 0'\n"
+        "jobs:\n  audit:\n    runs-on: ubuntu-latest\n",
+    )
+    assert bpl.detect_required_status_checks(project_env) == [
+        {"context": "audit"},
+        {"context": "validate"},
+    ]
 
 
 def test_detect_repo_slug_parses_standard_url(project_env: Path) -> None:
@@ -661,7 +693,7 @@ def test_apply_reports_auto_detected_checks_in_announcement(project_env: Path) -
     # check-runs. Sorted order → "validate" before "workflow-security".
     _write_workflow(
         project_env, "ci.yml",
-        "on: [push]\njobs:\n"
+        "on: [pull_request]\njobs:\n"
         "  validate:\n    runs-on: ubuntu-latest\n"
         "  workflow-security:\n    runs-on: ubuntu-latest\n",
     )
