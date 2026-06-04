@@ -14,6 +14,14 @@ dependencies = []
 [tool.ruff]
 line-length = 320
 
+[tool.ruff.lint]
+# Match the CPV publish-gate ruleset (cpv-remote-validate runs ruff with
+# `--select=E,F,W,I --ignore=E501`) so local `ruff check .` == the gate.
+# Without I (isort), local lint passed while the gate flagged 412 unsorted
+# imports — keeping them in sync prevents that surprise on every publish.
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
 [tool.mypy]
 ignore_missing_imports = true
 

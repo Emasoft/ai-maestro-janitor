@@ -53,12 +53,18 @@ sys.path.insert(0, str(_SCRIPTS / "lib"))
 sys.path.insert(0, str(_SCRIPTS))
 
 import state  # noqa: E402
+import suppression  # type: ignore[import-not-found]  # noqa: E402
 
 # Only these two severities ride the heartbeat. They mirror SEV_CRITICAL /
 # SEV_HIGH in lib.sentinel.model and the JSON severity contract emitted by
 # doctor_classify.py; MAJOR / MINOR are the on-demand doctor skill's job.
 _HEARTBEAT_SEVERITIES = ("CRITICAL", "HIGH")
 _MAX_SAMPLE = 10
+# Upper bound on a single workflow file read on the cron hot-path. Real
+# workflow YAML is a few KB; anything past this is generated junk or a
+# memory-pressure payload and reading it fully would balloon RSS. Mirrors
+# doctor_classify._MAX_WORKFLOW_BYTES so heartbeat and doctor agree.
+_MAX_WORKFLOW_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 def _iter_workflow_files(workflows_dir: Path) -> list[Path]:
@@ -72,6 +78,12 @@ def _iter_workflow_files(workflows_dir: Path) -> list[Path]:
 
 def main() -> int:
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_WORKFLOW_SECURITY_ENABLED", True):
+        return 0
+    # Hard self-scan guard: never emit security findings about the janitor's
+    # own repo from a heartbeat — feedback loops + confusing self-reports.
+    # The janitor's own CI does the same scan via publish.py + the
+    # CLAUDE_PLUGIN_ALLOW_SELF_SCAN=1 override path.
+    if state.is_self_scan_target():
         return 0
 
     state.init_state()
@@ -90,8 +102,10 @@ def main() -> int:
     per_file_hash: dict[str, str] = {}
     for path in files:
         try:
+            if path.stat().st_size > _MAX_WORKFLOW_BYTES:
+                continue
             text = path.read_text(encoding="utf-8")
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
         rel = str(path.relative_to(project_root))
         texts[rel] = text
@@ -123,6 +137,7 @@ def main() -> int:
         from lib.sentinel.model import Workflow
         from lib.sentinel.rules_absence import RULES as _ABSENCE_RULES
         from lib.sentinel.rules_context import RULES as _CONTEXT_RULES
+        from lib.sentinel.rules_extra import RULES as _EXTRA_RULES
         from lib.sentinel.rules_injection import RULES as _INJECTION_RULES
         from lib.sentinel.rules_repo import REPO_RULES
         from lib.zizmor_classifier import Classifier
@@ -130,15 +145,27 @@ def main() -> int:
         state.log_line("workflow-security", f"scanner import failed: {exc}")
         return 0
 
-    structural_rules = [*_ABSENCE_RULES, *_CONTEXT_RULES, *_INJECTION_RULES]
+    # _EXTRA_RULES carries the disclosed-CVE structural detectors
+    # (workflow-run-pwn-checkout, actions-allow-unsecure-commands, …). They
+    # are all CRITICAL/HIGH, so they ride the heartbeat once included here.
+    structural_rules = [*_ABSENCE_RULES, *_CONTEXT_RULES, *_INJECTION_RULES, *_EXTRA_RULES]
     classifier = Classifier()
+
+    # Project-local suppression table — let the user waive specific
+    # findings via .janitor.toml / .janitorignore before they ride the
+    # heartbeat. Loaded once per scan; per-rule lookup is O(N) over
+    # entry count which is tiny (single-digit in practice).
+    suppress_table = suppression.load(project_root)
 
     # (severity, rel, line, rule_id) tuples for the high-severity findings.
     findings: list[tuple[str, str, int, str]] = []
 
     def _consider(rel: str, finding) -> None:
-        if finding.severity in _HEARTBEAT_SEVERITIES:
-            findings.append((finding.severity, rel, finding.line, finding.rule_id))
+        if finding.severity not in _HEARTBEAT_SEVERITIES:
+            return
+        if suppress_table.is_suppressed(finding.rule_id, file=rel):
+            return
+        findings.append((finding.severity, rel, finding.line, finding.rule_id))
 
     for rel, text in texts.items():
         # Tier 1 — regex RegexSet.

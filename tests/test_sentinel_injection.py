@@ -270,5 +270,141 @@ jobs:
         self.assertNotIn("dangerous-triggers", fired(wf))
 
 
+class TestRunsOnInjection(unittest.TestCase):
+    def test_positive_head_ref_in_runs_on(self):
+        """Disclosed PWNPipe attack: runs-on interpolates fork head ref."""
+        wf = """\
+on: pull_request
+jobs:
+  build:
+    runs-on: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - run: echo hi
+"""
+        self.assertIn("runs-on-injection", fired(wf))
+
+    def test_negative_literal_runs_on(self):
+        """A literal runs-on label is safe."""
+        wf = """\
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"""
+        self.assertNotIn("runs-on-injection", fired(wf))
+
+    def test_negative_safe_trigger_only(self):
+        """Push-only workflow short-circuits even with the bad shape."""
+        wf = """\
+on: [push]
+jobs:
+  build:
+    runs-on: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - run: echo hi
+"""
+        self.assertNotIn("runs-on-injection", fired(wf))
+
+
+class TestIssueCommentToctou(unittest.TestCase):
+    def test_positive_issue_comment_checkout_head_ref(self):
+        """Disclosed PWNPipe attack: issue_comment + checkout PR head_ref."""
+        wf = """\
+on: issue_comment
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+"""
+        self.assertIn("issue-comment-toctou", fired(wf))
+
+    def test_negative_issue_comment_no_checkout(self):
+        """issue_comment trigger without head-ref checkout — safe."""
+        wf = """\
+on: issue_comment
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "got a comment"
+"""
+        self.assertNotIn("issue-comment-toctou", fired(wf))
+
+    def test_negative_pull_request_trigger(self):
+        """pull_request trigger + head_ref checkout — different attack class
+        (covered by dangerous-triggers), not issue-comment-toctou."""
+        wf = """\
+on: pull_request
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+"""
+        self.assertNotIn("issue-comment-toctou", fired(wf))
+
+
+class TestRunBlockWindow(unittest.TestCase):
+    """Audit MEDIUM-1 regression guard for model.in_run_block.
+
+    The look-back used a fixed 20-line window; an attacker padded a
+    multi-line `run: |` script with >20 lines above the payload so the
+    dangerous ${{ }} was classified as "not in a run block" and the
+    CRITICAL shell-injection-expr finding was suppressed. The window is now
+    indentation-bounded, so the payload fires no matter how long the script.
+    """
+
+    @staticmethod
+    def _padded_run_wf(pad_lines: int) -> str:
+        body = "\n".join(f"          echo step-{n}" for n in range(pad_lines))
+        return (
+            "on: pull_request\n"
+            "jobs:\n"
+            "  build:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: |\n"
+            f"{body}\n"
+            '          echo "${{ github.event.pull_request.title }}"\n'
+        )
+
+    def test_payload_after_25_padding_lines_fires(self):
+        """A dangerous expr 25+ lines into a run: block still fires CRITICAL
+        (the old 20-line window missed this)."""
+        self.assertIn("shell-injection-expr", fired(self._padded_run_wf(25)))
+
+    def test_payload_on_first_line_still_fires(self):
+        """Baseline: the same payload on the first body line fires (regression
+        sanity — both ends of the block are covered)."""
+        self.assertIn("shell-injection-expr", fired(self._padded_run_wf(0)))
+
+    def test_expr_in_later_with_block_does_not_false_positive(self):
+        """A dangerous context in a *different* step's with: value, sitting
+        many lines after an earlier run: block, must NOT be misattributed to
+        that run block (indentation boundary stops the upward walk)."""
+        pad = "\n".join(f"          echo line-{n}" for n in range(25))
+        wf = (
+            "on: pull_request\n"
+            "jobs:\n"
+            "  build:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: |\n"
+            f"{pad}\n"
+            "          echo done\n"
+            "      - uses: foo/bar@v1\n"
+            "        with:\n"
+            "          arg: ${{ github.event.pull_request.title }}\n"
+        )
+        self.assertNotIn("shell-injection-expr", fired(wf))
+
+
 if __name__ == "__main__":
     unittest.main()

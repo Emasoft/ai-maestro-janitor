@@ -30,6 +30,17 @@ from dataclasses import dataclass
 from typing import Iterator
 
 from .zizmor_patterns import PATTERN_FALLBACK_FLAGS, PATTERNS
+from .zizmor_patterns_extra import PATTERN_FALLBACK_FLAGS_EXTRA, PATTERNS_EXTRA
+
+# Single source of truth for the regex tier: the base catalog UNION the
+# extension catalog. Merging here (rather than in each consumer — the
+# workflow-security detector and doctor_classify) means every caller of
+# Classifier gets the extra rules automatically and the wiring cannot
+# silently regress (an importer forgetting the union no longer drops the
+# CVE-class extra rules). Dict union is collision-safe: a test asserts no
+# id appears in both PATTERNS and PATTERNS_EXTRA.
+_ALL_PATTERNS = {**PATTERNS, **PATTERNS_EXTRA}
+_ALL_FALLBACK_FLAGS = {**PATTERN_FALLBACK_FLAGS, **PATTERN_FALLBACK_FLAGS_EXTRA}
 
 try:
     import re2 as _re2  # type: ignore[import-not-found]  # google-re2 binding (optional)
@@ -74,8 +85,8 @@ class Classifier:
         re2_pairs: list[tuple[str, str]] = []
         fallback_pairs: list[tuple[str, str]] = []
 
-        for rule_id, (pattern, _sev, _desc) in PATTERNS.items():
-            re2_ok = _RE2_AVAILABLE and PATTERN_FALLBACK_FLAGS.get(rule_id, True)
+        for rule_id, (pattern, _sev, _desc) in _ALL_PATTERNS.items():
+            re2_ok = _RE2_AVAILABLE and _ALL_FALLBACK_FLAGS.get(rule_id, True)
             if re2_ok:
                 try:
                     _re2.compile(pattern)  # type: ignore[union-attr]
@@ -121,7 +132,7 @@ class Classifier:
                     rule_id = self._re2_group_names.get(gname)
                     if rule_id is None:
                         continue
-                    pattern, severity, description = PATTERNS[rule_id]
+                    pattern, severity, description = _ALL_PATTERNS[rule_id]
                     line, col = _line_col(text, m.start())
                     yield Finding(
                         rule_id=rule_id,
@@ -135,7 +146,7 @@ class Classifier:
 
         # Pass 2 — Python re for any pattern RE2 cannot handle.
         for rule_id, compiled in self._fallback_compiled:
-            _pat, severity, description = PATTERNS[rule_id]
+            _pat, severity, description = _ALL_PATTERNS[rule_id]
             for m in compiled.finditer(text):
                 line, col = _line_col(text, m.start())
                 yield Finding(

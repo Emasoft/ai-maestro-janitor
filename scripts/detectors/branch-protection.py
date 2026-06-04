@@ -78,6 +78,9 @@ def _gh_json(args: list[str], *, timeout: float = 15.0):
 def main() -> int:
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_BRANCH_PROTECTION_ENABLED", True):
         return 0
+    # Hard self-scan guard — see state.is_self_scan_target() docstring.
+    if state.is_self_scan_target():
+        return 0
 
     state.init_state()
     project_root = state.project_root()

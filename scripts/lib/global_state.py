@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import fcntl
 import os
@@ -25,17 +26,32 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 import state
 
 # Heartbeat staleness window. The daemon writes daemon.heartbeat.ts on every
-# loop tick (≤ 60 s) AND periodically while a workload subprocess is running;
-# if a session sees the ts older than this, it treats the daemon as stuck even
-# if its PID is still alive. 1800 s (30 min) is wider than any documented
-# workload (marketplace-refresh on 276 marketplaces ~10 min, user-plugins-update
-# across ~80 plugins ~7 min) — false-stale alarms must be near-impossible.
+# loop tick (≤ 60 s) AND every 10 s while a workload subprocess is running
+# (_WORKLOAD_HEARTBEAT_TICK_SEC in daemon.py); if a session sees the ts older
+# than this, it treats the daemon as stuck even if its PID is still alive.
+# 1800 s (30 min) is the heartbeat-SILENCE bound, NOT a task-duration bound:
+# a single bulk refresh can legitimately run for many minutes (a real one was
+# measured at 1641 s / 27 min) yet ticks the heartbeat every 10 s the whole
+# time, so a healthy-but-slow workload never looks silent for 1800 s — which
+# is exactly why liveness keys on this heartbeat, not on per-task completion
+# stamps (those age past one cadence during a long run and would false-alarm).
 DEFAULT_DAEMON_STALE_SECONDS = 1800
+
+# Minimum interval between two lazy-spawn attempts (seconds). ensure_daemon_running()
+# stamps daemon.spawn-attempt.ts on every spawn and refuses to re-spawn within this
+# window. Without it, a daemon that dies immediately on every start (broken PEP-723
+# dep resolution, import error, read-only global_state_dir) would be re-spawned by
+# EVERY heartbeat fire of EVERY session — unbounded churn (and on an NFS/network mount
+# where flock is unreliable, briefly-coexisting daemons). The marker damps that to one
+# attempt per window. Sized at ~2x the expected daemon startup cost so a healthy
+# spawn-die-retry still recovers within a heartbeat or two, but a hard-broken daemon
+# stops thrashing. Overridable for tests / slow hosts via the env var below.
+_DEFAULT_MIN_SPAWN_INTERVAL_SECONDS = 90
 
 
 def global_state_dir() -> Path:
@@ -73,6 +89,7 @@ def _heartbeat_path() -> Path: return global_state_dir() / "daemon.heartbeat.ts"
 def _killswitch_path() -> Path: return global_state_dir() / "kill-switch.flag"
 def _spawn_marker_path() -> Path: return global_state_dir() / "daemon.spawn-attempt.ts"
 def _reload_flag_path() -> Path: return global_state_dir() / "reload-needed.flag"
+def _marketplace_lock_path() -> Path: return global_state_dir() / "marketplace-op.lock"
 
 
 def daemon_pid() -> Optional[int]:
@@ -208,6 +225,81 @@ def release_singleton_flock(fd: int) -> None:
         os.close(fd)
     except OSError:
         pass
+
+
+# ---------- marketplace-operation lock -----------------------------------
+#
+# A SEPARATE cross-process flock (distinct from the singleton daemon flock)
+# that serialises every `claude plugin marketplace update` invocation. The
+# singleton flock guarantees one DAEMON; it does NOT stop the daemon's bulk
+# refresh and a per-session single-market update — different PROCESSES — from
+# running `claude plugin marketplace update` simultaneously and corrupting
+# ~/.claude/plugins/marketplaces/. Per-project PID dedup could not prevent
+# that cross-session race (issue #7); only a shared OS-level lock can.
+#
+# Non-blocking BY DESIGN: a loser SKIPS its turn rather than waiting. Both the
+# daemon (20-min cadence) and the per-session detectors (5-min cadence) re-fire
+# on their own schedule, so skipping is safe; blocking would risk wedging a
+# session's heartbeat turn behind the daemon's ~10-min bulk refresh, or
+# tripping the daemon's own workload timeout. Skip-and-retry is deadlock-proof.
+
+def acquire_marketplace_lock() -> Optional[int]:
+    """Non-blocking exclusive flock on marketplace-op.lock.
+
+    Return the fd on success — the caller MUST release it via
+    release_marketplace_lock() once the marketplace operation finishes.
+    Return None when another process already holds it; the caller MUST then
+    SKIP the marketplace operation this round (never block on it).
+    """
+    init_global_state()
+    fd = os.open(str(_marketplace_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except (BlockingIOError, OSError) as exc:
+        try:
+            os.close(fd)
+        finally:
+            pass
+        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
+            return None
+        # Unexpected — surface to logs but don't crash the caller.
+        state.log_line("daemon", f"unexpected marketplace-lock flock error: {exc}")
+        return None
+
+
+def release_marketplace_lock(fd: int) -> None:
+    """Release the marketplace-op flock and close the fd. Best-effort."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def marketplace_lock() -> Iterator[bool]:
+    """Serialise a `claude plugin marketplace update` against every other process.
+
+    Yields True when the lock was acquired (run the marketplace update), or
+    False when another process holds it (SKIP this round — the caller re-fires
+    on its normal cadence). Releases the lock on exit iff it was held.
+
+        with gs.marketplace_lock() as got:
+            if not got:
+                # log "deferred (marketplace op in progress)"; return
+                ...
+            # safe to run `claude plugin marketplace update ...`
+    """
+    fd = acquire_marketplace_lock()
+    try:
+        yield fd is not None
+    finally:
+        if fd is not None:
+            release_marketplace_lock(fd)
 
 
 # ---------- spawn ---------------------------------------------------------
@@ -400,12 +492,18 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
       * True when we spawned successfully (the child may still be racing the
         flock, but a spawn was issued).
       * False when the kill switch is set, the master `daemon_enabled` knob
-        is off, or the spawn could not happen.
+        is off, the spawn could not happen, OR the spawn was throttled
+        because a previous attempt is still within the min-spawn window.
 
     The master switch is `CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED` (truthy by
     default). When false, the daemon is never lazy-spawned AND every
     per-session shim becomes a silent no-op (the shims call us first; we
     return False, they exit).
+
+    Spawn throttle: daemon.spawn-attempt.ts (stamped by spawn_daemon_detached)
+    gates re-spawns to one per _DEFAULT_MIN_SPAWN_INTERVAL_SECONDS. This is the
+    backoff that stops a die-on-start daemon from being re-spawned by every
+    heartbeat fire of every session.
     """
     if kill_switch_present():
         return False
@@ -413,5 +511,16 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
         return False
     if daemon_is_alive(max_silence_s=max_silence_s):
         return True
+    # Throttle: refuse to re-spawn if the last attempt is still within the
+    # min-spawn window. Reads the marker spawn_daemon_detached already writes,
+    # closing the "written-but-never-read" gap that allowed unbounded respawn
+    # churn when the daemon dies on start.
+    min_interval = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MIN_SPAWN_INTERVAL"),
+        _DEFAULT_MIN_SPAWN_INTERVAL_SECONDS,
+    )
+    last_attempt = state.read_int_state(_spawn_marker_path(), 0)
+    if last_attempt and (int(time.time()) - last_attempt) < min_interval:
+        return False
     spawn_daemon_detached()
     return True

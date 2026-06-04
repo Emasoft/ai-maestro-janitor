@@ -256,3 +256,91 @@ def test_request_daemon_restart_no_daemon_returns_false(state_dir: Path) -> None
     gs = _gs()
     gs.init_global_state()
     assert gs.request_daemon_restart() is False
+
+
+# ---------- spawn throttle / backoff (audit finding 2) ---------------------
+#
+# spawn_daemon_detached() stamps daemon.spawn-attempt.ts; ensure_daemon_running()
+# now READS that marker and refuses to re-spawn within the min-spawn window. This
+# damps the "daemon dies on every start → every heartbeat re-spawns it" churn.
+# We replace the real OS-forking spawn with a call-recorder so we observe the GATE
+# decision (the fork itself is covered by the subprocess tests in test_daemon.py).
+
+
+def _record_spawns(gs):
+    """Swap spawn_daemon_detached for a recorder that also stamps the marker.
+
+    Mirrors the real spawn's marker write (the throttle reads it) without forking
+    a daemon. Returns the calls list.
+    """
+    calls: list[int] = []
+
+    def _fake_spawn():
+        calls.append(int(time.time()))
+        gs.state.atomic_write(gs._spawn_marker_path(), str(int(time.time())))
+        return 12345
+
+    gs.spawn_daemon_detached = _fake_spawn  # type: ignore[assignment]
+    return calls
+
+
+def test_ensure_daemon_running_spawns_when_no_marker(state_dir: Path) -> None:
+    """First call (dead daemon, no prior attempt) spawns and returns True."""
+    gs = _gs()
+    gs.init_global_state()
+    calls = _record_spawns(gs)
+    assert gs.ensure_daemon_running() is True
+    assert len(calls) == 1, "first call with no marker must spawn exactly once"
+    assert gs._spawn_marker_path().is_file(), "spawn must stamp the attempt marker"
+
+
+def test_ensure_daemon_running_throttles_within_window(state_dir: Path) -> None:
+    """A second call right after the first is throttled — no re-spawn, returns False.
+
+    This is the core of the fix: a daemon that died on start does not get
+    re-spawned by the immediately-following heartbeat fire.
+    """
+    gs = _gs()
+    gs.init_global_state()
+    calls = _record_spawns(gs)
+
+    assert gs.ensure_daemon_running() is True   # first → spawns
+    assert gs.ensure_daemon_running() is False  # second, within window → throttled
+    assert len(calls) == 1, "second call within the min-spawn window must NOT re-spawn"
+
+
+def test_ensure_daemon_running_respawns_after_window(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once the min-spawn window elapses, a re-spawn is allowed again.
+
+    We shrink the window to 1 s via the env knob and age the marker past it, so
+    the throttle clears and the next call spawns — proving the backoff recovers
+    rather than permanently wedging spawns.
+    """
+    gs = _gs()
+    gs.init_global_state()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_MIN_SPAWN_INTERVAL", "1")
+    calls = _record_spawns(gs)
+
+    assert gs.ensure_daemon_running() is True   # first → spawns, stamps marker
+    assert len(calls) == 1
+    # Age the marker beyond the 1 s window without sleeping.
+    gs.state.atomic_write(gs._spawn_marker_path(), str(int(time.time()) - 5))
+    assert gs.ensure_daemon_running() is True   # window elapsed → spawns again
+    assert len(calls) == 2, "spawn must be allowed once the window elapses"
+
+
+def test_ensure_daemon_running_throttle_skipped_when_alive(state_dir: Path) -> None:
+    """A live daemon short-circuits before the throttle — returns True, never spawns.
+
+    Guards against a regression where the throttle gate would block the cheap
+    already-alive fast path.
+    """
+    gs = _gs()
+    gs.init_global_state()
+    calls = _record_spawns(gs)
+    gs.write_daemon_pid(os.getpid())
+    gs.write_heartbeat()
+    assert gs.ensure_daemon_running() is True
+    assert calls == [], "must not spawn when the daemon is already alive"

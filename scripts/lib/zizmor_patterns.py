@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import re as _re_mod
+
 # rule_id → (pattern, severity, description)
 PATTERNS: dict[str, tuple[str, str, str]] = {
     # janitor-extension recipes (not in upstream zizmor catalogue).
@@ -81,10 +83,13 @@ PATTERNS: dict[str, tuple[str, str, str]] = {
         "$ENV_VAR — never let secrets touch the shell directly.",
     ),
     "github-env-write-with-expr": (
-        r"echo[^\n]*\$\{\{[^}]+}}[^\n]*>>\s*\"?\$(?:GITHUB_ENV|GITHUB_OUTPUT)\"?",
+        r"echo[^\n]*\$\{\{[^}]+}}[^\n]*>>\s*\"?\$GITHUB_ENV\b",
         "HIGH",
-        "Writing to $GITHUB_ENV / $GITHUB_OUTPUT with a ${{ }} expression "
-        "embedded in the value. Route the expression through env: first.",
+        "Writing to $GITHUB_ENV with a ${{ }} expression embedded in the "
+        "value. Env vars persist across steps, so an attacker-controlled "
+        "interpolation can poison later steps. Route the expression "
+        "through env: first. ($GITHUB_OUTPUT has its own dedicated rule "
+        "github-output-injection — the two no longer collide.)",
     ),
     # Sentinel-port regex-tier rules (mirrors of the security-scanner
     # detection corpus). All RE2-safe: no lookaround, no backrefs; only
@@ -126,6 +131,53 @@ PATTERNS: dict[str, tuple[str, str, str]] = {
         "jq --arg treats the value as a raw literal, so \\n/\\t stay literal "
         "backslash sequences — use real newlines or --argjson.",
     ),
+    # Wave 14 — from deep-workflow-security (PWNPipe-58 port)
+    "actions-allow-unsecure-commands": (
+        r"ACTIONS_ALLOW_UNSECURE_COMMANDS\s*:\s*(?:true|['\"]true['\"]|1|['\"]1['\"])"
+        r"(?:[^\n]*#\s*allow)?",
+        "CRITICAL",
+        "ACTIONS_ALLOW_UNSECURE_COMMANDS re-enables deprecated "
+        "::set-env::/::add-path:: shell commands — any step's stdout "
+        "can inject env vars / PATH into following steps. Remove this "
+        "env var and migrate to $GITHUB_ENV / $GITHUB_PATH.",
+    ),
+    "github-step-summary-injection": (
+        # `echo "${{ untrusted }}" >> $GITHUB_STEP_SUMMARY` shape — the
+        # attacker plants Markdown the maintainer sees in the Actions UI.
+        # Allowlist of untrusted contexts mirrors the DANGEROUS_CONTEXTS
+        # set used by the Sentinel injection rules.
+        r"\$\{\{\s*github\.(?:event\.(?:pull_request|issue|comment|review|"
+        r"discussion|commits|workflow_run)\.[^}]+|head_ref)\s*\}\}"
+        r"[^\n]*>>?\s*\"?\$GITHUB_STEP_SUMMARY\b",
+        "MAJOR",
+        "Untrusted ${{ }} context appended to $GITHUB_STEP_SUMMARY — "
+        "renders attacker-controlled Markdown in the Actions UI job-"
+        "summary page. Phishing-link / credential-harvest vector. "
+        "Sanitise via env: + plain text or remove.",
+    ),
+    "github-output-injection": (
+        # Same shape but writing into $GITHUB_OUTPUT, which downstream
+        # steps then expand via ${{ steps.X.outputs.Y }} = silent RCE.
+        r"\$\{\{\s*github\.(?:event\.(?:pull_request|issue|comment|review|"
+        r"discussion|commits|workflow_run)\.[^}]+|head_ref)\s*\}\}"
+        r"[^\n]*>>?\s*\"?\$GITHUB_OUTPUT\b",
+        "HIGH",
+        "Untrusted ${{ }} context written to $GITHUB_OUTPUT — "
+        "downstream steps that read ${{ steps.X.outputs.Y }} will "
+        "interpolate attacker text into their own commands. Distinct "
+        "from $GITHUB_ENV — that's covered by github-env-write-with-"
+        "expr. Move the value through env: and sanitise.",
+    ),
+    "overprovisioned-secrets-tojson": (
+        # `${{ toJSON(secrets) }}` or `${{ format('...', secrets.*) }}`
+        # leaks every secret as one blob — even unused ones.
+        r"\$\{\{\s*(?:toJSON|toPrettyJSON)\s*\(\s*secrets(?:\s*\))",
+        "HIGH",
+        "toJSON(secrets) / toPrettyJSON(secrets) serialises the FULL "
+        "secret block into the workflow context — every secret is "
+        "exposed even if only one was needed. Reference individual "
+        "secrets explicitly via ${{ secrets.NAME }}.",
+    ),
 }
 
 # Per-pattern toggle: True if the pattern is safe for RE2 (no lookaround
@@ -136,3 +188,111 @@ PATTERNS: dict[str, tuple[str, str, str]] = {
 # explicit so a future contributor adding a (?=...) / (?!...) / \1
 # pattern remembers to flip the flag and document why.
 PATTERN_FALLBACK_FLAGS: dict[str, bool] = {rule_id: True for rule_id in PATTERNS}
+
+
+# =========================================================================
+# FP-hardening (round 3) — caller-side discriminators
+# =========================================================================
+#
+# The patterns above are intentionally fast and broad — they catch the
+# attack shape but they don't know the FILE TYPE / PATH CONTEXT a hit
+# lives in. Two of the rules (`hardcoded-secrets`, `ide-config-injection`)
+# fire on legitimate plugin installers, test fixtures, and canonical
+# AWS test placeholders. The helpers below let the orchestrator suppress
+# those FP categories at dispatch time without modifying the regex.
+
+
+# Canonical placeholder values that ARE NOT real secrets. AWS publishes
+# `AKIAIOSFODNN7EXAMPLE` as the documented test placeholder; the GitHub
+# token shapes `ghp_xxx...` / `ghp_TEST...` and a fully-`x`'d AKIA are
+# universally used in CONTRIBUTING.md, training labs, and unit tests.
+# Real attackers never use these — they're public, well-known, and
+# every secret scanner ships an allowlist of them.
+_HARDCODED_SECRETS_PLACEHOLDER = _re_mod.compile(
+    r"AKIA(?:IOSFODNN7EXAMPLE|[X]{16}|TEST[A-Z0-9_-]*)"
+    r"|ghp_(?:[xX]{36}|TEST[A-Za-z0-9_-]{0,40})"
+    r"|github_pat_(?:[xX]{82}|TEST[A-Za-z0-9_-]{0,82})"
+    r"|gho_(?:[xX]{36}|TEST[A-Za-z0-9_-]{0,40})"
+    r"|ghs_(?:[xX]{36}|TEST[A-Za-z0-9_-]{0,40})"
+)
+
+
+def is_hardcoded_secret_placeholder(matched_text: str) -> bool:
+    """Return True when the matched secret literal is one of the
+    well-known test placeholders (AKIAIOSFODNN7EXAMPLE,
+    ghp_xxxxxx..., AKIATEST..., etc.). Callers should drop the
+    `hardcoded-secrets` finding when this returns True.
+    FP-hardening (round 3) — mirrors truffleHog / gitleaks behaviour."""
+    if not matched_text:
+        return False
+    return _HARDCODED_SECRETS_PLACEHOLDER.search(matched_text) is not None
+
+
+# Path segments that indicate the file is a test fixture, training
+# lab, or contributor-onboarding doc — places where placeholder
+# secrets canonically appear in plaintext. FP-hardening (round 3):
+# callers should NOT promote `hardcoded-secrets` to CRITICAL in these
+# files even if the value isn't a known placeholder shape (the file's
+# context is "documentation by example", not "live secret leak").
+_HARDCODED_SECRETS_FP_PATH = _re_mod.compile(
+    r"(?:^|/)("
+    r"tests?|"
+    r"test_[A-Za-z0-9_]+\.py|"
+    r"[A-Za-z0-9_]+\.test\.[A-Za-z0-9]+|"
+    r"__tests__|"
+    r"labs?|"
+    r"training|"
+    r"CONTRIBUTING\.md|"
+    r"IMPLEMENTATION_PLAN\.md|"
+    r"docs?/contributing|"
+    r"examples?|"
+    r"fixtures?|"
+    r"samples?"
+    r")(?:$|/|\.)",
+    _re_mod.IGNORECASE,
+)
+
+
+def is_hardcoded_secret_fp_path(filename: str) -> bool:
+    """Return True when `filename` lives in a test fixture / training
+    lab / contributor doc path. Callers should DEMOTE
+    `hardcoded-secrets` findings (CRITICAL → MEDIUM) in these files —
+    placeholders for documentation are normal here. The placeholder
+    allowlist `is_hardcoded_secret_placeholder()` should be tried
+    first; this is the broader fallback. FP-hardening (round 3)."""
+    if not filename:
+        return False
+    return _HARDCODED_SECRETS_FP_PATH.search(filename) is not None
+
+
+# Path discriminator for the `ide-config-injection` rule. The
+# original intent was to catch WORKFLOWS writing to `.claude/` /
+# `.vscode/` / `.cursor/` config — an injection vector when CI
+# untrusted input ends up in an agent's persistent config. Plugin
+# installers (`README.md`, `INSTALL.md`, `install.sh`,
+# `setup.sh`, agent definition docs) ALSO touch those paths but
+# they're consensual user installs, not injections.
+#
+# FP-hardening (round 3): callers should only fire
+# `ide-config-injection` on `.github/workflows/*.yml` /
+# `.github/workflows/*.yaml`. On every other file path the rule
+# should be skipped.
+_IDE_CONFIG_INJECTION_ONLY_PATH = _re_mod.compile(
+    r"(?:^|/)\.github/workflows/[^/]+\.ya?ml$",
+    _re_mod.IGNORECASE,
+)
+
+
+def is_ide_config_injection_applicable_path(filename: str) -> bool:
+    """Return True iff `filename` is a GitHub Actions workflow YAML.
+    Callers should skip the `ide-config-injection` rule for any other
+    path (README, install scripts, agent docs, forensic docs). The
+    threat is workflow CI writing attacker-controlled paths into
+    `.claude/` — not user-initiated installs from a README.
+    FP-hardening (round 3)."""
+    if not filename:
+        # No filename info => assume safest behaviour: do NOT apply
+        # the rule (caller's choice). The unknown-path case is the
+        # situation where the rule is most likely to FP.
+        return False
+    return _IDE_CONFIG_INJECTION_ONLY_PATH.search(filename) is not None

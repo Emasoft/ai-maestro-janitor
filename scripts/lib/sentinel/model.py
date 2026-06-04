@@ -268,11 +268,22 @@ def guarded_by_safe_event(wf: Workflow, line_num: int) -> bool:
 
 
 def in_run_block(wf: Workflow, target_line: int) -> bool:
-    """True iff target_line sits inside a `run:` block (port of shell_injection_expr)."""
+    """True iff target_line sits inside a `run:` block (port of shell_injection_expr).
+
+    Walks UP from the target line to find the enclosing `run:` key. The scan
+    is bounded by INDENTATION, not a fixed line count: a previous fixed
+    20-line window let an attacker pad a multi-line `run: |` script with
+    >20 lines above the payload so the dangerous `${{ }}` was silently
+    classified as "not in a run block" (suppressing CRITICAL injection
+    findings). The body of a `run: |` block is indented strictly deeper than
+    its step's structural keys, so we stop the moment we reach a structural
+    line (a `- ` step marker or a `key:` at the step level or shallower) —
+    that is the real step boundary regardless of how long the script is.
+    """
     raw = wf.raw_lines
     target_content = raw[target_line - 1] if 0 <= target_line - 1 < len(raw) else None
     target_indent = _indent(target_content) if target_content else 0
-    for i in range(target_line - 1, max(target_line - 20, 0) - 1, -1):
+    for i in range(target_line - 1, -1, -1):
         if i < 0 or i >= len(raw):
             continue
         content = raw[i]
@@ -285,6 +296,16 @@ def in_run_block(wf: Workflow, target_line: int) -> bool:
         if re.search(r"^\s+(uses|with|if|id|name|env):", content) or re.search(r"^\s+-\s+name:", content):
             line_indent = _indent(content)
             if target_indent <= line_indent + 2:
+                return False
+        # Indentation-based step boundary: any list-item marker (`- `) or
+        # mapping key (`word:`) indented shallower than the payload line
+        # means we have climbed out of the run-block's step without first
+        # seeing `run:` — so the target is not inside a run block. Blank
+        # lines and deeper-indented body text are skipped (they are part of
+        # the literal block). This is the stop condition that replaces the
+        # old magic 20-line cap.
+        if content.strip() and _indent(content) < target_indent:
+            if re.search(r"^\s*-\s", content) or re.search(r"^\s*[\w-]+:", content):
                 return False
     return False
 

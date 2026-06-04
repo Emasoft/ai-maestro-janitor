@@ -138,26 +138,49 @@ jobs:
 
 class TestMissingPersistCredentials(unittest.TestCase):
     def test_positive_checkout_without_flag(self):
-        """A checkout step without persist-credentials: false trips the rule."""
+        """A checkout WITHOUT persist-credentials:false in a job that PUSHES
+        trips the rule — the persisted token has a real in-job abuse path."""
         wf = """\
 on:
   push:
     branches: [main]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: echo hi
+      - run: git push origin HEAD:release
 """
         self.assertIn("missing-persist-credentials", fired(wf))
 
     def test_negative_checkout_with_flag(self):
         """A checkout step with persist-credentials: false does not trip the rule."""
         self.assertNotIn("missing-persist-credentials", fired(HARDENED))
+
+    def test_negative_readonly_job_checkout(self):
+        """A checkout in a READ-ONLY job (no push / PR-create path) does NOT
+        fire. The persist-credentials threat is a token left in .git/config
+        being abused by a later step to push/mutate the repo; a read-only job
+        has no such path, so flagging its checkout HIGH was a false positive
+        (FP-test round 2, surf-cli: 6 FPs on read-only CI checkouts)."""
+        wf = """\
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test
+"""
+        self.assertNotIn("missing-persist-credentials", fired(wf))
 
 
 class TestMissingEnvProtection(unittest.TestCase):
@@ -212,6 +235,42 @@ jobs:
     environment: pypi
     steps:
       - run: uv publish
+"""
+        self.assertNotIn("missing-env-protection", fired(wf))
+
+    def test_positive_write_all_oidc_without_environment(self):
+        """Audit MEDIUM-2: `permissions: write-all` is a STRING that implicitly
+        grants id-token: write. A dict-only check missed it; the OIDC branch
+        must now fire for a write-all workflow with no environment: gate."""
+        wf = """\
+on:
+  push:
+    branches: [main]
+permissions: write-all
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - run: echo deploy
+"""
+        self.assertIn("missing-env-protection", fired(wf))
+
+    def test_negative_write_all_oidc_with_environment(self):
+        """write-all but the job is gated by an environment: → no finding
+        (the environment is the mitigation)."""
+        wf = """\
+on:
+  push:
+    branches: [main]
+permissions: write-all
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - run: echo deploy
 """
         self.assertNotIn("missing-env-protection", fired(wf))
 

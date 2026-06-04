@@ -67,7 +67,7 @@ window clears.
 | `subagent-report` | 1 h | Recent `.md` reports in `docs_dev/`, `tests/scenarios/reports/`, `scripts_dev/` that have not been referenced in any commit — catches "subagent wrote a findings file that nobody acted on". |
 | `version-update` | 5 min | Keeps three versions in sync: the version embedded in the running cron's dispatch path, the highest version installed in the plugin cache, and the latest GitHub release. When the cache is behind GitHub it auto-runs `claude plugin marketplace update` + `claude plugin update --scope <auto>` (gated by `auto_update_on_new_release`, default on); the user is then nudged to `/reload-plugins` + `/janitor-arm` to apply. When the cache is up-to-date but the cron still points at an older installed version (because `/janitor-arm` bakes the path in at arm time), it nudges to `/janitor-arm`. Silent on network/CLI failures and when everything is in sync. |
 | `trashcan-purge` | 24 h | Auto-removes timestamped batches in `<project_root>/.trashcan/` whose age exceeds `trashcan_max_age_days` (default 90). Age is computed from the folder-name timestamp (`YYYYMMDD_HHMMSS±HHMM`), not file mtimes — `touch`-ing a file inside an old batch does not extend its life. Markers (`.gitkeep`, `README.txt`) are never touched, so the directory itself persists. Disable via `trashcan_purge_enabled: false`. Emits a single line whenever it actually purges something; silent otherwise. |
-| `remote-credentials` | 1 h | URGENT: parses `git remote -v` and flags any remote URL with an embedded password (`https://user:secret@host/...`). Always-on, no userConfig knob to disable — credential leaks via remote URLs are never legitimate. The nudge includes the exact `git remote set-url` command to strip the secret. Always rotate the leaked credential afterwards. |
+| `remote-credentials` | 1 h | URGENT: parses `git remote -v` and flags any remote URL with an embedded password (`https://user:****@host/...`). Always-on, no userConfig knob to disable — credential leaks via remote URLs are never legitimate. The nudge includes the exact `git remote set-url` command to strip the secret. Always rotate the leaked credential afterwards. |
 | `stale-stash` | 24 h | Surfaces git stashes older than `stash_stale_days` (default 30). A forgotten stash is invisible to `git status` and `git log` until a stash conflict on `git pull` reminds you it exists. Emits one line per stash with `git stash show -p <ref>` to inspect and `git stash pop` / `git stash drop` to act. Cross-platform date parsing (GNU + BSD) so it works on Linux CI and macOS dev. |
 | `nested-git-safety` | 1 h | URGENT: detects nested `.git` directories (or files, for submodule layout) that are NOT in the parent's `.gitignore`. An unignored nested `.git` can let `git add .` from the parent stage the inner repo's objects, silently corrupting both repos. Emits the exact `.gitignore` line to add or the `git submodule add` command to convert into a proper submodule. Depth-limited (`mindepth 2 maxdepth 4`) and prunes `node_modules/`, `.trashcan/`, etc. so it stays well under the detector budget on large projects. |
 | `tracked-ignored` | 1 h | Catches files that are CURRENTLY tracked by git BUT ALSO match a rule in the active `.gitignore`. Typically: a `.env` committed before the rule was added, build artifacts (`dist/`, `*.pyc`), IDE files (`.idea/`, `.vscode/`), OS noise (`.DS_Store`). The list is invisible to plain `git status`. Caches by HEAD SHA so it only re-shells `git ls-files --ignored --cached` when HEAD has moved — saves ~50ms per heartbeat on large repos. |
@@ -178,6 +178,34 @@ modifies your repos — it only operates on `~/.claude/plugins/`.
   CLAUDE_PLUGIN_OPTION_PKG_MANAGER_HOOK_ALLOW_USER_OVERRIDE=true to confirm
   per call, or raise CLAUDE_PLUGIN_OPTION_PKG_MANAGER_MIN_RELEASE_AGE_MINUTES
   if the threshold is wrong.`
+- **Context-compact watchdog** — `PreToolUse` `pre-tool-context-usage.py` +
+  `PostCompact` `post-compact-resume.py` (OPT-IN; `context_watchdog_enabled =
+  true`). Claude Code's native auto-compact is unreliable on the 1M window —
+  sessions run past the threshold, sometimes to ~999k where `/compact` itself
+  can no longer run (forcing a total-loss `/clear`). The watchdog puts the
+  agent in the loop instead, as a four-stage cycle:
+  - **Producer** — your statusline writes the live context % to a project-local
+    `<project>/.claude/janitor/context-usage.<session>.json` (throttled ≤ 1/10 s).
+  - **Consumer** — `pre-tool-context-usage` (`PreToolUse`, all tools) reads that
+    snapshot and injects `Context window: NN% …` into the agent's context before
+    every tool call. Advisory only — emits **no `permissionDecision`**, so the
+    tool's normal permission flow is untouched. At/above `context_compact_suggest_pct`
+    (default 60) it appends a nudge to run `/janitor-compact-context`.
+  - **Trigger** — the agent invokes `/janitor-compact-context`, which records a
+    one-shot resume directive then fires a detached ESC→`/compact` at ONLY its
+    own iTerm pane (matched by `$ITERM_SESSION_ID` UUID — never other panes; the
+    UUID is strictly validated before it reaches `osascript`).
+  - **Resume** — `post-compact-resume` (`PostCompact`) reads the directive and
+    writes `resume-after-compact.flag`; the next heartbeat emits
+    `[janitor-resume] …continue TRDD-xxxx…` and the agent resumes the work.
+
+  This closes the loop so an unattended overnight session compacts itself before
+  the wall and resumes — instead of stalling idle. **Off by default** (the
+  consumer fires on every tool call). The self-trigger is iTerm-only; outside
+  iTerm the skill still records the resume directive and asks you to run
+  `/compact`. Note: two sessions sharing the *exact same* working directory
+  share the resume flag (worktrees are already isolated); the per-session
+  context snapshot is always session-keyed.
 
 ## Supply-chain defense stack
 
@@ -229,22 +257,52 @@ on-demand when the doctor flags unpinned refs.
 - `/janitor-autofix-on` — flip autofix back to the default. Removes the
   sentinel (or overwrites with `on`). Idempotent; no-op when already on.
 - `/janitor-branch-protection-setup` — one-shot interactive setup of the
-  janitor's baseline branch ruleset on the project's default branch
-  (force-push block + deletion block + linear-history + 1-approval PR
-  review with dismiss-stale + thread-resolution). Tier 1 user-invoked
-  surface for TRDD-631fa3de Option B: the skill shows the EXACT JSON
-  payload before posting and waits for confirmation. Idempotent — a
-  ruleset named `janitor-baseline` is recognised by name so re-running
-  produces NOOP. Refuses when `gh` is missing, the viewer is not admin
-  on the repo, or no `repository` URL is declared. For the silent
+  ratified two-ruleset branch-protection baseline (janitor #14 /
+  maintainer #7) on the project's default branch:
+  `baseline-history-protect` (force-push block + deletion block +
+  linear-history, no bypass) and `baseline-pr-and-checks` (1-approval PR
+  review with dismiss-stale + thread-resolution + strict
+  required-status-checks, with the repo-admin role granted an
+  always-bypass so a solo admin is not self-locked). Both target the
+  `~DEFAULT_BRANCH` magic ref (byte-identical with the maintainer
+  plugin). The required status checks are **auto-detected** from the
+  repo's live CI check-runs at apply time (empty when CI has not run yet
+  — never hard-coded). Tier 1 user-invoked surface for TRDD-631fa3de
+  Option B: the skill shows BOTH EXACT JSON payloads (with the resolved
+  checks) before applying and waits for confirmation. Idempotent-by-name
+  — each ratified ruleset is PATCHed if present else POSTed, so
+  re-running never duplicates; an orphaned pre-migration
+  `janitor-baseline` ruleset is deleted once both ratified rulesets are
+  confirmed in place. Refuses when `gh` is missing, the viewer is not
+  admin on the repo, or no `repository` URL is declared. For the silent
   Tier 2 auto path (no human in the loop), flip
   `guard_mode_enabled = true` in plugin.json — same baseline, applied
   by `scripts/guard/branch_protection_apply.py` on the heartbeat.
+- `/janitor-actions-up` — bulk SHA-pin + update every GitHub Actions
+  reference under `.github/workflows/`. Wraps Azat-io's [`actions-up`](https://github.com/azat-io/actions-up)
+  CLI behind a safety harness: dry-run preview first, configurable
+  `--min-age` gate (default 5 days, matching the project's
+  `pkg_manager_min_release_age_minutes` floor), `--mode` to control
+  major/minor/patch upgrade scope, self-scan guard that refuses on the
+  janitor's own repo. Pairs with `workflow-security` (surveillance) —
+  this skill is the one-shot heal that closes every Sentinel
+  `github-dependency-refs` finding in one pass. Refuses on a dirty
+  working tree so the diff lands as a single discrete commit.
 - `/janitor-doctor` — pre-flight health check. Runs ~12 named pass/fail
   checks (state-dir writable, detectors executable, uv/git/gh available,
   `/reports/` + `/reports_dev/` gitignored, plugin.json valid) and prints
   a unicode-bordered table with fix hints for any failures. Read-only —
   safe to run during any session, including paused or disarmed.
+- `/janitor-compact-context` — agent-invocable self-compaction. Records a
+  one-shot resume directive (`<project>/.janitor/state/resume-directive.txt` —
+  "continue TRDD-xxxx at …", consumed once by the `PostCompact` hook) then fires
+  a detached ESC→`/compact` at this session's own iTerm pane (matched by
+  `$ITERM_SESSION_ID` UUID, strictly validated). The agent invokes it when the
+  context-watchdog's per-tool-call % injection crosses the threshold; after
+  invoking, the agent ends its turn so `/compact` runs, then auto-resumes on the
+  next heartbeat. iTerm-only for the trigger; elsewhere it records the directive
+  and asks you to `/compact`. Backed by `scripts/compact_trigger.py`. Part of the
+  context-compact watchdog (opt-in — see Hooks).
 - `/janitor-audit` — on-demand aggregate scan. Runs every detector
   synchronously and prints a consolidated markdown report with proposed
   remediation commands (never executed automatically).
@@ -506,6 +564,8 @@ via the `/plugin configure` interface or edit the project's
 | `pkg_manager_hook_allow_user_override` | false | When false (default), the `pre-tool-pkg-guard` hook hard-denies every detected bypass. When true, it downgrades to `ask` — per-call user confirmation instead of a block. Every block is logged regardless to `~/.claude/janitor-global-state/pkg-manager-guard.log`. |
 | `pkg_manager_policy_enabled` | true | When true (default), the `package-manager-policy` detector scans the project's package-manager config for missing or weak safety knobs and flags when no install-time malware firewall is on PATH. |
 | `pkg_manager_policy_interval` | 21600 | Min seconds between `package-manager-policy` scans. 6 h by default — package-manager config rarely changes, and the detector content-hashes the files anyway so an unchanged-config fire costs only file stats. |
+| `context_watchdog_enabled` | false | When true, the `pre-tool-context-usage` `PreToolUse` hook fires on EVERY tool call and injects the live context-window % (read from the statusline's project-local `context-usage.<session>.json` snapshot) via `additionalContext` — advisory only, never altering the tool's permission flow. At/above `context_compact_suggest_pct` it nudges the agent to run `/janitor-compact-context`. OPT-IN (off) because it fires on every tool call. The trigger leg of the context-compact watchdog; pairs with the `post-compact-resume` `PostCompact` hook + the `/janitor-compact-context` skill for an auto-resuming compaction loop for unattended overnight work. |
+| `context_compact_suggest_pct` | 60 | Context-window usage % at/above which the watchdog's `PreToolUse` hook appends a suggestion to run `/janitor-compact-context`. Default 60 leaves ~40% headroom so `/compact` can still run (wait too long — e.g. to ~999k on the 1M window — and `/compact` itself fails). Only consulted when `context_watchdog_enabled` is true. |
 
 ## Weekly fallback
 

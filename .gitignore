@@ -50,14 +50,24 @@ htmlcov/
 *.zip
 *.whl
 
-# Dev-only directories (local reports, scratch, validation output)
+# Dev-only directories (local reports, scratch, validation output).
+# Per ~/.claude/CLAUDE.md RULE 0.2, every `*_dev/` folder at the
+# project root is gitignored AND its content must never be deleted.
 docs_dev/
+scripts_dev/
+samples_dev/
+examples_dev/
+tests_dev/
+downloads_dev/
+libs_dev/
+builds_dev/
+reports_dev/
 .tldr/
 .tldrignore
 llm_externalizer_output/
 /reports/
-/reports_dev/
 /INPUT_DEV/
 
 # git-cliff scratch — ephemeral release notes between bump and push
 .git-cliff-release-notes.md
+/reports_dev/

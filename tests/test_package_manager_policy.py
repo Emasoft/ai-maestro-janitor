@@ -64,14 +64,166 @@ def test_silent_on_non_node_project(tmp_path: Path) -> None:
 
 
 def test_fires_on_node_project_with_no_npmrc(tmp_path: Path) -> None:
-    """A node project missing .npmrc is flagged."""
+    """A REAL node project (package.json with installable deps) missing
+    .npmrc is flagged. The dependency is what proves the project has an
+    install attack surface — see _has_installable_deps."""
     (tmp_path / "package.json").write_text(
-        json.dumps({"name": "x", "version": "1.0.0"}), encoding="utf-8",
+        json.dumps({
+            "name": "x", "version": "1.0.0",
+            "dependencies": {"lodash": "^4.0.0"},
+        }), encoding="utf-8",
     )
     r = _run(tmp_path)
     assert r.returncode == 0
     assert "[package-manager-policy]" in r.stdout
     assert "no .npmrc" in r.stdout
+
+
+def test_silent_on_metadata_only_package_json(tmp_path: Path) -> None:
+    """A package.json with ZERO installable dependencies (e.g. a Claude skill
+    bundle or doc-site config) has no install attack surface — supply-chain
+    knobs are irrelevant and the detector must not flag them.
+
+    This is the false-positive shape found on nutlope/hallmark:
+    `{name, version, files, skill: {...}, scripts: {...}}` with no deps."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "hallmark", "version": "1.0.0",
+        "license": "MIT", "type": "module",
+        "files": ["skills"],
+        "skill": {"entry": "skills/x/SKILL.md", "harnesses": ["claude-code"]},
+        "scripts": {"serve": "python3 -m http.server"},
+    }), encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert r.stdout == "", \
+        f"metadata-only package.json must not be flagged, got: {r.stdout!r}"
+
+
+def test_fires_on_dev_dependencies_only(tmp_path: Path) -> None:
+    """devDependencies alone are still an install attack surface — flag."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "devDependencies": {"vitest": "^1.0.0"},
+    }), encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "[package-manager-policy]" in r.stdout
+
+
+def test_fires_on_workspaces_root(tmp_path: Path) -> None:
+    """A monorepo root with no own deps but a `workspaces` list IS a node
+    project — sub-packages will run installs against shared hardening."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "mono", "version": "1.0.0",
+        "workspaces": ["packages/*"],
+    }), encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "[package-manager-policy]" in r.stdout
+
+
+def test_fires_on_lockfile_even_without_deps(tmp_path: Path) -> None:
+    """A package.json with no deps BUT a present lockfile is a real node
+    project — the lockfile proves installs happened (or are expected)."""
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "x", "version": "1.0.0"}), encoding="utf-8",
+    )
+    (tmp_path / "package-lock.json").write_text(
+        json.dumps({"name": "x", "lockfileVersion": 3, "packages": {}}),
+        encoding="utf-8",
+    )
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "[package-manager-policy]" in r.stdout
+
+
+def test_fires_on_malformed_package_json(tmp_path: Path) -> None:
+    """Malformed package.json is treated as a real node project (conservative
+    fail-safe — we'd rather over-report than miss a real attack surface
+    hidden behind a parse error)."""
+    (tmp_path / "package.json").write_text("{ not valid json", encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "[package-manager-policy]" in r.stdout
+
+
+def test_silent_on_workspaces_object_without_packages(tmp_path: Path) -> None:
+    """`workspaces: {nohoist: [...]}` without `packages:` is not a monorepo
+    root — Yarn syntax for hoist controls only. Must not fire."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "workspaces": {"nohoist": ["**/foo"]},
+    }), encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+def test_firewall_recognised_in_project_local_node_modules(tmp_path: Path) -> None:
+    """A safe-chain binary inside <root>/node_modules/.bin is sufficient
+    proof of the install-time firewall — even if nothing's on global PATH."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "devDependencies": {"@aikidosec/safe-chain": "^1.0.0"},
+    }), encoding="utf-8")
+    (tmp_path / ".npmrc").write_text(
+        "minimum-release-age=7200\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "safe-chain").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_dir / "safe-chain").chmod(0o755)
+    r = _run(tmp_path)  # NO --with-firewall (no global sfw)
+    assert r.returncode == 0
+    assert r.stdout == "", \
+        f"local node_modules/.bin/safe-chain must satisfy firewall check, got: {r.stdout!r}"
+
+
+def test_firewall_recognised_via_devDependencies_only(tmp_path: Path) -> None:
+    """Listing @aikidosec/safe-chain in devDependencies (without installing
+    the binary yet) is acceptance too — some teams use it via `npx`."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "dependencies": {"lodash": "^4.0.0"},
+        "devDependencies": {"@aikidosec/safe-chain": "^1.0.0"},
+    }), encoding="utf-8")
+    (tmp_path / ".npmrc").write_text(
+        "minimum-release-age=7200\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
+        encoding="utf-8",
+    )
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "install-time malware firewall" not in r.stdout
+
+
+def test_firewall_still_flagged_when_neither_present(tmp_path: Path) -> None:
+    """Sanity check: a project with no PATH binary, no node_modules/.bin
+    entry, no dependency listing still gets the recommend-install warning."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
+    (tmp_path / ".npmrc").write_text(
+        "minimum-release-age=7200\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
+        encoding="utf-8",
+    )
+    r = _run(tmp_path)  # no firewall via any path
+    assert r.returncode == 0
+    assert "install-time malware firewall" in r.stdout
+
+
+def test_silent_on_empty_dependencies_block(tmp_path: Path) -> None:
+    """`dependencies: {}` (empty) → still no install surface. Many lints add
+    the empty block as a placeholder; treat it the same as missing."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "dependencies": {},
+        "devDependencies": {},
+    }), encoding="utf-8")
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert r.stdout == ""
 
 
 def test_silent_on_hardened_node_project(tmp_path: Path) -> None:
@@ -93,7 +245,9 @@ def test_silent_on_hardened_node_project(tmp_path: Path) -> None:
 
 def test_flags_weak_npmrc(tmp_path: Path) -> None:
     """A .npmrc with weak values flags each issue."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     (tmp_path / ".npmrc").write_text(
         "minimum-release-age=60\ntrust-policy=allow\naudit-level=info\n",
         encoding="utf-8",
@@ -107,7 +261,9 @@ def test_flags_weak_npmrc(tmp_path: Path) -> None:
 
 def test_flags_missing_firewall(tmp_path: Path) -> None:
     """A node project with no sfw/safe-chain on PATH is flagged."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     (tmp_path / ".npmrc").write_text(
         "minimum-release-age=7200\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
         encoding="utf-8",
@@ -120,7 +276,9 @@ def test_flags_missing_firewall(tmp_path: Path) -> None:
 
 def test_content_hash_short_circuits(tmp_path: Path) -> None:
     """Second run with unchanged config produces no output (cache hit)."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     first = _run(tmp_path)
     assert "[package-manager-policy]" in first.stdout
     second = _run(tmp_path)
@@ -130,11 +288,20 @@ def test_content_hash_short_circuits(tmp_path: Path) -> None:
 
 def test_edit_invalidates_cache(tmp_path: Path) -> None:
     """Editing a config file changes the hash → re-emits the current findings."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     assert "[package-manager-policy]" in _run(tmp_path).stdout
-    # Editing the file (any byte change) re-fires.
+    # Editing the file (any byte change that keeps the project a real node
+    # project — i.e. deps still present) re-fires. Removing every dep would
+    # legitimately silence the detector by turning the project into a
+    # metadata-only one; that's the new context-aware behaviour, not a
+    # cache bug.
     (tmp_path / "package.json").write_text(
-        json.dumps({"name": "x", "version": "1.0.0"}), encoding="utf-8",
+        json.dumps({
+            "name": "x", "version": "1.0.0",
+            "dependencies": {"lodash": "^4.1.0"},
+        }), encoding="utf-8",
     )
     second = _run(tmp_path)
     assert "[package-manager-policy]" in second.stdout
@@ -142,7 +309,9 @@ def test_edit_invalidates_cache(tmp_path: Path) -> None:
 
 def test_disabled_env_silent(tmp_path: Path) -> None:
     """ENABLED=false silences the detector entirely."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     r = _run(tmp_path, env_overrides={"CLAUDE_PLUGIN_OPTION_PKG_MANAGER_POLICY_ENABLED": "0"})
     assert r.returncode == 0
     assert r.stdout == ""
@@ -150,7 +319,9 @@ def test_disabled_env_silent(tmp_path: Path) -> None:
 
 def test_threshold_override_relaxes_block(tmp_path: Path) -> None:
     """Lowering the threshold knob lets a lower minimum-release-age pass."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     (tmp_path / ".npmrc").write_text(
         "minimum-release-age=60\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
         encoding="utf-8",
@@ -166,7 +337,9 @@ def test_threshold_override_relaxes_block(tmp_path: Path) -> None:
 
 def test_yarnrc_enable_scripts_true_flagged(tmp_path: Path) -> None:
     """.yarnrc.yml enableScripts: true is flagged."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     (tmp_path / ".npmrc").write_text(
         "minimum-release-age=7200\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
         encoding="utf-8",
@@ -179,7 +352,9 @@ def test_yarnrc_enable_scripts_true_flagged(tmp_path: Path) -> None:
 
 def test_bunfig_verify_false_flagged(tmp_path: Path) -> None:
     """bunfig.toml [install].verify=false is flagged."""
-    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
     (tmp_path / ".npmrc").write_text(
         "minimum-release-age=7200\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
         encoding="utf-8",

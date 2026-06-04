@@ -16,17 +16,43 @@ from typing import Optional
 
 # --- path resolution -------------------------------------------------------
 
+# CPV-skillaudit: avoid reserved-env mutation. A caller (e.g. the PostCompact
+# hook, whose environment may lack CLAUDE_PROJECT_DIR) can supply a fallback
+# project dir WITHOUT writing the reserved $CLAUDE_PROJECT_DIR into the process
+# environment — exporting that harness-set var session-wide would clobber it for
+# every other plugin. The override is module-local and is consulted ONLY when
+# CLAUDE_PROJECT_DIR is absent, so the env var always wins (guarded fallback,
+# identical to the old behaviour where the hook set the env var before the first
+# resolution).
+_PROJECT_DIR_OVERRIDE: Optional[str] = None
+
+
+def set_project_dir_override(cwd: Optional[str]) -> None:
+    """Record a fallback project dir used only when CLAUDE_PROJECT_DIR is unset.
+
+    Does NOT touch os.environ (the reserved-env mutation CPV flags). Must be
+    called BEFORE the first project_root()/state_dir()/... call, since those are
+    lru-cached for the process lifetime.
+    """
+    global _PROJECT_DIR_OVERRIDE
+    _PROJECT_DIR_OVERRIDE = (cwd or "").strip() or None
+
+
 def _resolve_project_root() -> Path:
     """Equivalent to bash's resolve_project_root.
 
     Priority:
       1. $CLAUDE_PROJECT_DIR
-      2. `git rev-parse --show-toplevel`
-      3. cwd
+      2. the caller-supplied override (set_project_dir_override) — used only
+         when CLAUDE_PROJECT_DIR is absent, so the env var always wins
+      3. `git rev-parse --show-toplevel`
+      4. cwd
     """
     explicit = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
     if explicit:
         return Path(explicit)
+    if _PROJECT_DIR_OVERRIDE:
+        return Path(_PROJECT_DIR_OVERRIDE)
     try:
         proc = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -39,12 +65,21 @@ def _resolve_project_root() -> Path:
         return Path.cwd()
 
 
-# Cached so repeated imports/calls don't re-run git. The cache is keyed
-# on the bound function (no args) so it's effectively a module-level
-# singleton — but it's recomputed if the module is re-imported in a
-# fresh process (which is the lifetime we care about).
-@lru_cache(maxsize=1)
-def project_root() -> Path:
+# Cached so repeated imports/calls don't re-run git. The cache keys on the
+# (single, optional) argument; the normal no-arg call caches under key () so it
+# stays an effective module-level singleton — recomputed only if the module is
+# re-imported in a fresh process (the lifetime we care about). `.cache_clear()`
+# is preserved (tests rely on it).
+#
+# The optional `cwd_override` is a convenience for the no-env case: passing it
+# records the module-level override (so the cached janitor_root()/state_dir()
+# resolve from the same fallback) AND returns the resolved root. It is honoured
+# only when CLAUDE_PROJECT_DIR is absent. Pass nothing for the normal cached
+# call — every existing caller does exactly that and is unaffected.
+@lru_cache(maxsize=2)
+def project_root(cwd_override: Optional[str] = None) -> Path:
+    if cwd_override is not None:
+        set_project_dir_override(cwd_override)
     return _resolve_project_root()
 
 
@@ -60,6 +95,14 @@ def state_dir() -> Path:
 
 @lru_cache(maxsize=1)
 def log_dir() -> Path:
+    # The global daemon overrides this via JANITOR_LOG_DIR so its log lands
+    # in the deterministic global-state dir instead of whatever project tree
+    # happened to spawn it (see daemon.py main()). Per-session detectors leave
+    # it unset and keep their project-scoped logs under <project>/.janitor/logs.
+    # Set once per process and read here before the lru_cache memoises it.
+    override = os.environ.get("JANITOR_LOG_DIR")
+    if override:
+        return Path(override).expanduser()
     return janitor_root() / "logs"
 
 
@@ -184,6 +227,61 @@ def autofix_enabled() -> bool:
 def autofix_disabled() -> bool:
     """True iff `/janitor-autofix-off` has been run in this project."""
     return autofix_mode() == "off"
+
+
+# --- self-scan guard -----------------------------------------------------
+
+# The plugin's own canonical name — read from the source of truth on first
+# call to avoid drift if the package is ever renamed. The constant below is
+# the fallback used when the lookup itself fails (e.g. corrupted manifest).
+_JANITOR_NAME = "ai-maestro-janitor"
+
+
+@lru_cache(maxsize=1)
+def is_self_scan_target() -> bool:
+    """True iff the current `CLAUDE_PROJECT_DIR` is the janitor's own repo.
+
+    Detection: the project root has a `.claude-plugin/plugin.json` whose
+    top-level `"name"` equals "ai-maestro-janitor". This is the most
+    reliable signal — robust to forks (rename the plugin, lose the
+    self-scan suppression), worktree paths, sibling clones, and the
+    janitor being checked out under any directory name.
+
+    Why this exists:
+      * The janitor IS a plugin that scans repos for repo-security
+        issues. When the user arms the janitor inside its own source
+        repo (the natural case during plugin development), every
+        security detector would emit findings against the janitor's
+        own CI — confusing self-reports that look like a feedback
+        loop and clutter the heartbeat with noise the maintainer
+        already audits via `publish.py` and the GitHub Actions CI.
+
+      * Hard rule: a security scanner must not produce findings about
+        its own host project. Every security/CI detector calls
+        `if state.is_self_scan_target(): return 0` at the top of
+        `main()` to enforce this.
+
+    Override (for dev/CI):
+      Set `CLAUDE_PLUGIN_ALLOW_SELF_SCAN=1` to force scanning of the
+      janitor's own repo. The official CI publish-gate uses this so
+      the janitor's own CI keeps catching regressions in its own
+      workflow files.
+    """
+    if os.environ.get("CLAUDE_PLUGIN_ALLOW_SELF_SCAN", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        return False
+    manifest = project_root() / ".claude-plugin" / "plugin.json"
+    if not manifest.is_file():
+        return False
+    try:
+        # Lazy import to avoid pulling json into every script that imports
+        # state for the path helpers only.
+        import json as _json
+        data = _json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("name") == _JANITOR_NAME
 
 
 def file_mtime(path: Path | str) -> int:

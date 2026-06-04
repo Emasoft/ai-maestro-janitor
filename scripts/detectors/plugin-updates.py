@@ -43,6 +43,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
 SELF_PLUGIN_NAME = "ai-maestro-janitor"
@@ -112,18 +113,25 @@ def _latest_version_in_marketplace(plugin_name: str, mp_json: Path) -> Optional[
 
 
 def _refresh_marketplace(mp: str, log_path: Path) -> None:
-    state.log_line("plugin-updates", f"refreshing marketplace: {mp}")
-    try:
-        with log_path.open("a", encoding="utf-8") as logf:
-            subprocess.run(
-                ["claude", "plugin", "marketplace", "update", mp],
-                stdout=logf, stderr=subprocess.STDOUT,
-                timeout=60, check=False,
-            )
-    except subprocess.TimeoutExpired:
-        state.log_line("plugin-updates", f"marketplace refresh timed out: {mp}")
-    except OSError as exc:
-        state.log_line("plugin-updates", f"marketplace refresh failed: {mp} ({exc})")
+    # Serialise against the daemon's bulk refresh + every other per-session
+    # marketplace op via the shared cross-process lock; skip (don't block) when
+    # held — this detector re-fires on its own cadence.
+    with gs.marketplace_lock() as got:
+        if not got:
+            state.log_line("plugin-updates", f"marketplace refresh deferred (lock held): {mp}")
+            return
+        state.log_line("plugin-updates", f"refreshing marketplace: {mp}")
+        try:
+            with log_path.open("a", encoding="utf-8") as logf:
+                subprocess.run(
+                    ["claude", "plugin", "marketplace", "update", mp],
+                    stdout=logf, stderr=subprocess.STDOUT,
+                    timeout=60, check=False,
+                )
+        except subprocess.TimeoutExpired:
+            state.log_line("plugin-updates", f"marketplace refresh timed out: {mp}")
+        except OSError as exc:
+            state.log_line("plugin-updates", f"marketplace refresh failed: {mp} ({exc})")
 
 
 def main() -> int:

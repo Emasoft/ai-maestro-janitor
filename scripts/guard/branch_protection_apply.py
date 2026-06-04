@@ -1,12 +1,14 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
 # requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
 # ///
 """Tier 2 GUARDED AUTO-REMEDIATION — branch-protection baseline applier.
 
-Per TRDD-631fa3de Option B (recommended + 1): the janitor takes ONE
-specific autonomous action — creating the baseline branch ruleset on
-the default branch — WITHOUT a human in the loop. Every other "acting"
+Per TRDD-631fa3de Option B (recommended + 1) + the ratified unified
+baseline (janitor #14 / maintainer #7): the janitor takes ONE specific
+autonomous action — applying the ratified PAIR of branch rulesets on the
+default branch — WITHOUT a human in the loop. Every other "acting"
 remains in user-invoked skills.
 
 The path is deliberately separate from `scripts/detectors/` (which are
@@ -15,7 +17,19 @@ phase (`_phase_guard_branch_protection`) on its own cadence
 (`guard_branch_protection_interval`, default 6 h). Every safety gate
 listed below lives inside this module so the dispatch wiring stays
 trivial — no coordination with the read-only branch-protection detector
-is needed; the module's own idempotency check is the source of truth.
+is needed; the apply is idempotent-by-name (PATCH if the ruleset already
+exists, else POST) so re-running converges instead of duplicating.
+
+The ratified baseline is TWO rulesets (single source of truth in
+`branch_protection_lib.baseline_ruleset_payloads`):
+  * `baseline-history-protect` — deletion + non_fast_forward +
+    required_linear_history; no bypass actors.
+  * `baseline-pr-and-checks` — pull_request (1 approval, dismiss-stale,
+    thread-resolution) + required_status_checks (strict; CI contexts
+    auto-detected at apply time); repo-admin role gets an `always`
+    bypass so a solo admin is not locked out.
+After applying both, any orphaned pre-migration `janitor-baseline`
+ruleset is deleted.
 
 Safety gates (any one false → no action, surface verbatim instead):
   * `guard_mode_enabled` env-var is truthy
@@ -25,20 +39,21 @@ Safety gates (any one false → no action, surface verbatim instead):
   * the repo slug is resolvable from `<plugin-root>/.claude-plugin/plugin.json`
   * `gh` CLI is on PATH
   * the repo's default branch is discoverable via `gh api`
-  * the baseline ruleset is NOT already present (idempotency)
   * the authenticated viewer is admin on the repo
+  * the ruleset list is fetchable (else uncertain → don't act)
 
 On success:
   * appends to `.janitor/logs/branch-protection-apply.log` with the
-    timestamp, repo, ruleset id, and the exact payload (audit trail).
+    timestamp, repo, per-ruleset result, and the exact payloads (audit
+    trail).
   * appends a ledger line to `.janitor/state/branch-protection-acted.txt`
-    so a second invocation never double-applies (also detected by
-    is_baseline_present(), but the ledger is defence-in-depth + cheap
-    to inspect from the human side).
+    so the human can see what was applied (also detected by
+    `baselines_present()`, but the ledger is cheap to inspect by hand).
   * prints ONE loud announcement line to stdout — the heartbeat
     surfaces it to the user with full context.
 
-Failure modes (each surfaces a single line, never half-applies):
+Failure modes (each surfaces a single line, never half-applies a given
+ruleset):
   * gh missing / network failure / non-admin viewer / 403 / 422 →
     one drift line explaining what blocked the action.
 
@@ -129,8 +144,11 @@ def main() -> int:
         )
         return 0
 
-    # Gate 6: idempotency.
-    present = bpl.is_baseline_present(slug)
+    # Gate 6: convergence short-circuit. If BOTH ratified rulesets are
+    # already present, ledger once (so the human sees the baseline was
+    # confirmed-in-place) and exit silently. None means the list lookup
+    # failed → uncertain → don't act.
+    present = bpl.baselines_present(slug)
     if present is None:
         state.log_line(
             "branch-protection-apply",
@@ -138,9 +156,6 @@ def main() -> int:
         )
         return 0
     if present:
-        # Already protected — ledger this once so the human can see the
-        # baseline was confirmed-in-place, then exit silently on
-        # subsequent runs (ledger file becomes the dedupe signal).
         ledger = state.state_dir() / _LEDGER_FILE
         if not ledger.is_file():
             _ledger_append(slug, default_branch, "already-present")
@@ -154,25 +169,50 @@ def main() -> int:
         )
         return 0
 
-    # All gates passed → apply.
-    ok, msg = bpl.create_baseline_ruleset(slug, default_branch)
-    if not ok:
-        print(
-            f"[branch-protection] guard-mode ruleset POST failed for "
-            f"{slug}@{default_branch}: {msg}",
+    # All gates passed → apply BOTH rulesets idempotent-by-name, then
+    # delete the legacy orphan. apply_baseline_rulesets auto-detects the
+    # CI check contexts by PARSING this project's `.github/workflows/*`
+    # (so required_status_checks gates on the repo's configured jobs even
+    # before CI first runs) and returns the exact list it applied, which
+    # we reuse for the announcement (one detection pass, no display/apply
+    # skew). `plugin_root` is this project's root (resolved above).
+    all_ok, results, checks = bpl.apply_baseline_rulesets(
+        slug, default_branch, plugin_root,
+    )
+    if not all_ok:
+        # Surface the first failing step; the rest are in the audit log.
+        first_fail = next((r for r in results if not r[1]), None)
+        detail = (
+            f"{first_fail[0]}: {first_fail[2]}" if first_fail else "unknown error"
         )
-        _audit_append(f"FAIL\t{slug}\t{default_branch}\t{msg}")
+        print(
+            f"[branch-protection] guard-mode baseline apply FAILED for "
+            f"{slug}@{default_branch}: {detail}",
+        )
+        for name, ok, msg in results:
+            _audit_append(
+                f"{'OK' if ok else 'FAIL'}\t{slug}\t{default_branch}\t{name}\t{msg}",
+            )
         return 0
 
-    # Loud + auditable announcement.
-    payload = bpl.baseline_ruleset_payload(default_branch)
-    payload_json = json.dumps(payload, separators=(",", ":"))
-    _audit_append(f"OK\t{slug}\t{default_branch}\t{msg}\t{payload_json}")
-    _ledger_append(slug, default_branch, f"created ({msg})")
+    # Loud + auditable announcement. Record both emitted payloads.
+    payloads = bpl.baseline_ruleset_payloads(default_branch, checks)
+    payloads_json = json.dumps(payloads, separators=(",", ":"))
+    summary = "; ".join(f"{name}={msg}" for name, _ok, msg in results)
+    _audit_append(f"OK\t{slug}\t{default_branch}\t{summary}\t{payloads_json}")
+    _ledger_append(slug, default_branch, f"applied ({summary})")
+    check_note = (
+        f"{len(checks)} required check(s): "
+        + ", ".join(c["context"] for c in checks)
+        if checks
+        else "no required checks auto-detected (CI has not run yet)"
+    )
     print(
-        f"[guard] created branch-protection baseline on {slug}@{default_branch} "
-        f"({msg}). Rules: deletion + non_fast_forward + required_linear_history "
-        f"+ pull_request (1 approval, dismiss-stale, thread-resolution). "
+        f"[guard] applied branch-protection baseline on {slug}@{default_branch} "
+        f"({summary}). Rulesets: baseline-history-protect (deletion + "
+        f"non_fast_forward + required_linear_history) and baseline-pr-and-checks "
+        f"(pull_request 1-approval/dismiss-stale/thread-resolution + "
+        f"required_status_checks strict); {check_note}. "
         f"Audit log: .janitor/logs/{_LOG_FILE}. Ledger: .janitor/state/{_LEDGER_FILE}.",
     )
     return 0

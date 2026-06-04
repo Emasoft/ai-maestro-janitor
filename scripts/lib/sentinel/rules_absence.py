@@ -24,11 +24,25 @@ from lib.sentinel.model import (
     Workflow,
 )
 
-# --- 1. missing-permissions (Sentinel medium → MAJOR) ----------------------
+# --- 1. missing-permissions (Sentinel medium → two-state MAJOR / MINOR) ----
 
 class MissingPermissions(Rule):
+    """Missing-permissions rule with FP-hardening round 3 two-state
+    severity. The original rule fired MAJOR on every workflow lacking
+    a top-level `permissions:` block — but ~50% of clean repos have
+    pure read-only CI workflows (label / stale / welcome / build /
+    test only) where the default `GITHUB_TOKEN` is fine. Calibrate
+    the severity by looking at what the workflow actually does:
+
+      * **MAJOR** when the workflow uses one of the documented
+        write-actions (push-action / pull-request-creator / release
+        creator) or runs `git push` / `gh pr create` / `gh release
+        create` — write scope without an explicit permissions block
+        IS a real risk.
+      * **MINOR** otherwise — best-practice hardening rather than an
+        active vulnerability."""
     name = "missing-permissions"
-    severity = SEV_MAJOR
+    severity = SEV_MAJOR  # default (overridden per-finding in check())
     description = (
         "No top-level permissions block — jobs inherit broad default token "
         "permissions"
@@ -42,7 +56,53 @@ class MissingPermissions(Rule):
         if wf.permissions(scope="workflow") is not None:
             return []
         line = wf.line_of(r"^jobs:") or 1
-        return [self._finding(wf, line)]
+
+        # FP-hardening (round 3): inspect every step in every job to
+        # decide whether the workflow performs any write operation.
+        # Re-uses the same write-action / write-command regex lists
+        # that `ExcessivePermissions` defines below — keeping the two
+        # rules' definitions of "writes" in lockstep.
+        has_writes = self._workflow_does_writes(wf)
+        sev = SEV_MAJOR if has_writes else SEV_MINOR
+        desc = (
+            "No top-level permissions block — jobs inherit broad default "
+            "token permissions, and the workflow performs write operations "
+            "(push / release / PR) without explicit permissions."
+            if has_writes else
+            "No top-level permissions block — jobs inherit broad default "
+            "token permissions. The workflow appears read-only; declaring "
+            "`permissions: {}` is a best-practice hardening step."
+        )
+        finding = self._finding(wf, line, description=desc)
+        # Override the per-finding severity (the base _finding helper
+        # uses self.severity; we patched it post-construction).
+        return [Finding(
+            rule_id=finding.rule_id,
+            line=finding.line,
+            col=finding.col,
+            matched_text=finding.matched_text,
+            severity=sev,
+            description=finding.description,
+        )]
+
+    def _workflow_does_writes(self, wf: Workflow) -> bool:
+        """Return True if any step in any job uses one of the
+        write-actions or write-commands enumerated by the
+        `ExcessivePermissions` rule. Keeping the two rules' notions
+        of 'writes' in lockstep avoids drift."""
+        write_actions = ExcessivePermissions.WRITE_ACTIONS
+        write_commands = ExcessivePermissions.WRITE_COMMANDS
+        for job in wf.jobs().values():
+            for step in wf.steps(job):
+                if not isinstance(step, dict):
+                    continue
+                uses = step.get("uses")
+                if uses and any(p.search(str(uses)) for p in write_actions):
+                    return True
+                run = step.get("run")
+                if run and any(p.search(str(run)) for p in write_commands):
+                    return True
+        return False
 
 
 # --- 2. missing-timeouts (Sentinel low → MINOR) ----------------------------
@@ -162,6 +222,16 @@ class MissingPersistCredentials(Rule):
 
         for job in wf.jobs().values():
             job_pushes = self._job_does_push(job, wf)
+            # FP-resistance (FP-test round 2): the persist-credentials threat is
+            # a GITHUB_TOKEN left in .git/config that a LATER step in the SAME
+            # job abuses to push / open a PR / mutate the repo. A read-only job
+            # has no write path to abuse it, so its checkout is NOT a HIGH
+            # "can leak secrets" finding — flagging every read-only CI checkout
+            # (the overwhelmingly common case) was a guaranteed false positive.
+            # Only audit jobs that actually push / PR-create. `job_pushes` was
+            # already computed here but was never used to gate the main finding.
+            if not job_pushes:
+                continue
 
             for step in wf.steps(job):
                 if not isinstance(step, dict):
@@ -175,7 +245,10 @@ class MissingPersistCredentials(Rule):
 
                 if persist is False or persist == "false":
                     continue
-                if job_pushes and persist is True:
+                # The job pushes (gated above). An explicit `persist-credentials:
+                # true` is the author intentionally opting in because the push
+                # needs the token — don't second-guess that deliberate choice.
+                if persist is True:
                     continue
 
                 all_lines = wf.lines_of(r"uses:\s*" + re.escape(str(uses)))
@@ -285,9 +358,15 @@ class MissingEnvProtection(Rule):
         return findings
 
     def _oidc_id_token(self, perms) -> bool:
-        if not isinstance(perms, dict):
-            return False
-        return perms.get("id-token") == "write"
+        # `permissions: write-all` is a STRING, not a dict, and implicitly
+        # grants id-token: write — so a dict-only check silently misses the
+        # unscoped-OIDC case for write-all workflows. Accept both shapes
+        # (matches IdTokenWriteUnscoped._id_token_is_write).
+        if isinstance(perms, str):
+            return perms.strip().lower() == "write-all"
+        if isinstance(perms, dict):
+            return perms.get("id-token") == "write"
+        return False
 
 
 # --- 6. overly-broad-triggers (Sentinel low → MINOR) -----------------------

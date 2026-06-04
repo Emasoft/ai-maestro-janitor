@@ -59,9 +59,11 @@ from typing import Callable, Optional
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
+sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
+import supervisor as oauth_supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py
 import version_update_lib as vu  # noqa: E402
 
 # Default cadences. Each is overridable via the matching env var (the
@@ -79,6 +81,21 @@ _INTERVAL_VERSION_UPDATE = int(
     os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", "21600")
 )  # 6 h — janitor self-update cadence. GitHub releases land at human-day
 #  granularity; checking every 6 h is plenty and keeps the load light.
+_INTERVAL_OAUTH_SUPERVISOR = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_SUPERVISOR_INTERVAL", "600")
+)  # 10 min — the opt-in OAuth-rotator governance/auto-heal task (TRDD-32acd15f
+#  P2). A total no-op unless /janitor-auto-manage-oauth-on wrote the opt-in flag,
+#  so this cadence is free for every non-opted-in install. When opted-in the
+#  steady-state check is cheap (read the opt-in flag, stat the slots); the
+#  SessionStart fast-path surfaces alert-only findings the moment a session starts.
+_INTERVAL_OAUTH_TICK = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_TICK_INTERVAL", "60")
+)  # 60 s — the opt-in OAuth-rotator beat (TRDD-32acd15f), folded into the daemon
+#  per TRDD-f892e109 decision 3: this REPLACES the deleted launchd agent, which ran
+#  the same `tick --only-if-claude-running` every 60 s via plist `StartInterval 60`.
+#  A total no-op unless the opt-in flag is set AND the real Claude binary is running
+#  (the guard lives inside cmd_tick). The daemon loop ceiling is already 60 s, so
+#  this is the finest cadence the loop can offer.
 
 # Loop ceiling — heartbeat tick interval upper bound. Must be << the
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
@@ -174,8 +191,14 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
             if time.time() > deadline or not _running or gs.kill_switch_present():
                 state.log_line("daemon", f"  killing `{short}` (timeout or shutdown)")
                 proc.kill()
+                # communicate() (not wait()) is the documented reap after a
+                # communicate() timeout on a PIPE child: it drains the stdout/
+                # stderr pipes AND closes their fds deterministically. wait()
+                # leaves the read fds open until Popen.__del__ / GC closes them,
+                # so under repeated timeouts fd release would depend on GC
+                # timing instead of happening here-and-now.
                 try:
-                    proc.wait(timeout=5)
+                    proc.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     pass
                 return None
@@ -188,15 +211,21 @@ def task_marketplace_refresh() -> None:
 
     This is the operation that, when fired from N concurrent sessions, was
     the worst contributor to the pile-up reported in issue #7. The daemon
-    runs it exactly once per cadence — never overlapping with itself.
+    runs it exactly once per cadence — never overlapping with itself, and
+    (via the shared marketplace lock) never overlapping with a per-session
+    single-market update either.
     """
-    proc = _run_workload(["claude", "plugin", "marketplace", "update"])
-    if proc is None:
-        return
-    if proc.returncode != 0:
-        state.log_line("daemon", f"  marketplace-refresh exited rc={proc.returncode}")
-        for ln in (proc.stderr or "").splitlines()[:5]:
-            state.log_line("daemon", f"    stderr: {ln.strip()}")
+    with gs.marketplace_lock() as got:
+        if not got:
+            state.log_line("daemon", "  marketplace-refresh deferred (another marketplace op holds the lock)")
+            return
+        proc = _run_workload(["claude", "plugin", "marketplace", "update"])
+        if proc is None:
+            return
+        if proc.returncode != 0:
+            state.log_line("daemon", f"  marketplace-refresh exited rc={proc.returncode}")
+            for ln in (proc.stderr or "").splitlines()[:5]:
+                state.log_line("daemon", f"    stderr: {ln.strip()}")
 
 
 def task_user_plugins_update() -> None:
@@ -286,9 +315,14 @@ def task_version_update() -> None:
     def _log(msg: str) -> None:
         state.log_line("daemon", f"  {msg}")
 
-    updated, new_latest = vu.do_auto_update_if_needed(
-        plugin_root, _log, update_log_path=None,
-    )
+    updated, new_latest = False, ""
+    with gs.marketplace_lock() as got:
+        if not got:
+            _log("version-update deferred (another marketplace op holds the lock)")
+            return
+        updated, new_latest = vu.do_auto_update_if_needed(
+            plugin_root, _log, update_log_path=None,
+        )
     if updated:
         gs.set_reload_flag(f"janitor-self-update@{new_latest}")
         state.log_line(
@@ -296,6 +330,59 @@ def task_version_update() -> None:
             f"  version-update: janitor self-updated to {new_latest}; "
             f"reload-needed.flag SET (heartbeat will emit [janitor-reload])",
         )
+
+
+def task_oauth_rotator_supervisor() -> None:
+    """Governance (alert-only) for the opt-in OAuth account rotator
+    (TRDD-32acd15f, P2). The daemon owns this because rotating the live
+    credential (a keychain swap) is a user/global-scope mutation (scope
+    invariant, issue #7) and the daemon is the always-on singleton —
+    "without human, never stopping" by construction.
+
+    A TOTAL no-op unless the opt-in flag is set, so every janitor install
+    WITHOUT the rotator pays nothing here. When opted in: gather facts →
+    diagnose (pure) → log the alert-only findings (too few captured slots,
+    expiring setup-token, pinning env var) for the per-session detector to
+    surface to the user. There is no launchd agent to heal any more — the
+    60 s `oauth-rotator-tick` task (TRDD-f892e109 decision 3) replaced it.
+    """
+    facts = oauth_supervisor.gather_facts()
+    if not facts.opt_in:
+        return  # rotator not activated on this machine -> silent no-op
+    findings = oauth_supervisor.diagnose(facts)
+    if not findings:
+        return
+
+    def _log(msg: str) -> None:
+        state.log_line("daemon", f"  {msg}")
+
+    res = oauth_supervisor.apply(findings, log=_log)
+    state.log_line(
+        "daemon",
+        f"  oauth-rotator-supervisor: alerts={res.alerts or '[]'}",
+    )
+
+
+def task_oauth_rotator_tick() -> None:
+    """60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
+    TRDD-f892e109 decision 3 — this REPLACES the deleted launchd agent.
+
+    No-op unless the opt-in flag is set; the `--only-if-claude-running` guard
+    inside `cmd_tick` makes it a further no-op when the real Claude binary is
+    not up. Runs `rotator.py` as a TIMED SUBPROCESS (not in-process) so a hung
+    keychain or `/api/oauth/usage` call cannot wedge the daemon main loop —
+    `_run_workload` kills it past the timeout. The daemon auto-rolls
+    (dispatcher-stub re-execs the latest cached version), so
+    `_HERE/oauth_rotator/rotator.py` is always the current rotator and no
+    separate auto-roll stub is needed.
+    """
+    if not oauth_supervisor.opt_in_present():
+        return  # rotator not activated on this machine -> silent no-op
+    rotator_py = _HERE / "oauth_rotator" / "rotator.py"
+    _run_workload(
+        [sys.executable, str(rotator_py), "tick", "--only-if-claude-running"],
+        timeout=120,
+    )
 
 
 class Task:
@@ -340,10 +427,23 @@ def _build_tasks() -> list[Task]:
         Task("marketplace-refresh", _INTERVAL_MARKETPLACE_REFRESH, task_marketplace_refresh),
         Task("user-plugins-update", _INTERVAL_USER_PLUGINS_UPDATE, task_user_plugins_update),
         Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update),
+        Task("oauth-rotator-supervisor", _INTERVAL_OAUTH_SUPERVISOR,
+             task_oauth_rotator_supervisor),
+        Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_tick),
     ]
 
 
 def main() -> int:
+    # The daemon is a machine-wide singleton, but state.log_line() defaults to
+    # a PROJECT-scoped logs/ dir keyed on whatever tree spawned us — so the
+    # "global" daemon's log used to scatter into a random project's .janitor/
+    # logs/ (issue #9: the per-session watchdog pointed users at
+    # ~/.claude/janitor-global-state/daemon.log, which never existed). Pin the
+    # daemon's log to the global-state dir BEFORE the first log_line() so it is
+    # deterministic and the watchdog's `Inspect: <daemon.log>` path is real.
+    # setdefault() lets tests/hosts override it.
+    os.environ.setdefault("JANITOR_LOG_DIR", str(gs.global_state_dir()))
+
     gs.init_global_state()
 
     # Singleton: the flock IS the truth. If we cannot acquire it, another
@@ -360,8 +460,7 @@ def main() -> int:
     state.log_line(
         "daemon",
         f"started (pid={pid}, tasks={[t.name for t in tasks]}, "
-        f"intervals=[{_INTERVAL_MARKETPLACE_REFRESH}, "
-        f"{_INTERVAL_USER_PLUGINS_UPDATE}, {_INTERVAL_VERSION_UPDATE}])",
+        f"intervals={[t.interval_s for t in tasks]})",
     )
 
     signal.signal(signal.SIGTERM, _on_signal)

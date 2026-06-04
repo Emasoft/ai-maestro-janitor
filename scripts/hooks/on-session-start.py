@@ -67,6 +67,35 @@ def main() -> int:
             f"installed plugin rule(s): {', '.join(copied)}",
         )
 
+    # OAuth-rotator supervisor FAST-PATH (TRDD-32acd15f, P2). The daemon Task
+    # runs the same alert-only governance on a 10-min cadence; firing it here too
+    # surfaces the human-actionable conditions (pinning env var, expiring
+    # setup-token, opted-in non-macOS host) the moment ANY session starts. Since
+    # TRDD-f892e109 decision 3 the supervisor heals nothing — the daemon's 60 s
+    # oauth-rotator-tick Task owns rotation — so this is purely a "surface the
+    # alerts early" path. TOTAL no-op unless /janitor-auto-manage-oauth-on wrote
+    # the opt-in flag. Best-effort and fully isolated: any failure here must
+    # NEVER disrupt session start, so it is wrapped and swallowed.
+    try:
+        sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
+        import supervisor as oauth_supervisor  # noqa: E402  -- local module, not PyPI
+
+        _facts = oauth_supervisor.gather_facts()
+        if _facts.opt_in:
+            _findings = oauth_supervisor.diagnose(_facts)
+            if _findings:
+                _res = oauth_supervisor.apply(
+                    _findings,
+                    log=lambda m: state.log_line("session-start", m),
+                )
+                state.log_line(
+                    "session-start",
+                    f"oauth-rotator-supervisor (fast-path): "
+                    f"alerts={_res.alerts or '[]'}",
+                )
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        state.log_line("session-start", f"oauth-supervisor fast-path skipped: {exc}")
+
     # `last-activity.ts` was previously written here too, but no detector
     # ever read it — dropped to avoid carrying dead state. The
     # session-start nudge below is what callers actually rely on.

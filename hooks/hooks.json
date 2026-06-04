@@ -9,6 +9,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-session-start-trdd-state.py",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -52,6 +61,58 @@
             "type": "command",
             "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-pkg-guard.py",
             "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash-safety.py",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-context-usage.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-safety.py",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-mcp-response-sanitizer.py",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-compact-resume.py",
+            "timeout": 10
           }
         ]
       }

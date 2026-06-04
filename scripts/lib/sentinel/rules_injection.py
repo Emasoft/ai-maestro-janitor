@@ -288,10 +288,127 @@ class DangerousTriggers(Rule):
         return findings
 
 
+class RunsOnInjection(Rule):
+    """Attacker-controllable expression interpolated into `runs-on:`.
+
+    Disclosed PWNPipe attack — `runs-on: ${{ github.event.pull_request.head.ref }}`
+    lets a fork PR pick the runner that processes its own code, including
+    a self-hosted runner the attacker controls. The runner label is a
+    pre-job evaluation surface; no `env:` workaround applies. The only
+    safe shape is a hard-coded runner label or one read from a checked-in
+    config file.
+    """
+
+    name = "runs-on-injection"
+    severity = SEV_CRITICAL
+    description = "Attacker-controllable expression in runs-on:"
+
+    _RUNS_ON_LINE = re.compile(r"^\s*runs-on\s*:\s*(.+)$")
+
+    def check(self, wf: Workflow) -> list:
+        findings: list[Finding] = []
+        if safe_trigger_only(wf):
+            return findings
+
+        for idx, raw_line in enumerate(wf.raw_lines):
+            line_num = idx + 1
+            line_match = self._RUNS_ON_LINE.match(raw_line)
+            if not line_match:
+                continue
+            value = line_match.group(1).strip()
+            if not value:
+                continue
+            match = DANGEROUS_CONTEXT_PATTERN.search(value)
+            if not match:
+                continue
+            findings.append(self._finding(
+                wf,
+                line=line_num,
+                matched_text=raw_line.strip(),
+                description=(
+                    f"Attacker-controllable expression ${{{{ {match.group(1)} }}}} "
+                    "in runs-on: — a fork PR can pick the runner that processes "
+                    "its own code, including a self-hosted runner. runs-on must "
+                    "be a literal label or read from a checked-in config."
+                ),
+            ))
+        return findings
+
+
+class IssueCommentToctou(Rule):
+    """`issue_comment` trigger + checkout of head ref → TOCTOU window.
+
+    Disclosed PWNPipe attack — an `/approve`-style comment trigger
+    re-runs against the PR's HEAD. Between the comment that triggered
+    the run and the actual checkout, the attacker force-pushes a new
+    commit; the workflow runs on attacker-controlled code with the
+    base repo's secrets in scope. The mitigation is to checkout the
+    EXACT SHA the comment referred to (recorded in github.event.comment),
+    not the moving head_ref.
+    """
+
+    name = "issue-comment-toctou"
+    severity = SEV_HIGH
+    description = "issue_comment trigger + moving-head checkout — TOCTOU race"
+
+    _MOVING_REF = re.compile(
+        r"\$\{\{\s*github\.event\.pull_request\.head\.ref\s*\}\}"
+        r"|\$\{\{\s*github\.head_ref\s*\}\}"
+        r"|head\.ref$|head_ref$"
+    )
+
+    @staticmethod
+    def _has_issue_comment(triggers) -> bool:
+        if isinstance(triggers, dict):
+            return "issue_comment" in triggers
+        if isinstance(triggers, list):
+            return "issue_comment" in triggers
+        if isinstance(triggers, str):
+            return triggers == "issue_comment"
+        return False
+
+    def check(self, wf: Workflow) -> list:
+        findings: list[Finding] = []
+        if not self._has_issue_comment(wf.triggers()):
+            return findings
+
+        for job in wf.jobs().values():
+            for step in wf.steps(job):
+                if not isinstance(step, dict):
+                    continue
+                uses = step.get("uses")
+                if not (isinstance(uses, str) and "checkout" in uses):
+                    continue
+                with_block = step.get("with") or {}
+                ref = with_block.get("ref")
+                ref_str = str(ref) if ref is not None else ""
+                if not ref_str:
+                    continue
+                if not self._MOVING_REF.search(ref_str):
+                    continue
+                line = wf.line_of(re.compile(r"ref:.*head", re.IGNORECASE)) or \
+                       wf.line_of("checkout")
+                findings.append(self._finding(
+                    wf,
+                    line=line or 0,
+                    matched_text=f"ref: {ref_str}",
+                    description=(
+                        "issue_comment trigger + checkout of moving head ref — "
+                        "TOCTOU race between the trigger comment and the checkout. "
+                        "An attacker can force-push between the two and execute "
+                        "fresh code with the base repo's secrets. Checkout the "
+                        "exact SHA from github.event.comment instead."
+                    ),
+                ))
+        return findings
+
+
 RULES = [
     ShellInjectionExpr(),
     GithubScriptInjection(),
     ShellInjectionJq(),
     WorkflowDispatchInjection(),
     DangerousTriggers(),
+    RunsOnInjection(),
+    IssueCommentToctou(),
 ]

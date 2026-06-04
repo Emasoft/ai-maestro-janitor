@@ -134,12 +134,90 @@ def _is_truthy(v: Any) -> bool:
 
 _NODE_LOCKFILES = ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock")
 
+# Dependency-block keys whose presence (with at least one entry) proves a
+# package.json describes a project that actually consumes npm packages. A
+# package.json that exists only as project metadata (skill manifest, doc-
+# site config, monorepo placeholder with no own deps) does NOT expose the
+# install-time attack surface this detector is built to harden, and would
+# therefore false-positive on every supply-chain check below.
+_NPM_INSTALLABLE_DEP_KEYS = (
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+    "optionalDependencies",
+    "bundledDependencies",  # legacy synonym
+    "bundleDependencies",
+)
+
+
+def _has_installable_deps(pjson: Any) -> bool:
+    """True iff the package.json declares at least one installable dependency
+    OR is a workspace root (monorepo parent — sub-packages have deps).
+
+    Used as a context guard before running the supply-chain audits: a
+    metadata-only package.json (e.g. a Claude skill bundle that only sets
+    `{name, version, files, skill: {...}}`) has no install attack surface
+    and should not be flagged for missing `.npmrc`.
+
+    Takes Any (not dict) because `json.loads` of a malformed package.json
+    could be a list / string / number / null — the isinstance guard below
+    is the only thing keeping the function safe in that case.
+    """
+    if not isinstance(pjson, dict):
+        return False
+    for key in _NPM_INSTALLABLE_DEP_KEYS:
+        v = pjson.get(key)
+        if isinstance(v, dict) and v:
+            return True
+        if isinstance(v, list) and v:  # bundledDependencies is a list
+            return True
+    # Monorepo root: workspaces field present (string list OR object with
+    # `packages:` key). Sub-packages carry their own deps; the root still
+    # needs hardened defaults to govern child installs.
+    ws = pjson.get("workspaces")
+    if isinstance(ws, list) and ws:
+        return True
+    if isinstance(ws, dict) and ws.get("packages"):
+        return True
+    return False
+
 
 def _is_node_project(root: Path) -> bool:
-    """Heuristic: the project uses an npm-family package manager."""
-    if (root / "package.json").is_file():
+    """True iff the project actually installs npm packages.
+
+    Two acceptance shapes:
+      1. A JS lockfile exists (`package-lock.json` / `pnpm-lock.yaml` /
+         `yarn.lock` / `bun.lockb` / `bun.lock`). A lockfile is only
+         generated when `npm install` (or its equivalent) has actually run
+         against real deps, so its existence is proof of installation
+         intent.
+      2. `package.json` exists AND declares at least one installable
+         dependency block (or is a workspace root). A `package.json`
+         WITHOUT any deps is metadata-only and produces no install
+         attack surface, so the supply-chain knobs do not apply.
+
+    Skipping a metadata-only package.json is a context-precision
+    improvement, NOT a rule weakening: the day a real dependency is
+    added, the next heartbeat re-fires every relevant audit. A truly
+    malicious package.json that hides deps in an unusual location
+    (e.g. directly in a sub-script) is not the threat model this
+    detector is built for — that lives upstream in `pre-tool-pkg-guard`
+    and `supply-chain-watcher`.
+    """
+    # Lockfile path: definitive proof a node project has been installed.
+    if any((root / lf).exists() for lf in _NODE_LOCKFILES):
         return True
-    return any((root / lf).exists() for lf in _NODE_LOCKFILES)
+    pjson_path = root / "package.json"
+    if not pjson_path.is_file():
+        return False
+    try:
+        pjson = json.loads(pjson_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # Malformed package.json — be conservative, treat as node-project
+        # so the user is told to harden it (and so we don't silently swallow
+        # a real defect via a parse error).
+        return True
+    return _has_installable_deps(pjson)
 
 
 # ---- the per-knob policy walker -----------------------------------------
@@ -244,10 +322,53 @@ def _audit_bunfig(root: Path, _threshold: int, issues: list[str]) -> None:
         return
 
 
-def _audit_install_firewall(issues: list[str]) -> None:
-    """One of `sfw` (Socket Free) or `safe-chain` (AikidoSec) should be on PATH."""
-    if shutil.which("sfw") or shutil.which("safe-chain"):
+def _audit_install_firewall(root: Path, issues: list[str]) -> None:
+    """Verify an install-time malware firewall is reachable for THIS project.
+
+    Two firewalls are recognised:
+      * `sfw` — Socket Firewall Free (docs.socket.dev/docs/socket-firewall-free).
+        Wraps `sfw npm install` etc.; just having it on PATH is enough — the
+        user opts into protection at call time.
+      * `@aikidosec/safe-chain` — Aikido safe-chain (github.com/AikidoSec/safe-chain).
+        PATH-shim model: when installed globally it shadows `npm`/`yarn`/`pnpm`,
+        so every install is intercepted automatically. The CLI is exposed
+        under several executable names depending on install style.
+
+    Resolution order, any-hit short-circuits:
+      1. Global binary on PATH (the common case for `npm i -g`).
+      2. Project-local install — `<root>/node_modules/.bin/<bin>`. Tracked
+         for projects that vendor the firewall as a devDependency.
+      3. Listed as a (dev)dependency in `<root>/package.json`. Some
+         workflows use the package only via `npx <bin>` without ever
+         dropping a wrapper, so listing alone is acceptance.
+
+    Detected binary names: `sfw`, `safe-chain`, `aikido-safe-chain`,
+    `aikido` — covering every shim the two tools ship with.
+    """
+    candidate_bins = ("sfw", "safe-chain", "aikido-safe-chain", "aikido")
+    candidate_pkgs = ("sfw", "@aikidosec/safe-chain")
+
+    # 1. Global PATH check.
+    if any(shutil.which(b) for b in candidate_bins):
         return
+
+    # 2. Project-local node_modules/.bin shim.
+    local_bin = root / "node_modules" / ".bin"
+    if local_bin.is_dir() and any((local_bin / b).exists() for b in candidate_bins):
+        return
+
+    # 3. Declared as a (dev)dependency in package.json.
+    pjson = root / "package.json"
+    if pjson.is_file():
+        try:
+            data = _parse_json(_read_text(pjson))
+        except Exception:  # noqa: BLE001 - any parse failure → fall through
+            data = {}
+        for dep_block in ("dependencies", "devDependencies", "optionalDependencies"):
+            block = data.get(dep_block)
+            if isinstance(block, dict) and any(p in block for p in candidate_pkgs):
+                return
+
     issues.append(
         "no install-time malware firewall on PATH (install Aikido safe-chain via "
         "`npm i -g @aikidosec/safe-chain` for npm/yarn/pnpm/npx/pip/uv/poetry coverage, "
@@ -291,6 +412,9 @@ def _content_hash(root: Path) -> str:
 def main() -> int:
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_PKG_MANAGER_POLICY_ENABLED", True):
         return 0
+    # Hard self-scan guard — see state.is_self_scan_target() docstring.
+    if state.is_self_scan_target():
+        return 0
 
     state.init_state()
     project_root = state.project_root()
@@ -315,7 +439,7 @@ def main() -> int:
     _audit_pnpm_workspace(project_root, threshold, issues)
     _audit_yarnrc(project_root, threshold, issues)
     _audit_bunfig(project_root, threshold, issues)
-    _audit_install_firewall(issues)
+    _audit_install_firewall(project_root, issues)
 
     # Stamp the hash regardless of outcome — same dedupe shape as workflow-security.
     state.atomic_write(last_hash_file, combined)

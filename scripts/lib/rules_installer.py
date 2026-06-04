@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 PLUGIN_NAME = "ai-maestro-janitor"
@@ -152,9 +153,25 @@ def install_rules(plugin_root: Path) -> list[str]:
                     # Can't stat (race, permission). Bail rather than
                     # risk an overwrite based on incomplete info.
                     continue
+            tmp = None
             try:
-                shutil.copyfile(src, dst)
+                # Atomic publish: copy to a unique temp in the SAME dir, then
+                # os.replace (atomic rename on POSIX) so N concurrent
+                # session-start installs writing this user-scope rule file
+                # can't tear it. Rules-install stays per-session (rules must
+                # be present at session start), but the write is now
+                # corruption-free under fan-out — the cheap-idempotent-file
+                # analogue of the daemon's single-writer lock for commands.
+                fd, tmp = tempfile.mkstemp(dir=str(td), prefix=f".{src.name}.", suffix=".tmp")
+                os.close(fd)
+                shutil.copyfile(src, tmp)
+                os.replace(tmp, dst)
                 copied.append(str(dst))
             except OSError:
+                if tmp is not None:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
                 continue
     return copied

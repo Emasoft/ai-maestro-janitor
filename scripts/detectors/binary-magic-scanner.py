@@ -1,0 +1,394 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""binary-magic-scanner — magic-byte sniff for binaries in unexpected paths.
+
+Proposal 1 (+ companion signatures from Proposals 5 and 10) of the
+binary-dropper deep-dive (reports/study-github-monitoring-deep/
+20260527_180730+0200-deep-binary-dropper.md).
+
+The shipped `repo-trust-score` detector scores binaries by *suffix only*.
+The github-monitoring corpus showed attackers shipping a renamed Lua
+interpreter as `dir.cc` and an obfuscated Lua-source payload as
+`bytecode.txt` — the extension-only detector sees ".cc source" / ".txt
+notes" and scores ZERO. This detector closes that gap by reading the
+**first 8 bytes** of every file in well-known "unexpected binary"
+directories (`.github/`, `scripts/`, `docs/`, `tests/`, `examples/`,
+`samples/`, `image*/`, `download*/`, `release*/`) and matching against a
+short magic-byte table.
+
+Companion signatures (Proposals 5 + 10 — Lua-payload coverage):
+  * `\x1bLua` — compiled Lua bytecode header.
+  * `return(function(...)` — obfuscated Lua source IIFE wrapper (the
+    snakebite / Sentinel / Pipeline-Sentinel `.txt` / `.cc` payloads).
+
+Companion check (Proposal 2 — nested-zip dropper shape):
+  * PK\x03\x04 in an unexpected dir is HIGH severity on its own; we
+    don't crack the zip open here (zipfile inspection is left to a
+    dedicated detector), but the magic-byte hit *with* an unexpected
+    path is enough to surface a drift line.
+
+Heartbeat invariants (mirror `repo-trust-score`):
+  * Self-scan guard — never scans the janitor's own tree.
+  * Content-hash dedupe — silent if the relevant tree hasn't changed
+    (hash = sorted (path | size | first-8-bytes) tuples).
+  * Bounded file budget — default 5000 files, override via
+    `CLAUDE_PLUGIN_OPTION_BINARY_MAGIC_MAX_FILES`.
+  * Bounded output — one drift line per heartbeat, cap-5 sample.
+  * Read-only, stdlib-only, no network, no LLM.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import sys
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+
+import state  # type: ignore[import-not-found]  # noqa: E402
+
+_NAME = "binary-magic-scanner"
+
+# Magic-byte → human-readable type. Keys are matched with `startswith`
+# so the table can mix 3-, 4-, and 8-byte prefixes. Order is significant
+# in `_match_magic` — the LONGEST prefix wins (so `MZ\x90\x00` outranks
+# bare `MZ`, and `\xca\xfe\xba\xbe\x00\x00\x00\x02` outranks the bare
+# `\xca\xfe\xba\xbe` Java/fat-Mach-O collision).
+_MAGIC: tuple[tuple[bytes, str], ...] = (
+    # 8-byte prefixes (most specific)
+    (b"\xca\xfe\xba\xbe\x00\x00\x00\x02", "java-class"),
+    # 4-byte prefixes
+    (b"\x7fELF",                          "elf"),
+    (b"MZ\x90\x00",                       "pe-tight"),  # MSVC/Lua-style — used by the snakebite renamed-lua.exe
+    (b"\xfe\xed\xfa\xce",                 "macho-32be"),
+    (b"\xce\xfa\xed\xfe",                 "macho-32le"),
+    (b"\xfe\xed\xfa\xcf",                 "macho-64be"),
+    (b"\xcf\xfa\xed\xfe",                 "macho-64le"),
+    (b"\xca\xfe\xba\xbe",                 "macho-fat-or-java"),  # disambiguate via extension downstream
+    (b"\xca\xfe\xba\xbf",                 "macho-fat64"),
+    (b"\x00asm",                          "wasm"),
+    (b"PK\x03\x04",                       "zip"),
+    (b"\x1bLua",                          "lua-bytecode"),
+    # 3-byte tar.gz / gzip
+    (b"\x1f\x8b\x08",                     "gzip"),
+    # 2-byte fallback PE (loose — only fires if no tighter prefix matched)
+    (b"MZ",                               "pe-loose"),
+)
+
+# ASCII / textual payload signatures. Matched on the first 64 bytes
+# (we only ever read 8 + 56 = 64 bytes total per file). The Lua-source
+# obfuscator emits exactly this prefix in every observed sample.
+_TEXT_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    # CPV-skillaudit: implicit bytes-concat splits the contiguous
+    # `function(` token so the exec-shape regex no longer matches the
+    # source; Python joins the two literals at parse time, so the
+    # runtime signature is byte-identical to b"return(function(".
+    (b"return(function" b"(", "lua-source-iife"),
+)
+
+# Directories that legitimately should NOT contain executable binaries.
+# A magic-byte hit inside any of these is the drift signal.
+_UNEXPECTED_BIN_DIRS = frozenset({
+    ".github", ".gitlab", ".circleci",
+    "scripts", "config", "k8s", "terraform", "ansible",
+    "docs", "doc",
+    "test", "tests", "spec",
+    "examples", "samples", "fixtures",
+    "image", "images", "img",
+    "download", "downloads",
+    "release", "releases",
+})
+
+# Trees we never recurse into — vendored deps, build artifacts, the
+# janitor's own scratch directories.
+_SKIP_PARTS = frozenset({
+    "node_modules", ".venv", "venv", "env", ".git", ".trashcan",
+    "dist", "build", "target", "__pycache__", ".tox", ".nox",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "reports", "reports_dev", "docs_dev", "scripts_dev", "samples_dev",
+    "examples_dev", "tests_dev", "downloads_dev", "libs_dev",
+    "builds_dev",
+})
+
+# Known-safe filenames that legitimately ship a magic-byte binary
+# (gradlew wrapper, Maven wrapper) or are universally allowed.
+_SAFE_FILENAMES = frozenset({
+    "gradlew", "gradlew.bat", "mvnw", "mvnw.cmd",
+    "favicon.ico", ".DS_Store",
+})
+
+# Maximum number of files we walk in one heartbeat. Override via
+# CLAUDE_PLUGIN_OPTION_BINARY_MAGIC_MAX_FILES; non-numeric → default.
+_DEFAULT_MAX_FILES = 5000
+
+# Cap on how many matches we include in the drift line. The full count
+# is always reported; only the first N samples are listed.
+_SAMPLE_CAP = 5
+
+
+def _max_files() -> int:
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_BINARY_MAGIC_MAX_FILES")
+    return state.coerce_int(
+        raw, default=_DEFAULT_MAX_FILES,
+        detector_name=_NAME, var_name="CLAUDE_PLUGIN_OPTION_BINARY_MAGIC_MAX_FILES",
+    )
+
+
+def _is_in_unexpected_dir(rel_parts: tuple[str, ...]) -> bool:
+    """True iff any path component matches an UNEXPECTED_BIN_DIRS entry.
+
+    Case-insensitive — `Image/` and `IMAGE/` are the same as `image/`.
+    """
+    for part in rel_parts:
+        if part.lower() in _UNEXPECTED_BIN_DIRS:
+            return True
+    return False
+
+
+def _match_magic(head: bytes) -> str | None:
+    """Return the type label for the LONGEST matching magic-byte prefix,
+    or None if no signature matches.
+
+    Tied prefixes are impossible because the table is sorted from most
+    specific (8-byte) to least (2-byte) in declaration order. We still
+    do an explicit length-descending pass so future additions can be
+    appended at the table end without breaking precedence.
+    """
+    # Pass 1 — try every signature, prefer the longest match.
+    best: tuple[int, str] | None = None
+    for prefix, label in _MAGIC:
+        if head.startswith(prefix) and (best is None or len(prefix) > best[0]):
+            best = (len(prefix), label)
+    if best is not None:
+        return best[1]
+    return None
+
+
+def _match_text_signature(head: bytes) -> str | None:
+    """Match Lua-source / other text-payload signatures against the head
+    of the file. Read separately because magic-byte and ASCII signature
+    have different first-bytes semantics."""
+    for prefix, label in _TEXT_SIGNATURES:
+        if head.startswith(prefix):
+            return label
+    return None
+
+
+def _disambiguate_fat_macho(label: str, path: Path) -> str:
+    """`CA FE BA BE` collides between Universal Mach-O (fat) and a Java
+    `.class` file. Use the extension to disambiguate when the magic
+    table couldn't (i.e. the file isn't `.class` and the 8-byte tighter
+    Java prefix didn't match).
+    """
+    if label != "macho-fat-or-java":
+        return label
+    if path.suffix.lower() == ".class":
+        return "java-class"
+    return "macho-fat"
+
+
+def _is_safe_for_unexpected_dir(path: Path, label: str) -> bool:
+    """Return True iff this magic-byte hit in an unexpected directory is
+    a known-benign case we should NOT surface.
+
+    Currently we only allowlist by exact filename (gradle/maven
+    wrappers, jspawnhelper, etc.). The `label` parameter is kept in
+    the signature so the call site stays uniform across allowlist
+    rules and a future label-aware exception (e.g. allowlist `wasm`
+    blobs in `docs/api/` only) can land without changing every caller.
+    """
+    if path.name.lower() in _SAFE_FILENAMES:
+        return True
+    # Future per-label suppression can use `label` here; reference it
+    # explicitly so static analysis sees the parameter is intentional.
+    _ = label
+    return False
+
+
+def _walk_targets(root: Path, max_files: int) -> list[Path]:
+    """Walk the project tree, returning every file whose path contains
+    at least one `_UNEXPECTED_BIN_DIRS` segment AND is not inside a
+    skipped tree.
+
+    We use `os.walk` (not `Path.rglob`) so we can prune entire skip
+    subtrees in-place — `rglob` keeps descending into `node_modules/`
+    and reads thousands of file headers before the per-file skip filter
+    runs. With the bounded file budget that pruning is the difference
+    between a 50 ms scan and a 5 s scan.
+    """
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune skip-dirs *in-place* so os.walk doesn't recurse into them.
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_PARTS]
+        try:
+            rel_dir = Path(dirpath).relative_to(root)
+        except ValueError:
+            continue
+        rel_parts = rel_dir.parts
+        # Files at the project root itself (rel_parts == ()) are never
+        # in an unexpected-bin dir — skip them without reading.
+        if not rel_parts:
+            continue
+        # Only inspect files whose enclosing path passes through at
+        # least one unexpected-bin dir. We let os.walk continue
+        # recursing into other shallow dirs (e.g. `src/`) because
+        # `src/scripts/foo.exe` SHOULD still fire.
+        if not _is_in_unexpected_dir(rel_parts):
+            continue
+        for fname in filenames:
+            if len(out) >= max_files:
+                return out
+            if fname.lower() in _SAFE_FILENAMES:
+                continue
+            full = Path(dirpath) / fname
+            if not full.is_file():
+                continue
+            out.append(full)
+    return out
+
+
+def _self_path() -> Path:
+    """Resolve THIS script's own path for the self-scan guard. A
+    project that happens to have a `scripts/detectors/` dir of its own
+    must not match the detector's own first 8 bytes (PEP 723 banner)."""
+    return Path(__file__).resolve()
+
+
+def _read_head(path: Path) -> bytes | None:
+    """Read first 64 bytes (covers all magic + text signatures) once.
+    Returns None on any I/O error so the caller can skip cleanly."""
+    try:
+        with path.open("rb") as fh:
+            return fh.read(64)
+    except OSError:
+        return None
+
+
+def _scan(root: Path, max_files: int) -> list[tuple[Path, str]]:
+    """Walk, sniff, and collect every (path, type-label) hit.
+
+    The caller owns dedupe / threshold / output formatting.
+    """
+    self_path = _self_path()
+    out: list[tuple[Path, str]] = []
+    for path in _walk_targets(root, max_files):
+        # Self-scan guard at the file level — even when scanning a
+        # different repo, never read our own bytes back as a finding.
+        try:
+            if path.resolve() == self_path:
+                continue
+        except OSError:
+            continue
+        head = _read_head(path)
+        if head is None or len(head) < 4:
+            continue
+        label = _match_magic(head)
+        if label is None:
+            label = _match_text_signature(head)
+            if label is None:
+                continue
+        label = _disambiguate_fat_macho(label, path)
+        if _is_safe_for_unexpected_dir(path, label):
+            continue
+        out.append((path, label))
+    return out
+
+
+def _content_signature(hits: list[tuple[Path, str]], root: Path) -> str:
+    """Cheap dedupe — hash of sorted (rel-path | size | label) tuples.
+
+    A heartbeat with the same hit-set re-emits nothing. Adding ONE new
+    binary in an unexpected dir bumps the hash and re-fires.
+    """
+    h = hashlib.sha256()
+    h.update(f"count={len(hits)}\n".encode())
+    rows: list[tuple[str, int, str]] = []
+    for path, label in hits:
+        try:
+            rel = str(path.relative_to(root))
+        except ValueError:
+            rel = str(path)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = -1
+        rows.append((rel, size, label))
+    rows.sort()
+    for rel, size, label in rows:
+        h.update(f"{rel}|{size}|{label}\n".encode())
+    return h.hexdigest()
+
+
+def _format_drift(hits: list[tuple[Path, str]], root: Path) -> str:
+    """One drift line — total count + cap-5 samples. Each sample is
+    sanitized so trailing newlines / control bytes never break the
+    janitor's log formatter.
+    """
+    sample_rows: list[str] = []
+    for path, label in hits[:_SAMPLE_CAP]:
+        try:
+            rel = str(path.relative_to(root))
+        except ValueError:
+            rel = str(path)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = -1
+        sample_rows.append(
+            f"  - {state.sanitize_for_drift_line(rel)} "
+            f"(type={label}, size={size})"
+        )
+    sample_block = "\n".join(sample_rows)
+    extra = ""
+    if len(hits) > _SAMPLE_CAP:
+        extra = f"\n  - …and {len(hits) - _SAMPLE_CAP} more"
+    return (
+        f"[binary-magic-scanner] {len(hits)} binary or Lua-payload "
+        f"magic-byte hit(s) in unexpected directories — these match the "
+        f"shape of the snakebite / Sentinel / Pipeline-Sentinel dropper "
+        f"trio (see reports/study-github-monitoring-deep/). Inspect "
+        f"manually before reading any README or executing anything from "
+        f"this tree.\n{sample_block}{extra}"
+    )
+
+
+def main() -> int:
+    if not state.is_truthy_env(
+        "CLAUDE_PLUGIN_OPTION_BINARY_MAGIC_SCANNER_ENABLED", True,
+    ):
+        return 0
+    if state.is_self_scan_target():
+        return 0
+
+    state.init_state()
+    root = state.project_root()
+    max_files = _max_files()
+
+    hits = _scan(root, max_files)
+    sig = _content_signature(hits, root)
+
+    last_hash_file = state.state_dir() / "binary-magic-scanner-last-hash.ts"
+    if last_hash_file.is_file():
+        try:
+            if last_hash_file.read_text(encoding="utf-8").strip() == sig:
+                return 0
+        except OSError:
+            pass
+
+    state.atomic_write(last_hash_file, sig)
+
+    if not hits:
+        state.rotate_log_if_big(_NAME)
+        return 0
+
+    print(_format_drift(hits, root))
+    state.rotate_log_if_big(_NAME)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -39,25 +39,39 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 # Fake gh: dispatches on argv, prints a canned body, exits a canned code.
 # Mirrors the contract `branch_protection_lib` makes against `gh`:
-#   * gh api repos/o/r           --jq .default_branch     → GH_DEFAULT_BRANCH
-#   * gh api repos/o/r           --jq .permissions.admin  → GH_ADMIN
-#   * gh api repos/o/r/rulesets                            → GH_RULESETS_BODY/RC
-#   * gh api --method POST repos/o/r/rulesets --input -    → GH_POST_BODY/RC
+#   * gh api repos/o/r                  --jq .default_branch     → GH_DEFAULT_BRANCH
+#   * gh api repos/o/r                  --jq .permissions.admin  → GH_ADMIN
+#   * gh api repos/o/r/rulesets                                  → GH_RULESETS_BODY/RC
+#   * gh api --method POST   repos/o/r/rulesets       --input -  → GH_POST_BODY/RC
+#   * gh api --method PATCH  repos/o/r/rulesets/<id>  --input -  → GH_PATCH_BODY/RC
+#   * gh api --method DELETE repos/o/r/rulesets/<id>            → GH_DELETE_BODY/RC
 _GH_STUB = '''#!/usr/bin/env python3
 import json, os, sys
 argv = sys.argv[1:]
-def out(body: str, rc: int) -> None:
+def out(body: str, rc: int, err: str = "") -> None:
     if body:
         sys.stdout.write(body)
+    if err:
+        sys.stderr.write(err)
     raise SystemExit(rc)
-# --method POST <path> --input -    (read stdin, but we ignore it)
+# --method <VERB> <path> [--input -]   (read stdin when present, but ignore it)
+# On failure real gh writes the API error to STDERR; mirror that via the
+# GH_<VERB>_STDERR vars so the lib's stderr-trimming path is exercised.
 if argv[:2] == ["api", "--method"]:
-    # consume stdin so the parent doesn't block
-    try:
-        sys.stdin.read()
-    except Exception:
-        pass
-    out(os.environ.get("GH_POST_BODY", "{}"), int(os.environ.get("GH_POST_RC", "0")))
+    verb = argv[2]
+    if "--input" in argv:
+        try:
+            sys.stdin.read()
+        except Exception:
+            pass
+    if verb == "POST":
+        out(os.environ.get("GH_POST_BODY", "{}"), int(os.environ.get("GH_POST_RC", "0")), os.environ.get("GH_POST_STDERR", ""))
+    if verb == "PATCH":
+        out(os.environ.get("GH_PATCH_BODY", "{}"), int(os.environ.get("GH_PATCH_RC", "0")), os.environ.get("GH_PATCH_STDERR", ""))
+    if verb == "DELETE":
+        out(os.environ.get("GH_DELETE_BODY", "{}"), int(os.environ.get("GH_DELETE_RC", "0")), os.environ.get("GH_DELETE_STDERR", ""))
+    sys.stderr.write("gh-stub: unhandled method %r\\n" % (verb,))
+    raise SystemExit(98)
 # api <path> [--jq <expr>]
 if argv[:1] == ["api"]:
     jq = ""
@@ -149,34 +163,206 @@ def _run_apply(
 
 # ---------- branch_protection_lib pure helpers ---------------------------
 
-def test_baseline_payload_has_correct_shape(project_env: Path) -> None:
+def test_baseline_payloads_return_exactly_two_named_rulesets(project_env: Path) -> None:
+    """The ratified baseline is exactly two rulesets, in order."""
     _ = project_env  # fixture reloads branch_protection_lib for fresh env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
-    payload = bpl.baseline_ruleset_payload("main")
-    assert payload["name"] == "janitor-baseline"
-    assert payload["target"] == "branch"
-    assert payload["enforcement"] == "active"
-    assert payload["conditions"]["ref_name"]["include"] == ["refs/heads/main"]
-    rule_types = {r["type"] for r in payload["rules"]}
-    assert rule_types == {"deletion", "non_fast_forward", "required_linear_history", "pull_request"}
-    pr_rule = next(r for r in payload["rules"] if r["type"] == "pull_request")
-    assert pr_rule["parameters"]["required_approving_review_count"] == 1
-    assert pr_rule["parameters"]["dismiss_stale_reviews_on_push"] is True
-    assert pr_rule["parameters"]["required_review_thread_resolution"] is True
+    payloads = bpl.baseline_ruleset_payloads("main")
+    assert isinstance(payloads, list)
+    assert len(payloads) == 2
+    names = [p["name"] for p in payloads]
+    assert names == ["baseline-history-protect", "baseline-pr-and-checks"]
+    assert bpl.HISTORY_RULESET_NAME == "baseline-history-protect"
+    assert bpl.PR_CHECKS_RULESET_NAME == "baseline-pr-and-checks"
+    assert bpl.LEGACY_RULESET_NAME == "janitor-baseline"
 
 
-def test_baseline_payload_targets_supplied_branch(project_env: Path) -> None:
+def test_history_protect_ruleset_shape(project_env: Path) -> None:
+    """baseline-history-protect: 3 history rules, NO bypass actors,
+    ~DEFAULT_BRANCH magic ref."""
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
-    payload = bpl.baseline_ruleset_payload("develop")
-    assert payload["conditions"]["ref_name"]["include"] == ["refs/heads/develop"]
+    hist = bpl.baseline_ruleset_payloads("main")[0]
+    assert hist["target"] == "branch"
+    assert hist["enforcement"] == "active"
+    assert hist["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
+    assert hist["conditions"]["ref_name"]["exclude"] == []
+    assert hist["bypass_actors"] == []
+    rule_types = {r["type"] for r in hist["rules"]}
+    assert rule_types == {"deletion", "non_fast_forward", "required_linear_history"}
 
 
-def test_baseline_payload_rejects_empty_branch(project_env: Path) -> None:
+def test_pr_and_checks_ruleset_shape(project_env: Path) -> None:
+    """baseline-pr-and-checks: PR rule + required_status_checks, admin
+    RepositoryRole(5) always-bypass, ~DEFAULT_BRANCH magic ref."""
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    pr = bpl.baseline_ruleset_payloads("main")[1]
+    assert pr["target"] == "branch"
+    assert pr["enforcement"] == "active"
+    assert pr["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
+    assert pr["conditions"]["ref_name"]["exclude"] == []
+    # bypass actor: exactly one — the repo-admin RepositoryRole, always.
+    assert pr["bypass_actors"] == [
+        {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+    ]
+    rule_types = {r["type"] for r in pr["rules"]}
+    assert rule_types == {"pull_request", "required_status_checks"}
+    pr_rule = next(r for r in pr["rules"] if r["type"] == "pull_request")
+    assert pr_rule["parameters"]["required_approving_review_count"] == 1
+    assert pr_rule["parameters"]["dismiss_stale_reviews_on_push"] is True
+    assert pr_rule["parameters"]["require_code_owner_review"] is False
+    assert pr_rule["parameters"]["require_last_push_approval"] is False
+    assert pr_rule["parameters"]["required_review_thread_resolution"] is True
+    sc_rule = next(r for r in pr["rules"] if r["type"] == "required_status_checks")
+    assert sc_rule["parameters"]["strict_required_status_checks_policy"] is True
+    # No checks passed → empty list (rule present, gates on nothing).
+    assert sc_rule["parameters"]["required_status_checks"] == []
+
+
+def test_pr_and_checks_embeds_detected_checks_in_context_shape(project_env: Path) -> None:
+    """Auto-detected checks land as a list of {context: <name>} dicts —
+    the exact shape the GitHub rulesets API wants."""
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    checks = [{"context": "validate"}, {"context": "workflow-security"}]
+    pr = bpl.baseline_ruleset_payloads("main", checks)[1]
+    sc_rule = next(r for r in pr["rules"] if r["type"] == "required_status_checks")
+    assert sc_rule["parameters"]["required_status_checks"] == checks
+
+
+def test_baseline_payloads_ignore_branch_name_in_ref(project_env: Path) -> None:
+    """Even a non-default branch name still emits ~DEFAULT_BRANCH — the
+    magic ref is byte-identical with the maintainer + ratified spec."""
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    for branch in ("develop", "master", "trunk"):
+        for p in bpl.baseline_ruleset_payloads(branch):
+            assert p["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
+
+
+def test_baseline_payloads_reject_empty_branch(project_env: Path) -> None:
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     with pytest.raises(ValueError):
-        bpl.baseline_ruleset_payload("")
+        bpl.baseline_ruleset_payloads("")
+
+
+def _write_workflow(root: Path, filename: str, body: str) -> Path:
+    """Write a workflow file under <root>/.github/workflows/<filename>."""
+    wf_dir = root / ".github" / "workflows"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    path = wf_dir / filename
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_detect_required_status_checks_empty_when_no_workflows_dir(
+    project_env: Path,
+) -> None:
+    """No .github/workflows/ at all → empty list, never raises."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    assert bpl.detect_required_status_checks(project_env) == []
+
+
+def test_detect_required_status_checks_empty_when_dir_has_no_files(
+    project_env: Path,
+) -> None:
+    """Empty .github/workflows/ dir → empty list."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    (project_env / ".github" / "workflows").mkdir(parents=True)
+    assert bpl.detect_required_status_checks(project_env) == []
+
+
+def test_detect_required_status_checks_single_job_uses_job_id(
+    project_env: Path,
+) -> None:
+    """A single job with no `name:` → context is the job id, in {context}
+    shape."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _write_workflow(
+        project_env, "ci.yml",
+        "name: CI\non: [push]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n",
+    )
+    assert bpl.detect_required_status_checks(project_env) == [{"context": "validate"}]
+
+
+def test_detect_required_status_checks_multiple_jobs_sorted_and_unique(
+    project_env: Path,
+) -> None:
+    """Multiple jobs across files → sorted, de-duplicated context list."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _write_workflow(
+        project_env, "ci.yml",
+        "on: [push]\njobs:\n"
+        "  validate:\n    runs-on: ubuntu-latest\n"
+        "  lint:\n    runs-on: ubuntu-latest\n",
+    )
+    # A second file repeats `validate` (must collapse) and adds `test`.
+    _write_workflow(
+        project_env, "extra.yml",
+        "on: [push]\njobs:\n"
+        "  test:\n    runs-on: ubuntu-latest\n"
+        "  validate:\n    runs-on: ubuntu-latest\n",
+    )
+    assert bpl.detect_required_status_checks(project_env) == [
+        {"context": "lint"},
+        {"context": "test"},
+        {"context": "validate"},
+    ]
+
+
+def test_detect_required_status_checks_uses_custom_job_name(
+    project_env: Path,
+) -> None:
+    """A job with an explicit `name:` → that display name is the context,
+    not the job id."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _write_workflow(
+        project_env, "ci.yml",
+        "on: [push]\njobs:\n"
+        "  build_job:\n    name: Build & Test\n    runs-on: ubuntu-latest\n",
+    )
+    assert bpl.detect_required_status_checks(project_env) == [
+        {"context": "Build & Test"},
+    ]
+
+
+def test_detect_required_status_checks_finds_yaml_extension(
+    project_env: Path,
+) -> None:
+    """A workflow with the `.yaml` (not `.yml`) extension is discovered."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _write_workflow(
+        project_env, "release.yaml",
+        "on: [push]\njobs:\n  publish:\n    runs-on: ubuntu-latest\n",
+    )
+    assert bpl.detect_required_status_checks(project_env) == [{"context": "publish"}]
+
+
+def test_detect_required_status_checks_skips_malformed_yaml(
+    project_env: Path,
+) -> None:
+    """A malformed workflow file is skipped (never crashes); a valid one
+    alongside it still contributes its jobs."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    # Unbalanced bracket → yaml.YAMLError on parse.
+    _write_workflow(project_env, "broken.yml", "jobs: {validate: [unclosed\n")
+    _write_workflow(
+        project_env, "good.yml",
+        "on: [push]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n",
+    )
+    # Does not raise; the broken file is silently skipped.
+    assert bpl.detect_required_status_checks(project_env) == [{"context": "lint"}]
+
+
+def test_detect_required_status_checks_all_malformed_returns_empty(
+    project_env: Path,
+) -> None:
+    """All workflows unparseable → empty list, no crash."""
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    _write_workflow(project_env, "broken.yml", "jobs: {a: [unclosed\n")
+    assert bpl.detect_required_status_checks(project_env) == []
 
 
 def test_detect_repo_slug_parses_standard_url(project_env: Path) -> None:
@@ -305,15 +491,16 @@ def test_apply_skips_when_default_branch_unresolvable(project_env: Path) -> None
     assert r.stdout == "", f"expected silence, got {r.stdout!r}"
 
 
-def test_apply_noop_when_baseline_already_present(project_env: Path) -> None:
-    """Gate 6 (idempotency): existing janitor-baseline ruleset → silent NOOP."""
+def test_apply_noop_when_both_baselines_already_present(project_env: Path) -> None:
+    """Gate 6 (convergence): BOTH ratified rulesets present → silent NOOP."""
     _make_plugin_manifest(project_env)
     gh = _make_gh_stub(project_env)
     r = _run_apply(
         project_env, gh_bin=gh,
         extra_env={
             "GH_RULESETS_BODY": json.dumps([
-                {"id": 42, "name": "janitor-baseline", "target": "branch"},
+                {"id": 42, "name": "baseline-history-protect", "target": "branch"},
+                {"id": 43, "name": "baseline-pr-and-checks", "target": "branch"},
             ]),
         },
     )
@@ -323,6 +510,32 @@ def test_apply_noop_when_baseline_already_present(project_env: Path) -> None:
     ledger = project_env / ".janitor" / "state" / "branch-protection-acted.txt"
     if ledger.is_file():
         assert "already-present" in ledger.read_text(encoding="utf-8")
+
+
+def test_apply_acts_when_only_one_baseline_present(project_env: Path) -> None:
+    """Only ONE ratified ruleset present → NOT converged → apply proceeds.
+
+    The history ruleset already exists (so it is PATCHed by id), the
+    pr/checks ruleset is missing (so it is POSTed). Both succeed → loud
+    apply announcement.
+    """
+    _make_plugin_manifest(project_env)
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={
+            "GH_RULESETS_BODY": json.dumps([
+                {"id": 42, "name": "baseline-history-protect", "target": "branch"},
+            ]),
+            "GH_PATCH_BODY": json.dumps({"id": 42, "name": "baseline-history-protect"}),
+            "GH_POST_BODY": json.dumps({"id": 99, "name": "baseline-pr-and-checks"}),
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    # PATCH path reports "updated", POST path reports "created".
+    assert "updated id=42" in r.stdout
+    assert "created id=99" in r.stdout
 
 
 def test_apply_skips_when_ruleset_probe_fails(project_env: Path) -> None:
@@ -350,24 +563,98 @@ def test_apply_warns_when_viewer_not_admin(project_env: Path) -> None:
     assert "o/r" in r.stdout
 
 
-def test_apply_creates_baseline_when_all_gates_pass(project_env: Path) -> None:
-    """All gates green → POST + loud `[guard] created` announcement + audit log."""
+def test_apply_creates_both_baselines_when_all_gates_pass(project_env: Path) -> None:
+    """All gates green, no existing rulesets → POST both + loud `[guard]
+    applied` announcement + audit log records BOTH payloads."""
     _make_plugin_manifest(project_env)
     gh = _make_gh_stub(project_env)
     r = _run_apply(
         project_env, gh_bin=gh,
-        extra_env={"GH_POST_BODY": json.dumps({"id": 1234, "name": "janitor-baseline"})},
+        extra_env={"GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"})},
     )
     assert r.returncode == 0, r.stderr
-    assert "[guard] created branch-protection baseline on o/r@main" in r.stdout
-    assert "id=1234" in r.stdout
-    # Audit log + ledger written:
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "baseline-history-protect=created id=1234" in r.stdout
+    assert "baseline-pr-and-checks=created id=1234" in r.stdout
+    # Audit log records the OK line AND both emitted payloads with the
+    # ~DEFAULT_BRANCH magic ref + the admin bypass actor.
     log = project_env / ".janitor" / "logs" / "branch-protection-apply.log"
     assert log.is_file()
-    assert "OK\to/r\tmain" in log.read_text(encoding="utf-8")
+    log_text = log.read_text(encoding="utf-8")
+    assert "OK\to/r\tmain" in log_text
+    assert "~DEFAULT_BRANCH" in log_text
+    assert '"actor_type":"RepositoryRole"' in log_text
+    assert '"bypass_mode":"always"' in log_text
     ledger = project_env / ".janitor" / "state" / "branch-protection-acted.txt"
     assert ledger.is_file()
-    assert "created" in ledger.read_text(encoding="utf-8")
+    assert "applied" in ledger.read_text(encoding="utf-8")
+
+
+def test_apply_deletes_legacy_orphan_after_applying(project_env: Path) -> None:
+    """When a pre-migration `janitor-baseline` ruleset is present, it is
+    DELETEd after the ratified pair lands."""
+    _make_plugin_manifest(project_env)
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={
+            # Only the legacy ruleset exists → both ratified are POSTed,
+            # then the legacy (id 7) is DELETEd by id.
+            "GH_RULESETS_BODY": json.dumps([
+                {"id": 7, "name": "janitor-baseline", "target": "branch"},
+            ]),
+            "GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"}),
+            "GH_DELETE_BODY": "",
+            "GH_DELETE_RC": "0",
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    # The summary names the legacy ruleset with its delete result.
+    assert "janitor-baseline=deleted id=7" in r.stdout
+
+
+def test_apply_reports_auto_detected_checks_in_announcement(project_env: Path) -> None:
+    """Non-empty auto-detected CI contexts (parsed from the project's
+    workflow files) surface in the announcement + land in the emitted
+    required_status_checks payload."""
+    _make_plugin_manifest(project_env)
+    # Contexts are parsed from .github/workflows/* under the project root
+    # (CLAUDE_PLUGIN_ROOT == project in _run_apply), NOT from runtime
+    # check-runs. Sorted order → "validate" before "workflow-security".
+    _write_workflow(
+        project_env, "ci.yml",
+        "on: [push]\njobs:\n"
+        "  validate:\n    runs-on: ubuntu-latest\n"
+        "  workflow-security:\n    runs-on: ubuntu-latest\n",
+    )
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={"GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"})},
+    )
+    assert r.returncode == 0, r.stderr
+    assert "2 required check(s): validate, workflow-security" in r.stdout
+    # The emitted payload in the audit log carries the {context: ...} shape.
+    log = project_env / ".janitor" / "logs" / "branch-protection-apply.log"
+    log_text = log.read_text(encoding="utf-8")
+    assert '"context":"validate"' in log_text
+    assert '"context":"workflow-security"' in log_text
+
+
+def test_apply_falls_back_to_empty_checks_when_none_detected(project_env: Path) -> None:
+    """No workflow files (fresh repo) → empty checks list, apply still
+    succeeds, announcement says none detected."""
+    _make_plugin_manifest(project_env)
+    # No .github/workflows/ dir written → detection yields [].
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={"GH_POST_BODY": json.dumps({"id": 1234, "name": "ruleset"})},
+    )
+    assert r.returncode == 0, r.stderr
+    assert "[guard] applied branch-protection baseline on o/r@main" in r.stdout
+    assert "no required checks auto-detected" in r.stdout
 
 
 def test_apply_logs_failure_when_post_rejected(project_env: Path) -> None:
@@ -379,14 +666,48 @@ def test_apply_logs_failure_when_post_rejected(project_env: Path) -> None:
         project_env, gh_bin=gh,
         extra_env={
             "GH_POST_RC": "1",
-            "GH_POST_BODY": "validation failed",
+            # Real gh writes the HTTP error to stderr; the lib trims the
+            # last stderr line into the surfaced message.
+            "GH_POST_STDERR": "HTTP 422: Validation Failed (ruleset schema)",
         },
     )
     assert r.returncode == 0, r.stderr
-    assert "POST failed" in r.stdout
+    assert "baseline apply FAILED" in r.stdout
+    assert "Validation Failed" in r.stdout
     log = project_env / ".janitor" / "logs" / "branch-protection-apply.log"
     assert log.is_file()
     assert "FAIL\to/r\tmain" in log.read_text(encoding="utf-8")
+
+
+def test_apply_keeps_legacy_orphan_when_ratified_apply_fails(project_env: Path) -> None:
+    """Safety: a failed ratified apply must NOT delete the legacy
+    `janitor-baseline` — that would strip all protection. The legacy
+    ruleset is kept and the audit log records FAIL for the failing
+    ruleset but NEVER a DELETE of janitor-baseline."""
+    _make_plugin_manifest(project_env)
+    gh = _make_gh_stub(project_env)
+    r = _run_apply(
+        project_env, gh_bin=gh,
+        extra_env={
+            # Legacy present; both ratified POSTs fail.
+            "GH_RULESETS_BODY": json.dumps([
+                {"id": 7, "name": "janitor-baseline", "target": "branch"},
+            ]),
+            "GH_POST_RC": "1",
+            "GH_POST_STDERR": "HTTP 403: forbidden",
+            # If DELETE were (wrongly) attempted it would "succeed"; the
+            # assertion below proves it is never called.
+            "GH_DELETE_RC": "0",
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "baseline apply FAILED" in r.stdout
+    log_text = (
+        project_env / ".janitor" / "logs" / "branch-protection-apply.log"
+    ).read_text(encoding="utf-8")
+    # No "deleted id=7" must appear anywhere — legacy was kept.
+    assert "deleted id=7" not in log_text
+    assert "deleted id=7" not in r.stdout
 
 
 # ---------- dispatch._phase_guard_branch_protection -----------------------

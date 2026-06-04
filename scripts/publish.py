@@ -1480,6 +1480,12 @@ Examples:
     # The hook refuses any future `git push` unless publish.py is the caller.
     # Regenerated from the inline template on every run so local edits can't
     # survive as a bypass.
+    #
+    # This is the ONE intentional side effect of --dry-run: it installs the
+    # push-guard hook + sets local core.hooksPath. It does NOT commit, push,
+    # tag, or create a release — it only hardens the repo so a later real
+    # push goes through the gate. Skipping it in dry-run would mean dry-run
+    # doesn't actually exercise the gate machinery it claims to.
     print(f"\n{BLUE}=== Step 0.5: Install pre-push hook (strict gate) ==={NC}")
     ensure_pre_push_hook(git_root)
 
@@ -1490,9 +1496,15 @@ Examples:
     if dirty:
         dirty_files = {line.split()[-1] for line in dirty.splitlines() if line.strip()}
         if dirty_files == {"uv.lock"}:
-            print(f"{YELLOW}Auto-committing uv.lock (modified by uv run){NC}")
-            run(["git", "add", "uv.lock"], cwd=git_root)
-            run(["git", "commit", "-m", "chore: update uv.lock"], cwd=git_root)
+            # A `uv.lock`-only dirty tree is benign (uv run rewrites it). In a
+            # real run we auto-commit it so the tree is clean for the release.
+            # In --dry-run we must mutate NOTHING — never commit to git history.
+            if args.dry_run:
+                print(f"{YELLOW}[DRY-RUN] uv.lock dirty — would auto-commit (skipped){NC}")
+            else:
+                print(f"{YELLOW}Auto-committing uv.lock (modified by uv run){NC}")
+                run(["git", "add", "uv.lock"], cwd=git_root)
+                run(["git", "commit", "-m", "chore: update uv.lock"], cwd=git_root)
         else:
             print(f"{RED}x Uncommitted changes detected. Commit or stash first.{NC}", file=sys.stderr)
             print(dirty)

@@ -68,7 +68,7 @@ Remediation: doctor's `artipacked` recipe in `references/zizmor-audit-fix-recipe
 
 ### `timeout-minutes` on secret-bearing jobs
 
-The runner holds the token for the duration of the job. A 6-hour job with `NPM_TOKEN` in its env is a 6-hour window during which any compromise (malicious dependency, post-checkout step, log-extraction action) can exfiltrate the token.
+The runner holds the token for the duration of the job. A 6-hour job with `NPM_TOKEN` in its env is a 6-hour window during which any compromise (malicious dependency, post-checkout step, log-extraction action) can steal the token.
 
 Detection — for each job that references `${{ secrets.* }}` ANYWHERE in its tree (env, steps[].env, steps[].run, steps[].with):
 

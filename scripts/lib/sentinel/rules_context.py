@@ -14,12 +14,15 @@ import re
 from typing import Optional
 
 from lib.sentinel.model import (
+    DANGEROUS_CONTEXT_PATTERN,
+    SEV_CRITICAL,
     SEV_HIGH,
     SEV_MAJOR,
     SEV_MINOR,
     Finding,
     Rule,
     Workflow,
+    safe_trigger_only,
 )
 
 
@@ -475,6 +478,239 @@ class DangerousLifecycleScripts(Rule):
         return findings
 
 
+class IfAlwaysTrue(Rule):
+    """Step / job `if:` condition that always evaluates to true.
+
+    Disclosed PWNPipe attack — `if: ${{ always() }}` or `if: true` on a
+    sensitive step (publish, deploy, secret-using) defeats the workflow's
+    gating logic. Common shapes: `always()`, `success() || failure()`,
+    `${{ true }}`, a bare `true`. The intent is usually "run even after
+    upstream failure" — but the side effect is "secrets-using step
+    runs unconditionally, even when prior validation rejected the build".
+    """
+
+    name = "if-always-true"
+    severity = SEV_MAJOR
+    description = "if: condition that always evaluates to true"
+
+    # Lines we want to match:
+    #   "      if: condition"          (job-level / multi-line step)
+    #   "      - if: condition"        (single-line step start)
+    _IF_LINE = re.compile(r"^\s*(?:-\s+)?if\s*:\s*(.+?)\s*$")
+    # Conditions that always evaluate to truthy.
+    _ALWAYS_TRUE = re.compile(
+        r"^\$?\{?\{?\s*"
+        r"(?:always\(\)"
+        r"|(?:success\(\)|failure\(\)|cancelled\(\))\s*\|\|\s*(?:success\(\)|failure\(\)|cancelled\(\))"
+        r"|true"
+        r")"
+        r"\s*\}?\}?$",
+        re.IGNORECASE,
+    )
+
+    def check(self, wf: Workflow) -> list:
+        findings: list[Finding] = []
+        for idx, raw_line in enumerate(wf.raw_lines):
+            line_num = idx + 1
+            line_match = self._IF_LINE.match(raw_line)
+            if not line_match:
+                continue
+            cond = line_match.group(1).strip()
+            # Strip surrounding ${{ }} for the comparison.
+            inner = re.sub(r"^\$\{\{\s*|\s*\}\}$", "", cond).strip()
+            if self._ALWAYS_TRUE.match(inner):
+                findings.append(self._finding(
+                    wf,
+                    line=line_num,
+                    matched_text=raw_line.strip(),
+                    description=(
+                        f"if: {cond} always evaluates true — defeats step gating. "
+                        "Replace with the specific condition the step actually "
+                        "requires (e.g. `if: steps.X.outputs.failed == 'true'`)."
+                    ),
+                ))
+        return findings
+
+
+class AiConfigInjection(Rule):
+    """Attacker-controllable expression interpolated into an AI-tool config.
+
+    Disclosed sentinel-copilotkit attack — a workflow writes Cursor /
+    Aider / Copilot / Claude config (or invokes the AI from the run:
+    block) with attacker-controllable context interpolated into the
+    prompt / system message / tool list. The downstream AI tool then
+    receives crafted directives at next agent fire. Different shape
+    from the ide-config-injection regex (which catches plain CONFIG-
+    file writes) — this one catches the workflow-level paste.
+    """
+
+    name = "ai-config-injection"
+    severity = SEV_CRITICAL
+    description = "Attacker-controllable expression piped to an AI tool / config"
+
+    _AI_LINE = re.compile(
+        r"\b(?:claude|cursor|aider|copilot|continue|codex|windsurf|"
+        r"openai|anthropic)\b"
+        r"|\.cursorrules|\.aider\.conf|\.claude(?:/|\\)"
+        r"|CLAUDE\.md|AGENTS?\.md|\.mcp\.json",
+        re.IGNORECASE,
+    )
+
+    def check(self, wf: Workflow) -> list:
+        findings: list[Finding] = []
+        if safe_trigger_only(wf):
+            return findings
+
+        for idx, raw_line in enumerate(wf.raw_lines):
+            line_num = idx + 1
+            if raw_line.strip().startswith("#"):
+                continue
+            if not self._AI_LINE.search(raw_line):
+                continue
+            match = DANGEROUS_CONTEXT_PATTERN.search(raw_line)
+            if not match:
+                continue
+            findings.append(self._finding(
+                wf,
+                line=line_num,
+                matched_text=raw_line.strip(),
+                description=(
+                    f"Attacker-controllable expression ${{{{ {match.group(1)} }}}} "
+                    "on a line that mentions an AI tool / agent-config file. "
+                    "The crafted text lands in the AI's next prompt or in an "
+                    "agent-context file. Sanitise the value or move it to an "
+                    "env: block."
+                ),
+            ))
+        return findings
+
+
+class ArtipackedUpload(Rule):
+    """actions/upload-artifact in a fork-trusted-trigger workflow.
+
+    Disclosed zizmor / artipacked attack — `actions/upload-artifact` in
+    a workflow triggered by `pull_request_target` or `workflow_run`
+    uploads fork-produced content as an artifact that subsequent
+    privileged workflows can consume. Symmetric to the
+    cache-poisoning-pr-trigger rule (which covers the cache write
+    surface) and complements `allow-forks-artifact` (which covers the
+    DOWNLOAD side). The full attack chain needs all three rules to
+    surface to be auditable.
+    """
+
+    name = "artipacked-upload"
+    severity = SEV_HIGH
+    description = "actions/upload-artifact in a fork-trusted-trigger workflow"
+
+    _UPLOAD_USES = re.compile(r"^actions/upload-artifact(?:@|$)")
+
+    @staticmethod
+    def _has_fork_trusted_trigger(triggers) -> bool:
+        keys = []
+        if isinstance(triggers, dict):
+            keys = list(triggers.keys())
+        elif isinstance(triggers, list):
+            keys = list(triggers)
+        elif isinstance(triggers, str):
+            keys = [triggers]
+        for t in keys:
+            if t in ("pull_request_target", "workflow_run"):
+                return True
+        return False
+
+    def check(self, wf: Workflow) -> list:
+        findings: list[Finding] = []
+        if not self._has_fork_trusted_trigger(wf.triggers()):
+            return findings
+
+        for job in wf.jobs().values():
+            for step in wf.steps(job):
+                if not isinstance(step, dict):
+                    continue
+                uses = step.get("uses")
+                if not isinstance(uses, str):
+                    continue
+                if not self._UPLOAD_USES.match(uses):
+                    continue
+                line = wf.line_of(re.compile(re.escape(uses), re.IGNORECASE)) or 0
+                findings.append(self._finding(
+                    wf,
+                    line=line,
+                    matched_text=f"uses: {uses}",
+                    description=(
+                        "actions/upload-artifact in a workflow triggered by "
+                        "pull_request_target / workflow_run — fork-produced "
+                        "content lands in a base-repo artifact that subsequent "
+                        "privileged workflows consume. Symmetric to the cache-"
+                        "poisoning pattern. Scope the artifact name by the fork "
+                        "head SHA or move the upload to a pull_request workflow."
+                    ),
+                ))
+        return findings
+
+
+class CachePoisoningPrTrigger(Rule):
+    """`actions/cache` step in a workflow with a fork-trusted trigger.
+
+    Disclosed sentinel-copilotkit attack — `actions/cache` in a workflow
+    triggered by `pull_request_target` or `workflow_run` writes cache
+    entries that BASE-repo workflows then consume. A fork PR can
+    populate the cache with attacker-controlled binaries (compiled
+    artefacts, downloaded deps) that the next legitimate run picks up
+    silently.
+    """
+
+    name = "cache-poisoning-pr-trigger"
+    severity = SEV_HIGH
+    description = "actions/cache in a fork-trusted-trigger workflow"
+
+    _CACHE_USES = re.compile(r"^actions/cache(?:@|$|/save@|/restore@)")
+
+    @staticmethod
+    def _has_fork_trusted_trigger(triggers) -> bool:
+        keys = []
+        if isinstance(triggers, dict):
+            keys = list(triggers.keys())
+        elif isinstance(triggers, list):
+            keys = list(triggers)
+        elif isinstance(triggers, str):
+            keys = [triggers]
+        for t in keys:
+            if t in ("pull_request_target", "workflow_run"):
+                return True
+        return False
+
+    def check(self, wf: Workflow) -> list:
+        findings: list[Finding] = []
+        if not self._has_fork_trusted_trigger(wf.triggers()):
+            return findings
+
+        for job in wf.jobs().values():
+            for step in wf.steps(job):
+                if not isinstance(step, dict):
+                    continue
+                uses = step.get("uses")
+                if not isinstance(uses, str):
+                    continue
+                if not self._CACHE_USES.match(uses):
+                    continue
+                line = wf.line_of(re.compile(re.escape(uses), re.IGNORECASE)) or 0
+                findings.append(self._finding(
+                    wf,
+                    line=line,
+                    matched_text=f"uses: {uses}",
+                    description=(
+                        "actions/cache in a workflow triggered by "
+                        "pull_request_target / workflow_run — a fork PR can "
+                        "poison the cache; base-repo workflows then consume "
+                        "the attacker-controlled artefacts. Restrict cache use "
+                        "to non-fork-triggered workflows or scope the key by "
+                        "github.event.pull_request.head.sha."
+                    ),
+                ))
+        return findings
+
+
 RULES = [
     StaticAwsCredentials(),
     UnscopedAppToken(),
@@ -484,4 +720,8 @@ RULES = [
     BuildPublishSameJob(),
     AllowForksArtifact(),
     DangerousLifecycleScripts(),
+    IfAlwaysTrue(),
+    AiConfigInjection(),
+    CachePoisoningPrTrigger(),
+    ArtipackedUpload(),
 ]

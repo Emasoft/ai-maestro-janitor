@@ -13,7 +13,9 @@ from pathlib import Path
 # The lib.* imports MUST come after this sys.path mutation, hence the noqa.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 
+from _fake_secrets import b62, secret  # noqa: E402
 from lib.zizmor_classifier import Classifier, Finding  # noqa: E402
 from lib.zizmor_patterns import PATTERNS  # noqa: E402
 
@@ -101,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "TITLE=${{ github.event.pull_request.title }}" >> "$GITHUB_OUTPUT"
+          echo "TITLE=${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
 """
 
 CLEAN_WORKFLOW = """\
@@ -132,18 +134,18 @@ jobs:
           export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
 """
 
-HARDCODED_GH_TOKEN_WORKFLOW = """\
-name: bad-token
-on: push
-jobs:
-  fail:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "token=ghp_0123456789abcdefghijklmnopqrstuvwxyz"
-"""
+HARDCODED_GH_TOKEN_WORKFLOW = (
+    "name: bad-token\n"
+    "on: push\n"
+    "jobs:\n"
+    "  fail:\n"
+    "    runs-on: ubuntu-latest\n"
+    "    steps:\n"
+    "      - run: |\n"
+    f"          echo \"token={secret('ghp' + '_', 'zizmor-ghp-tok', 36)}\"\n"
+)
 
-HARDCODED_APIKEY_WORKFLOW = """\
+HARDCODED_APIKEY_WORKFLOW = f"""\
 name: bad-apikey
 on: push
 jobs:
@@ -151,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          api_key = "abcdefghijklmnopqrstuvwxyz0123456789"
+          api_key = "{b62('zizmor-apikey', 36)}"
 """
 
 SECRET_VIA_SECRETS_CTX_WORKFLOW = """\
@@ -456,6 +458,175 @@ class ClassifierTest(unittest.TestCase):
         )
         with self.assertRaises(Exception):
             f.line = 2  # type: ignore[misc]
+
+    # ---- Wave 14: ports from deep-workflow-security report ----
+
+    def test_actions_allow_unsecure_commands_fires(self) -> None:
+        wf = """\
+on: push
+env:
+  ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+"""
+        rules = {f.rule_id for f in self.classifier.classify(wf)}
+        self.assertIn("actions-allow-unsecure-commands", rules)
+
+    def test_actions_allow_unsecure_quoted_fires(self) -> None:
+        wf = """\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: "true"
+    steps:
+      - run: echo ok
+"""
+        rules = {f.rule_id for f in self.classifier.classify(wf)}
+        self.assertIn("actions-allow-unsecure-commands", rules)
+
+    def test_github_step_summary_injection_fires(self) -> None:
+        wf = """\
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "PR: ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+"""
+        rules = {f.rule_id for f in self.classifier.classify(wf)}
+        self.assertIn("github-step-summary-injection", rules)
+
+    def test_github_output_injection_fires(self) -> None:
+        wf = """\
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: x
+        run: |
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+"""
+        rules = {f.rule_id for f in self.classifier.classify(wf)}
+        self.assertIn("github-output-injection", rules)
+
+    def test_overprovisioned_secrets_tojson_fires(self) -> None:
+        wf = """\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ALL_SECRETS: ${{ toJSON(secrets) }}
+    steps:
+      - run: echo "got"
+"""
+        rules = {f.rule_id for f in self.classifier.classify(wf)}
+        self.assertIn("overprovisioned-secrets-tojson", rules)
+
+    def test_clean_workflow_no_wave14_fps(self) -> None:
+        """Hardened workflow must not fire any of the new rules."""
+        wf = """\
+on: push
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@a1b2c3d4e5f6 # v4
+        with:
+          persist-credentials: false
+      - run: echo ok
+"""
+        rules = {f.rule_id for f in self.classifier.classify(wf)}
+        wave14_rules = {
+            "actions-allow-unsecure-commands",
+            "github-step-summary-injection",
+            "github-output-injection",
+            "overprovisioned-secrets-tojson",
+        }
+        self.assertEqual(rules & wave14_rules, set())
+
+
+# --- PATTERNS_EXTRA wiring (audit HIGH-2 regression guard) ------------------
+#
+# The extension catalog scripts/lib/zizmor_patterns_extra.py was dead code:
+# the classifier imported only PATTERNS, so 7 regex rules (incl. the CRITICAL
+# workflow-run-pwn-checkout) never executed in production while their
+# isolated unit tests passed and masked the gap. These tests fail if the
+# union ever regresses — they go through the real Classifier(), not the
+# raw PATTERNS_EXTRA dict.
+
+WORKFLOW_RUN_PWN_CHECKOUT_WF = """\
+name: bad-workflow-run
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+"""
+
+INSTEADOF_SECRET_WF = """\
+name: bad-insteadof
+on: push
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          git config url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+"""
+
+
+class PatternsExtraWiringTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.classifier = Classifier()
+
+    def _find_rules(self, text: str) -> set[str]:
+        return {f.rule_id for f in self.classifier.classify(text)}
+
+    def test_every_extra_rule_is_reachable_through_classifier(self) -> None:
+        """Each PATTERNS_EXTRA id must be wired into the classifier's dispatch
+        (RE2 group names ∪ Python-re fallback), else it can never fire."""
+        from lib.zizmor_patterns_extra import PATTERNS_EXTRA  # noqa: PLC0415
+
+        reachable = set(self.classifier._re2_group_names.values())
+        reachable |= {rid for rid, _ in self.classifier._fallback_compiled}
+        missing = set(PATTERNS_EXTRA) - reachable
+        self.assertEqual(missing, set(), f"PATTERNS_EXTRA ids not wired: {missing}")
+
+    def test_workflow_run_pwn_checkout_fires_end_to_end(self) -> None:
+        """The CRITICAL extra rule actually fires through classify() now that
+        PATTERNS_EXTRA is merged (it was dead before the audit fix)."""
+        rules = self._find_rules(WORKFLOW_RUN_PWN_CHECKOUT_WF)
+        self.assertIn("workflow-run-pwn-checkout", rules)
+
+    def test_insteadof_secret_fires_end_to_end(self) -> None:
+        """A HIGH extra rule (insteadof-secret-in-url) fires through classify()."""
+        rules = self._find_rules(INSTEADOF_SECRET_WF)
+        self.assertIn("insteadof-secret-in-url", rules)
+
+    def test_clean_workflow_fires_no_extra_rules(self) -> None:
+        """A hardened workflow must not trip any extension-catalog rule."""
+        from lib.zizmor_patterns_extra import PATTERNS_EXTRA  # noqa: PLC0415
+
+        rules = self._find_rules(CLEAN_WORKFLOW)
+        self.assertEqual(rules & set(PATTERNS_EXTRA), set())
 
 
 if __name__ == "__main__":

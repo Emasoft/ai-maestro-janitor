@@ -2,14 +2,34 @@
 skill (`/janitor-branch-protection-setup`) and the Tier 2 guarded auto path
 (`scripts/guard/branch_protection_apply.py`).
 
-Per TRDD-631fa3de §10:
+Per TRDD-631fa3de §10 + the ratified unified baseline
+(janitor #14 / maintainer #7):
 
-* The baseline ruleset is the same in both surfaces. Single source of truth
-  here.
-* All `gh` calls use a fixed argv (no shell). Failures surface verbatim, no
-  half-apply.
+* The baseline is the SAME pair of rulesets in both surfaces. Single
+  source of truth here, byte-identical with the maintainer plugin.
+* All `gh` calls use a fixed argv (no shell). Failures surface verbatim,
+  no half-apply.
 * Refuses on non-default branch, non-admin viewer, missing repo.
-* Idempotent: callers check `is_baseline_present()` before posting.
+* Idempotent-by-name: callers PATCH a ruleset whose name already exists,
+  else POST a new one.
+
+## The ratified two-ruleset baseline
+
+Both `target: branch`, `enforcement: active`, condition
+`ref_name.include: ["~DEFAULT_BRANCH"]` (the GitHub magic ref that
+resolves to whatever branch the repo declares as default at apply
+time — NOT `refs/heads/<name>`; this is what makes the JSON byte-
+identical and portable across repos that use main/master/custom):
+
+1. ``baseline-history-protect`` — ``bypass_actors: []`` (nobody bypasses
+   history protection). Rules: ``deletion``, ``non_fast_forward``,
+   ``required_linear_history``.
+2. ``baseline-pr-and-checks`` — ``bypass_actors`` grants the repo-admin
+   role (``actor_id: 5``) an ``always`` bypass so a solo admin is not
+   locked out of their own repo by the self-approval requirement.
+   Rules: ``pull_request`` (1 approval, dismiss-stale, thread-resolution)
+   + ``required_status_checks`` (strict policy; CI check contexts are
+   AUTO-DETECTED at apply time — see ``detect_required_status_checks``).
 """
 
 from __future__ import annotations
@@ -21,49 +41,92 @@ import shutil
 import subprocess
 from pathlib import Path
 
-# Baseline name — the ruleset is recognised by exact name match so the
-# idempotency check in is_baseline_present() doesn't get confused by
+import yaml
+
+# The two ratified ruleset names. Recognised by exact name match so the
+# idempotent-apply logic in branch_protection_apply.py PATCHes the right
+# ruleset instead of POSTing a duplicate, and so we don't clobber
 # user-authored rulesets sitting alongside ours.
-BASELINE_RULESET_NAME = "janitor-baseline"
+HISTORY_RULESET_NAME = "baseline-history-protect"
+PR_CHECKS_RULESET_NAME = "baseline-pr-and-checks"
 
-# JSON payload for `gh api POST /repos/{owner}/{repo}/rulesets`. Pinned to
-# the same rule set the Tier 1 skill displays. The "ref_name" target is
-# overridden per-call to point at the discovered default branch.
-def baseline_ruleset_payload(default_branch: str) -> dict:
-    """Return the baseline ruleset JSON for the named default branch.
+# The pre-migration single-ruleset name. Kept ONLY so the apply path can
+# delete the orphan on re-apply (the ratified model splits it in two).
+LEGACY_RULESET_NAME = "janitor-baseline"
 
-    Rules (least-privilege defaults for a typical small-repo workflow):
-      * `non_fast_forward` — block force-pushes.
-      * `deletion`         — block branch deletion.
-      * `required_linear_history` — fast-forward / squash merges only.
-      * `pull_request`     — every change reaches main via a PR with
-                              ≥1 review and a dismissable-stale-reviews
-                              policy. Required approvers count is left
-                              at 1 because higher requires a team and
-                              is not a sensible default.
+# The GitHub magic ref that resolves to the repo's default branch at apply
+# time. Using this (instead of refs/heads/<name>) keeps the payload byte-
+# identical to the maintainer plugin and portable across default-branch
+# names — the ratified spec mandates it.
+_DEFAULT_BRANCH_REF = "~DEFAULT_BRANCH"
 
-    Deliberately omitted from the baseline (the user can layer on top):
-      * required_status_checks — needs status-check names the janitor
-        does not know; surface to the user instead.
-      * required_signatures — high bar; opt-in.
-      * required_deployments / required_status — same.
+# The repo-admin RepositoryRole id. GitHub assigns stable numeric ids to
+# the built-in roles; 5 == admin. Granted an `always` bypass on the
+# PR/checks ruleset so a solo admin can still merge their own work.
+_ADMIN_REPOSITORY_ROLE_ID = 5
+
+
+def baseline_ruleset_payloads(
+    default_branch: str,
+    required_status_checks: list[dict] | None = None,
+) -> list[dict]:
+    """Return the ratified pair of baseline ruleset payloads.
+
+    Each element is a JSON-serialisable dict ready for
+    `gh api {POST|PUT} /repos/{owner}/{repo}/rulesets`.
+
+    `default_branch` is accepted for signature symmetry with the rest of
+    the module and to fail loudly on an empty value, but the emitted
+    `conditions.ref_name.include` uses the `~DEFAULT_BRANCH` magic ref
+    (NOT `refs/heads/<default_branch>`) — that is what the ratified spec
+    and the maintainer plugin emit, so the payloads are byte-identical
+    regardless of the literal branch name.
+
+    `required_status_checks` is the auto-detected list of
+    `{"context": "<job-id>"}` dicts (see
+    `detect_required_status_checks`). When None or empty, the PR/checks
+    ruleset ships an empty `required_status_checks` list — the rule is
+    still present (strict policy on) but gates on no specific contexts
+    until the repo's CI surfaces some.
     """
     if not default_branch:
         raise ValueError("default_branch must be a non-empty string")
-    return {
-        "name": BASELINE_RULESET_NAME,
+    checks = list(required_status_checks or [])
+    history_protect = {
+        "name": HISTORY_RULESET_NAME,
         "target": "branch",
         "enforcement": "active",
         "conditions": {
             "ref_name": {
-                "include": [f"refs/heads/{default_branch}"],
+                "include": [_DEFAULT_BRANCH_REF],
                 "exclude": [],
             },
         },
+        "bypass_actors": [],
         "rules": [
             {"type": "deletion"},
             {"type": "non_fast_forward"},
             {"type": "required_linear_history"},
+        ],
+    }
+    pr_and_checks = {
+        "name": PR_CHECKS_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {
+            "ref_name": {
+                "include": [_DEFAULT_BRANCH_REF],
+                "exclude": [],
+            },
+        },
+        "bypass_actors": [
+            {
+                "actor_id": _ADMIN_REPOSITORY_ROLE_ID,
+                "actor_type": "RepositoryRole",
+                "bypass_mode": "always",
+            },
+        ],
+        "rules": [
             {
                 "type": "pull_request",
                 "parameters": {
@@ -74,8 +137,16 @@ def baseline_ruleset_payload(default_branch: str) -> dict:
                     "required_review_thread_resolution": True,
                 },
             },
+            {
+                "type": "required_status_checks",
+                "parameters": {
+                    "strict_required_status_checks_policy": True,
+                    "required_status_checks": checks,
+                },
+            },
         ],
     }
+    return [history_protect, pr_and_checks]
 
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
@@ -160,38 +231,122 @@ def list_existing_rulesets(slug: str) -> list[dict] | None:
     return data if isinstance(data, list) else None
 
 
-def is_baseline_present(slug: str) -> bool | None:
-    """Idempotency check — True iff a ruleset named BASELINE_RULESET_NAME
-    is already attached to the repo. Returns None on lookup failure so
-    the caller knows the answer is "unknown" rather than "no" (which
-    matters for the auto path — don't act when uncertain)."""
+def ruleset_id_by_name(slug: str, name: str) -> int | None:
+    """Return the numeric id of the ruleset named `name`, or None.
+
+    None means BOTH "lookup failed" and "no such ruleset" — the caller
+    must distinguish those via `list_existing_rulesets` returning None
+    when it needs the don't-act-when-uncertain behaviour. This helper is
+    a convenience for the apply path's PATCH-vs-POST decision once the
+    list lookup has already succeeded.
+    """
     rulesets = list_existing_rulesets(slug)
     if rulesets is None:
         return None
-    return any(
-        isinstance(r, dict) and r.get("name") == BASELINE_RULESET_NAME
-        for r in rulesets
-    )
+    for r in rulesets:
+        if isinstance(r, dict) and r.get("name") == name:
+            rid = r.get("id")
+            if isinstance(rid, int):
+                return rid
+    return None
 
 
-def create_baseline_ruleset(slug: str, default_branch: str,
-                            ) -> tuple[bool, str]:
-    """POST the baseline ruleset. Returns (success, message).
+def baselines_present(slug: str) -> bool | None:
+    """True iff BOTH ratified rulesets are already attached to the repo.
 
-    `message` is either the new ruleset id (on success) or the trimmed
-    `gh` stderr (on failure) — the caller decides whether to log /
-    surface that.
+    Returns None on lookup failure so the caller knows the answer is
+    "unknown" rather than "no" (matters for the auto path — don't act
+    when uncertain). Used for the cheap "already converged" short-circuit
+    before doing any PATCH/POST work.
     """
-    payload = baseline_ruleset_payload(default_branch)
+    rulesets = list_existing_rulesets(slug)
+    if rulesets is None:
+        return None
+    names = {r.get("name") for r in rulesets if isinstance(r, dict)}
+    return HISTORY_RULESET_NAME in names and PR_CHECKS_RULESET_NAME in names
+
+
+def detect_required_status_checks(project_root: Path) -> list[dict]:
+    """Discover the repo's CI check contexts from its WORKFLOW FILES.
+
+    Globs ``.github/workflows/*.yml`` and ``*.yaml`` under `project_root`,
+    parses each, and returns a sorted, de-duplicated list of
+    ``{"context": "<name>"}`` dicts — the EXACT shape the GitHub rulesets
+    API wants for ``required_status_checks``. The context for a job is its
+    ``name:`` if set, else the job id (matching how GitHub names a check
+    when no display name is given).
+
+    Why parse the CONFIGURED workflow jobs rather than query the runtime
+    ``repos/{slug}/commits/{branch}/check-runs`` API (the previous
+    approach):
+
+    * Runtime check-runs are EMPTY on a fresh repo whose CI has never run
+      — so the ruleset would ship with no required checks until the first
+      push, defeating the purpose of protecting the very first PR.
+    * Worse, check-run NAMES do not always equal the context GitHub uses
+      for branch-protection matching; feeding the wrong contexts to the
+      rulesets API gets the whole POST/PATCH rejected with **HTTP 422
+      Validation Failed**, which fails the entire apply. The workflow-
+      config job ids/names are the source of truth GitHub itself derives
+      the contexts from.
+
+    This is the cross-plugin-agreed source (janitor #14) and matches the
+    maintainer plugin's documented approach.
+
+    Never raises and never hard-codes job ids: a malformed/unreadable
+    workflow file is skipped (not fatal), and a project with no workflows
+    (or all unparseable) yields an empty list — the ruleset is still
+    created with a ``required_status_checks`` rule that gates on no
+    specific contexts.
+    """
+    workflows_dir = project_root / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return []
+    files = sorted(workflows_dir.glob("*.yml")) + sorted(workflows_dir.glob("*.yaml"))
+    contexts: set[str] = set()
+    for wf_path in files:
+        try:
+            wf = yaml.safe_load(wf_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            # A single broken/unreadable workflow must never crash the
+            # applier — skip it and keep collecting from the rest.
+            continue
+        if not isinstance(wf, dict):
+            continue
+        jobs = wf.get("jobs", {})
+        if not isinstance(jobs, dict):
+            continue
+        for job_id, job_cfg in jobs.items():
+            name = (job_cfg.get("name") if isinstance(job_cfg, dict) else None) or job_id
+            if isinstance(name, str) and name.strip():
+                contexts.add(name.strip())
+    return [{"context": ctx} for ctx in sorted(contexts)]
+
+
+def _post_or_patch_ruleset(
+    slug: str, payload: dict, existing_id: int | None,
+) -> tuple[bool, str]:
+    """POST a new ruleset, or PATCH an existing one when `existing_id` is
+    set (idempotent-by-name). Returns (success, message)."""
     if not gh_available():
         return (False, "gh CLI not in PATH")
+    if existing_id is None:
+        argv = [
+            "gh", "api", "--method", "POST",
+            f"repos/{slug}/rulesets",
+            "--input", "-",
+        ]
+        verb = "created"
+    else:
+        argv = [
+            "gh", "api", "--method", "PATCH",
+            f"repos/{slug}/rulesets/{existing_id}",
+            "--input", "-",
+        ]
+        verb = "updated"
     try:
         proc = subprocess.run(
-            [
-                "gh", "api", "--method", "POST",
-                f"repos/{slug}/rulesets",
-                "--input", "-",
-            ],
+            argv,
             input=json.dumps(payload),
             capture_output=True, text=True, timeout=15, check=False,
         )
@@ -200,13 +355,107 @@ def create_baseline_ruleset(slug: str, default_branch: str,
     if proc.returncode != 0:
         err = (proc.stderr or "").strip().splitlines()[-1:] or ["gh exited non-zero"]
         return (False, err[0])
-    # Extract the new ruleset id if the response is JSON.
     try:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        return (True, "created")
+        return (True, verb)
     new_id = data.get("id")
-    return (True, f"id={new_id}" if new_id is not None else "created")
+    return (True, f"{verb} id={new_id}" if new_id is not None else verb)
+
+
+def delete_ruleset_by_name(slug: str, name: str) -> tuple[bool, str]:
+    """Delete the ruleset named `name` if present. Returns (success, msg).
+
+    `success` is True when the ruleset was deleted OR was already absent
+    (both are the desired post-state). Used to remove the orphaned
+    legacy `janitor-baseline` ruleset after the ratified pair lands.
+    """
+    if not gh_available():
+        return (False, "gh CLI not in PATH")
+    rid = ruleset_id_by_name(slug, name)
+    if rid is None:
+        return (True, "absent")
+    try:
+        proc = subprocess.run(
+            [
+                "gh", "api", "--method", "DELETE",
+                f"repos/{slug}/rulesets/{rid}",
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return (False, f"gh subprocess failed: {exc}")
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip().splitlines()[-1:] or ["gh exited non-zero"]
+        return (False, err[0])
+    return (True, f"deleted id={rid}")
+
+
+def apply_baseline_rulesets(
+    slug: str, default_branch: str, project_root: Path,
+) -> tuple[bool, list[tuple[str, bool, str]], list[dict]]:
+    """Apply BOTH ratified rulesets idempotent-by-name, then delete the
+    legacy `janitor-baseline` orphan.
+
+    `project_root` is the directory whose `.github/workflows/` is parsed
+    to auto-detect the required CI check contexts (see
+    `detect_required_status_checks` — workflow-config, not runtime
+    check-runs, so a fresh repo's first PR is still gated and we never
+    feed wrong contexts that 422 the rulesets API).
+
+    Returns (all_ok, results, checks) where:
+      * `results` is a list of (label, ok, message) tuples — one per
+        applied ruleset plus one for the legacy cleanup,
+      * `all_ok` is True iff every step succeeded,
+      * `checks` is the auto-detected required-status-checks list that
+        was actually embedded in the applied payloads. The caller reuses
+        this for its announcement so the displayed checks match the
+        applied ones exactly (and so detection runs ONCE, not once here +
+        once in the caller).
+
+    The ruleset list is fetched ONCE up front: if that lookup fails we
+    can't safely tell PATCH from POST (and would risk a duplicate), so
+    we abort the whole apply with a single failure result.
+    """
+    rulesets = list_existing_rulesets(slug)
+    if rulesets is None:
+        return (False, [("list", False, "ruleset list lookup failed")], [])
+    by_name: dict[str, int] = {}
+    for r in rulesets:
+        if isinstance(r, dict):
+            rid = r.get("id")
+            nm = r.get("name")
+            if isinstance(rid, int) and isinstance(nm, str):
+                by_name[nm] = rid
+
+    checks = detect_required_status_checks(project_root)
+    payloads = baseline_ruleset_payloads(default_branch, checks)
+
+    results: list[tuple[str, bool, str]] = []
+    rulesets_ok = True
+    for payload in payloads:
+        name = payload["name"]
+        ok, msg = _post_or_patch_ruleset(slug, payload, by_name.get(name))
+        results.append((name, ok, msg))
+        if not ok:
+            rulesets_ok = False
+
+    # Only remove the pre-migration single-ruleset orphan once BOTH
+    # ratified rulesets are confirmed in place — otherwise a failed apply
+    # would strip the legacy protection and leave the branch unprotected.
+    # (idempotent — a missing legacy ruleset reports success "absent".)
+    all_ok = rulesets_ok
+    if rulesets_ok:
+        legacy_ok, legacy_msg = delete_ruleset_by_name(slug, LEGACY_RULESET_NAME)
+        results.append((LEGACY_RULESET_NAME, legacy_ok, legacy_msg))
+        if not legacy_ok:
+            all_ok = False
+    else:
+        results.append(
+            (LEGACY_RULESET_NAME, True, "kept (ratified apply incomplete)"),
+        )
+
+    return (all_ok, results, checks)
 
 
 def guard_mode_enabled() -> bool:

@@ -277,5 +277,216 @@ jobs:
         self.assertNotIn("dangerous-lifecycle-scripts", fired(wf))
 
 
+class TestIfAlwaysTrue(unittest.TestCase):
+    def test_positive_always(self):
+        """`if: ${{ always() }}` always evaluates true → fires."""
+        wf = """\
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ always() }}
+        run: ./publish.sh
+"""
+        self.assertIn("if-always-true", fired(wf))
+
+    def test_positive_success_or_failure(self):
+        """`success() || failure()` is a disguised always(). Fires."""
+        wf = """\
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - if: success() || failure()
+        run: ./publish.sh
+"""
+        self.assertIn("if-always-true", fired(wf))
+
+    def test_positive_bare_true(self):
+        wf = """\
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - if: true
+        run: ./publish.sh
+"""
+        self.assertIn("if-always-true", fired(wf))
+
+    def test_negative_meaningful_condition(self):
+        wf = """\
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - if: github.ref == 'refs/heads/main'
+        run: ./publish.sh
+"""
+        self.assertNotIn("if-always-true", fired(wf))
+
+
+class TestAiConfigInjection(unittest.TestCase):
+    def test_positive_pr_title_to_cursor_config(self):
+        """Dangerous expression written into a .cursorrules file fires."""
+        wf = """\
+on: pull_request
+jobs:
+  ai:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "${{ github.event.pull_request.title }}" > .cursorrules
+"""
+        self.assertIn("ai-config-injection", fired(wf))
+
+    def test_positive_pr_body_to_claude_md(self):
+        wf = """\
+on: pull_request
+jobs:
+  ai:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "${{ github.event.pull_request.body }}" >> CLAUDE.md
+"""
+        self.assertIn("ai-config-injection", fired(wf))
+
+    def test_negative_safe_trigger_only(self):
+        """A push-only workflow has no attacker-controlled context to inject."""
+        wf = """\
+on: [push]
+jobs:
+  ai:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "${{ github.event.pull_request.title }}" > .cursorrules
+"""
+        self.assertNotIn("ai-config-injection", fired(wf))
+
+    def test_negative_ai_mention_with_safe_context(self):
+        """An AI tool mention with a SAFE context (pull_request.number) does
+        not fire."""
+        wf = """\
+on: pull_request
+jobs:
+  ai:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "PR ${{ github.event.pull_request.number }}" > .cursorrules
+"""
+        self.assertNotIn("ai-config-injection", fired(wf))
+
+
+class TestCachePoisoningPrTrigger(unittest.TestCase):
+    def test_positive_pull_request_target_with_cache(self):
+        wf = """\
+on: pull_request_target
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: deps-${{ hashFiles('**/lock') }}
+"""
+        self.assertIn("cache-poisoning-pr-trigger", fired(wf))
+
+    def test_positive_workflow_run_with_cache(self):
+        wf = """\
+on:
+  workflow_run:
+    workflows: [CI]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: x
+"""
+        self.assertIn("cache-poisoning-pr-trigger", fired(wf))
+
+    def test_negative_pull_request_with_cache(self):
+        """Plain pull_request trigger is safe — fork PRs don't have access
+        to the base repo's cache writes anyway."""
+        wf = """\
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: x
+"""
+        self.assertNotIn("cache-poisoning-pr-trigger", fired(wf))
+
+    def test_negative_pull_request_target_no_cache(self):
+        """A pull_request_target workflow without actions/cache is fine."""
+        wf = """\
+on: pull_request_target
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+"""
+        self.assertNotIn("cache-poisoning-pr-trigger", fired(wf))
+
+
+class TestArtipackedUpload(unittest.TestCase):
+    def test_positive_pull_request_target_with_upload(self):
+        wf = """\
+on: pull_request_target
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact@v4
+        with:
+          path: ./build/
+"""
+        self.assertIn("artipacked-upload", fired(wf))
+
+    def test_positive_workflow_run_with_upload(self):
+        wf = """\
+on:
+  workflow_run:
+    workflows: [CI]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact@v4
+        with:
+          path: ./build/
+"""
+        self.assertIn("artipacked-upload", fired(wf))
+
+    def test_negative_pull_request_with_upload(self):
+        """Plain pull_request workflow uploading is fine — fork PRs don't
+        have artifact-write access to base repo."""
+        wf = """\
+on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact@v4
+        with:
+          path: ./build/
+"""
+        self.assertNotIn("artipacked-upload", fired(wf))
+
+
 if __name__ == "__main__":
     unittest.main()

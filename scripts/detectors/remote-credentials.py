@@ -5,7 +5,7 @@
 """Remote-credentials detector — Python port of remote-credentials.sh.
 
 Flags git remotes whose URL embeds a password in the userinfo component
-(e.g. `https://user:token@github.com/...`). These leak the secret into
+(e.g. `https://user:…@github.com/...`). These leak the secret into
 `git remote -v` output (visible in screen-shares, paste-bins, CI logs),
 into any clone of the repo that copies the local config, and into shell
 history when the URL was set via `git remote add`.
@@ -62,6 +62,9 @@ def _crc32(s: str) -> int:
 
 
 def main() -> int:
+    # Hard self-scan guard — see state.is_self_scan_target() docstring.
+    if state.is_self_scan_target():
+        return 0
     state.init_state()
 
     seen = state.state_dir() / "remote-credentials-seen.txt"

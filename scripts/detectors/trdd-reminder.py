@@ -4,9 +4,10 @@
 # ///
 """TRDD reminder — Python port of trdd-reminder.sh.
 
-Consolidated reminder of all TRDDs currently 'In progress'. Uses a
-time-bucket key for dedupe so the reminder fires at most once per
-configured interval even when the heartbeat cron fires more often.
+Consolidated reminder of all TRDDs currently active — frontmatter
+`status: in-progress` (v1) or a v2 `column:` in the actively-in-flight
+set. Uses a time-bucket key for dedupe so the reminder fires at most once
+per configured interval even when the heartbeat cron fires more often.
 """
 
 from __future__ import annotations
@@ -25,20 +26,89 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import dedupe  # noqa: E402
 import state  # noqa: E402
 
-_TRDD_NAME_RE = re.compile(r"^TRDD-([0-9a-f-]{36})-.+\.md$")
-_STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*(.+)$")
+# Matches both TRDD filename formats and captures a stable id used for the
+# dedupe entry + the short display ref:
+#   * current (~/.claude/rules/trdd-design-tasks.md):
+#       TRDD-<YYYYMMDD_HHMMSS±HHMM>-<uid-first-8>-<slug>.md  → capture the uid8
+#   * legacy: TRDD-<full-UUID>-<slug>.md                     → capture the UUID
+# The hex-length floor (8 / 36) prevents the collision the old too-permissive
+# regex allowed. The two alternatives are mutually exclusive — a `_` in the
+# timestamp can't appear in a UUID, and a UUID has no `_`.
+_TRDD_NAME_RE = re.compile(
+    r"^TRDD-"
+    r"(?:"
+    r"\d{8}_\d{6}[+-]\d{4}-([0-9a-f]{8})"   # current: <timestamp>-<uid8>
+    r"|([0-9a-f-]{36})"                      # legacy:  <full-uuid>
+    r")"
+    r"-.+\.md$"
+)
+
+# The canonical TRDD format (~/.claude/rules/trdd-design-tasks.md) puts the
+# task state in YAML frontmatter — `status:` (v1) and/or `column:` (v2) —
+# NOT a `**Status:**` markdown body line. We parse the frontmatter first and
+# keep the legacy `**Status:**` body line as a fallback for pre-frontmatter
+# TRDDs. All matches are anchored MULTILINE within the opening `---` block.
+_FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL)
+_FM_STATUS_RE = re.compile(r"^status:[ \t]*(.+)$", re.MULTILINE)
+_FM_COLUMN_RE = re.compile(r"^column:[ \t]*(.+)$", re.MULTILINE)
+# Legacy `**Status:** ...` markdown body line (pre-frontmatter TRDDs only).
+_LEGACY_STATUS_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.+)$", re.MULTILINE)
+
+# Read only the head of the file — frontmatter lives at the very top, and a
+# legacy `**Status:**` line sits just under the title. 4 KiB covers both
+# without slurping a multi-thousand-line TRDD body.
+_HEAD_BYTES = 4096
+
+# v2 `column:` values that mean "actively in flight" (per the task spec).
+# Same set the trdd-drift detector uses.
+_ACTIVE_COLUMNS = frozenset(
+    {"dev", "testing", "backburner", "todo", "dispatch", "ai_review", "human_review"}
+)
 
 
-def _parse_status(path: Path) -> str:
+def _norm_state(value: str) -> str:
+    """Normalise a status/column token to lowercase kebab-case.
+
+    Maps the legacy title-case body values (`In progress`) onto their
+    frontmatter spellings (`in-progress`) by lowercasing and collapsing
+    internal whitespace to a single hyphen, so a single membership set
+    covers both formats.
+    """
+    return "-".join(value.strip().rstrip("\r").lower().split())
+
+
+def _parse_trdd_state(path: Path) -> tuple[str, str]:
+    """Return (status, column) for a TRDD, both normalised kebab-case or ''.
+
+    Reads the YAML frontmatter `status:`/`column:` keys (the documented
+    location), falling back to a legacy `**Status:**` body line when the
+    frontmatter has no `status:`. Returns ('', '') on any read error.
+    """
     try:
         with path.open("r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                m = _STATUS_RE.match(line)
-                if m:
-                    return m.group(1).rstrip("\r").strip()
+            head = f.read(_HEAD_BYTES)
     except (FileNotFoundError, OSError):
-        return ""
-    return ""
+        return ("", "")
+
+    status = ""
+    column = ""
+    fm = _FRONTMATTER_RE.match(head)
+    if fm:
+        block = fm.group(1)
+        sm = _FM_STATUS_RE.search(block)
+        if sm:
+            status = _norm_state(sm.group(1))
+        cm = _FM_COLUMN_RE.search(block)
+        if cm:
+            column = _norm_state(cm.group(1))
+
+    # Legacy fallback only when the frontmatter carried no status: key.
+    if not status:
+        lm = _LEGACY_STATUS_RE.search(head)
+        if lm:
+            status = _norm_state(lm.group(1))
+
+    return (status, column)
 
 
 def _last_touched_epoch(path: Path, project_root: Path, fallback: int) -> int:
@@ -108,14 +178,18 @@ def main() -> int:
 
     entries: list[str] = []
     for f in sorted(trdd_dir.glob("TRDD-*.md")):
-        status = _parse_status(f)
-        if status != "In progress":
+        status, column = _parse_trdd_state(f)
+        # Remind about TRDDs that are actively in flight: v1 status
+        # `in-progress`, or a v2 column in the actively-in-flight set.
+        if status != "in-progress" and column not in _ACTIVE_COLUMNS:
             continue
 
         m = _TRDD_NAME_RE.match(f.name)
         if not m:
             continue
-        uuid = m.group(1)
+        # group(1) = current-format uid8, group(2) = legacy full UUID; exactly
+        # one is set. Both feed the dedupe entry and the `[:8]` display ref.
+        uuid = m.group(1) or m.group(2)
 
         touched = _last_touched_epoch(f, root, fallback=now)
         age_days = (now - touched) // 86400
@@ -125,7 +199,7 @@ def main() -> int:
         return 0
 
     # Mix the entries set into the tick_key so a NEW TRDD that flips to
-    # 'In progress' mid-tick produces a fresh key and a fresh reminder
+    # active mid-tick produces a fresh key and a fresh reminder
     # (instead of being suppressed by the existing tick's dedup entry).
     # The age component (`(Nd)` suffix) is intentionally kept out of the
     # key — re-keying every day for the same TRDD set would defeat the
@@ -137,7 +211,7 @@ def main() -> int:
     line = dedupe.emit_once(
         seen,
         tick_key,
-        f"[trdd-reminder] {len(entries)} TRDD(s) currently In progress: {', '.join(entries)}.",
+        f"[trdd-reminder] {len(entries)} TRDD(s) currently active: {', '.join(entries)}.",
     )
     if line is not None:
         print(line)

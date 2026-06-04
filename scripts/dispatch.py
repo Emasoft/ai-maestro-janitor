@@ -56,6 +56,7 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("worktree-janitor", 900,   "CLAUDE_PLUGIN_OPTION_WORKTREE_JANITOR_INTERVAL"),
     ("trdd-drift",       3600,  "CLAUDE_PLUGIN_OPTION_TRDD_DRIFT_INTERVAL"),
     ("trdd-reminder",    14400, "CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL"),
+    ("report-to-trdd-drift", 21600, "CLAUDE_PLUGIN_OPTION_REPORT_TO_TRDD_INTERVAL"),
     ("task-pr-mismatch", 1800,  "CLAUDE_PLUGIN_OPTION_TASK_PR_MISMATCH_INTERVAL"),
     ("stale-task",       1800,  "CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL"),
     ("dirty-tree",       300,   "CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL"),
@@ -111,6 +112,75 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # a project can be hardened before the next supply-chain attack lands.
     # Content-hash short-circuit keeps no-op fires near-free.
     ("package-manager-policy", 21600, "CLAUDE_PLUGIN_OPTION_PKG_MANAGER_POLICY_INTERVAL"),
+    # ai-context-poisoning audits installed packages for postinstall code
+    # that writes to an agent-context file (CLAUDE.md, .cursorrules,
+    # AGENTS.md, .claude/*). Content-hashes node_modules + site-packages so
+    # an unchanged tree returns immediately. Default cadence 1h — fast
+    # enough to notice a newly-installed malicious package within one
+    # heartbeat window.
+    ("ai-context-poisoning", 3600, "CLAUDE_PLUGIN_OPTION_AI_CONTEXT_POISONING_INTERVAL"),
+    # mcp-rugpull fingerprints every installed MCP server's identity
+    # (command/args/url/local-script content/npx-resolved version) on first
+    # run, then alerts on any drift. Catches the rug-pull attack shape
+    # where a trusted server silently rewrites its source / endpoint /
+    # tool surface. Default 1h cadence — server inventory changes are rare
+    # and the diff is near-free, but a malicious update must surface fast.
+    ("mcp-rugpull", 3600, "CLAUDE_PLUGIN_OPTION_MCP_RUGPULL_INTERVAL"),
+    # typosquat-watcher walks every supported lockfile and flags names
+    # within Levenshtein distance ≤ 1 of a curated popular-package list.
+    # Catches the canonical typosquat attack shape (react/reactt,
+    # ethers/ethersr, etc.) BEFORE the advisory feed surfaces it.
+    # Content-hash dedupe makes unchanged-lockfile fires almost free.
+    ("typosquat-watcher", 3600, "CLAUDE_PLUGIN_OPTION_TYPOSQUAT_WATCHER_INTERVAL"),
+    # repo-trust-score audits the project tree for the dropper-shape
+    # pattern shared by the two known-malicious repos found in the
+    # github-monitoring study (snakebite, Pipeline-Sentinel). Combines
+    # suspicious-binary inventory + README download-funnel + SEO
+    # stuffing + camouflage-ratio + missing-essentials signals into a
+    # single trust-deficit score. Default 6h cadence — the relevant
+    # signals (README content, binaries) change slowly.
+    ("repo-trust-score", 21600, "CLAUDE_PLUGIN_OPTION_REPO_TRUST_SCORE_INTERVAL"),
+    # historical-cache-scan walks every npm cacache / pnpm store / yarn
+    # cache + every global node_modules path for known-malicious
+    # package@version pairs listed in .janitor/incidents.txt. Catches
+    # the "version pruned from package.json is still in the cache and
+    # will silently re-fetch" case. Default 6h cadence — incident
+    # lists change rarely and the scan is content-hashed.
+    ("historical-cache-scan", 21600, "CLAUDE_PLUGIN_OPTION_HISTORICAL_CACHE_SCAN_INTERVAL"),
+    # binary-magic-scanner walks `.github/`, `scripts/`, `docs/`,
+    # `tests/`, `examples/`, `image*/`, `download*/`, `release*/`
+    # for ELF/PE/Mach-O/Java-class/Wasm/Zip magic-byte prefixes.
+    # Catches the dropper shape (snakebite / Pipeline-Sentinel /
+    # Sentinel-main-3) from a different angle than repo-trust-score.
+    # Default 6h cadence; content-hash dedupe makes unchanged-tree
+    # fires near-free.
+    ("binary-magic-scanner", 21600, "CLAUDE_PLUGIN_OPTION_BINARY_MAGIC_INTERVAL"),
+    # supply-chain-fingerprints aggregates 6 sub-checks per fire:
+    # import-cluster pairing in setup.py / package.json scripts,
+    # maintainer-join-vs-publish gap, wheel-absence heuristic for
+    # PyPI deps, fresh-publisher first-release shape, HTTP 451 npm
+    # security-hold surfacing, ghost-publisher reawake. Default 6h
+    # cadence; the detector's content-hash dedupe + opt-in network
+    # lookups keep no-op fires near-free.
+    ("supply-chain-fingerprints", 21600, "CLAUDE_PLUGIN_OPTION_SUPPLY_CHAIN_FINGERPRINTS_INTERVAL"),
+    # provenance-audit scans the project at release-time for SBOM +
+    # cosign verify presence, npm provenance, in-toto attestations,
+    # SLSA level floor. Default 6h cadence — release infrastructure
+    # changes rarely; content-hash dedupe is cheap.
+    ("provenance-audit", 21600, "CLAUDE_PLUGIN_OPTION_PROVENANCE_AUDIT_INTERVAL"),
+    # janitor-self-integrity verifies the janitor's own scripts /
+    # skills / CLAUDE.md against a checked-in SHA-256 manifest + an
+    # HMAC chain on the audit log. OPT-IN by default — flip
+    # CLAUDE_PLUGIN_OPTION_JANITOR_SELF_INTEGRITY_ENABLED=true to
+    # activate. Default 6h cadence.
+    ("janitor-self-integrity", 21600, "CLAUDE_PLUGIN_OPTION_JANITOR_SELF_INTEGRITY_INTERVAL"),
+    # oauth-cookie-reminder is OPT-IN by presence: silent no-op unless a local
+    # multi-account rotator home with a state.json exists (~/.claude/account-rotator
+    # or $CLAUDE_PLUGIN_DATA/oauth-rotator). When present, it reminds the user to
+    # run /refresh-claude-logins BEFORE a per-account claude.ai session cookie
+    # expires AND while OAuth is still healthy, so the two expiries never coincide
+    # (TRDD-32acd15f). 6h cadence; machine-scoped daily dedupe keeps it gentle.
+    ("oauth-cookie-reminder", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_COOKIE_REMINDER_INTERVAL"),
 ]
 
 
@@ -135,11 +205,35 @@ def _run_detector(name: str, interval: int) -> None:
         return
     # stdout passes through to the cron prompt as drift findings; stderr
     # goes to the detector's own log via state.log_line.
-    proc = subprocess.run(
-        [str(script), "--one-shot"],
-        capture_output=False,
-        check=False,
+    #
+    # A wall-clock `timeout` is mandatory: the detector roster is iterated
+    # in order (main() Phase 2), so a single hung detector — an infinite
+    # pure-Python loop, an un-timed inner subprocess / network / `gh` call,
+    # a blocking flock wait — would wedge THIS fire and starve every detector
+    # after it, every fire, until the cron process is killed. Mirrors the
+    # guard phase (_phase_guard_branch_protection), which already bounds its
+    # subprocess. Well-behaved detectors self-limit via state.run_subprocess
+    # (timeout=10s), but that's a convention, not an enforced bound — this is
+    # the enforced one.
+    timeout = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT"), 120
     )
+    try:
+        proc = subprocess.run(
+            [str(script), "--one-shot"],
+            capture_output=False,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        state.log_line("dispatch", f"detector '{name}' timed out after {timeout}s — killed")
+        # Stamp last-run even on timeout so a chronically-slow detector backs
+        # off to its cadence instead of re-firing (and re-hanging) every fire.
+        _mark_detector_ran(name)
+        return
+    except OSError as exc:
+        state.log_line("dispatch", f"detector '{name}' spawn failed: {exc}")
+        return
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")
     _mark_detector_ran(name)
@@ -223,12 +317,77 @@ def _phase_rate_limit_recovery() -> bool:
             "Resume the previous pending task."
         )
 
-    for p in (flag, since_file):
+    # Also clear any pending post-compact resume flag: a rate-limit resume cue
+    # already says "resume the pending task", which subsumes it. Clearing both
+    # here prevents a second, redundant [janitor-resume] on the next fire when a
+    # compaction and a rate-limit happened to overlap in the same window.
+    sd = state.state_dir()
+    for p in (
+        flag,
+        since_file,
+        sd / "resume-after-compact.flag",
+        sd / "resume-after-compact.ts",
+    ):
         try:
             p.unlink()
         except FileNotFoundError:
             pass
     state.log_line("dispatch", f"rate-limit cleared after {age}s, resume cue emitted")
+    return True
+
+
+def _phase_compact_resume() -> bool:
+    """Return True if a [janitor-resume] line was emitted for a post-compact resume.
+
+    The PostCompact hook (scripts/hooks/post-compact-resume.py) writes
+    `resume-after-compact.flag` (the resume directive) + a `.ts` sidecar
+    immediately after a context compaction. A compaction returns the REPL to
+    idle — Claude Code does not auto-continue the interrupted task (and for the
+    watchdog's manual /compact it never did), and a hook cannot start a fresh
+    turn. The heartbeat cron is the only thing that fires fresh turns, so this
+    phase is the wake-up: it reads the flag, emits ONE [janitor-resume] cue
+    carrying the directive, and clears the flag so the resume fires exactly once
+    per compaction. Without it an unattended session stalls idle after every
+    compact — fatal for the overnight task loop the context watchdog enables.
+
+    Mirrors _phase_rate_limit_recovery: emit + clear + return True so main()
+    skips the drift detectors this fire and the resume cue gets clean attention.
+    """
+    flag = state.state_dir() / "resume-after-compact.flag"
+    if not flag.is_file():
+        return False
+
+    try:
+        directive = flag.read_text(encoding="utf-8")
+    except OSError:
+        directive = ""
+    # Defang against marker-mimicry (a TRDD title / directive file embedding a
+    # fake `[janitor-…]` marker), collapse to a single bounded line.
+    directive = state.sanitize_for_drift_line(directive)
+    directive = " ".join(directive.split())
+    if len(directive) > 280:
+        directive = directive[:277] + "..."
+
+    since_file = state.state_dir() / "resume-after-compact.ts"
+    now = int(time.time())
+    age = max(0, now - state.read_int_state(since_file, now))
+
+    if directive:
+        print(f"[janitor-resume] Context was compacted {age}s ago — auto-resume. {directive}")
+    else:
+        # Flag present but empty/unreadable: still cue a generic resume so the
+        # session doesn't stall idle after a compaction.
+        print(
+            f"[janitor-resume] Context was compacted {age}s ago — auto-resume. "
+            "Resume your previous in-flight task (check the TRDD board / your handoff)."
+        )
+
+    for p in (flag, since_file):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+    state.log_line("dispatch", f"post-compact resume cue emitted (age {age}s)")
     return True
 
 
@@ -395,6 +554,15 @@ def main() -> int:
     # Phase 1: rate-limit recovery — if a [janitor-resume] was emitted,
     # skip drift detectors this fire so resume gets clean attention.
     if _phase_rate_limit_recovery():
+        return 0
+
+    # Phase 1.1: post-compact resume. A context compaction leaves the REPL idle;
+    # without this nudge an unattended session stalls forever after the watchdog
+    # (or a native auto-compact) compacts. The PostCompact hook drops
+    # resume-after-compact.flag; we surface it as a single [janitor-resume] cue
+    # exactly once and return early — like rate-limit recovery — so the resume
+    # gets clean attention with no detector noise this fire.
+    if _phase_compact_resume():
         return 0
 
     # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons).

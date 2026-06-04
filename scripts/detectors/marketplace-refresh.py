@@ -42,12 +42,11 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
-import dedupe  # noqa: E402
+import daemon_watchdog  # noqa: E402
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
@@ -169,61 +168,54 @@ def _run_worker() -> int:
             "[worker] no local/project marketplaces — nothing to refresh",
         )
         return 0
-    state.log_line(
-        _NAME,
-        f"[worker] refreshing {len(markets)} local/project marketplace(s) sequentially: "
-        f"{','.join(markets)}",
-    )
-    for market in markets:
-        try:
-            with log_path.open("a", encoding="utf-8") as logf:
-                logf.write(f"--- {market} ---\n")
-                subprocess.run(  # noqa: S603,S607 - explicit args, fixed command
-                    ["claude", "plugin", "marketplace", "update", market],
-                    stdout=logf, stderr=subprocess.STDOUT,
-                    timeout=120, check=False,
-                )
-        except subprocess.TimeoutExpired:
-            state.log_line(_NAME, f"[worker] refresh timed out: {market}")
-        except OSError as exc:
-            state.log_line(_NAME, f"[worker] refresh failed: {market} ({exc})")
-    state.log_line(_NAME, "[worker] completed")
+    with gs.marketplace_lock() as got:
+        if not got:
+            state.log_line(
+                _NAME,
+                "[worker] deferred — another marketplace op holds the lock; retry next cycle",
+            )
+            return 0
+        state.log_line(
+            _NAME,
+            f"[worker] refreshing {len(markets)} local/project marketplace(s) sequentially: "
+            f"{','.join(markets)}",
+        )
+        for market in markets:
+            try:
+                with log_path.open("a", encoding="utf-8") as logf:
+                    logf.write(f"--- {market} ---\n")
+                    subprocess.run(  # noqa: S603,S607 - explicit args, fixed command
+                        ["claude", "plugin", "marketplace", "update", market],
+                        stdout=logf, stderr=subprocess.STDOUT,
+                        timeout=120, check=False,
+                    )
+            except subprocess.TimeoutExpired:
+                state.log_line(_NAME, f"[worker] refresh timed out: {market}")
+            except OSError as exc:
+                state.log_line(_NAME, f"[worker] refresh failed: {market} ({exc})")
+        state.log_line(_NAME, "[worker] completed")
     return 0
 
 
 # --- daemon-staleness watchdog -------------------------------------------
 
 def _emit_daemon_stale_drift_if_needed() -> None:
-    """Surface a drift line ONCE/hour while the daemon's bulk refresh is stale.
+    """Surface a once/hour drift line when the daemon's global marketplace
+    refresh is stale AND the daemon is not responding.
 
-    The daemon writes `marketplace-refresh.last-run.ts` on every successful
-    completion. Missing → either the daemon just started or the task has
-    never finished; neither counts as "stale" yet.
+    Delegates to the shared `daemon_watchdog` so this shim and
+    user-plugins-update share ONE implementation and cannot drift apart (they
+    did: this one was fixed for issue #9 while the sibling kept crying "daemon
+    may be stuck"). See daemon_watchdog for the heartbeat-gate rationale that
+    eliminates the false positive a long-but-healthy refresh used to trigger.
     """
-    last_run_path = gs.global_state_dir() / "marketplace-refresh.last-run.ts"
-    last_run = state.read_int_state(last_run_path, 0)
-    if last_run <= 0:
-        return
-    cadence = state.coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL"),
-        1200,
+    daemon_watchdog.emit_if_daemon_stale(
+        task_name=_NAME,
+        last_run_filename="marketplace-refresh.last-run.ts",
+        cadence_env="CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL",
+        default_cadence_s=1200,
+        subject="global marketplaces last refreshed",
     )
-    stale_threshold = 2 * cadence
-    age = int(time.time()) - last_run
-    if age <= stale_threshold:
-        return
-    seen = state.state_dir() / "marketplace-refresh-stale-seen.txt"
-    key = f"stale@{int(time.time() // 3600)}"
-    out = dedupe.emit_once(
-        seen,
-        key,
-        f"[marketplace-refresh] daemon has not refreshed global marketplaces in "
-        f"~{age // 60} min (cadence {cadence}s) — daemon may be stuck. "
-        f"Inspect: ~/.claude/janitor-global-state/daemon.log. "
-        f"Restart: kill $(cat ~/.claude/janitor-global-state/daemon.pid).",
-    )
-    if out is not None:
-        print(out)
 
 
 # --- main -----------------------------------------------------------------

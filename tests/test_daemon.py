@@ -79,6 +79,11 @@ def harness(tmp_path: Path):
     base_env["JANITOR_GLOBAL_STATE_DIR"] = str(state_dir)
     base_env["PATH"] = f"{bin_dir}{os.pathsep}{base_env['PATH']}"
     base_env["CLAUDE_STUB_LOG"] = str(stub_log)
+    # Isolate the OAuth-rotator root so the 60 s oauth-rotator-tick Task resolves
+    # to an empty tmp dir (no opt-in.flag → a total no-op) and can NEVER touch the
+    # user's real keychain / slots during a daemon test. Without this the daemon
+    # would inherit whatever CLAUDE_PLUGIN_DATA happens to be in os.environ.
+    base_env["CLAUDE_PLUGIN_DATA"] = str(tmp_path / "plugin-data")
     # Fire tasks every second during tests so the assertion window is short.
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL"] = "1"
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL"] = "1"
@@ -350,3 +355,118 @@ def test_stdout_parser_classifies_correctly(stdout: str, expected: bool) -> None
     """The stdout parser must distinguish real version changes from no-ops."""
     daemon = _import_daemon_module()
     assert daemon._stdout_proves_plugin_updated(stdout) is expected
+
+
+# ---------- oauth-rotator-tick task (TRDD-f892e109 decision 3) --------------
+#
+# The daemon's 60 s oauth-rotator-tick Task REPLACED the launchd agent. These
+# in-process unit tests prove it is registered, no-ops when not opted in, and
+# otherwise runs rotator.py as a TIMED subprocess (so a hung keychain/usage
+# call can't wedge the loop).
+
+
+def test_oauth_rotator_tick_registered_at_60s() -> None:
+    """_build_tasks() includes the oauth-rotator-tick Task at the 60 s cadence."""
+    daemon = _import_daemon_module()
+    tasks = {t.name: t for t in daemon._build_tasks()}
+    assert "oauth-rotator-tick" in tasks
+    assert tasks["oauth-rotator-tick"].interval_s == 60
+
+
+def test_oauth_rotator_tick_noop_when_not_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No opt-in flag → the tick task never spawns the rotator subprocess."""
+    daemon = _import_daemon_module()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: False)
+    monkeypatch.setattr(daemon, "_run_workload", lambda cmd, **_k: calls.append(cmd))
+    daemon.task_oauth_rotator_tick()
+    assert calls == [], "tick must be a total no-op when not opted in"
+
+
+def test_oauth_rotator_tick_runs_rotator_when_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt-in flag present → the tick runs `rotator.py tick --only-if-claude-running`
+    via _run_workload (a TIMED subprocess, never in-process)."""
+    daemon = _import_daemon_module()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(daemon.oauth_supervisor, "opt_in_present", lambda *_a, **_k: True)
+    monkeypatch.setattr(daemon, "_run_workload", lambda cmd, **_k: calls.append(cmd))
+    daemon.task_oauth_rotator_tick()
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[1].endswith("rotator.py")
+    assert cmd[-2:] == ["tick", "--only-if-claude-running"]
+
+
+# ---------- _run_workload kill-path reap (audit finding 4) -----------------
+#
+# On timeout/shutdown _run_workload kills the child then drains it with
+# communicate() (not wait()), so the PIPE stdout/stderr fds close deterministically
+# instead of waiting on GC. These tests run a REAL sleeping subprocess (no mocks)
+# and assert the call is bounded, returns None, and the child is reaped.
+
+
+def test_run_workload_kills_hung_child_and_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A child that sleeps past the timeout is killed; _run_workload returns None fast."""
+    daemon = _import_daemon_module()
+    # Isolate global state so write_heartbeat() during the tick lands in tmp.
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    daemon.gs.init_global_state()
+
+    start = time.time()
+    result = daemon._run_workload(["sleep", "30"], timeout=1, heartbeat_tick=1)
+    elapsed = time.time() - start
+
+    assert result is None, "a killed/timed-out workload must return None"
+    assert elapsed < 10.0, f"kill path wedged for {elapsed:.1f}s — timeout did not fire"
+
+
+def test_run_workload_kill_path_closes_pipe_fds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the kill-path reap, the child's PIPE fds are closed deterministically.
+
+    communicate() (the fix) drains and closes proc.stdout/proc.stderr; the old
+    wait() left them open until GC. We capture the Popen object the function
+    creates (by wrapping Popen) and assert its pipe file objects are closed once
+    _run_workload returns — proof the reap closed them here, not via GC.
+    """
+    daemon = _import_daemon_module()
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    daemon.gs.init_global_state()
+
+    captured: list = []
+    real_popen = daemon.subprocess.Popen
+
+    def _capturing_popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        captured.append(proc)
+        return proc
+
+    monkeypatch.setattr(daemon.subprocess, "Popen", _capturing_popen)
+
+    result = daemon._run_workload(["sleep", "30"], timeout=1, heartbeat_tick=1)
+    assert result is None
+    assert len(captured) == 1, "exactly one child should have been spawned"
+    proc = captured[0]
+    # communicate() sets the pipe attrs to closed file objects; verify closed.
+    assert proc.stdout is None or proc.stdout.closed, "stdout pipe fd must be closed"
+    assert proc.stderr is None or proc.stderr.closed, "stderr pipe fd must be closed"
+    assert proc.poll() is not None, "the child must be reaped (not a zombie/alive)"
+
+
+def test_run_workload_normal_completion_returns_completedprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fast child that exits under the timeout returns a CompletedProcess with output."""
+    daemon = _import_daemon_module()
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    daemon.gs.init_global_state()
+
+    result = daemon._run_workload(
+        [sys.executable, "-c", "print('ok')"], timeout=10, heartbeat_tick=5
+    )
+    assert result is not None, "a normally-completing workload must return CompletedProcess"
+    assert result.returncode == 0
+    assert "ok" in result.stdout

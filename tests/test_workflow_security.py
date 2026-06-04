@@ -169,3 +169,91 @@ def test_yaml_extension_is_scanned(tmp_path: Path) -> None:
     r = _run(tmp_path)
     assert r.returncode == 0, r.stderr
     assert "shell-injection-expr" in r.stdout
+
+
+def test_janitor_toml_suppresses_finding(tmp_path: Path) -> None:
+    """A .janitor.toml waiver against the vulnerable rule silences the
+    drift line — verifies suppression library is wired into the
+    workflow-security detector."""
+    _write_wf(tmp_path, "vuln.yml", VULN_WF)
+    (tmp_path / ".janitor.toml").write_text(
+        '[[suppress]]\n'
+        'rule_id = "shell-injection-expr"\n'
+        'reason = "audited and accepted"\n',
+        encoding="utf-8",
+    )
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == ""
+
+
+# --- rules_extra wiring (audit HIGH-1 regression guard) --------------------
+#
+# scripts/lib/sentinel/rules_extra.RULES (5 disclosed-CVE structural
+# detectors) was imported by NEITHER consumer — both built
+# structural_rules = [*absence, *context, *injection] with no *_EXTRA. The
+# CRITICAL workflow_run RCE and the structural-only id-token-write-unscoped
+# rode nothing. These end-to-end tests fail if the detector ever drops the
+# *_EXTRA spread again.
+
+# id-token-write-unscoped is structural-ONLY (no regex-tier equivalent), so
+# it firing through the detector proves rules_extra is wired, not the regex
+# catalog. HIGH severity → rides the heartbeat.
+ID_TOKEN_UNSCOPED_WF = """\
+name: deploy
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: echo deploy
+"""
+
+# workflow-run-pwn-checkout is CRITICAL. (It is now caught by BOTH tiers; the
+# point of the test is that the CRITICAL rides the heartbeat at all.)
+WORKFLOW_RUN_PWN_WF = """\
+name: bad-workflow-run
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+jobs:
+  privileged:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - run: ./deploy.sh
+"""
+
+
+def test_id_token_unscoped_structural_rule_rides_heartbeat(tmp_path: Path) -> None:
+    """id-token: write without environment: (structural-only rules_extra rule)
+    surfaces — proves rules_extra is wired into the detector's structural set."""
+    _write_wf(tmp_path, "deploy.yml", ID_TOKEN_UNSCOPED_WF)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "[workflow-security]" in r.stdout
+    assert "id-token-write-unscoped" in r.stdout
+    assert "HIGH" in r.stdout
+
+
+def test_workflow_run_pwn_checkout_critical_rides_heartbeat(tmp_path: Path) -> None:
+    """workflow_run + checkout of head_sha (CRITICAL) surfaces on the heartbeat."""
+    _write_wf(tmp_path, "wfrun.yml", WORKFLOW_RUN_PWN_WF)
+    r = _run(tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "[workflow-security]" in r.stdout
+    assert "workflow-run-pwn-checkout" in r.stdout
+    assert "CRITICAL" in r.stdout

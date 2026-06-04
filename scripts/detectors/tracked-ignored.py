@@ -128,9 +128,15 @@ def main() -> int:
         sample_lines.append(f"  - …and {count - 10} more")
     sample = "\n".join(sample_lines)
 
+    # Key the dedupe on the FULL cache_key (HEAD + ignore-file mtimes), not
+    # HEAD alone. A second .gitignore edit at the same HEAD surfaces a new
+    # offender (the staleness gate above re-runs the scan because cache_key
+    # changed) — keying on head_sha alone would suppress that second finding
+    # forever until HEAD moved. Rotating the dedupe key in lockstep with the
+    # staleness key means each distinct offender-set at a fixed HEAD emits once.
     line = dedupe.emit_once(
         seen,
-        f"trackedignored@{head_sha}",
+        f"trackedignored@{cache_key}",
         f"[tracked-ignored] {count} tracked file(s) match current .gitignore rules — they were committed "
         f"before the rule was added and git keeps tracking them. Stop tracking with: "
         f"git rm --cached -r -- <path> (then commit). Affected:\n{sample}",
