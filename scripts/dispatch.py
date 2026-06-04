@@ -181,6 +181,14 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # expires AND while OAuth is still healthy, so the two expiries never coincide
     # (TRDD-32acd15f). 6h cadence; machine-scoped daily dedupe keeps it gentle.
     ("oauth-cookie-reminder", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_COOKIE_REMINDER_INTERVAL"),
+    # oauth-login-needed is the reactive sibling of oauth-cookie-reminder, same
+    # opt-in-by-presence gate (a rotator home with a state.json). It surfaces the
+    # accounts that need a ONE-TIME human login because they can neither self-renew
+    # (no refreshToken) nor auto-bootstrap (no live claude.ai Chrome session), so
+    # only a fresh sign-in via ~/.claude/account-rotator/open-login.sh can revive
+    # them. Distinct from cookie-reminder (the cookie/OAuth expiry RACE). 6h cadence;
+    # machine-scoped daily dedupe keeps it gentle.
+    ("oauth-login-needed", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_LOGIN_NEEDED_INTERVAL"),
 ]
 
 

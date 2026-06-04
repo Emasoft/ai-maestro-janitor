@@ -43,6 +43,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -1024,6 +1025,100 @@ def _keepalive_refresh() -> list[str]:
     return actions
 
 
+def _bootstrap_eligible(has_refresh: bool, has_session_key: bool) -> bool:
+    """PURE: is this slot a candidate for post-login auto-bootstrap?
+
+    Eligible iff it CANNOT self-renew (no refreshToken — so keepalive can't keep
+    it alive) but DOES have a live claude.ai Chrome session we can mint a fresh
+    refresh-bearing slot from (slot_capture_browser auto-clicks Authorize on the
+    seeded session). A slot that already has a refreshToken needs nothing; a slot
+    with no live session has nothing to bootstrap FROM (that one needs a human
+    login — surfaced by the oauth-login-needed detector)."""
+    return (not has_refresh) and has_session_key
+
+
+def _profiles_root() -> Path:
+    """The Chrome profiles root: ``<ROOT>/profiles``, overridable via
+    CLAUDE_ROTATOR_PROFILES — mirrors open-login.sh / slot_capture_browser so all
+    three agree on where ``chrome-profile-<email>`` lives."""
+    raw = os.environ.get("CLAUDE_ROTATOR_PROFILES", "").strip()
+    return Path(raw) if raw else (ROOT / "profiles")
+
+
+def _profile_has_session_key(email: str, *, now: float | None = None) -> bool:
+    """True iff a LIVE (not-yet-expired) claude.ai session cookie exists in the
+    account's Chrome profile — i.e. slot_capture_browser could auto-bootstrap a
+    refresh token from it. Read-only sqlite probe; never reads cookie VALUES, only
+    the sessionKey's host/name/expiry. Mirrors oauth-cookie-reminder._cookie_days."""
+    now = now if now is not None else time.time()
+    db = _profiles_root() / f"chrome-profile-{email}" / "Default" / "Cookies"
+    if not db.is_file():
+        return False
+    chrome_now = int((now + 11644473600) * 1_000_000)  # Chrome epoch: us since 1601-01-01
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        rows = con.execute(
+            "SELECT expires_utc FROM cookies WHERE name = 'sessionKey' "
+            "AND host_key LIKE '%claude.ai'"
+        ).fetchall()
+        con.close()
+    except sqlite3.Error:
+        return False
+    return any(exp > chrome_now for (exp,) in rows)
+
+
+def _invoke_slot_capture(email: str) -> bool:
+    """Mint a refresh-bearing slot for `email` by driving its SEEDED Chrome session.
+
+    Shells the sibling slot_capture_browser.py as a TIMED subprocess (headless;
+    180s cap so a wedged Playwright never stalls the tick). True iff it exited 0.
+    This is the ONE external-process seam — tests monkeypatch it so no real browser
+    / network is ever touched."""
+    script = Path(__file__).resolve().parent / "slot_capture_browser.py"
+    timeout = float(os.environ.get("CLAUDE_ROTATOR_BOOTSTRAP_TIMEOUT_S", "180"))
+    proc = subprocess.run(
+        [sys.executable, str(script), email, "--headless"],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    return proc.returncode == 0
+
+
+def _bootstrap_seeded_slots() -> list[str]:
+    """Post-login auto-bootstrap (P4d): for every indexed slot that was SEEDED by a
+    human login (a live claude.ai Chrome session) but cannot yet self-renew (no
+    refreshToken), mint a full refresh-bearing slot via slot_capture_browser. This is
+    what lets the "log me in once, the rotator manages the rest" UX work — the human
+    runs open-login.sh per dead account, and the next tick converts those seeded
+    sessions into self-renewing slots with NO further human action.
+
+    Best-effort and defensive: each capture is wrapped so a Playwright crash / timeout
+    / missing-profile failure is logged and SKIPPED, never aborting the loop or the
+    tick (a non-fatal helper must not crash the beat it runs in). Returns the list of
+    emails that were successfully bootstrapped."""
+    bootstrapped: list[str] = []
+    state = load_state()
+    now = time.time()
+    for email in list((state.get("slots") or {}).keys()):
+        blob = read_slot(email)
+        inner = _oauth(blob) if blob else {}
+        has_refresh = bool(inner.get("refreshToken") or inner.get("refresh_token"))
+        has_session = _profile_has_session_key(email, now=now)
+        if not _bootstrap_eligible(has_refresh, has_session):
+            continue
+        try:
+            if _invoke_slot_capture(email):
+                bootstrapped.append(email)
+        except Exception as exc:  # noqa: BLE001 — documented best-effort contract
+            # Best-effort by design: a capture failure (Playwright crash, subprocess
+            # timeout, missing profile, bad env) must NOT abort the remaining slots or
+            # the daemon tick this runs inside. We deliberately swallow EVERY exception
+            # here (the one place fail-fast is wrong — this is a last-line convenience,
+            # not a correctness gate) and continue to the next eligible slot.
+            print("[bootstrap] %s: capture failed (%r) — skipped" % (email, exc),
+                  file=sys.stderr)
+    return bootstrapped
+
+
 def _repair_integrity() -> list[str]:
     """Pillar 2 in-advance backup / corruption-repair pass, run at the START of every tick
     BEFORE any rotation decision, so the three credential stores each carry a verified
@@ -1077,8 +1172,9 @@ def cmd_tick(only_if_running: bool) -> int:
     # whichever root holds the state, so this is just promotion — the NEXT tick process
     # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
     migrate_root_to_canonical()
-    _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
-    _repair_integrity()   # Pillar 2: verify/restore state + slots + live BEFORE deciding
+    _keepalive_refresh()      # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
+    _bootstrap_seeded_slots()  # P4d: mint refresh-bearing slots from human-seeded sessions (best-effort)
+    _repair_integrity()       # Pillar 2: verify/restore state + slots + live BEFORE deciding
     cmd_capture(False)
     return cmd_auto()
 
