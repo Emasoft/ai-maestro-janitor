@@ -744,3 +744,54 @@ def test_keepalive_refresh_only_near_expiry_refreshable_non_live_slots(
     st = rotator.load_state()                                 # index updated for the refreshed slot
     assert st["slots"]["near@x"]["fp"] == rotator.fingerprint(written["near@x"])
     assert st["slots"]["near@x"]["expires_at"] > _ms_in(7)
+
+
+# ---- _reconcile_live_email: state.json self-heals to the ACTUAL live credential ----
+# (TRDD-7100178d#6 stale-index / live-account drift: an out-of-band `claude` login or a
+#  reauth that wrote the token but not the index leaves state.live_email pointing at the
+#  WRONG account; cmd_auto would then treat the real live account as a rotation target.)
+
+def test_reconcile_live_email_noop_when_in_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Steady state (state.live_fp already matches the live blob): ZERO network, ZERO write."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    live = _blob("LIVE-TOKEN")
+    calls = {"roles": 0, "save": 0}
+    monkeypatch.setattr(rotator, "account_email",
+                        lambda *_a, **_k: (calls.__setitem__("roles", calls["roles"] + 1), "WRONG@x")[1])
+    monkeypatch.setattr(rotator, "save_state", lambda _s: calls.__setitem__("save", calls["save"] + 1))
+    state = {"live_email": "a@x", "live_fp": rotator.fingerprint(live), "slots": {"a@x": {}}}
+    out = rotator._reconcile_live_email(state, live)
+    assert out["live_email"] == "a@x"   # unchanged
+    assert calls["roles"] == 0          # steady state never touches /roles
+    assert calls["save"] == 0           # …and never writes
+
+
+def test_reconcile_live_email_corrects_drift_via_roles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drift: live-blob fp != state.live_fp → /roles email is authoritative; state corrected + persisted."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    live = _blob("REAL-LIVE")
+    monkeypatch.setattr(rotator, "account_email", lambda *_a, **_k: "real@x")
+    state = {"live_email": "stale@x", "live_fp": "deadbeefdeadbeef",
+             "live_429_streak": 5, "slots": {"stale@x": {}, "real@x": {}}}
+    out = rotator._reconcile_live_email(state, live)
+    assert out["live_email"] == "real@x"                       # corrected to ground truth
+    assert out["live_fp"] == rotator.fingerprint(live)         # fp updated to reality
+    assert out["live_429_streak"] == 0                         # stale account's streak reset
+    assert isinstance(out.get("last_reconcile_at"), float)
+    assert rotator.load_state()["live_email"] == "real@x"      # persisted to disk
+
+
+def test_reconcile_live_email_falls_back_to_slot_fp_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drift + /roles can't resolve (returns '') → match the live fp against a known slot's blob."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    live = _blob("REAL-LIVE")
+    monkeypatch.setattr(rotator, "account_email", lambda *_a, **_k: "")  # /roles can't resolve
+    monkeypatch.setattr(rotator, "read_slot",
+                        lambda em: live if em == "real@x" else _blob("OTHER"))
+    state = {"live_email": "stale@x", "live_fp": "deadbeefdeadbeef",
+             "slots": {"stale@x": {}, "real@x": {}}}
+    out = rotator._reconcile_live_email(state, live)
+    assert out["live_email"] == "real@x"                       # resolved by fingerprint match

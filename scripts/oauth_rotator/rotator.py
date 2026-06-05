@@ -905,6 +905,44 @@ def select_drain_first(
     return best
 
 
+def _reconcile_live_email(state: dict, live_blob: dict) -> dict:
+    """Make state.json agree with the ACTUAL live keychain credential (ground truth).
+
+    The live credential can change WITHOUT the rotator's knowledge: an out-of-band
+    `claude` login, a `switch` from another process, or a Tier-3 reauth that wrote the
+    refreshed token to the keychain but never updated the index (TRDD-7100178d#6). When
+    that happens `state.live_email` / `live_fp` drift away from reality, and every
+    consumer that trusts them mislabels — worse, the candidate-list logic in cmd_auto
+    would treat the REAL live account as a rotation TARGET and skip the actually-stale
+    one. Reconcile here so the real credential always wins, BEFORE any rotation decision.
+
+    Network-cheap: the fingerprint compare is local, so the steady-state path (no drift)
+    does zero network and zero writes; `account_email` (/roles) is called at most once per
+    genuine drift event.
+    """
+    real_fp = fingerprint(live_blob)
+    if state.get("live_fp") == real_fp:
+        return state  # already in sync — steady state, no network, no write
+    old_email = state.get("live_email")
+    # Resolve the real account's email: Anthropic /roles is ground truth; fall back to a
+    # local fingerprint match against known slots, then to the stale value as last resort.
+    real_email = account_email(live_blob)
+    if not real_email:
+        for em in state.get("slots", {}):
+            sb = read_slot(em)
+            if sb and fingerprint(sb) == real_fp:
+                real_email = em
+                break
+    state["live_email"] = real_email or old_email
+    state["live_fp"] = real_fp
+    state["live_429_streak"] = 0  # the debounce streak belonged to the stale account
+    state["last_reconcile_at"] = time.time()
+    save_state(state)
+    print("auto: reconciled live account — state said %r but the real live credential "
+          "is %r; state.json corrected" % (old_email, state["live_email"]))
+    return state
+
+
 def cmd_auto() -> int:
     """Proactive usage-based rotation. No-op unless the LIVE account is near a
     limit AND a safer alternate slot exists. Reads quota from /api/oauth/usage
@@ -913,11 +951,15 @@ def cmd_auto() -> int:
     never triggers a switch.
     """
     state = load_state()
-    live_email = state.get("live_email")
     live_blob = read_live_blob()
     if live_blob is None:
         print("auto: no live credential")
         return 0
+    # GROUND-TRUTH RECONCILE (TRDD-7100178d#6 stale-index / live-account drift): the actual
+    # live keychain credential is authoritative. Correct state.json to match it BEFORE the
+    # decision below, or the candidate list would treat the real live account as a target.
+    state = _reconcile_live_email(state, live_blob)
+    live_email = state.get("live_email")
     live_status, live_data = usage_request(live_blob)
     fh = _util(live_data, "five_hour")
     sd = _util(live_data, "seven_day")
