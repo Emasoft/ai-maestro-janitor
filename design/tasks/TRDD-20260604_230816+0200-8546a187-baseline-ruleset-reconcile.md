@@ -3,7 +3,7 @@ trdd-id: 8546a187-781b-4449-93f4-d84af4ed1bcf
 title: Baseline-ruleset byte-identical reconcile with maintainer-agent + 2 shared follow-ups
 column: blocked
 created: 2026-06-04T23:08:16+0200
-updated: 2026-06-04T23:08:16+0200
+updated: 2026-06-06T00:05:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 3
@@ -68,6 +68,21 @@ filter + PUT update path. No janitor action until then.
    method→status (`PATCH /rulesets/{id}`→404, `PUT`→200, `POST`→201), unknown-path→404, and
    a check-runs fixture where a push-only job never reports on a `pull_request` event (makes
    the required-check deadlock reproducible IN-SUITE).
+
+**3rd shared item — TAG PROTECTION (NEW, maintainer#7 2026-06-05, Tier-2 — needs MANAGER co-ratify):**
+The maintainer proposed a THIRD baseline ruleset (it EXTENDS the ratified pair, so co-ratification
+required). Gap: both ratified rulesets target `~DEFAULT_BRANCH`, so `v*` release tags are
+unprotected — a moved/deleted published tag re-points installers at arbitrary code, and a post-hoc
+CI gate can't catch a tag moved onto a CI-passing commit. Janitor ENDORSED on merits (#7 comment
+4635916630) with one scoping note: prefer `["refs/tags/v*"]` over `["~ALL"]` (so it never breaks an
+intentional moving `latest`/`nightly` tag). Proposed `baseline-tag-protect`: `target: tag`,
+`enforcement: active`, `include: ["refs/tags/v*"]` (exact GitHub-accepted spelling locked together),
+`bypass_actors: []`, rules `[deletion, non_fast_forward]`. **Zero publish.py impact** — new-tag
+creation is neither deletion nor non_fast_forward, so publish.py still cuts releases with NO bypass
+actor. STATUS: awaiting MANAGER co-ratification; once ratified, janitor adds it to
+`branch_protection_lib.py` as a third payload (+ orphan-name awareness), byte-identical with the
+maintainer, applied Tier-0 like the pair. Maintainer's other audit items are maintainer-internal
+(no baseline change, no janitor co-sign).
 
 **Load-bearing facts:**
 - `triggers()` = `wf.get(True, wf.get('on'))` is loader-swap-safe (YAML 1.1 `on:`→`True` +
