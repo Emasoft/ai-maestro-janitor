@@ -3,7 +3,7 @@ trdd-id: 8546a187-781b-4449-93f4-d84af4ed1bcf
 title: Baseline-ruleset byte-identical reconcile with maintainer-agent + 2 shared follow-ups
 column: blocked
 created: 2026-06-04T23:08:16+0200
-updated: 2026-06-06T00:05:00+0200
+updated: 2026-06-06T00:10:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 3
@@ -69,19 +69,42 @@ filter + PUT update path. No janitor action until then.
    a check-runs fixture where a push-only job never reports on a `pull_request` event (makes
    the required-check deadlock reproducible IN-SUITE).
 
-**3rd shared item — TAG PROTECTION (NEW, maintainer#7 2026-06-05, Tier-2 — needs MANAGER co-ratify):**
-The maintainer proposed a THIRD baseline ruleset (it EXTENDS the ratified pair, so co-ratification
-required). Gap: both ratified rulesets target `~DEFAULT_BRANCH`, so `v*` release tags are
-unprotected — a moved/deleted published tag re-points installers at arbitrary code, and a post-hoc
-CI gate can't catch a tag moved onto a CI-passing commit. Janitor ENDORSED on merits (#7 comment
-4635916630) with one scoping note: prefer `["refs/tags/v*"]` over `["~ALL"]` (so it never breaks an
-intentional moving `latest`/`nightly` tag). Proposed `baseline-tag-protect`: `target: tag`,
-`enforcement: active`, `include: ["refs/tags/v*"]` (exact GitHub-accepted spelling locked together),
-`bypass_actors: []`, rules `[deletion, non_fast_forward]`. **Zero publish.py impact** — new-tag
-creation is neither deletion nor non_fast_forward, so publish.py still cuts releases with NO bypass
-actor. STATUS: awaiting MANAGER co-ratification; once ratified, janitor adds it to
-`branch_protection_lib.py` as a third payload (+ orphan-name awareness), byte-identical with the
-maintainer, applied Tier-0 like the pair. Maintainer's other audit items are maintainer-internal
+**3rd shared item — TAG PROTECTION (CONSENSUS CLOSED 2026-06-05, Tier-3 — awaiting USER ratify):**
+A THIRD baseline ruleset (it EXTENDS the ratified pair). Gap: the pair targets only
+`~DEFAULT_BRANCH`, so `v*` release tags are unprotected — a moved/deleted published tag re-points
+installers at arbitrary code, and a post-hoc CI gate can't catch a tag moved onto a CI-passing
+commit. **All three plugins (janitor + maintainer + MANAGER) converged byte-identical.** FINAL spec:
+
+```
+name: baseline-tag-protect
+target: tag
+enforcement: active
+conditions.ref_name.include: ["refs/tags/v*.*.*"]
+conditions.ref_name.exclude: []
+bypass_actors: []
+rules: [deletion, update]
+```
+
+KEY DECISIONS (mechanism-verified, not assumed):
+- **rule = `[deletion, update]`** (NOT `non_fast_forward`). `non_fast_forward` does NOT block a tag
+  fast-forward-moved onto a DESCENDANT commit (append a malicious child commit, ff-move `vX.Y.Z`
+  onto it → bypass). `update` ("Restrict updates") blocks EVERY repoint → minimal-complete, and
+  correct regardless of how GitHub evaluates tag fast-forwards. (MANAGER self-corrected its earlier
+  "a move is always a force-update" — it was wrong.)
+- **scope = `["refs/tags/v*.*.*"]`** — protects immutable full-semver release tags; leaves a future
+  movable `vN`/`latest` alias free. Verified: NEITHER repo ships a movable alias (janitor tags =
+  v0.4.3…v0.6.1 full versions only), so zero friction today; `v*.*.*` is the precise future-proof form.
+- **bypass = `[]`** — new-tag creation is unrestricted → publish.py still cuts releases, NO bypass
+  actor. Zero publish-path impact.
+- **literal lock** — readback-pin the exact `ref_name.include` GitHub echoes on first apply (same as
+  `actor_id:5`); both verify-blocks assert `rules == [deletion, update]` + `bypass_actors == []`.
+
+ROLLOUT (single-owner-per-domain, on USER ratify, folded into the same CPV-G3-cleared publish):
+janitor → add `baseline-tag-protect` to `branch_protection_lib.py` (3rd payload + orphan-name
+awareness), applied Tier-0; maintainer → 3rd payload in `workflow-protect-branch` + apply; MANAGER →
+ratify/gate only. Janitor threads: #14 comments 4635916630 / 4635958034 / 4636007547. STATUS:
+plugin-side consensus CLOSED; MANAGER + maintainer escalated to owner, recommendation = approve;
+**only the USER's Tier-3 ratify remains.** Maintainer's other audit items are maintainer-internal
 (no baseline change, no janitor co-sign).
 
 **Load-bearing facts:**
