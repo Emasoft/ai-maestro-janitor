@@ -186,6 +186,23 @@ impl Cli {
     }
 }
 
+/// Restore SIGPIPE to its default (terminate) disposition. Rust sets SIGPIPE to SIG_IGN at
+/// startup, so writing to a closed pipe (e.g. `memgrep … | head`) returns EPIPE, which `println!`
+/// unwraps into a panic + backtrace. A grep-like tool must instead die quietly on the signal. We
+/// reset it ourselves (no `libc` dep): SIGPIPE=13, SIG_DFL=0 on every Unix. No-op off Unix.
+#[cfg(unix)]
+fn reset_sigpipe() {
+    unsafe extern "C" {
+        fn signal(signum: i32, handler: usize) -> usize;
+    }
+    // SAFETY: a one-shot signal-disposition reset before any output/threads; async-signal-safe.
+    unsafe {
+        signal(13, 0);
+    }
+}
+#[cfg(not(unix))]
+fn reset_sigpipe() {}
+
 fn names_to_mask(names: &[String]) -> Result<u8> {
     let mut m = 0u8;
     for n in names {
@@ -335,6 +352,8 @@ fn json_str(s: &str) -> String {
 }
 
 fn main() -> Result<()> {
+    reset_sigpipe(); // die quietly on `… | head`, never panic on a closed pipe
+
     // Memory-helper subcommands dispatch before grep parsing. To grep for a literal "index" /
     // "links" / "fact" as the first word, use `memgrep -e index …`.
     let raw: Vec<String> = std::env::args().collect();

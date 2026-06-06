@@ -254,6 +254,27 @@ fn index_emits_title_and_toc() {
 }
 
 #[test]
+fn broken_pipe_dies_quietly_not_panics() {
+    // `memgrep … | head` closes the pipe early; memgrep must die on SIGPIPE like grep/rg, NOT
+    // panic with a backtrace. Use a large input so the write-after-close (which triggers EPIPE)
+    // definitely happens past the OS pipe buffer.
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let dir = std::env::temp_dir().join(format!("memgrep_bp_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let big = dir.join("big.md");
+    std::fs::write(&big, "match this line\n".repeat(40_000)).unwrap(); // ~640 KB ≫ pipe buffer
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(format!("'{}' match '{}' | head -1", bin, big.display()))
+        .output()
+        .expect("run pipeline");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(!stderr.contains("panicked"), "memgrep panicked on a broken pipe:\n{stderr}");
+    assert!(!stderr.contains("Broken pipe"), "memgrep leaked a broken-pipe error:\n{stderr}");
+}
+
+#[test]
 fn binary_file_is_skipped_without_crashing() {
     // Point memgrep at its own binary (full of NUL bytes); it must skip, not crash.
     let bin = env!("CARGO_BIN_EXE_memgrep");
