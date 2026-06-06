@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import stat
 import sys
 import time
@@ -843,3 +844,62 @@ def test_cmd_capture_fails_loud_on_corrupt_roundtrip(tmp_path: Path, monkeypatch
     rc = rotator.cmd_capture(only_if_running=False)
     assert rc == 1                                                       # FAILS LOUD
     assert "e@x" not in rotator.load_state().get("slots", {})            # NOT recorded
+
+
+# ── persistent decision log (TRDD-924645bb) ─────────────────────────────────────
+
+
+def test_log_appends_timestamped_line_creating_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_log appends '<ISO-local+offset> <msg>' to LOG_FILE and creates ROOT if absent."""
+    root = tmp_path / "missing-root"           # does NOT exist yet
+    monkeypatch.setattr(rotator, "ROOT", root)
+    monkeypatch.setattr(rotator, "LOG_FILE", root / "rotator.log")
+    rotator._log("auto: live a@x.com 5h=15% 7d=35% — within limits")
+    assert root.is_dir()                                            # ROOT auto-created
+    line = (root / "rotator.log").read_text(encoding="utf-8")
+    assert line.endswith("auto: live a@x.com 5h=15% 7d=35% — within limits\n")
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4} ", line)  # local time + GMT offset
+
+
+def test_log_self_trims_and_starts_on_record_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the log exceeds the cap, _log trims it to the recent tail AND the trimmed file
+    starts on a full record (the partial leading line is dropped), so it stays parseable."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    monkeypatch.setattr(rotator, "_LOG_MAX_BYTES", 2000)
+    monkeypatch.setattr(rotator, "_LOG_KEEP_BYTES", 1000)
+    for i in range(200):                       # ~200 * ~60 bytes ≫ 2000 → forces a trim
+        rotator._log("decision number %03d padding-padding-padding" % i)
+    data = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert len(data.encode()) <= rotator._LOG_MAX_BYTES                 # bounded
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T", data)                       # starts on a full record
+    assert data.endswith("decision number 199 padding-padding-padding\n")  # most-recent retained
+
+
+def test_log_never_raises_on_io_error_and_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A log-IO error must NEVER crash a rotation decision — _log reports to stderr and returns."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path)   # a DIRECTORY → open('a') raises IsADirectoryError
+    rotator._log("auto: switched a@x -> b@y")            # must not raise
+    assert "decision-log append failed" in capsys.readouterr().err
+
+
+def test_decide_prints_and_logs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """_decide mirrors a decision to BOTH stdout (manual/daemon) and the persistent log."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    rotator._decide("auto: live a@x.com 5h=99% 7d=10% +LOCALLY-EXPIRING")
+    assert "auto: live a@x.com 5h=99% 7d=10% +LOCALLY-EXPIRING" in capsys.readouterr().out
+    assert "5h=99% 7d=10%" in (tmp_path / "rotator.log").read_text(encoding="utf-8")
+
+
+def test_decision_log_carries_emails_and_usage_but_never_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SECURITY: a logged decision line carries account emails + usage %s (for diagnosis) but
+    NEVER a token value — the log shares state.json's trust boundary and must not widen leakage."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    rotator._log("auto: switched a@x.com -> b@y.com (target 5h=10% 7d=20%; live a@x.com -> rotate)")
+    body = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert "a@x.com" in body and "b@y.com" in body                      # emails kept (diagnosable)
+    assert "accessToken" not in body and "refreshToken" not in body     # no token KEYS
+    assert "sk-ant-" not in body                                        # no token VALUES

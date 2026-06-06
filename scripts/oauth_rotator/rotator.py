@@ -185,6 +185,52 @@ ROOT = _rotator_root()
 SLOTS = ROOT / "slots"
 STATE_FILE = ROOT / "state.json"
 
+# Persistent decision log (TRDD-924645bb). The daemon runs the 60s tick as a
+# subprocess whose stdout is NOT retained, so the rotator's per-tick decision —
+# printed by cmd_auto — used to vanish, leaving NO durable trail (the reason the
+# overnight failure was undiagnosable; see TRDD-5539cd6e). `_decide()` mirrors
+# every decision both to stdout (manual runs + daemon stdout) AND to this file.
+LOG_FILE = ROOT / "rotator.log"
+_LOG_MAX_BYTES = 256 * 1024   # self-trim ceiling — bounds the unattended 60s-cadence log
+_LOG_KEEP_BYTES = 128 * 1024  # on overflow, retain (roughly) the most-recent this-many bytes
+
+
+def _log(msg: str) -> None:
+    """Append a timestamped line to the persistent rotator log.
+
+    Self-trims so the file stays bounded under the daemon's 60s cadence (read the
+    last `_LOG_KEEP_BYTES`, drop the partial leading line so the file always starts
+    on a record boundary, atomic os.replace). Best-effort by design: a log-IO error
+    must NEVER crash a rotation decision — the decision is already on stdout, so we
+    report the log failure to stderr and carry on. This is deliberate separation of
+    an observability side-channel from the critical path, NOT a fallback of the core
+    rotation logic. SECURITY: callers pass decision strings (emails + usage %s +
+    fingerprints) — NEVER token values; the log shares state.json's trust boundary
+    (under CLAUDE_PLUGIN_DATA, gitignored, user-only)."""
+    try:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        with LOG_FILE.open("a", encoding="utf-8") as fh:
+            fh.write("%s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S%z"), msg))
+        if LOG_FILE.stat().st_size > _LOG_MAX_BYTES:
+            tail = LOG_FILE.read_bytes()[-_LOG_KEEP_BYTES:]
+            nl = tail.find(b"\n")  # discard the partial first record so we start on a boundary
+            if nl != -1:
+                tail = tail[nl + 1:]
+            tmp = ROOT / "rotator.log.trim.tmp"
+            tmp.write_bytes(tail)
+            os.replace(tmp, LOG_FILE)
+    except OSError as exc:
+        print("rotator: decision-log append failed (non-fatal): %r" % (exc,), file=sys.stderr)
+
+
+def _decide(msg: str) -> None:
+    """Emit one rotation DECISION: print to stdout AND append to the persistent log.
+
+    Use for every terminal cmd_auto/keepalive outcome so an unattended overnight run
+    leaves a durable, examinable trail of exactly-one decision per tick."""
+    print(msg)
+    _log(msg)
+
 # Auto-rotation thresholds (percent of a usage window consumed, 0-100). The
 # rotator switches the live credential to an alternate slot once the LIVE
 # account crosses SWITCH_AT on EITHER the 5-hour or the 7-day window —
@@ -995,7 +1041,7 @@ def cmd_auto() -> int:
     state = load_state()
     live_blob = read_live_blob()
     if live_blob is None:
-        print("auto: no live credential")
+        _decide("auto: no live credential")
         return 0
     # GROUND-TRUTH RECONCILE (TRDD-7100178d#6 stale-index / live-account drift): the actual
     # live keychain credential is authoritative. Correct state.json to match it BEFORE the
@@ -1021,9 +1067,9 @@ def cmd_auto() -> int:
         state["live_429_streak"] = streak
         save_state(state)
         if streak < LIVE_429_DEBOUNCE:
-            print("auto: live %s returned 429 (streak %d/%d) — likely a transient "
-                  "usage-endpoint throttle, not a real limit; deferring rotation"
-                  % (live_email or "(live)", streak, LIVE_429_DEBOUNCE))
+            _decide("auto: live %s returned 429 (streak %d/%d) — likely a transient "
+                    "usage-endpoint throttle, not a real limit; deferring rotation"
+                    % (live_email or "(live)", streak, LIVE_429_DEBOUNCE))
             return 0
         near = True
         live_desc = "RATE-LIMITED (429 x%d)" % streak
@@ -1041,16 +1087,16 @@ def cmd_auto() -> int:
         near = True   # no HTTP response, but the local expiresAt says the token is already dead
         live_desc = "LOCALLY EXPIRED + API unreachable (status %s)" % live_status
     else:
-        print("auto: live %s usage unreachable (status %s) but token still valid locally; "
-              "staying put" % (live_email or "(live)", live_status))
+        _decide("auto: live %s usage unreachable (status %s) but token still valid locally; "
+                "staying put" % (live_email or "(live)", live_status))
         return 0
     if not near:
-        print("auto: live %s %s — within limits" % (live_email or "(live)", live_desc))
+        _decide("auto: live %s %s — within limits" % (live_email or "(live)", live_desc))
         return 0
     last = state.get("last_switch_at")
     if isinstance(last, (int, float)) and (time.time() - last) < MIN_DWELL_S:
-        print("auto: live %s exhausted (%s) but inside dwell window; deferring"
-              % (live_email or "(live)", live_desc))
+        _decide("auto: live %s exhausted (%s) but inside dwell window; deferring"
+                % (live_email or "(live)", live_desc))
         return 0
     # Build the alternate-candidate list. A safe TARGET is NEVER itself locally expired. When the
     # network is up we also require a fresh /usage 200 below SAFE on both windows and apply the
@@ -1086,28 +1132,28 @@ def cmd_auto() -> int:
     if network_up:
         best = select_drain_first(candidates)
         if best is None:
-            print("auto: live %s exhausted (%s) but no alternate is healthy + below safe "
-                  "threshold — all paid accounts maxed; waiting for a window to reset"
-                  % (live_email or "(live)", live_desc))
+            _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe "
+                    "threshold — all paid accounts maxed; waiting for a window to reset"
+                    % (live_email or "(live)", live_desc))
             return 0
         target_email, target_blob, bfh, bsd = best
         reason = "live %s %s -> rotate" % (live_email or "(live)", live_desc)
         _switch_blob(target_email, target_blob, reason)
-        print("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)"
-              % (live_email or "(live)", target_email, bfh, bsd, reason))
+        _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)"
+                % (live_email or "(live)", target_email, bfh, bsd, reason))
         return 0
     # Degraded (no-network) rotation: the live token is locally dead and /usage is unreachable.
     if not degraded:
-        print("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate "
-              "with a known future expiry exists — cannot rotate; manual re-auth needed"
-              % (live_email or "(live)"))
+        _decide("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate "
+                "with a known future expiry exists — cannot rotate; manual re-auth needed"
+                % (live_email or "(live)"))
         return 0
     target_email, target_blob, target_eh = max(degraded, key=lambda c: c[2])
     reason = ("live %s %s -> degraded rotate (no usage; most-runway alternate)"
               % (live_email or "(live)", live_desc))
     _switch_blob(target_email, target_blob, reason)
-    print("auto: switched %s -> %s (degraded; target token valid ~%.1fh; %s)"
-          % (live_email or "(live)", target_email, target_eh, reason))
+    _decide("auto: switched %s -> %s (degraded; target token valid ~%.1fh; %s)"
+            % (live_email or "(live)", target_email, target_eh, reason))
     return 0
 
 
@@ -1150,6 +1196,8 @@ def _keepalive_refresh() -> list[str]:
             # (F2a rotates away if it lapses) and skip the state update for this slot.
             print("[keepalive] %s: keychain write refused (%s) — kept old token, skipped"
                   % (email, exc), file=sys.stderr)
+            _log("[keepalive] %s: keychain write refused (%s) — kept old token, skipped"
+                 % (email, exc))  # failure deserves a durable record, not just ephemeral stderr
             continue
         meta = slots.get(email)
         if isinstance(meta, dict):
@@ -1400,7 +1448,9 @@ def cmd_tick(only_if_running: bool) -> int:
     # whichever root holds the state, so this is just promotion — the NEXT tick process
     # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
     migrate_root_to_canonical()
-    _keepalive_refresh()      # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
+    refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
+    if refreshed:
+        _log("keepalive: refreshed %s" % ", ".join(refreshed))  # durable record of token-prolonging action
     _repair_integrity()       # Pillar 2: verify/restore state + slots + live BEFORE deciding
     try:
         cmd_capture(False)
@@ -1411,6 +1461,7 @@ def cmd_tick(only_if_running: bool) -> int:
         # standalone `rotator.py capture` still surfaces this error to the present human.
         print("[capture] keychain write refused (%s) — slot not filed this tick" % exc,
               file=sys.stderr)
+        _log("[capture] keychain write refused (%s) — slot not filed this tick" % exc)
     rc = cmd_auto()           # usage-based rotation FIRST — never starved by bootstrap
     _bootstrap_seeded_slots()  # P4d (LAST): launch detached captures from human-seeded sessions
     return rc
