@@ -1,9 +1,10 @@
 ---
 trdd-id: 5539cd6e-f0d3-49ff-9615-7ca9fc4871db
 title: CRITICAL — keychain slot write silently truncates every OAuth blob to 128 bytes
-column: dev
+column: testing
 created: 2026-06-06T02:33:30+0200
-updated: 2026-06-06T02:33:30+0200
+updated: 2026-06-06T02:45:00+0200
+implementation-commits: [655a870]
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 0
@@ -26,6 +27,16 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-06
 
+### ✅ FIXED + PROVEN (commit 655a870) — all 5 fix items landed
+1. argv write (no 128 truncation) ✓  2. write_slot strips to claudeAiOauth ✓
+3. _switch_blob merges (preserves live mcpOAuth) ✓  4. cmd_capture read-back-verify fails loud ✓
+5. tests: real-keychain regression round-trips 130B/600B/9000B byte-for-byte; +strip/merge/verify
+unit tests; 47 rotator tests pass; ruff clean. PROVEN LIVE: re-captured the live account →
+read_slot round-trips (471B claudeAiOauth-only, real 7.6h expiry, fp matches). **fmuaddib is now a
+healthy refreshable slot.** REMAINING: user must `/login` to the 2nd account (emanuele) → capture
+it (now round-trips) → 2 healthy slots → rotation can fire. THEN watch a real switch (#142).
+
+---
 **THIS is why "the oauth rotator didn't work at all."** Found 2026-06-06 ~02:30 while
 diagnosing an overnight failure (live account hit the 5h session cap; nothing rotated).
 
