@@ -424,24 +424,32 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
     if terms.is_empty() {
         anyhow::bail!("recall needs at least one content term (stopwords like 'to'/'how' don't count)");
     }
-    let mut scored: Vec<(i64, String, String)> = Vec::new(); // (score, path, summary)
+    // (surface_hits, body_only, path, summary)
+    let mut all: Vec<(i64, bool, String, String)> = Vec::new();
     for path in collect_md(&a.paths, a.hidden) {
         let Some(note) = read_note(&path) else { continue };
         let surface =
             format!("{} {} {}", note.title, note.summary, note.tags.join(" ")).to_lowercase();
-        let desc_hits = terms.iter().filter(|t| surface.contains(t.as_str())).count() as i64;
-        // Body tiebreak: only consulted when the symptom surface didn't match, so a note that
-        // merely MENTIONS a term still surfaces (below every surface match).
-        let body_hit = desc_hits == 0
+        let surface_hits = terms.iter().filter(|t| surface.contains(t.as_str())).count() as i64;
+        // Body match: only consulted when the symptom SURFACE missed for this note.
+        let body_only = surface_hits == 0
             && read_text(&path).is_some_and(|t| {
                 let lo = t.to_lowercase();
                 terms.iter().any(|x| lo.contains(x.as_str()))
             });
-        let score = desc_hits * 2 + i64::from(body_hit);
-        if score > 0 {
-            scored.push((score, rel(&path), note.summary));
+        if surface_hits > 0 || body_only {
+            all.push((surface_hits, body_only, rel(&path), note.summary));
         }
     }
+    // PRECISION-FIRST: if ANY note matched the symptom surface (description/title/tags), return
+    // only those, ranked by hit count. Fall back to body-only matches ONLY when nothing matched
+    // the surface — so a well-described KB stays precise, but we never miss a content-only note.
+    let any_surface = all.iter().any(|(h, ..)| *h > 0);
+    let mut scored: Vec<(i64, String, String)> = all
+        .into_iter()
+        .filter(|(h, body_only, ..)| *h > 0 || (!any_surface && *body_only))
+        .map(|(h, _, p, s)| (h, p, s))
+        .collect();
     scored.sort_by(|x, y| y.0.cmp(&x.0)); // best first; stable ⇒ ties keep path order
     for (_score, path, summary) in scored.into_iter().take(a.top) {
         let s = summary.trim();
