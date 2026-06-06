@@ -213,15 +213,13 @@ def _purge_slot_keychain(email: str) -> None:
     rotator._slot_keychain_delete(email, service=rotator.SLOT_BACKUP_KEYCHAIN_SERVICE)
 
 
-def test_keychain_write_keeps_token_out_of_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The keychain WRITE helper passes the secret on STDIN, never in argv (M1 fix).
-
-    The `security add-generic-password` argv must end in a bare `-w` (prompt mode) and
-    contain NO element holding the token; the token must arrive via `input=` as the
-    data + retype-confirm pair. Spies on subprocess.run so it runs on any platform and
-    never touches the real keychain.
-    """
-    SECRET = '{"accessToken":"DO-NOT-LEAK-THIS-TO-PS-0123456789abcdef","refreshToken":"R-secret"}'
+def test_keychain_write_passes_data_as_argv_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The keychain WRITE helper passes the secret as the argv `-w` VALUE, NOT via the
+    stdin-prompt mode (TRDD-5539cd6e). The old bare-`-w` prompt mode read via getpass(),
+    whose 128-byte buffer SILENTLY TRUNCATED every OAuth blob -> corrupt unreadable slots.
+    The argv value is briefly `ps`-visible, but slot items are already `security`-readable
+    by any process, so it adds no exposure. Spies on subprocess.run (no real keychain)."""
+    SECRET = '{"accessToken":"tok-0123456789abcdef","refreshToken":"R-secret"}'
     seen: dict = {}
 
     def _spy(argv, **kwargs):  # type: ignore[no-untyped-def]
@@ -236,29 +234,29 @@ def test_keychain_write_keeps_token_out_of_argv(monkeypatch: pytest.MonkeyPatch)
     rotator._security_add_password_via_stdin("svc-test", "acct-test", SECRET)
     argv = seen["argv"]
     assert argv[:2] == ["security", "add-generic-password"]
-    assert argv[-1] == "-w"                              # bare -w => prompt-on-stdin mode
-    assert not any(SECRET in str(a) for a in argv)       # token NEVER in argv (the whole point)
-    assert "DO-NOT-LEAK" not in " ".join(argv)           # no fragment of the token either
-    assert seen["input"] == "%s\n%s\n" % (SECRET, SECRET)  # data + retype-confirm on stdin
+    assert "-U" in argv                                   # update-if-exists (the hot path)
+    assert argv[-2] == "-w" and argv[-1] == SECRET        # data is the argv -w VALUE, full + intact
+    assert seen["input"] is None                          # NOT the truncating stdin-prompt mode
 
 
-def test_security_add_password_via_stdin_roundtrips_real_keychain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The STDIN-prompt keychain write actually stores the exact bytes in the real macOS keychain. 🐌"""
+def test_keychain_write_roundtrips_real_keychain_over_128_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The keychain write stores the EXACT bytes in the real macOS keychain — including
+    payloads well over 128 bytes (TRDD-5539cd6e REGRESSION LOCK). The old stdin-prompt mode
+    truncated everything >128B to 128B of corrupt JSON; this asserts a realistic ~600B and a
+    big ~9000B blob round-trip byte-for-byte. (The original test used an ~80B payload, which is
+    UNDER the 128 limit — that is exactly why the truncation bug went unnoticed.) 🐌"""
     if sys.platform != "darwin":
         pytest.skip("real macOS keychain test")
-    service = "Claude Code-rotator-stdin-TEST-%d" % os.getpid()
-    account = "stdin-test-%d@example.test" % os.getpid()
-    blob = _blob("stdin-secret-token-value", expires_ms=123456789000)
-    data = json.dumps(blob, separators=(",", ":"))
+    service = "Claude Code-rotator-wtest-%d" % os.getpid()
+    account = "wtest-%d@example.test" % os.getpid()
     try:
-        rotator._security_add_password_via_stdin(service, account, data)
-        # Read it back via the same security CLI READ path the rotator uses.
-        got = rotator._slot_keychain_read(account, service=service)
-        assert got == blob                               # exact round-trip, secret never in argv
-        # -U overwrite path (the rotator's real hot path): a second write replaces it.
-        blob2 = _blob("stdin-secret-token-ROTATED", expires_ms=123456789000)
-        rotator._security_add_password_via_stdin(service, account, json.dumps(blob2, separators=(",", ":")))
-        assert rotator._slot_keychain_read(account, service=service) == blob2
+        for tok_len in (40, 400, 8000):                  # blobs ~ 130B, ~600B, ~9000B
+            blob = _blob("T" * tok_len, refresh="R" * tok_len, expires_ms=123456789000)
+            data = json.dumps(blob, separators=(",", ":"))
+            assert len(data) > 128                        # the sizes that the old path corrupted
+            rotator._security_add_password_via_stdin(service, account, data)
+            got = rotator._slot_keychain_read(account, service=service)
+            assert got == blob, f"round-trip failed at data len={len(data)} (truncation?)"
     finally:
         rotator._slot_keychain_delete(account, service=service)
     assert rotator._slot_keychain_read(account, service=service) is None  # cleaned up
@@ -795,3 +793,53 @@ def test_reconcile_live_email_falls_back_to_slot_fp_match(tmp_path: Path, monkey
              "slots": {"stale@x": {}, "real@x": {}}}
     out = rotator._reconcile_live_email(state, live)
     assert out["live_email"] == "real@x"                       # resolved by fingerprint match
+
+
+# ---- TRDD-5539cd6e: slots store claudeAiOauth-only; switch merges; capture verifies ----
+
+def test_write_slot_strips_to_claudeaioauth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """write_slot stores ONLY claudeAiOauth — the ~8KB mcpOAuth section is dropped (smaller
+    slot, less keychain bloat + argv exposure). All rotator helpers read via _oauth()."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    captured: dict = {}
+    monkeypatch.setattr(rotator, "_slot_keychain_write",
+                        lambda email, blob, **k: captured.__setitem__("blob", blob) or True)
+    full = {"mcpOAuth": {"plugin:x": {"token": "Z" * 5000}},  # the bloat
+            "claudeAiOauth": {"accessToken": "A", "refreshToken": "R", "expiresAt": 1}}
+    rotator.write_slot("e@x", full)
+    assert set(captured["blob"].keys()) == {"claudeAiOauth"}          # mcpOAuth dropped
+    assert captured["blob"]["claudeAiOauth"] == full["claudeAiOauth"]  # credential intact
+
+
+def test_switch_blob_preserves_live_mcpoauth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_switch_blob swaps ONLY claudeAiOauth into the CURRENT live blob, preserving the live
+    mcpOAuth — so a rotation never wipes the user's MCP-server OAuth tokens (TRDD-5539cd6e)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    live = {"mcpOAuth": {"notion": "KEEP-ME"},
+            "claudeAiOauth": {"accessToken": "OLD-LIVE", "refreshToken": "ro"}}
+    written: dict = {}
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: live)
+    monkeypatch.setattr(rotator, "write_live_blob", lambda b: written.update(blob=b))
+    slot = {"claudeAiOauth": {"accessToken": "NEW-ACCT", "refreshToken": "rn"}}
+    rotator._switch_blob("new@x", slot, reason="test")
+    assert written["blob"]["mcpOAuth"] == {"notion": "KEEP-ME"}              # mcpOAuth preserved
+    assert written["blob"]["claudeAiOauth"] == slot["claudeAiOauth"]         # only the account swapped
+    assert rotator.load_state()["live_email"] == "new@x"
+
+
+def test_cmd_capture_fails_loud_on_corrupt_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If a written slot does NOT round-trip (the 128-byte-truncation class of failure),
+    cmd_capture returns non-zero and does NOT record it in state — fail loud, never silently
+    accept a corrupt slot (the guardrail that would have caught the overnight failure)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
+    monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: _blob("LIVE-TOKEN", expires_ms=_ms_in(8)))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a, **_k: "e@x")
+    monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)   # pretend the write happened
+    monkeypatch.setattr(rotator, "read_slot", lambda *_a, **_k: None)    # …but it round-trips to garbage
+    rc = rotator.cmd_capture(only_if_running=False)
+    assert rc == 1                                                       # FAILS LOUD
+    assert "e@x" not in rotator.load_state().get("slots", {})            # NOT recorded

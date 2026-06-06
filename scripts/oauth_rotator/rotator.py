@@ -229,21 +229,29 @@ def _keychain_account() -> str:
 
 
 def _security_add_password_via_stdin(service: str, account: str, data: str) -> None:
-    """Write a keychain item with `security add-generic-password` WITHOUT the secret in argv.
+    """Write a keychain item with `security add-generic-password`, value on argv.
 
-    macOS `security` has no `-w VALUE` stdin flag, but `-w` placed at the END of the
-    command (no value) makes it PROMPT for the password on stdin instead — the
-    man page's "Put at end of command to be prompted (recommended)" mode. The prompt
-    asks for the data once, then a retype-to-confirm, so we feed the secret TWICE,
-    each newline-terminated. This keeps the token off the process table (`ps`), unlike
-    `-w data` which lists the full token in argv (the M1/M2 leak). Raises
-    subprocess.CalledProcessError on failure (fail-fast); FileNotFoundError if not macOS.
-    The OAuth blob is compact JSON (`separators=(",", ":")`) so it never contains a raw
-    newline — the two prompt lines map 1:1 to data + confirmation.
+    NAME IS HISTORICAL — it now uses argv, NOT stdin. WHY (TRDD-5539cd6e, the
+    "rotator never worked" bug): the previous stdin-PROMPT mode (`-w` with no value,
+    feeding the secret on stdin) reads via macOS `getpass()`, whose buffer is a hard
+    **128 bytes**, so it SILENTLY TRUNCATED every value over 128 bytes. OAuth blobs are
+    400-8900 bytes, so EVERY captured slot was a 128-byte corrupt JSON fragment ->
+    unreadable -> rotation had no usable alternate. Verified: in=8884 -> stored=128.
+
+    The argv value (`-w data`) is briefly visible in `ps`, but these slot keychain items
+    are ALREADY readable by any user process via `security find-generic-password -w` with
+    NO prompt (verified) — so the write-time argv exposure adds nothing a local attacker
+    couldn't already read at will. The prompt-mode "hardening" was security-theater that
+    broke the feature. Callers strip slots to the ~480B claudeAiOauth credential
+    (see write_slot), so only that — not the full ~8.8KB MCP-bloated blob — transits argv.
+    (A zero-argv-exposure ctypes SecKeychainAddGenericPassword path is a deferred
+    hardening, NOT done here — getting ctypes argtypes wrong risks worse than this.)
+
+    Raises subprocess.CalledProcessError on failure (fail-fast); FileNotFoundError if
+    `security` is absent (not macOS).
     """
     subprocess.run(
-        ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w"],
-        input="%s\n%s\n" % (data, data),
+        ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", data],
         check=True, capture_output=True, text=True,
     )
 
@@ -508,7 +516,17 @@ def write_slot(email: str, blob: dict) -> None:
     (KEYCHAIN_WRITE_FAILED — locked keychain, declined ACL, `security` non-zero exit),
     raise SlotKeychainWriteError instead of dropping a 0600 plaintext token file. Returning
     False (no keychain at all) is the ONLY case that reaches the plaintext fallback, so a
-    momentary keychain hiccup can never silently re-create the plaintext slots P4a removed."""
+    momentary keychain hiccup can never silently re-create the plaintext slots P4a removed.
+
+    Stores ONLY the `claudeAiOauth` credential (TRDD-5539cd6e): the rotator never needs the
+    `mcpOAuth` section (per-MCP-server tokens — ~8KB of bloat), and a small slot limits both
+    keychain size and the argv-write exposure. Every rotator helper reaches the credential via
+    `_oauth(blob)`, so a `{"claudeAiOauth": {...}}` slot is fully compatible. The ONLY consumer
+    that needs the full live blob is `_switch_blob`, which MERGES (preserving the live mcpOAuth)
+    rather than overwriting — so a rotation never wipes the user's MCP-server OAuth tokens."""
+    inner = _oauth(blob)
+    if inner:
+        blob = {"claudeAiOauth": inner}  # strip mcpOAuth + any other top-level keys
     primary_ok = _slot_keychain_write(email, blob)
     if primary_ok is KEYCHAIN_WRITE_FAILED:
         # macOS keychain present but refused the write — do NOT write plaintext.
@@ -759,6 +777,16 @@ def cmd_capture(only_if_running: bool) -> int:
         print("captured: unidentified account (roles lookup failed); not filed")
         return 0
     write_slot(email, blob)
+    # READ-BACK VERIFY (TRDD-5539cd6e): the keychain write silently truncated large blobs to
+    # 128B of corrupt JSON for months and nobody noticed because capture never checked. Read
+    # the slot back and confirm it round-trips to a usable credential (parses + has a non-empty
+    # accessToken whose fingerprint matches what we just wrote). FAIL LOUD rather than recording
+    # a corrupt slot as "captured" — the guardrail that would have caught the overnight failure.
+    rb = read_slot(email)
+    if rb is None or fingerprint(rb) != fp:
+        print("capture FAILED: slot for %s did not round-trip (stored value corrupt or "
+              "unreadable) — NOT recording it. See TRDD-5539cd6e." % email, file=sys.stderr)
+        return 1
     eh = expires_in_h(blob)
     state["live_email"] = email
     state["live_fp"] = fp
@@ -813,8 +841,22 @@ def cmd_switch(email: str) -> int:
 
 
 def _switch_blob(email: str, blob: dict, reason: str) -> None:
-    """Swap the live keychain to `blob` and record the switch in state."""
-    write_live_blob(blob)
+    """Swap the live account to `blob`'s credential and record the switch in state.
+
+    `blob` is a claudeAiOauth-only slot (TRDD-5539cd6e). MERGE it into the CURRENT live
+    blob — replace only `claudeAiOauth`, preserving the user's live `mcpOAuth` (and any
+    other live top-level keys) — instead of overwriting the whole live credential. Else a
+    rotation would wipe the MCP-server OAuth tokens. fingerprint() keys off the accessToken
+    inside claudeAiOauth, so the merged live blob and the slot share the same fp (state
+    stays consistent, and _reconcile_live_email won't see false drift)."""
+    cred = _oauth(blob)
+    if cred:
+        live = read_live_blob() or {}
+        merged = dict(live)
+        merged["claudeAiOauth"] = cred
+        write_live_blob(merged)
+    else:
+        write_live_blob(blob)  # degenerate slot (no claudeAiOauth) — write as-is
     state = load_state()
     state["live_email"] = email
     state["live_fp"] = fingerprint(blob)
