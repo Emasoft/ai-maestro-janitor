@@ -6,10 +6,11 @@
 
 use crate::md;
 use crate::md::Context;
-use crate::predicate::{Expr, LineCtx, Pred};
+use crate::predicate::{Expr, LineCtx, LinkSets, Pred};
 use anyhow::{bail, Result};
 use regex::Regex;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// A `--num` heading-numbering matcher. Three intuitive forms, reusing syntax already familiar:
 /// a bare prefix (`1.2` ⟹ the 1.2 subtree), a glob (`1.2.*` ⟹ exactly one level under 1.2), or a
@@ -262,18 +263,34 @@ impl Query {
         let Some(expr) = self.to_expr() else {
             return Vec::new(); // nothing selects (no pattern, no structural filter)
         };
-        // The flat flags never emit a file-level predicate (`--fm` is the whole-file gate), so the
-        // file metadata is unused — pass empties.
+        // The flat flags never emit a file-level predicate (`--fm` is the whole-file gate, and
+        // there are no link predicates), so the file metadata is unused — pass empties.
         let fm = HashMap::new();
-        run_expr(&expr, lines, ctx, &FileMeta { path: "", name: "", fm: &fm })
+        let links = LinkSets::new();
+        run_expr(
+            &expr,
+            lines,
+            ctx,
+            &FileMeta {
+                path: "",
+                name: "",
+                fm: &fm,
+                canon: None,
+                links: &links,
+            },
+        )
     }
 }
 
-/// File metadata a file-level predicate (`path`/`name`/`fm`) reads. Constant across a file.
+/// File metadata the file-level predicates (`path`/`name`/`fm`/`links-to`/`linked-from`) read.
+/// Constant across a file. `canon` (the canonical path) and `links` (the precomputed semijoin
+/// sets) are only populated when the query has a link predicate.
 pub struct FileMeta<'a> {
     pub path: &'a str,
     pub name: &'a str,
     pub fm: &'a HashMap<String, String>,
+    pub canon: Option<&'a Path>,
+    pub links: &'a LinkSets,
 }
 
 /// Evaluate a prebuilt [`Expr`] tree against a file's lines — the shared engine behind both the
@@ -287,6 +304,8 @@ pub fn run_expr(expr: &Expr, lines: &[&str], ctx: &Context, meta: &FileMeta) -> 
             path: meta.path,
             name: meta.name,
             fm: meta.fm,
+            canon: meta.canon,
+            links: meta.links,
             raw,
             idx,
             line,

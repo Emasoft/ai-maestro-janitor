@@ -231,19 +231,31 @@ fn search_file(path: &Path, q: &Query, out: &Output) {
     out.emit(path, &matches);
 }
 
-/// The `--where` per-file path: builds the file metadata (path/basename/frontmatter) the DSL's
-/// file-level predicates read, then evaluates the prebuilt expression tree over the file's lines.
-fn search_file_where(path: &Path, expr: &predicate::Expr, out: &Output) {
+/// The `--where` per-file path: builds the file metadata (path/basename/frontmatter, plus the
+/// canonical path when a link predicate needs it) the DSL's file-level predicates read, then
+/// evaluates the prebuilt expression tree over the file's lines. `links` is the prebuilt semijoin
+/// set map; `need_canon` is true iff a `links-to`/`linked-from` predicate is present (so we only
+/// pay for `canonicalize` then).
+fn search_file_where(
+    path: &Path,
+    expr: &predicate::Expr,
+    links: &predicate::LinkSets,
+    need_canon: bool,
+    out: &Output,
+) {
     let Some(text) = read_text(path) else { return };
     let fm = md::parse_frontmatter(&text);
     let lines: Vec<&str> = text.lines().collect();
     let ctx = md::build_context(&text, lines.len());
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let pstr = path.to_string_lossy();
+    let canon = if need_canon { path.canonicalize().ok() } else { None };
     let meta = search::FileMeta {
         path: &pstr,
         name,
         fm: &fm,
+        canon: canon.as_deref(),
+        links,
     };
     let matches = search::run_expr(expr, &lines, &ctx, &meta);
     out.emit(path, &matches);
@@ -359,7 +371,16 @@ fn main() -> Result<()> {
         if paths.is_empty() {
             paths.push(PathBuf::from("."));
         }
-        walk_and(&paths, cli.hidden, |p| search_file_where(p, &expr, &out));
+        // `links-to`/`linked-from` predicates need the cross-file link graph. Resolve their
+        // semijoin file-sets ONCE here (the SQL "subquery") over the same corpus the grep walks; if
+        // the query has none, this is empty and we skip the graph build + per-file canonicalize.
+        let mut link_keys = Vec::new();
+        expr.collect_link_keys(&mut link_keys);
+        let link_sets = memory::build_link_sets(&paths, cli.hidden, &link_keys);
+        let need_canon = !link_sets.is_empty();
+        walk_and(&paths, cli.hidden, |p| {
+            search_file_where(p, &expr, &link_sets, need_canon, &out)
+        });
         return Ok(());
     }
 

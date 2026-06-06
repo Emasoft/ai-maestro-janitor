@@ -7,6 +7,7 @@
 //! kind / time. All pure-markdown, all grep-friendly output.
 
 use crate::md;
+use crate::predicate::{LinkDir, LinkSets};
 use anyhow::Result;
 use clap::Parser;
 use ignore::WalkBuilder;
@@ -188,6 +189,39 @@ fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
         }
     }
     Graph { notes, edges, backlinks }
+}
+
+/// Precompute the link semijoin sets (the SQL "subquery" pass): for each `(dir, needle)` key the
+/// `--where` tree uses, the set of CANONICAL file paths satisfying it — `To` = files that link to a
+/// note matching `needle`; `From` = files that a note matching `needle` links to. Built once over
+/// the same corpus the grep walks, so a `links-to`/`linked-from` predicate becomes a pure
+/// set-membership test (the "join") during evaluation. Returns empty for empty `keys` (callers
+/// then skip building the graph at all).
+pub fn build_link_sets(paths: &[PathBuf], hidden: bool, keys: &[(LinkDir, String)]) -> LinkSets {
+    let mut sets: LinkSets = BTreeMap::new();
+    if keys.is_empty() {
+        return sets;
+    }
+    let g = build_graph(paths, hidden);
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    for (dir, needle) in keys {
+        let entry = sets.entry((*dir, needle.clone())).or_default();
+        for e in &g.edges {
+            let Some(t) = &e.target else { continue };
+            match dir {
+                // files linking TO a note matching the needle ⟹ collect the link sources.
+                LinkDir::To if note_matches(t, needle) => {
+                    entry.insert(canon(&e.from));
+                }
+                // files a needle-matching note links to ⟹ collect the link targets.
+                LinkDir::From if note_matches(&e.from, needle) => {
+                    entry.insert(canon(t));
+                }
+                _ => {}
+            }
+        }
+    }
+    sets
 }
 
 fn rel(p: &Path) -> String {

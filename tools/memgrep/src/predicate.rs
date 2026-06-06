@@ -12,21 +12,43 @@
 //! describes a POSITIVE property of a line.
 
 use crate::md::{Context, InlineKind};
-use crate::search::NumSpec;
 use crate::search::LevelFilter;
+use crate::search::NumSpec;
 use anyhow::Result;
 use globset::GlobMatcher;
 use regex::{Regex, RegexBuilder};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 
-/// Everything a predicate needs to test one line. File-level fields (`path`, `name`, `fm`) are
-/// constant across a file (used by the `path`/`name`/`fm` predicates the `--where` DSL adds);
+/// Direction of a link predicate. `To` = this file links TO the named note; `From` = this file is
+/// linked FROM the named note (the note links to it). The `--where` DSL keywords are `links-to`
+/// and `linked-from`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LinkDir {
+    To,
+    From,
+}
+
+/// Precomputed link semijoins: for each `(direction, note-needle)` used in the query, the set of
+/// canonical file paths that satisfy it. This IS the "subquery" half of the SQL model — the link
+/// relation is resolved to a file-set ONCE (by `memory::build_link_sets`), and a `links-to` /
+/// `linked-from` predicate is then a pure set-membership test (the "join"). Empty when the query
+/// has no link predicate.
+pub type LinkSets = BTreeMap<(LinkDir, String), BTreeSet<PathBuf>>;
+
+/// Everything a predicate needs to test one line. File-level fields (`path`, `name`, `fm`, `canon`,
+/// `links`) are constant across a file (used by the file-level predicates the `--where` DSL adds);
 /// line-level fields vary per line. The flat-flag path passes empty file-level fields — its
 /// lowering never emits a file-level predicate (`--fm` stays a whole-file gate).
 pub struct LineCtx<'a> {
     pub path: &'a str,
     pub name: &'a str,
     pub fm: &'a HashMap<String, String>,
+    /// Canonical path of the file (computed once per file) — `None` unless a link predicate needs
+    /// it, since `canonicalize` is a syscall we skip when no `links-to`/`linked-from` is present.
+    pub canon: Option<&'a Path>,
+    /// The precomputed link semijoin sets (see [`LinkSets`]).
+    pub links: &'a LinkSets,
     pub raw: &'a str,
     pub idx: usize,  // 0-based line index (into the `ctx` vecs)
     pub line: usize, // 1-based line number (for the heading/section lookups)
@@ -128,6 +150,10 @@ pub enum Pred {
     Name(GlobMatcher),
     /// The file's frontmatter has KEY whose value matches this matcher.
     Fm(String, Matcher),
+    /// The file is in the precomputed link semijoin set for `(dir, needle)` — i.e. it links to
+    /// (`To`) / is linked from (`From`) the note matching `needle`. The SQL "join": a membership
+    /// test against the set the subquery (`memory::build_link_sets`) already computed.
+    Link(LinkDir, String),
 }
 
 impl Pred {
@@ -174,6 +200,11 @@ impl Pred {
             Pred::Path(g) => g.is_match(lc.path),
             Pred::Name(g) => g.is_match(lc.name),
             Pred::Fm(key, m) => lc.fm.get(key).is_some_and(|v| m.matches(v)),
+            Pred::Link(dir, needle) => lc
+                .links
+                .get(&(*dir, needle.clone()))
+                .zip(lc.canon)
+                .is_some_and(|(set, c)| set.contains(c)),
         }
     }
 
@@ -252,6 +283,18 @@ impl Expr {
             Expr::And(v) | Expr::Or(v) => v.iter().find_map(|e| e.first_match_col(lc)),
         }
     }
+
+    /// Collect every `(direction, needle)` link key in the tree so the caller can precompute the
+    /// semijoin file-sets ONCE before evaluating (the SQL "subquery" pass). Empty ⟹ no link
+    /// predicate, so the caller skips building the link graph entirely.
+    pub fn collect_link_keys(&self, out: &mut Vec<(LinkDir, String)>) {
+        match self {
+            Expr::Leaf(Pred::Link(dir, needle)) => out.push((*dir, needle.clone())),
+            Expr::Leaf(_) => {}
+            Expr::Not(e) => e.collect_link_keys(out),
+            Expr::And(v) | Expr::Or(v) => v.iter().for_each(|e| e.collect_link_keys(out)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -267,7 +310,18 @@ mod tests {
         let text = "alpha beta\n";
         let ctx = build_context(text, 1);
         let fm = HashMap::new();
-        let lc = LineCtx { path: "x.md", name: "x.md", fm: &fm, raw: "alpha beta", idx: 0, line: 1, ctx: &ctx };
+        let links = LinkSets::new();
+        let lc = LineCtx {
+            path: "x.md",
+            name: "x.md",
+            fm: &fm,
+            canon: None,
+            links: &links,
+            raw: "alpha beta",
+            idx: 0,
+            line: 1,
+            ctx: &ctx,
+        };
         let pat = |s: &str| Expr::Leaf(Pred::Pattern(Regex::new(s).unwrap()));
 
         assert!(Expr::Or(vec![pat("alpha"), pat("zzz")]).eval(&lc)); // one branch true

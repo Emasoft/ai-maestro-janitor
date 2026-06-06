@@ -19,7 +19,7 @@
 //! otherwise quietly drop a constraint.
 
 use crate::md;
-use crate::predicate::{build_glob, Expr, Matcher, Pred};
+use crate::predicate::{build_glob, Expr, LinkDir, Matcher, Pred};
 use crate::search::{parse_level, NumSpec};
 use anyhow::{anyhow, bail, Result};
 use regex::RegexBuilder;
@@ -251,6 +251,9 @@ impl<'a> Parser<'a> {
             // ── file-level: glob value ──
             "path" => Pred::Path(build_glob(&self.value(&lw)?)?),
             "name" => Pred::Name(build_glob(&self.value(&lw)?)?),
+            // ── file-level: link semijoin (the value is a note needle, matched by substring/stem) ──
+            "links-to" => Pred::Link(LinkDir::To, self.value(&lw)?),
+            "linked-from" => Pred::Link(LinkDir::From, self.value(&lw)?),
             // ── file-level: frontmatter (smart matcher) ──
             "fm" => {
                 let key = self.word(&lw)?;
@@ -291,16 +294,31 @@ fn mask(s: &str) -> Result<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::md::build_context;
-    use crate::predicate::LineCtx;
+    use crate::md::{build_context, Context};
+    use crate::predicate::{LineCtx, LinkSets};
     use std::collections::HashMap;
+
+    // Build a single-line LineCtx with no link semijoin sets (the link predicates are exercised
+    // end-to-end in tests/cli.rs, which can build the cross-file graph these unit tests can't).
+    #[allow(clippy::too_many_arguments)]
+    fn mk_lc<'a>(
+        path: &'a str,
+        name: &'a str,
+        fm: &'a HashMap<String, String>,
+        links: &'a LinkSets,
+        raw: &'a str,
+        ctx: &'a Context,
+    ) -> LineCtx<'a> {
+        LineCtx { path, name, fm, canon: None, links, raw, idx: 0, line: 1, ctx }
+    }
 
     fn eval(where_str: &str, line: &str) -> bool {
         let expr = parse_where(where_str, false).expect("parse");
         let text = format!("{line}\n");
         let ctx = build_context(&text, 1);
         let fm = HashMap::new();
-        let lc = LineCtx { path: "x.md", name: "x.md", fm: &fm, raw: line, idx: 0, line: 1, ctx: &ctx };
+        let links = LinkSets::new();
+        let lc = mk_lc("x.md", "x.md", &fm, &links, line, &ctx);
         expr.eval(&lc)
     }
 
@@ -325,14 +343,15 @@ mod tests {
         let text = "x\n";
         let ctx = build_context(text, 1);
         let fm = HashMap::new();
-        let hit = LineCtx { path: "a/b.md", name: "b.md", fm: &fm, raw: "x", idx: 0, line: 1, ctx: &ctx };
-        let miss = LineCtx { path: "a/b.rs", name: "b.rs", fm: &fm, raw: "x", idx: 0, line: 1, ctx: &ctx };
+        let links = LinkSets::new();
+        let hit = mk_lc("a/b.md", "b.md", &fm, &links, "x", &ctx);
+        let miss = mk_lc("a/b.rs", "b.rs", &fm, &links, "x", &ctx);
         assert!(expr.eval(&hit));
         assert!(!expr.eval(&miss));
 
         let p = parse_where(r#"path "**/memory/*.md""#, false).unwrap();
-        let m1 = LineCtx { path: "x/memory/n.md", name: "n.md", fm: &fm, raw: "x", idx: 0, line: 1, ctx: &ctx };
-        let m2 = LineCtx { path: "x/tasks/n.md", name: "n.md", fm: &fm, raw: "x", idx: 0, line: 1, ctx: &ctx };
+        let m1 = mk_lc("x/memory/n.md", "n.md", &fm, &links, "x", &ctx);
+        let m2 = mk_lc("x/tasks/n.md", "n.md", &fm, &links, "x", &ctx);
         assert!(p.eval(&m1));
         assert!(!p.eval(&m2));
     }
@@ -344,7 +363,8 @@ mod tests {
         fm.insert("prrd-version".to_string(), "1.42".to_string());
         let run = |w: &str| {
             let c = build_context("x\n", 1);
-            let l = LineCtx { path: "p", name: "p", fm: &fm, raw: "x", idx: 0, line: 1, ctx: &c };
+            let links = LinkSets::new();
+            let l = mk_lc("p", "p", &fm, &links, "x", &c);
             parse_where(w, false).unwrap().eval(&l)
         };
         // regex form (the default)

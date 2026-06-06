@@ -229,6 +229,24 @@ fn wikilink_resolves_trdd_id8_alias() {
 }
 
 #[test]
+fn where_link_semijoin_to_from_and_join() {
+    // The SQL model: `links-to`/`linked-from` resolve a FILE SET (the subquery), then AND with the
+    // content search is the JOIN. trdd_ref links to [[TRDD-abcd1234]] (resolved via the id8 alias).
+    let tgt = "tests/fixtures/TRDD-20260101_000000+0000-abcd1234-target.md";
+    let refr = "tests/fixtures/trdd_ref.md";
+    // files that link TO the abcd1234 note ⟹ trdd_ref.
+    assert_eq!(run(&["-l", "--where", r#"links-to "abcd1234""#, refr, tgt]).trim(), refr);
+    // files linked FROM trdd_ref (i.e. that note's out-links) ⟹ the abcd1234 target.
+    assert_eq!(run(&["-l", "--where", r#"linked-from "trdd_ref""#, refr, tgt]).trim(), tgt);
+    // the JOIN — content search restricted to the linking file.
+    let j = run(&["--where", r#"links-to "abcd1234" and text "rationale""#, refr, tgt]);
+    assert_eq!(j.lines().count(), 1, "{j}");
+    assert!(j.contains("trdd_ref.md"));
+    // a needle that matches no note ⟹ empty set ⟹ no file qualifies.
+    assert_eq!(run(&["--where", r#"links-to "nonesuch""#, refr, tgt]).lines().count(), 0);
+}
+
+#[test]
 fn index_emits_title_and_toc() {
     let o = run(&["index", "tests/fixtures/sample.md"]);
     assert!(o.contains("1 Intro"), "title missing:\n{o}");
