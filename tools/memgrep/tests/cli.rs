@@ -217,6 +217,18 @@ fn links_broken_and_backlinks() {
 }
 
 #[test]
+fn wikilink_resolves_trdd_id8_alias() {
+    // A `[[TRDD-abcd1234]]` wikilink must resolve to the file `TRDD-<ts>-abcd1234-<slug>.md`
+    // (via the id8 alias) rather than missing on the long file stem and reading as broken.
+    let tgt = "tests/fixtures/TRDD-20260101_000000+0000-abcd1234-target.md";
+    let refr = "tests/fixtures/trdd_ref.md";
+    let to = run(&["links", "--to", "trdd_ref", refr, tgt]);
+    assert!(to.contains("abcd1234-target.md"), "wikilink should resolve to the TRDD file:\n{to}");
+    assert!(!to.contains("BROKEN"), "{to}");
+    assert!(run(&["links", "--broken", refr, tgt]).trim().is_empty(), "no link should be broken");
+}
+
+#[test]
 fn index_emits_title_and_toc() {
     let o = run(&["index", "tests/fixtures/sample.md"]);
     assert!(o.contains("1 Intro"), "title missing:\n{o}");

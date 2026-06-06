@@ -151,9 +151,21 @@ fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
     let files = collect_md(paths, hidden);
     let notes: Vec<Note> = files.iter().filter_map(|p| read_note(p)).collect();
     let mut stem_map = BTreeMap::new();
+    // A TRDD's canonical short reference is `TRDD-<id8>` (the 8-hex segment of its filename
+    // `TRDD-<ts>-<id8>-<slug>.md`). Register that as an alias next to the full file stem so a
+    // `[[TRDD-<id8>]]` wikilink resolves to the file — otherwise it misses (the stem is the long
+    // form) and every TRDD cross-reference shows up as a broken link.
+    let trdd_re = Regex::new(r"(?i)^TRDD-[^-]+-([0-9a-f]{8})-").expect("static regex");
     for n in &notes {
         if let Some(stem) = n.path.file_stem().and_then(|s| s.to_str()) {
             stem_map.insert(stem.to_ascii_lowercase(), n.path.clone());
+        }
+        if let Some(name) = n.path.file_name().and_then(|s| s.to_str())
+            && let Some(c) = trdd_re.captures(name)
+        {
+            let alias = format!("trdd-{}", c[1].to_ascii_lowercase());
+            // Don't clobber a note literally stemmed that way; the alias is a fallback.
+            stem_map.entry(alias).or_insert_with(|| n.path.clone());
         }
     }
     let mut edges = Vec::new();
