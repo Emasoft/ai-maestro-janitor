@@ -380,6 +380,85 @@ pub fn cmd_links_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+// ─────────────────────────── `memgrep recall` ───────────────────────────
+
+#[derive(Parser)]
+#[command(name = "memgrep recall", about = "rank memory notes by a symptom/question phrase")]
+struct RecallArgs {
+    /// The symptom / question phrase (quote it): the words you HAVE, not the answer's jargon.
+    query: String,
+    /// Memory dir(s) to search (default: current dir).
+    paths: Vec<PathBuf>,
+    /// Show at most this many notes.
+    #[arg(long = "top", default_value_t = 10)]
+    top: usize,
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// `memgrep recall "<symptom phrase>" [memdir]` — the one-command memory recall. Scores every note
+/// by how many of the phrase's terms hit its SYMPTOM SURFACE (frontmatter description + title +
+/// tags — the question-vocabulary layer), ×2, with a body-match tiebreak so a content-only match
+/// still surfaces. Prints the best notes as `path — description`, so the agent recalls with ONE
+/// call and reads only the top hits. Collapses the two-step "precision query, then -i fallback"
+/// recipe into a single command.
+/// English function/question words that carry no discriminating signal — dropped from the recall
+/// phrase so they don't body-match every note (the score-1 noise tail). A symptom query's value
+/// is in its content words ("rotator", "keychain", "failed"), never in "to"/"had"/"how".
+const STOPWORDS: &[&str] = &[
+    "the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "at", "is", "are", "was", "were",
+    "be", "had", "has", "have", "it", "its", "this", "that", "these", "those", "with", "as", "by",
+    "but", "not", "no", "do", "did", "does", "so", "if", "then", "than", "from", "up", "out", "we",
+    "you", "your", "my", "me", "i", "how", "what", "why", "when", "where", "which", "who", "again",
+];
+
+pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
+    let a = RecallArgs::parse_from(std::iter::once("recall".to_string()).chain(args.iter().cloned()));
+    let terms: Vec<String> = a
+        .query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 2 && !STOPWORDS.contains(t))
+        .map(|t| t.to_string())
+        .collect();
+    if terms.is_empty() {
+        anyhow::bail!("recall needs at least one content term (stopwords like 'to'/'how' don't count)");
+    }
+    let mut scored: Vec<(i64, String, String)> = Vec::new(); // (score, path, summary)
+    for path in collect_md(&a.paths, a.hidden) {
+        let Some(note) = read_note(&path) else { continue };
+        let surface =
+            format!("{} {} {}", note.title, note.summary, note.tags.join(" ")).to_lowercase();
+        let desc_hits = terms.iter().filter(|t| surface.contains(t.as_str())).count() as i64;
+        // Body tiebreak: only consulted when the symptom surface didn't match, so a note that
+        // merely MENTIONS a term still surfaces (below every surface match).
+        let body_hit = desc_hits == 0
+            && read_text(&path).is_some_and(|t| {
+                let lo = t.to_lowercase();
+                terms.iter().any(|x| lo.contains(x.as_str()))
+            });
+        let score = desc_hits * 2 + i64::from(body_hit);
+        if score > 0 {
+            scored.push((score, rel(&path), note.summary));
+        }
+    }
+    scored.sort_by(|x, y| y.0.cmp(&x.0)); // best first; stable ⇒ ties keep path order
+    for (_score, path, summary) in scored.into_iter().take(a.top) {
+        let s = summary.trim();
+        let shown: String = if s.chars().count() > 140 {
+            s.chars().take(140).collect::<String>() + "…"
+        } else {
+            s.to_string()
+        };
+        if shown.is_empty() {
+            println!("{path}");
+        } else {
+            println!("{path} — {shown}");
+        }
+    }
+    Ok(())
+}
+
 // ─────────────────────────── `memgrep fact` ───────────────────────────
 
 #[derive(Parser)]

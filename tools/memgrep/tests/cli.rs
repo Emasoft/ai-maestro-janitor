@@ -247,6 +247,19 @@ fn where_link_semijoin_to_from_and_join() {
 }
 
 #[test]
+fn recall_ranks_by_symptom_surface() {
+    // `recall` scores notes by symptom-surface (description/title/tags) hits. A phrase in the
+    // QUESTION's vocabulary must rank the relevant note first and drop the unrelated one.
+    let dir = "tests/fixtures/recall";
+    let o = run(&["recall", "oauth rotation failed", dir]);
+    let first = o.lines().next().unwrap_or("");
+    assert!(first.contains("recall_a.md"), "oauth note should rank first:\n{o}");
+    assert!(!o.contains("recall_b.md"), "the unrelated tables note must not surface:\n{o}");
+    // the printed line carries the note's description (so the agent picks without opening it).
+    assert!(o.contains("rotation failed"), "recall should show the description:\n{o}");
+}
+
+#[test]
 fn index_emits_title_and_toc() {
     let o = run(&["index", "tests/fixtures/sample.md"]);
     assert!(o.contains("1 Intro"), "title missing:\n{o}");

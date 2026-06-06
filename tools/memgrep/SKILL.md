@@ -15,5 +15,4 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 `memgrep index [PATH]` → (re)write `memory-index.md` (per-note title+summary+tags+TOC+backlinks). · `memgrep links --broken|--orphans|--to N|--from N`. · `memgrep fact [--cat/--comp/--session/--kind/--since/--until]`.
 
 ## Recall memories
-1. `memgrep -l -i 'SYMPTOM WORDS FROM THE QUESTION' <memdir>` → candidate notes; read the top ones. Query the QUESTION's vocabulary, never the answer's.
-2. Precision on a large KB: `memgrep -l --where 'fm.description "SYMPTOM"' <memdir>`.
+`memgrep recall "SYMPTOM WORDS" <memdir>` → notes ranked by symptom match as `path — description`; read the top few. Query the QUESTION's words, not the answer's.
