@@ -3,7 +3,7 @@ trdd-id: 5539cd6e-f0d3-49ff-9615-7ca9fc4871db
 title: CRITICAL — keychain slot write silently truncates every OAuth blob to 128 bytes
 column: testing
 created: 2026-06-06T02:33:30+0200
-updated: 2026-06-06T02:45:00+0200
+updated: 2026-06-06T03:59:07+0200
 implementation-commits: [655a870]
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
@@ -19,7 +19,8 @@ delivery: direct-push
 target-branch: main
 test-requirements: [unit, lint]
 runtime-targets: [macos]
-last-test-result: not-run
+last-test-result: pass
+last-test-at: 2026-06-06T03:59:07+0200
 external-refs: []
 ---
 
@@ -35,6 +36,15 @@ unit tests; 47 rotator tests pass; ruff clean. PROVEN LIVE: re-captured the live
 read_slot round-trips (471B claudeAiOauth-only, real 7.6h expiry, fp matches). **fmuaddib is now a
 healthy refreshable slot.** REMAINING: user must `/login` to the 2nd account (emanuele) → capture
 it (now round-trips) → 2 healthy slots → rotation can fire. THEN watch a real switch (#142).
+
+### ✅ RE-VERIFIED post-compaction — 2026-06-06T03:59 (do NOT re-run every heartbeat)
+After a context compaction the resume marker pointed back here. Re-checked, NOT assumed:
+`rotator.py list` → fmuaddib slot round-trips, captured 02:39, token-expiry **~6.3h** (real future
+expiry — healthy). emanuele slot token-expiry **~-121.4h** (expired ~5d ago; the legacy 471 B
+argv-path slot — DEAD, needs a fresh human `/login`, can't refresh). `pytest test_oauth_rotator.py`
+→ **47 passed**. Tree clean, 13 commits ahead of origin (UNPUSHED per user). The fix is solid;
+nothing further is actionable until the user logs into emanuele. This re-verification need not
+repeat on every heartbeat — only if the rotator code or keychain helper changes again.
 
 ---
 **THIS is why "the oauth rotator didn't work at all."** Found 2026-06-06 ~02:30 while
