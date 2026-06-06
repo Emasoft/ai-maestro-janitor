@@ -5,7 +5,7 @@
 //! A structural-only query (e.g. `--heading` with no pattern) selects lines on structure alone.
 
 use crate::md;
-use crate::md::Context;
+use crate::md::{Context, InlineKind};
 use anyhow::{bail, Result};
 use regex::Regex;
 
@@ -127,6 +127,18 @@ pub struct Query {
     pub depth: Option<usize>,
     /// `--fm KEY=RE` filters (file-level): a file's frontmatter field must match. AND-combined.
     pub fm: Vec<(String, Regex)>,
+    /// Inline-emphasis scopes: the regex must match within that markup on the line. AND-combined.
+    pub bold: Option<Regex>,
+    pub italic: Option<Regex>,
+    pub code_span: Option<Regex>,
+    pub strike: Option<Regex>,
+    /// `--class` (OR), `--class-all` (AND): the line's bracketed-span `key="…"` must contain these.
+    pub class: Vec<String>,
+    pub class_all: Vec<String>,
+    /// `--span-class`: the line must carry a bracketed span with this `.className`.
+    pub span_class: Option<String>,
+    /// `--list` / `--no-list`: Some(true) ⟹ list lines only; Some(false) ⟹ exclude list lines.
+    pub list: Option<bool>,
 }
 
 /// A `--level` filter: an exact level or an inclusive `lo..=hi` range.
@@ -162,6 +174,14 @@ impl Query {
             || self.level.as_ref().map(|l| l.structural()).unwrap_or(false)
             || self.num.is_some()
             || self.depth.is_some()
+            || self.bold.is_some()
+            || self.italic.is_some()
+            || self.code_span.is_some()
+            || self.strike.is_some()
+            || !self.class.is_empty()
+            || !self.class_all.is_empty()
+            || self.span_class.is_some()
+            || self.list.is_some()
     }
 
     /// File-level frontmatter gate: every `--fm KEY=RE` must match a frontmatter field. Files
@@ -232,6 +252,77 @@ impl Query {
                 }
             }
 
+            // ── list scope ──────────────────────────────────────────────────────────────
+            if let Some(want) = self.list
+                && ctx.in_list.get(idx).copied().unwrap_or(false) != want
+            {
+                continue;
+            }
+
+            // ── inline emphasis (regex scoped to bold/italic/code/strike on this line) ──
+            // Each active emphasis filter must match SOME span of its kind; `inline_col` records
+            // where, so a structural-only emphasis query reports the span (not column 1).
+            let mut inline_col: Option<usize> = None;
+            let mut inline_ok = true;
+            for (re, kind) in [
+                (&self.bold, InlineKind::Bold),
+                (&self.italic, InlineKind::Italic),
+                (&self.code_span, InlineKind::Code),
+                (&self.strike, InlineKind::Strike),
+            ] {
+                if let Some(re) = re {
+                    match ctx
+                        .inline
+                        .get(idx)
+                        .and_then(|spans| spans.iter().find(|s| s.kind == kind && re.is_match(&s.text)))
+                    {
+                        Some(s) => {
+                            inline_col.get_or_insert(s.col);
+                        }
+                        None => {
+                            inline_ok = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !inline_ok {
+                continue;
+            }
+
+            // ── bracketed-span class metadata ───────────────────────────────────────────
+            let span_keys = |idx: usize| -> Vec<String> {
+                ctx.span_attrs
+                    .get(idx)
+                    .map(|al| {
+                        al.iter()
+                            .flat_map(|a| a.keys.split(',').map(|k| k.trim().to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            if !self.class.is_empty() {
+                let keys = span_keys(idx);
+                if !self.class.iter().any(|c| keys.iter().any(|k| k == c)) {
+                    continue;
+                }
+            }
+            if !self.class_all.is_empty() {
+                let keys = span_keys(idx);
+                if !self.class_all.iter().all(|c| keys.iter().any(|k| k == c)) {
+                    continue;
+                }
+            }
+            if let Some(name) = &self.span_class {
+                let has = ctx
+                    .span_attrs
+                    .get(idx)
+                    .is_some_and(|al| al.iter().any(|a| a.classes.iter().any(|c| c == name)));
+                if !has {
+                    continue;
+                }
+            }
+
             // ── content regex (or structural-only selection) ────────────────────────────
             match &self.pattern {
                 Some(re) => {
@@ -247,7 +338,7 @@ impl Query {
                     if self.has_structural() {
                         out.push(Match {
                             line,
-                            col: 1,
+                            col: inline_col.unwrap_or(1),
                             text: raw.to_string(),
                         });
                     }

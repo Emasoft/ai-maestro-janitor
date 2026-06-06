@@ -119,6 +119,41 @@ fn fm_field_gates_the_file() {
     assert_eq!(run(&["security", "--fm", "tags=x", FX]).lines().count(), 0);
 }
 
+const FXIN: &str = "tests/fixtures/sample_inline.md";
+
+#[test]
+fn emphasis_scopes_regex_to_markup() {
+    assert_eq!(run(&["--bold", "security", FXIN]).lines().count(), 1);
+    // "note" is italic, not bold ⟹ --bold finds nothing.
+    assert_eq!(run(&["--bold", "note", FXIN]).lines().count(), 0);
+    assert_eq!(run(&["--italic", "note", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--strike", "struck", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--code-span", "blob", FXIN]).lines().count(), 1);
+}
+
+#[test]
+fn class_keys_or_and_and() {
+    assert_eq!(run(&["--class", "security", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--class", "backend", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--class", "nope", FXIN]).lines().count(), 0);
+    assert_eq!(run(&["--class-all", "security,backend", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--class-all", "security,missing", FXIN]).lines().count(), 0);
+}
+
+#[test]
+fn span_class_name_filter() {
+    assert_eq!(run(&["--span-class", "note", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--span-class", "mem", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--span-class", "zzz", FXIN]).lines().count(), 0);
+}
+
+#[test]
+fn list_scope_include_exclude() {
+    assert_eq!(run(&["--list", FXIN]).lines().count(), 2); // two bullet lines
+    assert_eq!(run(&["widget", "--list", FXIN]).lines().count(), 1);
+    assert_eq!(run(&["widget", "--no-list", FXIN]).lines().count(), 0);
+}
+
 #[test]
 fn binary_file_is_skipped_without_crashing() {
     // Point memgrep at its own binary (full of NUL bytes); it must skip, not crash.

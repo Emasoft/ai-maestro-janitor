@@ -78,6 +78,34 @@ struct Cli {
     /// Frontmatter field filter `KEY=REGEX` (repeatable, AND): the file's frontmatter must match.
     #[arg(long = "fm")]
     fm: Vec<String>,
+
+    /// Match REGEX only inside **bold** text.
+    #[arg(long = "bold")]
+    bold: Option<String>,
+    /// Match REGEX only inside *italic* text.
+    #[arg(long = "italic")]
+    italic: Option<String>,
+    /// Match REGEX only inside `inline code`.
+    #[arg(long = "code-span")]
+    code_span: Option<String>,
+    /// Match REGEX only inside ~~strikethrough~~ text.
+    #[arg(long = "strike")]
+    strike: Option<String>,
+    /// Bracketed-span key filter (OR): the line's `[…]{.class key="…"}` keys must contain one of these.
+    #[arg(long = "class", value_delimiter = ',')]
+    class: Vec<String>,
+    /// Bracketed-span key filter (AND): the keys must contain ALL of these.
+    #[arg(long = "class-all", value_delimiter = ',')]
+    class_all: Vec<String>,
+    /// Bracketed-span class-name filter: the line must carry a span with this `.className`.
+    #[arg(long = "span-class")]
+    span_class: Option<String>,
+    /// Restrict to list-item lines.
+    #[arg(long = "list")]
+    list: bool,
+    /// Exclude list-item lines.
+    #[arg(long = "no-list")]
+    no_list: bool,
 }
 
 fn compile(pat: &str, ci: bool, word: bool) -> Result<Regex> {
@@ -210,7 +238,16 @@ fn main() -> Result<()> {
         || cli.heading
         || cli.level.is_some()
         || cli.num.is_some()
-        || cli.depth.is_some();
+        || cli.depth.is_some()
+        || cli.bold.is_some()
+        || cli.italic.is_some()
+        || cli.code_span.is_some()
+        || cli.strike.is_some()
+        || !cli.class.is_empty()
+        || !cli.class_all.is_empty()
+        || cli.span_class.is_some()
+        || cli.list
+        || cli.no_list;
     let mut pattern_str = cli.pattern.clone();
     let mut explicit_paths = cli.paths.clone();
     if structural_present
@@ -247,6 +284,19 @@ fn main() -> Result<()> {
         fm.push((k.trim().to_string(), compile(re, cli.ignore_case, false)?));
     }
 
+    let emph = |s: &Option<String>| -> Result<Option<Regex>> {
+        match s {
+            Some(p) => Ok(Some(compile(p, cli.ignore_case, cli.word)?)),
+            None => Ok(None),
+        }
+    };
+    let list = match (cli.list, cli.no_list) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        (false, false) => None,
+        (true, true) => anyhow::bail!("--list and --no-list are mutually exclusive"),
+    };
+
     let q = Query {
         pattern,
         no_code: cli.no_code,
@@ -258,6 +308,14 @@ fn main() -> Result<()> {
         num,
         depth: cli.depth,
         fm,
+        bold: emph(&cli.bold)?,
+        italic: emph(&cli.italic)?,
+        code_span: emph(&cli.code_span)?,
+        strike: emph(&cli.strike)?,
+        class: cli.class.clone(),
+        class_all: cli.class_all.clone(),
+        span_class: cli.span_class.clone(),
+        list,
     };
 
     let out = Output {
