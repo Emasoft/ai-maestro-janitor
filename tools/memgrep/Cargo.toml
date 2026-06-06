@@ -1,0 +1,11 @@
+[package]
+name = "memgrep"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+comrak = "0.52.0"
+ignore = "0.4.26"
+regex = "1.12.3"
