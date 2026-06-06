@@ -31,6 +31,14 @@ pub struct InlineSpan {
     pub text: String,
 }
 
+/// One out-link from a file: the source line and the raw destination (`path.md`, `[[name]]` → name,
+/// `https://…`). Used to build the cross-file link graph (backlinks, broken links, orphans).
+#[derive(Clone, Debug)]
+pub struct LinkRef {
+    pub line: usize,
+    pub url: String,
+}
+
 /// A Pandoc/Quarto bracketed span's attributes: `[txt]{.a .b key="x, y"}` → classes [a,b], keys "x, y".
 #[derive(Clone, Debug)]
 pub struct SpanAttr {
@@ -94,6 +102,8 @@ pub struct Context {
     pub span_attrs: Vec<Vec<SpanAttr>>,
     /// node_kinds[i] = a bitmask of the GFM structure kinds present on line i+1 (`--node`/`--no-node`).
     pub node_kinds: Vec<u8>,
+    /// Every out-link in the file (for the cross-file graph: `index` backlinks, `links` subcommand).
+    pub links: Vec<LinkRef>,
 }
 
 impl Context {
@@ -139,6 +149,7 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         inline: vec![Vec::new(); n_lines],
         span_attrs: vec![Vec::new(); n_lines],
         node_kinds: vec![0u8; n_lines],
+        links: Vec::new(),
     };
 
     let raw_lines: Vec<&str> = text.lines().collect();
@@ -150,6 +161,7 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         Vec<(usize, usize)>,
         Vec<(usize, usize, InlineKind, String)>,
         Vec<(usize, usize, u8)>,
+        Vec<LinkRef>,
     )> = std::panic::catch_unwind(|| {
         let arena = Arena::new();
         let mut opts = Options::default();
@@ -161,12 +173,16 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         opts.extension.math_code = true;
         opts.extension.multiline_block_quotes = true;
         opts.extension.wikilinks_title_after_pipe = true; // [[name]] → WikiLink (Phase 5)
+        // Treat leading `---`…`---` as frontmatter (a distinct node), so YAML lines never become
+        // Setext headings or shortcut-reference links — which polluted the index TOC + link graph.
+        opts.extension.front_matter_delimiter = Some("---".to_string());
         let root = parse_document(&arena, text, &opts);
         let mut code_spans = Vec::new();
         let mut heads = Vec::new();
         let mut list_spans = Vec::new();
         let mut inline_spans = Vec::new();
         let mut kind_spans = Vec::new();
+        let mut links = Vec::new();
         for node in root.descendants() {
             // Capture what we need from the data borrow, then DROP it before any descendants()
             // walk (gather_inline_text re-borrows the same node ⟹ RefCell double-borrow panic).
@@ -177,6 +193,7 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                 Inline(usize, usize, InlineKind),
                 KindBlock(usize, usize, u8),
                 KindInline(usize, u8),
+                Link(usize, String),
                 None,
             }
             let act = {
@@ -205,7 +222,8 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                         Act::KindBlock(sp.start.line, sp.end.line, K_FOOTNOTE)
                     }
                     NodeValue::Math(_) => Act::KindInline(sp.start.line, K_MATH),
-                    NodeValue::Link(_) | NodeValue::WikiLink(_) => Act::KindInline(sp.start.line, K_URL),
+                    NodeValue::Link(l) => Act::Link(sp.start.line, l.url.clone()),
+                    NodeValue::WikiLink(l) => Act::Link(sp.start.line, l.url.clone()),
                     NodeValue::Image(_) => Act::KindInline(sp.start.line, K_IMAGE),
                     NodeValue::HtmlInline(_) => Act::KindInline(sp.start.line, K_HTML),
                     NodeValue::FootnoteReference(_) => Act::KindInline(sp.start.line, K_FOOTNOTE),
@@ -221,13 +239,19 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                 }
                 Act::KindBlock(s, e, bit) => kind_spans.push((s, e, bit)),
                 Act::KindInline(line, bit) => kind_spans.push((line, line, bit)),
+                Act::Link(line, url) => {
+                    kind_spans.push((line, line, K_URL));
+                    links.push(LinkRef { line, url });
+                }
                 Act::None => {}
             }
         }
-        (code_spans, heads, list_spans, inline_spans, kind_spans)
+        (code_spans, heads, list_spans, inline_spans, kind_spans, links)
     });
 
-    let (code_spans, heads, list_spans, inline_spans, kind_spans) = parsed.unwrap_or_default();
+    let (code_spans, heads, list_spans, inline_spans, kind_spans, links) =
+        parsed.unwrap_or_default();
+    ctx.links = links;
 
     for (start, end, lang) in code_spans {
         for line in start..=end {

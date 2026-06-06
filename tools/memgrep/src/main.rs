@@ -8,6 +8,7 @@
 //! — it never crashes on an unfamiliar flavour.
 
 mod md;
+mod memory;
 mod search;
 
 use anyhow::Result;
@@ -31,6 +32,9 @@ struct Cli {
     /// Files or directories to search (default: current directory).
     paths: Vec<PathBuf>,
 
+    /// Explicit pattern (like grep -e); use it to grep for a word that is also a subcommand name.
+    #[arg(short = 'e', long = "regexp")]
+    regexp: Option<String>,
     /// Case-insensitive (like grep -i).
     #[arg(short = 'i', long = "ignore-case")]
     ignore_case: bool,
@@ -263,6 +267,16 @@ fn json_str(s: &str) -> String {
 }
 
 fn main() -> Result<()> {
+    // Memory-helper subcommands dispatch before grep parsing. To grep for a literal "index" /
+    // "links" / "fact" as the first word, use `memgrep -e index …`.
+    let raw: Vec<String> = std::env::args().collect();
+    match raw.get(1).map(|s| s.as_str()) {
+        Some("index") => return memory::cmd_index_cli(&raw[2..]),
+        Some("links") => return memory::cmd_links_cli(&raw[2..]),
+        Some("fact") => return memory::cmd_fact_cli(&raw[2..]),
+        _ => {}
+    }
+
     let cli = Cli::parse();
 
     // `pattern` is an optional FIRST positional, so a structural-only query like
@@ -299,6 +313,13 @@ fn main() -> Result<()> {
         || cli.footnote;
     let mut pattern_str = cli.pattern.clone();
     let mut explicit_paths = cli.paths.clone();
+    if let Some(e) = &cli.regexp {
+        // -e is the explicit pattern; the positional that would have been the pattern is a path.
+        if let Some(p) = &cli.pattern {
+            explicit_paths.insert(0, PathBuf::from(p));
+        }
+        pattern_str = Some(e.clone());
+    }
     if structural_present
         && explicit_paths.is_empty()
         && let Some(p) = pattern_str.clone()

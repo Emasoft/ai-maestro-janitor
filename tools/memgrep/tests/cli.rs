@@ -177,6 +177,41 @@ fn node_kind_structural_only_counts() {
     assert_eq!(count(&["--svg", FXGFM]), 1);
 }
 
+const FXFACTS: &str = "tests/fixtures/sample_facts.md";
+
+#[test]
+fn fact_filters_by_category_session_and_time() {
+    assert_eq!(run(&["fact", "--cat", "security", FXFACTS]).lines().count(), 2);
+    assert_eq!(run(&["fact", "--cat", "db", FXFACTS]).lines().count(), 1);
+    assert_eq!(run(&["fact", "--session", "bbbb2222", FXFACTS]).lines().count(), 1);
+    // --since excludes the 2026-06-05 fact.
+    assert_eq!(run(&["fact", "--since", "2026-06-06", FXFACTS]).lines().count(), 2);
+    // results are time-sorted (the 14:00 fact precedes the 18:00 one).
+    let o = run(&["fact", "--session", "aaaa1111", FXFACTS]);
+    let lines: Vec<&str> = o.lines().collect();
+    assert!(lines[0].contains("14:00:00") && lines[1].contains("18:00:00"));
+}
+
+#[test]
+fn links_broken_and_backlinks() {
+    let a = "tests/fixtures/link_a.md";
+    let b = "tests/fixtures/link_b.md";
+    // a → nope.md is the only broken link (a→b and b→a resolve).
+    let broken = run(&["links", "--broken", a, b]);
+    assert_eq!(broken.lines().count(), 1, "{broken}");
+    assert!(broken.contains("nope.md"));
+    // backlinks of link_b = link_a (which links to it).
+    let from = run(&["links", "--from", "link_b", a, b]);
+    assert!(from.contains("link_a.md"), "{from}");
+}
+
+#[test]
+fn index_emits_title_and_toc() {
+    let o = run(&["index", "tests/fixtures/sample.md"]);
+    assert!(o.contains("1 Intro"), "title missing:\n{o}");
+    assert!(o.contains("toc:"), "toc missing:\n{o}");
+}
+
 #[test]
 fn binary_file_is_skipped_without_crashing() {
     // Point memgrep at its own binary (full of NUL bytes); it must skip, not crash.
