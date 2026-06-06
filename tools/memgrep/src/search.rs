@@ -139,6 +139,10 @@ pub struct Query {
     pub span_class: Option<String>,
     /// `--list` / `--no-list`: Some(true) ⟹ list lines only; Some(false) ⟹ exclude list lines.
     pub list: Option<bool>,
+    /// `--node` mask: if non-zero, the line must carry ANY of these GFM structure kinds.
+    pub node: u8,
+    /// `--no-node` mask: if non-zero, the line must carry NONE of these kinds.
+    pub no_node: u8,
 }
 
 /// A `--level` filter: an exact level or an inclusive `lo..=hi` range.
@@ -182,6 +186,8 @@ impl Query {
             || !self.class_all.is_empty()
             || self.span_class.is_some()
             || self.list.is_some()
+            || self.node != 0
+            || self.no_node != 0
     }
 
     /// File-level frontmatter gate: every `--fm KEY=RE` must match a frontmatter field. Files
@@ -257,6 +263,17 @@ impl Query {
                 && ctx.in_list.get(idx).copied().unwrap_or(false) != want
             {
                 continue;
+            }
+
+            // ── GFM node-kind scope (--node / --no-node) ───────────────────────────────
+            if self.node != 0 || self.no_node != 0 {
+                let k = ctx.node_kinds.get(idx).copied().unwrap_or(0);
+                if self.node != 0 && (k & self.node) == 0 {
+                    continue;
+                }
+                if self.no_node != 0 && (k & self.no_node) != 0 {
+                    continue;
+                }
             }
 
             // ── inline emphasis (regex scoped to bold/italic/code/strike on this line) ──

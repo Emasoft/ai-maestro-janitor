@@ -38,6 +38,31 @@ pub struct SpanAttr {
     pub keys: String,
 }
 
+// GFM structure kinds, packed one-per-bit into the per-line `node_kinds` mask (`--node`/`--no-node`).
+pub const K_TABLE: u8 = 1 << 0;
+pub const K_QUOTE: u8 = 1 << 1;
+pub const K_MATH: u8 = 1 << 2;
+pub const K_URL: u8 = 1 << 3;
+pub const K_IMAGE: u8 = 1 << 4;
+pub const K_HTML: u8 = 1 << 5;
+pub const K_SVG: u8 = 1 << 6;
+pub const K_FOOTNOTE: u8 = 1 << 7;
+
+/// Map a `--node`/`--no-node` name (and intuitive aliases) to its bit. Unknown ⟹ None.
+pub fn kind_bit(name: &str) -> Option<u8> {
+    Some(match name.trim().to_ascii_lowercase().as_str() {
+        "table" => K_TABLE,
+        "quote" | "blockquote" => K_QUOTE,
+        "math" => K_MATH,
+        "url" | "link" => K_URL,
+        "image" | "img" => K_IMAGE,
+        "html" => K_HTML,
+        "svg" => K_SVG,
+        "footnote" | "note" | "ref" => K_FOOTNOTE,
+        _ => return None,
+    })
+}
+
 /// One heading occurrence, keyed by its 1-based source line.
 #[derive(Clone, Debug)]
 pub struct Heading {
@@ -67,6 +92,8 @@ pub struct Context {
     pub inline: Vec<Vec<InlineSpan>>,
     /// span_attrs[i] = the Pandoc bracketed-span attributes on line i+1 (for `--class`/`--span-class`).
     pub span_attrs: Vec<Vec<SpanAttr>>,
+    /// node_kinds[i] = a bitmask of the GFM structure kinds present on line i+1 (`--node`/`--no-node`).
+    pub node_kinds: Vec<u8>,
 }
 
 impl Context {
@@ -111,6 +138,7 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         in_list: vec![false; n_lines],
         inline: vec![Vec::new(); n_lines],
         span_attrs: vec![Vec::new(); n_lines],
+        node_kinds: vec![0u8; n_lines],
     };
 
     let raw_lines: Vec<&str> = text.lines().collect();
@@ -121,15 +149,24 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         Vec<(usize, u8)>,
         Vec<(usize, usize)>,
         Vec<(usize, usize, InlineKind, String)>,
+        Vec<(usize, usize, u8)>,
     )> = std::panic::catch_unwind(|| {
         let arena = Arena::new();
         let mut opts = Options::default();
         opts.extension.strikethrough = true; // GFM ~~strike~~ for --strike
+        opts.extension.table = true;
+        opts.extension.footnotes = true;
+        opts.extension.autolink = true;
+        opts.extension.math_dollars = true;
+        opts.extension.math_code = true;
+        opts.extension.multiline_block_quotes = true;
+        opts.extension.wikilinks_title_after_pipe = true; // [[name]] → WikiLink (Phase 5)
         let root = parse_document(&arena, text, &opts);
         let mut code_spans = Vec::new();
         let mut heads = Vec::new();
         let mut list_spans = Vec::new();
         let mut inline_spans = Vec::new();
+        let mut kind_spans = Vec::new();
         for node in root.descendants() {
             // Capture what we need from the data borrow, then DROP it before any descendants()
             // walk (gather_inline_text re-borrows the same node ⟹ RefCell double-borrow panic).
@@ -138,6 +175,8 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                 Head(usize, u8),
                 List(usize, usize),
                 Inline(usize, usize, InlineKind),
+                KindBlock(usize, usize, u8),
+                KindInline(usize, u8),
                 None,
             }
             let act = {
@@ -156,6 +195,20 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                         Act::Inline(sp.start.line, sp.start.column, InlineKind::Strike)
                     }
                     NodeValue::Code(_) => Act::Inline(sp.start.line, sp.start.column, InlineKind::Code),
+                    // ── GFM structure kinds (Phase 4) ──
+                    NodeValue::Table(_) => Act::KindBlock(sp.start.line, sp.end.line, K_TABLE),
+                    NodeValue::BlockQuote | NodeValue::MultilineBlockQuote(_) => {
+                        Act::KindBlock(sp.start.line, sp.end.line, K_QUOTE)
+                    }
+                    NodeValue::HtmlBlock(_) => Act::KindBlock(sp.start.line, sp.end.line, K_HTML),
+                    NodeValue::FootnoteDefinition(_) => {
+                        Act::KindBlock(sp.start.line, sp.end.line, K_FOOTNOTE)
+                    }
+                    NodeValue::Math(_) => Act::KindInline(sp.start.line, K_MATH),
+                    NodeValue::Link(_) | NodeValue::WikiLink(_) => Act::KindInline(sp.start.line, K_URL),
+                    NodeValue::Image(_) => Act::KindInline(sp.start.line, K_IMAGE),
+                    NodeValue::HtmlInline(_) => Act::KindInline(sp.start.line, K_HTML),
+                    NodeValue::FootnoteReference(_) => Act::KindInline(sp.start.line, K_FOOTNOTE),
                     _ => Act::None,
                 }
             };
@@ -166,13 +219,15 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                 Act::Inline(line, col, kind) => {
                     inline_spans.push((line, col, kind, gather_inline_text(node)))
                 }
+                Act::KindBlock(s, e, bit) => kind_spans.push((s, e, bit)),
+                Act::KindInline(line, bit) => kind_spans.push((line, line, bit)),
                 Act::None => {}
             }
         }
-        (code_spans, heads, list_spans, inline_spans)
+        (code_spans, heads, list_spans, inline_spans, kind_spans)
     });
 
-    let (code_spans, heads, list_spans, inline_spans) = parsed.unwrap_or_default();
+    let (code_spans, heads, list_spans, inline_spans, kind_spans) = parsed.unwrap_or_default();
 
     for (start, end, lang) in code_spans {
         for line in start..=end {
@@ -210,11 +265,23 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
     }
     ctx.headings.sort_by_key(|h| h.line);
 
-    // Pandoc/Quarto bracketed spans are NOT parsed by comrak, so recognise them on the raw lines.
+    for (start, end, bit) in kind_spans {
+        for line in start..=end {
+            if line >= 1 && line <= n_lines {
+                ctx.node_kinds[line - 1] |= bit;
+            }
+        }
+    }
+
+    // Raw-line passes: Pandoc bracketed spans (comrak doesn't parse attributes) and an embedded-SVG
+    // heuristic (catches `<svg` whether or not it parsed as an HTML node — lenient across flavours).
     for (i, raw) in raw_lines.iter().enumerate() {
         let attrs = parse_span_attrs(raw);
         if !attrs.is_empty() {
             ctx.span_attrs[i] = attrs;
+        }
+        if raw.to_ascii_lowercase().contains("<svg") {
+            ctx.node_kinds[i] |= K_SVG | K_HTML;
         }
     }
     ctx

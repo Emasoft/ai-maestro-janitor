@@ -106,6 +106,45 @@ struct Cli {
     /// Exclude list-item lines.
     #[arg(long = "no-list")]
     no_list: bool,
+
+    /// Restrict to these GFM structure kinds (comma list, OR): table,quote,math,url,image,html,svg,footnote.
+    #[arg(long = "node", value_delimiter = ',')]
+    node: Vec<String>,
+    /// Exclude these GFM structure kinds (comma list).
+    #[arg(long = "no-node", value_delimiter = ',')]
+    no_node: Vec<String>,
+    /// Sugar for `--node table`.
+    #[arg(long = "table")]
+    table: bool,
+    /// Sugar for `--node quote`.
+    #[arg(long = "quote")]
+    quote: bool,
+    /// Sugar for `--node math`.
+    #[arg(long = "math")]
+    math: bool,
+    /// Sugar for `--node url`.
+    #[arg(long = "url")]
+    url: bool,
+    /// Sugar for `--node image`.
+    #[arg(long = "image")]
+    image: bool,
+    /// Sugar for `--node html`.
+    #[arg(long = "html")]
+    html: bool,
+    /// Sugar for `--node svg`.
+    #[arg(long = "svg")]
+    svg: bool,
+    /// Sugar for `--node footnote`.
+    #[arg(long = "footnote")]
+    footnote: bool,
+}
+
+fn names_to_mask(names: &[String]) -> Result<u8> {
+    let mut m = 0u8;
+    for n in names {
+        m |= md::kind_bit(n).ok_or_else(|| anyhow::anyhow!("unknown node kind: {n}"))?;
+    }
+    Ok(m)
 }
 
 fn compile(pat: &str, ci: bool, word: bool) -> Result<Regex> {
@@ -247,7 +286,17 @@ fn main() -> Result<()> {
         || !cli.class_all.is_empty()
         || cli.span_class.is_some()
         || cli.list
-        || cli.no_list;
+        || cli.no_list
+        || !cli.node.is_empty()
+        || !cli.no_node.is_empty()
+        || cli.table
+        || cli.quote
+        || cli.math
+        || cli.url
+        || cli.image
+        || cli.html
+        || cli.svg
+        || cli.footnote;
     let mut pattern_str = cli.pattern.clone();
     let mut explicit_paths = cli.paths.clone();
     if structural_present
@@ -296,6 +345,22 @@ fn main() -> Result<()> {
         (false, false) => None,
         (true, true) => anyhow::bail!("--list and --no-list are mutually exclusive"),
     };
+    let mut node_mask = names_to_mask(&cli.node)?;
+    for (on, bit) in [
+        (cli.table, md::K_TABLE),
+        (cli.quote, md::K_QUOTE),
+        (cli.math, md::K_MATH),
+        (cli.url, md::K_URL),
+        (cli.image, md::K_IMAGE),
+        (cli.html, md::K_HTML),
+        (cli.svg, md::K_SVG),
+        (cli.footnote, md::K_FOOTNOTE),
+    ] {
+        if on {
+            node_mask |= bit;
+        }
+    }
+    let no_node_mask = names_to_mask(&cli.no_node)?;
 
     let q = Query {
         pattern,
@@ -316,6 +381,8 @@ fn main() -> Result<()> {
         class_all: cli.class_all.clone(),
         span_class: cli.span_class.clone(),
         list,
+        node: node_mask,
+        no_node: no_node_mask,
     };
 
     let out = Output {

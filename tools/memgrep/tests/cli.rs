@@ -154,6 +154,29 @@ fn list_scope_include_exclude() {
     assert_eq!(run(&["widget", "--no-list", FXIN]).lines().count(), 0);
 }
 
+const FXGFM: &str = "tests/fixtures/sample_gfm.md";
+
+#[test]
+fn node_kinds_scope_and_exclude() {
+    assert_eq!(run(&["security", "--table", FXGFM]).lines().count(), 1);
+    // "security" outside tables = the link line; the table cell is excluded.
+    let o = run(&["security", "--no-node", "table", FXGFM]);
+    assert_eq!(o.lines().count(), 1, "{o}");
+    assert!(o.contains("link to security"));
+    assert_eq!(run(&["widget", "--quote", FXGFM]).lines().count(), 1);
+    assert_eq!(run(&["widget", "--node", "table,quote", FXGFM]).lines().count(), 1);
+}
+
+#[test]
+fn node_kind_structural_only_counts() {
+    let count = |args: &[&str]| -> usize { run(args).lines().count() };
+    assert_eq!(count(&["--math", FXGFM]), 1);
+    assert_eq!(count(&["--url", FXGFM]), 1);
+    assert_eq!(count(&["--image", FXGFM]), 1);
+    assert_eq!(count(&["--footnote", FXGFM]), 2); // reference + definition
+    assert_eq!(count(&["--svg", FXGFM]), 1);
+}
+
 #[test]
 fn binary_file_is_skipped_without_crashing() {
     // Point memgrep at its own binary (full of NUL bytes); it must skip, not crash.
