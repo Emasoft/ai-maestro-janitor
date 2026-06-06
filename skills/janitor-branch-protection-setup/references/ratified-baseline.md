@@ -1,7 +1,8 @@
 # Ratified branch-protection baseline — full reference
 
-The janitor and maintainer plugins ratified a unified two-ruleset
-branch-protection baseline (janitor
+The janitor and maintainer plugins ratified a unified three-ruleset
+branch-protection baseline — the two branch rulesets plus a tag-protection
+ruleset (janitor
 [#14](https://github.com/Emasoft/ai-maestro-janitor/issues/14) /
 maintainer [#7](https://github.com/Emasoft/ai-maestro-maintainer-agent/issues/7)).
 Both plugins emit **byte-identical** ruleset JSON after key-sorted
@@ -11,18 +12,20 @@ algorithm the skill and the Tier 2 guard path share.
 
 ## Table of contents
 
-- [The two rulesets](#the-two-rulesets)
+- [The three rulesets](#the-three-rulesets)
 - [Why `~DEFAULT_BRANCH`](#why-default_branch)
 - [Why the admin bypass on baseline-pr-and-checks](#why-the-admin-bypass-on-baseline-pr-and-checks)
+- [Why tag protection (baseline-tag-protect)](#why-tag-protection-baseline-tag-protect)
 - [Required status checks — auto-detection](#required-status-checks--auto-detection)
 - [Apply algorithm (idempotent-by-name + legacy cleanup)](#apply-algorithm-idempotent-by-name--legacy-cleanup)
 - [Single source of truth](#single-source-of-truth)
 
-## The two rulesets
+## The three rulesets
 
-Both: `target: branch`, `enforcement: active`,
+The first two: `target: branch`, `enforcement: active`,
 `conditions.ref_name.include: ["~DEFAULT_BRANCH"]`,
-`conditions.ref_name.exclude: []`.
+`conditions.ref_name.exclude: []`. The third (`baseline-tag-protect`) is
+`target: tag`, scoped to `["refs/tags/v*.*.*"]`.
 
 ### 1. `baseline-history-protect`
 
@@ -89,6 +92,35 @@ The repo-admin `RepositoryRole` (`actor_id: 5`) gets an `always` bypass.
 (see auto-detection below). The rule is still present — strict policy on
 — it just gates on no specific contexts until CI surfaces some.
 
+### 3. `baseline-tag-protect`
+
+`target: tag` (NOT branch). No bypass actors — release-tag immutability
+applies to everyone; creating a NEW tag is unrestricted, so `publish.py`
+still cuts each `vX.Y.Z` with no bypass.
+
+```json
+{
+  "name": "baseline-tag-protect",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": { "include": ["refs/tags/v*.*.*"], "exclude": [] }
+  },
+  "bypass_actors": [],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "update" }
+  ]
+}
+```
+
+> Apply-time discipline: the exact GitHub-accepted literal for a
+> `target: tag` ruleset's `ref_name.include` is READBACK-PINNED on the first
+> real apply (same defence-in-depth as `actor_id: 5`). `refs/tags/v*.*.*` is
+> the REST-canonical form we ship; if GitHub normalises or rejects it,
+> reconcile to the echoed form — byte-identical with the maintainer — before
+> either plugin calls it done.
+
 ## Why `~DEFAULT_BRANCH`
 
 The `~DEFAULT_BRANCH` magic ref resolves to whatever branch the repo
@@ -119,6 +151,30 @@ rewrite + `--force-with-lease` push, then immediately re-enable `active`. This
 is a deliberate, audited, human-only operation — documented here so a future
 agent reads "history is protected, scrubbing is owner-toggle-then-rewrite," not
 "history is permanently immutable."
+
+## Why tag protection (baseline-tag-protect)
+
+The branch pair protects only `~DEFAULT_BRANCH`. Release **tags** were
+unprotected — and we both ship installs off `v*` tags, so a leaked token (or
+accident) could **delete or MOVE** a published `vX.Y.Z` to re-point installers
+at arbitrary code. A post-hoc CI gate can't catch this: a tag moved onto a
+commit that itself passes CI sails through. `baseline-tag-protect` closes the
+gap. Tri-party consensus (janitor + maintainer + MANAGER), USER-ratified
+Tier-3 (release integrity), janitor#14.
+
+- **`rules: [deletion, update]`, NOT `non_fast_forward`.** "Restrict updates"
+  (`update`) blocks **every** repoint of an existing tag. `non_fast_forward`
+  blocks only force-pushes — and a tag *fast-forward-moved onto a descendant*
+  commit is NOT a force-push (append a malicious child commit, ff-move the tag
+  onto it → bypass). `update` is minimal-complete and correct regardless of how
+  GitHub evaluates tag fast-forwards.
+- **Scope `["refs/tags/v*.*.*"]`.** Protects immutable full-semver release tags
+  while leaving a *future* movable `vN`/`latest` alias free (`~ALL` or bare
+  `v*` would freeze such an alias). Neither plugin currently ships a movable
+  alias, so this is zero-friction today and future-proof.
+- **`bypass_actors: []`.** Restricting *deletions* and *updates* does NOT
+  restrict *creations* — so `publish.py` still cuts each new `vX.Y.Z` with no
+  bypass actor. Zero publish-path impact.
 
 ## Required status checks — auto-detection
 
@@ -157,12 +213,13 @@ the ruleset is still created, gating on no specific contexts.
    whole apply (we can't tell PATCH from POST → would risk a duplicate).
 2. Build a `{name: id}` map from the existing rulesets.
 3. Auto-detect required status checks by parsing `project_root`'s
-   `.github/workflows/*`; build both payloads with them.
+   `.github/workflows/*`; build the three ratified payloads (only
+   baseline-pr-and-checks embeds the checks; the tag ruleset is static).
 4. For each ratified payload, in order:
    - if a ruleset with the same name already exists → `PATCH
      repos/{slug}/rulesets/{id}` (reports `updated`),
    - else → `POST repos/{slug}/rulesets` (reports `created`).
-5. **Only if both ratified rulesets succeeded**, delete the orphaned
+5. **Only if all three ratified rulesets succeeded**, delete the orphaned
    pre-migration `janitor-baseline` ruleset
    (`DELETE repos/{slug}/rulesets/{id}`; reports `deleted`/`absent`). A
    failed apply KEEPS the legacy ruleset — stripping it after a failed

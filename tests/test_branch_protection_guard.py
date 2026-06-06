@@ -163,17 +163,18 @@ def _run_apply(
 
 # ---------- branch_protection_lib pure helpers ---------------------------
 
-def test_baseline_payloads_return_exactly_two_named_rulesets(project_env: Path) -> None:
-    """The ratified baseline is exactly two rulesets, in order."""
+def test_baseline_payloads_return_exactly_three_named_rulesets(project_env: Path) -> None:
+    """The ratified baseline is exactly three rulesets, in order (branch pair + tag protect)."""
     _ = project_env  # fixture reloads branch_protection_lib for fresh env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     payloads = bpl.baseline_ruleset_payloads("main")
     assert isinstance(payloads, list)
-    assert len(payloads) == 2
+    assert len(payloads) == 3
     names = [p["name"] for p in payloads]
-    assert names == ["baseline-history-protect", "baseline-pr-and-checks"]
+    assert names == ["baseline-history-protect", "baseline-pr-and-checks", "baseline-tag-protect"]
     assert bpl.HISTORY_RULESET_NAME == "baseline-history-protect"
     assert bpl.PR_CHECKS_RULESET_NAME == "baseline-pr-and-checks"
+    assert bpl.TAG_PROTECT_RULESET_NAME == "baseline-tag-protect"
     assert bpl.LEGACY_RULESET_NAME == "janitor-baseline"  # back-compat alias
     # The shared orphan-delete UNION (janitor#14 / maintainer#7) — every
     # pre-ratification name in BOTH plugins' lineage, so a shared repo converges.
@@ -238,13 +239,36 @@ def test_pr_and_checks_embeds_detected_checks_in_context_shape(project_env: Path
     assert sc_rule["parameters"]["required_status_checks"] == checks
 
 
+def test_tag_protect_ruleset_shape(project_env: Path) -> None:
+    """baseline-tag-protect (3rd ratified, tri-party consensus): target=tag,
+    refs/tags/v*.*.* scope, [deletion, update] rules, NO bypass actor."""
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+    tag = bpl.baseline_ruleset_payloads("main")[2]
+    assert tag["name"] == "baseline-tag-protect"
+    assert tag["target"] == "tag"
+    assert tag["enforcement"] == "active"
+    assert tag["conditions"]["ref_name"]["include"] == ["refs/tags/v*.*.*"]
+    assert tag["conditions"]["ref_name"]["exclude"] == []
+    # No bypass actor — new-tag CREATION stays open so publish.py still cuts releases.
+    assert tag["bypass_actors"] == []
+    # [deletion, update] — `update` blocks every repoint (incl. a fast-forward move
+    # onto a descendant commit), which non_fast_forward-only would miss.
+    rule_types = {r["type"] for r in tag["rules"]}
+    assert rule_types == {"deletion", "update"}
+    assert len(tag["rules"]) == 2
+
+
 def test_baseline_payloads_ignore_branch_name_in_ref(project_env: Path) -> None:
     """Even a non-default branch name still emits ~DEFAULT_BRANCH — the
-    magic ref is byte-identical with the maintainer + ratified spec."""
+    magic ref is byte-identical with the maintainer + ratified spec.
+    (The tag ruleset is exempt: it scopes to refs/tags/v*.*.*, not a branch.)"""
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     for branch in ("develop", "master", "trunk"):
         for p in bpl.baseline_ruleset_payloads(branch):
+            if p["target"] != "branch":
+                continue  # tag ruleset uses refs/tags/v*.*.*, not the branch magic ref
             assert p["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
 
 
@@ -530,8 +554,10 @@ def test_apply_skips_when_default_branch_unresolvable(project_env: Path) -> None
     assert r.stdout == "", f"expected silence, got {r.stdout!r}"
 
 
-def test_apply_noop_when_both_baselines_already_present(project_env: Path) -> None:
-    """Gate 6 (convergence): BOTH ratified rulesets present → silent NOOP."""
+def test_apply_noop_when_all_three_baselines_already_present(project_env: Path) -> None:
+    """Gate 6 (convergence): ALL THREE ratified rulesets present → silent NOOP.
+    Convergence now requires baseline-tag-protect too (else a pair-only repo would
+    be wrongly judged converged and never get the 3rd ruleset)."""
     _make_plugin_manifest(project_env)
     gh = _make_gh_stub(project_env)
     r = _run_apply(
@@ -540,6 +566,7 @@ def test_apply_noop_when_both_baselines_already_present(project_env: Path) -> No
             "GH_RULESETS_BODY": json.dumps([
                 {"id": 42, "name": "baseline-history-protect", "target": "branch"},
                 {"id": 43, "name": "baseline-pr-and-checks", "target": "branch"},
+                {"id": 44, "name": "baseline-tag-protect", "target": "tag"},
             ]),
         },
     )

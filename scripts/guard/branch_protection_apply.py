@@ -210,9 +210,10 @@ def main() -> int:
     print(
         f"[guard] applied branch-protection baseline on {slug}@{default_branch} "
         f"({summary}). Rulesets: baseline-history-protect (deletion + "
-        f"non_fast_forward + required_linear_history) and baseline-pr-and-checks "
+        f"non_fast_forward + required_linear_history), baseline-pr-and-checks "
         f"(pull_request 1-approval/dismiss-stale/thread-resolution + "
-        f"required_status_checks strict); {check_note}. "
+        f"required_status_checks strict), and baseline-tag-protect "
+        f"(tag refs/tags/v*.*.* deletion + update, no bypass); {check_note}. "
         f"Audit log: .janitor/logs/{_LOG_FILE}. Ledger: .janitor/state/{_LEDGER_FILE}.",
     )
     return 0

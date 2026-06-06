@@ -49,6 +49,13 @@ import yaml
 # user-authored rulesets sitting alongside ours.
 HISTORY_RULESET_NAME = "baseline-history-protect"
 PR_CHECKS_RULESET_NAME = "baseline-pr-and-checks"
+# The ratified THIRD baseline ruleset (tri-party consensus closed on janitor#14,
+# USER-ratified Tier-3 2026-06-05). Tag protection: closes the supply-chain gap
+# where a leaked token / accident could DELETE or MOVE a published release tag and
+# re-point installers at arbitrary code — a threat a post-hoc CI gate can't catch
+# (a tag moved onto a commit that itself passes CI). Byte-identical with the
+# maintainer plugin's `workflow-protect-branch` 3rd payload (maintainer#7).
+TAG_PROTECT_RULESET_NAME = "baseline-tag-protect"
 
 # Every pre-ratification ruleset name in the COMBINED lineage of BOTH the janitor
 # and the maintainer-agent plugins — the shared orphan-delete UNION agreed on
@@ -83,12 +90,19 @@ _DEFAULT_BRANCH_REF = "~DEFAULT_BRANCH"
 # PR/checks ruleset so a solo admin can still merge their own work.
 _ADMIN_REPOSITORY_ROLE_ID = 5
 
+# The tag-protection ref pattern. `refs/tags/v*.*.*` is the REST-canonical form for a
+# `target: tag` ruleset's ref_name.include; per the cross-plugin agreement the exact
+# GitHub-accepted literal is READBACK-PINNED on first real apply (same defence-in-depth
+# as actor_id:5) — if GitHub normalises or rejects this spelling, reconcile to the
+# echoed form, byte-identical with the maintainer, before either plugin calls it done.
+_TAG_PROTECT_REF = "refs/tags/v*.*.*"
+
 
 def baseline_ruleset_payloads(
     default_branch: str,
     required_status_checks: list[dict] | None = None,
 ) -> list[dict]:
-    """Return the ratified pair of baseline ruleset payloads.
+    """Return the three ratified baseline ruleset payloads (branch pair + tag protection).
 
     Each element is a JSON-serialisable dict ready for
     `gh api {POST|PUT} /repos/{owner}/{repo}/rulesets`.
@@ -164,7 +178,31 @@ def baseline_ruleset_payloads(
             },
         ],
     }
-    return [history_protect, pr_and_checks]
+    tag_protect = {
+        "name": TAG_PROTECT_RULESET_NAME,
+        "target": "tag",
+        "enforcement": "active",
+        "conditions": {
+            "ref_name": {
+                "include": [_TAG_PROTECT_REF],
+                "exclude": [],
+            },
+        },
+        # No bypass actor: creating a NEW tag is unrestricted, so publish.py still
+        # cuts each vX.Y.Z release — zero publish-path impact, nobody needs to bypass.
+        "bypass_actors": [],
+        # rules: [deletion, update] (NOT non_fast_forward). `update` ("Restrict
+        # updates") blocks EVERY repoint of an existing tag — including a fast-forward
+        # move onto a descendant commit, the bypass that non_fast_forward-only would
+        # miss (append a malicious child commit, ff-move vX.Y.Z onto it). Minimal-
+        # complete immutability, correct regardless of how GitHub evaluates tag
+        # fast-forwards. Byte-identical with the maintainer plugin.
+        "rules": [
+            {"type": "deletion"},
+            {"type": "update"},
+        ],
+    }
+    return [history_protect, pr_and_checks, tag_protect]
 
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
@@ -270,18 +308,22 @@ def ruleset_id_by_name(slug: str, name: str) -> int | None:
 
 
 def baselines_present(slug: str) -> bool | None:
-    """True iff BOTH ratified rulesets are already attached to the repo.
+    """True iff ALL THREE ratified rulesets are already attached to the repo.
 
     Returns None on lookup failure so the caller knows the answer is
     "unknown" rather than "no" (matters for the auto path — don't act
     when uncertain). Used for the cheap "already converged" short-circuit
-    before doing any PATCH/POST work.
+    before doing any PUT/POST work. MUST require the tag ruleset too — else a
+    repo that has the branch pair but not `baseline-tag-protect` would be
+    wrongly judged "converged" and never get the 3rd ruleset applied.
     """
     rulesets = list_existing_rulesets(slug)
     if rulesets is None:
         return None
     names = {r.get("name") for r in rulesets if isinstance(r, dict)}
-    return HISTORY_RULESET_NAME in names and PR_CHECKS_RULESET_NAME in names
+    return (HISTORY_RULESET_NAME in names
+            and PR_CHECKS_RULESET_NAME in names
+            and TAG_PROTECT_RULESET_NAME in names)
 
 
 def _workflow_triggers(wf: dict) -> set[str]:
@@ -447,8 +489,8 @@ def delete_ruleset_by_name(slug: str, name: str) -> tuple[bool, str]:
 def apply_baseline_rulesets(
     slug: str, default_branch: str, project_root: Path,
 ) -> tuple[bool, list[tuple[str, bool, str]], list[dict]]:
-    """Apply BOTH ratified rulesets idempotent-by-name, then delete the
-    legacy `janitor-baseline` orphan.
+    """Apply ALL THREE ratified rulesets idempotent-by-name (branch pair +
+    baseline-tag-protect), then delete the legacy orphan union.
 
     `project_root` is the directory whose `.github/workflows/` is parsed
     to auto-detect the required CI check contexts (see
@@ -493,10 +535,11 @@ def apply_baseline_rulesets(
         if not ok:
             rulesets_ok = False
 
-    # Only remove the pre-ratification orphans once BOTH ratified rulesets are
-    # confirmed in place — otherwise a failed apply would strip the legacy
-    # protection and leave the branch unprotected. The baseline-* pair is created
-    # FIRST (above), so there is no unprotected window during the rename. Deletes
+    # Only remove the pre-ratification orphans once ALL THREE ratified rulesets are
+    # confirmed in place (rulesets_ok is False if ANY payload — incl. the tag ruleset —
+    # failed) — otherwise a failed apply would strip the legacy protection and leave the
+    # branch unprotected. The baseline-* set is created FIRST (above), so there is no
+    # unprotected window during the rename. Deletes
     # the SHARED UNION (janitor + maintainer lineage) by exact name so a repo
     # either plugin ever touched fully converges. Idempotent — a missing legacy
     # ruleset reports success "absent".
