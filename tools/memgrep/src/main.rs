@@ -11,12 +11,13 @@ mod md;
 mod memory;
 mod predicate;
 mod search;
+mod where_dsl;
 
 use anyhow::Result;
 use clap::Parser;
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
-use search::{LevelFilter, NumSpec, Query};
+use search::{parse_level, NumSpec, Query};
 use std::path::{Path, PathBuf};
 
 const MD_EXTS: &[&str] = &[
@@ -54,6 +55,12 @@ struct Cli {
     /// Also search hidden files/dirs.
     #[arg(long = "hidden")]
     hidden: bool,
+
+    /// Boolean query, e.g. `--where '(path "**/memory/*.md" or path "**/archive/*.md") and not
+    /// code and fm.column "dev"'`. Composes predicates with and/or/not + grouping; supersedes the
+    /// individual filter flags (do not combine them with --where).
+    #[arg(long = "where")]
+    where_expr: Option<String>,
 
     /// Exclude code blocks from the search.
     #[arg(long = "no-code")]
@@ -144,6 +151,41 @@ struct Cli {
     footnote: bool,
 }
 
+impl Cli {
+    /// Is any markdown-structural filter flag active? Used both to disambiguate a lone positional
+    /// (path vs regex) and to reject combining the flat flags with `--where`. (Does NOT include
+    /// the positional PATTERN or `--fm` — callers test those separately.)
+    fn structural_present(&self) -> bool {
+        self.no_code
+            || self.code
+            || !self.code_lang.is_empty()
+            || self.in_section.is_some()
+            || self.heading
+            || self.level.is_some()
+            || self.num.is_some()
+            || self.depth.is_some()
+            || self.bold.is_some()
+            || self.italic.is_some()
+            || self.code_span.is_some()
+            || self.strike.is_some()
+            || !self.class.is_empty()
+            || !self.class_all.is_empty()
+            || self.span_class.is_some()
+            || self.list
+            || self.no_list
+            || !self.node.is_empty()
+            || !self.no_node.is_empty()
+            || self.table
+            || self.quote
+            || self.math
+            || self.url
+            || self.image
+            || self.html
+            || self.svg
+            || self.footnote
+    }
+}
+
 fn names_to_mask(names: &[String]) -> Result<u8> {
     let mut m = 0u8;
     for n in names {
@@ -159,32 +201,6 @@ fn compile(pat: &str, ci: bool, word: bool) -> Result<Regex> {
         pat.to_string()
     };
     Ok(RegexBuilder::new(&body).case_insensitive(ci).build()?)
-}
-
-/// Lenient level parser: `2`, `2..3`, `2-3`, `>=2`, `>2`, `<=3`, `<3`. Clamped to 1..=6.
-fn parse_level(s: &str) -> Option<LevelFilter> {
-    let s = s.trim();
-    let clamp = |n: i64| n.clamp(1, 6) as u8;
-    let num = |t: &str| t.trim().parse::<i64>().ok();
-    if let Some((a, b)) = s.split_once("..").or_else(|| s.split_once('-')) {
-        return Some(LevelFilter {
-            lo: clamp(num(a)?),
-            hi: clamp(num(b)?),
-        });
-    }
-    for pfx in [">=", ">", "<=", "<"] {
-        if let Some(rest) = s.strip_prefix(pfx) {
-            let n = num(rest)?;
-            return Some(match pfx {
-                ">=" => LevelFilter { lo: clamp(n), hi: 6 },
-                ">" => LevelFilter { lo: clamp(n + 1), hi: 6 },
-                "<=" => LevelFilter { lo: 1, hi: clamp(n) },
-                _ => LevelFilter { lo: 1, hi: clamp(n - 1) },
-            });
-        }
-    }
-    let n = clamp(num(s)?);
-    Some(LevelFilter { lo: n, hi: n })
 }
 
 /// Read a file leniently: skip binary (NUL in the first 8 KiB, like rg), lossy-decode UTF-8.
@@ -213,6 +229,45 @@ fn search_file(path: &Path, q: &Query, out: &Output) {
     let ctx = md::build_context(&text, lines.len());
     let matches = q.run(&lines, &ctx);
     out.emit(path, &matches);
+}
+
+/// The `--where` per-file path: builds the file metadata (path/basename/frontmatter) the DSL's
+/// file-level predicates read, then evaluates the prebuilt expression tree over the file's lines.
+fn search_file_where(path: &Path, expr: &predicate::Expr, out: &Output) {
+    let Some(text) = read_text(path) else { return };
+    let fm = md::parse_frontmatter(&text);
+    let lines: Vec<&str> = text.lines().collect();
+    let ctx = md::build_context(&text, lines.len());
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let pstr = path.to_string_lossy();
+    let meta = search::FileMeta {
+        path: &pstr,
+        name,
+        fm: &fm,
+    };
+    let matches = search::run_expr(expr, &lines, &ctx, &meta);
+    out.emit(path, &matches);
+}
+
+/// Walk the given paths (a named file is searched as-is; a directory is recursed gitignore-aware,
+/// markdown files only) and invoke `f` on every file to search. Shared by the flat and `--where`
+/// paths so the traversal/extension rules live in one place.
+fn walk_and(paths: &[PathBuf], hidden: bool, mut f: impl FnMut(&Path)) {
+    for path in paths {
+        if path.is_file() {
+            // An explicitly-named file is searched regardless of extension.
+            f(path);
+        } else {
+            for entry in WalkBuilder::new(path).hidden(!hidden).build() {
+                let Ok(entry) = entry else { continue };
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+                    && is_markdown(entry.path())
+                {
+                    f(entry.path());
+                }
+            }
+        }
+    }
 }
 
 struct Output {
@@ -280,38 +335,40 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // `--where` is the complete boolean query; it supersedes the individual filter flags (file-
+    // level predicates like fm/path/name compose inside it, so there is no separate --fm gate).
+    // In this mode the positionals are ALL paths — the optional first positional that would be a
+    // PATTERN in normal mode is just the first path here.
+    if let Some(wexpr) = &cli.where_expr {
+        if cli.regexp.is_some() || cli.structural_present() || !cli.fm.is_empty() {
+            anyhow::bail!(
+                "--where is the complete query — do not combine it with -e/--regexp or the individual filter flags"
+            );
+        }
+        let expr = where_dsl::parse_where(wexpr, cli.ignore_case)?;
+        let out = Output {
+            files_only: cli.files_only,
+            count: cli.count,
+            json: cli.json,
+        };
+        let mut paths: Vec<PathBuf> = Vec::new();
+        if let Some(p) = &cli.pattern {
+            paths.push(PathBuf::from(p));
+        }
+        paths.extend(cli.paths.iter().cloned());
+        if paths.is_empty() {
+            paths.push(PathBuf::from("."));
+        }
+        walk_and(&paths, cli.hidden, |p| search_file_where(p, &expr, &out));
+        return Ok(());
+    }
+
     // `pattern` is an optional FIRST positional, so a structural-only query like
     // `memgrep --heading FILE` would otherwise bind FILE to `pattern` (a regex) and leave
     // `paths` empty. Disambiguate exactly that case: when a structural filter is present, no
     // explicit paths were given, and the lone positional names an existing path, treat it as the
     // path (structural browse) — never as a regex. The normal `memgrep PATTERN PATH` is untouched.
-    let structural_present = cli.no_code
-        || cli.code
-        || !cli.code_lang.is_empty()
-        || cli.in_section.is_some()
-        || cli.heading
-        || cli.level.is_some()
-        || cli.num.is_some()
-        || cli.depth.is_some()
-        || cli.bold.is_some()
-        || cli.italic.is_some()
-        || cli.code_span.is_some()
-        || cli.strike.is_some()
-        || !cli.class.is_empty()
-        || !cli.class_all.is_empty()
-        || cli.span_class.is_some()
-        || cli.list
-        || cli.no_list
-        || !cli.node.is_empty()
-        || !cli.no_node.is_empty()
-        || cli.table
-        || cli.quote
-        || cli.math
-        || cli.url
-        || cli.image
-        || cli.html
-        || cli.svg
-        || cli.footnote;
+    let structural_present = cli.structural_present();
     let mut pattern_str = cli.pattern.clone();
     let mut explicit_paths = cli.paths.clone();
     if let Some(e) = &cli.regexp {
@@ -419,20 +476,6 @@ fn main() -> Result<()> {
         explicit_paths
     };
 
-    for path in &paths {
-        if path.is_file() {
-            // An explicitly-named file is searched regardless of extension.
-            search_file(path, &q, &out);
-        } else {
-            for entry in WalkBuilder::new(path).hidden(!cli.hidden).build() {
-                let Ok(entry) = entry else { continue };
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
-                    && is_markdown(entry.path())
-                {
-                    search_file(entry.path(), &q, &out);
-                }
-            }
-        }
-    }
+    walk_and(&paths, cli.hidden, |p| search_file(p, &q, &out));
     Ok(())
 }

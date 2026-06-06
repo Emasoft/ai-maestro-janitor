@@ -12,16 +12,77 @@
 //! describes a POSITIVE property of a line.
 
 use crate::md::{Context, InlineKind};
-use crate::search::{LevelFilter, NumSpec};
-use regex::Regex;
+use crate::search::NumSpec;
+use crate::search::LevelFilter;
+use anyhow::Result;
+use globset::GlobMatcher;
+use regex::{Regex, RegexBuilder};
+use std::collections::HashMap;
 
-/// Everything a predicate needs to test one line. (Phase 6b will add file-level fields — path,
-/// basename, frontmatter — for the `path`/`name`/`fm` predicates introduced by `--where`.)
+/// Everything a predicate needs to test one line. File-level fields (`path`, `name`, `fm`) are
+/// constant across a file (used by the `path`/`name`/`fm` predicates the `--where` DSL adds);
+/// line-level fields vary per line. The flat-flag path passes empty file-level fields — its
+/// lowering never emits a file-level predicate (`--fm` stays a whole-file gate).
 pub struct LineCtx<'a> {
+    pub path: &'a str,
+    pub name: &'a str,
+    pub fm: &'a HashMap<String, String>,
     pub raw: &'a str,
     pub idx: usize,  // 0-based line index (into the `ctx` vecs)
     pub line: usize, // 1-based line number (for the heading/section lookups)
     pub ctx: &'a Context,
+}
+
+/// A smart value matcher: the `--where` DSL auto-detects which kind a quoted value is, reusing
+/// syntax a reader already knows — a version-range (`>=1.2,<3.5`, pip/PEP-440 style), a glob
+/// (`server*`, `*.md`), or, failing both, a regex (the default, like every other matcher). Used
+/// for `fm KEY VALUE`, where the value's intent is ambiguous; `path`/`name` are always globs and
+/// `num`/`level` are always ranges, so those bypass the auto-detection.
+pub enum Matcher {
+    Glob(GlobMatcher),
+    Range(NumSpec),
+    Regex(Regex),
+}
+
+impl Matcher {
+    /// Auto-detect the matcher kind. Range wins first (an explicit comparator is unambiguous),
+    /// then glob (an unescaped `*`/`?`/`[`), else a regex.
+    pub fn smart(s: &str, ci: bool) -> Result<Matcher> {
+        if looks_like_range(s) {
+            return Ok(Matcher::Range(NumSpec::parse(s)?));
+        }
+        if s.contains(['*', '?', '[']) {
+            return Ok(Matcher::Glob(build_glob(s)?));
+        }
+        Ok(Matcher::Regex(RegexBuilder::new(s).case_insensitive(ci).build()?))
+    }
+
+    pub fn matches(&self, val: &str) -> bool {
+        match self {
+            Matcher::Glob(g) => g.is_match(val),
+            Matcher::Range(spec) => parse_dotted(val).is_some_and(|v| spec.matches(&v)),
+            Matcher::Regex(re) => re.is_match(val),
+        }
+    }
+}
+
+/// Does this value carry an explicit version comparator (so it should parse as a `--num`-style
+/// range, not a regex)? `>`/`<` anywhere, or a leading `==`/`!=`.
+fn looks_like_range(s: &str) -> bool {
+    s.contains(['>', '<']) || s.starts_with("==") || s.starts_with("!=")
+}
+
+/// Compile a glob into a matcher (ripgrep's `globset`, so `**` crosses path separators).
+pub fn build_glob(s: &str) -> Result<GlobMatcher> {
+    Ok(globset::Glob::new(s)?.compile_matcher())
+}
+
+/// Parse a dotted value (`1.42`, `v2.0.1`) into a version tuple for range comparison; `None` if it
+/// is not dotted-numeric (then a `Range` matcher simply does not match it).
+fn parse_dotted(s: &str) -> Option<Vec<u32>> {
+    let s = s.trim().trim_start_matches(['v', 'V']);
+    let v: Vec<u32> = s.split('.').map(|p| p.parse::<u32>().ok()).collect::<Option<_>>()?;
+    if v.is_empty() { None } else { Some(v) }
 }
 
 /// One atomic test — a POSITIVE property of a line. Negatives are expressed with `Expr::Not`.
@@ -60,6 +121,13 @@ pub enum Pred {
     List,
     /// The line carries ANY GFM node kind in this bitmask.
     Node(u8),
+    // ── file-level (the `--where` DSL: path / name / frontmatter) ──
+    /// The file path matches this glob.
+    Path(GlobMatcher),
+    /// The file basename matches this glob.
+    Name(GlobMatcher),
+    /// The file's frontmatter has KEY whose value matches this matcher.
+    Fm(String, Matcher),
 }
 
 impl Pred {
@@ -103,6 +171,9 @@ impl Pred {
                 .is_some_and(|al| al.iter().any(|a| a.classes.iter().any(|c| c == name))),
             Pred::List => ctx.in_list.get(idx).copied().unwrap_or(false),
             Pred::Node(mask) => (ctx.node_kinds.get(idx).copied().unwrap_or(0) & *mask) != 0,
+            Pred::Path(g) => g.is_match(lc.path),
+            Pred::Name(g) => g.is_match(lc.name),
+            Pred::Fm(key, m) => lc.fm.get(key).is_some_and(|v| m.matches(v)),
         }
     }
 
@@ -152,10 +223,6 @@ pub enum Expr {
     Leaf(Pred),
     Not(Box<Expr>),
     And(Vec<Expr>),
-    // The flat-flag lowering only emits `And`/`Not`/`Leaf`; `Or` enters the binary with the
-    // `--where` DSL / find-style operators (Phase 6b), which remove this allow. The evaluator
-    // already handles it and `and_or_not_compose` tests it.
-    #[allow(dead_code)]
     Or(Vec<Expr>),
 }
 
@@ -199,7 +266,8 @@ mod tests {
     fn and_or_not_compose() {
         let text = "alpha beta\n";
         let ctx = build_context(text, 1);
-        let lc = LineCtx { raw: "alpha beta", idx: 0, line: 1, ctx: &ctx };
+        let fm = HashMap::new();
+        let lc = LineCtx { path: "x.md", name: "x.md", fm: &fm, raw: "alpha beta", idx: 0, line: 1, ctx: &ctx };
         let pat = |s: &str| Expr::Leaf(Pred::Pattern(Regex::new(s).unwrap()));
 
         assert!(Expr::Or(vec![pat("alpha"), pat("zzz")]).eval(&lc)); // one branch true

@@ -511,6 +511,7 @@ dependencies = [
  "anyhow",
  "clap",
  "comrak",
+ "globset",
  "ignore",
  "regex",
 ]

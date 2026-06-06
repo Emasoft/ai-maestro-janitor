@@ -16,6 +16,17 @@ fn run(args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// Run memgrep expecting a NON-zero exit (a usage/parse error). Returns nothing — only the failure
+/// is asserted.
+fn run_fail(args: &[&str]) {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    assert!(!out.status.success(), "memgrep should have failed for {args:?}");
+}
+
 #[test]
 fn plain_pattern_finds_prose_and_code() {
     // 3 prose mentions + 1 inside the code block.
@@ -219,4 +230,75 @@ fn binary_file_is_skipped_without_crashing() {
     let out = Command::new(bin).args(["the", bin]).output().unwrap();
     assert!(out.status.success(), "must not crash on a binary file");
     assert!(out.stdout.is_empty(), "binary file should yield no matches");
+}
+
+// ── Phase 6b: the --where boolean DSL (end-to-end through the real binary) ──
+
+#[test]
+fn where_and_not_equals_flat_no_code() {
+    // `text "security" and not code` reproduces `security --no-code` (3 prose lines)…
+    assert_eq!(run(&["--where", r#"text "security" and not code"#, FX]).lines().count(), 3);
+    // …and `and code` keeps only the in-code line.
+    assert_eq!(run(&["--where", r#"text "security" and code"#, FX]).lines().count(), 1);
+}
+
+#[test]
+fn where_or_unions_patterns() {
+    // "security" is on 4 lines, "widget" on 0 ⟹ their union is 4. (A flat query cannot OR these.)
+    assert_eq!(run(&["--where", r#"text "security" or text "widget""#, FX]).lines().count(), 4);
+}
+
+#[test]
+fn where_grouping_changes_precedence() {
+    // `(a or b) and c`: lines matching (security or nothing) AND in-code = the single code line.
+    let o = run(&["--where", r#"(text "security" or text "widget") and code"#, FX]);
+    assert_eq!(o.lines().count(), 1, "{o}");
+    assert!(o.contains("echo security"));
+    // without grouping, `a or (b and c)` = security-anywhere(4) OR (widget AND code)(0) = 4.
+    assert_eq!(
+        run(&["--where", r#"text "security" or text "widget" and code"#, FX]).lines().count(),
+        4
+    );
+}
+
+#[test]
+fn where_structural_and_numbering() {
+    // headings whose section number is >= 2 ⟹ just `# 2 Backend`.
+    let o = run(&["--where", r#"heading and num ">=2""#, FX]);
+    assert_eq!(o.lines().count(), 1, "{o}");
+    assert!(o.contains("# 2 Backend"));
+}
+
+#[test]
+fn where_fm_predicate_composes() {
+    // sample_fm.md: frontmatter status=dev, tags=[security, oauth]; body mentions "widget".
+    assert_eq!(run(&["--where", r#"fm.status "dev" and text "widget""#, FXFM]).lines().count(), 1);
+    // fm is a per-line-constant gate: with -l a matching file is listed, a non-matching one isn't.
+    assert_eq!(run(&["-l", "--where", r#"fm.status "dev""#, FXFM]).trim(), FXFM);
+    assert_eq!(run(&["--where", r#"fm.tags "nope""#, FXFM]).lines().count(), 0);
+}
+
+#[test]
+fn where_file_globs_and_emphasis() {
+    // name/path globs gate the file; the emphasis predicate scopes within it.
+    assert_eq!(run(&["--where", r#"name "*.md" and bold "security""#, FXIN]).lines().count(), 1);
+    assert_eq!(run(&["--where", r#"name "*.rs" and bold "security""#, FXIN]).lines().count(), 0);
+    assert_eq!(
+        run(&["--where", r#"path "**/sample_inline.md" and span-class "note""#, FXIN]).lines().count(),
+        1
+    );
+}
+
+#[test]
+fn where_rejects_combining_with_flags() {
+    // --where is the whole query; combining it with a filter flag or -e is a hard error (a stray
+    // positional, by contrast, is treated as a PATH in --where mode, not a conflict).
+    run_fail(&["--where", r#"code"#, "--no-code", FX]);
+    run_fail(&["--where", r#"code"#, "-e", "x", FX]);
+}
+
+#[test]
+fn where_parse_errors_are_clean_failures() {
+    run_fail(&["--where", r#"(text "a""#, FX]); // unbalanced paren
+    run_fail(&["--where", "boguspred \"x\"", FX]); // unknown predicate
 }

@@ -9,6 +9,7 @@ use crate::md::Context;
 use crate::predicate::{Expr, LineCtx, Pred};
 use anyhow::{bail, Result};
 use regex::Regex;
+use std::collections::HashMap;
 
 /// A `--num` heading-numbering matcher. Three intuitive forms, reusing syntax already familiar:
 /// a bare prefix (`1.2` ⟹ the 1.2 subtree), a glob (`1.2.*` ⟹ exactly one level under 1.2), or a
@@ -261,18 +262,70 @@ impl Query {
         let Some(expr) = self.to_expr() else {
             return Vec::new(); // nothing selects (no pattern, no structural filter)
         };
-        let mut out = Vec::new();
-        for (idx, raw) in lines.iter().enumerate() {
-            let line = idx + 1;
-            let lc = LineCtx { raw, idx, line, ctx };
-            if expr.eval(&lc) {
-                out.push(Match {
-                    line,
-                    col: expr.column_hint(&lc),
-                    text: raw.to_string(),
-                });
-            }
-        }
-        out
+        // The flat flags never emit a file-level predicate (`--fm` is the whole-file gate), so the
+        // file metadata is unused — pass empties.
+        let fm = HashMap::new();
+        run_expr(&expr, lines, ctx, &FileMeta { path: "", name: "", fm: &fm })
     }
+}
+
+/// File metadata a file-level predicate (`path`/`name`/`fm`) reads. Constant across a file.
+pub struct FileMeta<'a> {
+    pub path: &'a str,
+    pub name: &'a str,
+    pub fm: &'a HashMap<String, String>,
+}
+
+/// Evaluate a prebuilt [`Expr`] tree against a file's lines — the shared engine behind both the
+/// flat-flag query (an all-AND tree) and the `--where` DSL (an arbitrary tree). A line is emitted
+/// iff the tree holds for it; the column is the first content/emphasis leaf's match (or 1).
+pub fn run_expr(expr: &Expr, lines: &[&str], ctx: &Context, meta: &FileMeta) -> Vec<Match> {
+    let mut out = Vec::new();
+    for (idx, raw) in lines.iter().enumerate() {
+        let line = idx + 1;
+        let lc = LineCtx {
+            path: meta.path,
+            name: meta.name,
+            fm: meta.fm,
+            raw,
+            idx,
+            line,
+            ctx,
+        };
+        if expr.eval(&lc) {
+            out.push(Match {
+                line,
+                col: expr.column_hint(&lc),
+                text: raw.to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// Lenient `--level` parser: `2`, `2..3`, `2-3`, `>=2`, `>2`, `<=3`, `<3`. Clamped to 1..=6.
+/// Shared by the `--level` flag and the `--where` DSL's `level` predicate (one source of truth).
+pub fn parse_level(s: &str) -> Option<LevelFilter> {
+    let s = s.trim();
+    let clamp = |n: i64| n.clamp(1, 6) as u8;
+    let num = |t: &str| t.trim().parse::<i64>().ok();
+    if let Some((a, b)) = s.split_once("..").or_else(|| s.split_once('-')) {
+        return Some(LevelFilter {
+            lo: clamp(num(a)?),
+            hi: clamp(num(b)?),
+        });
+    }
+    for pfx in [">=", ">", "<=", "<"] {
+        if let Some(rest) = s.strip_prefix(pfx) {
+            let n = num(rest)?;
+            return Some(match pfx {
+                ">=" => LevelFilter { lo: clamp(n), hi: 6 },
+                ">" => LevelFilter { lo: clamp(n + 1), hi: 6 },
+                "<=" => LevelFilter { lo: 1, hi: clamp(n) },
+                _ => LevelFilter { lo: 1, hi: clamp(n - 1) },
+            });
+        }
+    }
+    let n = clamp(num(s)?);
+    Some(LevelFilter { lo: n, hi: n })
 }
