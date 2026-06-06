@@ -9,6 +9,7 @@
 
 mod md;
 mod memory;
+mod predicate;
 mod search;
 
 use anyhow::Result;

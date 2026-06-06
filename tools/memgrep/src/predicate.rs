@@ -1,0 +1,217 @@
+//! Composable boolean predicates over a markdown file's lines (Phase 6).
+//!
+//! Phase 1–5 evaluated every active filter as a flat AND chain inside `Query::run`. Phase 6 turns
+//! that chain into an EXPRESSION TREE (`And`/`Or`/`Not`/`Leaf`) so conditions compose with full
+//! boolean logic — driven either by the existing flags (which build an all-AND tree, so behaviour
+//! stays byte-identical) or, later, by the `--where` DSL / find-style operators (which build an
+//! arbitrary tree). One predicate set, one evaluator: there is exactly ONE place each structural
+//! check (`--no-code`, `--num`, an emphasis scope, …) lives.
+//!
+//! Negation lives in the tree (`Expr::Not`), never in a per-predicate flag — so `--no-code` is
+//! `Not(Code)`, `--no-list` is `Not(List)`, `--no-node X` is `Not(Node(X))`. A predicate only ever
+//! describes a POSITIVE property of a line.
+
+use crate::md::{Context, InlineKind};
+use crate::search::{LevelFilter, NumSpec};
+use regex::Regex;
+
+/// Everything a predicate needs to test one line. (Phase 6b will add file-level fields — path,
+/// basename, frontmatter — for the `path`/`name`/`fm` predicates introduced by `--where`.)
+pub struct LineCtx<'a> {
+    pub raw: &'a str,
+    pub idx: usize,  // 0-based line index (into the `ctx` vecs)
+    pub line: usize, // 1-based line number (for the heading/section lookups)
+    pub ctx: &'a Context,
+}
+
+/// One atomic test — a POSITIVE property of a line. Negatives are expressed with `Expr::Not`.
+pub enum Pred {
+    /// Content regex on the raw line (the positional PATTERN, like `grep`).
+    Pattern(Regex),
+    /// The line is inside a fenced or inline code span.
+    Code,
+    /// The line is inside a fenced block whose language is one of these (implies `Code`).
+    CodeLang(Vec<String>),
+    /// The line is a heading.
+    Heading,
+    /// The line is a heading of a level in this filter.
+    Level(LevelFilter),
+    /// The line is within a section whose heading (at any ancestor depth) matches this regex.
+    InSection(Regex),
+    /// The line's enclosing numbered section matches this `--num` spec.
+    Num(NumSpec),
+    /// The line's enclosing numbered section has at most this many dotted components.
+    Depth(usize),
+    /// The regex matches inside some **bold** span on the line.
+    Bold(Regex),
+    /// The regex matches inside some *italic* span on the line.
+    Italic(Regex),
+    /// The regex matches inside some `inline code` span on the line.
+    CodeSpan(Regex),
+    /// The regex matches inside some ~~strikethrough~~ span on the line.
+    Strike(Regex),
+    /// The line carries a bracketed-span `key="…"` containing ANY of these (OR).
+    Class(Vec<String>),
+    /// The line carries a bracketed-span `key="…"` containing ALL of these (AND).
+    ClassAll(Vec<String>),
+    /// The line carries a bracketed span with this `.className`.
+    SpanClass(String),
+    /// The line is a list item.
+    List,
+    /// The line carries ANY GFM node kind in this bitmask.
+    Node(u8),
+}
+
+impl Pred {
+    /// Does this predicate hold for the given line?
+    pub fn eval(&self, lc: &LineCtx) -> bool {
+        let idx = lc.idx;
+        let ctx = lc.ctx;
+        match self {
+            Pred::Pattern(re) => re.is_match(lc.raw),
+            Pred::Code => in_code(ctx, idx),
+            Pred::CodeLang(langs) => {
+                in_code(ctx, idx)
+                    && matches!(
+                        ctx.code_lang.get(idx).and_then(|o| o.as_deref()),
+                        Some(l) if langs.iter().any(|w| w.eq_ignore_ascii_case(l))
+                    )
+            }
+            Pred::Heading => ctx.is_heading(lc.line),
+            Pred::Level(lf) => matches!(
+                ctx.heading_level.get(idx).and_then(|o| *o),
+                Some(lvl) if lf.contains(lvl)
+            ),
+            Pred::InSection(re) => ctx.section_path(lc.line).iter().any(|h| re.is_match(&h.text)),
+            Pred::Num(spec) => ctx.section_num(lc.line).is_some_and(|n| spec.matches(&n)),
+            Pred::Depth(d) => ctx.section_num(lc.line).is_some_and(|n| n.len() <= *d),
+            Pred::Bold(re) => emphasis_col(ctx, idx, InlineKind::Bold, re).is_some(),
+            Pred::Italic(re) => emphasis_col(ctx, idx, InlineKind::Italic, re).is_some(),
+            Pred::CodeSpan(re) => emphasis_col(ctx, idx, InlineKind::Code, re).is_some(),
+            Pred::Strike(re) => emphasis_col(ctx, idx, InlineKind::Strike, re).is_some(),
+            Pred::Class(want) => {
+                let keys = span_keys(ctx, idx);
+                want.iter().any(|c| keys.iter().any(|k| k == c))
+            }
+            Pred::ClassAll(want) => {
+                let keys = span_keys(ctx, idx);
+                want.iter().all(|c| keys.iter().any(|k| k == c))
+            }
+            Pred::SpanClass(name) => ctx
+                .span_attrs
+                .get(idx)
+                .is_some_and(|al| al.iter().any(|a| a.classes.iter().any(|c| c == name))),
+            Pred::List => ctx.in_list.get(idx).copied().unwrap_or(false),
+            Pred::Node(mask) => (ctx.node_kinds.get(idx).copied().unwrap_or(0) & *mask) != 0,
+        }
+    }
+
+    /// The 1-based column this predicate matched at, when it is a content/emphasis matcher — used
+    /// only to report a useful column. Structural predicates return `None` (caller defaults to 1),
+    /// mirroring Phase 1–5: a pattern's match start, or an emphasis span's start column.
+    pub fn match_col(&self, lc: &LineCtx) -> Option<usize> {
+        let ctx = lc.ctx;
+        match self {
+            Pred::Pattern(re) => re.find(lc.raw).map(|m| m.start() + 1),
+            Pred::Bold(re) => emphasis_col(ctx, lc.idx, InlineKind::Bold, re),
+            Pred::Italic(re) => emphasis_col(ctx, lc.idx, InlineKind::Italic, re),
+            Pred::CodeSpan(re) => emphasis_col(ctx, lc.idx, InlineKind::Code, re),
+            Pred::Strike(re) => emphasis_col(ctx, lc.idx, InlineKind::Strike, re),
+            _ => None,
+        }
+    }
+}
+
+fn in_code(ctx: &Context, idx: usize) -> bool {
+    ctx.in_code.get(idx).copied().unwrap_or(false)
+}
+
+/// Column of the first span of `kind` on this line whose inner text matches `re`, if any.
+fn emphasis_col(ctx: &Context, idx: usize, kind: InlineKind, re: &Regex) -> Option<usize> {
+    ctx.inline
+        .get(idx)
+        .and_then(|spans| spans.iter().find(|s| s.kind == kind && re.is_match(&s.text)))
+        .map(|s| s.col)
+}
+
+/// The comma-split, trimmed `key="…"` entries of every bracketed span on this line.
+fn span_keys(ctx: &Context, idx: usize) -> Vec<String> {
+    ctx.span_attrs
+        .get(idx)
+        .map(|al| {
+            al.iter()
+                .flat_map(|a| a.keys.split(',').map(|k| k.trim().to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A boolean expression tree over [`Pred`] leaves. `And`/`Or` take a vector of children (so a flat
+/// all-AND query is one `And` node, not a right-leaning chain); `Not` wraps a single child.
+pub enum Expr {
+    Leaf(Pred),
+    Not(Box<Expr>),
+    And(Vec<Expr>),
+    // The flat-flag lowering only emits `And`/`Not`/`Leaf`; `Or` enters the binary with the
+    // `--where` DSL / find-style operators (Phase 6b), which remove this allow. The evaluator
+    // already handles it and `and_or_not_compose` tests it.
+    #[allow(dead_code)]
+    Or(Vec<Expr>),
+}
+
+impl Expr {
+    /// Is the whole expression true for this line?
+    pub fn eval(&self, lc: &LineCtx) -> bool {
+        match self {
+            Expr::Leaf(p) => p.eval(lc),
+            Expr::Not(e) => !e.eval(lc),
+            Expr::And(v) => v.iter().all(|e| e.eval(lc)),
+            Expr::Or(v) => v.iter().any(|e| e.eval(lc)),
+        }
+    }
+
+    /// The column to report for a matched line: the first content/emphasis leaf (in tree order)
+    /// that matched, else 1. For the all-AND tree the existing flags build, this reproduces
+    /// Phase 1–5 exactly (pattern leaf first ⟹ its match column; otherwise an emphasis span's).
+    pub fn column_hint(&self, lc: &LineCtx) -> usize {
+        self.first_match_col(lc).unwrap_or(1)
+    }
+
+    fn first_match_col(&self, lc: &LineCtx) -> Option<usize> {
+        match self {
+            Expr::Leaf(p) => p.match_col(lc),
+            // A negated branch contributes no positive match position.
+            Expr::Not(_) => None,
+            Expr::And(v) | Expr::Or(v) => v.iter().find_map(|e| e.first_match_col(lc)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::md::build_context;
+
+    // Exercise the full And/Or/Not/Leaf evaluator directly. The flat-flag lowering only ever emits
+    // And/Not/Leaf, so without this the `Or` arm would be unreachable until the `--where` DSL wires
+    // it up — but the engine is shared and must be correct (and clippy-clean) on its own.
+    #[test]
+    fn and_or_not_compose() {
+        let text = "alpha beta\n";
+        let ctx = build_context(text, 1);
+        let lc = LineCtx { raw: "alpha beta", idx: 0, line: 1, ctx: &ctx };
+        let pat = |s: &str| Expr::Leaf(Pred::Pattern(Regex::new(s).unwrap()));
+
+        assert!(Expr::Or(vec![pat("alpha"), pat("zzz")]).eval(&lc)); // one branch true
+        assert!(!Expr::Or(vec![pat("yyy"), pat("zzz")]).eval(&lc)); // neither true
+        assert!(Expr::And(vec![pat("alpha"), pat("beta")]).eval(&lc)); // both true
+        assert!(!Expr::And(vec![pat("alpha"), pat("zzz")]).eval(&lc)); // one false
+        assert!(Expr::Not(Box::new(pat("zzz"))).eval(&lc)); // negate a false
+        assert!(!Expr::Not(Box::new(pat("alpha"))).eval(&lc)); // negate a true
+
+        // column_hint walks to the first matching content leaf (here "beta" starts at col 7).
+        assert_eq!(Expr::Or(vec![pat("zzz"), pat("beta")]).column_hint(&lc), 7);
+        // a structural-only (negated) tree has no positive column ⟹ defaults to 1.
+        assert_eq!(Expr::Not(Box::new(pat("zzz"))).column_hint(&lc), 1);
+    }
+}

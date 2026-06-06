@@ -5,13 +5,15 @@
 //! A structural-only query (e.g. `--heading` with no pattern) selects lines on structure alone.
 
 use crate::md;
-use crate::md::{Context, InlineKind};
+use crate::md::Context;
+use crate::predicate::{Expr, LineCtx, Pred};
 use anyhow::{bail, Result};
 use regex::Regex;
 
 /// A `--num` heading-numbering matcher. Three intuitive forms, reusing syntax already familiar:
 /// a bare prefix (`1.2` ⟹ the 1.2 subtree), a glob (`1.2.*` ⟹ exactly one level under 1.2), or a
 /// pip/PEP-440 range (`>=1.2,<3.5`, comma = AND). Numbers compare as version tuples.
+#[derive(Clone)]
 pub enum NumSpec {
     Prefix(Vec<u32>),
     Glob(Vec<Option<u32>>), // None == '*'
@@ -146,6 +148,7 @@ pub struct Query {
 }
 
 /// A `--level` filter: an exact level or an inclusive `lo..=hi` range.
+#[derive(Clone, Copy)]
 pub struct LevelFilter {
     pub lo: u8,
     pub hi: u8,
@@ -154,9 +157,6 @@ pub struct LevelFilter {
 impl LevelFilter {
     pub fn contains(&self, lvl: u8) -> bool {
         lvl >= self.lo && lvl <= self.hi
-    }
-    fn structural(&self) -> bool {
-        true
     }
 }
 
@@ -168,26 +168,77 @@ pub struct Match {
 }
 
 impl Query {
-    /// Does this query impose any structural constraint (so a no-pattern query still selects)?
-    fn has_structural(&self) -> bool {
-        self.no_code
-            || self.code_only
-            || !self.code_langs.is_empty()
-            || self.in_section.is_some()
-            || self.heading_only
-            || self.level.as_ref().map(|l| l.structural()).unwrap_or(false)
-            || self.num.is_some()
-            || self.depth.is_some()
-            || self.bold.is_some()
-            || self.italic.is_some()
-            || self.code_span.is_some()
-            || self.strike.is_some()
-            || !self.class.is_empty()
-            || !self.class_all.is_empty()
-            || self.span_class.is_some()
-            || self.list.is_some()
-            || self.node != 0
-            || self.no_node != 0
+    /// Lower the flat (all-AND) flag set into a boolean [`Expr`] tree — the single representation
+    /// the evaluator runs. Negative flags become `Not(..)`; the pattern is the first conjunct so
+    /// its column wins in `column_hint` (mirroring Phase 1–5). Returns `None` when nothing selects
+    /// (no pattern and no structural filter) so such a query emits nothing, exactly as before.
+    ///
+    /// `--fm` is intentionally NOT lowered here: it stays a whole-file gate (`frontmatter_ok`) so
+    /// a non-matching file is skipped before its context is even built. (The `--where` DSL in
+    /// Phase 6b introduces `fm`/`path`/`name` as first-class, composable predicates instead.)
+    fn to_expr(&self) -> Option<Expr> {
+        let mut v: Vec<Expr> = Vec::new();
+        let leaf = Expr::Leaf;
+        let not = |p: Pred| Expr::Not(Box::new(Expr::Leaf(p)));
+
+        if let Some(re) = &self.pattern {
+            v.push(leaf(Pred::Pattern(re.clone())));
+        }
+        if self.no_code {
+            v.push(not(Pred::Code));
+        }
+        // A language list implies "in code", so `CodeLang` alone suffices; otherwise `--code`
+        // (recorded as `code_only`) maps to a bare `Code`.
+        if !self.code_langs.is_empty() {
+            v.push(leaf(Pred::CodeLang(self.code_langs.clone())));
+        } else if self.code_only {
+            v.push(leaf(Pred::Code));
+        }
+        if let Some(re) = &self.in_section {
+            v.push(leaf(Pred::InSection(re.clone())));
+        }
+        if self.heading_only {
+            v.push(leaf(Pred::Heading));
+        }
+        if let Some(lf) = &self.level {
+            v.push(leaf(Pred::Level(*lf)));
+        }
+        if let Some(spec) = &self.num {
+            v.push(leaf(Pred::Num(spec.clone())));
+        }
+        if let Some(d) = self.depth {
+            v.push(leaf(Pred::Depth(d)));
+        }
+        for (re, mk) in [
+            (&self.bold, Pred::Bold as fn(Regex) -> Pred),
+            (&self.italic, Pred::Italic),
+            (&self.code_span, Pred::CodeSpan),
+            (&self.strike, Pred::Strike),
+        ] {
+            if let Some(re) = re {
+                v.push(leaf(mk(re.clone())));
+            }
+        }
+        if !self.class.is_empty() {
+            v.push(leaf(Pred::Class(self.class.clone())));
+        }
+        if !self.class_all.is_empty() {
+            v.push(leaf(Pred::ClassAll(self.class_all.clone())));
+        }
+        if let Some(name) = &self.span_class {
+            v.push(leaf(Pred::SpanClass(name.clone())));
+        }
+        if let Some(want) = self.list {
+            v.push(if want { leaf(Pred::List) } else { not(Pred::List) });
+        }
+        if self.node != 0 {
+            v.push(leaf(Pred::Node(self.node)));
+        }
+        if self.no_node != 0 {
+            v.push(not(Pred::Node(self.no_node)));
+        }
+
+        if v.is_empty() { None } else { Some(Expr::And(v)) }
     }
 
     /// File-level frontmatter gate: every `--fm KEY=RE` must match a frontmatter field. Files
@@ -202,164 +253,24 @@ impl Query {
             .all(|(k, re)| fm.get(k).is_some_and(|v| re.is_match(v)))
     }
 
-    /// Run the query over one file's raw lines + its precomputed context.
+    /// Run the query over one file's raw lines + its precomputed context. Lowers the active flags
+    /// to a boolean [`Expr`] tree (one `And` of the flags, negatives as `Not`) and selects every
+    /// line for which the tree holds. The reported column is the first content/emphasis leaf's
+    /// match position, or 1 for a structural-only match — identical to the Phase 1–5 behaviour.
     pub fn run(&self, lines: &[&str], ctx: &Context) -> Vec<Match> {
+        let Some(expr) = self.to_expr() else {
+            return Vec::new(); // nothing selects (no pattern, no structural filter)
+        };
         let mut out = Vec::new();
         for (idx, raw) in lines.iter().enumerate() {
             let line = idx + 1;
-
-            // ── structural filters (AND) ────────────────────────────────────────────────
-            let in_code = ctx.in_code.get(idx).copied().unwrap_or(false);
-            if self.no_code && in_code {
-                continue;
-            }
-            if self.code_only && !in_code {
-                continue;
-            }
-            if !self.code_langs.is_empty() {
-                let lang = ctx.code_lang.get(idx).and_then(|o| o.as_deref());
-                match lang {
-                    Some(l) if self.code_langs.iter().any(|w| w.eq_ignore_ascii_case(l)) => {}
-                    _ => continue,
-                }
-            }
-            if self.heading_only && !ctx.is_heading(line) {
-                continue;
-            }
-            if let Some(lf) = &self.level {
-                match ctx.heading_level.get(idx).and_then(|o| *o) {
-                    Some(lvl) if lf.contains(lvl) => {}
-                    _ => continue,
-                }
-            }
-            if let Some(re) = &self.in_section {
-                let inside = ctx.section_path(line).iter().any(|h| re.is_match(&h.text));
-                if !inside {
-                    continue;
-                }
-            }
-            if self.num.is_some() || self.depth.is_some() {
-                // These filters apply to numbered structure only — a line with no enclosing
-                // numbered section cannot satisfy a numbering constraint, so it is excluded.
-                match ctx.section_num(line) {
-                    None => continue,
-                    Some(n) => {
-                        if let Some(spec) = &self.num
-                            && !spec.matches(&n)
-                        {
-                            continue;
-                        }
-                        if let Some(d) = self.depth
-                            && n.len() > d
-                        {
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            // ── list scope ──────────────────────────────────────────────────────────────
-            if let Some(want) = self.list
-                && ctx.in_list.get(idx).copied().unwrap_or(false) != want
-            {
-                continue;
-            }
-
-            // ── GFM node-kind scope (--node / --no-node) ───────────────────────────────
-            if self.node != 0 || self.no_node != 0 {
-                let k = ctx.node_kinds.get(idx).copied().unwrap_or(0);
-                if self.node != 0 && (k & self.node) == 0 {
-                    continue;
-                }
-                if self.no_node != 0 && (k & self.no_node) != 0 {
-                    continue;
-                }
-            }
-
-            // ── inline emphasis (regex scoped to bold/italic/code/strike on this line) ──
-            // Each active emphasis filter must match SOME span of its kind; `inline_col` records
-            // where, so a structural-only emphasis query reports the span (not column 1).
-            let mut inline_col: Option<usize> = None;
-            let mut inline_ok = true;
-            for (re, kind) in [
-                (&self.bold, InlineKind::Bold),
-                (&self.italic, InlineKind::Italic),
-                (&self.code_span, InlineKind::Code),
-                (&self.strike, InlineKind::Strike),
-            ] {
-                if let Some(re) = re {
-                    match ctx
-                        .inline
-                        .get(idx)
-                        .and_then(|spans| spans.iter().find(|s| s.kind == kind && re.is_match(&s.text)))
-                    {
-                        Some(s) => {
-                            inline_col.get_or_insert(s.col);
-                        }
-                        None => {
-                            inline_ok = false;
-                            break;
-                        }
-                    }
-                }
-            }
-            if !inline_ok {
-                continue;
-            }
-
-            // ── bracketed-span class metadata ───────────────────────────────────────────
-            let span_keys = |idx: usize| -> Vec<String> {
-                ctx.span_attrs
-                    .get(idx)
-                    .map(|al| {
-                        al.iter()
-                            .flat_map(|a| a.keys.split(',').map(|k| k.trim().to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-            if !self.class.is_empty() {
-                let keys = span_keys(idx);
-                if !self.class.iter().any(|c| keys.iter().any(|k| k == c)) {
-                    continue;
-                }
-            }
-            if !self.class_all.is_empty() {
-                let keys = span_keys(idx);
-                if !self.class_all.iter().all(|c| keys.iter().any(|k| k == c)) {
-                    continue;
-                }
-            }
-            if let Some(name) = &self.span_class {
-                let has = ctx
-                    .span_attrs
-                    .get(idx)
-                    .is_some_and(|al| al.iter().any(|a| a.classes.iter().any(|c| c == name)));
-                if !has {
-                    continue;
-                }
-            }
-
-            // ── content regex (or structural-only selection) ────────────────────────────
-            match &self.pattern {
-                Some(re) => {
-                    if let Some(m) = re.find(raw) {
-                        out.push(Match {
-                            line,
-                            col: m.start() + 1,
-                            text: raw.to_string(),
-                        });
-                    }
-                }
-                None => {
-                    if self.has_structural() {
-                        out.push(Match {
-                            line,
-                            col: inline_col.unwrap_or(1),
-                            text: raw.to_string(),
-                        });
-                    }
-                }
+            let lc = LineCtx { raw, idx, line, ctx };
+            if expr.eval(&lc) {
+                out.push(Match {
+                    line,
+                    col: expr.column_hint(&lc),
+                    text: raw.to_string(),
+                });
             }
         }
         out
