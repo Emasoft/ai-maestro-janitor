@@ -19,6 +19,9 @@ pub struct Heading {
     /// The heading's visible text with leading `#`s and surrounding `#`/space stripped — taken
     /// from the RAW line, which is deliberately lenient (works for any flavour's heading text).
     pub text: String,
+    /// The dotted section number parsed from the start of the text (`## 1.2 Foo` → `[1,2]`), if
+    /// present. Compared as a version tuple for `--num` ranges and capped by `--depth`.
+    pub num: Option<Vec<u32>>,
 }
 
 /// Per-line block context for a single file. Vectors are indexed by `line - 1`.
@@ -114,15 +117,72 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         if line >= 1 && line <= n_lines {
             ctx.heading_level[line - 1] = Some(level);
             let raw = raw_lines.get(line - 1).copied().unwrap_or("");
+            let text = strip_heading(raw);
+            let num = parse_numbering(&text);
             ctx.headings.push(Heading {
                 line,
                 level,
-                text: strip_heading(raw),
+                text,
+                num,
             });
         }
     }
     ctx.headings.sort_by_key(|h| h.line);
     ctx
+}
+
+impl Context {
+    /// The dotted section number of the DEEPEST numbered heading containing `line` — i.e. "the
+    /// section this line is in", as a version tuple. `None` if no enclosing heading is numbered.
+    pub fn section_num(&self, line: usize) -> Option<Vec<u32>> {
+        self.section_path(line)
+            .iter()
+            .rev()
+            .find_map(|h| h.num.clone())
+    }
+}
+
+/// Parse a leading dotted section number from a heading's stripped text: `1.2 Foo` → `[1,2]`,
+/// `2 Bar` → `[2]`, `Intro` → `None`. Lenient: stops at the first non-digit/non-dot.
+fn parse_numbering(text: &str) -> Option<Vec<u32>> {
+    let token: String = text
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let parts: Vec<u32> = token
+        .split('.')
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<u32>().ok())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts)
+    }
+}
+
+/// Extract the YAML frontmatter as a flat `key → raw-value-string` map. Leniently scans the
+/// leading `---` … `---` block for `key: value` lines (last value wins). Not a full YAML parser —
+/// just enough for `--fm KEY=REGEX` field filters, and it never errors on malformed frontmatter.
+pub fn parse_frontmatter(text: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    let mut lines = text.lines();
+    if lines.next().map(|l| l.trim_end()) != Some("---") {
+        return map;
+    }
+    for line in lines {
+        let t = line.trim_end();
+        if t == "---" || t == "..." {
+            break;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            let key = k.trim();
+            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+                map.insert(key.to_string(), v.trim().to_string());
+            }
+        }
+    }
+    map
 }
 
 /// Strip an ATX heading's leading `#`s and any trailing `#`s/space — leniently, from the raw line.

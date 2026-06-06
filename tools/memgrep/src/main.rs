@@ -14,7 +14,7 @@ use anyhow::Result;
 use clap::Parser;
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
-use search::{LevelFilter, Query};
+use search::{LevelFilter, NumSpec, Query};
 use std::path::{Path, PathBuf};
 
 const MD_EXTS: &[&str] = &[
@@ -69,6 +69,15 @@ struct Cli {
     /// Restrict to heading lines of this level: `2`, a range `2..3`/`2-3`, or `>=2` / `<=3` etc.
     #[arg(long = "level")]
     level: Option<String>,
+    /// Restrict to a heading-numbering: prefix `1.2`, glob `1.2.*`, or pip range `>=1.2,<3.5`.
+    #[arg(long = "num")]
+    num: Option<String>,
+    /// Cap the enclosing section number's depth (e.g. `--num 1.2 --depth 3` keeps `1.2.x`, not deeper).
+    #[arg(long = "depth")]
+    depth: Option<usize>,
+    /// Frontmatter field filter `KEY=REGEX` (repeatable, AND): the file's frontmatter must match.
+    #[arg(long = "fm")]
+    fm: Vec<String>,
 }
 
 fn compile(pat: &str, ci: bool, word: bool) -> Result<Regex> {
@@ -125,6 +134,9 @@ fn is_markdown(path: &Path) -> bool {
 
 fn search_file(path: &Path, q: &Query, out: &Output) {
     let Some(text) = read_text(path) else { return };
+    if !q.frontmatter_ok(&text) {
+        return; // file-level --fm gate failed
+    }
     let lines: Vec<&str> = text.lines().collect();
     let ctx = md::build_context(&text, lines.len());
     let matches = q.run(&lines, &ctx);
@@ -196,7 +208,9 @@ fn main() -> Result<()> {
         || !cli.code_lang.is_empty()
         || cli.in_section.is_some()
         || cli.heading
-        || cli.level.is_some();
+        || cli.level.is_some()
+        || cli.num.is_some()
+        || cli.depth.is_some();
     let mut pattern_str = cli.pattern.clone();
     let mut explicit_paths = cli.paths.clone();
     if structural_present
@@ -220,6 +234,18 @@ fn main() -> Result<()> {
         Some(s) => Some(parse_level(s).ok_or_else(|| anyhow::anyhow!("bad --level: {s}"))?),
         None => None,
     };
+    let num = match &cli.num {
+        Some(s) => Some(NumSpec::parse(s)?),
+        None => None,
+    };
+    // Each --fm is `KEY=REGEX`; the value compiles to a regex like every other matcher.
+    let mut fm = Vec::new();
+    for spec in &cli.fm {
+        let (k, re) = spec
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("bad --fm (expected KEY=REGEX): {spec}"))?;
+        fm.push((k.trim().to_string(), compile(re, cli.ignore_case, false)?));
+    }
 
     let q = Query {
         pattern,
@@ -229,6 +255,9 @@ fn main() -> Result<()> {
         in_section,
         heading_only: cli.heading,
         level,
+        num,
+        depth: cli.depth,
+        fm,
     };
 
     let out = Output {
