@@ -21,9 +21,19 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+import safe_storage
+
+# Keychain service the per-account claude.ai cookie jar is stored under (overridable for
+# tests). The jar (Chrome's already-encrypted blobs, JSON, base64) is encrypted AGAIN at
+# rest by safe_storage's backend — this is the "cookies stored encrypted in the OS
+# safe-storage, used to switch profiles" half of USER directive #2.
+COOKIE_KEYCHAIN_SERVICE = os.environ.get(
+    "CLAUDE_ROTATOR_COOKIE_KEYCHAIN_SERVICE", "Claude Code-rotator-cookies")
 
 # The full Chrome `cookies` table column set (schema verified against Chrome 13x on
 # macOS, 2026-06). ALL are NOT NULL, so a faithful round-trip must carry every one —
@@ -168,3 +178,43 @@ def inject_jar(cookies_db: Path | str, jar: CookieJar) -> int:
     finally:
         con.close()
     return written
+
+
+# --------------------------------------------------------------------------
+# Keychain orchestration — store a profile's cookies in the OS safe-storage and
+# materialize them back (the "switch profiles via keychain-stored cookies" of
+# USER directive #2). These tie cookie_vault (sqlite⇄jar) to safe_storage (encrypted
+# at rest). The live capture-flow wiring (snapshot before / scrub after a capture in
+# slot_capture_browser) is the validation-gated Phase 3 step; these primitives are it.
+# --------------------------------------------------------------------------
+def snapshot_to_keychain(email: str, cookies_db: Path | str,
+                         *, host_filter: str = "%claude.ai") -> safe_storage.StoreResult:
+    """Extract ``email``'s claude.ai cookies from its Chrome profile and store the jar
+    ENCRYPTED in the OS safe-storage under (COOKIE_KEYCHAIN_SERVICE, email).
+
+    Returns the safe_storage three-valued result so the caller fails closed: a
+    ``FAILED`` (present-but-locked keychain) must NOT be treated as "snapshotted". An
+    absent profile DB raises FileNotFoundError (the caller decides if that's expected)."""
+    jar = extract_jar(cookies_db, host_filter=host_filter)
+    return safe_storage.store(COOKIE_KEYCHAIN_SERVICE, email, jar_to_json(jar))
+
+
+def materialize_from_keychain(email: str, cookies_db: Path | str) -> int | None:
+    """Load ``email``'s stored cookie jar from safe-storage and INJECT it into the Chrome
+    profile Cookies DB at ``cookies_db`` (created if absent). Returns the number of rows
+    written, or ``None`` if no jar is stored for ``email`` (nothing to materialize).
+
+    This is the profile SWITCH: before a capture for ``email`` the daemon materializes
+    that account's keychain-stored cookies into its profile so the seeded session is
+    present without a plaintext jar ever living on disk between runs."""
+    payload = safe_storage.retrieve(COOKIE_KEYCHAIN_SERVICE, email)
+    if payload is None:
+        return None
+    jar = jar_from_json(payload)   # raises ValueError on a corrupt jar — fail fast
+    return inject_jar(cookies_db, jar)
+
+
+def forget_in_keychain(email: str) -> None:
+    """Best-effort removal of ``email``'s stored cookie jar from safe-storage (retiring
+    an account / scrubbing). Never raises."""
+    safe_storage.delete(COOKIE_KEYCHAIN_SERVICE, email)

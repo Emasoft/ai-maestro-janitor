@@ -8,6 +8,8 @@ exactly what must survive verbatim for a re-injected cookie to decrypt.
 
 from __future__ import annotations
 
+import os
+import platform
 import sqlite3
 import sys
 from pathlib import Path
@@ -18,6 +20,16 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "scripts" / "oauth_rotator"))
 
 import cookie_vault as cv  # noqa: E402
+import safe_storage as ss  # noqa: E402
+
+_TEST_COOKIE_SERVICE = "ai-maestro-janitor-cookies-TEST-%d" % os.getpid()
+
+
+def _real_macos_keychain() -> bool:
+    if platform.system() != "Darwin":
+        return False
+    from shutil import which
+    return which("security") is not None
 
 # A realistic claude.ai cookie row with BINARY encrypted_value (NUL + high bytes — the
 # bytes Chrome's OSCrypt actually produces). Full 21-column tuple in COOKIE_COLUMNS order.
@@ -153,3 +165,55 @@ def test_empty_jar_roundtrips(tmp_path: Path) -> None:
     jar = cv.extract_jar(db)
     assert len(jar) == 0
     assert len(cv.jar_from_json(cv.jar_to_json(jar))) == 0
+
+
+# ---------------------------------------------------------------------------
+# Keychain orchestration — snapshot / materialize / forget.
+# ---------------------------------------------------------------------------
+def test_materialize_returns_none_when_nothing_stored(monkeypatch: pytest.MonkeyPatch,
+                                                       tmp_path: Path) -> None:
+    """materialize_from_keychain returns None (nothing to inject) when no jar is stored —
+    no real keychain needed: force safe_storage to the 'none' backend."""
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "none")
+    assert cv.materialize_from_keychain("ghost@x.com", tmp_path / "Cookies") is None
+
+
+def test_snapshot_failed_propagates_failclosed(monkeypatch: pytest.MonkeyPatch,
+                                                tmp_path: Path) -> None:
+    """A keychain that REFUSES the write surfaces FAILED so the caller fails closed."""
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "macos")
+    db = tmp_path / "Cookies"
+    _make_db(db, [_row(".claude.ai", "sessionKey", _ENC_SESSION)])
+
+    class _R:
+        returncode = 1  # security write refused (locked/declined)
+    monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _R())
+    assert cv.snapshot_to_keychain("a@x.com", db) is ss.StoreResult.FAILED
+
+
+@pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
+def test_snapshot_then_materialize_switches_profile(monkeypatch: pytest.MonkeyPatch,
+                                                     tmp_path: Path) -> None:
+    """THE Phase-2 profile switch, end-to-end through the REAL keychain: snapshot account
+    A's cookies from its profile → store encrypted in the keychain → materialize into a
+    DIFFERENT (empty) profile → re-extract must equal the original jar (every byte). Uses a
+    throwaway PID-scoped cookie service; forgets it after."""
+    monkeypatch.delenv("CLAUDE_SAFE_STORAGE_BACKEND", raising=False)  # real macOS backend
+    monkeypatch.setattr(cv, "COOKIE_KEYCHAIN_SERVICE", _TEST_COOKIE_SERVICE)
+    email = "switch@x.com"
+    src = tmp_path / "profileA" / "Default" / "Cookies"
+    _make_db(src, [_row(".claude.ai", "cf_clearance", _ENC_CF),
+                   _row("claude.ai", "sessionKey", _ENC_SESSION)])
+    original = cv.extract_jar(src)
+    try:
+        res = cv.snapshot_to_keychain(email, src)
+        assert res is ss.StoreResult.OK, f"snapshot failed: {res}"
+
+        dst = tmp_path / "profileB" / "Default" / "Cookies"   # a fresh, empty profile
+        written = cv.materialize_from_keychain(email, dst)
+        assert written == 2
+        assert cv.extract_jar(dst).rows == original.rows       # full fidelity via the keychain
+    finally:
+        cv.forget_in_keychain(email)
+    # After forget, materialize finds nothing.
+    assert cv.materialize_from_keychain(email, tmp_path / "profileC" / "Cookies") is None
