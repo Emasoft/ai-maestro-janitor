@@ -343,6 +343,9 @@ def test_cmd_tick_runs_bootstrap_after_cmd_auto(
     recording the call sequence; all tick steps are stubbed to no-ops."""
     order: list[str] = []
     monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    # Isolate the cascade-visibility log so this order test touches NO real keychain/state/log
+    # (_log_cascade_plan does real keychain+state reads + a real _log write — TRDD-dfc0959a).
+    monkeypatch.setattr(rotator, "_log_cascade_plan", lambda: order.append("cascade-log"))
     monkeypatch.setattr(rotator, "migrate_root_to_canonical", lambda: order.append("migrate"))
     monkeypatch.setattr(rotator, "_keepalive_refresh", lambda: order.append("keepalive"))
     monkeypatch.setattr(rotator, "_repair_integrity", lambda: order.append("repair"))

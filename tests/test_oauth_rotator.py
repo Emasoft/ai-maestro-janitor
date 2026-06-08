@@ -188,6 +188,12 @@ def test_cmd_tick_survives_fail_closed_capture(monkeypatch: pytest.MonkeyPatch) 
     and the tick still proceeds to cmd_auto. The standalone `capture` command still raises."""
     monkeypatch.setattr(rotator, "claude_running", lambda: True)
     monkeypatch.setattr(rotator, "migrate_root_to_canonical", lambda: None)
+    # Isolate the side-effecting tick steps so the test touches NO real keychain/state/log:
+    # _log_cascade_plan does real keychain+state reads + a real _log write (the daemon's
+    # cascade-visibility line), and the except-block _log below also writes — both must be
+    # neutered or this unit test leaks into the production rotator.log (TRDD-dfc0959a).
+    monkeypatch.setattr(rotator, "_log_cascade_plan", lambda: None)
+    monkeypatch.setattr(rotator, "_log", lambda _m: None)
     monkeypatch.setattr(rotator, "_keepalive_refresh", lambda: None)
     monkeypatch.setattr(rotator, "_repair_integrity", lambda: None)
     monkeypatch.setattr(rotator, "_bootstrap_seeded_slots", lambda: None)

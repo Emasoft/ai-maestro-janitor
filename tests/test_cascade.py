@@ -207,3 +207,34 @@ def test_build_fleet_state_maps_keychain_and_cookies(monkeypatch: pytest.MonkeyP
     assert plan.renew_refresh == ("alt@x.com",)   # has refresh, 1h within the 2h keepalive window
     assert plan.renew_cookie == ("dead@x.com",)   # no refresh, live session → cookie-mint
     assert "live@x.com" in plan.healthy            # live account is ROTATE's concern, not RENEW/REAUTH
+
+
+def test_log_cascade_plan_writes_to_isolated_log_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REGRESSION GUARD (TRDD-dfc0959a): _log_cascade_plan is the SINGLE keychain/state/log IO
+    point for the daemon's per-beat cascade visibility. Run the REAL fn against an isolated
+    LOG_FILE + stubbed keychain reads and assert the cascade line lands in the TMP log — proving
+    it is fully isolatable. (A cmd_tick unit test that forgets to stub _log_cascade_plan would
+    otherwise leak real-account cascade lines into the production rotator.log, the exact bug this
+    guards.)"""
+    now = time.time()
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+    monkeypatch.setattr(rotator, "load_state",
+                        lambda: {"live_email": "live@x.com",
+                                 "slots": {"live@x.com": {}, "dead@x.com": {}}})
+    monkeypatch.setattr(rotator, "read_slot",
+                        lambda e: {"claudeAiOauth": {"refreshToken": "r",
+                                                     "expiresAt": int((now + 100 * 3600) * 1000)}}
+                        if e == "live@x.com"
+                        else {"claudeAiOauth": {"expiresAt": int((now - 3600) * 1000)}})
+    monkeypatch.setattr(rotator, "read_live_blob",
+                        lambda: {"claudeAiOauth": {"refreshToken": "r",
+                                                   "expiresAt": int((now + 100 * 3600) * 1000)}})
+    monkeypatch.setattr(rotator, "_profile_has_session_key", lambda e, now=None: e == "dead@x.com")
+
+    rotator._log_cascade_plan()  # the REAL fn — must not raise, must write only to the tmp log
+
+    written = (tmp_path / "rotator.log").read_text(encoding="utf-8")
+    assert "cascade:" in written
+    assert "renew-cookie=dead@x.com" in written  # dead@x.com → cookie-mint leg, proven end-to-end

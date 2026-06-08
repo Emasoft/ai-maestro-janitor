@@ -1489,6 +1489,24 @@ def _build_fleet_state(state: dict, now: float) -> list[cascade.AccountState]:
     return out
 
 
+def _log_cascade_plan() -> None:
+    """Log the explicit ROTATE→RENEW→REAUTH cascade plan (TRDD-dfc0959a) for the current
+    fleet — the per-account fallback legs (renew-refresh / renew-cookie / reauth-nudge /
+    waiting), so the daemon's cascade is auditable in rotator.log. Best-effort VISIBILITY
+    ONLY: never a gate, and a snapshot failure (unreadable keychain/state) must not break the
+    beat. Extracted from cmd_tick so the daemon has ONE call and tests have ONE mock point
+    (it does real keychain/state/log IO, so a cmd_tick test isolates it by stubbing THIS fn).
+
+    The authoritative reauth-nudge grace is the detector's env-configurable value; this summary
+    uses the cascade default, so a borderline account may bucket slightly differently in the LOG
+    than in the nudge — the detector nudge is the source of truth."""
+    try:
+        fleet = _build_fleet_state(load_state(), time.time())
+        _log(cascade.cascade_plan(fleet, keepalive_ahead_h=KEEPALIVE_AHEAD_H).summary_line())
+    except Exception as exc:  # noqa: BLE001 — explicit-cascade visibility log is best-effort
+        _log("cascade: plan unavailable (%r)" % exc)
+
+
 def cmd_tick(only_if_running: bool) -> int:
     """One daemon beat: migrate the legacy root once, keepalive-refresh slot tokens nearing
     expiry (F2b), run the Pillar-2 integrity-repair pass (verify/restore state + slots + live
@@ -1507,17 +1525,7 @@ def cmd_tick(only_if_running: bool) -> int:
     # whichever root holds the state, so this is just promotion — the NEXT tick process
     # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
     migrate_root_to_canonical()
-    # Explicit ROTATE→RENEW→REAUTH cascade (TRDD-dfc0959a): log the per-account fallback
-    # legs at the START of the beat so the daemon's cascade is auditable in rotator.log.
-    # Best-effort VISIBILITY only — never a gate; a snapshot failure must not break the beat.
-    # (The authoritative reauth-nudge grace is the detector's env-configurable value; this
-    # summary uses the cascade default, so a borderline account may bucket slightly
-    # differently in the LOG than in the nudge — the detector nudge is the source of truth.)
-    try:
-        _fleet = _build_fleet_state(load_state(), time.time())
-        _log(cascade.cascade_plan(_fleet, keepalive_ahead_h=KEEPALIVE_AHEAD_H).summary_line())
-    except Exception as exc:  # noqa: BLE001 — explicit-cascade visibility log is best-effort
-        _log("cascade: plan unavailable (%r)" % exc)
+    _log_cascade_plan()       # explicit ROTATE→RENEW→REAUTH cascade visibility (best-effort, never a gate)
     refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
     if refreshed:
         _log("keepalive: refreshed %s" % ", ".join(refreshed))  # durable record of token-prolonging action
