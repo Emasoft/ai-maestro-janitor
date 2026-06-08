@@ -1223,11 +1223,32 @@ def _bootstrap_eligible(has_refresh: bool, has_session_key: bool) -> bool:
 
 
 def _profiles_root() -> Path:
-    """The Chrome profiles root: ``<ROOT>/profiles``, overridable via
-    CLAUDE_ROTATOR_PROFILES — mirrors open-login.sh / slot_capture_browser so all
-    three agree on where ``chrome-profile-<email>`` lives."""
+    """The Chrome profiles root — the SINGLE resolver every profile consumer shares
+    (``_profile_has_session_key`` here and ``slot_capture_browser.profile_dir``), so
+    open-login.sh / the daemon / the capture all agree on where
+    ``chrome-profile-<email>`` lives. Resolution order:
+
+      1. ``CLAUDE_ROTATOR_PROFILES`` env override — explicit wins (used by tests and
+         by any caller that pins the profiles dir).
+      2. the canonical ``<ROOT>/profiles`` when it EXISTS.
+      3. the legacy ``~/.claude/account-rotator/profiles`` when IT exists but the
+         canonical one does NOT — a DURABLE fallback that replaces the old runtime
+         symlink: the human seeded the login under the standalone account-rotator
+         layout (open-login.sh's historical home) while state.json has since migrated
+         to the DATA dir (TRDD-7100178d), so the profiles and the state can live under
+         different roots. Without this, the daemon would look under an empty
+         ``<DATA>/oauth-rotator/profiles`` and never find the seeded session.
+      4. else ``<ROOT>/profiles`` — the default a fresh install writes to."""
     raw = os.environ.get("CLAUDE_ROTATOR_PROFILES", "").strip()
-    return Path(raw) if raw else (ROOT / "profiles")
+    if raw:
+        return Path(raw)
+    canonical = ROOT / "profiles"
+    if canonical.is_dir():
+        return canonical
+    legacy = _legacy_rotator_root() / "profiles"
+    if legacy.is_dir():
+        return legacy
+    return canonical
 
 
 def _profile_has_session_key(email: str, *, now: float | None = None) -> bool:
