@@ -3,7 +3,7 @@ trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
 column: dev
 created: 2026-06-08T16:53:09+0200
-updated: 2026-06-08T18:04:04+0200
+updated: 2026-06-08T18:16:52+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -101,11 +101,34 @@ No software fix for "all accounts maxed"; only a window reset, a fresh login, or
 helps. After the USER's `/login`, fmuaddib is live + healthy (7d=58%). The Phase-0/1 fixes are
 NOT live on the daemon yet (it runs cached 0.6.1) — needs republish + restart to take effect.
 
-**NEXT ACTION:** Phase 2 = keychain-encrypted cross-platform cookies + the `safe_storage`
-abstraction (macOS Keychain / Linux Secret Service / Windows DPAPI); store the per-account
-claude.ai cookie jar encrypted, inject into the Chrome profile on capture, scrub after. Then
-Phase 3 = end-to-end validate (non-429 + real reauth with "stay signed in") + republish +
-restart so the daemon runs the new cascade. DO NOT push the unpushed commits without USER go.
+**PHASE 2 MECHANICS — DONE (2026-06-08), verified with REAL keychain + real sqlite.** The
+keychain-encrypted cross-platform cookie storage (USER directive #2), built foundation-first:
+- 2a `scripts/oauth_rotator/safe_storage.py` — the cross-platform OS-secret API
+  (store/retrieve/delete; macOS `security` / Linux `secret-tool` / Windows DPAPI). Three-valued
+  StoreResult (OK/NO_BACKEND/FAILED) for fail-closed. TWO real bugs caught by REAL tests:
+  (1) macOS stdin form truncates at 128 bytes via getpass (TRDD-5539cd6e) → value on argv;
+  (2) macOS `security -w` HEX-DUMPS non-printable/unicode values → base64-wrap at the public
+  API. Verified vs the real keychain with a 6 KB AND a unicode/newline secret.
+- 2b `scripts/oauth_rotator/cookie_vault.py` — Chrome cookies sqlite⇄jar⇄json: extract +
+  inject. We NEVER decrypt a cookie — the jar carries Chrome's OSCrypt-encrypted blobs (stable
+  per-USER key), so re-injection is a faithful full-row copy (all 21 NOT-NULL columns). Verified
+  round-trip with an every-byte-0..255 blob.
+- 2c-mechanics — `snapshot_to_keychain` / `materialize_from_keychain` / `forget_in_keychain`:
+  the profile SWITCH. Double-encrypted at rest (Chrome blob + safe_storage). Verified END-TO-END
+  through the REAL macOS keychain: snapshot A → keychain → materialize into a DIFFERENT empty
+  profile → re-extract == original.
+- 166 oauth+cascade+safe_storage+cookie_vault tests green, ruff clean.
+
+**NEXT ACTION (Phase 2c-wiring + Phase 3, both validation-gated):**
+1. 2c-WIRING — wire the 2c-mechanics into the LIVE capture: in `slot_capture_browser.py`,
+   `materialize_from_keychain(email, profile_cookies)` BEFORE the CDP capture, and
+   `snapshot_to_keychain(email, profile_cookies)` AFTER a successful login + scrub the on-disk
+   plaintext. This touches the live capture path; it cannot be unit-validated without a real
+   claude.ai capture, so it pairs with Phase 3.
+2. Phase 3 — end-to-end validate on a non-429 session + a real reauth ("stay signed in") →
+   confirm RENEW mints via CDP-attach → ROTATE swaps → cookies snapshot/materialize round-trips
+   live → then republish + restart so the daemon runs the new cascade + cookie vault.
+DO NOT push the unpushed commits (now 55) without explicit USER go.
 
 **Load-bearing facts:**
 - Today's transport fix (commit d05b94c) already moved the renew capture to CDP-attach to
