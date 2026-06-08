@@ -3,7 +3,7 @@ trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
 column: dev
 created: 2026-06-08T16:53:09+0200
-updated: 2026-06-08T17:31:48+0200
+updated: 2026-06-08T18:04:04+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -77,11 +77,35 @@ A-F3/B-F3 (supervisor inline root/slots-dir dup, correct today); A-F4
 user-scope shell scripts INTO the repo + an installer so these fixes ship to every install
 (today they are local-machine + backed-up only).
 
-**NEXT ACTION:** Phase 1 = the 3-layer cascade paradigm (daemon tick + helpers as an
-explicit ROTATE → RENEW → REAUTHENTICATE-nudge cascade; one shared decision module both
-daemon and detectors import). Then Phase 2 = keychain-encrypted cross-platform cookies.
-Phase 1+ is XL and AWAITS USER GO; end-to-end validation needs a non-429 session + a real
-reauth with "stay signed in". DO NOT push the unpushed commits without explicit USER go.
+**PHASE 1 — DONE (2026-06-08), verified.** The 3-layer cascade SSOT landed:
+- NEW `scripts/oauth_rotator/cascade.py` = the SINGLE SOURCE OF TRUTH. `classify()` buckets each
+  ALTERNATE account into HEALTHY / RENEW_REFRESH / RENEW_COOKIE / REAUTH_NUDGE /
+  WAIT_SETUP_TOKEN; the live account is ROTATE's concern (cmd_auto) so it classifies HEALTHY.
+  Pure leaf (stdlib only, no rotator import → no cycle); thresholds passed by callers.
+- DELEGATION (proven byte-equivalent by SSOT tests BEFORE wiring): `rotator._bootstrap_eligible`
+  → RENEW_COOKIE; `oauth-login-needed.slot_needs_login` → REAUTH_NUDGE; `.slot_capture_stalled`
+  → RENEW_COOKIE. Daemon + detectors can no longer disagree.
+- `cmd_tick` logs an explicit per-account cascade plan each beat via `_log_cascade_plan()`
+  (best-effort, never a gate) → auditable in rotator.log.
+- BUG FOUND+FIXED (recheck): the new cascade-log block made two pre-existing cmd_tick unit tests
+  read the REAL keychain + leak `cascade:` lines into the PRODUCTION rotator.log. Extracted
+  `_log_cascade_plan()` as the single mock point; both tests isolated; added a guardrail test
+  proving the real fn writes only to a tmp log (real-log line count unchanged across the runs).
+  136 oauth+cascade tests green, ruff clean.
+
+**LIVE DIAGNOSIS (2026-06-08, why the USER had to manually rotate):** the daemon rotator.log
+showed `auto: live emanuele.sabetta@gmail.com exhausted (5h=28% 7d=100%) but no alternate is
+healthy + below safe threshold — all paid accounts maxed`. ROTATE worked correctly — it had
+NOWHERE to switch to because BOTH paid accounts were at/near their weekly wall simultaneously.
+No software fix for "all accounts maxed"; only a window reset, a fresh login, or a 3rd account
+helps. After the USER's `/login`, fmuaddib is live + healthy (7d=58%). The Phase-0/1 fixes are
+NOT live on the daemon yet (it runs cached 0.6.1) — needs republish + restart to take effect.
+
+**NEXT ACTION:** Phase 2 = keychain-encrypted cross-platform cookies + the `safe_storage`
+abstraction (macOS Keychain / Linux Secret Service / Windows DPAPI); store the per-account
+claude.ai cookie jar encrypted, inject into the Chrome profile on capture, scrub after. Then
+Phase 3 = end-to-end validate (non-429 + real reauth with "stay signed in") + republish +
+restart so the daemon runs the new cascade. DO NOT push the unpushed commits without USER go.
 
 **Load-bearing facts:**
 - Today's transport fix (commit d05b94c) already moved the renew capture to CDP-attach to
