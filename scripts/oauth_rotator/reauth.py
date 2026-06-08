@@ -42,7 +42,12 @@ AppleScript. The only *nix-specific piece is tmux (use WSL on Windows).
     non-default data directory"), so a dedicated profile is MANDATORY:
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \\
             --remote-debugging-port=9222 \\
-            --user-data-dir="$HOME/.claude/account-rotator/reauth-chrome"
+            --user-data-dir="<ROTATOR_DATA_DIR>/reauth-chrome"
+    where <ROTATOR_DATA_DIR> is the rotator's DATA-dir root
+    (rotator._rotator_root() — the canonical janitor DATA dir, NOT the legacy
+    ~/.claude/account-rotator standalone path). reauth.py PRINTS the exact
+    launch command (with the resolved path) at startup and on --dry-run, so
+    just copy that line.
     (Linux: `google-chrome` + the same two flags; Windows: `chrome.exe` + same.)
     The FIRST time, log into claude.ai in that window — the session persists in
     that user-data-dir, so later runs are hands-free. The script connects at
@@ -394,6 +399,17 @@ def main(argv: list[str]) -> int:
     log(f"tmux session     : {args.session}")
     log(f"authorize click  : {'MANUAL (you click)' if args.manual else f'Playwright/CDP @ {args.cdp_url}'}")
 
+    # Resolve the rotator engine ONCE (TRDD-dfc0959a A-F1) so the dedicated debug-Chrome
+    # user-data-dir we tell the human to launch is anchored on the SAME canonical rotator
+    # DATA root as everything else (rot.ROOT) — never the legacy ~/.claude/account-rotator
+    # literal. Resolving here (before the dry-run return) means --dry-run shows it too.
+    rot = _load_rotator(args.rotator_root)
+    reauth_chrome = (rot.ROOT / "reauth-chrome") if rot is not None else None
+    if reauth_chrome is not None:
+        log(f"debug Chrome dir : {reauth_chrome}")
+        log(f'  launch Chrome  : <chrome> --remote-debugging-port=<port in --cdp-url> '
+            f'--user-data-dir="{reauth_chrome}"')
+
     if args.dry_run:
         log("DRY RUN — would: launch the login command in tmux, read the consent URL, "
             + ("wait for YOU to click Authorize, " if args.manual
@@ -406,8 +422,8 @@ def main(argv: list[str]) -> int:
         kill_session(args.session)
 
     # Snapshot the live token BEFORE re-auth so we can PROVE it changed afterward
-    # (claude's "Login successful." is not proof on its own).
-    rot = _load_rotator(args.rotator_root)
+    # (claude's "Login successful." is not proof on its own). `rot` was resolved
+    # above (for the debug-Chrome-dir line) — reuse it, don't re-import.
     pre_fp = _live_fingerprint(rot) if rot else ""
     if rot is not None:
         log(f"pre-reauth live token fp: {pre_fp or '(none)'}  (slots dir: {rot.SLOTS})")

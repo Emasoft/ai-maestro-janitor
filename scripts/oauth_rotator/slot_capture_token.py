@@ -25,9 +25,12 @@ session on the first.
 Token safety: the token is read from stdin, never echoed, never placed in argv,
 never written anywhere except the 0600 slot file.
 
-Paths (slots/, state.json) resolve via ``rotator._rotator_root()`` — plugin
-mode = ``${CLAUDE_PLUGIN_DATA}/oauth-rotator/``; standalone =
-``~/.claude/account-rotator/``. This script holds no path of its own.
+Paths (slots, state.json) resolve via ``rotator._rotator_root()`` — the canonical
+janitor DATA-dir root (``${CLAUDE_PLUGIN_DATA}/.../oauth-rotator``), with the
+legacy ``~/.claude/account-rotator/`` only as a READ fallback (see rotator.py for
+the exact resolution order). Slot blobs are written ENCRYPTED to the OS keychain
+via ``rotator.write_slot``; the plaintext ``slots/<email>.json`` is legacy /
+read-fallback only. This script holds no path of its own.
 """
 from __future__ import annotations
 

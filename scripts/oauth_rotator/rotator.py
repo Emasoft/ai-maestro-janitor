@@ -1491,7 +1491,7 @@ def cmd_tick(only_if_running: bool) -> int:
 def cmd_live_email() -> int:
     """Print the authoritative email of the CURRENTLY LIVE account, or empty.
 
-    Used by reauth.sh as the identity guard's "intended" account. Prefers the
+    Used by reauth.py as the identity guard's "intended" account. Prefers the
     /roles resolution of the live token (ground truth from Anthropic); falls
     back to the last-known live_email in state when the live token is too
     expired for /roles to answer (which is exactly the case that triggers a
@@ -1508,7 +1508,7 @@ def cmd_live_email() -> int:
 def cmd_known_emails() -> int:
     """Print every known account email (live + all slots), one per line.
 
-    reauth.sh uses this list to detect a *positive* wrong-account match on the
+    reauth.py uses this list to detect a *positive* wrong-account match on the
     consent page (if the page shows a known email that is NOT the intended one,
     abort before clicking Authorize).
     """
@@ -1522,11 +1522,67 @@ def cmd_known_emails() -> int:
     return 0
 
 
+def cmd_print_profiles_root() -> int:
+    """Print the canonical Chrome-profiles root (``_profiles_root()``).
+
+    The shell helpers (open-login.sh / check-login.sh / lifetime-status.sh) call
+    this so every profile consumer resolves the SAME path the Python engine uses,
+    instead of hardcoding the legacy ``~/.claude/account-rotator/profiles`` default
+    and diverging on a migrated / symlink-less install (audit H1). Read-only.
+    """
+    print(_profiles_root())
+    return 0
+
+
+def cmd_oauth_health(as_json: bool) -> int:
+    """Print per-account OAuth health (has_refresh + expiry) read from the KEYCHAIN.
+
+    The source is the keychain slots (and the live credential for the live account),
+    NOT the legacy plaintext ``slots/<email>.json`` files the keychain migration
+    deletes by design. lifetime-status.sh consumes this so its "is OAuth healthy /
+    safe to refresh" verdict reflects the real keychain state on a migrated machine
+    instead of asserting a false "no healthy OAuth" banner (audit C2). Read-only.
+
+    With ``--json`` emits ``{email: {has_refresh, expires_days, expires_at}}``;
+    otherwise a human-readable line per account.
+    """
+    state = load_state()
+    emails = set(state.get("slots", {}).keys())
+    live = state.get("live_email")
+    if live:
+        emails.add(live)
+    live_blob = read_live_blob() if live else None
+    health: dict[str, dict] = {}
+    for e in sorted(emails):
+        # Live account: trust the live keychain blob (freshest); everyone else (and a
+        # failed live read) falls back to that account's stored slot.
+        blob = (live_blob if (e == live and live_blob is not None) else None) or read_slot(e)
+        if not isinstance(blob, dict):
+            health[e] = {"has_refresh": False, "expires_days": None, "expires_at": None}
+            continue
+        o = _oauth(blob)
+        hrs = expires_in_h(blob)
+        health[e] = {
+            "has_refresh": bool(o.get("refreshToken")),
+            "expires_days": (hrs / 24) if hrs is not None else None,
+            "expires_at": o.get("expiresAt"),
+        }
+    if as_json:
+        print(json.dumps(health))
+    else:
+        for e, h in health.items():
+            days = ("%.1f" % h["expires_days"]) if h["expires_days"] is not None else "?"
+            print("%s\trefresh=%s\tdays=%s"
+                  % (e, "yes" if h["has_refresh"] else "no", days))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print("usage: rotator.py {capture [--only-if-claude-running] | "
               "tick [--only-if-claude-running] | auto | usage | live-email | "
-              "known-emails | list | switch <email> | migrate-slots | "
+              "known-emails | print-profiles-root | oauth-health [--json] | "
+              "list | switch <email> | migrate-slots | "
               "delete-plaintext-slots | migrate-root}")
         return 2
     cmd = argv[0]
@@ -1537,6 +1593,10 @@ def main(argv: list[str]) -> int:
         return cmd_live_email()
     if cmd == "known-emails":
         return cmd_known_emails()
+    if cmd == "print-profiles-root":
+        return cmd_print_profiles_root()
+    if cmd == "oauth-health":
+        return cmd_oauth_health("--json" in argv[1:])
     if cmd == "list":
         return cmd_list()
 

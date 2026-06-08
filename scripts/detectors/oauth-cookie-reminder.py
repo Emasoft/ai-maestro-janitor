@@ -37,6 +37,7 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import dedupe  # noqa: E402
+import rotator  # noqa: E402  # scripts/oauth_rotator/rotator.py (shared profiles-root resolver)
 import state  # noqa: E402
 import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain-aware slot facts)
 
@@ -107,9 +108,12 @@ def main() -> int:
     if home is None:
         return 0  # opt-in: no rotator configured on this machine → silent no-op
 
-    profiles_root = Path(
-        os.environ.get("CLAUDE_ROTATOR_PROFILES", "").strip() or str(home / "profiles")
-    )
+    # Resolve the Chrome-profiles root through the SHARED engine resolver (audit B-F2)
+    # so this detector agrees with rotator/open-login.sh/the capture on a migrated
+    # install. _profiles_root() honours CLAUDE_ROTATOR_PROFILES first (tests + the
+    # standalone seed-login override) and ADDS the legacy ~/.claude/account-rotator
+    # fallback this detector previously lacked.
+    profiles_root = rotator._profiles_root()
     remind_days = state.coerce_int(os.environ.get("CLAUDE_ROTATOR_COOKIE_REMIND_DAYS"), 7)
     setup_remind_days = state.coerce_int(os.environ.get("CLAUDE_ROTATOR_SETUP_REMIND_DAYS"), 30)
 

@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -43,11 +42,9 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import dedupe  # noqa: E402
+import rotator  # noqa: E402  # scripts/oauth_rotator/rotator.py (canonical session-key probe + profiles root)
 import state  # noqa: E402
 import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain-aware slot facts)
-
-# Chrome stores expires_utc as microseconds since 1601-01-01.
-_EPOCH_OFFSET_SEC = 11644473600
 
 
 def _rotator_home() -> Path | None:
@@ -102,39 +99,18 @@ def slot_capture_stalled(has_refresh: bool, has_session_key: bool) -> bool:
     return (not has_refresh) and has_session_key
 
 
-def _cookie_days(profiles_root: Path, email: str, now: float) -> float | None:
-    """Days until the persistent claude.ai session cookie expires, or None.
+def _has_live_session(email: str, now: float) -> bool:
+    """True iff a live (not-yet-expired) claude.ai sessionKey cookie exists for the
+    account — i.e. the post-login auto-bootstrap could mint a refresh token from it.
 
-    Mirrors oauth-cookie-reminder._cookie_days (the canonical reader). Opens the
-    account's Chrome Cookies sqlite read-only; returns None when there is no live
-    sessionKey, which is exactly the "no seeded session" signal the login nudge
-    keys off."""
-    db = profiles_root / f"chrome-profile-{email}" / "Default" / "Cookies"
-    if not db.is_file():
-        return None
-    chrome_now = int((now + _EPOCH_OFFSET_SEC) * 1_000_000)
-    try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        rows = con.execute(
-            "SELECT name, expires_utc FROM cookies WHERE host_key LIKE '%claude.ai'"
-        ).fetchall()
-        con.close()
-    except sqlite3.Error:
-        return None
-    sk = [exp for (n, exp) in rows if n == "sessionKey" and exp > chrome_now]
-    if sk:
-        return (sk[0] / 1_000_000 - _EPOCH_OFFSET_SEC - now) / 86400.0
-    persistent = [exp for (_, exp) in rows if exp > chrome_now]
-    if len(persistent) >= 5:
-        return (max(persistent) / 1_000_000 - _EPOCH_OFFSET_SEC - now) / 86400.0
-    return None
-
-
-def _has_live_session(profiles_root: Path, email: str, now: float) -> bool:
-    """True iff a live (not-yet-expired) claude.ai session cookie exists for the
-    account — i.e. the post-login auto-bootstrap could mint a refresh token from it."""
-    cd = _cookie_days(profiles_root, email, now)
-    return cd is not None and cd > 0
+    Delegates to the canonical engine probe ``rotator._profile_has_session_key`` so
+    the LOGIN-eligibility decision is IDENTICAL to the rotator's own bootstrap gate
+    (audit B-F4): sessionKey-only, ``host_key LIKE '%claude.ai'``, ``expires_utc >
+    now`` (a session-cookie with ``expires_utc == 0`` is correctly excluded). The
+    engine fn resolves the profiles root via ``rotator._profiles_root()`` — the
+    shared resolver with the legacy fallback — so this also fixes the migrated-install
+    root bypass (audit B-F1) for the session check in one stroke."""
+    return rotator._profile_has_session_key(email, now=now)
 
 
 def _grace_days() -> float:
@@ -159,9 +135,6 @@ def main() -> int:
     if home is None:
         return 0  # opt-in: no rotator configured on this machine -> silent no-op
 
-    profiles_root = Path(
-        os.environ.get("CLAUDE_ROTATOR_PROFILES", "").strip() or str(home / "profiles")
-    )
     grace = _grace_days()
     now = time.time()
 
@@ -176,7 +149,7 @@ def main() -> int:
     needing: list[str] = []   # need a one-time human LOGIN (no refresh, no session, expired)
     stalled: list[str] = []   # B3: logged in (has session) but OAuth capture not yet completed
     for f in facts:
-        has_session = _has_live_session(profiles_root, f.email, now)
+        has_session = _has_live_session(f.email, now)
         if slot_needs_login(f.has_refresh, f.expires_days, has_session, grace):
             needing.append(f.email)
         elif slot_capture_stalled(f.has_refresh, has_session):
