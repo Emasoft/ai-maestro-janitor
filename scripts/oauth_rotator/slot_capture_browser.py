@@ -55,6 +55,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import secrets
 import socket
@@ -346,15 +347,67 @@ def _exchange(code: str, verifier: str, state: str) -> dict:
         return json.loads(r.read().decode())
 
 
+def _keychain_cookies_enabled() -> bool:
+    """OPT-IN flag for the Phase-2c keychain cookie vault (TRDD-dfc0959a). DEFAULT OFF:
+    when unset the capture flow is byte-identical to before — cookies stay only in the
+    Chrome profile's OSCrypt sqlite. Flip on (Phase 3, post live-validation) to also
+    keep them encrypted in the OS keychain and materialize/snapshot around a capture."""
+    return os.environ.get("CLAUDE_ROTATOR_KEYCHAIN_COOKIES", "").strip().lower() in (
+        "1", "true", "on", "yes")
+
+
+def _cookies_db_for(email: str) -> Path:
+    """The Chrome Cookies sqlite for an account's seeded profile."""
+    return profile_dir(email) / "Default" / "Cookies"
+
+
+def _materialize_cookies(profile_email: str) -> None:
+    """BEFORE a capture (Chrome not yet launched → the sqlite is unlocked): inject this
+    profile's keychain-stored cookies into its Chrome Cookies DB so the seeded session is
+    present without a plaintext jar living on disk between runs. No-op unless the opt-in
+    flag is set. BEST-EFFORT: any failure logs and the capture proceeds with whatever the
+    on-disk profile already holds — this hardening must NEVER break the proven capture."""
+    if not _keychain_cookies_enabled():
+        return
+    try:
+        import cookie_vault  # lazy: a cookie_vault issue must not break capture's import
+        n = cookie_vault.materialize_from_keychain(profile_email, _cookies_db_for(profile_email))
+        if n is not None:
+            print(f"[capture] materialized {n} keychain cookie row(s) into {profile_email}'s profile")
+    except Exception as exc:  # noqa: BLE001 — opt-in hardening, never a capture gate
+        print(f"[capture] keychain cookie materialize skipped ({exc!r})", file=sys.stderr)
+
+
+def _snapshot_cookies(profile_email: str) -> None:
+    """AFTER a successful capture (Chrome has exited → the sqlite is unlocked): snapshot
+    this profile's claude.ai cookies back into the OS keychain (encrypted at rest). No-op
+    unless the opt-in flag is set. BEST-EFFORT: the slot is already filed, so any failure
+    here is pure-hardening loss — it logs and returns."""
+    if not _keychain_cookies_enabled():
+        return
+    try:
+        import cookie_vault  # lazy (see _materialize_cookies)
+        res = cookie_vault.snapshot_to_keychain(profile_email, _cookies_db_for(profile_email))
+        print(f"[capture] snapshotted {profile_email}'s cookies to keychain: {res.value}")
+    except FileNotFoundError:
+        pass  # no Cookies DB (profile never logged in) — nothing to snapshot
+    except Exception as exc:  # noqa: BLE001
+        print(f"[capture] keychain cookie snapshot skipped ({exc!r})", file=sys.stderr)
+
+
 def capture(email: str, headless: bool) -> int:
     print(f"[capture] rotator state root: {rotator.ROOT}")
     print(f"[capture] target slot       : {rotator.slot_path(email)}")
+    # The profile we are about to drive belongs to the argv email (the captured account
+    # may resolve differently via /roles below; the COOKIES belong to this profile).
+    profile_email = email
 
     verifier = _b64url(secrets.token_bytes(32))
     challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
     state = _b64url(secrets.token_bytes(32))
     url = _build_url(challenge, state)
 
+    _materialize_cookies(profile_email)  # opt-in Phase-2c: keychain cookies → profile (best-effort)
     raw_code = _drive_browser(email, url, state, headless)
     if not raw_code:
         print("[capture] FAILED: no authorization code captured.")
@@ -413,6 +466,12 @@ def capture(email: str, headless: bool) -> int:
         "via": "slot_capture_browser(full-oauth)",
     }
     rotator.save_state(st)
+
+    # opt-in Phase-2c: snapshot the (now possibly refreshed) profile cookies back into the
+    # keychain, encrypted at rest. Keyed by the PROFILE owner (argv email), since the
+    # cookies belong to chrome-profile-<profile_email> regardless of which account /roles
+    # resolved the token to. Best-effort — the slot is already filed.
+    _snapshot_cookies(profile_email)
 
     eh = rotator.expires_in_h(blob)
     has_rt = "with refreshToken ✓" if inner["refreshToken"] else "NO refreshToken ✗"
