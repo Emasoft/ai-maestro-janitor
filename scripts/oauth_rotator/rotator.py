@@ -56,6 +56,7 @@ from pathlib import Path
 # already puts scripts/lib on sys.path); the insert below makes the import work in the
 # standalone case too. janitor_integrity is pure-stdlib, so it adds no PEP-723 deps.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
 
@@ -1218,8 +1219,18 @@ def _bootstrap_eligible(has_refresh: bool, has_session_key: bool) -> bool:
     refresh-bearing slot from (slot_capture_browser auto-clicks Authorize on the
     seeded session). A slot that already has a refreshToken needs nothing; a slot
     with no live session has nothing to bootstrap FROM (that one needs a human
-    login — surfaced by the oauth-login-needed detector)."""
-    return (not has_refresh) and has_session_key
+    login — surfaced by the oauth-login-needed detector).
+
+    Delegates to the cascade SSOT (TRDD-dfc0959a): bootstrap-eligible ⇔ the
+    account lands in the cascade's RENEW_COOKIE leg. Token expiry is irrelevant to
+    this leg (the cookie, not the token, is what gets minted from), so it is
+    passed as None. test_cascade proves this equals the historical truth table."""
+    return cascade.classify(
+        cascade.AccountState(
+            email="", is_live=False, has_refresh=has_refresh,
+            token_expires_h=None, has_session_cookie=has_session_key,
+        )
+    ) is cascade.CascadeLeg.RENEW_COOKIE
 
 
 def _profiles_root() -> Path:
@@ -1451,6 +1462,33 @@ def _repair_integrity() -> list[str]:
     return actions
 
 
+def _build_fleet_state(state: dict, now: float) -> list[cascade.AccountState]:
+    """Snapshot every account's cascade-relevant facts (all NON-secret) for the explicit
+    cascade plan logged each beat: has_refresh + token-expiry from the keychain slot (the
+    live account's from the live store), has_session_cookie from the seeded Chrome profile —
+    the same sources keepalive/bootstrap already read. Best-effort per account: an unreadable
+    slot contributes an all-False state (→ the REAUTH_NUDGE leg in the log) rather than
+    aborting the snapshot."""
+    live_email = state.get("live_email")
+    emails = set((state.get("slots") or {}).keys())
+    if live_email:
+        emails.add(live_email)
+    out: list[cascade.AccountState] = []
+    for email in sorted(emails):
+        blob = read_slot(email)
+        if blob is None and email == live_email:
+            blob = read_live_blob()  # the live token lives in the live store, not a slot
+        inner = _oauth(blob) if blob else {}
+        out.append(cascade.AccountState(
+            email=email,
+            is_live=(email == live_email),
+            has_refresh=bool(inner.get("refreshToken") or inner.get("refresh_token")),
+            token_expires_h=(expires_in_h(blob) if blob else None),
+            has_session_cookie=_profile_has_session_key(email, now=now),
+        ))
+    return out
+
+
 def cmd_tick(only_if_running: bool) -> int:
     """One daemon beat: migrate the legacy root once, keepalive-refresh slot tokens nearing
     expiry (F2b), run the Pillar-2 integrity-repair pass (verify/restore state + slots + live
@@ -1469,6 +1507,17 @@ def cmd_tick(only_if_running: bool) -> int:
     # whichever root holds the state, so this is just promotion — the NEXT tick process
     # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
     migrate_root_to_canonical()
+    # Explicit ROTATE→RENEW→REAUTH cascade (TRDD-dfc0959a): log the per-account fallback
+    # legs at the START of the beat so the daemon's cascade is auditable in rotator.log.
+    # Best-effort VISIBILITY only — never a gate; a snapshot failure must not break the beat.
+    # (The authoritative reauth-nudge grace is the detector's env-configurable value; this
+    # summary uses the cascade default, so a borderline account may bucket slightly
+    # differently in the LOG than in the nudge — the detector nudge is the source of truth.)
+    try:
+        _fleet = _build_fleet_state(load_state(), time.time())
+        _log(cascade.cascade_plan(_fleet, keepalive_ahead_h=KEEPALIVE_AHEAD_H).summary_line())
+    except Exception as exc:  # noqa: BLE001 — explicit-cascade visibility log is best-effort
+        _log("cascade: plan unavailable (%r)" % exc)
     refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
     if refreshed:
         _log("keepalive: refreshed %s" % ", ".join(refreshed))  # durable record of token-prolonging action

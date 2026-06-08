@@ -41,6 +41,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
+import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
 import dedupe  # noqa: E402
 import rotator  # noqa: E402  # scripts/oauth_rotator/rotator.py (canonical session-key probe + profiles root)
 import state  # noqa: E402
@@ -78,12 +79,20 @@ def slot_needs_login(
 
     Needs a human login iff it can't self-renew AND has no seeded session to
     auto-bootstrap from AND its token is expired / near-expired.
+
+    Delegates to the cascade SSOT (TRDD-dfc0959a): a LOGIN is needed ⇔ the account
+    lands in the cascade's REAUTH_NUDGE leg, so the daemon's cascade and this nudge
+    can never disagree about which accounts are genuinely stuck. test_cascade proves
+    this reproduces the historical truth table exactly.
     """
-    if has_refresh:        # daemon refreshes it via the refresh grant -> no nudge
-        return False
-    if has_session_key:    # bootstrap-eligible (Part B) -> no LOGIN nudge
-        return False
-    return token_days is None or token_days <= grace_days
+    return cascade.classify(
+        cascade.AccountState(
+            email="", is_live=False, has_refresh=has_refresh,
+            token_expires_h=(token_days * 24.0 if token_days is not None else None),
+            has_session_cookie=has_session_key,
+        ),
+        login_grace_days=grace_days,
+    ) is cascade.CascadeLeg.REAUTH_NUDGE
 
 
 def slot_capture_stalled(has_refresh: bool, has_session_key: bool) -> bool:
@@ -95,8 +104,18 @@ def slot_capture_stalled(has_refresh: bool, has_session_key: bool) -> bool:
     challenge, missing playwright, a wedged consent page) the slot stays stuck in this
     state forever. That stuck-ness is itself the signal to nudge the user to run the
     capture MANUALLY once. A slot that already self-renews (has_refresh) or has no
-    session (that's slot_needs_login's LOGIN nudge, not this one) is NOT stalled."""
-    return (not has_refresh) and has_session_key
+    session (that's slot_needs_login's LOGIN nudge, not this one) is NOT stalled.
+
+    Delegates to the cascade SSOT (TRDD-dfc0959a): stalled ⇔ the cascade's
+    RENEW_COOKIE leg (bootstrap-eligible) — the SAME set rotator._bootstrap_eligible
+    drives the daemon's capture launches from, so the launch set and the stalled-nudge
+    set can never diverge."""
+    return cascade.classify(
+        cascade.AccountState(
+            email="", is_live=False, has_refresh=has_refresh,
+            token_expires_h=None, has_session_cookie=has_session_key,
+        )
+    ) is cascade.CascadeLeg.RENEW_COOKIE
 
 
 def _has_live_session(email: str, now: float) -> bool:
