@@ -119,8 +119,12 @@ tick, and the stalled nudge tells you when to step in).
 4. **Report one line**, noting slot readiness:
 
    ```bash
-   N=$(ls "$ROT_DATA/slots/"*.json 2>/dev/null | wc -l | tr -d ' ')
-   echo "Janitor OAuth rotator: ON (daemon oauth-rotator-tick every 60s, threshold 97%, drain-first). Captured accounts: ${N:-0}. ${N:-0} < 2 ⇒ capture a 2nd account before rotation can fire (see /refresh-claude-logins + slot_capture_token.py). Ensure /janitor-arm has armed the heartbeat so the daemon stays alive. Disable with /janitor-auto-manage-oauth-off."
+   # Count known accounts from the KEYCHAIN via the rotator (known-emails), NOT the
+   # plaintext slots/*.json the keychain migration deletes — those read 0 on every
+   # migrated machine (audit C2 class).
+   VER="$(ls -d "$HOME"/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/*/scripts/oauth_rotator/rotator.py 2>/dev/null | sort -V | tail -1 || true)"
+   N=$( [ -n "$VER" ] && uv run "$VER" known-emails 2>/dev/null | grep -c . || echo 0 )
+   echo "Janitor OAuth rotator: ON (daemon oauth-rotator-tick every 60s, threshold 97%, drain-first). Known accounts: ${N:-0}. ${N:-0} < 2 ⇒ capture a 2nd account before rotation can fire (run /refresh-claude-logins — it seeds via open-login.sh then auto-bootstraps a refresh-bearing slot). Ensure /janitor-arm has armed the heartbeat so the daemon stays alive. Disable with /janitor-auto-manage-oauth-off."
    ```
 
 ## Output
@@ -149,7 +153,8 @@ User: keep my overnight session alive across both my accounts
 ## Scope
 
 ONLY sets the opt-in flag. Does NOT capture accounts (that needs a human login —
-see `/refresh-claude-logins` and `slot_capture_token.py`), does NOT arm the
+see `/refresh-claude-logins`, which seeds via `open-login.sh` then auto-bootstraps
+a refresh-bearing slot), does NOT arm the
 heartbeat cron (that is `/janitor-arm`, which the daemon needs to stay alive),
 and does NOT touch per-project state. To deactivate, run
 `/janitor-auto-manage-oauth-off`.

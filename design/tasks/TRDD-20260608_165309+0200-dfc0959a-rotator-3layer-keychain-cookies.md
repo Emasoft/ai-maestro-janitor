@@ -1,9 +1,9 @@
 ---
 trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
-column: dispatch
+column: dev
 created: 2026-06-08T16:53:09+0200
-updated: 2026-06-08T16:53:09+0200
+updated: 2026-06-08T17:31:48+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -42,11 +42,46 @@ external-refs: []
    to SWITCH PROFILES** (inject into the Chrome profile before a capture, scrub after).
    Security: nothing sensitive (token OR cookie) sits unencrypted on disk.
 
-**NEXT ACTION (phased — see plan):** Phase 0 = land the bounded consistency fixes from the
-audit (so the CURRENT system is correct) BEFORE the bigger redesign. Then Phase 1 = the
-cascade paradigm, Phase 2 = keychain-encrypted cookies + cross-platform safe-storage
-abstraction. DO NOT publish/push until at least Phase 0 + the cascade land and the chain is
-validated end-to-end (which needs a non-429 session + a real reauth with "stay signed in").
+**PHASE 0 — DONE (2026-06-08), verified.** The bounded consistency fixes from the audit
+landed:
+- IN-REPO (commit 3316e44; 120 oauth tests green, ruff clean): rotator.py + read-only
+  `print-profiles-root` (H1) + `oauth-health [--json]` (C2) subcommands +
+  cmd_live_email/cmd_known_emails doc-comments reauth.sh→reauth.py (C1);
+  oauth-login-needed.py B-F1/B-F4 (`_has_live_session`→`rotator._profile_has_session_key`;
+  removed the divergent ≥5-cookie heuristic, the own-root resolver, and the now-dead
+  `_cookie_days`/sqlite); oauth-cookie-reminder.py B-F2 (root via `_profiles_root`);
+  reauth.py A-F1 (debug-Chrome dir anchored on `rot.ROOT/reauth-chrome`, printed at
+  startup + --dry-run, legacy literal de-hardcoded); slot_capture_token.py A-F2 docstring.
+- IN-REPO (commit for THIS update): skills/janitor-auto-manage-oauth-on/SKILL.md M1
+  (point capture at open-login.sh + auto-bootstrap, drop slot_capture_token.py steer) +
+  the account-count now via `known-emails` (was falsely 0 reading the deleted plaintext
+  slots/*.json — C2 class).
+- USER-SCOPE (edited in place; originals backed up to gitignored
+  `scripts_dev/oauth-rotator-userscope-backup-20260608_171840+0200/`): lifetime-status.sh
+  C2 (OAuth health from the keychain via `oauth-health`; the false "⚠ no healthy OAuth"
+  banner is gone) + H1 (`print-profiles-root`); open-login.sh + check-login.sh H1;
+  reauth.sh C1 (retired → thin shim forwarding to the cached reauth.py);
+  ~/.claude/commands/refresh-claude-logins.md H2 (roster via `known-emails`) + M2
+  (version-glob note). Every shell fix uses a GRACEFUL FALLBACK: an older cached rotator
+  that lacks the new subcommands prints "unknown command: …" to STDOUT, so the output is
+  guarded by an absolute-path (`/*`) / JSON-object (`{*`) check before use — caught a real
+  self-introduced bug where the garbage poisoned PROFILE_ROOT. Verified by dual-test
+  (cached-fallback path + repo-subcommand path) on lifetime-status.sh and check-login.sh.
+- MEMORY de-stale: [[reference_oauth_rotator_three_layer_architecture]] ("puppeteer"→
+  CDP-attach) + [[feedback_oauth_rotator_resume_protocol]] (reauth.sh→retired shim;
+  replaced the now-inverted per-account snapshot with a pointer to `oauth-health`).
+
+DEFERRED (LOW; non-blocking follow-ups): A-F6 (capture PNGs → diagnostics subdir);
+A-F3/B-F3 (supervisor inline root/slots-dir dup, correct today); A-F4
+(`_slot_keychain_delete` dead half-primitive); A-F5 (clipboard opt-in). ALSO: bring the
+user-scope shell scripts INTO the repo + an installer so these fixes ship to every install
+(today they are local-machine + backed-up only).
+
+**NEXT ACTION:** Phase 1 = the 3-layer cascade paradigm (daemon tick + helpers as an
+explicit ROTATE → RENEW → REAUTHENTICATE-nudge cascade; one shared decision module both
+daemon and detectors import). Then Phase 2 = keychain-encrypted cross-platform cookies.
+Phase 1+ is XL and AWAITS USER GO; end-to-end validation needs a non-429 session + a real
+reauth with "stay signed in". DO NOT push the unpushed commits without explicit USER go.
 
 **Load-bearing facts:**
 - Today's transport fix (commit d05b94c) already moved the renew capture to CDP-attach to
