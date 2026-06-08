@@ -1,0 +1,170 @@
+"""Cookie-jar mechanics for the rotator (TRDD-dfc0959a Phase 2): EXTRACT a Chrome
+profile's claude.ai cookies into a portable JSON jar, and INJECT a jar back into a
+profile's Cookies sqlite. These are the sqlite⇄jar⇄json primitives the keychain
+cookie storage is built on (the safe_storage glue + capture-flow integration is 2c).
+
+Design — we NEVER decrypt a cookie value ourselves. Chrome stores each cookie's bytes
+in the ``encrypted_value`` BLOB, encrypted with the per-USER OSCrypt key (the "Chrome
+Safe Storage" keychain entry on macOS, the login keyring on Linux, DPAPI on Windows).
+That key is stable across every Chrome profile of the same OS user, so a row's
+``encrypted_value`` copied verbatim into ANOTHER of this user's profiles still decrypts.
+So the jar carries Chrome's already-encrypted blobs (base64'd for JSON transport) and
+re-injection is a faithful row copy — the plaintext cookie never passes through us, and
+when the jar is stored via ``safe_storage`` it is encrypted AGAIN at rest (defense in
+depth). Cross-user / cross-machine transport is therefore intentionally NOT supported
+(the OSCrypt key differs) — this is for switching profiles on one user's machine.
+
+Read paths open the sqlite ``mode=ro``; the inject path writes a fresh/served profile DB.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+
+# The full Chrome `cookies` table column set (schema verified against Chrome 13x on
+# macOS, 2026-06). ALL are NOT NULL, so a faithful round-trip must carry every one —
+# a partial INSERT would violate the NOT NULL constraints and Chrome would reject the DB.
+# Ordered exactly as the table declares them.
+COOKIE_COLUMNS: tuple[str, ...] = (
+    "creation_utc", "host_key", "top_frame_site_key", "name", "value", "encrypted_value",
+    "path", "expires_utc", "is_secure", "is_httponly", "last_access_utc", "has_expires",
+    "is_persistent", "priority", "samesite", "source_scheme", "source_port",
+    "last_update_utc", "source_type", "has_cross_site_ancestor",
+)
+
+# The column that holds Chrome's OSCrypt-encrypted bytes (a BLOB → base64 in JSON).
+_BLOB_COLUMN = "encrypted_value"
+
+JAR_VERSION = 1
+
+
+@dataclass(frozen=True)
+class CookieJar:
+    """A portable snapshot of one account's claude.ai cookies.
+
+    ``rows`` is the list of full-column cookie records (each a dict keyed by
+    ``COOKIE_COLUMNS``); ``encrypted_value`` is held as raw ``bytes`` in-memory and
+    base64-encoded only at JSON serialization. ``host_filter`` records the SQL LIKE
+    pattern the jar was extracted with so a reader knows its scope."""
+
+    rows: tuple[dict, ...]
+    host_filter: str
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def names(self) -> tuple[str, ...]:
+        """The cookie names in the jar (for logging / assertions — never the values)."""
+        return tuple(r["name"] for r in self.rows)
+
+
+def extract_jar(cookies_db: Path | str, *, host_filter: str = "%claude.ai") -> CookieJar:
+    """Read every cookie whose ``host_key`` matches ``host_filter`` from a Chrome Cookies
+    sqlite (opened read-only) into a CookieJar. Raises FileNotFoundError if the DB is
+    absent (fail-fast — the caller decides whether an absent profile is expected)."""
+    db = Path(cookies_db)
+    if not db.is_file():
+        raise FileNotFoundError(f"Chrome Cookies DB not found: {db}")
+    cols = ", ".join(COOKIE_COLUMNS)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        cur = con.execute(
+            f"SELECT {cols} FROM cookies WHERE host_key LIKE ? ORDER BY name, path",
+            (host_filter,),
+        )
+        rows: list[dict] = []
+        for record in cur.fetchall():
+            row = dict(zip(COOKIE_COLUMNS, record))
+            # encrypted_value comes back as bytes (BLOB) or possibly memoryview — normalise.
+            ev = row[_BLOB_COLUMN]
+            row[_BLOB_COLUMN] = bytes(ev) if ev is not None else b""
+            rows.append(row)
+    finally:
+        con.close()
+    return CookieJar(rows=tuple(rows), host_filter=host_filter)
+
+
+def jar_to_json(jar: CookieJar) -> str:
+    """Serialise a CookieJar to a compact JSON string (the form stored in safe_storage).
+    The ``encrypted_value`` BLOB is base64-encoded; everything else is JSON-native."""
+    out_rows = []
+    for row in jar.rows:
+        r = dict(row)
+        r[_BLOB_COLUMN] = base64.b64encode(row[_BLOB_COLUMN]).decode("ascii")
+        out_rows.append(r)
+    return json.dumps(
+        {"version": JAR_VERSION, "host_filter": jar.host_filter, "rows": out_rows},
+        separators=(",", ":"),
+    )
+
+
+def jar_from_json(payload: str) -> CookieJar:
+    """Parse a jar previously produced by ``jar_to_json``. Raises ValueError on a version
+    mismatch or a malformed payload (fail-fast — a corrupt jar must not silently yield an
+    empty one that would look like 'no cookies')."""
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"cookie jar is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict) or data.get("version") != JAR_VERSION:
+        raise ValueError(f"unsupported cookie-jar version: {data.get('version') if isinstance(data, dict) else 'n/a'}")
+    rows: list[dict] = []
+    for r in data.get("rows", []):
+        row = dict(r)
+        missing = [c for c in COOKIE_COLUMNS if c not in row]
+        if missing:
+            raise ValueError(f"cookie jar row missing columns: {missing}")
+        row[_BLOB_COLUMN] = base64.b64decode(row[_BLOB_COLUMN].encode("ascii"))
+        rows.append(row)
+    return CookieJar(rows=tuple(rows), host_filter=str(data.get("host_filter", "%claude.ai")))
+
+
+def _ensure_cookies_table(con: sqlite3.Connection) -> None:
+    """Create the Chrome ``cookies`` table + its unique index if absent, so a jar can be
+    injected into a fresh/empty profile DB. The DDL matches Chrome's schema verbatim."""
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS cookies("
+        "creation_utc INTEGER NOT NULL,host_key TEXT NOT NULL,top_frame_site_key TEXT NOT NULL,"
+        "name TEXT NOT NULL,value TEXT NOT NULL,encrypted_value BLOB NOT NULL,path TEXT NOT NULL,"
+        "expires_utc INTEGER NOT NULL,is_secure INTEGER NOT NULL,is_httponly INTEGER NOT NULL,"
+        "last_access_utc INTEGER NOT NULL,has_expires INTEGER NOT NULL,is_persistent INTEGER NOT NULL,"
+        "priority INTEGER NOT NULL,samesite INTEGER NOT NULL,source_scheme INTEGER NOT NULL,"
+        "source_port INTEGER NOT NULL,last_update_utc INTEGER NOT NULL,source_type INTEGER NOT NULL,"
+        "has_cross_site_ancestor INTEGER NOT NULL)"
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS cookies_unique_index ON cookies("
+        "host_key, top_frame_site_key, has_cross_site_ancestor, name, path, source_scheme, source_port)"
+    )
+
+
+def inject_jar(cookies_db: Path | str, jar: CookieJar) -> int:
+    """Write every row of ``jar`` into the Cookies sqlite at ``cookies_db`` (created with
+    the Chrome schema if absent), REPLACING any existing row with the same unique key.
+    Returns the number of rows written. Chrome must NOT be running on this profile during
+    the write (it holds a sqlite lock); the caller serialises that.
+
+    Uses INSERT OR REPLACE keyed on the table's unique index so re-injecting an updated
+    jar is idempotent and never duplicates a cookie."""
+    db = Path(cookies_db)
+    db.parent.mkdir(parents=True, exist_ok=True)
+    placeholders = ", ".join("?" for _ in COOKIE_COLUMNS)
+    cols = ", ".join(COOKIE_COLUMNS)
+    con = sqlite3.connect(db)
+    try:
+        _ensure_cookies_table(con)
+        written = 0
+        for row in jar.rows:
+            con.execute(
+                f"INSERT OR REPLACE INTO cookies ({cols}) VALUES ({placeholders})",
+                tuple(row[c] for c in COOKIE_COLUMNS),
+            )
+            written += 1
+        con.commit()
+    finally:
+        con.close()
+    return written
