@@ -3,7 +3,7 @@ trdd-id: 8546a187-781b-4449-93f4-d84af4ed1bcf
 title: Baseline-ruleset byte-identical reconcile with maintainer-agent + 2 shared follow-ups
 column: blocked
 created: 2026-06-04T23:08:16+0200
-updated: 2026-06-06T00:10:00+0200
+updated: 2026-06-08T23:39:09+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 3
@@ -29,6 +29,36 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/14", "github.com/E
 # TRDD-8546a187 — Baseline-ruleset reconcile with maintainer-agent
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-04
+
+### ⏵ SESSION ADDENDUM — 2026-06-08 (verified current state; supersedes stale claims below)
+
+The body below describes a **TWO-payload** baseline and "blocked on maintainer". BOTH are now
+partly stale — verified against live code + janitor#14 this session:
+
+- **THIRD ruleset `baseline-tag-protect` is IMPLEMENTED + TESTED in the janitor** (NOT just the
+  2-payload pair the body describes). `branch_protection_lib.py`: `TAG_PROTECT_RULESET_NAME`
+  (`target: tag`, `rules: [deletion, update]`, `bypass_actors: []`) in
+  `baseline_ruleset_payloads()`; `baselines_present()` requires all THREE; `apply_baseline_rulesets()`
+  applies all three then deletes the legacy orphan union. **60 branch-protection tests pass, ruff clean.**
+- **USER RATIFIED `baseline-tag-protect` (Tier-3, owner approval)** on janitor#14
+  (2026-06-05T23:50Z, MANAGER post). MANAGER's part done; janitor + maintainer own the apply.
+- So the janitor CODE side is **DONE for all THREE baselines** (history-protect + pr-and-checks +
+  tag-protect, orphan-delete union, PUT-not-PATCH update path, PR-trigger required-check filter).
+
+**Remaining (genuinely gated — NOT unilaterally actionable):**
+1. **Live first-apply readback-pin** of `baseline-tag-protect`'s `ref_name.include` (the exact
+   literal GitHub echoes — facts-not-assumptions). This is a LIVE GitHub mutation that RIDES the
+   next CPV-G3-cleared publish; do NOT one-off-apply it out-of-band.
+2. **Byte-identical reconcile with the maintainer** on all payloads + the 2 follow-ups — still
+   gated on the maintainer posting its commit SHAs on #14 (its CPV-G3 hold). No janitor action
+   until then.
+3. The **2 shared follow-ups** (job-level `if: github.event_name=='push'` awareness; gh-stub
+   tighten to real-API method→status semantics) — must land byte-identical WITH the maintainer.
+
+Net: #157 is NOT idle-stale — janitor code is done; it waits on the maintainer SHA exchange +
+the next publish. Nothing for the janitor to implement solo right now.
+
+---
 
 **What this is:** the janitor + maintainer-agent plugins standardised their GitHub
 branch rulesets to ONE ratified pair. The janitor side is **DONE**; this TRDD tracks the
