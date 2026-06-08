@@ -17,7 +17,7 @@ use anyhow::Result;
 use clap::Parser;
 use ignore::WalkBuilder;
 use regex::{Regex, RegexBuilder};
-use search::{parse_level, NumSpec, Query};
+use search::{NumSpec, Query, parse_level};
 use std::path::{Path, PathBuf};
 
 const MD_EXTS: &[&str] = &[
@@ -220,16 +220,6 @@ fn compile(pat: &str, ci: bool, word: bool) -> Result<Regex> {
     Ok(RegexBuilder::new(&body).case_insensitive(ci).build()?)
 }
 
-/// Read a file leniently: skip binary (NUL in the first 8 KiB, like rg), lossy-decode UTF-8.
-fn read_text(path: &Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    let probe = &bytes[..bytes.len().min(8192)];
-    if probe.contains(&0) {
-        return None; // binary — skip
-    }
-    Some(String::from_utf8_lossy(&bytes).into_owned())
-}
-
 fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -238,7 +228,9 @@ fn is_markdown(path: &Path) -> bool {
 }
 
 fn search_file(path: &Path, q: &Query, out: &Output) {
-    let Some(text) = read_text(path) else { return };
+    let Some(text) = md::read_text(path) else {
+        return;
+    };
     if !q.frontmatter_ok(&text) {
         return; // file-level --fm gate failed
     }
@@ -260,13 +252,19 @@ fn search_file_where(
     need_canon: bool,
     out: &Output,
 ) {
-    let Some(text) = read_text(path) else { return };
+    let Some(text) = md::read_text(path) else {
+        return;
+    };
     let fm = md::parse_frontmatter(&text);
     let lines: Vec<&str> = text.lines().collect();
     let ctx = md::build_context(&text, lines.len());
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let pstr = path.to_string_lossy();
-    let canon = if need_canon { path.canonicalize().ok() } else { None };
+    let canon = if need_canon {
+        path.canonicalize().ok()
+    } else {
+        None
+    };
     let meta = search::FileMeta {
         path: &pstr,
         name,

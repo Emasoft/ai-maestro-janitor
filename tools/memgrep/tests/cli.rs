@@ -6,6 +6,38 @@ use std::process::Command;
 
 const FX: &str = "tests/fixtures/sample.md";
 
+/// A self-deleting temp file holding generated content, for fixtures too large to commit (the
+/// adversarial deeply-nested markdown in H2). Drops remove the file so the test leaves no litter.
+struct TempFixture {
+    path: std::path::PathBuf,
+}
+
+impl TempFixture {
+    fn new(name: &str, contents: &str) -> Self {
+        // Unique-per-run name (pid + a monotonic counter) so parallel test threads never collide.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SEQ: AtomicUsize = AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "memgrep-test-{}-{}-{}",
+            std::process::id(),
+            n,
+            name
+        ));
+        std::fs::write(&path, contents).expect("write temp fixture");
+        TempFixture { path }
+    }
+    fn as_str(&self) -> &str {
+        self.path.to_str().expect("utf-8 temp path")
+    }
+}
+
+impl Drop for TempFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 fn run(args: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_memgrep");
     let out = Command::new(bin)
@@ -24,7 +56,31 @@ fn run_fail(args: &[&str]) {
         .args(args)
         .output()
         .expect("failed to run memgrep");
-    assert!(!out.status.success(), "memgrep should have failed for {args:?}");
+    assert!(
+        !out.status.success(),
+        "memgrep should have failed for {args:?}"
+    );
+}
+
+/// Run memgrep expecting a *clean* non-zero exit — a normal exit code, NEVER a signal kill.
+/// `status.code()` is `Some(n)` for an `exit(n)` and `None` when the process died from a signal
+/// (SIGSEGV/SIGABRT on a stack-overflow abort). Asserting `code().is_some()` is what distinguishes
+/// "rejected the garbage with a Result error" from "crashed on the garbage" — the latter would
+/// masquerade as a pass under the looser `run_fail`. Used for the adversarial-depth tests (H1).
+fn run_fail_clean(args: &[&str]) {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    assert!(
+        !out.status.success(),
+        "memgrep should have failed for {args:?}"
+    );
+    assert!(
+        out.status.code().is_some(),
+        "memgrep died from a signal (no exit code) on {args:?} — an abort/crash, not a clean error"
+    );
 }
 
 #[test]
@@ -37,7 +93,10 @@ fn plain_pattern_finds_prose_and_code() {
 fn no_code_drops_the_code_block_false_positive() {
     let o = run(&["security", "--no-code", FX]);
     assert_eq!(o.lines().count(), 3, "{o}");
-    assert!(!o.contains("echo security"), "code line must be excluded:\n{o}");
+    assert!(
+        !o.contains("echo security"),
+        "code line must be excluded:\n{o}"
+    );
 }
 
 #[test]
@@ -49,8 +108,18 @@ fn code_only_keeps_just_the_code_line() {
 
 #[test]
 fn code_lang_filters_by_fence_language() {
-    assert_eq!(run(&["security", "--code-lang", "python", FX]).lines().count(), 0);
-    assert_eq!(run(&["security", "--code-lang", "bash", FX]).lines().count(), 1);
+    assert_eq!(
+        run(&["security", "--code-lang", "python", FX])
+            .lines()
+            .count(),
+        0
+    );
+    assert_eq!(
+        run(&["security", "--code-lang", "bash", FX])
+            .lines()
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -82,7 +151,10 @@ fn level_filter_restricts_to_that_heading_level() {
 
 #[test]
 fn count_and_files_only_modes() {
-    assert_eq!(run(&["-c", "security", "--no-code", FX]).trim(), format!("{FX}:3"));
+    assert_eq!(
+        run(&["-c", "security", "--no-code", FX]).trim(),
+        format!("{FX}:3")
+    );
     assert_eq!(run(&["-l", "security", FX]).trim(), FX);
 }
 
@@ -109,7 +181,12 @@ fn num_range_compares_as_version_tuples() {
 #[test]
 fn depth_caps_numbering_components() {
     // prefix `1` + depth 1 ⟹ only [1] (1 component); [1,2]/[1,3] have 2 = excluded.
-    assert_eq!(run(&["--heading", "--num", "1", "--depth", "1", FX]).lines().count(), 1);
+    assert_eq!(
+        run(&["--heading", "--num", "1", "--depth", "1", FX])
+            .lines()
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -122,10 +199,21 @@ fn num_scopes_content_search() {
 
 #[test]
 fn fm_field_gates_the_file() {
-    assert_eq!(run(&["widget", "--fm", "tags=security", FXFM]).lines().count(), 1);
-    assert_eq!(run(&["widget", "--fm", "status=dev", FXFM]).lines().count(), 1);
+    assert_eq!(
+        run(&["widget", "--fm", "tags=security", FXFM])
+            .lines()
+            .count(),
+        1
+    );
+    assert_eq!(
+        run(&["widget", "--fm", "status=dev", FXFM]).lines().count(),
+        1
+    );
     // a frontmatter field that does not match ⟹ file skipped entirely.
-    assert_eq!(run(&["widget", "--fm", "tags=nope", FXFM]).lines().count(), 0);
+    assert_eq!(
+        run(&["widget", "--fm", "tags=nope", FXFM]).lines().count(),
+        0
+    );
     // a file lacking the required frontmatter field is excluded.
     assert_eq!(run(&["security", "--fm", "tags=x", FX]).lines().count(), 0);
 }
@@ -147,8 +235,18 @@ fn class_keys_or_and_and() {
     assert_eq!(run(&["--class", "security", FXIN]).lines().count(), 1);
     assert_eq!(run(&["--class", "backend", FXIN]).lines().count(), 1);
     assert_eq!(run(&["--class", "nope", FXIN]).lines().count(), 0);
-    assert_eq!(run(&["--class-all", "security,backend", FXIN]).lines().count(), 1);
-    assert_eq!(run(&["--class-all", "security,missing", FXIN]).lines().count(), 0);
+    assert_eq!(
+        run(&["--class-all", "security,backend", FXIN])
+            .lines()
+            .count(),
+        1
+    );
+    assert_eq!(
+        run(&["--class-all", "security,missing", FXIN])
+            .lines()
+            .count(),
+        0
+    );
 }
 
 #[test]
@@ -175,7 +273,12 @@ fn node_kinds_scope_and_exclude() {
     assert_eq!(o.lines().count(), 1, "{o}");
     assert!(o.contains("link to security"));
     assert_eq!(run(&["widget", "--quote", FXGFM]).lines().count(), 1);
-    assert_eq!(run(&["widget", "--node", "table,quote", FXGFM]).lines().count(), 1);
+    assert_eq!(
+        run(&["widget", "--node", "table,quote", FXGFM])
+            .lines()
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -192,11 +295,24 @@ const FXFACTS: &str = "tests/fixtures/sample_facts.md";
 
 #[test]
 fn fact_filters_by_category_session_and_time() {
-    assert_eq!(run(&["fact", "--cat", "security", FXFACTS]).lines().count(), 2);
+    assert_eq!(
+        run(&["fact", "--cat", "security", FXFACTS]).lines().count(),
+        2
+    );
     assert_eq!(run(&["fact", "--cat", "db", FXFACTS]).lines().count(), 1);
-    assert_eq!(run(&["fact", "--session", "bbbb2222", FXFACTS]).lines().count(), 1);
+    assert_eq!(
+        run(&["fact", "--session", "bbbb2222", FXFACTS])
+            .lines()
+            .count(),
+        1
+    );
     // --since excludes the 2026-06-05 fact.
-    assert_eq!(run(&["fact", "--since", "2026-06-06", FXFACTS]).lines().count(), 2);
+    assert_eq!(
+        run(&["fact", "--since", "2026-06-06", FXFACTS])
+            .lines()
+            .count(),
+        2
+    );
     // results are time-sorted (the 14:00 fact precedes the 18:00 one).
     let o = run(&["fact", "--session", "aaaa1111", FXFACTS]);
     let lines: Vec<&str> = o.lines().collect();
@@ -223,9 +339,15 @@ fn wikilink_resolves_trdd_id8_alias() {
     let tgt = "tests/fixtures/TRDD-20260101_000000+0000-abcd1234-target.md";
     let refr = "tests/fixtures/trdd_ref.md";
     let to = run(&["links", "--to", "trdd_ref", refr, tgt]);
-    assert!(to.contains("abcd1234-target.md"), "wikilink should resolve to the TRDD file:\n{to}");
+    assert!(
+        to.contains("abcd1234-target.md"),
+        "wikilink should resolve to the TRDD file:\n{to}"
+    );
     assert!(!to.contains("BROKEN"), "{to}");
-    assert!(run(&["links", "--broken", refr, tgt]).trim().is_empty(), "no link should be broken");
+    assert!(
+        run(&["links", "--broken", refr, tgt]).trim().is_empty(),
+        "no link should be broken"
+    );
 }
 
 #[test]
@@ -235,15 +357,60 @@ fn where_link_semijoin_to_from_and_join() {
     let tgt = "tests/fixtures/TRDD-20260101_000000+0000-abcd1234-target.md";
     let refr = "tests/fixtures/trdd_ref.md";
     // files that link TO the abcd1234 note ⟹ trdd_ref.
-    assert_eq!(run(&["-l", "--where", r#"links-to "abcd1234""#, refr, tgt]).trim(), refr);
+    assert_eq!(
+        run(&["-l", "--where", r#"links-to "abcd1234""#, refr, tgt]).trim(),
+        refr
+    );
     // files linked FROM trdd_ref (i.e. that note's out-links) ⟹ the abcd1234 target.
-    assert_eq!(run(&["-l", "--where", r#"linked-from "trdd_ref""#, refr, tgt]).trim(), tgt);
+    assert_eq!(
+        run(&["-l", "--where", r#"linked-from "trdd_ref""#, refr, tgt]).trim(),
+        tgt
+    );
     // the JOIN — content search restricted to the linking file.
-    let j = run(&["--where", r#"links-to "abcd1234" and text "rationale""#, refr, tgt]);
+    let j = run(&[
+        "--where",
+        r#"links-to "abcd1234" and text "rationale""#,
+        refr,
+        tgt,
+    ]);
     assert_eq!(j.lines().count(), 1, "{j}");
     assert!(j.contains("trdd_ref.md"));
     // a needle that matches no note ⟹ empty set ⟹ no file qualifies.
-    assert_eq!(run(&["--where", r#"links-to "nonesuch""#, refr, tgt]).lines().count(), 0);
+    assert_eq!(
+        run(&["--where", r#"links-to "nonesuch""#, refr, tgt])
+            .lines()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn link_needle_matches_basename_not_directory_substring() {
+    // M5: the link needle is scoped to the note BASENAME, not a substring of the whole path. The
+    // fixtures live under `tests/fixtures/`, so a needle like "fixtures" or "tests" appears only in
+    // a DIRECTORY component — it must NOT match any note (before the fix it pulled in every note via
+    // the whole-path substring). A proper basename needle ("trdd_ref") still resolves the file.
+    let tgt = "tests/fixtures/TRDD-20260101_000000+0000-abcd1234-target.md";
+    let refr = "tests/fixtures/trdd_ref.md";
+    for dir_substr in ["fixtures", "tests"] {
+        let q = format!(r#"linked-from "{dir_substr}""#);
+        assert_eq!(
+            run(&["--where", &q, refr, tgt]).lines().count(),
+            0,
+            "directory substring {dir_substr:?} must not match any note's links"
+        );
+        let q2 = format!(r#"links-to "{dir_substr}""#);
+        assert_eq!(
+            run(&["--where", &q2, refr, tgt]).lines().count(),
+            0,
+            "directory substring {dir_substr:?} must not match any note's links"
+        );
+    }
+    // a real basename needle still works (regression guard that the fix didn't over-restrict).
+    assert_eq!(
+        run(&["-l", "--where", r#"linked-from "trdd_ref""#, refr, tgt]).trim(),
+        tgt
+    );
 }
 
 #[test]
@@ -253,10 +420,37 @@ fn recall_ranks_by_symptom_surface() {
     let dir = "tests/fixtures/recall";
     let o = run(&["recall", "oauth rotation failed", dir]);
     let first = o.lines().next().unwrap_or("");
-    assert!(first.contains("recall_a.md"), "oauth note should rank first:\n{o}");
-    assert!(!o.contains("recall_b.md"), "the unrelated tables note must not surface:\n{o}");
+    assert!(
+        first.contains("recall_a.md"),
+        "oauth note should rank first:\n{o}"
+    );
+    assert!(
+        !o.contains("recall_b.md"),
+        "the unrelated tables note must not surface:\n{o}"
+    );
     // the printed line carries the note's description (so the agent picks without opening it).
-    assert!(o.contains("rotation failed"), "recall should show the description:\n{o}");
+    assert!(
+        o.contains("rotation failed"),
+        "recall should show the description:\n{o}"
+    );
+}
+
+#[test]
+fn recall_excludes_index_files() {
+    // A real memory dir contains a MEMORY.md (and optionally a memory-index.md). Those are MAPS of
+    // the notes, not notes — recall must NOT rank them, else a symptom query matches the index's
+    // gloss lines and returns the index as noise above the real note. The fixture MEMORY.md
+    // contains "oauth rotation failed", so without the exclusion it WOULD surface (non-vacuous).
+    let dir = "tests/fixtures/recall";
+    let o = run(&["recall", "oauth rotation failed", dir]);
+    assert!(
+        !o.contains("MEMORY.md"),
+        "the index file MEMORY.md must not be ranked as a note:\n{o}"
+    );
+    assert!(
+        o.contains("recall_a.md"),
+        "the real note must still surface:\n{o}"
+    );
 }
 
 #[test]
@@ -283,8 +477,14 @@ fn broken_pipe_dies_quietly_not_panics() {
         .expect("run pipeline");
     let stderr = String::from_utf8_lossy(&out.stderr);
     std::fs::remove_dir_all(&dir).ok();
-    assert!(!stderr.contains("panicked"), "memgrep panicked on a broken pipe:\n{stderr}");
-    assert!(!stderr.contains("Broken pipe"), "memgrep leaked a broken-pipe error:\n{stderr}");
+    assert!(
+        !stderr.contains("panicked"),
+        "memgrep panicked on a broken pipe:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Broken pipe"),
+        "memgrep leaked a broken-pipe error:\n{stderr}"
+    );
 }
 
 #[test]
@@ -301,26 +501,51 @@ fn binary_file_is_skipped_without_crashing() {
 #[test]
 fn where_and_not_equals_flat_no_code() {
     // `text "security" and not code` reproduces `security --no-code` (3 prose lines)…
-    assert_eq!(run(&["--where", r#"text "security" and not code"#, FX]).lines().count(), 3);
+    assert_eq!(
+        run(&["--where", r#"text "security" and not code"#, FX])
+            .lines()
+            .count(),
+        3
+    );
     // …and `and code` keeps only the in-code line.
-    assert_eq!(run(&["--where", r#"text "security" and code"#, FX]).lines().count(), 1);
+    assert_eq!(
+        run(&["--where", r#"text "security" and code"#, FX])
+            .lines()
+            .count(),
+        1
+    );
 }
 
 #[test]
 fn where_or_unions_patterns() {
     // "security" is on 4 lines, "widget" on 0 ⟹ their union is 4. (A flat query cannot OR these.)
-    assert_eq!(run(&["--where", r#"text "security" or text "widget""#, FX]).lines().count(), 4);
+    assert_eq!(
+        run(&["--where", r#"text "security" or text "widget""#, FX])
+            .lines()
+            .count(),
+        4
+    );
 }
 
 #[test]
 fn where_grouping_changes_precedence() {
     // `(a or b) and c`: lines matching (security or nothing) AND in-code = the single code line.
-    let o = run(&["--where", r#"(text "security" or text "widget") and code"#, FX]);
+    let o = run(&[
+        "--where",
+        r#"(text "security" or text "widget") and code"#,
+        FX,
+    ]);
     assert_eq!(o.lines().count(), 1, "{o}");
     assert!(o.contains("echo security"));
     // without grouping, `a or (b and c)` = security-anywhere(4) OR (widget AND code)(0) = 4.
     assert_eq!(
-        run(&["--where", r#"text "security" or text "widget" and code"#, FX]).lines().count(),
+        run(&[
+            "--where",
+            r#"text "security" or text "widget" and code"#,
+            FX
+        ])
+        .lines()
+        .count(),
         4
     );
 }
@@ -336,19 +561,46 @@ fn where_structural_and_numbering() {
 #[test]
 fn where_fm_predicate_composes() {
     // sample_fm.md: frontmatter status=dev, tags=[security, oauth]; body mentions "widget".
-    assert_eq!(run(&["--where", r#"fm.status "dev" and text "widget""#, FXFM]).lines().count(), 1);
+    assert_eq!(
+        run(&["--where", r#"fm.status "dev" and text "widget""#, FXFM])
+            .lines()
+            .count(),
+        1
+    );
     // fm is a per-line-constant gate: with -l a matching file is listed, a non-matching one isn't.
-    assert_eq!(run(&["-l", "--where", r#"fm.status "dev""#, FXFM]).trim(), FXFM);
-    assert_eq!(run(&["--where", r#"fm.tags "nope""#, FXFM]).lines().count(), 0);
+    assert_eq!(
+        run(&["-l", "--where", r#"fm.status "dev""#, FXFM]).trim(),
+        FXFM
+    );
+    assert_eq!(
+        run(&["--where", r#"fm.tags "nope""#, FXFM]).lines().count(),
+        0
+    );
 }
 
 #[test]
 fn where_file_globs_and_emphasis() {
     // name/path globs gate the file; the emphasis predicate scopes within it.
-    assert_eq!(run(&["--where", r#"name "*.md" and bold "security""#, FXIN]).lines().count(), 1);
-    assert_eq!(run(&["--where", r#"name "*.rs" and bold "security""#, FXIN]).lines().count(), 0);
     assert_eq!(
-        run(&["--where", r#"path "**/sample_inline.md" and span-class "note""#, FXIN]).lines().count(),
+        run(&["--where", r#"name "*.md" and bold "security""#, FXIN])
+            .lines()
+            .count(),
+        1
+    );
+    assert_eq!(
+        run(&["--where", r#"name "*.rs" and bold "security""#, FXIN])
+            .lines()
+            .count(),
+        0
+    );
+    assert_eq!(
+        run(&[
+            "--where",
+            r#"path "**/sample_inline.md" and span-class "note""#,
+            FXIN
+        ])
+        .lines()
+        .count(),
         1
     );
 }
@@ -365,4 +617,100 @@ fn where_rejects_combining_with_flags() {
 fn where_parse_errors_are_clean_failures() {
     run_fail(&["--where", r#"(text "a""#, FX]); // unbalanced paren
     run_fail(&["--where", "boguspred \"x\"", FX]); // unknown predicate
+}
+
+#[test]
+fn where_deep_nesting_exits_cleanly_not_via_signal() {
+    // H1: a pathological --where (100k `!` or 100k `(`) must be rejected by the parser's depth guard
+    // as a normal non-zero EXIT, never a stack-overflow SIGSEGV/abort (which catch_unwind can't
+    // catch). run_fail_clean asserts status.code().is_some() so a signal-kill can't pass as success.
+    let bangs = format!("{}text \"code\"", "!".repeat(100_000));
+    run_fail_clean(&["--where", &bangs, FX]);
+    let parens = format!(
+        "{}text \"code\"{}",
+        "(".repeat(100_000),
+        ")".repeat(100_000)
+    );
+    run_fail_clean(&["--where", &parens, FX]);
+}
+
+#[test]
+fn deeply_nested_markdown_greps_without_aborting() {
+    // H2: pathologically nested block structure (verified to make comrak 0.52 hang/recurse
+    // catastrophically) must NOT reach comrak. The cheap pre-scan degrades the file to plain-grep
+    // (empty structural context), so memgrep still searches it and exits 0 — never a SIGSEGV/hang.
+    //
+    // Shape 1 — accumulating blockquote depth (line i opens i nested `>` containers). At 100k lines
+    // this hangs comrak for minutes; even a few thousand levels crosses the pre-scan's nesting cap.
+    let mut accum = String::with_capacity(2_000 * 1_500);
+    for i in 1..=2_000 {
+        accum.push_str(&">".repeat(i));
+        accum.push_str(" ACCUM_NEEDLE\n");
+    }
+    let fx = TempFixture::new("deep-accum-quotes.md", &accum);
+    // exit 0 (run() asserts success); plain-grep finds the needle on every line.
+    let out = run(&["ACCUM_NEEDLE", fx.as_str()]);
+    assert_eq!(
+        out.lines().count(),
+        2_000,
+        "plain-grep should match every line"
+    );
+    // Degrade proof: comrak was skipped, so the structural `--quote` filter sees an empty context
+    // and matches nothing — confirming we took the pre-scan bail, not a (slow) full parse.
+    assert_eq!(
+        run(&["--quote", "ACCUM_NEEDLE", fx.as_str()])
+            .lines()
+            .count(),
+        0,
+        "deeply nested file must degrade to empty context (no structural matches)"
+    );
+
+    // Shape 2 — a single line with a very deep `>` run. Same nesting signal, different layout.
+    let deep_line = format!("{} DEEP_NEEDLE\n", ">".repeat(50_000));
+    let fx2 = TempFixture::new("deep-line-quotes.md", &deep_line);
+    let out2 = run(&["DEEP_NEEDLE", fx2.as_str()]);
+    assert_eq!(
+        out2.lines().count(),
+        1,
+        "plain-grep should match the single line"
+    );
+}
+
+#[test]
+fn oversized_file_is_skipped_normal_file_works() {
+    // M4: a file larger than the 64 MiB cap must be SKIPPED (no read into RAM, no OOM, no output),
+    // while an ordinary file still greps. We isolate the SIZE gate from the binary-NUL skip by
+    // giving the big file valid text in its first 8 KiB (so the NUL probe would pass) and extending
+    // it past the cap with a sparse tail — if it's skipped, only the size gate can be responsible.
+
+    // Sanity: a normal small file with the needle IS found.
+    let small = TempFixture::new("small.md", "hello CAP_NEEDLE world\n");
+    assert_eq!(
+        run(&["CAP_NEEDLE", small.as_str()]).lines().count(),
+        1,
+        "a normal file must still be searched"
+    );
+
+    // Oversized file: 8 KiB of real UTF-8 text (needle included) then a sparse extension to 65 MiB.
+    let path =
+        std::env::temp_dir().join(format!("memgrep-test-{}-oversized.md", std::process::id()));
+    {
+        let head = format!("CAP_NEEDLE {}\n", "x".repeat(8 * 1024));
+        std::fs::write(&path, head.as_bytes()).expect("write head");
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("reopen");
+        // 65 MiB > the 64 MiB cap. set_len extends with sparse zeros (no real disk/RAM cost).
+        f.set_len(65 * 1024 * 1024).expect("set_len");
+    }
+    // run() asserts exit 0 — the oversized file is skipped gracefully, not an OOM/crash, and the
+    // needle in its (unread) head produces NO output.
+    let out = run(&["CAP_NEEDLE", path.to_str().unwrap()]);
+    assert_eq!(
+        out.lines().count(),
+        0,
+        "oversized file must be skipped (no match emitted):\n{out}"
+    );
+    let _ = std::fs::remove_file(&path);
 }

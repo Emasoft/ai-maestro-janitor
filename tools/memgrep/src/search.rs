@@ -7,7 +7,7 @@
 use crate::md;
 use crate::md::Context;
 use crate::predicate::{Expr, LineCtx, LinkSets, Pred};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::Path;
@@ -107,7 +107,10 @@ impl NumSpec {
         match self {
             NumSpec::Prefix(p) => num.starts_with(p),
             NumSpec::Glob(g) => {
-                g.len() == num.len() && g.iter().zip(num).all(|(gc, nc)| gc.is_none_or(|v| v == *nc))
+                g.len() == num.len()
+                    && g.iter()
+                        .zip(num)
+                        .all(|(gc, nc)| gc.is_none_or(|v| v == *nc))
             }
             NumSpec::Range(cmps) => cmps.iter().all(|(op, v)| op.test(num, v)),
         }
@@ -231,7 +234,11 @@ impl Query {
             v.push(leaf(Pred::SpanClass(name.clone())));
         }
         if let Some(want) = self.list {
-            v.push(if want { leaf(Pred::List) } else { not(Pred::List) });
+            v.push(if want {
+                leaf(Pred::List)
+            } else {
+                not(Pred::List)
+            });
         }
         if self.node != 0 {
             v.push(leaf(Pred::Node(self.node)));
@@ -240,7 +247,11 @@ impl Query {
             v.push(not(Pred::Node(self.no_node)));
         }
 
-        if v.is_empty() { None } else { Some(Expr::And(v)) }
+        if v.is_empty() {
+            None
+        } else {
+            Some(Expr::And(v))
+        }
     }
 
     /// File-level frontmatter gate: every `--fm KEY=RE` must match a frontmatter field. Files
@@ -338,13 +349,52 @@ pub fn parse_level(s: &str) -> Option<LevelFilter> {
         if let Some(rest) = s.strip_prefix(pfx) {
             let n = num(rest)?;
             return Some(match pfx {
-                ">=" => LevelFilter { lo: clamp(n), hi: 6 },
-                ">" => LevelFilter { lo: clamp(n + 1), hi: 6 },
-                "<=" => LevelFilter { lo: 1, hi: clamp(n) },
-                _ => LevelFilter { lo: 1, hi: clamp(n - 1) },
+                ">=" => LevelFilter {
+                    lo: clamp(n),
+                    hi: 6,
+                },
+                // saturating_add/sub so a near-i64::MAX/MIN level (e.g. `--level ">9223372036854775807"`)
+                // can't overflow — that panics in debug builds and silently wraps in release. The
+                // saturated value clamps to the intended 6/1 bound, giving an empty/full level range.
+                ">" => LevelFilter {
+                    lo: clamp(n.saturating_add(1)),
+                    hi: 6,
+                },
+                "<=" => LevelFilter {
+                    lo: 1,
+                    hi: clamp(n),
+                },
+                _ => LevelFilter {
+                    lo: 1,
+                    hi: clamp(n.saturating_sub(1)),
+                },
             });
         }
     }
     let n = clamp(num(s)?);
     Some(LevelFilter { lo: n, hi: n })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // M3: a near-i64::MAX `--level` must parse to a clean LevelFilter, never an arithmetic overflow
+    // (debug panic "attempt to add with overflow" / release silent wrap). Tests run in debug, so a
+    // regression here would panic the test process. (A `<` + a *negative* i64 isn't reachable here:
+    // the `-` is consumed by the leading range-split before the `<` prefix is tried, so the
+    // `saturating_sub` underflow path is exercised with a large *positive* operand instead.)
+    #[test]
+    fn parse_level_saturates_on_extreme_bounds() {
+        // `>` i64::MAX: saturating_add keeps it at i64::MAX → clamps to 6 ("above level 6" = empty).
+        // This is the exact audit repro `--level ">9223372036854775807"`.
+        let lf = parse_level(&format!(">{}", i64::MAX)).expect("clean parse, no panic");
+        assert_eq!((lf.lo, lf.hi), (6, 6));
+        // `<` i64::MAX (positive): saturating_sub stays huge → clamps to 6 (hi = 6, lo = 1).
+        let lf = parse_level(&format!("<{}", i64::MAX)).expect("clean parse, no panic");
+        assert_eq!((lf.lo, lf.hi), (1, 6));
+        // sanity: ordinary `>2` still behaves (lo = 3, hi = 6).
+        let lf = parse_level(">2").unwrap();
+        assert_eq!((lf.lo, lf.hi), (3, 6));
+    }
 }

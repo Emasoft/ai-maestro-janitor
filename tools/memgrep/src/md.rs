@@ -9,9 +9,70 @@
 //! like plain `grep`.
 
 use comrak::nodes::NodeValue;
-use comrak::{parse_document, Arena, Options};
+use comrak::{Arena, Options, parse_document};
 use regex::Regex;
+use std::io::Read;
+use std::path::Path;
 use std::sync::OnceLock;
+
+/// Hard cap on the size of a file memgrep will read into memory. Files larger than this are skipped
+/// (returning `None`, exactly like a binary file), so a multi-GB file dropped in a memory dir can't
+/// OOM-kill the process. memgrep reads whole files (it needs the full markdown tree), so streaming
+/// isn't an option here — a size gate is the portable defense. 64 MiB is far larger than any real
+/// note yet a small fraction of typical RAM.
+pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Size of the leading window read to test a file for NUL bytes (the binary-skip heuristic) BEFORE
+/// committing to reading the whole file.
+const PROBE_BYTES: usize = 8192;
+
+/// Read a text file for grepping, or `None` if it should be skipped. The single source of truth for
+/// "turn a path into searchable text" (used by the flat search, `--where`, `index`/`links`, and
+/// `fact`). Skips, in order: files that fail to stat/open, files over [`MAX_FILE_BYTES`] (OOM
+/// guard), and binary files (a NUL in the first [`PROBE_BYTES`]). The NUL probe reads only the
+/// leading window first, so a huge binary is rejected without slurping the whole file.
+pub fn read_text(path: &Path) -> Option<String> {
+    // (b) Size gate FIRST — stat before reading a byte, so an oversized file never hits RAM.
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
+        return None;
+    }
+    let mut file = std::fs::File::open(path).ok()?;
+
+    // (c) Probe window: read up to PROBE_BYTES and reject on a NUL before committing to the rest.
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    let mut probe = [0u8; PROBE_BYTES];
+    let n = read_full(&mut file, &mut probe).ok()?;
+    if probe[..n].contains(&0) {
+        return None; // binary — skip (no full read incurred)
+    }
+    bytes.extend_from_slice(&probe[..n]);
+    // Read the remainder only after the probe passed.
+    file.read_to_end(&mut bytes).ok()?;
+
+    // Avoid the guaranteed second full allocation on the common all-valid-UTF-8 path: borrow via
+    // `from_utf8`, falling back to the lossy copy only when the bytes aren't valid UTF-8.
+    match String::from_utf8(bytes) {
+        Ok(s) => Some(s),
+        Err(e) => Some(String::from_utf8_lossy(e.as_bytes()).into_owned()),
+    }
+}
+
+/// Read until `buf` is full or EOF, returning how many bytes were read. `Read::read` may return a
+/// short count without being at EOF (e.g. on a pipe), so a single call could under-fill the probe
+/// and miss a NUL just past the short boundary; looping until full or EOF makes the probe reliable.
+fn read_full(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match file.read(&mut buf[filled..]) {
+            Ok(0) => break, // EOF
+            Ok(n) => filled += n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(filled)
+}
 
 /// Inline emphasis kinds memgrep can scope a regex to (`--bold`, `--italic`, `--code-span`,
 /// `--strike`).
@@ -134,11 +195,73 @@ impl Context {
     }
 }
 
+/// Block-nesting depth past which we refuse to hand a document to comrak. comrak parses block
+/// structure (blockquotes `>`, list items, …) by recursive descent, so a pathologically nested
+/// document — e.g. 50k stacked `>` or 50k open `[` — can overflow comrak's stack and ABORT the
+/// process (SIGSEGV/abort), which `catch_unwind` cannot catch. 1000 is far deeper than any real
+/// note yet a tiny fraction of what overflows the parser; above it we degrade to an empty context
+/// (plain-grep), the same graceful outcome the catch_unwind path already produces.
+const MAX_MD_NESTING: usize = 1000;
+
+/// Cheap O(lines) estimate of the maximum block-nesting depth in `text`, used to bail to plain-grep
+/// before comrak's recursive descent can overflow the stack (see [`MAX_MD_NESTING`]). It is a
+/// conservative lower bound on what comrak would recurse into — it never *over*-reports nesting, so
+/// it can't spuriously degrade an ordinary document, but it reliably catches the adversarial
+/// "deeply stacked container" shapes. Returns as soon as the threshold is exceeded (early-out, so a
+/// hostile file is rejected without scanning all of it).
+fn max_block_nesting(text: &str, threshold: usize) -> usize {
+    let mut worst = 0usize;
+    let mut in_fence = false; // inside a ``` / ~~~ fenced code block: its content isn't block structure
+    for raw in text.lines() {
+        let line = raw.trim_end();
+        let trimmed = line.trim_start();
+        // A fence toggle (``` or ~~~). Inside a fence, leading `>`/brackets are literal text, not
+        // nesting — so we stop counting until the fence closes.
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        // Blockquote nesting: count the run of leading `>` markers (`> > >` ⟹ depth 3). comrak
+        // recurses once per level, so this run length is a direct proxy for parse depth.
+        let mut bytes = line.as_bytes();
+        let mut quote_depth = 0usize;
+        loop {
+            // skip leading ASCII whitespace
+            let mut j = 0;
+            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'>' {
+                quote_depth += 1;
+                bytes = &bytes[j + 1..];
+            } else {
+                break;
+            }
+        }
+        // Unclosed `[` openers on the line (link/image/wikilink starts). A line of 50k `[` drives
+        // comrak's inline bracket matcher deep; the surplus of `[` over `]` is the proxy here.
+        let opens = line.bytes().filter(|&b| b == b'[').count();
+        let closes = line.bytes().filter(|&b| b == b']').count();
+        let bracket_depth = opens.saturating_sub(closes);
+
+        worst = worst.max(quote_depth).max(bracket_depth);
+        if worst > threshold {
+            return worst; // early-out: already over the limit, no need to scan the rest
+        }
+    }
+    worst
+}
+
 /// Build the per-line context for `text` (the file's full contents). `n_lines` is the raw line
 /// count so the vectors line up exactly with the file even if the parse under- or over-reports.
 ///
 /// LENIENCY: parsing is wrapped so a panic in comrak (should never happen on CommonMark, but we
 /// treat every flavour as untrusted) degrades to an empty context rather than aborting the run.
+/// A separate cheap pre-scan ([`max_block_nesting`]) rejects pathologically nested input BEFORE
+/// comrak sees it, because a stack overflow inside comrak is an abort `catch_unwind` cannot catch.
 pub fn build_context(text: &str, n_lines: usize) -> Context {
     let mut ctx = Context {
         in_code: vec![false; n_lines],
@@ -153,6 +276,14 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
     };
 
     let raw_lines: Vec<&str> = text.lines().collect();
+
+    // Reject pathologically nested documents BEFORE comrak: its recursive-descent parser would
+    // overflow the stack and abort the whole process (uncatchable by the catch_unwind below). `ctx`
+    // is already fully default-initialized (all-empty vectors), so returning it here degrades to
+    // plain-grep — exactly what `parsed.unwrap_or_default()` yields on a comrak panic.
+    if max_block_nesting(text, MAX_MD_NESTING) > MAX_MD_NESTING {
+        return ctx;
+    }
 
     #[allow(clippy::type_complexity)]
     let parsed: std::thread::Result<(
@@ -206,12 +337,18 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                     }
                     NodeValue::Heading(h) => Act::Head(sp.start.line, h.level),
                     NodeValue::Item(_) => Act::List(sp.start.line, sp.end.line),
-                    NodeValue::Strong => Act::Inline(sp.start.line, sp.start.column, InlineKind::Bold),
-                    NodeValue::Emph => Act::Inline(sp.start.line, sp.start.column, InlineKind::Italic),
+                    NodeValue::Strong => {
+                        Act::Inline(sp.start.line, sp.start.column, InlineKind::Bold)
+                    }
+                    NodeValue::Emph => {
+                        Act::Inline(sp.start.line, sp.start.column, InlineKind::Italic)
+                    }
                     NodeValue::Strikethrough => {
                         Act::Inline(sp.start.line, sp.start.column, InlineKind::Strike)
                     }
-                    NodeValue::Code(_) => Act::Inline(sp.start.line, sp.start.column, InlineKind::Code),
+                    NodeValue::Code(_) => {
+                        Act::Inline(sp.start.line, sp.start.column, InlineKind::Code)
+                    }
                     // ── GFM structure kinds (Phase 4) ──
                     NodeValue::Table(_) => Act::KindBlock(sp.start.line, sp.end.line, K_TABLE),
                     NodeValue::BlockQuote | NodeValue::MultilineBlockQuote(_) => {
@@ -246,7 +383,14 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                 Act::None => {}
             }
         }
-        (code_spans, heads, list_spans, inline_spans, kind_spans, links)
+        (
+            code_spans,
+            heads,
+            list_spans,
+            inline_spans,
+            kind_spans,
+            links,
+        )
     });
 
     let (code_spans, heads, list_spans, inline_spans, kind_spans, links) =
@@ -373,11 +517,7 @@ fn parse_numbering(text: &str) -> Option<Vec<u32>> {
         .filter(|s| !s.is_empty())
         .filter_map(|s| s.parse::<u32>().ok())
         .collect();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts)
-    }
+    if parts.is_empty() { None } else { Some(parts) }
 }
 
 /// Extract the YAML frontmatter as a flat `key → raw-value-string` map. Leniently scans the
@@ -396,7 +536,11 @@ pub fn parse_frontmatter(text: &str) -> std::collections::HashMap<String, String
         }
         if let Some((k, v)) = line.split_once(':') {
             let key = k.trim();
-            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            if !key.is_empty()
+                && key
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            {
                 map.insert(key.to_string(), v.trim().to_string());
             }
         }

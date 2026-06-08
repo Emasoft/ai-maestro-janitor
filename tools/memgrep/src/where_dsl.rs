@@ -19,9 +19,9 @@
 //! otherwise quietly drop a constraint.
 
 use crate::md;
-use crate::predicate::{build_glob, Expr, LinkDir, Matcher, Pred};
-use crate::search::{parse_level, NumSpec};
-use anyhow::{anyhow, bail, Result};
+use crate::predicate::{Expr, LinkDir, Matcher, Pred, build_glob};
+use crate::search::{NumSpec, parse_level};
+use anyhow::{Result, anyhow, bail};
 use regex::RegexBuilder;
 
 /// Parse a `--where` expression into an [`Expr`] tree. `ci` threads `-i` into every regex/text
@@ -31,7 +31,12 @@ pub fn parse_where(input: &str, ci: bool) -> Result<Expr> {
     if toks.is_empty() {
         bail!("empty --where expression");
     }
-    let mut p = Parser { t: &toks, i: 0, ci };
+    let mut p = Parser {
+        t: &toks,
+        i: 0,
+        ci,
+        depth: 0,
+    };
     let e = p.or_expr()?;
     if p.i != p.t.len() {
         bail!("unexpected trailing tokens in --where (a stray ')' or operator?)");
@@ -109,15 +114,37 @@ fn lex(s: &str) -> Result<Vec<Tok>> {
     Ok(toks)
 }
 
+/// Hard cap on recursive-descent nesting. A run of `!`/`not` or `(` deepens the parse stack one
+/// frame per token; without this cap an adversarial expression (e.g. 100k `(`) overflows the OS
+/// stack, which aborts via SIGSEGV — uncatchable by `catch_unwind`, defeating the "never crash on
+/// garbage input" contract. Exceeding the cap is a clean `Err` (`bail!`), not an abort. 256 is far
+/// deeper than any hand-written query yet shallow enough to stay well inside the default stack.
+const MAX_WHERE_DEPTH: usize = 256;
+
 struct Parser<'a> {
     t: &'a [Tok],
     i: usize,
     ci: bool,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
     fn peek(&self) -> Option<&'a Tok> {
         self.t.get(self.i)
+    }
+
+    /// Enter one recursion level, bailing (never panicking) past the depth cap. Pair every call
+    /// with [`Parser::ascend`] on exit so sibling expressions don't accumulate phantom depth.
+    fn descend(&mut self) -> Result<()> {
+        self.depth += 1;
+        if self.depth > MAX_WHERE_DEPTH {
+            bail!("--where nesting too deep");
+        }
+        Ok(())
+    }
+
+    fn ascend(&mut self) {
+        self.depth -= 1;
     }
 
     fn bump(&mut self) -> Option<&'a Tok> {
@@ -129,21 +156,30 @@ impl<'a> Parser<'a> {
     }
 
     // or_expr := and_expr ( "or" and_expr )*
+    //
+    // Every recursive-descent rule guards with `descend()?` on entry and `ascend()` on the success
+    // path; on an error path the whole parse aborts, so the un-decremented depth is irrelevant. The
+    // guard is what makes a pathological `(((…` / `!!!…` a clean `Err` instead of a stack-overflow
+    // abort (see [`MAX_WHERE_DEPTH`]).
     fn or_expr(&mut self) -> Result<Expr> {
+        self.descend()?;
         let mut parts = vec![self.and_expr()?];
         while matches!(self.peek(), Some(Tok::Or)) {
             self.i += 1;
             parts.push(self.and_expr()?);
         }
-        Ok(if parts.len() == 1 {
+        let e = if parts.len() == 1 {
             parts.pop().unwrap()
         } else {
             Expr::Or(parts)
-        })
+        };
+        self.ascend();
+        Ok(e)
     }
 
     // and_expr := not_expr ( "and"? not_expr )*   — juxtaposition is an implicit `and`
     fn and_expr(&mut self) -> Result<Expr> {
+        self.descend()?;
         let mut parts = vec![self.not_expr()?];
         loop {
             match self.peek() {
@@ -156,37 +192,46 @@ impl<'a> Parser<'a> {
                 _ => break,
             }
         }
-        Ok(if parts.len() == 1 {
+        let e = if parts.len() == 1 {
             parts.pop().unwrap()
         } else {
             Expr::And(parts)
-        })
+        };
+        self.ascend();
+        Ok(e)
     }
 
     // not_expr := ("not" | "!") not_expr | primary
     fn not_expr(&mut self) -> Result<Expr> {
-        if matches!(self.peek(), Some(Tok::Not)) {
+        self.descend()?;
+        let e = if matches!(self.peek(), Some(Tok::Not)) {
             self.i += 1;
-            return Ok(Expr::Not(Box::new(self.not_expr()?)));
-        }
-        self.primary()
+            Expr::Not(Box::new(self.not_expr()?))
+        } else {
+            self.primary()?
+        };
+        self.ascend();
+        Ok(e)
     }
 
     // primary := "(" or_expr ")" | predicate
     fn primary(&mut self) -> Result<Expr> {
-        match self.peek() {
+        self.descend()?;
+        let e = match self.peek() {
             Some(Tok::LParen) => {
                 self.i += 1;
-                let e = self.or_expr()?;
+                let inner = self.or_expr()?;
                 if !matches!(self.peek(), Some(Tok::RParen)) {
                     bail!("expected ')' in --where");
                 }
                 self.i += 1;
-                Ok(e)
+                inner
             }
-            Some(Tok::Word(_)) => self.predicate(),
+            Some(Tok::Word(_)) => self.predicate()?,
             other => bail!("unexpected token in --where: {other:?}"),
-        }
+        };
+        self.ascend();
+        Ok(e)
     }
 
     /// Take the next token as a value string (quoted or bare).
@@ -221,8 +266,8 @@ impl<'a> Parser<'a> {
             "code" => Pred::Code,
             "heading" => Pred::Heading,
             "list" => Pred::List,
-            "table" | "quote" | "blockquote" | "math" | "url" | "link" | "image" | "img" | "html"
-            | "svg" | "footnote" | "note" | "ref" => {
+            "table" | "quote" | "blockquote" | "math" | "url" | "link" | "image" | "img"
+            | "html" | "svg" | "footnote" | "note" | "ref" => {
                 Pred::Node(md::kind_bit(&lw).ok_or_else(|| anyhow!("unknown node kind: {lw}"))?)
             }
             // ── 1-arg, regex value ──
@@ -294,7 +339,7 @@ fn mask(s: &str) -> Result<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::md::{build_context, Context};
+    use crate::md::{Context, build_context};
     use crate::predicate::{LineCtx, LinkSets};
     use std::collections::HashMap;
 
@@ -309,7 +354,17 @@ mod tests {
         raw: &'a str,
         ctx: &'a Context,
     ) -> LineCtx<'a> {
-        LineCtx { path, name, fm, canon: None, links, raw, idx: 0, line: 1, ctx }
+        LineCtx {
+            path,
+            name,
+            fm,
+            canon: None,
+            links,
+            raw,
+            idx: 0,
+            line: 1,
+            ctx,
+        }
     }
 
     fn eval(where_str: &str, line: &str) -> bool {
@@ -331,8 +386,14 @@ mod tests {
         assert!(eval(r#"not text "zzz""#, "alpha beta"));
         assert!(eval(r#"! text "zzz""#, "alpha beta"));
         // grouping changes precedence: (a or b) and c
-        assert!(eval(r#"(text "alpha" or text "x") and text "beta""#, "alpha beta"));
-        assert!(!eval(r#"(text "x" or text "y") and text "beta""#, "alpha beta"));
+        assert!(eval(
+            r#"(text "alpha" or text "x") and text "beta""#,
+            "alpha beta"
+        ));
+        assert!(!eval(
+            r#"(text "x" or text "y") and text "beta""#,
+            "alpha beta"
+        ));
         // implicit AND (juxtaposition)
         assert!(eval(r#"text "alpha" text "beta""#, "alpha beta"));
     }
@@ -386,5 +447,27 @@ mod tests {
         assert!(parse_where("(text \"a\"", false).is_err()); // unbalanced paren
         assert!(parse_where("boguspred \"x\"", false).is_err()); // unknown keyword
         assert!(parse_where("text", false).is_err()); // missing value
+    }
+
+    // H1: a deep run of `!`/`not` or `(` must return a clean Err via the depth guard, NOT overflow
+    // the stack (which would SIGSEGV-abort, uncatchable by catch_unwind). We assert the call
+    // RETURNS (an Err) rather than crashing the test process.
+    #[test]
+    fn deep_nesting_is_err_not_stack_overflow() {
+        let bangs = format!("{}text \"code\"", "!".repeat(100_000));
+        assert!(parse_where(&bangs, false).is_err());
+
+        let parens = format!(
+            "{}text \"code\"{}",
+            "(".repeat(100_000),
+            ")".repeat(100_000)
+        );
+        assert!(parse_where(&parens, false).is_err());
+
+        // A run just under the cap on a flat negation chain still parses (sanity that the cap isn't
+        // tripped by ordinary moderate nesting). `not_expr` adds one frame per `!`; the surrounding
+        // or_expr/and_expr/not_expr entry adds 3, so stay a few below MAX_WHERE_DEPTH.
+        let ok = format!("{}text \"code\"", "!".repeat(MAX_WHERE_DEPTH - 8));
+        assert!(parse_where(&ok, false).is_ok());
     }
 }

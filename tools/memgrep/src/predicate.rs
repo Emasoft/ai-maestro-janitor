@@ -76,7 +76,9 @@ impl Matcher {
         if s.contains(['*', '?', '[']) {
             return Ok(Matcher::Glob(build_glob(s)?));
         }
-        Ok(Matcher::Regex(RegexBuilder::new(s).case_insensitive(ci).build()?))
+        Ok(Matcher::Regex(
+            RegexBuilder::new(s).case_insensitive(ci).build()?,
+        ))
     }
 
     pub fn matches(&self, val: &str) -> bool {
@@ -103,7 +105,10 @@ pub fn build_glob(s: &str) -> Result<GlobMatcher> {
 /// is not dotted-numeric (then a `Range` matcher simply does not match it).
 fn parse_dotted(s: &str) -> Option<Vec<u32>> {
     let s = s.trim().trim_start_matches(['v', 'V']);
-    let v: Vec<u32> = s.split('.').map(|p| p.parse::<u32>().ok()).collect::<Option<_>>()?;
+    let v: Vec<u32> = s
+        .split('.')
+        .map(|p| p.parse::<u32>().ok())
+        .collect::<Option<_>>()?;
     if v.is_empty() { None } else { Some(v) }
 }
 
@@ -176,7 +181,10 @@ impl Pred {
                 ctx.heading_level.get(idx).and_then(|o| *o),
                 Some(lvl) if lf.contains(lvl)
             ),
-            Pred::InSection(re) => ctx.section_path(lc.line).iter().any(|h| re.is_match(&h.text)),
+            Pred::InSection(re) => ctx
+                .section_path(lc.line)
+                .iter()
+                .any(|h| re.is_match(&h.text)),
             Pred::Num(spec) => ctx.section_num(lc.line).is_some_and(|n| spec.matches(&n)),
             Pred::Depth(d) => ctx.section_num(lc.line).is_some_and(|n| n.len() <= *d),
             Pred::Bold(re) => emphasis_col(ctx, idx, InlineKind::Bold, re).is_some(),
@@ -232,7 +240,11 @@ fn in_code(ctx: &Context, idx: usize) -> bool {
 fn emphasis_col(ctx: &Context, idx: usize, kind: InlineKind, re: &Regex) -> Option<usize> {
     ctx.inline
         .get(idx)
-        .and_then(|spans| spans.iter().find(|s| s.kind == kind && re.is_match(&s.text)))
+        .and_then(|spans| {
+            spans
+                .iter()
+                .find(|s| s.kind == kind && re.is_match(&s.text))
+        })
         .map(|s| s.col)
 }
 
