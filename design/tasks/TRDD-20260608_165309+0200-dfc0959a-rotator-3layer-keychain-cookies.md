@@ -3,7 +3,7 @@ trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
 column: dev
 created: 2026-06-08T16:53:09+0200
-updated: 2026-06-08T18:16:52+0200
+updated: 2026-06-08T18:40:27+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -119,16 +119,31 @@ keychain-encrypted cross-platform cookie storage (USER directive #2), built foun
   profile → re-extract == original.
 - 166 oauth+cascade+safe_storage+cookie_vault tests green, ruff clean.
 
-**NEXT ACTION (Phase 2c-wiring + Phase 3, both validation-gated):**
-1. 2c-WIRING — wire the 2c-mechanics into the LIVE capture: in `slot_capture_browser.py`,
-   `materialize_from_keychain(email, profile_cookies)` BEFORE the CDP capture, and
-   `snapshot_to_keychain(email, profile_cookies)` AFTER a successful login + scrub the on-disk
-   plaintext. This touches the live capture path; it cannot be unit-validated without a real
-   claude.ai capture, so it pairs with Phase 3.
-2. Phase 3 — end-to-end validate on a non-429 session + a real reauth ("stay signed in") →
-   confirm RENEW mints via CDP-attach → ROTATE swaps → cookies snapshot/materialize round-trips
-   live → then republish + restart so the daemon runs the new cascade + cookie vault.
-DO NOT push the unpushed commits (now 55) without explicit USER go.
+**PHASE 2c-WIRING — DONE (2026-06-08), default-OFF + best-effort.** Wired into
+`slot_capture_browser.capture()`: `_materialize_cookies(profile_email)` BEFORE `_drive_browser`
+(Chrome not launched → sqlite unlocked) and `_snapshot_cookies(profile_email)` AFTER a
+successful capture (Chrome exited → unlocked). Gated on `CLAUDE_ROTATOR_KEYCHAIN_COOKIES`
+(DEFAULT OFF → `capture()` byte-identical to before; cookie_vault never called). Best-effort
+(every call wrapped; a failure logs + the capture proceeds with the on-disk profile) → safe to
+land unvalidated. 9 wiring tests (flag gate, correct calls + profile path, error-swallowing);
+175 rotator tests green.
+
+DELIBERATELY NOT IMPLEMENTED — the on-disk SCRUB (directive #2's "scrub after"). Removing the
+profile's Cookies after snapshot is a DESTRUCTIVE op that, if the keychain snapshot silently
+failed, would BRICK the account's capture (cookies lost entirely → fresh human login needed).
+It requires a verify-before-destroy guard (snapshot → materialize-back → byte-compare → only
+then scrub) AND live validation. So scrub is a Phase-3 task behind its own opt-in
+(`CLAUDE_ROTATOR_KEYCHAIN_COOKIES_SCRUB`), NOT an unvalidated landing. The snapshot-to-keychain
+already gives directive #2's main win (a SECOND encrypted-at-rest copy in the OS keychain);
+scrub is the marginal extra (the on-disk copy is already Chrome-OSCrypt encrypted).
+
+**NEXT ACTION — Phase 3 (the ONLY remaining work; validation-gated):** on a non-429 session +
+a real reauth ("stay signed in"): (1) flip `CLAUDE_ROTATOR_KEYCHAIN_COOKIES=1` and confirm a
+real capture materializes-before + snapshots-after correctly; (2) confirm RENEW mints via
+CDP-attach → ROTATE swaps → cascade log is correct; (3) decide + implement the verify-before
+SCRUB; (4) republish the janitor + restart Claude Code + restart the daemon so ALL of Phase
+0/1/2 goes live (today the daemon still runs cached 0.6.1 — none of this is live yet).
+DO NOT push the unpushed commits (now 57) without explicit USER go.
 
 **Load-bearing facts:**
 - Today's transport fix (commit d05b94c) already moved the renew capture to CDP-attach to
