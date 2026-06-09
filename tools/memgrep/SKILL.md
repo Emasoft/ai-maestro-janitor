@@ -16,3 +16,6 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 
 ## Recall memories
 `memgrep recall "SYMPTOM WORDS" <memdir>` → notes ranked by symptom match as `path — description`; read the top few. Query the QUESTION's words, not the answer's.
+
+## Find — `+`/`-`/wildcard/phrase query DSL
+`memgrep find "<query>" <memdir>` → note-level search by a keyword DSL (NOT line grep). The query is ONE whitespace-separated string (quote it): `+TERM` mandatory, `-TERM` exclude, bare `TERM` optional (ranks). A word may use `*` (wildcard, any run: `pro*`, `*debug`); a `"quoted phrase"` matches verbatim WITH the spaces and can itself be `+`/`-` prefixed. A `+`/`-` INSIDE a token is literal — `pro*-debug*` is ONE wildcard term, not `pro*` minus `debug*`. Results = notes with every `+` term and no `-` term, ranked by optional hits. `--only-notes` searches the resolved `[^N]` lessons instead of pages. Composes with `--sort ocd|lmd|score`, `--since/--until`, `--with-notes/--full-notes`, `--use-index`.

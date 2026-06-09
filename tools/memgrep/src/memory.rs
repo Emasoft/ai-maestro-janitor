@@ -8,6 +8,7 @@
 
 use crate::md;
 use crate::predicate::{LinkDir, LinkSets};
+use crate::query_dsl;
 use crate::search::Cmp;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
@@ -986,18 +987,38 @@ fn recall_terms(query: &str) -> Result<Vec<String>> {
     Ok(terms)
 }
 
-/// Apply the precision-first filter, the `--since`/`--until` date-range filter, the chosen sort, and
-/// print the top results (with resolved lessons appended when wanted). Shared by the walk and index
-/// paths so the output is identical regardless of source.
-fn finalize_recall(all: Vec<RecallScored>, a: &RecallArgs) -> Result<()> {
+/// The shared finalize knobs — the subset of `recall`/`find` flags the ranking/printing step reads.
+/// Both `RecallArgs` and `FindArgs` build one (`as_finalize`), so `finalize_recall` is the SINGLE
+/// date-filter + sort + print path for both commands (no duplicated logic, identical output rules).
+struct FinalizeOpts {
+    no_notes: bool,
+    full_notes: bool,
+    sort: SortKey,
+    order: Order,
+    since: Option<String>,
+    until: Option<String>,
+    date_field: DateField,
+    top: usize,
+    /// Apply recall's precision-first surface-vs-body filter? TRUE for `recall` (a surface match
+    /// suppresses body-only matches). FALSE for `find`: every gathered row already PASSED the +/-
+    /// gate, so a row with zero OPTIONAL hits (e.g. a `+mandatory`-only query) is still a valid
+    /// result and must NOT be dropped — find rows carry `surface_hits = optional-count` (often 0).
+    precision_first: bool,
+}
+
+/// Apply the (recall-only) precision-first filter, the `--since`/`--until` date-range filter, the
+/// chosen sort, and print the top results (with resolved lessons appended when wanted). Shared by the
+/// walk and index paths AND by both `recall` and `find` so the output is identical across source/command.
+fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     let want_notes = !a.no_notes;
-    // PRECISION-FIRST: if ANY note matched the symptom surface (description/title/tags), return
-    // only those, ranked by hit count. Fall back to body-only matches ONLY when nothing matched
-    // the surface — so a well-described KB stays precise, but we never miss a content-only note.
+    // PRECISION-FIRST (recall only): if ANY note matched the symptom surface (description/title/tags),
+    // return only those, ranked by hit count; fall back to body-only matches ONLY when nothing matched
+    // the surface. For `find` this is OFF — its rows already passed the +/- gate, so even a zero-
+    // optional-hit row (a `+term`-only query) is a real result and is kept unconditionally.
     let any_surface = all.iter().any(|(h, ..)| *h > 0);
     let mut scored: Vec<RecallRanked> = all
         .into_iter()
-        .filter(|(h, body_only, ..)| *h > 0 || (!any_surface && *body_only))
+        .filter(|(h, body_only, ..)| !a.precision_first || *h > 0 || (!any_surface && *body_only))
         .map(|(h, _, p, s, pb, ocd, lmd)| (h, p, s, pb, ocd, lmd))
         .collect();
 
@@ -1080,6 +1101,23 @@ fn finalize_recall(all: Vec<RecallScored>, a: &RecallArgs) -> Result<()> {
     Ok(())
 }
 
+impl RecallArgs {
+    /// Project the recall flags onto the shared `FinalizeOpts` (the date-filter + sort + print knobs).
+    fn as_finalize(&self) -> FinalizeOpts {
+        FinalizeOpts {
+            no_notes: self.no_notes,
+            full_notes: self.full_notes,
+            sort: self.sort,
+            order: self.order,
+            since: self.since.clone(),
+            until: self.until.clone(),
+            date_field: self.date_field,
+            top: self.top,
+            precision_first: true, // recall: surface match suppresses body-only matches
+        }
+    }
+}
+
 pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
     let a =
         RecallArgs::parse_from(std::iter::once("recall".to_string()).chain(args.iter().cloned()));
@@ -1111,7 +1149,250 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
         gather_from_walk(&a.paths, a.hidden, &terms)
     };
 
-    finalize_recall(all, &a)
+    finalize_recall(all, &a.as_finalize())
+}
+
+// ─────────────────────────── `memgrep find` (the +/- query DSL) ───────────────────────────
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep find",
+    about = "note-level search with the +/- (mandatory/exclude) / wildcard / phrase query DSL"
+)]
+struct FindArgs {
+    /// The query: whitespace-separated terms. `+TERM` mandatory, `-TERM` exclude, bare TERM optional
+    /// (ranks). A word may use `*` (wildcard, any run); a `"quoted phrase"` matches verbatim WITH the
+    /// spaces and may itself be `+`/`-` prefixed. A `+`/`-` INSIDE a token is literal (so `pro*-debug*`
+    /// is ONE wildcard term). QUOTE the whole query in the shell. `allow_hyphen_values` so a query that
+    /// STARTS with a `-exclude` term (e.g. `-tables`) is taken as the query value, not a CLI flag.
+    #[arg(allow_hyphen_values = true)]
+    query: String,
+    /// Memory dir(s) to search (default: current dir).
+    paths: Vec<PathBuf>,
+    /// Search ONLY the resolved `[^N]` lessons (lessons-only mode) — match the DSL against each
+    /// lesson's text and return the matching `[N] - …` lessons, NOT the memory pages.
+    #[arg(long = "only-notes")]
+    only_notes: bool,
+    /// Show at most this many results.
+    #[arg(long = "top", default_value_t = 10)]
+    top: usize,
+    /// Resolve + append each note's `[^N]` lessons-learned (default ON, like recall). `--no-notes`
+    /// is the off switch. Ignored in `--only-notes` mode (the lessons ARE the result there).
+    #[arg(long = "with-notes")]
+    with_notes: bool,
+    /// Body/page only — do NOT resolve/append the lessons-learned footnotes.
+    #[arg(long = "no-notes", conflicts_with = "with_notes")]
+    no_notes: bool,
+    /// Keep each lesson's leading `[...]` metadata prefix (default: stripped).
+    #[arg(long = "full-notes")]
+    full_notes: bool,
+    /// Order results by `score` (optional-match count — default), `ocd`, or `lmd`.
+    #[arg(long = "sort", value_enum, default_value_t = SortKey::Score)]
+    sort: SortKey,
+    /// Sort direction: `desc` (default) or `asc`.
+    #[arg(long = "order", value_enum, default_value_t = Order::Desc)]
+    order: Order,
+    /// Keep only notes whose date (see `--date-field`) is on/after this ISO-8601 bound (inclusive).
+    #[arg(long = "since")]
+    since: Option<String>,
+    /// Keep only notes whose date (see `--date-field`) is on/before this ISO-8601 bound (inclusive).
+    #[arg(long = "until")]
+    until: Option<String>,
+    /// Which date `--since`/`--until` filter on (default `lmd`).
+    #[arg(long = "date-field", value_enum, default_value_t = DateField::Lmd)]
+    date_field: DateField,
+    /// Force the persistent SQLite index. Falls back to the live walk when no index exists, so results
+    /// are always correct. Without it, `find` auto-uses a FRESH index and otherwise walks.
+    #[arg(long = "use-index")]
+    use_index: bool,
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+impl FindArgs {
+    /// Project the find flags onto the shared `FinalizeOpts`. `--only-notes` forces `no_notes` (the
+    /// page-lessons append is meaningless when the result IS lessons) so finalize never double-appends.
+    fn as_finalize(&self) -> FinalizeOpts {
+        FinalizeOpts {
+            no_notes: self.no_notes || self.only_notes,
+            full_notes: self.full_notes,
+            sort: self.sort,
+            order: self.order,
+            since: self.since.clone(),
+            until: self.until.clone(),
+            date_field: self.date_field,
+            top: self.top,
+            precision_first: false, // find: rows already passed the +/- gate — keep them all
+        }
+    }
+}
+
+/// Build the lowercased searchable surface for a `find` NOTE candidate — the SAME text recall ranks
+/// on (title + description + tags + body), so a `find` and a `recall` see identical content. Lowercased
+/// once here; every `Term::matches` is a lowercased compare against it.
+fn find_note_surface(title: &str, summary: &str, tags_joined: &str, body: &str) -> String {
+    format!("{title} {summary} {tags_joined} {body}").to_lowercase()
+}
+
+/// Apply the `+`/`-` DSL gate to ONE note candidate, returning the `RecallScored` row (re-using the
+/// recall finalize pipeline) when it passes — `surface_hits` = the optional-match count (the rank),
+/// `body_only` = false (it already passed the gate, so the precision-first filter keeps it). Returns
+/// None when the note fails a mandatory term or hits an exclude term. Shared by the walk + index paths.
+fn find_score_note(q: &query_dsl::Query, m: CandidateMeta, body: &str) -> Option<RecallScored> {
+    let surface = find_note_surface(&m.title, &m.summary, &m.tags_joined, body);
+    if !q.matches_text(&surface) {
+        return None;
+    }
+    Some((
+        q.optional_hits(&surface),
+        false,
+        m.display_path,
+        m.summary,
+        m.pathbuf,
+        m.ocd,
+        m.lmd,
+    ))
+}
+
+/// Gather `find` note candidates from the LIVE tree-walk: parse each note, build its surface, apply the
+/// DSL gate. Unlike recall, the body is read eagerly (the DSL can match a body-only term, so the whole
+/// surface must be available — there is no surface-then-body fallback here).
+fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Vec<RecallScored> {
+    let mut all = Vec::new();
+    for path in collect_md(paths, hidden) {
+        if is_index_file(&path) {
+            continue;
+        }
+        let Some(note) = read_note(&path) else {
+            continue;
+        };
+        let body = md::read_text(&path).unwrap_or_default();
+        let meta = CandidateMeta {
+            display_path: rel(&path),
+            title: note.title,
+            summary: note.summary,
+            tags_joined: note.tags.join(" "),
+            pathbuf: path,
+            ocd: note.ocd,
+            lmd: note.lmd,
+        };
+        if let Some(row) = find_score_note(q, meta, &body) {
+            all.push(row);
+        }
+    }
+    all
+}
+
+/// Gather `find` note candidates from the SQLite index (`memories` rows). Each row already carries the
+/// stored body, so the surface + DSL gate is byte-identical to `find_gather_walk` — guaranteeing an
+/// index-backed `find` returns the SAME results as the walk (the slice's hard correctness contract).
+fn find_gather_index(
+    conn: &rusqlite::Connection,
+    q: &query_dsl::Query,
+) -> Result<Vec<RecallScored>> {
+    let mut all = Vec::new();
+    for c in crate::index::recall_candidates(conn)? {
+        let body = c.body.clone();
+        let meta = CandidateMeta {
+            pathbuf: PathBuf::from(&c.display_path),
+            display_path: c.display_path,
+            title: c.title,
+            summary: c.summary,
+            tags_joined: c.tags_joined,
+            ocd: c.ocd,
+            lmd: c.lmd,
+        };
+        if let Some(row) = find_score_note(q, meta, &body) {
+            all.push(row);
+        }
+    }
+    Ok(all)
+}
+
+/// Lessons-only (`--only-notes`) mode: match the DSL against each resolved `[^N]` lesson's text and
+/// print the matching lessons as `[N] - <text>` (or `[N] - [meta] <text>` with `--full-notes`), ranked
+/// by optional-match count (desc, stable). Walks the corpus once via `resolve_notes`; the lesson search
+/// is its own surface (the lesson body). Walk-only by design: the SQLite `notes` table stores the
+/// stripped lesson body but NOT the raw `[...]` metadata prefix, so an index path could not reproduce
+/// `--full-notes` byte-for-byte — resolving per file is cheap and always correct.
+fn find_only_notes(
+    paths: &[PathBuf],
+    hidden: bool,
+    q: &query_dsl::Query,
+    a: &FindArgs,
+) -> Result<()> {
+    // (rank, render-line) rows; a stable sort by rank desc keeps best-first while preserving corpus order.
+    let mut rows: Vec<(i64, String)> = Vec::new();
+    for path in collect_md(paths, hidden) {
+        if is_index_file(&path) {
+            continue;
+        }
+        for ln in resolve_notes(&path) {
+            let surface = ln.text.to_lowercase();
+            if !q.matches_text(&surface) {
+                continue;
+            }
+            let line = match (&ln.meta, a.full_notes) {
+                (Some(meta), true) => format!("[{}] - [{}] {}", ln.num, meta, ln.text),
+                _ => format!("[{}] - {}", ln.num, ln.text),
+            };
+            rows.push((q.optional_hits(&surface), line));
+        }
+    }
+    let asc = a.order == Order::Asc;
+    rows.sort_by(|x, y| {
+        let o = x.0.cmp(&y.0);
+        if asc { o } else { o.reverse() }
+    });
+    for (_rank, line) in rows.into_iter().take(a.top) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// `memgrep find "<+/- query>" [memdir]` — note-level search with the mandatory/exclude/wildcard/phrase
+/// DSL (`query_dsl`). Matches each note's surface (title+description+tags+body) against the query: a
+/// note survives iff it contains every `+` term and no `-` term, ranked by how many optional terms it
+/// matched. `--only-notes` searches the resolved lessons instead. Honors the SQLite index (index-backed
+/// results equal the walk) and composes with `--sort`/`--since`/`--until`/`--with-notes` like recall.
+pub fn cmd_find_cli(args: &[String]) -> Result<()> {
+    let a = FindArgs::parse_from(std::iter::once("find".to_string()).chain(args.iter().cloned()));
+    let q = query_dsl::parse(&a.query)?;
+    if q.is_empty() {
+        anyhow::bail!(
+            "find needs at least one query term (a word, a wildcard like `pro*`, or a \"quoted phrase\")"
+        );
+    }
+
+    // Lessons-only mode is a separate surface (the lesson bodies) — it never uses the page index/walk
+    // split, since lessons are resolved per file on demand and are not the `memories` rows.
+    if a.only_notes {
+        return find_only_notes(&a.paths, a.hidden, &q, &a);
+    }
+
+    // SOURCE SELECTION (identical policy to recall): with `--use-index` use the index when it EXISTS
+    // (else walk); without the flag, auto-use a FRESH index and otherwise walk — so results are always
+    // correct. Both gather paths build the SAME `RecallScored` rows, so index-backed == walk.
+    let root = a
+        .paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("."));
+    let use_index = if a.use_index {
+        crate::index::open_existing(&root).is_some()
+    } else {
+        crate::index::is_fresh(&root, &collect_md(&a.paths, a.hidden))
+    };
+    let all = if use_index {
+        match crate::index::open_existing(&root) {
+            Some(conn) => find_gather_index(&conn, &q)?,
+            None => find_gather_walk(&a.paths, a.hidden, &q),
+        }
+    } else {
+        find_gather_walk(&a.paths, a.hidden, &q)
+    };
+
+    finalize_recall(all, &a.as_finalize())
 }
 
 // ─────────────────────────── `memgrep fact` ───────────────────────────

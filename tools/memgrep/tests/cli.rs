@@ -1365,3 +1365,172 @@ fn reindex_edit_replaces_indexed_body() {
         "the new body term must be present after the incremental re-parse:\n{new}"
     );
 }
+
+// ─────────────────────────── slice 4 — `memgrep find` +/- query DSL ───────────────────────────
+
+const FIND_DIR: &str = "tests/fixtures/find";
+const RECALL_DIR: &str = "tests/fixtures/recall";
+
+#[test]
+fn find_plus_term_is_mandatory() {
+    // A `+TERM` is MANDATORY: only notes whose searchable surface contains it survive. `+production`
+    // keeps the production note and drops the logistic-regression / old-approach notes that lack it.
+    let o = run(&["find", "+production", FIND_DIR]);
+    assert!(
+        o.contains("prod_debug.md"),
+        "mandatory +production must keep prod_debug:\n{o}"
+    );
+    assert!(
+        !o.contains("db_logistics.md") && !o.contains("old_approach.md"),
+        "notes missing the mandatory term must be dropped:\n{o}"
+    );
+}
+
+#[test]
+fn find_minus_term_excludes() {
+    // A `-TERM` EXCLUDES: any note containing it is dropped. The query (ONE whitespace-separated
+    // string per the DSL) `regression -logistic` matches the ml note on the optional `regression`,
+    // but `-logistic` removes it — so db_logistics is dropped despite the optional hit.
+    let o = run(&["find", "regression -logistic", FIND_DIR]);
+    assert!(
+        !o.contains("db_logistics.md"),
+        "a note containing the -excluded term must be dropped even if an optional term matched:\n{o}"
+    );
+}
+
+#[test]
+fn find_optional_terms_rank_by_match_count() {
+    // With no `+`/`-`, every term is OPTIONAL: notes are RANKED by how many optional terms matched.
+    // `oauth rotation tables` — recall_a matches two (oauth, rotation), recall_b matches one (tables),
+    // so recall_a ranks ABOVE recall_b (more optional hits first).
+    let o = run(&["find", "oauth rotation tables", RECALL_DIR]);
+    let a = o.find("recall_a.md").expect("recall_a must appear");
+    let b = o.find("recall_b.md").expect("recall_b must appear");
+    assert!(
+        a < b,
+        "the note matching MORE optional terms must rank first:\n{o}"
+    );
+}
+
+#[test]
+fn find_wildcard_word_matches_any_run() {
+    // A `*` matches any run of chars: `regress*` matches `regression`; the note surfaces. The plain
+    // (non-wildcard) note without that stem does not.
+    let o = run(&["find", "+regress*", FIND_DIR]);
+    assert!(
+        o.contains("db_logistics.md"),
+        "wildcard regress* must match regression:\n{o}"
+    );
+    assert!(
+        !o.contains("old_approach.md"),
+        "a non-matching note must not surface:\n{o}"
+    );
+}
+
+#[test]
+fn find_embedded_hyphen_is_literal_not_operator() {
+    // CRITICAL disambiguation: a `-` that is NOT the leading char is LITERAL. `pro*-debug*` is ONE
+    // wildcard term (→ regex `pro.*\-debug.*`) matching `prod-debugger`, NOT `pro*` minus `debug*`.
+    // If the `-` were parsed as an exclude operator, the prod note (which contains `debug`) would be
+    // wrongly dropped; instead it must surface.
+    let o = run(&["find", "+pro*-debug*", FIND_DIR]);
+    assert!(
+        o.contains("prod_debug.md"),
+        "embedded-hyphen wildcard must be one term matching prod-debugger, not an exclude:\n{o}"
+    );
+}
+
+#[test]
+fn find_quoted_phrase_matches_with_spaces() {
+    // A double-quoted token is a VERBATIM phrase matched literally WITH the spaces. Only the note
+    // whose surface contains the exact run `logistic regression failure` survives the mandatory phrase.
+    let o = run(&["find", "+\"logistic regression failure\"", FIND_DIR]);
+    assert!(
+        o.contains("db_logistics.md"),
+        "the phrase note must match:\n{o}"
+    );
+    assert!(
+        !o.contains("prod_debug.md") && !o.contains("old_approach.md"),
+        "notes without the exact phrase must be dropped:\n{o}"
+    );
+}
+
+#[test]
+fn find_prefixed_phrase_excludes() {
+    // A phrase may carry a leading `+`/`-`. The single-string query `retry -"old approach"` matches
+    // old_approach on the optional `retry`, but the `-"old approach"` phrase exclusion drops it
+    // (a phrase is a keyword WITH spaces, so it too can be `-`-prefixed).
+    let o = run(&["find", "retry -\"old approach\"", FIND_DIR]);
+    assert!(
+        !o.contains("old_approach.md"),
+        "the prefixed-phrase exclusion must drop the note containing the exact phrase:\n{o}"
+    );
+}
+
+#[test]
+fn find_only_notes_searches_lessons() {
+    // `--only-notes` searches ONLY the resolved `[^N]` lessons (not the memory bodies), returning the
+    // matching `[N] - …` lesson lines. The note_plain fixture has a lesson about `max_retries`; that
+    // term lives in a LESSON, not the page surface, so only `--only-notes` finds it.
+    let o = run(&["find", "+max_retries", NOTES_DIR, "--only-notes"]);
+    assert!(
+        o.lines()
+            .any(|l| l.trim_start().starts_with("[3]") && l.contains("max_retries")),
+        "only-notes must return the matching lesson line:\n{o}"
+    );
+    // A lesson term that is NOT present must yield nothing for that lesson.
+    let none = run(&["find", "+quibblefrobnicator", NOTES_DIR, "--only-notes"]);
+    assert!(
+        !none.contains("[3]") && !none.contains("[4]"),
+        "an absent lesson term must return no lessons:\n{none}"
+    );
+}
+
+#[test]
+fn find_index_equals_walk() {
+    // `find` honors the index when fresh; an index-backed find MUST return the SAME results as the
+    // live walk — asserted byte-for-byte (the slice's hard correctness contract).
+    let d = TempDir::new("find-idx");
+    seed_corpus(&d);
+    run(&["reindex", d.as_str()]);
+    let walk = run(&["find", "+keychain rotation -widget", d.as_str()]);
+    let indexed = run(&[
+        "find",
+        "+keychain rotation -widget",
+        d.as_str(),
+        "--use-index",
+    ]);
+    assert!(
+        walk.contains("alpha.md"),
+        "walk find must surface alpha:\n{walk}"
+    );
+    assert!(
+        !walk.contains("beta.md"),
+        "the -widget exclusion must drop beta:\n{walk}"
+    );
+    assert_eq!(
+        walk, indexed,
+        "index-backed find must match the walk byte-for-byte:\nwalk:\n{walk}\nindex:\n{indexed}"
+    );
+}
+
+#[test]
+fn find_empty_query_is_clean_error() {
+    // An empty query (no terms at all) is a clean usage error, never a panic or a match-everything.
+    run_fail_clean(&["find", "", FIND_DIR]);
+}
+
+#[test]
+fn find_only_minus_returns_non_excluded() {
+    // With NO `+`/optional terms but a `-` exclusion, the result set is every NON-excluded note. In
+    // the recall corpus, `-tables` drops recall_b and keeps recall_a (which lacks `tables`).
+    let o = run(&["find", "-tables", RECALL_DIR]);
+    assert!(
+        o.contains("recall_a.md"),
+        "a non-excluded note must remain:\n{o}"
+    );
+    assert!(
+        !o.contains("recall_b.md"),
+        "the note containing the -excluded term must be dropped:\n{o}"
+    );
+}
