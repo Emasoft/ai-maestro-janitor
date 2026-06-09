@@ -3,7 +3,7 @@ trdd-id: 4334aad0-c5b2-4990-8214-11e654032cd7
 title: User private memories — /to-user-mem + /search-user-mem with +/- query operators
 column: backburner
 created: 2026-06-09T18:47:51+0200
-updated: 2026-06-09T18:47:51+0200
+updated: 2026-06-09T18:52:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -110,6 +110,42 @@ Searches ONLY the `user-mem/` subfolder. Powered by memgrep's query engine.
 - Result set = (has ALL `+` terms) AND (has NONE of the `-` terms), ranked by how
   many optional terms matched. Empty `+` set ⇒ ranking is by optional matches.
 
+### Full invisibility + immutable global numbering + `/share-user-mem` (USER, 2026-06-09)
+
+**The entire user-memory system is INVISIBLE to agents — including search
+results.** Nothing about user memories ever enters the agent's context window
+unless the user *explicitly* shares it. Specifically:
+
+- **`/search-user-mem` results are emitted to the USER via a `systemMessage`
+  pipe**, NOT into the conversation — the same mechanism the **claude-menu-system**
+  plugin uses (a Stop/Stop-hook that emits post-turn via `systemMessage` at zero
+  context cost; ref `github.com/Emasoft/claude-menu-system`). The user reads the
+  results; the agent sees nothing. (This RESOLVES the earlier open question:
+  results are ALWAYS private, never agent-visible.)
+- The agent therefore cannot read, recall, summarize, or leak user memories. They
+  are the user's private store that merely lives alongside the project.
+
+**Immutable global numbering.** Every user memory is assigned a **permanent,
+globally-unique, never-reused number** at save time (a monotonic counter in the
+`user-mem/` store — like the PRRD rule-numbering invariant: once N is assigned to
+a memory it is that memory forever; deleting a memory retires N, never recycles
+it). The number is stable across the librarian-free lifetime of the memory and
+is what the user references to act on a specific memory.
+
+- `/search-user-mem` results (in the systemMessage) are printed WITH each
+  memory's immutable number, so the user can pick one.
+
+**`/share-user-mem <number>` — the explicit, deliberate opt-in to share.** The
+user flow is: `/search-user-mem <query>` → read the numbered results in the
+systemMessage → pick a number → `/share-user-mem <N>` → memory #N's text is
+injected into Claude's context (the ONLY path by which the agent ever sees a user
+memory). The user may equally just paste a memory's text manually — `/share-user-mem`
+is the convenience that avoids re-typing.
+
+So the privacy model is **default-opaque, explicit-share**: save (invisible),
+search (results to the user only, numbered), share-by-number (the single
+deliberate gate that lets a chosen memory into the agent's context).
+
 ## Relationship to the rest of the memory system
 
 - **Agent memories** — authored by the agent, organized by the librarian
@@ -123,12 +159,10 @@ Searches ONLY the `user-mem/` subfolder. Powered by memgrep's query engine.
 
 ## Open design questions
 
-- **Search-result privacy:** `/to-user-mem` keeps content out of agent context;
-  should `/search-user-mem` results ALSO bypass the agent (shown to the user
-  directly via the hook), or is it acceptable for the agent to see results it was
-  explicitly asked to retrieve? Default proposal: results are the user's query,
-  so returning them to the conversation is fine — but offer a `--private` mode
-  that routes results to the user only (hook-rendered), symmetric with save.
+- **Search-result privacy:** RESOLVED (USER, 2026-06-09) — results are ALWAYS
+  invisible to the agent, emitted to the user via a `systemMessage` pipe
+  (claude-menu-system pattern). The only path into agent context is the explicit
+  `/share-user-mem <number>`. See the "Full invisibility" section above.
 - **Index:** reuse the same git-incremental memgrep index (c77dae09) but as a
   SEPARATE index/namespace for `user-mem/` (never co-mingled with agent notes).
 - **Commands location:** two new slash commands shipped by the janitor plugin
