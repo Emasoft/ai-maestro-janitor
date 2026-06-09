@@ -226,7 +226,9 @@ def test_keychain_write_passes_data_as_argv_value(monkeypatch: pytest.MonkeyPatc
     whose 128-byte buffer SILENTLY TRUNCATED every OAuth blob -> corrupt unreadable slots.
     The argv value is briefly `ps`-visible, but slot items are already `security`-readable
     by any process, so it adds no exposure. Spies on subprocess.run (no real keychain)."""
-    SECRET = '{"accessToken":"tok-0123456789abcdef","refreshToken":"R-secret"}'
+    # Fragmented so no contiguous credential literal sits in tracked source
+    # (tests/README.md §"fragment-only"); reconstructs byte-identical for the assertion below.
+    SECRET = '{"accessToken":"tok-' + '0123456789abcdef' + '","refreshToken":"R-' + 'secret"}'
     seen: dict = {}
 
     def _spy(argv, **kwargs):  # type: ignore[no-untyped-def]
