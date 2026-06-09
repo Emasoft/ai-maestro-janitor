@@ -55,6 +55,44 @@ matters to the current conversation.
    by searching `description`? If the description reads like the *answer*, rewrite
    it to read like the *question*.
 
+## Correcting a memory — the 2-step non-destructive protocol
+
+When a new discovery CONTRADICTS an existing memory, you (an agent) MUST change
+the memory — never the janitor. Do it non-destructively, in exactly two steps:
+
+1. **Clean the fact in place.** Replace the wrong statement in the body with the
+   correct one, so the page's record of the FACTS is always clean and true — no
+   "we used to think X" clutter inline. The body is the current truth.
+2. **Demote the error to a lesson — the WHY is the point.** Record the error that
+   caused the false memory as a **numbered entry** in a `## Notes and lessons
+   learned` section at the BOTTOM of the page, and connect the corrected fact to
+   it with a standard-markdown footnote `[^N]`. The load-bearing content is
+   *why* the previous statement was wrong / *why* the plan failed — the root
+   cause, not merely "this was wrong". A lesson without a WHY cannot stop the
+   next repeat.
+
+This mirrors the CLAUDE.md Bug Autopsy directive (every fixed bug becomes a
+guardrail) and RULE 0 (never lose information): the *fact* is corrected, the
+*error* is never deleted — it is demoted to a linked lesson so future readers
+don't repeat it. Lessons thereby accrue in the topic's own page, so all
+lessons-learned for a topic collect in one findable place (recallable with
+`memgrep find "<symptom>" <memdir> --only-notes`).
+
+## Lesson format (footnotes + per-element dates)
+
+Lessons use **standard markdown footnotes** — `[^N]` in the body, `[^N]: …`
+under `## Notes and lessons learned`. A lesson is a first-class memory element:
+give it the SAME metadata a fact has, including two intrinsic dates in a leading
+`[…]` prefix:
+
+- **OCD — Original Creation Date** (when first written),
+- **LMD — Last Modified Date** (when last changed).
+
+These survive when the background librarian later moves the memory between
+pages, so they — not the file mtime — are the authoritative age. memgrep strips
+the `[…]` prefix from the default render and restores it under `--full-notes`;
+its `--since`/`--until` filters read these dates.
+
 ## Output
 
 One note file + one MEMORY.md index line. Report the note path and the
@@ -71,6 +109,26 @@ User: remember that automating my own paid Claude accounts is fine, don't over-f
   → type: feedback; description carries "is it ok to automate / rotate my own Claude accounts".
 ```
 
+A corrected memory page (the 2-step protocol applied — fact clean in the body,
+error demoted to a dated `[^3]` lesson with the WHY):
+
+```markdown
+---
+name: reference_widget_retry_cap
+description: "widget kept retrying / how many times before it gives up"
+metadata:
+  node_type: memory
+  type: reference
+---
+The widget retries 3× then fails.[^3] Tune via the `max_retries` config key.
+
+## Notes and lessons learned
+[^3]: [ocd:2026-06-09 lmd:2026-06-09] earlier this page said "retries 5×" — wrong,
+  the cap is 3. The error: the constant was read off the variable name
+  `max_attempts` (which doesn't exist) instead of the actual key `max_retries`.
+  Lesson: verify a constant against the SOURCE, not a guessed variable name.
+```
+
 ## Scope
 
 ONLY authors/updates memory notes + the MEMORY.md index. Does NOT recall (use
@@ -80,6 +138,10 @@ mandatory — it is what makes the note recallable.
 ## Resources
 
 - `~/.claude/rules/markdown-memory-recall.md` — the protocol (the law, schema,
-  dual-test method).
+  the lessons-learned conventions, dual-test method).
 - The harness `# Memory` directive — the authoring source-of-truth this skill
   follows.
+- `/janitor-memory-recall` — the RECALL side (find a note before you duplicate
+  or correct it; lessons come back appended).
+- `/to-user-mem` — saves a memory to the USER's PRIVATE store (agent-invisible);
+  distinct from authoring an agent note here.

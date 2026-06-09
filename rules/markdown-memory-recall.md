@@ -61,6 +61,77 @@ subcommands `recall`/`index`/`links`/`fact`). Its own teaching doc is
   precision-first (surface matches suppress body-only matches unless nothing
   matched the surface), printed `path — description`, best first.
 
+## Read-the-notes rule — a memory's lessons are part of the memory
+
+When you read ANY memory, you MUST also read **all the notes/lessons attached to
+it** — every `[^N]` footnote reference and the `## Notes and lessons learned`
+entries they point to. Reading a memory's facts without its lessons is
+incomplete: the lessons are *why* the facts are the way they are and *what
+errors not to repeat*. Recall the page, read it WHOLE (facts + its linked
+lessons), then act.
+
+This is FREE — you never issue a second search for the references. `memgrep`
+auto-resolves footnotes on the memory subcommands: `recall` (default-on) and
+`find` (default-on) APPEND each returned note's resolved lessons; `fact` does
+too with `--with-notes`. One `memgrep recall` yields body **and** every linked
+WHY in a single result.
+
+- Render is token-economical by default: an inline reference shows as a **bare
+  number `[9]`**, and after the body memgrep appends the list
+  `[9] - <lesson WHY text>.` — only the number + the content (no on-disk
+  footnote machinery, no per-note metadata).
+- `--full-notes` restores each lesson's leading `[…]` metadata prefix; `--no-notes`
+  suppresses the lessons (body only). URLs / image links / cross-references in a
+  lesson are ALWAYS kept, even in the minimal form — only metadata is strippable.
+- A footnote-free note appends nothing, so the read-the-notes rule is a no-op on
+  notes that have no lessons yet.
+
+## memgrep recall / find / index — the command surface that shipped
+
+These are the actual flags on the shipped binary (verify with `memgrep recall
+--help` / `find --help`). Every one below exists today.
+
+- **recall** — symptom-ranked pages, lessons appended by default:
+
+  ```bash
+  memgrep recall "SYMPTOM" <memdir>                 # ranked path — description (+ lessons)
+  memgrep recall "SYMPTOM" <memdir> --no-notes      # body only, no lessons
+  memgrep recall "SYMPTOM" <memdir> --sort lmd      # order by last-modified date (newest first)
+  memgrep recall "SYMPTOM" <memdir> --sort ocd --order asc   # oldest-created first
+  memgrep recall "SYMPTOM" <memdir> --since 2026-06-01 --until 2026-06-09   # date window (on lmd)
+  memgrep recall "SYMPTOM" <memdir> --since 2026-06-01 --date-field ocd     # window on creation date
+  ```
+
+  `--sort score|ocd|lmd` (default `score` = relevance), `--order asc|desc`
+  (default `desc`), `--since`/`--until` filter on `--date-field ocd|lmd`
+  (default `lmd`), `--top N` (default 10), `--use-index` (force the SQLite
+  sidecar; auto-used when fresh, else the live walk — results always correct).
+
+- **find** — note-level `+`/`-`/wildcard/phrase keyword search (NOT line grep).
+  The query is ONE whitespace-quoted string: `+TERM` mandatory, `-TERM` exclude,
+  bare `TERM` optional (ranks). `*` = wildcard (any run); `"quoted phrase"`
+  matches verbatim WITH spaces and may be `+`/`-` prefixed; a `+`/`-` INSIDE a
+  token is literal (`pro*-debug*` is ONE term). `--only-notes` searches the
+  resolved `[^N]` lessons instead of pages. Composes with every recall flag
+  above.
+
+  ```bash
+  memgrep find "+rotator +keychain -widget" <memdir>          # must have rotator AND keychain, not widget
+  memgrep find '+"old approach" retry' <memdir>               # mandatory phrase + optional ranker
+  memgrep find "+max_retries" <memdir> --only-notes           # search ONLY the lessons-learned
+  ```
+
+- **index / reindex** (aliases) — build the persistent `.memgrep/index.db`
+  SQLite sidecar (gitignored, git-incremental — re-parses only changed files).
+  `memgrep index --markdown` is the legacy `memory-index.md` doc-generator (the
+  per-note title/summary/tags/TOC/backlinks index); `--full` rebuilds the
+  SQLite index from scratch.
+
+  ```bash
+  memgrep reindex <memdir>             # build/refresh the SQLite query index
+  memgrep index --markdown <memdir>    # the human-readable memory-index.md doc-generator
+  ```
+
 ## The note format (recall-relevant fields)
 
 The `# Memory` directive is the authoring source-of-truth. On disk, notes are:
@@ -78,10 +149,47 @@ metadata:
 ```
 
 `MEMORY.md` is the human index (`- [Title](file.md) — hook`, one line per note)
-loaded each session. `memgrep index` can generate a richer `memory-index.md`
-(per-note title/summary/tags/TOC/backlinks) — that is an OPTIONAL generated
-artifact; `MEMORY.md` remains the canonical loaded index. Recall does not need
-either index — it scans the notes directly.
+loaded each session. `memgrep index --markdown` can generate a richer
+`memory-index.md` (per-note title/summary/tags/TOC/backlinks) — that is an
+OPTIONAL generated artifact; `MEMORY.md` remains the canonical loaded index.
+Recall does not need either index — it scans the notes directly (and
+transparently uses the SQLite `.memgrep/index.db` when it is fresh).
+
+## Lessons-learned conventions (footnotes + per-element dates)
+
+Memory pages grow a bottom `## Notes and lessons learned` section. The format is
+**standard markdown footnotes** — nothing new to memorize, and memgrep's
+markdown parser already understands it:
+
+- In the body, reference a lesson as `[^N]`; under `## Notes and lessons learned`
+  define it as `[^N]: <the WHY>`. memgrep resolves ref ↔ def WITHIN the same note
+  by default and inlines the lesson when it returns the note.
+- A lesson is a **first-class memory element**, not a second-class footnote — it
+  carries the same metadata schema a fact does, including two intrinsic dates:
+  - **OCD — Original Creation Date** (when the lesson/fact was first written),
+  - **LMD — Last Modified Date** (when its content last changed).
+  These survive when the background librarian moves a memory between pages, so a
+  page's filesystem mtime is NOT a reliable age for any element it holds — the
+  per-element OCD/LMD is. memgrep reads OCD from frontmatter `ocd` (alias
+  `created`) and LMD from `lmd` (alias `updated`, falling back to the file
+  mtime). On a lesson, the dates live in its leading `[ocd:… lmd:…]` metadata
+  prefix — stripped from the default render, restored by `--full-notes`.
+
+```markdown
+<clean, current FACTS about this topic>. The widget retries 3× then fails.[^3]
+... tangential topics LINK, never duplicate: see [[other-topic]] ...
+
+## Notes and lessons learned
+[^3]: [ocd:2026-06-09 lmd:2026-06-09] earlier this said "retries 5×"; wrong, the
+  cap is 3 — the config key was misread as `max_attempts` when it is
+  `max_retries`. Lesson: verify the constant against the source, not the
+  variable name.
+```
+
+Authoring the lessons (clean-the-fact-in-place + demote-the-error correction
+protocol) is the WRITE side — see the `janitor-memory-write` skill. Searching
+across lessons (`find --only-notes`, `--since`/`--until` over OCD/LMD) is the
+recall side above.
 
 ## Evaluating / improving the system: the dual-test method
 
@@ -98,6 +206,22 @@ In each, evaluate (1) YOUR search strategy AND (2) the system's retrieval, and
 improve both. **Contamination warning:** after you WRITE a note you are biased
 toward its wording — your own cold-recall is no longer cold. Do cold-recall
 from a clean framing, or have the symptom come from the user verbatim.
+
+## The memory system's parts (how they connect)
+
+| Part | Surface | Role |
+|---|---|---|
+| Authoring | `# Memory` harness directive + `janitor-memory-write` skill | write one fact per note; symptom-indexed `description`; the correction protocol (clean fact in place, demote error to a `[^N]` lesson) |
+| Recall | THIS rule + `janitor-memory-recall` skill + `memgrep recall`/`find` | symptom-ranked recall, lessons auto-appended |
+| Organization | `memory-librarian` detector (janitor heartbeat) | SURFACES aggregation/conflict candidates to `memory-reorg-proposed.md`; never edits content (a session does the conscious reorg) |
+| Tool | `memgrep` (`tools/memgrep/SKILL.md`) | the engine all three lean on |
+| Private user store | `/to-user-mem`, `/search-user-mem`, `/share-user-mem` | the USER's own agent-invisible memories — a SEPARATE corpus, not the agent notes; search routes through `memgrep find` |
+
+Separation of powers: the **janitor** reorganizes structure and *surfaces*
+contradictions but never edits a fact; an **agent** creates and corrects content
+but never reorganizes. (The background auto-merge — the librarian consolidating
+clusters into one wiki page — is DESIGNED but not yet shipped; today the detector
+only proposes, an agent applies.)
 
 ## Why this rule exists
 

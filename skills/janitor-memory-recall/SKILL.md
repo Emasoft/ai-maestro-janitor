@@ -54,6 +54,46 @@ find it from the problem.)
    bodies. If recall returns nothing, the memory doesn't exist yet — solve the
    problem, then capture it with `/janitor-memory-write`.
 
+## Read the notes too (the lessons come back for free)
+
+Reading a memory means reading its lessons too. `recall` resolves and APPENDS
+each note's `[^N]` lessons-learned by default (so does `find`) — one call yields
+the facts AND every linked WHY, no second search. The render is minimal: an
+inline reference shows as a bare number `[9]`, and the appended list reads
+`[9] - <lesson WHY text>.`
+
+- `--no-notes` — body only (suppress the lessons).
+- `--full-notes` — keep each lesson's leading `[…]` metadata prefix (dates,
+  class). URLs and image links in a lesson are ALWAYS kept regardless.
+
+## Enriched recall — sort, date-range, keyword find
+
+The shipped `recall`/`find` accept (verify with `memgrep recall --help`):
+
+- `--sort score|ocd|lmd` (default `score` = relevance), `--order asc|desc`
+  (default `desc`) — e.g. `--sort lmd` for newest-modified first.
+- `--since <ISO>` / `--until <ISO>` over `--date-field ocd|lmd` (default `lmd`)
+  — "what did I learn last week", "every lesson about X between two dates".
+- `--top N` (default 10); `--use-index` forces the SQLite sidecar (auto-used
+  when fresh, else the live walk — results are always correct).
+
+`memgrep find "<query>" <memdir>` is note-level keyword search with a `+`/`-`/
+wildcard/phrase DSL (NOT line grep): `+TERM` mandatory, `-TERM` exclude, bare
+`TERM` optional (ranks), `*` wildcard, `"quoted phrase"` verbatim. Add
+`--only-notes` to search ONLY the resolved lessons (returns matching `[N] - …`
+lessons, not pages).
+
+```bash
+memgrep recall "$SYMPTOM" "$MEMDIR" --sort lmd                 # newest-touched first
+memgrep recall "$SYMPTOM" "$MEMDIR" --since 2026-06-01         # only recent notes
+memgrep find "+rotator +keychain -widget" "$MEMDIR"           # AND/exclude keyword search
+memgrep find "+max_retries" "$MEMDIR" --only-notes            # search the lessons only
+```
+
+Optional speed-up: `memgrep reindex "$MEMDIR"` builds the persistent
+`.memgrep/index.db` (gitignored, git-incremental). Recall auto-uses it when
+fresh; you never have to manage it.
+
 ## Output
 
 A short ranked list of `path — description` lines (memgrep) or matching paths
@@ -62,11 +102,26 @@ the conversation — open the one you need.
 
 ## Examples
 
-```text
+<example>
 User: the oauth rotator failed again and I had to log in manually
 → recall "oauth rotator failed had to log in manually" → surfaces the keychain
-  + resume-protocol notes #1/#2; read them before touching the rotator.
+  + resume-protocol notes #1/#2 with their lessons appended; read them WHOLE
+  (facts + the `[N] - WHY` lessons) before touching the rotator.
+</example>
 
+<example>
+User: what did we learn about the rotator in the last week?
+→ memgrep recall "oauth rotator" "$MEMDIR" --since 2026-06-02 --sort lmd
+  → recent rotator notes, newest-modified first, each with its lessons.
+</example>
+
+<example>
+User: find the memory that mentions max_retries but not the widget
+→ memgrep find "+max_retries -widget" "$MEMDIR"
+  → note-level keyword search (mandatory term, exclude term).
+</example>
+
+```text
 User: recall what we decided about branch protection rulesets
 User: have we seen this head/tee truncation before?
 User: check the memory notes about compaction resume
@@ -81,5 +136,8 @@ never blocks on a missing binary.
 ## Resources
 
 - `~/.claude/rules/markdown-memory-recall.md` — the recall protocol (the law,
-  the schema, the dual-test method).
+  the schema, the read-the-notes rule, the dual-test method).
 - `$CLAUDE_PLUGIN_ROOT/tools/memgrep/SKILL.md` — the memgrep tool reference.
+- `/janitor-memory-write` — the WRITE side (authoring + the correction protocol).
+- `/search-user-mem` — searches the USER's PRIVATE memory store (a separate
+  corpus, agent-invisible); distinct from this recall of the agent's notes.
