@@ -787,7 +787,15 @@ def language_lint_step(info: ProjectInfo) -> None:
         print(f"{GREEN}ok go vet passed{NC}")
 
     # ── Markdown ────────────────────────────────────────────────────────
-    md_files = sorted({*by_ext.get(".md", []), *by_ext.get(".markdown", [])})
+    # Style-lint only SHIPPED docs. Exclude (a) TRDDs under design/tasks/ — append-only
+    # terminal design logs whose bodies are immutable per the TRDD rule and which never ship
+    # to users; and (b) **/fixtures/** — deliberately-diverse markdown that is PARSER TEST
+    # DATA (e.g. a multi-H1 sample), not documentation. Linting either is a category error
+    # (it would force edits to immutable logs or break the very tests the fixtures drive).
+    md_files = sorted(
+        p for p in {*by_ext.get(".md", []), *by_ext.get(".markdown", [])}
+        if "fixtures" not in p.parts and not ("design" in p.parts and "tasks" in p.parts)
+    )
     if md_files:
         # `pymarkdownlnt` is uv-installable, pure-Python, and ships the
         # `pymarkdown` CLI. We pass each file explicitly so the linter
