@@ -3,7 +3,7 @@ trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
 column: backburner
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-09T17:53:01+0200
+updated: 2026-06-09T18:07:40+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -131,3 +131,95 @@ a regex; the "background/automated" requirement means it is *scheduled* and
 - **Tool** — `memgrep` (TRDD-d151fe52) is the engine all three lean on.
 
 This TRDD is the missing third leg (organization) of the memory system.
+
+---
+
+## ADDENDUM — 2026-06-09 (USER): separation of powers + non-destructive correction + read-the-notes rule
+
+A second USER directive refined the maintenance model. Two roles, strictly
+separated, plus a correction protocol and a reading rule.
+
+### Separation of powers (janitor vs single agent)
+
+| | **Janitor** (background librarian) | **Single agent** (a session) |
+|---|---|---|
+| **CAN** | reorganize / aggregate notes into one per-topic wiki page; **detect contradictions & conflicting memories and SURFACE them** to agents | **create** new memories (authoring); **correct** false memories / memories with wrong facts |
+| **CANNOT** | **create** new memories; **correct** memories (fix a fact) | **reorganize** the memories |
+
+The load-bearing rule: **the janitor never edits memory CONTENT.** It only
+(a) reorganizes structure (aggregation, linking) and (b) *finds and surfaces*
+contradictions — it raises a flag, an agent resolves it. The agent never
+reorganizes; it only creates and corrects content. Conflict detection (janitor)
+and conflict resolution (agent) are split so a background pass never silently
+rewrites a fact, and a single session never fights the librarian's structure.
+
+> Implementation note: the janitor's conflict-surfacing is a new detector /
+> librarian-pass output — e.g. a `memory-conflicts-surfaced.md` (or a heartbeat
+> `[memory-conflict]` nudge) listing pairs of notes that assert contradictory
+> facts about the same topic, for the next agent session to reconcile. memgrep
+> can PROPOSE the candidate conflicting pairs (same topic/tag, opposing
+> assertions); the janitor surfaces, never resolves.
+
+### The 2-step non-destructive correction protocol (AGENT mandate)
+
+When a new discovery **contradicts** an existing memory, the agent MUST change
+the memory — but non-disruptively, in exactly two steps:
+
+1. **Clean the fact in place.** Replace the wrong statement in the memory body
+   with the correct one, so the page's record of the FACTS is always clean and
+   true (the body is the current truth — no "we used to think X" clutter inline).
+2. **Preserve the error as a lesson.** The error that caused the false memory /
+   false conclusion / wrong solution-plan is recorded as a **numbered entry** in
+   a **`## Notes and lessons learned`** section at the **bottom** of the page,
+   and the corrected fact is **connected to it via a footnote reference**
+   (`[7](#ref)` style). Lessons thereby accrue in their **category page**
+   (the topic's wiki page), so all lessons-learned for a topic are collected in
+   one findable place.
+
+This mirrors the existing CLAUDE.md **Bug Autopsy** directive (every fixed bug
+becomes a guardrail) and RULE 0 (never lose information): the *fact* is corrected,
+the *error* is never deleted — it is demoted to a linked footnote so future
+readers don't repeat it.
+
+### Page shape (target)
+
+```markdown
+---
+name: <topic-slug>
+description: "<symptom surface for recall>"
+---
+<clean, current FACTS about this topic — corrected in place>.
+The widget retries 3× then fails.[^3]
+... links to tangential topics: see [[other-topic]] ...
+
+## Notes and lessons learned
+[^3]: 2026-06-09 — earlier this said "retries 5×"; wrong, the cap is 3 (the
+  config key was misread as `max_attempts` when it is `max_retries`). Lesson:
+  verify the constant against the source, not the variable name. (was: TRDD-xyz)
+```
+
+### NEW RULE (USER-mandated) — read-the-notes-too
+
+> When an agent reads ANY memory, it MUST also read **all the notes / footnotes
+> attached to it** (every `[N]` / `[^N]` reference and the `## Notes and lessons
+> learned` entries they point to). Reading a memory's facts without its lessons
+> is incomplete — the lessons are *why* the facts are the way they are and *what
+> errors not to repeat*.
+
+This rule must be added, on implementation, to **both** halves of the recall
+surface:
+- `rules/markdown-memory-recall.md` (the recall protocol rule), and
+- the `janitor-memory-recall` skill,
+- and reflected back to the harness `# Memory` directive's recall guidance.
+
+It pairs with the existing "recall before acting" discipline: recall the page,
+then read it WHOLE (facts + its linked lessons), then act.
+
+### Implementation note (do NOT build piecemeal)
+
+The correction protocol, the `## Notes and lessons learned` page structure, the
+footnote-reference convention, the janitor conflict-surfacing detector, and the
+read-the-notes rule are ONE coherent feature. They must be designed and shipped
+together (the read-the-notes rule is meaningless until the lessons section
+exists). Capture-first, integrate-once — do not add the reading rule in
+isolation. Implement as a unit when this TRDD leaves `backburner`.
