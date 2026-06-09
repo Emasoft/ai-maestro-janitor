@@ -3,7 +3,7 @@ trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
 column: dev
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-09T21:01:24+0200
+updated: 2026-06-10T01:51:49+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -373,6 +373,50 @@ git-tracked, which the design must exploit, not fight:
   the librarian should BATCH a reorg pass into a few well-described commits
   (not one commit per moved line) so history stays readable and the index's
   incremental delta stays coherent.
+
+### THREE-SCOPE WIKI LAYERS (USER directive, 2026-06-10) — mirror Claude Code's memory layers
+
+The wiki MUST be layered exactly like Claude Code's own memory system (user
+CLAUDE.md / project CLAUDE.md / CLAUDE.local.md). Three scopes, three storage
+roots, one recall surface:
+
+| Scope | Root | Git | Shared with | Contains |
+|---|---|---|---|---|
+| **USER (global)** | `~/.claude/memory/` (new) | never in any repo | all of this user's projects on this machine | cross-project knowledge, user preferences, machine-independent lessons |
+| **PROJECT** | `<project-root>/memory/` (new) | **git-tracked, PUSHED to GitHub** | **every dev** working on the project | project knowledge any contributor needs: architecture facts, codebase gotchas, project lessons. **Sensitive/local data FORBIDDEN** (enforced, below) |
+| **LOCAL** | `~/.claude/projects/<slug>/memory/` (the EXISTING corpus) | outside the repo by construction — never pushed | one Claude instance on one computer | local paths, machine specifics, credentials hints, private data, per-instance info. The harness `# Memory` directive already writes here; `user-mem/` stays inside it |
+
+Design notes:
+- **LOCAL is the existing corpus** — no migration: `~/.claude/projects/<slug>/memory/`
+  is already per-project + per-machine + un-pushed, exactly the local-scope
+  semantics. New roots are only USER + PROJECT.
+- **Recall searches ALL THREE, most-specific first: LOCAL → PROJECT → USER.**
+  Results carry their scope. On conflicting facts the more specific scope wins
+  (local overrides project overrides user). memgrep needs multi-root search
+  (one invocation, several roots) with the per-root `.memgrep/index.db` it
+  already builds; the PROJECT root's index dir is self-gitignored (already the
+  slice-3 behavior).
+- **Write routing (authoring decision tree, goes in the rule + write skill):**
+  contains a local path / username / hostname / secret / machine-specific
+  detail → LOCAL. Project knowledge any dev needs → PROJECT. About the user
+  across projects → USER. When unsure → LOCAL (the safe scope; promotion to
+  PROJECT is a deliberate later act).
+- **JANITOR ENFORCEMENT (the load-bearing piece — hooks + rules, per the USER):**
+  1. **scope-leak detector** (new): scans the PROJECT-scope `memory/` for
+     local absolute paths (`/Users/<name>/…`), usernames, hostnames, emails,
+     credentials (reuse the existing private-path + credential pattern libs) —
+     a leak is surfaced as a finding proposing demotion to LOCAL. This is what
+     makes the git-tracked scope SAFE to push.
+  2. **gitignore guards**: PROJECT `memory/` must be TRACKED (not accidentally
+     ignored); LOCAL must never appear inside the repo; `memory/.memgrep/`
+     stays self-ignored.
+  3. **librarian is per-scope**: aggregation/conflict surfacing runs within
+     each scope; it NEVER moves a page across scopes autonomously — cross-scope
+     placement is an agent/user decision (it may SURFACE "this page looks
+     misplaced").
+  4. recall/write rules + skills updated to teach the three scopes + routing.
+- **user-mem** (TRDD-4334aad0) is unchanged: the USER's private, agent-invisible
+  store — a fourth thing, inside LOCAL, not part of the agent wiki layers.
 
 ### Implementation note (do NOT build piecemeal)
 
