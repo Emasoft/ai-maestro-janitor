@@ -119,6 +119,134 @@ fn read_note(path: &Path) -> Option<Note> {
     })
 }
 
+// ─────────────────────── footnote resolution (the read-the-notes feature) ───────────────────────
+
+/// One resolved lesson/note element: the footnote label `N` (as it renders, bare), the optional
+/// leading `[...]` metadata prefix (stripped by default, restored by `--full-notes`), and the WHY
+/// text (links/images/URLs always preserved — only the metadata prefix is strippable).
+struct ResolvedNote {
+    num: String,
+    meta: Option<String>,
+    text: String,
+}
+
+/// Read the text of a footnote definition spanning raw lines `[start, end]` (1-based), strip the
+/// leading `[^label]:` marker, and collapse the (possibly multi-line, indented) continuation into a
+/// single logical line. Markdown links/images/URLs inside the text are untouched.
+fn footnote_def_text(lines: &[&str], label: &str, start: usize, end: usize) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for ln in start..=end {
+        if ln >= 1 && ln <= lines.len() {
+            parts.push(lines[ln - 1].trim().to_string());
+        }
+    }
+    let joined = parts.join(" ");
+    let joined = joined.trim();
+    // Strip the `[^label]:` definition marker that opens the first line.
+    let marker = format!("[^{label}]:");
+    let body = joined
+        .strip_prefix(&marker)
+        .map(|s| s.trim_start())
+        .unwrap_or(joined);
+    // Collapse any run of internal whitespace to a single space (multi-line defs indent their
+    // continuation lines), so the rendered lesson is one tidy line.
+    body.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Split a lesson body into an optional leading `[...]` METADATA prefix and the remaining WHY text.
+/// A leading `[` is metadata ONLY when it is NOT a markdown link/image — i.e. the matching `]` is
+/// not immediately followed by `(` and the bracket is not an image `![...]`. This keeps a lesson
+/// that legitimately STARTS with a link (`[issue](url) …`) fully intact while stripping a true
+/// `[ocd:… class:…]` metadata head. Returns `(metadata_without_brackets, rest_text)`.
+fn split_note_metadata(body: &str) -> (Option<String>, String) {
+    let bytes = body.as_bytes();
+    if bytes.first() != Some(&b'[') {
+        return (None, body.to_string());
+    }
+    // Find the matching close bracket of the opening `[` (no nested brackets expected in metadata).
+    let Some(close_rel) = body[1..].find(']') else {
+        return (None, body.to_string());
+    };
+    let close = 1 + close_rel; // index of `]` in `body`
+    // If the char right after `]` is `(`, this is a markdown link `[text](url)` → NOT metadata.
+    if body[close + 1..].starts_with('(') {
+        return (None, body.to_string());
+    }
+    let meta = body[1..close].trim().to_string();
+    let rest = body[close + 1..].trim_start().to_string();
+    (Some(meta), rest)
+}
+
+/// Resolve a note's in-body `[^N]` references to their `[^N]:` definitions (its `## Notes and
+/// lessons learned` section), in reference order, returning the modeled lessons. A definition's
+/// text is split into its (strippable) `[...]` metadata prefix and its WHY text. Only definitions
+/// that are actually referenced from the body are returned, deduped by label (so repeated refs to
+/// the same lesson list it once).
+fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
+    let Some(text) = md::read_text(path) else {
+        return Vec::new();
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let ctx = md::build_context(&text, lines.len());
+    // Map label → def text, once.
+    let mut def_text: BTreeMap<String, String> = BTreeMap::new();
+    for d in &ctx.footnote_defs {
+        def_text
+            .entry(d.label.clone())
+            .or_insert_with(|| footnote_def_text(&lines, &d.label, d.start, d.end));
+    }
+    // Walk refs in body order; emit each referenced def once.
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut out = Vec::new();
+    for r in &ctx.footnote_refs {
+        if !seen.insert(r.label.clone()) {
+            continue;
+        }
+        if let Some(body) = def_text.get(&r.label) {
+            let (meta, rest) = split_note_metadata(body);
+            out.push(ResolvedNote {
+                num: r.label.clone(),
+                meta,
+                text: rest,
+            });
+        }
+    }
+    out
+}
+
+/// Normalize a body line's inline footnote references for display: the parser-recognized `[^N]`
+/// refs on this 1-based source line render as the bare `[N]` the output format mandates (storage
+/// form ≠ render form). Only labels whose footnote reference comrak located on THIS line are
+/// rewritten, so a literal `[^x]` inside e.g. inline code is left untouched. `refs` is the file's
+/// full ref list; `line` is the 1-based source line of `raw`.
+fn normalize_refs_in_line(raw: &str, line: usize, refs: &[md::FootnoteRef]) -> String {
+    let mut s = raw.to_string();
+    for r in refs.iter().filter(|r| r.line == line) {
+        s = s.replace(&format!("[^{}]", r.label), &format!("[{}]", r.label));
+    }
+    s
+}
+
+/// Render a note's resolved lessons as the token-economical block appended after a memory body:
+/// `[N] - <WHY>` per lesson (bare number, metadata stripped). `--full-notes` restores the metadata
+/// as `[N] - [meta] <WHY>`. Returns an empty string when there are no lessons (so callers append
+/// nothing for a footnote-free note). The leading blank line delimits body-from-lessons.
+fn render_notes(notes: &[ResolvedNote], full: bool) -> String {
+    if notes.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from("\n");
+    for n in notes {
+        match (&n.meta, full) {
+            (Some(meta), true) => {
+                s.push_str(&format!("[{}] - [{}] {}\n", n.num, meta, n.text));
+            }
+            _ => s.push_str(&format!("[{}] - {}\n", n.num, n.text)),
+        }
+    }
+    s
+}
+
 /// Resolve a raw link URL to a target file in the corpus. Returns (target, external).
 fn resolve(
     url: &str,
@@ -463,6 +591,16 @@ struct RecallArgs {
     /// Show at most this many notes.
     #[arg(long = "top", default_value_t = 10)]
     top: usize,
+    /// Resolve + append each note's `[^N]` lessons-learned (default ON for recall). Accepted
+    /// explicitly for symmetry; `--no-notes` is the off switch.
+    #[arg(long = "with-notes")]
+    with_notes: bool,
+    /// Body only — do NOT resolve/append the lessons-learned footnotes.
+    #[arg(long = "no-notes", conflicts_with = "with_notes")]
+    no_notes: bool,
+    /// Keep each lesson's leading `[...]` metadata prefix (default: stripped).
+    #[arg(long = "full-notes")]
+    full_notes: bool,
     #[arg(long = "hidden")]
     hidden: bool,
 }
@@ -498,8 +636,10 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
             "recall needs at least one content term (stopwords like 'to'/'how' don't count)"
         );
     }
-    // (surface_hits, body_only, path, summary)
-    let mut all: Vec<(i64, bool, String, String)> = Vec::new();
+    // Notes are resolved+appended unless --no-notes. --with-notes is the (default) explicit on.
+    let want_notes = !a.no_notes;
+    // (surface_hits, body_only, display_path, summary, path)
+    let mut all: Vec<(i64, bool, String, String, PathBuf)> = Vec::new();
     for path in collect_md(&a.paths, a.hidden) {
         // Skip the index files: `MEMORY.md` (the hand-authored index) and `memory-index.md` (the
         // `memgrep index` output) are MAPS of the notes, not notes. Ranking them lets a symptom
@@ -526,20 +666,20 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
                 terms.iter().any(|x| lo.contains(x.as_str()))
             });
         if surface_hits > 0 || body_only {
-            all.push((surface_hits, body_only, rel(&path), note.summary));
+            all.push((surface_hits, body_only, rel(&path), note.summary, path));
         }
     }
     // PRECISION-FIRST: if ANY note matched the symptom surface (description/title/tags), return
     // only those, ranked by hit count. Fall back to body-only matches ONLY when nothing matched
     // the surface — so a well-described KB stays precise, but we never miss a content-only note.
     let any_surface = all.iter().any(|(h, ..)| *h > 0);
-    let mut scored: Vec<(i64, String, String)> = all
+    let mut scored: Vec<(i64, String, String, PathBuf)> = all
         .into_iter()
         .filter(|(h, body_only, ..)| *h > 0 || (!any_surface && *body_only))
-        .map(|(h, _, p, s)| (h, p, s))
+        .map(|(h, _, p, s, pb)| (h, p, s, pb))
         .collect();
     scored.sort_by(|x, y| y.0.cmp(&x.0)); // best first; stable ⇒ ties keep path order
-    for (_score, path, summary) in scored.into_iter().take(a.top) {
+    for (_score, path, summary, pathbuf) in scored.into_iter().take(a.top) {
         let s = summary.trim();
         let shown: String = if s.chars().count() > 140 {
             s.chars().take(140).collect::<String>() + "…"
@@ -550,6 +690,13 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
             println!("{path}");
         } else {
             println!("{path} — {shown}");
+        }
+        // Read-the-notes: after the ranked note, append its resolved lessons (body-then-lessons).
+        if want_notes {
+            let block = render_notes(&resolve_notes(&pathbuf), a.full_notes);
+            if !block.is_empty() {
+                print!("{block}");
+            }
         }
     }
     Ok(())
@@ -581,6 +728,12 @@ struct FactArgs {
     /// Only facts on/before this ISO date/time.
     #[arg(long = "until")]
     until: Option<String>,
+    /// Resolve + append the matched files' `[^N]` lessons-learned (OFF by default for fact).
+    #[arg(long = "with-notes")]
+    with_notes: bool,
+    /// Keep each lesson's leading `[...]` metadata prefix (default: stripped). Implies --with-notes.
+    #[arg(long = "full-notes")]
+    full_notes: bool,
     #[arg(long = "hidden")]
     hidden: bool,
 }
@@ -604,12 +757,24 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
         Some(p) => Some(Regex::new(p)?),
         None => None,
     };
+    // --full-notes implies --with-notes (you asked for the verbose form of the notes).
+    let want_notes = a.with_notes || a.full_notes;
     let mut hits: Vec<(String, String)> = Vec::new(); // (ts, full line) — sorted by ts
+    let mut matched_paths: Vec<PathBuf> = Vec::new(); // files with ≥1 matched fact, first-seen order
     for path in collect_md(&a.paths, a.hidden) {
         let Some(text) = md::read_text(&path) else {
             continue;
         };
-        for raw in text.lines() {
+        // Footnote refs for inline `[^N]` → `[N]` normalization on the emitted fact line (the
+        // render form). Only parsed when notes are wanted, so the no-notes path is untouched.
+        let fn_refs: Vec<md::FootnoteRef> = if want_notes {
+            let lc = text.lines().count();
+            md::build_context(&text, lc).footnote_refs
+        } else {
+            Vec::new()
+        };
+        let mut path_matched = false;
+        for (i, raw) in text.lines().enumerate() {
             let Some(c) = fact_re.captures(raw) else {
                 continue;
             };
@@ -647,12 +812,32 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
             {
                 continue;
             }
-            hits.push((ts.to_string(), format!("{}: {}", rel(&path), raw)));
+            // Display the fact with inline footnote refs normalized to the bare `[N]` render form.
+            let shown_line = if want_notes {
+                normalize_refs_in_line(raw, i + 1, &fn_refs)
+            } else {
+                raw.to_string()
+            };
+            hits.push((ts.to_string(), format!("{}: {}", rel(&path), shown_line)));
+            path_matched = true;
+        }
+        if path_matched {
+            matched_paths.push(path);
         }
     }
     hits.sort();
     for (_, line) in hits {
         println!("{line}");
+    }
+    // Read-the-notes: with --with-notes, append each matched file's resolved lessons once, after
+    // the fact lines (body-then-lessons), so a fact lookup also carries its WHY.
+    if want_notes {
+        for path in &matched_paths {
+            let block = render_notes(&resolve_notes(path), a.full_notes);
+            if !block.is_empty() {
+                print!("{block}");
+            }
+        }
     }
     Ok(())
 }

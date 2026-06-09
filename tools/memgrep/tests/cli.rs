@@ -714,3 +714,143 @@ fn oversized_file_is_skipped_normal_file_works() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+const NOTES_DIR: &str = "tests/fixtures/notes";
+
+#[test]
+fn recall_with_notes_appends_resolved_lessons_by_default() {
+    // recall is --with-notes by default: after the ranked note it appends its resolved [^N]
+    // lessons as a token-economical `[N] - <WHY>` list, so one recall yields facts + every WHY.
+    let o = run(&["recall", "widget retry cap", NOTES_DIR]);
+    assert!(o.contains("note_plain.md"), "the note must rank:\n{o}");
+    // The two lessons appear as bare-number list entries (NOT the on-disk `[^N]:` form).
+    assert!(
+        o.contains("[3] - ") && o.contains("[4] - "),
+        "resolved lessons must render as `[N] - <text>`:\n{o}"
+    );
+    assert!(
+        o.contains("max_retries"),
+        "the lesson WHY text must be inlined:\n{o}"
+    );
+    // The footnote-definition machinery (`[^3]:`) must NOT leak into the output.
+    assert!(
+        !o.contains("[^3]:"),
+        "the on-disk footnote-def syntax must be normalized away:\n{o}"
+    );
+}
+
+#[test]
+fn recall_no_notes_returns_body_only() {
+    // --no-notes is the escape hatch: resolution off, the ranked note prints without its lessons.
+    let o = run(&["recall", "widget retry cap", NOTES_DIR, "--no-notes"]);
+    assert!(
+        o.contains("note_plain.md"),
+        "the note must still rank:\n{o}"
+    );
+    assert!(
+        !o.contains("[3] - ") && !o.contains("max_retries"),
+        "--no-notes must suppress the resolved lessons:\n{o}"
+    );
+}
+
+#[test]
+fn recall_strips_note_metadata_prefix_by_default() {
+    // A lesson's leading `[...]` metadata prefix is recognized + stripped by default — the agent
+    // gets the WHY, not the bookkeeping (ocd/lmd/class/...).
+    let o = run(&["recall", "rotator keychain", NOTES_DIR]);
+    assert!(o.contains("note_meta.md"), "the note must rank:\n{o}");
+    assert!(
+        o.contains("[9] - ") && o.contains("OS keychain"),
+        "the lesson WHY must render:\n{o}"
+    );
+    assert!(
+        !o.contains("ocd:2026-06-01") && !o.contains("class:reference"),
+        "the metadata prefix must be stripped by default:\n{o}"
+    );
+}
+
+#[test]
+fn recall_full_notes_restores_metadata_prefix() {
+    // --full-notes restores the full form `[N] - [metadata...] <text>` for when the agent wants it.
+    let o = run(&["recall", "rotator keychain", NOTES_DIR, "--full-notes"]);
+    assert!(
+        o.contains("ocd:2026-06-01") && o.contains("lmd:2026-06-09"),
+        "--full-notes must restore the metadata prefix:\n{o}"
+    );
+    assert!(
+        o.contains("OS keychain"),
+        "the WHY text is still present in full mode:\n{o}"
+    );
+}
+
+#[test]
+fn recall_keeps_urls_and_images_in_minimal_notes() {
+    // URLs / markdown links / image links are load-bearing and ALWAYS survive — even in the
+    // default minimal render; only the `[...]` metadata prefix is strippable, never resources.
+    let o = run(&["recall", "build cache lockfile", NOTES_DIR]);
+    assert!(o.contains("note_link.md"), "the note must rank:\n{o}");
+    assert!(
+        o.contains("https://example.com/cache-bug"),
+        "a bare URL in the lesson must survive the minimal render:\n{o}"
+    );
+    assert!(
+        o.contains("![flow](img/cache-flow.png)"),
+        "an image link in the lesson must survive:\n{o}"
+    );
+    assert!(
+        o.contains("[issue](https://example.com/issues/7)"),
+        "a markdown link in the lesson must survive:\n{o}"
+    );
+    // But the metadata prefix on THIS note is still stripped by default.
+    assert!(
+        !o.contains("class:reference"),
+        "metadata is still stripped while resources are kept:\n{o}"
+    );
+}
+
+#[test]
+fn fact_with_notes_appends_resolved_lessons() {
+    // `fact` also honors --with-notes: after the matched fact line it appends the file's resolved
+    // lessons, so a fact lookup carries its WHY too.
+    let o = run(&["fact", NOTES_DIR, "--cat", "cache", "--with-notes"]);
+    assert!(
+        o.contains("note_fact.md") && o.contains("lockfile hash"),
+        "the fact must match:\n{o}"
+    );
+    assert!(
+        o.contains("[1] - ") && o.contains("poisoned the cache"),
+        "the fact's lesson must be resolved and appended:\n{o}"
+    );
+    // The inline ref in the emitted fact line renders as bare `[1]`, NOT the on-disk `[^1]`.
+    assert!(
+        !o.contains("[^1]"),
+        "the inline footnote ref must normalize to the bare `[1]` form:\n{o}"
+    );
+}
+
+#[test]
+fn fact_without_with_notes_is_unchanged() {
+    // `fact` is body-only unless --with-notes is asked for (it is NOT default-on for fact), so the
+    // existing fact behavior is preserved.
+    let o = run(&["fact", NOTES_DIR, "--cat", "cache"]);
+    assert!(o.contains("lockfile hash"), "the fact must match:\n{o}");
+    assert!(
+        !o.contains("[1] - ") && !o.contains("poisoned the cache"),
+        "without --with-notes the fact must stay body-only:\n{o}"
+    );
+}
+
+#[test]
+fn recall_with_notes_does_not_break_undescribed_corpus() {
+    // The recall fixtures dir has notes WITHOUT footnotes; --with-notes (default) must be a no-op
+    // there — body-only output, no crash, all 42 existing recall expectations intact.
+    let o = run(&["recall", "oauth rotation failed", "tests/fixtures/recall"]);
+    assert!(
+        o.contains("recall_a.md"),
+        "existing recall still works:\n{o}"
+    );
+    assert!(
+        !o.contains("] - "),
+        "a corpus with no footnotes yields no notes block:\n{o}"
+    );
+}

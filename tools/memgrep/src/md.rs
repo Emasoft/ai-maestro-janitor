@@ -100,6 +100,24 @@ pub struct LinkRef {
     pub url: String,
 }
 
+/// An inline footnote reference `[^N]` in the note body: its 1-based source line and label `N`
+/// (the text between `[^` and `]`). Resolved against the [`FootnoteDef`] of the same label.
+#[derive(Clone, Debug)]
+pub struct FootnoteRef {
+    pub line: usize,
+    pub label: String,
+}
+
+/// A footnote definition `[^N]: <text>` (the lessons-learned entries): its label and the 1-based
+/// `[start, end]` source span. The text is read from the raw lines by the memory layer (which then
+/// strips the `[^N]:` marker and any leading `[...]` metadata), keeping this parser format-agnostic.
+#[derive(Clone, Debug)]
+pub struct FootnoteDef {
+    pub label: String,
+    pub start: usize,
+    pub end: usize,
+}
+
 /// A Pandoc/Quarto bracketed span's attributes: `[txt]{.a .b key="x, y"}` → classes [a,b], keys "x, y".
 #[derive(Clone, Debug)]
 pub struct SpanAttr {
@@ -165,6 +183,12 @@ pub struct Context {
     pub node_kinds: Vec<u8>,
     /// Every out-link in the file (for the cross-file graph: `index` backlinks, `links` subcommand).
     pub links: Vec<LinkRef>,
+    /// Every inline footnote reference `[^N]` in the body: its 1-based line and label `N`. comrak
+    /// drops the label by default; we keep it so the memory layer can resolve `[^N]` → `[^N]: …`.
+    pub footnote_refs: Vec<FootnoteRef>,
+    /// Every footnote definition `[^N]: …` (under `## Notes and lessons learned`): its label and
+    /// 1-based source span, so the memory layer can read the def's text from the raw lines.
+    pub footnote_defs: Vec<FootnoteDef>,
 }
 
 impl Context {
@@ -273,6 +297,8 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         span_attrs: vec![Vec::new(); n_lines],
         node_kinds: vec![0u8; n_lines],
         links: Vec::new(),
+        footnote_refs: Vec::new(),
+        footnote_defs: Vec::new(),
     };
 
     let raw_lines: Vec<&str> = text.lines().collect();
@@ -293,6 +319,8 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         Vec<(usize, usize, InlineKind, String)>,
         Vec<(usize, usize, u8)>,
         Vec<LinkRef>,
+        Vec<FootnoteRef>,
+        Vec<FootnoteDef>,
     )> = std::panic::catch_unwind(|| {
         let arena = Arena::new();
         let mut opts = Options::default();
@@ -314,6 +342,8 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
         let mut inline_spans = Vec::new();
         let mut kind_spans = Vec::new();
         let mut links = Vec::new();
+        let mut fn_refs: Vec<FootnoteRef> = Vec::new();
+        let mut fn_defs: Vec<FootnoteDef> = Vec::new();
         for node in root.descendants() {
             // Capture what we need from the data borrow, then DROP it before any descendants()
             // walk (gather_inline_text re-borrows the same node ⟹ RefCell double-borrow panic).
@@ -325,6 +355,10 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                 KindBlock(usize, usize, u8),
                 KindInline(usize, u8),
                 Link(usize, String),
+                // Footnote def/ref: keep tagging K_FOOTNOTE (so `--footnote` still matches) AND
+                // capture the label that comrak otherwise discards, for `[^N]` ↔ `[^N]:` resolution.
+                FnDef(usize, usize, String),
+                FnRef(usize, String),
                 None,
             }
             let act = {
@@ -355,15 +389,15 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                         Act::KindBlock(sp.start.line, sp.end.line, K_QUOTE)
                     }
                     NodeValue::HtmlBlock(_) => Act::KindBlock(sp.start.line, sp.end.line, K_HTML),
-                    NodeValue::FootnoteDefinition(_) => {
-                        Act::KindBlock(sp.start.line, sp.end.line, K_FOOTNOTE)
+                    NodeValue::FootnoteDefinition(fd) => {
+                        Act::FnDef(sp.start.line, sp.end.line, fd.name.clone())
                     }
                     NodeValue::Math(_) => Act::KindInline(sp.start.line, K_MATH),
                     NodeValue::Link(l) => Act::Link(sp.start.line, l.url.clone()),
                     NodeValue::WikiLink(l) => Act::Link(sp.start.line, l.url.clone()),
                     NodeValue::Image(_) => Act::KindInline(sp.start.line, K_IMAGE),
                     NodeValue::HtmlInline(_) => Act::KindInline(sp.start.line, K_HTML),
-                    NodeValue::FootnoteReference(_) => Act::KindInline(sp.start.line, K_FOOTNOTE),
+                    NodeValue::FootnoteReference(fr) => Act::FnRef(sp.start.line, fr.name.clone()),
                     _ => Act::None,
                 }
             };
@@ -380,6 +414,14 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
                     kind_spans.push((line, line, K_URL));
                     links.push(LinkRef { line, url });
                 }
+                Act::FnDef(start, end, label) => {
+                    kind_spans.push((start, end, K_FOOTNOTE));
+                    fn_defs.push(FootnoteDef { label, start, end });
+                }
+                Act::FnRef(line, label) => {
+                    kind_spans.push((line, line, K_FOOTNOTE));
+                    fn_refs.push(FootnoteRef { line, label });
+                }
                 Act::None => {}
             }
         }
@@ -390,12 +432,16 @@ pub fn build_context(text: &str, n_lines: usize) -> Context {
             inline_spans,
             kind_spans,
             links,
+            fn_refs,
+            fn_defs,
         )
     });
 
-    let (code_spans, heads, list_spans, inline_spans, kind_spans, links) =
+    let (code_spans, heads, list_spans, inline_spans, kind_spans, links, fn_refs, fn_defs) =
         parsed.unwrap_or_default();
     ctx.links = links;
+    ctx.footnote_refs = fn_refs;
+    ctx.footnote_defs = fn_defs;
 
     for (start, end, lang) in code_spans {
         for line in start..=end {
