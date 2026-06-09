@@ -189,6 +189,17 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # them. Distinct from cookie-reminder (the cookie/OAuth expiry RACE). 6h cadence;
     # machine-scoped daily dedupe keeps it gentle.
     ("oauth-login-needed", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_LOGIN_NEEDED_INTERVAL"),
+    # memory-librarian SURFACES (never mutates) memory aggregation/conflict
+    # candidates in the per-project agent-memory corpus (~/.claude/projects/
+    # <slug>/memory/) — the librarian half of the memory system (TRDD-c77dae09).
+    # It drives off memgrep index/links to cheaply (no-LLM) cluster same-topic
+    # notes (aggregation candidates) and flag unlinked same-topic pairs (conflict
+    # candidates), writes a memory-reorg-proposed.md, and emits one line. It NEVER
+    # moves/merges/edits/deletes a note — an AGENT does the conscious reorg. Silent
+    # no-op when the memory dir / memgrep binary is absent or the candidate set is
+    # unchanged. 6h cadence — the corpus changes slowly and the scan is bounded +
+    # content-fingerprint deduped, so unchanged fires are near-free.
+    ("memory-librarian", 21600, "CLAUDE_PLUGIN_OPTION_MEMORY_LIBRARIAN_INTERVAL"),
 ]
 
 
