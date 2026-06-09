@@ -556,6 +556,13 @@
       "default": 60,
       "sensitive": false
     },
+    "memory_autorecall": {
+      "title": "Automatic Memory Recall on Prompt (OPT-IN)",
+      "description": "When true, the `on-prompt-submit-autorecall` UserPromptSubmit hook runs `memgrep recall` over THIS project's AGENT memory corpus (~/.claude/projects/<slug>/memory/) on every ordinary user prompt and injects the top notes into the agent context via additionalContext — so the agent is automatically reminded of relevant prior notes ('have we hit this before?') without calling recall by hand. It searches ONLY the agent-visible notes: the private user-mem store (.../memory/user-mem/) is structurally excluded (only top-level *.md files are passed to recall), so a private user memory is never surfaced. Cron [janitor-…] prompts and slash commands are skipped; a missing memgrep binary, an empty corpus, or any error is a silent no-op (never blocks or crashes the turn). OPT-IN by default (false) because it fires on EVERY prompt and shells out to the memgrep binary. Part of the memory system (issue #16); pairs with the markdown-memory-recall rule and the janitor-memory-recall/janitor-memory-write skills.",
+      "type": "boolean",
+      "default": false,
+      "sensitive": false
+    },
     "post_edit_safety_enabled": {
       "title": "Post-Edit-Safety Hook Enabled (OPT-IN)",
       "description": "When true, the `post-edit-safety` PostToolUse hook fires AFTER every Edit/Write/MultiEdit/NotebookEdit and surfaces an additionalContext warning when the write landed at a sensitive path (.git/hooks/*, ~/.ssh/*, ~/.aws/*, .github/workflows/*, ~/.bashrc, /etc/*) OR contains a sensitive payload (eval+base64 decode, curl|sh, /dev/tcp reverse-shell, ssh-rsa being written). Catches the 'model was conned into WRITING attack code' class that the pre-bash hook (which catches EXECUTION) does not. OPT-IN by default (false). From the narthex sweep-A.",
