@@ -758,8 +758,25 @@ def language_lint_step(info: ProjectInfo) -> None:
         if not _has_command("cargo"):
             print(f"{RED}fail cargo missing — Rust files tracked but Rust toolchain not installed{NC}")
             sys.exit(1)
-        run(["cargo", "clippy", "--", "-D", "warnings"], cwd=info.root)
-        print(f"{GREEN}ok cargo clippy passed{NC}")
+        # The crate need not live at the git root — a Rust tool can be bundled under
+        # tools/<name>/ (e.g. tools/memgrep). Locate every tracked Cargo.toml and lint
+        # the OUTERMOST ones (a workspace root covers its members; a standalone crate is
+        # its own root), pointing cargo at each with --manifest-path so it finds the crate
+        # regardless of cwd. Depth-sort so a parent manifest is always seen before a nested one.
+        manifests = sorted(
+            (p for p in by_ext.get(".toml", []) if p.name == "Cargo.toml"),
+            key=lambda p: (len(p.parts), str(p)),
+        )
+        outermost: list[Path] = []
+        for m in manifests:
+            if not any(o.parent in m.parents for o in outermost):
+                outermost.append(m)
+        if not outermost:
+            print(f"{RED}fail Rust files tracked but no Cargo.toml found — cannot run clippy{NC}")
+            sys.exit(1)
+        for m in outermost:
+            run(["cargo", "clippy", "--manifest-path", str(m), "--", "-D", "warnings"], cwd=info.root)
+        print(f"{GREEN}ok cargo clippy passed ({len(outermost)} crate(s)){NC}")
 
     # ── Go ──────────────────────────────────────────────────────────────
     if have.get(".go"):
