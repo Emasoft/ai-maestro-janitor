@@ -119,7 +119,7 @@ metadata consumed by the scanner detectors. Naming: `<domain>_patterns.py` (e.g.
 `cloud_credential_patterns`, `prompt_injection_patterns`, `npm_lifecycle_patterns`,
 `k8s_admission_patterns`, …). **Don't enumerate — grep by domain when needed.**
 
-**Hooks (`scripts/hooks/`, 11)** — `on-session-start` (installs rules + ensures
+**Hooks (`scripts/hooks/`, 12)** — `on-session-start` (installs rules + ensures
 daemon), `on-session-start-trdd-state`, `on-prompt-submit`, `on-stop`,
 `on-stop-failure`, `post-edit-safety`, `post-mcp-response-sanitizer`,
 `pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage` (OPT-IN
@@ -127,10 +127,26 @@ PreToolUse → injects live context % on every tool call, suggests
 /janitor-compact-context ≥60%), `post-compact-resume` (PostCompact → writes
 `resume-after-compact.flag` so the next heartbeat emits `[janitor-resume]
 …continue TRDD-xxxx…`; closes the watchdog loop so a compact doesn't stall an
-unattended session — TRDD-31095269). The context-watchdog trio
+unattended session — TRDD-31095269), `on-prompt-submit-user-mem` (UserPromptSubmit
+→ the PRIVATE user-memory subsystem, TRDD-4334aad0). The context-watchdog trio
 (pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
 skill + `scripts/compact_trigger.py`) is OPT-IN via
 `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`.
+
+**USER-MEMORY subsystem (`commands/{to,search,share}-user-mem.md` +
+`scripts/hooks/on-prompt-submit-user-mem.py` + `scripts/lib/user_mem_lib.py`,
+TRDD-4334aad0)** — a PRIVATE, agent-invisible user-authored memory store at
+`~/.claude/projects/<slug>/memory/user-mem/` (sibling of the agent corpus), with
+an immutable monotonic counter (`.counter` + flock; numbers retired-never-reused).
+`/to-user-mem [<text>]` saves (bare → previous user message via transcript);
+`/search-user-mem <q>` searches ONLY that store via `memgrep find <q> <dir>
+--use-index` (the `+`/`-`/wildcard/phrase DSL lives in the Rust crate);
+`/share-user-mem <N>` is the ONE gate that injects a memory into context. PRIVACY
+(verified vs the Claude Code hook docs): the UserPromptSubmit hook returns
+`decision:block` (erases the prompt → save text + search query never reach the
+model) and surfaces confirmations/results via `systemMessage` (user-only);
+`/share-user-mem` is the sole path using `additionalContext` (which DOES reach
+the model). Fast no-op for any non-user-mem prompt; never crashes the session.
 
 **Skills (`skills/`)** — `janitor-arm` (install stub + arm cron; + `janitor-disarm`),
 `janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,

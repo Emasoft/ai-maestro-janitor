@@ -1,9 +1,9 @@
 ---
 trdd-id: 4334aad0-c5b2-4990-8214-11e654032cd7
 title: User private memories — /to-user-mem + /search-user-mem with +/- query operators
-column: backburner
+column: complete
 created: 2026-06-09T18:47:51+0200
-updated: 2026-06-09T18:52:00+0200
+updated: 2026-06-09T20:30:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -25,14 +25,40 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-09
 
-**Status:** captured from a USER directive 2026-06-09; NOT started. A SEPARATE
-subsystem from the agent memory corpus + the librarian (TRDD-c77dae09): memories
-the **USER** authors, stored privately (NOT in agent context), with two slash
-commands and a +/- search query language. Shares memgrep as the search engine.
+**Status:** IMPLEMENTED + tested (column: complete). JANITOR-side build landed.
 
-**NEXT ACTION when picked up:** design the two commands + the privacy intercept
-(how `/to-user-mem` keeps the text out of agent context) + the query parser, then
-implement. Read TRDD-c77dae09 (memory system) + TRDD-d151fe52 (memgrep) first.
+**What shipped:**
+- `scripts/lib/user_mem_lib.py` — `UserMemStore` (save/read/delete/search),
+  immutable monotonic counter (`.counter` + `.counter.lock` flock,
+  retired-never-reused), `previous_user_message(transcript)` (bare-form),
+  `build_search_argv` → `memgrep find <q> <user-mem-dir> --use-index`,
+  `parse_command`, `resolve_user_mem_dir`.
+- `scripts/hooks/on-prompt-submit-user-mem.py` — UserPromptSubmit hook (the
+  privacy intercept). Fast no-op for non-user-mem prompts.
+- `commands/{to,search,share}-user-mem.md` — three slash commands.
+- Wired into `hooks/hooks.json` (UserPromptSubmit array, 2nd entry).
+- Tests: `tests/test_user_mem_lib.py` (22) + `tests/test_user_mem_hooks.py` (17).
+
+**Storage location (decided):** `~/.claude/projects/<project-slug>/memory/user-mem/`
+— sibling of the agent corpus (the harness per-project memory dir), one `<NNNNNN>.md`
+per memory + `.counter`. Persistent, per-project.
+
+**ACHIEVED privacy boundary (verified vs Claude Code hook docs, 2026-06):**
+- `/to-user-mem` and `/search-user-mem`: hook returns `{"decision":"block",...}`
+  → docs: "Blocks prompt processing and erases the prompt" → the command line,
+  the saved text, and the search query NEVER enter the agent context/transcript.
+  Confirmations/results go to the USER via `systemMessage` ("shown to the user").
+  Unit-tested: the saved text / search results appear in NO agent-context field
+  (`additionalContext`/`hookSpecificOutput`/`reason`) of the hook output.
+- `/share-user-mem <N>`: the ONE gate — injects via `hookSpecificOutput.additionalContext`
+  (docs: additionalContext reaches the model). Tested.
+- **FLAGGED (platform-runtime, not unit-testable):** whether `systemMessage`
+  visibly co-displays with `decision:block` in the live TUI is the one behavior
+  the docs leave slightly ambiguous. MITIGATED by ALSO putting the confirmation
+  in `reason`. If a future Claude Code version drops the search-results
+  `systemMessage` when blocking, results would be silently lost (never leaked) —
+  recheck on a CC upgrade. memgrep `find` was rebuilt/reinstalled from source
+  (installed 0.1.0 lacked it); the `+`/`-`/wildcard/phrase DSL is the Rust crate's.
 
 ## USER directive (verbatim intent, 2026-06-09)
 
