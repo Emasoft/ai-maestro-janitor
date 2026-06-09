@@ -1,9 +1,9 @@
 ---
 trdd-id: fb4850b5-9443-4600-a9e0-038598db7d40
 title: Host-level user-presence breadcrumb for MANAGER degraded-mode fallback
-column: blocked
+column: complete
 created: 2026-06-05T04:01:18+0200
-updated: 2026-06-05T04:01:18+0200
+updated: 2026-06-09T22:40:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -26,7 +26,32 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/15"]
 
 # TRDD-fb4850b5 — User-presence breadcrumb for MANAGER degraded-mode fallback
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-05
+## ⏵ IMPLEMENTED — 2026-06-09 (column: complete; supersedes the BLOCKED state below)
+
+Shipped on `main` (rides the next publish). The schema-confirmation block below was
+LIFTED by USER directive 2026-06-09 ("implement all valid issues"): we shipped the
+EXACT 3-field shape the MANAGER proposed — `{"last_user_input_epoch": <int>,
+"source": "janitor", "written_at_epoch": <int>}` — NO extras (source_pid/version
+were never confirmed; additive later if wanted).
+
+- `scripts/lib/state.py` — `user_presence_path()` / `bump_user_presence()` /
+  `refresh_user_presence_written_at()` (atomic tmp+replace; bool-rejecting int
+  guard; corrupt/absent file seeds `last_user_input_epoch: 0`; best-effort).
+  Documented exception to prefer-PLUGIN_DATA: `~/.aimaestro/state/` is the shared
+  cross-plugin contract path the MANAGER reads.
+- `scripts/hooks/on-prompt-submit.py` — bumps BOTH epochs on a genuine prompt;
+  any `[janitor-…]`-prefixed prompt (heartbeat/resume/renew/reload) is skipped —
+  the load-bearing cron-vs-user trap. Never blocks, exits 0 on every path.
+- `scripts/dispatch.py` — Phase 0.4 `_phase_user_presence_breadcrumb()` refreshes
+  `written_at_epoch` each non-paused fire BEFORE the early-return resume phases,
+  preserving `last_user_input_epoch`.
+- Tests: `tests/test_user_presence_breadcrumb.py` (14 — bump, no-bump-on-cron,
+  refresh-preserves-input-epoch, corrupt-seed, garbage-stdin; real fs via tmp
+  HOME). 31 green incl. user-mem regression; ruff clean.
+- Next: ping janitor#15 with the SHA (done) so the MANAGER verifies the on-disk
+  shape; goes live for the MANAGER at the next janitor publish.
+
+## ⏵ STATE — superseded 2026-06-09 (was: blocked on schema confirmation) — 2026-06-05
 
 **What this is:** the MANAGER (assistant-manager) plugin asked the janitor (janitor#15,
 a *proposal*, not a directive) to write a host-level user-presence breadcrumb the

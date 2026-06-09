@@ -560,12 +560,37 @@ def _phase_heartbeat_renew() -> None:
         print(line)
 
 
+def _phase_user_presence_breadcrumb() -> None:
+    """Refresh the cross-plugin user-presence breadcrumb's liveness stamp.
+
+    Writes ~/.aimaestro/state/user-presence.json's `written_at_epoch` on every
+    non-paused fire (the heartbeat firing IS the liveness proof the MANAGER's
+    presence tracker reads as a server-down fallback — TRDD-fb4850b5). It does
+    NOT touch `last_user_input_epoch` — that field is owned by the
+    UserPromptSubmit hook and reflects genuine user input, not cron ticks.
+
+    Cheap (one read + one atomic write) and best-effort: `refresh_user_presence_
+    written_at` swallows OSError internally, and this wrapper catches anything
+    else so a breadcrumb problem can never break the heartbeat.
+    """
+    try:
+        state.refresh_user_presence_written_at()
+    except Exception as exc:  # noqa: BLE001
+        state.log_line("dispatch", f"user-presence refresh failed: {exc}")
+
+
 def main() -> int:
     state.init_state()
 
     # Phase 0: paused sentinel.
     if _phase_paused():
         return 0
+
+    # Phase 0.4: refresh the user-presence breadcrumb liveness stamp. Runs on
+    # every non-paused fire, BEFORE the early-returning resume phases, so the
+    # MANAGER's presence fallback sees a fresh written_at_epoch even on a fire
+    # that exits early for a rate-limit/compact resume.
+    _phase_user_presence_breadcrumb()
 
     # Phase 0.5: log retention.
     _phase_log_retention()

@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import time
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -126,6 +128,94 @@ def atomic_write(target: Path, value: str) -> None:
     tmp = target.with_suffix(target.suffix + f".tmp.{os.getpid()}")
     tmp.write_text(value)
     os.replace(tmp, target)
+
+
+# --- host-level user-presence breadcrumb (TRDD-fb4850b5, janitor#15) --------
+#
+# A cross-plugin host file the MANAGER's `amama-presence-tracker` reads as a
+# *server-unreachable fallback*. It deliberately lives under ~/.aimaestro/state/
+# (a shared host path) rather than ${CLAUDE_PLUGIN_DATA} (janitor-private, which
+# the MANAGER cannot locate) — a documented exception to the "prefer PLUGIN_DATA"
+# principle precisely because this is a shared contract.
+#
+# The on-disk shape is exactly three fields (byte-agreed with the MANAGER on
+# janitor#15 — NO extra fields like source_pid/version, which were never
+# confirmed):
+#   {"last_user_input_epoch": <int>, "source": "janitor", "written_at_epoch": <int>}
+#
+# - last_user_input_epoch — bumped ONLY on a genuine user prompt (the hook), NOT
+#   on a cron `[janitor-…]` heartbeat prompt.
+# - written_at_epoch — refreshed every heartbeat tick (liveness), independent of
+#   input recency. The tracker treats the breadcrumb as stale (→ "unknown") once
+#   written_at_epoch is older than its threshold.
+_PRESENCE_SOURCE = "janitor"
+
+
+def user_presence_path(home: Path | None = None) -> Path:
+    """Path of the cross-plugin user-presence breadcrumb under HOME.
+
+    Defaults to `Path.home()` so a `HOME` override (set by tests or by the
+    harness) is honoured naturally; callers may pass an explicit `home` to
+    pin it.
+    """
+    base = Path(home) if home is not None else Path.home()
+    return base / ".aimaestro" / "state" / "user-presence.json"
+
+
+def _write_user_presence(path: Path, last_user_input_epoch: int, written_at_epoch: int) -> None:
+    """Atomically write the three-field breadcrumb. Single serialization site."""
+    payload = json.dumps(
+        {
+            "last_user_input_epoch": int(last_user_input_epoch),
+            "source": _PRESENCE_SOURCE,
+            "written_at_epoch": int(written_at_epoch),
+        }
+    )
+    atomic_write(path, payload)
+
+
+def bump_user_presence(home: Path | None = None, now: int | None = None) -> None:
+    """Record a GENUINE user-input event — stamp BOTH epochs to `now`.
+
+    Called by the UserPromptSubmit hook ONLY for real user prompts (cron
+    `[janitor-…]` prompts must be filtered out by the caller first). Best-effort:
+    any filesystem error is swallowed so the user's turn is never aborted.
+    """
+    ts = int(time.time()) if now is None else int(now)
+    try:
+        _write_user_presence(user_presence_path(home), ts, ts)
+    except OSError:
+        # Never crash the session on a breadcrumb write failure.
+        pass
+
+
+def refresh_user_presence_written_at(home: Path | None = None, now: int | None = None) -> None:
+    """Refresh the breadcrumb's liveness (written_at_epoch) WITHOUT touching input recency.
+
+    Called by the heartbeat each tick. Preserves the existing
+    `last_user_input_epoch` when the file exists and parses to a dict with an
+    int value; seeds `0` when the file is absent, corrupt, a non-dict, or has a
+    non-int `last_user_input_epoch`. Best-effort — never propagates an error so
+    a breadcrumb problem cannot break dispatch.
+    """
+    ts = int(time.time()) if now is None else int(now)
+    path = user_presence_path(home)
+    last_input = 0
+    try:
+        existing = json.loads(path.read_text())
+        if isinstance(existing, dict):
+            value = existing.get("last_user_input_epoch")
+            # bool is an int subclass — reject it so a stray `true` doesn't become 1.
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                last_input = value
+    except (FileNotFoundError, OSError, ValueError):
+        # Absent or unreadable/undecodable → seed 0 (handled below). ValueError
+        # covers json.JSONDecodeError (its subclass).
+        last_input = 0
+    try:
+        _write_user_presence(path, last_input, ts)
+    except OSError:
+        pass
 
 
 def read_int_state(path: Path | str, default: int = 0) -> int:
