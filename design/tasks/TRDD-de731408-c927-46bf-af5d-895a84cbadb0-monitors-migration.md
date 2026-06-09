@@ -1,10 +1,77 @@
-# TRDD-de731408-c927-46bf-af5d-895a84cbadb0 — Migrate heartbeat from `CronCreate` skill to plugin `monitors:` manifest key
+---
+trdd-id: de731408-c927-46bf-af5d-895a84cbadb0
+title: Migrate heartbeat from CronCreate skill to plugin monitors manifest key
+column: backburner
+created: 2026-05-02T00:00:00+0200
+updated: 2026-06-09T21:45:00+0200
+current-owner: janitor-dev-session
+assignee: janitor-dev-session
+priority: 6
+severity: LOW
+effort: XL
+labels: [heartbeat, monitors, bootstrap, shelved-pending-upstream]
+task-type: refactor
+parent-trdd: null
+relevant-rules: []
+release-via: publish
+delivery: direct-push
+target-branch: main
+test-requirements: [unit, integration]
+runtime-targets: [macos, linux]
+external-refs: ["https://code.claude.com/docs/en/plugins-reference"]
+---
 
-**TRDD ID:** `de731408-c927-46bf-af5d-895a84cbadb0`
+# TRDD-de731408 — Migrate heartbeat from `CronCreate` skill to plugin `monitors:` manifest key
+
 **Filename:** `design/tasks/TRDD-de731408-c927-46bf-af5d-895a84cbadb0-monitors-migration.md`
-**Tracked in:** this repo (design/tasks/ is git-tracked)
-**Status:** Not started
 **Originated:** 2026-05-02 (after reviewing Claude Code changelog 2.1.83 → 2.1.126)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-09
+
+**VERDICT: SHELVED (pre-work research DONE; migration deliberately parked).** The
+TRDD's gating pre-work — "research the `monitors:` schema" — was completed
+2026-06-09 against the live plugins-reference docs (closing janitor#17/#13 drift).
+The findings flip the TRDD's premise, and trigger the TRDD's own pre-planned exit
+branch ("…this TRDD is shelved and the current `CronCreate` pattern remains
+canonical"):
+
+1. **`monitors:` is NOT a harness-armed cron/scheduled-prompt.** Documented schema
+   (plugins-reference §Monitors): a JSON array of `{name, command, description,
+   when}` where `command` is "a shell command run as a **persistent background
+   process** in the session working directory" for the session's lifetime, with
+   "every stdout line delivered to Claude as a **notification**". To emulate the
+   heartbeat we'd wrap dispatch in a `while … sleep` loop and redesign around
+   notification-reaction semantics — a different primitive, not the drop-in the
+   TRDD hoped for (answers Q1/Q2: no cron, no interval field; `${user_config.*}`
+   IS substitutable in `command`).
+2. **Experimental component.** Docs: monitors (with themes) live under
+   `experimental.monitors`; "manifest schema **may change between releases** while
+   they stabilize"; top-level declaration already warns in `claude plugin
+   validate`. Building the plugin's load-bearing bootstrap on an explicitly
+   unstable schema is the wrong trade (answers Q9: also gated on CC ≥ 2.1.105).
+3. **WORSE update-roll than the current stub.** Docs: after a mid-session plugin
+   update "monitors require a **session restart**" to use the new version's path —
+   while our DATA-dir auto-rolling stub re-resolves the newest cached version on
+   EVERY cron fire with zero re-arm. Migration would regress the auto-roll
+   property (answers Q-lifecycle).
+4. **Unknowns that the heartbeat's recovery loop depends on remain undocumented:**
+   whether notification deliveries queue across a 429 window (the
+   `[janitor-resume]` pattern), the reacting turn's tool surface, and concurrency
+   when several interactive sessions each spawn the monitor (`when: "always"` is
+   per-session — N sessions = N dispatcher loops; cron is one durable job per
+   project). Also: "Disabling a plugin mid-session does not stop monitors already
+   running" — a pause-UX regression vs `/janitor-disarm`.
+
+**NEXT ACTION (when revived):** revisit ONLY when `monitors:` graduates out of
+`experimental.*` AND the docs answer the 429-queueing + tool-surface questions;
+then re-evaluate phases A-F below against the then-current schema (the loop-wrapper
+redesign replaces the speculative cron-shape in Phase B). Until then the
+`CronCreate` + auto-rolling-stub pattern REMAINS CANONICAL.
+
+**Full research findings:** quoted schema + field tables captured from
+`code.claude.com/docs/en/plugins-reference` §Monitors on 2026-06-09 (lines: array
+of name/command/description/when; required/optional field tables; substitution
+rules; the experimental-components caveat; the session-restart roll rule).
 
 ---
 
