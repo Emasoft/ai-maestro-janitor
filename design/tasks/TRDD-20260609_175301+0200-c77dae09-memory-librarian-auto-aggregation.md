@@ -3,7 +3,7 @@ trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
 column: backburner
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-09T18:24:00+0200
+updated: 2026-06-09T18:32:16+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -311,6 +311,52 @@ This makes the lessons corpus a queryable ledger: "what did I learn last week",
 become single memgrep calls. Belongs in memgrep's memory + where-DSL layers
 (TRDD-d151fe52) — it already has `--where` boolean filtering and a markdown date
 sense to build on.
+
+### Notes follow their memory on a move + the indexer + git (USER, 2026-06-09)
+
+**Atomic co-movement — a memory and its notes are inseparable.** Because each
+memory is LINKED to its notes/lessons, when the librarian relocates a memory to
+another wiki page, **all of its referenced notes move WITH it**, appended to the
+destination page's `## Notes & Lessons Learned` section. The memory never gets
+divorced from the lessons that explain it. (A merge is therefore: move the
+fact-memory into the canonical page's body AND append its `[^N]` lessons into
+that page's lessons section, renumbering as needed.)
+
+**Mandatory section — every memory `.md` has `## Notes & Lessons Learned`** at
+its bottom, even if currently empty: it is the standing landing zone so an
+incoming memory's notes always have a home, and so the corpus shape is uniform
+(every page = body + lessons section).
+
+**The indexer must be FAST + intelligently structured (not a per-query scan).**
+The corpus is thousands of `.md` files that the janitor **continuously
+aggregates and re-aggregates** — elements move pages constantly. Answering
+"every lesson between datetime A and B" or "newest lessons about <topic>" by
+walking + regexing thousands of files each time is too slow. memgrep needs a
+**persistent, incrementally-maintained index** keyed for these queries — at
+minimum by `(element-type {fact|note}, OCD, LMD, topic/tags, page)` — so a
+time-range or topic query is an index lookup, not a tree scan. This is the
+single biggest engineering requirement of the whole memory system and is
+memgrep's job (TRDD-d151fe52): its current `index` subcommand must grow from a
+doc-generator into a real query index (a sidecar SQLite or equivalent), kept in
+sync as the librarian moves elements.
+
+**Git is the lever (the "…under git, so…").** The whole memory dir is
+git-tracked, which the design must exploit, not fight:
+- **Every move/merge is an auditable commit.** `git log --follow` reconstructs a
+  memory's full lineage — which pages it lived on, when it moved — so the
+  librarian's reorgs are completely traceable and **RULE 0 is satisfied for
+  free**: nothing is ever lost, every move is reversible. (Intrinsic OCD/LMD
+  metadata remains the authoritative age source — git-follow across moves +
+  renames is fragile — but git is the recovery/audit backstop.)
+- **Incremental indexing rides git.** The index re-processes ONLY what
+  `git diff <last-indexed-commit>..HEAD` reports as changed, never the whole
+  corpus — so constant background churn costs near-nothing to re-index. memgrep
+  is already gitignore-aware; making it git-commit-aware for incremental index
+  updates is the natural extension.
+- **Move-churn discipline.** Continuous background moves generate many commits;
+  the librarian should BATCH a reorg pass into a few well-described commits
+  (not one commit per moved line) so history stays readable and the index's
+  incremental delta stays coherent.
 
 ### Implementation note (do NOT build piecemeal)
 
