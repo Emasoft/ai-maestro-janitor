@@ -3,7 +3,7 @@ trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
 column: backburner
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-09T18:07:40+0200
+updated: 2026-06-09T18:13:13+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -168,13 +168,16 @@ the memory — but non-disruptively, in exactly two steps:
 1. **Clean the fact in place.** Replace the wrong statement in the memory body
    with the correct one, so the page's record of the FACTS is always clean and
    true (the body is the current truth — no "we used to think X" clutter inline).
-2. **Preserve the error as a lesson.** The error that caused the false memory /
-   false conclusion / wrong solution-plan is recorded as a **numbered entry** in
-   a **`## Notes and lessons learned`** section at the **bottom** of the page,
-   and the corrected fact is **connected to it via a footnote reference**
-   (`[7](#ref)` style). Lessons thereby accrue in their **category page**
-   (the topic's wiki page), so all lessons-learned for a topic are collected in
-   one findable place.
+2. **Preserve the error as a lesson — the WHY is the point.** The error that
+   caused the false memory / false conclusion / wrong solution-plan is recorded
+   as a **numbered entry** in a **`## Notes and lessons learned`** section at the
+   **bottom** of the page, and the corrected fact is **connected to it via a
+   standard-markdown footnote reference** (`[^N]`). **The load-bearing content of
+   a lesson is the WHY** — *why* the previous statement was wrong, *why* the plan
+   failed: the root cause, not merely "this was wrong". A lesson without a WHY is
+   useless — it cannot stop the next repeat. Lessons thereby accrue in their
+   **category page** (the topic's wiki page), so all lessons-learned for a topic
+   are collected in one findable place.
 
 This mirrors the existing CLAUDE.md **Bug Autopsy** directive (every fixed bug
 becomes a guardrail) and RULE 0 (never lose information): the *fact* is corrected,
@@ -214,6 +217,28 @@ surface:
 
 It pairs with the existing "recall before acting" discipline: recall the page,
 then read it WHOLE (facts + its linked lessons), then act.
+
+### memgrep auto-resolves footnotes (makes the read-notes rule FREE) — cross-ref TRDD-d151fe52
+
+So the agent never burns tokens chasing references, `memgrep` MUST — when it
+returns a memory (`recall`, `fact`, `get` of a note) — **automatically resolve
+and inline the full text of every footnote that memory references**, returning
+the memory body **AND** all its `[^N]` lessons-learned **in one result**. One
+`memgrep recall` yields the complete picture (facts + every linked WHY); the
+agent issues **no** second search for the references.
+
+- **Syntax = standard markdown footnotes.** Reference `[^N]` in the body;
+  definition `[^N]: <the WHY>` under `## Notes and lessons learned`. This is the
+  convention agents already know (nothing new to memorize) AND memgrep's existing
+  markdown parser already understands it — so resolution is a parse, not a new
+  format.
+- **Scope:** resolve footnotes defined **within the same note** by default. A
+  footnote may also point at another page's lesson (cross-page `[[topic]]#^N`)
+  — for those, return the link, optionally `--expand-cross-page` to inline.
+- **Implementation:** a new memgrep behavior on the memory subcommands (likely a
+  default-on `--with-notes` that the `recall`/`fact`/`get` paths honor); the
+  footnote block is appended to each returned note, clearly delimited, so the
+  caller sees body-then-lessons. Belongs in memgrep's memory layer (TRDD-d151fe52).
 
 ### Implementation note (do NOT build piecemeal)
 
