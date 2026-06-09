@@ -1,9 +1,9 @@
 ---
 trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
-column: backburner
+column: dev
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-09T18:32:16+0200
+updated: 2026-06-09T21:01:24+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -25,10 +25,26 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-09
 
-**Status:** captured from a USER directive 2026-06-09; NOT started. This is the
-"librarian" half of the memory system — the background organizer that keeps the
-note corpus rational over time, complementing the existing authoring (the
-`# Memory` harness directive + `janitor-memory-write` skill) and recall
+**Status (2026-06-09):** PARTIALLY built (column: dev). The SAFE, surface-only
+first version LANDED — commit **6575e04**: `scripts/detectors/memory-librarian.py`,
+a project-scoped 6h-cadence detector that uses memgrep to find same-topic
+AGGREGATION + CONFLICT candidates and SURFACES them (writes
+`<memdir>/memory-reorg-proposed.md` + a `[memory-librarian]` heartbeat nudge).
+**ZERO corpus mutation — verified live** (notes byte-identical before/after a run;
+17 tests; the no-mutation test is the load-bearing safety guarantee). This is the
+"detect + surface" half of the librarian's mandate (the janitor surfaces; agents
+resolve).
+
+**DEFERRED (the open-question, memory-MUTATING half):** the agent-reasoned
+**auto-merge/aggregation** (cluster → canonical page, move notes with their `[^N]`
+lessons, rewrite tangents as `[[links]]`) is NOT built — it needs the conscious
+agent-reasoning pass (Opus/LLM-Externalizer on a cadence) + the careful design of
+the open questions below (cadence, conscious boundary, RULE-0 git-backed merges).
+Left for deliberate design, not a background dispatch.
+
+This is the "librarian" half of the memory system — the background organizer that
+keeps the note corpus rational over time, complementing the existing authoring
+(the `# Memory` harness directive + `janitor-memory-write` skill) and recall
 (`markdown-memory-recall.md` rule + `janitor-memory-recall` skill + `memgrep`).
 
 **NEXT ACTION when picked up:** design the background librarian pass (cadence,
