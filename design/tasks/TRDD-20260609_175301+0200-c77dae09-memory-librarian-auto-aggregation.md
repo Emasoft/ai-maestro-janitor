@@ -3,7 +3,7 @@ trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
 column: backburner
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-09T18:13:13+0200
+updated: 2026-06-09T18:18:42+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -239,6 +239,40 @@ agent issues **no** second search for the references.
   default-on `--with-notes` that the `recall`/`fact`/`get` paths honor); the
   footnote block is appended to each returned note, clearly delimited, so the
   caller sees body-then-lessons. Belongs in memgrep's memory layer (TRDD-d151fe52).
+
+#### Output format — token-economical by default (USER, 2026-06-09)
+
+memgrep RENDERS the resolved notes minimally — storage format ≠ render format:
+
+- **On disk** the note uses standard markdown footnotes (`[^N]` ref, `[^N]: …`
+  def under `## Notes and lessons learned`) — what the agent writes, what
+  memgrep parses.
+- **In the returned output** memgrep normalizes to the **strict-necessary**
+  shape: inline references render as a **bare number `[9]`**, and after the
+  memory body it appends the list:
+
+  ```
+  [9] - <lesson WHY text>.
+  [10] - <lesson WHY text>.
+  ```
+
+  No on-disk hashes, no reference tags, no footnote-definition machinery — only
+  the number + the content.
+- **Metadata STRIPPED by default.** A note's own metadata (frontmatter, keys,
+  class, type, origin ids, etc.) is NOT emitted. An **opt-in flag**
+  (e.g. `--full-notes`) restores the full form:
+
+  ```
+  [9] - [metadata, keys, class, …] <lesson text>.
+  ```
+- **URLs / references / image links are ALWAYS kept** — even in the default
+  minimal form. Any URL, cross-reference, or image link (`![..](..)`,
+  `[..](http..)`, bare URLs) present in a note's text is load-bearing and MUST be
+  reported; only the note's *metadata* is strippable, never its links/resources.
+
+Rationale: the agent gets every lesson's WHY + every resource it points to, at
+minimum token cost — the metadata (which the agent rarely needs at read time) is
+the only thing dropped, and only until `--full-notes` asks for it.
 
 ### Implementation note (do NOT build piecemeal)
 
