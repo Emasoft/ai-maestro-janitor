@@ -3,7 +3,7 @@ trdd-id: 3e1e9b12-e3bc-484c-b337-b208593cfe1d
 title: Janitor actively enforces the TRDD process across compactions and resumes
 status: in-progress
 created: 2026-05-30T22:32:23+0200
-updated: 2026-05-30T22:32:23+0200
+updated: 2026-06-09T02:31:18+0200
 ---
 
 # TRDD-3e1e9b12-e3bc-484c-b337-b208593cfe1d — Janitor actively enforces the TRDD process across compactions and resumes
@@ -47,15 +47,27 @@ The running janitor is the INSTALLED cache version (0.5.0); these repo changes
 activate only after a publish + install (or `/reload-plugins` for plugin-scoped
 `hooks/hooks.json`). Until then they are repo-only.
 
+### ⏵ TRIAGE 2026-06-09 (stale-task #151 — verified current state)
+Core feature DONE + committed (SessionStart hook f4b1c7e + report-to-trdd-drift detector
+d3dc991, 14 tests). Derived-bug #1 below is **already fixed** (verified, was stale).
+Genuine remainder = #2 (report-conversion — undirected/unrelated, defer to a directed
+session) + #3 (rides the USER-gated publish). Nothing for the janitor to implement solo.
+
 ### NEXT ACTION / derived tasks
-1. **`trdd-reminder.py` parses the OLD `**Status:**` bold line, not frontmatter
-   `status:`** — so it likely no-ops on every current (frontmatter) TRDD. Migrate it
-   to frontmatter parsing (the new hook/detector already do). Derived bug found
-   2026-05-30; not yet fixed.
+1. ✅ **DONE — verified 2026-06-09 (the 2026-05-30 "not yet fixed" note was stale).**
+   `scripts/detectors/trdd-reminder.py` parses YAML frontmatter `status:` (v1) AND
+   `column:` (v2) FIRST (`_FM_STATUS_RE`/`_FM_COLUMN_RE`, `_parse_trdd_state`), keeping the
+   `**Status:**` bold line ONLY as a pre-frontmatter fallback. Confirmed by LIVE behavior —
+   `[trdd-reminder]` correctly lists the v2 `column:`-based TRDDs with day-ages every
+   heartbeat this session. No code change needed.
 2. Review the 2 reports the detector flagged
    (`reports/audit/…-consolidated-fix-plan.md`, `reports/study-github-monitoring/CONSOLIDATED_PLAN.md`)
-   — convert each decision into a TRDD, or mark obsolete.
-3. Ship in the next janitor release so the hook + detector go live.
+   — convert each decision into a TRDD, or mark obsolete. NOTE: these touch UNRELATED work
+   areas (audit fix-plan, github-monitoring study) + live in gitignored ephemeral `reports/`
+   (may already be purged); a directed session should own the conversion — NOT picked up
+   undirected here (RULE 1).
+3. Ship in the next janitor release so the hook + detector go live (rides the same
+   USER-gated publish as the rest of the unpushed work).
 4. Consider whether the hook should inject (not just list) on `source=resume` too.
 
 ## Problem
