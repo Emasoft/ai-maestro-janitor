@@ -10,8 +10,8 @@ description: Capture a durable, reusable fact as a markdown memory note so a fut
 Capture one durable fact as a memory note so a future session — which will have
 the SYMPTOM, not the answer — can recall it. The load-bearing decision is the
 `description`: it MUST carry the words the problem will present with (the user's
-words, the error, the symptom), because recall ranks on `description` (+ `title`
-+ `tags`). Put the symptom in `description`; put the answer in the body.
+words, the error, the symptom), because recall ranks on `description`
+(+ `title` + `tags`). Put the symptom in `description`; put the answer in the body.
 
 Only capture what is NON-OBVIOUS and reusable: gotchas, constraints not in the
 code, confirmed preferences, hard-won debugging facts. Do NOT capture what the
