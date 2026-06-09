@@ -338,10 +338,16 @@ def _exchange(code: str, verifier: str, state: str) -> dict:
         "code_verifier": verifier,
         "state": state,
     }).encode()
-    # The reference sends only Content-Type (no anthropic-beta, no custom UA).
+    # MUST send a non-default User-Agent. urllib's default `Python-urllib/<ver>` is
+    # banned by Cloudflare at the token endpoint with **HTTP 403 / error code 1010**
+    # ("banned browser signature") — empirically verified 2026-06-09: no-UA → 1010,
+    # `claude-account-rotator` → clean app response. Reuse the SAME UA rotator.py
+    # already uses for its /roles + /usage calls (which pass CF), so the whole rotator
+    # speaks to platform.claude.com with one identity. (anthropic-beta is NOT needed
+    # for the token grant.)
     req = urllib.request.Request(
         TOKEN_URL, data=body, method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode())

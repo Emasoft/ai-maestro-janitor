@@ -764,9 +764,13 @@ def refresh_oauth_token(blob: dict) -> dict | None:
         "client_id": CLIENT_ID,
         "refresh_token": rtok,
     }).encode()
+    # MUST send a non-default User-Agent: urllib's default Python-urllib/<ver> is banned by
+    # Cloudflare at the token endpoint (HTTP 403 / error code 1010 — "banned browser
+    # signature"; empirically verified 2026-06-09). Reuse the same UA the /roles + /usage
+    # calls already use (which pass CF) so keepalive-refresh isn't silently 1010-blocked.
     req = urllib.request.Request(
         TOKEN_URL, data=body, method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
