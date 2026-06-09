@@ -455,7 +455,10 @@ fn recall_excludes_index_files() {
 
 #[test]
 fn index_emits_title_and_toc() {
-    let o = run(&["index", "tests/fixtures/sample.md"]);
+    // The Markdown doc-generator now lives behind `index --markdown` (bare `index` builds the
+    // SQLite query index — TRDD-c77dae09 "the index subcommand must grow from a doc-generator into
+    // a real query index"). The doc output itself is unchanged.
+    let o = run(&["index", "--markdown", "tests/fixtures/sample.md"]);
     assert!(o.contains("1 Intro"), "title missing:\n{o}");
     assert!(o.contains("toc:"), "toc missing:\n{o}");
 }
@@ -1090,4 +1093,275 @@ fn recall_rejects_unknown_sort_key() {
     // An unknown --sort value is a clean usage error (not a silent fallback), matching the crate's
     // fail-loud convention for bad inputs.
     run_fail(&["recall", "ledger element", DATES_DIR, "--sort", "bogus"]);
+}
+
+// ─────────────────────── SQLite + FTS5 persistent index (slice 3) ───────────────────────
+
+/// A self-deleting temp DIRECTORY holding a generated corpus, for the mutate-and-reindex tests
+/// (they modify/delete `.md` files and write a `.memgrep/` sidecar — never touch committed
+/// fixtures). `Drop` recursively removes the tree so the test leaves no litter.
+struct TempDir {
+    path: std::path::PathBuf,
+}
+
+impl TempDir {
+    fn new(tag: &str) -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SEQ: AtomicUsize = AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("memgrep-idx-{}-{}-{}", std::process::id(), n, tag));
+        std::fs::create_dir_all(&path).expect("create temp corpus dir");
+        TempDir { path }
+    }
+    fn as_str(&self) -> &str {
+        self.path.to_str().expect("utf-8 temp path")
+    }
+    /// Write a note file `name` with `contents` into the corpus.
+    fn write(&self, name: &str, contents: &str) {
+        std::fs::write(self.path.join(name), contents).expect("write note");
+    }
+    fn join(&self, rel: &str) -> std::path::PathBuf {
+        self.path.join(rel)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// A small two-note corpus reused by several index tests.
+fn seed_corpus(d: &TempDir) {
+    d.write(
+        "alpha.md",
+        "---\ndescription: oauth rotator keychain credentials\ntags: [oauth, rotator]\nocd: 2024-01-01\nlmd: 2024-06-01\n---\n# Alpha\n\nBody about keychain credentials and token rotation.\n",
+    );
+    d.write(
+        "beta.md",
+        "---\ndescription: widget retry backoff schedule\ntags: [widget]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# Beta\n\nBody about the widget retry policy.\n",
+    );
+}
+
+#[test]
+fn index_builds_sqlite_db_and_self_gitignores() {
+    // Bare `index DIR` (no --markdown) builds the persistent SQLite index at <root>/.memgrep/
+    // index.db AND drops a self-ignoring <root>/.memgrep/.gitignore containing `*` — the derived
+    // cache must never be committed (git tracks the .md source of truth).
+    let d = TempDir::new("gitignore");
+    seed_corpus(&d);
+    let o = run(&["index", d.as_str()]);
+    assert!(
+        d.join(".memgrep/index.db").is_file(),
+        "index.db must exist after `index DIR`:\nstdout: {o}"
+    );
+    let gi = std::fs::read_to_string(d.join(".memgrep/.gitignore"))
+        .expect(".memgrep/.gitignore must exist");
+    assert!(
+        gi.lines().any(|l| l.trim() == "*"),
+        ".memgrep/.gitignore must contain `*` (self-ignoring):\n{gi}"
+    );
+    assert!(
+        o.contains("indexed"),
+        "index must print a one-line summary:\n{o}"
+    );
+}
+
+#[test]
+fn reindex_is_an_alias_for_index() {
+    // `reindex DIR` is the canonical name; `index DIR` (no flag) is its alias. Both build the DB.
+    let d = TempDir::new("alias");
+    seed_corpus(&d);
+    let o = run(&["reindex", d.as_str()]);
+    assert!(
+        d.join(".memgrep/index.db").is_file(),
+        "reindex must build the DB:\n{o}"
+    );
+    assert!(o.contains("indexed"), "reindex prints a summary:\n{o}");
+}
+
+#[test]
+fn reindex_then_recall_via_index_matches_walk() {
+    // The whole point: an index-backed recall returns the SAME results as the live tree-walk. Build
+    // the index, then compare `recall --use-index` to plain `recall` (walk) — byte-identical.
+    let d = TempDir::new("match");
+    seed_corpus(&d);
+    run(&["reindex", d.as_str()]);
+    let walk = run(&["recall", "keychain credentials", d.as_str()]);
+    let indexed = run(&["recall", "keychain credentials", d.as_str(), "--use-index"]);
+    assert!(
+        walk.contains("alpha.md"),
+        "walk recall must find alpha:\n{walk}"
+    );
+    assert_eq!(
+        walk, indexed,
+        "index-backed recall must match the walk byte-for-byte:\nwalk:\n{walk}\nindex:\n{indexed}"
+    );
+}
+
+#[test]
+fn reindex_incremental_skips_unchanged() {
+    // A second reindex of an unchanged corpus re-parses NOTHING — the summary reports 0 changed and
+    // every file skipped (incremental change-detection via the `files` ledger).
+    let d = TempDir::new("skip");
+    seed_corpus(&d);
+    run(&["reindex", d.as_str()]); // first build: 2 changed
+    let o = run(&["reindex", d.as_str()]); // second: 0 changed, 2 skipped
+    assert!(
+        o.contains("indexed 2 (0 changed, 2 skipped, 0 deleted)"),
+        "an unchanged second pass must skip everything:\n{o}"
+    );
+}
+
+#[test]
+fn reindex_reparses_only_changed_file() {
+    // Modify exactly ONE note, reindex, and assert the summary reports exactly 1 changed (the other
+    // is skipped). This proves the indexer re-parses only what changed, not the whole corpus.
+    let d = TempDir::new("onechange");
+    seed_corpus(&d);
+    run(&["reindex", d.as_str()]);
+    // Touch the BODY of alpha only (changing its blob sha / size+mtime).
+    d.write(
+        "alpha.md",
+        "---\ndescription: oauth rotator keychain credentials\ntags: [oauth, rotator]\nocd: 2024-01-01\nlmd: 2024-06-01\n---\n# Alpha\n\nBody about keychain credentials and token rotation. EDITED.\n",
+    );
+    let o = run(&["reindex", d.as_str()]);
+    assert!(
+        o.contains("indexed 2 (1 changed, 1 skipped, 0 deleted)"),
+        "only the edited file must re-parse:\n{o}"
+    );
+}
+
+#[test]
+fn reindex_prunes_deleted_file() {
+    // A file in the ledger but no longer on disk has its rows deleted; an index-backed recall no
+    // longer returns it, and the summary reports the deletion.
+    let d = TempDir::new("delete");
+    seed_corpus(&d);
+    run(&["reindex", d.as_str()]);
+    std::fs::remove_file(d.join("beta.md")).expect("remove beta");
+    let o = run(&["reindex", d.as_str()]);
+    assert!(
+        o.contains("indexed 1 (0 changed, 1 skipped, 1 deleted)"),
+        "the removed file must be pruned:\n{o}"
+    );
+    let r = run(&["recall", "widget retry", d.as_str(), "--use-index"]);
+    assert!(
+        !r.contains("beta.md"),
+        "a pruned file must not surface via the index:\n{r}"
+    );
+}
+
+#[test]
+fn recall_use_index_fts_text_match() {
+    // A body-only term (not in description/title/tags) resolves through the FTS5 body match: the
+    // index returns the note whose BODY contains the term, same as the walk's body fallback.
+    let d = TempDir::new("fts");
+    d.write(
+        "doc.md",
+        "---\ndescription: an unrelated surface line\ntags: [misc]\n---\n# Doc\n\nThe quibblefrobnicator only appears deep in the body text.\n",
+    );
+    run(&["reindex", d.as_str()]);
+    let o = run(&["recall", "quibblefrobnicator", d.as_str(), "--use-index"]);
+    assert!(
+        o.contains("doc.md"),
+        "FTS body match must surface the note via the index:\n{o}"
+    );
+}
+
+#[test]
+fn recall_use_index_date_range_filter() {
+    // A --since/--until window applied via the index uses the stored OCD/LMD (a B-tree/ORDER BY
+    // path), returning the same membership as the walk's date filter.
+    let d = TempDir::new("daterange");
+    seed_corpus(&d); // alpha lmd 2024-06-01, beta lmd 2026-06-01
+    run(&["reindex", d.as_str()]);
+    let o = run(&[
+        "recall",
+        "rotator widget",
+        d.as_str(),
+        "--use-index",
+        "--since",
+        "2025-01-01",
+    ]);
+    assert!(
+        o.contains("beta.md") && !o.contains("alpha.md"),
+        "only the note with LMD ≥ since must remain via the index:\n{o}"
+    );
+}
+
+#[test]
+fn recall_index_absent_falls_back_to_walk() {
+    // `--use-index` with NO index present must still return correct results — it degrades to the
+    // live walk so a missing/never-built index never yields wrong/empty output.
+    let d = TempDir::new("absent");
+    seed_corpus(&d);
+    // No reindex — there is no .memgrep/index.db.
+    let o = run(&["recall", "keychain credentials", d.as_str(), "--use-index"]);
+    assert!(
+        !d.join(".memgrep/index.db").exists(),
+        "the absent-index test must not have a DB"
+    );
+    assert!(
+        o.contains("alpha.md"),
+        "recall --use-index must fall back to the walk when no index exists:\n{o}"
+    );
+}
+
+#[test]
+fn recall_auto_uses_fresh_index_else_walks() {
+    // Without --use-index, recall auto-uses a FRESH index when present, but a corpus file newer than
+    // the ledger forces the live walk so results are always correct. Here: build the index, then add
+    // a NEW file the index doesn't know — the auto path must still find it (by walking).
+    let d = TempDir::new("auto");
+    seed_corpus(&d);
+    run(&["reindex", d.as_str()]);
+    // Add a third note AFTER indexing; the ledger is now stale.
+    d.write(
+        "gamma.md",
+        "---\ndescription: a freshly added note about keychain access\ntags: [new]\n---\n# Gamma\n\nKeychain credentials body, added after the last index.\n",
+    );
+    let o = run(&["recall", "keychain credentials", d.as_str()]);
+    assert!(
+        o.contains("gamma.md"),
+        "a corpus newer than the ledger must force the walk so new notes still surface:\n{o}"
+    );
+}
+
+#[test]
+fn reindex_edit_replaces_indexed_body() {
+    // After an incremental re-parse the OLD body content is gone from the index (the delete cleared
+    // the row + its FTS shadow) and the NEW content is present (the reinsert) — proving the changed-
+    // file path replaces, never duplicates or leaks stale text.
+    let d = TempDir::new("editbody");
+    d.write(
+        "doc.md",
+        "---\ndescription: surface stays the same\ntags: [x]\n---\n# Doc\n\nThe originalbodyterm lives here.\n",
+    );
+    run(&["reindex", d.as_str()]);
+    assert!(
+        run(&["recall", "originalbodyterm", d.as_str(), "--use-index"]).contains("doc.md"),
+        "the index must initially match the original body term"
+    );
+    // Replace the body term; reindex incrementally.
+    d.write(
+        "doc.md",
+        "---\ndescription: surface stays the same\ntags: [x]\n---\n# Doc\n\nThe replacedbodyterm lives here now.\n",
+    );
+    let summary = run(&["reindex", d.as_str()]);
+    assert!(
+        summary.contains("indexed 1 (1 changed, 0 skipped, 0 deleted)"),
+        "the edited file must re-parse:\n{summary}"
+    );
+    let old = run(&["recall", "originalbodyterm", d.as_str(), "--use-index"]);
+    assert!(
+        !old.contains("doc.md"),
+        "the stale body term must be gone from the index after the edit:\n{old}"
+    );
+    let new = run(&["recall", "replacedbodyterm", d.as_str(), "--use-index"]);
+    assert!(
+        new.contains("doc.md"),
+        "the new body term must be present after the incremental re-parse:\n{new}"
+    );
 }

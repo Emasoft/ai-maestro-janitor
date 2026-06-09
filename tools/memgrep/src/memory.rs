@@ -53,19 +53,38 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
 /// Everything `index`/`links` need about one note, plus the per-element datetimes the librarian
 /// needs once it starts MOVING memories between pages (which makes file mtime meaningless as an age
 /// signal — so the dates are intrinsic metadata, fs is only a fallback).
-struct Note {
+pub(crate) struct Note {
     path: PathBuf,
-    title: String,
-    summary: String,
-    tags: Vec<String>,
+    pub(crate) title: String,
+    pub(crate) summary: String,
+    pub(crate) tags: Vec<String>,
     headings: Vec<(u8, String)>,
     links: Vec<md::LinkRef>,
     /// Original Creation Date (ISO-8601). Frontmatter `ocd` (alias `created`); else None — a
     /// cross-platform file btime is unreliable, so we do NOT invent an OCD from the filesystem.
-    ocd: Option<String>,
+    pub(crate) ocd: Option<String>,
     /// Last Modified Date (ISO-8601). Frontmatter `lmd` (alias `updated`); else the file mtime
     /// (`fs::metadata().modified()`, formatted ISO-8601 UTC) — mtime is at least a real lower bound.
-    lmd: Option<String>,
+    pub(crate) lmd: Option<String>,
+}
+
+/// Public wrapper over `read_note` for the SQLite indexer (`index.rs`): the index needs the same
+/// title/summary/tags/OCD/LMD the recall walk derives, so it parses via the identical seam — keeping
+/// indexed extraction byte-for-byte with the walk's.
+pub fn read_note_public(path: &Path) -> Option<Note> {
+    read_note(path)
+}
+
+/// Public wrapper over `resolve_notes` for the indexer: the resolved lessons (label + dates + WHY
+/// text + URLs) become the index's `notes` rows.
+pub fn resolve_notes_public(path: &Path) -> Vec<ResolvedNote> {
+    resolve_notes(path)
+}
+
+/// Current wall-clock time as an ISO-8601 UTC string — the `indexed_at` stamp the SQLite index
+/// records per file. Shares the dependency-free civil-date math with the fs-mtime formatter.
+pub fn now_iso_utc() -> String {
+    system_time_to_iso_utc(std::time::SystemTime::now())
 }
 
 /// Format a `SystemTime` as an ISO-8601 UTC string (`YYYY-MM-DDTHH:MM:SSZ`) WITHOUT a date crate —
@@ -202,16 +221,17 @@ fn read_note(path: &Path) -> Option<Note> {
 /// leading `[...]` metadata prefix (stripped by default, restored by `--full-notes`), and the WHY
 /// text (links/images/URLs always preserved — only the metadata prefix is strippable). A lesson is a
 /// FIRST-CLASS memory element, so it carries its own intrinsic OCD/LMD parsed from that prefix.
-struct ResolvedNote {
-    num: String,
+pub(crate) struct ResolvedNote {
+    pub(crate) num: String,
     meta: Option<String>,
-    text: String,
+    pub(crate) text: String,
     /// Original/Last-Modified dates of THIS lesson, parsed from `ocd:`/`lmd:` in the metadata prefix
     /// (None when the prefix carries no such key). Intrinsic — survives the librarian's page moves.
-    #[allow(dead_code)] // modeled now; the lessons-only date filter/sort is a later slice.
-    ocd: Option<String>,
-    #[allow(dead_code)]
-    lmd: Option<String>,
+    pub(crate) ocd: Option<String>,
+    pub(crate) lmd: Option<String>,
+    /// Every URL / image-link / markdown-link target in the lesson text, space-joined. Load-bearing
+    /// per the spec (a lesson's links/resources are always kept), so the index stores them for recall.
+    pub(crate) urls: String,
 }
 
 /// Read the text of a footnote definition spanning raw lines `[start, end]` (1-based), strip the
@@ -261,6 +281,28 @@ fn split_note_metadata(body: &str) -> (Option<String>, String) {
     (Some(meta), rest)
 }
 
+/// Extract every URL / link target from a lesson's WHY text, space-joined (empty when none). Covers
+/// markdown links `[t](url)` / images `![a](url)` (the parenthesized target) and bare `http(s)://`
+/// URLs. The spec keeps a lesson's links/resources ALWAYS — the index stores them so a recall can
+/// surface a lesson's references. Compiled once.
+fn extract_urls(text: &str) -> String {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        // `](...)` markdown/image target, OR a bare http(s) URL run.
+        Regex::new(r"\]\(([^)\s]+)\)|(https?://[^\s)\]]+)").expect("static regex")
+    });
+    let mut urls: Vec<String> = Vec::new();
+    for c in re.captures_iter(text) {
+        if let Some(m) = c.get(1).or_else(|| c.get(2)) {
+            let u = m.as_str().to_string();
+            if !urls.contains(&u) {
+                urls.push(u);
+            }
+        }
+    }
+    urls.join(" ")
+}
+
 /// Resolve a note's in-body `[^N]` references to their `[^N]:` definitions (its `## Notes and
 /// lessons learned` section), in reference order, returning the modeled lessons. A definition's
 /// text is split into its (strippable) `[...]` metadata prefix and its WHY text. Only definitions
@@ -292,12 +334,14 @@ fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
                 .as_deref()
                 .map(parse_meta_dates)
                 .unwrap_or((None, None));
+            let urls = extract_urls(&rest);
             out.push(ResolvedNote {
                 num: r.label.clone(),
                 meta,
                 text: rest,
                 ocd,
                 lmd,
+                urls,
             });
         }
     }
@@ -461,21 +505,67 @@ fn rel(p: &Path) -> String {
     p.display().to_string()
 }
 
-// ─────────────────────────── `memgrep index` ───────────────────────────
+// ─────────────────────────── `memgrep index` / `memgrep reindex` ───────────────────────────
 
 #[derive(Parser)]
-#[command(name = "memgrep index", about = "(re)generate memory-index.md")]
+#[command(
+    name = "memgrep index",
+    about = "build the persistent SQLite query index (or, with --markdown, regenerate memory-index.md)"
+)]
 struct IndexArgs {
     paths: Vec<PathBuf>,
-    /// Write to <root>/memory-index.md instead of stdout.
+    /// Build the legacy Markdown doc-generator (memory-index.md) instead of the SQLite index.
+    #[arg(long = "markdown")]
+    markdown: bool,
+    /// (--markdown only) Write to <root>/memory-index.md instead of stdout.
     #[arg(long = "write")]
     write: bool,
+    /// Ignore the change-detection ledger and rebuild the SQLite index from scratch.
+    #[arg(long = "full")]
+    full: bool,
     #[arg(long = "hidden")]
     hidden: bool,
 }
 
+/// `memgrep index` — default builds the SQLite query index (an alias for `reindex`); `--markdown`
+/// builds the legacy human-readable `memory-index.md` doc. The SQLite index is the fast query layer
+/// (TRDD-c77dae09); the Markdown doc is the older note-map generator, kept behind the flag.
 pub fn cmd_index_cli(args: &[String]) -> Result<()> {
     let a = IndexArgs::parse_from(std::iter::once("index".to_string()).chain(args.iter().cloned()));
+    if a.markdown {
+        return cmd_index_markdown(&a);
+    }
+    do_reindex(&a.paths, a.hidden, a.full)
+}
+
+/// `memgrep reindex [PATH] [--full]` — the canonical name for building the SQLite index (`index`
+/// with no flag is its alias). `--full` rebuilds from scratch; otherwise only changed/new files are
+/// re-parsed and vanished files pruned.
+pub fn cmd_reindex_cli(args: &[String]) -> Result<()> {
+    let a =
+        IndexArgs::parse_from(std::iter::once("reindex".to_string()).chain(args.iter().cloned()));
+    if a.markdown {
+        anyhow::bail!(
+            "`reindex` builds the SQLite index — use `index --markdown` for memory-index.md"
+        );
+    }
+    do_reindex(&a.paths, a.hidden, a.full)
+}
+
+/// Build/refresh the SQLite index rooted at the first PATH (default `.`), enumerating the corpus via
+/// `collect_md` and printing the one-line summary. The index lives at `<root>/.memgrep/index.db`.
+fn do_reindex(paths: &[PathBuf], hidden: bool, full: bool) -> Result<()> {
+    let root = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+    let files = collect_md(paths, hidden);
+    let summary = crate::index::reindex(&root, &files, full)?;
+    println!("{summary}");
+    Ok(())
+}
+
+/// The legacy `memory-index.md` doc-generator (the pre-SQLite `index` behavior), now reached via
+/// `index --markdown`. Emits one `##` section per note with summary/tags/TOC/backlinks; `--write`
+/// atomically writes `<root>/memory-index.md`.
+fn cmd_index_markdown(a: &IndexArgs) -> Result<()> {
     let g = build_graph(&a.paths, a.hidden);
     let mut out = String::from(
         "# memory-index.md (auto-generated by `memgrep index` — do not hand-edit)\n\n",
@@ -729,6 +819,11 @@ struct RecallArgs {
     /// Which date `--since`/`--until` filter on (default `lmd`).
     #[arg(long = "date-field", value_enum, default_value_t = DateField::Lmd)]
     date_field: DateField,
+    /// Force the persistent SQLite index (`.memgrep/index.db`). Falls back to the live walk when no
+    /// index exists, so results are always correct. Without this flag, recall auto-uses a FRESH
+    /// index (one no corpus file is newer than) and otherwise walks.
+    #[arg(long = "use-index")]
+    use_index: bool,
     #[arg(long = "hidden")]
     hidden: bool,
 }
@@ -749,11 +844,135 @@ const STOPWORDS: &[&str] = &[
     "you", "your", "my", "me", "i", "how", "what", "why", "when", "where", "which", "who", "again",
 ];
 
-pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
-    let a =
-        RecallArgs::parse_from(std::iter::once("recall".to_string()).chain(args.iter().cloned()));
-    let terms: Vec<String> = a
-        .query
+/// One scored candidate BEFORE the precision-first filter: `(surface_hits, body_only, display_path,
+/// summary, pathbuf, ocd, lmd)`. Built identically from the live walk OR the SQLite index, so both
+/// paths feed the SAME finalize step and produce byte-identical output.
+type RecallScored = (
+    i64,
+    bool,
+    String,
+    String,
+    PathBuf,
+    Option<String>,
+    Option<String>,
+);
+
+/// The rank row AFTER the precision-first filter: `(score, display_path, summary, pathbuf, ocd,
+/// lmd)` — what the date filter + sort + print operate on.
+type RecallRanked = (i64, String, String, PathBuf, Option<String>, Option<String>);
+
+/// Is `path` one of the index FILES (`MEMORY.md` / `memory-index.md`)? Those are MAPS of the notes,
+/// not notes — ranking them lets a symptom query match the index's gloss lines and return the index
+/// itself as noise above the real note (observed dogfooding recall on the live KB).
+fn is_index_file(path: &Path) -> bool {
+    path.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
+        n.eq_ignore_ascii_case("MEMORY.md") || n.eq_ignore_ascii_case("memory-index.md")
+    })
+}
+
+/// The metadata of one recall candidate (everything but the body, which is supplied as a lazy
+/// closure so the walk can read it only on a surface-miss). Built identically from a parsed `Note`
+/// (walk) or an `IndexCandidate` (index), so `score_candidate` ranks both the same way.
+struct CandidateMeta {
+    display_path: String,
+    title: String,
+    summary: String,
+    tags_joined: String,
+    pathbuf: PathBuf,
+    ocd: Option<String>,
+    lmd: Option<String>,
+}
+
+/// Score one note's symptom surface (title + summary + tags) against the query terms, plus the
+/// body-only fallback (consulted ONLY when the surface missed). Returns the `RecallScored` row, or
+/// None when neither the surface nor the body matched (the note doesn't rank). Shared by the walk
+/// (body read lazily) and the index (body already loaded) so both rank identically.
+fn score_candidate(
+    terms: &[String],
+    m: CandidateMeta,
+    body_text: impl FnOnce() -> Option<String>,
+) -> Option<RecallScored> {
+    let surface = format!("{} {} {}", m.title, m.summary, m.tags_joined).to_lowercase();
+    let surface_hits = terms
+        .iter()
+        .filter(|t| surface.contains(t.as_str()))
+        .count() as i64;
+    // Body match: only consulted when the symptom SURFACE missed for this note.
+    let body_only = surface_hits == 0
+        && body_text().is_some_and(|t| {
+            let lo = t.to_lowercase();
+            terms.iter().any(|x| lo.contains(x.as_str()))
+        });
+    if surface_hits > 0 || body_only {
+        Some((
+            surface_hits,
+            body_only,
+            m.display_path,
+            m.summary,
+            m.pathbuf,
+            m.ocd,
+            m.lmd,
+        ))
+    } else {
+        None
+    }
+}
+
+/// Gather scored candidates from the LIVE tree-walk (`collect_md` → `read_note`). The body is read
+/// lazily (only when the surface missed), preserving the walk's existing I/O profile.
+fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<RecallScored> {
+    let mut all = Vec::new();
+    for path in collect_md(paths, hidden) {
+        if is_index_file(&path) {
+            continue;
+        }
+        let Some(note) = read_note(&path) else {
+            continue;
+        };
+        let p = path.clone();
+        let meta = CandidateMeta {
+            display_path: rel(&path),
+            title: note.title,
+            summary: note.summary,
+            tags_joined: note.tags.join(" "),
+            pathbuf: path,
+            ocd: note.ocd,
+            lmd: note.lmd,
+        };
+        if let Some(row) = score_candidate(terms, meta, || md::read_text(&p)) {
+            all.push(row);
+        }
+    }
+    all
+}
+
+/// Gather scored candidates from the SQLite index (`memories` rows). The body is the stored text, so
+/// the surface/body matching is byte-identical to `gather_from_walk` — guaranteeing an index-backed
+/// recall returns the SAME results as the walk.
+fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Vec<RecallScored>> {
+    let mut all = Vec::new();
+    for c in crate::index::recall_candidates(conn)? {
+        let body = c.body;
+        let meta = CandidateMeta {
+            pathbuf: PathBuf::from(&c.display_path),
+            display_path: c.display_path,
+            title: c.title,
+            summary: c.summary,
+            tags_joined: c.tags_joined,
+            ocd: c.ocd,
+            lmd: c.lmd,
+        };
+        if let Some(row) = score_candidate(terms, meta, || Some(body)) {
+            all.push(row);
+        }
+    }
+    Ok(all)
+}
+
+/// Tokenize the recall phrase: lowercase, split on non-alphanumerics, drop sub-2-char tokens and
+/// stopwords. Errors when nothing discriminating remains (a query of only stopwords).
+fn recall_terms(query: &str) -> Result<Vec<String>> {
+    let terms: Vec<String> = query
         .to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.len() >= 2 && !STOPWORDS.contains(t))
@@ -764,64 +983,19 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
             "recall needs at least one content term (stopwords like 'to'/'how' don't count)"
         );
     }
-    // Notes are resolved+appended unless --no-notes. --with-notes is the (default) explicit on.
+    Ok(terms)
+}
+
+/// Apply the precision-first filter, the `--since`/`--until` date-range filter, the chosen sort, and
+/// print the top results (with resolved lessons appended when wanted). Shared by the walk and index
+/// paths so the output is identical regardless of source.
+fn finalize_recall(all: Vec<RecallScored>, a: &RecallArgs) -> Result<()> {
     let want_notes = !a.no_notes;
-    // (surface_hits, body_only, display_path, summary, path, ocd, lmd) before precision-first filter.
-    type Scored = (
-        i64,
-        bool,
-        String,
-        String,
-        PathBuf,
-        Option<String>,
-        Option<String>,
-    );
-    // (score, display_path, summary, path, ocd, lmd) after the precision-first filter — the rank row
-    // the date filter + sort operate on.
-    type Ranked = (i64, String, String, PathBuf, Option<String>, Option<String>);
-    let mut all: Vec<Scored> = Vec::new();
-    for path in collect_md(&a.paths, a.hidden) {
-        // Skip the index files: `MEMORY.md` (the hand-authored index) and `memory-index.md` (the
-        // `memgrep index` output) are MAPS of the notes, not notes. Ranking them lets a symptom
-        // query match the index's gloss lines and return the index itself as noise above the real
-        // note (observed dogfooding recall on the live KB).
-        if path.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
-            n.eq_ignore_ascii_case("MEMORY.md") || n.eq_ignore_ascii_case("memory-index.md")
-        }) {
-            continue;
-        }
-        let Some(note) = read_note(&path) else {
-            continue;
-        };
-        let surface =
-            format!("{} {} {}", note.title, note.summary, note.tags.join(" ")).to_lowercase();
-        let surface_hits = terms
-            .iter()
-            .filter(|t| surface.contains(t.as_str()))
-            .count() as i64;
-        // Body match: only consulted when the symptom SURFACE missed for this note.
-        let body_only = surface_hits == 0
-            && md::read_text(&path).is_some_and(|t| {
-                let lo = t.to_lowercase();
-                terms.iter().any(|x| lo.contains(x.as_str()))
-            });
-        if surface_hits > 0 || body_only {
-            all.push((
-                surface_hits,
-                body_only,
-                rel(&path),
-                note.summary,
-                path,
-                note.ocd,
-                note.lmd,
-            ));
-        }
-    }
     // PRECISION-FIRST: if ANY note matched the symptom surface (description/title/tags), return
     // only those, ranked by hit count. Fall back to body-only matches ONLY when nothing matched
     // the surface — so a well-described KB stays precise, but we never miss a content-only note.
     let any_surface = all.iter().any(|(h, ..)| *h > 0);
-    let mut scored: Vec<Ranked> = all
+    let mut scored: Vec<RecallRanked> = all
         .into_iter()
         .filter(|(h, body_only, ..)| *h > 0 || (!any_surface && *body_only))
         .map(|(h, _, p, s, pb, ocd, lmd)| (h, p, s, pb, ocd, lmd))
@@ -863,7 +1037,7 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
             if asc { o } else { o.reverse() }
         }),
         SortKey::Ocd | SortKey::Lmd => {
-            let key = |t: &Ranked| match a.sort {
+            let key = |t: &RecallRanked| match a.sort {
                 SortKey::Ocd => t.4.clone(),
                 _ => t.5.clone(),
             };
@@ -904,6 +1078,40 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
+    let a =
+        RecallArgs::parse_from(std::iter::once("recall".to_string()).chain(args.iter().cloned()));
+    let terms = recall_terms(&a.query)?;
+
+    // SOURCE SELECTION: with `--use-index`, use the persistent index when it EXISTS (else fall back
+    // to the walk so a missing index is never wrong). Without the flag, auto-use a FRESH index (one
+    // no corpus file is newer than) and otherwise walk — so results are ALWAYS correct even with a
+    // stale/absent index. The index gather and the walk gather produce identical `RecallScored` rows.
+    let root = a
+        .paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("."));
+    let use_index = if a.use_index {
+        crate::index::open_existing(&root).is_some()
+    } else {
+        // Auto: use the index only when it is FRESH (no corpus file changed/added/removed since the
+        // last reindex — a precise per-file `(size, mtime_ns)`/blob check, not a coarse timestamp).
+        crate::index::is_fresh(&root, &collect_md(&a.paths, a.hidden))
+    };
+
+    let all = if use_index {
+        match crate::index::open_existing(&root) {
+            Some(conn) => gather_from_index(&conn, &terms)?,
+            None => gather_from_walk(&a.paths, a.hidden, &terms),
+        }
+    } else {
+        gather_from_walk(&a.paths, a.hidden, &terms)
+    };
+
+    finalize_recall(all, &a)
 }
 
 // ─────────────────────────── `memgrep fact` ───────────────────────────

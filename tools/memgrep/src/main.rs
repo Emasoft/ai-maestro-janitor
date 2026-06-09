@@ -7,6 +7,7 @@
 //! search to a chapter and its sub-chapters. Anything it cannot parse degrades to plain line-grep
 //! — it never crashes on an unfamiliar flavour.
 
+mod index;
 mod md;
 mod memory;
 mod predicate;
@@ -353,10 +354,11 @@ fn main() -> Result<()> {
     reset_sigpipe(); // die quietly on `… | head`, never panic on a closed pipe
 
     // Memory-helper subcommands dispatch before grep parsing. To grep for a literal "index" /
-    // "links" / "fact" / "recall" as the first word, use `memgrep -e index …`.
+    // "reindex" / "links" / "fact" / "recall" as the first word, use `memgrep -e index …`.
     let raw: Vec<String> = std::env::args().collect();
     match raw.get(1).map(|s| s.as_str()) {
         Some("index") => return memory::cmd_index_cli(&raw[2..]),
+        Some("reindex") => return memory::cmd_reindex_cli(&raw[2..]),
         Some("links") => return memory::cmd_links_cli(&raw[2..]),
         Some("fact") => return memory::cmd_fact_cli(&raw[2..]),
         Some("recall") => return memory::cmd_recall_cli(&raw[2..]),

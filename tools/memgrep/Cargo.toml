@@ -10,3 +10,4 @@ comrak = "0.52.0"
 globset = "0.4.18"
 ignore = "0.4.26"
 regex = "1.12.3"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
