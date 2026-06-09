@@ -3,7 +3,7 @@ trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
 column: backburner
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-09T18:18:42+0200
+updated: 2026-06-09T18:24:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -273,6 +273,44 @@ memgrep RENDERS the resolved notes minimally — storage format ≠ render forma
 Rationale: the agent gets every lesson's WHY + every resource it points to, at
 minimum token cost — the metadata (which the agent rarely needs at read time) is
 the only thing dropped, and only until `--full-notes` asks for it.
+
+### Per-element datetimes (OCD + LMD) + notes are first-class searchable elements (USER, 2026-06-09)
+
+**The background reorg breaks "page mtime = memory age."** Because the librarian
+MOVES memories between wiki pages in the background, a page's filesystem
+last-modified time reflects only the librarian's last reorg — NOT when any
+specific memory in it was created or changed. So dating must move DOWN to the
+element:
+
+- **Every memory element carries its own two datetimes in metadata:**
+  - **OCD — Original Creation Date** (when the memory/lesson was first written),
+  - **LMD — Last Modified Date** (when its content last changed).
+  These are intrinsic to the element and survive moves between pages.
+- **Uniform metadata across ALL memory elements.** A fact-memory and each
+  **note/lesson-learned share the SAME metadata schema** — OCD, LMD, type, class,
+  keys, origin, etc. A note/lesson is a **first-class memory element**, not a
+  second-class footnote: it carries full metadata (stored in the `[…]` prefix
+  that the render strips by default — see the output-format section). The
+  page-level `created:`/`updated:` frontmatter stays, but it is now a derived/
+  coarse marker, not the source of truth for any individual memory's age.
+
+**memgrep searches/filters/sorts notes-and-lessons too** (not just fact bodies):
+
+- **Search within lessons** — query among the notes/lessons-learned, including a
+  **lessons-ONLY** mode (e.g. `memgrep recall --only-notes "<symptom>"` /
+  `memgrep notes <query>`) to find a specific lesson without the fact bodies.
+- **Datetime-range filter** — "all lessons learned between datetime A and B"
+  (e.g. `--since`/`--until` over OCD or LMD), enabled precisely because each
+  element now has its own OCD/LMD.
+- **Configurable sort** — sort/order results by OCD, LMD, relevance, topic, etc.
+  The sort key is an option, not hard-coded (e.g. `--sort lmd|ocd|score`,
+  `--order asc|desc`).
+
+This makes the lessons corpus a queryable ledger: "what did I learn last week",
+"every lesson about <topic> newest-first", "the lesson I wrote on <date>" all
+become single memgrep calls. Belongs in memgrep's memory + where-DSL layers
+(TRDD-d151fe52) — it already has `--where` boolean filtering and a markdown date
+sense to build on.
 
 ### Implementation note (do NOT build piecemeal)
 
