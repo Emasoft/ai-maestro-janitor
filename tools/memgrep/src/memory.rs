@@ -8,8 +8,9 @@
 
 use crate::md;
 use crate::predicate::{LinkDir, LinkSets};
+use crate::search::Cmp;
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ignore::WalkBuilder;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,7 +50,9 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
     out
 }
 
-/// Everything `index`/`links` need about one note.
+/// Everything `index`/`links` need about one note, plus the per-element datetimes the librarian
+/// needs once it starts MOVING memories between pages (which makes file mtime meaningless as an age
+/// signal — so the dates are intrinsic metadata, fs is only a fallback).
 struct Note {
     path: PathBuf,
     title: String,
@@ -57,6 +60,59 @@ struct Note {
     tags: Vec<String>,
     headings: Vec<(u8, String)>,
     links: Vec<md::LinkRef>,
+    /// Original Creation Date (ISO-8601). Frontmatter `ocd` (alias `created`); else None — a
+    /// cross-platform file btime is unreliable, so we do NOT invent an OCD from the filesystem.
+    ocd: Option<String>,
+    /// Last Modified Date (ISO-8601). Frontmatter `lmd` (alias `updated`); else the file mtime
+    /// (`fs::metadata().modified()`, formatted ISO-8601 UTC) — mtime is at least a real lower bound.
+    lmd: Option<String>,
+}
+
+/// Format a `SystemTime` as an ISO-8601 UTC string (`YYYY-MM-DDTHH:MM:SSZ`) WITHOUT a date crate —
+/// the crate is deliberately dependency-light (no chrono). Converts the UNIX-epoch second count to a
+/// civil (Gregorian) date via Howard Hinnant's `days_from_civil` inverse, so the result compares
+/// lexicographically against frontmatter ISO dates. Pre-epoch times (negative) clamp to the epoch.
+fn system_time_to_iso_utc(t: std::time::SystemTime) -> String {
+    let secs = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    // civil_from_days (Hinnant): days since 1970-01-01 → (year, month, day), proleptic Gregorian.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097); // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = if m <= 2 { y + 1 } else { y };
+    format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
+/// Pull `ocd`/`lmd` out of a note/lesson's `[...]` metadata prefix (e.g. `ocd:2025-03-03
+/// lmd:2026-05-05 class:reference`). The prefix is the whitespace-separated `key:value` bag that
+/// `split_note_metadata` isolates; only `ocd`/`lmd` are read here, every other key stays opaque.
+/// Returns `(ocd, lmd)`, each None when absent.
+fn parse_meta_dates(meta: &str) -> (Option<String>, Option<String>) {
+    let mut ocd = None;
+    let mut lmd = None;
+    for tok in meta.split_whitespace() {
+        if let Some(v) = tok.strip_prefix("ocd:") {
+            if !v.is_empty() {
+                ocd = Some(v.to_string());
+            }
+        } else if let Some(v) = tok.strip_prefix("lmd:")
+            && !v.is_empty()
+        {
+            lmd = Some(v.to_string());
+        }
+    }
+    (ocd, lmd)
 }
 
 fn parse_tags(raw: &str) -> Vec<String> {
@@ -109,6 +165,25 @@ fn read_note(path: &Path) -> Option<Note> {
         })
         .unwrap_or_default();
     let tags = fm.get("tags").map(|v| parse_tags(v)).unwrap_or_default();
+    // OCD: frontmatter `ocd` (alias `created`); no filesystem fallback (btime is unreliable).
+    let ocd = fm
+        .get("ocd")
+        .or_else(|| fm.get("created"))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    // LMD: frontmatter `lmd` (alias `updated`); else the file mtime as ISO-8601 UTC. The librarian
+    // moves files, so frontmatter wins when present — fs mtime is only the no-metadata fallback.
+    let lmd = fm
+        .get("lmd")
+        .or_else(|| fm.get("updated"))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(system_time_to_iso_utc)
+        });
     Some(Note {
         path: path.to_path_buf(),
         title,
@@ -116,6 +191,8 @@ fn read_note(path: &Path) -> Option<Note> {
         tags,
         headings,
         links: ctx.links,
+        ocd,
+        lmd,
     })
 }
 
@@ -123,11 +200,18 @@ fn read_note(path: &Path) -> Option<Note> {
 
 /// One resolved lesson/note element: the footnote label `N` (as it renders, bare), the optional
 /// leading `[...]` metadata prefix (stripped by default, restored by `--full-notes`), and the WHY
-/// text (links/images/URLs always preserved — only the metadata prefix is strippable).
+/// text (links/images/URLs always preserved — only the metadata prefix is strippable). A lesson is a
+/// FIRST-CLASS memory element, so it carries its own intrinsic OCD/LMD parsed from that prefix.
 struct ResolvedNote {
     num: String,
     meta: Option<String>,
     text: String,
+    /// Original/Last-Modified dates of THIS lesson, parsed from `ocd:`/`lmd:` in the metadata prefix
+    /// (None when the prefix carries no such key). Intrinsic — survives the librarian's page moves.
+    #[allow(dead_code)] // modeled now; the lessons-only date filter/sort is a later slice.
+    ocd: Option<String>,
+    #[allow(dead_code)]
+    lmd: Option<String>,
 }
 
 /// Read the text of a footnote definition spanning raw lines `[start, end]` (1-based), strip the
@@ -204,10 +288,16 @@ fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
         }
         if let Some(body) = def_text.get(&r.label) {
             let (meta, rest) = split_note_metadata(body);
+            let (ocd, lmd) = meta
+                .as_deref()
+                .map(parse_meta_dates)
+                .unwrap_or((None, None));
             out.push(ResolvedNote {
                 num: r.label.clone(),
                 meta,
                 text: rest,
+                ocd,
+                lmd,
             });
         }
     }
@@ -578,6 +668,29 @@ pub fn cmd_links_cli(args: &[String]) -> Result<()> {
 
 // ─────────────────────────── `memgrep recall` ───────────────────────────
 
+/// How to order the ranked recall results. `Score` is the existing precision-first relevance order
+/// (the default — unchanged); `Ocd`/`Lmd` sort by the per-element creation / last-modified date.
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
+enum SortKey {
+    Score,
+    Ocd,
+    Lmd,
+}
+
+/// Ascending or descending sort direction (default descending: newest / highest first).
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
+enum Order {
+    Asc,
+    Desc,
+}
+
+/// Which per-element date `--since`/`--until` filter on (and which date `--sort lmd|ocd` reads).
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
+enum DateField {
+    Ocd,
+    Lmd,
+}
+
 #[derive(Parser)]
 #[command(
     name = "memgrep recall",
@@ -601,6 +714,21 @@ struct RecallArgs {
     /// Keep each lesson's leading `[...]` metadata prefix (default: stripped).
     #[arg(long = "full-notes")]
     full_notes: bool,
+    /// Order the results by `score` (relevance — default), `ocd`, or `lmd`.
+    #[arg(long = "sort", value_enum, default_value_t = SortKey::Score)]
+    sort: SortKey,
+    /// Sort direction: `desc` (newest/highest first — default) or `asc`.
+    #[arg(long = "order", value_enum, default_value_t = Order::Desc)]
+    order: Order,
+    /// Keep only notes whose date (see `--date-field`) is on/after this ISO-8601 bound (inclusive).
+    #[arg(long = "since")]
+    since: Option<String>,
+    /// Keep only notes whose date (see `--date-field`) is on/before this ISO-8601 bound (inclusive).
+    #[arg(long = "until")]
+    until: Option<String>,
+    /// Which date `--since`/`--until` filter on (default `lmd`).
+    #[arg(long = "date-field", value_enum, default_value_t = DateField::Lmd)]
+    date_field: DateField,
     #[arg(long = "hidden")]
     hidden: bool,
 }
@@ -638,8 +766,20 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
     }
     // Notes are resolved+appended unless --no-notes. --with-notes is the (default) explicit on.
     let want_notes = !a.no_notes;
-    // (surface_hits, body_only, display_path, summary, path)
-    let mut all: Vec<(i64, bool, String, String, PathBuf)> = Vec::new();
+    // (surface_hits, body_only, display_path, summary, path, ocd, lmd) before precision-first filter.
+    type Scored = (
+        i64,
+        bool,
+        String,
+        String,
+        PathBuf,
+        Option<String>,
+        Option<String>,
+    );
+    // (score, display_path, summary, path, ocd, lmd) after the precision-first filter — the rank row
+    // the date filter + sort operate on.
+    type Ranked = (i64, String, String, PathBuf, Option<String>, Option<String>);
+    let mut all: Vec<Scored> = Vec::new();
     for path in collect_md(&a.paths, a.hidden) {
         // Skip the index files: `MEMORY.md` (the hand-authored index) and `memory-index.md` (the
         // `memgrep index` output) are MAPS of the notes, not notes. Ranking them lets a symptom
@@ -666,20 +806,84 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
                 terms.iter().any(|x| lo.contains(x.as_str()))
             });
         if surface_hits > 0 || body_only {
-            all.push((surface_hits, body_only, rel(&path), note.summary, path));
+            all.push((
+                surface_hits,
+                body_only,
+                rel(&path),
+                note.summary,
+                path,
+                note.ocd,
+                note.lmd,
+            ));
         }
     }
     // PRECISION-FIRST: if ANY note matched the symptom surface (description/title/tags), return
     // only those, ranked by hit count. Fall back to body-only matches ONLY when nothing matched
     // the surface — so a well-described KB stays precise, but we never miss a content-only note.
     let any_surface = all.iter().any(|(h, ..)| *h > 0);
-    let mut scored: Vec<(i64, String, String, PathBuf)> = all
+    let mut scored: Vec<Ranked> = all
         .into_iter()
         .filter(|(h, body_only, ..)| *h > 0 || (!any_surface && *body_only))
-        .map(|(h, _, p, s, pb)| (h, p, s, pb))
+        .map(|(h, _, p, s, pb, ocd, lmd)| (h, p, s, pb, ocd, lmd))
         .collect();
-    scored.sort_by(|x, y| y.0.cmp(&x.0)); // best first; stable ⇒ ties keep path order
-    for (_score, path, summary, pathbuf) in scored.into_iter().take(a.top) {
+
+    // Date-range filter (`--since`/`--until` on the `--date-field` date). A note with NO date in the
+    // chosen field is EXCLUDED whenever any bound is set — a missing date cannot be proven in-range,
+    // so it falls out (documented in `recall_missing_date_excluded_from_range_filter`). ISO-8601
+    // strings compare lexicographically via the shared `Cmp` comparator (one comparator with --num).
+    if a.since.is_some() || a.until.is_some() {
+        scored.retain(|(_, _, _, _, ocd, lmd)| {
+            let date = match a.date_field {
+                DateField::Ocd => ocd,
+                DateField::Lmd => lmd,
+            };
+            let Some(d) = date else { return false };
+            if let Some(s) = &a.since
+                && !Cmp::Ge.test_str(d, s)
+            {
+                return false;
+            }
+            if let Some(u) = &a.until
+                && !Cmp::Le.test_str(d, u)
+            {
+                return false;
+            }
+            true
+        });
+    }
+
+    // Sort. `score` keeps the precision-first relevance order (default); `ocd`/`lmd` order by that
+    // date. `sort_by` is stable, so within equal keys the input (path) order is preserved. A note
+    // missing the date key always sorts LAST, irrespective of --order (a no-date element has no
+    // place on a timeline). Default direction is desc (newest / highest first); --order asc flips.
+    let asc = a.order == Order::Asc;
+    match a.sort {
+        SortKey::Score => scored.sort_by(|x, y| {
+            let o = x.0.cmp(&y.0); // ascending by score
+            if asc { o } else { o.reverse() }
+        }),
+        SortKey::Ocd | SortKey::Lmd => {
+            let key = |t: &Ranked| match a.sort {
+                SortKey::Ocd => t.4.clone(),
+                _ => t.5.clone(),
+            };
+            scored.sort_by(|x, y| {
+                use std::cmp::Ordering::*;
+                match (key(x), key(y)) {
+                    (Some(dx), Some(dy)) => {
+                        let o = dx.cmp(&dy);
+                        if asc { o } else { o.reverse() }
+                    }
+                    // A present date always precedes a missing one (missing sorts last, both dirs).
+                    (Some(_), None) => Less,
+                    (None, Some(_)) => Greater,
+                    (None, None) => Equal,
+                }
+            });
+        }
+    }
+
+    for (_score, path, summary, pathbuf, ..) in scored.into_iter().take(a.top) {
         let s = summary.trim();
         let shown: String = if s.chars().count() > 140 {
             s.chars().take(140).collect::<String>() + "…"
@@ -840,4 +1044,58 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meta_dates_parse_ocd_and_lmd_from_prefix() {
+        // A lesson/note's `[...]` metadata prefix carries the element's intrinsic OCD/LMD; only
+        // those two keys are read, every other key (class, …) stays opaque.
+        let (ocd, lmd) = parse_meta_dates("ocd:2025-03-03 lmd:2026-05-05 class:reference");
+        assert_eq!(ocd.as_deref(), Some("2025-03-03"));
+        assert_eq!(lmd.as_deref(), Some("2026-05-05"));
+    }
+
+    #[test]
+    fn meta_dates_absent_keys_are_none() {
+        // A prefix with no ocd/lmd keys yields no dates (the keys are optional, not required).
+        let (ocd, lmd) = parse_meta_dates("class:reference type:project");
+        assert!(ocd.is_none() && lmd.is_none());
+    }
+
+    #[test]
+    fn meta_dates_partial_prefix_parses_only_present_key() {
+        // Only lmd present ⟹ lmd parses, ocd stays None (each is independent).
+        let (ocd, lmd) = parse_meta_dates("lmd:2026-05-05 class:x");
+        assert!(ocd.is_none());
+        assert_eq!(lmd.as_deref(), Some("2026-05-05"));
+    }
+
+    #[test]
+    fn resolved_lesson_carries_its_prefix_dates() {
+        // End-to-end of item 2: resolving a footnote whose def opens with an `[ocd:… lmd:…]` prefix
+        // models the lesson's intrinsic OCD/LMD (parsed off the same prefix the render strips).
+        let p = Path::new("tests/fixtures/dates/note_dated.md");
+        let notes = resolve_notes(p);
+        let l = notes
+            .iter()
+            .find(|n| n.num == "7")
+            .expect("lesson [^7] must resolve");
+        assert_eq!(l.ocd.as_deref(), Some("2025-03-03"));
+        assert_eq!(l.lmd.as_deref(), Some("2026-05-05"));
+    }
+
+    #[test]
+    fn epoch_formats_as_iso_utc() {
+        // The dependency-free civil-date math must reproduce known instants so the fs-mtime fallback
+        // is lexicographically comparable to frontmatter ISO dates. UNIX epoch = 1970-01-01T00:00:00Z.
+        let s = system_time_to_iso_utc(std::time::UNIX_EPOCH);
+        assert_eq!(s, "1970-01-01T00:00:00Z");
+        // A known later instant: 1_000_000_000 s after epoch = 2001-09-09T01:46:40Z.
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        assert_eq!(system_time_to_iso_utc(t), "2001-09-09T01:46:40Z");
+    }
 }

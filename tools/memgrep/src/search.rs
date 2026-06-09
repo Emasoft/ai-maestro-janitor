@@ -34,8 +34,24 @@ pub enum Cmp {
 
 impl Cmp {
     fn test(self, a: &[u32], b: &[u32]) -> bool {
+        // slice Ord is lexicographic, with prefix-is-less ([1,2] < [1,2,0])
+        self.holds(a.cmp(b))
+    }
+
+    /// Date comparator: compare two ISO-8601 datetime strings LEXICOGRAPHICALLY (ISO-8601 sorts
+    /// correctly as plain strings, so `2025-06-01 < 2026-01-01` falls out of `str::cmp`). Reuses the
+    /// same `Ordering`→bool dispatch as the version-tuple `test`, so the date-range filter on
+    /// `recall --since/--until` shares one comparator with `--num`. Kept here next to `test` so the
+    /// six comparison semantics live in exactly one place.
+    pub fn test_str(self, a: &str, b: &str) -> bool {
+        self.holds(a.cmp(b))
+    }
+
+    /// Does this comparator hold for the given `Ordering` of `lhs` vs `rhs`? The one place the six
+    /// `Ge/Gt/Le/Lt/Eq/Ne` semantics are encoded, shared by `test` (version tuples) and `test_str`
+    /// (ISO dates).
+    fn holds(self, o: std::cmp::Ordering) -> bool {
         use std::cmp::Ordering::*;
-        let o = a.cmp(b); // slice Ord is lexicographic, with prefix-is-less ([1,2] < [1,2,0])
         match self {
             Cmp::Ge => o != Less,
             Cmp::Gt => o == Greater,

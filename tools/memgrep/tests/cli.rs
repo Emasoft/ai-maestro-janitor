@@ -854,3 +854,240 @@ fn recall_with_notes_does_not_break_undescribed_corpus() {
         "a corpus with no footnotes yields no notes block:\n{o}"
     );
 }
+
+const DATES_DIR: &str = "tests/fixtures/dates";
+
+/// Extract the ordered list of ranked NOTE paths from a recall run, dropping the interleaved
+/// `[N] - <lesson>` lines and blank delimiters. A note line is `path — description`; a lesson line
+/// starts with `[` and contains `] - `. This lets a sort assertion check note ORDER regardless of
+/// any appended lessons block.
+fn note_order(out: &str) -> Vec<String> {
+    out.lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter(|l| !(l.trim_start().starts_with('[') && l.contains("] - ")))
+        .map(|l| l.split(" — ").next().unwrap_or(l).trim().to_string())
+        .collect()
+}
+
+#[test]
+fn recall_sort_lmd_orders_newest_first_by_default() {
+    // --sort lmd reorders the ranked notes by Last-Modified-Date; default order is desc (newest
+    // first). ISO-8601 strings compare lexicographically, so 2026-06-01 > 2025-06-01 > 2024-06-01.
+    let o = run(&["recall", "ledger element", DATES_DIR, "--sort", "lmd"]);
+    let order = note_order(&o);
+    let pos = |needle: &str| {
+        order
+            .iter()
+            .position(|p| p.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} missing from recall:\n{o}"))
+    };
+    assert!(
+        pos("date_new.md") < pos("date_mid.md") && pos("date_mid.md") < pos("date_old.md"),
+        "newest LMD must rank first under --sort lmd (desc default):\n{o}"
+    );
+    // The alias-dated note (lmd 2023-06-01) is the oldest of all, so it sorts last among the four.
+    assert!(
+        pos("date_old.md") < pos("date_alias.md"),
+        "the 2023 alias-dated note is oldest, sorts after 2024:\n{o}"
+    );
+}
+
+#[test]
+fn recall_sort_lmd_asc_orders_oldest_first() {
+    // --order asc flips the LMD sort to oldest-first.
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--sort",
+        "lmd",
+        "--order",
+        "asc",
+    ]);
+    let order = note_order(&o);
+    let pos = |needle: &str| order.iter().position(|p| p.contains(needle)).unwrap();
+    assert!(
+        pos("date_alias.md") < pos("date_old.md")
+            && pos("date_old.md") < pos("date_mid.md")
+            && pos("date_mid.md") < pos("date_new.md"),
+        "--order asc must rank oldest LMD first:\n{o}"
+    );
+}
+
+#[test]
+fn recall_sort_ocd_uses_creation_date_and_aliases() {
+    // --sort ocd orders by Original-Creation-Date, and the created/updated aliases populate ocd/lmd
+    // when ocd/lmd are absent — so the alias note's ocd 2023-01-01 makes it the oldest creation.
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--sort",
+        "ocd",
+        "--order",
+        "asc",
+    ]);
+    let order = note_order(&o);
+    let pos = |needle: &str| order.iter().position(|p| p.contains(needle)).unwrap();
+    assert!(
+        pos("date_alias.md") < pos("date_old.md")
+            && pos("date_old.md") < pos("date_mid.md")
+            && pos("date_mid.md") < pos("date_new.md"),
+        "ocd asc with the `created:` alias must rank the 2023 note first:\n{o}"
+    );
+}
+
+#[test]
+fn recall_since_filters_by_lmd() {
+    // --since keeps only notes whose LMD (the default date field) is on/after the bound. With
+    // 2025-01-01 the 2024 and 2023 notes drop; the 2025 and 2026 notes remain.
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--since",
+        "2025-01-01",
+    ]);
+    assert!(
+        o.contains("date_mid.md") && o.contains("date_new.md"),
+        "notes with LMD ≥ since must remain:\n{o}"
+    );
+    assert!(
+        !o.contains("date_old.md") && !o.contains("date_alias.md"),
+        "notes with LMD < since must be filtered out:\n{o}"
+    );
+}
+
+#[test]
+fn recall_until_filters_by_lmd() {
+    // --until keeps only notes whose LMD is on/before the bound (inclusive). 2024-12-31 keeps the
+    // 2024 and 2023 notes, drops 2025/2026.
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--until",
+        "2024-12-31",
+    ]);
+    assert!(
+        o.contains("date_old.md") && o.contains("date_alias.md"),
+        "notes with LMD ≤ until must remain:\n{o}"
+    );
+    assert!(
+        !o.contains("date_mid.md") && !o.contains("date_new.md"),
+        "notes with LMD > until must be filtered out:\n{o}"
+    );
+}
+
+#[test]
+fn recall_since_until_window_filters_by_lmd() {
+    // Both bounds compose into an inclusive [since, until] window on LMD: only the 2025 note's
+    // 2025-06-01 falls inside [2025-01-01, 2025-12-31].
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--since",
+        "2025-01-01",
+        "--until",
+        "2025-12-31",
+    ]);
+    assert!(
+        o.contains("date_mid.md"),
+        "the in-window note must remain:\n{o}"
+    );
+    assert!(
+        !o.contains("date_new.md") && !o.contains("date_old.md") && !o.contains("date_alias.md"),
+        "out-of-window notes must be filtered:\n{o}"
+    );
+}
+
+#[test]
+fn recall_date_field_ocd_switches_the_filtered_field() {
+    // --date-field ocd makes --since/--until compare against OCD instead of LMD. With ocd cut
+    // 2026-01-01, only date_new.md (ocd 2026-01-01) survives — even though several have a 2026 LMD.
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--since",
+        "2026-01-01",
+        "--date-field",
+        "ocd",
+    ]);
+    assert!(o.contains("date_new.md"), "ocd ≥ since must remain:\n{o}");
+    assert!(
+        !o.contains("date_mid.md") && !o.contains("date_old.md") && !o.contains("date_alias.md"),
+        "earlier-ocd notes must drop under --date-field ocd:\n{o}"
+    );
+}
+
+#[test]
+fn recall_missing_date_excluded_from_range_filter() {
+    // A note with NO ocd in frontmatter has no OCD (fs btime is unreliable, so OCD stays None). A
+    // date-range filter on the missing field EXCLUDES it (documented choice: no-date ⟹ out of range).
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--since",
+        "2020-01-01",
+        "--date-field",
+        "ocd",
+    ]);
+    // date_nodate.md has no ocd ⟹ excluded even by a very permissive since bound.
+    assert!(
+        !o.contains("date_nodate.md"),
+        "a note missing OCD must be excluded from an OCD range filter:\n{o}"
+    );
+    // …while the dated notes still pass the permissive bound.
+    assert!(
+        o.contains("date_new.md"),
+        "dated notes still pass a permissive since:\n{o}"
+    );
+}
+
+#[test]
+fn recall_missing_date_sorts_last() {
+    // Under --sort ocd, a note with no OCD sorts AFTER every dated note (missing date ⟹ last),
+    // regardless of order direction. date_nodate.md must be the final entry.
+    let o = run(&[
+        "recall",
+        "ledger element",
+        DATES_DIR,
+        "--sort",
+        "ocd",
+        "--order",
+        "desc",
+    ]);
+    let order = note_order(&o);
+    assert!(
+        order.last().is_some_and(|p| p.contains("date_nodate.md")),
+        "the OCD-less note must sort last:\n{o}"
+    );
+    assert!(
+        order.len() >= 5,
+        "all dated notes plus the undated one should rank:\n{o}"
+    );
+}
+
+#[test]
+fn recall_default_sort_is_score_unchanged() {
+    // Omitting --sort keeps the existing precision-first relevance order (score), NOT a date sort:
+    // the most on-topic note ranks first by surface hits, exactly as before this slice. "freshest"
+    // appears in ONLY date_new.md's description, so it is the sole surface match ⟹ ranks #1, even
+    // though by LMD it is the newest (i.e. the result is NOT date-ordered without --sort).
+    let o = run(&["recall", "freshest ledger", DATES_DIR]);
+    let order = note_order(&o);
+    assert!(
+        order.first().is_some_and(|p| p.contains("date_new.md")),
+        "default sort stays score-based (the uniquely-matching note ranks first):\n{o}"
+    );
+}
+
+#[test]
+fn recall_rejects_unknown_sort_key() {
+    // An unknown --sort value is a clean usage error (not a silent fallback), matching the crate's
+    // fail-loud convention for bad inputs.
+    run_fail(&["recall", "ledger element", DATES_DIR, "--sort", "bogus"]);
+}
