@@ -95,6 +95,40 @@ _TAGS_RE = re.compile(r"^tags:\s*(?P<tags>.+?)\s*$")
 _SUMMARY_RE = re.compile(r'^summary:\s*"?(?P<summary>.+?)"?\s*$')
 # `memgrep links` line: `<from>:LINE -> <slug>  [<to-path>]`
 _LINK_RE = re.compile(r"^(?P<from>\S+):\d+\s+->\s+\S+\s+\[(?P<to>[^\]]+)\]\s*$")
+# `memgrep links --broken` line: same shape but the target token is the literal
+# `[BROKEN]` marker (verified live: `./a.md:7 -> nonexistent  [BROKEN]`). We only
+# need the SOURCE note (which page carries the dangling `[[link]]`).
+_BROKEN_LINK_RE = re.compile(r"^(?P<from>\S+):\d+\s+->\s+(?P<slug>\S+)\s+\[BROKEN\]\s*$")
+# `memgrep links --orphans` line: a bare path, one per line (`./nodesc.md`).
+_ORPHAN_RE = re.compile(r"^(?P<path>\S+\.md)\s*$")
+
+# Page-shape regexes — applied to a note's RAW text (not memgrep's index output,
+# which is unreliable for frontmatter presence: a note with NO `description:`
+# still emits a `summary:` line built from the body, verified live). So the shape
+# pass reads each note file directly and is a cheap per-line regex scan.
+#
+# The canonical lessons section header (TRDD-c77dae09:188-189) — case-insensitive
+# on READ (older notes may vary case), `&` accepted as a historical spelling of
+# `and` so a pre-canonicalization note is not falsely flagged as missing it.
+_LESSONS_SECTION_RE = re.compile(
+    r"^\s*#{2,}\s+notes\s+(?:and|&)\s+lessons\s+learned\s*$",
+    re.IGNORECASE,
+)
+# Footnote REFERENCE in the body: `[^N]` (N = one or more digits). The leading
+# char-class excludes a `\[` escape so an escaped `\[^1]` is not counted.
+_FOOTNOTE_REF_RE = re.compile(r"(?<!\\)\[\^(?P<n>\d+)\]")
+# Footnote DEFINITION at line start: `[^N]:` — the only shape memgrep resolves.
+_FOOTNOTE_DEF_RE = re.compile(r"^\s*\[\^(?P<n>\d+)\]:")
+# Frontmatter key presence (within the leading `---`…`---` block). `name:` and
+# `description:` are the two recall-load-bearing keys; `ocd:`/`lmd:` (aliases
+# `created:`/`updated:`) are the per-element dates (advisory — older notes
+# predate the convention).
+_FM_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][\w-]*)\s*:")
+# Bound the per-note shape read so a pathological note can't blow up the
+# heartbeat. Notes are small; 4000 lines is already absurd for a memory page.
+_MAX_NOTE_LINES = 4000
+# Cap the page-shape findings listed in the proposal (one line per issue).
+_MAX_SHAPE_FINDINGS = 60
 
 # A word-ish token: 3+ alphanumerics (drops 1-2 char noise like `a`, `to`, `of`).
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
@@ -123,6 +157,34 @@ class NoteMeta:
 
     tags: frozenset[str] = field(default_factory=frozenset)
     tokens: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass
+class ScopeReport:
+    """Everything the librarian surfaces for ONE memory scope root.
+
+    Carries the per-scope candidate/integrity findings so the proposal renderer,
+    the dedupe fingerprint, and the heartbeat counter all read from one object
+    rather than a brittle positional tuple. Aggregation/conflict are the original
+    surfacing duties; `shape` (rank 3) and `broken`/`orphans`/`index_sync`
+    (rank 4) are the structural-integrity additions. A scope contributes to the
+    proposal iff ANY of these is non-empty.
+    """
+
+    scope: str
+    clusters: dict[str, list[str]] = field(default_factory=dict)
+    conflicts: list[tuple[str, str, str]] = field(default_factory=list)
+    shape: list[str] = field(default_factory=list)
+    broken: list[str] = field(default_factory=list)
+    orphans: list[str] = field(default_factory=list)
+    index_sync: list[str] = field(default_factory=list)
+
+    def has_findings(self) -> bool:
+        """True iff this scope surfaces ANYTHING (candidate or integrity issue)."""
+        return bool(
+            self.clusters or self.conflicts or self.shape
+            or self.broken or self.orphans or self.index_sync
+        )
 
 
 def _significant_tokens(*texts: str) -> frozenset[str]:
@@ -519,17 +581,130 @@ def _conflict_pairs(
     return out
 
 
-def _analyze_scope(
-    binary: str, memdir: Path
-) -> tuple[dict[str, list[str]], list[tuple[str, str, str]]]:
-    """Run the per-scope candidate analysis on ONE memory root.
+def _split_frontmatter(text: str) -> tuple[list[str], list[str]]:
+    """Split a note into (frontmatter-lines, body-lines).
 
-    Returns `(clusters, conflicts)` for this root alone — NEVER mixing notes
-    across scopes (the per-scope invariant of TRDD-c77dae09: a LOCAL note and a
-    PROJECT note are different layers and must not be clustered together). A scope
-    with no notes, an unparseable index, or <2 notes yields `({}, [])` so the
-    caller simply omits it from the proposal.
+    The frontmatter is the leading `---`…`---` block (YAML). A note with no
+    leading `---` has an empty frontmatter and the whole text is body. Returns
+    line lists (no trailing newlines) so the callers can regex per line cheaply.
+    Bounded by `_MAX_NOTE_LINES` so a pathological file can't blow up the scan.
     """
+    lines = text.splitlines()[:_MAX_NOTE_LINES]
+    if not lines or lines[0].strip() != "---":
+        return [], lines
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return lines[1:i], lines[i + 1 :]
+    # Opened but never closed → treat the whole thing as frontmatter (malformed;
+    # the missing-key check below will still flag it if name/description absent).
+    return lines[1:], []
+
+
+def _scan_page_shape(note: str, text: str) -> list[str]:
+    """Per-note structural-integrity checks → list of one-line issue strings.
+
+    Reads a note's RAW text (NOT memgrep's index output — that is unreliable for
+    frontmatter presence, verified live). Checks, per TRDD-c77dae09 + the audit
+    rank-3 proposal:
+      (a) missing `## Notes and lessons learned` section (the mandatory standing
+          landing zone for an incoming memory's lessons — uniform corpus shape);
+      (b) unresolved footnotes — a body `[^N]` with no `[^N]:` definition, and a
+          dangling `[^N]:` definition no body references (memgrep silently
+          ignores BOTH — verified live — so a botched correction/move leaves a
+          broken reference that never surfaces);
+      (c) frontmatter missing `description` or `name` (the recall-load-bearing
+          keys — a note with no `description` is unrecallable-by-symptom);
+      (d) missing `ocd`/`lmd` per-element dates (ADVISORY — older notes predate
+          the convention; flagged `(advisory)` so it is visibly lower-severity).
+    Returns [] for a perfectly-shaped note.
+    """
+    fm_lines, body_lines = _split_frontmatter(text)
+    issues: list[str] = []
+
+    # (c) frontmatter key presence. Accept the documented aliases so an older
+    # note using `created:`/`updated:` is not falsely flagged for ocd/lmd.
+    fm_keys: set[str] = set()
+    for ln in fm_lines:
+        m = _FM_KEY_RE.match(ln)
+        if m:
+            fm_keys.add(m.group("key").lower())
+    for required in ("name", "description"):
+        if required not in fm_keys:
+            issues.append(f"{note}: frontmatter missing `{required}`")
+
+    # (a) mandatory lessons section anywhere in the body.
+    has_section = any(_LESSONS_SECTION_RE.match(ln) for ln in body_lines)
+    if not has_section:
+        issues.append(f"{note}: missing `## Notes and lessons learned` section")
+
+    # (b) footnote integrity over the body (refs) vs the whole note (defs — a def
+    # only ever appears under the lessons section, which is in the body, but scan
+    # the whole text to be robust to layout). A def line ALSO contains the `[^N]`
+    # ref shape, so collect defs first and subtract them from the ref scan.
+    def_ns = {m.group("n") for ln in body_lines for m in [_FOOTNOTE_DEF_RE.match(ln)] if m}
+    ref_ns: set[str] = set()
+    for ln in body_lines:
+        if _FOOTNOTE_DEF_RE.match(ln):
+            continue  # the `[^N]:` on a def line is the definition, not a ref
+        for m in _FOOTNOTE_REF_RE.finditer(ln):
+            ref_ns.add(m.group("n"))
+    undefined = sorted(ref_ns - def_ns, key=int)
+    if undefined:
+        joined = ", ".join(f"[^{n}]" for n in undefined)
+        issues.append(f"{note}: footnote ref(s) with no definition: {joined}")
+    undefinedref = sorted(def_ns - ref_ns, key=int)
+    if undefinedref:
+        joined = ", ".join(f"[^{n}]" for n in undefinedref)
+        issues.append(f"{note}: footnote def(s) never referenced: {joined}")
+
+    # (d) per-element dates — advisory (older notes predate the convention).
+    if "ocd" not in fm_keys and "created" not in fm_keys:
+        issues.append(f"{note}: frontmatter missing `ocd` date (advisory)")
+    if "lmd" not in fm_keys and "updated" not in fm_keys:
+        issues.append(f"{note}: frontmatter missing `lmd` date (advisory)")
+
+    return issues
+
+
+def _collect_shape_findings(memdir: Path) -> list[str]:
+    """Run `_scan_page_shape` over every NOTE in one scope root → issue lines.
+
+    Notes only (the non-note files — MEMORY.md, the proposal, the generated
+    index — are excluded by `_is_note_basename`, and `user-mem/` is never
+    entered because we iterate the top level only, matching the rest of the
+    librarian). Sorted by note name for a stable proposal/fingerprint. Capped at
+    `_MAX_SHAPE_FINDINGS`. A note we cannot read is skipped (never crashes).
+    """
+    findings: list[str] = []
+    try:
+        entries = sorted(p for p in memdir.iterdir() if p.is_file() and _is_note_basename(p.name))
+    except OSError:
+        return []
+    for path in entries:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        findings.extend(_scan_page_shape(path.name, text))
+        if len(findings) >= _MAX_SHAPE_FINDINGS:
+            return findings[:_MAX_SHAPE_FINDINGS]
+    return findings
+
+
+def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
+    """Run the per-scope candidate + integrity analysis on ONE memory root.
+
+    Returns a `ScopeReport` for this root alone — NEVER mixing notes across
+    scopes (the per-scope invariant of TRDD-c77dae09: a LOCAL note and a PROJECT
+    note are different layers and must not be clustered together). A scope with no
+    notes yields an empty report so the caller omits it from the proposal.
+
+    Aggregation/conflict candidates need ≥2 notes; the page-SHAPE pass (rank 3)
+    runs on EVERY note independently — a single malformed note must surface even
+    when the scope has only one note (so the early `<2 notes` / `no clusters`
+    returns no longer short-circuit the shape pass).
+    """
+    report = ScopeReport(scope="")  # scope label is set by the caller
     has_note = False
     try:
         for entry in memdir.iterdir():
@@ -537,63 +712,99 @@ def _analyze_scope(
                 has_note = True
                 break
     except OSError:
-        return {}, []
+        return report
     if not has_note:
-        return {}, []
+        return report
+
+    # Page-shape integrity runs per-note, independent of clustering (rank 3).
+    report.shape = _collect_shape_findings(memdir)
 
     index_out = _run_memgrep(binary, ["index", "--markdown"], memdir)
-    if not index_out:
-        return {}, []
-    notes = _parse_index(index_out)
-    if len(notes) < 2:
-        return {}, []
+    notes = _parse_index(index_out) if index_out else {}
 
-    clusters = _build_clusters(notes)
-    if not clusters:
-        return {}, []
+    if len(notes) >= 2:
+        clusters = _build_clusters(notes)
+        if clusters:
+            links_out = _run_memgrep(binary, ["links"], memdir)
+            linked = _parse_links(links_out) if links_out else set()
+            report.clusters = clusters
+            report.conflicts = _conflict_pairs(notes, linked)
 
-    links_out = _run_memgrep(binary, ["links"], memdir)
-    linked = _parse_links(links_out) if links_out else set()
-    conflicts = _conflict_pairs(notes, linked)
-    return clusters, conflicts
+    return report
 
 
-def _render_scope_section(
-    scope: str,
-    clusters: dict[str, list[str]],
-    conflicts: list[tuple[str, str, str]],
-) -> list[str]:
-    """Render ONE scope's aggregation + conflict candidates as markdown lines.
+def _render_scope_section(report: ScopeReport) -> list[str]:
+    """Render ONE scope's candidates + integrity findings as markdown lines.
 
     Each scope gets its own section so a reader (and the agent applying the
     reorg) never confuses a LOCAL candidate with a PROJECT/USER one — the
     per-scope separation is visible in the proposal, not just in the analysis.
+    Sections: Aggregation candidates, Conflict candidates, Page shape (rank 3),
+    Broken links / Orphan pages / MEMORY.md sync (rank 4).
     """
     lines: list[str] = [
-        f"## {scope} scope",
+        f"## {report.scope} scope",
         "",
         "### Aggregation candidates",
         "",
     ]
-    if clusters:
-        for tag in sorted(clusters)[:_MAX_CLUSTERS_LISTED]:
-            members = clusters[tag]
+    if report.clusters:
+        for tag in sorted(report.clusters)[:_MAX_CLUSTERS_LISTED]:
+            members = report.clusters[tag]
             lines.append(f"- topic `{tag}` ({len(members)} notes): {', '.join(members)}")
     else:
         lines.append("- (none)")
     lines += ["", "### Conflict candidates", ""]
-    if conflicts:
-        for a, b, tag in conflicts[:_MAX_PAIRS_LISTED]:
+    if report.conflicts:
+        for a, b, tag in report.conflicts[:_MAX_PAIRS_LISTED]:
             lines.append(f"- topic `{tag}`: {a} vs {b}")
     else:
         lines.append("- (none)")
+
+    # Page shape — structural integrity per note (rank 3). Listed only when there
+    # is something to fix; a clean corpus shows "(none)" so the section's meaning
+    # is unambiguous (checked, nothing wrong) vs absent (not checked).
+    lines += ["", "### Page shape", ""]
+    if report.shape:
+        for issue in report.shape[:_MAX_SHAPE_FINDINGS]:
+            lines.append(f"- {issue}")
+    else:
+        lines.append("- (none)")
+
+    lines += _render_link_section(report)
     lines.append("")
     return lines
 
 
-def _render_proposal(
-    per_scope: list[tuple[str, dict[str, list[str]], list[tuple[str, str, str]]]],
-) -> str:
+def _render_link_section(report: ScopeReport) -> list[str]:
+    """Render the rank-4 link/orphan/MEMORY.md-sync findings for one scope.
+
+    Kept as its own helper so piece 2 owns this block; on the piece-1 commit the
+    three lists are always empty (populated by `_analyze_scope` only once rank 4
+    lands), so every subsection renders `- (none)`.
+    """
+    lines: list[str] = ["", "### Broken links", ""]
+    if report.broken:
+        for issue in report.broken[:_MAX_SHAPE_FINDINGS]:
+            lines.append(f"- {issue}")
+    else:
+        lines.append("- (none)")
+    lines += ["", "### Orphan pages", ""]
+    if report.orphans:
+        for issue in report.orphans[:_MAX_SHAPE_FINDINGS]:
+            lines.append(f"- {issue}")
+    else:
+        lines.append("- (none)")
+    lines += ["", "### MEMORY.md sync", ""]
+    if report.index_sync:
+        for issue in report.index_sync[:_MAX_SHAPE_FINDINGS]:
+            lines.append(f"- {issue}")
+    else:
+        lines.append("- (none)")
+    return lines
+
+
+def _render_proposal(per_scope: list[ScopeReport]) -> str:
     """Render the human/agent-facing proposal markdown across ALL scopes.
 
     The proposal is git-trackable BY THE USER, but the detector only WRITES it —
@@ -614,31 +825,37 @@ def _render_proposal(
         "and a PROJECT/USER note are different layers)._",
         "",
     ]
-    for scope, clusters, conflicts in per_scope:
-        lines += _render_scope_section(scope, clusters, conflicts)
+    for report in per_scope:
+        lines += _render_scope_section(report)
     return "\n".join(lines)
 
 
-def _candidate_fingerprint(
-    per_scope: list[tuple[str, dict[str, list[str]], list[tuple[str, str, str]]]],
-) -> str:
-    """A stable hash of the per-scope candidate SET so dedupe is silent on an
+def _candidate_fingerprint(per_scope: list[ScopeReport]) -> str:
+    """A stable hash of the per-scope finding SET so dedupe is silent on an
     unchanged corpus.
 
-    Sorted so directory/parse order never changes the key. A new cluster or a new
-    conflict pair in ANY scope changes the fingerprint → a fresh heartbeat
-    finding. The scope label is part of the key so the same cluster appearing in
-    a different scope is a distinct candidate.
+    Sorted so directory/parse order never changes the key. A new cluster, a new
+    conflict pair, a new page-shape issue, a new broken-link/orphan, or a new
+    MEMORY.md-sync mismatch in ANY scope changes the fingerprint → a fresh
+    heartbeat finding. The scope label is part of the key so the same finding
+    appearing in a different scope is a distinct candidate.
     """
     parts: list[str] = []
-    for scope, clusters, conflicts in per_scope:
+    for r in per_scope:
         cluster_sig = ";".join(
-            f"{tag}:{'|'.join(clusters[tag])}" for tag in sorted(clusters)
+            f"{tag}:{'|'.join(r.clusters[tag])}" for tag in sorted(r.clusters)
         )
         conflict_sig = ";".join(
-            sorted("|".join(sorted((a, b))) + f"@{tag}" for a, b, tag in conflicts)
+            sorted("|".join(sorted((a, b))) + f"@{tag}" for a, b, tag in r.conflicts)
         )
-        parts.append(f"{scope}=={cluster_sig}##{conflict_sig}")
+        shape_sig = "|".join(sorted(r.shape))
+        broken_sig = "|".join(sorted(r.broken))
+        orphan_sig = "|".join(sorted(r.orphans))
+        sync_sig = "|".join(sorted(r.index_sync))
+        parts.append(
+            f"{r.scope}=={cluster_sig}##{conflict_sig}"
+            f"##S:{shape_sig}##B:{broken_sig}##O:{orphan_sig}##M:{sync_sig}"
+        )
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
@@ -660,33 +877,46 @@ def main() -> int:
         return 0
 
     # Analyze EACH scope SEPARATELY — never cluster/conflict across scopes
-    # (TRDD-c77dae09). A scope with no candidates is dropped from the proposal.
-    per_scope: list[tuple[str, dict[str, list[str]], list[tuple[str, str, str]]]] = []
+    # (TRDD-c77dae09). A scope with no findings is dropped from the proposal.
+    per_scope: list[ScopeReport] = []
     total_agg = 0
     total_conf = 0
+    total_shape = 0
+    total_link = 0  # broken-links + orphans + MEMORY.md-sync (rank 4)
     for scope, memdir in scopes:
-        clusters, conflicts = _analyze_scope(binary, memdir)
-        if clusters or conflicts:
-            per_scope.append((scope, clusters, conflicts))
-            total_agg += len(clusters)
-            total_conf += len(conflicts)
+        report = _analyze_scope(binary, memdir)
+        report.scope = scope
+        if report.has_findings():
+            per_scope.append(report)
+            total_agg += len(report.clusters)
+            total_conf += len(report.conflicts)
+            total_shape += len(report.shape)
+            total_link += len(report.broken) + len(report.orphans) + len(report.index_sync)
 
     if not per_scope:
-        # No two notes share a topic in any scope → nothing to surface.
+        # Nothing to surface in any scope → silent no-op.
         state.rotate_log_if_big("memory-librarian")
         return 0
 
-    # Dedupe BEFORE writing the proposal: an unchanged candidate set must be a
+    # Dedupe BEFORE writing the proposal: an unchanged finding set must be a
     # complete no-op (no heartbeat line AND no proposal churn), so the detector
-    # is idempotent on a stable corpus. The seen-file keys on the candidate
+    # is idempotent on a stable corpus. The seen-file keys on the finding
     # fingerprint; emit_once returns the line only on a NEW set.
     seen = state.state_dir() / "memory-librarian-seen.txt"
     fingerprint = _candidate_fingerprint(per_scope)
     n_scopes = len(per_scope)
     scope_note = "" if n_scopes == 1 else f" across {n_scopes} scopes"
+    # The heartbeat line counts every surfaced finding class; the zero-count
+    # classes are omitted so the line stays short on a corpus with only one issue
+    # type. Aggregation + conflict are always shown (the original two duties).
+    extra = ""
+    if total_shape:
+        extra += f" + {total_shape} page-shape"
+    if total_link:
+        extra += f" + {total_link} link/sync"
     msg = (
-        f"[memory-librarian] {total_agg} aggregation + {total_conf} conflict "
-        f"candidate(s){scope_note} — see {PROPOSAL_NAME}"
+        f"[memory-librarian] {total_agg} aggregation + {total_conf} conflict"
+        f"{extra} finding(s){scope_note} — see {PROPOSAL_NAME}"
     )
     line = dedupe.emit_once(seen, f"reorg-{fingerprint}", msg)
     if line is None:

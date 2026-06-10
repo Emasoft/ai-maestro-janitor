@@ -44,11 +44,20 @@ def _slug(project_dir: str) -> str:
 
 
 def _note(name: str, description: str, tags: list[str], body: str = "body.") -> str:
-    """Render a memory note in the corpus's frontmatter shape."""
+    """Render a memory note in the corpus's frontmatter shape — SHAPE-COMPLIANT.
+
+    Includes the mandatory `## Notes and lessons learned` section and the
+    `ocd:`/`lmd:` per-element dates, so the page-shape validator (rank 3) finds
+    NOTHING wrong with it. Candidate-focused tests use this so their
+    "no candidate" silence assertions are not perturbed by shape findings; the
+    page-shape tests build deliberately-malformed notes inline.
+    """
     taglist = "[" + ", ".join(tags) + "]" if tags else "[]"
     return (
         f"---\nname: {name}\ndescription: \"{description}\"\ntags: {taglist}\n"
-        f"metadata:\n  node_type: memory\n---\n{body}\n"
+        f"ocd: 2026-06-09\nlmd: 2026-06-09\n"
+        f"metadata:\n  node_type: memory\n---\n{body}\n\n"
+        f"## Notes and lessons learned\n"
     )
 
 
@@ -260,6 +269,221 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             self.assertIn("oauth_rotator_alpha.md", bullets[0])
             self.assertIn("oauth_rotator_beta.md", bullets[0])
             self.assertIn("oauth_rotator_gamma.md", bullets[0])
+
+
+def _raw_note(
+    *,
+    name: str | None = "n",
+    description: str | None = "a topic description",
+    body: str = "Some facts.",
+    lessons_section: bool = True,
+    ocd: bool = True,
+    lmd: bool = True,
+) -> str:
+    """Build a note with FINE-GRAINED control over which shape elements exist.
+
+    Lets a page-shape test omit exactly one element (the lessons section, the
+    `name`/`description` key, the `ocd`/`lmd` date) and assert the validator
+    flags precisely that. By default every element is present (shape-clean).
+    """
+    fm = ["---"]
+    if name is not None:
+        fm.append(f"name: {name}")
+    if description is not None:
+        fm.append(f'description: "{description}"')
+    if ocd:
+        fm.append("ocd: 2026-06-09")
+    if lmd:
+        fm.append("lmd: 2026-06-09")
+    fm += ["metadata:", "  node_type: memory", "---"]
+    text = "\n".join(fm) + "\n" + body + "\n"
+    if lessons_section:
+        text += "\n## Notes and lessons learned\n"
+    return text
+
+
+@unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
+class TestMemoryLibrarianPageShape(unittest.TestCase):
+    """Per-note structural-integrity validator (rank 3, TRDD-c77dae09).
+
+    The detector no-ops entirely without memgrep, so these run only with the
+    binary present — but the shape checks themselves read the note files
+    directly (memgrep's index output is unreliable for frontmatter presence).
+    """
+
+    def _shape_section(self, memdir: Path) -> str:
+        """The proposal's `### Page shape` block (the part after that header,
+        up to the next `###` header). Empty string if no proposal was written."""
+        prop = memdir / PROPOSAL_NAME
+        if not prop.exists():
+            return ""
+        text = prop.read_text()
+        if "### Page shape" not in text:
+            return ""
+        after = text.split("### Page shape", 1)[1]
+        return after.split("\n### ", 1)[0]
+
+    def test_missing_lessons_section_flagged(self):
+        """A note with no `## Notes and lessons learned` section is surfaced."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "no_section.md").write_text(
+                _raw_note(name="no_section", lessons_section=False))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            self.assertIn("page-shape", out)
+            shape = self._shape_section(memdir)
+            self.assertIn("no_section.md", shape)
+            self.assertIn("Notes and lessons learned", shape)
+
+    def test_lessons_section_case_insensitive_and_ampersand_accepted(self):
+        """`## Notes & Lessons Learned` (historical spelling, any case) satisfies the section check."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            body = "Facts here."
+            text = (
+                '---\nname: histfmt\ndescription: "topic"\nocd: 2026-06-09\n'
+                "lmd: 2026-06-09\nmetadata:\n  node_type: memory\n---\n"
+                f"{body}\n\n## NOTES & lessons LEARNED\n"
+            )
+            (memdir / "histfmt.md").write_text(text)
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            # The note is otherwise clean, so it must NOT be flagged for a missing
+            # section despite the `&` + mixed case.
+            self.assertNotIn("histfmt.md: missing", shape)
+
+    def test_undefined_footnote_ref_flagged(self):
+        """A body `[^N]` reference with no `[^N]:` definition is surfaced (memgrep ignores it silently)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "danglingref.md").write_text(
+                _raw_note(name="danglingref",
+                          body="A fact with a broken footnote[^7]. No def below."))
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("danglingref.md", shape)
+            self.assertIn("[^7]", shape)
+            self.assertIn("no definition", shape)
+
+    def test_dangling_footnote_def_flagged(self):
+        """A `[^N]:` definition that no body `[^N]` references is surfaced."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            text = (
+                '---\nname: orphandef\ndescription: "topic"\nocd: 2026-06-09\n'
+                "lmd: 2026-06-09\nmetadata:\n  node_type: memory\n---\n"
+                "Facts with no reference to the lesson.\n\n"
+                "## Notes and lessons learned\n[^9]: a lesson nobody points at.\n"
+            )
+            (memdir / "orphandef.md").write_text(text)
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("orphandef.md", shape)
+            self.assertIn("[^9]", shape)
+            self.assertIn("never referenced", shape)
+
+    def test_resolved_footnote_not_flagged(self):
+        """A `[^N]` ref WITH a matching `[^N]:` def is clean (no footnote finding)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            text = (
+                '---\nname: resolved\ndescription: "topic"\nocd: 2026-06-09\n'
+                "lmd: 2026-06-09\nmetadata:\n  node_type: memory\n---\n"
+                "A corrected fact[^3].\n\n"
+                "## Notes and lessons learned\n[^3]: the WHY of the correction.\n"
+            )
+            (memdir / "resolved.md").write_text(text)
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertNotIn("resolved.md", shape)
+
+    def test_missing_description_flagged(self):
+        """A note with no `description:` frontmatter key is surfaced (unrecallable)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "nodesc.md").write_text(
+                _raw_note(name="nodesc", description=None))
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("nodesc.md", shape)
+            self.assertIn("description", shape)
+
+    def test_missing_name_flagged(self):
+        """A note with no `name:` frontmatter key is surfaced."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "noname.md").write_text(_raw_note(name=None))
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("noname.md", shape)
+            self.assertIn("name", shape)
+
+    def test_missing_ocd_lmd_is_advisory(self):
+        """Missing `ocd`/`lmd` dates surface as ADVISORY (older notes predate the convention)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "nodates.md").write_text(
+                _raw_note(name="nodates", ocd=False, lmd=False))
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("nodates.md", shape)
+            self.assertIn("ocd", shape)
+            self.assertIn("advisory", shape)
+
+    def test_created_updated_aliases_satisfy_ocd_lmd(self):
+        """`created:`/`updated:` are accepted aliases — no advisory ocd/lmd finding."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            text = (
+                '---\nname: aliased\ndescription: "topic"\ncreated: 2026-06-09\n'
+                "updated: 2026-06-09\nmetadata:\n  node_type: memory\n---\n"
+                "Facts.\n\n## Notes and lessons learned\n"
+            )
+            (memdir / "aliased.md").write_text(text)
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertNotIn("aliased.md", shape)
+
+    def test_clean_corpus_has_no_page_shape_findings(self):
+        """A fully shape-compliant corpus surfaces NO page-shape findings (silence test)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # Two clean notes, DISTINCT topics with no shared significant token
+            # (names + descriptions share nothing) → no clustering either, so the
+            # whole detector stays silent and writes no proposal.
+            (memdir / "alpha.md").write_text(
+                _raw_note(name="alpha", description="alpha widget pipeline"))
+            (memdir / "bravo.md").write_text(
+                _raw_note(name="bravo", description="bravo keychain rotator"))
+            out = _run(home, project)
+            self.assertEqual(out.strip(), "")
+            self.assertFalse((memdir / PROPOSAL_NAME).exists())
+
+    def test_single_malformed_note_surfaces_even_without_a_cluster(self):
+        """One malformed note (no cluster possible) still surfaces via the shape pass.
+
+        Proves the shape pass is independent of the ≥2-note clustering gate —
+        a lone broken page is not invisible just because it can't cluster.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "lonely.md").write_text(
+                _raw_note(name="lonely", lessons_section=False))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            self.assertIn("page-shape", out)
 
 
 @unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
