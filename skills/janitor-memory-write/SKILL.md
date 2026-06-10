@@ -20,11 +20,22 @@ matters to the current conversation.
 
 ## Instructions
 
-1. Resolve the memory dir (same as recall):
+1. **Route the SCOPE first** (the wiki is layered LOCAL / PROJECT / USER like
+   Claude Code's own memory). Decision tree:
+   - contains a local path / username / hostname / secret / machine-specific
+     detail → **LOCAL** (machine-private, never pushed);
+   - project knowledge ANY dev working on the repo needs → **PROJECT**
+     (git-tracked + pushed; sensitive/local data FORBIDDEN — the janitor's
+     `memory-scope-leak` detector polices it);
+   - about the user across ALL projects → **USER** (global);
+   - **UNSURE → LOCAL** (promotion to PROJECT is a deliberate later act).
 
    ```bash
-   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
-   [ -d "$MEMDIR" ] || MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory"
+   case "$SCOPE" in
+     local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
+     project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory" ;;
+     user)    MEMDIR="$HOME/.claude/memory" ;;
+   esac
    mkdir -p "$MEMDIR"
    ```
 

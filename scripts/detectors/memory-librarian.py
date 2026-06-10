@@ -155,10 +155,69 @@ def _project_slug(project_dir: str) -> str:
 
 
 def _resolve_memory_dir() -> Path:
-    """Return the per-project agent-memory dir (parent of user-mem). Not created."""
+    """Return the per-project LOCAL agent-memory dir (parent of user-mem). Not created.
+
+    This is the LOCAL scope of the three-scope wiki (TRDD-c77dae09): per-project,
+    per-machine, never pushed. It is also where the proposal file is written
+    (the always-present primary root).
+    """
     proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip()
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     return home / ".claude" / "projects" / _project_slug(proj) / "memory"
+
+
+def _resolve_project_scope_dir() -> Path | None:
+    """The PROJECT scope memory root: `<git-root>/memory/`, or None when the cwd
+    is not in a git repo. Resolved via `git rev-parse --show-toplevel` so a
+    worktree / sub-directory cwd still finds the repo root (TRDD-c77dae09)."""
+    proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip() or None
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=proj, capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    top = proc.stdout.strip()
+    return (Path(top) / "memory") if top else None
+
+
+def _resolve_user_scope_dir() -> Path:
+    """The USER scope (global) memory root: `~/.claude/memory/`. Not created."""
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+    return home / ".claude" / "memory"
+
+
+def _resolve_scope_dirs() -> list[tuple[str, Path]]:
+    """The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT →
+    USER (TRDD-c77dae09). The librarian runs SEPARATELY per scope — it NEVER
+    clusters or surfaces a conflict ACROSS scopes (a local note and a project
+    note are intentionally different layers; cross-scope placement is an
+    agent/user decision, not the librarian's). LOCAL is always first so the
+    proposal lands in it. PROJECT/USER are de-duplicated against earlier roots so
+    a path that resolves twice (e.g. overlapping roots) is analyzed once.
+    """
+    out: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+
+    def _add(label: str, d: Path | None) -> None:
+        if d is None:
+            return
+        try:
+            resolved = d.resolve()
+        except OSError:
+            resolved = d
+        if resolved in seen or not d.is_dir():
+            return
+        seen.add(resolved)
+        out.append((label, d))
+
+    _add("LOCAL", _resolve_memory_dir())
+    _add("PROJECT", _resolve_project_scope_dir())
+    _add("USER", _resolve_user_scope_dir())
+    return out
 
 
 def _find_memgrep() -> str | None:
@@ -460,16 +519,88 @@ def _conflict_pairs(
     return out
 
 
-def _render_proposal(
+def _analyze_scope(
+    binary: str, memdir: Path
+) -> tuple[dict[str, list[str]], list[tuple[str, str, str]]]:
+    """Run the per-scope candidate analysis on ONE memory root.
+
+    Returns `(clusters, conflicts)` for this root alone — NEVER mixing notes
+    across scopes (the per-scope invariant of TRDD-c77dae09: a LOCAL note and a
+    PROJECT note are different layers and must not be clustered together). A scope
+    with no notes, an unparseable index, or <2 notes yields `({}, [])` so the
+    caller simply omits it from the proposal.
+    """
+    has_note = False
+    try:
+        for entry in memdir.iterdir():
+            if entry.is_file() and _is_note_basename(entry.name):
+                has_note = True
+                break
+    except OSError:
+        return {}, []
+    if not has_note:
+        return {}, []
+
+    index_out = _run_memgrep(binary, ["index", "--markdown"], memdir)
+    if not index_out:
+        return {}, []
+    notes = _parse_index(index_out)
+    if len(notes) < 2:
+        return {}, []
+
+    clusters = _build_clusters(notes)
+    if not clusters:
+        return {}, []
+
+    links_out = _run_memgrep(binary, ["links"], memdir)
+    linked = _parse_links(links_out) if links_out else set()
+    conflicts = _conflict_pairs(notes, linked)
+    return clusters, conflicts
+
+
+def _render_scope_section(
+    scope: str,
     clusters: dict[str, list[str]],
     conflicts: list[tuple[str, str, str]],
+) -> list[str]:
+    """Render ONE scope's aggregation + conflict candidates as markdown lines.
+
+    Each scope gets its own section so a reader (and the agent applying the
+    reorg) never confuses a LOCAL candidate with a PROJECT/USER one — the
+    per-scope separation is visible in the proposal, not just in the analysis.
+    """
+    lines: list[str] = [
+        f"## {scope} scope",
+        "",
+        "### Aggregation candidates",
+        "",
+    ]
+    if clusters:
+        for tag in sorted(clusters)[:_MAX_CLUSTERS_LISTED]:
+            members = clusters[tag]
+            lines.append(f"- topic `{tag}` ({len(members)} notes): {', '.join(members)}")
+    else:
+        lines.append("- (none)")
+    lines += ["", "### Conflict candidates", ""]
+    if conflicts:
+        for a, b, tag in conflicts[:_MAX_PAIRS_LISTED]:
+            lines.append(f"- topic `{tag}`: {a} vs {b}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+    return lines
+
+
+def _render_proposal(
+    per_scope: list[tuple[str, dict[str, list[str]], list[tuple[str, str, str]]]],
 ) -> str:
-    """Render the human/agent-facing proposal markdown.
+    """Render the human/agent-facing proposal markdown across ALL scopes.
 
     The proposal is git-trackable BY THE USER, but the detector only WRITES it —
     it never touches a note. It is advisory input for an agent's conscious
     merge/correction pass (the actual reorg is the agent's job, not this
-    detector's).
+    detector's). Candidates are grouped PER SCOPE (LOCAL/PROJECT/USER) — the
+    librarian never proposes a cross-scope merge (TRDD-c77dae09).
     """
     lines: list[str] = [
         "# Memory reorganization — PROPOSED (surfaced by janitor memory-librarian)",
@@ -478,80 +609,49 @@ def _render_proposal(
         "(TRDD-c77dae09). These are CANDIDATES surfaced for an AGENT to review —",
         "the janitor never moves, merges, edits, or deletes a memory note. An",
         "agent makes the conscious consolidation/correction decision; do not treat",
-        "this file as having mutated anything._",
-        "",
-        "## Aggregation candidates",
-        "",
-        "_Clusters of notes sharing a topic (a common frontmatter tag, or",
-        "overlapping name/description topic words) that could be consolidated into",
-        "one canonical wiki page, with tangential mentions linking it rather than",
-        "duplicating its facts. The topic label is the shared tag(s) or token(s)._",
+        "this file as having mutated anything. Candidates are grouped PER SCOPE —",
+        "the librarian never proposes merging a note across scopes (a LOCAL note",
+        "and a PROJECT/USER note are different layers)._",
         "",
     ]
-    if clusters:
-        for tag in sorted(clusters)[:_MAX_CLUSTERS_LISTED]:
-            members = clusters[tag]
-            joined = ", ".join(members)
-            lines.append(f"- topic `{tag}` ({len(members)} notes): {joined}")
-    else:
-        lines.append("- (none)")
-    lines += [
-        "",
-        "## Conflict candidates",
-        "",
-        "_Same-topic note pairs that do NOT cross-link and therefore MIGHT",
-        "duplicate or contradict. These are CANDIDATES only — an agent must read",
-        "both notes to decide whether a real conflict exists and reconcile it",
-        "(non-destructively, per the correction protocol)._",
-        "",
-    ]
-    if conflicts:
-        for a, b, tag in conflicts[:_MAX_PAIRS_LISTED]:
-            lines.append(f"- topic `{tag}`: {a} vs {b}")
-    else:
-        lines.append("- (none)")
-    lines.append("")
+    for scope, clusters, conflicts in per_scope:
+        lines += _render_scope_section(scope, clusters, conflicts)
     return "\n".join(lines)
 
 
 def _candidate_fingerprint(
-    clusters: dict[str, list[str]],
-    conflicts: list[tuple[str, str, str]],
+    per_scope: list[tuple[str, dict[str, list[str]], list[tuple[str, str, str]]]],
 ) -> str:
-    """A stable hash of the candidate SET so dedupe is silent on an unchanged corpus.
+    """A stable hash of the per-scope candidate SET so dedupe is silent on an
+    unchanged corpus.
 
     Sorted so directory/parse order never changes the key. A new cluster or a new
-    conflict pair changes the fingerprint → a fresh heartbeat finding.
+    conflict pair in ANY scope changes the fingerprint → a fresh heartbeat
+    finding. The scope label is part of the key so the same cluster appearing in
+    a different scope is a distinct candidate.
     """
-    cluster_sig = ";".join(
-        f"{tag}:{'|'.join(clusters[tag])}" for tag in sorted(clusters)
-    )
-    conflict_sig = ";".join(
-        sorted("|".join(sorted((a, b))) + f"@{tag}" for a, b, tag in conflicts)
-    )
-    return hashlib.sha256(f"{cluster_sig}##{conflict_sig}".encode("utf-8")).hexdigest()[:12]
+    parts: list[str] = []
+    for scope, clusters, conflicts in per_scope:
+        cluster_sig = ";".join(
+            f"{tag}:{'|'.join(clusters[tag])}" for tag in sorted(clusters)
+        )
+        conflict_sig = ";".join(
+            sorted("|".join(sorted((a, b))) + f"@{tag}" for a, b, tag in conflicts)
+        )
+        parts.append(f"{scope}=={cluster_sig}##{conflict_sig}")
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
 def main() -> int:
     state.init_state()
 
-    memdir = _resolve_memory_dir()
-    # Graceful no-op: no per-project memory dir → nothing to organize.
-    if not memdir.is_dir():
+    # The three-scope roots that exist (LOCAL → PROJECT → USER, most-specific
+    # first). LOCAL is the always-present primary root where the proposal lands.
+    scopes = _resolve_scope_dirs()
+    # Graceful no-op: no memory dir in ANY scope → nothing to organize.
+    if not scopes:
         return 0
-
-    # Are there any agent NOTES at all (excluding the non-note files + user-mem)?
-    # Cheap pre-check so an empty/near-empty corpus skips the memgrep spawn.
-    has_note = False
-    try:
-        for entry in memdir.iterdir():
-            if entry.is_file() and _is_note_basename(entry.name):
-                has_note = True
-                break
-    except OSError:
-        return 0
-    if not has_note:
-        return 0
+    local_memdir = scopes[0][1]  # LOCAL is always first (or the only scope)
 
     binary = _find_memgrep()
     if binary is None:
@@ -559,34 +659,34 @@ def main() -> int:
         state.log_line("memory-librarian", "memgrep not resolved — skipping")
         return 0
 
-    index_out = _run_memgrep(binary, ["index", "--markdown"], memdir)
-    if not index_out:
-        return 0
-    notes = _parse_index(index_out)
-    if len(notes) < 2:
-        return 0
+    # Analyze EACH scope SEPARATELY — never cluster/conflict across scopes
+    # (TRDD-c77dae09). A scope with no candidates is dropped from the proposal.
+    per_scope: list[tuple[str, dict[str, list[str]], list[tuple[str, str, str]]]] = []
+    total_agg = 0
+    total_conf = 0
+    for scope, memdir in scopes:
+        clusters, conflicts = _analyze_scope(binary, memdir)
+        if clusters or conflicts:
+            per_scope.append((scope, clusters, conflicts))
+            total_agg += len(clusters)
+            total_conf += len(conflicts)
 
-    clusters = _build_clusters(notes)
-    if not clusters:
-        # No two notes share a topic → nothing to aggregate, nothing to flag.
+    if not per_scope:
+        # No two notes share a topic in any scope → nothing to surface.
+        state.rotate_log_if_big("memory-librarian")
         return 0
-
-    links_out = _run_memgrep(binary, ["links"], memdir)
-    linked = _parse_links(links_out) if links_out else set()
-
-    conflicts = _conflict_pairs(notes, linked)
 
     # Dedupe BEFORE writing the proposal: an unchanged candidate set must be a
     # complete no-op (no heartbeat line AND no proposal churn), so the detector
     # is idempotent on a stable corpus. The seen-file keys on the candidate
     # fingerprint; emit_once returns the line only on a NEW set.
     seen = state.state_dir() / "memory-librarian-seen.txt"
-    fingerprint = _candidate_fingerprint(clusters, conflicts)
-    n_agg = len(clusters)
-    m_conf = len(conflicts)
+    fingerprint = _candidate_fingerprint(per_scope)
+    n_scopes = len(per_scope)
+    scope_note = "" if n_scopes == 1 else f" across {n_scopes} scopes"
     msg = (
-        f"[memory-librarian] {n_agg} aggregation + {m_conf} conflict candidate(s) "
-        f"— see {PROPOSAL_NAME}"
+        f"[memory-librarian] {total_agg} aggregation + {total_conf} conflict "
+        f"candidate(s){scope_note} — see {PROPOSAL_NAME}"
     )
     line = dedupe.emit_once(seen, f"reorg-{fingerprint}", msg)
     if line is None:
@@ -595,11 +695,11 @@ def main() -> int:
         state.rotate_log_if_big("memory-librarian")
         return 0
 
-    # NEW candidate set: write/refresh the proposal (atomic; it is NOT a note —
-    # zero memory-note mutation) and emit the one-line finding.
-    proposal = _render_proposal(clusters, conflicts)
+    # NEW candidate set: write/refresh the proposal into the LOCAL root (atomic;
+    # it is NOT a note — zero memory-note mutation) and emit the one-line finding.
+    proposal = _render_proposal(per_scope)
     try:
-        state.atomic_write(memdir / PROPOSAL_NAME, proposal)
+        state.atomic_write(local_memdir / PROPOSAL_NAME, proposal)
     except OSError as exc:
         # If we cannot write the proposal, do NOT emit a line that points at a
         # file that isn't there — log and stay silent.

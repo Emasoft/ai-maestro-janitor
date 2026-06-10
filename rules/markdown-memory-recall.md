@@ -31,20 +31,46 @@ recurring alert, RECALL first — "have we hit this before?". Cheap, and it's th
 whole point of having a memory.
 
 ```bash
-# memdir is the harness per-project memory dir:
-MEMDIR="$HOME/.claude/projects/<project-slug>/memory"   # slug = project path, dashed
-SYMPTOM="the user's words / the error / the symptom"     # NOT the answer's jargon
+# Compose the THREE scope roots (see "Memory scopes" below); search them in ONE call:
+LOCAL_MEM="$HOME/.claude/projects/<project-slug>/memory"          # slug = project path, dashed
+PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/memory" # git-tracked, shared
+USER_MEM="$HOME/.claude/memory"                                   # global, cross-project
+ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
+SYMPTOM="the user's words / the error / the symptom"              # NOT the answer's jargon
 
 if command -v memgrep >/dev/null 2>&1; then
-  memgrep recall "$SYMPTOM" "$MEMDIR"      # notes ranked best-first as: path — description
+  # shellcheck disable=SC2086 # ROOTS is a deliberate word-split list of dirs
+  memgrep recall "$SYMPTOM" $ROOTS         # notes ranked best-first as: path — description
 else
-  grep -rliE "$SYMPTOM" "$MEMDIR"          # fallback: plain grep, degrade-not-break
+  # shellcheck disable=SC2086
+  grep -rliE "$SYMPTOM" $ROOTS             # fallback: plain grep, degrade-not-break
 fi
 ```
 
-Read the top 1-3 notes the recall returns; the answer is in their bodies. If
-recall returns nothing, the memory doesn't exist yet — consider writing one
-after you solve the problem (per the `# Memory` directive).
+Read the top 1-3 notes the recall returns; the answer is in their bodies. The
+note's SCOPE is its path (under `~/.claude/projects/…` = LOCAL, under the repo
+= PROJECT, under `~/.claude/memory` = USER); when two scopes state conflicting
+facts, the MORE SPECIFIC scope wins: LOCAL over PROJECT over USER. If recall
+returns nothing, the memory doesn't exist yet — consider writing one after you
+solve the problem (per the `# Memory` directive).
+
+## Memory scopes (LOCAL / PROJECT / USER)
+
+The wiki is layered like Claude Code's own memory (user CLAUDE.md / project
+CLAUDE.md / CLAUDE.local.md). Three roots, one recall surface:
+
+| Scope | Root | Git | Contains |
+|---|---|---|---|
+| **LOCAL** | `~/.claude/projects/<slug>/memory/` | outside any repo — never pushed | machine-private notes: local paths, hostnames, credentials hints, per-instance info. The harness `# Memory` directive writes here; `user-mem/` (the user's private store) lives inside it |
+| **PROJECT** | `<git-root>/memory/` | **tracked + PUSHED** — shared by every dev | project knowledge any contributor needs: architecture facts, codebase gotchas, project lessons. Sensitive/local data FORBIDDEN — the janitor's `memory-scope-leak` detector polices this scope |
+| **USER** | `~/.claude/memory/` | never in any repo | cross-project knowledge: user preferences, machine-independent lessons |
+
+**Write routing (decide the scope BEFORE authoring):** contains a local path /
+username / hostname / secret / machine-specific detail → **LOCAL**. Project
+knowledge any dev needs → **PROJECT**. About the user across projects →
+**USER**. **UNSURE → LOCAL** (the safe scope; promotion to PROJECT is a
+deliberate later act, and the scope-leak detector flags anything sensitive that
+lands in PROJECT).
 
 ## memgrep — the recall engine
 

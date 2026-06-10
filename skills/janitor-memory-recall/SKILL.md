@@ -26,12 +26,14 @@ find it from the problem.)
 
 ## Instructions
 
-1. Resolve the project memory dir (the harness per-project notes dir):
+1. Compose the THREE scope roots (LOCAL machine-private · PROJECT git-tracked ·
+   USER global) — recall searches every root that exists, in one call:
 
    ```bash
-   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
-   # If that path doesn't exist, fall back to a project-local memory/ dir:
-   [ -d "$MEMDIR" ] || MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory"
+   LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
+   PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory"
+   USER_MEM="$HOME/.claude/memory"
+   ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
    ```
 
 2. Build a SYMPTOM query from the user's words / the error / the problem (never
@@ -40,11 +42,17 @@ find it from the problem.)
    ```bash
    SYMPTOM="the symptom in the user's / the error's words"
    if command -v memgrep >/dev/null 2>&1; then
-     memgrep recall "$SYMPTOM" "$MEMDIR"        # notes ranked best-first: path — description
+     # shellcheck disable=SC2086 # ROOTS is a deliberate word-split list of dirs
+     memgrep recall "$SYMPTOM" $ROOTS           # notes ranked best-first: path — description
    else
-     grep -rliE "$SYMPTOM" "$MEMDIR" 2>/dev/null # fallback: degrade, never break
+     # shellcheck disable=SC2086
+     grep -rliE "$SYMPTOM" $ROOTS 2>/dev/null    # fallback: degrade, never break
    fi
    ```
+
+   A result's SCOPE is its path (`~/.claude/projects/…` = LOCAL, repo = PROJECT,
+   `~/.claude/memory` = USER). On conflicting facts the more specific scope
+   wins: LOCAL over PROJECT over USER.
 
    If `memgrep` is not installed, install it once (it lives in this plugin):
    `cargo install --path "$CLAUDE_PLUGIN_ROOT/tools/memgrep"` — until then the

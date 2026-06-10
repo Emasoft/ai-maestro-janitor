@@ -55,6 +55,17 @@ _TIMEOUT_S = 4.0
 # the agent context; recall prints one `path — description` line per note.
 _MAX_CHARS = 1200
 
+# Non-page files inside a PROJECT/USER memory root that must NOT be recalled
+# (loaded index, generated query index, the memory detectors' proposal files).
+# The LOCAL corpus uses `_agent_notes` (top-level *.md), which never reaches
+# these by depth; the PROJECT/USER walk is recursive, so it excludes them by name.
+_NON_PAGE_NAMES = frozenset({
+    "MEMORY.md",
+    "memory-index.md",
+    "memory-reorg-proposed.md",
+    "memory-scope-leak-proposed.md",
+})
+
 
 def _load_libs():
     """Import `user_mem_lib` (for find_memgrep + the agent-memdir resolution) and
@@ -104,6 +115,64 @@ def _agent_notes(memdir: Path) -> list[str]:
         return sorted(str(p) for p in memdir.glob("*.md") if p.is_file())
     except OSError:  # pragma: no cover - defensive
         return []
+
+
+def _scope_pages(root: Path) -> list[str]:
+    """The recallable `*.md` pages of a PROJECT or USER memory root.
+
+    The memory system has THREE scopes (TRDD-c77dae09): LOCAL (the agent corpus,
+    handled by `_agent_notes` with its user-mem exclusion), PROJECT
+    (`<git-root>/memory/`, git-tracked + pushed), and USER (`~/.claude/memory/`,
+    global). PROJECT/USER pages may live in subdirectories, so we walk
+    recursively — but EXCLUDE the tool's generated `.memgrep/` index sidecar and
+    the detector proposal/index files (not pages). Returns absolute file paths
+    sorted for determinism; an unreadable/absent root yields [].
+
+    Note: PROJECT/USER scopes never contain a private `user-mem/` subtree (that
+    is LOCAL-only by construction), so there is no privacy subtree to exclude
+    here — but skipping `.memgrep/` keeps generated cache out of the recall set.
+    """
+    if not root.is_dir():
+        return []
+    try:
+        pages = [
+            str(p)
+            for p in root.rglob("*.md")
+            if p.is_file()
+            and ".memgrep" not in p.parts
+            and p.name not in _NON_PAGE_NAMES
+        ]
+    except OSError:  # pragma: no cover - defensive
+        return []
+    return sorted(pages)
+
+
+def _project_memdir(project_dir: str | None) -> Path | None:
+    """The PROJECT-scope memory root: `<git-root>/memory/`, or None when the cwd
+    is not in a git repo. Resolved via `git rev-parse --show-toplevel` so a
+    worktree / sub-directory cwd still finds the repo root."""
+    cwd = (project_dir or os.getcwd()).strip() or None
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT_S,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    if proc.returncode != 0:
+        return None
+    top = proc.stdout.strip()
+    return (Path(top) / "memory") if top else None
+
+
+def _user_memdir() -> Path:
+    """The USER-scope (global) memory root: `~/.claude/memory/`. Not created."""
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+    return home / ".claude" / "memory"
 
 
 def _recall(memgrep: str, query: str, note_paths: list[str]) -> str:
@@ -202,15 +271,36 @@ def main() -> int:
         return 0
 
     project_dir = (os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "").strip() or None
-    memdir = _agent_memdir(um, project_dir)
-    if not memdir.is_dir():
-        # No corpus yet → nothing to recall.
-        return 0
 
-    note_paths = _agent_notes(memdir)
+    # Compose ALL THREE memory scopes into ONE recall (TRDD-c77dae09): LOCAL (the
+    # agent corpus, with its structural user-mem exclusion) → PROJECT
+    # (`<git-root>/memory/`) → USER (`~/.claude/memory/`). recall takes explicit
+    # FILE paths and only walks DIRECTORIES, so passing files keeps the private
+    # `user-mem/` subtree untraversed AND lets one invocation rank across all
+    # roots. Ordering is most-specific-first so that, all else equal, a local note
+    # precedes a project/user note in the input order. A scope whose dir is absent
+    # contributes nothing.
+    local_dir = _agent_memdir(um, project_dir)
+    note_paths: list[str] = []
+    if local_dir.is_dir():
+        note_paths.extend(_agent_notes(local_dir))  # top-level *.md only (user-mem excluded)
+    project_dir_mem = _project_memdir(project_dir)
+    if project_dir_mem is not None:
+        note_paths.extend(_scope_pages(project_dir_mem))
+    note_paths.extend(_scope_pages(_user_memdir()))
+    # De-duplicate while preserving most-specific-first order (a path could in
+    # principle appear via two roots if they overlap; keep the first occurrence).
+    seen_paths: set[str] = set()
+    deduped: list[str] = []
+    for pth in note_paths:
+        if pth not in seen_paths:
+            seen_paths.add(pth)
+            deduped.append(pth)
+    note_paths = deduped
+
     if not note_paths:
-        # Corpus dir exists but holds no top-level notes (only user-mem/, or
-        # empty) → nothing the agent may recall.
+        # No notes in any scope (empty/absent corpora, or only the private
+        # user-mem store) → nothing the agent may recall.
         return 0
 
     recall_out = _recall(memgrep, stripped, note_paths)

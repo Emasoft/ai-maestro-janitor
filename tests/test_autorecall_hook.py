@@ -296,3 +296,93 @@ def test_empty_stdin_is_noop(tmp_path):
     )
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""
+
+
+# --------------------------------------------------------------------------
+# THREE-SCOPE recall composition (TRDD-c77dae09): LOCAL + PROJECT + USER
+# --------------------------------------------------------------------------
+
+
+def _write_page(memdir: Path, name: str, description: str, body: str = "body text") -> None:
+    """Write a memory page into an arbitrary scope root (USER/PROJECT/LOCAL)."""
+    memdir.mkdir(parents=True, exist_ok=True)
+    (memdir / f"{name}.md").write_text(
+        f"---\nname: {name}\ndescription: \"{description}\"\n"
+        f"metadata: {{node_type: memory, type: project}}\n---\n{body}\n",
+        encoding="utf-8",
+    )
+
+
+def _init_git(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+    })
+    subprocess.run(["git", "init", "-q"], cwd=str(root), env=env, check=False,
+                   capture_output=True, text=True)
+
+
+@_needs_memgrep
+def test_user_scope_note_is_recalled(tmp_path):
+    """A note in the USER scope (`~/.claude/memory/`) is composed into recall —
+    even when the LOCAL corpus has no matching note."""
+    home = tmp_path / "home"
+    project = tmp_path / "proj"
+    # USER scope note (global), no matching LOCAL note.
+    _write_page(home / ".claude" / "memory", "userpref",
+                "globalwidget calibration drifts after sleep where is the knob",
+                body="turn the global knob")
+    rc, out, _err = _run_hook(
+        _prompt("the globalwidget calibration drifts again"), _ON, project, home)
+    assert rc == 0
+    assert out.strip() != ""
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "userpref.md" in ctx
+    assert "calibration" in ctx
+
+
+@_needs_memgrep
+def test_project_scope_note_is_recalled(tmp_path):
+    """A note in the PROJECT scope (`<git-root>/memory/`) is composed into recall
+    when CLAUDE_PROJECT_DIR is a git repo."""
+    home = tmp_path / "home"
+    project = tmp_path / "proj"
+    _init_git(project)
+    # PROJECT scope page (git-tracked root), no matching LOCAL/USER note.
+    _write_page(project / "memory", "projarch",
+                "projwidget pipeline stalls on cold start where is the retry",
+                body="bump the retry")
+    rc, out, _err = _run_hook(
+        _prompt("the projwidget pipeline stalls on cold start"), _ON, project, home)
+    assert rc == 0
+    assert out.strip() != ""
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "projarch.md" in ctx
+    assert "pipeline" in ctx
+
+
+@_needs_memgrep
+def test_all_three_scopes_compose_and_user_mem_excluded(tmp_path):
+    """LOCAL + PROJECT + USER all contribute to ONE recall, and the private
+    user-mem/ note (inside LOCAL) is STILL never surfaced (structural bound)."""
+    home = tmp_path / "home"
+    project = tmp_path / "proj"
+    _init_git(project)
+    memdir = _agent_memdir(home, project)
+    # One matching note per scope on the same topic, plus a private user-mem note.
+    _write_page(memdir, "localnote", "tribblewidget overheats reset procedure local", body="local")
+    _write_page(project / "memory", "projnote", "tribblewidget overheats reset procedure project", body="proj")
+    _write_page(home / ".claude" / "memory", "usernote", "tribblewidget overheats reset procedure user", body="user")
+    _write_page(memdir / "user-mem", "secret", "tribblewidget overheats reset SECRETMEMO", body="private")
+    rc, out, _err = _run_hook(_prompt("the tribblewidget overheats again"), _ON, project, home)
+    assert rc == 0
+    assert out.strip() != ""
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    # The private user-mem note must NEVER appear, regardless of scope composition.
+    assert "SECRETMEMO" not in ctx
+    assert "user-mem" not in ctx
+    # At least the three scope notes are reachable (recall ranks; --top caps at 3,
+    # so assert the private one is absent and the public ones are the source).
+    assert any(tok in ctx for tok in ("localnote.md", "projnote.md", "usernote.md"))

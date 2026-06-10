@@ -200,6 +200,18 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # unchanged. 6h cadence — the corpus changes slowly and the scan is bounded +
     # content-fingerprint deduped, so unchanged fires are near-free.
     ("memory-librarian", 21600, "CLAUDE_PLUGIN_OPTION_MEMORY_LIBRARIAN_INTERVAL"),
+    # memory-scope-leak keeps the PUSHED memory scope clean (TRDD-c77dae09, the
+    # THREE-SCOPE addendum). The PROJECT scope (<git-root>/memory/) is git-tracked
+    # and pushed, so it must NEVER carry machine/user-private data; this detector
+    # scans those pages with the private-path lib + privacy PII shapes + the
+    # credential libs + an entropy pass, and guards the gitignore invariants
+    # (PROJECT memory/ must be TRACKED; a LOCAL-shaped store must not be committed).
+    # Each leak surfaces a "demote to LOCAL scope before push" finding into
+    # memory-scope-leak-proposed.md. ZERO page mutation (RULE 0) — an agent demotes.
+    # Silent no-op when not a git repo / no PROJECT memory dir / unchanged finding
+    # set. 1h cadence — leaks should be caught quickly before a push, and the scan
+    # is bounded + content-fingerprint deduped so unchanged fires are near-free.
+    ("memory-scope-leak", 3600, "CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL"),
 ]
 
 
