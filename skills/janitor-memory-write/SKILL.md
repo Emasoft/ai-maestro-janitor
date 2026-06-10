@@ -1,167 +1,173 @@
 ---
 name: janitor-memory-write
-description: Capture a durable, reusable fact as a markdown memory note so a future session recalls it from the SYMPTOM. Use after solving a non-trivial bug (a bug-autopsy gotcha), learning a project constraint not derivable from code, a confirmed user preference, or any "we should remember this" moment — or when the user says "remember this", "save a memory", "capture this gotcha", "note that for next time". Writes a schema-valid note (name/description/metadata + body) with the description indexed by question/symptom vocabulary, and appends the MEMORY.md index line. The reference implementation of the AI-Maestro memory-write protocol (see the markdown-memory-recall rule).
+description: MEMORIZE — capture a durable decision/fact into the project's memory WIKI as a navigable page, not a loose note. Use after solving a non-trivial bug (a bug-autopsy gotcha), making a design/architecture decision, learning a project constraint not derivable from code, a confirmed user preference, or any "we should remember this" moment — or when the user says "remember this", "memorize this", "save a memory", "capture this decision/gotcha", "note that for next time". Finds the right existing wikimem page first (so it never duplicates), and only when none fits creates a new HUB / ASPECT / COMPONENT page via the expand/reduce decision, wires it into the See-also context web, and indexes it by symptom. The MEMORIZE leg of the AI-Maestro wiki-memory protocol.
 ---
 
-# Janitor memory-write
+# Janitor memory — MEMORIZE
 
 ## Overview
 
-Capture one durable fact as a memory note so a future session — which will have
-the SYMPTOM, not the answer — can recall it. The load-bearing decision is the
-`description`: it MUST carry the words the problem will present with (the user's
-words, the error, the symptom), because recall ranks on `description`
-(+ `title` + `tags`). Put the symptom in `description`; put the answer in the body.
+MEMORIZE is the CREATE/CAPTURE leg of the memory wiki. It places a new durable
+decision into the right wikimem page so a future session can navigate to it — not
+dump a loose `.md` into a pile. Read [the wikimem model](references/wikimem-model.md)
+once: pages have a **tier** (hub / aspect / component), a **See-also** context
+web, and a **file→functionality** mapping. This skill is the rules for growing
+that wiki correctly.
 
-Only capture what is NON-OBVIOUS and reusable: gotchas, constraints not in the
-code, confirmed preferences, hard-won debugging facts. Do NOT capture what the
-repo already records (code structure, git history, CLAUDE.md) or what only
-matters to the current conversation.
+Only memorize what is NON-OBVIOUS and reusable: design decisions, gotchas,
+constraints not in the code, confirmed preferences, hard-won debugging facts. Do
+NOT memorize what the repo already records (code structure, git history,
+CLAUDE.md) or what only matters to this conversation.
 
-## Instructions
+## The algorithm
 
-1. **Route the SCOPE first** (the wiki is layered LOCAL / PROJECT / USER like
-   Claude Code's own memory). Decision tree:
-   - contains a local path / username / hostname / secret / machine-specific
-     detail → **LOCAL** (machine-private, never pushed);
-   - project knowledge ANY dev working on the repo needs → **PROJECT**
-     (git-tracked + pushed; sensitive/local data FORBIDDEN — the janitor's
-     `memory-scope-leak` detector polices it);
-   - about the user across ALL projects → **USER** (global);
-   - **UNSURE → LOCAL** (promotion to PROJECT is a deliberate later act).
+### 1. Route the SCOPE (machine-private vs shared vs global)
 
-   ```bash
-   case "$SCOPE" in
-     local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
-     project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory" ;;
-     user)    MEMDIR="$HOME/.claude/memory" ;;
-   esac
-   mkdir -p "$MEMDIR"
-   ```
+```bash
+# LOCAL = local paths/usernames/hosts/secrets/machine-specific (never pushed)
+# PROJECT = knowledge any dev on the repo needs (git-tracked + pushed; NO secrets)
+# USER = true across ALL projects (global).  UNSURE → LOCAL.
+case "$SCOPE" in
+  local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
+  project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory" ;;
+  user)    MEMDIR="$HOME/.claude/memory" ;;
+esac
+mkdir -p "$MEMDIR"
+```
 
-2. Choose `type` ∈ `user | feedback | project | reference` and a kebab slug
-   (prefix the slug with the type, e.g. `feedback_…`, `reference_…`).
+The janitor's `memory-scope-leak` detector polices secrets/local paths in
+PROJECT/USER scope — keep machine-specific detail in LOCAL.
 
-3. Check for an existing note that already covers this (update it rather than
-   duplicate): `command -v memgrep >/dev/null && memgrep recall "<symptom>" "$MEMDIR"`.
+### 2. FIND the home first — never duplicate
 
-4. Write `"$MEMDIR/<type>_<slug>.md"` with the Write tool (NOT echo), schema.
-   Set `ocd`/`lmd` to TODAY (ISO-8601) on create; bump `lmd` on every later
-   edit. ALWAYS include the empty `## Notes and lessons learned` section — it is
-   the mandatory standing landing zone so a future correction's `[^N]` lesson
-   has a home and the corpus shape is uniform (the janitor's page-shape validator
-   flags a note that omits it):
+Run RECALL (or memgrep directly) for the subject AND its functionality, so you
+land on the page that should already hold this:
 
-   ```yaml
-   ---
-   name: <type>_<slug>
-   description: "<the SYMPTOM in the user's / the error's words — the words a future session will search with, NOT the answer's jargon>"
-   ocd: <YYYY-MM-DD>   # Original Creation Date — set once, never changes
-   lmd: <YYYY-MM-DD>   # Last Modified Date — bump on every content edit
-   metadata:
-     node_type: memory
-     type: <user|feedback|project|reference>
-   ---
-   <the one fact. For feedback/project, follow with **Why:** and **How to apply:** lines.
-   Link related notes with [[their-name]].>
+```bash
+memgrep recall "<the decision's subject + symptom>" "$MEMDIR"
+memgrep --where 'fm.functionality "<functionality>"' "$MEMDIR"   # the functionality's pages
+```
 
-   ## Notes and lessons learned
-   ```
+- A fitting page exists → this is an **UPDATE, not a create**. Stop here and use
+  `/janitor-memory-update` to add the memory to that page (it keeps See-also and
+  lessons consistent). MEMORIZE only proceeds when no page is the right home.
 
-5. Append a one-line pointer to `"$MEMDIR/MEMORY.md"` (create if missing):
-   `- [<Title>](<type>_<slug>.md) — <one-line hook>.`
+### 3. No page fits → decide the SHAPE (expand vs reduce)
 
-6. Sanity-check: would a future session, having only the SYMPTOM, find this note
-   by searching `description`? If the description reads like the *answer*, rewrite
-   it to read like the *question*.
+Pick exactly one (see the model for the full definition):
 
-## Correcting a memory — the 2-step non-destructive protocol
+- **New functionality entirely** (no hub yet for this area) → seed a **`hub`**
+  page: the overview + the big general decisions + the file `globs:` the
+  functionality owns. The tip of the iceberg.
+- **EXPAND** — the memory is a *general rule shared by many components/procedures*
+  → an **`aspect`** page (`style-system`, `error-envelope`, `dialog-forms`).
+- **REDUCE** — the memory is *specific to one element* → a **`component`** page
+  (`login-panel`, `user-model`, `checkout-endpoint`).
 
-When a new discovery CONTRADICTS an existing memory, you (an agent) MUST change
-the memory — never the janitor. Do it non-destructively, in exactly two steps:
+Honor the **one-component-one-page** invariant: if a component page for this
+element already exists, the memory goes THERE (→ UPDATE), even if you arrived
+from a different subject. Never make `login-panel-style` beside `login-panel`.
 
-1. **Clean the fact in place.** Replace the wrong statement in the body with the
-   correct one, so the page's record of the FACTS is always clean and true — no
-   "we used to think X" clutter inline. The body is the current truth.
-2. **Demote the error to a lesson — the WHY is the point.** Record the error that
-   caused the false memory as a **numbered entry** in a `## Notes and lessons
-   learned` section at the BOTTOM of the page, and connect the corrected fact to
-   it with a standard-markdown footnote `[^N]`. The load-bearing content is
-   *why* the previous statement was wrong / *why* the plan failed — the root
-   cause, not merely "this was wrong". A lesson without a WHY cannot stop the
-   next repeat.
+### 4. WRITE the page (Write tool, not echo)
 
-This mirrors the CLAUDE.md Bug Autopsy directive (every fixed bug becomes a
-guardrail) and RULE 0 (never lose information): the *fact* is corrected, the
-*error* is never deleted — it is demoted to a linked lesson so future readers
-don't repeat it. Lessons thereby accrue in the topic's own page, so all
-lessons-learned for a topic collect in one findable place (recallable with
-`memgrep find "<symptom>" <memdir> --only-notes`).
+Author `"$MEMDIR/<slug>.md"` with the model's schema. Set `ocd`/`lmd` to TODAY.
+ALWAYS include `## See also` AND the standing `## Notes and lessons learned`
+section (the janitor's page-shape validator flags a page that omits either):
 
-## Lesson format (footnotes + per-element dates)
+```yaml
+---
+name: <slug>
+description: "<the SYMPTOM/topic in search words — what a future session will query, NOT the answer's jargon>"
+ocd: <YYYY-MM-DD>
+lmd: <YYYY-MM-DD>
+metadata:
+  node_type: memory
+  type: <project|reference|feedback|user>
+  tier: <hub|aspect|component>
+  functionality: <hub-slug>            # which functionality this lives under
+  globs: ["<owned file patterns>"]     # REQUIRED on hubs; omit on most leaves
+---
+<the memories — concise; for a hub the overview + a short map of the parts.
+For feedback/project add **Why:** and **How to apply:** lines.>
 
-Lessons use **standard markdown footnotes** — `[^N]` in the body, `[^N]: …`
-under `## Notes and lessons learned`. A lesson is a first-class memory element:
-give it the SAME metadata a fact has, including two intrinsic dates in a leading
-`[…]` prefix:
+## See also
+- [[related-page]] — why it relates / how it influences this subject.
 
-- **OCD — Original Creation Date** (when first written),
-- **LMD — Last Modified Date** (when last changed).
+## Notes and lessons learned
+```
 
-These survive when the background librarian later moves the memory between
-pages, so they — not the file mtime — are the authoritative age. memgrep strips
-the `[…]` prefix from the default render and restores it under `--full-notes`;
-its `--since`/`--until` filters read these dates.
+### 5. WIRE the context (this is what makes it a wiki)
+
+A page with no edges is a dead note. Two link directions:
+
+- **Out** — fill `## See also` with EVERY page that relates to or influences this
+  subject: the general style aspect, the view/model it binds, the API functions
+  it calls, graphic items/animations, the db, downstream consumers. Each link
+  says *why*. A `[[link]]` to a not-yet-written page is fine (it flags one to
+  create later).
+- **Up** — add the new page to its hub's "parts" map and/or the parent aspect's
+  `## See also`, so the tip can reach it. (The janitor librarian backfills any
+  inbound links you miss, but do the obvious ones now.)
+
+### 6. Index it
+
+Append a one-line pointer to `"$MEMDIR/MEMORY.md"` (create if missing):
+`- [<Title>](<slug>.md) — <one-line hook>.` Then `memgrep reindex "$MEMDIR"` if
+present (optional; recall auto-reindexes).
+
+### 7. Sanity-check
+
+- Would a future session find this from the SYMPTOM via `description`? If the
+  description reads like the *answer*, rewrite it as the *question*.
+- Is `## See also` non-empty and honest (real influences, not filler)?
+- Did you respect one-component-one-page (no fragmenting an element)?
+- If you created a hub, are its `globs` precise and non-overlapping with other
+  hubs (one file → one functionality)?
 
 ## Output
 
-One note file + one MEMORY.md index line. Report the note path and the
-one-line description; do NOT echo the whole note back into the conversation.
+The page path + its one-line description + the See-also targets you wired. Do NOT
+echo the whole page back into the conversation.
 
 ## Examples
 
-```text
-After fixing a flaky pipe-truncation bug:
-  description: "command output looks truncated / wrong line count when piping through tee | head"
-  body: explains the SIGPIPE-kills-tee mechanism + the capture-to-file-first fix.
+<example>
+Decision: "all destructive dialogs use a red secondary 'Delete' button, primary is Cancel."
+→ general rule shared by many dialogs ⇒ EXPAND ⇒ aspect page `dialog-forms`
+  (functionality: frontend). See also: [[style-system]] (the red token),
+  [[interaction-patterns]]. Linked up from the `frontend` hub's parts map.
+</example>
 
+<example>
+Decision: "the checkout endpoint is idempotent on the Idempotency-Key header."
+→ specific to one element ⇒ REDUCE ⇒ component page `checkout-endpoint`
+  (functionality: backend). See also: [[order-model]], [[payment-gateway]],
+  [[error-envelope]]. If `checkout-endpoint` already exists ⇒ UPDATE it instead.
+</example>
+
+<example>
 User: remember that automating my own paid Claude accounts is fine, don't over-flag ToS
-  → type: feedback; description carries "is it ok to automate / rotate my own Claude accounts".
-```
-
-A corrected memory page (the 2-step protocol applied — fact clean in the body,
-error demoted to a dated `[^3]` lesson with the WHY):
-
-```markdown
----
-name: reference_widget_retry_cap
-description: "widget kept retrying / how many times before it gives up"
-metadata:
-  node_type: memory
-  type: reference
----
-The widget retries 3× then fails.[^3] Tune via the `max_retries` config key.
-
-## Notes and lessons learned
-[^3]: [ocd:2026-06-09 lmd:2026-06-09] earlier this page said "retries 5×" — wrong,
-  the cap is 3. The error: the constant was read off the variable name
-  `max_attempts` (which doesn't exist) instead of the actual key `max_retries`.
-  Lesson: verify a constant against the SOURCE, not a guessed variable name.
-```
+→ type: feedback, USER scope, component page; description carries the QUESTION
+  "is it ok to automate / rotate my own Claude accounts".
+</example>
 
 ## Scope
 
-ONLY authors/updates memory notes + the MEMORY.md index. Does NOT recall (use
-`/janitor-memory-recall`). One fact per note. Symptom-indexed description is
-mandatory — it is what makes the note recallable.
+ONLY creates/seeds wikimem pages + the MEMORY.md index, and wires their See-also.
+To MODIFY an existing page (including correcting a wrong memory) use
+`/janitor-memory-update`. To FIND pages use `/janitor-memory-recall`. One subject
+per page; symptom-indexed `description` + non-empty `## See also` are mandatory.
 
 ## Resources
 
-- `~/.claude/rules/markdown-memory-recall.md` — the protocol (the law, schema,
-  the lessons-learned conventions, dual-test method).
-- The harness `# Memory` directive — the authoring source-of-truth this skill
-  follows.
-- `/janitor-memory-recall` — the RECALL side (find a note before you duplicate
-  or correct it; lessons come back appended).
-- `/to-user-mem` — saves a memory to the USER's PRIVATE store (agent-invisible);
-  distinct from authoring an agent note here.
+- [references/wikimem-model.md](references/wikimem-model.md) — the wiki data
+  model (tiers, expand/reduce, See-also discipline, file→functionality, memgrep
+  map). The source of truth all three memory skills share.
+- `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" law +
+  schema + dual-test method.
+- `/janitor-memory-update` — MODIFY a page / correct a memory (the 2-step
+  non-destructive correction protocol lives there).
+- `/janitor-memory-recall` — RECALL: find the right page (run it BEFORE creating,
+  step 2).
+- `/to-user-mem` — saves to the USER's PRIVATE store (agent-invisible); distinct
+  from authoring an agent wikimem page here.

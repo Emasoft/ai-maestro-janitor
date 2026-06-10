@@ -1,151 +1,156 @@
 ---
 name: janitor-memory-recall
-description: Recall durable project memories from a SYMPTOM before debugging, deciding, or acting on a recurring problem. Searches the project's markdown memory notes with memgrep (degrading to plain grep when memgrep is absent), ranking notes by how well your symptom query hits each note's description/title/tags, and returns the top notes to read. Use when you think "have we hit this before?", or the user says "recall memories about X", "did we already solve this", "search the memory notes", "check what we learned about Y", or before re-deriving architecture/gotchas a past session may have written down. The reference implementation of the AI-Maestro memory-recall protocol (see the markdown-memory-recall rule).
+description: RECALL — before working on a file or debugging/deciding, surface the right memory WIKI page and navigate it. Two entry points - (1) FILE-anchored - about to edit a file in some functionality (frontend, backend, db, a render engine, a parser, a controller, an endpoint…) → surface that functionality's HUB page (the tip of the iceberg) and descend through its links to the detail the task needs; (2) SYMPTOM - "have we hit this before?" → rank pages by how your symptom hits their description/title/tags. Use when you think "have we hit this before", before re-deriving architecture/gotchas, or the user says "recall memories about X", "what do we know about the frontend", "did we already solve this", "check what we learned about Y". Reads only the pages the task needs (progressive disclosure), degrading to grep when memgrep is absent. The RECALL leg of the AI-Maestro wiki-memory protocol.
 ---
 
-# Janitor memory-recall
+# Janitor memory — RECALL
 
 ## Overview
 
-Recall is the FIRST step before debugging a recurring problem, making a design
-decision, or acting on a recurring alert — "have we hit this before?". It
-searches the project's curated markdown memory notes (the `memory/` dir the
-harness maintains) and returns the notes whose `description`/`title`/`tags` best
-match your SYMPTOM. The answer is in the matched note's body.
+RECALL is the FIND/READ leg of the memory wiki. It does two things the flat-note
+recall could not: it maps **the file you're about to touch → the functionality's
+hub page** (so you get the overview before you edit), and it lets you **navigate
+the wiki** — read the tip, then follow only the links the task needs. Read [the
+wikimem model](../janitor-memory-write/references/wikimem-model.md) for tiers,
+the See-also web, and the file→functionality mapping.
 
-This is distinct from conversation/transcript search: it recalls *curated,
-symptom-indexed notes*, not raw chat history.
+Always run RECALL FIRST: before debugging a recurring problem, before a design
+decision, before editing a file in an area you haven't loaded, before MEMORIZING
+(so you update the right page instead of duplicating).
 
-## The one law
-
-Query with the SYMPTOM — the user's words, the error text, the problem — NOT the
-answer's jargon. A note is findable from the symptom because its author put
-symptom vocabulary in `description`. (If you query "keychain" you only find it
-once you already know the answer; query "rotator failed, had to log in" and you
-find it from the problem.)
-
-## Instructions
-
-1. Compose the THREE scope roots (LOCAL machine-private · PROJECT git-tracked ·
-   USER global) — recall searches every root that exists, in one call:
-
-   ```bash
-   LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
-   PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory"
-   USER_MEM="$HOME/.claude/memory"
-   ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
-   ```
-
-2. Build a SYMPTOM query from the user's words / the error / the problem (never
-   the answer's jargon), then recall — memgrep if present, plain grep otherwise:
-
-   ```bash
-   SYMPTOM="the symptom in the user's / the error's words"
-   if command -v memgrep >/dev/null 2>&1; then
-     # shellcheck disable=SC2086 # ROOTS is a deliberate word-split list of dirs
-     memgrep recall "$SYMPTOM" $ROOTS           # notes ranked best-first: path — description
-   else
-     # shellcheck disable=SC2086
-     grep -rliE "$SYMPTOM" $ROOTS 2>/dev/null    # fallback: degrade, never break
-   fi
-   ```
-
-   A result's SCOPE is its path (`~/.claude/projects/…` = LOCAL, repo = PROJECT,
-   `~/.claude/memory` = USER). On conflicting facts the more specific scope
-   wins: LOCAL over PROJECT over USER.
-
-   If `memgrep` is not installed, install it once (it lives in this plugin):
-   `cargo install --path "$CLAUDE_PLUGIN_ROOT/tools/memgrep"` — until then the
-   grep fallback works on note frontmatter + bodies.
-
-3. Read the top 1-3 notes the recall returns; the fact you need is in their
-   bodies. If recall returns nothing, the memory doesn't exist yet — solve the
-   problem, then capture it with `/janitor-memory-write`.
-
-## Read the notes too (the lessons come back for free)
-
-Reading a memory means reading its lessons too. `recall` resolves and APPENDS
-each note's `[^N]` lessons-learned by default (so does `find`) — one call yields
-the facts AND every linked WHY, no second search. The render is minimal: an
-inline reference shows as a bare number `[9]`, and the appended list reads
-`[9] - <lesson WHY text>.`
-
-- `--no-notes` — body only (suppress the lessons).
-- `--full-notes` — keep each lesson's leading `[…]` metadata prefix (dates,
-  class). URLs and image links in a lesson are ALWAYS kept regardless.
-
-## Enriched recall — sort, date-range, keyword find
-
-The shipped `recall`/`find` accept (verify with `memgrep recall --help`):
-
-- `--sort score|ocd|lmd` (default `score` = relevance), `--order asc|desc`
-  (default `desc`) — e.g. `--sort lmd` for newest-modified first.
-- `--since <ISO>` / `--until <ISO>` over `--date-field ocd|lmd` (default `lmd`)
-  — "what did I learn last week", "every lesson about X between two dates".
-- `--top N` (default 10); `--use-index` forces the SQLite sidecar (auto-used
-  when fresh, else the live walk — results are always correct).
-
-`memgrep find "<query>" <memdir>` is note-level keyword search with a `+`/`-`/
-wildcard/phrase DSL (NOT line grep): `+TERM` mandatory, `-TERM` exclude, bare
-`TERM` optional (ranks), `*` wildcard, `"quoted phrase"` verbatim. Add
-`--only-notes` to search ONLY the resolved lessons (returns matching `[N] - …`
-lessons, not pages).
+## Compose the scope roots (once)
 
 ```bash
-memgrep recall "$SYMPTOM" "$MEMDIR" --sort lmd                 # newest-touched first
-memgrep recall "$SYMPTOM" "$MEMDIR" --since 2026-06-01         # only recent notes
-memgrep find "+rotator +keychain -widget" "$MEMDIR"           # AND/exclude keyword search
-memgrep find "+max_retries" "$MEMDIR" --only-notes            # search the lessons only
+LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"   # machine-private
+PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory"  # git-tracked
+USER_MEM="$HOME/.claude/memory"                                    # global
+ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
 ```
 
-Optional speed-up: `memgrep reindex "$MEMDIR"` builds the persistent
-`.memgrep/index.db` (gitignored, git-incremental). Recall auto-uses it when
-fresh; you never have to manage it.
+On conflicting facts the more specific scope wins: **LOCAL > PROJECT > USER**.
+
+## Entry A — FILE-anchored (the "I'm about to work on this file" path)
+
+Goal: surface the HUB for the functionality the file belongs to, then descend.
+
+1. Find the hub whose `globs` own the file you're about to edit:
+
+   ```bash
+   FILE="src/frontend/panels/Login.tsx"          # the file (relative to repo root)
+   # List hub pages, read each hub's globs, and pick the hub whose glob matches FILE.
+   memgrep --where 'fm.tier "hub"' $ROOTS          # the hubs; inspect their globs:
+   memgrep --where 'fm.functionality "frontend"' $ROOTS   # or query a functionality directly
+   ```
+
+   (When memgrep is absent: `grep -rl 'tier: hub' $ROOTS`, read each hub's
+   `globs:`, and match `FILE` against them by eye / with a glob test.)
+
+2. Read the matching **hub** page (the tip): the functionality overview, the big
+   general decisions, the map of parts. This alone is often enough.
+
+3. **Descend on demand.** From the hub's body + `## See also`, follow ONLY the
+   `[[links]]` your specific task needs — the style aspect if you're restyling,
+   the component page for the exact panel, the endpoint it calls. Do NOT read the
+   whole subtree; load detail like a Skill loads a reference — only if relevant.
+
+   ```bash
+   memgrep links --from frontend $ROOTS               # what the hub points to (descend)
+   memgrep --where 'linked-from "login-panel"' $ROOTS  # the panel's context (its influences)
+   memgrep --where 'links-to "style-system"' $ROOTS    # who else depends on this aspect
+   ```
+
+## Entry B — SYMPTOM (the "have we hit this before?" path)
+
+Query with the SYMPTOM — the user's words, the error, the problem — NOT the
+answer's jargon (its author indexed `description` by the question):
+
+```bash
+SYMPTOM="the symptom in the user's / the error's words"
+if command -v memgrep >/dev/null 2>&1; then
+  memgrep recall "$SYMPTOM" $ROOTS          # pages ranked best-first: path — description
+else
+  grep -rliE "$SYMPTOM" $ROOTS 2>/dev/null  # fallback: degrade, never break
+fi
+```
+
+Read the top 1-3 pages; the fact is in the body, and from there you can follow
+See-also into related pages exactly as in Entry A. If recall returns nothing, the
+memory doesn't exist yet — solve it, then `/janitor-memory-write` (MEMORIZE).
+
+If memgrep is not installed, install once (it ships in this plugin):
+`cargo install --path "$CLAUDE_PLUGIN_ROOT/tools/memgrep"`.
+
+## The lessons come back for free
+
+`recall`/`find` resolve and APPEND each page's `[^N]` lessons-learned by default,
+so one call yields the facts AND every WHY. `--no-notes` = body only;
+`--full-notes` = keep each lesson's `[…]` date/class prefix.
+
+## Enriched recall (verify with `memgrep recall --help`)
+
+- `--sort score|ocd|lmd` (default relevance), `--order asc|desc` — `--sort lmd`
+  for newest-touched first.
+- `--since <ISO>` / `--until <ISO>` over `--date-field ocd|lmd` — "what did we
+  decide about X last week".
+- `--top N` (default 10); `--use-index` forces the SQLite sidecar (auto-used when
+  fresh; results always correct).
+- `memgrep find "+TERM -TERM \"phrase\"" $ROOTS` — note-level boolean keyword
+  search; add `--only-notes` to search ONLY the lessons.
+
+```bash
+memgrep recall "$SYMPTOM" $ROOTS --sort lmd                # newest-touched first
+memgrep find "+rotator +keychain -widget" $ROOTS           # AND / exclude
+memgrep links --broken $ROOTS                              # context edges to fill (→ MEMORIZE/UPDATE)
+```
+
+## The navigation contract (don't over-read)
+
+Surface the TIP, read what the task needs, follow links on demand. Reading an
+entire functionality's page tree "to be safe" defeats the wiki — its whole point
+is that context spend stays proportional to the task. One hub + the two or three
+linked pages your edit actually touches is the normal read.
 
 ## Output
 
-A short ranked list of `path — description` lines (memgrep) or matching paths
-(grep fallback), best first. Read the top few; do NOT dump full note bodies into
-the conversation — open the one you need.
+A short ranked list of `path — description` (memgrep) or paths (grep), plus the
+hub you landed on for a file-anchored recall. Read the few you need; do NOT dump
+full page bodies into the conversation — open the one the task requires.
 
 ## Examples
 
 <example>
+About to edit src/frontend/panels/Login.tsx
+→ Entry A: find the `frontend` hub (its globs own src/frontend/**), read it, then
+  follow See-also to [[login-panel]] + [[style-system]] only — skip the rest of
+  the tree.
+</example>
+
+<example>
 User: the oauth rotator failed again and I had to log in manually
-→ recall "oauth rotator failed had to log in manually" → surfaces the keychain
-  + resume-protocol notes #1/#2 with their lessons appended; read them WHOLE
-  (facts + the `[N] - WHY` lessons) before touching the rotator.
+→ Entry B: recall "oauth rotator failed had to log in manually" → the keychain +
+  resume-protocol pages with lessons appended; read them WHOLE before touching it.
 </example>
 
 <example>
-User: what did we learn about the rotator in the last week?
-→ memgrep recall "oauth rotator" "$MEMDIR" --since 2026-06-02 --sort lmd
-  → recent rotator notes, newest-modified first, each with its lessons.
+User: what do we know about the frontend before I restyle the dialogs?
+→ Entry A from the `frontend` hub → descend into [[dialog-forms]] + [[style-system]].
 </example>
-
-<example>
-User: find the memory that mentions max_retries but not the widget
-→ memgrep find "+max_retries -widget" "$MEMDIR"
-  → note-level keyword search (mandatory term, exclude term).
-</example>
-
-```text
-User: recall what we decided about branch protection rulesets
-User: have we seen this head/tee truncation before?
-User: check the memory notes about compaction resume
-```
 
 ## Scope
 
-ONLY searches + surfaces existing memory notes (read-only). Does NOT write notes
-(use `/janitor-memory-write`). Degrades to plain grep when memgrep is absent;
-never blocks on a missing binary.
+ONLY searches + surfaces + navigates existing wikimem pages (read-only). Does NOT
+write (use `/janitor-memory-write`) or modify (use `/janitor-memory-update`).
+Degrades to grep when memgrep is absent; never blocks on a missing binary.
 
 ## Resources
 
-- `~/.claude/rules/markdown-memory-recall.md` — the recall protocol (the law,
-  the schema, the read-the-notes rule, the dual-test method).
-- `$CLAUDE_PLUGIN_ROOT/tools/memgrep/SKILL.md` — the memgrep tool reference.
-- `/janitor-memory-write` — the WRITE side (authoring + the correction protocol).
-- `/search-user-mem` — searches the USER's PRIVATE memory store (a separate
-  corpus, agent-invisible); distinct from this recall of the agent's notes.
+- [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
+  — the wiki data model (tiers, file→functionality globs, See-also, the memgrep
+  command map).
+- `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" recall
+  law + schema + dual-test method.
+- `$CLAUDE_PLUGIN_ROOT/tools/memgrep/SKILL.md` — the memgrep instrument reference.
+- `/janitor-memory-write` (MEMORIZE) · `/janitor-memory-update` (UPDATE) — the
+  write legs; run RECALL before both.
+- `/search-user-mem` — searches the USER's PRIVATE store (agent-invisible); a
+  separate corpus, distinct from this recall of the agent wiki.
