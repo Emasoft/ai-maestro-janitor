@@ -200,6 +200,15 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # unchanged. 6h cadence — the corpus changes slowly and the scan is bounded +
     # content-fingerprint deduped, so unchanged fires are near-free.
     ("memory-librarian", 21600, "CLAUDE_PLUGIN_OPTION_MEMORY_LIBRARIAN_INTERVAL"),
+    # project-map-drift nudges when the fenced CLAUDE.md project map is stale
+    # (TRDD-e247a349). DETECTION ONLY — digest-compare against the fence
+    # header, zero extraction — and it NEVER writes CLAUDE.md: the write busts
+    # the prompt-prefix cache (§5) and would race human/Claude edits; the
+    # refresh is agent-run via repomap_generate.py, which carries the gen-lock
+    # + lost-update guard + byte-preservation invariant. Opt-in flag
+    # (`repomap-opt-in.flag`, default OFF) → total no-op until
+    # /janitor-auto-repomap-on. 6h cadence — a stale map is advisory.
+    ("project-map-drift", 21600, "CLAUDE_PLUGIN_OPTION_PROJECT_MAP_DRIFT_INTERVAL"),
     # memory-scope-leak keeps the PUSHED memory scope clean (TRDD-c77dae09, the
     # THREE-SCOPE addendum). The PROJECT scope (<git-root>/memory/) is git-tracked
     # and pushed, so it must NEVER carry machine/user-private data; this detector

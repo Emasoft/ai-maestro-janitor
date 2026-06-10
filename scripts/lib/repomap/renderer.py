@@ -32,6 +32,13 @@ FENCE_END = "<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>"
 # enough that genuine small clusters stay expanded.
 MIN_FAMILY = 8
 
+# Cap the bracketed member-name list of a collapsed family. A 223-member
+# family must not spell out 223 names (two such lines once dominated the whole
+# map); the first names + a "+N more" keep the line scannable, and the full
+# roster is one `ls`/glob away on disk. Deterministic (sorted members, fixed
+# cut) so the structure hash stays stable.
+MAX_FAMILY_NAMES = 10
+
 _SCHEMA = "v1"
 
 
@@ -116,7 +123,12 @@ def render_body(filemaps: list[FileMap]) -> str:
     family_lines: list[str] = []
     for key in sorted(collapsed, key=lambda k: (k.directory, k.token)):
         members = sorted(groups[key], key=lambda f: f.path)
-        prefixes = ", ".join(_stem_prefix(m.path) for m in members)
+        names = [_stem_prefix(m.path) for m in members]
+        if len(names) > MAX_FAMILY_NAMES:
+            shown = names[:MAX_FAMILY_NAMES]
+            prefixes = ", ".join(shown) + f", … +{len(names) - len(shown)} more"
+        else:
+            prefixes = ", ".join(names)
         role = _common_role(members)
         pattern = f"`{key.directory}/*_{key.token}.py`" if key.directory else f"`*_{key.token}.py`"
         head = f"{pattern} (×{len(members)})"
