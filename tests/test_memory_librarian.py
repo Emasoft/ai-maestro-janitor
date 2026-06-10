@@ -17,6 +17,7 @@ binary is absent (the detector itself is a graceful no-op without it).
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -745,6 +746,98 @@ class TestMemoryLibrarianDedupe(unittest.TestCase):
             (memdir / "d.md").write_text(_note("d", "topic two", ["two"]))
             second = _run(home, project)
             self.assertIn("[memory-librarian]", second)
+
+
+class TestMemoryLibrarianReindex(unittest.TestCase):
+    """Scheduled reindex (rank 8): the librarian refreshes the SQLite index per root.
+
+    Uses a SPY memgrep (a tiny script that logs every invocation's argv and
+    returns empty stdout) so the test can assert `reindex <root>` was invoked
+    per scope root — without depending on the real binary's index internals.
+    """
+
+    def _spy_memgrep(self, home: Path, *, reindex_exit: int = 0) -> tuple[Path, Path]:
+        """Write a spy memgrep that logs argv to a file; return (binary, logfile).
+
+        `reindex_exit` lets a test make ONLY the `reindex` subcommand fail (every
+        other subcommand still exits 0 with empty stdout) to prove failure is
+        tolerated.
+        """
+        log = home / "memgrep-calls.log"
+        binary = home / "spy-memgrep"
+        binary.write_text(
+            "#!/usr/bin/env bash\n"
+            f'printf "%s\\n" "$*" >> {log}\n'
+            f'if [ "$1" = "reindex" ]; then exit {reindex_exit}; fi\n'
+            "exit 0\n"
+        )
+        binary.chmod(0o755)
+        return binary, log
+
+    def _run_with_spy(self, home: Path, project: Path, binary: Path) -> str:
+        env = dict(os.environ)
+        env["HOME"] = str(home)
+        env["CLAUDE_PROJECT_DIR"] = str(project)
+        env["CLAUDE_SESSION_ID"] = "reindexsess"
+        env["MEMGREP_BIN"] = str(binary)
+        env.pop("CLAUDE_PLUGIN_OPTION_MEMORY_LIBRARIAN_INTERVAL", None)
+        res = subprocess.run(
+            [sys.executable, str(DETECTOR)],
+            capture_output=True, text=True, env=env, timeout=60, check=False,
+        )
+        if res.returncode != 0:
+            raise AssertionError(f"detector exited {res.returncode}; stderr:\n{res.stderr}")
+        return res.stdout
+
+    def test_reindex_invoked_for_the_local_root(self):
+        """`memgrep reindex <local-root>` is invoked when the LOCAL scope has notes."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "n.md").write_text(_note("n", "a topic", []))
+            binary, log = self._spy_memgrep(home)
+            self._run_with_spy(home, project, binary)
+            self.assertTrue(log.exists(), "spy memgrep was never invoked")
+            calls = log.read_text()
+            # The reindex line must name the LOCAL memory root.
+            self.assertRegex(calls, rf"(?m)^reindex .*{re.escape(str(memdir))}\s*$")
+
+    def test_reindex_runs_before_index_query(self):
+        """reindex is invoked BEFORE the `index --markdown` query (freshness-first)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "n.md").write_text(_note("n", "a topic", []))
+            binary, log = self._spy_memgrep(home)
+            self._run_with_spy(home, project, binary)
+            lines = log.read_text().splitlines()
+            reindex_idx = next((i for i, ln in enumerate(lines) if ln.startswith("reindex ")), None)
+            index_idx = next((i for i, ln in enumerate(lines) if ln.startswith("index ")), None)
+            self.assertIsNotNone(reindex_idx, "reindex was never invoked")
+            if index_idx is not None:
+                self.assertLess(reindex_idx, index_idx, "reindex must precede the index query")
+
+    def test_reindex_failure_is_tolerated(self):
+        """A failing `reindex` does not crash the detector (it falls back to the walk)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "n.md").write_text(_note("n", "a topic", []))
+            binary, log = self._spy_memgrep(home, reindex_exit=3)
+            # Must NOT raise (the _run_with_spy helper asserts exit 0).
+            self._run_with_spy(home, project, binary)
+            # reindex was still attempted (proving the failure path was exercised).
+            self.assertRegex(log.read_text(), r"(?m)^reindex ")
+
+    def test_no_reindex_when_no_notes(self):
+        """An empty scope root is not reindexed (no point indexing nothing)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            _build(home, project)  # empty memdir, no notes
+            binary, log = self._spy_memgrep(home)
+            self._run_with_spy(home, project, binary)
+            # The spy is never invoked at all (the detector no-ops on an empty root).
+            self.assertFalse(log.exists(), "reindex must not run on an empty scope")
 
 
 class TestMemoryLibrarianRegistration(unittest.TestCase):

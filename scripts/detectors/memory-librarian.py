@@ -831,6 +831,20 @@ def _collect_link_findings(
     return broken, orphans, index_sync
 
 
+def _reindex_scope(binary: str, memdir: Path) -> None:
+    """Refresh memgrep's persistent SQLite index for ONE scope root (rank 8).
+
+    `memgrep reindex <root>` builds/updates the `.memgrep/index.db` sidecar; it
+    is git-incremental (only changed files re-parse) so it is cheap on the 6h
+    cadence. Failure-tolerant: `_run_memgrep` already logs a non-zero exit and
+    returns None, and a reindex failure is non-fatal (the live walk still returns
+    correct results — only the index speed-up is lost), so we simply discard the
+    result and continue. The index sidecar is self-gitignored by memgrep, so this
+    never dirties the (PROJECT-scope) repo tree.
+    """
+    _run_memgrep(binary, ["reindex"], memdir)
+
+
 def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     """Run the per-scope candidate + integrity analysis on ONE memory root.
 
@@ -855,6 +869,15 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
         return report
     if not has_note:
         return report
+
+    # Refresh the persistent SQLite index FIRST (rank 8) so the corpus index
+    # stays fresh on the 6h cadence. `reindex` is cheap — it is git-incremental,
+    # re-parsing only files changed since the last indexed commit (memgrep is
+    # already git-aware), so the constant background churn costs near-nothing.
+    # Failure is tolerated: on a reindex error the live walk still produces
+    # correct results (it just silently loses the index speed-up), so we log and
+    # continue rather than skipping the scope.
+    _reindex_scope(binary, memdir)
 
     # Page-shape integrity runs per-note, independent of clustering (rank 3).
     report.shape = _collect_shape_findings(memdir)
