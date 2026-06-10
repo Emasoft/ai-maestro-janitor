@@ -1,12 +1,44 @@
 ---
 trdd-id: 631fa3de-77a6-400f-841c-c745a33637d4
 title: Janitor security guard mode — evaluate autonomous remediation of high-risk findings
-status: not-started
+column: backburner
 created: 2026-05-25T15:22:13+0200
-updated: 2026-05-25T15:22:13+0200
+updated: 2026-06-10T09:50:00+0200
+current-owner: janitor-dev-session
+priority: 5
+severity: MEDIUM
+effort: L
+labels: [security, autonomy, guard-mode, evaluation, shelved-pending-user-direction]
+task-type: spike
+release-via: none
 ---
 
 # TRDD-631fa3de — Janitor security guard mode: evaluate autonomous remediation of high-risk findings
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-10
+
+**Status: PARKED in `backburner`, awaiting the USER's explicit §9 direction pick
+— but PARTIALLY ANSWERED by events since authoring (2026-05-25):**
+
+1. **The user already gave a class-level direction** (memory
+   `feedback_security_act_dont_ask`, standing): *for rulesets / workflows /
+   publish hooks, fix immediately, skip the ask-gate.* That is a de-facto §9
+   answer for the GitHub-hardening slice of guard mode.
+2. **A real autonomous-acting slice SHIPPED + was RATIFIED:** the tri-party
+   `baseline-*` rulesets (janitor#14, owner-ratified Tier-3) — the janitor now
+   auto-applies the ratified pair + `baseline-tag-protect` as-is (exempt per
+   manager-approval-defaults §F), with deviations still gated. The
+   `/janitor-autofix-on|off` mode switch also exists.
+3. **What remains genuinely OPEN** (the part still needing a deliberate user
+   pick): autonomous EDITING of workflow YAML / repo files beyond the ratified
+   baselines — i.e. the full "guard mode" where the janitor rewrites a
+   vulnerable workflow on detection. The evaluation in the body below stands;
+   no such acting surface ships until the user picks among §9's options.
+
+**NEXT ACTION when revived:** present §9's options to the user with the
+post-May-25 reality above folded in (much of the option-space collapsed to
+"already ratified+shipped"); implement only what they pick. Until then this
+TRDD is a deliberate park, not neglect.
 
 **Filename:** `design/tasks/TRDD-20260525_152213+0200-631fa3de-janitor-security-guard-mode.md`
 **Tracked in:** this repo (design/tasks/ is git-tracked)
