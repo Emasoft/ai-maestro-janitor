@@ -114,6 +114,16 @@
         ]
       },
       {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/post-edit-memory-correction.py",
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "matcher": "mcp__.*",
         "hooks": [
           {
