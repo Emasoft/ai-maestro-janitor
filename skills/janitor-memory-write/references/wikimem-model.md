@@ -101,10 +101,18 @@ Every page declares a `tier` — the output of the EXPAND/REDUCE decision:
 suns (hub + aspects) all radiate DOWN onto the same shared component terminals,
 so the graph CONVERGES rather than fanning out forever.
 
-## The directional edge model (typed links, not a flat "see also")
+## The edge model — EVERY link is bidirectional (the link law)
 
-Links carry MEANING based on the two endpoints' tiers. Every page stores the
-edges relevant to ITS side:
+**The one law of wikimem links: if A links to B, B links to A. ALWAYS.** No
+exceptions, no link type exempt. Every edge in the wiki is one relation stored on
+BOTH endpoints, so the graph is fully navigable from ANY page in ANY direction —
+an agent landing on a component can climb to every rule that governs it, and an
+agent landing on a rule can descend to every element it affects, without any
+reverse-lookup machinery. A one-sided link is a defect (the janitor librarian
+detects and backfills it, but the authoring agent wires both ends NOW).
+
+Links also carry MEANING based on the two endpoints' tiers — the SAME edge is
+named differently on each side. Every page stores the half relevant to ITS side:
 
 - **On a GENERAL page (`hub`/`aspect`) → `## Applies to`** — the ray-list: a
   `[[link]]` to EVERY element this page's rule governs. The `frontend-style`
@@ -116,14 +124,23 @@ edges relevant to ITS side:
   component lists NOTHING downstream — it governs nothing.
 - **`## See also`** (optional, any tier) — genuinely LATERAL relations that are
   not a govern edge: a sibling component it interacts with, the view/model it
-  binds, the db table behind it, a related aspect.
+  binds, the db table behind it, a related aspect. **Also bidirectional:** if
+  `login-panel`'s See-also lists `[[user-model]]`, then `user-model`'s See-also
+  lists `[[login-panel]]`.
 
-`Applies to` and `Governed by` are the two halves of ONE edge: if `style-system`
-*Applies to* `login-panel`, then `login-panel` is *Governed by* `style-system`.
-When you create/extend one side, add the reciprocal on the other (the janitor
-librarian backfills any you miss and flags one-sided edges). Links are
-`[[page-name]]` wikilinks (memgrep parses them); a link to a not-yet-written page
-is fine — it marks one to create, and the librarian surfaces it as a broken link.
+How the law maps to the sections — the same edge, two spellings:
+
+| Edge kind | On the A side | On the B side |
+|---|---|---|
+| govern (general ↔ element) | general's `## Applies to` → `[[element]]` | element's `## Governed by` → `[[general]]` |
+| hub ↔ part | hub's parts map / `## Applies to` → `[[part]]` | part's `## Governed by` (or hub link) → `[[hub]]` |
+| lateral (peer ↔ peer) | A's `## See also` → `[[B]]` | B's `## See also` → `[[A]]` |
+
+When you create/extend one side, add the reciprocal on the other in the SAME
+edit (the janitor librarian backfills any you miss and flags one-sided edges).
+Links are `[[page-name]]` wikilinks (memgrep parses them); a link to a
+not-yet-written page is fine — it marks one to create, and the librarian
+surfaces it as a broken link until the page (and its back-link) exists.
 
 ## Page anatomy
 
@@ -207,19 +224,28 @@ whole point is that token spend stays proportional to the task.
 
 ## memgrep — the instrument (which command does what)
 
-memgrep is the *tool*; these skills are the *rules*.
+memgrep is the *tool*; these skills are the *rules*. Command semantics below are
+EMPIRICALLY VERIFIED against memgrep 0.1.0 — note especially the `links` flags:
+**`--to NOTE` = NOTE's OUT-links (where NOTE points); `--from NOTE` = NOTE's
+BACKLINKS (who points at NOTE)** — read them as "links to/from, relative to the
+named note".
 
 | Operation | memgrep |
 |---|---|
 | Symptom recall | `memgrep recall "<symptom>" <roots…>` |
-| Find the hub for the file being edited | list hubs (`--where 'fm.tier "hub"'`), match each hub's `globs` against the file |
-| EXPAND: all elements to radiate onto | `memgrep --where 'fm.tier "component" and fm.functionality "<fn>"'` → link them in `## Applies to` |
-| Descend (component → its governors) | read the page's `## Governed by`, or `memgrep links --from <component>` |
-| Reverse (general → all it affects) | `memgrep --where 'linked-from "<general>"'` / `memgrep links --to <general>` |
-| Reciprocity audit (one-sided edges) | compare `links --to <general>` against the general's `## Applies to` list → librarian backfills |
-| Pages of a functionality | `memgrep --where 'fm.functionality "frontend"'` |
-| Context edges to fill | `memgrep links --broken` / `--orphans` |
-| Refresh the index | `memgrep reindex <root>` |
+| List hub pages (then match their `globs` against the file you're editing) | `memgrep -l . <dir> --where 'fm.tier "hub"' \| sort -u` |
+| EXPAND: all elements to radiate onto | `memgrep -l . <dir> --where 'fm.tier "component" and fm.functionality "<fn>"' \| sort -u` |
+| Where does this page point? (out-links) | `memgrep links --to <page> <dir>` |
+| Who points at this page? (backlinks) | `memgrep links --from <page> <dir>` |
+| Files that link to N (semijoin) | `memgrep -l . <dir> --where 'links-to "<N>"' \| sort -u` |
+| Files N links to (semijoin) | `memgrep -l . <dir> --where 'linked-from "<N>"' \| sort -u` |
+| Bidirectionality audit (the link law) | for each page: out-links (`links --to`) minus backlinks (`links --from`) must be empty both ways → librarian backfills |
+| Pages of a functionality | `memgrep -l . <dir> --where 'fm.functionality "frontend"' \| sort -u` |
+| Dangling / unreferenced pages | `memgrep links --broken <dir>` / `memgrep links --orphans <dir>` |
+| Refresh the index | `memgrep reindex <dir>` |
+
+(`fm.KEY` matches the key ANYWHERE in the frontmatter — `fm.tier` finds the
+nested `metadata.tier`; a dotted path like `fm.metadata.tier` does NOT work.)
 
 When memgrep is absent, every operation degrades to `grep`/`ls` over the same
 plain-markdown files — the wiki never *breaks*, it only gets slower to navigate.

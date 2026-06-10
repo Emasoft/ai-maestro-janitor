@@ -60,11 +60,12 @@ in a new page):
    this is not a plain add — apply THE UPDATE INVARIANT: clean the body to the
    new truth AND demote the old statement to a `[^N]` lesson with the WHY (§2).
    Only a genuinely NEW, additive fact skips the demotion.
-2. Update the TYPED edges if the change adds/removes a govern relation, BOTH
-   sides: a component now obeying a new rule → add it to the component's
-   `## Governed by` AND that rule's `## Applies to`; a general rule now covering a
-   new element → add to its `## Applies to` AND the element's `## Governed by`.
-   Remove dead edges on both ends. (Lateral, non-govern links go in `## See also`.)
+2. Update the edges if the change adds/removes a relation — and per THE LINK LAW
+   (every link bidirectional, always), edit BOTH ends in the same pass: a
+   component now obeying a new rule → the component's `## Governed by` AND that
+   rule's `## Applies to`; a general rule covering a new element → its
+   `## Applies to` AND the element's `## Governed by`; a new lateral relation →
+   `## See also` on BOTH pages. Remove dead edges on both ends too.
 3. Bump `lmd:`. Reindex / fix the MEMORY.md hook line only if the title or
    `description` changed.
 
@@ -110,9 +111,10 @@ move + relink, NOT a silent copy):
   that other components ALSO follow. Move that rule OUT into a new RADIATING
   `aspect` page; replace it in the component with a `## Governed by` link UP to
   the aspect; and on the aspect's `## Applies to`, radiate DOWN to that component
-  AND every other follower (`memgrep --where 'fm.tier "component" …'` to find
-  them). Now the rule has one home and every follower points up to it — the
-  duplication is gone.
+  AND every other follower (find them:
+  `memgrep -l . "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`).
+  Now the rule has one home and every follower points up to it — the duplication
+  is gone.
 - **REDUCE (push element-specific detail down):** a general page (`aspect`/`hub`)
   collected detail that affects only ONE element. Move it INTO that element's
   `component` page (create it if absent). If the general page still governs the
@@ -133,9 +135,10 @@ you left no dangling edge.
 ## Consistency checklist (run after every UPDATE)
 
 - `lmd:` bumped on every page you touched.
-- The typed edges reflect the new reality and stay RECIPROCAL: every general
-  page's `## Applies to` ray is matched by `## Governed by` on the element (and
-  vice versa); lateral changes land in `## See also`. Fix both ends of any move.
+- THE LINK LAW holds: EVERY link bidirectional — each `## Applies to` ray matched
+  by a `## Governed by` on the element (and vice versa), each `## See also`
+  mirrored on the other page. Fix both ends of any move; no one-sided link of
+  any kind survives the update.
 - No fact was deleted outright — a contradicted fact was demoted to a `[^N]`
   lesson with its WHY, not erased.
 - `memgrep links --broken` over the scope shows no new dangling `[[link]]` you

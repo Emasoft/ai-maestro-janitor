@@ -191,12 +191,13 @@ class ScopeReport:
     broken: list[str] = field(default_factory=list)
     orphans: list[str] = field(default_factory=list)
     index_sync: list[str] = field(default_factory=list)
+    one_sided: list[str] = field(default_factory=list)
 
     def has_findings(self) -> bool:
         """True iff this scope surfaces ANYTHING (candidate or integrity issue)."""
         return bool(
             self.clusters or self.conflicts or self.shape
-            or self.broken or self.orphans or self.index_sync
+            or self.broken or self.orphans or self.index_sync or self.one_sided
         )
 
 
@@ -427,6 +428,48 @@ def _parse_links(stdout: str) -> set[frozenset[str]]:
             continue
         pairs.add(frozenset((a, b)))
     return pairs
+
+
+def _parse_links_directed(stdout: str) -> set[tuple[str, str]]:
+    """Parse `memgrep links` → DIRECTED (from, to) basename pairs, notes only.
+
+    The undirected `_parse_links` deliberately collapses direction (a single
+    tangential link satisfies the cross-link invariant for clustering). The LINK
+    LAW check (every link bidirectional — wikimem-model, TRDD-bc16d602) needs the
+    direction preserved, so this variant keeps (from, to) ordered. Non-note
+    endpoints (MEMORY.md, the proposal, the generated index) are excluded — the
+    index legitimately links one-way. Self-links are dropped.
+    """
+    pairs: set[tuple[str, str]] = set()
+    for raw in stdout.splitlines():
+        m = _LINK_RE.match(raw)
+        if not m:
+            continue
+        a = _basename(m.group("from"))
+        b = _basename(m.group("to"))
+        if a == b or not _is_note_basename(a) or not _is_note_basename(b):
+            continue
+        pairs.add((a, b))
+    return pairs
+
+
+def _collect_one_sided_findings(directed: set[tuple[str, str]]) -> list[str]:
+    """The LINK LAW audit: every wikimem link must be bidirectional.
+
+    For each directed note→note link (a, b) with no reverse (b, a), surface a
+    rank-4 finding telling the agent which back-link to add. The janitor never
+    edits the page itself — like every librarian duty this is a surfaced
+    candidate for an agent's conscious backfill (typically: add `[[a]]` to b's
+    `## Applies to` / `## Governed by` / `## See also`, whichever side of the
+    edge b is). Sorted + capped for a stable proposal fingerprint.
+    """
+    findings = [
+        f"`{a}` links [[{b}]] but `{b}` has no back-link to `{a}` "
+        "(the link law: every link is bidirectional — add the reciprocal)"
+        for (a, b) in directed
+        if (b, a) not in directed
+    ]
+    return sorted(findings)[:_MAX_LINK_FINDINGS]
 
 
 def _tag_clusters(notes: dict[str, NoteMeta]) -> dict[str, list[str]]:
@@ -896,6 +939,11 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
         binary, memdir, linked
     )
 
+    # The LINK LAW audit (rank 4, TRDD-bc16d602): every note→note link must have
+    # its reciprocal. Reuses the SAME `links` stdout — no extra memgrep call.
+    if links_out:
+        report.one_sided = _collect_one_sided_findings(_parse_links_directed(links_out))
+
     index_out = _run_memgrep(binary, ["index", "--markdown"], memdir)
     notes = _parse_index(index_out) if index_out else {}
 
@@ -976,6 +1024,12 @@ def _render_link_section(report: ScopeReport) -> list[str]:
             lines.append(f"- {issue}")
     else:
         lines.append("- (none)")
+    lines += ["", "### One-sided links (the link law)", ""]
+    if report.one_sided:
+        for issue in report.one_sided[:_MAX_LINK_FINDINGS]:
+            lines.append(f"- {issue}")
+    else:
+        lines.append("- (none)")
     return lines
 
 
@@ -1027,9 +1081,11 @@ def _candidate_fingerprint(per_scope: list[ScopeReport]) -> str:
         broken_sig = "|".join(sorted(r.broken))
         orphan_sig = "|".join(sorted(r.orphans))
         sync_sig = "|".join(sorted(r.index_sync))
+        one_sided_sig = "|".join(sorted(r.one_sided))
         parts.append(
             f"{r.scope}=={cluster_sig}##{conflict_sig}"
             f"##S:{shape_sig}##B:{broken_sig}##O:{orphan_sig}##M:{sync_sig}"
+            f"##L:{one_sided_sig}"
         )
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
 
@@ -1057,7 +1113,7 @@ def main() -> int:
     total_agg = 0
     total_conf = 0
     total_shape = 0
-    total_link = 0  # broken-links + orphans + MEMORY.md-sync (rank 4)
+    total_link = 0  # broken-links + orphans + MEMORY.md-sync + one-sided (rank 4)
     for scope, memdir in scopes:
         report = _analyze_scope(binary, memdir)
         report.scope = scope
@@ -1066,7 +1122,10 @@ def main() -> int:
             total_agg += len(report.clusters)
             total_conf += len(report.conflicts)
             total_shape += len(report.shape)
-            total_link += len(report.broken) + len(report.orphans) + len(report.index_sync)
+            total_link += (
+                len(report.broken) + len(report.orphans)
+                + len(report.index_sync) + len(report.one_sided)
+            )
 
     if not per_scope:
         # Nothing to surface in any scope → silent no-op.

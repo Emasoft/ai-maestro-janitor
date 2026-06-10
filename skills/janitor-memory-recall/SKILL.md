@@ -38,8 +38,9 @@ Goal: surface the HUB for the functionality the file belongs to, then descend.
    ```bash
    FILE="src/frontend/panels/Login.tsx"          # the file (relative to repo root)
    # List hub pages, read each hub's globs, and pick the hub whose glob matches FILE.
-   memgrep --where 'fm.tier "hub"' $ROOTS          # the hubs; inspect their globs:
-   memgrep --where 'fm.functionality "frontend"' $ROOTS   # or query a functionality directly
+   # shellcheck disable=SC2086
+   memgrep -l . $ROOTS --where 'fm.tier "hub"' | sort -u            # the hubs; inspect their globs
+   memgrep -l . $ROOTS --where 'fm.functionality "frontend"' | sort -u  # or a functionality's pages
    ```
 
    (When memgrep is absent: `grep -rl 'tier: hub' $ROOTS`, read each hub's
@@ -56,13 +57,18 @@ Goal: surface the HUB for the functionality the file belongs to, then descend.
    like a Skill loads a reference — only if relevant; never the whole subtree.
 
    ```bash
-   memgrep links --from login-panel $ROOTS             # the component's Governed-by (its rulers)
-   memgrep --where 'linked-from "style-system"' $ROOTS  # reverse: every element this rule governs
-   memgrep links --to style-system $ROOTS              # same, via the link graph
+   # links --to NOTE = NOTE's OUT-links; links --from NOTE = its BACKLINKS.
+   memgrep links --to login-panel $ROOTS    # where the component points (its rulers + laterals)
+   memgrep links --to style-system $ROOTS   # where the rule points (every element it governs)
+   memgrep links --from style-system $ROOTS # who points at the rule (same set — see below)
    ```
 
-   If you're about to CHANGE a general rule, read its `## Applies to` ray-list
-   first — it shows every element you'd affect before you touch it.
+   THE LINK LAW (every link bidirectional) means out-links and backlinks of a
+   page agree — you can navigate the graph from ANY entry point in ANY direction,
+   no reverse-lookup needed. If `--to` and `--from` ever disagree, that's a
+   one-sided link defect to flag for the librarian. If you're about to CHANGE a
+   general rule, read its `## Applies to` ray-list first — every element you'd
+   affect, before you touch it.
 
 ## Entry B — SYMPTOM (the "have we hit this before?" path)
 

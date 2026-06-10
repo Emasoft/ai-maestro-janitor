@@ -517,6 +517,44 @@ class TestMemoryLibrarianLinksAndSync(unittest.TestCase):
             self.assertIn("has_broken.md", broken)
             self.assertIn("does-not-exist", broken)
 
+    def test_one_sided_link_surfaced(self):
+        """THE LINK LAW (TRDD-bc16d602): a note→note link with no reciprocal is
+        flagged as one-sided, naming both endpoints and the missing back-link."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # alpha links beta; beta does NOT link back → one-sided.
+            (memdir / "alpha.md").write_text(
+                _note("alpha", "alpha widget topic", [], body="See [[beta]]."))
+            (memdir / "beta.md").write_text(
+                _note("beta", "beta gadget topic", [], body="No links here."))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            self.assertIn("link/sync", out)
+            one_sided = self._section(memdir, "One-sided links (the link law)")
+            self.assertIn("alpha", one_sided)
+            self.assertIn("beta", one_sided)
+            self.assertIn("no back-link", one_sided)
+
+    def test_bidirectional_links_are_not_flagged(self):
+        """A fully reciprocal pair satisfies the link law → the one-sided section
+        stays `(none)` (the corpus also carries a broken link so a proposal
+        exists to inspect, without perturbing the a<->b reciprocity)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "a.md").write_text(
+                _note("a", "alpha widget topic", [], body="See [[b]]."))
+            (memdir / "b.md").write_text(
+                _note("b", "bravo gadget topic", [],
+                      body="Back to [[a]]. Also [[missing-page]]."))
+            _run(home, project)
+            one_sided = self._section(memdir, "One-sided links (the link law)")
+            self.assertIn("(none)", one_sided)
+            # the a<->b reciprocal pair itself is never reported one-sided
+            self.assertNotIn("no back-link to `a`", one_sided)
+            self.assertNotIn("no back-link to `b`", one_sided)
+
     def test_orphan_surfaced_only_in_a_linked_corpus(self):
         """An orphan page is surfaced when the corpus HAS a link graph it is left out of."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:

@@ -117,21 +117,26 @@ page is fine (it flags one to create later).
 
 ### 5. WIRE the context — radiate or receive (this is what makes it a wiki)
 
-A page with no edges is a dead note. The wiring follows the page's SHAPE:
+A page with no edges is a dead note. **THE LINK LAW: every link is bidirectional
+— if A links to B, B links to A, ALWAYS, See-also included.** Wire BOTH ends of
+every edge in the same edit. The wiring follows the page's SHAPE:
 
 - **If you EXPANDED (a general/radiating page):** in `## Applies to`, link DOWN to
-  EVERY element this rule governs (find them: `memgrep --where 'fm.tier
-  "component" and fm.functionality "<fn>"'`). Then add the reciprocal: on each of
-  those component pages, add this page to their `## Governed by`. Also link the
-  new aspect from its hub's parts map.
+  EVERY element this rule governs (find them:
+  `memgrep -l . "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`).
+  Then the reciprocal: on each of those component pages, add this page to their
+  `## Governed by`. Also link the new aspect from its hub's parts map (and the
+  hub into the aspect's edges).
 - **If you REDUCED (a component/receiving page):** in `## Governed by`, link UP to
   EVERY general page that affects this element (its style, protocols, configs).
-  Then add the reciprocal: on each of those general pages, add this element to
-  their `## Applies to`. Link the new component from its hub's parts map.
+  Then the reciprocal: on each of those general pages, add this element to their
+  `## Applies to`. Link the new component from its hub's parts map (and the hub
+  into the component's `## Governed by`).
+- **Any `## See also` lateral link** gets its mirror See-also on the other page,
+  same edit.
 
-`Applies to` ↔ `Governed by` are two halves of one edge — wire both sides. The
-janitor librarian backfills any reciprocal you miss and flags one-sided edges,
-but do the obvious ones now.
+The janitor librarian backfills any reciprocal you miss and flags one-sided
+edges, but it is a safety net — the author wires both ends now.
 
 ### 6. Index it
 
@@ -143,8 +148,9 @@ present (optional; recall auto-reindexes).
 
 - Would a future session find this from the SYMPTOM via `description`? If the
   description reads like the *answer*, rewrite it as the *question*.
-- Are the typed edges wired BOTH ways — a general page's `## Applies to` rays
-  matched by `## Governed by` on each element, or vice versa (no one-sided edge)?
+- Is EVERY link bidirectional — each `## Applies to` ray matched by a
+  `## Governed by` on the element (and vice versa), and each `## See also`
+  mirrored on the other page? No one-sided link of ANY kind (the link law).
 - Is the page LEAN — no governing rule re-copied that should be a link up?
 - Did you respect one-component-one-page (no fragmenting an element)?
 - If you created a hub, are its `globs` precise and non-overlapping with other
