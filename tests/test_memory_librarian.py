@@ -338,6 +338,48 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
             self.assertIn("no_section.md", shape)
             self.assertIn("Notes and lessons learned", shape)
 
+    def test_hub_without_globs_flagged(self):
+        """Wikimem (TRDD-bc16d602): a `tier: hub` page with no `globs:` is flagged
+        (the file→functionality map RECALL Entry A depends on)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "myhub.md").write_text(
+                '---\nname: myhub\ndescription: "frontend overview"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                "metadata:\n  node_type: memory\n  tier: hub\n"
+                "  functionality: frontend\n---\nOverview.\n\n"
+                "## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("myhub.md", shape)
+            self.assertIn("globs", shape)
+
+    def test_component_with_applies_to_flagged_and_clean_wiki_pages_silent(self):
+        """Wikimem: a component that RADIATES (`## Applies to`) is flagged;
+        a well-formed hub (globs) + component (Governed by) are NOT flagged."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "badcomp.md").write_text(
+                '---\nname: badcomp\ndescription: "a widget panel"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                "metadata:\n  node_type: memory\n  tier: component\n---\n"
+                "Body.\n\n## Applies to\n- [[goodhub]]\n\n"
+                "## Notes and lessons learned\n")
+            (memdir / "goodhub.md").write_text(
+                '---\nname: goodhub\ndescription: "area overview"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                "metadata:\n  node_type: memory\n  tier: hub\n"
+                '  globs: ["src/widgets/**"]\n---\nOverview.\n\n'
+                "## Applies to\n- [[badcomp]]\n\n"
+                "## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("badcomp.md", shape)
+            self.assertIn("must not radiate", shape)
+            self.assertNotIn("goodhub.md", shape)
+
     def test_lessons_section_case_insensitive_and_ampersand_accepted(self):
         """`## Notes & Lessons Learned` (historical spelling, any case) satisfies the section check."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:

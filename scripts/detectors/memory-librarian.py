@@ -124,6 +124,15 @@ _FOOTNOTE_DEF_RE = re.compile(r"^\s*\[\^(?P<n>\d+)\]:")
 # `created:`/`updated:`) are the per-element dates (advisory — older notes
 # predate the convention).
 _FM_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][\w-]*)\s*:")
+# Wikimem tier keys (TRDD-bc16d602). `tier:`/`globs:` live NESTED under
+# `metadata:` (but a top-level spelling is tolerated, matching memgrep's
+# any-depth `fm.KEY`), so these match at ANY indent — unlike `_FM_KEY_RE`,
+# which is deliberately top-level-anchored.
+_FM_TIER_RE = re.compile(r"^\s*tier:\s*['\"]?(?P<tier>[\w-]+)")
+_FM_GLOBS_RE = re.compile(r"^\s*globs:\s*\S")
+# The radiating ray-list heading — legal on hub/aspect pages ONLY.
+_APPLIES_TO_RE = re.compile(r"^\s*#{2,}\s+applies\s+to\s*$", re.IGNORECASE)
+
 # Bound the per-note shape read so a pathological note can't blow up the
 # heartbeat. Notes are small; 4000 lines is already absurd for a memory page.
 _MAX_NOTE_LINES = 4000
@@ -671,7 +680,12 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
       (c) frontmatter missing `description` or `name` (the recall-load-bearing
           keys — a note with no `description` is unrecallable-by-symptom);
       (d) missing `ocd`/`lmd` per-element dates (ADVISORY — older notes predate
-          the convention; flagged `(advisory)` so it is visibly lower-severity).
+          the convention; flagged `(advisory)` so it is visibly lower-severity);
+      (e) wikimem (TRDD-bc16d602): a `tier: hub` page missing `globs:` — the
+          file→functionality map RECALL Entry A depends on;
+      (f) wikimem: a `tier: component` page carrying `## Applies to` — components
+          RECEIVE only; the radiating ray-list is general-page-only. A page with
+          NO tier is a plain flat note and is exempt from (e)/(f).
     Returns [] for a perfectly-shaped note.
     """
     fm_lines, body_lines = _split_frontmatter(text)
@@ -718,6 +732,22 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
         issues.append(f"{note}: frontmatter missing `ocd` date (advisory)")
     if "lmd" not in fm_keys and "updated" not in fm_keys:
         issues.append(f"{note}: frontmatter missing `lmd` date (advisory)")
+
+    # (e)/(f) wikimem tier shape (TRDD-bc16d602). No tier ⇒ a plain flat note,
+    # exempt — the wiki is additive and old notes stay valid.
+    tier = next(
+        (m.group("tier") for ln in fm_lines for m in [_FM_TIER_RE.match(ln)] if m),
+        None,
+    )
+    if tier == "hub" and not any(_FM_GLOBS_RE.match(ln) for ln in fm_lines):
+        issues.append(
+            f"{note}: hub page missing `globs:` (the file→functionality map — wikimem)"
+        )
+    if tier == "component" and any(_APPLIES_TO_RE.match(ln) for ln in body_lines):
+        issues.append(
+            f"{note}: component page must not radiate — `## Applies to` is "
+            "general-page-only (wikimem: components receive via `## Governed by`)"
+        )
 
     return issues
 

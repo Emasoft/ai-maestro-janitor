@@ -190,6 +190,33 @@ OPTIONAL generated artifact; `MEMORY.md` remains the canonical loaded index.
 Recall does not need either index — it scans the notes directly (and
 transparently uses the SQLite `.memgrep/index.db` when it is fresh).
 
+## The wiki layer — pages are wiki nodes, not loose notes (wikimem)
+
+The corpus is a navigable WIKI, not a pile (TRDD-bc16d602). On top of the note
+format above, every page declares its place in the pyramid and its context:
+
+- **`metadata.tier: hub | aspect | component`** — a `hub` is one functionality's
+  overview (frontend, backend, db, …) carrying `metadata.globs:` (the file
+  patterns it owns — so "I'm editing this FILE" maps to its hub); an `aspect` is
+  a GENERAL rule shared by many elements (EXPAND — it RADIATES an `## Applies to`
+  ray-list down to every element it governs); a `component` is ONE element's page
+  (REDUCE — it RECEIVES, carrying `## Governed by` up-links only, and never
+  re-copies a governing rule). One element = one page, always.
+- **THE LINK LAW: every link is bidirectional.** If A links to B, B links to A —
+  `Applies to` ↔ `Governed by` across tiers, `See also` ↔ `See also` laterally.
+  Wire both ends in the same edit; the janitor librarian flags one-sided links.
+- **Updates never delete:** a superseded memory is demoted to a dated `[^N]`
+  lesson with its WHY (see the lessons conventions below), never erased.
+- **Navigate progressively:** recall surfaces the TIP (the hub / the best page);
+  follow only the links the task needs; read a shared general page ONCE and
+  reuse it across every component that points at it.
+
+The executable protocol is the three janitor skills — `/janitor-memory-write`
+(MEMORIZE), `/janitor-memory-update` (UPDATE), `/janitor-memory-recall` (RECALL)
+— and the full data model lives in the write skill's
+`references/wikimem-model.md`. Existing flat notes stay valid (no `tier` ⇒
+`component`); the wiki emerges incrementally as pages are touched.
+
 ## Lessons-learned conventions (footnotes + per-element dates)
 
 Memory pages grow a bottom `## Notes and lessons learned` section. The format is
