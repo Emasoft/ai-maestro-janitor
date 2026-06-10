@@ -60,9 +60,11 @@ in a new page):
    this is not a plain add — apply THE UPDATE INVARIANT: clean the body to the
    new truth AND demote the old statement to a `[^N]` lesson with the WHY (§2).
    Only a genuinely NEW, additive fact skips the demotion.
-2. Update `## See also` if the change introduces a NEW dependency/influence
-   (e.g. the panel now calls a new endpoint → add `[[that-endpoint]]`), and
-   remove an edge that is no longer true.
+2. Update the TYPED edges if the change adds/removes a govern relation, BOTH
+   sides: a component now obeying a new rule → add it to the component's
+   `## Governed by` AND that rule's `## Applies to`; a general rule now covering a
+   new element → add to its `## Applies to` AND the element's `## Governed by`.
+   Remove dead edges on both ends. (Lateral, non-govern links go in `## See also`.)
 3. Bump `lmd:`. Reindex / fix the MEMORY.md hook line only if the title or
    `description` changed.
 
@@ -105,13 +107,17 @@ Editing reveals a page is the wrong shape. Three moves (each = a real content
 move + relink, NOT a silent copy):
 
 - **EXPAND (extract a now-shared rule):** a `component` page accumulated a rule
-  that other components ALSO follow. Move that rule OUT into an `aspect` page
-  (create it via MEMORIZE shape rules), then replace it in the component with a
-  `## See also` link to the new aspect. Add the aspect to the hub map. Now the
-  rule has one home and every follower links to it.
-- **REDUCE (push element-specific detail down):** an `aspect` (or hub) page
-  collected detail that only affects ONE element. Move it INTO that element's
-  `component` page (create it if absent), and leave a See-also link. The general
+  that other components ALSO follow. Move that rule OUT into a new RADIATING
+  `aspect` page; replace it in the component with a `## Governed by` link UP to
+  the aspect; and on the aspect's `## Applies to`, radiate DOWN to that component
+  AND every other follower (`memgrep --where 'fm.tier "component" …'` to find
+  them). Now the rule has one home and every follower points up to it — the
+  duplication is gone.
+- **REDUCE (push element-specific detail down):** a general page (`aspect`/`hub`)
+  collected detail that affects only ONE element. Move it INTO that element's
+  `component` page (create it if absent). If the general page still governs the
+  element for OTHER rules, keep the `## Applies to`/`## Governed by` edge;
+  otherwise the moved detail is purely the component's own (no edge). The general
   page stays general.
 - **MERGE (heal fragmentation):** two pages describe the SAME element from
   different subjects (`login-panel-style` + `login-panel-behavior`). Merge into
@@ -127,8 +133,9 @@ you left no dangling edge.
 ## Consistency checklist (run after every UPDATE)
 
 - `lmd:` bumped on every page you touched.
-- `## See also` reflects the new reality (added new influences, removed dead
-  ones) — on BOTH sides of any move.
+- The typed edges reflect the new reality and stay RECIPROCAL: every general
+  page's `## Applies to` ray is matched by `## Governed by` on the element (and
+  vice versa); lateral changes land in `## See also`. Fix both ends of any move.
 - No fact was deleted outright — a contradicted fact was demoted to a `[^N]`
   lesson with its WHY, not erased.
 - `memgrep links --broken` over the scope shows no new dangling `[[link]]` you

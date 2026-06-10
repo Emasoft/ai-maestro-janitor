@@ -54,16 +54,22 @@ memgrep --where 'fm.functionality "<functionality>"' "$MEMDIR"   # the functiona
 
 ### 3. No page fits → decide the SHAPE (expand vs reduce)
 
-Pick exactly one (see the model for the full definition):
+Pick exactly one (see the model for the full definition + the WHY):
 
 - **New functionality entirely** (no hub yet for this area) → seed a **`hub`**
-  page: the overview + the big general decisions + the file `globs:` the
-  functionality owns. The tip of the iceberg.
-- **EXPAND** — the memory is a *general rule shared by many components/procedures*
-  → an **`aspect`** page (`style-system`, `error-envelope`, `dialog-forms`).
-- **REDUCE** — the memory is *specific to one element* → a **`component`** page
-  (`login-panel`, `user-model`, `checkout-endpoint`).
+  page: the overview + the big general decisions + the parts map + the file
+  `globs:` the functionality owns. The tip of the iceberg.
+- **EXPAND → a GENERAL, RADIATING page** (`aspect`) — the memory is a *general
+  rule shared by many elements* (a style, protocol, config, brand, convention:
+  `style-system`, `error-envelope`, `dialog-forms`). It is a sun: it will carry
+  links DOWN to EVERY element it governs.
+- **REDUCE → a SPECIFIC, RECEIVING page** (`component`) — the memory is *specific
+  to ONE element and governs nothing else* (`login-panel`, `user-model`,
+  `checkout-endpoint`). It is a terminal: it only links UP to the general pages
+  that govern it.
 
+Keep the new page LEAN — never re-copy a governing rule into a component; link up
+to it. This is what keeps the pyramid from exploding (the model's core WHY).
 Honor the **one-component-one-page** invariant: if a component page for this
 element already exists, the memory goes THERE (→ UPDATE), even if you arrived
 from a different subject. Never make `login-panel-style` beside `login-panel`.
@@ -71,8 +77,9 @@ from a different subject. Never make `login-panel-style` beside `login-panel`.
 ### 4. WRITE the page (Write tool, not echo)
 
 Author `"$MEMDIR/<slug>.md"` with the model's schema. Set `ocd`/`lmd` to TODAY.
-ALWAYS include `## See also` AND the standing `## Notes and lessons learned`
-section (the janitor's page-shape validator flags a page that omits either):
+Include the **typed edge section for the page's tier** AND the standing
+`## Notes and lessons learned` section (the janitor's page-shape validator flags
+a page that omits its edges or the lessons section):
 
 ```yaml
 ---
@@ -87,27 +94,44 @@ metadata:
   functionality: <hub-slug>            # which functionality this lives under
   globs: ["<owned file patterns>"]     # REQUIRED on hubs; omit on most leaves
 ---
-<the memories — concise; for a hub the overview + a short map of the parts.
-For feedback/project add **Why:** and **How to apply:** lines.>
+<the memories — LEAN. A hub: overview + parts map. An aspect: the shared rule.
+A component: only what is specific to this element (never re-copy a governing
+rule — link up to it). For feedback/project add **Why:** and **How to apply:**.>
 
-## See also
-- [[related-page]] — why it relates / how it influences this subject.
+## Applies to          # GENERAL pages (hub/aspect) ONLY — the radiating ray-list
+- [[governed-element-1]] · [[governed-element-2]]   # EVERY element this rule governs
+
+## Governed by         # COMPONENT pages ONLY — up-links to its governors
+- [[style-system]] — the palette/spacing it uses.
+- [[error-envelope]] — the error shape it returns.
+
+## See also            # any tier (optional) — lateral relations, not govern edges
+- [[user-model]] — the data this element binds.
 
 ## Notes and lessons learned
 ```
 
-### 5. WIRE the context (this is what makes it a wiki)
+Use `## Applies to` on a hub/aspect, `## Governed by` on a component (+ optional
+`## See also` either way). Each link says *why*; a `[[link]]` to a not-yet-written
+page is fine (it flags one to create later).
 
-A page with no edges is a dead note. Two link directions:
+### 5. WIRE the context — radiate or receive (this is what makes it a wiki)
 
-- **Out** — fill `## See also` with EVERY page that relates to or influences this
-  subject: the general style aspect, the view/model it binds, the API functions
-  it calls, graphic items/animations, the db, downstream consumers. Each link
-  says *why*. A `[[link]]` to a not-yet-written page is fine (it flags one to
-  create later).
-- **Up** — add the new page to its hub's "parts" map and/or the parent aspect's
-  `## See also`, so the tip can reach it. (The janitor librarian backfills any
-  inbound links you miss, but do the obvious ones now.)
+A page with no edges is a dead note. The wiring follows the page's SHAPE:
+
+- **If you EXPANDED (a general/radiating page):** in `## Applies to`, link DOWN to
+  EVERY element this rule governs (find them: `memgrep --where 'fm.tier
+  "component" and fm.functionality "<fn>"'`). Then add the reciprocal: on each of
+  those component pages, add this page to their `## Governed by`. Also link the
+  new aspect from its hub's parts map.
+- **If you REDUCED (a component/receiving page):** in `## Governed by`, link UP to
+  EVERY general page that affects this element (its style, protocols, configs).
+  Then add the reciprocal: on each of those general pages, add this element to
+  their `## Applies to`. Link the new component from its hub's parts map.
+
+`Applies to` ↔ `Governed by` are two halves of one edge — wire both sides. The
+janitor librarian backfills any reciprocal you miss and flags one-sided edges,
+but do the obvious ones now.
 
 ### 6. Index it
 
@@ -119,7 +143,9 @@ present (optional; recall auto-reindexes).
 
 - Would a future session find this from the SYMPTOM via `description`? If the
   description reads like the *answer*, rewrite it as the *question*.
-- Is `## See also` non-empty and honest (real influences, not filler)?
+- Are the typed edges wired BOTH ways — a general page's `## Applies to` rays
+  matched by `## Governed by` on each element, or vice versa (no one-sided edge)?
+- Is the page LEAN — no governing rule re-copied that should be a link up?
 - Did you respect one-component-one-page (no fragmenting an element)?
 - If you created a hub, are its `globs` precise and non-overlapping with other
   hubs (one file → one functionality)?
@@ -133,16 +159,19 @@ echo the whole page back into the conversation.
 
 <example>
 Decision: "all destructive dialogs use a red secondary 'Delete' button, primary is Cancel."
-→ general rule shared by many dialogs ⇒ EXPAND ⇒ aspect page `dialog-forms`
-  (functionality: frontend). See also: [[style-system]] (the red token),
-  [[interaction-patterns]]. Linked up from the `frontend` hub's parts map.
+→ general rule shared by many dialogs ⇒ EXPAND ⇒ RADIATING aspect `dialog-forms`
+  (functionality: frontend). `## Applies to`: [[login-panel]], [[settings-panel]],
+  … every dialog. Reciprocal: each of those gets `dialog-forms` in its
+  `## Governed by`. Linked from the `frontend` hub's parts map.
 </example>
 
 <example>
 Decision: "the checkout endpoint is idempotent on the Idempotency-Key header."
-→ specific to one element ⇒ REDUCE ⇒ component page `checkout-endpoint`
-  (functionality: backend). See also: [[order-model]], [[payment-gateway]],
-  [[error-envelope]]. If `checkout-endpoint` already exists ⇒ UPDATE it instead.
+→ specific to one element ⇒ REDUCE ⇒ RECEIVING component `checkout-endpoint`
+  (functionality: backend). `## Governed by`: [[error-envelope]] (the protocol it
+  obeys); `## See also`: [[order-model]], [[payment-gateway]] (lateral). Reciprocal:
+  `error-envelope`'s `## Applies to` gains `checkout-endpoint`. If
+  `checkout-endpoint` already exists ⇒ UPDATE it instead.
 </example>
 
 <example>

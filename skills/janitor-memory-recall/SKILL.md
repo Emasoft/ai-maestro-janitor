@@ -48,16 +48,21 @@ Goal: surface the HUB for the functionality the file belongs to, then descend.
 2. Read the matching **hub** page (the tip): the functionality overview, the big
    general decisions, the map of parts. This alone is often enough.
 
-3. **Descend on demand.** From the hub's body + `## See also`, follow ONLY the
-   `[[links]]` your specific task needs — the style aspect if you're restyling,
-   the component page for the exact panel, the endpoint it calls. Do NOT read the
-   whole subtree; load detail like a Skill loads a reference — only if relevant.
+3. **Descend on demand, following the typed edges.** From the hub's parts map go
+   to the COMPONENT you're touching, then read its `## Governed by` to load the
+   general pages (style, protocols, configs) that rule it — and ONLY those the
+   task needs. Read each governing page ONCE: if a later component shares the same
+   governor, it is already in context (cached) — never re-read a sun. Load detail
+   like a Skill loads a reference — only if relevant; never the whole subtree.
 
    ```bash
-   memgrep links --from frontend $ROOTS               # what the hub points to (descend)
-   memgrep --where 'linked-from "login-panel"' $ROOTS  # the panel's context (its influences)
-   memgrep --where 'links-to "style-system"' $ROOTS    # who else depends on this aspect
+   memgrep links --from login-panel $ROOTS             # the component's Governed-by (its rulers)
+   memgrep --where 'linked-from "style-system"' $ROOTS  # reverse: every element this rule governs
+   memgrep links --to style-system $ROOTS              # same, via the link graph
    ```
+
+   If you're about to CHANGE a general rule, read its `## Applies to` ray-list
+   first — it shows every element you'd affect before you touch it.
 
 ## Entry B — SYMPTOM (the "have we hit this before?" path)
 
@@ -107,8 +112,12 @@ memgrep links --broken $ROOTS                              # context edges to fi
 
 Surface the TIP, read what the task needs, follow links on demand. Reading an
 entire functionality's page tree "to be safe" defeats the wiki — its whole point
-is that context spend stays proportional to the task. One hub + the two or three
-linked pages your edit actually touches is the normal read.
+is that context spend stays proportional to the task. One hub + the component +
+its two or three `## Governed by` rulers is the normal read. **Cache the suns:**
+a shared general page (style, protocol) is read ONCE and reused across every
+component it governs — so working across many components costs the governors only
+once, not per component. That cacheability is why the wiki abstracts shared rules
+into radiating pages instead of copying them into each element.
 
 ## Output
 
@@ -120,9 +129,9 @@ full page bodies into the conversation — open the one the task requires.
 
 <example>
 About to edit src/frontend/panels/Login.tsx
-→ Entry A: find the `frontend` hub (its globs own src/frontend/**), read it, then
-  follow See-also to [[login-panel]] + [[style-system]] only — skip the rest of
-  the tree.
+→ Entry A: find the `frontend` hub (its globs own src/frontend/**), read it, go to
+  the [[login-panel]] component, read its `## Governed by` ([[style-system]],
+  [[dialog-forms]]) — load those rulers once — and skip the rest of the tree.
 </example>
 
 <example>
