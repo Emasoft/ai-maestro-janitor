@@ -166,13 +166,22 @@ The `# Memory` directive is the authoring source-of-truth. On disk, notes are:
 ---
 name: <kebab-slug>                 # == filename stem
 description: "<symptom surface — the load-bearing recall field>"
+ocd: <YYYY-MM-DD>                  # Original Creation Date — set once on create
+lmd: <YYYY-MM-DD>                  # Last Modified Date — bump on every edit
 metadata:
   node_type: memory
   type: user | feedback | project | reference
   originSessionId: <uuid>
 ---
 <body: the one fact; for feedback/project add **Why:** and **How to apply:**>
+
+## Notes and lessons learned
 ```
+
+The `## Notes and lessons learned` section is MANDATORY on every page, even
+when empty — it is the standing landing zone for a `[^N]` correction lesson and
+keeps the corpus shape uniform (the janitor's `memory-librarian` page-shape pass
+flags a note that omits it, or that omits `ocd`/`lmd`).
 
 `MEMORY.md` is the human index (`- [Title](file.md) — hook`, one line per note)
 loaded each session. `memgrep index --markdown` can generate a richer

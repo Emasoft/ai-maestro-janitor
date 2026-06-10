@@ -3,7 +3,7 @@ trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
 column: dev
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-10T01:51:49+0200
+updated: 2026-06-10T05:59:15+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
@@ -333,12 +333,12 @@ sense to build on.
 **Atomic co-movement — a memory and its notes are inseparable.** Because each
 memory is LINKED to its notes/lessons, when the librarian relocates a memory to
 another wiki page, **all of its referenced notes move WITH it**, appended to the
-destination page's `## Notes & Lessons Learned` section. The memory never gets
+destination page's `## Notes and lessons learned` section. The memory never gets
 divorced from the lessons that explain it. (A merge is therefore: move the
 fact-memory into the canonical page's body AND append its `[^N]` lessons into
 that page's lessons section, renumbering as needed.)
 
-**Mandatory section — every memory `.md` has `## Notes & Lessons Learned`** at
+**Mandatory section — every memory `.md` has `## Notes and lessons learned`** at
 its bottom, even if currently empty: it is the standing landing zone so an
 incoming memory's notes always have a home, and so the corpus shape is uniform
 (every page = body + lessons section).

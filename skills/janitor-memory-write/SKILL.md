@@ -45,18 +45,27 @@ matters to the current conversation.
 3. Check for an existing note that already covers this (update it rather than
    duplicate): `command -v memgrep >/dev/null && memgrep recall "<symptom>" "$MEMDIR"`.
 
-4. Write `"$MEMDIR/<type>_<slug>.md"` with the Write tool (NOT echo), schema:
+4. Write `"$MEMDIR/<type>_<slug>.md"` with the Write tool (NOT echo), schema.
+   Set `ocd`/`lmd` to TODAY (ISO-8601) on create; bump `lmd` on every later
+   edit. ALWAYS include the empty `## Notes and lessons learned` section — it is
+   the mandatory standing landing zone so a future correction's `[^N]` lesson
+   has a home and the corpus shape is uniform (the janitor's page-shape validator
+   flags a note that omits it):
 
    ```yaml
    ---
    name: <type>_<slug>
    description: "<the SYMPTOM in the user's / the error's words — the words a future session will search with, NOT the answer's jargon>"
+   ocd: <YYYY-MM-DD>   # Original Creation Date — set once, never changes
+   lmd: <YYYY-MM-DD>   # Last Modified Date — bump on every content edit
    metadata:
      node_type: memory
      type: <user|feedback|project|reference>
    ---
    <the one fact. For feedback/project, follow with **Why:** and **How to apply:** lines.
    Link related notes with [[their-name]].>
+
+   ## Notes and lessons learned
    ```
 
 5. Append a one-line pointer to `"$MEMDIR/MEMORY.md"` (create if missing):
