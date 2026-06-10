@@ -130,6 +130,19 @@ _MAX_NOTE_LINES = 4000
 # Cap the page-shape findings listed in the proposal (one line per issue).
 _MAX_SHAPE_FINDINGS = 60
 
+# MEMORY.md index line: `- [Title](target.md) — hook.` (the write skill's shape).
+# We only need the link TARGET (the `.md` file the line points at) to diff the
+# index against the notes on disk. The target may be a bare basename or a
+# relative path; normalise to a basename in the caller. A markdown link with an
+# anchor/query is tolerated by stopping at the first `)` / `#`.
+_MEMORY_INDEX_LINE_RE = re.compile(
+    r"^\s*[-*+]\s+\[[^\]]*\]\((?P<target>[^)#?]+\.md)[^)]*\)"
+)
+# The canonical human index file (one line per note) — diffed against disk.
+_MEMORY_INDEX_NAME = "MEMORY.md"
+# Cap the rank-4 link/orphan/sync findings listed per scope.
+_MAX_LINK_FINDINGS = 60
+
 # A word-ish token: 3+ alphanumerics (drops 1-2 char noise like `a`, `to`, `of`).
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
 
@@ -691,6 +704,133 @@ def _collect_shape_findings(memdir: Path) -> list[str]:
     return findings
 
 
+def _parse_broken_links(stdout: str) -> list[str]:
+    """Parse `memgrep links --broken` → sorted findings of which page dangles.
+
+    Each line is `<from>:LINE -> <slug>  [BROKEN]` (verified live — the target
+    token is the literal `[BROKEN]` marker, NOT a path, so the plain-`links`
+    `_LINK_RE` cannot be reused). We surface "page X has a broken [[slug]] link"
+    so an agent can fix the dangling reference (a botched rename/move leaves
+    one). Deduped per (from, slug); non-note sources (MEMORY.md etc.) are skipped.
+    """
+    out: set[str] = set()
+    for raw in stdout.splitlines():
+        m = _BROKEN_LINK_RE.match(raw)
+        if not m:
+            continue
+        src = _basename(m.group("from"))
+        if not _is_note_basename(src):
+            continue
+        out.add(f"{src}: broken [[{m.group('slug')}]] link (target file missing)")
+    return sorted(out)[:_MAX_LINK_FINDINGS]
+
+
+def _parse_orphans(stdout: str) -> list[str]:
+    """Parse `memgrep links --orphans` → sorted findings of notes with no inbound links.
+
+    Each line is a bare `.md` path. An orphan page is one nothing else links to —
+    a candidate for a `[[link]]` from its topic's canonical page (the wiki
+    invariant: tangential mentions link, they don't float). Non-note files are
+    skipped. We surface the orphan as advisory (a brand-new note is briefly an
+    orphan; this is a hint, not an error).
+
+    NOTE: this is only called when the corpus HAS a link graph (see
+    `_collect_link_findings`) — in a corpus where no note links any other, EVERY
+    note is trivially an orphan, which is noise, not signal (and would flag the
+    whole standalone-note LOCAL corpus). Orphans are meaningful only relative to
+    an existing link structure a page was left out of.
+    """
+    out: set[str] = set()
+    for raw in stdout.splitlines():
+        m = _ORPHAN_RE.match(raw)
+        if not m:
+            continue
+        name = _basename(m.group("path"))
+        if not _is_note_basename(name):
+            continue
+        out.add(f"{name}: orphan page (no inbound [[links]]) (advisory)")
+    return sorted(out)[:_MAX_LINK_FINDINGS]
+
+
+def _parse_memory_index_targets(text: str) -> set[str]:
+    """Parse MEMORY.md → set of note basenames its index lines point at.
+
+    Each index line is `- [Title](target.md) — hook.`; we extract the link
+    target and normalise to a basename. Lines that are not index lines (the
+    heading, blank lines, prose) are ignored.
+    """
+    targets: set[str] = set()
+    for raw in text.splitlines():
+        m = _MEMORY_INDEX_LINE_RE.match(raw)
+        if m:
+            targets.add(_basename(m.group("target")))
+    return targets
+
+
+def _collect_memory_sync_findings(memdir: Path) -> list[str]:
+    """Diff MEMORY.md against the notes on disk → sync-mismatch findings.
+
+    Two failure modes, both surfaced (rank 4):
+      * an index line points at a `.md` file that does NOT exist on disk (a stale
+        entry left after a note was renamed/deleted);
+      * a note file on disk is NOT listed in MEMORY.md (a note added without the
+        index line the write protocol requires).
+    No MEMORY.md at all → no findings (the index is optional; a corpus may not
+    keep one yet). Bounded by `_MAX_LINK_FINDINGS`. Never crashes on a read
+    error.
+    """
+    index_path = memdir / _MEMORY_INDEX_NAME
+    if not index_path.is_file():
+        return []
+    try:
+        index_text = index_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    listed = _parse_memory_index_targets(index_text)
+
+    try:
+        on_disk = {
+            p.name for p in memdir.iterdir()
+            if p.is_file() and _is_note_basename(p.name)
+        }
+    except OSError:
+        return []
+
+    findings: list[str] = []
+    for missing in sorted(listed - on_disk):
+        findings.append(f"MEMORY.md lists `{missing}` but the file is missing on disk")
+    for unlisted in sorted(on_disk - listed):
+        findings.append(f"`{unlisted}` is on disk but missing from MEMORY.md")
+    return findings[:_MAX_LINK_FINDINGS]
+
+
+def _collect_link_findings(
+    binary: str, memdir: Path, linked: set[frozenset[str]]
+) -> tuple[list[str], list[str], list[str]]:
+    """Run the rank-4 link-graph + MEMORY.md-sync checks for ONE scope root.
+
+    Returns `(broken, orphans, index_sync)`. `broken` comes from `memgrep links
+    --broken` (always actionable — a dangling `[[link]]`, zero false positives);
+    `index_sync` is a pure-Python MEMORY.md↔disk diff (no memgrep). `orphans`
+    (from `memgrep links --orphans`) is surfaced ONLY when `linked` is non-empty
+    — i.e. the corpus has a real link graph a page could be left out of. In a
+    corpus with NO links, every note is trivially an orphan (pure noise that
+    would flag the whole standalone-note LOCAL corpus), so orphans stay silent.
+    Each sub-check degrades to an empty list on a memgrep failure (graceful — the
+    detector never crashes the heartbeat just because one query failed).
+    """
+    broken_out = _run_memgrep(binary, ["links", "--broken"], memdir)
+    broken = _parse_broken_links(broken_out) if broken_out else []
+
+    orphans: list[str] = []
+    if linked:
+        orphans_out = _run_memgrep(binary, ["links", "--orphans"], memdir)
+        orphans = _parse_orphans(orphans_out) if orphans_out else []
+
+    index_sync = _collect_memory_sync_findings(memdir)
+    return broken, orphans, index_sync
+
+
 def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     """Run the per-scope candidate + integrity analysis on ONE memory root.
 
@@ -719,14 +859,26 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     # Page-shape integrity runs per-note, independent of clustering (rank 3).
     report.shape = _collect_shape_findings(memdir)
 
+    # The resolved cross-file link graph (one memgrep call) — reused by BOTH the
+    # rank-4 orphan gate (orphans are only meaningful when a link graph exists)
+    # and the conflict-candidate exclusion (a cross-linked pair is not a
+    # conflict). Computed once here so we don't run `links` twice.
+    links_out = _run_memgrep(binary, ["links"], memdir)
+    linked = _parse_links(links_out) if links_out else set()
+
+    # Link-graph integrity + MEMORY.md sync run per-root, independent of
+    # clustering (rank 4) — a broken link or a stale index line must surface even
+    # when no two notes share a topic.
+    report.broken, report.orphans, report.index_sync = _collect_link_findings(
+        binary, memdir, linked
+    )
+
     index_out = _run_memgrep(binary, ["index", "--markdown"], memdir)
     notes = _parse_index(index_out) if index_out else {}
 
     if len(notes) >= 2:
         clusters = _build_clusters(notes)
         if clusters:
-            links_out = _run_memgrep(binary, ["links"], memdir)
-            linked = _parse_links(links_out) if links_out else set()
             report.clusters = clusters
             report.conflicts = _conflict_pairs(notes, linked)
 

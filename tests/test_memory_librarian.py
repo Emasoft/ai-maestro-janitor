@@ -487,6 +487,132 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
 
 
 @unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
+class TestMemoryLibrarianLinksAndSync(unittest.TestCase):
+    """Broken-links, orphans, and MEMORY.md↔disk sync (rank 4, TRDD-c77dae09)."""
+
+    def _section(self, memdir: Path, header: str) -> str:
+        """Return the proposal block under `### <header>` (up to the next `###`)."""
+        prop = memdir / PROPOSAL_NAME
+        if not prop.exists():
+            return ""
+        text = prop.read_text()
+        marker = f"### {header}"
+        if marker not in text:
+            return ""
+        return text.split(marker, 1)[1].split("\n### ", 1)[0]
+
+    def test_broken_link_surfaced(self):
+        """A page with a `[[link]]` to a nonexistent note is flagged as a broken link."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "has_broken.md").write_text(
+                _note("has_broken", "topic about widgets and retries", [],
+                      body="See [[does-not-exist]] for more."))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            self.assertIn("link/sync", out)
+            broken = self._section(memdir, "Broken links")
+            self.assertIn("has_broken.md", broken)
+            self.assertIn("does-not-exist", broken)
+
+    def test_orphan_surfaced_only_in_a_linked_corpus(self):
+        """An orphan page is surfaced when the corpus HAS a link graph it is left out of."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # a <-> b form a link graph; c is isolated → c is the orphan.
+            (memdir / "a.md").write_text(
+                _note("a", "alpha topic core", [], body="See [[b]]."))
+            (memdir / "b.md").write_text(
+                _note("b", "bravo topic core", [], body="See [[a]]."))
+            (memdir / "c.md").write_text(
+                _note("c", "gamma standalone", [], body="No links here."))
+            _run(home, project)
+            orphans = self._section(memdir, "Orphan pages")
+            self.assertIn("c.md", orphans)
+
+    def test_no_orphans_in_a_linkless_corpus(self):
+        """A corpus with NO links at all surfaces NO orphans (every note would trivially be one)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # Two notes, NO [[links]], distinct topics → no link graph → no orphan
+            # noise, and (distinct topics) no clusters → whole detector silent.
+            (memdir / "iso_one.md").write_text(
+                _note("iso_one", "widget pipeline alpha", []))
+            (memdir / "iso_two.md").write_text(
+                _note("iso_two", "keychain rotator bravo", []))
+            out = _run(home, project)
+            self.assertEqual(out.strip(), "")
+            self.assertFalse((memdir / PROPOSAL_NAME).exists())
+
+    def test_index_line_to_deleted_note_surfaced(self):
+        """A MEMORY.md line pointing at a note absent on disk is a sync mismatch."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "present.md").write_text(
+                _note("present", "a present topic", []))
+            (memdir / "MEMORY.md").write_text(
+                "# Memory index\n"
+                "- [Present](present.md) — present hook.\n"
+                "- [Gone](deleted_note.md) — points at a deleted file.\n"
+            )
+            _run(home, project)
+            sync = self._section(memdir, "MEMORY.md sync")
+            self.assertIn("deleted_note.md", sync)
+            self.assertIn("missing on disk", sync)
+
+    def test_note_missing_from_index_surfaced(self):
+        """A note on disk that MEMORY.md does not list is a sync mismatch."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "listed.md").write_text(_note("listed", "listed topic", []))
+            (memdir / "unlisted.md").write_text(_note("unlisted", "unlisted topic", []))
+            (memdir / "MEMORY.md").write_text(
+                "# Memory index\n- [Listed](listed.md) — only this one is indexed.\n"
+            )
+            _run(home, project)
+            sync = self._section(memdir, "MEMORY.md sync")
+            self.assertIn("unlisted.md", sync)
+            self.assertIn("missing from MEMORY.md", sync)
+
+    def test_memory_md_in_sync_is_silent_on_sync(self):
+        """A MEMORY.md that lists exactly the notes on disk surfaces no sync mismatch."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "one.md").write_text(_note("one", "first topic alpha", []))
+            (memdir / "two.md").write_text(_note("two", "second topic bravo", []))
+            (memdir / "MEMORY.md").write_text(
+                "# Memory index\n"
+                "- [One](one.md) — first.\n"
+                "- [Two](two.md) — second.\n"
+            )
+            _run(home, project)
+            sync = self._section(memdir, "MEMORY.md sync")
+            # Section may be absent (no proposal) or present-but-(none); either way
+            # neither note basename appears as a mismatch.
+            self.assertNotIn("one.md", sync.replace("(none)", ""))
+            self.assertNotIn("two.md", sync.replace("(none)", ""))
+
+    def test_memory_md_excluded_from_notes_disk_set(self):
+        """MEMORY.md itself is never counted as a 'note missing from the index'."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "solo.md").write_text(_note("solo", "solo topic", []))
+            (memdir / "MEMORY.md").write_text(
+                "# Memory index\n- [Solo](solo.md) — the one note.\n"
+            )
+            _run(home, project)
+            sync = self._section(memdir, "MEMORY.md sync")
+            self.assertNotIn("MEMORY.md", sync)
+
+
+@unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
 class TestMemoryLibrarianNoMutation(unittest.TestCase):
     """The load-bearing safety guarantee: ZERO mutation of the memory corpus."""
 
