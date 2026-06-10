@@ -119,7 +119,10 @@ page is fine (it flags one to create later).
 
 A page with no edges is a dead note. **THE LINK LAW: every link is bidirectional
 — if A links to B, B links to A, ALWAYS, See-also included.** Wire BOTH ends of
-every edge in the same edit. The wiring follows the page's SHAPE:
+every edge in the same edit. Links are **scope-local**: a `[[wikilink]]` may only
+target a page in the SAME scope root (LOCAL/PROJECT/USER) — reference another
+scope's page in prose instead (see the model's Link hygiene). The wiring follows
+the page's SHAPE:
 
 - **If you EXPANDED (a general/radiating page):** in `## Applies to`, link DOWN to
   EVERY element this rule governs (find them:

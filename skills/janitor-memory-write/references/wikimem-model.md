@@ -250,6 +250,32 @@ nested `metadata.tier`; a dotted path like `fm.metadata.tier` does NOT work.)
 When memgrep is absent, every operation degrades to `grep`/`ls` over the same
 plain-markdown files — the wiki never *breaks*, it only gets slower to navigate.
 
+## Link hygiene (simulation-verified constraints)
+
+Empirically verified against memgrep 0.1.0 (simulations, TRDD-bc16d602):
+
+- **Links are SCOPE-LOCAL.** A `[[wikilink]]` may only target a page in the SAME
+  scope root. The link graph is computed per root, so a LOCAL→PROJECT wikilink
+  is forever "broken" to the per-scope librarian — and a PROJECT→LOCAL back-link
+  (required by the link law) would be broken for every other dev who clones the
+  repo. Cross-scope references go in PROSE (name the page and its scope), never
+  as a wikilink.
+- **Link the PAGE, not an anchor.** `[[page#section]]` resolves, but the law's
+  reciprocal is page-level; prefer bare `[[page]]`.
+- **Targets are the page name exactly** — `[[name|alias]]` works; resolution is
+  case-insensitive (keep canonical casing anyway); SPACES in a target do NOT
+  resolve (use the kebab page name).
+- **Lessons' links count.** A `[[link]]` inside a `[^N]` lesson is a real graph
+  edge — the link law applies to it like any other.
+- **Fenced code is invisible** to the link graph AND the librarian's shape scan
+  — a doc example showing `## Applies to` or `[[x]]` inside ``` fences is inert.
+- **Keep page names unique across scopes** unless deliberately shadowing —
+  recall surfaces same-named pages from every scope and only the path
+  distinguishes them (precedence LOCAL > PROJECT > USER is the reader's rule).
+- **Globs match repo-RELATIVE file paths.** Entry A must normalize the file to
+  repo-relative before matching (`fnmatch` of an absolute path against
+  `src/frontend/**` is False).
+
 ## Scope (LOCAL / PROJECT / USER) is orthogonal to tier
 
 The wiki exists at each scope (machine-private LOCAL, git-tracked PROJECT, global

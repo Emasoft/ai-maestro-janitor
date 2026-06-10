@@ -125,13 +125,21 @@ _FOOTNOTE_DEF_RE = re.compile(r"^\s*\[\^(?P<n>\d+)\]:")
 # predate the convention).
 _FM_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][\w-]*)\s*:")
 # Wikimem tier keys (TRDD-bc16d602). `tier:`/`globs:` live NESTED under
-# `metadata:` (but a top-level spelling is tolerated, matching memgrep's
-# any-depth `fm.KEY`), so these match at ANY indent — unlike `_FM_KEY_RE`,
-# which is deliberately top-level-anchored.
-_FM_TIER_RE = re.compile(r"^\s*tier:\s*['\"]?(?P<tier>[\w-]+)")
-_FM_GLOBS_RE = re.compile(r"^\s*globs:\s*\S")
+# `metadata:` — in BLOCK style (`  tier: hub`) or FLOW style
+# (`metadata: {tier: hub, globs: [...]}`), both of which memgrep's any-depth
+# `fm.KEY` matches. These are SEARCH patterns (used with `.search`, not
+# `.match`) anchored on start-of-line OR a `{`/`,` so the flow spelling is not
+# silently invisible to the tier checks (found by simulation S10a: a flow-style
+# `tier: component` skipped both checks entirely).
+_FM_TIER_RE = re.compile(r"(?:^|[{,])\s*['\"]?tier['\"]?\s*:\s*['\"]?(?P<tier>[\w-]+)")
+_FM_GLOBS_RE = re.compile(r"(?:^|[{,])\s*['\"]?globs['\"]?\s*:\s*\S")
 # The radiating ray-list heading — legal on hub/aspect pages ONLY.
 _APPLIES_TO_RE = re.compile(r"^\s*#{2,}\s+applies\s+to\s*$", re.IGNORECASE)
+# Code-fence delimiters — the body shape scans MUST ignore fenced content (a
+# component whose body shows a doc EXAMPLE containing `## Applies to` must not
+# be flagged as radiating; found by simulation S10b). memgrep's own link parser
+# is already fence-aware; this brings the line-wise shape scan to parity.
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 # Bound the per-note shape read so a pathological note can't blow up the
 # heartbeat. Notes are small; 4000 lines is already absurd for a memory page.
@@ -689,6 +697,20 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
     Returns [] for a perfectly-shaped note.
     """
     fm_lines, body_lines = _split_frontmatter(text)
+    # Drop fenced-code content from EVERY body scan below (lessons section,
+    # footnotes, the radiating-heading check): a fenced doc EXAMPLE showing a
+    # heading or a `[^N]` must never satisfy or violate a shape rule. memgrep's
+    # AST parser already excludes fences from the LINK graph; this keeps the
+    # line-wise shape scan consistent with it (simulation S10b).
+    stripped: list[str] = []
+    in_fence = False
+    for ln in body_lines:
+        if _FENCE_RE.match(ln):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            stripped.append(ln)
+    body_lines = stripped
     issues: list[str] = []
 
     # (c) frontmatter key presence. Accept the documented aliases so an older
@@ -736,10 +758,10 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
     # (e)/(f) wikimem tier shape (TRDD-bc16d602). No tier ⇒ a plain flat note,
     # exempt — the wiki is additive and old notes stay valid.
     tier = next(
-        (m.group("tier") for ln in fm_lines for m in [_FM_TIER_RE.match(ln)] if m),
+        (m.group("tier") for ln in fm_lines for m in [_FM_TIER_RE.search(ln)] if m),
         None,
     )
-    if tier == "hub" and not any(_FM_GLOBS_RE.match(ln) for ln in fm_lines):
+    if tier == "hub" and not any(_FM_GLOBS_RE.search(ln) for ln in fm_lines):
         issues.append(
             f"{note}: hub page missing `globs:` (the file→functionality map — wikimem)"
         )

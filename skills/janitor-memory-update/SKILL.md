@@ -127,6 +127,15 @@ move + relink, NOT a silent copy):
   it, repoint every inbound `[[link]]` to the survivor, and delete the duplicate
   ONLY after it is committed (RULE 0). Prefer handing large merges to the janitor
   librarian, which deduplicates corpus-wide.
+- **RENAME (inbound links FIRST):** renaming a page breaks EVERY inbound
+  `[[link]]` at once (simulation-verified: one component rename = one broken
+  link per governor + the hub). Order matters:
+  1. list who points at it: `memgrep links --from <old-name> <memdir>`;
+  2. repoint every inbound `[[old-name]]` → `[[new-name]]` on those pages;
+  3. rename the file AND its frontmatter `name:` (they must stay equal) + the
+     MEMORY.md index line;
+  4. re-audit: `memgrep links --broken <memdir>` must show nothing new.
+  Never rename by just moving the file — that strands the whole inbound web.
 
 After any reshape: fix See-also on BOTH endpoints, update the hub's parts map,
 bump `lmd:` on every touched page, and re-run `memgrep links --broken` to confirm

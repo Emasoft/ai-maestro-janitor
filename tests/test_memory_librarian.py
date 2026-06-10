@@ -380,6 +380,41 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
             self.assertIn("must not radiate", shape)
             self.assertNotIn("goodhub.md", shape)
 
+    def test_fenced_applies_to_is_not_a_radiating_violation(self):
+        """Simulation S10b regression: a component whose body shows `## Applies
+        to` ONLY inside a fenced code EXAMPLE must NOT be flagged as radiating
+        (the shape scan is fence-aware, like memgrep's link parser)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "fencedcomp.md").write_text(
+                '---\nname: fencedcomp\ndescription: "a widget panel"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                "metadata:\n  node_type: memory\n  tier: component\n---\n"
+                "Body. Doc example:\n\n```markdown\n## Applies to\n- [[ghost]]\n```\n\n"
+                "## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertNotIn("fencedcomp.md", shape,
+                             "fenced example must not trigger the radiating check")
+
+    def test_flow_style_metadata_tier_is_detected(self):
+        """Simulation S10a regression: FLOW-style `metadata: {tier: hub}` must
+        not be invisible to the tier checks — a flow-style hub missing globs is
+        still flagged."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "flowhub.md").write_text(
+                '---\nname: flowhub\ndescription: "area overview"\n'
+                "ocd: 2026-06-10\nlmd: 2026-06-10\n"
+                "metadata: {node_type: memory, tier: hub}\n---\nOverview.\n\n"
+                "## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("flowhub.md", shape)
+            self.assertIn("globs", shape)
+
     def test_lessons_section_case_insensitive_and_ampersand_accepted(self):
         """`## Notes & Lessons Learned` (historical spelling, any case) satisfies the section check."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:
