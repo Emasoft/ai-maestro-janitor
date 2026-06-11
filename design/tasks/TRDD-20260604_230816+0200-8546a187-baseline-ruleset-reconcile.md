@@ -3,7 +3,7 @@ trdd-id: 8546a187-781b-4449-93f4-d84af4ed1bcf
 title: Baseline-ruleset byte-identical reconcile with maintainer-agent + 2 shared follow-ups
 column: blocked
 created: 2026-06-04T23:08:16+0200
-updated: 2026-06-08T23:39:09+0200
+updated: 2026-06-11T11:06:34+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 3
@@ -28,7 +28,31 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/14", "github.com/E
 
 # TRDD-8546a187 — Baseline-ruleset reconcile with maintainer-agent
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-04
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-11
+
+### ⏵ SESSION ADDENDUM — 2026-06-11 (baseline-tag-protect now LIVE on the janitor repo)
+
+The remaining-item #1 below ("Live first-apply readback-pin of baseline-tag-protect")
+is **DONE**. Applied live to `Emasoft/ai-maestro-janitor` (ruleset id **17545495**,
+POST of the exact `baseline_ruleset_payloads()[2]` payload). **Readback-pin confirmed
+byte-identical** — GitHub echoed `ref_name.include == ["refs/tags/v*.*.*"]` UNCHANGED
+(matching the maintainer's first-apply observation), `rules == ["deletion","update"]`,
+`bypass_actors == []`, `target: tag`, `enforcement: active`. The janitor repo now has
+**all three** ratified rulesets live (history-protect 17286452 + pr-and-checks 17286453
++ tag-protect 17545495); zero stragglers. This closes the MANAGER's coverage-table gap
+("janitor itself is missing baseline-tag-protect").
+
+Why now (the 2026-06-08 "rides the next publish, do NOT one-off-apply" guidance is
+superseded): that deferral was written while gated on the maintainer SHA-exchange. Since
+then the maintainer SHIPPED all 3 live (ids 17471104/05/06) and confirmed the `v*.*.*`
+echo; the USER ratified tag-protect (Tier-3); the MANAGER flagged the janitor's missing
+tag-protect as a gap to close. The live apply is independent of the CPV-blocked plugin
+PUBLISH (the maintainer applied its 3 live the same way, not via a publish). The CODE that
+emits tag-protect is already committed + tested and ships on the next CPV-unblocked publish.
+
+Still genuinely publish-gated (be patient — CPV FP fix incoming): shipping the baseline
+CODE in a published janitor version, and the 2 shared follow-ups (job-level `if:` filter,
+gh-stub real-API-semantics) which must land byte-identical WITH the maintainer.
 
 ### ⏵ SESSION ADDENDUM — 2026-06-08 (verified current state; supersedes stale claims below)
 
