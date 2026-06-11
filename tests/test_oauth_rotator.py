@@ -132,8 +132,8 @@ def test_write_slot_file_fallback_is_0600_and_roundtrips(tmp_path: Path, monkeyp
     monkeypatch.setattr(rotator, "SLOTS", slots)
     # Force the no-keychain branch so the test is deterministic on macOS too and never
     # touches the real keychain: pretend the keychain write fails / has nothing.
-    monkeypatch.setattr(rotator, "_slot_keychain_write", lambda *a, **k: False)
-    monkeypatch.setattr(rotator, "_slot_keychain_read", lambda *a, **k: None)
+    monkeypatch.setattr(rotator, "_slot_keychain_write", lambda *_a, **_k: False)
+    monkeypatch.setattr(rotator, "_slot_keychain_read", lambda *_a, **_k: None)
     blob = _blob("secret-token-value", expires_ms=123456789000)
     rotator.write_slot("a@x.com", blob)
     p = slots / "a@x.com.json"
@@ -731,6 +731,51 @@ def test_cmd_auto_excludes_alternate_when_refresh_fails(
     rotator.cmd_auto()
     assert switches == []                                  # cannot rotate onto an unrefreshable token
     assert wrote == []                                     # nothing healed when refresh failed
+
+
+def test_cmd_auto_refresh_on_err_heals_state_index(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refresh-on-err heal keeps the state.json slots index in LOCKSTEP with the keychain
+    (fp + expires_at updated and PERSISTED before the switch) — the F3 self-heal invariant;
+    a stale index here is the TRDD-7100178d blocker-6 drift class."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    stale_alt = _blob("ALT_OLD", expires_ms=_ms_in(50))
+    fresh_alt = _blob("ALT_NEW", expires_ms=_ms_in(80))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": stale_alt},
+                           usage={"LIVE": (401, None), "ALT_OLD": (403, None), "ALT_NEW": (200, _usage_ok())})
+    monkeypatch.setattr(rotator, "refresh_oauth_token",
+                        lambda b: fresh_alt if _tok(b) == "ALT_OLD" else None)
+    monkeypatch.setattr(rotator, "write_slot", lambda e, b: None)          # keychain write succeeds
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"]
+    meta = rotator.load_state()["slots"]["alt@x"]                          # re-read from DISK —
+    assert meta["fp"] == rotator.fingerprint(fresh_alt)                    # proves the save landed
+    assert meta["expires_at"] == fresh_alt["claudeAiOauth"]["expiresAt"]   # before _switch_blob ran
+
+
+def test_cmd_auto_refresh_on_err_keychain_refused_skips_index_update(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the keychain REFUSES the healed slot write, the index meta must NOT be updated
+    (index claiming the new fp while the keychain holds the old token would be a lie) — but
+    rotation still proceeds onto the in-memory fresh token (the anti-deadlock goal)."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    stale_alt = _blob("ALT_OLD", expires_ms=_ms_in(50))
+    fresh_alt = _blob("ALT_NEW", expires_ms=_ms_in(80))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": stale_alt},
+                           usage={"LIVE": (401, None), "ALT_OLD": (403, None), "ALT_NEW": (200, _usage_ok())})
+    monkeypatch.setattr(rotator, "refresh_oauth_token",
+                        lambda b: fresh_alt if _tok(b) == "ALT_OLD" else None)
+
+    def refuse(e: str, b: dict) -> None:
+        raise rotator.SlotKeychainWriteError("keychain locked")
+
+    monkeypatch.setattr(rotator, "write_slot", refuse)
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"]                           # still rotated (no deadlock)
+    assert _tok(switches[0][1]) == "ALT_NEW"                               # onto the fresh in-memory token
+    assert rotator.load_state()["slots"]["alt@x"] == {}                    # index untouched — no false fp
 
 
 # --------------------------------------------------------------------------

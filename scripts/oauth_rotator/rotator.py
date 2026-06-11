@@ -1112,6 +1112,7 @@ def cmd_auto() -> int:
     # future expiry is a valid target, and we pick the one with the MOST runway.
     candidates: list[tuple[str, dict, float, float]] = []
     degraded: list[tuple[str, dict, float]] = []  # (email, blob, expires_in_h) — no-usage path
+    index_healed = False  # set when refresh-on-err re-mints a slot → index meta must be persisted
     for email in state.get("slots", {}):
         if email == live_email:
             continue
@@ -1140,8 +1141,22 @@ def cmd_auto() -> int:
                     # FAIL SOFT: a locked/declined keychain refused the persist. Still use the fresh
                     # token IN MEMORY for this decision — the goal is to not deadlock; a rotation
                     # onto it writes the live credential (a different keychain item), not this slot.
+                    # Accepted hazard (same as _keepalive_refresh's skip-on-refusal): if the token
+                    # endpoint ROTATES refresh tokens, the slot's stored refresh token may now be
+                    # spent — but a locked keychain already degrades every persist path equally,
+                    # and NOT refreshing would deadlock rotation outright.
                     _log("[auto] %s: keychain write refused after refresh-on-err (%s) — "
                          "using fresh token in-memory" % (email, exc))
+                else:
+                    # Keep the state.json index in lockstep with the keychain (the F3 self-heal
+                    # invariant; a fp/expires_at left stale here is exactly the blocker-6 drift
+                    # class of TRDD-7100178d). Persisted after the loop, BEFORE any switch —
+                    # _switch_blob re-loads state from disk, so an unsaved update would be lost.
+                    meta = state.get("slots", {}).get(email)
+                    if isinstance(meta, dict):
+                        meta["fp"] = fingerprint(refreshed)
+                        meta["expires_at"] = _oauth(refreshed).get("expiresAt")
+                        index_healed = True
                 b = refreshed
                 st2, d2 = usage_request(b)  # re-probe with the fresh token
             if st2 != 200:
@@ -1158,6 +1173,8 @@ def cmd_auto() -> int:
             if eh is None:
                 continue  # cannot confirm validity offline -> not a safe degraded target
             degraded.append((email, b, eh))
+    if index_healed:
+        save_state(state)  # before any _switch_blob (it re-loads state from disk)
     if network_up:
         best = select_drain_first(candidates)
         if best is None:
