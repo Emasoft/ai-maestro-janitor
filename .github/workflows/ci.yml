@@ -149,3 +149,28 @@ jobs:
             timeout 30 ./"$h" || rc=$?
             [ "${rc:-0}" -eq 124 ] && { echo "::error::$h exceeded 30s wall clock"; exit 1; } || true
           done
+
+      # STRICT per-detector smoke (the v0.7.1 lesson): every detector runs via its
+      # own `uv run --script` shebang with ONLY its PEP-723-declared deps, so an
+      # undeclared third-party import (memory-scope-leak's transitive PyYAML)
+      # crashes at import time on EVERY heartbeat fire — and the tolerant
+      # dispatch smoke above masked it (dispatch deliberately survives detector
+      # failures; CI must not). Each detector must exit 0 AND emit no Traceback.
+      - name: Strict-run each detector (exit 0, no Traceback)
+        env:
+          CLAUDE_PROJECT_DIR: ${{ github.workspace }}
+          CLAUDE_PLUGIN_ROOT: ${{ github.workspace }}
+        run: |
+          fail=0
+          for d in scripts/detectors/*.py; do
+            echo "=== $d ==="
+            out=$(timeout 60 ./"$d" --one-shot 2>&1); rc=$?
+            printf '%s\n' "$out"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::$d exited $rc"; fail=1
+            fi
+            if printf '%s' "$out" | grep -q 'Traceback (most recent call last)'; then
+              echo "::error::$d raised an unhandled exception"; fail=1
+            fi
+          done
+          exit "$fail"

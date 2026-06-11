@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
 # requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
 # ///
+# pyyaml: cicd_secret_leak_patterns' yaml-structured rules need it (that lib now
+# fail-softs without yaml, but declaring the dep keeps those rules ACTIVE here).
 """memory-scope-leak — keep the PUSHED memory scope free of machine/user-private data.
 
 The memory system has THREE scopes (TRDD-c77dae09): LOCAL

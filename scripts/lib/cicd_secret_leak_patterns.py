@@ -42,7 +42,15 @@ from __future__ import annotations
 import re
 from typing import Any, NamedTuple, Optional
 
-import yaml
+# OPTIONAL dependency — this pattern lib is imported by heartbeat detectors
+# whose PEP-723 env may lack PyYAML (the v0.7.1 memory-scope-leak crash:
+# a module-level `import yaml` took the WHOLE detector down on every fire).
+# Fail soft: the yaml-structured rules degrade to no-findings; every
+# regex-based rule keeps working. A detector must never crash the heartbeat.
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised only in yaml-less envs
+    yaml = None  # type: ignore[assignment]
 
 # ---- Data model ---------------------------------------------------------
 
@@ -956,6 +964,8 @@ _CREDENTIAL_WRITING_ACTIONS: frozenset = frozenset({
 
 
 def _load_yaml(text: str) -> dict:
+    if yaml is None:  # PyYAML absent → yaml-structured rules degrade to no-findings
+        return {}
     try:
         loaded = yaml.safe_load(text)
         return loaded if isinstance(loaded, dict) else {}
