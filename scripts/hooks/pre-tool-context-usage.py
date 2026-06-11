@@ -5,8 +5,10 @@
 """PreToolUse hook — surface the live context-window % to the agent on every tool call.
 
 Part of the context-compact watchdog (TRDD-31095269). Claude Code's native
-auto-compact is unreliable on the 1M window (sessions run past the configured
-threshold, sometimes to 999k where /compact itself can no longer run). The
+auto-compact still under-fires on the 1M window for credit-bearing sessions
+(they run past the configured threshold, sometimes to 999k where /compact
+itself can no longer run). (CC 2.1.172 added an auto-compact-back, but only for
+the 1M-WITHOUT-usage-credits stuck case — not this threshold overrun.) The
 watchdog puts the agent in the loop instead: the statusline writes the live %
 to a project-local snapshot, this hook injects that % before every tool call,
 and the agent decides whether to keep going or invoke /janitor-compact-context.

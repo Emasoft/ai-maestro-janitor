@@ -7,10 +7,14 @@ description: Self-compact the current Claude Code session's context window mid-w
 
 ## Overview
 
-Native auto-compact is unreliable on the 1M window — sessions run past the
-threshold, sometimes to ~999k where `/compact` itself can no longer run (forcing
-a total-loss `/clear`). This skill lets the agent compact **itself** before that
-wall: it records where to resume, then triggers `/compact` on its own iTerm pane.
+Native auto-compact still under-fires on the 1M window for the case this skill
+targets — a **credit-bearing** session that runs past the configured threshold,
+sometimes to ~999k where `/compact` itself can no longer run (forcing a
+total-loss `/clear`). (CC 2.1.172 added an automatic compact-back, but only for
+the narrower *1M-WITHOUT-usage-credits stuck* case — not the threshold overrun
+here; re-verify empirically per CC release.) This skill lets the agent compact
+**itself** before that wall: it records where to resume, then triggers `/compact`
+on its own iTerm pane.
 
 It is the **trigger** leg of the context-compact watchdog (TRDD-31095269). The
 loop: the statusline writes the live % → the `pre-tool-context-usage` PreToolUse
