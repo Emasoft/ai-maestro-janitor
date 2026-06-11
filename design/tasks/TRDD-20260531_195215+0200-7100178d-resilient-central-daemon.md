@@ -3,7 +3,7 @@ trdd-id: 7100178d-faa1-495a-aeb6-01c12448738a
 title: Resilient central daemon — last line of defence (auto-restart, backup/restore, concurrent-failure ladder, OOM culprit-killer)
 status: in-progress
 created: 2026-05-31T19:52:15+0200
-updated: 2026-06-11T20:22:04+0200
+updated: 2026-06-11T20:43:36+0200
 ---
 
 # TRDD-7100178d — Resilient central daemon (last line of defence)
@@ -113,15 +113,31 @@ supervision + subprocess retry in `scripts/daemon.py`:
 - +7 tests (`tests/test_daemon.py`): 32 daemon tests + 55 daemon-adjacent (marketplace / version /
   global_state) all pass; ruff + mypy clean on daemon.py.
 
-**NEXT ACTION (Phase 4 — Pillar 0 self-resurrection, REMAINING):** in `scripts/lib/global_state.py`
-make `ensure_daemon_running` detect a WEDGED daemon (PID alive but heartbeat stale → it still
-holds the singleton flock, so the current code spawns a replacement that can't acquire the flock →
-silent outage) and KILL it (SIGTERM→SIGKILL escalation, since a SIGSTOP'd pid ignores SIGTERM)
-before respawning; plus crash-loop detection (N spawns in M min → louder backoff + a drift line)
-on top of the existing single-interval spawn throttle. SAFETY: the wedged-kill must NEVER target
-the caller's own pid (the per-session tests set `daemon.pid` to `os.getpid()` as an alive stand-in).
-Then Phase 5 (OOM Tier-1 guard — SAFETY-GATED, confirm before live), Phase 6 (publish + activate
-opt-in + loop test #142 — OUTWARD-GATED).
+**PHASE 4 PILLAR 0 DONE (2026-06-11, this session, UNPUSHED — commit pending).** Self-resurrection
+in `scripts/lib/global_state.py`:
+- `_kill_wedged_daemon()` — a WEDGED daemon (pid alive, heartbeat stale → still HOLDING the
+  singleton flock, so a plain respawn would lose the flock race and exit: silent outage) is killed
+  before respawn. Safety ladder, every rung gating any signal: (1) never self/parent; (2) zombie-
+  aware liveness (`_process_alive_not_zombie` — a zombie has already RELEASED the flock at death,
+  so it counts as gone; `kill(pid,0)` alone lies about zombies); (3) heartbeat must EXIST and be
+  stale (> max_silence_s) — hb==0 could be a daemon mid-startup; (4) live cmdline must contain
+  `daemon.py` (PID-REUSE guard — never kill an innocent recycled pid). Escalation SIGTERM →
+  2 s grace → SIGKILL (a SIGSTOP'd wedge never DELIVERS the queued SIGTERM; SIGKILL works on
+  stopped processes). Wired at the top of `ensure_daemon_running`'s spawn path.
+- Crash-loop circuit-breaker — `spawn_daemon_detached` records every attempt in
+  `daemon.spawn-history` (ring of 20); `_crash_loop_active()` trips at `_CRASH_LOOP_SPAWN_LIMIT`
+  (5) attempts within `_CRASH_LOOP_WINDOW_S` (1800 s) → `ensure_daemon_running` refuses to spawn,
+  logs loudly, and SELF-RESETS as attempts age out of the window (refusal stops new entries — no
+  extra cool-off state). The 90 s per-attempt throttle stays as the fine-grained damper; surfacing
+  rides the existing daemon-stale watchdog (stale task stamps → shims emit drift lines).
+- +10 tests (`tests/test_global_state.py`) — all REAL subprocesses, killed+reaped in `finally`:
+  own-pid refusal, dead-pid no-op, fresh-heartbeat survival, foreign-cmdline (pid-reuse) survival,
+  real SIGTERM kill, SIGSTOP→SIGKILL escalation 🐌, history ring prune, breaker truth table,
+  ensure-refuses-during-crash-loop, end-to-end kill-wedge-then-spawn. 97 daemon-adjacent tests
+  pass; ruff + mypy clean.
+
+**NEXT ACTION:** Phase 5 (OOM Tier-1 memory-guard task — SAFETY-GATED, confirm with user before
+live), Phase 6 (publish + activate opt-in + loop test #142 — OUTWARD-GATED on the user/CPV).
 
 ### Load-bearing facts from the 2026-05-31 live audit (the WHY — all ✓ verified)
 The rotator is currently **DORMANT** — it would NOT have protected an unattended night.

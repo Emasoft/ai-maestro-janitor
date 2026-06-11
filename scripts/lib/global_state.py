@@ -53,6 +53,25 @@ DEFAULT_DAEMON_STALE_SECONDS = 1800
 # stops thrashing. Overridable for tests / slow hosts via the env var below.
 _DEFAULT_MIN_SPAWN_INTERVAL_SECONDS = 90
 
+# Crash-loop circuit-breaker (TRDD-7100178d Phase 4, Pillar 0). The per-attempt
+# throttle above damps churn but a daemon that dies on EVERY start would still be
+# re-spawned once per window forever. When _CRASH_LOOP_SPAWN_LIMIT attempts land
+# inside _CRASH_LOOP_WINDOW_S, ensure_daemon_running refuses further spawns until
+# attempts age out of the window (no extra cool-off state needed — the refusal
+# itself stops new history entries, so the window naturally drains). With the
+# 90 s throttle, a die-on-start daemon trips this after ~7.5 min, then retries
+# roughly twice an hour instead of 40 times.
+_CRASH_LOOP_SPAWN_LIMIT = 5
+_CRASH_LOOP_WINDOW_S = 1800
+_SPAWN_HISTORY_KEEP = 20  # ring length of daemon.spawn-history (one epoch per line)
+
+# Wedged-daemon kill escalation (Pillar 0). After SIGTERM, wait this long for the
+# process to exit before SIGKILL — a SIGSTOP'd (wedged) process never DELIVERS the
+# queued SIGTERM, so the escalation is mandatory, not a nicety. SIGKILL always works
+# on stopped processes.
+_WEDGE_TERM_GRACE_S = 2.0
+_WEDGE_KILL_GRACE_S = 1.0
+
 
 def global_state_dir() -> Path:
     """Return the system-wide janitor state directory.
@@ -88,6 +107,7 @@ def _pid_path() -> Path: return global_state_dir() / "daemon.pid"
 def _heartbeat_path() -> Path: return global_state_dir() / "daemon.heartbeat.ts"
 def _killswitch_path() -> Path: return global_state_dir() / "kill-switch.flag"
 def _spawn_marker_path() -> Path: return global_state_dir() / "daemon.spawn-attempt.ts"
+def _spawn_history_path() -> Path: return global_state_dir() / "daemon.spawn-history"
 def _reload_flag_path() -> Path: return global_state_dir() / "reload-needed.flag"
 def _marketplace_lock_path() -> Path: return global_state_dir() / "marketplace-op.lock"
 def _oauth_rotator_lock_path() -> Path: return global_state_dir() / "oauth-rotator-tick.lock"
@@ -406,6 +426,7 @@ def spawn_daemon_detached() -> Optional[int]:
     """
     init_global_state()
     state.atomic_write(_spawn_marker_path(), str(int(time.time())))
+    _record_spawn_attempt()  # crash-loop bookkeeping (Pillar 0) — every spawn path counts
     script = daemon_script_path()
     if not script.is_file():
         state.log_line("daemon", f"daemon script missing at {script} — cannot spawn")
@@ -560,6 +581,135 @@ def request_daemon_restart() -> bool:
     return True
 
 
+# ---------- Pillar 0 — self-resurrection (TRDD-7100178d Phase 4) -------------
+
+def _process_alive_not_zombie(pid: int) -> bool:
+    """True iff pid is alive AND not a zombie. The wedge-kill verdict needs this
+    instead of bare _process_exists: kill(pid, 0) SUCCEEDS on a zombie, but a
+    zombie has already RELEASED its flock (locks release at process death, not at
+    reaping) — so for "does it still hold the singleton flock / need killing" a
+    zombie counts as GONE. `ps -o stat=` is BSD+procps portable; a 'Z' state
+    letter marks the zombie."""
+    if not _process_exists(pid):
+        return False
+    try:
+        proc = subprocess.run(  # noqa: S603 - explicit args, no shell
+            ["ps", "-p", str(pid), "-o", "stat="],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True  # can't tell → assume alive (the conservative direction here)
+    if proc.returncode != 0:
+        return False  # ps can't see it → gone
+    return not (proc.stdout or "").strip().upper().startswith("Z")
+
+
+def _record_spawn_attempt(now: Optional[int] = None) -> None:
+    """Append a spawn-attempt epoch to daemon.spawn-history (ring of the last
+    _SPAWN_HISTORY_KEEP entries). The history is what _crash_loop_active counts;
+    the single daemon.spawn-attempt.ts marker stays as the fine-grained throttle."""
+    ts = int(now if now is not None else time.time())
+    path = _spawn_history_path()
+    lines: list[str] = []
+    try:
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip().isdigit()]
+    except (FileNotFoundError, OSError):
+        lines = []
+    lines.append(str(ts))
+    state.atomic_write(path, "\n".join(lines[-_SPAWN_HISTORY_KEEP:]))
+
+
+def _crash_loop_active(now: Optional[int] = None) -> bool:
+    """True iff _CRASH_LOOP_SPAWN_LIMIT or more spawn attempts landed within the
+    last _CRASH_LOOP_WINDOW_S — the daemon is dying on start; stop feeding it.
+    Self-draining: while active no new attempts are recorded, so entries age out
+    of the window and spawning resumes on its own. Unreadable history → False
+    (never block a spawn on a corrupt bookkeeping file)."""
+    ts = int(now if now is not None else time.time())
+    try:
+        raw = _spawn_history_path().read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return False
+    recent = [ln for ln in raw.splitlines()
+              if ln.strip().isdigit() and ts - int(ln.strip()) <= _CRASH_LOOP_WINDOW_S]
+    return len(recent) >= _CRASH_LOOP_SPAWN_LIMIT
+
+
+def _kill_wedged_daemon(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
+    """Kill a WEDGED daemon — pid alive but heartbeat provably stale — so the kernel
+    releases the singleton flock it still holds and a respawn can actually take over.
+
+    Without this, ensure_daemon_running would spawn a replacement that LOSES the
+    flock race against the zombie and exits: a silent outage for as long as the
+    wedged process lives (the issue-#7 compounding failure mode, second half).
+
+    Safety ladder — every rung must pass before any signal is sent:
+      1. never self/parent (per-session tests use os.getpid() as an alive stand-in);
+      2. the pid must be alive (a dead pid needs no kill — the spawn path handles it);
+      3. the heartbeat must EXIST and be stale beyond max_silence_s (hb==0 could be
+         a daemon mid-startup between write_daemon_pid and write_heartbeat — strict
+         beats sorry, the plain spawn path covers that case);
+      4. the pid's LIVE cmdline must contain "daemon.py" — defends against PID REUSE
+         (daemon crashed without cleanup, the OS recycled its pid onto an innocent
+         process; killing that would be the exact collateral damage Pillar 4's
+         safelist exists to prevent). A foreign cmdline means the real daemon is
+         already dead → its flock is already free → no kill needed anyway.
+
+    Escalation: SIGTERM → grace → SIGKILL. A SIGSTOP'd process queues SIGTERM
+    without delivering it, so SIGKILL (which works on stopped processes) is the
+    only guaranteed terminator for the wedge case. Returns True iff the process
+    is gone afterwards. Never raises."""
+    import signal as _signal
+    pid = daemon_pid()
+    if pid is None or pid <= 0 or pid == os.getpid() or pid == os.getppid():
+        return False
+    if not _process_alive_not_zombie(pid):
+        return False  # dead or zombie → flock already free; the spawn path handles it
+    hb = read_heartbeat()
+    if hb <= 0 or (int(time.time()) - hb) <= max_silence_s:
+        return False  # not provably wedged
+    cmdline = _read_process_cmdline(pid)
+    if "daemon.py" not in cmdline:
+        state.log_line(
+            "daemon",
+            f"wedge-kill: pid={pid} heartbeat stale but cmdline {cmdline!r} is not a "
+            f"janitor daemon (pid reuse?) — NOT killing; clearing nothing",
+        )
+        return False
+    state.log_line(
+        "daemon",
+        f"wedge-kill: daemon pid={pid} heartbeat stale {int(time.time()) - hb}s "
+        f"(> {max_silence_s}s) — sending SIGTERM",
+    )
+    try:
+        os.kill(pid, _signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        return not _process_alive_not_zombie(pid)
+    deadline = time.time() + _WEDGE_TERM_GRACE_S
+    while time.time() < deadline:
+        if not _process_alive_not_zombie(pid):
+            state.log_line("daemon", f"wedge-kill: pid={pid} exited on SIGTERM")
+            return True
+        time.sleep(0.1)
+    # Still alive (a SIGSTOP'd wedge never delivers SIGTERM) → escalate.
+    state.log_line("daemon", f"wedge-kill: pid={pid} survived SIGTERM — escalating to SIGKILL")
+    try:
+        os.kill(pid, _signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        return not _process_alive_not_zombie(pid)
+    deadline = time.time() + _WEDGE_KILL_GRACE_S
+    while time.time() < deadline:
+        if not _process_alive_not_zombie(pid):
+            break
+        time.sleep(0.1)
+    gone = not _process_alive_not_zombie(pid)
+    state.log_line(
+        "daemon",
+        f"wedge-kill: pid={pid} {'killed' if gone else 'STILL ALIVE after SIGKILL (foreign uid?)'}",
+    )
+    return gone
+
+
 def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
     """If the daemon is dead AND not kill-switched AND enabled, spawn it.
 
@@ -570,8 +720,13 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
       * True when we spawned successfully (the child may still be racing the
         flock, but a spawn was issued).
       * False when the kill switch is set, the master `daemon_enabled` knob
-        is off, the spawn could not happen, OR the spawn was throttled
-        because a previous attempt is still within the min-spawn window.
+        is off, the spawn could not happen, the spawn was throttled because a
+        previous attempt is still within the min-spawn window, OR the crash-loop
+        breaker is tripped (too many spawn attempts inside the window).
+
+    Pillar 0 (TRDD-7100178d): before spawning, a WEDGED daemon (pid alive,
+    heartbeat stale — still holding the singleton flock) is killed via
+    `_kill_wedged_daemon` so the replacement can actually acquire the flock.
 
     The master switch is `CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED` (truthy by
     default). When false, the daemon is never lazy-spawned AND every
@@ -589,6 +744,23 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
         return False
     if daemon_is_alive(max_silence_s=max_silence_s):
         return True
+    # Pillar 0 (TRDD-7100178d Phase 4): not-alive splits into DEAD (pid gone — the
+    # spawn below just works) and WEDGED (pid alive, heartbeat stale — it still HOLDS
+    # the singleton flock, so a plain respawn would lose the flock race against the
+    # zombie and exit: a silent outage for as long as the wedge lives). Kill the
+    # wedged process first (cmdline-verified, SIGTERM→SIGKILL) so the kernel frees
+    # the flock and the spawn can actually take over. No-ops fast in the DEAD case.
+    _kill_wedged_daemon(max_silence_s=max_silence_s)
+    # Crash-loop circuit-breaker: a daemon dying on EVERY start would otherwise be
+    # re-fed once per throttle window forever. Refuse to spawn while the breaker is
+    # tripped; it self-resets as attempts age out of the window.
+    if _crash_loop_active():
+        state.log_line(
+            "daemon",
+            f"spawn refused — crash-loop breaker tripped ({_CRASH_LOOP_SPAWN_LIMIT}+ "
+            f"attempts in {_CRASH_LOOP_WINDOW_S}s); will retry once attempts age out",
+        )
+        return False
     # Throttle: refuse to re-spawn if the last attempt is still within the
     # min-spawn window. Reads the marker spawn_daemon_detached already writes,
     # closing the "written-but-never-read" gap that allowed unbounded respawn

@@ -13,6 +13,8 @@ cached state. Tests use the running pytest PID as a guaranteed-alive PID.
 from __future__ import annotations
 
 import os
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -344,3 +346,185 @@ def test_ensure_daemon_running_throttle_skipped_when_alive(state_dir: Path) -> N
     gs.write_heartbeat()
     assert gs.ensure_daemon_running() is True
     assert calls == [], "must not spawn when the daemon is already alive"
+
+
+# ---------- Pillar 0: wedged-daemon kill + crash-loop breaker (TRDD-7100178d) ----
+#
+# A WEDGED daemon (pid alive, heartbeat stale) still holds the singleton flock, so
+# a plain respawn loses the flock race and exits — silent outage. _kill_wedged_daemon
+# frees the flock; the crash-loop breaker stops feeding a die-on-start daemon.
+# Real subprocesses, every one killed + reaped in finally (no leaks).
+
+
+def _spawn_fake_daemon(tmp_path: Path) -> subprocess.Popen:
+    """A REAL child whose argv ends in .../daemon.py (passes the wedge-kill cmdline
+    gate) and sleeps long enough to look wedged. Caller MUST kill+reap in finally."""
+    script = tmp_path / "daemon.py"
+    script.write_text("import time\ntime.sleep(300)\n", encoding="utf-8")
+    return subprocess.Popen(
+        [sys.executable, str(script)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def _reap(proc: subprocess.Popen) -> None:
+    """Guaranteed cleanup: kill if alive, always reap (no zombie left behind)."""
+    if proc.poll() is None:
+        proc.kill()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _stale_hb(gs) -> int:
+    """A heartbeat timestamp older than the default staleness threshold."""
+    return int(time.time()) - gs.DEFAULT_DAEMON_STALE_SECONDS - 60
+
+
+def test_kill_wedged_refuses_own_pid(state_dir: Path) -> None:
+    """The wedge-kill must NEVER target the calling process — pid==getpid() with a
+    stale heartbeat (the per-session-test stand-in pattern) returns False untouched."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.write_daemon_pid(os.getpid())
+    gs.write_heartbeat(_stale_hb(gs))
+    assert gs._kill_wedged_daemon() is False  # and we are trivially still alive
+
+
+def test_kill_wedged_refuses_dead_pid(state_dir: Path) -> None:
+    """A dead pid needs no kill — the plain spawn path handles it; returns False."""
+    gs = _gs()
+    gs.init_global_state()
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=10)                       # now certainly dead AND reaped
+    gs.write_daemon_pid(child.pid)
+    gs.write_heartbeat(_stale_hb(gs))
+    assert gs._kill_wedged_daemon() is False
+
+
+def test_kill_wedged_requires_stale_heartbeat(state_dir: Path, tmp_path: Path) -> None:
+    """A FRESH heartbeat means not wedged — the daemon-shaped child must survive."""
+    gs = _gs()
+    gs.init_global_state()
+    proc = _spawn_fake_daemon(tmp_path)
+    try:
+        gs.write_daemon_pid(proc.pid)
+        gs.write_heartbeat()                     # fresh
+        assert gs._kill_wedged_daemon() is False
+        assert proc.poll() is None, "a fresh-heartbeat daemon must NOT be killed"
+    finally:
+        _reap(proc)
+
+
+def test_kill_wedged_refuses_foreign_cmdline(state_dir: Path) -> None:
+    """PID-REUSE guard: a stale-heartbeat pid whose live cmdline is NOT a janitor
+    daemon (no 'daemon.py' in argv) must never be killed — collateral-damage rule."""
+    gs = _gs()
+    gs.init_global_state()
+    proc = subprocess.Popen(                      # an innocent non-daemon process
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        gs.write_daemon_pid(proc.pid)
+        gs.write_heartbeat(_stale_hb(gs))
+        assert gs._kill_wedged_daemon() is False
+        assert proc.poll() is None, "an innocent (pid-reused) process must survive"
+    finally:
+        _reap(proc)
+
+
+def test_kill_wedged_kills_real_wedged_daemon(state_dir: Path, tmp_path: Path) -> None:
+    """The real thing: daemon-shaped child + stale heartbeat → SIGTERM kills it and
+    the function reports True (zombie-aware — the unreaped child counts as gone
+    because a dead process has already released the flock)."""
+    gs = _gs()
+    gs.init_global_state()
+    proc = _spawn_fake_daemon(tmp_path)
+    try:
+        gs.write_daemon_pid(proc.pid)
+        gs.write_heartbeat(_stale_hb(gs))
+        assert gs._kill_wedged_daemon() is True
+        assert proc.wait(timeout=10) is not None  # actually dead (and reaped here)
+    finally:
+        _reap(proc)
+
+
+def test_kill_wedged_sigkill_escalation_on_stopped_process(
+    state_dir: Path, tmp_path: Path,
+) -> None:
+    """A SIGSTOP'd wedge never DELIVERS the queued SIGTERM — the escalation to
+    SIGKILL (which works on stopped processes) must finish the job. 🐌"""
+    gs = _gs()
+    gs.init_global_state()
+    proc = _spawn_fake_daemon(tmp_path)
+    try:
+        time.sleep(0.3)                          # let the child reach its sleep
+        os.kill(proc.pid, signal.SIGSTOP)        # wedge it for real
+        gs.write_daemon_pid(proc.pid)
+        gs.write_heartbeat(_stale_hb(gs))
+        assert gs._kill_wedged_daemon() is True, "SIGKILL escalation must terminate a stopped wedge"
+        assert proc.wait(timeout=10) is not None
+    finally:
+        _reap(proc)
+
+
+def test_record_spawn_attempt_appends_and_prunes(state_dir: Path) -> None:
+    """The spawn history is a ring: 25 recorded attempts keep only the newest 20."""
+    gs = _gs()
+    gs.init_global_state()
+    for i in range(25):
+        gs._record_spawn_attempt(now=1000 + i)
+    lines = gs._spawn_history_path().read_text(encoding="utf-8").splitlines()
+    assert len(lines) == gs._SPAWN_HISTORY_KEEP
+    assert lines[-1] == "1024" and lines[0] == "1005"  # newest kept, oldest pruned
+
+
+def test_crash_loop_active_truth_table(state_dir: Path) -> None:
+    """Breaker trips at LIMIT recent attempts; old attempts and a missing file don't trip it."""
+    gs = _gs()
+    gs.init_global_state()
+    now = int(time.time())
+    hist = gs._spawn_history_path()
+    assert gs._crash_loop_active(now=now) is False           # no history file
+    recent = [str(now - 10 * i) for i in range(gs._CRASH_LOOP_SPAWN_LIMIT - 1)]
+    gs.state.atomic_write(hist, "\n".join(recent))
+    assert gs._crash_loop_active(now=now) is False           # LIMIT-1 recent → not tripped
+    recent.append(str(now - 5))
+    gs.state.atomic_write(hist, "\n".join(recent))
+    assert gs._crash_loop_active(now=now) is True            # LIMIT recent → tripped
+    old = [str(now - gs._CRASH_LOOP_WINDOW_S - 100 - i) for i in range(gs._CRASH_LOOP_SPAWN_LIMIT)]
+    gs.state.atomic_write(hist, "\n".join(old))
+    assert gs._crash_loop_active(now=now) is False           # aged out → self-reset
+
+
+def test_ensure_daemon_refuses_spawn_when_crash_looping(state_dir: Path) -> None:
+    """With the breaker tripped, ensure_daemon_running refuses to spawn (returns False)."""
+    gs = _gs()
+    gs.init_global_state()
+    calls = _record_spawns(gs)
+    now = int(time.time())
+    gs.state.atomic_write(
+        gs._spawn_history_path(),
+        "\n".join(str(now - 10 * i) for i in range(gs._CRASH_LOOP_SPAWN_LIMIT)),
+    )
+    assert gs.ensure_daemon_running() is False
+    assert calls == [], "no spawn may happen while the crash-loop breaker is tripped"
+
+
+def test_ensure_daemon_kills_wedge_then_spawns(state_dir: Path, tmp_path: Path) -> None:
+    """End-to-end Pillar 0: a wedged daemon-shaped child is killed AND a fresh spawn
+    is issued in the same ensure_daemon_running call — the outage self-heals."""
+    gs = _gs()
+    gs.init_global_state()
+    calls = _record_spawns(gs)
+    proc = _spawn_fake_daemon(tmp_path)
+    try:
+        gs.write_daemon_pid(proc.pid)
+        gs.write_heartbeat(_stale_hb(gs))        # wedged: pid alive + stale heartbeat
+        assert gs.ensure_daemon_running() is True
+        assert proc.wait(timeout=10) is not None, "the wedge must be dead"
+        assert len(calls) == 1, "a replacement spawn must be issued after the kill"
+    finally:
+        _reap(proc)
