@@ -89,7 +89,7 @@ See-also into related pages exactly as in Entry A. If recall returns nothing, th
 memory doesn't exist yet — solve it, then `/janitor-memory-write` (MEMORIZE).
 
 If memgrep is not installed, install once (it ships in this plugin):
-`cargo install --path "$CLAUDE_PLUGIN_ROOT/tools/memgrep"`.
+`cargo install --path "$CLAUDE_PLUGIN_ROOT/scripts/memgrep"`.
 
 ## The lessons come back for free
 
@@ -164,7 +164,7 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
   command map).
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" recall
   law + schema + dual-test method.
-- `$CLAUDE_PLUGIN_ROOT/tools/memgrep/SKILL.md` — the memgrep instrument reference.
+- `$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` — the memgrep instrument reference.
 - `/janitor-memory-write` (MEMORIZE) · `/janitor-memory-update` (UPDATE) — the
   write legs; run RECALL before both.
 - `/search-user-mem` — searches the USER's PRIVATE store (agent-invisible); a

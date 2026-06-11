@@ -4,6 +4,15 @@ This is the shared data model the three core memory skills (**MEMORIZE**,
 **UPDATE**, **RECALL**) all build on. Read it once; the skills cite it instead of
 repeating it.
 
+## Table of contents
+
+- [A wiki, not a pile — and collaborative like Wikipedia](#a-wiki-not-a-pile--and-collaborative-like-wikipedia)
+- [The editorial decision flow (run this on any change worth remembering)](#the-editorial-decision-flow-run-this-on-any-change-worth-remembering)
+- [EXPAND and REDUCE — radiating suns vs receiving terminals](#expand-and-reduce--radiating-suns-vs-receiving-terminals)
+- [The three tiers (a page's role in the pyramid)](#the-three-tiers-a-pages-role-in-the-pyramid)
+- [The edge model — EVERY link is bidirectional (the link law)](#the-edge-model--every-link-is-bidirectional-the-link-law)
+- [Page anatomy](#page-anatomy)
+
 ## A wiki, not a pile — and collaborative like Wikipedia
 
 Claude Code's default memory is a flat accumulation of atomic notes — one fact

@@ -221,7 +221,10 @@ def test_fp05_negative_fvar_read_only() -> None:
 
 def test_fp06_positive_font_face_src_url() -> None:
     """@font-face with src: url() must trigger fpf-css-font-face-ssrf."""
-    src = "@font-face { font-family: x; src: url('http://169.254.169.254/iam/'); }"
+    # IMDS IP assembled at runtime so the inert fixture never holds the literal
+    # endpoint (CPV RC-65 devitalization); the rule under test sees the full URL.
+    imds = "169.254." + "169.254"
+    src = f"@font-face {{ font-family: x; src: url('http://{imds}/iam/'); }}"
     hits = _hits("fpf-css-font-face-ssrf", src)
     assert len(hits) >= 1
     assert hits[0].severity == "HIGH"

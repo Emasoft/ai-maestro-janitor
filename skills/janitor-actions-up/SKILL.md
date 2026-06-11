@@ -191,6 +191,8 @@ rule are the surveillance arm. This skill is the one-shot heal.
 
 ## Checklist
 
+Copy this checklist and track your progress:
+
 * [ ] Pre-flight: `.github/workflows/` exists
 * [ ] Pre-flight: working tree clean (or `--apply` was explicit)
 * [ ] Pre-flight: self-scan guard (refuse on janitor's own repo)

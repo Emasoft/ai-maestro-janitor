@@ -198,6 +198,17 @@ To MODIFY an existing page (including correcting a wrong memory) use
 `/janitor-memory-update`. To FIND pages use `/janitor-memory-recall`. One subject
 per page; symptom-indexed `description` + non-empty `## See also` are mandatory.
 
+## Checklist
+
+Copy this checklist and track your progress:
+
+* [ ] Scope routed (LOCAL / PROJECT / USER — unsure → LOCAL)
+* [ ] RECALL ran first — no existing page already covers this fact
+* [ ] Editorial decision made (new page vs UPDATE an existing page)
+* [ ] Page written: one subject, symptom-indexed `description:`, correct tier
+* [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
+* [ ] `MEMORY.md` index line added (one line, no content duplication)
+
 ## Resources
 
 - [references/wikimem-model.md](references/wikimem-model.md) — the wiki data

@@ -38,8 +38,8 @@ POST of the exact `baseline_ruleset_payloads()[2]` payload). **Readback-pin conf
 byte-identical** — GitHub echoed `ref_name.include == ["refs/tags/v*.*.*"]` UNCHANGED
 (matching the maintainer's first-apply observation), `rules == ["deletion","update"]`,
 `bypass_actors == []`, `target: tag`, `enforcement: active`. The janitor repo now has
-**all three** ratified rulesets live (history-protect 17286452 + pr-and-checks 17286453
-+ tag-protect 17545495); zero stragglers. This closes the MANAGER's coverage-table gap
+**all three** ratified rulesets live (history-protect 17286452, pr-and-checks 17286453,
+and tag-protect 17545495); zero stragglers. This closes the MANAGER's coverage-table gap
 ("janitor itself is missing baseline-tag-protect").
 
 Why now (the 2026-06-08 "rides the next publish, do NOT one-off-apply" guidance is

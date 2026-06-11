@@ -202,6 +202,8 @@ attack surface end-to-end.
 
 ## Checklist
 
+Copy this checklist and track your progress:
+
 * [ ] Pre-flight: project root resolved (worktree-safe)
 * [ ] Pre-flight: self-scan guard fires on janitor's own repo
 * [ ] Enumerated agent-context files via `agent_context_files()` inventory

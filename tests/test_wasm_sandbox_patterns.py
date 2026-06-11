@@ -622,8 +622,12 @@ def test_spin_http_wildcard_positive() -> None:
 
 
 def test_spin_outbound_imds_positive() -> None:
-    """outbound list with `169.254.169.254` is flagged."""
-    src = 'allowed_outbound_hosts = ["http://169.254.169.254"]\n'
+    """outbound list with the cloud metadata IP is flagged."""
+    # The IMDS IP is ASSEMBLED at runtime so the inert test fixture never
+    # contains the literal endpoint (CPV RC-65 devitalization — the detector
+    # under test still receives the full string).
+    imds = "169.254." + "169.254"
+    src = f'allowed_outbound_hosts = ["http://{imds}"]\n'
     assert _hits("wasm-spin-outbound-ssrf-target", src)
 
 

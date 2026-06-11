@@ -51,9 +51,10 @@ See [references/ratified-baseline.md](references/ratified-baseline.md)
 for the full payloads, the auto-detection query, and the apply algorithm.
 Its table of contents:
 
-* The two rulesets
+* The three rulesets
 * Why `~DEFAULT_BRANCH`
 * Why the admin bypass on baseline-pr-and-checks
+* Why tag protection (baseline-tag-protect)
 * Required status checks — auto-detection
 * Apply algorithm (idempotent-by-name + legacy cleanup)
 * Single source of truth
@@ -203,9 +204,10 @@ The Tier 2 path is a separate opt-in via plugin.json.
 * [references/ratified-baseline.md](references/ratified-baseline.md) —
   the full payloads, the auto-detection query + exact API shape, and the
   apply/cleanup algorithm. Its table of contents:
-  * The two rulesets
+  * The three rulesets
   * Why `~DEFAULT_BRANCH`
   * Why the admin bypass on baseline-pr-and-checks
+  * Why tag protection (baseline-tag-protect)
   * Required status checks — auto-detection
   * Apply algorithm (idempotent-by-name + legacy cleanup)
   * Single source of truth

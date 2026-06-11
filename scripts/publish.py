@@ -759,7 +759,7 @@ def language_lint_step(info: ProjectInfo) -> None:
             print(f"{RED}fail cargo missing — Rust files tracked but Rust toolchain not installed{NC}")
             sys.exit(1)
         # The crate need not live at the git root — a Rust tool can be bundled under
-        # tools/<name>/ (e.g. tools/memgrep). Locate every tracked Cargo.toml and lint
+        # a subdir (e.g. scripts/memgrep). Locate every tracked Cargo.toml and lint
         # the OUTERMOST ones (a workspace root covers its members; a standalone crate is
         # its own root), pointing cargo at each with --manifest-path so it finds the crate
         # regardless of cwd. Depth-sort so a parent manifest is always seen before a nested one.

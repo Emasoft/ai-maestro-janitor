@@ -26,11 +26,8 @@ from typing import Optional
 
 try:
     import fcntl  # POSIX only (macOS + linux — the declared runtime targets)
-
-    _HAVE_FCNTL = True
 except ImportError:  # pragma: no cover - non-POSIX fallback
     fcntl = None  # type: ignore[assignment]
-    _HAVE_FCNTL = False
 
 # --- path resolution -------------------------------------------------------
 #
@@ -189,7 +186,10 @@ class UserMemStore:
         behaviour we want, never a reused number.
         """
         self.dir.mkdir(parents=True, exist_ok=True)
-        if not _HAVE_FCNTL:  # pragma: no cover - non-POSIX fallback (best-effort)
+        # `fcntl is None` (not a separate bool) so the type-checker NARROWS fcntl
+        # to a real module for the rest of the function — a `_HAVE_FCNTL` flag
+        # left pyright seeing `module | None` at every flock call below.
+        if fcntl is None:  # pragma: no cover - non-POSIX fallback (best-effort)
             n = self._read_counter() + 1
             _atomic_write(self._counter_path, str(n))
             return n

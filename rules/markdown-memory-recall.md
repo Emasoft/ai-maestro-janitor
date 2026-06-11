@@ -77,10 +77,10 @@ lands in PROJECT).
 `memgrep` is `rg` for markdown (gitignore-aware tree walk, per-line regex,
 markdown-structural filters, boolean `--where`, link semijoin, and the memory
 subcommands `recall`/`index`/`links`/`fact`). Its own teaching doc is
-`tools/memgrep/SKILL.md` in `ai-maestro-janitor`.
+`scripts/memgrep/SKILL.md` in `ai-maestro-janitor`.
 
 - **Availability:** memgrep is a Rust binary. If `command -v memgrep` is empty,
-  install it once: `cargo install --path <…>/ai-maestro-janitor/tools/memgrep`
+  install it once: `cargo install --path <…>/ai-maestro-janitor/scripts/memgrep`
   (puts it on `~/.cargo/bin`). Until then, the plain-`grep` fallback above
   works on note frontmatter + bodies — recall degrades, never breaks.
 - **recall** `memgrep recall "SYMPTOM" <memdir>` — symptom-ranked notes,
@@ -276,7 +276,7 @@ from a clean framing, or have the symptom come from the user verbatim.
 | Authoring | `# Memory` harness directive + `janitor-memory-write` skill | write one fact per note; symptom-indexed `description`; the correction protocol (clean fact in place, demote error to a `[^N]` lesson) |
 | Recall | THIS rule + `janitor-memory-recall` skill + `memgrep recall`/`find` | symptom-ranked recall, lessons auto-appended |
 | Organization | `memory-librarian` detector (janitor heartbeat) | SURFACES aggregation/conflict candidates to `memory-reorg-proposed.md`; never edits content (a session does the conscious reorg) |
-| Tool | `memgrep` (`tools/memgrep/SKILL.md`) | the engine all three lean on |
+| Tool | `memgrep` (`scripts/memgrep/SKILL.md`) | the engine all three lean on |
 | Private user store | `/to-user-mem`, `/search-user-mem`, `/share-user-mem` | the USER's own agent-invisible memories — a SEPARATE corpus, not the agent notes; search routes through `memgrep find` |
 
 Separation of powers: the **janitor** reorganizes structure and *surfaces*

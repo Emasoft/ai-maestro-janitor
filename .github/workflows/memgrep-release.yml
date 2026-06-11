@@ -68,7 +68,7 @@ jobs:
         run: rustup target add "${{ matrix.target }}"
 
       - name: Build memgrep (release)
-        run: cargo build --release --locked --target "${{ matrix.target }}" --manifest-path tools/memgrep/Cargo.toml
+        run: cargo build --release --locked --target "${{ matrix.target }}" --manifest-path scripts/memgrep/Cargo.toml
 
       # Stage the built binary under the asset name and compute its checksum.
       # macOS ships `shasum`; Linux ships `sha256sum` — pick per-OS. The `.sha256`

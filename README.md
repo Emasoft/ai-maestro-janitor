@@ -420,7 +420,7 @@ acts on it (the token is documented), the cron is replaced with a fresh
 new-prompt one, and from then on future renewals are silent forever. The
 nudge threshold remains tunable via `heartbeat_renewal_threshold_days`.
 
-## Install
+## Installation
 
 This plugin is designed for **project scope only** — install it in the
 projects where you want the janitor running, not globally.
@@ -439,7 +439,7 @@ echo '.janitor/' >> .gitignore
 
 Then inside the session, run:
 
-```
+```text
 /janitor-arm
 ```
 
@@ -452,6 +452,27 @@ On Claude Code v2.1.110+, `claude --resume <session-id>` and
 heartbeat survives explicit resume too. On older versions those commands
 could leave the cron behind — re-run `/janitor-arm` if no drift lines
 surface after an explicit resume.
+
+## Usage
+
+Day-to-day the janitor is hands-off: once `/janitor-arm` is run, the
+heartbeat fires every ~5 minutes, runs the due [detectors](#detectors),
+and surfaces one-line drift findings in the session — silence means
+nothing drifted. Typical interactions:
+
+- `/janitor-audit` — run a full on-demand audit instead of waiting for
+  the heartbeat cadences.
+- `/janitor-doctor` — deep-scan the repo's GitHub workflows
+  (zizmor + Sentinel classifiers).
+- `/janitor-safe-delete <path>` — move files to the recoverable
+  `.trashcan/` instead of `rm`.
+- `/janitor-pause` · `/janitor-resume` — temporarily silence / restore
+  the heartbeat; `/janitor-disarm` removes the cron entirely.
+- `/janitor-autofix-on|off` — toggle the act-don't-ask remediation
+  policy per project.
+
+The full command list lives in [Skills](#skills); tuning knobs in
+[Configuration](#configuration).
 
 ## Data layout
 

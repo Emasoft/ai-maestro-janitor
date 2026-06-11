@@ -2,7 +2,7 @@
 # Build the memgrep binary (the memory system's markdown-AST grepper).
 #
 # memgrep ships as Rust SOURCE in this plugin and is compiled on demand — the
-# memory skills/rules install it with `cargo install --path "$CLAUDE_PLUGIN_ROOT/tools/memgrep"`.
+# memory skills/rules install it with `cargo install --path "$CLAUDE_PLUGIN_ROOT/scripts/memgrep"`.
 # This script is the explicit build entry point: it produces a release binary
 # under target/release/memgrep (and, with `install`, puts it on ~/.cargo/bin).
 #
