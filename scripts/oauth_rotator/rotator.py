@@ -436,7 +436,9 @@ def expires_in_h(blob: dict) -> float | None:
     return (secs - time.time()) / 3600
 
 
-_DEFAULT_STATE = {"live_email": None, "live_fp": None, "slots": {}}
+# Heterogeneous values (str | None live_email/live_fp, dict slots, int 429-streak, float
+# last_switch_at) → annotate as dict[str, object] so mypy has a concrete element type.
+_DEFAULT_STATE: dict[str, object] = {"live_email": None, "live_fp": None, "slots": {}}
 
 
 def load_state() -> dict:
@@ -1733,16 +1735,17 @@ def main(argv: list[str]) -> int:
             print("delete-plaintext-slots: removed %d plaintext file(s): %s"
                   % (len(removed), ", ".join(removed) or "(none)"))
             return 0
-        # cmd == "migrate-root"
-        legacy, canonical, moved = migrate_root_to_canonical()
-        if legacy == canonical:
+        # cmd == "migrate-root"  (legacy_root is a Path here, not the list[Path] used in the
+        # delete-plaintext-slots branch above — a distinct name avoids the type collision)
+        legacy_root, canonical, moved = migrate_root_to_canonical()
+        if legacy_root == canonical:
             print("migrate-root: canonical and legacy root are identical (%s) — no-op" % canonical)
         elif moved:
-            print("migrate-root: copied state.json/opt-in %s -> %s (legacy kept)" % (legacy, canonical))
+            print("migrate-root: copied state.json/opt-in %s -> %s (legacy kept)" % (legacy_root, canonical))
         elif (canonical / "state.json").is_file():
             print("migrate-root: already migrated (%s has state.json)" % canonical)
         else:
-            print("migrate-root: nothing to migrate (no state.json in %s)" % legacy)
+            print("migrate-root: nothing to migrate (no state.json in %s)" % legacy_root)
         return 0
 
 
