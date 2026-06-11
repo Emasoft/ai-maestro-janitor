@@ -1120,8 +1120,30 @@ def cmd_auto() -> int:
             continue  # never rotate ONTO a dead/dying token
         if network_up:
             st2, d2 = usage_request(b)
+            if st2 not in (200, 429):
+                # REFRESH-ON-ERR safety net (TRDD-32acd15f, the 2026-06-11 incident): a non-200,
+                # non-429 probe almost always means the alternate's SLOT access token has EXPIRED
+                # (401/403). Excluding it here is what deadlocked rotation — "all paid accounts
+                # maxed" while a genuinely FRESH alternate sat unusable because its token had lapsed
+                # (a keepalive gap, e.g. the daemon running a pre-CF-1010-fix build whose refresh
+                # silently 1010'd). Refresh the token and re-probe BEFORE excluding, so one stale
+                # access token can never again deadlock rotation. 429 is deliberately NOT refreshed
+                # (the account is maxed, not the token expired — a refresh would not help).
+                refreshed = refresh_oauth_token(b)
+                if refreshed is None:
+                    continue  # setup-token slot (no refreshToken) or the refresh grant failed
+                try:
+                    write_slot(email, refreshed)  # heal the lapsed slot in the keychain (as keepalive would)
+                except SlotKeychainWriteError as exc:
+                    # FAIL SOFT: a locked/declined keychain refused the persist. Still use the fresh
+                    # token IN MEMORY for this decision — the goal is to not deadlock; a rotation
+                    # onto it writes the live credential (a different keychain item), not this slot.
+                    _log("[auto] %s: keychain write refused after refresh-on-err (%s) — "
+                         "using fresh token in-memory" % (email, exc))
+                b = refreshed
+                st2, d2 = usage_request(b)  # re-probe with the fresh token
             if st2 != 200:
-                continue  # 429 (maxed) or error -> not a safe target
+                continue  # still 429 (maxed) or error after the refresh attempt -> not a safe target
             bfh = _util(d2, "five_hour")
             bsd = _util(d2, "seven_day")
             if bfh is None or bsd is None:

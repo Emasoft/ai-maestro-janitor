@@ -672,6 +672,67 @@ def test_cmd_auto_proactive_swap_on_locally_expiring_live(
     assert [s[0] for s in switches] == ["alt@x"]           # rotated before the live token expired
 
 
+def _tok(blob: dict) -> str:
+    """The accessToken inside a credential blob — used to assert WHICH token a switch landed on."""
+    return blob.get("claudeAiOauth", {}).get("accessToken", "")
+
+
+def test_cmd_auto_refreshes_expired_alternate_before_excluding(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """REFRESH-ON-ERR (TRDD-32acd15f, the 2026-06-11 deadlock): an alternate that passed the local
+    expiry guard but whose token the server REJECTS (probe 401/403) is refreshed + re-probed BEFORE
+    exclusion — so a single stale slot token can no longer make the rotator declare 'all accounts
+    maxed' while a fresh alternate exists. The switch lands on the FRESH token and the slot is healed."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    stale_alt = _blob("ALT_OLD", expires_ms=_ms_in(50))    # local runway fine; the SERVER rejects the token
+    fresh_alt = _blob("ALT_NEW", expires_ms=_ms_in(80))    # what refresh_oauth_token mints
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": stale_alt},
+                           usage={"LIVE": (401, None), "ALT_OLD": (403, None), "ALT_NEW": (200, _usage_ok())})
+    monkeypatch.setattr(rotator, "refresh_oauth_token",
+                        lambda b: fresh_alt if _tok(b) == "ALT_OLD" else None)
+    healed: list = []
+    monkeypatch.setattr(rotator, "write_slot", lambda e, b: healed.append((e, _tok(b))))
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"]           # rotated instead of deadlocking
+    assert _tok(switches[0][1]) == "ALT_NEW"               # onto the FRESH token, not the stale one
+    assert healed == [("alt@x", "ALT_NEW")]                # the lapsed slot was re-minted in the keychain
+
+
+def test_cmd_auto_does_not_refresh_maxed_429_alternate(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 429 alternate is MAXED, not expired — refreshing cannot un-max it, so it must NOT trigger a
+    refresh grant; with no other candidate the rotator correctly stays put (genuinely all-maxed)."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    maxed_alt = _blob("ALT", expires_ms=_ms_in(80))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": maxed_alt},
+                           usage={"LIVE": (401, None), "ALT": (429, None)})
+    refreshed: list = []
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: refreshed.append(_tok(b)) or None)
+    rotator.cmd_auto()
+    assert refreshed == []                                 # 429 (maxed) never triggers a wasted refresh
+    assert switches == []                                  # genuinely maxed → no rotation
+
+
+def test_cmd_auto_excludes_alternate_when_refresh_fails(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the rejected alternate cannot be refreshed (setup-token slot or a dead refresh chain →
+    refresh_oauth_token returns None) it is still excluded — refresh-on-err must not rotate onto an
+    unusable token, and it must not 'heal' a slot it could not refresh."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    stale_alt = _blob("ALT_OLD", expires_ms=_ms_in(50))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": stale_alt},
+                           usage={"LIVE": (401, None), "ALT_OLD": (401, None)})
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: None)    # refresh chain is dead
+    wrote: list = []
+    monkeypatch.setattr(rotator, "write_slot", lambda e, b: wrote.append(e))
+    rotator.cmd_auto()
+    assert switches == []                                  # cannot rotate onto an unrefreshable token
+    assert wrote == []                                     # nothing healed when refresh failed
+
+
 # --------------------------------------------------------------------------
 # F2b (TRDD-7100178d): refresh-token keepalive — PREVENT slot expiry (slots only)
 # --------------------------------------------------------------------------
