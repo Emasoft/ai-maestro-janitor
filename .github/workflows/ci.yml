@@ -72,6 +72,34 @@ jobs:
             exit $exit_code
           fi
 
+  # Exercise the RELEASE pipeline's build+stage path on EVERY push — the
+  # recurrence guard for the v0.7.0 incident, where the memgrep-release
+  # workflow's staging step (tag-trigger-only, so never exercised pre-tag)
+  # copied from a wrong target/ path and failed on all four platforms at the
+  # one moment it mattered. This job builds with an explicit --target (the
+  # same triple-subdir layout the release matrix produces) and runs the SAME
+  # scripts/memgrep/stage.sh the release workflow calls, so any drift between
+  # build output and staging breaks CI immediately instead of at tag time.
+  memgrep-build:
+    name: memgrep build+stage smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build memgrep exactly as the release does
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          cargo build --release --locked --target x86_64-unknown-linux-gnu --manifest-path scripts/memgrep/Cargo.toml
+
+      - name: Stage via the shared release script
+        run: bash scripts/memgrep/stage.sh x86_64-unknown-linux-gnu memgrep-linux-x64
+
+      - name: Staged binary runs
+        run: ./dist/memgrep-linux-x64 --help >/dev/null && echo "staged binary executes OK"
+
   smoke:
     name: Smoke
     runs-on: ubuntu-latest
