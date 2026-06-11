@@ -161,7 +161,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=de133a4cc62c digest=395e3b5e4334 generated=2026-06-11T01:09:39+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=a63718acc35e digest=107b83fc8bbc generated=2026-06-11T11:12:30+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -222,6 +222,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/plugin-updates.py` — Plugin-updates detector — Python port of plugin-updates.sh.
   · main() -> int
 `scripts/detectors/pr-reconciler.py` — PR reconciler — Python port of pr-reconciler.sh.
+  · main() -> int
+`scripts/detectors/project-map-drift.py` — project-map-drift — nudge when the fenced CLAUDE.md project map is stale.
   · main() -> int
 `scripts/detectors/project-plugins-update.py` — Project-plugins-update detector — Track 2b of the auto-update directive.
   · main() -> int
@@ -698,6 +700,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · update_python_versions(plugin_root, new_version) -> list[tuple[bool, str]] — Update __version__ = 'X.Y.Z' in all Python files.
   · check_version_consistency(plugin_root) -> tuple[bool, str] — Check all version sources match. Returns (ok, message).
   · do_bump(plugin_root, new_version, dry_run) -> bool — Bump version across all files. Returns True on success.
+  · main() -> int
+`scripts/repomap_generate.py` — repomap_generate — generate/refresh the fenced project map in CLAUDE.md.
+  · load_excludes(root) -> list[str] — The persisted exclude globs (one per line, `#` comments). Persisting
+  · save_excludes(root, globs) -> None
+  · discover_sources(root, excludes) -> list[Path] — Tracked `*.py` files via git (gitignore-respecting); bounded rglob
+  · repo_digest(root) -> str — Cheap repo-change digest: git HEAD + a hash of the porcelain status
+  · extract_all(root, excludes) -> list[FileMap] — Extract every supported source file. Today the adapter registry holds
+  · splice_with_verify(claude_md, block, attempts) -> bool — The anti-corruption write: read+signature → splice+invariant-verify →
+  · cmd_check(root) -> int
+  · cmd_remove(root) -> int
+  · cmd_generate(root, *, to_stdout, excludes) -> int
   · main() -> int
 `scripts/safe_delete.py` — safe-delete — Python port of safe-delete.sh.
   · main() -> int
