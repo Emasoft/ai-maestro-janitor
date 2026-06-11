@@ -1,6 +1,6 @@
 ---
 name: janitor-auto-repomap-on
-description: Enable the auto-maintained project map in this project's CLAUDE.md - generates the fenced repo-map block (one line per file + public symbols, convention-collapsed) and turns on the stale-map heartbeat nudge. Use when the user says "turn on the repo map", "enable the project map", "add the auto map to CLAUDE.md", "keep the CLAUDE.md map updated". Safe by construction - the generator holds a project lock, guards against concurrent CLAUDE.md edits (lost-update retry), verifies byte-preservation of the human narrative before every write, and backs up CLAUDE.md first. The janitor heartbeat itself NEVER rewrites CLAUDE.md (cache + co-ownership safety) - it only nudges.
+description: Enable the auto-maintained project map in this project's CLAUDE.md - generates the fenced repo-map block (one line per file + public symbols, convention-collapsed) and turns on the stale-map heartbeat nudge. Use when the user says "turn on the repo map", "enable the project map", "add the auto map to CLAUDE.md". Safe by construction - the generator holds a project lock, guards against concurrent CLAUDE.md edits, verifies byte-preservation of the human narrative before every write, and backs up first. The heartbeat itself NEVER rewrites CLAUDE.md (cache + co-ownership safety) - it only nudges.
 ---
 
 # Janitor auto-repomap ON

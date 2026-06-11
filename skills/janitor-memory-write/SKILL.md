@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-write
-description: MEMORIZE — capture a durable decision/fact into the project's memory WIKI as a navigable page, not a loose note. Use after solving a non-trivial bug (a bug-autopsy gotcha), making a design/architecture decision, learning a project constraint not derivable from code, a confirmed user preference, or any "we should remember this" moment — or when the user says "remember this", "memorize this", "save a memory", "capture this decision/gotcha", "note that for next time". Finds the right existing wikimem page first (so it never duplicates), and only when none fits creates a new HUB / ASPECT / COMPONENT page via the expand/reduce decision, wires it into the See-also context web, and indexes it by symptom. The MEMORIZE leg of the AI-Maestro wiki-memory protocol.
+description: MEMORIZE — capture a durable decision/fact into the project's memory WIKI as a navigable page, not a loose note. Use after a bug-autopsy gotcha, a design/architecture decision, a project constraint not derivable from code, a confirmed user preference, or when the user says "remember this", "memorize this", "save a memory". Finds the right existing wikimem page first so it never duplicates; only when none fits, creates a HUB / ASPECT / COMPONENT page via the expand/reduce decision, wires it into the See-also web, and indexes it by symptom. The MEMORIZE leg of the wiki-memory protocol.
 ---
 
 # Janitor memory — MEMORIZE

@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-update
-description: UPDATE — modify an existing memory WIKI page when something changes — add a new decision to the page that owns the subject, CORRECT a memory a new discovery contradicts (the 2-step non-destructive protocol), or RESHAPE a page that outgrew its tier (extract a now-shared rule into an aspect = expand; move element-specific detail into its component page = reduce). Use after a design decision changes, a memory turns out wrong, a page mixes too many subjects, or the user says "update the memory", "that's no longer true", "we changed our mind about X", "fix the note about Y", "this memory is outdated". Keeps the See-also context web, the hub map, and the lessons-learned trail consistent across the edit. The UPDATE leg of the AI-Maestro wiki-memory protocol.
+description: UPDATE — modify an existing memory WIKI page when something changes — ADD a decision to the page that owns the subject, CORRECT a memory a new discovery contradicts (the 2-step non-destructive protocol), or RESHAPE a page that outgrew its tier (expand a shared rule into an aspect, reduce element-specific detail into its component page). Use when a decision changes, a memory turns out wrong, a page mixes too many subjects, or the user says "update the memory", "that's no longer true", "fix the note about Y", "this memory is outdated". Keeps the See-also web, the hub map, and the lessons trail consistent. The UPDATE leg of the wiki-memory protocol.
 ---
 
 # Janitor memory — UPDATE
