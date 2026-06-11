@@ -97,8 +97,16 @@ jobs:
       - name: Stage via the shared release script
         run: bash scripts/memgrep/stage.sh x86_64-unknown-linux-gnu memgrep-linux-x64
 
+      # The staged binary lives under dist/ — a directory CREATED BY the stage
+      # step above, so it never exists in the repo; reference it through an env
+      # var rather than a literal path (a literal would trip path-exists checks
+      # that cannot know about mid-job build artifacts).
       - name: Staged binary runs
-        run: ./dist/memgrep-linux-x64 --help >/dev/null && echo "staged binary executes OK"
+        env:
+          ASSET: memgrep-linux-x64
+        run: |
+          "dist/${ASSET}" --help >/dev/null
+          echo "staged binary (${ASSET}) executes OK"
 
   smoke:
     name: Smoke
