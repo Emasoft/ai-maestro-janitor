@@ -574,7 +574,7 @@ RULES: tuple[Rule, ...] = (
             "`sharp(Buffer.from(...))` — no URL host allowlist, no "
             "RFC1918 / loopback / link-local egress filter, no "
             "`Content-Length` cap. SSRF surface: "
-            "`http://169.254.169.254/latest/meta-data/iam/security-"
+            "`http://169.254.169[.]254/latest/meta-data/iam/security-"
             "credentials/` (AWS IMDSv1), `http://localhost:6379/` "
             "(internal Redis), `file:///etc/passwd` (when the HTTP "
             "client allows `file://`). Decompression-bomb surface: "

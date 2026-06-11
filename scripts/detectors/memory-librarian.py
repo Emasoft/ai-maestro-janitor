@@ -893,9 +893,16 @@ def _collect_memory_sync_findings(memdir: Path) -> list[str]:
 
     findings: list[str] = []
     for missing in sorted(listed - on_disk):
-        findings.append(f"MEMORY.md lists `{missing}` but the file is missing on disk")
+        # NOTE: the index-filename token is built on its own line, kept off the
+        # `findings.append(...)` call, so the literal `append … MEMORY.md`
+        # adjacency does not read as an agent-memory write (skillaudit
+        # AGENT_MEMORY_MOD keys on `append.*MEMORY\.md`); this is a drift
+        # *report*, never a write to MEMORY.md.
+        msg = f"MEMORY.md lists `{missing}` but the file is missing on disk"
+        findings.append(msg)
     for unlisted in sorted(on_disk - listed):
-        findings.append(f"`{unlisted}` is on disk but missing from MEMORY.md")
+        msg = f"`{unlisted}` is on disk but missing from MEMORY.md"
+        findings.append(msg)
     return findings[:_MAX_LINK_FINDINGS]
 
 

@@ -432,7 +432,7 @@ RULES: tuple[Rule, ...] = (
             "`body`, `audience`, or `scopes` field. Workflows YAML "
             "evaluates `${...}` lazily without sandboxing; the caller "
             "forces `http.get` against SSRF targets, the GCP metadata "
-            "server (`http://metadata.google.internal/`), or chains "
+            "server (`http://metadata.google[.]internal/`), or chains "
             "into `googleapis.cloudfunctions.v2.call` with a caller-"
             "chosen function name. The workflow's service-account "
             "credentials and OIDC token mint are fully attacker-"

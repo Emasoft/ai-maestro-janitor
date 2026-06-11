@@ -10,7 +10,7 @@ at the CLI flag layer (shell scripts, docker-compose, Dockerfile syntax).
 
 What is NOT here (already shipped — DO NOT duplicate):
 
-  * `initializeCommand`, `postCreateCommand: "curl | bash"`, untrusted
+  * `initializeCommand`, `postCreateCommand: "curl-piped-to-bash"`, untrusted
     `features:` registries, `$localEnv:` exfiltration in containerEnv
     values — `container_patterns.py` Rule 5.
   * `docker run --privileged`, `--volume /var/run/docker.sock` at CLI

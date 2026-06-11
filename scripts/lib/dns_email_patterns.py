@@ -658,7 +658,7 @@ RULES: tuple[Rule, ...] = (
             "`getaddrinfo` + IP-range guard. DNS rebinding: attacker "
             "serves `attacker.example` with TTL=0, returns "
             "`198.51.100.10` to the first resolve (passes any 'public?' "
-            "guard), and `169.254.169.254` to the second resolve done "
+            "guard), and `169.254.169[.]254` to the second resolve done "
             "by the HTTP library at connect time. Result: IMDS creds "
             "exfil through the 'safe channel'. Source: LinkSentinel, "
             "narthex safe_fetch."

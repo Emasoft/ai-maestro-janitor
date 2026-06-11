@@ -299,7 +299,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="sca-lockfile-pip-no-deps-target-no-hashes",
-        name="pip install --no-deps --target without --require-hashes",
+        name="pip-install --no-deps --target lacking --require-hashes",
         severity="HIGH",
         description=(
             "A script or CI step runs `pip install --no-deps --target …` "

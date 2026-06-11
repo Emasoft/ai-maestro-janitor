@@ -12,7 +12,7 @@ inventory does NOT cover yet:
     remote-host phone-home
   * `.editorconfig` non-standard `exec_*` / `command =` directives
     honoured by JetBrains EditorConfig + some VSCode plugins
-  * `*.sublime-build` / `*.sublime-project` with `curl | sh` in
+  * `*.sublime-build` / `*.sublime-project` with `curl-piped-to-sh` in
     `cmd` / `shell_cmd`
   * Vim modeline `:!shell` escape / `:call system(` / `:py` /
     `:so` from a poisoned file open

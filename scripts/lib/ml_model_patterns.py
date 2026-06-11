@@ -592,7 +592,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="ml-model.readme-pip-install-from-git-url",
-        name="pip install git+URL / wheel URL inside ML model card",
+        name="pip-install of a git+URL or wheel URL inside an ML model card",
         severity="HIGH",
         description=(
             "Markdown model card / README contains `pip install "

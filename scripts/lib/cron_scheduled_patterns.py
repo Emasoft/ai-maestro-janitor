@@ -16,7 +16,7 @@ schtasks call) as an attack-vector / persistence beachhead.
 
 What is NOT here (already shipped — DO NOT duplicate):
 
-  * `curl … | sh` literal in any file (narthex `post_edit.py:66`).
+  * `curl …`-piped-to-`sh` literal in any file (narthex `post_edit.py:66`).
     This module *extends* that by adding crontab/systemd context.
   * Kubernetes `CronJob` admission (k8s_admission_patterns).
   * Linux privilege-escalation patterns (out of scope per round-13

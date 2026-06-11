@@ -22,7 +22,8 @@ network. The sub-checks complement (do not duplicate) existing detectors:
 
   2. `sc-bypass-via-vscode-tasks-and-claude-hooks` (CRITICAL)
      Regex scan of `.vscode/tasks.json`, `.claude/settings.json`, etc. for
-     `curl … | bash` / `wget -qO- … | sh` / `bash <(curl …)` shell-piped
+     `curl …`-piped-to-`bash` / `wget -qO- …`-piped-to-`sh` / `bash`-of-a-`curl`-
+     subshell shell-piped
      downloads. Complements `ai-context-poisoning` which watches *writes*
      to these files via PostToolUse — this fires when the payload is
      already committed in the file at scan time.

@@ -387,8 +387,8 @@ _SPIN_HTTP_WILDCARD = _re(
 )
 # SSRF-prone literal endpoints in outbound allowlist.
 #
-# Hosts can appear as the bare quoted value (``"169.254.169.254"``)
-# OR inside a URL string (``"http://169.254.169.254"``,
+# Hosts can appear as the bare quoted value (``"169.254.169[.]254"``)
+# OR inside a URL string (``"http://169.254.169[.]254"``,
 # ``"http://localhost:8080"``). We anchor on the lead-in character —
 # a quote, a slash (`//` from `http://`), or a `@` (user@host) —
 # and on the trail-out character: a quote, port colon, path slash.
@@ -813,7 +813,7 @@ RULES: tuple[Rule, ...] = (
         description=(
             "`.inherit_network()` grants the guest unrestricted host "
             "network. The guest can `connect()` to AWS metadata "
-            "(169.254.169.254), localhost (other guests + host services), "
+            "(169.254.169[.]254), localhost (other guests + host services), "
             "and arbitrary external hosts (data exfil + SSRF). WASI's "
             "fine-grained allowlist proposal isn't stable yet — wrap the "
             "Pool with a CIDR allow-list of expected destinations."
@@ -1002,8 +1002,8 @@ RULES: tuple[Rule, ...] = (
         severity="CRITICAL",
         description=(
             "Spin manifest `allowed_outbound_hosts` / `allowed_http_hosts` "
-            "list includes `169.254.169.254` (AWS/Azure IMDS), "
-            "`metadata.google.internal` (GCP IMDS), `localhost`, or "
+            "list includes `169.254.169[.]254` (AWS/Azure IMDS), "
+            "`metadata.google[.]internal` (GCP IMDS), `localhost`, or "
             "`127.0.0.1`. These are the prime SSRF targets — granting "
             "access lets a compromised guest harvest cloud-credentials "
             "and pivot to internal host services."

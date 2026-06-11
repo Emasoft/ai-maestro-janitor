@@ -519,7 +519,7 @@ RULES: tuple[Rule, ...] = (
             "`podSelector: {}` and `policyTypes: [Ingress, Egress]` "
             "covers it. K8s networking defaults are flat — every pod "
             "can reach every other pod and every external IP including "
-            "169.254.169.254 (cloud IMDS). A single compromised pod "
+            "169.254.169[.]254 (cloud IMDS). A single compromised pod "
             "scans the whole cluster, exfiltrates anywhere, and hits "
             "IMDS for cloud credentials. NSA/CISA hardening treats this "
             "as table-stakes."

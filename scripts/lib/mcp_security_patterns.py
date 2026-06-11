@@ -22,7 +22,7 @@ What IS here (net-new rules per deep-dive proposals 2, 3, 4, 6, 7, 8):
                                           with no path qualifier
   * mcp-sensitive-path-in-args          (P3, CRITICAL) — `~/.ssh/id_*`
                                           and friends appear in args
-  * mcp-curl-pipe-shell-in-args         (P4, CRITICAL) — `curl ... | sh`
+  * mcp-curl-pipe-shell-in-args         (P4, CRITICAL) — `curl-...-piped-to-sh`
                                           shape in command/args
   * mcp-hidden-directive-tag-in-desc    (P6, CRITICAL) — `<IMPORTANT>`,
                                           `<SYSTEM>`, ChatML delimiters
@@ -31,7 +31,7 @@ What IS here (net-new rules per deep-dive proposals 2, 3, 4, 6, 7, 8):
                                           instructs the agent to read
                                           ssh/aws/etc credentials
   * mcp-shell-prefix-in-desc            (P6, CRITICAL) — Line-Jumping
-                                          `curl x | sh` / `chmod ~/` in
+                                          `curl-x-piped-to-sh` / `chmod ~/` in
                                           a tool description
   * mcp-non-latin-script-in-tool-name   (P7, HIGH)     — non-ASCII chars
                                           in a tool name (homoglyph

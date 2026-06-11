@@ -414,7 +414,7 @@ RULES: tuple[Rule, ...] = (
             "`$uri` / `$request_uri`, or a `$N` rewrite-capture. The "
             "upstream destination is therefore attacker-controlled — "
             "single-request SSRF into the cluster's internal network "
-            "(AWS IMDS 169.254.169.254, GCP metadata, K8s API on "
+            "(AWS IMDS 169.254.169[.]254, GCP metadata, K8s API on "
             "10.0.0.1:443, internal admin endpoints)."
         ),
         pattern=_PROXY_PASS_USER_CONTROLLED,

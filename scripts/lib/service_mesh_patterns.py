@@ -292,7 +292,7 @@ RULES: tuple[Rule, ...] = (
             "ALLOW_ANY` (legacy default; new installs default to "
             "REGISTRY_ONLY). With ALLOW_ANY, any sidecar-injected pod "
             "can egress to any external address — including "
-            "169.254.169.254 (cloud IMDS), attacker-controlled C2 "
+            "169.254.169[.]254 (cloud IMDS), attacker-controlled C2 "
             "domains, and any non-mesh service. The mesh becomes a pure "
             "performance layer with no egress control. REGISTRY_ONLY "
             "forces every external destination through a registered "

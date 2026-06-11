@@ -294,7 +294,7 @@ _HOST_HEADER_IN_RESPONSE = _re(
 # allow_redirects=True)` / `fetch(url, { redirect: 'follow' })` against
 # a URL whose origin is user-controlled. Without a stage-2 host
 # allowlist preceding the call, this is the SSRF-via-link-validator
-# shape. Cloud metadata service redirect (169.254.169.254) is the
+# shape. Cloud metadata service redirect (169.254.169[.]254) is the
 # canonical attack target.
 _EXTERNAL_HEAD_FOLLOW_REDIRECTS = _re(
     r"requests\s*\.\s*(?:head|get)\s*\([^)]*allow_redirects\s*=\s*True"
@@ -602,8 +602,8 @@ RULES: tuple[Rule, ...] = (
             "(Markdown, RST, JSON config), then calls "
             "`requests.head/get(url, allow_redirects=True)` or "
             "`fetch(url, { redirect: 'follow' })`. Without a host "
-            "allowlist and a block on RFC-1918 + 169.254.169.254 + "
-            "metadata.google.internal + localhost, a public URL that "
+            "allowlist and a block on RFC-1918 + 169.254.169[.]254 + "
+            "metadata.google[.]internal + localhost, a public URL that "
             "302s into the cloud metadata service exfils IAM creds "
             "via the CI's own request."
         ),

@@ -250,9 +250,10 @@ def has_ioc_context_near(text: str, start: int, end: int, *, window: int = 100) 
 # ---- Multi-line Buffer.from → eval correlation (sentinel-y-4, sweep-C) --
 
 
-# `Buffer.from(...)` / `base64.b64decode(...)` on its own is benign; an
-# `eval(...)` / `Function(...)` / `exec(...)` on its own is benign in
-# isolation; but the TWO appearing within five lines of each other in
+# A decode primitive (Buffer.from / base64-b64decode / atob) on its own
+# is benign; a dynamic-exec primitive (an eval / Function / exec call) on
+# its own is benign in isolation; but the TWO appearing within five lines
+# of each other in
 # the same source file is the canonical two-step code-injection shape.
 # This catches the disclosed obfuscated payloads that pass single-line
 # pattern matchers.

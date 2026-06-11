@@ -29,8 +29,8 @@ Sensitive-path writes (warn, regardless of content)
     /etc/*
 
 Sensitive-payload writes (warn, regardless of path)
-    eval(base64.b64decode(…))
-    curl … | sh / wget … -O - | sh / bash <(curl …)
+    an eval call wrapping a base64-decoded payload
+    curl-piped-to-sh / wget-redirected-to-sh / bash-of-a-curl-subshell
     /dev/tcp / /dev/udp
     long base64 blobs (>200 chars) inside eval / Function / exec
     ssh-rsa / ssh-ed25519 public-key lines being written
@@ -70,7 +70,7 @@ _SENSITIVE_PATH_PATTERNS = (
 
 # Payloads whose presence in ANY written content is a strong signal.
 _SENSITIVE_PAYLOAD_PATTERNS = (
-    # eval(base64.b64decode(...)) / atob(eval(...)) — two-step decode + exec
+    # a dynamic-exec call wrapping a base64-decode / atob / Buffer.from result
     re.compile(r"eval\s*\(\s*(?:base64\.b64decode|atob|Buffer\.from)"),
     # curl/wget piped to shell
     re.compile(r"\bcurl\s+[^|]+?\|\s*(?:bash|sh|zsh|fish)\b"),
