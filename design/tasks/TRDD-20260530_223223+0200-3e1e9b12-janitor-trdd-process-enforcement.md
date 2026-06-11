@@ -3,7 +3,7 @@ trdd-id: 3e1e9b12-e3bc-484c-b337-b208593cfe1d
 title: Janitor actively enforces the TRDD process across compactions and resumes
 status: in-progress
 created: 2026-05-30T22:32:23+0200
-updated: 2026-06-09T02:31:18+0200
+updated: 2026-06-11T20:54:09+0200
 ---
 
 # TRDD-3e1e9b12-e3bc-484c-b337-b208593cfe1d — Janitor actively enforces the TRDD process across compactions and resumes
@@ -60,15 +60,28 @@ session) + #3 (rides the USER-gated publish). Nothing for the janitor to impleme
    `**Status:**` bold line ONLY as a pre-frontmatter fallback. Confirmed by LIVE behavior —
    `[trdd-reminder]` correctly lists the v2 `column:`-based TRDDs with day-ages every
    heartbeat this session. No code change needed.
-2. Review the 2 reports the detector flagged
-   (`reports/audit/…-consolidated-fix-plan.md`, `reports/study-github-monitoring/CONSOLIDATED_PLAN.md`)
-   — convert each decision into a TRDD, or mark obsolete. NOTE: these touch UNRELATED work
-   areas (audit fix-plan, github-monitoring study) + live in gitignored ephemeral `reports/`
-   (may already be purged); a directed session should own the conversion — NOT picked up
-   undirected here (RULE 1).
+2. ✅ **DONE — triaged 2026-06-11 (user-directed "complete the pending tasks"). Both reports
+   are FULLY-EXECUTED historical plans — no TRDD conversion needed; this citation closes the
+   detector loop (the paths are now TRDD-referenced):**
+   - `reports/audit/20260424_041237+0200-consolidated-fix-plan.md` — the v0.3.4-era fix plan
+     for the SHELL implementation (`dispatch.sh`, `lib/dedupe.sh`, `*.sh` detectors). Its
+     substrate no longer exists: the entire plugin was ported to Python (every detector/hook/
+     lib in today's tree is the "Python port of X.sh"), and the named fixes (int coercion,
+     dedupe locking, `CLAUDE_PLUGIN_ROOT` guards) are present in the Python successors.
+     Disposition: EXECUTED/OBSOLETE — historical evidence only.
+   - `reports/study-github-monitoring/CONSOLIDATED_PLAN.md` — the 10-agent study's Wave map
+     (W1-W7). Implemented end-to-end by the Wave 2-37 task series; the named detectors all
+     exist today (mcp-rugpull, ai-context-poisoning, typosquat-watcher, repo-trust-score,
+     posture grade, pre-bash-safety compositional-exfil blocker, post-edit-safety
+     sensitive-write watch, historical-cache-scan, …). Disposition: EXECUTED — historical
+     evidence only.
 3. Ship in the next janitor release so the hook + detector go live (rides the same
    USER-gated publish as the rest of the unpushed work).
-4. Consider whether the hook should inject (not just list) on `source=resume` too.
+4. ✅ **DECIDED 2026-06-11 — keep as-is (list on `resume`, full-inject only on `compact`).**
+   Rationale: a resume keeps the full prior transcript — injecting every STATE block there
+   would duplicate content the session already has and bloat context for zero information
+   gain; the compact is the lossy event where injection is load-bearing. Revisit only if a
+   real resume-after-long-gap incident shows the listing alone was insufficient.
 
 ## Problem
 
