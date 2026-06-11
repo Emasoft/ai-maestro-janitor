@@ -161,7 +161,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=a63718acc35e digest=107b83fc8bbc generated=2026-06-11T11:12:30+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=403529d17c97 digest=0e184d346215 generated=2026-06-11T21:34:20+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -660,7 +660,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · profile_dir(email) -> Path
   · capture(email, headless) -> int
   · main(argv) -> int
-`scripts/oauth_rotator/slot_capture_token.py` — Capture a `claude setup-token` long-lived token into a rotator slot.
+`scripts/oauth_rotator/slot_capture_token.py` — Capture a long-lived CLI-minted setup token into a rotator slot.
   · read_token() -> str — Read the token from (in order): a hidden TTY prompt, piped stdin, or — as
   · main() -> int
 `scripts/oauth_rotator/supervisor.py` — OAuth-rotator supervisor — the governance layer (TRDD-32acd15f, P2).

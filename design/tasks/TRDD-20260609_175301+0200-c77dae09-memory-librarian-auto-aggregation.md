@@ -141,7 +141,7 @@ a regex; the "background/automated" requirement means it is *scheduled* and
 - **Authoring** — `# Memory` harness directive + `janitor-memory-write` skill
   (writes one fact per note, symptom-indexed `description`).
 - **Recall** — `rules/markdown-memory-recall.md` + `janitor-memory-recall` skill
-  + `memgrep recall` (symptom-ranked, precision-first).
+  and `memgrep recall` (symptom-ranked, precision-first).
 - **Organization (THIS TRDD)** — the background librarian that keeps the corpus a
   rational wiki over time.
 - **Tool** — `memgrep` (TRDD-d151fe52) is the engine all three lean on.

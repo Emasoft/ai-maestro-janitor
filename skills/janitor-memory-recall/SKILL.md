@@ -12,7 +12,15 @@ recall could not: it maps **the file you're about to touch → the functionality
 hub page** (so you get the overview before you edit), and it lets you **navigate
 the wiki** — read the tip, then follow only the links the task needs. Read [the
 wikimem model](../janitor-memory-write/references/wikimem-model.md) for tiers,
-the See-also web, and the file→functionality mapping.
+the See-also web, and the file→functionality mapping. The model doc's table of
+contents:
+
+- A wiki, not a pile — and collaborative like Wikipedia
+- The editorial decision flow (run this on any change worth remembering)
+- EXPAND and REDUCE — radiating suns vs receiving terminals
+- The three tiers (a page's role in the pyramid)
+- The edge model — EVERY link is bidirectional (the link law)
+- Page anatomy
 
 Always run RECALL FIRST: before debugging a recurring problem, before a design
 decision, before editing a file in an area you haven't loaded, before MEMORIZING
@@ -161,7 +169,13 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
 
 - [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
   — the wiki data model (tiers, file→functionality globs, See-also, the memgrep
-  command map).
+  command map). Its table of contents:
+  - A wiki, not a pile — and collaborative like Wikipedia
+  - The editorial decision flow (run this on any change worth remembering)
+  - EXPAND and REDUCE — radiating suns vs receiving terminals
+  - The three tiers (a page's role in the pyramid)
+  - The edge model — EVERY link is bidirectional (the link law)
+  - Page anatomy
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" recall
   law + schema + dual-test method.
 - `$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` — the memgrep instrument reference.

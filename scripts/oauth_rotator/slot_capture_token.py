@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture a `claude setup-token` long-lived token into a rotator slot.
+"""Capture a long-lived CLI-minted setup token into a rotator slot.
 
 `claude setup-token` mints a 1-year Claude.ai OAuth access token and PRINTS it
 once ("Store this token securely. You won't be able to see it again."). This

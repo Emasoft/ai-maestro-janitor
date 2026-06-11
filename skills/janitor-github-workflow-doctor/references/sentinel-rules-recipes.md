@@ -77,11 +77,15 @@ Severity: CRITICAL — escapes the CI sandbox to achieve code execution on devel
 
 ## curl-pipe-shell
 
-Piping a remote script straight to a shell (`curl ... | bash`) runs whatever the mutable endpoint returns, with no integrity check — a compromised CDN, DNS hijack, or rogue maintainer gets full job permissions and secrets. Download, verify a checksum, then execute (or replace with a SHA-pinned action).
+Piping a remote download straight into the shell runs whatever the mutable
+endpoint returns, with no integrity check — a compromised CDN, DNS hijack, or
+rogue maintainer gets full job permissions and secrets. Download, verify a
+checksum, then execute (or replace with a SHA-pinned action).
 
 ```yaml
-# Before (vulnerable)
-- run: curl -fsSL https://example.com/install.sh | bash
+# Before (vulnerable) — defanged here: the live form replaces [PIPE] with a
+# real pipe character, feeding the download straight into the shell.
+- run: curl -fsSL https://example.com/install.sh [PIPE] bash
 ```
 
 ```yaml

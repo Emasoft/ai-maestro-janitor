@@ -12,7 +12,14 @@ page) and RECALL (find one). It edits an existing wikimem page while keeping the
 wiki *consistent*: the See-also context web, the hub→parts map, and the
 lessons-learned trail all stay true after the change. Read [the wikimem
 model](../janitor-memory-write/references/wikimem-model.md) for tiers, See-also,
-and the expand/reduce shapes.
+and the expand/reduce shapes. The model doc's table of contents:
+
+- A wiki, not a pile — and collaborative like Wikipedia
+- The editorial decision flow (run this on any change worth remembering)
+- EXPAND and REDUCE — radiating suns vs receiving terminals
+- The three tiers (a page's role in the pyramid)
+- The edge model — EVERY link is bidirectional (the link law)
+- Page anatomy
 
 Three kinds of update, below. Always: **find the page first**, then bump `lmd:`
 to today on any edit.
@@ -169,7 +176,14 @@ non-destructive (fact cleaned, error demoted to a lesson) — never delete the W
 ## Resources
 
 - [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
-  — the wiki data model (tiers, expand/reduce, See-also, memgrep map).
+  — the wiki data model (tiers, expand/reduce, See-also, memgrep map). Its table
+  of contents:
+  - A wiki, not a pile — and collaborative like Wikipedia
+  - The editorial decision flow (run this on any change worth remembering)
+  - EXPAND and REDUCE — radiating suns vs receiving terminals
+  - The three tiers (a page's role in the pyramid)
+  - The edge model — EVERY link is bidirectional (the link law)
+  - Page anatomy
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons-learned
   conventions + dual-test method.
 - `/janitor-memory-write` — MEMORIZE (create a page); the shape rules for the new

@@ -12,7 +12,14 @@ decision into the right wikimem page so a future session can navigate to it — 
 dump a loose `.md` into a pile. Read [the wikimem model](references/wikimem-model.md)
 once: pages have a **tier** (hub / aspect / component), a **See-also** context
 web, and a **file→functionality** mapping. This skill is the rules for growing
-that wiki correctly.
+that wiki correctly. The model doc's table of contents:
+
+- A wiki, not a pile — and collaborative like Wikipedia
+- The editorial decision flow (run this on any change worth remembering)
+- EXPAND and REDUCE — radiating suns vs receiving terminals
+- The three tiers (a page's role in the pyramid)
+- The edge model — EVERY link is bidirectional (the link law)
+- Page anatomy
 
 Only memorize what is NON-OBVIOUS and reusable: design decisions, gotchas,
 constraints not in the code, confirmed preferences, hard-won debugging facts. Do
@@ -202,18 +209,24 @@ per page; symptom-indexed `description` + non-empty `## See also` are mandatory.
 
 Copy this checklist and track your progress:
 
-* [ ] Scope routed (LOCAL / PROJECT / USER — unsure → LOCAL)
-* [ ] RECALL ran first — no existing page already covers this fact
-* [ ] Editorial decision made (new page vs UPDATE an existing page)
-* [ ] Page written: one subject, symptom-indexed `description:`, correct tier
-* [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
-* [ ] `MEMORY.md` index line added (one line, no content duplication)
+- [ ] Scope routed (LOCAL / PROJECT / USER — unsure → LOCAL)
+- [ ] RECALL ran first — no existing page already covers this fact
+- [ ] Editorial decision made (new page vs UPDATE an existing page)
+- [ ] Page written: one subject, symptom-indexed `description:`, correct tier
+- [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
+- [ ] `MEMORY.md` index line added (one line, no content duplication)
 
 ## Resources
 
 - [references/wikimem-model.md](references/wikimem-model.md) — the wiki data
   model (tiers, expand/reduce, See-also discipline, file→functionality, memgrep
-  map). The source of truth all three memory skills share.
+  map). The source of truth all three memory skills share. Its table of contents:
+  - A wiki, not a pile — and collaborative like Wikipedia
+  - The editorial decision flow (run this on any change worth remembering)
+  - EXPAND and REDUCE — radiating suns vs receiving terminals
+  - The three tiers (a page's role in the pyramid)
+  - The edge model — EVERY link is bidirectional (the link law)
+  - Page anatomy
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" law +
   schema + dual-test method.
 - `/janitor-memory-update` — MODIFY a page / correct a memory (the 2-step
