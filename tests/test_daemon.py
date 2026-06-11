@@ -497,3 +497,127 @@ def test_run_workload_normal_completion_returns_completedprocess(
     assert result is not None, "a normally-completing workload must return CompletedProcess"
     assert result.returncode == 0
     assert "ok" in result.stdout
+
+
+# ---------- Pillar 1: per-task supervision + subprocess retry (TRDD-7100178d) ----
+#
+# Task.run() must NEVER let a crashing task kill the daemon (already true) AND must
+# quarantine a permanently-broken task with exponential backoff so it stops burning
+# its cadence every tick. _run_workload retries a NON-ZERO exit exactly once.
+
+
+def _daemon_isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Import the daemon with its global state pinned to a throwaway dir (so Task
+    failcount/last-run files land in tmp, never the user's real state dir)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    daemon = _import_daemon_module()
+    daemon.gs.init_global_state()
+    return daemon
+
+
+def test_task_success_keeps_zero_failcount(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A task whose fn succeeds records no failure streak and stays on its bare cadence."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    t = daemon.Task("ok-task", 1000, lambda: None)
+    t.run()
+    assert t._failcount() == 0
+    assert t._backoff_penalty(t._failcount()) == 0
+
+
+def test_task_failure_increments_streak_without_killing_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A task that raises is caught (daemon survives) and its consecutive-failure streak grows."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+
+    def boom() -> None:
+        raise RuntimeError("kaboom")
+
+    t = daemon.Task("bad-task", 1000, boom)
+    t.run()
+    t.run()
+    t.run()  # three crashes in a row — none may propagate
+    assert t._failcount() == 3
+
+
+def test_task_backoff_penalty_math(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quarantine backoff is 0 below K, then interval * 2**(fails-K), capped at the ceiling."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    t = daemon.Task("bo", 60, lambda: None)
+    assert t._backoff_penalty(2) == 0                                  # below K (=3)
+    assert t._backoff_penalty(3) == 60                                 # interval * 2**0
+    assert t._backoff_penalty(4) == 120                                # interval * 2**1
+    assert t._backoff_penalty(5) == 240                                # interval * 2**2
+    assert t._backoff_penalty(999) == daemon._TASK_MAX_BACKOFF_SEC     # capped
+
+
+def test_task_quarantine_defers_next_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """After K consecutive failures, time_until_due() adds the backoff penalty (quarantine)."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+
+    def boom() -> None:
+        raise RuntimeError("x")
+
+    t = daemon.Task("q", 1000, boom)
+    for _ in range(daemon._TASK_BACKOFF_AFTER_FAILS):   # reach K → penalty == interval (1000)
+        t.run()
+    due = t.time_until_due()                            # last_run ≈ now, so due ≈ interval + penalty
+    assert due > 1000, "a quarantined task must wait longer than its bare cadence"
+    assert due >= 1990, "the backoff penalty (=interval at K) must be added to the cadence"
+
+
+def test_task_success_resets_streak(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single success clears an accumulated failure streak → back to the normal cadence."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    box = {"fail": True}
+
+    def maybe() -> None:
+        if box["fail"]:
+            raise RuntimeError("x")
+
+    t = daemon.Task("r", 1000, maybe)
+    t.run()
+    t.run()
+    assert t._failcount() == 2
+    box["fail"] = False
+    t.run()
+    assert t._failcount() == 0
+    assert t._backoff_penalty(t._failcount()) == 0
+
+
+def test_run_workload_retries_once_on_nonzero_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A workload exiting NON-ZERO is retried exactly once (two real child spawns)."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    captured: list = []
+    real_popen = daemon.subprocess.Popen
+
+    def cap(*a, **k):
+        proc = real_popen(*a, **k)
+        captured.append(proc)
+        return proc
+
+    monkeypatch.setattr(daemon.subprocess, "Popen", cap)
+    result = daemon._run_workload([sys.executable, "-c", "import sys; sys.exit(3)"], timeout=10)
+    assert result is not None and result.returncode == 3
+    assert len(captured) == 2, "a non-zero exit must be retried exactly once"
+
+
+def test_run_workload_no_retry_on_clean_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clean rc==0 workload is NOT retried (a single child spawn)."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    captured: list = []
+    real_popen = daemon.subprocess.Popen
+
+    def cap(*a, **k):
+        proc = real_popen(*a, **k)
+        captured.append(proc)
+        return proc
+
+    monkeypatch.setattr(daemon.subprocess, "Popen", cap)
+    result = daemon._run_workload([sys.executable, "-c", "pass"], timeout=10)
+    assert result is not None and result.returncode == 0
+    assert len(captured) == 1, "a clean exit must not be retried"

@@ -110,6 +110,21 @@ _WORKLOAD_TIMEOUT_SEC = 1800  # 30 min
 # How often to tick the heartbeat WHILE a workload is running.
 _WORKLOAD_HEARTBEAT_TICK_SEC = 10
 
+# Pillar-1 subprocess retry (TRDD-7100178d Phase 4). A workload that exits
+# NON-ZERO (a crash / transient failure) is retried once immediately before
+# deferring to the next cadence. A None result (spawn-failure or timeout-kill) is
+# NOT retried — a missing binary won't reappear on a retry and a timeout already
+# consumed its full budget, so re-running would only double a long wait.
+_WORKLOAD_MAX_ATTEMPTS = 2
+
+# Pillar-1 per-task supervision. Task.run already swallows a task exception so one
+# crash never kills the daemon, but a PERMANENTLY-broken task must not burn its
+# cadence every tick forever. After this many CONSECUTIVE failures the task is
+# quarantined: its next-due is pushed out by interval * 2**(fails - K), capped at
+# _TASK_MAX_BACKOFF_SEC. A single success resets the streak (see Task.run).
+_TASK_BACKOFF_AFTER_FAILS = 3
+_TASK_MAX_BACKOFF_SEC = 3600  # 1 h ceiling so a recovered task is retried within the hour
+
 # Patterns that prove a `claude plugin update` subprocess actually changed
 # something on disk (vs. "already up to date"). Conservative: any reasonably-
 # unambiguous "moved from version X to version Y" phrase. False negatives are
@@ -153,14 +168,17 @@ def _on_signal(signum: int, _frame: Optional[FrameType]) -> None:
     state.log_line("daemon", f"received signal {signum} — graceful shutdown")
 
 
-def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
-                  heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC) -> Optional[subprocess.CompletedProcess[str]]:
-    """Run a subprocess to completion, ticking the daemon heartbeat periodically.
+def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
+                       heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC) -> Optional[subprocess.CompletedProcess[str]]:
+    """Run a subprocess ONCE to completion, ticking the daemon heartbeat periodically.
 
     Returns the CompletedProcess on a normal exit (whatever the returncode),
     or None on timeout / spawn failure (already logged). The periodic
     heartbeat tick is what keeps the daemon visible to per-session liveness
     checks during a long `claude plugin marketplace update` (≈10 min).
+
+    This is the single-attempt primitive; `_run_workload` wraps it with the
+    Pillar-1 retry-on-non-zero-exit policy.
     """
     short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     try:
@@ -202,6 +220,34 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
                 except subprocess.TimeoutExpired:
                     pass
                 return None
+
+
+def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
+                  heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC,
+                  max_attempts: int = _WORKLOAD_MAX_ATTEMPTS) -> Optional[subprocess.CompletedProcess[str]]:
+    """Run a workload with the Pillar-1 retry policy (TRDD-7100178d Phase 4).
+
+    Calls `_run_workload_once` up to `max_attempts` times, retrying ONLY on a
+    non-zero exit (a crash / transient failure). A None result (spawn-failure or
+    timeout-kill) and a clean rc==0 both return immediately — a missing binary
+    won't reappear on a retry and a timed-out command already spent its budget.
+    The retried exit code is logged so a recurring failure is visible. Every
+    caller is idempotent (re-running a marketplace refresh / plugin update / usage
+    probe has no side effect beyond the intended one), so a single retry is safe.
+    """
+    short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
+    result: Optional[subprocess.CompletedProcess[str]] = None
+    for attempt in range(1, max(1, max_attempts) + 1):
+        result = _run_workload_once(cmd, timeout=timeout, heartbeat_tick=heartbeat_tick)
+        if result is None or result.returncode == 0:
+            return result
+        if attempt < max_attempts:
+            state.log_line(
+                "daemon",
+                f"  `{short}` exited {result.returncode} "
+                f"(attempt {attempt}/{max_attempts}) — retrying once",
+            )
+    return result
 
 
 # ---------- Tasks --------------------------------------------------------
@@ -408,12 +454,30 @@ class Task:
         self.interval_s = interval_s
         self.fn = fn
         self.last_run_path = gs.global_state_dir() / f"{name}.last-run.ts"
+        # Consecutive-failure streak (Pillar 1). Lives beside last-run.ts so a
+        # quarantine SURVIVES daemon restarts — a broken task does not get a clean
+        # slate just because the daemon respawned. Reset to 0 on the first success.
+        self.failcount_path = gs.global_state_dir() / f"{name}.failcount"
 
     def _last_run(self) -> int:
         return state.read_int_state(self.last_run_path, 0)
 
+    def _failcount(self) -> int:
+        return state.read_int_state(self.failcount_path, 0)
+
+    def _backoff_penalty(self, fails: int) -> int:
+        """Quarantine backoff added on top of the cadence: 0 until
+        _TASK_BACKOFF_AFTER_FAILS consecutive failures, then interval * 2**(fails-K),
+        capped at _TASK_MAX_BACKOFF_SEC. Keeps a permanently-broken task from
+        re-running every tick while still retrying a recovered one within the hour."""
+        if fails < _TASK_BACKOFF_AFTER_FAILS:
+            return 0
+        shift = min(fails - _TASK_BACKOFF_AFTER_FAILS, 16)  # cap the exponent (2**16 is already huge)
+        return min(self.interval_s * (2 ** shift), _TASK_MAX_BACKOFF_SEC)
+
     def time_until_due(self) -> int:
-        return max(0, self._last_run() + self.interval_s - int(time.time()))
+        penalty = self._backoff_penalty(self._failcount())
+        return max(0, self._last_run() + self.interval_s + penalty - int(time.time()))
 
     def is_due(self) -> bool:
         return self.time_until_due() == 0
@@ -421,14 +485,31 @@ class Task:
     def run(self) -> None:
         state.log_line("daemon", f"task '{self.name}' starting")
         t0 = time.time()
+        failed = False
         try:
             self.fn()
         except Exception as exc:  # noqa: BLE001 - never propagate a task error
+            failed = True
             state.log_line("daemon", f"task '{self.name}' raised: {exc}")
         finally:
             dt = int(time.time() - t0)
             state.atomic_write(self.last_run_path, str(int(time.time())))
-            state.log_line("daemon", f"task '{self.name}' done in {dt}s")
+            # Pillar-1 supervision: a success clears the streak; each consecutive
+            # failure increments it so time_until_due() quarantines the task with
+            # exponential backoff instead of re-running it every cadence.
+            if failed:
+                fails = self._failcount() + 1
+                state.atomic_write(self.failcount_path, str(fails))
+                penalty = self._backoff_penalty(fails)
+                note = f" — quarantined, next run +{penalty}s" if penalty else ""
+                state.log_line(
+                    "daemon",
+                    f"task '{self.name}' FAILED in {dt}s (consecutive={fails}){note}",
+                )
+            else:
+                if self._failcount():
+                    state.atomic_write(self.failcount_path, "0")  # recovered → reset the streak
+                state.log_line("daemon", f"task '{self.name}' done in {dt}s")
 
 
 def _build_tasks() -> list[Task]:

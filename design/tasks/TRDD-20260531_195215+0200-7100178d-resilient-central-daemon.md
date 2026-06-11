@@ -3,7 +3,7 @@ trdd-id: 7100178d-faa1-495a-aeb6-01c12448738a
 title: Resilient central daemon — last line of defence (auto-restart, backup/restore, concurrent-failure ladder, OOM culprit-killer)
 status: in-progress
 created: 2026-05-31T19:52:15+0200
-updated: 2026-06-01T23:28:58+0200
+updated: 2026-06-11T20:22:04+0200
 ---
 
 # TRDD-7100178d — Resilient central daemon (last line of defence)
@@ -98,11 +98,30 @@ for an overnight rotation.
 - +3 tests (grant mapping; network-error→None; keepalive selection: only near-expiry refreshable
   non-live slots, index updated). 75 rotator/integrity/supervisor/daemon tests pass; ruff clean.
 
-**NEXT ACTION (Phase 4 — supervision / auto-restart):** the daemon's per-task supervision so a
-crashed rotator tick auto-re-runs (crash → re-run with backoff), a hung daemon is detected +
-killed + respawned, and a crash-loop backs off instead of hot-looping (Pillar 0 self-resurrection
-plus Pillar 1 per-task supervision/auto-retry). Then Phase 5 (OOM Tier-1 guard — SAFETY-GATED,
-confirm before live), Phase 6 (publish v0.5.2 + activate opt-in + loop test #142 — OUTWARD-GATED).
+**PHASE 4 PILLAR 1 DONE (2026-06-11, this session, UNPUSHED — commit pending).** Per-task
+supervision + subprocess retry in `scripts/daemon.py`:
+- `Task` now tracks a persisted CONSECUTIVE-failure streak (`<name>.failcount` beside
+  `<name>.last-run.ts`, so a quarantine survives a daemon restart). After
+  `_TASK_BACKOFF_AFTER_FAILS` (3) consecutive failures the task is quarantined: `time_until_due`
+  adds `interval * 2**(fails-K)` capped at `_TASK_MAX_BACKOFF_SEC` (3600 s); a single success
+  resets the streak to 0. A crashing task still never propagates (daemon survives) — it just
+  stops burning its cadence every tick.
+- `_run_workload` split into `_run_workload_once` (the heartbeat-ticking primitive) + a retry
+  wrapper that retries ONCE on a NON-ZERO exit (`_WORKLOAD_MAX_ATTEMPTS`=2); a None result
+  (spawn-fail / timeout-kill) is NOT retried (missing binary won't reappear; timeout already
+  spent its budget). Every caller is idempotent, so the retry is safe.
+- +7 tests (`tests/test_daemon.py`): 32 daemon tests + 55 daemon-adjacent (marketplace / version /
+  global_state) all pass; ruff + mypy clean on daemon.py.
+
+**NEXT ACTION (Phase 4 — Pillar 0 self-resurrection, REMAINING):** in `scripts/lib/global_state.py`
+make `ensure_daemon_running` detect a WEDGED daemon (PID alive but heartbeat stale → it still
+holds the singleton flock, so the current code spawns a replacement that can't acquire the flock →
+silent outage) and KILL it (SIGTERM→SIGKILL escalation, since a SIGSTOP'd pid ignores SIGTERM)
+before respawning; plus crash-loop detection (N spawns in M min → louder backoff + a drift line)
+on top of the existing single-interval spawn throttle. SAFETY: the wedged-kill must NEVER target
+the caller's own pid (the per-session tests set `daemon.pid` to `os.getpid()` as an alive stand-in).
+Then Phase 5 (OOM Tier-1 guard — SAFETY-GATED, confirm before live), Phase 6 (publish + activate
+opt-in + loop test #142 — OUTWARD-GATED).
 
 ### Load-bearing facts from the 2026-05-31 live audit (the WHY — all ✓ verified)
 The rotator is currently **DORMANT** — it would NOT have protected an unattended night.
