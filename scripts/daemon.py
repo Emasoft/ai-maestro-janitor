@@ -62,6 +62,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import global_state as gs  # noqa: E402
+import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import state  # noqa: E402
 import supervisor as oauth_supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py
 import version_update_lib as vu  # noqa: E402
@@ -96,6 +97,11 @@ _INTERVAL_OAUTH_TICK = int(
 #  A total no-op unless the opt-in flag is set AND the real Claude binary is running
 #  (the guard lives inside cmd_tick). The daemon loop ceiling is already 60 s, so
 #  this is the finest cadence the loop can offer.
+_INTERVAL_MEMORY_GUARD = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MEMORY_GUARD_INTERVAL", "120")
+)  # 2 min — the Tier-1 OOM guard beat (TRDD-7100178d Pillar 4, Decision 1).
+#  Steady state is one cheap free-memory read; the ps snapshot + kill logic only
+#  runs under real memory pressure, so the cadence costs nothing when healthy.
 
 # Loop ceiling — heartbeat tick interval upper bound. Must be << the
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
@@ -440,6 +446,62 @@ def task_oauth_rotator_tick() -> None:
     )
 
 
+def task_memory_guard() -> None:
+    """Tier-1 OOM guard (TRDD-7100178d Pillar 4, Decision 1 — user-signed 2026-05-31).
+
+    Each beat: read free memory (one cheap syscall-ish probe). Only under real
+    pressure does it snapshot the process table TO A FILE (the no-self-match
+    discipline; the file is also the forensic record), select the single
+    largest-RSS janitor-owned RUNAWAY via the pure Tier-1 truth table
+    (signature allowlist + protected pids + claude-session rejection + runaway
+    age gate), and SIGTERM->SIGKILL it. At most ONE kill per beat — pressure is
+    re-evaluated next beat, so a misread can never cascade.
+
+    Tier 2 (kill the biggest non-interactive process at critical pressure) is
+    NOT implemented — per Decision 1 it stays off the table without a fresh
+    user sign-off; there is deliberately no code path or enabling flag for it.
+
+    Every kill is logged LOUDLY with the full command line, RSS, age, and the
+    free-memory reading that triggered it.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ENABLED", True):
+        return
+    min_free_mb = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_MIN_FREE_MB"),
+        mg.DEFAULT_MIN_FREE_MB,
+    )
+    free_mb = mg.free_memory_mb()
+    if free_mb is None or free_mb >= min_free_mb:
+        return  # unknown reading = NO-OP (never kill on missing data); healthy = done
+    state.log_line(
+        "daemon",
+        f"memory-guard: free {free_mb}MB < {min_free_mb}MB floor — scanning for a runaway",
+    )
+    snapshot = gs.global_state_dir() / "memory-guard.ps-snapshot.txt"
+    rows = mg.snapshot_processes(str(snapshot))
+    protected = frozenset({os.getpid(), os.getppid()})
+    min_age = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_RUNAWAY_ETIME_S"),
+        mg.DEFAULT_RUNAWAY_ETIME_S,
+    )
+    victim = mg.select_victim(rows, protected_pids=protected, min_etime_s=min_age)
+    if victim is None:
+        state.log_line(
+            "daemon",
+            "memory-guard: pressure but NO Tier-1 candidate (only janitor-owned "
+            "runaways are killable) — standing down; snapshot kept at "
+            f"{snapshot}",
+        )
+        return
+    killed = mg.kill_process(victim.pid)
+    state.log_line(
+        "daemon",
+        f"memory-guard: {'KILLED' if killed else 'KILL FAILED for'} runaway "
+        f"pid={victim.pid} rss={victim.rss_kb}KB age={victim.etime_s}s "
+        f"cmd={victim.command!r} (free was {free_mb}MB; snapshot: {snapshot})",
+    )
+
+
 class Task:
     """One periodic unit of work owned by the daemon.
 
@@ -520,6 +582,7 @@ def _build_tasks() -> list[Task]:
         Task("oauth-rotator-supervisor", _INTERVAL_OAUTH_SUPERVISOR,
              task_oauth_rotator_supervisor),
         Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_tick),
+        Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
     ]
 
 

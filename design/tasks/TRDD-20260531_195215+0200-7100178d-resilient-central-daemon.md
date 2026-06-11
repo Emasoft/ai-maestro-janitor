@@ -3,7 +3,7 @@ trdd-id: 7100178d-faa1-495a-aeb6-01c12448738a
 title: Resilient central daemon — last line of defence (auto-restart, backup/restore, concurrent-failure ladder, OOM culprit-killer)
 status: in-progress
 created: 2026-05-31T19:52:15+0200
-updated: 2026-06-11T20:43:36+0200
+updated: 2026-06-12T01:27:45+0200
 ---
 
 # TRDD-7100178d — Resilient central daemon (last line of defence)
@@ -136,8 +136,21 @@ in `scripts/lib/global_state.py`:
   ensure-refuses-during-crash-loop, end-to-end kill-wedge-then-spawn. 97 daemon-adjacent tests
   pass; ruff + mypy clean.
 
-**NEXT ACTION:** Phase 5 (OOM Tier-1 memory-guard task — SAFETY-GATED, confirm with user before
-live), Phase 6 (publish + activate opt-in + loop test #142 — OUTWARD-GATED on the user/CPV).
+**PHASE 5 DONE (2026-06-12, Tier-1 per Decision 1).** `scripts/lib/memory_guard.py` (pure
+truth-table core: signature ALLOWLIST of janitor-workload shapes; hard claude-session
+rejection; protected-pid set; runaway age gate 2× workload timeout; zombie-aware kill
+verdict) + daemon `memory-guard` Task @120 s (`task_memory_guard`: cheap free-memory probe
+each beat — macOS vm_stat / Linux MemAvailable; under pressure snapshot ps TO A FILE
+(no-self-match + forensic record), select ONE top-RSS Tier-1 victim, SIGTERM→SIGKILL, loud
+log with cmdline/RSS/age/free-reading; unknown reading = no-op; max one kill per beat).
+Tier 2 deliberately NOT implemented (no code path; needs fresh user sign-off). userConfig:
+`memory_guard_enabled` (default true) + `memory_guard_min_free_mb` (default 1024).
+18 tests (parsers; the Tier-1 truth table incl. interactive-claude-NEVER; real-child kill
+round-trip zombie-aware; daemon orchestration seams). Full suite 10851 green; ruff+mypy clean.
+
+**Phases 1-5 ALL COMPLETE → the resilient-daemon design is fully built.** Remaining: Phase 6
+activation specifics (rotator opt-in + live loop test #142 — user-gated); ships with the
+regular publish cadence (v0.7.0-0.7.2 already carried Phases 1-4).
 
 ### Load-bearing facts from the 2026-05-31 live audit (the WHY — all ✓ verified)
 The rotator is currently **DORMANT** — it would NOT have protected an unattended night.

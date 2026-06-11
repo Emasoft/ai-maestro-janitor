@@ -542,6 +542,20 @@
       "default": false,
       "sensitive": false
     },
+    "memory_guard_enabled": {
+      "title": "Tier-1 OOM Memory-Guard Enabled",
+      "description": "When true (default), the global daemon's `memory-guard` task checks system free memory every memory_guard_interval seconds; under real pressure (free below memory_guard_min_free_mb) it snapshots the process table to a file and kills the single largest-RSS JANITOR-OWNED runaway (a stuck `claude plugin marketplace update`, an orphaned rotator/reauth/capture subprocess older than the runaway age gate). Tier-1 only: an explicit signature allowlist plus a hard claude-session rejection means interactive `claude` sessions, the daemon itself, and every system process are never candidates by construction; at most one kill per beat; every kill is logged with full cmdline, RSS, age, and the triggering free-memory reading. Tier 2 (killing non-janitor processes) is deliberately NOT implemented. Part of the resilient-daemon design (TRDD-7100178d Pillar 4, Decision 1).",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "memory_guard_min_free_mb": {
+      "title": "Memory-Guard Free-Memory Floor (MB)",
+      "description": "System free memory (MB) below which the daemon's memory-guard starts looking for a janitor-owned runaway to kill. Default: 1024. An unknown reading is always a no-op (the guard never kills on missing data).",
+      "type": "number",
+      "default": 1024,
+      "sensitive": false
+    },
     "context_watchdog_enabled": {
       "title": "Context-Compact Watchdog Enabled (OPT-IN)",
       "description": "When true, the `pre-tool-context-usage` PreToolUse hook fires on every tool call and injects the live context-window % (read from the statusline's project-local snapshot at <project>/.claude/janitor/context-usage.<session>.json) into the agent's context via additionalContext \u2014 advisory only, never altering the tool's permission flow. At or above context_compact_suggest_pct it appends a nudge to run /janitor-compact-context so the agent can compact its own context before the 1M window fills (native auto-compact is unreliable on this window). OPT-IN by default (false) because it fires on EVERY tool call. Part of the context-compact watchdog (TRDD-31095269); pairs with the post-compact-resume PostCompact hook and the /janitor-compact-context skill for an auto-resuming compaction loop for unattended overnight work.",
