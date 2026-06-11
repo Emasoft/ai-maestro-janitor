@@ -143,9 +143,11 @@ edges, but it is a safety net — the author wires both ends now.
 
 ### 6. Index it
 
-Append a one-line pointer to `"$MEMDIR/MEMORY.md"` (create if missing):
-`- [<Title>](<slug>.md) — <one-line hook>.` Then `memgrep reindex "$MEMDIR"` if
-present (optional; recall auto-reindexes).
+Append a one-line pointer to `"$MEMDIR/MEMORY.md"` (create if missing) — a
+markdown list item whose link target is the new page's slug file and whose text
+is its Title, followed by an em-dash and a one-line hook (the same shape every
+other MEMORY.md line uses). Then `memgrep reindex "$MEMDIR"` if present
+(optional; recall auto-reindexes).
 
 ### 7. Sanity-check
 

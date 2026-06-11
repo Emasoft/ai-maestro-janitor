@@ -663,9 +663,6 @@
     }
   },
   "cpv": {
-    "allow_root_dirs": [
-      "INPUT_DEV"
-    ],
     "_intentional_validator_false_positives": [
       "Command injection (README.md):141",
       "Command injection (scripts/lib/state.py):95",
