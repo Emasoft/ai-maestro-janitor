@@ -406,5 +406,87 @@ class TestRunBlockWindow(unittest.TestCase):
         self.assertNotIn("shell-injection-expr", fired(wf))
 
 
+class TestSecretBareInRun(unittest.TestCase):
+    """secret-env-bare-in-run, moved regex→structural in issue #24.
+
+    Fires ONLY when a ``${{ secrets.* }}`` expression physically sits inside a
+    step's run: block (where it is spliced into the shell script text). A secret
+    passed via a sibling step's ``with:`` input, or via env indirection, must
+    NOT fire — those are the two false-positive shapes the old fixed-window
+    regex produced.
+    """
+
+    def test_positive_secret_literal_in_run(self):
+        """${{ secrets.X }} interpolated directly into a run: body fires HIGH."""
+        wf = """\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -H "Authorization: Bearer ${{ secrets.NPM_TOKEN }}" https://example.test
+"""
+        self.assertIn("secret-env-bare-in-run", fired(wf))
+
+    def test_negative_secret_in_sibling_with(self):
+        """The exact issue #24 FP: non-secret env on the run: step, the real
+        secret on a SIBLING step's with: input — must NOT fire."""
+        wf = """\
+on: push
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get plugin info
+        id: plugin
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          REF_SHA: ${{ github.sha }}
+        run: |
+          printf 'name=%s\\n' "$REPO_NAME" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\\n' "$REF_SHA" >> "$GITHUB_OUTPUT"
+      - name: Trigger marketplace update
+        uses: peter-evans/repository-dispatch@5fc4efd1a4797ddb68ffd0714a238564e4cc0e6f
+        with:
+          token: ${{ secrets.MARKETPLACE_PAT }}
+          repository: owner/repo
+"""
+        self.assertNotIn("secret-env-bare-in-run", fired(wf))
+
+    def test_negative_env_indirection_is_safe(self):
+        """The recommended safe pattern — secret in the step env:, run uses
+        $VAR (no literal ${{ secrets }} in the run body) — must NOT fire."""
+        wf = """\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: use token safely
+        env:
+          TOKEN: ${{ secrets.MY_TOKEN }}
+        run: |
+          curl -H "Authorization: token $TOKEN" https://example.test
+"""
+        self.assertNotIn("secret-env-bare-in-run", fired(wf))
+
+    def test_positive_secret_deep_in_padded_run_body(self):
+        """A secret expression many lines into a run: block still fires — the
+        in_run_block walk is indentation-bounded, not a fixed line window."""
+        pad = "\n".join(f"          echo line-{n}" for n in range(25))
+        wf = (
+            "on: push\n"
+            "jobs:\n"
+            "  build:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: |\n"
+            f"{pad}\n"
+            "          echo \"deploy with ${{ secrets.DEPLOY_KEY }}\"\n"
+        )
+        self.assertIn("secret-env-bare-in-run", fired(wf))
+
+
 if __name__ == "__main__":
     unittest.main()

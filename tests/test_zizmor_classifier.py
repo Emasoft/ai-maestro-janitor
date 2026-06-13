@@ -84,17 +84,6 @@ jobs:
           git switch ${{ github.ref }}
 """
 
-SECRET_IN_RUN_WORKFLOW = """\
-name: bad-secret
-on: push
-jobs:
-  fail:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          curl -H "Authorization: Bearer ${{ secrets.NPM_TOKEN }}" https://example.test
-"""
-
 GITHUB_ENV_INJECTION_WORKFLOW = """\
 name: bad-env
 on: push
@@ -420,9 +409,8 @@ class ClassifierTest(unittest.TestCase):
         rules = self._find_rules(REF_INTERPOLATION_WORKFLOW)
         self.assertIn("ref-confusion-in-run", rules)
 
-    def test_secret_in_run_fires(self) -> None:
-        rules = self._find_rules(SECRET_IN_RUN_WORKFLOW)
-        self.assertIn("secret-env-bare-in-run", rules)
+    # `secret-env-bare-in-run` moved to the structural tier (issue #24); its
+    # coverage now lives in tests/test_sentinel_injection.py::TestSecretBareInRun.
 
     def test_github_env_injection_fires(self) -> None:
         rules = self._find_rules(GITHUB_ENV_INJECTION_WORKFLOW)

@@ -403,8 +403,47 @@ class IssueCommentToctou(Rule):
         return findings
 
 
+class SecretBareInRun(Rule):
+    """``${{ secrets.* }}`` interpolated directly inside this step's run: body.
+
+    The secret is spliced into the shell SCRIPT TEXT before execution, so a
+    value containing shell metacharacters can break quoting, and the assembled
+    command can surface the secret (``set -x`` / error echoes) before GitHub's
+    log masking applies. The safe pattern is env indirection: put the secret in
+    the step's ``env:`` and reference ``$VAR`` — the shell reads it from the
+    environment and never splices it into the script text.
+
+    Structural, not regex (issue #24): the old RE2 rule used a fixed
+    ``[\\s\\S]{0,400}`` window between ``run:`` and ``${{ secrets.``, which bled
+    across the step boundary and flagged a ``run:`` whose only secret lived in a
+    SIBLING step's ``with:`` input (two independent ecosystem audits confirmed
+    zero bare secrets there). Anchoring each ``${{ secrets. }}`` line on
+    ``in_run_block`` counts it ONLY when it physically sits inside a run block —
+    a sibling ``with:``/``uses:`` input walks up to its step key and returns
+    False, and env indirection never matches because there is no literal
+    ``${{ secrets. }}`` in the run body.
+    """
+
+    name = "secret-env-bare-in-run"
+    severity = SEV_HIGH
+    description = (
+        "${{ secrets.* }} interpolated directly inside a run: block. Route the "
+        "secret through an env: key on the step and reference $ENV_VAR — never "
+        "let a secret expression touch the shell script text directly."
+    )
+    _SECRET = re.compile(r"\$\{\{\s*secrets\.")
+
+    def check(self, wf: Workflow) -> list:
+        findings: list[Finding] = []
+        for line_num in wf.lines_of(self._SECRET):
+            if in_run_block(wf, line_num):
+                findings.append(self._finding(wf, line_num))
+        return findings
+
+
 RULES = [
     ShellInjectionExpr(),
+    SecretBareInRun(),
     GithubScriptInjection(),
     ShellInjectionJq(),
     WorkflowDispatchInjection(),

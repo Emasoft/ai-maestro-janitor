@@ -159,7 +159,10 @@ _PROV_NPM_PUBLISH = _re(
     # Shape 1: `- run: npm publish ...` on one line (single-line step).
     r"^[\s]*-?\s*run:\s*(?:npm|pnpm|yarn)\s+publish\b[^\n]*$"
     # Shape 2: multi-line `run: |` block scalar containing `npm publish ...`
-    # within the next 400 chars (mirrors `secret-env-bare-in-run` shape).
+    # within the next 400 chars. (Unlike the secret-attribution case — see
+    # rules_injection.py::SecretBareInRun, moved structural in issue #24 — a
+    # run:-window bleed here is benign: `npm publish` in a sibling step IS still
+    # a publish in a run somewhere, so a provenance check on it is not a FP.)
     r"|run:[ \t]*[|>][^\n]*\n(?:[\s\S]{0,400}?)(?:^|\s)(?:npm|pnpm|yarn)\s+publish\b[^\n]*$"
 )
 

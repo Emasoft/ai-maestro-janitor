@@ -72,16 +72,12 @@ PATTERNS: dict[str, tuple[str, str, str]] = {
         "contains() used where == or startsWith would be safer and clearer "
         "for an identity-based comparison.",
     ),
-    "secret-env-bare-in-run": (
-        # Multi-line `run: |` block followed by a `${{ secrets.X }}` reference.
-        # The `[\s\S]*?` non-greedy "any content" works under both RE2 and
-        # Python re (RE2 supports `[\s\S]*` natively; lookahead is avoided).
-        r"run:[ \t]*[|>][^\n]*\n(?:[\s\S]{0,400}?)\$\{\{\s*secrets\.",
-        "HIGH",
-        "${{ secrets.* }} interpolated inside a run: block (multi-line OK). "
-        "Route the secret through an env: key on the step and reference "
-        "$ENV_VAR — never let secrets touch the shell directly.",
-    ),
+    # NOTE: `secret-env-bare-in-run` MOVED to the structural tier
+    # (scripts/lib/sentinel/rules_injection.py::SecretBareInRun) in the issue #24
+    # fix. A single RE2 pattern's fixed `[\s\S]{0,400}` window bled across the
+    # YAML step boundary and flagged a run: whose only secret lived in a SIBLING
+    # step's `with:` input. The structural rule anchors on `in_run_block` so the
+    # secret reference counts only when it physically sits inside the run body.
     "github-env-write-with-expr": (
         r"echo[^\n]*\$\{\{[^}]+}}[^\n]*>>\s*\"?\$GITHUB_ENV\b",
         "HIGH",
