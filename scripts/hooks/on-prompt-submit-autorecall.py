@@ -122,8 +122,9 @@ def _scope_pages(root: Path) -> list[str]:
 
     The memory system has THREE scopes (TRDD-c77dae09): LOCAL (the agent corpus,
     handled by `_agent_notes` with its user-mem exclusion), PROJECT
-    (`<git-root>/memory/`, git-tracked + pushed), and USER (`~/.claude/memory/`,
-    global). PROJECT/USER pages may live in subdirectories, so we walk
+    (`<git-root>/memory/`, git-tracked + pushed), and USER (the janitor PLUGIN_DATA
+    dir `${CLAUDE_PLUGIN_DATA}/memory/`, global). PROJECT/USER pages may live in
+    subdirectories, so we walk
     recursively — but EXCLUDE the tool's generated `.memgrep/` index sidecar and
     the detector proposal/index files (not pages). Returns absolute file paths
     sorted for determinism; an unreadable/absent root yields [].
@@ -170,9 +171,15 @@ def _project_memdir(project_dir: str | None) -> Path | None:
 
 
 def _user_memdir() -> Path:
-    """The USER-scope (global) memory root: `~/.claude/memory/`. Not created."""
+    """The USER-scope (global) memory root: the janitor PLUGIN_DATA dir
+    `${CLAUDE_PLUGIN_DATA}/memory/` — untouchable, survives plugin updates +
+    `--keep-data` uninstall (NOT a `~/.claude/<custom>/` folder a cleanup pass
+    could wipe). Not created."""
+    data = os.environ.get("CLAUDE_PLUGIN_DATA")
+    if data:
+        return Path(data) / "memory"
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "memory"
+    return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
 
 
 def _recall(memgrep: str, query: str, note_paths: list[str]) -> str:
@@ -274,7 +281,7 @@ def main() -> int:
 
     # Compose ALL THREE memory scopes into ONE recall (TRDD-c77dae09): LOCAL (the
     # agent corpus, with its structural user-mem exclusion) → PROJECT
-    # (`<git-root>/memory/`) → USER (`~/.claude/memory/`). recall takes explicit
+    # (`<git-root>/memory/`) → USER (`${CLAUDE_PLUGIN_DATA}/memory/`). recall takes explicit
     # FILE paths and only walks DIRECTORIES, so passing files keeps the private
     # `user-mem/` subtree untraversed AND lets one invocation rank across all
     # roots. Ordering is most-specific-first so that, all else equal, a local note

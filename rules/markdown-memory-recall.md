@@ -34,7 +34,7 @@ whole point of having a memory.
 # Compose the THREE scope roots (see "Memory scopes" below); search them in ONE call:
 LOCAL_MEM="$HOME/.claude/projects/<project-slug>/memory"          # slug = project path, dashed
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/memory" # git-tracked, shared
-USER_MEM="$HOME/.claude/memory"                                   # global, cross-project
+USER_MEM="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory"  # global; janitor PLUGIN_DATA (untouchable, backed up, survives --keep-data uninstall)
 ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
 SYMPTOM="the user's words / the error / the symptom"              # NOT the answer's jargon
 
@@ -49,7 +49,7 @@ fi
 
 Read the top 1-3 notes the recall returns; the answer is in their bodies. The
 note's SCOPE is its path (under `~/.claude/projects/…` = LOCAL, under the repo
-= PROJECT, under `~/.claude/memory` = USER); when two scopes state conflicting
+= PROJECT, under the janitor PLUGIN_DATA dir `…/plugins/data/<janitor>/memory` = USER); when two scopes state conflicting
 facts, the MORE SPECIFIC scope wins: LOCAL over PROJECT over USER. If recall
 returns nothing, the memory doesn't exist yet — consider writing one after you
 solve the problem (per the `# Memory` directive).
@@ -63,7 +63,7 @@ CLAUDE.md / CLAUDE.local.md). Three roots, one recall surface:
 |---|---|---|---|
 | **LOCAL** | `~/.claude/projects/<slug>/memory/` | outside any repo — never pushed | machine-private notes: local paths, hostnames, credentials hints, per-instance info. The harness `# Memory` directive writes here; `user-mem/` (the user's private store) lives inside it |
 | **PROJECT** | `<git-root>/memory/` | **tracked + PUSHED** — shared by every dev | project knowledge any contributor needs: architecture facts, codebase gotchas, project lessons. Sensitive/local data FORBIDDEN — the janitor's `memory-scope-leak` detector polices this scope |
-| **USER** | `~/.claude/memory/` | never in any repo | cross-project knowledge: user preferences, machine-independent lessons |
+| **USER** | `${CLAUDE_PLUGIN_DATA}/memory/` → `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` | the janitor's plugin DATA dir — **never** a `~/.claude/<custom>/` folder (those can be cleaned up as stray); untouchable by design, survives plugin updates + `--keep-data` uninstall | cross-project knowledge: user preferences, machine-independent lessons |
 
 **Write routing (decide the scope BEFORE authoring):** contains a local path /
 username / hostname / secret / machine-specific detail → **LOCAL**. Project

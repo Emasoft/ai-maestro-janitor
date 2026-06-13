@@ -10,7 +10,8 @@
 The memory system has THREE scopes (TRDD-c77dae09): LOCAL
 (`~/.claude/projects/<slug>/memory/`, per-machine, never pushed), PROJECT
 (`<git-root>/memory/`, git-tracked + PUSHED, shared with every dev), and USER
-(`~/.claude/memory/`, global, never pushed). The PROJECT scope is the only one
+(the janitor PLUGIN_DATA dir `${CLAUDE_PLUGIN_DATA}/memory/`, global, never
+pushed). The PROJECT scope is the only one
 that LEAVES the machine, so it is the one that can leak: a contributor who pastes
 a `/Users/<name>/…` path, an email, a hostname, or a stray token into a PROJECT
 page would push that private material to GitHub for everyone to see.

@@ -278,9 +278,15 @@ def _resolve_project_scope_dir() -> Path | None:
 
 
 def _resolve_user_scope_dir() -> Path:
-    """The USER scope (global) memory root: `~/.claude/memory/`. Not created."""
+    """The USER scope (global) memory root: the janitor PLUGIN_DATA dir
+    `${CLAUDE_PLUGIN_DATA}/memory/` — untouchable, survives plugin updates +
+    `--keep-data` uninstall (NOT a `~/.claude/<custom>/` folder a cleanup pass
+    could wipe). Not created."""
+    data = os.environ.get("CLAUDE_PLUGIN_DATA")
+    if data:
+        return Path(data) / "memory"
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "memory"
+    return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
 
 
 def _resolve_scope_dirs() -> list[tuple[str, Path]]:

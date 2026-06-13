@@ -85,6 +85,9 @@ def _run_hook(payload: dict, env_extra: dict, project: Path, home: Path) -> tupl
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["CLAUDE_PROJECT_DIR"] = str(project)
+    # USER scope = ${CLAUDE_PLUGIN_DATA}/memory (the janitor plugin DATA dir). Pin it
+    # to a tmp dir under `home` so the test is isolated AND exercises the env-var path.
+    env["CLAUDE_PLUGIN_DATA"] = str(home / "plugin-data")
     # Drop any ambient opt-in so each test controls it explicitly via env_extra.
     env.pop("CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL", None)
     # Make the chosen memgrep the one the hook resolves (find_memgrep honours
@@ -326,12 +329,12 @@ def _init_git(root: Path) -> None:
 
 @_needs_memgrep
 def test_user_scope_note_is_recalled(tmp_path):
-    """A note in the USER scope (`~/.claude/memory/`) is composed into recall —
-    even when the LOCAL corpus has no matching note."""
+    """A note in the USER scope (`${CLAUDE_PLUGIN_DATA}/memory/`) is composed into
+    recall — even when the LOCAL corpus has no matching note."""
     home = tmp_path / "home"
     project = tmp_path / "proj"
-    # USER scope note (global), no matching LOCAL note.
-    _write_page(home / ".claude" / "memory", "userpref",
+    # USER scope = ${CLAUDE_PLUGIN_DATA}/memory; _run_hook pins it to <home>/plugin-data.
+    _write_page(home / "plugin-data" / "memory", "userpref",
                 "globalwidget calibration drifts after sleep where is the knob",
                 body="turn the global knob")
     rc, out, _err = _run_hook(

@@ -37,7 +37,7 @@ CLAUDE.md) or what only matters to this conversation.
 case "$SCOPE" in
   local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
   project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory" ;;
-  user)    MEMDIR="$HOME/.claude/memory" ;;
+  user)    MEMDIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory" ;;  # janitor PLUGIN_DATA (untouchable, survives --keep-data)
 esac
 mkdir -p "$MEMDIR"
 ```
