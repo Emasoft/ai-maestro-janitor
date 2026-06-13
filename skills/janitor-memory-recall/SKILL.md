@@ -22,9 +22,17 @@ contents:
 - The edge model — EVERY link is bidirectional (the link law)
 - Page anatomy
 
-Always run RECALL FIRST: before debugging a recurring problem, before a design
-decision, before editing a file in an area you haven't loaded, before MEMORIZING
-(so you update the right page instead of duplicating).
+## PROACTIVE-USE CONTRACT — recall FIRST, unprompted (commitment 1)
+
+This is the FIND leg of THE PROACTIVE-USE CONTRACT (full text in
+`~/.claude/rules/markdown-memory-recall.md`). Run RECALL **before you act —
+without being asked**: before debugging a recurring problem, before a design
+decision, before acting on a recurring alert, before editing a file in an area
+you haven't loaded, and before MEMORIZING (so you update the right page instead
+of duplicating). Index the query by the **SYMPTOM / the user's words**, never the
+answer's jargon. Skipping recall means re-deriving — usually worse — what a past
+session already solved. After you solve the thing, close the loop: WRITE/UPDATE
+the owning page (`/janitor-memory-write`, `/janitor-memory-update`).
 
 ## Compose the scope roots (once)
 

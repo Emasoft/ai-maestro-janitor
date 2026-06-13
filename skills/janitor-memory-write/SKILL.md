@@ -26,6 +26,20 @@ constraints not in the code, confirmed preferences, hard-won debugging facts. Do
 NOT memorize what the repo already records (code structure, git history,
 CLAUDE.md) or what only matters to this conversation.
 
+## PROACTIVE-USE CONTRACT — write AFTER solving, unprompted (commitment 2)
+
+This is the CAPTURE leg of THE PROACTIVE-USE CONTRACT (full text in
+`~/.claude/rules/markdown-memory-recall.md`). **After you solve a non-trivial
+problem, fix a bug, or make a decision** that isn't derivable from the code,
+memorize it **without waiting to be asked** — RECALL first (so you ADD to the
+owning page, never duplicate), then write/update. Route the scope BEFORE
+authoring: machine-private → **LOCAL**; project-shared-with-no-secrets →
+**PROJECT** (so it's git-tracked + shared with every dev); cross-project →
+**USER**; UNSURE → **LOCAL**. To keep the PROJECT wiki current as you go — the
+architecture hub, key-solution component pages, the publish/deploy pipeline page
+— this skill is the tool; if the project has no wikimem yet, run
+`/janitor-memory-bootstrap` once first.
+
 ## The algorithm
 
 ### 1. Route the SCOPE (machine-private vs shared vs global)

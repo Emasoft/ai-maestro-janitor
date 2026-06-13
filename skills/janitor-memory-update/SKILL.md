@@ -24,6 +24,19 @@ and the expand/reduce shapes. The model doc's table of contents:
 Three kinds of update, below. Always: **find the page first**, then bump `lmd:`
 to today on any edit.
 
+## PROACTIVE-USE CONTRACT — keep the wiki current, unprompted (commitment 2-3)
+
+This is the MAINTAIN leg of THE PROACTIVE-USE CONTRACT (full text in
+`~/.claude/rules/markdown-memory-recall.md`). When a fact changes, a decision
+flips, or a discovery contradicts a memory — **update the owning page as part of
+finishing the work, without being asked**, applying the non-destructive
+correction protocol (§2): clean the body to the current truth AND demote the old
+statement to a dated `[^N]` lesson carrying the WHY (the error becomes a
+guardrail; nothing is lost). Proactively keep each project's **PROJECT-scope**
+pages current as you touch the code — the architecture hub, key-solution
+component pages, the publish/deploy pipeline — so the knowledge stays git-tracked
+and shared with every dev rather than going stale.
+
 ## THE UPDATE INVARIANT — a superseded memory is NEVER deleted; it becomes a lesson
 
 This governs EVERY update, not just explicit corrections. Whenever an edit

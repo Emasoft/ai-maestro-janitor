@@ -6,6 +6,45 @@ The harness `# Memory` directive (injected each session) tells you how to
 it. Together they are "the memory system": authoring (directive) + recall (this
 rule) + the search tool (memgrep) + the note corpus.
 
+## THE PROACTIVE-USE CONTRACT (do this UNPROMPTED — the whole point of memory)
+
+The memory system is **worthless if it is only used when the user asks**. Every
+agent — orchestrator and sub-agent, in every plugin — uses it **proactively**, by
+default, without being told. Four standing commitments:
+
+1. **RECALL BEFORE ACTING.** Before you debug a recurring problem, make a design
+   decision, or act on a recurring alert — RECALL FIRST ("have we hit this
+   before?"). One symptom-indexed query across all 3 scopes (the snippet below),
+   indexed by the **SYMPTOM / the user's words**, never the answer's jargon. It
+   is cheap and it is the entire reason a memory exists. Skipping it means
+   re-deriving (often badly) something a past session already solved.
+
+2. **WRITE / UPDATE AFTER SOLVING.** After you solve a non-trivial problem, fix a
+   bug, or make a decision that isn't derivable from the code — capture it into
+   the wiki page that OWNS the subject (RECALL first so you update, not
+   duplicate). Use the correction protocol when it supersedes a prior fact: clean
+   the body to the current truth AND demote the old statement to a dated `[^N]`
+   lesson carrying the WHY. The fact moves forward clean; the error becomes a
+   guardrail. `/janitor-memory-write` (MEMORIZE) and `/janitor-memory-update`.
+
+3. **MAINTAIN THE PROJECT WIKIMEM.** Each project's agent proactively keeps its
+   **PROJECT-scope** pages current — an **architecture hub**, the **key-solution
+   component** pages, the **publish/deploy pipeline** page — so this knowledge is
+   git-tracked and shared with every dev (not stranded in one session's head). If
+   the project has no wikimem yet, bootstrap it once with
+   `/janitor-memory-bootstrap`.
+
+4. **SCOPE ROUTING (decide BEFORE writing).** machine-private (local paths,
+   usernames, hostnames, secrets, machine-specific detail) → **LOCAL**;
+   project-shared knowledge with NO private data → **PROJECT**; true across all
+   projects → **USER**. **UNSURE → LOCAL** (the safe scope; the `memory-scope-leak`
+   detector polices PROJECT/USER for anything sensitive).
+
+This contract is not optional and not gated on a user request. The three skills
+(`/janitor-memory-recall`, `/janitor-memory-write`, `/janitor-memory-update`) are
+the executable form of commitments 1-2; `/janitor-memory-bootstrap` stands up
+commitment 3 in a fresh project.
+
 ## The one law that makes memory work: index by the QUESTION, not the answer
 
 A memory is found from the SYMPTOM, not the solution. When you write a note,
@@ -26,9 +65,8 @@ body.
 
 ## Recall BEFORE acting (the protocol)
 
-Before debugging a recurring problem, making a design decision, or acting on a
-recurring alert, RECALL first — "have we hit this before?". Cheap, and it's the
-whole point of having a memory.
+This is commitment 1 of THE PROACTIVE-USE CONTRACT above — recall FIRST, every
+time, unprompted. The mechanics:
 
 ```bash
 # Compose the THREE scope roots (see "Memory scopes" below); search them in ONE call:
@@ -275,6 +313,7 @@ from a clean framing, or have the symptom come from the user verbatim.
 |---|---|---|
 | Authoring | `# Memory` harness directive + `janitor-memory-write` skill | write one fact per note; symptom-indexed `description`; the correction protocol (clean fact in place, demote error to a `[^N]` lesson) |
 | Recall | THIS rule + `janitor-memory-recall` skill + `memgrep recall`/`find` | symptom-ranked recall, lessons auto-appended |
+| Bootstrap | `janitor-memory-bootstrap` skill | stands up a project's wikimem once: creates the PROJECT-scope dir (+ gitignore exception), seeds an architecture-hub page + MEMORY.md, points the agent at the proactive contract |
 | Organization | `memory-librarian` detector (janitor heartbeat) | SURFACES aggregation/conflict candidates to `memory-reorg-proposed.md`; never edits content (a session does the conscious reorg) |
 | Tool | `memgrep` (`scripts/memgrep/SKILL.md`) | the engine all three lean on |
 | Private user store | `/to-user-mem`, `/search-user-mem`, `/share-user-mem` | the USER's own agent-invisible memories — a SEPARATE corpus, not the agent notes; search routes through `memgrep find` |
