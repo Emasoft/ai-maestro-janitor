@@ -161,7 +161,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=403529d17c97 digest=0e184d346215 generated=2026-06-11T21:34:20+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6068b40eabaf digest=688306a9051e generated=2026-06-13T11:42:24+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -173,6 +173,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · task_version_update() -> None — Auto-update the janitor plugin itself when GitHub is ahead of the
   · task_oauth_rotator_supervisor() -> None — Governance (alert-only) for the opt-in OAuth account rotator
   · task_oauth_rotator_tick() -> None — 60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
+  · task_memory_guard() -> None — Tier-1 OOM guard (TRDD-7100178d Pillar 4, Decision 1 — user-signed 2026-05-31).
   · Task — One periodic unit of work owned by the daemon.
   · Task.time_until_due(self) -> int
   · Task.is_due(self) -> bool
@@ -390,6 +391,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · write_manifest(manifest, path) -> None — Write the manifest atomically.
   · load_manifest(path) -> dict[str, str] — Load a manifest written by `write_manifest`.
   · verify_manifest(plugin_root, manifest_path, globs) -> tuple[list[str], list[str], list[str]] — Compare live files against the manifest baseline.
+`scripts/lib/memory_guard.py` — Tier-1 OOM memory-guard primitives (TRDD-7100178d, Pillar 4 / Phase 5).
+  · ProcRow — One parsed `ps -axo pid,ppid,rss,etime,command` row.
+  · parse_etime(raw) -> int — Parse ps ELAPSED ([[dd-]hh:]mm:ss) into seconds. Unparseable -> 0.
+  · parse_ps_snapshot(text) -> list[ProcRow] — Parse `ps -axo pid,ppid,rss,etime,command` output (header tolerated).
+  · parse_vm_stat(text, page_size) -> Optional[int] — Free MB from macOS `vm_stat` output: (free + speculative) pages.
+  · parse_meminfo(text) -> Optional[int] — Free MB from Linux /proc/meminfo's MemAvailable (kB). None if absent.
+  · is_tier1_killable(row, *, protected_pids, min_etime_s) -> bool — The Tier-1 truth: may this row EVER be killed by the guard?
+  · select_victim(rows, *, protected_pids, min_etime_s) -> Optional[ProcRow] — Pick the single largest-RSS Tier-1-killable row, or None.
+  · free_memory_mb() -> Optional[int] — System free memory in MB (macOS vm_stat / Linux meminfo). None = unknown.
+  · snapshot_processes(snapshot_path) -> list[ProcRow] — `ps -axo pid,ppid,rss,etime,command` -> FILE -> parsed rows.
+  · kill_process(pid, *, term_grace_s) -> bool — SIGTERM -> grace -> SIGKILL. True iff the process is gone afterwards.
 `scripts/lib/output_formats.py` — Output formats — HMAC-signed scan badge, approval-gate protocol, FP-filters DSL.
   · make_badge(report_id, verdict, scanned_at, key, expiry_days) -> str — Build a signed badge token.
   · verify_badge(badge, key, *, now) -> tuple[bool, str] — Verify a signed badge token.
@@ -700,6 +712,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · update_python_versions(plugin_root, new_version) -> list[tuple[bool, str]] — Update __version__ = 'X.Y.Z' in all Python files.
   · check_version_consistency(plugin_root) -> tuple[bool, str] — Check all version sources match. Returns (ok, message).
   · do_bump(plugin_root, new_version, dry_run) -> bool — Bump version across all files. Returns True on success.
+  · main() -> int
+`scripts/reload_trigger.py` — Backing script for /janitor-reload-plugins (analogue of compact_trigger.py).
   · main() -> int
 `scripts/repomap_generate.py` — repomap_generate — generate/refresh the fenced project map in CLAUDE.md.
   · load_excludes(root) -> list[str] — The persisted exclude globs (one per line, `#` comments). Persisting
