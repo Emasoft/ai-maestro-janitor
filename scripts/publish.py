@@ -798,14 +798,38 @@ def language_lint_step(info: ProjectInfo) -> None:
         print(f"{GREEN}ok go vet passed{NC}")
 
     # ── Markdown ────────────────────────────────────────────────────────
-    # Style-lint only SHIPPED docs. Exclude (a) TRDDs under design/tasks/ — append-only
-    # terminal design logs whose bodies are immutable per the TRDD rule and which never ship
-    # to users; and (b) **/fixtures/** — deliberately-diverse markdown that is PARSER TEST
-    # DATA (e.g. a multi-H1 sample), not documentation. Linting either is a category error
-    # (it would force edits to immutable logs or break the very tests the fixtures drive).
+    # Style-lint only SHIPPED docs. Exclude the content / immutable categories where
+    # doc-lint is a category error:
+    #   (a) **/fixtures/**            — PARSER TEST DATA (deliberately-diverse markdown,
+    #                                   e.g. a multi-H1 sample); linting breaks the tests.
+    #   (b) design/{tasks,archived,proposals,refused}/  — the TRDD lifecycle logs: append-only /
+    #                                   terminal design records whose bodies are immutable per
+    #                                   the TRDD rule and which never ship to users. (Only
+    #                                   design/requirements/ — the living PRRD — stays linted.)
+    #   (c) .claude/project/memory/** — the wiki-MEMORY CORPUS: a knowledge base with its OWN
+    #                                   format (ocd/lmd/nested-metadata frontmatter, [^N]
+    #                                   footnotes, prose conventions) defined by
+    #                                   janitor-memory-write, NOT plugin documentation. Linting
+    #                                   it would force wiki notes to bend to doc-markdown
+    #                                   conventions, and the MD023 hits are a front-matter
+    #                                   parser mismatch on the richer YAML, not real heading bugs.
+    _design_log_dirs = {"tasks", "archived", "proposals", "refused"}
+
+    def _doc_lint_excluded(p: Path) -> bool:
+        parts = p.parts
+        if "fixtures" in parts:
+            return True
+        if "design" in parts:
+            i = parts.index("design")
+            if i + 1 < len(parts) and parts[i + 1] in _design_log_dirs:
+                return True
+        if ".claude" in parts and "project" in parts and "memory" in parts:
+            return True
+        return False
+
     md_files = sorted(
         p for p in {*by_ext.get(".md", []), *by_ext.get(".markdown", [])}
-        if "fixtures" not in p.parts and not ("design" in p.parts and "tasks" in p.parts)
+        if not _doc_lint_excluded(p)
     )
     if md_files:
         # `pymarkdownlnt` is uv-installable, pure-Python, and ships the
