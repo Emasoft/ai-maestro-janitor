@@ -2,9 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.7.4] - 2026-06-13
+## [0.7.5] - 2026-06-13
 
-### Features
+### Bug Fixes
 
-- /janitor-reload-plugins — agent-invocable /reload-plugins trigger
+- Scope secret-env-bare-in-run structurally (issue #24)
+
+### Miscellaneous
+
+- Refresh CLAUDE.md map after v0.7.4 (memory_guard + reload_trigger)
 
