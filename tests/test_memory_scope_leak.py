@@ -1,16 +1,19 @@
 """Tests for the memory-scope-leak detector (TRDD-c77dae09, ranks 2+6).
 
-The PROJECT memory scope (`<git-root>/memory/`) is git-tracked and PUSHED, so it
-MUST NOT carry machine/user-private material. This detector scans those pages
-with the private-path lib + privacy PII shapes + credential libs + entropy and
-surfaces `[memory-scope-leak] <file>: <class> — demote to LOCAL scope` findings.
-It also guards the gitignore invariants: PROJECT `memory/` must be TRACKED (not
-ignored), and a LOCAL-shaped store must not be committed into the repo.
+The PROJECT memory scope (`<git-root>/.claude/project/memory/`) is git-tracked
+and PUSHED, so it MUST NOT carry machine/user-private material. This detector
+scans those pages with the private-path lib + privacy PII shapes + credential
+libs + entropy and surfaces `[memory-scope-leak] <file>: <class> — demote to
+LOCAL scope` findings. It also guards the gitignore invariants: PROJECT
+`.claude/project/memory/` must be TRACKED (and since it lives under the commonly
+ignored `.claude/`, a missing `!.claude/project/memory/**` exception is flagged),
+and a LOCAL-shaped store must not be committed into the repo.
 
-Real I/O, no mocks: each case builds a tmp git repo with a `memory/` dir and
-runs the detector as a subprocess with CLAUDE_PROJECT_DIR + HOME pointed at the
-fixture. The detector is project-scoped and a graceful no-op when there is no
-`memory/` dir, no git repo, or an unchanged finding set.
+Real I/O, no mocks: each case builds a tmp git repo with a
+`.claude/project/memory/` dir and runs the detector as a subprocess with
+CLAUDE_PROJECT_DIR + HOME pointed at the fixture. The detector is project-scoped
+and a graceful no-op when there is no PROJECT memory dir, no git repo, or an
+unchanged finding set.
 """
 
 from __future__ import annotations
@@ -68,8 +71,13 @@ def _run(home: Path, project: Path, *, extra_env: dict | None = None) -> str:
     return res.stdout
 
 
+def _project_memdir(root: Path) -> Path:
+    """The PROJECT-scope memory dir (in-repo, namespaced under .claude/)."""
+    return root / ".claude" / "project" / "memory"
+
+
 def _write_project_memory(root: Path, name: str, content: str) -> Path:
-    mem = root / "memory"
+    mem = _project_memdir(root)
     mem.mkdir(parents=True, exist_ok=True)
     page = mem / name
     page.write_text(content, encoding="utf-8")
@@ -79,7 +87,7 @@ def _write_project_memory(root: Path, name: str, content: str) -> Path:
 def _proposal(root: Path) -> str:
     """The detector's proposal file content (the per-page leak detail lives here;
     the heartbeat line is intentionally terse, like the librarian's)."""
-    p = root / "memory" / "memory-scope-leak-proposed.md"
+    p = _project_memdir(root) / "memory-scope-leak-proposed.md"
     return p.read_text(encoding="utf-8") if p.is_file() else ""
 
 
@@ -105,7 +113,7 @@ class TestMemoryScopeLeak(unittest.TestCase):
             self.assertEqual(out.strip(), "")
 
     def test_clean_pages_yield_nothing(self) -> None:
-        """A tracked memory/ with only portable, non-private content → no leak."""
+        """A tracked PROJECT memory dir with only portable, non-private content → no leak."""
         with TemporaryDirectory() as td:
             root = Path(td) / "proj"
             root.mkdir()
@@ -114,7 +122,7 @@ class TestMemoryScopeLeak(unittest.TestCase):
                 root, "arch.md",
                 "The parser retries 3× then fails. See [[other]] for the table.\n",
             )
-            _git(["add", "memory/arch.md"], root)
+            _git(["add", ".claude/project/memory/arch.md"], root)
             _git(["commit", "-qm", "x"], root)
             out = _run(Path(td) / "home", root)
             self.assertNotIn("[memory-scope-leak]", out)
@@ -131,7 +139,7 @@ class TestMemoryScopeLeak(unittest.TestCase):
                 root, "paths.md",
                 "the script lives at /Users/emanuele/Code/run.sh on my box.\n",
             )
-            _git(["add", "memory/paths.md"], root)
+            _git(["add", ".claude/project/memory/paths.md"], root)
             _git(["commit", "-qm", "x"], root)
             out = _run(Path(td) / "home", root)
             self.assertIn("[memory-scope-leak]", out)
@@ -151,7 +159,7 @@ class TestMemoryScopeLeak(unittest.TestCase):
                 root, "contact.md",
                 "ping the maintainer at someone.private@gmail.com when stuck.\n",
             )
-            _git(["add", "memory/contact.md"], root)
+            _git(["add", ".claude/project/memory/contact.md"], root)
             _git(["commit", "-qm", "x"], root)
             out = _run(Path(td) / "home", root)
             self.assertIn("[memory-scope-leak]", out)
@@ -170,7 +178,7 @@ class TestMemoryScopeLeak(unittest.TestCase):
                 root, "token.md",
                 f"the api key was {secret} but it has been rotated since.\n",
             )
-            _git(["add", "memory/token.md"], root)
+            _git(["add", ".claude/project/memory/token.md"], root)
             _git(["commit", "-qm", "x"], root)
             out = _run(Path(td) / "home", root)
             self.assertIn("[memory-scope-leak]", out)
@@ -189,18 +197,18 @@ class TestMemoryScopeLeak(unittest.TestCase):
                 "CI runs in /home/runner/work; cache under /Users/Shared/x; "
                 "docs at example.com and localhost; bare ~/bin is fine.\n",
             )
-            _git(["add", "memory/ok.md"], root)
+            _git(["add", ".claude/project/memory/ok.md"], root)
             _git(["commit", "-qm", "x"], root)
             out = _run(Path(td) / "home", root)
             self.assertNotIn("[memory-scope-leak]", out)
 
     def test_memgrep_dir_skipped(self) -> None:
-        """The tool's `.memgrep/` index sidecar inside memory/ is never scanned."""
+        """The tool's `.memgrep/` index sidecar inside the PROJECT memory dir is never scanned."""
         with TemporaryDirectory() as td:
             root = Path(td) / "proj"
             root.mkdir()
             _init_repo(root)
-            mem = root / "memory"
+            mem = _project_memdir(root)
             mem.mkdir(parents=True)
             (mem / "arch.md").write_text("clean fact.\n", encoding="utf-8")
             idx = mem / ".memgrep"
@@ -209,7 +217,7 @@ class TestMemoryScopeLeak(unittest.TestCase):
             (idx / "cache.md").write_text(
                 "/Users/secretuser/leak/path/here.sh\n", encoding="utf-8",
             )
-            _git(["add", "memory/arch.md"], root)
+            _git(["add", ".claude/project/memory/arch.md"], root)
             _git(["commit", "-qm", "x"], root)
             out = _run(Path(td) / "home", root)
             self.assertNotIn("[memory-scope-leak]", out)
@@ -217,19 +225,26 @@ class TestMemoryScopeLeak(unittest.TestCase):
     # ----- gitignore guards ----------------------------------------------
 
     def test_ignored_project_memory_flagged(self) -> None:
-        """PROJECT memory/ must be TRACKED. If a .gitignore swallows it, surface
-        a guard finding (the shared scope would silently never be pushed)."""
+        """PROJECT `.claude/project/memory/` must be TRACKED. Because it lives under
+        `.claude/` (commonly gitignored), a bare `.claude/` rule with no
+        re-include exception swallows it — surface a guard finding (the shared
+        scope would silently never be pushed)."""
         with TemporaryDirectory() as td:
             root = Path(td) / "proj"
             root.mkdir()
             _init_repo(root)
-            (root / ".gitignore").write_text("memory/\n", encoding="utf-8")
+            # `.claude/` ignored, NO `!.claude/project/memory/**` exception → the
+            # PROJECT scope is swallowed. This is the exact real-world misconfig.
+            (root / ".gitignore").write_text(".claude/\n", encoding="utf-8")
             _write_project_memory(root, "arch.md", "clean fact.\n")
             out = _run(Path(td) / "home", root)
             self.assertIn("[memory-scope-leak]", out)
             self.assertIn("gitignore guard", out.lower())
-            # The guard detail (the word "gitignored" + the fix) is in the proposal.
-            self.assertIn("gitignored", _proposal(root).lower())
+            # The guard detail (the word "gitignored" + the exception fix) is in
+            # the proposal.
+            prop = _proposal(root).lower()
+            self.assertIn("gitignored", prop)
+            self.assertIn("!.claude/project/memory/**", prop)
 
     # ----- dedupe ---------------------------------------------------------
 
@@ -243,7 +258,7 @@ class TestMemoryScopeLeak(unittest.TestCase):
             _write_project_memory(
                 root, "paths.md", "see /Users/emanuele/x.sh on disk.\n",
             )
-            _git(["add", "memory/paths.md"], root)
+            _git(["add", ".claude/project/memory/paths.md"], root)
             _git(["commit", "-qm", "x"], root)
             home = Path(td) / "home"
             first = _run(home, root)

@@ -30,7 +30,7 @@ decision, before editing a file in an area you haven't loaded, before MEMORIZING
 
 ```bash
 LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"   # machine-private
-PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory"  # git-tracked
+PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # git-tracked (in-repo, namespaced)
 USER_MEM="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory"  # global; janitor PLUGIN_DATA
 ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
 ```

@@ -348,13 +348,14 @@ def test_user_scope_note_is_recalled(tmp_path):
 
 @_needs_memgrep
 def test_project_scope_note_is_recalled(tmp_path):
-    """A note in the PROJECT scope (`<git-root>/memory/`) is composed into recall
-    when CLAUDE_PROJECT_DIR is a git repo."""
+    """A note in the PROJECT scope (`<git-root>/.claude/project/memory/`) is
+    composed into recall when CLAUDE_PROJECT_DIR is a git repo."""
     home = tmp_path / "home"
     project = tmp_path / "proj"
     _init_git(project)
-    # PROJECT scope page (git-tracked root), no matching LOCAL/USER note.
-    _write_page(project / "memory", "projarch",
+    # PROJECT scope page (git-tracked root, namespaced under .claude/), no
+    # matching LOCAL/USER note.
+    _write_page(project / ".claude" / "project" / "memory", "projarch",
                 "projwidget pipeline stalls on cold start where is the retry",
                 body="bump the retry")
     rc, out, _err = _run_hook(
@@ -376,7 +377,7 @@ def test_all_three_scopes_compose_and_user_mem_excluded(tmp_path):
     memdir = _agent_memdir(home, project)
     # One matching note per scope on the same topic, plus a private user-mem note.
     _write_page(memdir, "localnote", "tribblewidget overheats reset procedure local", body="local")
-    _write_page(project / "memory", "projnote", "tribblewidget overheats reset procedure project", body="proj")
+    _write_page(project / ".claude" / "project" / "memory", "projnote", "tribblewidget overheats reset procedure project", body="proj")
     _write_page(home / ".claude" / "memory", "usernote", "tribblewidget overheats reset procedure user", body="user")
     _write_page(memdir / "user-mem", "secret", "tribblewidget overheats reset SECRETMEMO", body="private")
     rc, out, _err = _run_hook(_prompt("the tribblewidget overheats again"), _ON, project, home)

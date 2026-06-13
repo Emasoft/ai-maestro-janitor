@@ -9,9 +9,9 @@
 
 The memory system has THREE scopes (TRDD-c77dae09): LOCAL
 (`~/.claude/projects/<slug>/memory/`, per-machine, never pushed), PROJECT
-(`<git-root>/memory/`, git-tracked + PUSHED, shared with every dev), and USER
-(the janitor PLUGIN_DATA dir `${CLAUDE_PLUGIN_DATA}/memory/`, global, never
-pushed). The PROJECT scope is the only one
+(`<git-root>/.claude/project/memory/`, git-tracked + PUSHED, shared with every
+dev), and USER (the janitor PLUGIN_DATA dir `${CLAUDE_PLUGIN_DATA}/memory/`,
+global, never pushed). The PROJECT scope is the only one
 that LEAVES the machine, so it is the one that can leak: a contributor who pastes
 a `/Users/<name>/…` path, an email, a hostname, or a stray token into a PROJECT
 page would push that private material to GitHub for everyone to see.
@@ -19,24 +19,28 @@ page would push that private material to GitHub for everyone to see.
 THIS DETECTOR is the load-bearing janitor enforcement piece (the USER's directive
 in the THREE-SCOPE addendum). It SURFACES, it never mutates:
 
-  * Scans every `<git-root>/memory/**/*.md` page (the would-be-pushed PROJECT
-    scope) with the local-path lib (`private_path_patterns`), the PII shapes
+  * Scans every `<git-root>/.claude/project/memory/**/*.md` page (the
+    would-be-pushed PROJECT scope) with the local-path lib
+    (`private_path_patterns`), the PII shapes
     (`privacy_patterns.PII_SHAPES`), the credential shape libs
     (`cloud_credential_patterns`, `cicd_secret_leak_patterns`), and an
     unknown-secret entropy pass (`security_helpers.shannon_entropy` +
     `looks_like_base64`). Each hit becomes a
     `[memory-scope-leak] <file>: <class> — demote to LOCAL scope before push`
     finding: the material belongs in LOCAL, not in the shared page.
-  * gitignore guards: PROJECT `memory/` must be TRACKED — if a `.gitignore`
-    rule swallows it, the shared scope would silently never be pushed
-    (`git check-ignore`); and a LOCAL-shaped store committed INSIDE the repo
-    (a `projects/<slug>/memory/` tree) is itself a leak of the local corpus.
+  * gitignore guards: PROJECT `.claude/project/memory/` must be TRACKED — but it
+    lives under `.claude/`, which is very commonly gitignored, so if a
+    `.gitignore` rule swallows it the shared scope would silently never be
+    pushed (`git check-ignore`). The fix is a gitignore EXCEPTION
+    (`!.claude/project/memory/**`); the guard surfaces that. And a LOCAL-shaped
+    store committed INSIDE the repo (a `projects/<slug>/memory/` tree) is itself
+    a leak of the local corpus.
   * ZERO mutation of any memory page (RULE 0). It only READS pages and WRITES a
     proposal file (`memory-scope-leak-proposed.md`, NOT a note) + emits one
     heartbeat line.
 
 Graceful no-op (never crashes the heartbeat): not a git repo, no PROJECT
-`memory/` dir, an empty corpus, or an unchanged finding set → exit silently with
+`.claude/project/memory/` dir, an empty corpus, or an unchanged finding set → exit silently with
 no output. Project-scoped — never touches user/global scope; the janitor's own
 repo is skipped (`state.is_self_scan_target`) unless `CLAUDE_PLUGIN_ALLOW_SELF_SCAN`.
 
@@ -64,9 +68,8 @@ import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
 
 # The detector's own output file — written into the PROJECT memory dir but it is
-# NOT a memory note. (It is gitignored-by-content via the .memgrep self-ignore?
-# No — it lives at memory/ root; it is a proposal artifact like the librarian's,
-# and is excluded from scanning by name.)
+# NOT a memory note. It lives at the `.claude/project/memory/` root; it is a
+# proposal artifact like the librarian's, and is excluded from scanning by name.
 PROPOSAL_NAME = "memory-scope-leak-proposed.md"
 
 # Files inside memory/ that are NOT pages and must be skipped (indices + the two
@@ -216,17 +219,25 @@ def _scan_page(page: Path) -> list[str]:
 def _gitignore_guards(root: Path, memdir: Path) -> list[str]:
     """Guard findings about the gitignore invariants. Returns guard-line bodies.
 
-    (a) PROJECT memory/ must be TRACKED — if a .gitignore swallows it, the shared
-        scope would silently never be pushed.
+    (a) PROJECT `.claude/project/memory/` must be TRACKED — but it lives under
+        `.claude/`, which is very commonly gitignored, so a `.gitignore` rule
+        easily swallows the present dir and the shared scope would silently never
+        be pushed. `memdir` already exists here (the caller only invokes this when
+        the dir is present), so an "ignored" verdict means a missing exception:
+        the fix is to add `!.claude/project/memory/**` after the `.claude/` rule.
     (b) A LOCAL-shaped store committed inside the repo (a `projects/<slug>/memory`
         tree, i.e. the harness LOCAL corpus checked into the repo) is a leak of
         the entire local corpus.
     """
     guards: list[str] = []
-    if _is_path_gitignored(root, "memory/"):
+    rel_memdir = memdir.relative_to(root).as_posix() + "/"
+    if _is_path_gitignored(root, rel_memdir):
         guards.append(
-            "PROJECT memory/ is gitignored — it must be TRACKED and pushed "
-            "(the shared scope is silently excluded from the repo)"
+            "PROJECT .claude/project/memory/ is gitignored — it must be TRACKED "
+            "and pushed (the shared scope is silently excluded from the repo). "
+            "Since it lives under .claude/ (commonly ignored), add a gitignore "
+            "exception: `!.claude/project/`, `!.claude/project/memory/`, then "
+            "`!.claude/project/memory/**`"
         )
     # (b) LOCAL-shaped dirs inside the repo: any `.../projects/<x>/memory` path.
     # The harness LOCAL corpus lives at ~/.claude/projects/<slug>/memory; if such
@@ -257,9 +268,9 @@ def _render_proposal(
     lines: list[str] = [
         "# Memory scope-leak — PROJECT pages carrying machine/user-private data",
         "",
-        "The PROJECT memory scope (`<git-root>/memory/`) is git-tracked and PUSHED,",
-        "so it MUST NOT carry machine/user-private material. The pages below carry a",
-        "leak class that belongs in the LOCAL scope",
+        "The PROJECT memory scope (`<git-root>/.claude/project/memory/`) is git-tracked",
+        "and PUSHED, so it MUST NOT carry machine/user-private material. The pages below",
+        "carry a leak class that belongs in the LOCAL scope",
         "(`~/.claude/projects/<slug>/memory/`, never pushed). An AGENT should DEMOTE",
         "the offending fact to LOCAL (move it / rewrite the page portable). The",
         "janitor only SURFACES — it never edits a page (RULE 0).",
@@ -324,7 +335,7 @@ def main() -> int:
         state.log_line("memory-scope-leak", "not a git repo — skipping")
         return 0
 
-    memdir = root / "memory"
+    memdir = root / ".claude" / "project" / "memory"
     has_memdir = memdir.is_dir()
 
     # gitignore guards run even when memory/ has no pages yet (an ignored-but-

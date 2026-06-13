@@ -36,7 +36,7 @@ CLAUDE.md) or what only matters to this conversation.
 # USER = true across ALL projects (global).  UNSURE → LOCAL.
 case "$SCOPE" in
   local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
-  project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory" ;;
+  project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory" ;;  # in-repo, namespaced under .claude/ (add a !.claude/project/memory/** gitignore exception if .claude/ is ignored)
   user)    MEMDIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory" ;;  # janitor PLUGIN_DATA (untouchable, survives --keep-data)
 esac
 mkdir -p "$MEMDIR"

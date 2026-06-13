@@ -122,9 +122,9 @@ def _scope_pages(root: Path) -> list[str]:
 
     The memory system has THREE scopes (TRDD-c77dae09): LOCAL (the agent corpus,
     handled by `_agent_notes` with its user-mem exclusion), PROJECT
-    (`<git-root>/memory/`, git-tracked + pushed), and USER (the janitor PLUGIN_DATA
-    dir `${CLAUDE_PLUGIN_DATA}/memory/`, global). PROJECT/USER pages may live in
-    subdirectories, so we walk
+    (`<git-root>/.claude/project/memory/`, git-tracked + pushed), and USER (the
+    janitor PLUGIN_DATA dir `${CLAUDE_PLUGIN_DATA}/memory/`, global). PROJECT/USER
+    pages may live in subdirectories, so we walk
     recursively — but EXCLUDE the tool's generated `.memgrep/` index sidecar and
     the detector proposal/index files (not pages). Returns absolute file paths
     sorted for determinism; an unreadable/absent root yields [].
@@ -149,9 +149,12 @@ def _scope_pages(root: Path) -> list[str]:
 
 
 def _project_memdir(project_dir: str | None) -> Path | None:
-    """The PROJECT-scope memory root: `<git-root>/memory/`, or None when the cwd
-    is not in a git repo. Resolved via `git rev-parse --show-toplevel` so a
-    worktree / sub-directory cwd still finds the repo root."""
+    """The PROJECT-scope memory root: `<git-root>/.claude/project/memory/`, or None
+    when the cwd is not in a git repo. In-repo + namespaced under `.claude/` (a
+    bare `memory/` collides with the very common GitHub root-folder name; the
+    `.claude/project/memory` path is collision-free). Resolved via
+    `git rev-parse --show-toplevel` so a worktree / sub-directory cwd still finds
+    the repo root."""
     cwd = (project_dir or os.getcwd()).strip() or None
     try:
         proc = subprocess.run(
@@ -167,7 +170,7 @@ def _project_memdir(project_dir: str | None) -> Path | None:
     if proc.returncode != 0:
         return None
     top = proc.stdout.strip()
-    return (Path(top) / "memory") if top else None
+    return (Path(top) / ".claude" / "project" / "memory") if top else None
 
 
 def _user_memdir() -> Path:
@@ -281,7 +284,7 @@ def main() -> int:
 
     # Compose ALL THREE memory scopes into ONE recall (TRDD-c77dae09): LOCAL (the
     # agent corpus, with its structural user-mem exclusion) → PROJECT
-    # (`<git-root>/memory/`) → USER (`${CLAUDE_PLUGIN_DATA}/memory/`). recall takes explicit
+    # (`<git-root>/.claude/project/memory/`) → USER (`${CLAUDE_PLUGIN_DATA}/memory/`). recall takes explicit
     # FILE paths and only walks DIRECTORIES, so passing files keeps the private
     # `user-mem/` subtree untraversed AND lets one invocation rank across all
     # roots. Ordering is most-specific-first so that, all else equal, a local note

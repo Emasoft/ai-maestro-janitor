@@ -260,9 +260,12 @@ def _resolve_memory_dir() -> Path:
 
 
 def _resolve_project_scope_dir() -> Path | None:
-    """The PROJECT scope memory root: `<git-root>/memory/`, or None when the cwd
-    is not in a git repo. Resolved via `git rev-parse --show-toplevel` so a
-    worktree / sub-directory cwd still finds the repo root (TRDD-c77dae09)."""
+    """The PROJECT scope memory root: `<git-root>/.claude/project/memory/`, or None
+    when the cwd is not in a git repo. In-repo + namespaced under `.claude/` (a
+    bare `memory/` collides with the very common GitHub root-folder name; the
+    `.claude/project/memory` path is collision-free). Resolved via
+    `git rev-parse --show-toplevel` so a worktree / sub-directory cwd still finds
+    the repo root (TRDD-c77dae09)."""
     proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip() or None
     try:
         proc = subprocess.run(
@@ -274,7 +277,7 @@ def _resolve_project_scope_dir() -> Path | None:
     if proc.returncode != 0:
         return None
     top = proc.stdout.strip()
-    return (Path(top) / "memory") if top else None
+    return (Path(top) / ".claude" / "project" / "memory") if top else None
 
 
 def _resolve_user_scope_dir() -> Path:

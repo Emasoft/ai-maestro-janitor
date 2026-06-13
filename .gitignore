@@ -24,8 +24,16 @@ node_modules/
 *.pem
 *.key
 
-# Claude Code cache directory
-.claude/
+# Claude Code cache directory — ignore the whole tree DEEPLY (`**`, not a bare
+# `.claude/`). The bare form prunes the directory so git never descends to honor
+# a re-include; `.claude/**` lets the exceptions below take effect.
+.claude/**
+# …but the PROJECT memory scope lives in-repo under .claude/ and MUST be tracked
+# + pushed (it is the shared, cross-dev memory). Re-include it via these
+# exceptions (each parent dir is re-included first, then the whole tree).
+!.claude/project/
+!.claude/project/memory/
+!.claude/project/memory/**
 
 # Editor and OS files
 .DS_Store

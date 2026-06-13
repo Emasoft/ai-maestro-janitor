@@ -48,7 +48,7 @@ mistake or wonder why the decision flipped. The full mechanics are in §2; §1 a
 
 ```bash
 LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
-PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/memory"
+PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # git-tracked (in-repo, namespaced)
 USER_MEM="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory"  # janitor PLUGIN_DATA
 ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
 memgrep recall "<the subject + symptom>" $ROOTS        # land on the owning page
