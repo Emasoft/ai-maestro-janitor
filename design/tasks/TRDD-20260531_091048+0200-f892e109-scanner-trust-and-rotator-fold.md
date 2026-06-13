@@ -6,7 +6,7 @@ current-owner: amama
 task-type: refactor
 release-via: publish
 created: 2026-05-31T09:10:48+0200
-updated: 2026-06-13T15:46:17+0200
+updated: 2026-06-13T16:08:43+0200
 ---
 
 # TRDD-f892e109 — Janitor security-scan trust model (keep-in-janitor) + fold OAuth rotation into the daemon (remove launchd)
@@ -15,6 +15,12 @@ updated: 2026-06-13T15:46:17+0200
 **Tracked in:** this repo (design/tasks/ is git-tracked)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-05-31
+
+> ✅ **CLOSED 2026-06-13 (column → complete).** Both deliverables shipped: scanner-trust
+> "keep-in-janitor" decided, and the launchd→daemon-fold landed (launchd retired). The
+> "### NEXT ACTION — publish BLOCKED on CPV-FP MINORs / DECISION PENDING" note below is
+> **SUPERSEDED and RESOLVED** — the fleet publish policy is now CPV-only + devitalize-or-remove
+> (never exempt/suppress, per PRRD S5.1), and v0.7.5 ships with CPV `--strict` passing. No open action.
 
 > Captured just before a forced /compact so the decisions can't be garbled by the
 > lossy summary. These are DECIDED with the user (Emasoft) across a long design
