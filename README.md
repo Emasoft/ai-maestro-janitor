@@ -305,6 +305,15 @@ on-demand when the doctor flags unpinned refs.
   next heartbeat. iTerm-only for the trigger; elsewhere it records the directive
   and asks you to `/compact`. Backed by `scripts/compact_trigger.py`. Part of the
   context-compact watchdog (opt-in — see Hooks).
+- `/janitor-reload-plugins` — agent-invocable `/reload-plugins` trigger (the
+  analogue of `/janitor-compact-context` for reloads). Fires a detached
+  ESC→`/reload-plugins` at this session's own iTerm pane (same `$ITERM_SESSION_ID`
+  UUID matching, strictly validated) so the running session picks up freshly
+  auto-updated plugin hooks/skills without the human typing the command — the
+  working path for the heartbeat's `[janitor-reload]` marker, since the Skill
+  tool refuses built-in slash commands. Records NO state (reloading does not
+  discard the conversation). iTerm-only for the trigger; elsewhere it asks you to
+  `/reload-plugins`. Backed by `scripts/reload_trigger.py`.
 - `/janitor-audit` — on-demand aggregate scan. Runs every detector
   synchronously and prints a consolidated markdown report with proposed
   remediation commands (never executed automatically).
