@@ -1,9 +1,12 @@
 ---
 trdd-id: be2efa56-bcbd-465e-890b-eab614a4ff31
 title: Global janitor daemon — single-instance owner of global-state auto-update tasks (closes issue #7)
-status: completed
+column: complete
+current-owner: amama
+task-type: feature
+release-via: publish
 created: 2026-05-26T04:15:33+0200
-updated: 2026-05-26T04:29:39+0200
+updated: 2026-06-13T15:46:17+0200
 ---
 
 # TRDD-be2efa56 — Global janitor daemon

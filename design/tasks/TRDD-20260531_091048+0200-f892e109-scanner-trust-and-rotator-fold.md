@@ -1,9 +1,12 @@
 ---
 trdd-id: f892e109-3105-4bfe-9978-f23b9bb3378c
 title: Janitor security-scan trust model (keep-in-janitor) + fold OAuth rotation into the daemon (remove launchd)
-status: in-progress
+column: complete
+current-owner: amama
+task-type: refactor
+release-via: publish
 created: 2026-05-31T09:10:48+0200
-updated: 2026-05-31T10:14:00+0200
+updated: 2026-06-13T15:46:17+0200
 ---
 
 # TRDD-f892e109 — Janitor security-scan trust model (keep-in-janitor) + fold OAuth rotation into the daemon (remove launchd)

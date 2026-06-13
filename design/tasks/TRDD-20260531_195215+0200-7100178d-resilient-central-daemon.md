@@ -1,9 +1,12 @@
 ---
 trdd-id: 7100178d-faa1-495a-aeb6-01c12448738a
 title: Resilient central daemon — last line of defence (auto-restart, backup/restore, concurrent-failure ladder, OOM culprit-killer)
-status: in-progress
+column: complete
+current-owner: amama
+task-type: feature
+release-via: publish
 created: 2026-05-31T19:52:15+0200
-updated: 2026-06-12T01:27:45+0200
+updated: 2026-06-13T15:46:17+0200
 ---
 
 # TRDD-7100178d — Resilient central daemon (last line of defence)

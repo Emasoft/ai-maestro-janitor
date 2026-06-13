@@ -1,9 +1,12 @@
 ---
 trdd-id: 3e1e9b12-e3bc-484c-b337-b208593cfe1d
 title: Janitor actively enforces the TRDD process across compactions and resumes
-status: in-progress
+column: complete
+current-owner: amama
+task-type: infra
+release-via: none
 created: 2026-05-30T22:32:23+0200
-updated: 2026-06-11T20:54:09+0200
+updated: 2026-06-13T15:46:17+0200
 ---
 
 # TRDD-3e1e9b12-e3bc-484c-b337-b208593cfe1d — Janitor actively enforces the TRDD process across compactions and resumes

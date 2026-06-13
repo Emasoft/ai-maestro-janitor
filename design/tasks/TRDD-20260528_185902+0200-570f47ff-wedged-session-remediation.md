@@ -1,9 +1,12 @@
 ---
 trdd-id: 570f47ff-b15d-4fa6-a86a-911e735a1d50
 title: Janitor wedged-session detector + multi-channel command-injection remediation
-status: completed
+column: complete
+current-owner: amama
+task-type: security
+release-via: publish
 created: 2026-05-28T18:59:02+0200
-updated: 2026-05-30T22:40:41+0200
+updated: 2026-06-13T15:46:17+0200
 ---
 
 # TRDD-570f47ff — Janitor wedged-session detector + multi-channel command-injection remediation
