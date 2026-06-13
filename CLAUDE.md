@@ -161,7 +161,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6068b40eabaf digest=688306a9051e generated=2026-06-13T11:42:24+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=bdce0eaf8f3e digest=ee89ea206579 generated=2026-06-13T18:14:24+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -538,6 +538,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · RunsOnInjection.check(self, wf) -> list
   · IssueCommentToctou — `issue_comment` trigger + checkout of head ref → TOCTOU window.
   · IssueCommentToctou.check(self, wf) -> list
+  · SecretBareInRun — ``${{ secrets.* }}`` interpolated directly inside this step's run: body.
+  · SecretBareInRun.check(self, wf) -> list
 `scripts/lib/sentinel/rules_repo.py` — Repo-level Sentinel rules — checks that span the whole repository rather
   · missing_zizmor(workflow_texts) -> list[Finding] — Repo-level: no workflow runs the zizmor static analyzer anywhere.
 `scripts/lib/state.py` — Shared state helpers for ai-maestro-janitor hooks and detectors —
