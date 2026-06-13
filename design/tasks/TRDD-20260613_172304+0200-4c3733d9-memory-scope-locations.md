@@ -1,9 +1,9 @@
 ---
 trdd-id: 4c3733d9-479b-4926-8ada-2b0b51895164
 title: Memory scope locations — USER to PLUGIN_DATA done, PROJECT to .claude-project-memory, LOCAL harness
-column: dev
+column: complete
 created: 2026-06-13T17:23:05+0200
-updated: 2026-06-13T17:23:05+0200
+updated: 2026-06-13T18:05:00+0200
 current-owner: amama
 assignee: amama
 task-type: refactor
@@ -16,6 +16,14 @@ labels: [memory, scope, storage-location]
 # TRDD-4c3733d9 — Memory scope storage locations (3-scope redesign + content install)
 
 ## STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-13T17:23:05+0200
+
+> ✅ **COMPLETE 2026-06-13.** All phases done + committed (unpushed, pending USER review):
+> Phase 1 PROJECT migration `b75f250`; Phase 2 content install `dd19c40` (USER 7 + PROJECT
+> 12 pages, 8→PROJECT/5→USER promotions redacted, 7 held LOCAL, scope-leak CLEAN); Phase 3
+> proactive directives + `/janitor-memory-bootstrap` skill `4b47aaa`. Tested: 226 tests pass,
+> end-to-end multi-root recall verified spanning LOCAL+PROJECT+USER, plugin validates.
+> NOT published — USER said "I'll check it all when I return." The NEXT ACTION below is
+> SUPERSEDED (it described the now-done work).
 
 LOCKED CONFIG (USER decision 2026-06-13 — see memory notes
 feedback_user_memory_in_plugin_data + feedback_memory_cooperate_with_harness):
