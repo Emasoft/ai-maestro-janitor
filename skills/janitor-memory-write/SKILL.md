@@ -51,7 +51,7 @@ architecture hub, key-solution component pages, the publish/deploy pipeline page
 case "$SCOPE" in
   local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
   project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory" ;;  # in-repo, namespaced under .claude/ (add a !.claude/project/memory/** gitignore exception if .claude/ is ignored)
-  user)    MEMDIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory" ;;  # janitor PLUGIN_DATA (untouchable, survives --keep-data)
+  user)    MEMDIR="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory" ;;  # janitor's FIXED data dir, hard-coded — NOT ${CLAUDE_PLUGIN_DATA} (that is the running plugin's dir, not the janitor's, in an agent shell); untouchable, survives --keep-data
 esac
 mkdir -p "$MEMDIR"
 ```

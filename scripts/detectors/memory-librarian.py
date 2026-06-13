@@ -281,13 +281,18 @@ def _resolve_project_scope_dir() -> Path | None:
 
 
 def _resolve_user_scope_dir() -> Path:
-    """The USER scope (global) memory root: the janitor PLUGIN_DATA dir
-    `${CLAUDE_PLUGIN_DATA}/memory/` — untouchable, survives plugin updates +
-    `--keep-data` uninstall (NOT a `~/.claude/<custom>/` folder a cleanup pass
-    could wipe). Not created."""
-    data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if data:
-        return Path(data) / "memory"
+    """The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
+    `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` —
+    untouchable, survives plugin updates + `--keep-data` uninstall (NOT a
+    `~/.claude/<custom>/` folder a cleanup pass could wipe). Not created.
+
+    Resolved by this EXPLICIT hard-coded path, NEVER via ``${CLAUDE_PLUGIN_DATA}``:
+    that env var holds the *currently-running* plugin's data dir, which is the
+    janitor ONLY inside the janitor's own plugin hooks. This detector runs via the
+    heartbeat (main-session bash) where ``CLAUDE_PLUGIN_DATA`` points at whatever
+    plugin owns that turn — verified to be some other plugin, not the janitor — so
+    reading it would route USER recall/write to the wrong plugin's dir.
+    """
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
 

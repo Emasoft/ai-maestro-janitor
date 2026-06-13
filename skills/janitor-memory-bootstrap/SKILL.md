@@ -21,7 +21,7 @@ The three scopes (final design, TRDD-4c3733d9):
 |---|---|---|---|
 | **LOCAL** | `~/.claude/projects/<slug>/memory/` | never pushed (harness-owned) | — (the harness owns it; no action here) |
 | **PROJECT** | `<repo>/.claude/project/memory/` | **tracked + PUSHED** (in-repo) | ✅ dir + gitignore exception + seed pages |
-| **USER** | `${CLAUDE_PLUGIN_DATA}/memory/` | never in any repo (global) | — (created lazily on first USER write) |
+| **USER** | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` (the janitor's FIXED data dir — hard-coded, NOT `${CLAUDE_PLUGIN_DATA}`, which is the *running* plugin's dir) | never in any repo (global) | — (created lazily on first USER write) |
 
 This skill bootstraps the **PROJECT** scope — the one that lives in the repo and
 is shared with every dev. LOCAL and USER need no setup.
@@ -29,7 +29,7 @@ is shared with every dev. LOCAL and USER need no setup.
 ## Prerequisites
 
 - Run inside the project (a git repo is ideal — PROJECT scope is in-repo).
-- `${CLAUDE_PLUGIN_DATA}` resolves (it always does when the janitor is installed).
+- The USER scope is the janitor's FIXED data dir `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` (always present once the janitor is installed; resolved by this explicit path, NOT via `${CLAUDE_PLUGIN_DATA}`).
 
 ## Step 1 — create the PROJECT memory directory
 

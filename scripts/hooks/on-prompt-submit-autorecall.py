@@ -123,7 +123,9 @@ def _scope_pages(root: Path) -> list[str]:
     The memory system has THREE scopes (TRDD-c77dae09): LOCAL (the agent corpus,
     handled by `_agent_notes` with its user-mem exclusion), PROJECT
     (`<git-root>/.claude/project/memory/`, git-tracked + pushed), and USER (the
-    janitor PLUGIN_DATA dir `${CLAUDE_PLUGIN_DATA}/memory/`, global). PROJECT/USER
+    janitor's FIXED data dir
+    `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`,
+    global — see `_user_memdir`). PROJECT/USER
     pages may live in subdirectories, so we walk
     recursively — but EXCLUDE the tool's generated `.memgrep/` index sidecar and
     the detector proposal/index files (not pages). Returns absolute file paths
@@ -174,13 +176,18 @@ def _project_memdir(project_dir: str | None) -> Path | None:
 
 
 def _user_memdir() -> Path:
-    """The USER-scope (global) memory root: the janitor PLUGIN_DATA dir
-    `${CLAUDE_PLUGIN_DATA}/memory/` — untouchable, survives plugin updates +
-    `--keep-data` uninstall (NOT a `~/.claude/<custom>/` folder a cleanup pass
-    could wipe). Not created."""
-    data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if data:
-        return Path(data) / "memory"
+    """The USER-scope (global) memory root: the janitor's FIXED plugin-DATA dir
+    `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` —
+    untouchable, survives plugin updates + `--keep-data` uninstall (NOT a
+    `~/.claude/<custom>/` folder a cleanup pass could wipe). Not created.
+
+    Resolved by this EXPLICIT hard-coded path, NEVER via ``${CLAUDE_PLUGIN_DATA}``:
+    that env var holds the *currently-running* plugin's data dir, which is the
+    janitor ONLY inside the janitor's own plugin hooks. This is a UserPromptSubmit
+    hook fired in the host session where ``CLAUDE_PLUGIN_DATA`` is unset or points
+    at whatever plugin owns the turn — not necessarily the janitor — so reading it
+    would route USER recall to the wrong plugin's dir.
+    """
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
 
@@ -284,7 +291,8 @@ def main() -> int:
 
     # Compose ALL THREE memory scopes into ONE recall (TRDD-c77dae09): LOCAL (the
     # agent corpus, with its structural user-mem exclusion) → PROJECT
-    # (`<git-root>/.claude/project/memory/`) → USER (`${CLAUDE_PLUGIN_DATA}/memory/`). recall takes explicit
+    # (`<git-root>/.claude/project/memory/`) → USER (the janitor's FIXED data dir,
+    # see `_user_memdir`). recall takes explicit
     # FILE paths and only walks DIRECTORIES, so passing files keeps the private
     # `user-mem/` subtree untraversed AND lets one invocation rank across all
     # roots. Ordering is most-specific-first so that, all else equal, a local note

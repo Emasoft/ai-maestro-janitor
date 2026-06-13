@@ -85,9 +85,10 @@ def _run_hook(payload: dict, env_extra: dict, project: Path, home: Path) -> tupl
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["CLAUDE_PROJECT_DIR"] = str(project)
-    # USER scope = ${CLAUDE_PLUGIN_DATA}/memory (the janitor plugin DATA dir). Pin it
-    # to a tmp dir under `home` so the test is isolated AND exercises the env-var path.
-    env["CLAUDE_PLUGIN_DATA"] = str(home / "plugin-data")
+    # USER scope is the janitor's FIXED data dir under HOME
+    # (`<home>/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory`),
+    # resolved by an explicit path — NOT via ${CLAUDE_PLUGIN_DATA}. HOME is pinned
+    # to a tmp dir, which isolates the USER scope without touching that env var.
     # Drop any ambient opt-in so each test controls it explicitly via env_extra.
     env.pop("CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL", None)
     # Make the chosen memgrep the one the hook resolves (find_memgrep honours
@@ -316,6 +317,12 @@ def _write_page(memdir: Path, name: str, description: str, body: str = "body tex
     )
 
 
+def _user_scope_dir(home: Path) -> Path:
+    """The USER-scope dir the hook resolves under a given HOME — the janitor's
+    FIXED plugin-DATA path (NOT ${CLAUDE_PLUGIN_DATA}). Mirrors `_user_memdir()`."""
+    return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
+
+
 def _init_git(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
@@ -329,12 +336,13 @@ def _init_git(root: Path) -> None:
 
 @_needs_memgrep
 def test_user_scope_note_is_recalled(tmp_path):
-    """A note in the USER scope (`${CLAUDE_PLUGIN_DATA}/memory/`) is composed into
-    recall — even when the LOCAL corpus has no matching note."""
+    """A note in the USER scope (the janitor's FIXED data dir under HOME) is
+    composed into recall — even when the LOCAL corpus has no matching note."""
     home = tmp_path / "home"
     project = tmp_path / "proj"
-    # USER scope = ${CLAUDE_PLUGIN_DATA}/memory; _run_hook pins it to <home>/plugin-data.
-    _write_page(home / "plugin-data" / "memory", "userpref",
+    # USER scope = the janitor's FIXED data dir (resolved by explicit path, NOT
+    # ${CLAUDE_PLUGIN_DATA}); with HOME pinned to tmp it lands under <home>/.claude/…
+    _write_page(_user_scope_dir(home), "userpref",
                 "globalwidget calibration drifts after sleep where is the knob",
                 body="turn the global knob")
     rc, out, _err = _run_hook(
@@ -378,7 +386,7 @@ def test_all_three_scopes_compose_and_user_mem_excluded(tmp_path):
     # One matching note per scope on the same topic, plus a private user-mem note.
     _write_page(memdir, "localnote", "tribblewidget overheats reset procedure local", body="local")
     _write_page(project / ".claude" / "project" / "memory", "projnote", "tribblewidget overheats reset procedure project", body="proj")
-    _write_page(home / ".claude" / "memory", "usernote", "tribblewidget overheats reset procedure user", body="user")
+    _write_page(_user_scope_dir(home), "usernote", "tribblewidget overheats reset procedure user", body="user")
     _write_page(memdir / "user-mem", "secret", "tribblewidget overheats reset SECRETMEMO", body="private")
     rc, out, _err = _run_hook(_prompt("the tribblewidget overheats again"), _ON, project, home)
     assert rc == 0

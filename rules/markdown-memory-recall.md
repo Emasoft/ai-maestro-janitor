@@ -72,7 +72,7 @@ time, unprompted. The mechanics:
 # Compose the THREE scope roots (see "Memory scopes" below); search them in ONE call:
 LOCAL_MEM="$HOME/.claude/projects/<project-slug>/memory"          # slug = project path, dashed
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory" # git-tracked, shared (in-repo, namespaced under .claude/ via gitignore exception)
-USER_MEM="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory"  # global; janitor PLUGIN_DATA (untouchable, backed up, survives --keep-data uninstall)
+USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # global; the JANITOR's FIXED plugin-DATA dir — hard-coded, NOT ${CLAUDE_PLUGIN_DATA} (that resolves to the RUNNING plugin's dir, which in an arbitrary agent's shell is some other plugin, not the janitor)
 ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
 SYMPTOM="the user's words / the error / the symptom"              # NOT the answer's jargon
 
@@ -101,7 +101,7 @@ CLAUDE.md / CLAUDE.local.md). Three roots, one recall surface:
 |---|---|---|---|
 | **LOCAL** | `~/.claude/projects/<slug>/memory/` | outside any repo — never pushed | machine-private notes: local paths, hostnames, credentials hints, per-instance info. The harness `# Memory` directive writes here; `user-mem/` (the user's private store) lives inside it |
 | **PROJECT** | `<git-root>/.claude/project/memory/` | **tracked + PUSHED** — shared by every dev (in-repo, namespaced under `.claude/`; if `.claude/` is gitignored, add a `!.claude/project/memory/**` exception so the scope is actually pushed) | project knowledge any contributor needs: architecture facts, codebase gotchas, project lessons. Sensitive/local data FORBIDDEN — the janitor's `memory-scope-leak` detector polices this scope |
-| **USER** | `${CLAUDE_PLUGIN_DATA}/memory/` → `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` | the janitor's plugin DATA dir — **never** a `~/.claude/<custom>/` folder (those can be cleaned up as stray); untouchable by design, survives plugin updates + `--keep-data` uninstall | cross-project knowledge: user preferences, machine-independent lessons |
+| **USER** | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` (the janitor's FIXED data dir — resolved by this EXPLICIT hard-coded path, **never** via `${CLAUDE_PLUGIN_DATA}`, because that env var is the *running* plugin's data dir — in an arbitrary agent's shell or the heartbeat it points at some other plugin, not the janitor) | the janitor's plugin DATA dir — **never** a `~/.claude/<custom>/` folder (those can be cleaned up as stray); untouchable by design, survives plugin updates + `--keep-data` uninstall | cross-project knowledge: user preferences, machine-independent lessons |
 
 **Write routing (decide the scope BEFORE authoring):** contains a local path /
 username / hostname / secret / machine-specific detail → **LOCAL**. Project

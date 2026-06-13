@@ -62,7 +62,7 @@ mistake or wonder why the decision flipped. The full mechanics are in §2; §1 a
 ```bash
 LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # git-tracked (in-repo, namespaced)
-USER_MEM="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/memory"  # janitor PLUGIN_DATA
+USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # janitor's FIXED data dir (hard-coded, NOT ${CLAUDE_PLUGIN_DATA} — that is the running plugin's dir, not the janitor's, in an agent shell)
 ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
 memgrep recall "<the subject + symptom>" $ROOTS        # land on the owning page
 ```
