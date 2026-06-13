@@ -40,7 +40,7 @@ the owning page (`/janitor-memory-write`, `/janitor-memory-update`).
 LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"   # machine-private
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # git-tracked (in-repo, namespaced)
 USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # global; janitor's FIXED data dir (hard-coded, NOT ${CLAUDE_PLUGIN_DATA} — that is the running plugin's dir, not the janitor's, in an agent shell)
-ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
+ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS+=("$d"); done  # ARRAY — zsh (macOS default) does NOT word-split an unquoted "$ROOTS", so a space-joined string passes all roots as ONE bogus path → silent 0 results; "${ROOTS[@]}" works in bash AND zsh
 ```
 
 On conflicting facts the more specific scope wins: **LOCAL > PROJECT > USER**.
@@ -54,12 +54,11 @@ Goal: surface the HUB for the functionality the file belongs to, then descend.
    ```bash
    FILE="src/frontend/panels/Login.tsx"          # the file (relative to repo root)
    # List hub pages, read each hub's globs, and pick the hub whose glob matches FILE.
-   # shellcheck disable=SC2086
-   memgrep -l . $ROOTS --where 'fm.tier "hub"' | sort -u            # the hubs; inspect their globs
-   memgrep -l . $ROOTS --where 'fm.functionality "frontend"' | sort -u  # or a functionality's pages
+   memgrep -l . "${ROOTS[@]}" --where 'fm.tier "hub"' | sort -u            # the hubs; inspect their globs
+   memgrep -l . "${ROOTS[@]}" --where 'fm.functionality "frontend"' | sort -u  # or a functionality's pages
    ```
 
-   (When memgrep is absent: `grep -rl 'tier: hub' $ROOTS`, read each hub's
+   (When memgrep is absent: `grep -rl 'tier: hub' "${ROOTS[@]}"`, read each hub's
    `globs:`, and match `FILE` against them by eye / with a glob test.)
 
 2. Read the matching **hub** page (the tip): the functionality overview, the big
@@ -74,9 +73,9 @@ Goal: surface the HUB for the functionality the file belongs to, then descend.
 
    ```bash
    # links --to NOTE = NOTE's OUT-links; links --from NOTE = its BACKLINKS.
-   memgrep links --to login-panel $ROOTS    # where the component points (its rulers + laterals)
-   memgrep links --to style-system $ROOTS   # where the rule points (every element it governs)
-   memgrep links --from style-system $ROOTS # who points at the rule (same set — see below)
+   memgrep links --to login-panel "${ROOTS[@]}"    # where the component points (its rulers + laterals)
+   memgrep links --to style-system "${ROOTS[@]}"   # where the rule points (every element it governs)
+   memgrep links --from style-system "${ROOTS[@]}" # who points at the rule (same set — see below)
    ```
 
    THE LINK LAW (every link bidirectional) means out-links and backlinks of a
@@ -94,9 +93,9 @@ answer's jargon (its author indexed `description` by the question):
 ```bash
 SYMPTOM="the symptom in the user's / the error's words"
 if command -v memgrep >/dev/null 2>&1; then
-  memgrep recall "$SYMPTOM" $ROOTS          # pages ranked best-first: path — description
+  memgrep recall "$SYMPTOM" "${ROOTS[@]}"          # pages ranked best-first: path — description
 else
-  grep -rliE "$SYMPTOM" $ROOTS 2>/dev/null  # fallback: degrade, never break
+  grep -rliE "$SYMPTOM" "${ROOTS[@]}" 2>/dev/null  # fallback: degrade, never break
 fi
 ```
 
@@ -121,13 +120,13 @@ so one call yields the facts AND every WHY. `--no-notes` = body only;
   decide about X last week".
 - `--top N` (default 10); `--use-index` forces the SQLite sidecar (auto-used when
   fresh; results always correct).
-- `memgrep find "+TERM -TERM \"phrase\"" $ROOTS` — note-level boolean keyword
+- `memgrep find "+TERM -TERM \"phrase\"" "${ROOTS[@]}"` — note-level boolean keyword
   search; add `--only-notes` to search ONLY the lessons.
 
 ```bash
-memgrep recall "$SYMPTOM" $ROOTS --sort lmd                # newest-touched first
-memgrep find "+rotator +keychain -widget" $ROOTS           # AND / exclude
-memgrep links --broken $ROOTS                              # context edges to fill (→ MEMORIZE/UPDATE)
+memgrep recall "$SYMPTOM" "${ROOTS[@]}" --sort lmd                # newest-touched first
+memgrep find "+rotator +keychain -widget" "${ROOTS[@]}"           # AND / exclude
+memgrep links --broken "${ROOTS[@]}"                              # context edges to fill (→ MEMORIZE/UPDATE)
 ```
 
 ## The navigation contract (don't over-read)

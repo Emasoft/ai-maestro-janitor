@@ -63,8 +63,8 @@ mistake or wonder why the decision flipped. The full mechanics are in §2; §1 a
 LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # git-tracked (in-repo, namespaced)
 USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # janitor's FIXED data dir (hard-coded, NOT ${CLAUDE_PLUGIN_DATA} — that is the running plugin's dir, not the janitor's, in an agent shell)
-ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
-memgrep recall "<the subject + symptom>" $ROOTS        # land on the owning page
+ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS+=("$d"); done  # ARRAY — zsh (macOS default) does NOT word-split an unquoted "$ROOTS"; the array form works in bash AND zsh
+memgrep recall "<the subject + symptom>" "${ROOTS[@]}"        # land on the owning page
 ```
 
 If no page exists, this is a CREATE → use `/janitor-memory-write` (MEMORIZE).
@@ -120,7 +120,7 @@ own dates (they survive the librarian later moving the lesson between pages, so
 they — not file mtime — are the authoritative age). memgrep strips the prefix in
 the default render and restores it under `--full-notes`; `--since/--until` read
 these dates. All of a subject's lessons thus collect in its own page, recallable
-with `memgrep find "<symptom>" $ROOTS --only-notes`.
+with `memgrep find "<symptom>" "${ROOTS[@]}" --only-notes`.
 
 ## 3. RESHAPE — the page outgrew its tier (keep the pyramid honest)
 

@@ -73,15 +73,13 @@ time, unprompted. The mechanics:
 LOCAL_MEM="$HOME/.claude/projects/<project-slug>/memory"          # slug = project path, dashed
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory" # git-tracked, shared (in-repo, namespaced under .claude/ via gitignore exception)
 USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # global; the JANITOR's FIXED plugin-DATA dir — hard-coded, NOT ${CLAUDE_PLUGIN_DATA} (that resolves to the RUNNING plugin's dir, which in an arbitrary agent's shell is some other plugin, not the janitor)
-ROOTS=""; for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS="$ROOTS $d"; done
+ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS+=("$d"); done  # ARRAY, not a space-joined string — zsh (macOS default) does NOT word-split an unquoted "$ROOTS", so the string form passes all roots as ONE bogus path → silent 0 results. The "${ROOTS[@]}" array form works in BOTH bash and zsh.
 SYMPTOM="the user's words / the error / the symptom"              # NOT the answer's jargon
 
 if command -v memgrep >/dev/null 2>&1; then
-  # shellcheck disable=SC2086 # ROOTS is a deliberate word-split list of dirs
-  memgrep recall "$SYMPTOM" $ROOTS         # notes ranked best-first as: path — description
+  memgrep recall "$SYMPTOM" "${ROOTS[@]}"  # notes ranked best-first as: path — description
 else
-  # shellcheck disable=SC2086
-  grep -rliE "$SYMPTOM" $ROOTS             # fallback: plain grep, degrade-not-break
+  grep -rliE "$SYMPTOM" "${ROOTS[@]}"      # fallback: plain grep, degrade-not-break
 fi
 ```
 
