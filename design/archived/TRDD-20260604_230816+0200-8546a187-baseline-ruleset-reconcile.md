@@ -1,9 +1,11 @@
 ---
 trdd-id: 8546a187-781b-4449-93f4-d84af4ed1bcf
 title: Baseline-ruleset byte-identical reconcile with maintainer-agent + 2 shared follow-ups
-column: blocked
+column: published
 created: 2026-06-04T23:08:16+0200
-updated: 2026-06-11T11:06:34+0200
+updated: 2026-06-14T01:26:21+0200
+published-version: 0.7.0
+published-at: 2026-06-11T21:38:52+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 3
@@ -28,7 +30,30 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/14", "github.com/E
 
 # TRDD-8546a187 — Baseline-ruleset reconcile with maintainer-agent
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-11
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-14
+
+### ⏵ CLOSURE — 2026-06-14 (column: blocked→published; the external blocker cleared 4 days ago)
+
+**RESOLVED.** This TRDD sat at `column: blocked` with an EMPTY `blocked-by: []` — a
+bookkeeping miss, not a real block. The substantive work is DONE and SHIPPED:
+
+- **Janitor baseline code is PUBLISHED.** Commits `5922c1a`/`8c63ad3`/`874cdd7` are tagged
+  in **v0.7.0–v0.7.5** (verified `git tag --contains`). All THREE ratified rulesets
+  (`baseline-history-protect`, `baseline-pr-and-checks`, `baseline-tag-protect`) are in the
+  published `branch_protection_lib.py` and live-applied to the janitor repo (ids 17286452 /
+  17286453 / 17545495, readback-pinned byte-identical).
+- **The maintainer reconciled + SHIPPED.** maintainer#7's last comment (2026-06-10T07:53Z):
+  "🚢 SHIPPED — v1.4.0 published; the maintainer's #7 obligation" fulfilled — it applied its
+  3 live rulesets (ids 17471104/05/06) and confirmed the `v*.*.*` echo. The byte-identical
+  reconcile both sides were gated on is COMPLETE. The blocker cleared 2026-06-10.
+- **Follow-up #1 (job-level `if: github.event_name == 'push'` awareness)** — DONE
+  (`scripts/lib/sentinel/model.py:193`, shipped v0.7.x).
+- **Follow-up #2 (apply-path gh-stub method→status hardening)** — the lone residual, a
+  test-quality NIT (the PATCH-vs-PUT bug it would make in-suite-reproducible is ALREADY
+  fixed + shipped in `874cdd7`). Spun out to task #182 so closing this TRDD does not drop it.
+
+`published`-terminal because release-via=publish and the code shipped in v0.7.0
+(2026-06-11). Everything below this CLOSURE block is prior history.
 
 ### ⏵ SESSION ADDENDUM — 2026-06-11 (baseline-tag-protect now LIVE on the janitor repo)
 
