@@ -75,6 +75,25 @@ def _read_tail_lines(path: Path, max_bytes: int = _TAIL_BYTES) -> list[str]:
     return data.decode("utf-8", errors="replace").splitlines()
 
 
+def _is_tool_result(entry: dict) -> bool:
+    """True iff a `type:user` entry is a tool RESULT, not a real prompt.
+
+    Tool results are delivered as user-role messages whose content is a list
+    containing `tool_result` blocks. They are part of the IN-PROGRESS turn (the
+    agent called a tool, this is the reply), NOT the turn-triggering user prompt
+    — so the walk-back must step over them, or it stops at the wrong boundary and
+    every multi-step turn (i.e. every heartbeat that runs the dispatcher) is
+    misread as a non-heartbeat turn with zero usage.
+    """
+    msg = entry.get("message")
+    if not isinstance(msg, dict):
+        return False
+    content = msg.get("content")
+    if isinstance(content, list):
+        return any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+    return False
+
+
 def _message_text(entry: dict) -> str:
     """The text of a transcript entry's message — handles a string OR a list of
     content blocks (only `text` blocks contribute)."""
@@ -125,6 +144,8 @@ def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsa
     for entry in reversed(entries):
         etype = entry.get("type")
         if etype == "user":
+            if _is_tool_result(entry):
+                continue  # tool result — part of the turn, not its boundary
             trigger = entry
             break
         if etype == "assistant":

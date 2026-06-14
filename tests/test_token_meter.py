@@ -31,6 +31,13 @@ def _assistant(*, text: str = "", usage: dict | None = None, tool: bool = False)
     return json.dumps({"type": "assistant", "message": msg})
 
 
+def _tool_result() -> str:
+    """A tool-result entry — delivered as a user-role message (NOT a real prompt),
+    exactly as the real transcript records the reply to a tool call."""
+    return json.dumps({"type": "user", "message": {
+        "role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
+
+
 _HB = "[janitor-heartbeat]\n/path/to/dispatcher-stub.py\nSurface stdout verbatim..."
 
 
@@ -68,6 +75,32 @@ class TestTokenMeter(unittest.TestCase):
             self.assertEqual(u.assistant_messages, 2)
             self.assertEqual(u.tool_calls, 1)
             # The previous turn's usage (9/9) must NOT be included.
+
+    def test_multistep_heartbeat_turn_with_tool_results(self):
+        """The REAL shape: a heartbeat turn whose assistant calls tools, so the
+        turn contains tool_result USER messages interleaved. The walk-back must
+        step over those and find the real `[janitor-heartbeat]` prompt — summing
+        usage across ALL the turn's assistant messages. (Regression for the bug
+        where the meter stopped at the last tool_result → is_heartbeat=False.)"""
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            t = _write(
+                tmp,
+                _user(_HB),
+                _assistant(text="", tool=True, usage={"input_tokens": 100, "output_tokens": 40}),
+                _tool_result(),
+                _assistant(text="", tool=True, usage={"input_tokens": 30, "output_tokens": 15}),
+                _tool_result(),
+                _assistant(text="silent", usage={"input_tokens": 12, "output_tokens": 5}),
+            )
+            u = token_meter.tail_turn_usage(t)
+            self.assertIsNotNone(u)
+            assert u is not None
+            self.assertTrue(u.is_heartbeat)              # found the real prompt, not a tool_result
+            self.assertEqual(u.input_tokens, 142)         # summed across all 3 assistant msgs
+            self.assertEqual(u.output_tokens, 60)
+            self.assertEqual(u.assistant_messages, 3)
+            self.assertEqual(u.tool_calls, 2)
 
     def test_non_heartbeat_turn_flagged_false(self):
         """A normal (typed) user turn → is_heartbeat=False (so the hook logs nothing)."""
