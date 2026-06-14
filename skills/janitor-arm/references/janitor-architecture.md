@@ -11,6 +11,7 @@ when designing a follow-up change to the dispatcher contract.
 - [Why the stub exists](#why-the-stub-exists)
 - [Operational rules](#operational-rules)
 - [Responsibility split and safety](#responsibility-split-and-safety)
+- [Known limitations](#known-limitations)
 
 ## Why the stub exists
 
@@ -93,3 +94,64 @@ Per the spec's "Path traversal limitations" section, the design is fully complia
 - `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` — the drift detectors `dispatch.py` invokes each fire.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — per-project state and dedupe seen-files (separate from `${CLAUDE_PLUGIN_DATA}`).
 - Top-level README — user-facing summary of the heartbeat, detectors, and configuration.
+
+## Known limitations
+
+Two harness-provided guarantees this design depends on do NOT hold on some
+Claude Code builds (verified empirically on 2.1.173 and 2.1.177). The
+`janitor-arm` skill passes every flag correctly — these are **upstream**
+(Claude Code runtime) gaps the janitor must detect/work-around rather than
+source bugs. Tracked in ai-maestro-janitor#23.
+
+### 1. `durable: true` may be silently downgraded to session-only
+
+`CronCreate(durable: true, recurring: true)` is the contract the whole
+overnight rate-limit-recovery design rests on: the cron is supposed to persist
+in `~/.claude/scheduled_tasks.json` and survive a Claude Code restart
+(`--continue`, crash, OOM, manual relaunch). On the affected builds the runtime
+accepts `durable: true` but creates a **session-only** job — nothing is written
+to `~/.claude/scheduled_tasks.json` (the file is often absent entirely), and
+`CronList` reports `[session-only]`.
+
+**Consequence.** A session restart loses the heartbeat; the janitor stops firing
+until something re-arms it.
+
+**Mitigation in place.** The SessionStart hook surfaces a `/janitor-arm` nudge on
+every new session, so the heartbeat is re-armed (freshly, session-scoped) each
+session — the residual exposure is only a *mid-session* restart, recovered at the
+next SessionStart. The `janitor-arm` skill (step 7) now **reads back durability
+and reports session-only honestly** instead of claiming "survives restarts".
+
+**Open (needs decision / upstream).** A true durable heartbeat requires the
+Claude Code runtime to honor `durable: true`; this should be escalated upstream
+if it persists. The janitor cannot make a session-only cron durable from its
+side.
+
+### 2. `${CLAUDE_PLUGIN_DATA}` is not stable across load-source changes
+
+The stub indirection exists so the cron target survives plugin **version**
+updates without re-arming — it anchors at `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`,
+documented as "the path that survives every plugin update". But
+`${CLAUDE_PLUGIN_DATA}` is harness-derived and its trailing segment tracks the
+plugin's **load source**: `…/ai-maestro-janitor-inline` for an inline/local load
+vs `…/ai-maestro-janitor-ai-maestro-plugins` for the marketplace load. Re-arming
+under a different load source than the first arm writes a *second* stub dir and
+leaves the prior cron firing the old path; if the stale dir is ever cleaned, the
+still-scheduled cron `os.execv`-fails.
+
+**Consequence.** Orphaned `…-inline` / `…-ai-maestro-plugins` data dirs
+accumulate; an armed cron can point at a path no longer being updated.
+
+**Mitigation in place.** Each `/janitor-arm` re-bakes the *current*
+`${CLAUDE_PLUGIN_DATA}` into the cron, so the active heartbeat self-corrects on
+the next arm. Orphaned dirs are otherwise harmless (byte-identical stubs).
+
+**Open (needs USER decision).** The report's suggested fix — anchor the stub at a
+source-independent fixed path the janitor controls (e.g.
+`~/.claude/plugins/data/ai-maestro-janitor/dispatcher-stub.py`, no suffix) —
+conflicts with the project principle to *prefer `${CLAUDE_PLUGIN_DATA}`* (the
+suffixed dir is the only one the harness guarantees to back up, preserve across
+updates, and purge on uninstall). A fixed non-`${CLAUDE_PLUGIN_DATA}` path is an
+unofficial folder that backups miss and purge orphans. Resolving this is a
+deliberate design trade-off for the USER, not an autonomous change to the
+survival path.
