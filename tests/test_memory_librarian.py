@@ -338,6 +338,35 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
             self.assertIn("no_section.md", shape)
             self.assertIn("Notes and lessons learned", shape)
 
+    def test_nested_ocd_lmd_under_metadata_not_flagged_missing(self):
+        """#33: a write-path normalizer nests ocd/lmd under `metadata:` instead
+        of top-level. The dates ARE present, so the date-presence advisory must
+        not false-flag them missing."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "nested.md").write_text(
+                '---\nname: nested\ndescription: "a topic"\n'
+                "metadata:\n  node_type: memory\n"
+                "  ocd: 2026-06-14\n  lmd: 2026-06-14\n---\n"
+                "Body.\n\n## Notes and lessons learned\n")
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertNotIn("missing `ocd`", shape)
+            self.assertNotIn("missing `lmd`", shape)
+
+    def test_truly_missing_ocd_lmd_still_flagged(self):
+        """Guard the positive direction: ocd/lmd absent at EVERY depth still fires
+        the advisory (the depth-tolerant fix must not blind the check)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "nodate.md").write_text(_raw_note(name="nodate", ocd=False, lmd=False))
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("nodate.md", shape)
+            self.assertIn("missing `ocd`", shape)
+
     def test_hub_without_globs_flagged(self):
         """Wikimem (TRDD-bc16d602): a `tier: hub` page with no `globs:` is flagged
         (the file→functionality map RECALL Entry A depends on)."""

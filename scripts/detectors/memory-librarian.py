@@ -124,6 +124,11 @@ _FOOTNOTE_DEF_RE = re.compile(r"^\s*\[\^(?P<n>\d+)\]:")
 # `created:`/`updated:`) are the per-element dates (advisory — older notes
 # predate the convention).
 _FM_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][\w-]*)\s*:")
+# Same key shape but at ANY indentation — used only for the ocd/lmd date-presence
+# advisory, which must accept a date nested under `metadata:` (`metadata.ocd`),
+# not just a top-level `ocd:` (#33). `name`/`description` still use the
+# top-level-anchored _FM_KEY_RE.
+_FM_KEY_ANY_DEPTH_RE = re.compile(r"^\s*(?P<key>[A-Za-z_][\w-]*)\s*:")
 # Wikimem tier keys (TRDD-bc16d602). `tier:`/`globs:` live NESTED under
 # `metadata:` — in BLOCK style (`  tier: hub`) or FLOW style
 # (`metadata: {tier: hub, globs: [...]}`), both of which memgrep's any-depth
@@ -730,10 +735,14 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
     # (c) frontmatter key presence. Accept the documented aliases so an older
     # note using `created:`/`updated:` is not falsely flagged for ocd/lmd.
     fm_keys: set[str] = set()
+    fm_keys_any_depth: set[str] = set()
     for ln in fm_lines:
         m = _FM_KEY_RE.match(ln)
         if m:
             fm_keys.add(m.group("key").lower())
+        m_any = _FM_KEY_ANY_DEPTH_RE.match(ln)
+        if m_any:
+            fm_keys_any_depth.add(m_any.group("key").lower())
     for required in ("name", "description"):
         if required not in fm_keys:
             issues.append(f"{note}: frontmatter missing `{required}`")
@@ -764,9 +773,13 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
         issues.append(f"{note}: footnote def(s) never referenced: {joined}")
 
     # (d) per-element dates — advisory (older notes predate the convention).
-    if "ocd" not in fm_keys and "created" not in fm_keys:
+    # Depth-tolerant: a harness/normalizer write-path nests ocd/lmd under
+    # `metadata:` (`metadata.ocd`) instead of top-level, so a top-level-only
+    # check false-flagged every freshly-created note as "missing ocd/lmd" (#33).
+    # The date is present wherever it sits — only its presence matters here.
+    if "ocd" not in fm_keys_any_depth and "created" not in fm_keys_any_depth:
         issues.append(f"{note}: frontmatter missing `ocd` date (advisory)")
-    if "lmd" not in fm_keys and "updated" not in fm_keys:
+    if "lmd" not in fm_keys_any_depth and "updated" not in fm_keys_any_depth:
         issues.append(f"{note}: frontmatter missing `lmd` date (advisory)")
 
     # (e)/(f) wikimem tier shape (TRDD-bc16d602). No tier ⇒ a plain flat note,
