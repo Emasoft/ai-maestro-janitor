@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.1] - 2026-06-14
+## [0.8.2] - 2026-06-14
 
-### Documentation
+### Bug Fixes
 
-- Add janitor-footprint — concise always-injected machine-footprint rule
+- Make janitor-install-scope.py executable — CI exit 126 + heartbeat skip
 
