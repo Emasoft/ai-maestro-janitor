@@ -59,18 +59,25 @@ def out(body: str, rc: int, err: str = "") -> None:
 # GH_<VERB>_STDERR vars so the lib's stderr-trimming path is exercised.
 if argv[:2] == ["api", "--method"]:
     verb = argv[2]
+    path = argv[3] if len(argv) > 3 else ""
     if "--input" in argv:
         try:
             sys.stdin.read()
         except Exception:
             pass
-    if verb == "POST":
+    # METHOD->PATH semantics (mirror real gh/GitHub routing so a mis-routed call
+    # is caught, not silently accepted): POST targets the COLLECTION
+    # (.../rulesets, create), PUT/DELETE target a RESOURCE (.../rulesets/<id>,
+    # update/delete). A verb sent to the wrong shape is a 404/405 on real GitHub.
+    is_collection = path.endswith("/rulesets")
+    is_resource = "/rulesets/" in path
+    if verb == "POST" and is_collection:
         out(os.environ.get("GH_POST_BODY", "{}"), int(os.environ.get("GH_POST_RC", "0")), os.environ.get("GH_POST_STDERR", ""))
-    if verb == "PUT":  # ruleset UPDATE is PUT (not PATCH) on real GitHub — janitor#14
+    if verb == "PUT" and is_resource:  # ruleset UPDATE is PUT (not PATCH) on real GitHub — janitor#14
         out(os.environ.get("GH_PUT_BODY", "{}"), int(os.environ.get("GH_PUT_RC", "0")), os.environ.get("GH_PUT_STDERR", ""))
-    if verb == "DELETE":
+    if verb == "DELETE" and is_resource:
         out(os.environ.get("GH_DELETE_BODY", "{}"), int(os.environ.get("GH_DELETE_RC", "0")), os.environ.get("GH_DELETE_STDERR", ""))
-    sys.stderr.write("gh-stub: unhandled method %r\\n" % (verb,))
+    sys.stderr.write("gh-stub: %s to %r is not a valid ruleset route\\n" % (verb, path))
     raise SystemExit(98)
 # api <path> [--jq <expr>]
 if argv[:1] == ["api"]:
