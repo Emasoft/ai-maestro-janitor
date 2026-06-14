@@ -478,6 +478,29 @@ def project_is_ai_maestro() -> bool:
     return isinstance(name, str) and name in ai_maestro_marketplace_members()
 
 
+def is_ai_maestro_plugin_id(plugin_id: str) -> bool:
+    """True iff `plugin_id` (a `<name>@<marketplace>` id from `claude plugin
+    list`) belongs to the ai-maestro-plugins marketplace.
+
+    Used by the daemon to EXCLUDE the ai-maestro fleet from its per-plugin
+    auto-update (TRDD-db169d9e R2): fleet versions are owned by each plugin's own
+    release pipeline, so auto-bumping them here causes version skew. The janitor's
+    OWN self-update path (`task_version_update`) is separate and unaffected — even
+    though the janitor's own id is excluded here.
+
+    Detection: the `@ai-maestro-plugins` marketplace suffix is authoritative; a
+    bare/odd id falls back to the marketplace-member name check.
+    """
+    pid = (plugin_id or "").strip()
+    if not pid:
+        return False
+    name, sep, market = pid.rpartition("@")
+    if sep and market == _AI_MAESTRO_MARKETPLACE:
+        return True
+    candidate = name if sep else pid
+    return candidate in ai_maestro_marketplace_members()
+
+
 # --- terminal / runtime-context detection (TRDD-db169d9e R3/R4) -----------
 
 # Terminal-program signatures, matched against an ANCESTOR process's command.

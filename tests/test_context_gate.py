@@ -135,6 +135,32 @@ def test_members_union_live_catalog(monkeypatch, tmp_path):
     assert "ai-maestro-janitor" in members     # from the hardcoded fallback
 
 
+# --- is_ai_maestro_plugin_id (R2 daemon exclusion) -------------------------
+
+def test_plugin_id_fleet_member_by_marketplace_suffix(monkeypatch, tmp_path):
+    monkeypatch.setenv("JANITOR_PLUGINS_ROOT", str(_empty_plugins_root(tmp_path)))
+    state.ai_maestro_marketplace_members.cache_clear()
+    assert state.is_ai_maestro_plugin_id("ai-maestro-maintainer-agent@ai-maestro-plugins") is True
+    # The janitor's OWN id is excluded here too (self-update is task_version_update).
+    assert state.is_ai_maestro_plugin_id("ai-maestro-janitor@ai-maestro-plugins") is True
+
+
+def test_plugin_id_foreign_marketplace_is_not_fleet(monkeypatch, tmp_path):
+    monkeypatch.setenv("JANITOR_PLUGINS_ROOT", str(_empty_plugins_root(tmp_path)))
+    state.ai_maestro_marketplace_members.cache_clear()
+    assert state.is_ai_maestro_plugin_id("some-community-tool@other-marketplace") is False
+
+
+def test_plugin_id_bare_member_name_is_fleet(monkeypatch, tmp_path):
+    monkeypatch.setenv("JANITOR_PLUGINS_ROOT", str(_empty_plugins_root(tmp_path)))
+    state.ai_maestro_marketplace_members.cache_clear()
+    assert state.is_ai_maestro_plugin_id("ai-maestro-janitor") is True
+
+
+def test_plugin_id_empty_is_false():
+    assert state.is_ai_maestro_plugin_id("") is False
+
+
 # --- terminal_kind: PROCESS ANCESTRY, not env inference --------------------
 #
 # Each snapshot is `pid ppid command` per line — the format of

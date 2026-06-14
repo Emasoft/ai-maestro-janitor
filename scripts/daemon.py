@@ -303,10 +303,19 @@ def task_user_plugins_update() -> None:
         return
     if not isinstance(plugins, list):
         return
-    user_scope = [p for p in plugins
-                  if isinstance(p, dict) and p.get("scope") == "user" and p.get("id")]
+    all_user = [p for p in plugins
+                if isinstance(p, dict) and p.get("scope") == "user" and p.get("id")]
+    # R2 (TRDD-db169d9e): NEVER auto-update the ai-maestro fleet. Those plugins'
+    # versions are owned by each plugin's own release pipeline; bumping them here
+    # causes fleet version skew. The janitor's own id is excluded too — its
+    # self-update is the dedicated task_version_update, not this per-plugin sweep.
+    user_scope = [p for p in all_user if not state.is_ai_maestro_plugin_id(str(p["id"]))]
+    excluded = len(all_user) - len(user_scope)
     total = len(user_scope)
-    state.log_line("daemon", f"  user-plugins-update: {total} user-scope plugin(s)")
+    msg = f"  user-plugins-update: {total} user-scope plugin(s)"
+    if excluded:
+        msg += f" ({excluded} ai-maestro-plugins member(s) excluded — fleet self-manages)"
+    state.log_line("daemon", msg)
     updated_ids: list[str] = []
     for i, p in enumerate(user_scope, start=1):
         if not _running or gs.kill_switch_present():

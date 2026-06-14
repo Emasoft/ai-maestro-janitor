@@ -13,6 +13,7 @@ tasks within the test's wait window without us having to mock time.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -497,6 +498,46 @@ def test_run_workload_normal_completion_returns_completedprocess(
     assert result is not None, "a normally-completing workload must return CompletedProcess"
     assert result.returncode == 0
     assert "ok" in result.stdout
+
+
+def test_user_plugins_update_excludes_ai_maestro_fleet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R2 (TRDD-db169d9e): the per-plugin update SKIPS ai-maestro-plugins members
+    (incl. the janitor itself — its self-update is task_version_update) and still
+    updates foreign user-scope plugins."""
+    import state  # first-party — sys.path for scripts/lib is set up below the top imports
+
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    monkeypatch.setenv("JANITOR_PLUGINS_ROOT", str(tmp_path / "noplugins"))  # empty → hardcoded fleet
+    state.ai_maestro_marketplace_members.cache_clear()
+
+    daemon = _import_daemon_module()
+    listing = json.dumps([
+        {"id": "ai-maestro-maintainer-agent@ai-maestro-plugins", "scope": "user"},
+        {"id": "ai-maestro-janitor@ai-maestro-plugins", "scope": "user"},
+        {"id": "community-helper@some-market", "scope": "user"},
+        {"id": "proj-only@mp", "scope": "project"},
+    ])
+    updates: list[str] = []
+
+    def fake_run_workload(cmd, **_kw):
+        if cmd[:3] == ["claude", "plugin", "list"]:
+            return subprocess.CompletedProcess(cmd, 0, listing, "")
+        if cmd[:3] == ["claude", "plugin", "update"]:
+            updates.append(cmd[3])
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(daemon, "_run_workload", fake_run_workload)
+    monkeypatch.setattr(daemon, "_running", True)
+
+    daemon.task_user_plugins_update()
+
+    assert "community-helper@some-market" in updates          # foreign user plugin → updated
+    assert "ai-maestro-maintainer-agent@ai-maestro-plugins" not in updates  # fleet → excluded
+    assert "ai-maestro-janitor@ai-maestro-plugins" not in updates           # self-update path is separate
+    assert "proj-only@mp" not in updates                      # not user-scope anyway
 
 
 # ---------- Pillar 1: per-task supervision + subprocess retry (TRDD-7100178d) ----

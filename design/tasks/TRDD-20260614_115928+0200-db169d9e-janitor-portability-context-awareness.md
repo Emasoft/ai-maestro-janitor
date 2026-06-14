@@ -3,7 +3,7 @@ trdd-id: db169d9e-32db-414e-89d6-96c81c84cc2b
 title: Janitor portability — context-aware gating, terminal abstraction, user-level-only, no ai-maestro auto-upgrade
 column: dev
 created: 2026-06-14T11:59:28+0200
-updated: 2026-06-14T15:20:00+0200
+updated: 2026-06-14T15:45:00+0200
 current-owner: amama
 assignee: amama
 task-type: feature
@@ -56,10 +56,16 @@ verified before the next.
   catalog at `~/.claude/plugins/marketplaces/ai-maestro-plugins/.claude-plugin/marketplace.json`
   (`name: ai-maestro-plugins`, 11 members). `project_is_ai_maestro()` = the current project's
   `.claude-plugin/plugin.json` `name` ∈ that member set (live catalog ∪ hardcoded fleet fallback).
-- **Inside-agent env flag (USER offered 2026-06-14):** ai-maestro sets an explicit flag on the
-  `claude` LAUNCH command (`AIMAESTRO_AGENT=1`, or `tmux new-session -e AIMAESTRO_AGENT=1 …`),
-  NOT via `tmux set-environment` (that doesn't touch a running process). `in_ai_maestro_agent_env()`
-  honours `AIMAESTRO_AGENT` / `THIS_IS_AIMAESTRO` (truthy) + `AMP_AGENT_ID`/`AID_AUTH` (present).
+- **Inside-agent env flag — DECIDED (USER, 2026-06-14): the tmux `-e` method.** ai-maestro
+  injects the flag via tmux's native `-e` when it creates the agent's session/window/pane —
+  `tmux new-session -e AIMAESTRO_AGENT=1 …` (and `new-window -e …` / `split-window -e …` for any
+  extra pane that hosts a `claude` agent). `-e` seeds the **pane's initial process environment at
+  spawn**, so `claude` and every subprocess it spawns inherit it — exactly the set of processes
+  that must know "inside ai-maestro". Requires **tmux ≥ 3.2**. NOT `tmux set-environment` (that
+  only affects FUTURE panes and never updates a running `claude`). Janitor side already wired:
+  `in_ai_maestro_agent_env()` treats `AIMAESTRO_AGENT` / `THIS_IS_AIMAESTRO` (truthy) as inside
+  and falls back to `AMP_AGENT_ID`/`AID_AUTH` (present). The full implementation spec was handed
+  to the USER on 2026-06-14.
 
 ### Progress
 - ✅ **Phase 1 (DONE)** — context-gate + terminal primitives in `scripts/lib/state.py`, pure +
@@ -73,10 +79,18 @@ verified before the next.
   (`tests/test_context_gate_detectors.py`, positive+negative controls); fixed the 2 existing
   detector test harnesses to force the gate ON (they test detector logic, not the gate). 50
   tests green, ruff clean.
-- ⏳ **NEXT: Phase 3** — R2: exclude `ai-maestro-plugins` marketplace members from the
-  daemon's per-plugin `task_user_plugins_update`. Then Phase 4 (terminal send-abstraction onto
-  `terminal_kind()`), Phase 5 (ai-maestro API send when `in_ai_maestro_agent_env()`), Phase 6
-  (user-level-only enforcement + arm refusal).
+- ✅ **Phase 3 (DONE)** — R2: `state.is_ai_maestro_plugin_id()` (suffix `@ai-maestro-plugins`
+  authoritative + member-name fallback) now filters the daemon's `task_user_plugins_update`, so
+  the fleet (janitor included — its self-update is the separate `task_version_update`) is never
+  auto-bumped; foreign user-scope plugins still update. Logs the excluded count. 4 helper unit
+  tests + 1 daemon in-process exclusion test; existing daemon tests unaffected (their stub uses
+  marketplace `mp`). 67 tests green, ruff clean.
+- ⏳ **NEXT: Phase 4** — terminal send-abstraction: refactor `compact_trigger.py` /
+  `reload_trigger.py` onto a shared `terminal_trigger.py` keyed on `terminal_kind()` (iTerm +
+  Apple Terminal osascript, tmux `send-keys`, kitty `@ send-text`, WezTerm `cli send-text`;
+  graceful-degrade marker otherwise). Then Phase 5 (ai-maestro API send via
+  `POST /api/sessions/<tmux>/command` when `in_ai_maestro_agent_env()`), Phase 6 (user-level-only
+  enforcement + `/janitor-arm` refusal on a non-user install).
 
 ## USER directive (verbatim, 2026-06-14)
 
