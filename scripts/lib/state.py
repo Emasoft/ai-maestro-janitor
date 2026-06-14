@@ -591,7 +591,14 @@ def terminal_kind(*, ps_text: Optional[str] = None, pid: Optional[int] = None) -
 
     `ps_text` / `pid` are injectable for tests (a synthetic
     `pid ppid command`-per-line snapshot and a starting pid).
+
+    Override: `JANITOR_FORCE_TERMINAL_KIND` (e.g. `tmux`, `iterm`) short-circuits
+    the ancestry walk — a manual escape hatch if detection ever misfires, and the
+    deterministic hook tests use to pin a kind regardless of the host terminal.
     """
+    forced = os.environ.get("JANITOR_FORCE_TERMINAL_KIND", "").strip().lower()
+    if forced:
+        return forced
     if ps_text is None:
         proc = run_subprocess(
             ["ps", "-axo", "pid=,ppid=,command="],

@@ -38,6 +38,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import terminal_trigger  # noqa: E402
+
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
 # `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we
 # MUST reject anything that isn't hex+dashes — an env var is attacker-settable,
@@ -137,6 +140,19 @@ def main() -> int:
     if directive:
         path = _write_directive(directive)
         print(f"DIRECTIVE_WRITTEN {path}")
+
+    # Prefer a non-iTerm automatable terminal (tmux) when detected via process
+    # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
+    # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    sent = terminal_trigger.send_self_command("/compact", delay_s=args.delay, dry_run=args.dry_run)
+    if sent != terminal_trigger.USE_ITERM_PATH:
+        if sent.startswith("FIRED:"):
+            print("COMPACT_FIRED")
+        elif sent.startswith("DRY_RUN:"):
+            print(f"DRY_RUN {sent.split(':', 1)[1]}")
+        else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; ask the human (legacy marker)
+            print("NO_ITERM")
+        return 0
 
     iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
     if not iterm:

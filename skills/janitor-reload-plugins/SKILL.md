@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-plugins
-description: Run /reload-plugins for the current Claude Code session so freshly auto-updated plugin hooks and skills take effect, without the human typing the command. Invoke in response to a [janitor-reload] heartbeat marker (emitted after the daemon auto-updates the janitor plugin), or whenever plugin code changed on disk and the session must pick it up. Fires ESC then /reload-plugins at this session's own iTerm pane. Trigger with /janitor-reload-plugins or by asking to reload plugins now.
+description: Run /reload-plugins for the current Claude Code session so freshly auto-updated plugin hooks and skills take effect, without the human typing the command. Invoke in response to a [janitor-reload] heartbeat marker (emitted after the daemon auto-updates the janitor plugin), or whenever plugin code changed on disk and the session must pick it up. Fires ESC then /reload-plugins at this session's own terminal pane (iTerm or tmux). Trigger with /janitor-reload-plugins or by asking to reload plugins now.
 ---
 
 # Janitor reload-plugins
@@ -13,8 +13,9 @@ still using the OLD cached hooks and skills until `/reload-plugins` runs. The
 heartbeat surfaces a bare `[janitor-reload]` marker for exactly this — but the
 agent cannot run a built-in slash command via the Skill tool (it refuses
 `/reload-plugins`, `/compact`, `/clear`). This skill is the working path: it
-types `/reload-plugins` into this session's own iTerm pane via osascript, the
-same mechanism `/janitor-compact-context` uses for `/compact`.
+types `/reload-plugins` into this session's own terminal pane (iTerm via
+osascript, or tmux via `send-keys`), the same mechanism `/janitor-compact-context`
+uses for `/compact`.
 
 Unlike compaction, **reloading plugins does NOT discard the conversation** — it
 swaps plugin code in place — so there is no resume directive and nothing is lost.
@@ -36,10 +37,12 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
    ```
 
    Read the one-word result:
-   - `RELOAD_FIRED` → the reload is queued at your pane; proceed to step 2.
-   - `NO_ITERM` → this session is not in iTerm, so self-trigger isn't available.
-     Tell the user: *"Plugins were auto-updated — please run `/reload-plugins`
-     now (auto-trigger only works in iTerm)."* Then stop.
+   - `RELOAD_FIRED` → the reload is queued at your pane (iTerm or tmux); proceed to
+     step 2.
+   - `NO_ITERM` → this session is not in an automatable terminal (iTerm or tmux),
+     so self-trigger isn't available. Tell the user: *"Plugins were auto-updated —
+     please run `/reload-plugins` now (auto-trigger works in iTerm and tmux)."*
+     Then stop.
 
 2. **END YOUR TURN IMMEDIATELY.** The script fired a *detached* keystroke sender
    that, after ~2 s, sends ESC then `/reload-plugins` to your pane. For the
@@ -51,21 +54,25 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
 ## Output
 
 One short line to the user, then the turn ends. Side effect: launches a detached
-osascript that sends ESC→`/reload-plugins` to this session's own pane.
+keystroke sender (osascript in iTerm, `tmux send-keys` in tmux) that sends
+ESC→`/reload-plugins` to this session's own pane.
 
 ## Error handling
 
-- `NO_ITERM` → not in iTerm; ask the user to run `/reload-plugins` manually.
+- `NO_ITERM` → not in an automatable terminal (iTerm/tmux); ask the user to run
+  `/reload-plugins` manually.
 - The script never blocks: it returns immediately and the keystrokes fire detached.
-- If `osascript` is unavailable (non-macOS), the keystroke send is a no-op — ask
-  the user to `/reload-plugins` manually.
+- If no automatable terminal is detected (e.g. plain Apple Terminal / VS Code, or
+  `osascript` unavailable on non-macOS), the keystroke send degrades — ask the
+  user to `/reload-plugins` manually.
 
 ## Scope
 
 ONLY triggers `/reload-plugins` on THIS session's own pane (matched by
-`$ITERM_SESSION_ID` UUID — never other panes, so concurrent Claude instances are
-untouched). Records NO state, writes NO files, does NOT change plugin config,
-does NOT disarm the heartbeat, does NOT touch other sessions.
+`$ITERM_SESSION_ID` UUID in iTerm, or `$TMUX_PANE` in tmux — never other panes, so
+concurrent Claude instances are untouched). Records NO state, writes NO files,
+does NOT change plugin config, does NOT disarm the heartbeat, does NOT touch other
+sessions.
 
 ## Resources
 

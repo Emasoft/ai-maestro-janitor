@@ -1,6 +1,6 @@
 ---
 name: janitor-compact-context
-description: Self-compact the current Claude Code session's context window mid-work, then auto-resume. Invoke when context usage is high (for example the watchdog injected a context-window percentage warning at or above the threshold) and you want to compact before hitting the wall where /compact itself fails. Records a one-line resume directive, then fires ESC then /compact at this session's own iTerm pane. Trigger with /janitor-compact-context or by asking to compact the context now.
+description: Self-compact the current Claude Code session's context window mid-work, then auto-resume. Invoke when context usage is high (for example the watchdog injected a context-window percentage warning at or above the threshold) and you want to compact before hitting the wall where /compact itself fails. Records a one-line resume directive, then fires ESC then /compact at this session's own terminal pane (iTerm or tmux). Trigger with /janitor-compact-context or by asking to compact the context now.
 ---
 
 # Janitor compact-context
@@ -14,7 +14,7 @@ total-loss `/clear`). (CC 2.1.172 added an automatic compact-back, but only for
 the narrower *1M-WITHOUT-usage-credits stuck* case — not the threshold overrun
 here; re-verify empirically per CC release.) This skill lets the agent compact
 **itself** before that wall: it records where to resume, then triggers `/compact`
-on its own iTerm pane.
+on its own terminal pane (iTerm via osascript, or tmux via `send-keys`).
 
 It is the **trigger** leg of the context-compact watchdog (TRDD-31095269). The
 loop: the statusline writes the live % → the `pre-tool-context-usage` PreToolUse
@@ -52,11 +52,13 @@ Do NOT use it for trivial turns or when context is low — compaction is lossy.
    ```
 
    Read the one-word result:
-   - `COMPACT_FIRED` → the compact is queued at your pane; proceed to step 3.
-   - `NO_ITERM` → this session is not in iTerm, so self-trigger isn't available.
-     Tell the user: *"Context is at NN% — please run `/compact` now (auto-trigger
-     only works in iTerm)."* Then stop. The resume directive was still recorded,
-     so the auto-resume will work once the user compacts.
+   - `COMPACT_FIRED` → the compact is queued at your pane (iTerm or tmux); proceed
+     to step 3.
+   - `NO_ITERM` → this session is not in an automatable terminal (iTerm or tmux),
+     so self-trigger isn't available. Tell the user: *"Context is at NN% — please
+     run `/compact` now (auto-trigger works in iTerm and tmux)."* Then stop. The
+     resume directive was still recorded, so the auto-resume will work once the
+     user compacts.
 
 3. **END YOUR TURN IMMEDIATELY.** This is critical: the script fired a *detached*
    keystroke sender that, after ~2 s, sends ESC then `/compact` to your pane. For
@@ -69,21 +71,24 @@ Do NOT use it for trivial turns or when context is low — compaction is lossy.
 
 One short line to the user, then the turn ends. Side effects: writes
 `<project>/.janitor/state/resume-directive.txt` (consumed once by the PostCompact
-hook) and launches a detached osascript that sends ESC→`/compact` to this pane.
+hook) and launches a detached keystroke sender (osascript in iTerm, `tmux
+send-keys` in tmux) that sends ESC→`/compact` to this pane.
 
 ## Error handling
 
-- `NO_ITERM` → not in iTerm; ask the user to run `/compact` (directive still recorded).
+- `NO_ITERM` → not in an automatable terminal (iTerm/tmux); ask the user to run
+  `/compact` (directive still recorded).
 - The script never blocks: it returns immediately and the keystrokes fire detached.
-- If `osascript` is unavailable (non-macOS), the script still records the directive;
-  the keystroke send is a no-op — ask the user to `/compact` manually.
+- If no automatable terminal is detected (e.g. plain Apple Terminal / VS Code, or
+  `osascript` unavailable on non-macOS), the script still records the directive;
+  the keystroke send degrades — ask the user to `/compact` manually.
 
 ## Scope
 
 ONLY records the resume directive and triggers `/compact` on THIS session's own
-pane (matched by `$ITERM_SESSION_ID` UUID — never other panes, so concurrent
-Claude instances are untouched). Does NOT change any plugin config, does NOT
-disarm the heartbeat, does NOT compact other sessions.
+pane (matched by `$ITERM_SESSION_ID` UUID in iTerm, or `$TMUX_PANE` in tmux —
+never other panes, so concurrent Claude instances are untouched). Does NOT change
+any plugin config, does NOT disarm the heartbeat, does NOT compact other sessions.
 
 ## Resources
 

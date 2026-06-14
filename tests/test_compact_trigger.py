@@ -28,6 +28,10 @@ def _import():
 
 def _run(args: list[str], *, project: Path, iterm: str | None) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", ""), "CLAUDE_PROJECT_DIR": str(project)}
+    # Pin the terminal-kind so these tests exercise the iTerm path deterministically
+    # regardless of the host terminal (e.g. running the suite inside tmux). The tmux
+    # delegation is covered by test_terminal_trigger.py.
+    env["JANITOR_FORCE_TERMINAL_KIND"] = "iterm"
     if iterm is not None:
         env["ITERM_SESSION_ID"] = iterm
     return subprocess.run(

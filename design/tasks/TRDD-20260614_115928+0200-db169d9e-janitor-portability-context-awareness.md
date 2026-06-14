@@ -3,7 +3,7 @@ trdd-id: db169d9e-32db-414e-89d6-96c81c84cc2b
 title: Janitor portability — context-aware gating, terminal abstraction, user-level-only, no ai-maestro auto-upgrade
 column: dev
 created: 2026-06-14T11:59:28+0200
-updated: 2026-06-14T15:45:00+0200
+updated: 2026-06-14T16:10:00+0200
 current-owner: amama
 assignee: amama
 task-type: feature
@@ -85,12 +85,23 @@ verified before the next.
   auto-bumped; foreign user-scope plugins still update. Logs the excluded count. 4 helper unit
   tests + 1 daemon in-process exclusion test; existing daemon tests unaffected (their stub uses
   marketplace `mp`). 67 tests green, ruff clean.
-- ⏳ **NEXT: Phase 4** — terminal send-abstraction: refactor `compact_trigger.py` /
-  `reload_trigger.py` onto a shared `terminal_trigger.py` keyed on `terminal_kind()` (iTerm +
-  Apple Terminal osascript, tmux `send-keys`, kitty `@ send-text`, WezTerm `cli send-text`;
-  graceful-degrade marker otherwise). Then Phase 5 (ai-maestro API send via
-  `POST /api/sessions/<tmux>/command` when `in_ai_maestro_agent_env()`), Phase 6 (user-level-only
-  enforcement + `/janitor-arm` refusal on a non-user install).
+- ✅ **Phase 4 (DONE)** — terminal send-abstraction `scripts/lib/terminal_trigger.py`:
+  `send_self_command()` dispatches on `terminal_kind()`. **tmux** is the new first-class
+  backend (detached delayed `tmux send-keys` ESC → command → Enter at `$TMUX_PANE`,
+  **live-verified end-to-end** against a real pane). iTerm + any not-yet-automated terminal
+  return the `USE_ITERM_PATH` sentinel so `compact_trigger.py`/`reload_trigger.py` fall through
+  to their PROVEN iTerm-osascript path UNCHANGED (existing 13 trigger tests stay green —
+  pinned via the new `JANITOR_FORCE_TERMINAL_KIND` override). kitty/WezTerm/Apple-Terminal/
+  vscode degrade gracefully (= today's behaviour for non-iTerm; never a regression) — they're
+  one `_DELEGATE_KINDS` entry away once a real host can verify their send commands. Updated
+  both skill docs to say "iTerm or tmux". 14 new tests (incl. the real-tmux integration test,
+  gated + torn down). Full set green, ruff clean.
+- ⏳ **NEXT: Phase 5** — ai-maestro API send: when `in_ai_maestro_agent_env()`, resolve this
+  agent's tmux session via `GET /api/agents` (CWD match) and `POST /api/sessions/<tmux>/command`
+  `{command, requireIdle:false, addNewline:true}` INSTEAD of the local keystroke send (the
+  authoritative in-ai-maestro path; the Phase-4 tmux backend is the fallback when the server is
+  unreachable). Then Phase 6 (user-level-only enforcement + `/janitor-arm` refusal on a
+  non-user install).
 
 ## USER directive (verbatim, 2026-06-14)
 

@@ -32,6 +32,10 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import terminal_trigger  # noqa: E402
 
 # An iTerm session id is a hex UUID (8-4-4-4-12). $ITERM_SESSION_ID is
 # `<tty>:<UUID>`. We interpolate the UUID into an `osascript -e` string, so we
@@ -93,6 +97,19 @@ def main() -> int:
         help="print the plan, but do NOT fire osascript (for tests)",
     )
     args = ap.parse_args()
+
+    # Prefer a non-iTerm automatable terminal (tmux) when detected via process
+    # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
+    # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
+    sent = terminal_trigger.send_self_command("/reload-plugins", delay_s=args.delay, dry_run=args.dry_run)
+    if sent != terminal_trigger.USE_ITERM_PATH:
+        if sent.startswith("FIRED:"):
+            print("RELOAD_FIRED")
+        elif sent.startswith("DRY_RUN:"):
+            print(f"DRY_RUN {sent.split(':', 1)[1]}")
+        else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; ask the human (legacy marker)
+            print("NO_ITERM")
+        return 0
 
     iterm = os.environ.get("ITERM_SESSION_ID", "").strip()
     if not iterm:
