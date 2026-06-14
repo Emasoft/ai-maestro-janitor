@@ -423,6 +423,48 @@ jobs:
 """
         self.assertNotIn("id-token-write-unscoped", fired(wf))
 
+    def test_attestation_job_id_token_does_not_fire(self):
+        """#30: id-token: write for actions/attest-build-provenance mints a
+        sigstore SIGNING token, not cloud creds — the environment: gate is
+        inapplicable, so a job-scoped attestation grant must NOT fire."""
+        wf = """
+on: push
+jobs:
+  build-memgrep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - run: cargo build --release
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: target/release/memgrep
+"""
+        self.assertNotIn("id-token-write-unscoped", fired(wf))
+
+    def test_attestation_plus_cloud_auth_still_fires(self):
+        """A job that does attestation AND cloud auth without an environment gate
+        is still a real unscoped-OIDC risk — suppression must not hide it."""
+        wf = """
+on: push
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/app
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::1234:role/ci
+"""
+        self.assertIn("id-token-write-unscoped", fired(wf))
+
     def test_no_id_token_perm_does_not_fire(self):
         """contents: read only — no OIDC trust, no fire."""
         wf = """

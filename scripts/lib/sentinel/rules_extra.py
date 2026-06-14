@@ -445,6 +445,43 @@ class IdTokenWriteUnscoped(Rule):
             return isinstance(val, str) and val.strip().lower() == "write"
         return False
 
+    # GitHub artifact-attestation actions use `id-token: write` to mint a
+    # SIGSTORE signing token (keyless artifact attestation), NOT cloud
+    # credentials — there is no IAM trust policy to scope, so the `environment:`
+    # gate mitigation is inapplicable and flagging them is a false positive
+    # (#30: the reporter's `attest-build-provenance` job is the exact case). A
+    # job that ALSO does cloud auth is still a real unscoped-OIDC risk, so
+    # suppression requires attestation present AND cloud-auth absent.
+    _ATTESTATION_USES = (
+        "actions/attest-build-provenance",
+        "actions/attest-sbom",
+        "actions/attest",
+    )
+    _CLOUD_AUTH_USES = (
+        "aws-actions/configure-aws-credentials",
+        "google-github-actions/auth",
+        "azure/login",
+        "hashicorp/vault-action",
+    )
+
+    @staticmethod
+    def _job_uses_any(job_hash: dict, action_refs: tuple[str, ...]) -> bool:
+        """True iff any step `uses:` an action whose repo ref equals (or is a
+        subpath of) one of `action_refs` — version ref (`@...`) ignored."""
+        steps = job_hash.get("steps")
+        if not isinstance(steps, list):
+            return False
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str):
+                continue
+            ref = uses.split("@", 1)[0].strip()
+            if any(ref == a or ref.startswith(a + "/") for a in action_refs):
+                return True
+        return False
+
     def check(self, wf: Workflow) -> list:
         findings: list[Finding] = []
         workflow_perm = wf.permissions("workflow")
@@ -470,6 +507,13 @@ class IdTokenWriteUnscoped(Rule):
                 if isinstance(name, str) and name.strip():
                     has_environment = True
             if has_environment:
+                continue
+            # Attestation jobs mint a sigstore SIGNING token, not cloud creds, so
+            # the environment: gate is inapplicable — suppress unless the job
+            # ALSO does cloud auth (a genuine unscoped-OIDC risk) (#30).
+            if self._job_uses_any(job_hash, self._ATTESTATION_USES) and not self._job_uses_any(
+                job_hash, self._CLOUD_AUTH_USES
+            ):
                 continue
             # Locate the line — prefer the job-level id-token: write line,
             # else the workflow-level one.
