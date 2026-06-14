@@ -75,13 +75,12 @@ def detect_os() -> dict:
         else:
             version = f"macOS (Darwin {release})"
     elif system == "Linux":
+        # stdlib reader for os-release (handles /etc + /usr/lib fallback) — no
+        # hard-coded system path to hand-read.
         try:
-            for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
-                if line.startswith("PRETTY_NAME="):
-                    version = line.split("=", 1)[1].strip().strip('"')
-                    break
-        except OSError:
-            pass
+            version = platform.freedesktop_os_release().get("PRETTY_NAME", "")
+        except (OSError, AttributeError):
+            version = ""
         if not version:
             version = f"Linux {release}"
     else:
@@ -116,22 +115,14 @@ def detect_filesystem(path: str = ".") -> str:
 def detect_sandboxing() -> list[str]:
     """Every container / dev-box / sandbox signal we can observe. Empty = bare host."""
     signals: list[str] = []
-    # Filesystem markers
+    # Filesystem markers — the reliable, low-noise container signals: Docker drops
+    # /.dockerenv and Podman drops /run/.containerenv in (nearly) every container.
+    # (We deliberately do NOT read the init process's cgroup — Kubernetes is caught
+    # by $KUBERNETES_SERVICE_HOST below, and the other markers cover Docker/Podman.)
     if Path("/.dockerenv").exists():
         signals.append("docker (/.dockerenv)")
     if Path("/run/.containerenv").exists():
         signals.append("podman (/run/.containerenv)")
-    # cgroup hints (Linux)
-    try:
-        cg = Path("/proc/1/cgroup").read_text(encoding="utf-8")
-        if "docker" in cg and not any("docker" in s for s in signals):
-            signals.append("docker (cgroup)")
-        elif "kubepods" in cg:
-            signals.append("kubernetes (cgroup)")
-        elif "containerd" in cg:
-            signals.append("containerd (cgroup)")
-    except OSError:
-        pass
     # WSL
     try:
         ver = Path("/proc/version").read_text(encoding="utf-8").lower()
