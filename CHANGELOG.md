@@ -2,9 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.5] - 2026-06-14
+## [0.8.6] - 2026-06-14
 
-### Bug Fixes
+### Documentation
 
-- Don't flag attestation id-token: write as unscoped (#30)
+- Add TRDD-b3eae1cd — librarian conflict/aggregation heuristic tuning (#35)
+
+### Ci
+
+- Add timeout-minutes to all jobs + self-heal the flaky CPV validate step
 
