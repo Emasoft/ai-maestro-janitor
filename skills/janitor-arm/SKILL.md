@@ -20,6 +20,22 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
 
 ## Instructions
 
+0. **Refuse a non-user install (TRDD-db169d9e R5).** The janitor MUST be a
+   USER-scope install — it guards OAuth, the global single-instance daemon, and
+   drift for the WHOLE machine. Arming a project/local-scope janitor would create
+   a per-project heartbeat and bind a machine-global guardian to one repo. Verify
+   first:
+
+   ```bash
+   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/detectors/janitor-install-scope.py" --check
+   ```
+
+   If it exits NON-ZERO (prints a `[janitor-install-scope]` warning), **STOP — do
+   NOT arm.** Relay the warning to the user: the janitor is installed at
+   project/local scope and must be moved to user scope (the exact `claude plugin
+   uninstall … / install … --scope user` commands are in the warning). Only
+   proceed to step 1 when it prints `OK user-scope`.
+
 1. Install (or refresh) the stub atomically:
 
    ```bash

@@ -221,6 +221,13 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # set. 1h cadence — leaks should be caught quickly before a push, and the scan
     # is bounded + content-fingerprint deduped so unchanged fires are near-free.
     ("memory-scope-leak", 3600, "CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL"),
+    # janitor-install-scope warns if ai-maestro-janitor is enabled at PROJECT/LOCAL
+    # scope — it MUST be a USER-only install (it guards OAuth + the global daemon for
+    # the whole machine; TRDD-db169d9e R5). Runs in EVERY project (the invariant is
+    # universal, not ai-maestro-specific); silent in the normal case (user-scope
+    # install). 6h cadence — install config changes rarely; dedupe keeps it to one
+    # nag until the config changes.
+    ("janitor-install-scope", 21600, "CLAUDE_PLUGIN_OPTION_JANITOR_INSTALL_SCOPE_INTERVAL"),
 ]
 
 

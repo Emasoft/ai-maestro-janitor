@@ -1,9 +1,9 @@
 ---
 trdd-id: db169d9e-32db-414e-89d6-96c81c84cc2b
 title: Janitor portability — context-aware gating, terminal abstraction, user-level-only, no ai-maestro auto-upgrade
-column: dev
+column: complete
 created: 2026-06-14T11:59:28+0200
-updated: 2026-06-14T17:05:00+0200
+updated: 2026-06-14T17:35:00+0200
 current-owner: amama
 assignee: amama
 task-type: feature
@@ -106,8 +106,18 @@ verified before the next.
   fallback. Also rewrote `tests/test_context_gate_detectors.py` onto a subprocess harness (the
   in-process importlib+capsys version was flaky under full-suite ordering — production gate is
   unaffected). **Full suite: 10925 passed, ruff clean.**
-- ⏳ **NEXT: Phase 6** — R5 user-level-only: a detector that WARNS if a project/local-scope
-  janitor install is found, and `/janitor-arm` refusing to arm a non-user install.
+- ✅ **Phase 6 (DONE)** — R5 user-level-only: new `scripts/detectors/janitor-install-scope.py`
+  warns (heartbeat, 6h cadence, deduped) when ai-maestro-janitor is ENABLED at project/local
+  scope — it MUST be USER-only (it guards OAuth + the global daemon for the whole machine).
+  Runs in EVERY project (universal invariant, not ai-maestro-gated). A `--check` mode bypasses
+  the dedupe and exits non-zero on a violation; `/janitor-arm` Step 0 runs it and REFUSES to arm
+  a mis-scoped install. 6 tests; the janitor's own repo correctly reports `OK user-scope` (no
+  self-FP). ruff clean.
+
+## ✅ ALL 6 PHASES DONE — TRDD-db169d9e COMPLETE (2026-06-14)
+R1 context gate, R2 fleet-exclude, R3 terminal abstraction (+tmux, live-verified), R4 ai-maestro
+API send (+stub-server test), R5 user-level-only all shipped + tested. Full suite green. Ready
+for publish.
 
 ## USER directive (verbatim, 2026-06-14)
 
