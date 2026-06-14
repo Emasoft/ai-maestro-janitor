@@ -3,7 +3,7 @@ trdd-id: db169d9e-32db-414e-89d6-96c81c84cc2b
 title: Janitor portability — context-aware gating, terminal abstraction, user-level-only, no ai-maestro auto-upgrade
 column: design
 created: 2026-06-14T11:59:28+0200
-updated: 2026-06-14T11:59:28+0200
+updated: 2026-06-14T13:18:48+0200
 current-owner: amama
 assignee: amama
 task-type: feature
@@ -109,9 +109,25 @@ decisions (§Decisions) before implementation. NOT started.
   per-plugin update (proposed), or a broader "only self-update, never other plugins"
   policy? The directive says "ai-maestro-plugin or any other ai-maestro-plugins
   marketplace plugin" → exclude the `@ai-maestro-plugins` marketplace. Confirm.
-- **D3 — the ai-maestro API.** What is the exact command / entry point to "send an
-  instruction to the agent terminal" from inside an ai-maestro agent? (CLI? a Python
-  client? an env var that signals "inside ai-maestro"?) Phase 5 is blocked on this.
+- **D3 — the ai-maestro API. ✅ ANSWERED by research (2026-06-14), no longer blocking.**
+  Source: `~/Code/AI-MAESTRO-PLUGIN/ai-maestro-plugin/scripts/ai-maestro-hook.cjs`
+  (`sendMessageNotification`). The contract:
+  - **inside-ai-maestro detection** — `GET http://localhost:23000/api/agents` succeeds
+    AND an agent's `workingDirectory` (or `session.workingDirectory`) equals the cwd OR
+    the cwd is a strict subdir of it. (`AMP_AGENT_ID` / `AID_AUTH` env vars are present in
+    an ai-maestro agent and serve as a cheap pre-check, but the AUTHORITATIVE resolver is
+    the CWD match against `/api/agents`.) ai-maestro agents run in a **tmux** session.
+  - **send the instruction to the agent's own terminal** —
+    `POST http://localhost:23000/api/sessions/<tmuxSessionName>/command`,
+    `Content-Type: application/json`, body
+    `{"command": "<e.g. /compact or /reload-plugins>", "requireIdle": false, "addNewline": true}`
+    (`addNewline:true` submits it; `requireIdle:true` waits for the agent to be idle).
+    Returns `{"success": bool}`. `<tmuxSessionName>` = the matched agent's
+    `agent.session.tmuxSessionName`.
+  - The server base is `AIMAESTRO_API` (default `http://localhost:23000`).
+  Implication: R4's in-ai-maestro send is this POST; R3's **tmux** backend
+  (`tmux send-keys`) is the graceful fallback when the server is unreachable but we ARE
+  in tmux. D3 is recorded; D1 + D2 still want USER confirmation before behavior changes.
 
 ## Durable artifacts to read before acting
 - The current-state audit above (verified greps, 2026-06-14).
