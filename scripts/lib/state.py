@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -626,7 +627,7 @@ _AI_MAESTRO_AGENT_FLAGS = ("AIMAESTRO_AGENT", "THIS_IS_AIMAESTRO")
 _AI_MAESTRO_AGENT_INTERNALS = ("AMP_AGENT_ID", "AID_AUTH")
 
 
-def in_ai_maestro_agent_env(env: Optional[dict] = None) -> bool:
+def in_ai_maestro_agent_env(env: Optional[Mapping[str, str]] = None) -> bool:
     """Cheap pre-check: are we running INSIDE an ai-maestro agent?
 
     True iff an explicit ai-maestro flag is truthy (`AIMAESTRO_AGENT=1` /

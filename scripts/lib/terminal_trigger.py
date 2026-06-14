@@ -41,6 +41,9 @@ import re
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -122,8 +125,108 @@ def _fire_detached_steps(delay_s: float, steps: list[list[str]]) -> None:
     )
 
 
+# --- ai-maestro API send (TRDD-db169d9e R4) --------------------------------
+#
+# When running INSIDE an ai-maestro agent, the AUTHORITATIVE way to type a command
+# into the agent's own terminal is the ai-maestro server, not a local keystroke
+# injection: GET /api/agents to find this agent (CWD match) → its tmux session →
+# POST /api/sessions/<tmux>/command. Every step is best-effort with a short
+# timeout; ANY failure returns None so the caller falls back to the local tmux
+# keystroke send (ai-maestro agents run in tmux, so that path works too).
+
+_AIMAESTRO_DEFAULT_BASE = "http://localhost:23000"
+
+
+def _aimaestro_base(env: Mapping[str, str]) -> str:
+    return (env.get("AIMAESTRO_API") or _AIMAESTRO_DEFAULT_BASE).rstrip("/")
+
+
+def _http_json(url: str, *, method: str = "GET", body: dict | None = None, timeout: float = 4.0):
+    """GET/POST JSON, returning the decoded object or None on ANY failure.
+
+    Network best-effort: a dead server, a timeout, a non-JSON body, or a non-2xx
+    status all collapse to None so the caller degrades to the tmux fallback.
+    """
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    headers = {"Content-Type": "application/json"} if data is not None else {}
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed localhost API base
+            raw = resp.read().decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return None
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+def _agent_working_dir(agent: dict) -> str | None:
+    wd = agent.get("workingDirectory")
+    if not (isinstance(wd, str) and wd):
+        sess = agent.get("session")
+        wd = sess.get("workingDirectory") if isinstance(sess, dict) else None
+    return wd if isinstance(wd, str) and wd else None
+
+
+def _agent_tmux_session(agent: dict) -> str | None:
+    sess = agent.get("session")
+    if isinstance(sess, dict):
+        ts = sess.get("tmuxSessionName")
+        if isinstance(ts, str) and ts:
+            return ts
+    ts = agent.get("tmuxSessionName")
+    return ts if isinstance(ts, str) and ts else None
+
+
+def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
+    """Pure: the tmux session of the agent whose workingDirectory equals — or is a
+    parent of — any cwd candidate. Returns None when nothing matches."""
+    cands = [os.path.realpath(c) for c in cwd_candidates if c]
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        wd = _agent_working_dir(agent)
+        if not wd:
+            continue
+        wdr = os.path.realpath(wd)
+        if any(c == wdr or c.startswith(wdr + os.sep) for c in cands):
+            ts = _agent_tmux_session(agent)
+            if ts:
+                return ts
+    return None
+
+
+def _try_ai_maestro_send(command: str, *, dry_run: bool, env: Mapping[str, str]) -> str | None:
+    """Best-effort ai-maestro API send. Returns a status string on success, or
+    None to signal the caller to fall through to the local terminal send."""
+    base = _aimaestro_base(env)
+    agents = _http_json(f"{base}/api/agents", timeout=4.0)
+    if isinstance(agents, dict) and isinstance(agents.get("agents"), list):
+        agents = agents["agents"]
+    if not isinstance(agents, list):
+        return None
+    tmux = match_agent_tmux(agents, [os.getcwd(), env.get("CLAUDE_PROJECT_DIR", "")])
+    if not tmux:
+        return None
+    if dry_run:
+        return f"DRY_RUN:aimaestro:{tmux}:{command}"
+    resp = _http_json(
+        f"{base}/api/sessions/{urllib.parse.quote(tmux)}/command",
+        method="POST",
+        body={"command": command, "requireIdle": False, "addNewline": True},
+        timeout=5.0,
+    )
+    if isinstance(resp, dict) and resp.get("success"):
+        return "FIRED:aimaestro"
+    return None  # POST failed / unconfirmed → caller falls back to the tmux keystroke send
+
+
 def send_self_command(
-    command: str, *, delay_s: float = 2.0, dry_run: bool = False, env: dict | None = None
+    command: str, *, delay_s: float = 2.0, dry_run: bool = False,
+    env: Mapping[str, str] | None = None,
 ) -> str:
     """Send `command` (a fixed literal like `/compact`) to this session's own pane,
     choosing the mechanism by `state.terminal_kind()`.
@@ -137,7 +240,15 @@ def send_self_command(
       - `NO_AUTO_TERMINAL:<kind>` — the kind is delegated but its target was
         unresolvable (e.g. `$TMUX_PANE` malformed); caller degrades.
     """
-    e = os.environ if env is None else env
+    e: Mapping[str, str] = os.environ if env is None else env
+    # Inside an ai-maestro agent the server API is the authoritative way to reach
+    # the agent's own terminal. Best-effort — any failure (server down, no match,
+    # unconfirmed POST) falls through to the local terminal send below; ai-maestro
+    # agents run in tmux, so that fallback works too (TRDD-db169d9e R4).
+    if state.in_ai_maestro_agent_env(e):
+        api = _try_ai_maestro_send(command, dry_run=dry_run, env=e)
+        if api is not None:
+            return api
     kind = state.terminal_kind()
     if kind not in _DELEGATE_KINDS:
         return USE_ITERM_PATH

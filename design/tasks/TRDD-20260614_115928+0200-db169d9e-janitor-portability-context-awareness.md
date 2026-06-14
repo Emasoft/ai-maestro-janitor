@@ -3,7 +3,7 @@ trdd-id: db169d9e-32db-414e-89d6-96c81c84cc2b
 title: Janitor portability — context-aware gating, terminal abstraction, user-level-only, no ai-maestro auto-upgrade
 column: dev
 created: 2026-06-14T11:59:28+0200
-updated: 2026-06-14T16:10:00+0200
+updated: 2026-06-14T17:05:00+0200
 current-owner: amama
 assignee: amama
 task-type: feature
@@ -96,12 +96,18 @@ verified before the next.
   one `_DELEGATE_KINDS` entry away once a real host can verify their send commands. Updated
   both skill docs to say "iTerm or tmux". 14 new tests (incl. the real-tmux integration test,
   gated + torn down). Full set green, ruff clean.
-- ⏳ **NEXT: Phase 5** — ai-maestro API send: when `in_ai_maestro_agent_env()`, resolve this
-  agent's tmux session via `GET /api/agents` (CWD match) and `POST /api/sessions/<tmux>/command`
-  `{command, requireIdle:false, addNewline:true}` INSTEAD of the local keystroke send (the
-  authoritative in-ai-maestro path; the Phase-4 tmux backend is the fallback when the server is
-  unreachable). Then Phase 6 (user-level-only enforcement + `/janitor-arm` refusal on a
-  non-user install).
+- ✅ **Phase 5 (DONE)** — ai-maestro API send in `terminal_trigger.send_self_command`: when
+  `in_ai_maestro_agent_env()`, resolve this agent's tmux session via `GET /api/agents`
+  (`match_agent_tmux` CWD match) and `POST /api/sessions/<tmux>/command`
+  `{command, requireIdle:false, addNewline:true}`. Best-effort — ANY failure (server down, no
+  match, unconfirmed POST) returns None and falls through to the Phase-4 tmux keystroke send
+  (agents run in tmux, so that works too). Env params widened to `Mapping[str,str]`. 11 new
+  tests incl. a REAL localhost stub-server end-to-end (no mocks) + the unreachable→tmux
+  fallback. Also rewrote `tests/test_context_gate_detectors.py` onto a subprocess harness (the
+  in-process importlib+capsys version was flaky under full-suite ordering — production gate is
+  unaffected). **Full suite: 10925 passed, ruff clean.**
+- ⏳ **NEXT: Phase 6** — R5 user-level-only: a detector that WARNS if a project/local-scope
+  janitor install is found, and `/janitor-arm` refusing to arm a non-user install.
 
 ## USER directive (verbatim, 2026-06-14)
 
