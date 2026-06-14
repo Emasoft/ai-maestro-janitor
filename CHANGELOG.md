@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.7] - 2026-06-14
+## [0.8.8] - 2026-06-14
 
-### Documentation
+### Features
 
-- Honest durability reporting + document CC survival gaps (#23)
+- Log each heartbeat's token cost + /janitor-token-report (TRDD-a4e41e89 Phase 1)
 
