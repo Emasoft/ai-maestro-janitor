@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -372,6 +373,244 @@ def is_self_scan_target() -> bool:
     except (OSError, ValueError):
         return False
     return isinstance(data, dict) and data.get("name") == _JANITOR_NAME
+
+
+# --- ai-maestro context gate (TRDD-db169d9e R1) --------------------------
+
+# The canonical ai-maestro-plugins marketplace member set — the fallback used
+# when the live catalog can't be read. The janitor is installed FROM this
+# marketplace so the catalog is normally present, but the gate must NEVER depend
+# on that. Kept in sync with the marketplace's
+# `.claude-plugin/marketplace.json` `plugins` list; the live read below UNIONs
+# anything new in, so a member added after this constant was last edited is still
+# recognised. Both sources only ever list real members, so the union can never
+# wrongly include a non-member.
+_AI_MAESTRO_MARKETPLACE = "ai-maestro-plugins"
+_AI_MAESTRO_FLEET = frozenset({
+    "ai-maestro-plugin",
+    "ai-maestro-assistant-manager-agent",
+    "ai-maestro-chief-of-staff",
+    "ai-maestro-architect-agent",
+    "ai-maestro-orchestrator-agent",
+    "ai-maestro-integrator-agent",
+    "ai-maestro-programmer-agent",
+    "ai-maestro-maintainer-agent",
+    "ai-maestro-autonomous-agent",
+    "ai-maestro-janitor",
+    "ai-maestro-visual-communicator-plugin",
+})
+
+
+def _plugins_root() -> Path:
+    """The Claude plugins root (`~/.claude/plugins`), env-overridable for tests."""
+    override = os.environ.get("JANITOR_PLUGINS_ROOT", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".claude" / "plugins"
+
+
+@lru_cache(maxsize=1)
+def ai_maestro_marketplace_members() -> frozenset[str]:
+    """Return every plugin name that belongs to the `ai-maestro-plugins` marketplace.
+
+    Source of truth is the installed marketplace catalog at
+    `<plugins-root>/marketplaces/ai-maestro-plugins/.claude-plugin/marketplace.json`
+    (present on every machine the janitor runs on — the janitor is installed FROM
+    that marketplace). The hard-coded `_AI_MAESTRO_FLEET` is unioned in as a
+    fallback so the gate never under-recognises a known member when the catalog
+    read fails. Cached for the process lifetime; tests call `.cache_clear()`.
+    """
+    members = set(_AI_MAESTRO_FLEET)
+    root = _plugins_root()
+    for rel in (
+        Path("marketplaces") / _AI_MAESTRO_MARKETPLACE / ".claude-plugin" / "marketplace.json",
+        Path("marketplaces") / _AI_MAESTRO_MARKETPLACE / "marketplace.json",
+    ):
+        try:
+            data = json.loads((root / rel).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict) or data.get("name") != _AI_MAESTRO_MARKETPLACE:
+            continue
+        for entry in data.get("plugins", []):
+            name = entry.get("name") if isinstance(entry, dict) else entry
+            if isinstance(name, str) and name:
+                members.add(name)
+        break
+    return frozenset(members)
+
+
+@lru_cache(maxsize=1)
+def project_is_ai_maestro() -> bool:
+    """True iff the CURRENT project is a plugin of the `ai-maestro-plugins` marketplace.
+
+    The master context gate (TRDD-db169d9e R1). The janitor is installed at USER
+    scope, so it runs in EVERY project — ai-maestro or not. ai-maestro-SPECIFIC
+    detectors/skills (TRDD/PRRD/AMP/fleet-coordination) consult this gate and
+    self-deactivate when it is False, so the janitor stays silent about ai-maestro
+    conventions in unrelated projects. Generic detectors (git hygiene, security,
+    cleanup) ignore the gate and run everywhere.
+
+    Detection: the project root has a `.claude-plugin/plugin.json` whose top-level
+    `"name"` is a member of the ai-maestro-plugins marketplace (see
+    `ai_maestro_marketplace_members`). A project with no plugin manifest — or whose
+    plugin name is not a marketplace member — is NOT ai-maestro.
+
+    Override: set `JANITOR_FORCE_AI_MAESTRO` to a truthy value (1/true/yes/on) to
+    force the gate ON, or a falsy value (0/false/no/off) to force it OFF — for
+    tests, or a project the user wants treated either way.
+    """
+    forced = os.environ.get("JANITOR_FORCE_AI_MAESTRO", "").strip().lower()
+    if forced in ("1", "true", "yes", "on"):
+        return True
+    if forced in ("0", "false", "no", "off"):
+        return False
+    manifest = project_root() / ".claude-plugin" / "plugin.json"
+    if not manifest.is_file():
+        return False
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    name = data.get("name")
+    return isinstance(name, str) and name in ai_maestro_marketplace_members()
+
+
+# --- terminal / runtime-context detection (TRDD-db169d9e R3/R4) -----------
+
+# Terminal-program signatures, matched against an ANCESTOR process's command.
+# Order matters: `tmux` is first so a multiplexer ancestor wins over a GUI
+# terminal further up the tree (the reliable send inside tmux is `tmux
+# send-keys`). The patterns match either a macOS `.app` bundle path or a bare
+# Unix executable at a path/word boundary, so they work on macOS and Linux.
+_TERMINAL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"tmux:? ?server|(?:^|/)tmux(?:\s|$)"), "tmux"),
+    (re.compile(r"iTerm\.app|(?:^|/)iTerm2?(?:\s|$)"), "iterm"),
+    (re.compile(r"WezTerm\.app|(?:^|/)wezterm(?:-gui)?(?:\s|$)"), "wezterm"),
+    (re.compile(r"(?:^|/)kitty(?:\.app|\s|/|$)"), "kitty"),
+    (re.compile(r"Ghostty\.app|(?:^|/)ghostty(?:\s|$)"), "ghostty"),
+    (re.compile(r"Alacritty\.app|(?:^|/)alacritty(?:\s|$)"), "alacritty"),
+    (re.compile(r"Hyper\.app"), "hyper"),
+    (re.compile(r"Warp\.app|WarpTerminal"), "warp"),
+    (re.compile(r"Code Helper|Visual Studio Code\.app|(?:^|/)code(?:\s|$)"), "vscode"),
+    (re.compile(r"Terminal\.app/Contents/MacOS/Terminal"), "apple-terminal"),
+)
+
+
+def _terminal_from_command(cmd: str) -> Optional[str]:
+    """Return the terminal kind a process command belongs to, or None. Pure."""
+    for pat, kind in _TERMINAL_PATTERNS:
+        if pat.search(cmd):
+            return kind
+    return None
+
+
+def parse_ps_table(text: str) -> dict[int, tuple[int, str]]:
+    """Parse `ps -axo pid=,ppid=,command=` output into `{pid: (ppid, command)}`.
+
+    Tolerates leading whitespace and a header line; skips malformed rows. The
+    command (3rd field) keeps its embedded spaces (split with maxsplit=2).
+    """
+    table: dict[int, tuple[int, str]] = {}
+    for line in text.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        table[pid] = (ppid, parts[2])
+    return table
+
+
+def process_ancestry(start_pid: int, table: dict[int, tuple[int, str]]) -> list[str]:
+    """Commands of `start_pid`'s ancestors, NEAREST first (excludes itself).
+
+    Walks parent PIDs through `table` (from `parse_ps_table`). Stops at pid <= 1
+    (kernel / launchd / init), a cycle, a missing parent, or a 64-deep cap — so
+    a corrupted snapshot can never loop forever.
+    """
+    out: list[str] = []
+    seen = {start_pid}
+    cur = start_pid
+    for _ in range(64):
+        entry = table.get(cur)
+        if entry is None:
+            break
+        ppid = entry[0]
+        if ppid <= 1 or ppid in seen:
+            break
+        parent = table.get(ppid)
+        if parent is None:
+            break
+        out.append(parent[1])
+        seen.add(ppid)
+        cur = ppid
+    return out
+
+
+def terminal_kind(*, ps_text: Optional[str] = None, pid: Optional[int] = None) -> str:
+    """Identify the terminal program hosting this process by walking the PROCESS
+    ANCESTRY to the launching terminal — NOT by inferring from `$TERM_PROGRAM` &
+    friends (those env vars are inherited into subshells, go stale, or are
+    missing, so they lie about the real host).
+
+    Walks parent PIDs from this process up toward the session's terminal emulator
+    (or multiplexer) and matches each ancestor's command against
+    `_TERMINAL_PATTERNS`. Returns one of `iterm`, `apple-terminal`, `tmux`,
+    `kitty`, `wezterm`, `vscode`, `ghostty`, `alacritty`, `hyper`, `warp`, or
+    `unknown`. The NEAREST matching ancestor wins, so a tmux pane (whose shell's
+    parent is the tmux server) resolves to `tmux` even when a GUI terminal sits
+    further up the tree.
+
+    `ps_text` / `pid` are injectable for tests (a synthetic
+    `pid ppid command`-per-line snapshot and a starting pid).
+    """
+    if ps_text is None:
+        proc = run_subprocess(
+            ["ps", "-axo", "pid=,ppid=,command="],
+            timeout=5.0,
+            capture=True,
+            detector_name="terminal_kind",
+        )
+        ps_text = proc.stdout if proc and proc.stdout else ""
+    table = parse_ps_table(ps_text)
+    start = os.getpid() if pid is None else pid
+    for cmd in process_ancestry(start, table):
+        kind = _terminal_from_command(cmd)
+        if kind:
+            return kind
+    return "unknown"
+
+
+# Env signals that a process is running INSIDE an ai-maestro agent. The explicit
+# boolean flags are the PREFERRED, stable contract — ai-maestro sets one on the
+# `claude` launch command (or `tmux new-session -e …`) so every descendant
+# (the janitor's detector subprocesses, a daemon spawned from a heartbeat)
+# inherits it. `AMP_AGENT_ID` / `AID_AUTH` are ai-maestro internals honoured as a
+# fallback so detection still works if the explicit flag is ever absent.
+_AI_MAESTRO_AGENT_FLAGS = ("AIMAESTRO_AGENT", "THIS_IS_AIMAESTRO")
+_AI_MAESTRO_AGENT_INTERNALS = ("AMP_AGENT_ID", "AID_AUTH")
+
+
+def in_ai_maestro_agent_env(env: Optional[dict] = None) -> bool:
+    """Cheap pre-check: are we running INSIDE an ai-maestro agent?
+
+    True iff an explicit ai-maestro flag is truthy (`AIMAESTRO_AGENT=1` /
+    `THIS_IS_AIMAESTRO=true`) OR an ai-maestro internal id is present
+    (`AMP_AGENT_ID` / `AID_AUTH`). This is the FAST signal (TRDD-db169d9e R4);
+    the AUTHORITATIVE resolver is a CWD match against the ai-maestro server's
+    `/api/agents` (which also yields the tmux session to send to), done by the
+    trigger scripts when this pre-check passes. Pass `env` to test.
+    """
+    e = os.environ if env is None else env
+    for name in _AI_MAESTRO_AGENT_FLAGS:
+        if (e.get(name) or "").strip().lower() in ("1", "true", "yes", "on"):
+            return True
+    return any((e.get(name) or "").strip() for name in _AI_MAESTRO_AGENT_INTERNALS)
 
 
 def file_mtime(path: Path | str) -> int:

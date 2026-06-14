@@ -1,9 +1,9 @@
 ---
 trdd-id: db169d9e-32db-414e-89d6-96c81c84cc2b
 title: Janitor portability — context-aware gating, terminal abstraction, user-level-only, no ai-maestro auto-upgrade
-column: design
+column: dev
 created: 2026-06-14T11:59:28+0200
-updated: 2026-06-14T13:18:48+0200
+updated: 2026-06-14T14:55:00+0200
 current-owner: amama
 assignee: amama
 task-type: feature
@@ -20,8 +20,43 @@ labels: [portability, context-awareness, scope, terminal, daemon, install]
 The janitor is installed at **USER level**, so it runs in EVERY project — ai-maestro
 or not. It must be CONTEXT-AWARE: ai-maestro-specific behavior auto-deactivates outside
 ai-maestro, terminal self-triggers work beyond iTerm, and it never touches the
-ai-maestro fleet's own plugin versions. Captured as a design spec; awaiting USER
-decisions (§Decisions) before implementation. NOT started.
+ai-maestro fleet's own plugin versions.
+
+**IN PROGRESS (column: dev).** The USER explicitly de-blocked implementation ("this is
+surely something you can handle yourself. why waiting for me? we are late") — so D1/D2 are
+TAKEN as their proposed defaults (below), not deferred. Phases run in order; each ≤5 files,
+verified before the next.
+
+### Decisions taken (no longer blocking)
+- **D1 — gate-OFF list (ACCEPTED, proposed defaults):** the ai-maestro-specific detectors
+  that early-return when `not project_is_ai_maestro()`: `subagent-report`,
+  `subagent-scope-drift`, `trdd-drift`, `trdd-reminder`, `report-to-trdd-drift`,
+  `task-pr-mismatch`, `stale-task`, `memory-librarian`, `memory-scope-leak`,
+  `project-map-drift`. Everything else (git hygiene, security, supply-chain, cleanup) stays
+  ON everywhere.
+- **D2 — auto-upgrade scope (ACCEPTED):** exclude every plugin that belongs to the
+  `ai-maestro-plugins` marketplace from the daemon's per-plugin `task_user_plugins_update`.
+  The janitor's OWN self-update (`task_version_update`) is unaffected.
+- **D3 — ai-maestro API (ANSWERED):** see below; `POST /api/sessions/<tmux>/command`.
+- **Detection signal (verified on disk 2026-06-14):** the `ai-maestro-plugins` marketplace
+  catalog at `~/.claude/plugins/marketplaces/ai-maestro-plugins/.claude-plugin/marketplace.json`
+  (`name: ai-maestro-plugins`, 11 members). `project_is_ai_maestro()` = the current project's
+  `.claude-plugin/plugin.json` `name` ∈ that member set (live catalog ∪ hardcoded fleet fallback).
+- **Inside-agent env flag (USER offered 2026-06-14):** ai-maestro sets an explicit flag on the
+  `claude` LAUNCH command (`AIMAESTRO_AGENT=1`, or `tmux new-session -e AIMAESTRO_AGENT=1 …`),
+  NOT via `tmux set-environment` (that doesn't touch a running process). `in_ai_maestro_agent_env()`
+  honours `AIMAESTRO_AGENT` / `THIS_IS_AIMAESTRO` (truthy) + `AMP_AGENT_ID`/`AID_AUTH` (present).
+
+### Progress
+- ✅ **Phase 1 (DONE)** — context-gate + terminal primitives in `scripts/lib/state.py`, pure +
+  tested, NO behavior change. `project_is_ai_maestro()`, `ai_maestro_marketplace_members()`,
+  `terminal_kind()` (process-ancestry walk — `ps -axo pid,ppid,command`, NEAREST terminal
+  ancestor wins; NOT env inference, per USER), `parse_ps_table()`, `process_ancestry()`,
+  `in_ai_maestro_agent_env()`. 27 tests in `tests/test_context_gate.py`, ruff clean.
+  Live-verified: this repo → `project_is_ai_maestro()=True`, `terminal_kind()=iterm`.
+- ⏳ **NEXT: Phase 2** — gate the D1 detectors on `project_is_ai_maestro()` (early-return when
+  False). Then Phase 3 (R2 daemon exclude), Phase 4 (terminal send-abstraction), Phase 5
+  (ai-maestro API send), Phase 6 (user-level-only enforcement).
 
 ## USER directive (verbatim, 2026-06-14)
 
