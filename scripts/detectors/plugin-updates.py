@@ -187,6 +187,14 @@ def main() -> int:
         plugin_name = plugin_id.split("@", 1)[0]
         if plugin_name == SELF_PLUGIN_NAME:
             continue
+        # `claude plugin list --json` keeps listing a plugin — with its install
+        # scope + projectPath — even after it's been DISABLED in that project.
+        # A disabled plugin has nothing to auto-update: `claude plugin update
+        # <id> --scope <scope>` on it returns output we mis-read as an
+        # "unexpected output" failure, nagging every heartbeat (#34). Only act
+        # on entries the CLI explicitly marks enabled.
+        if entry.get("enabled") is not True:
+            continue
         scope = str(entry.get("scope") or "")
         if scope not in ("project", "local"):
             continue

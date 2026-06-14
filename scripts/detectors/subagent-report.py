@@ -52,6 +52,48 @@ def _path_or_parent_referenced(rel: str, scan_dir: str, commits: str) -> bool:
         p = parent
 
 
+def _dir_is_gitignored(scan_dir: str, root: Path) -> bool:
+    """True iff `scan_dir` is matched by git's ignore rules.
+
+    The `_dev` scratch convention (`docs_dev/`, `scripts_dev/`, `reports*/`)
+    gitignores whole directories — so every file under them is INTENTIONALLY
+    uncommittable (RULE 0.2). Reporting per-file that such a file is "not
+    referenced in any commit" is pure noise: the file can never be committed,
+    and a note placed in the same scratch dir is itself gitignored (#32).
+    One `git check-ignore -q <dir>` per scan dir (3 calls total) classifies
+    the dir; `-q` exits 0 when ignored, 1 when not.
+    """
+    proc = state.run_subprocess(
+        ["git", "check-ignore", "-q", scan_dir],
+        cwd=root,
+        timeout=10,
+        detector_name="subagent-report",
+    )
+    return proc is not None and proc.returncode == 0
+
+
+def _recent_unreferenced(f: Path, root: Path, cutoff: int, scan_dir: str, commit_bodies: str):
+    """Return (rel, mtime) if `f` is a recent .md not yet referenced in a commit.
+
+    Factored out of main() so the gitignored-scratch path and the tracked
+    per-file path apply the SAME recency + not-referenced filter. Returns
+    None when the file is too old or already referenced (directly or via a
+    committed parent dir).
+    """
+    if not f.is_file():
+        return None
+    mtime = state.file_mtime(f)
+    if mtime == 0 or mtime < cutoff:
+        return None
+    try:
+        rel = str(f.relative_to(root))
+    except ValueError:
+        return None
+    if _path_or_parent_referenced(rel, scan_dir, commit_bodies):
+        return None
+    return rel, mtime
+
+
 def main() -> int:
     state.init_state()
 
@@ -88,45 +130,37 @@ def main() -> int:
     commit_bodies = log_proc.stdout if (log_proc is not None and log_proc.returncode == 0) else ""
 
     count = 0
+    scratch_count = 0
+    scratch_example = ""
     for d in _SCAN_DIRS:
-        if count >= _MAX_EMIT_PER_FIRE:
-            break
         full = root / d
         if not full.is_dir():
             continue
+        ignored = _dir_is_gitignored(d, root)
         for f in full.rglob("*.md"):
-            if not f.is_file():
+            hit = _recent_unreferenced(f, root, cutoff, d, commit_bodies)
+            if hit is None:
                 continue
+            rel, mtime = hit
+
+            # Gitignored _dev scratch: the file can NEVER be committed
+            # (RULE 0.2), so the per-file "not referenced in any commit" nag
+            # is un-actionable noise. Fold every such file into one daily
+            # summary instead of N per-file lines (#32).
+            if ignored:
+                scratch_count += 1
+                if not scratch_example:
+                    scratch_example = d
+                continue
+
             if count >= _MAX_EMIT_PER_FIRE:
-                break
-
-            mtime = state.file_mtime(f)
-            if mtime == 0 or mtime < cutoff:
-                continue
-            age = now - mtime
-            try:
-                rel = str(f.relative_to(root))
-            except ValueError:
                 continue
 
-            # Match the full project-relative path against recent commit
-            # messages, walking up parent directories so a commit that
-            # references a parent (e.g. a timestamped backup snapshot
-            # folder) suppresses per-file alerts for everything inside it.
-            # Walk stops before the scan dir itself, so generic mentions of
-            # 'docs_dev' don't silence real orphan reports. Full paths are
-            # matched (not basenames) — a short name like 'notes.md' would
-            # false-match commit bodies that mention 'notes' in any
-            # unrelated way.
-            if _path_or_parent_referenced(rel, d, commit_bodies):
-                continue
-
-            age_h = age // 3600
-            bucket = age // 86400
-            # `rel` comes from the project's filesystem (any user with
-            # write access to docs_dev/ or scripts_dev/ controls it).
-            # Defang `[`/`]` for the prose; keep raw `rel` in the dedup
-            # key so dedup behaviour is unaffected.
+            age_h = (now - mtime) // 3600
+            bucket = (now - mtime) // 86400
+            # `rel` comes from the project's filesystem (any user with write
+            # access to the scan dir controls it). Defang `[`/`]` for the
+            # prose; keep raw `rel` in the dedup key so dedup is unaffected.
             display_rel = state.sanitize_for_drift_line(rel)
             line = dedupe.emit_once(
                 seen,
@@ -136,6 +170,20 @@ def main() -> int:
             if line is not None:
                 print(line)
                 count += 1
+
+    # One soft heads-up per day for the whole gitignored-scratch bucket — keyed
+    # on the local date so it fires at most once/day no matter how many scratch
+    # files accumulate (the reporter saw 212 per-file nags every heartbeat).
+    if scratch_count > 0:
+        summary = dedupe.emit_once(
+            seen,
+            f"scratch-summary@d{now // 86400}",
+            f"[subagent-report] {scratch_count} recent report file(s) under gitignored scratch "
+            f"(e.g. {scratch_example}/) — intentionally uncommitted (RULE 0.2); act on any pending "
+            "findings if needed, but no commit is required.",
+        )
+        if summary is not None:
+            print(summary)
 
     state.rotate_log_if_big("subagent-report")
     return 0
