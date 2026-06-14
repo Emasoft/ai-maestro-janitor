@@ -1,0 +1,46 @@
+---
+name: reference_cpv_dotclaude_gitignore_fp
+description: "CPV --strict blocks the janitor publish on '.gitignore missing coverage for .claude/' — why it can't be satisfied, and that it's a filed false positive, not something to fix in our gitignore"
+ocd: 2026-06-14
+lmd: 2026-06-14
+metadata:
+  node_type: memory
+  type: project
+  tier: component
+  functionality: publish
+---
+
+CPV `--strict` emits **`[MINOR] .gitignore missing coverage for: Claude Code cache
+directory (.claude/)`** and blocks the janitor publish (exit ≥2). This is a **filed
+false positive — `claude-plugins-validation#120`** — do NOT try to "fix" it in our
+`.gitignore`; it is **mathematically unsatisfiable** alongside our memory design.
+
+**Root cause (verified in CPV source):** `validate_plugin.py:3970`
+`_gitignore_covers_category` decides coverage by running `git check-ignore -q -- .claude`
+(covered ⇔ exit 0). `git check-ignore .claude` only exits 0 if the **`.claude` directory
+entry itself** is ignored. But we DELIBERATELY track `<repo>/.claude/project/memory/**`
+(the PROJECT memory scope), which forces the deep gitignore form `.claude/**` +
+`!.claude/project/memory/**` — and `git` **cannot re-include a path under an excluded
+parent** (`man gitignore`). So `git check-ignore .claude` necessarily exits 1 → CPV
+flags it. No gitignore both (a) makes `git check-ignore .claude` exit 0 AND (b) keeps the
+memory dir trackable; the two are mutually exclusive.
+
+**How to apply:** when a janitor publish fails CPV `--strict` with ONLY this `.claude/`
+MINOR, the plugin is otherwise clean — the publish **auto-unblocks when CPV ships the #120
+fix** (the pipeline fetches CPV fresh via `uvx --from git+…`). The alternative (the USER's
+call) is to move PROJECT memory out from under `.claude/` to dodge the check entirely. Do
+NOT add a bare `.claude/` gitignore line (it prunes the dir and silently un-tracks the
+memory corpus). See [[project_janitor_publish_blocked_cpv_fps]] for the broader CPV
+publish-gate FP history and [[memory-system]] for why memory lives under `.claude/`.
+
+## Notes and lessons learned
+[^1]: [ocd:2026-06-14 lmd:2026-06-14] the CPV publish gate has TWO separate skill-reference
+  checks with DIFFERENT fence handling: `validate_skill.py:680` (`validate_supporting_files`)
+  regex-flags ANY non-resolving `[text](path)` markdown link in SKILL.md with **no fence or
+  placeholder exemption** (a `[architecture](architecture.md)` example inside a ```` ```markdown ````
+  template fence still trips it); the comprehensive validator's "Broken file reference" check
+  is the lenient one that DOES strip fences and honor `<path>`/`{path}`/`example-` placeholders.
+  Lesson: to clear a `validate_skill.py` "Referenced file not found", the `[](…)` pattern must
+  not appear at all unless it resolves — describe the format in prose, keep literal paths inside
+  fenced **bash** (stripped). Don't trust the "fenced content is stripped" hint; it's only one
+  of the two checks.

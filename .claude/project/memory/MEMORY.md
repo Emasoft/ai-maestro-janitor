@@ -17,6 +17,7 @@ ONLY one that leaves the machine — it carries NO machine-private data (the
 - [memgrep links --to/--from semantics](reference_memgrep_links_to_from_semantics.md) — `--to NOTE` = its OUT-links, `--from NOTE` = its BACKLINKS (intuition inverts them); `fm.KEY` matches any depth; `--where` is main-grep-only.
 - [macOS `security` keychain gotchas](reference_macos_security_keychain_gotchas.md) — a secret stored via `security` truncates at 128 bytes (stdin getpass cap → put value on argv) or returns HEX for non-printable/unicode (→ base64-wrap).
 - [OAuth token CF-1010 / missing User-Agent](reference_oauth_token_cloudflare_1010_useragent.md) — rotator can't mint/renew a slot; token POST dies with HTTP 403 "error code 1010" (Cloudflare). The urllib POST sent NO User-Agent → add `User-Agent: claude-account-rotator`.
+- [CPV `.claude/` gitignore FP blocks publish](reference_cpv_dotclaude_gitignore_fp.md) — CPV `--strict` flags "`.gitignore` missing coverage for `.claude/`" because `git check-ignore .claude` can't pass while we track `.claude/project/memory/`. Filed CPV #120 (unsatisfiable, not our bug); publish auto-unblocks on the CPV fix.
 
 ## Project history & coordination
 
