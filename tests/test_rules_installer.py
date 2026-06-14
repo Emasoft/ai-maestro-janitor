@@ -73,6 +73,37 @@ def test_overwrite_on_size_change(tmp_path, monkeypatch):
     assert str(dst) in copied
 
 
+def test_user_scope_wins_no_project_copy(tmp_path, monkeypatch):
+    """When the plugin is installed at BOTH user and project scope, the rule goes
+    ONLY to the user scope — no redundant project-local copy (issue #36). User-
+    scope rules already load for every project, so a project copy is pure noise."""
+    home = tmp_path / "home"
+    project = tmp_path / "proj"
+    user_claude = home / ".claude"
+    user_claude.mkdir(parents=True)
+    (user_claude / "settings.json").write_text(
+        '{"enabledPlugins":["ai-maestro-janitor@mp"]}', encoding="utf-8"
+    )
+    proj_claude = project / ".claude"
+    proj_claude.mkdir(parents=True)
+    (proj_claude / "settings.json").write_text(
+        '{"enabledPlugins":["ai-maestro-janitor@mp"]}', encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "RULE BODY\n")
+    copied = rules_installer.install_rules(plugin)
+
+    user_dst = user_claude / "rules" / _DST_NAME
+    proj_dst = proj_claude / "rules" / _DST_NAME
+    assert user_dst.is_file(), "rule must be installed at user scope"
+    assert not proj_dst.exists(), "no redundant project-local copy (user-scope wins)"
+    assert str(user_dst) in copied
+    assert str(proj_dst) not in copied
+
+
 def test_atomic_write_leaves_no_temp_residue(tmp_path, monkeypatch):
     """The atomic copy (tmp + os.replace) leaves no stray .tmp files behind."""
     dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")

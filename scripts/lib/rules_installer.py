@@ -123,6 +123,17 @@ def install_rules(plugin_root: Path) -> list[str]:
     if not scopes:
         return []
 
+    # USER-SCOPE WINS (issue #36). Claude Code loads `~/.claude/rules/*` for
+    # EVERY project, so a user-scope rule already applies everywhere. A
+    # project-local copy is therefore a REDUNDANT mirror that adds nothing AND
+    # sits untracked in the project tree, tripping the dirty-tree detector on
+    # every heartbeat. When the plugin is user-installed (the janitor always is),
+    # install ONLY to the user scope. Fall back to the project scope solely when
+    # the plugin is NOT at user scope (a project-only install, where the local
+    # copy is the only way the rule reaches Claude).
+    if "user" in scopes:
+        scopes = ["user"]
+
     # Deduplicate target dirs: local + project both resolve to the
     # same `<project>/.claude/rules/` path, so a plugin installed in
     # both scopes would otherwise be processed twice. dict-by-path
