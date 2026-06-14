@@ -179,8 +179,18 @@ def attempt_auto_update(log_writer: Callable[[str], None],
         for scope in scopes:
             targets.append(base_cmd + ["--scope", scope])
     else:
-        targets.append(base_cmd)
-        log_writer(f"auto-update: {' '.join(base_cmd)} (no scope detected)")
+        # NEVER run a scope-less `claude plugin update`. Without --scope the CLI
+        # INFERS the scope, which can silently MIGRATE the plugin between scopes
+        # (e.g. local→user) — the exact accident the scope invariant forbids. If
+        # the install scope can't be detected, SKIP the self-update (leave
+        # `targets` empty → the `not any_success` guard below returns False)
+        # rather than guess; the user updates manually with the exact --scope.
+        log_writer(
+            f"auto-update: could not detect any install scope for "
+            f"{PLUGIN_NAME}@{MARKETPLACE_NAME} — SKIPPING self-update "
+            "(refusing a scope-less `claude plugin update`; update manually "
+            "with the exact --scope it was installed at)."
+        )
 
     any_success = False
     for cmd in targets:

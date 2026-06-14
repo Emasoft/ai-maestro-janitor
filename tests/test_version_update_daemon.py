@@ -185,3 +185,53 @@ def test_do_auto_update_silent_when_attempt_returns_false(
     updated, latest = vu.do_auto_update_if_needed(vdir, lambda _m: None)
     assert updated is False
     assert latest == "0.5.0"
+
+
+class _Proc:
+    def __init__(self, rc: int, out: str = "") -> None:
+        self.returncode = rc
+        self.stdout = out
+
+
+def test_auto_update_skips_when_no_scope_detected(
+    env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scope invariant: when no install scope is detected, the self-update is
+    SKIPPED (returns False) and NO scope-less `claude plugin update` is run — the
+    marketplace refresh is the only subprocess."""
+    vu = _vu()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(vu.shutil, "which", lambda _x: "/usr/bin/claude")
+    monkeypatch.setattr(vu.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), _Proc(0))[1])
+    monkeypatch.setattr(vu, "detect_install_scopes", lambda: [])
+    logs: list[str] = []
+
+    result = vu.attempt_auto_update(logs.append)
+
+    assert result is False
+    update_calls = [c for c in calls if c[:3] == ["claude", "plugin", "update"]]
+    assert update_calls == [], f"a scope-less plugin update was attempted: {update_calls}"
+    assert any("SKIPPING self-update" in m for m in logs)
+
+
+def test_auto_update_passes_exact_scope_per_detected_scope(
+    env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One `claude plugin update … --scope <s>` per detected scope, never scope-less."""
+    vu = _vu()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(vu.shutil, "which", lambda _x: "/usr/bin/claude")
+    monkeypatch.setattr(
+        vu.subprocess, "run",
+        lambda cmd, **kw: (calls.append(cmd), _Proc(0, "updated from 0.1.0 to 0.2.0"))[1],
+    )
+    monkeypatch.setattr(vu, "detect_install_scopes", lambda: ["user", "local"])
+
+    result = vu.attempt_auto_update(lambda _m: None)
+
+    assert result is True
+    update_calls = [c for c in calls if c[:3] == ["claude", "plugin", "update"]]
+    assert len(update_calls) == 2
+    assert update_calls[0][-2:] == ["--scope", "user"]
+    assert update_calls[1][-2:] == ["--scope", "local"]
+    assert all("--scope" in c for c in update_calls)
