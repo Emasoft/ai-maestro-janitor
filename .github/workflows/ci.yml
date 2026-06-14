@@ -18,6 +18,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -47,6 +48,7 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -60,17 +62,26 @@ jobs:
 
       - name: Validate plugin (strict)
         run: |
-          set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict
-          exit_code=$?
-          set -e
-          if [ $exit_code -eq 0 ]; then
-            echo "Validation passed"
-            exit 0
-          else
-            echo "::error::Validation failed (exit code $exit_code)"
-            exit $exit_code
+          # CPV remote validation occasionally HANGS on a flaky remote/network
+          # call (observed on the v0.8.5 CI run: the step ran 10min+ with no
+          # progress while publish.py's identical local CPV --strict had already
+          # passed). Bound each attempt with `timeout` and retry ONCE on a hang
+          # (exit 124) so a transient hang self-heals; a real validation failure
+          # (any other non-zero) fails fast without a pointless retry. The
+          # job-level timeout-minutes is the hard backstop.
+          run_cpv() {
+            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+              --with pyyaml cpv-remote-validate plugin . --strict
+          }
+          run_cpv && { echo "Validation passed"; exit 0; }
+          rc=$?
+          if [ "$rc" -eq 124 ]; then
+            echo "::warning::CPV validation hung (timed out at 300s) — retrying once"
+            run_cpv && { echo "Validation passed on retry"; exit 0; }
+            rc=$?
           fi
+          echo "::error::Validation failed (exit code $rc)"
+          exit "$rc"
 
   # Exercise the RELEASE pipeline's build+stage path on EVERY push — the
   # recurrence guard for the v0.7.0 incident, where the memgrep-release
@@ -111,6 +122,7 @@ jobs:
   smoke:
     name: Smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
