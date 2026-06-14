@@ -21,7 +21,7 @@ updated: 2026-06-13T16:08:43+0200
 > "### NEXT ACTION — publish BLOCKED on CPV-FP MINORs / DECISION PENDING" note below is
 > **SUPERSEDED and RESOLVED** — the fleet publish policy is now CPV-only + devitalize-or-remove
 > (never exempt/suppress, per PRRD S5.1), and v0.7.5 ships with CPV `--strict` passing. No open action.
-
+>
 > Captured just before a forced /compact so the decisions can't be garbled by the
 > lossy summary. These are DECIDED with the user (Emasoft) across a long design
 > dialogue + a cross-check with the CPV-side Claude. Do NOT re-litigate.

@@ -96,8 +96,9 @@ ls "$PROJECT_MEM"/*.md >/dev/null 2>&1 && echo "wikimem already exists — skip 
 
 If empty, create two files with the **Write tool** (real content, not echo).
 
-`$PROJECT_MEM/architecture.md` — the project's root architecture HUB. Fill the
-placeholders from what you actually know about THIS project (its name, what it is,
+The project's root **architecture HUB** page (written to `$PROJECT_MEM/` — its
+`name:` is `architecture`; the staging command in Step 4 shows the exact path).
+Fill the placeholders from what you actually know about THIS project (its name, what it is,
 its top-level parts); leave the parts map sparse — it grows as pages are added.
 Set `ocd`/`lmd` to today (`date +%F`), and set `globs:` to the source roots the
 project owns:
@@ -139,9 +140,10 @@ page; the canonical loaded index):
 
 The git-tracked, cross-dev memory wiki. Recall surfaces these pages by symptom;
 the protocol lives in `~/.claude/rules/markdown-memory-recall.md` (run
-`/janitor-memory-recall`). One line per page below.
+`/janitor-memory-recall`). One line per page — each a markdown link from the page
+title to its file. Seed it with the architecture hub entry:
 
-- [architecture](architecture.md) — how <PROJECT> works: overview + the parts map.
+- architecture — how <PROJECT> works: overview + the parts map.
 ```
 
 ## Step 4 — index it (optional) + commit guidance
@@ -189,8 +191,8 @@ page bodies back into the conversation.
 <example>
 User: set up memory for this project
 → create .claude/project/memory/, add the `!.claude/project/memory/**` gitignore
-  exception (the repo's .gitignore had `.claude/**`), seed architecture.md +
-  MEMORY.md, and tell the agent recall-first / write-after.
+  exception (the repo's .gitignore had `.claude/**`), seed the architecture hub +
+  MEMORY index, and tell the agent recall-first / write-after.
 </example>
 
 <example>
@@ -217,8 +219,8 @@ pages beyond the starter hub — that is the day-to-day job of
 
 - `~/.claude/rules/markdown-memory-recall.md` — THE PROACTIVE-USE CONTRACT + the
   recall law (index by the question) + the three scopes.
-- [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
-  — the wiki data model (tiers, hub/aspect/component, the bidirectional link law,
-  page anatomy) the seeded hub follows.
+- The wiki data model the seeded hub follows (tiers, hub/aspect/component, the
+  bidirectional link law, page anatomy) — see the `/janitor-memory-write` skill,
+  which owns and fully documents the model.
 - `/janitor-memory-write` (MEMORIZE) · `/janitor-memory-update` (UPDATE) ·
   `/janitor-memory-recall` (RECALL) — the day-to-day legs this bootstrap enables.
