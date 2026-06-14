@@ -37,6 +37,10 @@ def _run(project: Path, session: str = "testsess") -> str:
     env = dict(os.environ)
     env["CLAUDE_PROJECT_DIR"] = str(project)
     env["CLAUDE_SESSION_ID"] = session
+    # This test exercises the report→TRDD LOGIC, not the ai-maestro context gate
+    # (TRDD-db169d9e R1) — the temp project isn't an ai-maestro-plugins member,
+    # so force the gate ON. The gate is covered by test_context_gate_detectors.py.
+    env["JANITOR_FORCE_AI_MAESTRO"] = "1"
     env.pop("CLAUDE_PLUGIN_OPTION_REPORT_TO_TRDD_INTERVAL", None)
     env.pop("CLAUDE_PLUGIN_OPTION_TRDD_PATH", None)
     res = subprocess.run(

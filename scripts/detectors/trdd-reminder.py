@@ -149,6 +149,11 @@ def _session_key() -> str:
 
 def main() -> int:
     state.init_state()
+    # Context gate (TRDD-db169d9e R1): TRDD reminders are an ai-maestro/Emasoft
+    # framework convention — silent in projects that aren't ai-maestro-plugins
+    # members. (Override with JANITOR_FORCE_AI_MAESTRO=1.)
+    if not state.project_is_ai_maestro():
+        return 0
 
     interval = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL"), 14400)
 

@@ -82,6 +82,13 @@ def _trdd_corpus(tasks_dir: Path) -> str:
 
 def main() -> int:
     state.init_state()
+    # Context gate (TRDD-db169d9e R1): the "decisions become TRDDs" rule is an
+    # ai-maestro/Emasoft framework convention, and this is the one TRDD detector
+    # that triggers on a GENERIC artifact (reports/) — so without this gate it
+    # would nag in vanilla projects that have a reports/ dir but no TRDDs. Stay
+    # silent outside ai-maestro. (Override with JANITOR_FORCE_AI_MAESTRO=1.)
+    if not state.project_is_ai_maestro():
+        return 0
     interval = state.coerce_int(
         os.environ.get("CLAUDE_PLUGIN_OPTION_REPORT_TO_TRDD_INTERVAL"), 21600
     )

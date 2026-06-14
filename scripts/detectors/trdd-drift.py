@@ -133,6 +133,12 @@ def _last_touched_epoch(path: Path, project_root: Path) -> int:
 
 def main() -> int:
     state.init_state()
+    # Context gate (TRDD-db169d9e R1): TRDD enforcement is an ai-maestro/Emasoft
+    # framework convention. The janitor runs at USER scope in EVERY project, so
+    # stay silent in projects that aren't ai-maestro-plugins members. (Override
+    # with JANITOR_FORCE_AI_MAESTRO=1 to use TRDDs in a non-ai-maestro project.)
+    if not state.project_is_ai_maestro():
+        return 0
 
     stale_days = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_STALENESS_DAYS"), 14)
     seen = state.state_dir() / "trdd-drift-seen.txt"

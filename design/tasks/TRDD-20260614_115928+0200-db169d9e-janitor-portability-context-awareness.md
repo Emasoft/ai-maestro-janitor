@@ -3,7 +3,7 @@ trdd-id: db169d9e-32db-414e-89d6-96c81c84cc2b
 title: Janitor portability — context-aware gating, terminal abstraction, user-level-only, no ai-maestro auto-upgrade
 column: dev
 created: 2026-06-14T11:59:28+0200
-updated: 2026-06-14T14:55:00+0200
+updated: 2026-06-14T15:20:00+0200
 current-owner: amama
 assignee: amama
 task-type: feature
@@ -28,12 +28,26 @@ TAKEN as their proposed defaults (below), not deferred. Phases run in order; eac
 verified before the next.
 
 ### Decisions taken (no longer blocking)
-- **D1 — gate-OFF list (ACCEPTED, proposed defaults):** the ai-maestro-specific detectors
-  that early-return when `not project_is_ai_maestro()`: `subagent-report`,
-  `subagent-scope-drift`, `trdd-drift`, `trdd-reminder`, `report-to-trdd-drift`,
-  `task-pr-mismatch`, `stale-task`, `memory-librarian`, `memory-scope-leak`,
-  `project-map-drift`. Everything else (git hygiene, security, supply-chain, cleanup) stays
-  ON everywhere.
+- **D1 — gate-OFF list (REFINED after reading each detector's trigger logic; the original
+  10-item proposal was WRONG for 7 of them).** Only detectors that enforce the **TRDD
+  framework** (an Emasoft/ai-maestro-only artifact) AND would misfire in a vanilla project
+  are gated: **`trdd-drift`, `trdd-reminder`, `report-to-trdd-drift`**. The other 7 from the
+  original proposal are deliberately KEPT UNIVERSAL because gating them would be redundant or
+  HARMFUL:
+  - `memory-librarian`, `memory-scope-leak` — the wiki-memory system is a GENERAL janitor
+    feature meant to work in ANY project that adopts it; both already self-gate on the
+    presence of a memory corpus. Gating them on ai-maestro membership would DISABLE memory
+    maintenance + the project-memory privacy-leak check for non-ai-maestro adopters (a
+    regression).
+  - `project-map-drift` — explicitly opt-in (`repomap-opt-in.flag`, default OFF) general
+    feature; gating would break the repomap for non-ai-maestro adopters.
+  - `task-pr-mismatch`, `stale-task` — operate on the NATIVE Claude Code task list (a vanilla
+    CC feature); generically useful. Gating = feature loss for vanilla users.
+  - `subagent-scope-drift`, `subagent-report` — general Claude Code subagent/agent-report
+    hygiene; self-gate on their artifacts (`.claude/agents/`, `docs_dev/` reports) so they're
+    quiet in vanilla projects anyway.
+  Everything else (git hygiene, security, supply-chain, cleanup) was never in scope — stays ON
+  everywhere. Override per-project with `JANITOR_FORCE_AI_MAESTRO=1`/`0`.
 - **D2 — auto-upgrade scope (ACCEPTED):** exclude every plugin that belongs to the
   `ai-maestro-plugins` marketplace from the daemon's per-plugin `task_user_plugins_update`.
   The janitor's OWN self-update (`task_version_update`) is unaffected.
@@ -54,9 +68,15 @@ verified before the next.
   ancestor wins; NOT env inference, per USER), `parse_ps_table()`, `process_ancestry()`,
   `in_ai_maestro_agent_env()`. 27 tests in `tests/test_context_gate.py`, ruff clean.
   Live-verified: this repo → `project_is_ai_maestro()=True`, `terminal_kind()=iterm`.
-- ⏳ **NEXT: Phase 2** — gate the D1 detectors on `project_is_ai_maestro()` (early-return when
-  False). Then Phase 3 (R2 daemon exclude), Phase 4 (terminal send-abstraction), Phase 5
-  (ai-maestro API send), Phase 6 (user-level-only enforcement).
+- ✅ **Phase 2 (DONE)** — gated `trdd-drift`, `trdd-reminder`, `report-to-trdd-drift` on
+  `project_is_ai_maestro()` (early-return when False). 3 new gate tests
+  (`tests/test_context_gate_detectors.py`, positive+negative controls); fixed the 2 existing
+  detector test harnesses to force the gate ON (they test detector logic, not the gate). 50
+  tests green, ruff clean.
+- ⏳ **NEXT: Phase 3** — R2: exclude `ai-maestro-plugins` marketplace members from the
+  daemon's per-plugin `task_user_plugins_update`. Then Phase 4 (terminal send-abstraction onto
+  `terminal_kind()`), Phase 5 (ai-maestro API send when `in_ai_maestro_agent_env()`), Phase 6
+  (user-level-only enforcement + arm refusal).
 
 ## USER directive (verbatim, 2026-06-14)
 

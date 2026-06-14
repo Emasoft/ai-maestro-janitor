@@ -63,6 +63,11 @@ def _run(detector: Path, project: Path, session: str = "sess") -> str:
     env = dict(os.environ)
     env["CLAUDE_PROJECT_DIR"] = str(project)
     env["CLAUDE_SESSION_ID"] = session
+    # These tests exercise the drift/reminder LOGIC, not the ai-maestro context
+    # gate (TRDD-db169d9e R1). The temp project isn't an ai-maestro-plugins
+    # member, so force the gate ON; the gate itself is covered by
+    # test_context_gate_detectors.py.
+    env["JANITOR_FORCE_AI_MAESTRO"] = "1"
     # Default staleness (14d) is fine — files are aged 100d. Clear knobs so a
     # host env value can't change the threshold under the test.
     for k in (
