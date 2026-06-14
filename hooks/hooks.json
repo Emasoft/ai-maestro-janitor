@@ -56,6 +56,11 @@
             "type": "command",
             "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop.py",
             "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-stop-token-meter.py",
+            "timeout": 3
           }
         ]
       }

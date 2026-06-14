@@ -119,7 +119,7 @@ metadata consumed by the scanner detectors. Naming: `<domain>_patterns.py` (e.g.
 `cloud_credential_patterns`, `prompt_injection_patterns`, `npm_lifecycle_patterns`,
 `k8s_admission_patterns`, …). **Don't enumerate — grep by domain when needed.**
 
-**Hooks (`scripts/hooks/`, 12)** — `on-session-start` (installs rules + ensures
+**Hooks (`scripts/hooks/`, 15)** — `on-session-start` (installs rules + ensures
 daemon), `on-session-start-trdd-state`, `on-prompt-submit`, `on-stop`,
 `on-stop-failure`, `post-edit-safety`, `post-mcp-response-sanitizer`,
 `pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage` (OPT-IN
@@ -128,7 +128,10 @@ PreToolUse → injects live context % on every tool call, suggests
 `resume-after-compact.flag` so the next heartbeat emits `[janitor-resume]
 …continue TRDD-xxxx…`; closes the watchdog loop so a compact doesn't stall an
 unattended session — TRDD-31095269), `on-prompt-submit-user-mem` (UserPromptSubmit
-→ the PRIVATE user-memory subsystem, TRDD-4334aad0). The context-watchdog trio
+→ the PRIVATE user-memory subsystem, TRDD-4334aad0), `on-stop-token-meter` (Stop
+→ logs each heartbeat turn's token cost to `token-meter.jsonl` for
+`/janitor-token-report`; separate from the survival-critical on-stop hooks so a
+meter bug can't break resume — TRDD-a4e41e89). The context-watchdog trio
 (pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
 skill + `scripts/compact_trigger.py`) is OPT-IN via
 `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`.
