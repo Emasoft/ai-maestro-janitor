@@ -3,7 +3,7 @@ trdd-id: a4e41e89-e995-4309-bd15-8e247a34b960
 title: Heartbeat token meter + push automation into scripts to minimize per-fire agent tokens
 column: dev
 created: 2026-06-14T19:42:55+0200
-updated: 2026-06-14T19:42:55+0200
+updated: 2026-06-15T12:40:17+0200
 current-owner: ai-maestro-janitor
 task-type: feature
 priority: 2
@@ -17,7 +17,7 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/23"]
 
 # Heartbeat token meter + push automation into scripts to minimize per-fire agent tokens
 
-## ⏵ STATE — READ FIRST
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-15
 
 USER directive (2026-06-14): keep the **5-min** heartbeat; **automate every
 possible procedure** so that even when an agent is required, scripts do the
@@ -29,11 +29,35 @@ are visible).
 
 Two parts, built in order (you can't optimize what you can't measure):
 
-- **Phase 1 — THE METER (this TRDD's first deliverable).** Per-heartbeat token
-  accounting + a `/janitor-token-report` command. STATUS: in progress.
-- **Phase 2+ — AUTOMATION.** Per-detector heuristic preprocessing to cut the
-  agent's read/write per fire, each change verified against the meter. STATUS:
-  planned (own follow-up TRDDs per detector cluster).
+- **Phase 1 — THE METER. ✅ COMPLETE + SHIPPED + LIVE-VERIFIED.** Per-heartbeat
+  token accounting (`scripts/lib/token_meter.py`), a separate Stop hook
+  (`scripts/hooks/on-stop-token-meter.py`, isolated from the survival-critical
+  on-stop hooks), and the `/janitor-token-report` command
+  (`scripts/token_report.py`). Shipped across **v0.8.8** (build) → **v0.8.9**
+  (the load-bearing fix: tool_result messages are `type:user`, so the turn-
+  boundary walk-back must step over them via `_is_tool_result`, else every
+  multi-step heartbeat read as a non-heartbeat with zero usage) → **v0.8.10**
+  (the real meter, after live-reload caught the empty log). Tests: 10 in
+  `tests/test_token_meter.py` (incl. `test_multistep_heartbeat_turn_with_tool_results`).
+  **Measured live (2026-06-14): a SILENT heartbeat = ~162 output / ~160 input
+  tokens** (the ~870k `cache_read` is the cheap 0.1× context re-read).
+- **Phase 2+ — AUTOMATION. ⏸ DECISION PENDING (measure-first says: NOT
+  WARRANTED).** The meter's own data shows the detectors are ALREADY scripts —
+  a silent fire is just the dispatcher Bash call. **The cost driver is the
+  AGENT'S RESPONSE LENGTH, not detection** (the sampled spikes were long status
+  messages, 3000–5400 output tokens; the spike alarm correctly flagged a 5394-
+  token one). So "push the detectors into scripts to save tokens" yields ≈0 —
+  they're already scripts. Two optimizations were explored and REJECTED on the
+  data: (a) auto-regenerating the CLAUDE.md project map in the heartbeat would
+  INCREASE cost (CLAUDE.md is in the cached prompt prefix → a mid-session
+  rewrite busts the whole context cache; this is why `project-map-drift` nudges
+  instead of writing); (b) background agents are NOT free (`claude --bg` bills
+  the same quota — only `--exec`/the daemon invoke no model). The only real
+  lever left is behavioral (keep heartbeat replies terse/silent), not a code
+  change. **NEXT ACTION (user's call):** either CLOSE Phase 2 as "not warranted
+  on the data" (recommended — `column: dev` → `complete`) OR build the behavioral
+  terse-reply guardrail. No autonomous code change pending; the meter is the
+  lasting win. See LOCAL memory `reference_heartbeat_token_baseline.md`.
 
 ## Verified feasibility (2026-06-14)
 
