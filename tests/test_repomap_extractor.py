@@ -101,3 +101,29 @@ def test_self_extraction_on_real_file():
     fm = extract_python(_PROJECT_ROOT / "scripts" / "lib" / "state.py")
     assert fm.role  # non-empty (comment-block fallback works on a real file)
     assert any(s.name == "atomic_write" for s in fm.symbols)
+
+
+def test_doc_first_line_balances_dangling_backtick(tmp_path):
+    """A docstring whose first line wraps mid-`code` must NOT surface an
+    unbalanced backtick — that is invalid markdown and trips pymarkdown MD038
+    in the generated CLAUDE.md map. The dangling fragment is dropped; earlier
+    balanced spans are preserved."""
+    body = (
+        "def f():\n"
+        '    """True iff `x` is a `<name>@<marketplace>` id from `claude plugin\n'
+        '    marketplace list` output."""\n'
+        "    return True\n"
+    )
+    fm = extract_python(_write(tmp_path, body))
+    doc = next(s for s in fm.symbols).doc
+    assert doc.count("`") % 2 == 0                 # balanced
+    assert not doc.rstrip().endswith("`")          # no dangling open backtick
+    assert "claude plugin" not in doc              # dangling fragment dropped
+    assert "`<name>@<marketplace>`" in doc         # earlier balanced spans kept
+
+
+def test_doc_first_line_balanced_is_unchanged(tmp_path):
+    """A first line with balanced backticks passes through verbatim."""
+    body = 'def g():\n    """Returns `x` and `y`."""\n    return 1\n'
+    fm = extract_python(_write(tmp_path, body))
+    assert next(s for s in fm.symbols).doc == "Returns `x` and `y`."

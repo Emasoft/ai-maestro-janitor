@@ -53,13 +53,29 @@ class FileMap:
     symbols: list[Symbol] = field(default_factory=list)
 
 
+def _balance_backticks(s: str) -> str:
+    """Drop a dangling, unclosed inline-code fragment.
+
+    A docstring's first line can end mid-code-span when the source wraps a long
+    `` `code` `` across lines, e.g. ``...from `claude plugin`` (the closing
+    backtick lives on line 2). Surfacing that first line verbatim leaves an
+    ODD number of backticks → invalid markdown that mis-renders AND trips
+    pymarkdown MD038 (spaces-in-code-span) in the generated CLAUDE.md map. When
+    the count is odd, cut back to just before the last (unmatched-opening)
+    backtick and trim trailing separators, so the map line is always valid.
+    """
+    if s.count("`") % 2 == 0:
+        return s
+    return s[: s.rfind("`")].rstrip(" \t,;:.—-")
+
+
 def _first_line(text: Optional[str]) -> str:
     if not text:
         return ""
     for line in text.splitlines():
         s = line.strip()
         if s:
-            return s
+            return _balance_backticks(s)
     return ""
 
 

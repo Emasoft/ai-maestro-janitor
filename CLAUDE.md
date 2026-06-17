@@ -175,7 +175,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=44bd2012d07f digest=168a2df8509f generated=2026-06-17T19:34:37+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8c53ebca2aeb digest=30c1aa42acce generated=2026-06-17T19:41:22+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -591,7 +591,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · is_self_scan_target() -> bool — True iff the current `CLAUDE_PROJECT_DIR` is the janitor's own repo.
   · ai_maestro_marketplace_members() -> frozenset[str] — Return every plugin name that belongs to the `ai-maestro-plugins` marketplace.
   · project_is_ai_maestro() -> bool — True iff the CURRENT project is a plugin of the `ai-maestro-plugins` marketplace.
-  · is_ai_maestro_plugin_id(plugin_id) -> bool — True iff `plugin_id` (a `<name>@<marketplace>` id from `claude plugin
+  · is_ai_maestro_plugin_id(plugin_id) -> bool — True iff `plugin_id` (a `<name>@<marketplace>` id from
   · parse_ps_table(text) -> dict[int, tuple[int, str]] — Parse `ps -axo pid=,ppid=,command=` output into `{pid: (ppid, command)}`.
   · process_ancestry(start_pid, table) -> list[str] — Commands of `start_pid`'s ancestors, NEAREST first (excludes itself).
   · terminal_kind(*, ps_text, pid) -> str — Identify the terminal program hosting this process by walking the PROCESS
