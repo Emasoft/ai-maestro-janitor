@@ -3,7 +3,7 @@ trdd-id: 54b25d7e-ba33-49e5-b7e5-add0a54f0c8c
 title: Wikimem editor — librarian that aggregates, splits to overview+in-depth, and harmonizes like a Wikipedia editor
 column: design
 created: 2026-06-17T02:35:58+0200
-updated: 2026-06-17T02:35:58+0200
+updated: 2026-06-17T19:27:26+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -130,6 +130,69 @@ discovery/mechanics), emits decisions, and the scripts execute them.
   with the WHY (the memory correction protocol).
 - This must stay token-frugal (Phase-1 token-meter mindset): the heavy pass is
   RARE and the agent only sees the pre-digested candidate bundle.
+
+## USER DETAILED SPEC (2026-06-17) — the three interventions (authoritative)
+
+Core truth: this is **hardly automatable — the AGENT must actually READ the
+wikimem files to decide merge/split; no script can.** Scripts only PREPARE
+(narrow candidates) and VERIFY (post-condition invariants). Three distinct
+interventions, each on its own GLOBAL configurable cadence (ALL memory settings
+are GLOBAL, not per-repo; every cadence has a get/set command; bare `set` reverts
+to default).
+
+### A. MERGE / consolidation (incremental, agent-read) — default 2–3×/day
+- INCREMENTAL: read only the MOST RECENT entries.
+- Agent uses **memgrep** to search those entries' keywords/terms across the other
+  wikimem files → narrows the candidate pool to a MINIMAL set (script-cheap).
+- Agent then READS each candidate one-by-one to confirm it ACTUALLY shares the
+  same subject/theme AND is the SAME TYPE (both expand-type OR both reduce-type).
+  Merge ONLY when both hold.
+- Scripts CANNOT merge but CAN VERIFY: merged file contains ALL memories+notes
+  from both sources, note numbers renumbered correctly, metadata preserved, TOC
+  updated, formatting unbroken.
+- Agent does the actual merge: read 2 sources → write output, update
+  intro/definitions/TOC, renumber.
+- Commands: `/janitor-memory-consolidation-frequency-set [N]` / `…-get`
+  (N = times/day; bare set → 2–3/day default).
+
+### B. SPLIT (size-driven, RECURSIVE) — default 4–5×/day
+- Decision is SIZE-ONLY: a max wikimem size; over it → split.
+- An **opus agent** splits the original into sub-category wikimems; the original
+  is replaced by an OVERVIEW page = concise summary of each linked sub-category +
+  very FEW notes (notes live in the specialized sub-pages).
+- RECURSIVE (Wikipedia-style): if a sub-category file is still too big, split it
+  again (+ its own overview), recursively, until NO file exceeds the limit.
+- NEVER lose information: all memories/notes/metadata preserved, only
+  reordered/renumbered; frontmatter REWRITTEN to match each file's content.
+- TYPE-PRESERVING: expand-type splits into expand-type pages, reduce-type into
+  reduce-type. Original nature preserved.
+- Cheaper + partially automatable → own frequency command (default 4–5/day), global.
+
+### C. CONFLICT RESOLUTION + fact verification (very expensive) — default 0.5×/day (every 48h)
+- Needs a fleet of opus agents — even an **ultracode workflow behind the scenes** —
+  with access to ALL repos (user-level memories) and each single repo
+  (project/local memories) to verify the SOURCE CODE matches the memories. An
+  AGENT (not a script) distinguishes true/false and old/new.
+- Obsolete info is NEVER lost — DOWNGRADED/archived into the memory's
+  notes/lessons-learned.
+- **The WHY can ONLY come from the ORIGINAL agent that made the change** — do NOT
+  let agents INFER it (they hallucinate). WHY sources: (1) the **commit hash** in
+  the memory's metadata → read that commit's message; (2) the **code comments** at
+  the change. The janitor may write the note with the OLD version, leaving the WHY
+  to those sources.
+- **NEW JANITOR RULE to add:** instruct ALL agents to commit OFTEN, after each
+  memory write, and to write the WHY BOTH in the commit message AND in code
+  comments — these become the WHY sources above.
+- Notes/lessons COMPOUND: a new note does NOT overwrite / start fresh — it EXPANDS
+  the existing note with the chronological history of changes / failed attempts /
+  lessons (how the current version was chosen).
+- Conflict resolution by TIME + git: ~same timestamp → only one can be true. Older
+  → may be a PRIOR code version (not false): verify via commit hash + git history.
+  No trace of a memory's facts in git history → it is FALSE → DELETE (do NOT
+  archive as note, do NOT use to replace). Caveat: two consecutive memories with
+  one later commit leave no trace for the first → assume the LATEST is true, ignore
+  memories with no git record.
+- Floating-point times/day command (0.5 = every 48h), global.
 
 ## Approval log
 - 2026-06-17T02:35:58+0200 — Authored from the USER's 2026-06-17 directive
