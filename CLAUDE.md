@@ -175,7 +175,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=bdce0eaf8f3e digest=ee89ea206579 generated=2026-06-13T18:14:24+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=44bd2012d07f digest=168a2df8509f generated=2026-06-17T19:34:37+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -206,6 +206,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/dirty-tree.py` — Dirty-tree detector — Python port of dirty-tree.sh.
   · main() -> int
 `scripts/detectors/historical-cache-scan.py` — historical-cache-scan — known-malicious package version detector.
+  · main() -> int
+`scripts/detectors/janitor-install-scope.py` — janitor-install-scope — warn if ai-maestro-janitor is installed at PROJECT/LOCAL scope.
   · main() -> int
 `scripts/detectors/janitor-self-integrity.py` — janitor-self-integrity — heartbeat self-attestation detector.
   · main() -> int
@@ -304,6 +306,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/hooks/on-stop-failure.py` — StopFailure hook — Python port of on-stop-failure.sh.
   · main() -> int
+`scripts/hooks/on-stop-token-meter.py` — Stop hook — per-heartbeat token meter (TRDD-a4e41e89, Phase 1).
+  · main() -> int
 `scripts/hooks/on-stop.py` — Stop hook — Python port of on-stop.sh.
   · main() -> int
 `scripts/hooks/post-compact-resume.py` — PostCompact hook — record what the next heartbeat should auto-resume.
@@ -323,6 +327,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/hooks/pre-tool-pkg-guard.py` — PreToolUse guard against package-manager safety-knob bypasses.
   · check_bash(command) -> str | None
   · check_edit(tool, tool_input, cwd) -> str | None
+  · main() -> int
+`scripts/hooks/pre-tool-token-budget.py` — PreToolUse hook — warn the agent when ITS OWN token consumption is high.
+  · main() -> int
+`scripts/identify_environment.py` — Backing script for /janitor-identify-environment (TRDD-db169d9e follow-up).
+  · detect_terminal() -> dict
+  · detect_ancestry() -> list[str]
+  · detect_tmux() -> dict | None
+  · detect_os() -> dict
+  · detect_filesystem(path) -> str
+  · detect_sandboxing() -> list[str] — Every container / dev-box / sandbox signal we can observe. Empty = bare host.
+  · gather() -> dict
   · main() -> int
 `scripts/lib/__init__.py` — Marker file. Makes scripts/lib/ an importable Python package so hooks
 `scripts/lib/ai_context_extras.py` — AI-context extras — net-new rules from deep-ai-context wave.
@@ -574,6 +589,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · autofix_enabled() -> bool — True iff the "act, don't ask" autofix policy is active.
   · autofix_disabled() -> bool — True iff `/janitor-autofix-off` has been run in this project.
   · is_self_scan_target() -> bool — True iff the current `CLAUDE_PROJECT_DIR` is the janitor's own repo.
+  · ai_maestro_marketplace_members() -> frozenset[str] — Return every plugin name that belongs to the `ai-maestro-plugins` marketplace.
+  · project_is_ai_maestro() -> bool — True iff the CURRENT project is a plugin of the `ai-maestro-plugins` marketplace.
+  · is_ai_maestro_plugin_id(plugin_id) -> bool — True iff `plugin_id` (a `<name>@<marketplace>` id from `claude plugin
+  · parse_ps_table(text) -> dict[int, tuple[int, str]] — Parse `ps -axo pid=,ppid=,command=` output into `{pid: (ppid, command)}`.
+  · process_ancestry(start_pid, table) -> list[str] — Commands of `start_pid`'s ancestors, NEAREST first (excludes itself).
+  · terminal_kind(*, ps_text, pid) -> str — Identify the terminal program hosting this process by walking the PROCESS
+  · in_ai_maestro_agent_env(env) -> bool — Cheap pre-check: are we running INSIDE an ai-maestro agent?
   · file_mtime(path) -> int — Return file mtime in epoch seconds, or 0 on error.
   · log_line(name, message) -> None — Append one log line with a local-time timestamp + GMT offset.
   · rotate_log_if_big(name, max_bytes) -> None — Rotate <name>.log to <name>.log.1 when it exceeds `max_bytes`.
@@ -586,6 +608,19 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · SuppressionTable — The full set of suppression entries for a project root.
   · SuppressionTable.is_suppressed(self, rule_id, file, sha) -> bool
   · load(project_root) -> SuppressionTable — Load the project's suppression table.
+`scripts/lib/terminal_trigger.py` — Terminal-aware self-trigger send-abstraction (TRDD-db169d9e R3).
+  · build_tmux_steps(pane, command) -> list[list[str]] — The ordered send sequence for a tmux pane: ESC, settle, the command (literal),
+  · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
+  · send_self_command(command, *, delay_s, dry_run, env) -> str — Send `command` (a fixed literal like `/compact`) to this session's own pane,
+  · main() -> int
+`scripts/lib/token_meter.py` — Per-heartbeat token accounting (TRDD-a4e41e89, Phase 1).
+  · TurnUsage — Summed token usage of the most-recent turn, plus whether it was a heartbeat.
+  · TurnUsage.as_record(self, now_epoch) -> dict
+  · tail_turn_usage(transcript_path) -> Optional[TurnUsage] — Sum the most-recent turn's token usage and flag whether it's a heartbeat.
+  · append_log(log_path, turn_usage, now_epoch) -> None — Append one JSON line for a heartbeat turn's usage (append is atomic enough
+  · trim_log(log_path, *, keep_lines, max_bytes) -> None — Cap the append-only log: when it exceeds `max_bytes`, atomically rewrite
+  · load_log(log_path) -> list[dict]
+  · summarize(records, *, field) -> Optional[dict] — Distribution stats for `field` over the per-heartbeat records.
 `scripts/lib/user_mem_lib.py` — USER-MEMORY subsystem core (TRDD-4334aad0) — a PRIVATE, agent-invisible
   · resolve_user_mem_dir(project_dir) -> Path — Return the user-mem store dir for a project (does not create it).
   · SearchResult — One memgrep hit, annotated with the memory's immutable number.
@@ -743,6 +778,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · cmd_generate(root, *, to_stdout, excludes) -> int
   · main() -> int
 `scripts/safe_delete.py` — safe-delete — Python port of safe-delete.sh.
+  · main() -> int
+`scripts/token_report.py` — Backing script for /janitor-token-report (TRDD-a4e41e89, Phase 1).
   · main() -> int
 ### Convention groups
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
