@@ -3,7 +3,7 @@ trdd-id: a4e41e89-e995-4309-bd15-8e247a34b960
 title: Heartbeat token meter + push automation into scripts to minimize per-fire agent tokens
 column: dev
 created: 2026-06-14T19:42:55+0200
-updated: 2026-06-17T02:31:10+0200
+updated: 2026-06-17T13:18:37+0200
 current-owner: ai-maestro-janitor
 task-type: feature
 priority: 2
@@ -56,11 +56,22 @@ Two parts, built in order (you can't optimize what you can't measure):
   natural vehicle is a PreToolUse `additionalContext` nudge, exactly like the
   existing `pre-tool-context-usage` context-watchdog (which already surfaces
   context-window %). Everything configurable (thresholds, cadence, on/off).
-  **NEXT ACTION:** design the threshold-monitor + self-warning hook, TDD it,
-  ship behind a config knob. (The two REJECTED micro-optimizations still stand
-  and are NOT this: auto-regenerating CLAUDE.md mid-heartbeat busts the context
-  cache → costs MORE; `claude --bg` agents are NOT free — only `--exec`/the
-  daemon invoke no model.) See LOCAL memory `reference_heartbeat_token_baseline.md`.
+  **v1 BUILT 2026-06-17** (uncommitted-to-origin, rides next publish):
+  `scripts/hooks/pre-tool-token-budget.py` — a PreToolUse hook that REUSES
+  `token_meter.tail_turn_usage` to sum the in-progress turn's output and, at/above
+  a configurable budget (`…TOKEN_BUDGET_TURN_OUTPUT`, default 10000), injects an
+  advisory `additionalContext` self-consumption warning (no permissionDecision —
+  never alters permission flow; mirrors the context-watchdog). OPT-IN
+  (`…TOKEN_BUDGET_ENABLED`, default OFF) so it's safe to land + tune before
+  enabling. 8 tests. **NEXT (follow-ups, not blocking):** (a) a session-CUMULATIVE
+  / recent-window rate view (v1 is per-TURN spike only); (b) tune the default
+  threshold from live `/janitor-token-report` data; (c) consider a cheap
+  producer-snapshot (like the context-watchdog's statusline snapshot) instead of
+  reading the transcript tail per tool call, if the per-call read proves costly.
+  (The two REJECTED micro-optimizations still stand and are NOT this:
+  auto-regenerating CLAUDE.md mid-heartbeat busts the context cache → costs MORE;
+  `claude --bg` agents are NOT free — only `--exec`/the daemon invoke no model.)
+  See LOCAL memory `reference_heartbeat_token_baseline.md`.
 
 ## Verified feasibility (2026-06-14)
 

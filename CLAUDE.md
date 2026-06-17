@@ -119,7 +119,7 @@ metadata consumed by the scanner detectors. Naming: `<domain>_patterns.py` (e.g.
 `cloud_credential_patterns`, `prompt_injection_patterns`, `npm_lifecycle_patterns`,
 `k8s_admission_patterns`, …). **Don't enumerate — grep by domain when needed.**
 
-**Hooks (`scripts/hooks/`, 15)** — `on-session-start` (installs rules + ensures
+**Hooks (`scripts/hooks/`, 16)** — `on-session-start` (installs rules + ensures
 daemon), `on-session-start-trdd-state`, `on-prompt-submit`, `on-stop`,
 `on-stop-failure`, `post-edit-safety`, `post-mcp-response-sanitizer` (PostToolUse
 → **ON BY DEFAULT**; on a strong injection signal in an `mcp__*` response it
@@ -136,7 +136,13 @@ unattended session — TRDD-31095269), `on-prompt-submit-user-mem` (UserPromptSu
 → the PRIVATE user-memory subsystem, TRDD-4334aad0), `on-stop-token-meter` (Stop
 → logs each heartbeat turn's token cost to `token-meter.jsonl` for
 `/janitor-token-report`; separate from the survival-critical on-stop hooks so a
-meter bug can't break resume — TRDD-a4e41e89). The context-watchdog trio
+meter bug can't break resume — TRDD-a4e41e89), `pre-tool-token-budget` (PreToolUse
+→ token-meter **Phase 2**: reuses `token_meter.tail_turn_usage` to sum the
+in-progress turn's output and, at/above a configurable budget, injects an
+advisory `additionalContext` self-consumption warning — OPT-IN via
+`CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED`, budget
+`…TOKEN_BUDGET_TURN_OUTPUT` (default 10000); advisory-only, no permissionDecision —
+TRDD-a4e41e89). The context-watchdog trio
 (pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
 skill + `scripts/compact_trigger.py`) is OPT-IN via
 `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`.
