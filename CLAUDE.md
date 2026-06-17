@@ -121,7 +121,12 @@ metadata consumed by the scanner detectors. Naming: `<domain>_patterns.py` (e.g.
 
 **Hooks (`scripts/hooks/`, 15)** — `on-session-start` (installs rules + ensures
 daemon), `on-session-start-trdd-state`, `on-prompt-submit`, `on-stop`,
-`on-stop-failure`, `post-edit-safety`, `post-mcp-response-sanitizer`,
+`on-stop-failure`, `post-edit-safety`, `post-mcp-response-sanitizer` (PostToolUse
+→ **ON BY DEFAULT**; on a strong injection signal in an `mcp__*` response it
+STRIPS covert invisible/bidi unicode and REPLACES the payload via CC's
+`updatedToolOutput`, with a homoglyph-only weak-signal warn-not-replace
+safeguard; opt out `…POST_MCP_SANITIZER_ENABLED=false`, warn-only
+`…_STRIP=false`),
 `pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage` (OPT-IN
 PreToolUse → injects live context % on every tool call, suggests
 /janitor-compact-context ≥60%), `post-compact-resume` (PostCompact → writes
