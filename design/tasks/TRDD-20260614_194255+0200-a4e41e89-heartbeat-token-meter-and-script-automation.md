@@ -3,7 +3,7 @@ trdd-id: a4e41e89-e995-4309-bd15-8e247a34b960
 title: Heartbeat token meter + push automation into scripts to minimize per-fire agent tokens
 column: dev
 created: 2026-06-14T19:42:55+0200
-updated: 2026-06-15T12:40:17+0200
+updated: 2026-06-17T02:31:10+0200
 current-owner: ai-maestro-janitor
 task-type: feature
 priority: 2
@@ -41,23 +41,26 @@ Two parts, built in order (you can't optimize what you can't measure):
   `tests/test_token_meter.py` (incl. `test_multistep_heartbeat_turn_with_tool_results`).
   **Measured live (2026-06-14): a SILENT heartbeat = ~162 output / ~160 input
   tokens** (the ~870k `cache_read` is the cheap 0.1× context re-read).
-- **Phase 2+ — AUTOMATION. ⏸ DECISION PENDING (measure-first says: NOT
-  WARRANTED).** The meter's own data shows the detectors are ALREADY scripts —
-  a silent fire is just the dispatcher Bash call. **The cost driver is the
-  AGENT'S RESPONSE LENGTH, not detection** (the sampled spikes were long status
-  messages, 3000–5400 output tokens; the spike alarm correctly flagged a 5394-
-  token one). So "push the detectors into scripts to save tokens" yields ≈0 —
-  they're already scripts. Two optimizations were explored and REJECTED on the
-  data: (a) auto-regenerating the CLAUDE.md project map in the heartbeat would
-  INCREASE cost (CLAUDE.md is in the cached prompt prefix → a mid-session
-  rewrite busts the whole context cache; this is why `project-map-drift` nudges
-  instead of writing); (b) background agents are NOT free (`claude --bg` bills
-  the same quota — only `--exec`/the daemon invoke no model). The only real
-  lever left is behavioral (keep heartbeat replies terse/silent), not a code
-  change. **NEXT ACTION (user's call):** either CLOSE Phase 2 as "not warranted
-  on the data" (recommended — `column: dev` → `complete`) OR build the behavioral
-  terse-reply guardrail. No autonomous code change pending; the meter is the
-  lasting win. See LOCAL memory `reference_heartbeat_token_baseline.md`.
+- **Phase 2 — RELIABLE MONITOR + AGENT SELF-WARNING. ▶ AUTHORIZED 2026-06-17
+  (USER re-scoped my mis-framing).** My earlier "not warranted" was WRONG — it
+  only applied to a narrow reading ("push detectors into scripts to save
+  tokens", which IS moot: detectors are already scripts; the cost driver is
+  AGENT RESPONSE LENGTH). The USER's actual goal is bigger and IS warranted:
+  **token usage must be monitored RELIABLY**, serving TWO purposes —
+  (a) keep janitor work under control / fire expensive things less often, AND
+  (b) **inform the Claude/agent instance, in real time, that IT is consuming too
+  much** (self-awareness feedback, not just a post-hoc log). Design direction:
+  extend `token_meter` from per-fire logging to a session-wide cumulative/rate
+  view, add a CONFIGURABLE threshold monitor, and SURFACE a warning to the agent
+  when its recent output-token rate / cumulative crosses the budget — the
+  natural vehicle is a PreToolUse `additionalContext` nudge, exactly like the
+  existing `pre-tool-context-usage` context-watchdog (which already surfaces
+  context-window %). Everything configurable (thresholds, cadence, on/off).
+  **NEXT ACTION:** design the threshold-monitor + self-warning hook, TDD it,
+  ship behind a config knob. (The two REJECTED micro-optimizations still stand
+  and are NOT this: auto-regenerating CLAUDE.md mid-heartbeat busts the context
+  cache → costs MORE; `claude --bg` agents are NOT free — only `--exec`/the
+  daemon invoke no model.) See LOCAL memory `reference_heartbeat_token_baseline.md`.
 
 ## Verified feasibility (2026-06-14)
 
