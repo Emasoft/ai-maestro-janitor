@@ -100,7 +100,7 @@ durable unblock recipe and the tag-only-workflow recurrence guard live in the
 LOCAL memory `project_janitor_publish_blocked_cpv_fps.md`. No upstream FILE-CPV
 issue was warranted from these reports (the classifier matched its design TRDDs
 on every finding); the actionable upstream items became CPV issues
-#112/#113/#115/#116.
+(#112, #113, #115, #116).
 
 ## Approval log
 

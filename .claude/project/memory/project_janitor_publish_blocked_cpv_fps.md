@@ -24,8 +24,8 @@ exempt-lists were dropped fleet-wide as exploitable):
   TOC embeds (progressive-discovery contract: every reference link embeds the
   file's FULL TOC — adding a TOC to a reference file CREATES embed obligations
   at every link site); MD004 prose-wrap `+ ` lines reworded (CPV#113); demoted
-  skillaudit NITs devitalized (docstring head reworded + repomap regen; curl-pipe
-  teaching example defanged with a `[PIPE]` placeholder).
+  skillaudit NITs devitalized (docstring head reworded + repomap regen; the
+  pipe-to-shell teaching example defanged with a `[PIPE]` placeholder).
 - Mid-job build-artifact paths in workflows must go through env vars or
   RC-WORKFLOW-PATH-BROKEN blocks the publish (CPV#116).
 
