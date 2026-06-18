@@ -273,12 +273,15 @@ proportional to the task. The full data model lives in the write skill's
 
 ## The private user-memory store (a SEPARATE corpus)
 
-`/to-user-mem`, `/search-user-mem`, `/share-user-mem` manage the USER's OWN
-agent-invisible memories at `$HOME/.claude/projects/<project-slug>/memory/user-mem/`
-(a sibling of the agent corpus inside LOCAL). This is a DISTINCT corpus from the
-agent wikimem pages — its search routes through `memgrep find` but it is private:
-the agent cannot read it except via the one `/share-user-mem <N>` gate. Don't
-conflate it with the agent memory wiki recalled by `/janitor-memory-recall`.
+`/janitor-memory-user-add`, `/janitor-memory-user-search`,
+`/janitor-memory-user-share` manage the USER's OWN agent-invisible memories at
+`$HOME/.claude/projects/<project-slug>/memory/user-mem/` (a sibling of the agent
+corpus inside LOCAL). The legacy `/to-user-mem` / `/search-user-mem` /
+`/share-user-mem` names still work (deprecated aliases, kept recognised-and-blocked
+so they never leak). This is a DISTINCT corpus from the agent wikimem pages — its
+search routes through `memgrep find` but it is private: the agent cannot read it
+except via the one `/janitor-memory-user-share <N>` gate. Don't conflate it with
+the agent memory wiki recalled by `/janitor-memory-recall`.
 
 ## See also
 

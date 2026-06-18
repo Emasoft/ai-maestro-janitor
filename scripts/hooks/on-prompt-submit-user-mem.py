@@ -4,28 +4,36 @@
 # ///
 """UserPromptSubmit hook — the PRIVATE user-memory commands (TRDD-4334aad0).
 
-Intercepts three slash commands and keeps the entire user-memory subsystem
-INVISIBLE to the agent, relying on documented Claude Code hook semantics:
+Intercepts the user-memory slash commands and keeps the entire subsystem
+INVISIBLE to the agent, relying on documented Claude Code hook semantics. The
+PRIMARY names are `/janitor-memory-user-{add,search,share}`; the legacy
+`/to-user-mem` / `/search-user-mem` / `/share-user-mem` forms remain recognised
+(deprecated) so a user who still types them is still BLOCKED — an unrecognised
+form would not be intercepted and the private text would leak.
 
-  /to-user-mem [<text>]   save a private memory. The prompt is BLOCKED
-                          (`decision:block` "erases the prompt" → it never
-                          enters the agent context/transcript). The text lands
-                          on disk; the user sees only a redacted confirmation
-                          via `systemMessage` (+ `reason`). With no argument the
-                          WHOLE previous user message (read from transcript_path)
-                          is saved instead.
+  /janitor-memory-user-add [<text>]
+                          (legacy: /to-user-mem) save a private memory. The
+                          prompt is BLOCKED (`decision:block` "erases the prompt"
+                          → it never enters the agent context/transcript). The
+                          text lands on disk; the user sees only a redacted
+                          confirmation via `systemMessage` (+ `reason`). With no
+                          argument the WHOLE previous user message (read from
+                          transcript_path) is saved instead.
 
-  /search-user-mem <q>    search ONLY the user-mem store via `memgrep find`
-                          (the +/- / wildcard / phrase DSL lives in the Rust
-                          crate). The prompt is BLOCKED; the numbered results
-                          reach the USER via `systemMessage` ONLY — they appear
-                          in NO agent-context field, so the agent never reads,
-                          recalls, or can leak a user memory.
+  /janitor-memory-user-search <q>
+                          (legacy: /search-user-mem) search ONLY the user-mem
+                          store via `memgrep find` (the +/- / wildcard / phrase
+                          DSL lives in the Rust crate). The prompt is BLOCKED;
+                          the numbered results reach the USER via `systemMessage`
+                          ONLY — they appear in NO agent-context field, so the
+                          agent never reads, recalls, or can leak a user memory.
 
-  /share-user-mem <N>     the ONE explicit gate INTO agent context: memory #N's
-                          text is injected via `hookSpecificOutput.additionalContext`
-                          (the docs route additionalContext to the model). This
-                          is the deliberate, user-initiated opt-in to share.
+  /janitor-memory-user-share <N>
+                          (legacy: /share-user-mem) the ONE explicit gate INTO
+                          agent context: memory #N's text is injected via
+                          `hookSpecificOutput.additionalContext` (the docs route
+                          additionalContext to the model). This is the
+                          deliberate, user-initiated opt-in to share.
 
 PRIVACY CONTRACT (verified against the Claude Code hooks docs, 2026-06):
   - `decision:block` → "Blocks prompt processing and erases the prompt": the
@@ -47,6 +55,25 @@ import json
 import os
 import sys
 from pathlib import Path
+
+# Every slash form the hook must INTERCEPT — the PRIMARY `/janitor-memory-user-*`
+# names PLUS the three legacy `/…-user-mem` aliases. This list MUST mirror
+# user_mem_lib._COMMAND_ALIASES. It is duplicated here (rather than imported)
+# because the fast-path guard below runs BEFORE the lib is imported, and the
+# guard is the privacy gate: a command form missing from this list is NOT
+# intercepted, so the user's private prompt flows straight to the model. The
+# authoritative classification still happens in user_mem_lib.parse_command (this
+# is only a cheap prefilter); any drift between the two simply makes the hook
+# import the lib and then no-op, never leaks, because parse_command is the one
+# that decides — but keeping them in sync avoids a missed-interception window.
+_COMMAND_NAMES = (
+    "/janitor-memory-user-add",
+    "/janitor-memory-user-search",
+    "/janitor-memory-user-share",
+    "/to-user-mem",
+    "/search-user-mem",
+    "/share-user-mem",
+)
 
 
 def _load_user_mem_lib():
@@ -194,10 +221,13 @@ def main() -> int:
         return 0
 
     # FAST PATH: a cheap string check BEFORE importing the lib, so the common
-    # case (any prompt that is not one of our three commands) costs nothing but
-    # a startswith — the hook fires on EVERY prompt, so this guard keeps it
+    # case (any prompt that is not one of our commands) costs nothing but a
+    # startswith — the hook fires on EVERY prompt, so this guard keeps it
     # effectively free except when the user actually invokes a user-mem command.
-    if not prompt.lstrip().startswith("/to-user-mem") and not prompt.lstrip().startswith("/search-user-mem") and not prompt.lstrip().startswith("/share-user-mem"):
+    # It must match ANY of the six recognised forms (new + legacy): a form
+    # missing here is never intercepted and the user's private text would leak.
+    head = prompt.lstrip()
+    if not any(head.startswith(name) for name in _COMMAND_NAMES):
         return 0
 
     um = _load_user_mem_lib()
@@ -207,8 +237,9 @@ def main() -> int:
         return 0
 
     # parse_command anchors the match (requires end-of-string or a following
-    # space), so a lookalike like `/to-user-memory` that passed the cheap
-    # prefix guard above is correctly rejected here.
+    # space) and maps every recognised slash form — new and legacy — to the
+    # canonical id "add"/"search"/"share", so a lookalike like `/to-user-memory`
+    # that passed the cheap prefix guard above is correctly rejected here.
     command, argstring = um.parse_command(prompt)
     if command is None:
         return 0
@@ -220,11 +251,11 @@ def main() -> int:
     store_dir = um.resolve_user_mem_dir(project_dir=project_dir)
     store = um.UserMemStore(store_dir)
 
-    if command == "to-user-mem":
+    if command == "add":
         _emit(_handle_to_user_mem(um, argstring, payload, store))
-    elif command == "search-user-mem":
+    elif command == "search":
         _emit(_handle_search_user_mem(um, argstring, store))
-    elif command == "share-user-mem":
+    elif command == "share":
         _emit(_handle_share_user_mem(argstring, store))
     return 0
 

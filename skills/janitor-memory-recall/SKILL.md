@@ -188,5 +188,6 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
 - `$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` — the memgrep instrument reference.
 - `/janitor-memory-write` (MEMORIZE) · `/janitor-memory-update` (UPDATE) — the
   write legs; run RECALL before both.
-- `/search-user-mem` — searches the USER's PRIVATE store (agent-invisible); a
-  separate corpus, distinct from this recall of the agent wiki.
+- `/janitor-memory-user-search` (legacy `/search-user-mem`, still works) — searches
+  the USER's PRIVATE store (agent-invisible); a separate corpus, distinct from this
+  recall of the agent wiki.

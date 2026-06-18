@@ -3,7 +3,7 @@ description: Search your PRIVATE user memories with a +/- query DSL (mandatory/o
 argument-hint: "<query with +/- operators>"
 ---
 
-# /search-user-mem <query>
+# /janitor-memory-user-search <query>
 
 Searches **only** your private user-memory store (never the agent's memory
 corpus) using memgrep's query DSL. Results are printed **to you only** — numbered
@@ -33,9 +33,9 @@ many optional terms matched.
 ## Examples
 
 ```
-/search-user-mem +keychain -coffee rotation
-/search-user-mem "logistic regression failure"
-/search-user-mem +deploy pro*-debug* -staging
+/janitor-memory-user-search +keychain -coffee rotation
+/janitor-memory-user-search "logistic regression failure"
+/janitor-memory-user-search +deploy pro*-debug* -staging
 ```
 
 ## How it works (privacy)
@@ -43,5 +43,10 @@ many optional terms matched.
 The janitor `UserPromptSubmit` hook intercepts this command, runs
 `memgrep find <query> <user-mem-dir> --use-index`, and **blocks the prompt** so
 the agent never sees the query or the results. The numbered results are surfaced
-to **you** via `systemMessage`. Pick a number, then `/share-user-mem <number>`
-to inject that one memory into the agent's context.
+to **you** via `systemMessage`. Pick a number, then `/janitor-memory-user-share
+<number>` to inject that one memory into the agent's context.
+
+> **Legacy name:** `/search-user-mem` still works (deprecated alias). Prefer the
+> `/janitor-memory-user-*` names; the old form is kept only so the hook still
+> intercepts and blocks it (an unrecognised form would leak your query to the
+> agent).

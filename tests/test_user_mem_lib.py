@@ -232,6 +232,72 @@ def test_previous_user_message_ignores_meta_and_command_entries(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# parse_command: new names AND legacy aliases → canonical add/search/share
+# --------------------------------------------------------------------------
+
+
+def test_parse_command_new_names_map_to_canonical_ids():
+    """The PRIMARY /janitor-memory-user-* names map to canonical add/search/share."""
+    assert user_mem_lib.parse_command("/janitor-memory-user-add") == ("add", "")
+    assert user_mem_lib.parse_command("/janitor-memory-user-search") == ("search", "")
+    assert user_mem_lib.parse_command("/janitor-memory-user-share") == ("share", "")
+
+
+def test_parse_command_legacy_aliases_still_map_to_canonical_ids():
+    """The LEGACY /…-user-mem aliases must STILL be recognised (else the hook can't block them → leak)."""
+    assert user_mem_lib.parse_command("/to-user-mem") == ("add", "")
+    assert user_mem_lib.parse_command("/search-user-mem") == ("search", "")
+    assert user_mem_lib.parse_command("/share-user-mem") == ("share", "")
+
+
+def test_parse_command_extracts_argstring_for_both_forms():
+    """The remainder after the command word is returned trimmed, for new and legacy forms alike."""
+    assert user_mem_lib.parse_command("/janitor-memory-user-add  remember this  ") == ("add", "remember this")
+    assert user_mem_lib.parse_command("/to-user-mem remember this") == ("add", "remember this")
+    assert user_mem_lib.parse_command("/janitor-memory-user-search +keychain -coffee") == ("search", "+keychain -coffee")
+    assert user_mem_lib.parse_command("/share-user-mem 7") == ("share", "7")
+
+
+def test_parse_command_newline_separator_is_accepted():
+    """A following newline (not just a space) still splits the command from its argument."""
+    assert user_mem_lib.parse_command("/janitor-memory-user-add\nmultiline memory") == ("add", "multiline memory")
+    assert user_mem_lib.parse_command("/to-user-mem\nlegacy multiline") == ("add", "legacy multiline")
+
+
+def test_parse_command_rejects_lookalikes():
+    """A longer lookalike is NOT misclassified (anchored: exact token or token+space/newline only)."""
+    assert user_mem_lib.parse_command("/to-user-memory please") == (None, "")
+    assert user_mem_lib.parse_command("/janitor-memory-user-adder x") == (None, "")
+    assert user_mem_lib.parse_command("not a command at all") == (None, "")
+    assert user_mem_lib.parse_command("") == (None, "")
+
+
+def test_command_prefixes_cover_all_six_forms():
+    """_COMMAND_PREFIXES (used to skip our own lines in the transcript) lists all six slash forms."""
+    assert set(user_mem_lib._COMMAND_PREFIXES) == {
+        "/janitor-memory-user-add",
+        "/janitor-memory-user-search",
+        "/janitor-memory-user-share",
+        "/to-user-mem",
+        "/search-user-mem",
+        "/share-user-mem",
+    }
+
+
+def test_previous_user_message_skips_new_command_name(tmp_path):
+    """A bare /janitor-memory-user-add line is skipped so the command itself is never the memory."""
+    tr = tmp_path / "t.jsonl"
+    _write_transcript(
+        tr,
+        [
+            {"type": "user", "message": {"role": "user", "content": "the fact to remember"}},
+            {"type": "user", "message": {"role": "user", "content": "/janitor-memory-user-add"}},
+        ],
+    )
+    assert user_mem_lib.previous_user_message(tr) == "the fact to remember"
+
+
+# --------------------------------------------------------------------------
 # search: routes to `memgrep find <query> <dir> --use-index`
 # --------------------------------------------------------------------------
 

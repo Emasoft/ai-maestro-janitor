@@ -147,20 +147,24 @@ TRDD-a4e41e89). The context-watchdog trio
 skill + `scripts/compact_trigger.py`) is OPT-IN via
 `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`.
 
-**USER-MEMORY subsystem (`commands/{to,search,share}-user-mem.md` +
+**USER-MEMORY subsystem (`commands/janitor-memory-user-{add,search,share}.md` +
 `scripts/hooks/on-prompt-submit-user-mem.py` + `scripts/lib/user_mem_lib.py`,
-TRDD-4334aad0)** — a PRIVATE, agent-invisible user-authored memory store at
-`~/.claude/projects/<slug>/memory/user-mem/` (sibling of the agent corpus), with
-an immutable monotonic counter (`.counter` + flock; numbers retired-never-reused).
-`/to-user-mem [<text>]` saves (bare → previous user message via transcript);
-`/search-user-mem <q>` searches ONLY that store via `memgrep find <q> <dir>
---use-index` (the `+`/`-`/wildcard/phrase DSL lives in the Rust crate);
-`/share-user-mem <N>` is the ONE gate that injects a memory into context. PRIVACY
-(verified vs the Claude Code hook docs): the UserPromptSubmit hook returns
-`decision:block` (erases the prompt → save text + search query never reach the
-model) and surfaces confirmations/results via `systemMessage` (user-only);
-`/share-user-mem` is the sole path using `additionalContext` (which DOES reach
-the model). Fast no-op for any non-user-mem prompt; never crashes the session.
+TRDD-4334aad0; renamed TRDD #196)** — a PRIVATE, agent-invisible user-authored
+memory store at `~/.claude/projects/<slug>/memory/user-mem/` (sibling of the
+agent corpus), with an immutable monotonic counter (`.counter` + flock; numbers
+retired-never-reused). `/janitor-memory-user-add [<text>]` saves (bare → previous
+user message via transcript); `/janitor-memory-user-search <q>` searches ONLY
+that store via `memgrep find <q> <dir> --use-index` (the `+`/`-`/wildcard/phrase
+DSL lives in the Rust crate); `/janitor-memory-user-share <N>` is the ONE gate
+that injects a memory into context. The legacy `/to-user-mem` / `/search-user-mem`
+/ `/share-user-mem` names still work (deprecated aliases) and — critically — stay
+recognised-and-blocked so a user who types one never leaks (an UNRECOGNISED form
+is not intercepted → the private text reaches the model). PRIVACY (verified vs
+the Claude Code hook docs): the UserPromptSubmit hook returns `decision:block`
+(erases the prompt → save text + search query never reach the model) and surfaces
+confirmations/results via `systemMessage` (user-only); `/janitor-memory-user-share`
+is the sole path using `additionalContext` (which DOES reach the model). Fast
+no-op for any non-user-mem prompt; never crashes the session.
 
 **Skills (`skills/`)** — `janitor-arm` (install stub + arm cron; + `janitor-disarm`),
 `janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,

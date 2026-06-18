@@ -3,14 +3,14 @@ description: Save a PRIVATE user memory that is invisible to the agent. With tex
 argument-hint: "[<memory text>]"
 ---
 
-# /to-user-mem [<memory text>]
+# /janitor-memory-user-add [<memory text>]
 
 Saves a **private user memory** to your per-project user-memory store. This
 memory is **invisible to the agent**: the text never enters the conversation or
 the model's context window.
 
-- `/to-user-mem <text>` — saves `<text>`.
-- `/to-user-mem` (no argument) — saves your **whole previous message**.
+- `/janitor-memory-user-add <text>` — saves `<text>`.
+- `/janitor-memory-user-add` (no argument) — saves your **whole previous message**.
 
 ## How it works (privacy)
 
@@ -27,8 +27,13 @@ it reaches the agent**. The hook:
    `[user-mem] saved #7 (142 chars) — content withheld from agent context.`
 
 You should never see the agent respond to this command. If you do, the janitor
-plugin's user-mem hook is not wired in — run `/janitor-arm` is not needed, but
-verify the plugin is installed and the hook is registered in `hooks/hooks.json`.
+plugin's user-mem hook is not wired in — verify the plugin is installed and the
+hook is registered in `hooks/hooks.json`.
 
-Search your memories with `/search-user-mem`; bring one into the agent's context
-(the only path that does) with `/share-user-mem <number>`.
+Search your memories with `/janitor-memory-user-search`; bring one into the
+agent's context (the only path that does) with `/janitor-memory-user-share
+<number>`.
+
+> **Legacy name:** `/to-user-mem` still works (deprecated alias). Prefer the
+> `/janitor-memory-user-*` names; the old form is kept only so existing muscle
+> memory never leaks (the hook still intercepts and blocks it).

@@ -343,7 +343,7 @@ from a clean framing, or have the symptom come from the user verbatim.
 | Bootstrap | `janitor-memory-bootstrap` skill | stands up a project's wikimem once: creates the PROJECT-scope dir (+ gitignore exception), seeds an architecture-hub page + MEMORY.md, points the agent at the proactive contract |
 | Organization | `memory-librarian` detector (janitor heartbeat) | SURFACES aggregation/conflict candidates to `memory-reorg-proposed.md`; never edits content (a session does the conscious reorg) |
 | Tool | `memgrep` (`scripts/memgrep/SKILL.md`) | the engine all three lean on |
-| Private user store | `/to-user-mem`, `/search-user-mem`, `/share-user-mem` | the USER's own agent-invisible memories — a SEPARATE corpus, not the agent notes; search routes through `memgrep find` |
+| Private user store | `/janitor-memory-user-{add,search,share}` (legacy `/to-user-mem`, `/search-user-mem`, `/share-user-mem` still work, deprecated) | the USER's own agent-invisible memories — a SEPARATE corpus, not the agent notes; search routes through `memgrep find` |
 
 Separation of powers: the **janitor** reorganizes structure and *surfaces*
 contradictions but never edits a fact; an **agent** creates and corrects content

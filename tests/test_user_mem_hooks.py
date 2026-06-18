@@ -106,15 +106,16 @@ def test_empty_prompt_is_noop(tmp_path):
 
 
 def test_lookalike_command_is_not_intercepted(tmp_path):
-    """`/to-user-memory ...` (a different word) is NOT treated as /to-user-mem."""
-    rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": "/to-user-memory please"},
-        {},
-        tmp_path / "proj",
-        tmp_path / "home",
-    )
-    assert rc == 0
-    assert out.strip() == ""
+    """A longer lookalike of either a new or legacy name is NOT intercepted (no false block)."""
+    for prompt in ("/to-user-memory please", "/janitor-memory-user-adder please"):
+        rc, out, _err = _run_hook(
+            {"hook_event_name": "UserPromptSubmit", "prompt": prompt},
+            {},
+            tmp_path / "proj",
+            tmp_path / "home",
+        )
+        assert rc == 0, prompt
+        assert out.strip() == "", prompt
 
 
 # --------------------------------------------------------------------------
@@ -123,10 +124,10 @@ def test_lookalike_command_is_not_intercepted(tmp_path):
 
 
 def test_to_user_mem_with_text_saves_and_blocks(tmp_path):
-    """`/to-user-mem <text>` blocks the prompt and writes the text to the user-mem store."""
+    """`/janitor-memory-user-add <text>` blocks the prompt and writes the text to the user-mem store."""
     secret = "my api key rotation cadence is every 30 days"
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": f"/to-user-mem {secret}"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/janitor-memory-user-add {secret}"},
         {},
         tmp_path / "proj",
         tmp_path / "home",
@@ -143,7 +144,7 @@ def test_to_user_mem_text_is_not_in_any_agent_context_field(tmp_path):
     """PRIVACY: the saved text appears in NO agent-context field of the hook output."""
     secret = "PRIVATE-TOKEN-abc123-do-not-leak"
     _rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": f"/to-user-mem {secret}"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/janitor-memory-user-add {secret}"},
         {},
         tmp_path / "proj",
         tmp_path / "home",
@@ -166,7 +167,7 @@ def test_to_user_mem_text_is_not_in_any_agent_context_field(tmp_path):
 def test_to_user_mem_confirmation_reports_number_and_withholding(tmp_path):
     """The user-facing confirmation reports the immutable number and that content was withheld."""
     _rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": "/to-user-mem something to remember"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "/janitor-memory-user-add something to remember"},
         {},
         tmp_path / "proj",
         tmp_path / "home",
@@ -179,7 +180,7 @@ def test_to_user_mem_confirmation_reports_number_and_withholding(tmp_path):
 
 
 def test_to_user_mem_bare_uses_previous_user_message(tmp_path):
-    """Bare `/to-user-mem` saves the WHOLE previous user message read from the transcript."""
+    """Bare `/janitor-memory-user-add` saves the WHOLE previous user message read from the transcript."""
     transcript = tmp_path / "t.jsonl"
     prev = "this is the message I want filed as a memory"
     transcript.write_text(
@@ -187,7 +188,7 @@ def test_to_user_mem_bare_uses_previous_user_message(tmp_path):
             json.dumps(e)
             for e in (
                 {"type": "user", "message": {"role": "user", "content": prev}},
-                {"type": "user", "message": {"role": "user", "content": "/to-user-mem"}},
+                {"type": "user", "message": {"role": "user", "content": "/janitor-memory-user-add"}},
             )
         )
         + "\n",
@@ -196,7 +197,7 @@ def test_to_user_mem_bare_uses_previous_user_message(tmp_path):
     rc, out, _err = _run_hook(
         {
             "hook_event_name": "UserPromptSubmit",
-            "prompt": "/to-user-mem",
+            "prompt": "/janitor-memory-user-add",
             "transcript_path": str(transcript),
         },
         {},
@@ -211,16 +212,16 @@ def test_to_user_mem_bare_uses_previous_user_message(tmp_path):
 
 
 def test_to_user_mem_bare_no_previous_message_saves_nothing(tmp_path):
-    """Bare `/to-user-mem` with no recoverable previous message blocks but saves nothing."""
+    """Bare `/janitor-memory-user-add` with no recoverable previous message blocks but saves nothing."""
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(
-        json.dumps({"type": "user", "message": {"role": "user", "content": "/to-user-mem"}}) + "\n",
+        json.dumps({"type": "user", "message": {"role": "user", "content": "/janitor-memory-user-add"}}) + "\n",
         encoding="utf-8",
     )
     rc, out, _err = _run_hook(
         {
             "hook_event_name": "UserPromptSubmit",
-            "prompt": "/to-user-mem",
+            "prompt": "/janitor-memory-user-add",
             "transcript_path": str(transcript),
         },
         {},
@@ -247,11 +248,11 @@ def _seed(home: Path, project: Path, texts: list[str]) -> user_mem_lib.UserMemSt
 
 
 def test_search_blocks_and_returns_results_via_systemMessage(tmp_path):
-    """`/search-user-mem` blocks the prompt and emits numbered results via systemMessage only."""
+    """`/janitor-memory-user-search` blocks the prompt and emits numbered results via systemMessage only."""
     home, proj = tmp_path / "home", tmp_path / "proj"
     _seed(home, proj, ["keychain rotation cadence", "coffee preferences", "deploy keychain check"])
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": "/search-user-mem +keychain -coffee"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "/janitor-memory-user-search +keychain -coffee"},
         {},
         proj,
         home,
@@ -272,7 +273,7 @@ def test_search_results_not_in_agent_context_fields(tmp_path):
     marker = "UNIQUEMARKERWORD"
     _seed(home, proj, [f"a memory containing {marker} inside it"])
     _rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": f"/search-user-mem {marker}"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/janitor-memory-user-search {marker}"},
         {},
         proj,
         home,
@@ -290,7 +291,7 @@ def test_search_no_match_reports_zero_results(tmp_path):
     home, proj = tmp_path / "home", tmp_path / "proj"
     _seed(home, proj, ["alpha beta"])
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": "/search-user-mem +zzznotfound"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "/janitor-memory-user-search +zzznotfound"},
         {},
         proj,
         home,
@@ -307,12 +308,12 @@ def test_search_no_match_reports_zero_results(tmp_path):
 
 
 def test_share_injects_memory_into_agent_context(tmp_path):
-    """`/share-user-mem N` injects memory #N's text into the agent context via additionalContext."""
+    """`/janitor-memory-user-share N` injects memory #N's text into the agent context via additionalContext."""
     home, proj = tmp_path / "home", tmp_path / "proj"
     text = "the shared memory body that the agent should now see"
     _seed(home, proj, ["unrelated", text])  # text is #2
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": "/share-user-mem 2"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "/janitor-memory-user-share 2"},
         {},
         proj,
         home,
@@ -331,7 +332,7 @@ def test_share_unknown_number_blocks_and_does_not_inject(tmp_path):
     home, proj = tmp_path / "home", tmp_path / "proj"
     _seed(home, proj, ["only one memory"])  # #1 exists; #999 does not
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": "/share-user-mem 999"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "/janitor-memory-user-share 999"},
         {},
         proj,
         home,
@@ -346,11 +347,11 @@ def test_share_unknown_number_blocks_and_does_not_inject(tmp_path):
 
 
 def test_share_non_numeric_argument_blocks(tmp_path):
-    """`/share-user-mem notanumber` blocks with a usage hint and injects nothing."""
+    """`/janitor-memory-user-share notanumber` blocks with a usage hint and injects nothing."""
     home, proj = tmp_path / "home", tmp_path / "proj"
     _seed(home, proj, ["a memory"])
     rc, out, _err = _run_hook(
-        {"hook_event_name": "UserPromptSubmit", "prompt": "/share-user-mem notanumber"},
+        {"hook_event_name": "UserPromptSubmit", "prompt": "/janitor-memory-user-share notanumber"},
         {},
         proj,
         home,
@@ -360,6 +361,108 @@ def test_share_non_numeric_argument_blocks(tmp_path):
     ac = obj.get("hookSpecificOutput", {}).get("additionalContext", "")
     assert "a memory" not in ac
     assert obj.get("decision") == "block"
+
+
+# --------------------------------------------------------------------------
+# LEGACY ALIASES: each old name must STILL be intercepted/blocked (no leak)
+# --------------------------------------------------------------------------
+#
+# These are the load-bearing privacy regression tests for the rename. If a
+# legacy name silently stopped being recognised, a user still typing it would
+# have their PRIVATE text flow straight to the model. Each test drives the REAL
+# hook subprocess with a legacy command and asserts the same privacy contract
+# the new names enforce.
+
+
+def test_legacy_to_user_mem_still_saves_and_blocks(tmp_path):
+    """LEGACY `/to-user-mem <text>` must still BLOCK and save (privacy preserved)."""
+    secret = "legacy-private-token-do-not-leak"
+    rc, out, _err = _run_hook(
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/to-user-mem {secret}"},
+        {},
+        tmp_path / "proj",
+        tmp_path / "home",
+    )
+    assert rc == 0
+    obj = json.loads(out)
+    assert obj.get("decision") == "block"  # erased from agent context
+    # The secret never appears in any agent-context field.
+    assert secret not in json.dumps(obj.get("hookSpecificOutput", {}))
+    assert secret not in str(obj.get("reason", ""))
+    assert secret not in str(obj.get("systemMessage", ""))
+    # And it landed on disk.
+    store = user_mem_lib.UserMemStore(_resolve(tmp_path / "home", tmp_path / "proj"))
+    assert store.read(1) == secret
+
+
+def test_legacy_search_user_mem_still_blocks_and_returns_via_systemMessage(tmp_path):
+    """LEGACY `/search-user-mem` must still BLOCK and surface results via systemMessage only."""
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    marker = "LEGACYSEARCHMARKER"
+    _seed(home, proj, [f"a memory with {marker} in it", "coffee preferences"])
+    rc, out, _err = _run_hook(
+        {"hook_event_name": "UserPromptSubmit", "prompt": f"/search-user-mem {marker}"},
+        {},
+        proj,
+        home,
+    )
+    assert rc == 0
+    obj = json.loads(out)
+    assert obj.get("decision") == "block"
+    # Results in systemMessage (user-facing) only; NOT in any agent-context field.
+    assert "#1" in str(obj.get("systemMessage", ""))
+    assert marker not in json.dumps(obj.get("hookSpecificOutput", {}))
+    assert marker not in str(obj.get("reason", ""))
+
+
+def test_legacy_share_user_mem_still_injects(tmp_path):
+    """LEGACY `/share-user-mem N` must still inject memory #N via additionalContext."""
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    text = "the legacy-shared memory body"
+    _seed(home, proj, ["unrelated", text])  # text is #2
+    rc, out, _err = _run_hook(
+        {"hook_event_name": "UserPromptSubmit", "prompt": "/share-user-mem 2"},
+        {},
+        proj,
+        home,
+    )
+    assert rc == 0
+    obj = json.loads(out)
+    ac = obj.get("hookSpecificOutput", {}).get("additionalContext", "")
+    assert text in ac
+    assert obj.get("decision") != "block"  # share is meant to reach the model
+
+
+def test_legacy_to_user_mem_bare_uses_previous_user_message(tmp_path):
+    """LEGACY bare `/to-user-mem` still files the previous message AND skips its own command line."""
+    transcript = tmp_path / "t.jsonl"
+    prev = "the previous message to file via the legacy command"
+    transcript.write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in (
+                {"type": "user", "message": {"role": "user", "content": prev}},
+                {"type": "user", "message": {"role": "user", "content": "/to-user-mem"}},
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rc, out, _err = _run_hook(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "/to-user-mem",
+            "transcript_path": str(transcript),
+        },
+        {},
+        tmp_path / "proj",
+        tmp_path / "home",
+    )
+    assert rc == 0
+    obj = json.loads(out)
+    assert obj.get("decision") == "block"
+    store = user_mem_lib.UserMemStore(_resolve(tmp_path / "home", tmp_path / "proj"))
+    assert store.read(1) == prev  # the bare-legacy form filed the previous message, not the command
 
 
 # --------------------------------------------------------------------------
@@ -402,12 +505,19 @@ def test_hook_is_registered_in_hooks_json():
 
 
 def test_three_commands_are_shipped():
-    """All three slash commands exist with valid frontmatter (description present)."""
+    """The three PRIMARY slash commands exist with valid frontmatter (description present)."""
     cmd_dir = _PROJECT_ROOT / "commands"
-    for name in ("to-user-mem", "search-user-mem", "share-user-mem"):
+    for name in ("janitor-memory-user-add", "janitor-memory-user-search", "janitor-memory-user-share"):
         path = cmd_dir / f"{name}.md"
         assert path.is_file(), f"missing command file: {name}.md"
         text = path.read_text(encoding="utf-8")
         assert text.startswith("---"), f"{name}.md missing frontmatter"
         fm = text.split("---", 2)[1]
         assert "description:" in fm, f"{name}.md missing description"
+
+
+def test_legacy_command_files_are_removed():
+    """The renamed-away legacy command files must be gone (the rename is a real move, not a copy)."""
+    cmd_dir = _PROJECT_ROOT / "commands"
+    for name in ("to-user-mem", "search-user-mem", "share-user-mem"):
+        assert not (cmd_dir / f"{name}.md").exists(), f"legacy command file still present: {name}.md"

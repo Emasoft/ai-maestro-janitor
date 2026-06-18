@@ -247,5 +247,6 @@ Copy this checklist and track your progress:
   non-destructive correction protocol lives there).
 - `/janitor-memory-recall` — RECALL: find the right page (run it BEFORE creating,
   step 2).
-- `/to-user-mem` — saves to the USER's PRIVATE store (agent-invisible); distinct
-  from authoring an agent wikimem page here.
+- `/janitor-memory-user-add` (legacy `/to-user-mem`, still works) — saves to the
+  USER's PRIVATE store (agent-invisible); distinct from authoring an agent wikimem
+  page here.

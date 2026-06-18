@@ -359,7 +359,25 @@ def build_search_argv(query: str, store_dir: Path, *, memgrep: Optional[str] = N
 # --- transcript: recover the previous user message (bare /to-user-mem) ------
 
 
-_COMMAND_PREFIXES = ("/to-user-mem", "/search-user-mem", "/share-user-mem")
+# Slash form → canonical command id. The PRIMARY names are the
+# `/janitor-memory-user-*` family; the three `/…-user-mem` forms are LEGACY
+# aliases kept (deprecated) for one reason only: privacy. The UserPromptSubmit
+# hook BLOCKS (erases) these prompts before the model sees them — an
+# UNRECOGNISED command form is NOT blocked, so dropping the old names would leak
+# a user who still types them. Every form maps to the same canonical id, so the
+# hook dispatch keys on "add"/"search"/"share" regardless of which name was used.
+_COMMAND_ALIASES: dict[str, str] = {
+    "/janitor-memory-user-add": "add",
+    "/janitor-memory-user-search": "search",
+    "/janitor-memory-user-share": "share",
+    "/to-user-mem": "add",  # legacy alias (deprecated) — kept blocked, never leaks
+    "/search-user-mem": "search",  # legacy alias (deprecated)
+    "/share-user-mem": "share",  # legacy alias (deprecated)
+}
+
+# Every slash form we recognise (new + legacy). Used by previous_user_message to
+# skip our own command lines so a bare /…-add never files the command itself.
+_COMMAND_PREFIXES = tuple(_COMMAND_ALIASES)
 
 
 def _content_to_text(content: object) -> str:
@@ -381,14 +399,15 @@ def _content_to_text(content: object) -> str:
 
 
 def previous_user_message(transcript_path: Path | str) -> Optional[str]:
-    """Return the text of the user message immediately BEFORE the /to-user-mem line.
+    """Return the text of the user message immediately BEFORE the save-command line.
 
     The transcript is JSONL (one event per line). We walk it, collecting the
     text of genuine user messages, skipping:
       - non-user events,
       - meta entries (`isMeta`),
-      - entries whose content IS one of our slash commands (so the bare
-        `/to-user-mem` line itself is never returned as its own memory).
+      - entries whose content IS one of our slash commands — any of the six
+        recognised forms in `_COMMAND_PREFIXES` (new or legacy) — so the bare
+        save-command line itself is never returned as its own memory.
     The LAST surviving user message is the one to file. Returns None when the
     transcript is missing/unreadable or holds no eligible user message (the hook
     then reports nothing-to-save instead of crashing).
@@ -432,22 +451,28 @@ def previous_user_message(transcript_path: Path | str) -> Optional[str]:
 def parse_command(prompt: str) -> tuple[Optional[str], str]:
     """Classify a submitted prompt as one of our commands.
 
-    Returns (command, argstring) where command is one of
-    "to-user-mem" / "search-user-mem" / "share-user-mem" (without the leading
-    slash) or None if the prompt is not one of ours. `argstring` is the trimmed
+    Returns (command, argstring) where `command` is the CANONICAL id —
+    "add" / "search" / "share" — that BOTH the new `/janitor-memory-user-*`
+    names AND the three legacy `/…-user-mem` aliases map to (so the hook
+    dispatch keys on the canonical id regardless of which slash form was typed),
+    or None if the prompt is not one of ours. `argstring` is the trimmed
     remainder after the command word. The match is anchored at the start and
-    requires either end-of-string or a following space, so `/to-user-memory`
-    (a different hypothetical command) is NOT misclassified as `/to-user-mem`.
+    requires either end-of-string or a following space/newline, so a longer
+    lookalike (e.g. `/to-user-memory`, `/janitor-memory-user-adder`) is NOT
+    misclassified as one of ours.
     """
     if not prompt:
         return None, ""
     stripped = prompt.strip()
-    for cmd in ("to-user-mem", "search-user-mem", "share-user-mem"):
-        token = "/" + cmd
+    # Longest token first so a name that is a prefix of another can never shadow
+    # the longer one (defensive — the current set has no such overlap, but this
+    # keeps the anchoring correct if names are ever added).
+    for token in sorted(_COMMAND_ALIASES, key=len, reverse=True):
+        canonical = _COMMAND_ALIASES[token]
         if stripped == token:
-            return cmd, ""
+            return canonical, ""
         if stripped.startswith(token + " ") or stripped.startswith(token + "\n"):
-            return cmd, stripped[len(token):].strip()
+            return canonical, stripped[len(token):].strip()
     return None, ""
 
 
