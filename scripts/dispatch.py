@@ -200,6 +200,19 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # unchanged. 6h cadence — the corpus changes slowly and the scan is bounded +
     # content-fingerprint deduped, so unchanged fires are near-free.
     ("memory-librarian", 21600, "CLAUDE_PLUGIN_OPTION_MEMORY_LIBRARIAN_INTERVAL"),
+    # memory-maintenance is the wikimem-editor SCHEDULER (TRDD-b4b9e27c, the
+    # SCHEDULE layer) — the DETECT→SCHEDULE pair with memory-librarian above.
+    # NEAR-FREE per fire: a stat + int-compare on the global last-run stamp via
+    # memory_settings.is_due — NO memgrep, no corpus read. When an editorial pass
+    # is due it takes a machine-wide flock (skip-if-held so N sessions fire ONCE),
+    # round-robins ONE scope/heartbeat, stamps mark_ran, and emits a single BARE
+    # forge-proof marker ([janitor-memory-{split|consolidate|conflict}]) the cron
+    # turn silent-executes. Honors editor_enabled() + the edit_project_scope gate
+    # (PROJECT skipped unless opted in — it's in-repo + unpushable). The detector's
+    # OWN per-intervention is_due is the real cadence, so this dispatch cadence is
+    # short (300s = every heartbeat) to give the due-check a chance each fire; an
+    # idle fire is essentially free.
+    ("memory-maintenance", 300, "CLAUDE_PLUGIN_OPTION_MEMORY_MAINTENANCE_INTERVAL"),
     # project-map-drift nudges when the fenced CLAUDE.md project map is stale
     # (TRDD-e247a349). DETECTION ONLY — digest-compare against the fence
     # header, zero extraction — and it NEVER writes CLAUDE.md: the write busts

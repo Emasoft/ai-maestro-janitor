@@ -1,0 +1,361 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""memory-maintenance — the wikimem-editor SCHEDULER (TRDD-b4b9e27c, the SCHEDULE layer).
+
+This is the SCHEDULE half of the wikimem editor (the plan's four layers:
+DETECT → SCHEDULE → EXECUTE → VERIFY). The DETECT layer (`memory-librarian`)
+SURFACES reorg candidates; this detector decides WHEN an editorial pass is due,
+deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron turn
+acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
+only EMITS one of three bare markers:
+
+    [janitor-memory-split]       → silently run /janitor-memory-split
+    [janitor-memory-consolidate] → silently run /janitor-memory-consolidate
+    [janitor-memory-conflict]    → silently run /janitor-memory-conflict
+
+The cron turn (the EXECUTE layer) interprets the marker; this detector cannot
+spawn agents — the "a python detector cannot spawn agents, only the main loop can"
+contract holds through CC 2.1.181. (TRDD-b4b9e27c STATE block.)
+
+Three load-bearing safety properties, each from a CRITICAL correction in the plan:
+
+  * NEAR-FREE due-check — a `stat` + int-compare on the global last-run stamp via
+    `memory_settings.is_due` (NO memgrep here). The heartbeat fires ~5 min; a fire
+    with nothing due is essentially free.
+
+  * MACHINE-WIDE dedupe — the scheduler "multiplies per session + starves roots" if
+    naive (plan §[HIGH]). Two sessions firing the same heartbeat window would both
+    pass `is_due` and both emit. So the whole pick→stamp→emit is serialized under ONE
+    machine-wide flock (non-blocking, skip-if-held — the loser stays silent and the
+    winner's `mark_ran` advances the stamp so the loser is no longer due). The stamps
+    are keyed per (intervention × scope × concrete-root) under `global_state_dir()`,
+    so LOCAL/USER dedupe globally while PROJECT keeps a per-repo cadence.
+
+  * ROUND-ROBIN one scope per heartbeat — at most ONE marker per fire. A persisted
+    rotation cursor rotates which scope gets first dibs across heartbeats so no scope
+    starves; within the chosen scope the first DUE intervention (in a stable cost
+    order) fires and ONLY that one is stamped (the rest stay due for a later fire =
+    natural fairness). If the cursor's scope has nothing due, the cursor advances and
+    the next scope is tried, so an idle scope-of-the-turn never wastes the heartbeat.
+
+Gating (honored before anything is emitted):
+
+  * `memory_txn.editor_enabled()` — the master kill gate (janitor kill-switch OR
+    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`). Off → total no-op.
+  * the PROJECT-scope gate — PROJECT memory is in-repo and the pre-push hook blocks
+    every pusher except `publish.py`, so editing it defaults OFF; PROJECT is skipped
+    unless `memory_settings.get("edit_project_scope")` is on.
+  * a frequency of 0 (DISABLED) makes that intervention never due (`is_due` is False).
+
+SECURITY — forge-proof marker. The marker is acted on by the cron turn ONLY when it
+appears BARE/EXACT on its own line in the heartbeat STUB's OWN stdout (the cron
+prompt's silent-execute clause keys on "a line of exactly `[janitor-memory-…]`").
+This detector therefore emits the marker as a bare line and NOTHING ELSE on that
+line, mirroring dispatch.py's marker-mimicry defense (`state.sanitize_for_drift_line`
+defangs `[`/`]` and bidi controls in any UNTRUSTED text, so a forged
+`[janitor-memory-*]` embedded in a TRDD title / note / directive file is rendered
+`⟦janitor-memory-*⟧` and never matches the clause). Because emitting is the SOLE
+side effect that can trigger a fan-out, and it only happens AFTER the flock + the
+`is_due` check + `mark_ran`, a forged marker that did not go through this gate
+cannot trigger a pass. (TRDD-b4b9e27c — "a forged marker does NOT trigger".)
+
+Graceful no-op (never crashes the heartbeat): editor disabled, no scope roots,
+nothing due, the flock held by a peer session, or any unexpected error → exit 0 with
+no output.
+"""
+
+from __future__ import annotations
+
+import errno
+import fcntl
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import global_state  # noqa: E402
+import memory_settings  # noqa: E402
+import memory_txn  # noqa: E402
+import state  # noqa: E402
+
+# intervention -> the exact bare marker the cron turn's silent-execute clause keys
+# on. Order is the round-robin priority WITHIN a chosen scope: split first (cheap,
+# size-triggered), then consolidate (merge), then conflict (the costly fact-verify).
+_MARKERS: list[tuple[str, str]] = [
+    ("split", "[janitor-memory-split]"),
+    ("consolidate", "[janitor-memory-consolidate]"),
+    ("conflict", "[janitor-memory-conflict]"),
+]
+
+# The scopes the editor may act on, most-specific first (matches memory-librarian's
+# LOCAL → PROJECT → USER ordering). PROJECT is gated (see _scopes_in_play).
+_SCOPE_ORDER = ("LOCAL", "PROJECT", "USER")
+
+
+# --------------------------------------------------------------------------- #
+# scope resolution — IDENTICAL to memory-librarian._resolve_scope_dirs
+# --------------------------------------------------------------------------- #
+
+def _project_slug(project_dir: str) -> str:
+    """Harness per-project slug: the absolute path with every separator dashed.
+
+    Mirrors memory-librarian._project_slug / user_mem_lib._project_slug. Do NOT
+    resolve symlinks — the harness keys on the literal launch path.
+    """
+    p = project_dir.replace(os.sep, "-")
+    if os.altsep:
+        p = p.replace(os.altsep, "-")
+    return p
+
+
+def _resolve_memory_dir() -> Path:
+    """The per-project LOCAL agent-memory dir (parent of user-mem). Not created."""
+    proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip()
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+    return home / ".claude" / "projects" / _project_slug(proj) / "memory"
+
+
+def _resolve_project_scope_dir() -> Path | None:
+    """The PROJECT scope memory root: `<git-root>/.claude/project/memory/`, or None
+    when the cwd is not in a git repo. Resolved via `git rev-parse --show-toplevel`
+    so a worktree / sub-directory cwd still finds the repo root (TRDD-c77dae09)."""
+    proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip() or None
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=proj, capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    top = proc.stdout.strip()
+    return (Path(top) / ".claude" / "project" / "memory") if top else None
+
+
+def _resolve_user_scope_dir() -> Path:
+    """The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
+    `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`.
+
+    Resolved by this EXPLICIT hard-coded path, NEVER via ``${CLAUDE_PLUGIN_DATA}``:
+    that env var holds the *currently-running* plugin's data dir, which at heartbeat
+    time is whatever plugin owns the turn — not the janitor. (Same trap
+    memory-librarian._resolve_user_scope_dir documents.)
+    """
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+    return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
+
+
+def _resolve_scope_dirs() -> list[tuple[str, Path]]:
+    """The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT → USER.
+
+    De-duplicated by resolved path so a root that resolves twice is scheduled once.
+    IDENTICAL resolution to memory-librarian._resolve_scope_dirs (the SSOT both
+    layers share) so the scheduler and the librarian agree on what a scope is.
+    """
+    out: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+
+    def _add(label: str, d: Path | None) -> None:
+        if d is None:
+            return
+        try:
+            resolved = d.resolve()
+        except OSError:
+            resolved = d
+        if resolved in seen or not d.is_dir():
+            return
+        seen.add(resolved)
+        out.append((label, d))
+
+    _add("LOCAL", _resolve_memory_dir())
+    _add("PROJECT", _resolve_project_scope_dir())
+    _add("USER", _resolve_user_scope_dir())
+    return out
+
+
+def _scopes_in_play() -> list[tuple[str, Path]]:
+    """The scope roots eligible for editing this fire — existing scopes minus the
+    gated-off PROJECT scope. PROJECT is dropped unless the user opted in via
+    `edit_project_scope`, because PROJECT memory is in-repo and unpushable outside
+    `publish.py` (plan §[CRITICAL] PROJECT-memory commits are unpushable)."""
+    edit_project = bool(memory_settings.get("edit_project_scope"))
+    out: list[tuple[str, Path]] = []
+    for label, root in _resolve_scope_dirs():
+        if label == "PROJECT" and not edit_project:
+            continue
+        out.append((label, root))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# round-robin cursor — persisted machine-wide so the rotation survives across
+# heartbeats and is shared by every session (no per-session drift in fairness).
+# --------------------------------------------------------------------------- #
+
+def _cursor_path() -> Path:
+    return global_state.global_state_dir() / "memory-maint-rr-cursor.ts"
+
+
+def _read_cursor() -> int:
+    return state.read_int_state(_cursor_path(), default=0)
+
+
+def _write_cursor(value: int) -> None:
+    global_state.init_global_state()
+    state.atomic_write(_cursor_path(), str(int(value)))
+
+
+# --------------------------------------------------------------------------- #
+# the machine-wide dispatch flock — serialises pick→stamp→emit across sessions.
+# A dedicated lock file under global_state_dir(), non-blocking + skip-if-held, in
+# the same idiom as global_state.{marketplace,oauth_rotator}_lock (kept local to
+# this detector so the SCHEDULE layer adds no surface to shared global_state.py;
+# it is detector glue, not a reusable lib primitive). Distinct from
+# memory_txn.commit_lock — that per-scope lock guards the EXECUTOR's actual page
+# swap; this one guards only the scheduler's decision-to-emit.
+# --------------------------------------------------------------------------- #
+
+def _dispatch_lock_path() -> Path:
+    return global_state.global_state_dir() / "memory-maint-dispatch.lock"
+
+
+def _acquire_dispatch_lock() -> int | None:
+    """Non-blocking exclusive flock. fd on success, None when a peer holds it
+    (caller MUST then skip this fire — never block; the heartbeat re-fires)."""
+    global_state.init_global_state()
+    fd = os.open(str(_dispatch_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except (BlockingIOError, OSError) as exc:
+        try:
+            os.close(fd)
+        finally:
+            pass
+        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (
+            errno.EAGAIN, errno.EWOULDBLOCK,
+        ):
+            return None
+        # Unexpected — log, but never crash the heartbeat.
+        state.log_line("memory-maintenance", f"unexpected dispatch-lock flock error: {exc}")
+        return None
+
+
+def _release_dispatch_lock(fd: int) -> None:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+# --------------------------------------------------------------------------- #
+# the scheduling decision (pure given a clock + the resolved scopes)
+# --------------------------------------------------------------------------- #
+
+def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
+    """The first DUE intervention for (scope, root) in the stable cost order, or
+    None. NEAR-FREE: each `is_due` is a stat + int-compare on the global stamp."""
+    for intervention, _marker in _MARKERS:
+        if memory_settings.is_due(intervention, scope, root, now):
+            return intervention
+    return None
+
+
+def _pick(scopes: list[tuple[str, Path]], cursor: int, now: int) -> tuple[int, str, str, Path] | None:
+    """Round-robin pick: starting at `cursor`, return the first scope (in rotation
+    order) that has a due intervention, as (next_cursor, intervention, scope_label,
+    root). None when nothing is due in any scope.
+
+    `next_cursor` advances PAST the chosen scope so the next heartbeat gives a
+    different scope first dibs (fairness). When nothing is due, the cursor is left
+    unchanged (no rotation churn on an idle fire)."""
+    n = len(scopes)
+    if n == 0:
+        return None
+    for offset in range(n):
+        idx = (cursor + offset) % n
+        label, root = scopes[idx]
+        intervention = _first_due_intervention(label, root, now)
+        if intervention is not None:
+            return ((idx + 1) % n, intervention, label, root)
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# main
+# --------------------------------------------------------------------------- #
+
+def main() -> int:
+    # `--one-shot` is the dispatch.py contract; we accept it (and ignore other args)
+    # so the detector is a drop-in roster member.
+    _ = sys.argv
+
+    # Master kill gate — off → total no-op (also covers the janitor kill-switch).
+    if not memory_txn.editor_enabled():
+        return 0
+
+    scopes = _scopes_in_play()
+    if not scopes:
+        return 0
+
+    now = int(time.time())
+
+    # Cheap pre-check OUTSIDE the lock: is anything due at all? Avoids taking the
+    # flock on the overwhelmingly-common idle fire. (The authoritative check is
+    # re-done under the lock to close the check-then-stamp race.)
+    if _pick(scopes, _read_cursor(), now) is None:
+        return 0
+
+    fd = _acquire_dispatch_lock()
+    if fd is None:
+        # A peer session holds the dispatch lock this fire — skip silently. It will
+        # stamp whatever it fires, so we are no longer due; the heartbeat re-fires.
+        state.log_line("memory-maintenance", "dispatch lock held by a peer — skipped this fire")
+        return 0
+    try:
+        # Re-read the cursor + re-pick UNDER the lock — a peer that just released the
+        # lock may have advanced the cursor and stamped an intervention, so the
+        # pre-check decision could be stale.
+        cursor = _read_cursor()
+        picked = _pick(scopes, cursor, now)
+        if picked is None:
+            return 0
+        next_cursor, intervention, scope_label, root = picked
+
+        # Stamp BEFORE emitting: the stamp is the cross-session dedupe oracle. If we
+        # crashed between stamp and emit the worst case is one skipped pass (it
+        # re-surfaces next cadence) — strictly safer than emitting-then-crashing,
+        # which could let a peer also emit. Only the fired intervention is stamped,
+        # so the other due interventions stay due for a later heartbeat (fairness).
+        memory_settings.mark_ran(intervention, scope_label, root, now)
+        _write_cursor(next_cursor)
+
+        marker = dict(_MARKERS)[intervention]
+        state.log_line(
+            "memory-maintenance",
+            f"due: {intervention} @ {scope_label} ({root}) — emitting {marker}",
+        )
+        # The marker MUST be bare/exact on its own line (the cron clause keys on
+        # that). NEVER routed through sanitize_for_drift_line — that is for UNTRUSTED
+        # text; this is our own trusted, constant marker, and defanging it would
+        # break the silent-execute clause. The forge-proofing lives in the cron
+        # prompt (act only on a bare line in the stub's OWN stdout) + the fact that
+        # this emit is the sole fan-out trigger and only fires post-flock/post-stamp.
+        print(marker)
+    finally:
+        _release_dispatch_lock(fd)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
