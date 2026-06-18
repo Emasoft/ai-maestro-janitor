@@ -37,7 +37,7 @@ test-requirements: [unit]
   - Every frequency `0` = disabled (the user owns the cost ceiling).
 - **SUPERSEDED — do NOT carry forward:** none yet.
 - **Durable artifacts to read before acting:** the plan
-  `/Users/emanuelesabetta/.claude/plans/glittery-hatching-shell.md` (TRDD-B
+  `glittery-hatching-shell.md` (TRDD-B
   sub-section + the PROJECT-unpushable + settings-path corrections) and TRDD-54b25d7e.
 
 ## Scope

@@ -40,7 +40,7 @@ test-requirements: [unit]
   - Note the re-arm rollout lag (the live heartbeat runs the installed plugin CACHE).
 - **SUPERSEDED — do NOT carry forward:** none yet.
 - **Durable artifacts to read before acting:** the plan
-  `/Users/emanuelesabetta/.claude/plans/glittery-hatching-shell.md` (TRDD-D
+  `glittery-hatching-shell.md` (TRDD-D
   sub-section + the scheduler + forge-proof-marker corrections) and TRDD-54b25d7e.
 
 ## Scope

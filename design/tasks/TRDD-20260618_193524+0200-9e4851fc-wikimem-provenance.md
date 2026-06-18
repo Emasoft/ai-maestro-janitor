@@ -35,7 +35,7 @@ test-requirements: [unit]
     STORES persist via atomic-write, NEVER git.
 - **SUPERSEDED — do NOT carry forward:** none yet.
 - **Durable artifacts to read before acting:** the plan
-  `/Users/emanuelesabetta/.claude/plans/glittery-hatching-shell.md` (TRDD-C
+  `glittery-hatching-shell.md` (TRDD-C
   sub-section + the provenance-resolution correction) and TRDD-54b25d7e.
 
 ## Scope

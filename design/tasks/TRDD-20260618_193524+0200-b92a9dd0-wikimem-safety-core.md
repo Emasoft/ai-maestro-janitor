@@ -43,7 +43,7 @@ test-requirements: [unit]
     the librarian's hard-coded janitor plugin-DATA path when it touches the USER scope.
 - **SUPERSEDED — do NOT carry forward:** none yet.
 - **Durable artifacts to read before acting:** the plan
-  `/Users/emanuelesabetta/.claude/plans/glittery-hatching-shell.md` (§"Decisive
+  `glittery-hatching-shell.md` (§"Decisive
   corrections" + the TRDD-A sub-section) and the parent TRDD-54b25d7e.
 
 ## Scope
