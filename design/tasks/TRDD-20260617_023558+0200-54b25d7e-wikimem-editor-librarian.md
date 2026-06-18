@@ -1,9 +1,9 @@
 ---
 trdd-id: 54b25d7e-ba33-49e5-b7e5-add0a54f0c8c
 title: Wikimem editor — librarian that aggregates, splits to overview+in-depth, and harmonizes like a Wikipedia editor
-column: design
+column: complete
 created: 2026-06-17T02:35:58+0200
-updated: 2026-06-17T19:27:26+0200
+updated: 2026-06-19T01:44:39+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3

@@ -1,9 +1,9 @@
 ---
 trdd-id: b4b9e27c-4f2f-4923-92d2-38370314d481
 title: Wikimem editor — scheduler detector + cron-prompt marker wiring
-column: todo
+column: complete
 created: 2026-06-18T19:35:24+0200
-updated: 2026-06-18T19:35:24+0200
+updated: 2026-06-19T01:44:39+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 3
@@ -11,7 +11,8 @@ task-type: feature
 release-via: publish
 parent-trdd: TRDD-54b25d7e
 npt: [TRDD-b92a9dd0, TRDD-c1397102]
-blocked-by: [TRDD-b92a9dd0, TRDD-c1397102]
+blocked-by: []
+implementation-commits: [dfd0c30]
 relevant-rules: []
 test-requirements: [unit]
 ---
