@@ -2,17 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.1] - 2026-06-18
-
-### Bug Fixes
-
-- Redact absolute plan path + MD004 NIT in wikimem TRDD backlog
-
-### Documentation
-
-- Author wikimem-editor TRDD backlog (b3eae1cd NPT + A-G)
+## [0.9.2] - 2026-06-18
 
 ### Features
 
-- Memory-edit safety core — txn + lock + verify (TRDD-b92a9dd0)
+- Commit-discipline rule + model provenance fields (TRDD-9e4851fc)
 
