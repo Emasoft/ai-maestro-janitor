@@ -1,9 +1,9 @@
 ---
 trdd-id: b3eae1cd-97c3-4f5b-b26f-aa6c72f81af9
 title: memory-librarian — gate conflict/aggregation on subject-entity + cohesion, not keyword overlap
-column: backburner
+column: todo
 created: 2026-06-14T17:30:03+0200
-updated: 2026-06-14T17:30:03+0200
+updated: 2026-06-18T19:35:24+0200
 current-owner: ai-maestro-janitor
 task-type: refactor
 priority: 6
@@ -62,7 +62,11 @@ metric and contradiction signal are a design choice to settle during the work.
 
 ## STATE
 
-Backburner. Solo-actionable later (janitor's own detector). The conflict/
-aggregation clustering lives in `scripts/detectors/memory-librarian.py`; tests
-in `tests/test_memory_librarian.py`. Issue #35 carries the reporter's concrete
-false-positive examples (seed the negative set from them).
+Promoted backburner → `todo`. This is the **NPT** (necessary prerequisite) for the
+wikimem-editor executors TRDD-c5da00c0 (SPLIT), TRDD-31168858 (MERGE), and
+TRDD-88bdf651 (CONFLICT) — every executor consumes the librarian's candidate pool,
+so a noisy pool wastes the editorial agents' tokens. Solo-actionable (janitor's own
+detector). The conflict/aggregation clustering lives in
+`scripts/detectors/memory-librarian.py`; tests in `tests/test_memory_librarian.py`.
+Issue #35 carries the reporter's concrete false-positive examples (seed the negative
+set from them).
