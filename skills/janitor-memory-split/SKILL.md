@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-split
-description: SPLIT — break ONE oversized wikimem memory page (over the split_max_bytes cap) into a concise overview plus type-preserving linked sub-pages. The autonomous-librarian SPLIT executor. Invoke on a bare [janitor-memory-split] heartbeat marker, or when asked to "split the big memory page", "the memory wiki page is too large", "this memory note grew past the cap". One page per run, ONE level deep (recursion across later heartbeats, never nested in-turn); loses no fact or lesson, redirects inbound [[links]] to the right sub-page, partitions hub globs non-overlapping. Mutates pages ONLY through the crash-safe transaction core (scripts/memory_txn_cli.py begin/commit --op split) — never edits a live page directly. Refuses to fragment a component (one element = one page), leaves an un-splittable atomic note intact, and exits on verify-pass with bounded retry then aborts with a finding.
+description: SPLIT executor — breaks ONE oversized wikimem page (over split_max_bytes) into a concise overview + type-preserving linked sub-pages, losing no fact or lesson, redirecting inbound [[links]], partitioning hub globs. One page per run, one level deep (recursion across later heartbeats). Mutates only through the crash-safe transaction core (scripts/memory_txn_cli.py begin/commit --op split); refuses to fragment a component. Use on a [janitor-memory-split] marker, or "split the big memory page", "the memory wiki page is too large".
 ---
 
 # Janitor memory — SPLIT

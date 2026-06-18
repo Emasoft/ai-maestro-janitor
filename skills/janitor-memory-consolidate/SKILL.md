@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-consolidate
-description: CONSOLIDATE (MERGE) — the janitor's autonomous wiki-librarian pass that fuses two duplicate memory notes about the SAME subject AND same type into one page, deduplicating their lessons, redirecting every backlink, and keeping the oldest origin date — all through the crash-safe memory transaction core, never by editing a live page. Use on a `[janitor-consolidate]` heartbeat marker, or when asked to "consolidate / merge / deduplicate the memory", "two notes cover the same thing", "fold these memory pages together", or "clean up duplicate memories". Merges ONLY a same-subject same-type pair (runs is_legal_merge first); ABSTAINS when uncertain, on cross-type/cross-scope/two-hub pairs, or when a third page shares the subject. Defaults to LOCAL+USER scope (PROJECT is opt-in and staged-not-pushed). The MERGE leg of the wikimem editor.
+description: CONSOLIDATE (MERGE) executor — fuses two duplicate memory notes about the SAME subject + same type into one page (dedup lessons, redirect backlinks, keep the oldest origin date), through the crash-safe transaction core, never editing a live page. ABSTAINS on uncertainty, cross-type/cross-scope/two-hub, or a third page sharing the subject. Use on a [janitor-memory-consolidate] marker, or "consolidate / merge / deduplicate the memory", "two notes cover the same thing", "fold these memory pages together".
 ---
 
 # Janitor memory — CONSOLIDATE (MERGE executor)
@@ -20,11 +20,9 @@ made to *copies* inside a staging dir that the CLI hands you; the CLI verifies t
 result lost nothing and applies it atomically. If you `Edit` a file under a memory
 root directly, you have broken the contract — undo it.
 
-Read the wiki data model before merging: tiers (hub/aspect/component), the link
-law, page anatomy, lessons —
-[../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md).
-Mechanics and the worked walkthrough are in
-[references/merge-protocol.md](references/merge-protocol.md).
+Know the wiki data model before merging — tiers (hub/aspect/component), the link
+law, page anatomy, lessons. The mechanics + worked walkthrough are in the
+merge-protocol reference (Resources).
 
 ## Default posture — ABSTAIN unless certain
 
@@ -284,10 +282,15 @@ defaults to LOCAL+USER (PROJECT opt-in, staged-not-pushed).
 
 ## Resources
 
-- [references/merge-protocol.md](references/merge-protocol.md) — the worked
-  walkthrough, the exact CLI two-phase contract, and the verify_merge failure
-  catalog.
-- [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
-  — tiers, the link law, page anatomy, lessons conventions.
+- [merge-protocol](references/merge-protocol.md) — the worked walkthrough, the CLI
+  two-phase contract, and the verify_merge failure catalog. Its sections:
+  - The two-phase transaction contract
+  - What is_legal_merge checks
+  - What verify_merge enforces at commit
+  - Why backlink redirect is the load-bearing step
+  - Slug rules
+  - Worked walkthrough
+  - Failure-path walkthrough
+  - Bounds & safety recap
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons
   conventions + the LOCAL/PROJECT/USER scope table.

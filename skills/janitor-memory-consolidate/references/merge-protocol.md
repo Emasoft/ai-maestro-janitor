@@ -4,6 +4,17 @@ This is the deep reference for `/janitor-memory-consolidate`. The SKILL.md is th
 checklist; this doc is the *why* and the exact mechanics. Read it once; the skill
 has the runnable steps.
 
+## Table of contents
+
+- The two-phase transaction contract
+- What is_legal_merge checks
+- What verify_merge enforces at commit
+- Why backlink redirect is the load-bearing step
+- Slug rules
+- Worked walkthrough
+- Failure-path walkthrough
+- Bounds & safety recap
+
 ## The two-phase transaction contract (`scripts/memory_txn_cli.py`)
 
 You NEVER mutate a live memory page. You mutate **copies** the CLI stages for you,
