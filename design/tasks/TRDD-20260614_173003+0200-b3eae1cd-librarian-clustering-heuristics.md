@@ -1,7 +1,7 @@
 ---
 trdd-id: b3eae1cd-97c3-4f5b-b26f-aa6c72f81af9
 title: memory-librarian — gate conflict/aggregation on subject-entity + cohesion, not keyword overlap
-column: todo
+column: complete
 created: 2026-06-14T17:30:03+0200
 updated: 2026-06-18T19:35:24+0200
 current-owner: ai-maestro-janitor
@@ -13,7 +13,7 @@ labels: [memory-librarian, heuristics, false-positive]
 release-via: publish
 test-requirements: [unit]
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/35"]
-updated: 2026-06-18T21:30:00+0200
+updated: 2026-06-18T22:05:00+0200
 ---
 
 # memory-librarian — gate conflict/aggregation on subject-entity + cohesion, not keyword overlap
@@ -97,9 +97,13 @@ build it AS the tests:**
 
 Out of scope: full semantic contradiction-detection (the "Direction" option 1) —
 the df-gated shared-subject-entity bar is the agreed minimum and what this
-implements. NOT shipped 2026-06-18: a working detector + delicate threshold on a
-saturated context is a regression risk; this spec de-risks a fresh-context
-implementation.
+implements. IMPLEMENTED + shipped 2026-06-18: df-gating with `_GENERIC_DF_FLOOR = 4`
+/ `_GENERIC_DF_RATIO = 0.34` applied in `_token_clusters` + `_conflict_pairs` via a
+new `_distinctive_token_sets()` helper; NEG (5 generic-theme notes → no cluster) +
+POS (distinctive pair → still clusters) fixtures added to `test_memory_librarian.py`.
+49 tests pass, no regression. Acceptance #1/#2 met; #3 (genuine contradiction still
+surfaced) holds because a real same-subject pair shares distinctive tokens (df ≤
+floor) and is kept.
 
 ## STATE
 

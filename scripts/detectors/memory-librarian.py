@@ -45,6 +45,7 @@ touches user/global scope and never the project's own source tree.
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import re
 import shutil
@@ -88,6 +89,19 @@ _MAX_CLUSTER_SIZE = 12
 # makes the detector actually fire on the real corpus. Requiring ≥2 shared
 # significant tokens (not 1) avoids clustering on a single common word.
 _MIN_SHARED_TOKENS = 2
+
+# Document-frequency gating (issue #35). A token shared across MANY notes of a
+# scope is a generic THEME word, not a distinctive subject — and on a small,
+# domain-clustered corpus it (plus one other common word) transitively collapses
+# distinct subtopics into one FALSE cluster, eroding trust in the proposals. So a
+# token is excluded from edge-formation when its document-frequency (notes
+# containing it) exceeds `_GENERIC_DF = max(_GENERIC_DF_FLOOR, ceil(n*RATIO))`.
+# A token shared across a would-be cluster of K notes has df ≥ K, so any cluster
+# bigger than `_GENERIC_DF` loses its common tokens and breaks apart, while a
+# genuine 2-4 note duplicate (distinctive tokens, df ≤ the floor) still forms. The
+# FLOOR is load-bearing for the small-corpus FP; the RATIO governs large corpora.
+_GENERIC_DF_FLOOR = 4
+_GENERIC_DF_RATIO = 0.34
 
 # `memgrep index --markdown` block header: `## <path> — <name>` (em-dash spaced).
 _BLOCK_RE = re.compile(r"^##\s+(?P<path>\S.*?)\s+—\s+(?P<name>.+?)\s*$")
@@ -528,6 +542,31 @@ def _tag_clusters(notes: dict[str, NoteMeta]) -> dict[str, list[str]]:
     return clusters
 
 
+def _distinctive_token_sets(notes: dict[str, NoteMeta]) -> dict[str, frozenset[str]]:
+    """Per-note tokens with the corpus-GENERIC ones removed (issue #35).
+
+    A token is GENERIC when its document-frequency (how many notes contain it)
+    exceeds `_GENERIC_DF = max(_GENERIC_DF_FLOOR, ceil(n * _GENERIC_DF_RATIO))`.
+    Removing generic tokens before edge-formation stops a shared domain THEME word
+    from transitively collapsing distinct subtopics into one cluster: a token
+    shared across a would-be cluster of K notes has df ≥ K, so any cluster bigger
+    than `_GENERIC_DF` loses its common tokens and breaks apart, while a genuine
+    2-4 note duplicate (distinctive tokens, df ≤ the floor) still forms.
+    """
+    n = len(notes)
+    if n == 0:
+        return {}
+    df: dict[str, int] = {}
+    for meta in notes.values():
+        for tok in meta.tokens:
+            df[tok] = df.get(tok, 0) + 1
+    generic_df = max(_GENERIC_DF_FLOOR, math.ceil(n * _GENERIC_DF_RATIO))
+    return {
+        name: frozenset(t for t in meta.tokens if df[t] <= generic_df)
+        for name, meta in notes.items()
+    }
+
+
 def _token_clusters(
     notes: dict[str, NoteMeta],
     already_clustered: set[str],
@@ -548,10 +587,11 @@ def _token_clusters(
     proposal does not double-list the same group. O(n²) over a `_MAX_NOTES`-capped
     n; cheap.
     """
+    distinctive = _distinctive_token_sets(notes)
     items = [
         (name, meta)
         for name, meta in sorted(notes.items())
-        if name not in already_clustered and len(meta.tokens) >= _MIN_SHARED_TOKENS
+        if name not in already_clustered and len(distinctive[name]) >= _MIN_SHARED_TOKENS
     ]
     n = len(items)
     if n < 2:
@@ -572,9 +612,9 @@ def _token_clusters(
             parent[max(ra, rb)] = min(ra, rb)
 
     for i in range(n):
-        toks_i = items[i][1].tokens
+        toks_i = distinctive[items[i][0]]
         for j in range(i + 1, n):
-            if len(toks_i & items[j][1].tokens) >= _MIN_SHARED_TOKENS:
+            if len(toks_i & distinctive[items[j][0]]) >= _MIN_SHARED_TOKENS:
                 union(i, j)
 
     # Collect components.
@@ -648,6 +688,7 @@ def _conflict_pairs(
     already cross-linked — the tangential-mention-links-canonical wiki invariant
     working as intended — is excluded. Bounded by `_MAX_PAIRS_LISTED`.
     """
+    distinctive = _distinctive_token_sets(notes)
     items = sorted(notes.items())
     seen: set[frozenset[str]] = set()
     out: list[tuple[str, str, str]] = []
@@ -659,7 +700,7 @@ def _conflict_pairs(
             if pair in seen or pair in linked:
                 continue
             shared_tags = meta_i.tags & meta_j.tags
-            shared_tokens = meta_i.tokens & meta_j.tokens
+            shared_tokens = distinctive[name_i] & distinctive[name_j]
             if shared_tags:
                 topic = "+".join(sorted(shared_tags)[:4])
             elif len(shared_tokens) >= _MIN_SHARED_TOKENS:

@@ -271,6 +271,47 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             self.assertIn("oauth_rotator_beta.md", bullets[0])
             self.assertIn("oauth_rotator_gamma.md", bullets[0])
 
+    def test_issue35_generic_theme_notes_do_not_overcluster(self):
+        """Issue #35: distinct subtopics that merely share a generic THEME word are
+        NOT collapsed into one aggregation cluster. Five tagless notes whose only
+        common tokens are high-df theme words (document-frequency-gated out), each
+        carrying its own distinctive word, must produce NO aggregation candidate
+        and NO conflict pair — the small-corpus over-clustering FP is gone.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            for w in ("alpha", "bravo", "charlie", "delta", "echo"):
+                (memdir / f"topic_{w}.md").write_text(
+                    _note(f"topic_{w}", f"telemetry dashboard {w} subtopic", []))
+            # one unrelated note keeps the corpus small (df threshold = the floor)
+            (memdir / "unrelated.md").write_text(
+                _note("unrelated", "keychain rotator cookie", []))
+            out = _run(home, project)
+            self.assertNotIn("aggregation", out)
+            self.assertNotIn("conflict", out)
+
+    def test_distinctive_token_pair_still_clusters(self):
+        """Guard against over-gating: two notes sharing DISTINCTIVE (low-df) tokens
+        are still surfaced as an aggregation candidate — the precision fix must not
+        suppress a genuine same-subject duplicate.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "frobnicator_setup.md").write_text(
+                _note("frobnicator_setup", "the frobnicator widget bootstrap routine", []))
+            (memdir / "frobnicator_teardown.md").write_text(
+                _note("frobnicator_teardown", "the frobnicator widget shutdown routine", []))
+            (memdir / "unrelated.md").write_text(
+                _note("unrelated", "keychain rotator cookie", []))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            self.assertIn("aggregation", out)
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            self.assertIn("frobnicator_setup.md", proposal)
+            self.assertIn("frobnicator_teardown.md", proposal)
+
 
 def _raw_note(
     *,
