@@ -242,3 +242,116 @@ def test_split_converged_tolerates_flagged_unsplittable():
     """An over-cap page flagged un-splittable (one atomic note) is allowed."""
     ok, oversized = v.split_converged({"giant-note.md": 30000}, max_bytes=12000, unsplittable={"giant-note.md"})
     assert ok and oversized == []
+
+
+# ---- composite verifier: verify_merge --------------------------------------
+
+def test_verify_merge_clean_pass():
+    """Both lessons preserved, ocd=min, no dups, no dangling → PASS."""
+    a = _note(name="a", ocd="2026-05-01", lmd="2026-05-10",
+              body="Auth uses JWT.", lessons="[^1]: the cap is 3, verified against the source.\n")
+    b = _note(name="b", ocd="2026-06-01", lmd="2026-06-09",
+              body="Tokens expire in 30s.", lessons="[^1]: timeouts default to 30s per the config.\n")
+    result = _note(name="c", ocd="2026-05-01", lmd="2026-06-18",
+                   body="Auth uses JWT. Tokens expire in 30s.", lessons=(
+                       "[^1]: the cap is 3, verified against the source.\n"
+                       "[^2]: timeouts default to 30s per the config.\n"))
+    others = {"x.md": "see [[c]] for auth details"}
+    ok, reasons = v.verify_merge(
+        [a, b], [v.parse_frontmatter(a), v.parse_frontmatter(b)],
+        result, v.parse_frontmatter(result), retired_slugs={"a", "b"}, other_live_pages=others,
+    )
+    assert ok, reasons
+
+
+def test_verify_merge_fails_on_dropped_lesson():
+    """A source lesson missing from the merged page → FAIL with a lesson reason."""
+    a = _note(name="a", ocd="2026-05-01", lmd="2026-05-10",
+              lessons="[^1]: the cap is 3, verified against the source.\n")
+    b = _note(name="b", ocd="2026-06-01", lmd="2026-06-09",
+              lessons="[^1]: timeouts default to 30s per the config.\n")
+    result = _note(name="c", ocd="2026-05-01", lmd="2026-06-18",
+                   lessons="[^1]: timeouts default to 30s per the config.\n")  # dropped a's lesson
+    ok, reasons = v.verify_merge(
+        [a, b], [v.parse_frontmatter(a), v.parse_frontmatter(b)],
+        result, v.parse_frontmatter(result), retired_slugs={"a", "b"}, other_live_pages={},
+    )
+    assert not ok and any("lesson" in r for r in reasons)
+
+
+def test_verify_merge_fails_on_dangling_ref():
+    """A surviving OTHER page still linking a retired source slug → FAIL (redirect missed)."""
+    a = _note(name="a", ocd="2026-05-01", lmd="2026-05-10", lessons="[^1]: cap is 3 per source.\n")
+    b = _note(name="b", ocd="2026-06-01", lmd="2026-06-09", lessons="[^1]: 30s timeout per config.\n")
+    result = _note(name="c", ocd="2026-05-01", lmd="2026-06-18", lessons=(
+        "[^1]: cap is 3 per source.\n[^2]: 30s timeout per config.\n"))
+    others = {"x.md": "still references [[a]] which no longer exists"}  # redirect missed
+    ok, reasons = v.verify_merge(
+        [a, b], [v.parse_frontmatter(a), v.parse_frontmatter(b)],
+        result, v.parse_frontmatter(result), retired_slugs={"a", "b"}, other_live_pages=others,
+    )
+    assert not ok and any("dangling" in r for r in reasons)
+
+
+# ---- composite verifier: verify_split --------------------------------------
+
+def _hub(name, globs, body, lessons=""):
+    glist = "[" + ", ".join(f'"{g}"' for g in globs) + "]"
+    return (
+        f"---\nname: {name}\ndescription: \"d\"\nocd: 2026-06-01\nlmd: 2026-06-01\n"
+        f"metadata:\n  node_type: memory\n  type: project\n  tier: hub\n  globs: {glist}\n---\n\n"
+        f"{body}\n\n## Notes and lessons learned\n{lessons}\n"
+    )
+
+
+def test_verify_split_clean_pass():
+    """A hub split whose sub-pages partition the globs, preserve the lesson, and
+    converge, with no dangling refs → PASS."""
+    source = _hub("plat", ["src/a/**", "src/b/**"],
+                  "## Frontend\nUI bits.\n## Backend\nServer bits.\n",
+                  lessons="[^1]: the build flag is --release, learned the hard way.\n")
+    overview = _hub("plat", ["src/a/**", "src/b/**"],
+                    "Overview: see [[plat-frontend]] and [[plat-backend]].\n")
+    sub1 = _hub("plat-frontend", ["src/a/**"],
+                "UI bits.\n", lessons="[^1]: the build flag is --release, learned the hard way.\n")
+    sub2 = _hub("plat-backend", ["src/b/**"], "Server bits.\n")
+    sizes = {"plat.md": len(overview.encode()), "plat-frontend.md": len(sub1.encode()),
+             "plat-backend.md": len(sub2.encode())}
+    ok, reasons = v.verify_split(
+        source, v.parse_frontmatter(source), [sub1, sub2],
+        [v.parse_frontmatter(sub1), v.parse_frontmatter(sub2)], overview,
+        sizes, max_bytes=12000, retired_slugs=set(), other_live_pages={},
+    )
+    assert ok, reasons
+
+
+def test_verify_split_fails_on_dropped_lesson():
+    """The source's lesson lost from every sub-page → FAIL."""
+    source = _hub("plat", ["src/a/**", "src/b/**"],
+                  "## Frontend\nUI.\n## Backend\nServer.\n",
+                  lessons="[^1]: the build flag is --release, learned the hard way.\n")
+    overview = _hub("plat", ["src/a/**", "src/b/**"], "Overview.\n")
+    sub1 = _hub("plat-frontend", ["src/a/**"], "UI.\n")          # lesson dropped
+    sub2 = _hub("plat-backend", ["src/b/**"], "Server.\n")
+    sizes = {"plat.md": 500, "plat-frontend.md": 500, "plat-backend.md": 500}
+    ok, reasons = v.verify_split(
+        source, v.parse_frontmatter(source), [sub1, sub2],
+        [v.parse_frontmatter(sub1), v.parse_frontmatter(sub2)], overview,
+        sizes, max_bytes=12000, retired_slugs=set(), other_live_pages={},
+    )
+    assert not ok and any("lesson" in r for r in reasons)
+
+
+def test_verify_split_fails_on_dangling_ref():
+    """A retired source slug still linked by a surviving page → FAIL (redirect missed)."""
+    source = _hub("plat", ["src/a/**"], "## Frontend\nUI.\n## Backend\nServer.\n",
+                  lessons="[^1]: cap is 3.\n")
+    overview = _hub("plat-overview", ["src/a/**"], "Overview.\n")  # source slug retired -> plat
+    sub1 = _hub("plat-frontend", ["src/a/**"], "UI.\n", lessons="[^1]: cap is 3.\n")
+    sizes = {"plat-overview.md": 500, "plat-frontend.md": 500}
+    others = {"x.md": "links to [[plat]] still"}  # 'plat' retired, redirect missed
+    ok, reasons = v.verify_split(
+        source, v.parse_frontmatter(source), [sub1], [v.parse_frontmatter(sub1)], overview,
+        sizes, max_bytes=12000, retired_slugs={"plat"}, other_live_pages=others,
+    )
+    assert not ok and any("dangling" in r for r in reasons)

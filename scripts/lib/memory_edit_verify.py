@@ -255,3 +255,117 @@ def split_converged(page_sizes: dict, max_bytes: int, unsplittable=None) -> tupl
     flagged = set(unsplittable or set())
     oversized = [p for p, n in page_sizes.items() if n > max_bytes and p not in flagged]
     return (not oversized, oversized)
+
+
+# --------------------------------------------------------------------------- #
+# composite verifiers — the ONE call each executor (merge / split) runs before
+# its transaction commits. Each composes the primitives above into a single
+# (ok, reasons) verdict; a non-empty `reasons` list aborts the txn.
+# --------------------------------------------------------------------------- #
+
+def verify_merge(
+    source_texts: list[str],
+    source_metas: list[dict],
+    result_text: str,
+    result_meta: dict,
+    retired_slugs,
+    other_live_pages: dict,
+) -> tuple[bool, list[str]]:
+    """Prove a MERGE lost nothing before its transaction commits.
+
+    Composes the four merge invariants into one verdict:
+    - LESSON PRESERVATION — every `[^N]` lesson from every source survives into
+      the merged page (the sacred never-lost layer; reword/drop FAILS).
+    - OCD/LMD — the survivor keeps the oldest origin date + a fresh modify date.
+    - NO NEW DUPLICATES — a merge REMOVES redundancy; a naive union that
+      re-introduced a duplicate content line FAILS.
+    - NO DANGLING REFS — the LINK LAW: after the source slugs retire, NO surviving
+      page (the merged page itself OR any OTHER live page) may still `[[link]]` a
+      retired slug — that means a backlink redirect was missed.
+
+    `other_live_pages` is {slug_or_path: text} of every page in the scope OTHER
+    than the merged result; the dangling check unions it with the result so a
+    missed redirect anywhere in the corpus is caught. Returns (ok, [reasons])."""
+    reasons: list[str] = []
+
+    ok, missing = lessons_preserved(source_texts, result_text)
+    if not ok:
+        reasons.append("dropped/reworded lesson(s): " + "; ".join(missing))
+
+    ok, why = ocd_lmd_ok_merge(source_metas, result_meta)
+    if not ok:
+        reasons.append("ocd/lmd: " + why)
+
+    ok, dups = no_new_duplicate_lines(result_text)
+    if not ok:
+        reasons.append("duplicate content line(s) re-introduced: " + "; ".join(dups))
+
+    live_after = dict(other_live_pages or {})
+    live_after["__merged_result__"] = result_text
+    ok, dangling = no_dangling_refs(live_after, retired_slugs)
+    if not ok:
+        reasons.append("dangling refs to retired slug(s): " + "; ".join(dangling))
+
+    return (not reasons, reasons)
+
+
+def verify_split(
+    source_text: str,
+    source_meta: dict,
+    subpage_texts: list[str],
+    subpage_metas: list[dict],
+    overview_text: str,
+    page_sizes: dict,
+    max_bytes: int,
+    unsplittable=None,
+    retired_slugs=None,
+    other_live_pages: dict | None = None,
+) -> tuple[bool, list[str]]:
+    """Prove a SPLIT lost nothing before its transaction commits.
+
+    Composes the split invariants into one verdict:
+    - LESSON PRESERVATION — every lesson of the SOURCE page survives SOMEWHERE
+      across the sub-pages (checked over the concatenated sub-page bodies; the
+      overview is a map of summaries, so lessons live in the leaves it points to).
+    - GLOBS PARTITION — only when the SOURCE is a `hub`: its `globs:` ownership
+      must partition across the sub-pages (union == parent, no overlap). A
+      non-hub source has no `globs` ownership to partition, so the check is skipped.
+    - CONVERGENCE — every output page is within the size cap or flagged
+      un-splittable (an atomic leaf over the cap, left intact); an unflagged
+      over-cap page means the split gave up.
+    - NO DANGLING REFS — after the source slug retires, no surviving page (the
+      overview, the sub-pages, or any OTHER live page) `[[link]]`s the retired slug.
+
+    `page_sizes` is {page_path: byte_len} for every output (overview + sub-pages).
+    `retired_slugs` defaults to empty (a split that keeps the source slug as the
+    overview retires nothing); pass the source slug when it is replaced. Returns
+    (ok, [reasons])."""
+    reasons: list[str] = []
+
+    # The overview is part of the output and may itself carry a stray lesson; fold
+    # it into the concatenation so a lesson placed there is still counted preserved.
+    concatenated = "\n".join([*subpage_texts, overview_text])
+    ok, missing = lessons_preserved([source_text], concatenated)
+    if not ok:
+        reasons.append("source lesson(s) lost across sub-pages: " + "; ".join(missing))
+
+    if source_meta.get("tier") == "hub":
+        ok, why = split_globs_partition_ok(
+            source_meta.get("globs"), [m.get("globs") for m in subpage_metas]
+        )
+        if not ok:
+            reasons.append("globs: " + why)
+
+    ok, oversized = split_converged(page_sizes, max_bytes, unsplittable)
+    if not ok:
+        reasons.append("un-converged over-cap page(s): " + ", ".join(oversized))
+
+    live_after = dict(other_live_pages or {})
+    live_after["__overview__"] = overview_text
+    for i, txt in enumerate(subpage_texts):
+        live_after[f"__subpage_{i}__"] = txt
+    ok, dangling = no_dangling_refs(live_after, retired_slugs or set())
+    if not ok:
+        reasons.append("dangling refs to retired slug(s): " + "; ".join(dangling))
+
+    return (not reasons, reasons)
