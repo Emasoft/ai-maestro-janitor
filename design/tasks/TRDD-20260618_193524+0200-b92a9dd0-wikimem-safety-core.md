@@ -1,9 +1,9 @@
 ---
 trdd-id: b92a9dd0-7ba2-434a-9b33-f0735ac69d5f
 title: Wikimem editor — memory-edit safety core (txn + lock + verify)
-column: todo
+column: complete
 created: 2026-06-18T19:35:24+0200
-updated: 2026-06-18T19:35:24+0200
+updated: 2026-06-18T20:14:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 3
@@ -18,13 +18,16 @@ test-requirements: [unit]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-18
 
-- **Current state:** authored, not started. This is TRDD-A, the FOUNDATION — every
-  executor (E/F/G) mutates pages ONLY through this transaction core, never directly.
-- **NEXT ACTION:** create `scripts/lib/memory_txn.py` — the staging dir
-  (`memory/.maint-staging/<txn-id>/`) + `journal.json` + ordered atomic-swap
-  (write survivors via `state.atomic_write`/`os.replace` FIRST, delete sources LAST)
-  + heartbeat-start resume-check (roll-forward a half-applied swap / discard an
-  unstarted staging dir).
+- **Current state:** BUILT + TESTED (41 tests green, ruff clean). `scripts/lib/memory_txn.py`
+  (begin/stage/commit/abort/resume + per-scope commit flock + SHA-256 stale-snapshot
+  guard + `editor_enabled` kill gate + `apply_atomic` convenience) and
+  `scripts/lib/memory_edit_verify.py` (lesson-preservation strict check, legality
+  predicates, ocd/lmd, dangling-link, dedup, split globs-partition/convergence) exist,
+  with `tests/test_memory_txn.py` + `tests/test_memory_edit_verify.py`. Every executor
+  (E/F/G) mutates pages ONLY through this transaction core, never directly.
+- **NEXT ACTION:** ship via `publish.py`; then the executors (E/F) import
+  `memory_txn.apply_atomic` + the `memory_edit_verify.*` checks. A thin `memory_txn`
+  CLI (begin/commit/resume subcommands) for the agent-driven case lands with TRDD-D/E.
 - **Load-bearing facts (CRITICAL corrections from the plan):**
   - A merge/split mutates MANY files (merged/overview page, deleted sources,
     MEMORY.md, **redirected backlinks in OTHER pages**) — a crash / rate-limit /
