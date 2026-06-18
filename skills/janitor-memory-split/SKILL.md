@@ -118,7 +118,7 @@ becoming one sub-page. Then design the outputs:
 
 - **Overview page** — REUSE the source's path/slug. It keeps the page's identity,
   frontmatter `name`, `ocd`, and `tier`, and becomes a concise map: a short intro
-  + one tight summary line per sub-page, each with a `[[sub-page-slug]]` link
+  - one tight summary line per sub-page, each with a `[[sub-page-slug]]` link
   (the link law — the overview links DOWN to every sub-page). Move the bulk detail
   OUT to the sub-pages; the overview is a navigation surface, not a dumping
   ground. A stray `[^N]` lesson may stay on the overview (verify folds it in), but
@@ -167,7 +167,7 @@ that point at moved detail.
 > (step 5): the commit reconstructs that as a write that overwrites the live
 > holder. So `begin` takes only `$REL`; the holder edits ride along as extra
 > staged writes.
-
+>
 > The verify gate (`no_dangling_refs`) only fails on links to a RETIRED slug. If
 > you keep the source slug as the overview (recommended), nothing retires and the
 > check is trivially satisfied — but redirecting moved-detail backlinks is still

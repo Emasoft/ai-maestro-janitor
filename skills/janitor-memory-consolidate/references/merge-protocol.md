@@ -126,11 +126,13 @@ one page".
 5. **Backlinks:** `memgrep links --from rotator-version-skew "$LOCAL_MEM"` →
    `oauth-rotator-hub` links `[[rotator-version-skew]]`. That holder must repoint.
 6. **begin:**
+
    ```bash
    out=$(uv run "$CLI" begin "$LOCAL_MEM" merge "rotator-429-deadlock.md" "rotator-version-skew.md")
    TXN=…; STAGING=…
    cp "$LOCAL_MEM/oauth-rotator-hub.md" "$STAGING/oauth-rotator-hub.md"   # the holder
    ```
+
 7. **Edit copies under $STAGING:**
    - overwrite `rotator-429-deadlock.md` with the merged page C: both facets as
      `##` sections; both lesson sets unioned + deduped under one `## Notes and
@@ -144,7 +146,7 @@ one page".
    the holder; 1 delete = the retired source.)
 9. **Index + report:** fix `MEMORY.md` (drop the `rotator-version-skew` line),
    report `merged rotator-version-skew → rotator-429-deadlock (4 lessons preserved,
-   1 backlink redirected, ocd=2026-05-30)`.
+1 backlink redirected, ocd=2026-05-30)`.
 
 ## Failure-path walkthrough (verify FAIL → bounded retry)
 

@@ -223,6 +223,7 @@ state. Two pages for one element violate "one element = one page" anyway, so the
 right wiki outcome is to CONSOLIDATE: keep the page holding the CURRENT truth as
 the survivor, retire the obsolete page, and fold its (still-true-of-the-past) fact
 into the survivor as a compounding `[^N]`. Nothing is lost — only the slug merges.
+
 ```bash
 # sources = the conflict PAIR: <obsolete.md> (to retire) + <current.md> (survivor)
 uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<obsolete.md>" "<current.md>"
@@ -248,6 +249,7 @@ uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op merge
 DEMOTE; only the `[^N]` framing differs — the retired page was proven FALSE (not
 merely superseded), so its WHY-it-was-wrong rides into the survivor and NOTHING is
 lost even on a "delete":
+
 ```bash
 # sources = the conflict PAIR: <false.md> (to retire) + <survivor.md>
 uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<false.md>" "<survivor.md>"
@@ -274,7 +276,7 @@ uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op merge
 > `--op conflict` (an in-place demote that keeps both slugs), prefer it — but until
 > then a verdict ALWAYS retires one page of the pair; it can never keep both pages
 > nor edit a single page in place.
-
+>
 > Note: the `--op merge` commit gate does NOT call `is_legal_merge` — structural
 > legality (same-tier/same-type/no-two-hubs) is the CONSOLIDATE skill's concern, not
 > CONFLICT's. A conflict pair contradicts about ONE subject, so folding the
