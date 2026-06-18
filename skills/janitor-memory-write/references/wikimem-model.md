@@ -165,6 +165,8 @@ metadata:
   tier: hub | aspect | component   # the pyramid role (absent ⇒ treat as component)
   functionality: <hub-slug>        # which functionality this lives under (frontend, backend…)
   globs: ["src/frontend/**", ...]  # files this page's subject OWNS (REQUIRED on hubs)
+  commits: ["<sha>", ...]          # PROVENANCE (code-change memories): the commit(s) the fact came from
+  trdd: TRDD-<8hex>                # the TRDD that designed that change (corroborated by its implementation-commits:)
 ---
 
 <THE MEMORIES — the durable decisions for this page's subject, kept LEAN. A hub:
@@ -202,6 +204,29 @@ corrected body links to. RULE 0 + the Bug-Autopsy directive applied to memory:
 the fact moves forward clean; the history/WHY persists as a guardrail so the next
 session can't repeat the old mistake or re-litigate a settled flip. Mechanics are
 in the UPDATE skill.
+
+## Provenance — `commits:` / `trdd:` and the WHY-resolution chain
+
+A memory that records a **code change** SHOULD carry its provenance: the
+`commits:` (the SHA[s] the fact came from) and, when one exists, the `trdd:`
+(the TRDD that designed the change). These are optional and forward-going —
+existing notes without them stay valid — but they are what makes the
+**superseded-memory WHY sourceable rather than inferred**.
+
+When the autonomous conflict / fact-verification pass finds an **obsolete**
+memory, it resolves the WHY for the `[^N]` demotion in this fixed order, and
+**never invents one**:
+
+`memory.commits:` → `memory.trdd:` → that TRDD's `implementation-commits:` →
+`git show <sha>` (commit message **+** diff **+** code comments at the site).
+
+That chain is only as good as the discipline that fed it — see
+`~/.claude/rules/commit-discipline.md` (commit often; WHY in the commit message
+AND the code comments; `TRDD-<8hex>` in the subject). It is also the test the
+pass uses to tell a **false** memory (no trace anywhere in git → safe to delete)
+from a **superseded** one (traceable → demote, never delete): a memory with **no
+provenance and no git trace is NOT deleted** — provenance is the precondition for
+the destructive path.
 
 ## File → functionality (the RECALL entry point)
 

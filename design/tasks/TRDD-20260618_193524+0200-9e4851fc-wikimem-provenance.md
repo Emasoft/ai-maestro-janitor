@@ -1,9 +1,9 @@
 ---
 trdd-id: 9e4851fc-cb3b-4435-8022-d05e6dbb5d1a
 title: Wikimem editor — commit-discipline rule + model commit/trdd provenance fields
-column: todo
+column: complete
 created: 2026-06-18T19:35:24+0200
-updated: 2026-06-18T19:35:24+0200
+updated: 2026-06-18T20:42:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 3
@@ -18,11 +18,14 @@ test-requirements: [unit]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-18
 
-- **Current state:** authored, not started. This is TRDD-C (P1), parallelizable
-  with TRDD-B. TRDD-G depends on it (the WHY-resolution chain).
-- **NEXT ACTION:** author `rules/commit-discipline.md` (auto-installed user-scope):
-  commit often, after each memory write, WHY in BOTH the commit message AND code
-  comments, `TRDD-<8hex>` in the subject.
+- **Current state:** BUILT + TESTED (4 tests green, ruff clean). `rules/commit-discipline.md`
+  ships (auto-installed user-scope by rules_installer) with all four obligations; the
+  wikimem model gained the `commits:`/`trdd:` provenance fields + the WHY-resolution-chain
+  section. `tests/test_commit_discipline.py` pins the load-bearing content. TRDD-G
+  consumes the chain.
+- **NEXT ACTION:** none for TRDD-C — ship via publish.py. (TRDD-G implements the chain
+  in the conflict pass: memory.commits → memory.trdd → TRDD.implementation-commits →
+  git show.)
 - **Load-bearing facts (CRITICAL corrections from the plan):**
   - Fact-verify repo resolution MUST come from **provenance, not a guess** — a USER
     memory references code in *some* repo; scanning every repo mis-attributes (same
