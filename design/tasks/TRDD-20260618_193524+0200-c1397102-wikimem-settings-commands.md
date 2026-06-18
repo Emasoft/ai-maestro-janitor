@@ -1,9 +1,9 @@
 ---
 trdd-id: c1397102-5b7e-450f-8d59-c1207eefa704
 title: Wikimem editor — global settings store + frequency commands + scheduler stamps
-column: todo
+column: complete
 created: 2026-06-18T19:35:24+0200
-updated: 2026-06-18T19:35:24+0200
+updated: 2026-06-18T21:05:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 3
@@ -18,11 +18,14 @@ test-requirements: [unit]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-18
 
-- **Current state:** authored, not started. This is TRDD-B (P1), parallelizable
-  with TRDD-C.
-- **NEXT ACTION:** create `scripts/lib/memory_settings.py` — the atomic JSON store
-  at the janitor's HARD-CODED plugin-DATA path, with the four frequency keys + the
-  size key + `interval_s(key)` (∞ on `0`=disabled) + bare-set → default.
+- **Current state:** BUILT + TESTED (21 tests green, ruff clean). `scripts/lib/memory_settings.py`
+  (hard-coded plugin-DATA JSON store, defaults, `interval_s`, bare-set→default,
+  fail-fast validation, `edit_project_scope` gate defaulting OFF, + `is_due`/`mark_ran`
+  global per-(intervention×scope×root) stamps under global_state_dir), `scripts/memory_settings_cli.py`,
+  and 8 commands (`/janitor-memory-{consolidation,split,conflict}-frequency-{set,get}`
+  plus `-split-maxsize-{set,get}`). `tests/test_memory_settings.py`.
+- **NEXT ACTION:** none for TRDD-B — ship via publish.py. TRDD-D's detector consumes
+  `is_due`/`mark_ran` + `edit_project_scope`; a per-intervention marker is emitted when due.
 - **Load-bearing facts (CRITICAL corrections from the plan):**
   - The settings store MUST use the janitor's **hard-coded plugin-DATA path**
     (`…/plugins/data/ai-maestro-janitor-…/memory-settings.json`), NOT
