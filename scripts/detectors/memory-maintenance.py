@@ -71,7 +71,6 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -79,6 +78,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import global_state  # noqa: E402
+import memory_scopes  # noqa: E402
 import memory_settings  # noqa: E402
 import memory_txn  # noqa: E402
 import state  # noqa: E402
@@ -99,86 +99,12 @@ _MARKERS: list[tuple[str, str]] = [
 _SCOPE_ORDER = ("LOCAL", "PROJECT", "USER")
 
 
-# --------------------------------------------------------------------------- #
-# scope resolution — IDENTICAL to memory-librarian._resolve_scope_dirs
-# --------------------------------------------------------------------------- #
-
-def _project_slug(project_dir: str) -> str:
-    """Harness per-project slug: the absolute path with every separator dashed.
-
-    Mirrors memory-librarian._project_slug / user_mem_lib._project_slug. Do NOT
-    resolve symlinks — the harness keys on the literal launch path.
-    """
-    p = project_dir.replace(os.sep, "-")
-    if os.altsep:
-        p = p.replace(os.altsep, "-")
-    return p
-
-
-def _resolve_memory_dir() -> Path:
-    """The per-project LOCAL agent-memory dir (parent of user-mem). Not created."""
-    proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip()
-    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "projects" / _project_slug(proj) / "memory"
-
-
-def _resolve_project_scope_dir() -> Path | None:
-    """The PROJECT scope memory root: `<git-root>/.claude/project/memory/`, or None
-    when the cwd is not in a git repo. Resolved via `git rev-parse --show-toplevel`
-    so a worktree / sub-directory cwd still finds the repo root (TRDD-c77dae09)."""
-    proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip() or None
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=proj, capture_output=True, text=True, timeout=10, check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
-    if proc.returncode != 0:
-        return None
-    top = proc.stdout.strip()
-    return (Path(top) / ".claude" / "project" / "memory") if top else None
-
-
-def _resolve_user_scope_dir() -> Path:
-    """The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
-    `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`.
-
-    Resolved by this EXPLICIT hard-coded path, NEVER via ``${CLAUDE_PLUGIN_DATA}``:
-    that env var holds the *currently-running* plugin's data dir, which at heartbeat
-    time is whatever plugin owns the turn — not the janitor. (Same trap
-    memory-librarian._resolve_user_scope_dir documents.)
-    """
-    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
-
-
-def _resolve_scope_dirs() -> list[tuple[str, Path]]:
-    """The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT → USER.
-
-    De-duplicated by resolved path so a root that resolves twice is scheduled once.
-    IDENTICAL resolution to memory-librarian._resolve_scope_dirs (the SSOT both
-    layers share) so the scheduler and the librarian agree on what a scope is.
-    """
-    out: list[tuple[str, Path]] = []
-    seen: set[Path] = set()
-
-    def _add(label: str, d: Path | None) -> None:
-        if d is None:
-            return
-        try:
-            resolved = d.resolve()
-        except OSError:
-            resolved = d
-        if resolved in seen or not d.is_dir():
-            return
-        seen.add(resolved)
-        out.append((label, d))
-
-    _add("LOCAL", _resolve_memory_dir())
-    _add("PROJECT", _resolve_project_scope_dir())
-    _add("USER", _resolve_user_scope_dir())
-    return out
+# Scope resolution is the shared SSOT in scripts/lib/memory_scopes.py — extracted
+# from this detector + memory-librarian, which carried byte-identical copies (a
+# latent divergence bug the moment one was touched; TRDD-87935f21 priority #2).
+# _scopes_in_play below layers THIS scheduler's PROJECT-gating on top of the
+# shared three-scope resolution; the private alias keeps that call site unchanged.
+_resolve_scope_dirs = memory_scopes.resolve_scope_dirs
 
 
 def _scopes_in_play() -> list[tuple[str, Path]]:

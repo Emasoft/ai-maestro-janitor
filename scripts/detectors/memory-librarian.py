@@ -57,6 +57,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import memory_scopes  # noqa: E402
 import state  # noqa: E402
 
 # The librarian's own output file — written into the memory dir but it is NOT a
@@ -253,97 +254,14 @@ def _significant_tokens(*texts: str) -> frozenset[str]:
     return frozenset(toks)
 
 
-def _project_slug(project_dir: str) -> str:
-    """Harness per-project slug: the absolute path with every separator dashed.
-
-    Mirrors user_mem_lib._project_slug / the directory the harness creates under
-    ~/.claude/projects/. Do NOT resolve symlinks — the harness keys on the
-    literal launch path, so resolving could diverge from the real dir name.
-    """
-    p = project_dir.replace(os.sep, "-")
-    if os.altsep:
-        p = p.replace(os.altsep, "-")
-    return p
-
-
-def _resolve_memory_dir() -> Path:
-    """Return the per-project LOCAL agent-memory dir (parent of user-mem). Not created.
-
-    This is the LOCAL scope of the three-scope wiki (TRDD-c77dae09): per-project,
-    per-machine, never pushed. It is also where the proposal file is written
-    (the always-present primary root).
-    """
-    proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip()
-    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "projects" / _project_slug(proj) / "memory"
-
-
-def _resolve_project_scope_dir() -> Path | None:
-    """The PROJECT scope memory root: `<git-root>/.claude/project/memory/`, or None
-    when the cwd is not in a git repo. In-repo + namespaced under `.claude/` (a
-    bare `memory/` collides with the very common GitHub root-folder name; the
-    `.claude/project/memory` path is collision-free). Resolved via
-    `git rev-parse --show-toplevel` so a worktree / sub-directory cwd still finds
-    the repo root (TRDD-c77dae09)."""
-    proj = (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip() or None
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=proj, capture_output=True, text=True, timeout=10, check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
-    if proc.returncode != 0:
-        return None
-    top = proc.stdout.strip()
-    return (Path(top) / ".claude" / "project" / "memory") if top else None
-
-
-def _resolve_user_scope_dir() -> Path:
-    """The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
-    `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` —
-    untouchable, survives plugin updates + `--keep-data` uninstall (NOT a
-    `~/.claude/<custom>/` folder a cleanup pass could wipe). Not created.
-
-    Resolved by this EXPLICIT hard-coded path, NEVER via ``${CLAUDE_PLUGIN_DATA}``:
-    that env var holds the *currently-running* plugin's data dir, which is the
-    janitor ONLY inside the janitor's own plugin hooks. This detector runs via the
-    heartbeat (main-session bash) where ``CLAUDE_PLUGIN_DATA`` points at whatever
-    plugin owns that turn — verified to be some other plugin, not the janitor — so
-    reading it would route USER recall/write to the wrong plugin's dir.
-    """
-    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
-
-
-def _resolve_scope_dirs() -> list[tuple[str, Path]]:
-    """The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT →
-    USER (TRDD-c77dae09). The librarian runs SEPARATELY per scope — it NEVER
-    clusters or surfaces a conflict ACROSS scopes (a local note and a project
-    note are intentionally different layers; cross-scope placement is an
-    agent/user decision, not the librarian's). LOCAL is always first so the
-    proposal lands in it. PROJECT/USER are de-duplicated against earlier roots so
-    a path that resolves twice (e.g. overlapping roots) is analyzed once.
-    """
-    out: list[tuple[str, Path]] = []
-    seen: set[Path] = set()
-
-    def _add(label: str, d: Path | None) -> None:
-        if d is None:
-            return
-        try:
-            resolved = d.resolve()
-        except OSError:
-            resolved = d
-        if resolved in seen or not d.is_dir():
-            return
-        seen.add(resolved)
-        out.append((label, d))
-
-    _add("LOCAL", _resolve_memory_dir())
-    _add("PROJECT", _resolve_project_scope_dir())
-    _add("USER", _resolve_user_scope_dir())
-    return out
+# Scope resolution is the shared SSOT in scripts/lib/memory_scopes.py — extracted
+# from this detector + memory-maintenance, which carried byte-identical copies (a
+# latent divergence bug the moment one was touched; TRDD-87935f21 priority #2).
+# The librarian runs SEPARATELY per scope (it NEVER clusters or surfaces a conflict
+# ACROSS scopes — a local note and a project note are intentionally different
+# layers); the private alias keeps the one call site (_resolve_scope_dirs())
+# unchanged. LOCAL is always first so the reorg proposal lands in it.
+_resolve_scope_dirs = memory_scopes.resolve_scope_dirs
 
 
 def _find_memgrep() -> str | None:
