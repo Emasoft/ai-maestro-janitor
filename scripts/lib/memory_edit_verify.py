@@ -407,3 +407,68 @@ def verify_split(
         reasons.append("dangling refs to retired slug(s): " + "; ".join(dangling))
 
     return (not reasons, reasons)
+
+
+# --------------------------------------------------------------------------- #
+# repair — single-page in-place page-shape / metadata backfill (TRDD-87935f21)
+# --------------------------------------------------------------------------- #
+
+# Every wikimem page MUST carry these. The repair pass backfills them; verify_repair
+# refuses a "repair" that still lacks any (it didn't finish) or that DROPPED one.
+_REQUIRED_FM_KEYS = ("name", "description", "ocd", "lmd", "node_type", "type", "tier")
+_VALID_TIERS = ("hub", "aspect", "component")
+
+
+def verify_repair(
+    source_text: str,
+    source_meta: dict,
+    result_text: str,
+    result_meta: dict,
+) -> tuple[bool, list[str]]:
+    """Prove an in-place page REPAIR lost nothing AND actually completed the page.
+
+    Repair is additive structural maintenance of ONE page — backfill missing
+    metadata, add the Notes section, set/correct the tier, fix a tier/edge
+    inversion — NOT a merge or split, so it produces exactly ONE write at the SAME
+    path, zero deletes (the CLI enforces that shape). The verifier guarantees:
+
+    - LESSON PRESERVATION — every `[^N]` lesson of the source survives (sacred, the
+      same parser-independent check merge/split use).
+    - COMPLETENESS — the result carries every REQUIRED frontmatter key with a
+      non-empty value, and a `tier` from the legal set.
+    - NO METADATA LOSS — repair never DROPS a frontmatter key the source had.
+    - ORIGIN PRESERVED — `ocd` is unchanged when the source already had one (a
+      repair must never rewrite a page's birth date); `lmd` is not regressed.
+    - NOTES SECTION — the standing `## Notes and lessons learned` section is present.
+
+    Returns (ok, [reasons])."""
+    reasons: list[str] = []
+
+    ok, missing = lessons_preserved([source_text], result_text)
+    if not ok:
+        reasons.append("lesson(s) lost in repair: " + "; ".join(missing))
+
+    absent = [k for k in _REQUIRED_FM_KEYS if not str(result_meta.get(k, "")).strip()]
+    if absent:
+        reasons.append("frontmatter still missing required key(s): " + ", ".join(absent))
+
+    tier = result_meta.get("tier")
+    if tier and tier not in _VALID_TIERS:
+        reasons.append(f"invalid tier {tier!r} (must be one of {', '.join(_VALID_TIERS)})")
+
+    dropped = [k for k in source_meta if k not in result_meta]
+    if dropped:
+        reasons.append("repair dropped frontmatter key(s): " + ", ".join(sorted(dropped)))
+
+    s_ocd, r_ocd = source_meta.get("ocd"), result_meta.get("ocd")
+    if s_ocd and r_ocd and str(s_ocd) != str(r_ocd):
+        reasons.append(f"ocd must not change in repair: {s_ocd} -> {r_ocd}")
+
+    s_lmd, r_lmd = source_meta.get("lmd"), result_meta.get("lmd")
+    if s_lmd and r_lmd and str(r_lmd) < str(s_lmd):
+        reasons.append(f"lmd regressed in repair: {s_lmd} -> {r_lmd}")
+
+    if _LESSONS_HEADING not in result_text:
+        reasons.append(f"missing '{_LESSONS_HEADING}' section")
+
+    return (not reasons, reasons)

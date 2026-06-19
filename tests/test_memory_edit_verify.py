@@ -82,6 +82,59 @@ def test_lessons_preserved_tolerates_lmd_only_and_split_metadata_prefix():
         "[^9]: timeouts default to 30s.\n",
     )[0] is True
 
+
+# ---- repair (single-page page-shape / metadata backfill, TRDD-87935f21) -----
+
+def test_verify_repair_passes_on_clean_backfill():
+    """A repair that backfills the missing ocd/lmd/node_type/tier and keeps the
+    lesson + the body PASSES (the source had only name/description/type)."""
+    source = ("---\nname: x\ndescription: \"d\"\nmetadata:\n  type: project\n---\n\n"
+              "A fact.\n\n## Notes and lessons learned\n[^1]: the cap is 3.\n")
+    result = _note(name="x", ocd="2026-06-01", lmd="2026-06-19", tier="component",
+                   typ="project", body="A fact.", lessons="[^1]: the cap is 3.\n")
+    ok, reasons = v.verify_repair(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert ok, reasons
+
+
+def test_verify_repair_fails_on_dropped_lesson():
+    """Repair must never lose a lesson."""
+    source = _note(lessons="[^1]: the cap is 3, verified.\n")
+    result = _note(lessons="")
+    ok, reasons = v.verify_repair(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert not ok and any("lesson" in r for r in reasons)
+
+
+def test_verify_repair_fails_when_required_key_still_missing():
+    """A 'repair' that did not actually backfill tier/ocd/lmd/node_type is refused."""
+    txt = "---\nname: x\ndescription: \"d\"\nmetadata:\n  type: project\n---\n\nf\n\n## Notes and lessons learned\n"
+    ok, reasons = v.verify_repair(txt, v.parse_frontmatter(txt), txt, v.parse_frontmatter(txt))
+    assert not ok and any("missing required key" in r for r in reasons)
+
+
+def test_verify_repair_fails_on_changed_ocd():
+    """A repair must never rewrite a page's birth date (ocd)."""
+    source = _note(ocd="2026-06-01", lmd="2026-06-01")
+    result = _note(ocd="2026-06-19", lmd="2026-06-19")
+    ok, reasons = v.verify_repair(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert not ok and any("ocd must not change" in r for r in reasons)
+
+
+def test_verify_repair_fails_on_missing_notes_section():
+    """The standing Notes section must be present after a repair."""
+    source = _note()
+    result = ("---\nname: x\ndescription: \"d\"\nocd: 2026-06-01\nlmd: 2026-06-19\n"
+              "metadata:\n  node_type: memory\n  type: project\n  tier: component\n---\n\nA fact.\n")
+    ok, reasons = v.verify_repair(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert not ok and any("Notes and lessons" in r for r in reasons)
+
 def test_lessons_preserved_on_clean_merge():
     """Both sources' lessons survive in the result → preserved."""
     a = _note(name="a", lessons="[^1]: the cap is 3, verified against the source.\n")

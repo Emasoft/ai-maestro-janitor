@@ -106,6 +106,62 @@ def test_begin_edit_staging_commit_applies_merge(tmp_path):
     assert not (MemoryTxn._staging_root(scope) / f"{txn_id}.json").exists()
 
 
+def test_begin_edit_staging_commit_applies_repair(tmp_path):
+    """A clean repair (TRDD-87935f21): begin copies a malformed page; the agent
+    backfills the missing ocd/lmd/node_type/tier and adds the Notes section IN
+    PLACE; commit reconstructs (1 write at the same path, 0 deletes) and applies."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    bad = ("---\nname: foo\ndescription: \"d\"\nmetadata:\n  type: project\n---\n\n"
+           "A fact.\n[^1]: the cap is 3.\n")
+    (scope / "foo.md").write_text(bad, encoding="utf-8")
+
+    txn_id = _txn_id_from_begin(scope, "repair", "foo.md")
+    staging = _staging(scope, txn_id)
+    (staging / "foo.md").write_text(
+        _note("foo", ocd="2026-06-19", lmd="2026-06-19", body="A fact.",
+              lessons="[^1]: the cap is 3.\n"),
+        encoding="utf-8",
+    )
+
+    rc = _run("commit", scope, txn_id, "--op", "repair")
+    assert rc == 0
+    applied = (scope / "foo.md").read_text(encoding="utf-8")
+    assert "tier: component" in applied and "## Notes and lessons learned" in applied
+    assert not staging.exists()
+
+
+def test_repair_rejects_dropped_lesson(tmp_path):
+    """A repair that loses a lesson FAILS verify; the live page is left untouched."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    src = _note("foo", body="A fact.", lessons="[^1]: the cap is 3, verified.\n")
+    (scope / "foo.md").write_text(src, encoding="utf-8")
+    txn_id = _txn_id_from_begin(scope, "repair", "foo.md")
+    staging = _staging(scope, txn_id)
+    (staging / "foo.md").write_text(_note("foo", lmd="2026-06-19", body="A fact."), encoding="utf-8")
+
+    rc = _run("commit", scope, txn_id, "--op", "repair")
+    assert rc == 1
+    assert (scope / "foo.md").read_text(encoding="utf-8") == src  # live tree untouched
+
+
+def test_repair_rejects_delete_shaped_changeset(tmp_path):
+    """A 'repair' that deletes the source (a merge/split shape) is refused — repair
+    is strictly a single-page in-place edit, so the live tree is untouched."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    (scope / "foo.md").write_text(_note("foo", body="A fact."), encoding="utf-8")
+    txn_id = _txn_id_from_begin(scope, "repair", "foo.md")
+    staging = _staging(scope, txn_id)
+    (staging / "foo.md").unlink()
+    (staging / "other.md").write_text(_note("other", body="x"), encoding="utf-8")
+
+    rc = _run("commit", scope, txn_id, "--op", "repair")
+    assert rc != 0
+    assert (scope / "foo.md").exists()
+
+
 def test_begin_edit_staging_commit_applies_split(tmp_path):
     """A clean hub split: begin copies the hub; the agent overwrites it as the
     overview and adds two sub-pages; commit reconstructs the writes, verifies the

@@ -18,7 +18,7 @@ The contract is two-phase so the agent can do its semantic work between them:
         - add a brand-new .md            → a WRITE (new page)
         - delete a copied source .md     → a DELETE (page removed)
 
-  commit <scope_root> <txn_id> --op <merge|split>
+  commit <scope_root> <txn_id> --op <merge|split|repair>
       RECONSTRUCT the write/delete set by DIFFING staging vs the recorded sources
       (a new or content-changed staged file → stage_write; a recorded source whose
       staged copy was removed → stage_delete), run verify_merge / verify_split, and
@@ -185,6 +185,30 @@ def _verify_split(txn, writes, deletes):
     return ok, reasons
 
 
+def _verify_repair(txn, writes, deletes):
+    """Build verify_repair inputs. Repair edits ONE page IN PLACE: exactly one write
+    at the source's path, ZERO deletes — a merge/split-shaped change set is a bug,
+    not a repair, so reject it before verify even runs (TRDD-87935f21)."""
+    if len(txn.sources) != 1:
+        raise MemoryTxnError(
+            f"repair expects exactly ONE source page, found {len(txn.sources)}"
+        )
+    if deletes:
+        raise MemoryTxnError(
+            f"repair must not delete any page (found {len(deletes)} delete(s))"
+        )
+    source_rel = next(iter(txn.sources))
+    if list(writes) != [source_rel]:
+        raise MemoryTxnError(
+            f"repair must write exactly the source page {source_rel!r}, got {sorted(writes)}"
+        )
+    source_text = (txn.scope_root / source_rel).read_text(encoding="utf-8")
+    source_meta = verify.parse_frontmatter(source_text)
+    result_text = writes[source_rel]
+    result_meta = verify.parse_frontmatter(result_text)
+    return verify.verify_repair(source_text, source_meta, result_text, result_meta)
+
+
 def _split_max_bytes() -> int:
     """The configured split size cap (memory_settings is a sibling lib on the path;
     `get` degrades to its own default internally, so this never needs a fallback)."""
@@ -218,8 +242,10 @@ def cmd_commit(args) -> int:
 
     if args.op == "merge":
         ok, reasons = _verify_merge(txn, writes, deletes)
-    else:
+    elif args.op == "split":
         ok, reasons = _verify_split(txn, writes, deletes)
+    else:
+        ok, reasons = _verify_repair(txn, writes, deletes)
 
     if not ok:
         txn.abort()
@@ -271,7 +297,7 @@ def main() -> int:
     c = sub.add_parser("commit", help="verify the staged edit and apply it atomically")
     c.add_argument("scope_root")
     c.add_argument("txn_id")
-    c.add_argument("--op", required=True, choices=("merge", "split"))
+    c.add_argument("--op", required=True, choices=("merge", "split", "repair"))
 
     a = sub.add_parser("abort", help="discard a not-yet-committed transaction")
     a.add_argument("scope_root")
