@@ -3,7 +3,7 @@ trdd-id: 87935f21-392a-4022-8161-64f493663c44
 title: Memory curation at all scopes — the janitor's core self-maintaining mission
 column: dev
 created: 2026-06-19T05:20:38+0200
-updated: 2026-06-19T05:20:38+0200
+updated: 2026-06-19T06:28:10+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -39,9 +39,19 @@ external-refs: []
   6. Ensure the **background machinery runs error-free on ALL armed projects**,
      that Claudes are **nudged to memorize recent changes**, and that the
      **WHY-in-commit-messages** rule is honored.
-- **NEXT ACTION:** Execute the audit-driven fixes (below) in phases; in parallel,
-  design the new autonomous **page-shape / metadata-repair pass** (priority 4)
-  and the **self-audit** (priorities 1-2) that make this self-maintaining.
+- **PROGRESS (2026-06-19):** P1 (memgrep `.`-contamination + walk_and dedup), P2
+  (helper flow-style `metadata` parse + 2 LOW), P3 (3 skills — decisive PROJECT
+  scope routing + tier/metadata enforcement + clean memgrep cmd), and **P4 (the
+  autonomous repair pass — `verify_repair` + txn `--op repair` + `repair_per_day`
+  cadence + the `[janitor-memory-repair]` scheduler marker + the
+  `janitor-memory-repair` skill)** are all DONE, tested, CPV-clean. v0.10.1 carried
+  P1–P3; P4 ships next. The repair marker is dormant until the next `/janitor-arm`
+  re-arm (by design, like the other memory markers).
+- **NEXT ACTION:** P5 — strengthen the consolidation/librarian passes for
+  Wikipedia-grade structure; P6 — the cross-project background-machinery
+  self-audit + the memorize-recent-changes nudge + WHY-in-commits enforcement. The
+  EXISTING ai-maestro corpus migration (LOCAL→PROJECT) still awaits the USER's
+  a/b/c choice — skill-independent.
 - **Load-bearing finding (memgrep):** the documented filter command in
   `wikimem-model.md` / the recall rule — `memgrep -l . <dir> --where '…'` — is
   WRONG: the `.` is parsed as a second search PATH (= cwd), silently
