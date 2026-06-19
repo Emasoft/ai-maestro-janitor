@@ -234,6 +234,14 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # set. 1h cadence — leaks should be caught quickly before a push, and the scan
     # is bounded + content-fingerprint deduped so unchanged fires are near-free.
     ("memory-scope-leak", 3600, "CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL"),
+    # memorize-nudge keeps the wiki POPULATED (TRDD-87935f21, priority #6): when
+    # substantive (non-bookkeeping) commits have landed since the last memory note,
+    # it reminds the agent to /janitor-memory-write what changed + WHY. Reads git +
+    # LOCAL/PROJECT memory mtimes only; NEVER mutates. Never nags — silent unless the
+    # wiki is already in use (adoption gate), needs ≥3 substantive commits, dedupes
+    # to one nudge per interval, and auto-silences the instant a note is written.
+    # 4h cadence; an idle fire is one bounded `git log`.
+    ("memorize-nudge", 14400, "CLAUDE_PLUGIN_OPTION_MEMORIZE_NUDGE_INTERVAL"),
     # janitor-install-scope warns if ai-maestro-janitor is enabled at PROJECT/LOCAL
     # scope — it MUST be a USER-only install (it guards OAuth + the global daemon for
     # the whole machine; TRDD-db169d9e R5). Runs in EVERY project (the invariant is
