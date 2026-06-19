@@ -32,10 +32,11 @@ DEFAULTS: dict = {
     "split_per_day": 4.5,           # SPLIT pass (cheaper, size-triggered)
     "split_max_bytes": 12000,       # a page over this is a SPLIT candidate
     "conflict_per_day": 0.5,        # CONFLICT + fact-verify (once/48h — the costly one)
+    "repair_per_day": 3.0,          # REPAIR pass (page-shape/metadata backfill — a few/day)
     "edit_project_scope": False,    # default LOCAL+USER only; PROJECT memory is in-repo
 }
 
-_PER_DAY_KEYS = frozenset({"consolidation_per_day", "split_per_day", "conflict_per_day"})
+_PER_DAY_KEYS = frozenset({"consolidation_per_day", "split_per_day", "conflict_per_day", "repair_per_day"})
 _INT_KEYS = frozenset({"split_max_bytes"})
 _BOOL_KEYS = frozenset({"edit_project_scope"})
 
@@ -44,6 +45,7 @@ INTERVENTIONS: dict = {
     "consolidate": "consolidation_per_day",
     "split": "split_per_day",
     "conflict": "conflict_per_day",
+    "repair": "repair_per_day",
 }
 
 _SECONDS_PER_DAY = 86400

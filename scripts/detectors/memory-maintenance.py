@@ -85,9 +85,11 @@ import state  # noqa: E402
 
 # intervention -> the exact bare marker the cron turn's silent-execute clause keys
 # on. Order is the round-robin priority WITHIN a chosen scope: split first (cheap,
-# size-triggered), then consolidate (merge), then conflict (the costly fact-verify).
+# size-triggered), then repair (page-shape/metadata backfill), then consolidate
+# (merge), then conflict (the costly fact-verify).
 _MARKERS: list[tuple[str, str]] = [
     ("split", "[janitor-memory-split]"),
+    ("repair", "[janitor-memory-repair]"),
     ("consolidate", "[janitor-memory-consolidate]"),
     ("conflict", "[janitor-memory-conflict]"),
 ]
