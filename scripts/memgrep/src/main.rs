@@ -282,17 +282,30 @@ fn search_file_where(
 /// markdown files only) and invoke `f` on every file to search. Shared by the flat and `--where`
 /// paths so the traversal/extension rules live in one place.
 fn walk_and(paths: &[PathBuf], hidden: bool, mut f: impl FnMut(&Path)) {
+    // Dedup the visited set ACROSS positionals: overlapping paths (`. memdir`, `memdir memdir`,
+    // `a a/b`) would otherwise search + emit each covered file once per covering path. Key on the
+    // canonical path so `./memdir/x.md` and `memdir/x.md` collapse; fall back to the raw path when
+    // canonicalize fails (e.g. broken symlink) so nothing is silently dropped.
+    // (memgrep audit Finding 1b, TRDD-87935f21.)
+    use std::collections::HashSet;
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut visit = |p: &Path, f: &mut dyn FnMut(&Path)| {
+        let key = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        if seen.insert(key) {
+            f(p);
+        }
+    };
     for path in paths {
         if path.is_file() {
             // An explicitly-named file is searched regardless of extension.
-            f(path);
+            visit(path, &mut f);
         } else {
             for entry in WalkBuilder::new(path).hidden(!hidden).build() {
                 let Ok(entry) = entry else { continue };
                 if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
                     && is_markdown(entry.path())
                 {
-                    f(entry.path());
+                    visit(entry.path(), &mut f);
                 }
             }
         }
@@ -387,7 +400,16 @@ fn main() -> Result<()> {
         };
         let mut paths: Vec<PathBuf> = Vec::new();
         if let Some(p) = &cli.pattern {
-            paths.push(PathBuf::from(p));
+            // In --where mode there is no PATTERN slot — the first positional is a path. BUT a lone
+            // `.`/`./` is almost always a leftover match-any placeholder from `memgrep PATTERN PATHS`
+            // muscle memory, NOT an intent to ALSO walk cwd; pushing it silently contaminates the
+            // result with whatever `.md` files happen to be in the current directory. Treat `.`/`./`
+            // as that placeholder ONLY when another explicit path was given, so `memgrep --where '…' .`
+            // meaning "search cwd" still works. (memgrep audit Finding 1, TRDD-87935f21.)
+            let is_placeholder_dot = (p == "." || p == "./") && !cli.paths.is_empty();
+            if !is_placeholder_dot {
+                paths.push(PathBuf::from(p));
+            }
         }
         paths.extend(cli.paths.iter().cloned());
         if paths.is_empty() {

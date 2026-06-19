@@ -1534,3 +1534,55 @@ fn find_only_minus_returns_non_excluded() {
         "the note containing the -excluded term must be dropped:\n{o}"
     );
 }
+
+// ── Regression: --where positional `.` placeholder + walk_and dedup (memgrep audit, TRDD-87935f21) ──
+
+/// Run memgrep from a specific working directory — needed to prove the cwd-contamination cases.
+fn run_in(dir: &std::path::Path, args: &[&str]) -> String {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    assert!(out.status.success(), "memgrep exited non-zero for {args:?}");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn where_ignores_leading_dot_placeholder_when_other_path_given() {
+    // Finding 1: `memgrep -l . <dir> --where '…'` must NOT also walk cwd — the leading `.` is a
+    // leftover match-any placeholder, not a request to search the current directory.
+    let work = TempDir::new("where-dot-work");
+    let mem = TempDir::new("where-dot-mem");
+    work.write("cwd_contaminant.md", "---\ncolumn: dev\n---\ncontaminant\n");
+    mem.write("note1.md", "---\ncolumn: dev\n---\nnote1\n");
+    let o = run_in(
+        &work.path,
+        &["-l", ".", mem.as_str(), "--where", r#"fm.column "dev""#],
+    );
+    assert!(o.contains("note1.md"), "the explicit memdir page must be found:\n{o}");
+    assert!(
+        !o.contains("cwd_contaminant.md"),
+        "the cwd file must NOT leak in when an explicit path was given:\n{o}"
+    );
+}
+
+#[test]
+fn where_lone_dot_still_searches_cwd() {
+    // Counter-case: a LONE `.` (no other path) is a legitimate "search cwd" request and is honored.
+    let work = TempDir::new("where-lonedot-work");
+    work.write("here.md", "---\ncolumn: dev\n---\nhere\n");
+    let o = run_in(&work.path, &["-l", "--where", r#"fm.column "dev""#, "."]);
+    assert!(o.contains("here.md"), "a lone `.` must still search cwd:\n{o}");
+}
+
+#[test]
+fn walk_and_dedups_overlapping_positional_paths() {
+    // Finding 1b: the same dir passed twice must emit each file ONCE, not once per covering path.
+    let mem = TempDir::new("dedup-mem");
+    mem.write("note1.md", "---\ncolumn: dev\n---\nfindme\n");
+    let o = run(&["-l", "findme", mem.as_str(), mem.as_str()]);
+    let hits = o.lines().filter(|l| l.contains("note1.md")).count();
+    assert_eq!(hits, 1, "overlapping positionals must not duplicate a file:\n{o}");
+}
