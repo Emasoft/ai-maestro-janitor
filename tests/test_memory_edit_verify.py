@@ -44,7 +44,43 @@ def test_parse_frontmatter_reads_flow_glob_list():
     assert fm["globs"] == ["src/a/**", "src/b/**"]
 
 
+def test_parse_frontmatter_reads_flow_style_metadata_map():
+    """Flow-style `metadata: {tier: …, globs: […]}` hoists the SAME keys as block
+    style (audit Finding 1 — a flow-style page must NOT read tier=None and slip past
+    the verify guards). Commas inside the globs list must not break the pairs."""
+    flow = ("---\nname: h\nmetadata: {node_type: memory, type: project, tier: hub, "
+            "globs: [\"src/a/**\", \"src/b/**\"]}\n---\n\nbody\n")
+    fm = v.parse_frontmatter(flow)
+    assert fm["tier"] == "hub"
+    assert fm["type"] == "project"
+    assert fm["node_type"] == "memory"
+    assert fm["globs"] == ["src/a/**", "src/b/**"]
+
+
+def test_flow_and_block_metadata_agree_for_legality():
+    """A flow-style component pair merges legally exactly like block style, and a
+    flow-style component is correctly REFUSED for splitting (reads tier=component,
+    not None) — the bug was that flow-style read None and bypassed both guards."""
+    flow_a = v.parse_frontmatter("---\nname: a\nmetadata: {tier: component, type: project}\n---\nx")
+    flow_b = v.parse_frontmatter("---\nname: b\nmetadata: {tier: component, type: project}\n---\ny")
+    assert v.is_legal_merge(flow_a, flow_b)[0] is True
+    assert v.is_legal_split(flow_a, "## A\nx\n## B\ny")[0] is False
+
+
 # ---- lesson preservation (THE strict check) --------------------------------
+
+def test_lessons_preserved_tolerates_lmd_only_and_split_metadata_prefix():
+    """A legal metadata-format change on a lesson prefix — `[lmd:…]` alone, or
+    `[ocd:…] [lmd:…]` as two separate brackets — is NOT a reworded lesson, so
+    preservation still passes when only the prefix differs (audit Finding 2)."""
+    assert v.lessons_preserved(
+        ["[^1]: [lmd:2026-06-09] the cap is 3, verified against source.\n"],
+        "[^1]: the cap is 3, verified against source.\n",
+    )[0] is True
+    assert v.lessons_preserved(
+        ["[^2]: [ocd:2026-06-01] [lmd:2026-06-09] timeouts default to 30s.\n"],
+        "[^9]: timeouts default to 30s.\n",
+    )[0] is True
 
 def test_lessons_preserved_on_clean_merge():
     """Both sources' lessons survive in the result → preserved."""

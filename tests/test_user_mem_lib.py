@@ -68,6 +68,17 @@ def test_counter_persists_across_store_instances(tmp_path):
     assert user_mem_lib.UserMemStore(d).save("c") == 3
 
 
+def test_body_number_does_not_shadow_frontmatter_number():
+    """The immutable number is read ONLY from the leading frontmatter — a `number:`
+    line in the body (or in a stray non-memory file) must not shadow it (Finding 3)."""
+    # real memory: fm number 7, body ALSO has a `number:` line → must read 7
+    assert user_mem_lib._parse_number_from_text(
+        "---\nnumber: 7\nfoo: bar\n---\nbody number: 999\n"
+    ) == 7
+    # stray file, no frontmatter, only a body `number:` → None (no shadow)
+    assert user_mem_lib._parse_number_from_text("some user text\nnumber: 999\nmore") is None
+
+
 def test_counter_does_not_rewind_when_all_deleted(tmp_path):
     """Even after deleting every memory, the counter keeps climbing — numbers are permanent."""
     store = user_mem_lib.UserMemStore(tmp_path / "user-mem")

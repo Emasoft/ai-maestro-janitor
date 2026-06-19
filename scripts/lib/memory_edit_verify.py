@@ -37,6 +37,28 @@ def _parse_scalar_or_list(val: str):
     return val.strip().strip('"').strip("'")
 
 
+def _split_top_level(inner: str) -> list[str]:
+    """Split a flow-map body on commas that are NOT inside [] or {} brackets, so
+    `tier: component, globs: ["a", "b"]` splits into two pairs and NOT on the comma
+    between the two globs."""
+    parts: list[str] = []
+    depth = 0
+    buf: list[str] = []
+    for ch in inner:
+        if ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        parts.append("".join(buf))
+    return [p for p in (seg.strip() for seg in parts) if p]
+
+
 def parse_frontmatter(text: str) -> dict:
     """Flatten a wikimem note's YAML frontmatter into one dict (top-level keys +
     the `metadata:` sub-keys hoisted to the top level). Returns {} when there is
@@ -60,6 +82,19 @@ def parse_frontmatter(text: str) -> dict:
             continue
         key, _, val = s.partition(":")
         key = key.strip()
+        # Flow-style metadata: `metadata: {tier: hub, globs: ["a","b"]}` — hoist the
+        # inner k:v pairs to the top level exactly like the block-style branch, so the
+        # verify guards (is_legal_merge/is_legal_split, the hub globs-partition) see
+        # tier/type/globs. Without this a flow-style hub split that DROPS a glob
+        # committed clean (memory-helpers audit Finding 1, TRDD-87935f21). Split
+        # bracket-aware so a list value's internal commas don't break the pairs.
+        if key == "metadata" and not indented and val.strip().startswith("{"):
+            in_meta = False
+            for pair in _split_top_level(val.strip().lstrip("{").rstrip("}")):
+                if ":" in pair:
+                    k2, _, v2 = pair.partition(":")
+                    fm[k2.strip()] = _parse_scalar_or_list(v2)
+            continue
         if indented and in_meta:
             fm[key] = _parse_scalar_or_list(val)
         elif not indented:
@@ -79,7 +114,10 @@ def _normalize_lesson(body: str) -> str:
     then collapse whitespace. What remains is the claim; if THAT changes, it was
     reworded; if it vanishes, it was dropped."""
     body = re.sub(r"^\s*\[\^[^\]]+\]:\s*", "", body)
-    body = re.sub(r"^\s*\[ocd:[^\]]*\]\s*", "", body)
+    # Strip a leading metadata prefix in ANY spelling — `[ocd:… lmd:…]` (canonical),
+    # `[lmd:…]` alone, or two separate `[ocd:…] [lmd:…]` brackets — so a legal
+    # metadata-format change is not misread as a reworded lesson (audit Finding 2).
+    body = re.sub(r"^\s*(?:\[(?:ocd|lmd):[^\]]*\]\s*)+", "", body)
     body = re.sub(r"\s+", " ", body)
     return body.strip()
 

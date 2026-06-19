@@ -87,8 +87,14 @@ _FM_SPLIT_RE = re.compile(r"^---\s*$", re.MULTILINE)
 
 
 def _parse_number_from_text(text: str) -> Optional[int]:
-    """Recover the immutable number from a memory file's frontmatter."""
-    m = _FM_NUMBER_RE.search(text)
+    """Recover the immutable number from a memory file's LEADING frontmatter block.
+
+    Anchored to the frontmatter segment so a `number:` line in the BODY of a stray
+    non-memory `.md` file in the store can never shadow the real one (audit
+    Finding 3, TRDD-87935f21)."""
+    parts = _FM_SPLIT_RE.split(text, maxsplit=2)
+    fm_segment = parts[1] if len(parts) >= 3 and parts[0].strip() == "" else ""
+    m = _FM_NUMBER_RE.search(fm_segment)
     return int(m.group(1)) if m else None
 
 
