@@ -2,7 +2,7 @@
 name: memory-system
 description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence"
 ocd: 2026-06-13
-lmd: 2026-06-13
+lmd: 2026-06-19
 metadata:
   node_type: memory
   type: project
@@ -174,13 +174,18 @@ superseded statement is DEMOTED to a dated `[^N]` lesson under
 cause it changed). The corrected body links to it with `[^N]`. This is RULE 0
 (never lose information) + the Bug-Autopsy directive applied to memory.
 
-## The two heartbeat detectors (janitor enforcement)
+## The heartbeat detectors + nudges (janitor enforcement)
 
-Both run on the janitor heartbeat, SURFACE candidates to a proposal file, and
-**never mutate a fact** (RULE 0). Separation of powers: the **janitor**
-reorganizes structure and surfaces contradictions; an **agent** creates and
-corrects content. Both skip the janitor's own repo (`state.is_self_scan_target`)
-unless `CLAUDE_PLUGIN_ALLOW_SELF_SCAN` is set.
+The SURFACING detectors run on the janitor heartbeat, surface candidates to a
+proposal file or a one-line nudge, and **never mutate a fact** (RULE 0):
+the **janitor** reorganizes structure and surfaces contradictions; an **agent**
+creates and corrects content. (The one MUTATING path is the autonomous wikimem
+editor — split / repair / consolidate / conflict — which `memory-maintenance`
+SCHEDULES and which edits ONLY through the `memory_txn` transaction core, never a
+raw write.) All scope resolution for every detector + the scheduler is the shared
+`scripts/lib/memory_scopes.py` SSOT.[^4] The surfacing detectors skip the
+janitor's own repo (`state.is_self_scan_target`) unless
+`CLAUDE_PLUGIN_ALLOW_SELF_SCAN` is set.
 
 - **`memory-scope-leak`** (`scripts/detectors/memory-scope-leak.py`) — keeps the
   PUSHED PROJECT scope free of machine/user-private data, because PROJECT is the
@@ -211,6 +216,23 @@ unless `CLAUDE_PLUGIN_ALLOW_SELF_SCAN` is set.
   on-disk sync mismatches. The background auto-merge (consolidating a cluster into
   one wiki page) is DESIGNED but not yet shipped — today the detector only
   proposes; an agent applies via `/janitor-memory-update`.
+
+- **`memorize-nudge`** (`scripts/detectors/memorize-nudge.py`, TRDD-87935f21 #6) —
+  keeps the wiki POPULATED. When SUBSTANTIVE (non-bookkeeping) commits have landed
+  since the last LOCAL/PROJECT memory note, it nudges the agent to
+  `/janitor-memory-write` what changed + WHY (recall-first). Universal but
+  adoption-gated (silent unless the wiki is already in use; `…REQUIRE_ADOPTION=false`
+  for the fleet's aggressive mode), ≥3 substantive commits, one nudge per interval,
+  auto-silences the instant a note is written. Read-only (git + note mtimes); never
+  reads USER scope (a cross-project write would falsely suppress this project's nudge).
+
+- **`why-in-commits`** (`scripts/detectors/why-in-commits.py`, TRDD-87935f21 #6) —
+  enforces the commit-discipline rule (the WHY belongs in the message body; only the
+  author can write it and it is lost once committed). Surfaces recent subject-only
+  feat/fix/refactor/perf commits (no body → no WHY). ai-maestro-gated (the fleet that
+  mandates it + uses conventional commits), ≥3 deficient over a 3-day window, set-based
+  dedupe (one reminder per distinct deficient set — never re-nags immutable history).
+  Read-only git log.
 
 ## The wikimem layer (pages are wiki nodes, not loose notes)
 
@@ -309,3 +331,15 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
   and USER live under `$HOME/.claude/` and are never pushed, so they are not
   scanned. Machine-private detail belongs in LOCAL; "UNSURE → LOCAL" is the safe
   default precisely because PROJECT is the pushed scope.
+[^4]: [ocd:2026-06-19 lmd:2026-06-19] The LOCAL/PROJECT/USER scope-dir resolvers
+  were copy-pasted byte-identical into `memory-maintenance` + `memory-librarian`
+  with an "IDENTICAL to ..." comment; adding a 3rd consumer (`memorize-nudge`)
+  would have calcified a 3-way duplication that silently routes recall/write to the
+  WRONG dir the moment one copy drifts (esp. the USER-path `${CLAUDE_PLUGIN_DATA}`
+  gotcha — the running plugin's data dir is NOT the janitor's at heartbeat time).
+  Extracted to `scripts/lib/memory_scopes.py` (the SSOT, with tests). Lesson:
+  extract the shared resolver BEFORE the 2nd copy gets a 3rd sibling. And test
+  heartbeat detectors AS A SUBPROCESS (how the heartbeat runs them) — `state`'s
+  `project_root`/`janitor_root` are process-lifetime `@lru_cache`d, so in-process
+  repeated `main()` calls leak the first test's resolved root (the cache is correct
+  in production, where every heartbeat is a fresh process).

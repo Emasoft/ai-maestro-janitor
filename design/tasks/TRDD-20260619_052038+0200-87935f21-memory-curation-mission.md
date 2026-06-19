@@ -3,7 +3,7 @@ trdd-id: 87935f21-392a-4022-8161-64f493663c44
 title: Memory curation at all scopes — the janitor's core self-maintaining mission
 column: dev
 created: 2026-06-19T05:20:38+0200
-updated: 2026-06-19T06:28:10+0200
+updated: 2026-06-19T12:32:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -39,19 +39,25 @@ external-refs: []
   6. Ensure the **background machinery runs error-free on ALL armed projects**,
      that Claudes are **nudged to memorize recent changes**, and that the
      **WHY-in-commit-messages** rule is honored.
-- **PROGRESS (2026-06-19):** P1 (memgrep `.`-contamination + walk_and dedup), P2
-  (helper flow-style `metadata` parse + 2 LOW), P3 (3 skills — decisive PROJECT
-  scope routing + tier/metadata enforcement + clean memgrep cmd), and **P4 (the
-  autonomous repair pass — `verify_repair` + txn `--op repair` + `repair_per_day`
-  cadence + the `[janitor-memory-repair]` scheduler marker + the
-  `janitor-memory-repair` skill)** are all DONE, tested, CPV-clean. v0.10.1 carried
-  P1–P3; P4 ships next. The repair marker is dormant until the next `/janitor-arm`
-  re-arm (by design, like the other memory markers).
-- **NEXT ACTION:** P5 — strengthen the consolidation/librarian passes for
-  Wikipedia-grade structure; P6 — the cross-project background-machinery
-  self-audit + the memorize-recent-changes nudge + WHY-in-commits enforcement. The
-  EXISTING ai-maestro corpus migration (LOCAL→PROJECT) still awaits the USER's
-  a/b/c choice — skill-independent.
+- **PROGRESS:** P1 (memgrep `.`-contamination + walk_and dedup), P2 (helper
+  flow-style `metadata` parse + 2 LOW), P3 (3 skills — PROJECT scope routing +
+  tier/metadata enforcement + clean memgrep cmd), and P4 (the autonomous repair
+  pass — `verify_repair` + txn `--op repair` + `repair_per_day` + the
+  `[janitor-memory-repair]` marker + skill) all SHIPPED in **v0.11.0**. **P6 (this
+  session):** P6.2 memorize-nudge detector (`memorize-nudge.py`, d14510a) + P6.3
+  why-in-commits detector (`why-in-commits.py`, aa4c593) + the shared
+  `memory_scopes.py` SSOT refactor (10ee8d1, dedups the LOCAL/PROJECT/USER
+  resolvers out of memory-maintenance + memory-librarian) — all DONE, tested
+  (subprocess-based, hermetic), ruff-clean, full `tests/` suite 11118 green. **P6.1
+  (machinery self-audit) consciously SKIPPED** — it reduces to "is memgrep on PATH",
+  already handled by graceful grep-fallback + the recall rule; a heartbeat nudge
+  there would risk nagging for marginal value. P6.2+P6.3 ship in the next publish.
+- **NEXT ACTION:** P5 — strengthen the consolidation (`janitor-memory-consolidate`)
+  + `memory-librarian` passes for Wikipedia-grade one-topic-per-page structure
+  (judgment-heavy, mostly skill prose). The EXISTING ai-maestro corpus migration
+  (LOCAL→PROJECT) still awaits the USER's a/b/c choice — skill-independent. New
+  detectors are dormant in THIS session until the daemon rolls the cache forward
+  (or /reload-plugins) — they're verified via their tests + a live working-tree run.
 - **Load-bearing finding (memgrep):** the documented filter command in
   `wikimem-model.md` / the recall rule — `memgrep -l . <dir> --where '…'` — is
   WRONG: the `.` is parsed as a second search PATH (= cwd), silently
