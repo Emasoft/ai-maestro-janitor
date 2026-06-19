@@ -267,14 +267,14 @@ named note".
 | Operation | memgrep |
 |---|---|
 | Symptom recall | `memgrep recall "<symptom>" <roots…>` |
-| List hub pages (then match their `globs` against the file you're editing) | `memgrep -l . <dir> --where 'fm.tier "hub"' \| sort -u` |
-| EXPAND: all elements to radiate onto | `memgrep -l . <dir> --where 'fm.tier "component" and fm.functionality "<fn>"' \| sort -u` |
+| List hub pages (then match their `globs` against the file you're editing) | `memgrep -l <dir> --where 'fm.tier "hub"' \| sort -u` |
+| EXPAND: all elements to radiate onto | `memgrep -l <dir> --where 'fm.tier "component" and fm.functionality "<fn>"' \| sort -u` |
 | Where does this page point? (out-links) | `memgrep links --to <page> <dir>` |
 | Who points at this page? (backlinks) | `memgrep links --from <page> <dir>` |
-| Files that link to N (semijoin) | `memgrep -l . <dir> --where 'links-to "<N>"' \| sort -u` |
-| Files N links to (semijoin) | `memgrep -l . <dir> --where 'linked-from "<N>"' \| sort -u` |
+| Files that link to N (semijoin) | `memgrep -l <dir> --where 'links-to "<N>"' \| sort -u` |
+| Files N links to (semijoin) | `memgrep -l <dir> --where 'linked-from "<N>"' \| sort -u` |
 | Bidirectionality audit (the link law) | for each page: out-links (`links --to`) minus backlinks (`links --from`) must be empty both ways → librarian backfills |
-| Pages of a functionality | `memgrep -l . <dir> --where 'fm.functionality "frontend"' \| sort -u` |
+| Pages of a functionality | `memgrep -l <dir> --where 'fm.functionality "frontend"' \| sort -u` |
 | Dangling / unreferenced pages | `memgrep links --broken <dir>` / `memgrep links --orphans <dir>` |
 | Refresh the index | `memgrep reindex <dir>` |
 

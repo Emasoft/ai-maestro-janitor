@@ -54,8 +54,8 @@ Goal: surface the HUB for the functionality the file belongs to, then descend.
    ```bash
    FILE="src/frontend/panels/Login.tsx"          # the file (relative to repo root)
    # List hub pages, read each hub's globs, and pick the hub whose glob matches FILE.
-   memgrep -l . "${ROOTS[@]}" --where 'fm.tier "hub"' | sort -u            # the hubs; inspect their globs
-   memgrep -l . "${ROOTS[@]}" --where 'fm.functionality "frontend"' | sort -u  # or a functionality's pages
+   memgrep -l "${ROOTS[@]}" --where 'fm.tier "hub"' | sort -u            # the hubs; inspect their globs
+   memgrep -l "${ROOTS[@]}" --where 'fm.functionality "frontend"' | sort -u  # or a functionality's pages
    ```
 
    (When memgrep is absent: `grep -rl 'tier: hub' "${ROOTS[@]}"`, read each hub's

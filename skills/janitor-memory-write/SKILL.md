@@ -33,9 +33,14 @@ This is the CAPTURE leg of THE PROACTIVE-USE CONTRACT (full text in
 problem, fix a bug, or make a decision** that isn't derivable from the code,
 memorize it **without waiting to be asked** — RECALL first (so you ADD to the
 owning page, never duplicate), then write/update. Route the scope BEFORE
-authoring: machine-private → **LOCAL**; project-shared-with-no-secrets →
-**PROJECT** (so it's git-tracked + shared with every dev); cross-project →
-**USER**; UNSURE → **LOCAL**. To keep the PROJECT wiki current as you go — the
+authoring — **any wiki structure page (a hub / aspect / component describing the
+project's code, architecture, conventions, or pipeline) is project knowledge by
+definition → PROJECT** (git-tracked, shipped with the repo, shared with every
+dev). Route to **LOCAL** ONLY when the content is specifically about THIS machine
+(local absolute paths, this host's name, this machine's credentials/tokens).
+Cross-project machine-independent facts → **USER**. The privacy backstop
+(machine-specific *and* unsure → LOCAL) NEVER demotes a structure page —
+architecture is not "unsure", it is PROJECT. To keep the PROJECT wiki current as you go — the
 architecture hub, key-solution component pages, the publish/deploy pipeline page
 — this skill is the tool; if the project has no wikimem yet, run
 `/janitor-memory-bootstrap` once first.
@@ -45,9 +50,12 @@ architecture hub, key-solution component pages, the publish/deploy pipeline page
 ### 1. Route the SCOPE (machine-private vs shared vs global)
 
 ```bash
-# LOCAL = local paths/usernames/hosts/secrets/machine-specific (never pushed)
-# PROJECT = knowledge any dev on the repo needs (git-tracked + pushed; NO secrets)
-# USER = true across ALL projects (global).  UNSURE → LOCAL.
+# DECIDE BY CONTENT — a wiki structure page (hub/aspect/component about the
+#   project's code/architecture/conventions/pipeline) is PROJECT by DEFINITION:
+# PROJECT = anything a teammate cloning the repo needs (git-tracked + pushed; NO secrets) — the DEFAULT for structure pages
+# LOCAL   = ONLY machine-specific facts: local absolute paths, this host's name, this machine's creds/tokens (never pushed)
+# USER    = true across ALL projects (a preference / machine-independent lesson)
+# Privacy backstop: machine-specific AND unsure → LOCAL; project structure is NOT unsure → PROJECT.
 case "$SCOPE" in
   local)   MEMDIR="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory" ;;
   project) MEMDIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory" ;;  # in-repo, namespaced under .claude/ (add a !.claude/project/memory/** gitignore exception if .claude/ is ignored)
@@ -147,7 +155,7 @@ the page's SHAPE:
 
 - **If you EXPANDED (a general/radiating page):** in `## Applies to`, link DOWN to
   EVERY element this rule governs (find them:
-  `memgrep -l . "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`).
+  `memgrep -l "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`).
   Then the reciprocal: on each of those component pages, add this page to their
   `## Governed by`. Also link the new aspect from its hub's parts map (and the
   hub into the aspect's edges).
@@ -181,6 +189,13 @@ other MEMORY.md line uses). Then `memgrep reindex "$MEMDIR"` if present
 - Did you respect one-component-one-page (no fragmenting an element)?
 - If you created a hub, are its `globs` precise and non-overlapping with other
   hubs (one file → one functionality)?
+- Is the frontmatter COMPLETE — `name`, `description`, `ocd`, `lmd`,
+  `metadata.{node_type: memory, type, tier}` (+ `functionality`, and `globs` on a
+  hub) — and is the `## Notes and lessons learned` section present (even if empty)?
+  A page missing any of these is malformed and ranks/repairs poorly.
+- Does the SHAPE match the tier — a `hub`/`aspect` RADIATES via `## Applies to`
+  (NEVER `## Governed by`); a `component` RECEIVES via `## Governed by` (NEVER
+  `## Applies to`)? Inverting these is the most common authoring error.
 
 ## Output
 
@@ -223,10 +238,13 @@ per page; symptom-indexed `description` + non-empty `## See also` are mandatory.
 
 Copy this checklist and track your progress:
 
-- [ ] Scope routed (LOCAL / PROJECT / USER — unsure → LOCAL)
+- [ ] Scope routed — structure/architecture/code → PROJECT; machine-specific → LOCAL; cross-project → USER
 - [ ] RECALL ran first — no existing page already covers this fact
 - [ ] Editorial decision made (new page vs UPDATE an existing page)
+- [ ] Frontmatter COMPLETE: `name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier` (+ `globs` on hubs)
 - [ ] Page written: one subject, symptom-indexed `description:`, correct tier
+- [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
+- [ ] `## Notes and lessons learned` section present (even if empty)
 - [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
 - [ ] `MEMORY.md` index line added (one line, no content duplication)
 

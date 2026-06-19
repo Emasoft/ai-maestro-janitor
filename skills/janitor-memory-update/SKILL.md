@@ -132,7 +132,7 @@ move + relink, NOT a silent copy):
   `aspect` page; replace it in the component with a `## Governed by` link UP to
   the aspect; and on the aspect's `## Applies to`, radiate DOWN to that component
   AND every other follower (find them:
-  `memgrep -l . "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`).
+  `memgrep -l "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`).
   Now the rule has one home and every follower points up to it — the duplication
   is gone.
 - **REDUCE (push element-specific detail down):** a general page (`aspect`/`hub`)
