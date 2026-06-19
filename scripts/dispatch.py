@@ -242,6 +242,13 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # to one nudge per interval, and auto-silences the instant a note is written.
     # 4h cadence; an idle fire is one bounded `git log`.
     ("memorize-nudge", 14400, "CLAUDE_PLUGIN_OPTION_MEMORIZE_NUDGE_INTERVAL"),
+    # why-in-commits enforces the commit-discipline rule (TRDD-87935f21, priority #6):
+    # when recent feat/fix/refactor/perf commits are subject-only (no body → no WHY),
+    # it reminds the agent to record the WHY (rules/commit-discipline.md). ai-maestro
+    # -gated (the fleet that mandates it + uses conventional commits); read-only git
+    # log; never nags — only the substantive types, ≥3 deficient, 3-day window, and
+    # set-based dedupe (one nudge per distinct deficient set, not per interval).
+    ("why-in-commits", 14400, "CLAUDE_PLUGIN_OPTION_WHY_IN_COMMITS_INTERVAL"),
     # janitor-install-scope warns if ai-maestro-janitor is enabled at PROJECT/LOCAL
     # scope — it MUST be a USER-only install (it guards OAuth + the global daemon for
     # the whole machine; TRDD-db169d9e R5). Runs in EVERY project (the invariant is
