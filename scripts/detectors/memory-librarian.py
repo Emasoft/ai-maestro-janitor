@@ -51,6 +51,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -200,6 +201,46 @@ _STOPWORDS = frozenset({
     "first", "last", "next", "old", "good", "bad", "still", "even", "both",
 })
 
+# ── Contradiction detection (issues #35/#38/#43) ──────────────────────────────
+# A CONFLICT candidate is NOT mere topic co-membership — it needs an actual
+# OPPOSING-CLAIM signal. Two notes that merely share a tag or a domain keyword
+# (both filed under `user-preferences`, or both mentioning "cpv") are at most an
+# AGGREGATION candidate, never a conflict. We surface a conflict only when two
+# SAME-SUBJECT notes (sharing distinctive tokens) ALSO show a real contradiction:
+# an antonym split across them, or a different NUMBER stated about the same
+# subject (the canonical "retries 3×" vs "retries 5×" clash). This keeps conflict
+# PRECISE (the issues' explicit ask) — complementary same-subject notes stay on
+# the wider aggregation net, not mislabelled "conflicting".
+_CONTRA_WINDOW = 4  # token proximity window around a shared subject
+
+# Opposing term pairs — one side in note A, the other in note B ⇒ contradiction.
+_ANTONYM_PAIRS: tuple[tuple[str, str], ...] = (
+    ("always", "never"), ("enable", "disable"), ("enabled", "disabled"),
+    ("allow", "forbid"), ("allow", "block"), ("allowed", "blocked"),
+    ("true", "false"), ("keep", "delete"), ("add", "remove"),
+    ("include", "exclude"), ("valid", "invalid"), ("correct", "incorrect"),
+    ("required", "optional"),
+)
+
+# Word sequence INCLUDING bare numbers (which `_TOKEN_RE`, min 3 chars, drops) —
+# the proximity-scoped contradiction scan needs ORDER and the digits `3`/`5`.
+_WORD_SEQ_RE = re.compile(r"[a-z0-9]+")
+
+# Coarse CATEGORY tags that file many UNRELATED notes into one broad drawer — NOT
+# a consolidation subject (#43). A shared `functionality: user-preferences` (or
+# `feedback`, `general`, …) is a bucket, not a topic two notes should be MERGED
+# on; clustering on one alone over-groups distinct subjects. A genuine
+# same-subject cluster ALSO shares distinctive name/description tokens, so the
+# token-overlap path still surfaces it — only the coarse-tag-ALONE cluster is
+# suppressed.
+_COARSE_TAGS = frozenset({
+    "user-preferences", "user-preference", "preferences", "preference",
+    "feedback", "general", "misc", "miscellaneous", "meta", "notes", "note",
+    "convention", "conventions", "guideline", "guidelines", "rule", "rules",
+    "policy", "policies", "best-practice", "best-practices", "project",
+    "reference", "user", "memory",
+})
+
 
 @dataclass
 class NoteMeta:
@@ -252,6 +293,71 @@ def _significant_tokens(*texts: str) -> frozenset[str]:
             if tok not in _STOPWORDS:
                 toks.add(tok)
     return frozenset(toks)
+
+
+def _word_seq(text: str) -> list[str]:
+    """Ordered lowercased alnum tokens of `text`, INCLUDING bare numbers.
+
+    Distinct from `_significant_tokens` (which drops <3-char runs + stopwords and
+    returns a set): the contradiction scan needs ORDER (for proximity) and the
+    NUMBERS (`3`, `5`) the topic tokenizer discards.
+    """
+    return _WORD_SEQ_RE.findall(text.lower())
+
+
+def _numbers_near(seq: list[str], subj: str, window: int) -> frozenset[str]:
+    """Bare numbers appearing within `window` tokens of any occurrence of `subj`."""
+    nums: set[str] = set()
+    for i, w in enumerate(seq):
+        if w == subj:
+            lo, hi = max(0, i - window), min(len(seq), i + window + 1)
+            nums.update(t for t in seq[lo:hi] if t.isdigit())
+    return frozenset(nums)
+
+
+def _has_contradiction_signal(
+    text_a: str, text_b: str, shared_subjects: frozenset[str]
+) -> bool:
+    """True iff two SAME-SUBJECT notes show a real OPPOSING-CLAIM signal (#35/#38/#43).
+
+    A conflict is more than a shared topic — it needs a contradiction. Two low-FP
+    forms are detected: (1) an ANTONYM split (always/never, enable/disable, …)
+    with one side in each note; (2) a NUMERIC divergence — a different number
+    stated within `_CONTRA_WINDOW` tokens of the SAME shared subject in each note
+    (the canonical "retries 3×" vs "retries 5×" clash). Complementary same-subject
+    notes (no antonym, no numeric clash) are NOT a contradiction — they belong to
+    the wider aggregation net, not the precise conflict surface. Negation-only
+    clashes ("use X" vs "don't use X") are deliberately LEFT to aggregation:
+    surfacing them as conflicts would re-introduce the very false positives
+    #38/#43 are about (any two co-topic notes where one happens to say "not"), and
+    the issues ask conflict to be PRECISE over exhaustive.
+    """
+    seq_a, seq_b = _word_seq(text_a), _word_seq(text_b)
+    set_a, set_b = set(seq_a), set(seq_b)
+    for x, y in _ANTONYM_PAIRS:
+        if (x in set_a and y in set_b) or (y in set_a and x in set_b):
+            return True
+    for subj in shared_subjects:
+        nums_a = _numbers_near(seq_a, subj, _CONTRA_WINDOW)
+        nums_b = _numbers_near(seq_b, subj, _CONTRA_WINDOW)
+        if nums_a and nums_b and nums_a != nums_b:
+            return True
+    return False
+
+
+def _read_note_texts(memdir: Path, names: Iterable[str]) -> dict[str, str]:
+    """Read each note's raw text for the contradiction scan; unreadable → "".
+
+    Kept as a thin I/O helper so `_conflict_pairs` stays pure (text in, candidates
+    out) and unit-testable without a filesystem.
+    """
+    out: dict[str, str] = {}
+    for name in names:
+        try:
+            out[name] = (memdir / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            out[name] = ""
+    return out
 
 
 # Scope resolution is the shared SSOT in scripts/lib/memory_scopes.py — extracted
@@ -446,11 +552,16 @@ def _tag_clusters(notes: dict[str, NoteMeta]) -> dict[str, list[str]]:
     A cluster is a tag carried by ≥2 notes. A tag carried by a single note is
     not a consolidation topic. An over-broad tag (carried by > _MAX_CLUSTER_SIZE
     notes) is dropped — it is a project-wide label, not a wiki topic, and would
-    produce a useless mega-cluster.
+    produce a useless mega-cluster. A COARSE category tag (`_COARSE_TAGS`, e.g.
+    `user-preferences`) is skipped entirely (#43): a broad filing drawer is not a
+    subject two notes should be merged on — a genuine same-subject cluster still
+    surfaces via the token-overlap path.
     """
     by_tag: dict[str, list[str]] = {}
     for note, meta in notes.items():
         for tag in meta.tags:
+            if tag in _COARSE_TAGS:
+                continue
             by_tag.setdefault(tag, []).append(note)
     clusters: dict[str, list[str]] = {}
     for tag, members in by_tag.items():
@@ -592,41 +703,47 @@ def _build_clusters(notes: dict[str, NoteMeta]) -> dict[str, list[str]]:
 def _conflict_pairs(
     notes: dict[str, NoteMeta],
     linked: set[frozenset[str]],
+    note_texts: dict[str, str],
 ) -> list[tuple[str, str, str]]:
-    """DIRECTLY same-topic note pairs that are NOT cross-linked → (noteA, noteB, topic).
+    """SAME-SUBJECT note pairs with an actual CONTRADICTION → (noteA, noteB, topic).
 
-    A pair is a conflict CANDIDATE when the two notes share a topic DIRECTLY — a
-    common frontmatter tag, OR ≥ _MIN_SHARED_TOKENS significant name/description
-    tokens — AND neither links the other. We surface the candidate for an agent
-    to check; we do NOT decide they truly conflict (that needs agent reasoning).
+    A conflict CANDIDATE requires BOTH (issues #35/#38/#43):
+      * the two notes are the SAME SUBJECT — they share ≥ _MIN_SHARED_TOKENS
+        DISTINCTIVE (low-df) name/description tokens. A merely shared tag (even a
+        specific one) or a generic domain keyword is NOT enough: co-membership in
+        a topic bucket is not a contradiction. The OLD shared-tag trigger is
+        exactly what flagged two distinct `user-preferences` notes as
+        "conflicting" (#38/#43) and two complementary cpv notes (#35) — removed.
+      * an actual OPPOSING-CLAIM signal (`_has_contradiction_signal`: an antonym
+        split, or a different number about the same subject). Two complementary
+        same-subject notes are NOT a conflict — they are an aggregation candidate,
+        surfaced by the wider net.
 
-    Derived from the DIRECT same-topic relation (not transitive cluster
+    Derived from the DIRECT same-subject relation (not transitive cluster
     membership): a chain A-B-C where A and C share nothing directly must not flag
-    A vs C as a conflict pair (they aren't actually the same-topic pair). A pair
-    already cross-linked — the tangential-mention-links-canonical wiki invariant
-    working as intended — is excluded. Bounded by `_MAX_PAIRS_LISTED`.
+    A vs C. An already-cross-linked pair (the wiki invariant working as intended)
+    is excluded. Bounded by `_MAX_PAIRS_LISTED`.
     """
     distinctive = _distinctive_token_sets(notes)
-    items = sorted(notes.items())
+    names = sorted(notes)
     seen: set[frozenset[str]] = set()
     out: list[tuple[str, str, str]] = []
-    for i in range(len(items)):
-        name_i, meta_i = items[i]
-        for j in range(i + 1, len(items)):
-            name_j, meta_j = items[j]
+    for i in range(len(names)):
+        name_i = names[i]
+        for j in range(i + 1, len(names)):
+            name_j = names[j]
             pair = frozenset((name_i, name_j))
             if pair in seen or pair in linked:
                 continue
-            shared_tags = meta_i.tags & meta_j.tags
             shared_tokens = distinctive[name_i] & distinctive[name_j]
-            if shared_tags:
-                topic = "+".join(sorted(shared_tags)[:4])
-            elif len(shared_tokens) >= _MIN_SHARED_TOKENS:
-                topic = "+".join(sorted(shared_tokens)[:4])
-            else:
-                continue
+            if len(shared_tokens) < _MIN_SHARED_TOKENS:
+                continue  # not the same subject — a shared tag alone is not a conflict
+            if not _has_contradiction_signal(
+                note_texts.get(name_i, ""), note_texts.get(name_j, ""), shared_tokens
+            ):
+                continue  # same subject but COMPLEMENTARY → aggregation, not conflict
             seen.add(pair)
-            out.append((name_i, name_j, topic))
+            out.append((name_i, name_j, "+".join(sorted(shared_tokens)[:4])))
             if len(out) >= _MAX_PAIRS_LISTED:
                 return out
     return out
@@ -996,7 +1113,11 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
         clusters = _build_clusters(notes)
         if clusters:
             report.clusters = clusters
-            report.conflicts = _conflict_pairs(notes, linked)
+            # Conflict detection needs each note's FULL text (body included) to
+            # spot a contradiction signal (a number/antonym clash) — the index
+            # only carries name+description. Read the cluster's notes once.
+            note_texts = _read_note_texts(memdir, notes.keys())
+            report.conflicts = _conflict_pairs(notes, linked, note_texts)
 
     return report
 

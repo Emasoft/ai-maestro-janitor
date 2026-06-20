@@ -312,6 +312,69 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             self.assertIn("frobnicator_setup.md", proposal)
             self.assertIn("frobnicator_teardown.md", proposal)
 
+    def test_issue43_distinct_userpreference_notes_not_conflict_or_aggregation(self):
+        """Issues #38/#43: two DISTINCT user-preference notes that share ONLY the
+        broad `user-preferences` tag (different subjects, no contradiction) must be
+        surfaced as NEITHER a conflict NOR an aggregation candidate — the detector
+        stays fully silent (coarse tag skipped, no distinctive-token overlap)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "feedback_github_comment_self_identification.md").write_text(
+                _note("feedback_github_comment_self_identification",
+                      "how to sign github comments with the self-id first line",
+                      ["user-preferences"]))
+            (memdir / "feedback_personal_account_automation_legit.md").write_text(
+                _note("feedback_personal_account_automation_legit",
+                      "automating the owner paid accounts is tos legitimate",
+                      ["user-preferences"]))
+            out = _run(home, project)
+            self.assertEqual(out.strip(), "", f"expected silence, got: {out!r}")
+            self.assertFalse((memdir / PROPOSAL_NAME).exists())
+
+    def test_complementary_same_subject_is_aggregation_not_conflict(self):
+        """Issue #35: two SAME-SUBJECT notes that are COMPLEMENTARY (no opposing
+        claim) are an AGGREGATION candidate but NOT a conflict — conflict needs a
+        real contradiction signal, not topic overlap."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "frobnicator_usage.md").write_text(
+                _note("frobnicator_usage",
+                      "the frobnicator widget calibration knob location", [],
+                      body="Turn the frobnicator calibration knob clockwise to engage."))
+            (memdir / "frobnicator_notes.md").write_text(
+                _note("frobnicator_notes",
+                      "the frobnicator widget calibration knob caveats", [],
+                      body="The frobnicator calibration knob also resets on sleep."))
+            (memdir / "unrelated.md").write_text(
+                _note("unrelated", "keychain rotator cookie", []))
+            out = _run(home, project)
+            self.assertIn("aggregation", out)
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+            self.assertIn("(none)", conflict,
+                          f"complementary pair must not be a conflict; got:\n{conflict}")
+
+    def test_real_antonym_contradiction_is_a_conflict(self):
+        """A GENUINE contradiction — two same-subject notes making OPPOSING claims
+        (always vs never about the same subject) — IS surfaced as a conflict."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "widget_reset_always.md").write_text(
+                _note("widget_reset_always", "widget reset policy on sleep", [],
+                      body="Always reset the widget on sleep."))
+            (memdir / "widget_reset_never.md").write_text(
+                _note("widget_reset_never", "widget reset policy on sleep", [],
+                      body="Never reset the widget on sleep."))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            conflict = proposal.split("### Conflict candidates")[1].split("### Page shape")[0]
+            self.assertIn("widget_reset_always.md", conflict)
+            self.assertIn("widget_reset_never.md", conflict)
+
 
 def _raw_note(
     *,
