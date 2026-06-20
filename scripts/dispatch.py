@@ -206,7 +206,7 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # memory_settings.is_due — NO memgrep, no corpus read. When an editorial pass
     # is due it takes a machine-wide flock (skip-if-held so N sessions fire ONCE),
     # round-robins ONE scope/heartbeat, stamps mark_ran, and emits a single BARE
-    # forge-proof marker ([janitor-memory-{split|consolidate|conflict}]) the cron
+    # forge-proof marker ([janitor-memory-*] — split/repair/harvest/consolidate/conflict) the cron
     # turn silent-executes. Honors editor_enabled() + the edit_project_scope gate
     # (PROJECT skipped unless opted in — it's in-repo + unpushable). The detector's
     # OWN per-intervention is_due is the real cadence, so this dispatch cadence is

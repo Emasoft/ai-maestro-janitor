@@ -282,6 +282,47 @@ def test_verify_split_fails_on_paraphrased_body_fact():
     assert not ok and any("body fact" in r for r in reasons)
 
 
+# ---- harvest preservation (Part C) -----------------------------------------
+
+def test_harvest_preservation_ok_when_pointer_target_exists():
+    """A MEMORY.md pointer whose target note exists → preserved."""
+    mem = "# MEMORY\n\n- [The cap rule](feedback_cap.md) — the retry cap is 3.\n"
+    ok, missing = v.harvest_preservation_ok(mem, "irrelevant corpus", {"feedback_cap.md"})
+    assert ok and missing == []
+
+
+def test_harvest_preservation_fails_when_pointer_target_missing():
+    """A pointer whose target note is gone → NOT preserved (would lose the memory)."""
+    mem = "- [The cap rule](feedback_cap.md) — the retry cap is 3.\n"
+    ok, missing = v.harvest_preservation_ok(mem, "", set())
+    assert not ok and any("feedback_cap.md" in m for m in missing)
+
+
+def test_harvest_preservation_ok_when_content_in_corpus():
+    """A non-pointer content memory that now lives in a wiki page → preserved."""
+    mem = "The OAuth rotator retries three times then fails after a backoff window.\n"
+    corpus = "## Rotator\nThe OAuth rotator retries three times then fails after a backoff window.\n"
+    ok, missing = v.harvest_preservation_ok(mem, corpus, set())
+    assert ok and missing == []
+
+
+def test_harvest_preservation_fails_when_content_not_in_corpus():
+    """A content memory NOT yet in any wiki page → NOT preserved (abstain, keep MEMORY.md)."""
+    mem = "The OAuth rotator retries three times then fails after a backoff window.\n"
+    ok, missing = v.harvest_preservation_ok(mem, "an unrelated wiki page about other matters", set())
+    assert not ok and any("rotator retries three times" in m for m in missing)
+
+
+def test_harvest_preservation_stub_only_is_clean():
+    """A MEMORY.md that is already the deprecation stub holds no memories → preserved."""
+    stub = (
+        "# MEMORY — index retired (managed by memgrep)\n\n"
+        "⚠ DEPRECATED stub. Recall via memgrep.\n"
+    )
+    ok, missing = v.harvest_preservation_ok(stub, "", set())
+    assert ok and missing == []
+
+
 # ---- duplicate detection ---------------------------------------------------
 
 def test_no_new_duplicate_lines_flags_repeats():

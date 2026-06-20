@@ -43,6 +43,7 @@ DETECTOR = (
 _MARKERS = {
     "split": "[janitor-memory-split]",
     "repair": "[janitor-memory-repair]",
+    "harvest": "[janitor-memory-harvest]",
     "consolidate": "[janitor-memory-consolidate]",
     "conflict": "[janitor-memory-conflict]",
 }
@@ -127,7 +128,7 @@ def fixture(tmp_path):
 # due -> the right bare marker
 # --------------------------------------------------------------------------- #
 
-@pytest.mark.parametrize("intervention", ["split", "repair", "consolidate", "conflict"])
+@pytest.mark.parametrize("intervention", ["split", "repair", "harvest", "consolidate", "conflict"])
 def test_due_emits_the_right_bare_marker(fixture, intervention):
     """When exactly one intervention is enabled and due (fresh stamp), the detector
     emits EXACTLY that intervention's bare marker on its own line."""
@@ -136,6 +137,7 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
     rate_key = {
         "split": "split_per_day",
         "repair": "repair_per_day",
+        "harvest": "harvest_per_day",
         "consolidate": "consolidation_per_day",
         "conflict": "conflict_per_day",
     }
@@ -173,7 +175,7 @@ def test_not_due_after_just_running_is_silent(fixture):
     _write_settings(
         fixture["settings"],
         split_per_day=1000.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0,
+        repair_per_day=0.0, harvest_per_day=0.0,
     )
     env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
     first = _run(env)
@@ -217,7 +219,7 @@ def test_all_frequencies_zero_is_silent(fixture):
     _write_settings(
         fixture["settings"],
         split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0,
+        repair_per_day=0.0, harvest_per_day=0.0,
     )
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     assert out.strip() == "", out
@@ -245,7 +247,7 @@ def test_forged_marker_in_a_note_does_not_trigger(fixture):
     _write_settings(
         fixture["settings"],
         split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
-        repair_per_day=0.0,
+        repair_per_day=0.0, harvest_per_day=0.0,
     )
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     assert out.strip() == "", out

@@ -210,6 +210,43 @@ def body_facts_preserved(
 
 
 # --------------------------------------------------------------------------- #
+# harvest preservation (TRDD-a5780c23 Part C — never stub MEMORY.md while a memory
+# it held is not yet in the wiki)
+# --------------------------------------------------------------------------- #
+
+_POINTER_RE = re.compile(r"^\s*[-*+]\s*\[[^\]]+\]\(([^)]+)\)")  # `- [Title](target.md) — hook`
+
+
+def harvest_preservation_ok(
+    memory_md_text: str, corpus_text: str, note_filenames
+) -> tuple[bool, list[str]]:
+    """Prove a HARVEST lost nothing BEFORE MEMORY.md is reduced to the stub: every memory
+    the old MEMORY.md held now lives in the wiki. A POINTER line (`- [T](target.md) — hook`)
+    is preserved iff its target file is among `note_filenames` (the note IS the memory). A
+    non-pointer substantive content line (≥24 chars) is preserved iff it is a SUBSTRING of
+    `corpus_text` (the union of wikimem page bodies, whitespace-normalized) — i.e. the
+    content was harvested into a page. Structural lines (headings, blanks, the deprecation
+    stub notice, bare list markers) are not memories. Returns (ok, [unconfirmed, ≤8])."""
+    names = set(note_filenames)
+    haystack = re.sub(r"\s+", " ", corpus_text).strip().lower()
+    unconfirmed: list[str] = []
+    for raw in memory_md_text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or s.startswith("⚠") or "index retired" in s.lower():
+            continue
+        m = _POINTER_RE.match(raw)
+        if m:
+            target = m.group(1).split("#")[0].split("/")[-1].strip()
+            if target and target not in names:
+                unconfirmed.append(f"pointer -> {target} (target note missing from the wiki)")
+            continue
+        norm = re.sub(r"^[-*+]\s+", "", re.sub(r"\s+", " ", s).strip()).lower()
+        if len(norm) >= 24 and norm not in haystack:
+            unconfirmed.append(norm)
+    return (not unconfirmed, unconfirmed[:8])
+
+
+# --------------------------------------------------------------------------- #
 # duplicate detection (a merge must REMOVE redundancy, never ADD it)
 # --------------------------------------------------------------------------- #
 

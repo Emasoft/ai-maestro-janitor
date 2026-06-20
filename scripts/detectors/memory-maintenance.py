@@ -9,9 +9,11 @@ DETECT → SCHEDULE → EXECUTE → VERIFY). The DETECT layer (`memory-librarian
 SURFACES reorg candidates; this detector decides WHEN an editorial pass is due,
 deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron turn
 acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
-only EMITS one of three bare markers:
+only EMITS one of five bare markers:
 
     [janitor-memory-split]       → silently run /janitor-memory-split
+    [janitor-memory-repair]      → silently run /janitor-memory-repair
+    [janitor-memory-harvest]     → silently run /janitor-memory-harvest
     [janitor-memory-consolidate] → silently run /janitor-memory-consolidate
     [janitor-memory-conflict]    → silently run /janitor-memory-conflict
 
@@ -85,11 +87,13 @@ import state  # noqa: E402
 
 # intervention -> the exact bare marker the cron turn's silent-execute clause keys
 # on. Order is the round-robin priority WITHIN a chosen scope: split first (cheap,
-# size-triggered), then repair (page-shape/metadata backfill), then consolidate
-# (merge), then conflict (the costly fact-verify).
+# size-triggered), then repair (page-shape/metadata backfill), then harvest
+# (incorporate stray MEMORY.md / loose .md memories into the wiki, once/day), then
+# consolidate (merge), then conflict (the costly fact-verify).
 _MARKERS: list[tuple[str, str]] = [
     ("split", "[janitor-memory-split]"),
     ("repair", "[janitor-memory-repair]"),
+    ("harvest", "[janitor-memory-harvest]"),
     ("consolidate", "[janitor-memory-consolidate]"),
     ("conflict", "[janitor-memory-conflict]"),
 ]
