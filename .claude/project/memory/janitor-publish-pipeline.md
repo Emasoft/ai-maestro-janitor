@@ -14,8 +14,8 @@ metadata:
 ---
 
 The janitor ships via `scripts/publish.py` — a strict, **fail-fast** release
-pipeline. **It is a CPV plugin**, so its pipeline includes the CPV plugin-schema
-+ security gate. Not every fleet project is a plugin: **non-plugin agents (e.g.
+pipeline. **It is a CPV plugin**, so its pipeline includes the CPV plugin-schema +
+security gate. Not every fleet project is a plugin: **non-plugin agents (e.g.
 service-style or library projects) have their OWN pipelines** — this page
 documents the janitor's specifically; do not assume another project releases the
 same way. The pipeline auto-detects the project (it is language-agnostic:

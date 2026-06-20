@@ -59,8 +59,8 @@ external-refs: []
   WHEN. No sharding code this TRDD (optional future enhancement) — the spec's
   "may divide" is satisfied by the existing any-project-can-do-USER design.
 - **PROGRESS (2026-06-20):** P1 (staggering — `is_due` phase-aligned + `stagger_enabled`,
-  7 tests) DONE+committed. P2 (gitignore enforcer `project_memory_tracked.ensure_tracked`
-  + `project-memory-tracked` detector + dispatch register, 6 tests, never `git add -f`)
+  7 tests) DONE+committed. P2 (gitignore enforcer `project_memory_tracked.ensure_tracked` +
+  `project-memory-tracked` detector + dispatch register, 6 tests, never `git add -f`)
   DONE+committed. P3a (LOCAL `MEMORY.md` → stub, harvest_preservation_ok PRESERVED,
   backup kept, reindexed) DONE. P3b (repaired ALL 19 malformed LOCAL pages → 0 remain;
   every commit verify_repair-gated) DONE. 119 tests green, ruff clean.
