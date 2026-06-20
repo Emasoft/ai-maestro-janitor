@@ -60,8 +60,9 @@ symptom — NOT the jargon of the fix.
 Two-hop recall: a symptom query lands you on the note; the note's BODY gives the
 answer. The `description` is the load-bearing surface — `memgrep recall` ranks
 on `description + title + tags` ONLY (the `metadata.type` taxonomy does NOT
-affect ranking). Put symptom vocabulary in `description`; put the answer in the
-body.
+affect ranking — it is ORGANIZATIONAL-only metadata, so don't over-invest effort
+choosing it; a note is found purely by its `description`/`title`/`tags`). Put
+symptom vocabulary in `description`; put the answer in the body.
 
 ## Recall BEFORE acting (the protocol)
 
