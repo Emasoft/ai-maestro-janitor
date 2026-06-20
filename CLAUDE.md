@@ -179,7 +179,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=718692a504a9 digest=bbafaa3d6606 generated=2026-06-20T19:39:46+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=bc1728b2f662 digest=69832097563d generated=2026-06-20T23:13:13+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -192,6 +192,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · task_oauth_rotator_supervisor() -> None — Governance (alert-only) for the opt-in OAuth account rotator
   · task_oauth_rotator_tick() -> None — 60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
   · task_memory_guard() -> None — Tier-1 OOM guard (TRDD-7100178d Pillar 4, Decision 1 — user-signed 2026-05-31).
+  · task_cache_prune() -> None — Prune stale plugin-cache version dirs (TRDD-a6d2fdaf, Fix A).
   · Task — One periodic unit of work owned by the daemon.
   · Task.time_until_due(self) -> int
   · Task.is_due(self) -> bool
@@ -374,6 +375,14 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · delete_ruleset_by_name(slug, name) -> tuple[bool, str] — Delete the ruleset named `name` if present. Returns (success, msg).
   · apply_baseline_rulesets(slug, default_branch, project_root) -> tuple[bool, list[tuple[str, bool, str]], list[dict]] — Apply ALL THREE ratified rulesets idempotent-by-name (branch pair +
   · guard_mode_enabled() -> bool — Master gate for the Tier 2 auto path. Default is False — the
+`scripts/lib/cache_prune.py` — Plugin-cache pruning primitives (TRDD-a6d2fdaf, Fix A).
+  · oldest_claude_session_start(sessions, now) -> int | None — Return the START epoch of the OLDEST live Claude session, or None if none
+  · prune_cutoff(*, now, min_age_s, oldest_session_start, session_margin_s) -> int — Versions whose dir mtime is STRICTLY OLDER than the returned epoch are old
+  · plan_plugin_prune(*, versions, version_mtime, pinned, keep_recent, cutoff_epoch, now) -> tuple[list[str], list[str]] — Decide (prune, keep) for ONE plugin's version list. Pure.
+  · pinned_version_for(installed_plugins, plugin, marketplace) -> str | None — Best-effort: the version Claude Code currently pins for
+  · PrunePlan — The prune decision for one plugin dir.
+  · plan_cache_prune(cache_root, installed_plugins, *, keep_recent, cutoff_epoch, now) -> list[PrunePlan] — Build a prune plan for every `<marketplace>/<plugin>/` under `cache_root`.
+  · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
 `scripts/lib/daemon_watchdog.py` — Shared daemon-task staleness watchdog for the per-session detector shims.
   · emit_if_daemon_stale(*, task_name, last_run_filename, cadence_env, default_cadence_s, subject) -> None — Print a once/hour drift line iff `task_name`'s completion stamp is stale
 `scripts/lib/dedupe.py` — Dedupe helper — Python port of scripts/lib/dedupe.sh.
@@ -402,9 +411,10 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · oauth_rotator_lock() -> Iterator[bool] — Serialise an OAuth-rotator tick against every other tick-class process.
   · daemon_script_path() -> Path — Resolve scripts/daemon.py absolute path.
   · spawn_daemon_detached() -> Optional[int] — Spawn the daemon as a fully-detached child. Return child PID or None.
+  · reload_generation() -> int — Return the reload generation (epoch the daemon last stamped after a
   · reload_flag_present() -> bool
-  · set_reload_flag(reason) -> None — Mark that a `/reload-plugins` is needed before the next user turn.
-  · clear_reload_flag() -> None
+  · set_reload_flag(reason) -> None — Stamp the reload generation (current epoch) after a plugin changed on
+  · clear_reload_flag() -> None — Reset the reload generation. Used only by the disarm / manual-reset path;
   · daemon_needs_restart() -> bool — True iff the running daemon's script path doesn't match the current cache.
   · request_daemon_restart() -> bool — Send SIGTERM to a stale daemon so the next heartbeat lazy-spawns a new one.
   · ensure_daemon_running(max_silence_s) -> bool — If the daemon is dead AND not kill-switched AND enabled, spawn it.
