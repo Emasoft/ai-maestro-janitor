@@ -3,7 +3,7 @@ trdd-id: 87935f21-392a-4022-8161-64f493663c44
 title: Memory curation at all scopes — the janitor's core self-maintaining mission
 column: dev
 created: 2026-06-19T05:20:38+0200
-updated: 2026-06-20T04:01:30+0200
+updated: 2026-06-20T04:35:49+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -58,16 +58,27 @@ external-refs: []
   cargo target while the fingerprint said fresh); fixed by clearing the stale target
   then re-running. Recorded as LOCAL memory `reference_publish_cargo_clippy_bindgen_flaky`
   with a publish.py-hardening follow-up (Step 3 should auto-clear+retry).
-- **NEXT ACTION:** P5 — strengthen the consolidation. EVIDENCE-FIRST: the merge
-  EXECUTOR (`janitor-memory-consolidate`) is already mature (abstain-default,
-  `is_legal_merge`, no-third-page, backlink-redirect, lesson-preservation), so the
-  real lever is the LIBRARIAN's SURFACING precision — re-check the issue-#35
-  keyword-overlap FP cluster (NPT TRDD-b3eae1cd: gate on subject-entity + cohesion,
-  not keyword overlap) + the structural quality of the merged page. The EXISTING
-  ai-maestro corpus migration (LOCAL→PROJECT) still awaits the USER's a/b/c choice —
-  skill-independent. The v0.12.0 detectors roll into running sessions on the next
-  daemon version-update (~6h) or `/reload-plugins`; verified meanwhile via tests + a
-  live working-tree run.
+- **P5 SHIPPED in v0.12.1** (tag, GH release, origin synced — 2026-06-20). The merge
+  EXECUTOR was already mature and the librarian's #35 precision shipped in
+  TRDD-b3eae1cd (complete), so P5 added the missing structural quality: a one-sentence
+  LEAD norm in the wikimem-model SSOT (referenced by merge step 7 and the split
+  overview) and an explicit preserve-EVERY-body-fact guardrail (verify_merge guards
+  lessons byte-identically but does NOT diff body facts — now documented, agent-owned).
+- **NEW BUG found dogfooding the heartbeat SPLIT pass (fixed):** the split skill's
+  candidate `find` used GNU-only `-printf` (breaks on macOS) and scanned non-note plus
+  PRIVATE `user-mem/` files (it picked the generated `memory-reorg-proposed.md`; could
+  pick a private user-mem note). Fixed the find — portable `wc -c`, exclude `user-mem/`
+  and the 3 generated/index basenames (mirrors the librarian's `_NON_NOTE_NAMES`). The
+  SPLIT pass itself correctly ABSTAINED (no real page over the 12000-byte cap; largest
+  notes ~5-6 KB).
+- **NEXT ACTION (mandate #3 — the proper SSOT fix):** hoist the non-note/user-mem
+  exclusion into `memory_scopes.py` (`NON_NOTE_BASENAMES`, `USER_MEM_DIRNAME`,
+  `is_note_file`/`iter_note_files`) plus a thin CLI, DEDUP the librarian's local
+  copies, and switch every editor scan to it (including excluding user-mem from the
+  consolidate skill's memgrep calls — the one minor remaining gap; repair is
+  unaffected, it consumes the librarian's filtered output). The EXISTING ai-maestro
+  corpus migration (LOCAL→PROJECT) still awaits the USER's a/b/c choice —
+  skill-independent.
 - **Load-bearing finding (memgrep):** the documented filter command in
   `wikimem-model.md` / the recall rule — `memgrep -l . <dir> --where '…'` — is
   WRONG: the `.` is parsed as a second search PATH (= cwd), silently

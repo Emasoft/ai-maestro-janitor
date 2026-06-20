@@ -84,10 +84,17 @@ the scope with the largest over-cap page). `$SCOPE_ROOT` below is that one root.
 
 ```bash
 CAP="$(uv run "$PLUGIN/scripts/memory_settings_cli.py" get split_max_bytes | grep -oE '[0-9]+' | head -1)"
-# Every .md in the scope strictly larger than the cap, biggest first. The staging
-# dir lives under the scope as .maint-staging/ — exclude it.
-find "$SCOPE_ROOT" -type f -name '*.md' -not -path '*/.maint-staging/*' \
-  -size +"${CAP}"c -printf '%s\t%p\n' 2>/dev/null | sort -rn
+# Every real NOTE in the scope strictly larger than the cap, biggest first. EXCLUDE
+# (these are NOT splittable notes): the staging dir; the PRIVATE user-mem store
+# (never scan it — privacy); and the generated/index files MEMORY.md /
+# memory-index.md / memory-reorg-proposed.md (the canonical non-note set — mirrors
+# the librarian's _NON_NOTE_NAMES). `-printf` is GNU-only and breaks on BSD/macOS
+# find, so size+sort portably via `wc -c`.
+find "$SCOPE_ROOT" -type f -name '*.md' \
+  -not -path '*/.maint-staging/*' -not -path '*/user-mem/*' \
+  ! -name 'MEMORY.md' ! -name 'memory-index.md' ! -name 'memory-reorg-proposed.md' \
+  -size +"${CAP}"c 2>/dev/null \
+  | while IFS= read -r f; do printf '%s\t%s\n' "$(wc -c < "$f")" "$f"; done | sort -rn
 ```
 
 Pick the **single largest** over-cap page as `$PAGE` (rel-path `$REL` under
