@@ -61,6 +61,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
 sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
+import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix A)
 import global_state as gs  # noqa: E402
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import state  # noqa: E402
@@ -102,6 +103,11 @@ _INTERVAL_MEMORY_GUARD = int(
 )  # 2 min — the Tier-1 OOM guard beat (TRDD-7100178d Pillar 4, Decision 1).
 #  Steady state is one cheap free-memory read; the ps snapshot + kill logic only
 #  runs under real memory pressure, so the cadence costs nothing when healthy.
+_INTERVAL_CACHE_PRUNE = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_CACHE_PRUNE_INTERVAL", "21600")
+)  # 6 h — plugin-cache prune (TRDD-a6d2fdaf, Fix A). The cache only bloats over
+#  hours/days (a plugin shipping several versions/day), so a 6 h cadence reclaims
+#  promptly without churn. The daemon owns it because the cache is machine-global.
 
 # Loop ceiling — heartbeat tick interval upper bound. Must be << the
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
@@ -511,6 +517,97 @@ def task_memory_guard() -> None:
     )
 
 
+def _plugins_cache_root() -> Path:
+    """Resolve `<config>/plugins/cache` — the parent of every marketplace's
+    cached plugins. The daemon itself lives inside this tree
+    (`<cache>/<mkt>/<plugin>/<ver>/scripts/daemon.py`), so walk up to the `cache`
+    dir whose parent is `plugins`; fall back to the HOME/CLAUDE_CONFIG_DIR path."""
+    for p in _HERE.parents:
+        if p.name == "cache" and p.parent.name == "plugins":
+            return p
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    return Path(cfg) / "plugins" / "cache"
+
+
+def task_cache_prune() -> None:
+    """Prune stale plugin-cache version dirs (TRDD-a6d2fdaf, Fix A).
+
+    The cache `~/.claude/plugins/cache/<mkt>/<plugin>/<version>/` grows without
+    bound: a fast-publishing plugin (CPV ships several versions a DAY) leaves
+    dozens of stale version dirs, and Claude Code's ~7-day GC keeps them all
+    because they are each 'recent' — on this machine CPV alone reached 49 cached
+    versions and the cache hit 4.5 GB. The daemon owns this because the cache is
+    machine-global (scope invariant, issue #7).
+
+    Cardinal safety: NEVER prune a version a LIVE session might still have loaded.
+    Per plugin we keep {pinned ∪ newest-N}; of the rest, a version is removed only
+    when its dir mtime predates the cutoff — and the cutoff is pulled back behind
+    the OLDEST live `claude` session's start (+ a margin), so a long unattended
+    fleet session (the very thing the janitor protects) never has the version it
+    loaded deleted out from under it. A cache dir is regeneratable (re-downloaded
+    on demand), so the delete is safe and reversible-by-redownload.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_ENABLED", True):
+        return
+    cache_root = _plugins_cache_root()
+    if not cache_root.is_dir():
+        return
+    keep_recent = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_KEEP_RECENT"), 5
+    )
+    min_age_days = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_MIN_AGE_DAYS"), 7
+    )
+    margin_hours = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_CACHE_PRUNE_SESSION_MARGIN_HOURS"), 24
+    )
+    now = int(time.time())
+
+    # Snapshot ps TO A FILE (no-self-match discipline) and find the oldest live
+    # claude session; the cutoff is pulled back behind it so its loaded version
+    # is protected.
+    snapshot = gs.global_state_dir() / "cache-prune.ps-snapshot.txt"
+    rows = mg.snapshot_processes(str(snapshot))
+    sessions = [(r.command, r.etime_s) for r in rows]
+    oldest_start = cp.oldest_claude_session_start(sessions, now)
+    cutoff = cp.prune_cutoff(
+        now=now,
+        min_age_s=min_age_days * 86400,
+        oldest_session_start=oldest_start,
+        session_margin_s=margin_hours * 3600,
+    )
+
+    installed: dict = {}
+    ip_path = cache_root.parent / "installed_plugins.json"
+    try:
+        installed = json.loads(ip_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        installed = {}  # no pin info → keep_recent still protects the current version
+
+    plans = cp.plan_cache_prune(
+        cache_root, installed, keep_recent=keep_recent, cutoff_epoch=cutoff, now=now
+    )
+    if not plans:
+        return
+    removed, failed = cp.apply_prune_plan(plans)
+    if not removed and not failed:
+        return
+    sess_note = (
+        f"oldest live session ~{(now - oldest_start) // 3600}h old"
+        if oldest_start is not None
+        else "no live session"
+    )
+    state.log_line(
+        "daemon",
+        f"cache-prune: removed {len(removed)} stale version dir(s) across "
+        f"{len(plans)} plugin(s) (kept pinned + newest {keep_recent}; cutoff "
+        f"{(now - cutoff) // 86400}d back; {sess_note})"
+        + (f"; {len(failed)} delete(s) FAILED" if failed else ""),
+    )
+    for rel in removed[:20]:  # cap the log; the count above is the full total
+        state.log_line("daemon", f"  cache-prune removed: {rel}")
+
+
 class Task:
     """One periodic unit of work owned by the daemon.
 
@@ -592,6 +689,7 @@ def _build_tasks() -> list[Task]:
              task_oauth_rotator_supervisor),
         Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_tick),
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
+        Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
     ]
 
 
