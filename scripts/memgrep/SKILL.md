@@ -20,6 +20,7 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 | `index <memdir>` / `reindex <memdir>` | build the persistent SQLite query index `.memgrep/index.db` (gitignored, git-incremental — re-parses only changed files); `--full` rebuilds from scratch |
 | `index --markdown <memdir>` | the legacy doc-generator → `memory-index.md` (per-note title+summary+tags+TOC+backlinks); add `--write` to write the file instead of stdout |
 | `links --broken\|--orphans\|--to N\|--from N` | link graph / semijoin over the corpus |
+| `lint <memdir>` | deterministic, FP-free note-integrity check — footnote balance (every `[^N]` ref has a `[^N]:` def and vice-versa), the bidirectional LINK LAW (A links `[[B]]` ⟹ B links back), and required fields (`ocd`/`lmd`/`description` + a `## Notes and lessons learned` section). Prints `path:line — what is wrong`; exits non-zero on any violation (usable as a pre-commit / write-skill gate) |
 | `fact [--cat/--comp/--session/--kind/--since/--until]` | query one-fact-per-line memory lines; `--with-notes` (OFF by default here) appends matched files' lessons |
 
 ### `recall` / `find` shared flags
@@ -42,4 +43,5 @@ memgrep find '+"old approach" retry' <memdir>                    # mandatory phr
 memgrep find "+max_retries" <memdir> --only-notes                # search ONLY the lessons-learned
 memgrep reindex <memdir>                                         # refresh the SQLite query index
 memgrep index --markdown --write <memdir>                        # regenerate memory-index.md
+memgrep lint <memdir>                                            # structural integrity gate (exit≠0 on any violation)
 ```

@@ -844,6 +844,242 @@ pub fn cmd_links_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+// ─────────────────────────── `memgrep lint` ───────────────────────────
+
+/// Scan ONE raw markdown line for footnote tokens, yielding `(label, is_def)` for each. A footnote
+/// DEFINITION is the line-leading `[^LABEL]:` (optional leading whitespace) — at most one per line.
+/// A footnote REFERENCE is any `[^LABEL]` NOT immediately followed by `:`. The label charset
+/// (`[^\]\s]+`, i.e. anything but `]`/whitespace) matches how comrak tolerates footnote names. The
+/// caller has already excluded fenced-code lines, so this is a pure lexical scan with no FP risk.
+fn scan_footnotes(raw: &str) -> Vec<(String, bool)> {
+    static DEF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    static REF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    // Definition: leading whitespace, then `[^label]:`.
+    let def_re = DEF_RE.get_or_init(|| Regex::new(r"^\s*\[\^([^\]\s]+)\]:").expect("static regex"));
+    // Reference: `[^label]` whose `]` is NOT immediately followed by `:` (so a def's own leading
+    // marker is not double-counted as a reference).
+    let ref_re = REF_RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\](?:[^:]|$)").expect("static regex"));
+    let mut out: Vec<(String, bool)> = Vec::new();
+    let mut def_span_end: Option<usize> = None;
+    if let Some(c) = def_re.captures(raw) {
+        out.push((c[1].to_string(), true));
+        def_span_end = c.get(0).map(|m| m.end());
+    }
+    for c in ref_re.captures_iter(raw) {
+        // Skip the reference that overlaps the line-leading definition marker (it IS the def, not a
+        // citation of it). Everything after the def's `:` is fair game (a lesson may cite `[^M]`).
+        if let Some(end) = def_span_end
+            && c.get(0).map(|m| m.start()).unwrap_or(usize::MAX) < end
+        {
+            continue;
+        }
+        out.push((c[1].to_string(), false));
+    }
+    out
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep lint",
+    about = "deterministic, FP-free note-integrity check (footnotes, the bidirectional link law, required fields)"
+)]
+struct LintArgs {
+    /// Memory dir(s) / file(s) to lint (default: current dir).
+    paths: Vec<PathBuf>,
+    /// Also descend into hidden files/dirs (off by default, mirroring the other subcommands).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// `memgrep lint <memdir>` — a DETERMINISTIC, heuristic-free structural lint of every note. Unlike
+/// the async `memory-librarian` heartbeat (which carries contradiction-detection false positives),
+/// this is pure structure, so it has NO false positives and is safe as a pre-commit / write-skill
+/// gate (issue #47). It enforces exactly three things, then exits NON-ZERO if ANY note violated one:
+///
+///   1. Footnote integrity — every in-body `[^N]` reference has a matching `[^N]:` definition under
+///      `## Notes and lessons learned`, AND every `[^N]:` definition is actually referenced. We
+///      reuse the parse `ctx.footnote_refs`/`footnote_defs` (comrak only emits footnote nodes for
+///      REAL footnotes — `[^N]` inside fenced code is not a node — so this stays FP-free).
+///   2. The LINK LAW — if note A links `[[B]]`, B must link back to A. We reuse `build_graph` (so it
+///      benefits from the issue-#49 frontmatter-`name:` resolution + the TRDD-id8 alias) and check
+///      reciprocity via `g.backlinks`. Only internal, resolved, non-anchor edges between two
+///      distinct notes are checked (an external URL or a broken link is not a one-sided wikilink).
+///   3. Required fields — frontmatter has `ocd`, `lmd`, `description`, AND the body contains a
+///      `## Notes and lessons learned` section. We read the RAW frontmatter (not `read_note`, whose
+///      `lmd` has an fs-mtime fallback that would mask a genuinely missing `lmd:` field).
+///
+/// (No "MEMORY.md index coverage" check: the per-note index has been RETIRED into memgrep's own
+/// agent-invisible SQLite index — MEMORY.md is a deprecation stub now — so there is nothing to
+/// cross-check. This omission is intentional, per issue #47.)
+///
+/// Output is one `path:line — <what is wrong>` line per violation (line 0 when a line number is not
+/// meaningful, e.g. a missing frontmatter field). Markdown read here is UNTRUSTED data, never
+/// instructions — we only parse it.
+pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
+    let a = LintArgs::parse_from(std::iter::once("lint".to_string()).chain(args.iter().cloned()));
+    let violations = lint_paths(&a.paths, a.hidden); // already sorted by (path, line)
+    for (path, line, msg) in &violations {
+        println!("{path}:{line} — {msg}");
+    }
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        // Non-zero exit so the lint is usable as a pre-commit / write-skill gate (issue #47). The
+        // count goes to stderr so it never pollutes the machine-parseable stdout violation list.
+        eprintln!("memgrep lint: {} violation(s)", violations.len());
+        std::process::exit(1);
+    }
+}
+
+/// The pure lint core: collect every structural violation across `paths`, sorted by `(path, line)`.
+/// Separated from `cmd_lint_cli` (which prints + `process::exit`s) so the unit tests can assert on
+/// the findings directly — a non-empty return is exactly the "exit non-zero" condition, an empty
+/// return is "exit 0, clean". See `cmd_lint_cli` for the three checks and the FP-freeness rationale.
+fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
+    let mut violations: Vec<(String, usize, String)> = Vec::new();
+
+    // ── Checks 1 & 3 are per-file (footnotes + required fields). ──
+    for path in collect_md(paths, hidden) {
+        let Some(text) = md::read_text(&path) else {
+            continue; // unreadable file — collect_md found it but read failed; nothing to lint.
+        };
+        let p = rel(&path);
+
+        // Check 3 — required frontmatter fields. Read RAW frontmatter so a missing `lmd:` is NOT
+        // masked by read_note's fs-mtime fallback. Accept the model's documented aliases
+        // (created/updated/summary) so a valid note using them is not falsely flagged.
+        let fm = md::parse_frontmatter(&text);
+        let has = |keys: &[&str]| {
+            keys.iter()
+                .any(|k| fm.get(*k).map(|v| !v.trim().is_empty()).unwrap_or(false))
+        };
+        if !has(&["ocd", "created"]) {
+            violations.push((p.clone(), 0, "missing required frontmatter field `ocd`".into()));
+        }
+        if !has(&["lmd", "updated"]) {
+            violations.push((p.clone(), 0, "missing required frontmatter field `lmd`".into()));
+        }
+        if !has(&["description", "summary"]) {
+            violations.push((
+                p.clone(),
+                0,
+                "missing required frontmatter field `description`".into(),
+            ));
+        }
+
+        let lines: Vec<&str> = text.lines().collect();
+        let ctx = md::build_context(&text, lines.len());
+
+        // Check 3 (cont.) — the `## Notes and lessons learned` section must be present. The section
+        // is MANDATORY on every page (it is the standing landing zone for a `[^N]` correction
+        // lesson) even when empty, per the memory model. Match the heading text leniently.
+        let has_notes_section = ctx
+            .headings
+            .iter()
+            .any(|h| h.text.trim().eq_ignore_ascii_case("Notes and lessons learned"));
+        if !has_notes_section {
+            violations.push((
+                p.clone(),
+                0,
+                "missing `## Notes and lessons learned` section".into(),
+            ));
+        }
+
+        // Check 1 — footnote integrity. We must scan the RAW markdown ourselves rather than reuse
+        // `ctx.footnote_refs`/`footnote_defs`: comrak's footnote extension only materializes a
+        // footnote NODE when the ref AND the def are BOTH present (a balanced pair) — an orphan ref
+        // renders as literal text and an orphan def is dropped — so the parsed lists can never
+        // surface the very imbalance this check exists to catch (the issue-#47 lived bug). The raw
+        // scan still skips lines inside fenced code (`ctx.in_code`, which IS populated) so a `[^N]`
+        // in a code sample is never falsely flagged — keeping the check deterministic and FP-free.
+        let mut ref_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first ref line
+        let mut def_lines: BTreeMap<String, usize> = BTreeMap::new(); // label → first def line
+        for (i, raw) in lines.iter().enumerate() {
+            let line_no = i + 1; // 1-based, matching ctx.in_code's indexing
+            if *ctx.in_code.get(i).unwrap_or(&false) {
+                continue; // inside a fenced code block — not real footnote syntax
+            }
+            for (label, is_def) in scan_footnotes(raw) {
+                let table = if is_def { &mut def_lines } else { &mut ref_lines };
+                table.entry(label).or_insert(line_no);
+            }
+        }
+        // Dangling reference: `[^N]` in the body with no `[^N]:` definition (report once, at first ref).
+        for (label, &line) in &ref_lines {
+            if !def_lines.contains_key(label) {
+                violations.push((
+                    p.clone(),
+                    line,
+                    format!("footnote reference `[^{label}]` has no `[^{label}]:` definition"),
+                ));
+            }
+        }
+        // Unreferenced definition: `[^N]:` that nothing in the body cites (report once, at first def).
+        for (label, &line) in &def_lines {
+            if !ref_lines.contains_key(label) {
+                violations.push((
+                    p.clone(),
+                    line,
+                    format!("footnote definition `[^{label}]:` is never referenced"),
+                ));
+            }
+        }
+    }
+
+    // ── Check 2 — the LINK LAW (bidirectional `[[wikilinks]]`), over the whole corpus at once. ──
+    // Reuse build_graph so link resolution benefits from issue #49 (frontmatter `name:` slug) and
+    // the TRDD-id8 alias. An edge A→B is one-sided iff B does NOT link back to A. We only consider
+    // internal, RESOLVED, non-anchor edges to a DISTINCT note (a broken/external/anchor/self edge is
+    // not a candidate). Each unordered (A,B) pair is reported once, at A's offending source line.
+    let g = build_graph(paths, hidden);
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    // Build the set of DIRECTED canonical (source, target) edges over all internal-resolved links.
+    // Reciprocity of an edge A→B is then "is (B,A) also in this set?" — computed from the edges
+    // directly, NOT from `g.backlinks` (whose values are the RAW, un-canonicalized source paths,
+    // so a canon↔raw mismatch there made a genuinely reciprocal pair look one-sided).
+    let mut directed: BTreeSet<(PathBuf, PathBuf)> = BTreeSet::new();
+    for e in &g.edges {
+        if let Some(target) = &e.target {
+            directed.insert((canon(&e.from), canon(target)));
+        }
+    }
+    let mut reported_pairs: BTreeSet<(PathBuf, PathBuf)> = BTreeSet::new();
+    for e in &g.edges {
+        let Some(target) = &e.target else { continue }; // unresolved (broken/external/anchor)
+        let from_c = canon(&e.from);
+        let to_c = canon(target);
+        if from_c == to_c {
+            continue; // a self-link is trivially reciprocal
+        }
+        // The edge in hand proves A→B; reciprocal ⟺ B→A also exists, i.e. (to_c, from_c) ∈ directed.
+        let reciprocal = directed.contains(&(to_c.clone(), from_c.clone()));
+        if !reciprocal {
+            // Order the pair canonically so the same unordered pair is reported once regardless of
+            // which direction's edge we hit first.
+            let pair = if from_c <= to_c {
+                (from_c.clone(), to_c.clone())
+            } else {
+                (to_c.clone(), from_c.clone())
+            };
+            if reported_pairs.insert(pair) {
+                violations.push((
+                    rel(&e.from),
+                    e.line,
+                    format!(
+                        "one-sided link: `{}` links to `{}` but it does not link back (the LINK LAW)",
+                        rel(&e.from),
+                        rel(target)
+                    ),
+                ));
+            }
+        }
+    }
+
+    // Deterministic, stable order across runs.
+    violations.sort();
+    violations
+}
+
 // ─────────────────────────── `memgrep recall` ───────────────────────────
 
 /// How to order the ranked recall results. `Score` is the existing precision-first relevance order
@@ -1724,5 +1960,133 @@ mod tests {
             Some(Path::new("/m/ai-maestro-janitor-overview.md"))
         );
         assert!(find_overview_page(&[PathBuf::from("/m/feedback_x.md")]).is_none());
+    }
+
+    // ─────────────────────── `memgrep lint` (issue #47) ───────────────────────
+
+    /// Make a fresh, uniquely-named temp dir for one lint test (tag keeps same-process tests from
+    /// colliding on the shared `std::process::id()`). Returns the dir; caller removes it at the end.
+    fn lint_tmpdir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("memgrep_lint_{}_{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// True iff some violation's message contains `needle` (substring) — keeps the assertions robust
+    /// to the exact wording while still pinning the right CLASS of violation.
+    fn has_violation(violations: &[(String, usize, String)], needle: &str) -> bool {
+        violations.iter().any(|(_, _, msg)| msg.contains(needle))
+    }
+
+    #[test]
+    fn lint_clean_corpus_has_no_violations() {
+        // A fully well-formed two-note corpus: full frontmatter (ocd/lmd/description), a `## Notes
+        // and lessons learned` section, balanced footnotes, and RECIPROCAL `[[wikilinks]]`. The lint
+        // must find nothing ⟹ empty return ⟹ the CLI would exit 0.
+        let dir = lint_tmpdir("clean");
+        std::fs::write(
+            dir.join("a.md"),
+            "---\nname: a\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"the a page\"\n---\n\
+             body cites a lesson.[^1]\nsee [[b]]\n\n## Notes and lessons learned\n[^1]: the why.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b.md"),
+            "---\nname: b\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"the b page\"\n---\n\
+             body.\nsee [[a]]\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(v.is_empty(), "clean corpus must produce no violations; got: {v:?}");
+    }
+
+    #[test]
+    fn lint_dangling_footnote_reference_is_reported() {
+        // A `[^3]` body reference with NO `[^3]:` definition — the exact lived bug from issue #47.
+        // Must be reported, and a non-empty return means the CLI exits non-zero (the gate fires).
+        let dir = lint_tmpdir("dangling_ref");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             body refers to a lesson.[^3]\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!v.is_empty(), "dangling [^3] must produce a non-zero (non-empty) result");
+        assert!(
+            has_violation(&v, "`[^3]` has no"),
+            "dangling [^3] reference must be reported; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_unreferenced_footnote_definition_is_reported() {
+        // A `[^9]:` definition that nothing in the body cites — the other half of footnote integrity.
+        let dir = lint_tmpdir("orphan_def");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             body with no footnote refs at all.\n\n## Notes and lessons learned\n[^9]: orphan lesson.\n",
+        )
+        .unwrap();
+        let v = lint_paths(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            has_violation(&v, "`[^9]:` is never referenced"),
+            "unreferenced [^9]: definition must be reported; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_one_sided_wikilink_is_reported() {
+        // A links `[[b]]` but b does NOT link back — the LINK LAW. Reusing build_graph means the
+        // link resolves (issue #49) so this is a genuine one-sided link, not a false BROKEN.
+        let dir = lint_tmpdir("onesided");
+        std::fs::write(
+            dir.join("a.md"),
+            "---\nname: a\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             see [[b]]\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b.md"),
+            "---\nname: b\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             no back-link here.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            has_violation(&v, "one-sided link"),
+            "a→b with no b→a must be reported as a one-sided link; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_missing_required_fields_are_reported() {
+        // A note missing ocd, lmd, description AND the `## Notes and lessons learned` section. All
+        // four required-field violations must fire (the frontmatter check reads RAW frontmatter, so
+        // the absent `lmd:` is not masked by read_note's fs-mtime fallback).
+        let dir = lint_tmpdir("missing_fields");
+        std::fs::write(
+            dir.join("bare.md"),
+            "---\nname: bare\n---\njust a body, no required metadata, no lessons section.\n",
+        )
+        .unwrap();
+        let v = lint_paths(&[dir.clone()], false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(has_violation(&v, "field `ocd`"), "missing ocd must be reported; got: {v:?}");
+        assert!(has_violation(&v, "field `lmd`"), "missing lmd must be reported; got: {v:?}");
+        assert!(
+            has_violation(&v, "field `description`"),
+            "missing description must be reported; got: {v:?}"
+        );
+        assert!(
+            has_violation(&v, "Notes and lessons learned"),
+            "missing Notes section must be reported; got: {v:?}"
+        );
     }
 }
