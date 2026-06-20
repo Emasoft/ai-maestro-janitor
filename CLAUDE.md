@@ -179,7 +179,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e2341de59c68 digest=9bcb6e63bfca generated=2026-06-20T10:29:37+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=718692a504a9 digest=bbafaa3d6606 generated=2026-06-20T19:39:46+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -249,6 +249,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/pr-reconciler.py` — PR reconciler — Python port of pr-reconciler.sh.
   · main() -> int
 `scripts/detectors/project-map-drift.py` — project-map-drift — nudge when the fenced CLAUDE.md project map is stale.
+  · main() -> int
+`scripts/detectors/project-memory-tracked.py` — project-memory-tracked — keep PROJECT-scope memory git-TRACKED (TRDD-3f7b6807).
   · main() -> int
 `scripts/detectors/project-plugins-update.py` — Project-plugins-update detector — Track 2b of the auto-update directive.
   · main() -> int
@@ -472,7 +474,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · interval_s_for(intervention) -> float — Cadence (seconds) for an intervention, derived from its governing per-day
   · read_last_run(intervention, scope, root) -> int
   · mark_ran(intervention, scope, root, now) -> None — Stamp that `intervention` ran for (scope, root) at `now` (epoch seconds).
-  · is_due(intervention, scope, root, now) -> bool — True iff `intervention` is due for (scope, root): enabled AND at least one
+  · is_due(intervention, scope, root, now) -> bool — True iff `intervention` is due for (scope, root): enabled AND a cadence
 `scripts/lib/memory_txn.py` — Memory-edit transaction core (TRDD-b92a9dd0) — the safety substrate every
   · MemoryTxnError — A transaction precondition failed (stale source, vanished source, lock
   · editor_enabled() -> bool — Master kill gate for the entire wikimem editor.
@@ -504,6 +506,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · select_mode(name) -> PostureMode — Look up a `PostureMode` by its canonical kebab-case name.
   · apply_mode_to_grade(grade, mode) — Return a new PostureGrade with the letter shifted by the mode.
   · compliance_map(rule_id) -> dict[str, list[str]] — Return the compliance framework cross-walk for a janitor rule_id.
+`scripts/lib/project_memory_tracked.py` — PROJECT-memory gitignore-exception enforcer (TRDD-3f7b6807, Phase 2).
+  · ensure_tracked(repo_root) -> tuple[str, str] — Guarantee `<repo>/.claude/project/memory/` is git-trackable via a
 `scripts/lib/repomap/__init__.py` — Auto-maintained project-map extractor/renderer (TRDD-e247a349).
 `scripts/lib/repomap/extractor.py` — Project-map extractor — language-agnostic interface + Python adapter.
   · Symbol — One public symbol in a file.
