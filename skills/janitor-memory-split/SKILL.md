@@ -117,8 +117,10 @@ Group the page's `##` content sections into **2–4 coherent sub-topics**, each
 becoming one sub-page. Then design the outputs:
 
 - **Overview page** — REUSE the source's path/slug. It keeps the page's identity,
-  frontmatter `name`, `ocd`, and `tier`, and becomes a concise map: a short intro
-  - one tight summary line per sub-page, each with a `[[sub-page-slug]]` link
+  frontmatter `name`, `ocd`, and `tier`, and becomes a concise map: it OPENS with a
+  one-sentence **lead** naming the subject it is the overview of (wikimem-model →
+  Page anatomy → "The lead"), then one tight summary line per sub-page, each with a
+  `[[sub-page-slug]]` link
   (the link law — the overview links DOWN to every sub-page). Move the bulk detail
   OUT to the sub-pages; the overview is a navigation surface, not a dumping
   ground. A stray `[^N]` lesson may stay on the overview (verify folds it in), but

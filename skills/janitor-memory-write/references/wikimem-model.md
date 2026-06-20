@@ -193,6 +193,16 @@ uses `## Applies to` (+ optional `## See also`). The point is the same: a page i
 its (lean) memories PLUS its typed context edges. A page with memories but no
 edges is a dead end, not a wiki node.
 
+**The lead — one-topic discipline.** A page that carries MORE THAN ONE fact or
+facet — a hub, an aspect, or a freshly *merged* page — OPENS with a one-sentence
+**lead** that names its single subject, so the page reads as ONE topic rather than
+a pile (the Wikipedia lead). An atomic single-fact `component` needs none — its one
+fact *is* the lead. The lead only ORIENTS the reader; it never asserts a claim the
+body doesn't already support, so it never adds an unverifiable fact. This is the
+structural half of one-element-one-page: the no-third-page / same-subject gates keep
+*distinct* subjects apart; the lead keeps the *surviving* page reading as the single
+subject it is.
+
 ## The superseded-memory invariant (updates never delete)
 
 Whenever an update **supersedes** a memory — a corrected fact, a reversed

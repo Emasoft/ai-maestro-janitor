@@ -94,6 +94,15 @@ redirect *anywhere in the scope* is caught. This is why step 5 (discover backlin
 via `memgrep links --from`) and step 6 (copy holders into staging and repoint
 them) are mandatory, not optional.
 
+**What the catalog does NOT cover — body-fact loss + the lead are YOURS.** Every
+failure above is machine-checked. Two page-quality rules are NOT: (1) a distinct
+*body* fact dropped while reorganizing — the verifier guards lessons byte-identically
+and forbids duplicate lines, but does not diff body facts (a strict body-superset
+check would false-fail on every legitimate dedup), so a fact you silently drop is
+gone forever; and (2) the one-sentence **lead** that makes C read as one topic.
+Both are enforced only by the agent in step 7. No-information-lost is the editor's
+first law; for the body, you are its only guardian.
+
 ## Why backlink redirect is the load-bearing step
 
 THE LINK LAW: every `[[link]]` is bidirectional and must resolve. When you retire
@@ -145,10 +154,11 @@ one page".
    ```
 
 7. **Edit copies under $STAGING:**
-   - overwrite `rotator-429-deadlock.md` with the merged page C: both facets as
-     `##` sections; both lesson sets unioned + deduped under one `## Notes and
-     lessons learned`; `ocd: min(...)`, `lmd: 2026-06-19`; `name:` stays
-     `rotator-429-deadlock`; no `[[rotator-version-skew]]` link remains.
+   - overwrite `rotator-429-deadlock.md` with the merged page C: a one-sentence
+     lead naming the subject, then both facets as `##` sections; both lesson sets
+     unioned + deduped under one `## Notes and lessons learned`; `ocd: min(...)`,
+     `lmd: 2026-06-19`; `name:` stays `rotator-429-deadlock`; no
+     `[[rotator-version-skew]]` link remains.
    - `rm "$STAGING/rotator-version-skew.md"`.
    - in `oauth-rotator-hub.md`, replace `[[rotator-version-skew]]` →
      `[[rotator-429-deadlock]]`.
