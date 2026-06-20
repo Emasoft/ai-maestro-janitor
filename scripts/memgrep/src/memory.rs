@@ -56,6 +56,11 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
 /// signal — so the dates are intrinsic metadata, fs is only a fallback).
 pub(crate) struct Note {
     path: PathBuf,
+    /// The wiki topic slug — frontmatter `name` (alias `topic`), lowercased; None if neither is
+    /// set. The canonical `[[name]]` wikilink target (issue #49: the protocol links by the `name:`
+    /// slug, often hyphenated, while the harness names files with underscores). Mirrors index.rs
+    /// `topic_of` so the link graph keys on the same identity as the SQLite index.
+    name: Option<String>,
     pub(crate) title: String,
     pub(crate) summary: String,
     pub(crate) tags: Vec<String>,
@@ -204,8 +209,17 @@ fn read_note(path: &Path) -> Option<Note> {
                 .ok()
                 .map(system_time_to_iso_utc)
         });
+    // The wiki topic slug — frontmatter `name` (alias `topic`), lowercased (issue #49). The link
+    // graph registers this so a `[[name-slug]]` wikilink resolves even when the filename stem
+    // differs (hyphenated slug vs underscored filename). Mirrors index.rs `topic_of`.
+    let name = fm
+        .get("name")
+        .or_else(|| fm.get("topic"))
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty());
     Some(Note {
         path: path.to_path_buf(),
+        name,
         title,
         summary,
         tags,
@@ -433,7 +447,23 @@ fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
     let trdd_re = trdd_id8_re();
     for n in &notes {
         if let Some(stem) = n.path.file_stem().and_then(|s| s.to_str()) {
-            stem_map.insert(stem.to_ascii_lowercase(), n.path.clone());
+            let stem_l = stem.to_ascii_lowercase();
+            stem_map.insert(stem_l.clone(), n.path.clone());
+            // issue #49: also register the `_`→`-` normalized stem as a FALLBACK, so a hyphenated
+            // `[[name-slug]]` resolves to an underscore-named file that carries no frontmatter
+            // `name:`. Don't clobber a real stem.
+            let norm = stem_l.replace('_', "-");
+            if norm != stem_l {
+                stem_map.entry(norm).or_insert_with(|| n.path.clone());
+            }
+        }
+        // issue #49: register the frontmatter `name:`/`topic:` slug — the canonical `[[name]]`
+        // wikilink target. The protocol links by the `name:` slug (often hyphenated) while the
+        // harness names files with underscores, so without this every `[[hyphen-slug]]` falsely
+        // reported BROKEN (59/94 on a real corpus). FALLBACK (don't clobber a real stem); mirrors
+        // index.rs `topic_of` so the link graph keys on the same identity as the SQLite index.
+        if let Some(slug) = &n.name {
+            stem_map.entry(slug.clone()).or_insert_with(|| n.path.clone());
         }
         if let Some(name) = n.path.file_name().and_then(|s| s.to_str())
             && let Some(c) = trdd_re.captures(name)
@@ -1586,5 +1616,41 @@ mod tests {
         // A known later instant: 1_000_000_000 s after epoch = 2001-09-09T01:46:40Z.
         let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
         assert_eq!(system_time_to_iso_utc(t), "2001-09-09T01:46:40Z");
+    }
+
+    #[test]
+    fn wikilink_resolves_by_frontmatter_name_not_just_stem() {
+        // issue #49: a note whose FILENAME uses underscores but whose frontmatter `name:` is the
+        // hyphenated slug must resolve when linked by `[[hyphen-slug]]`. build_graph now registers
+        // the `name:` slug (and a `_`→`-` normalized stem), so the link is NOT falsely BROKEN.
+        let dir = std::env::temp_dir().join(format!("memgrep_i49_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // target: underscore filename, hyphenated frontmatter `name:` slug.
+        std::fs::write(
+            dir.join("feedback_opus_for_security.md"),
+            "---\nname: feedback-opus-for-security\ndescription: \"x\"\n---\nbody\n",
+        )
+        .unwrap();
+        // source: links to it by the `[[name:]]` slug (hyphenated, per the protocol).
+        std::fs::write(
+            dir.join("other.md"),
+            "---\nname: other\n---\nsee [[feedback-opus-for-security]]\n",
+        )
+        .unwrap();
+        let g = build_graph(&[dir.clone()], false);
+        let broken: Vec<&String> = g
+            .edges
+            .iter()
+            .filter(|e| {
+                e.target.is_none() && !e.external && !e.raw.trim_start().starts_with('#')
+            })
+            .map(|e| &e.raw)
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            broken.is_empty(),
+            "[[feedback-opus-for-security]] must resolve by the name: slug, not report BROKEN; got: {broken:?}"
+        );
     }
 }
