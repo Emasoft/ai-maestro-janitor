@@ -616,6 +616,24 @@ def main() -> int:
         return 0
 
     pid = os.getpid()
+    # Install the graceful-shutdown handlers BEFORE publishing the pid file.
+    # The pid file is the public "I'm alive" signal a supervisor waits on before
+    # SIGTERM'ing a stale daemon (request_daemon_restart). If the pid were
+    # written first and a SIGTERM arrived in the window before these handlers
+    # were installed, the DEFAULT SIGTERM disposition would kill the process
+    # outright — skipping the `finally` below that calls remove_daemon_pid() —
+    # and orphan a stale pid file (the intermittent
+    # test_daemon_sigterm_graceful_shutdown failure: process dead, pid file
+    # left behind). Handlers-first guarantees that once the pid file exists, any
+    # SIGTERM runs _on_signal and unwinds through the finally, so cleanup always
+    # runs and the pid file is removed.
+    signal.signal(signal.SIGTERM, _on_signal)
+    signal.signal(signal.SIGINT, _on_signal)
+    try:
+        signal.signal(signal.SIGHUP, _on_signal)  # nice-to-have on Unix
+    except (AttributeError, ValueError):
+        pass
+
     gs.write_daemon_pid(pid)
     gs.write_heartbeat()
     tasks = _build_tasks()
@@ -624,13 +642,6 @@ def main() -> int:
         f"started (pid={pid}, tasks={[t.name for t in tasks]}, "
         f"intervals={[t.interval_s for t in tasks]})",
     )
-
-    signal.signal(signal.SIGTERM, _on_signal)
-    signal.signal(signal.SIGINT, _on_signal)
-    try:
-        signal.signal(signal.SIGHUP, _on_signal)  # nice-to-have on Unix
-    except (AttributeError, ValueError):
-        pass
 
     exit_reason = "signal"
     try:
