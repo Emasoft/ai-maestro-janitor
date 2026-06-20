@@ -2,7 +2,7 @@
 name: memory-system
 description: "how does the wiki-memory system work / where do memories live / how to recall before acting / what is memgrep / how do I install the memory system in a new project / why did my PROJECT memory page get flagged for a leak / LOCAL vs PROJECT vs USER scope precedence"
 ocd: 2026-06-13
-lmd: 2026-06-19
+lmd: 2026-06-20
 metadata:
   node_type: memory
   type: project
@@ -97,11 +97,14 @@ body (two-hop recall: symptom query → note → body answer). The
 — the standing landing zone for `[^N]` correction lessons; the page-shape pass
 flags a note that omits it, or that omits `ocd`/`lmd`.
 
-`MEMORY.md` is the human index (`- [Title](file.md) — hook`, one line per note),
-loaded each session and the canonical index. `memgrep index --markdown` can
-generate a richer `memory-index.md` (per-note title/summary/tags/TOC/backlinks)
-— an OPTIONAL generated artifact. Recall needs neither — it scans notes directly,
-transparently using the SQLite `.memgrep/index.db` when fresh.
+**The index is memgrep's, and ONLY memgrep's** (v0.13.0, TRDD-a5780c23): recall runs on
+the agent-invisible, unlimited SQLite index `.memgrep/index.db` (or a live note-scan) and
+NEVER reads a human index.[^5] `MEMORY.md` is now a **deprecation stub** — never
+maintained, loaded-as-index, or hand-trimmed. The daily **harvest chore**
+(`/janitor-memory-harvest`) re-files any stray memory an agent mis-adds to `MEMORY.md`
+(or a loose `.md`) back into proper wiki pages, NON-destructively, then stubs `MEMORY.md`.
+Each PROJECT corpus carries one `<project>-overview.md` entry page — `memgrep overview
+<dir>` prints it (the Wikipedia-style overview that links to the deeper pages).
 
 ## The memgrep engine
 
@@ -121,6 +124,7 @@ one call searches LOCAL + PROJECT + USER together (`$ROOTS`).
 |---|---|
 | `recall "SYMPTOM" <memdir…>` | rank notes by symptom match → `path — description`, best first; each note's `[^N]` lessons appended (default-on). Query the QUESTION's words |
 | `find "<query>" <memdir…>` | note-level `+`/`-`/wildcard/phrase keyword search; `--only-notes` searches the lessons instead of pages |
+| `overview <memdir…>` | print the project's `*-overview.md` entry page (the navigation entry point; the MEMORY.md stub advertises this command) |
 | `index` / `reindex <memdir>` | build/refresh the persistent SQLite query index `.memgrep/index.db` (gitignored, git-incremental); `--full` rebuilds from scratch |
 | `index --markdown <memdir>` | legacy doc-generator → `memory-index.md` (add `--write` to write the file) |
 | `links --broken\|--orphans\|--to N\|--from N` | link graph / semijoin over the corpus |
@@ -343,3 +347,11 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
   `project_root`/`janitor_root` are process-lifetime `@lru_cache`d, so in-process
   repeated `main()` calls leak the first test's resolved root (the cache is correct
   in production, where every heartbeat is a fresh process).
+[^5]: [ocd:2026-06-20 lmd:2026-06-20] Pre-v0.13.0 this page said "`MEMORY.md` is the human
+  index loaded each session and the canonical index." That model WAS the bug: the
+  context-loaded MEMORY.md grew unbounded with the corpus, so agents hand-trimmed it to
+  save context and LOST pointers / corrupted memories. v0.13.0 (TRDD-a5780c23) moved the
+  index ENTIRELY into memgrep's agent-invisible, unlimited SQLite — there is no
+  human-maintained index any more. Lesson: never put a growing index in the agent's
+  context window; let the search engine own it (unlimited, invisible). The daily harvest
+  chore and the deprecation stub keep it that way against agents who re-add to MEMORY.md.
