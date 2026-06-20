@@ -11,6 +11,7 @@ as `bytecode.txt` (the extension-only `repo-trust-score` misses both).
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import subprocess
@@ -48,7 +49,20 @@ _WASM = b"\x00asm\x01\x00\x00\x00" + b"\x00" * 56
 _ZIP = b"PK\x03\x04\x14\x00\x00\x00" + b"\x00" * 56
 _LUA_BYTECODE = b"\x1bLua\x51\x00\x01\x04" + b"\x00" * 56
 _LUA_SOURCE_TROJAN = b"return(function(...)local J=function(...)" + b" " * 32
-_GZIP = b"\x1f\x8b\x08\x00\x00\x00\x00\x00" + b"\x00" * 56
+
+# Real gzip streams (issue #40): the detector now decompresses gzip hits
+# and re-tests the INNER bytes — a malformed/zeros "gzip header" no
+# longer counts. Build genuine members with stdlib gzip.compress.
+#
+# tiktoken-shape BPE vocab: `<base64-token> <int-rank>` per line, pure
+# text, zero executable magic → must NOT be flagged.
+_TIKTOKEN_INNER = b"IQ== 0\nIg== 1\nIw== 2\nJA== 3\nJQ== 4\n" * 64
+_GZIP_TIKTOKEN = gzip.compress(_TIKTOKEN_INNER)
+# A gzip whose decompressed bytes begin with a real PE header → STILL a
+# dropper; the detector must not go blind to it.
+_GZIP_INNER_MZ = gzip.compress(_PE_TIGHT + b"payload" * 16)
+# A gzip whose decompressed bytes begin with a real ELF header.
+_GZIP_INNER_ELF = gzip.compress(_ELF + b"payload" * 16)
 
 
 def _seed_minimal_project(project_dir: Path) -> None:
@@ -349,13 +363,86 @@ def test_invalid_max_files_falls_back_to_default(tmp_path: Path) -> None:
     assert "[binary-magic-scanner]" in r.stdout
 
 
-# ---------- Gzip fixture (sanity check the magic table is wired) ---------
+# ---------- Gzip inner-content gate (issue #40) --------------------------
 
 
-def test_fires_on_gzip_in_image_dir(tmp_path: Path) -> None:
+def test_tiktoken_gz_in_scripts_data_not_flagged(tmp_path: Path) -> None:
+    """The reported FP: a gzip-compressed tiktoken BPE vocab in a
+    scripts/data/ dir. Its decompressed bytes are pure text
+    (`<base64> <int>` per line), zero executable magic — must NOT be
+    flagged on gzip-shape alone. (Named generically so the name-based
+    allowlist does NOT short-circuit it; this exercises fix 1 only.)"""
     _seed_minimal_project(tmp_path)
-    (tmp_path / "image").mkdir()
-    (tmp_path / "image" / "data.bin").write_bytes(_GZIP)
+    (tmp_path / "scripts" / "data").mkdir(parents=True)
+    (tmp_path / "scripts" / "data" / "vocab.bin.gz").write_bytes(_GZIP_TIKTOKEN)
     r = _run(tmp_path)
     assert r.returncode == 0
-    assert "gzip" in r.stdout
+    assert r.stdout == ""
+
+
+def test_gzip_with_inner_pe_still_flagged(tmp_path: Path) -> None:
+    """A gzip whose DECOMPRESSED content starts with a real MZ/PE header
+    is a genuine dropper — the detector must not go blind to it after the
+    inner-content gate. The promoted label names the inner type."""
+    _seed_minimal_project(tmp_path)
+    (tmp_path / "image").mkdir()
+    (tmp_path / "image" / "data.bin.gz").write_bytes(_GZIP_INNER_MZ)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "[binary-magic-scanner]" in r.stdout
+    assert "data.bin.gz" in r.stdout
+    assert "gzip>pe" in r.stdout
+
+
+def test_gzip_with_inner_elf_still_flagged(tmp_path: Path) -> None:
+    """Same as the PE case but for an ELF inner header."""
+    _seed_minimal_project(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "blob.gz").write_bytes(_GZIP_INNER_ELF)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert "[binary-magic-scanner]" in r.stdout
+    assert "gzip>elf" in r.stdout
+
+
+# ---------- Tokenizer-vocab name allowlist (issue #40, fix 2) ------------
+
+
+def test_tiktoken_named_gz_is_allowlisted(tmp_path: Path) -> None:
+    """A file literally named `o200k_base.tiktoken.gz` is allowlisted by
+    NAME — even if its bytes were a dropper, the tokenizer-vocab globs
+    short-circuit before the magic check. Here we even hand it a real PE
+    inner payload to prove the name allowlist wins on its own."""
+    _seed_minimal_project(tmp_path)
+    (tmp_path / "scripts" / "data").mkdir(parents=True)
+    (tmp_path / "scripts" / "data" / "o200k_base.tiktoken.gz").write_bytes(
+        _GZIP_INNER_MZ
+    )
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+def test_plain_tiktoken_name_is_allowlisted(tmp_path: Path) -> None:
+    """An uncompressed `cl100k_base.tiktoken` is allowlisted too."""
+    _seed_minimal_project(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "cl100k_base.tiktoken").write_bytes(_PE_TIGHT)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+# ---------- Dependency / cache-root skip (issue #40, fix 3) --------------
+
+
+def test_site_packages_is_skipped(tmp_path: Path) -> None:
+    """A binary inside a vendored site-packages/ tree must NOT be
+    reported — third-party package data is not project code."""
+    _seed_minimal_project(tmp_path)
+    pkg = tmp_path / ".venv-other" / "lib" / "site-packages" / "tiktoken_ext" / "scripts"
+    pkg.mkdir(parents=True)
+    (pkg / "helper.exe").write_bytes(_PE_TIGHT)
+    r = _run(tmp_path)
+    assert r.returncode == 0
+    assert r.stdout == ""

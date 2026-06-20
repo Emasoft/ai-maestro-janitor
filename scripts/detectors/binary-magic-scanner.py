@@ -41,6 +41,8 @@ Heartbeat invariants (mirror `repo-trust-score`):
 
 from __future__ import annotations
 
+import fnmatch
+import gzip
 import hashlib
 import os
 import sys
@@ -90,6 +92,31 @@ _TEXT_SIGNATURES: tuple[tuple[bytes, str], ...] = (
     (b"return(function" b"(", "lua-source-iife"),
 )
 
+# Executable / script signatures we look for INSIDE a decompressed gzip
+# member (issue #40, fix 1). A `.gz` only stays a finding if its inner
+# bytes carry one of these — a `.gz` whose inner content is pure text
+# (e.g. a `<base64-token> <int-rank>` BPE vocab) is NOT a dropper and is
+# dropped silently. These are searched anywhere in the probed window
+# (`in`, not `startswith`) because a script payload's marker can sit
+# after a shebang line, a BOM, or leading whitespace. The
+# implicit-concat on `eval` / `php` mirrors the `_TEXT_SIGNATURES`
+# CPV-skillaudit dodge — Python joins the literals at parse time, so the
+# runtime needles are byte-identical to b"eval(" and b"<?php".
+_GZIP_INNER_EXEC_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"MZ",            "gzip>pe"),
+    (b"\x7fELF",       "gzip>elf"),
+    (b"\xfe\xed\xfa\xce", "gzip>macho"),
+    (b"\xce\xfa\xed\xfe", "gzip>macho"),
+    (b"\xfe\xed\xfa\xcf", "gzip>macho"),
+    (b"\xcf\xfa\xed\xfe", "gzip>macho"),
+    (b"\xca\xfe\xba\xbe", "gzip>macho-fat-or-java"),
+    (b"\x1bLua",       "gzip>lua-bytecode"),
+    (b"#!",            "gzip>shebang"),
+    (b"<" b"?php",     "gzip>php"),
+    (b"eval" b"(",     "gzip>eval"),
+    (b"return(function" b"(", "gzip>lua-source-iife"),
+)
+
 # Directories that legitimately should NOT contain executable binaries.
 # A magic-byte hit inside any of these is the drift signal.
 _UNEXPECTED_BIN_DIRS = frozenset({
@@ -105,14 +132,51 @@ _UNEXPECTED_BIN_DIRS = frozenset({
 
 # Trees we never recurse into — vendored deps, build artifacts, the
 # janitor's own scratch directories.
+#
+# `site-packages` is here (issue #40, fix 3): a project that vendors an
+# installed venv or whose root happens to sit under a Python install
+# tree should not have its third-party dependency data policed — those
+# files (e.g. tiktoken's `scripts/data/o200k_base.tiktoken.gz`) are
+# regeneratable package payloads, not project code. `node_modules`,
+# `.venv`, and `venv` already covered the JS / venv cases.
 _SKIP_PARTS = frozenset({
     "node_modules", ".venv", "venv", "env", ".git", ".trashcan",
+    "site-packages",
     "dist", "build", "target", "__pycache__", ".tox", ".nox",
     ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "reports", "reports_dev", "docs_dev", "scripts_dev", "samples_dev",
     "examples_dev", "tests_dev", "downloads_dev", "libs_dev",
     "builds_dev",
 })
+
+# Absolute path prefixes we never scan — package-manager caches that may
+# legitimately hold compressed dependency data (issue #40, fix 3). These
+# only matter when the PROJECT ROOT itself sits inside one (os.walk never
+# escapes `root`), but pruning by prefix keeps the scan honest in that
+# edge case. `~` is expanded at module load.
+_SKIP_ABS_PREFIXES: tuple[Path, ...] = (
+    Path("~/.cache/uv").expanduser(),
+)
+
+# Known tokenizer-vocab artifacts (issue #40, fix 2). tiktoken /
+# transformers / CPV ship these BPE merge tables and they are ubiquitous
+# in any project doing token-count work. Matched case-insensitively
+# against the filename via fnmatch — a hit short-circuits the magic-byte
+# check entirely (these are pure-text vocab data, never droppers).
+_TOKENIZER_VOCAB_GLOBS: tuple[str, ...] = (
+    "*.tiktoken",
+    "*.tiktoken.gz",
+    "o200k_base*",
+    "cl100k_base*",
+    "p50k_*",
+    "r50k_*",
+)
+
+# Number of DECOMPRESSED bytes we pull from a gzip member to re-test for
+# real executable/script magic (issue #40, fix 1). Bounded so a
+# multi-megabyte .gz (e.g. a 1.7 MB BPE vocab) never lands wholesale in
+# memory — 64 KiB is far more than any magic prefix needs.
+_GZIP_INNER_PROBE_BYTES = 64 * 1024
 
 # Known-safe filenames that legitimately ship a magic-byte binary
 # (gradlew wrapper, Maven wrapper) or are universally allowed.
@@ -178,6 +242,58 @@ def _match_text_signature(head: bytes) -> str | None:
     return None
 
 
+def _is_tokenizer_vocab(name: str) -> bool:
+    """True iff `name` is a known tokenizer-vocab artifact (issue #40,
+    fix 2). These BPE merge tables (tiktoken / transformers / CPV) are
+    pure-text data, never executable — allowlist them by name so a
+    `.tiktoken.gz` never reaches the magic-byte check at all."""
+    lower = name.lower()
+    for pattern in _TOKENIZER_VOCAB_GLOBS:
+        if fnmatch.fnmatch(lower, pattern):
+            return True
+    return False
+
+
+def _under_skipped_abs_prefix(path: Path) -> bool:
+    """True iff `path` lives under a package-manager cache we never scan
+    (issue #40, fix 3). os.walk never leaves the project root, so this
+    only fires when the root itself is inside such a cache."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for prefix in _SKIP_ABS_PREFIXES:
+        if resolved == prefix or prefix in resolved.parents:
+            return True
+    return False
+
+
+def _gzip_inner_label(path: Path) -> str | None:
+    """Decompress up to `_GZIP_INNER_PROBE_BYTES` of `path` and return a
+    `gzip>…` label iff the inner bytes carry real executable/script
+    magic (issue #40, fix 1).
+
+    Returns None when the inner content shows no executable magic — i.e.
+    the `.gz` is benign data (the tiktoken-vocab false positive) — OR
+    when the file cannot be read / decompressed (a truncated or
+    not-actually-gzip blob; the outer magic already flagged its SHAPE,
+    but without verifiable executable inner content we do NOT escalate
+    the alarming dropper-trio framing on shape alone).
+
+    Bounded: we read at most `_GZIP_INNER_PROBE_BYTES` decompressed bytes
+    so a multi-megabyte member never lands in memory.
+    """
+    try:
+        with gzip.open(path, "rb") as fh:
+            inner = fh.read(_GZIP_INNER_PROBE_BYTES)
+    except (OSError, EOFError, gzip.BadGzipFile):
+        return None
+    for needle, label in _GZIP_INNER_EXEC_MAGIC:
+        if needle in inner:
+            return label
+    return None
+
+
 def _disambiguate_fat_macho(label: str, path: Path) -> str:
     """`CA FE BA BE` collides between Universal Mach-O (fat) and a Java
     `.class` file. Use the extension to disambiguate when the magic
@@ -224,6 +340,12 @@ def _walk_targets(root: Path, max_files: int) -> list[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune skip-dirs *in-place* so os.walk doesn't recurse into them.
         dirnames[:] = [d for d in dirnames if d not in _SKIP_PARTS]
+        # Skip package-manager cache trees by absolute prefix (issue #40,
+        # fix 3) — only relevant if the project root itself sits inside
+        # one, since os.walk never escapes `root`.
+        if _under_skipped_abs_prefix(Path(dirpath)):
+            dirnames[:] = []
+            continue
         try:
             rel_dir = Path(dirpath).relative_to(root)
         except ValueError:
@@ -243,6 +365,11 @@ def _walk_targets(root: Path, max_files: int) -> list[Path]:
             if len(out) >= max_files:
                 return out
             if fname.lower() in _SAFE_FILENAMES:
+                continue
+            # Allowlist tokenizer-vocab artifacts by name (issue #40,
+            # fix 2) — never sniff a `.tiktoken[.gz]` / `o200k_base*`
+            # BPE merge table; they are pure-text data, not droppers.
+            if _is_tokenizer_vocab(fname):
                 continue
             full = Path(dirpath) / fname
             if not full.is_file():
@@ -292,6 +419,19 @@ def _scan(root: Path, max_files: int) -> list[tuple[Path, str]]:
             if label is None:
                 continue
         label = _disambiguate_fat_macho(label, path)
+        # Gzip content gate (issue #40, fix 1): a gzip member's SHAPE
+        # (`\x1f\x8b\x08` + unexpected dir) is not evidence of a dropper
+        # on its own — legitimate ML data (the tiktoken `o200k_base`
+        # BPE vocab) is gzip-shaped too. Decompress a bounded window and
+        # only keep the finding if the INNER bytes carry real
+        # executable/script magic; otherwise drop it silently. The label
+        # is promoted to the specific inner type (e.g. `gzip>pe`) so the
+        # drift line names what was actually found, not just "gzip".
+        if label == "gzip":
+            inner = _gzip_inner_label(path)
+            if inner is None:
+                continue
+            label = inner
         if _is_safe_for_unexpected_dir(path, label):
             continue
         out.append((path, label))
