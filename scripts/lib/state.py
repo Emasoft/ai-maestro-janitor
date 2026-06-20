@@ -633,8 +633,9 @@ def in_ai_maestro_agent_env(env: Optional[Mapping[str, str]] = None) -> bool:
     True iff an explicit ai-maestro flag is truthy (`AIMAESTRO_AGENT=1` /
     `THIS_IS_AIMAESTRO=true`) OR an ai-maestro internal id is present
     (`AMP_AGENT_ID` / `AID_AUTH`). This is the FAST signal (TRDD-db169d9e R4);
-    the AUTHORITATIVE resolver is a CWD match against the ai-maestro server's
-    `/api/agents` (which also yields the tmux session to send to), done by the
+    the AUTHORITATIVE resolver is a CWD match against the agent list from the
+    ai-maestro CLI (`aimaestro-agent.sh list --json`, which also yields the tmux
+    session to send to — issue #42, decoupled from the server API), done by the
     trigger scripts when this pre-check passes. Pass `env` to test.
     """
     e = os.environ if env is None else env

@@ -38,11 +38,10 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
-import urllib.parse
-import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -125,41 +124,54 @@ def _fire_detached_steps(delay_s: float, steps: list[list[str]]) -> None:
     )
 
 
-# --- ai-maestro API send (TRDD-db169d9e R4) --------------------------------
+# --- ai-maestro send via the SHIPPED CLI (issue #42; TRDD-db169d9e R4) ------
 #
 # When running INSIDE an ai-maestro agent, the AUTHORITATIVE way to type a command
-# into the agent's own terminal is the ai-maestro server, not a local keystroke
-# injection: GET /api/agents to find this agent (CWD match) → its tmux session →
-# POST /api/sessions/<tmux>/command. Every step is best-effort with a short
-# timeout; ANY failure returns None so the caller falls back to the local tmux
-# keystroke send (ai-maestro agents run in tmux, so that path works too).
+# into the agent's own terminal goes through the ai-maestro server — but NOT by
+# calling the server's HTTP API directly. Per the ecosystem decoupling rule
+# (ai-maestro@8a2cc269: "no plugin element may call the server API directly — hooks
+# and MCP included"), the janitor couples to the IMMUTABLE CLI layer the ai-maestro
+# installer ships to ~/.local/bin, never the endpoints (the API changes constantly;
+# the CLI is a frozen interface that POSTs the same endpoints behind it). So:
+# `aimaestro-agent.sh list --json` to find this agent (CWD match) → its tmux session
+# → `aimaestro-agent.sh session command <tmux> --newline -- <cmd>`. Every step is
+# best-effort: a missing CLI, a down server, or an unconfirmed send returns None so
+# the caller falls back to the local tmux keystroke send (ai-maestro agents run in
+# tmux, so that path works too). Auth (AID_AUTH / AIMAESTRO_SUDO_TOKEN) is read by
+# the CLI from the inherited env — the janitor never handles a token itself.
 
-_AIMAESTRO_DEFAULT_BASE = "http://localhost:23000"
 
+def _resolve_aimaestro_cli(env: Mapping[str, str]) -> str | None:
+    """Resolve the ai-maestro CLI: $AIMAESTRO_CLI → ~/.local/bin → PATH; None if absent.
 
-def _aimaestro_base(env: Mapping[str, str]) -> str:
-    return (env.get("AIMAESTRO_API") or _AIMAESTRO_DEFAULT_BASE).rstrip("/")
-
-
-def _http_json(url: str, *, method: str = "GET", body: dict | None = None, timeout: float = 4.0):
-    """GET/POST JSON, returning the decoded object or None on ANY failure.
-
-    Network best-effort: a dead server, a timeout, a non-JSON body, or a non-2xx
-    status all collapse to None so the caller degrades to the tmux fallback.
+    The unified installer drops `aimaestro-agent.sh` in ~/.local/bin; an explicit
+    `$AIMAESTRO_CLI` overrides (as the COS scripts do) so it resolves under a
+    minimal hook/cron env where ~/.local/bin may not be on PATH.
     """
-    data = json.dumps(body).encode("utf-8") if body is not None else None
-    headers = {"Content-Type": "application/json"} if data is not None else {}
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    override = env.get("AIMAESTRO_CLI")
+    if override and Path(override).is_file() and os.access(override, os.X_OK):
+        return override
+    home = env.get("HOME") or os.path.expanduser("~")
+    cand = Path(home) / ".local" / "bin" / "aimaestro-agent.sh"
+    if cand.is_file() and os.access(cand, os.X_OK):
+        return str(cand)
+    return shutil.which("aimaestro-agent.sh")
+
+
+def _run_aimaestro_cli(
+    cli: str, args: list[str], *, env: Mapping[str, str], timeout: float
+) -> subprocess.CompletedProcess[str] | None:
+    """Run `<cli> <args…>` with the inherited env; None on ANY failure (best-effort)."""
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed localhost API base
-            raw = resp.read().decode("utf-8", "replace")
-    except (OSError, ValueError):
-        return None
-    if not raw.strip():
-        return {}
-    try:
-        return json.loads(raw)
-    except ValueError:
+        return subprocess.run(
+            [cli, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=dict(env),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
         return None
 
 
@@ -200,10 +212,26 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
 
 
 def _try_ai_maestro_send(command: str, *, dry_run: bool, env: Mapping[str, str]) -> str | None:
-    """Best-effort ai-maestro API send. Returns a status string on success, or
-    None to signal the caller to fall through to the local terminal send."""
-    base = _aimaestro_base(env)
-    agents = _http_json(f"{base}/api/agents", timeout=4.0)
+    """Best-effort ai-maestro send via the shipped CLI (issue #42). Returns a status
+    string on success, or None to fall through to the local terminal send.
+
+    Repointed off the direct `/api/...` calls to `aimaestro-agent.sh` (the frozen
+    CLI interface). CLI absent / server down / unconfirmed → None → caller degrades
+    to the tmux keystroke send.
+    """
+    cli = _resolve_aimaestro_cli(env)
+    if not cli:
+        return None
+    # 1) Enumerate agents → find THIS agent's tmux session by cwd match. `list
+    #    --json` returns the same agent objects the API did, so the pure matcher is
+    #    reused unchanged.
+    proc = _run_aimaestro_cli(cli, ["list", "--json"], env=env, timeout=5.0)
+    if proc is None or proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        agents = json.loads(proc.stdout)
+    except ValueError:
+        return None
     if isinstance(agents, dict) and isinstance(agents.get("agents"), list):
         agents = agents["agents"]
     if not isinstance(agents, list):
@@ -213,15 +241,16 @@ def _try_ai_maestro_send(command: str, *, dry_run: bool, env: Mapping[str, str])
         return None
     if dry_run:
         return f"DRY_RUN:aimaestro:{tmux}:{command}"
-    resp = _http_json(
-        f"{base}/api/sessions/{urllib.parse.quote(tmux)}/command",
-        method="POST",
-        body={"command": command, "requireIdle": False, "addNewline": True},
-        timeout=5.0,
+    # 2) Type the command into that agent's terminal via the CLI (frozen interface
+    #    over POST /api/sessions/<tmux>/command). `--newline` presses Enter;
+    #    requireIdle stays False (flag omitted). `--` guards a dash-leading command.
+    sent = _run_aimaestro_cli(
+        cli, ["session", "command", tmux, "--newline", "--", command],
+        env=env, timeout=6.0,
     )
-    if isinstance(resp, dict) and resp.get("success"):
+    if sent is not None and sent.returncode == 0:
         return "FIRED:aimaestro"
-    return None  # POST failed / unconfirmed → caller falls back to the tmux keystroke send
+    return None  # unconfirmed → caller falls back to the tmux keystroke send
 
 
 def send_self_command(

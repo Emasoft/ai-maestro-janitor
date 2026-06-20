@@ -13,14 +13,11 @@ skipped when tmux isn't installed, and always tears its session down.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import shutil
 import subprocess
 import sys
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -40,46 +37,24 @@ def _force(monkeypatch, kind: str) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-@contextlib.contextmanager
-def _stub_aimaestro_server(agents_payload):
-    """A REAL localhost HTTP server mimicking the ai-maestro API: serves
-    GET /api/agents and records POST /api/sessions/<s>/command. No mocks."""
-    posts: list[dict] = []
-
-    class _H(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):  # noqa: A002 - match base signature; silence access logs
-            return
-
-        def _json(self, code: int, obj) -> None:
-            data = json.dumps(obj).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler contract
-            self._json(200, agents_payload) if self.path == "/api/agents" else self._json(404, {})
-
-        def do_POST(self):  # noqa: N802 - BaseHTTPRequestHandler contract
-            n = int(self.headers.get("Content-Length", 0) or 0)
-            raw = self.rfile.read(n).decode("utf-8") if n else ""
-            try:
-                body = json.loads(raw) if raw else {}
-            except ValueError:
-                body = {}
-            posts.append({"path": self.path, "body": body})
-            self._json(200, {"success": True})
-
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), _H)
-    thread = threading.Thread(target=srv.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{srv.server_address[1]}", posts
-    finally:
-        srv.shutdown()
-        srv.server_close()
-        thread.join(timeout=5)
+def _spy_aimaestro_cli(tmp_path, agents_payload):
+    """Write a spy `aimaestro-agent.sh` (issue #42 — the janitor now shells out to
+    the CLI, not the HTTP API). `list --json` prints `agents_payload`; `session
+    command …` records its argv to a log. A REAL executable the janitor invokes —
+    no mocks. Returns (cli_path, calls_log)."""
+    agents_file = tmp_path / "agents.json"
+    agents_file.write_text(json.dumps(agents_payload))
+    log = tmp_path / "cli-calls.log"
+    cli = tmp_path / "aimaestro-agent.sh"
+    cli.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = "list" ]; then cat "{agents_file}"; exit 0; fi\n'
+        f'if [ "$1" = "session" ] && [ "$2" = "command" ]; then '
+        f'printf "%s\\n" "$*" >> "{log}"; exit 0; fi\n'
+        "exit 0\n"
+    )
+    cli.chmod(0o755)
+    return cli, log
 
 
 # --- build_tmux_steps (pure) -----------------------------------------------
@@ -220,49 +195,56 @@ def test_match_agent_tmux_no_match(tmp_path):
     assert tt.match_agent_tmux(agents, [str(tmp_path / "y")]) is None
 
 
-def test_ai_maestro_api_send_end_to_end(monkeypatch, tmp_path):
-    """Inside an ai-maestro agent: send_self_command POSTs the command to the
-    agent's tmux session resolved via GET /api/agents. Real localhost server."""
+def test_ai_maestro_cli_send_end_to_end(monkeypatch, tmp_path):
+    """Inside an ai-maestro agent: send_self_command resolves the agent's tmux
+    session via `aimaestro-agent.sh list --json` and types the command via
+    `aimaestro-agent.sh session command <tmux> --newline -- <cmd>` (issue #42 —
+    decoupled from the server API). Real spy CLI, no mocks."""
     wd = str(tmp_path)
     agents = [{"id": "a1", "workingDirectory": wd, "session": {"tmuxSessionName": "agent-sess-1"}}]
-    with _stub_aimaestro_server(agents) as (base, posts):
-        _force(monkeypatch, "iterm")                       # terminal kind irrelevant — API wins
-        monkeypatch.setenv("AIMAESTRO_AGENT", "1")
-        monkeypatch.setenv("AIMAESTRO_API", base)
-        monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)        # matches the served workingDirectory
-        out = tt.send_self_command("/compact")
-        assert out == "FIRED:aimaestro"
-    assert len(posts) == 1
-    assert posts[0]["path"] == "/api/sessions/agent-sess-1/command"
-    assert posts[0]["body"] == {"command": "/compact", "requireIdle": False, "addNewline": True}
+    cli, log = _spy_aimaestro_cli(tmp_path, agents)
+    _force(monkeypatch, "iterm")                        # terminal kind irrelevant — CLI wins
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")
+    monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)         # matches the listed workingDirectory
+    out = tt.send_self_command("/compact")
+    assert out == "FIRED:aimaestro"
+    assert "session command agent-sess-1 --newline -- /compact" in log.read_text()
 
 
-def test_ai_maestro_api_dry_run_does_not_post(monkeypatch, tmp_path):
+def test_ai_maestro_cli_dry_run_does_not_send(monkeypatch, tmp_path):
     wd = str(tmp_path)
     agents = [{"workingDirectory": wd, "session": {"tmuxSessionName": "sess-x"}}]
-    with _stub_aimaestro_server(agents) as (base, posts):
-        _force(monkeypatch, "iterm")
-        monkeypatch.setenv("AIMAESTRO_AGENT", "1")
-        monkeypatch.setenv("AIMAESTRO_API", base)
-        monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
-        out = tt.send_self_command("/compact", dry_run=True)
-        assert out == "DRY_RUN:aimaestro:sess-x:/compact"
-    assert posts == []
+    cli, log = _spy_aimaestro_cli(tmp_path, agents)
+    _force(monkeypatch, "iterm")
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")
+    monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
+    out = tt.send_self_command("/compact", dry_run=True)
+    assert out == "DRY_RUN:aimaestro:sess-x:/compact"
+    assert not log.exists()   # the `session command` step never ran
 
 
-def test_ai_maestro_unreachable_falls_back_to_tmux(monkeypatch):
-    """In-agent but the server is unreachable → the API send returns None and the
-    call falls through to the local tmux keystroke send (agents run in tmux)."""
+def test_ai_maestro_cli_failure_falls_back_to_tmux(monkeypatch, tmp_path):
+    """In-agent but the CLI fails (server down → `list` exits non-zero) → the
+    ai-maestro send returns None and the call falls through to the local tmux
+    keystroke send (agents run in tmux)."""
+    cli = tmp_path / "aimaestro-agent.sh"
+    cli.write_text("#!/usr/bin/env bash\nexit 1\n")     # every subcommand fails (server unreachable)
+    cli.chmod(0o755)
     _force(monkeypatch, "tmux")
     monkeypatch.setenv("AIMAESTRO_AGENT", "1")
-    monkeypatch.setenv("AIMAESTRO_API", "http://127.0.0.1:1")   # port 1 → connection refused
+    monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
     monkeypatch.setenv("TMUX_PANE", "%5")
     out = tt.send_self_command("/compact", dry_run=True)
     assert out == "DRY_RUN:tmux:%5:/compact@2.0s"
 
 
-def test_not_in_agent_skips_api(monkeypatch):
-    # No agent flags → API path never attempted (a dead AIMAESTRO_API must NOT matter).
+def test_not_in_agent_skips_cli(monkeypatch, tmp_path):
+    # No agent flags → the ai-maestro path is never attempted (a present CLI must NOT matter).
+    cli = tmp_path / "aimaestro-agent.sh"
+    cli.write_text("#!/usr/bin/env bash\nexit 0\n")
+    cli.chmod(0o755)
     _force(monkeypatch, "iterm")                              # _force clears agent flags
-    monkeypatch.setenv("AIMAESTRO_API", "http://127.0.0.1:1")
+    monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
     assert tt.send_self_command("/compact") == tt.USE_ITERM_PATH
