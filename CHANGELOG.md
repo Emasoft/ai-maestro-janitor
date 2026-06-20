@@ -2,15 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.11.0] - 2026-06-19
+## [0.12.0] - 2026-06-20
+
+### Bug Fixes
+
+- Consistent dash list markers — clear MD004 publish blocker (TRDD-87935f21)
 
 ### Documentation
 
-- P1-P4 done; P5/P6 next (TRDD-87935f21)
+- Record P6 detectors + memory_scopes SSOT; TRDD STATE (TRDD-87935f21)
 
 ### Features
 
-- Repair txn op — single-page page-shape/metadata backfill verifier + CLI (TRDD-87935f21)
-- Schedule the repair pass — repair_per_day cadence + [janitor-memory-repair] marker (TRDD-87935f21)
-- Janitor-memory-repair skill — the autonomous page-shape repair executor (TRDD-87935f21)
+- Memorize-nudge detector — keep the wiki populated (TRDD-87935f21)
+- Why-in-commits detector — enforce the WHY in commit messages (TRDD-87935f21)
+
+### Refactor
+
+- Extract three-scope resolver to shared SSOT (TRDD-87935f21)
 
