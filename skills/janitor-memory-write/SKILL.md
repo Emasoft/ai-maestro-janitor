@@ -170,13 +170,14 @@ the page's SHAPE:
 The janitor librarian backfills any reciprocal you miss and flags one-sided
 edges, but it is a safety net — the author wires both ends now.
 
-### 6. Index it
+### 6. Index it (memgrep only — do NOT touch MEMORY.md)
 
-Append a one-line pointer to `"$MEMDIR/MEMORY.md"` (create if missing) — a
-markdown list item whose link target is the new page's slug file and whose text
-is its Title, followed by an em-dash and a one-line hook (the same shape every
-other MEMORY.md line uses). Then `memgrep reindex "$MEMDIR"` if present
-(optional; recall auto-reindexes).
+The index is 100% memgrep's — the agent-invisible, unlimited SQLite
+`.memgrep/index.db`. Do **NOT** append a pointer to `MEMORY.md` (it is a retired
+deprecation stub; hand-maintaining a human index is what grew unbounded and
+corrupted memories). Just refresh the search index: `memgrep reindex "$MEMDIR"`
+if memgrep is present (optional — recall auto-reindexes). Recall finds the new
+page by its `description`/body, never by a human index.
 
 ### 7. Sanity-check
 
@@ -229,8 +230,8 @@ User: remember that automating my own paid Claude accounts is fine, don't over-f
 
 ## Scope
 
-ONLY creates/seeds wikimem pages + the MEMORY.md index, and wires their See-also.
-To MODIFY an existing page (including correcting a wrong memory) use
+ONLY creates/seeds wikimem pages and wires their See-also (the index is memgrep's
+— never touch MEMORY.md). To MODIFY an existing page (including correcting a wrong memory) use
 `/janitor-memory-update`. To FIND pages use `/janitor-memory-recall`. One subject
 per page; symptom-indexed `description` + non-empty `## See also` are mandatory.
 
@@ -246,7 +247,7 @@ Copy this checklist and track your progress:
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
 - [ ] `## Notes and lessons learned` section present (even if empty)
 - [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
-- [ ] `MEMORY.md` index line added (one line, no content duplication)
+- [ ] `memgrep reindex` run if present — the index is memgrep's; do NOT touch `MEMORY.md`
 
 ## Resources
 

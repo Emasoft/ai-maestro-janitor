@@ -165,9 +165,9 @@ one page".
 8. **commit:** `uv run "$CLI" commit "$LOCAL_MEM" "$TXN" --op merge` → verify
    passes → `committed <id> (merge): 2 write(s), 1 delete(s)`. (2 writes = C +
    the holder; 1 delete = the retired source.)
-9. **Index + report:** fix `MEMORY.md` (drop the `rotator-version-skew` line),
-   report `merged rotator-version-skew → rotator-429-deadlock (4 lessons preserved,
-1 backlink redirected, ocd=2026-05-30)`.
+9. **Reindex + report:** `memgrep reindex` if present (the index is memgrep's — do
+   NOT touch `MEMORY.md`), report `merged rotator-version-skew → rotator-429-deadlock
+   (4 lessons preserved, 1 backlink redirected, ocd=2026-05-30)`.
 
 ## Failure-path walkthrough (verify FAIL → bounded retry)
 

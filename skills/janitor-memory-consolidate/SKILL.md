@@ -241,8 +241,8 @@ writes-before-deletes via `os.replace`. On PASS it prints
 ### 9. EXIT / retry / rollback
 
 - **SUCCESS** = `commit` exited 0 (verify passed; LOCAL/USER applied on disk;
-  PROJECT, if enabled, staged-not-pushed). Update the survivor's `MEMORY.md` index
-  line and remove B's line. Report the one-line result.
+  PROJECT, if enabled, staged-not-pushed). `memgrep reindex` if present (the index
+  is memgrep's — do NOT touch `MEMORY.md`). Report the one-line result.
 - **verify FAILED** (exit 1) — the CLI already **aborted** the txn and left the
   live tree untouched. Read the printed reasons, fix C in a **fresh** transaction
   (begin again), and retry. **Bounded retry ≤ 3.** After 3 failures, `uv run

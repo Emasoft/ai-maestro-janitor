@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-bootstrap
-description: BOOTSTRAP — stand up the wiki-memory system in a project that doesn't have it yet (the one-time fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir under .claude/project/memory/ (adding the gitignore exception when .claude/ is ignored), seeds a starter architecture-hub page + a MEMORY.md index, and points the agent at the recall rule + the write/recall/update skills + the proactive-use contract. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
+description: BOOTSTRAP — stand up the wiki-memory system in a project that doesn't have it yet (the one-time fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir under .claude/project/memory/ (adding the gitignore exception when .claude/ is ignored), seeds a starter architecture-hub page + the MEMORY.md deprecation stub, and points the agent at the recall rule + the write/recall/update skills + the proactive-use contract. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
 ---
 
 # Janitor memory — BOOTSTRAP
@@ -86,7 +86,7 @@ git -C "$REPO" check-ignore -v ".claude/project/memory/MEMORY.md"; echo "exit=$?
 # `.claude/**`); fix it and re-check.
 ```
 
-## Step 3 — seed a starter architecture HUB + the MEMORY.md index
+## Step 3 — seed a starter architecture HUB + the MEMORY.md stub
 
 Don't overwrite an existing wikimem. Only seed when the dir is empty of pages:
 
@@ -132,18 +132,18 @@ metadata:
 ## Notes and lessons learned
 ```
 
-`$PROJECT_MEM/MEMORY.md` — the human index loaded each session (one line per
-page; the canonical loaded index):
+`$PROJECT_MEM/MEMORY.md` — the **deprecation stub** (the index is retired to
+memgrep; this file is NOT an index and is never maintained, loaded-as-index, or
+trimmed):
 
 ```markdown
-# Project memory (wikimem) — PROJECT scope
+# MEMORY — index retired (managed by memgrep)
 
-The git-tracked, cross-dev memory wiki. Recall surfaces these pages by symptom;
-the protocol lives in `~/.claude/rules/markdown-memory-recall.md` (run
-`/janitor-memory-recall`). One line per page — each a markdown link from the page
-title to its file. Seed it with the architecture hub entry:
-
-- architecture — how <PROJECT> works: overview + the parts map.
+⚠ DEPRECATED stub. The memory index is 100% managed by `memgrep` — the
+agent-invisible, unlimited SQLite index at `.memgrep/index.db`. Recall ONLY via
+`memgrep recall "<symptom>" <memdir>` / `memgrep find …` (run
+`/janitor-memory-recall`); the protocol is `~/.claude/rules/markdown-memory-recall.md`.
+Do NOT add page pointers here, load this as an index, or trim it.
 ```
 
 ## Step 4 — index it (optional) + commit guidance

@@ -86,8 +86,9 @@ in a new page):
    rule's `## Applies to`; a general rule covering a new element → its
    `## Applies to` AND the element's `## Governed by`; a new lateral relation →
    `## See also` on BOTH pages. Remove dead edges on both ends too.
-3. Bump `lmd:`. Reindex / fix the MEMORY.md hook line only if the title or
-   `description` changed.
+3. Bump `lmd:`. If the title or `description` changed, refresh the search index
+   (`memgrep reindex` — optional, recall auto-reindexes); do NOT touch `MEMORY.md`
+   (the index is memgrep's, agent-invisible).
 
 ## 2. CORRECT a memory — the 2-step NON-DESTRUCTIVE protocol
 
@@ -152,8 +153,8 @@ move + relink, NOT a silent copy):
   link per governor + the hub). Order matters:
   1. list who points at it: `memgrep links --from <old-name> <memdir>`;
   2. repoint every inbound `[[old-name]]` → `[[new-name]]` on those pages;
-  3. rename the file AND its frontmatter `name:` (they must stay equal) + the
-     MEMORY.md index line;
+  3. rename the file AND its frontmatter `name:` (they must stay equal), then
+     `memgrep reindex <memdir>` (do NOT touch `MEMORY.md` — the index is memgrep's);
   4. re-audit: `memgrep links --broken <memdir>` must show nothing new.
   Never rename by just moving the file — that strands the whole inbound web.
 

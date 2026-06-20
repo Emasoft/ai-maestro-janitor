@@ -186,7 +186,7 @@ that point at moved detail.
 
 ```bash
 # 5a. BEGIN — copy ONLY the source page being split into a fresh staging dir.
-#     A split has exactly ONE source; holders/MEMORY.md ride along as staged
+#     A split has exactly ONE source; backlink holders ride along as staged
 #     writes (below), they are NOT begin sources.
 OUT="$(uv run "$PLUGIN/scripts/memory_txn_cli.py" begin "$SCOPE_ROOT" split "$REL")"
 TXN="$(printf '%s\n' "$OUT" | sed -n 's/^txn_id=//p')"
@@ -208,9 +208,9 @@ copy becomes a write:
   references with the right sub-page slug, write the result into staging at the
   holder's rel-path). The commit treats it as a write that overwrites the live
   holder — no need to declare it a begin source.
-- If a `MEMORY.md` index in the scope lists the source page, write its updated
-  copy to `"$STAGING/MEMORY.md"` the same way (add the new sub-pages, keep the
-  overview line).
+- Do NOT touch `MEMORY.md` (the index is memgrep's — a retired stub). After the
+  commit, the new sub-pages are picked up by `memgrep reindex` (recall
+  auto-reindexes); there is no human index to update.
 
 Then commit — this is the gate:
 
