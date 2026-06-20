@@ -234,6 +234,17 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # set. 1h cadence — leaks should be caught quickly before a push, and the scan
     # is bounded + content-fingerprint deduped so unchanged fires are near-free.
     ("memory-scope-leak", 3600, "CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL"),
+    # project-memory-tracked guarantees the PROJECT memory scope
+    # (<repo>/.claude/project/memory/) is git-TRACKED via a .gitignore EXCEPTION
+    # (TRDD-3f7b6807, Phase 2) — that scope is shared with every contributor and
+    # MUST live in the repo. When the scope is ignored it APPENDS the canonical
+    # exception triplet idempotently + atomically; it NEVER `git add`/`git add -f`
+    # and NEVER rewrites an existing ignore line. Surfaces ONE drift line only
+    # when it added the exception or a directory-pruning ignore (bare `.claude/`)
+    # blocks it (needs-manual); silent for absent / already-tracked / probe-error.
+    # Daily cadence — .gitignore changes rarely and the probe is one cheap
+    # `git check-ignore`, so unchanged fires are near-free.
+    ("project-memory-tracked", 86400, "CLAUDE_PLUGIN_OPTION_PROJECT_MEMORY_TRACKED_INTERVAL"),
     # memorize-nudge keeps the wiki POPULATED (TRDD-87935f21, priority #6): when
     # substantive (non-bookkeeping) commits have landed since the last memory note,
     # it reminds the agent to /janitor-memory-write what changed + WHY. Reads git +
