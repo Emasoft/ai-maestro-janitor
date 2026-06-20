@@ -256,9 +256,15 @@ MIN_DWELL_S = float(os.environ.get("ROTATOR_MIN_DWELL_S", "60"))
 EXPIRY_GRACE_H = float(os.environ.get("ROTATOR_EXPIRY_GRACE_H", "0.5"))
 # F2b keepalive (TRDD-7100178d): proactively refresh a SLOT token once its local runway drops
 # below this many hours, so an idle alternate stays valid for an overnight rotation. MUST stay
-# below the OAuth access-token lifetime so a freshly-refreshed token isn't immediately back in
-# the window (no re-refresh spam). Env-overridable for loop tests.
-KEEPALIVE_AHEAD_H = float(os.environ.get("ROTATOR_KEEPALIVE_AHEAD_H", "2"))
+# below the OAuth access-token lifetime (~8 h) so a freshly-refreshed token isn't immediately
+# back in the window (no re-refresh spam). Raised 2 → 6 (TRDD-a6d2fdaf): at 2 h an alternate's
+# token could drift API-stale (a 401 while still locally "valid") in the gap between keepalive
+# windows, which DEADLOCKED rotation on 2026-06-20 (the live account exhausted, the lone
+# alternate excluded for a stale probe). A 6 h horizon refreshes every ~2 h so alternate tokens
+# stay fresh long before they can lapse — and 6 < ~8 h keeps the no-spam invariant. The cascade
+# classifier reads the SAME constant (cascade_plan keepalive_ahead_h=…), so keepalive and the
+# RENEW classification stay consistent. Env-overridable for loop tests.
+KEEPALIVE_AHEAD_H = float(os.environ.get("ROTATOR_KEEPALIVE_AHEAD_H", "6"))
 # A 429 on /api/oauth/usage can mean EITHER the account is genuinely rate-limited
 # OR our polling tripped the endpoint's own throttle (transient). A genuinely
 # maxed account 429s persistently; a throttle clears within a tick. So require
@@ -1134,7 +1140,25 @@ def cmd_auto() -> int:
                 # (the account is maxed, not the token expired — a refresh would not help).
                 refreshed = refresh_oauth_token(b)
                 if refreshed is None:
-                    continue  # setup-token slot (no refreshToken) or the refresh grant failed
+                    # The in-tick refresh grant returned nothing. If the slot is
+                    # STRUCTURALLY renewable — carries a refresh token AND a future
+                    # expiry AND is not locally expired — keep it as a DEGRADED
+                    # fallback instead of dropping it outright: the grant may have
+                    # failed transiently (CF-1010, a slow/timed-out token endpoint,
+                    # a rotating refresh token already spent this tick) and a later
+                    # tick's keepalive will re-mint it. A degraded rotate beats
+                    # pinning the user to a dead live account — the 2026-06-20
+                    # deadlock, where a rescuable alternate was excluded here while
+                    # the live account sat at 100%/401. Only a slot that truly
+                    # cannot renew (no refresh token) is dropped.
+                    _eh = expires_in_h(b)
+                    if (
+                        _oauth(b).get("refreshToken")
+                        and _eh is not None
+                        and not _blob_locally_expired(b)
+                    ):
+                        degraded.append((email, b, _eh))
+                    continue
                 try:
                     write_slot(email, refreshed)  # heal the lapsed slot in the keychain (as keepalive would)
                 except SlotKeychainWriteError as exc:
@@ -1160,7 +1184,18 @@ def cmd_auto() -> int:
                 b = refreshed
                 st2, d2 = usage_request(b)  # re-probe with the fresh token
             if st2 != 200:
-                continue  # still 429 (maxed) or error after the refresh attempt -> not a safe target
+                # Not a usage-confirmed safe target. Distinguish WHY:
+                #  - 429 → the alternate is genuinely MAXED (no quota left);
+                #    rotating onto it is useless, so drop it.
+                #  - else (401/403/0 after a SUCCESSFUL refresh) → the usage probe
+                #    failed transiently while we hold a FRESH token; keep it as a
+                #    DEGRADED fallback so one bad probe can't pin the user to a dead
+                #    live account when a rescuable alternate is right there.
+                if st2 != 429:
+                    _eh = expires_in_h(b)
+                    if _eh is not None and not _blob_locally_expired(b):
+                        degraded.append((email, b, _eh))
+                continue
             bfh = _util(d2, "five_hour")
             bsd = _util(d2, "seven_day")
             if bfh is None or bsd is None:
@@ -1175,31 +1210,40 @@ def cmd_auto() -> int:
             degraded.append((email, b, eh))
     if index_healed:
         save_state(state)  # before any _switch_blob (it re-loads state from disk)
-    if network_up:
-        best = select_drain_first(candidates)
-        if best is None:
-            _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe "
-                    "threshold — all paid accounts maxed; waiting for a window to reset"
-                    % (live_email or "(live)", live_desc))
-            return 0
+    # 1) Best usage-confirmed safe target (DRAIN-FIRST), when the network is up.
+    best = select_drain_first(candidates) if network_up else None
+    if best is not None:
         target_email, target_blob, bfh, bsd = best
         reason = "live %s %s -> rotate" % (live_email or "(live)", live_desc)
         _switch_blob(target_email, target_blob, reason)
         _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)"
                 % (live_email or "(live)", target_email, bfh, bsd, reason))
         return 0
-    # Degraded (no-network) rotation: the live token is locally dead and /usage is unreachable.
-    if not degraded:
+    # 2) DEGRADED fallback — no usage-confirmed target (or the network is down), but a
+    # structurally-valid alternate exists (future expiry; its usage probe failed
+    # transiently / its token just needs one mint). Rotating onto the most-runway one
+    # beats pinning the user to an exhausted/dead live account. THIS is the fix for the
+    # 2026-06-20 deadlock: previously the network-up path returned "all paid accounts
+    # maxed" here even when a rescuable alternate sat in `degraded`, which was only ever
+    # consulted on the no-network path. A degraded rotate writes a fresh live credential
+    # and the next tick's keepalive (now on the live slot's twin) keeps it alive.
+    if degraded:
+        target_email, target_blob, target_eh = max(degraded, key=lambda c: c[2])
+        why = "no usage-confirmed target" if network_up else "no usage; API unreachable"
+        reason = "live %s %s -> degraded rotate (%s)" % (live_email or "(live)", live_desc, why)
+        _switch_blob(target_email, target_blob, reason)
+        _decide("auto: switched %s -> %s (degraded; target token valid ~%.1fh; %s)"
+                % (live_email or "(live)", target_email, target_eh, reason))
+        return 0
+    # 3) Genuinely stuck — nothing rotatable in either path.
+    if network_up:
+        _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe threshold "
+                "and none is structurally renewable — all paid accounts maxed; waiting for a "
+                "window to reset" % (live_email or "(live)", live_desc))
+    else:
         _decide("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate "
                 "with a known future expiry exists — cannot rotate; manual re-auth needed"
                 % (live_email or "(live)"))
-        return 0
-    target_email, target_blob, target_eh = max(degraded, key=lambda c: c[2])
-    reason = ("live %s %s -> degraded rotate (no usage; most-runway alternate)"
-              % (live_email or "(live)", live_desc))
-    _switch_blob(target_email, target_blob, reason)
-    _decide("auto: switched %s -> %s (degraded; target token valid ~%.1fh; %s)"
-            % (live_email or "(live)", target_email, target_eh, reason))
     return 0
 
 

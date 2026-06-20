@@ -715,22 +715,41 @@ def test_cmd_auto_does_not_refresh_maxed_429_alternate(
     assert switches == []                                  # genuinely maxed → no rotation
 
 
-def test_cmd_auto_excludes_alternate_when_refresh_fails(
+def test_cmd_auto_degraded_rotate_when_in_tick_refresh_fails(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When the rejected alternate cannot be refreshed (setup-token slot or a dead refresh chain →
-    refresh_oauth_token returns None) it is still excluded — refresh-on-err must not rotate onto an
-    unusable token, and it must not 'heal' a slot it could not refresh."""
+    """TRDD-a6d2fdaf fix for the 2026-06-20 deadlock: when the only alternate's stored token is
+    rejected (401) AND its in-tick refresh FAILS, but the slot is STRUCTURALLY VALID (carries a
+    refresh token + a future expiry), the rotator now does a DEGRADED rotate onto it rather than
+    deadlocking on the exhausted live account. A transient refresh failure (CF-1010, a slow/timed-
+    out token endpoint, a rotating refresh token already spent this tick) must NOT pin the user to
+    a dead live credential when a rescuable alternate exists — a later tick's keepalive re-mints
+    the slot, and a degraded rotate beats staying on a 100%/401 live account. (Contrast
+    test_cmd_auto_refreshes_expired_alternate_before_excluding, where the refresh SUCCEEDS and the
+    switch lands on the fresh token; here it fails and we still escape the deadlock.)"""
     live = _blob("LIVE", expires_ms=_ms_in(50))
-    stale_alt = _blob("ALT_OLD", expires_ms=_ms_in(50))
+    stale_alt = _blob("ALT_OLD", expires_ms=_ms_in(50))   # 401 probe, but 50h local runway + a refresh token
     switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
                            slot_blobs={"alt@x": stale_alt},
                            usage={"LIVE": (401, None), "ALT_OLD": (401, None)})
-    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: None)    # refresh chain is dead
-    wrote: list = []
-    monkeypatch.setattr(rotator, "write_slot", lambda e, b: wrote.append(e))
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: None)    # in-tick refresh fails
     rotator.cmd_auto()
-    assert switches == []                                  # cannot rotate onto an unrefreshable token
-    assert wrote == []                                     # nothing healed when refresh failed
+    assert [s[0] for s in switches] == ["alt@x"]           # degraded-rotated; did NOT deadlock
+
+
+def test_cmd_auto_excludes_alternate_with_no_refresh_token(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A truly-unrenewable alternate — a setup-token slot with NO refresh token whose stored token
+    the server rejects (401) — is STILL excluded under the degraded fallback: nothing can ever mint
+    a fresh token for it, so a degraded rotate onto its dead access token would just move the
+    deadlock. Only a slot that can plausibly be re-minted (has a refresh token) is degraded-eligible."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    no_rt_alt = _blob("ALT_NORT", refresh=None, expires_ms=_ms_in(50))  # setup-token slot, no refreshToken
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": no_rt_alt},
+                           usage={"LIVE": (401, None), "ALT_NORT": (401, None)})
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: None)    # no refresh token → nothing to mint
+    rotator.cmd_auto()
+    assert switches == []                                  # excluded — cannot be rescued, so no rotation
 
 
 def test_cmd_auto_refresh_on_err_heals_state_index(
