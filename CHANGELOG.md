@@ -2,22 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.12.0] - 2026-06-20
+## [0.12.1] - 2026-06-20
 
 ### Bug Fixes
 
-- Consistent dash list markers — clear MD004 publish blocker (TRDD-87935f21)
+- Clear CPV --strict blockers in the v0.12.1 changeset (TRDD-87935f21)
 
 ### Documentation
 
-- Record P6 detectors + memory_scopes SSOT; TRDD STATE (TRDD-87935f21)
-
-### Features
-
-- Memorize-nudge detector — keep the wiki populated (TRDD-87935f21)
-- Why-in-commits detector — enforce the WHY in commit messages (TRDD-87935f21)
-
-### Refactor
-
-- Extract three-scope resolver to shared SSOT (TRDD-87935f21)
+- Record v0.12.0 ship (P6) + flaky-clippy detour; refocus on P5 (TRDD-87935f21)
+- Merge/split — mandate a lead + preserve-every-body-fact guardrail (TRDD-87935f21)
 
