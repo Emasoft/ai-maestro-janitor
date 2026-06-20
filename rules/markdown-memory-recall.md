@@ -252,7 +252,7 @@ flags a note that omits it, or that omits `ocd`/`lmd`).
 SQLite index `.memgrep/index.db` (auto-built, git-incremental, **agent-invisible**,
 **no size limit**), or a live note-scan when no index exists — either way recall
 never reads a human index. So there is **no human-maintained index** any more.
-`MEMORY.md` is now a one-line **DEPRECATION STUB**; `memgrep index --markdown`'s
+`MEMORY.md` is now a tiny **DEPRECATION STUB**; `memgrep index --markdown`'s
 `memory-index.md` is an optional throwaway doc. Do **NOT** append note pointers to
 `MEMORY.md`, do **NOT** load it as an index, and **NEVER hand-trim it** — agents who
 trimmed the old ever-growing index lost pointers and corrupted the corpus, which is
@@ -261,15 +261,27 @@ bootstrap writes, and what an existing MEMORY.md is reduced to):
 
 ```text
 # MEMORY — index retired (managed by memgrep)
-⚠ DEPRECATED stub. The memory index is 100% managed by memgrep — the
-agent-invisible, unlimited SQLite index at .memgrep/index.db. Recall ONLY via
-`memgrep recall "<symptom>" <memdir>` / `memgrep find …`. Do NOT add pointers
-here, load this as an index, or trim it.
+⚠ DEPRECATED stub — do NOT add pointers here, load this as an index, or trim it.
+The memory index is 100% managed by memgrep (agent-invisible, unlimited SQLite
+index at .memgrep/index.db). To use project memory:
+- ENTRY POINT — navigate the project:  memgrep overview <memdir>
+  (prints <project>-overview.md: the overview that links out to the deeper pages)
+- RECALL by symptom:  memgrep recall "<symptom>" <memdir>   (or: memgrep find …)
+Protocol: ~/.claude/rules/markdown-memory-recall.md
 ```
 
 The harness `# Memory` directive still says to maintain a `MEMORY.md` pointer
 list; that is **superseded for this memory system** — the stub is the whole file,
 the harness loads only that tiny notice, and recall is memgrep-only.
+
+**The navigation entry point — `<project>-overview.md`.** Each PROJECT-scope corpus
+carries ONE `<project>-overview.md` wiki page: a concise **Wikipedia-style overview**
+of the whole project — a container of the overall-project memories with links OUT to
+the deeper, more specific wikimem pages. It is **not an index** (no exhaustive pointer
+list) and stays small; it is the reader's way INTO the wiki. `memgrep overview <memdir>`
+prints it (the command the MEMORY.md stub advertises). Bootstrap seeds it; agents grow
+it as the project's top-level story and link from it down to the hubs + key component
+pages — never paste those pages' detail into it.
 
 ## The wiki layer — pages are wiki nodes, not loose notes (wikimem)
 

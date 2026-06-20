@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-bootstrap
-description: BOOTSTRAP — stand up the wiki-memory system in a project that doesn't have it yet (the one-time fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir under .claude/project/memory/ (adding the gitignore exception when .claude/ is ignored), seeds a starter architecture-hub page + the MEMORY.md deprecation stub, and points the agent at the recall rule + the write/recall/update skills + the proactive-use contract. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
+description: BOOTSTRAP — stand up the wiki-memory system in a project that doesn't have it yet (the one-time fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir under .claude/project/memory/ (adding the gitignore exception when .claude/ is ignored), seeds the project's <name>-overview entry page + the MEMORY.md deprecation stub, and points the agent at the recall rule + the write/recall/update skills + the proactive-use contract. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
 ---
 
 # Janitor memory — BOOTSTRAP
@@ -86,7 +86,7 @@ git -C "$REPO" check-ignore -v ".claude/project/memory/MEMORY.md"; echo "exit=$?
 # `.claude/**`); fix it and re-check.
 ```
 
-## Step 3 — seed a starter architecture HUB + the MEMORY.md stub
+## Step 3 — seed the `<project>-overview` entry page + the MEMORY.md stub
 
 Don't overwrite an existing wikimem. Only seed when the dir is empty of pages:
 
@@ -96,27 +96,30 @@ ls "$PROJECT_MEM"/*.md >/dev/null 2>&1 && echo "wikimem already exists — skip 
 
 If empty, create two files with the **Write tool** (real content, not echo).
 
-The project's root **architecture HUB** page (written to `$PROJECT_MEM/` — its
-`name:` is `architecture`; the staging command in Step 4 shows the exact path).
-Fill the placeholders from what you actually know about THIS project (its name, what it is,
-its top-level parts); leave the parts map sparse — it grows as pages are added.
-Set `ocd`/`lmd` to today (`date +%F`), and set `globs:` to the source roots the
-project owns:
+The project's **overview ENTRY POINT** page — file `<project-name>-overview.md` in
+`$PROJECT_MEM/`, its `name:` is `<project-name>-overview` (Step 4 stages the exact
+path). This is the Wikipedia-style overview the reader enters through (`memgrep
+overview <memdir>` prints it): a concise story of the whole project with links OUT to
+the deeper pages — **not an index**, no exhaustive pointer list, kept small. Fill the
+placeholders from what you know about THIS project; leave the links sparse — they grow
+as pages are added. Set `ocd`/`lmd` to today (`date +%F`), and `globs:` to the source
+roots the project owns:
 
 ```yaml
 ---
-name: architecture
-description: "how does <PROJECT> work — overview, the main parts, where the key pieces live"
+name: <project-name>-overview
+description: "how does <PROJECT> work — the overall story + where the deeper pages are"
 ocd: <YYYY-MM-DD>
 lmd: <YYYY-MM-DD>
 metadata:
   node_type: memory
   type: project
   tier: hub
-  functionality: architecture
+  functionality: <project-name>-overview
   globs: ["src/**", "scripts/**"]
 ---
-<PROJECT> — one paragraph: what it is and what it does.
+<PROJECT> — a short overview: what it is, what it does, how its parts fit. Link OUT to
+the deeper pages below rather than detailing them here.
 
 ## Parts map
 - (add component/aspect pages here as they're created — e.g. the data model, the
@@ -139,11 +142,13 @@ trimmed):
 ```markdown
 # MEMORY — index retired (managed by memgrep)
 
-⚠ DEPRECATED stub. The memory index is 100% managed by `memgrep` — the
-agent-invisible, unlimited SQLite index at `.memgrep/index.db`. Recall ONLY via
-`memgrep recall "<symptom>" <memdir>` / `memgrep find …` (run
-`/janitor-memory-recall`); the protocol is `~/.claude/rules/markdown-memory-recall.md`.
-Do NOT add page pointers here, load this as an index, or trim it.
+⚠ DEPRECATED stub — do NOT add pointers here, load this as an index, or trim it.
+The memory index is 100% managed by `memgrep` (agent-invisible, unlimited SQLite
+index at `.memgrep/index.db`). To use project memory:
+- ENTRY POINT — navigate the project: `memgrep overview <memdir>`
+  (prints the project's overview page, which links out to the deeper wiki pages)
+- RECALL by symptom: `memgrep recall "<symptom>" <memdir>` (or `memgrep find …`)
+Protocol: `~/.claude/rules/markdown-memory-recall.md` (run `/janitor-memory-recall`).
 ```
 
 ## Step 4 — index it (optional) + commit guidance
@@ -156,7 +161,7 @@ Stage the new PROJECT-scope files **by name** (never `git add -A`) when the user
 wants them committed — this scope is meant to be pushed so every dev shares it:
 
 ```bash
-git -C "$REPO" add .gitignore "$PROJECT_MEM/architecture.md" "$PROJECT_MEM/MEMORY.md"
+git -C "$REPO" add .gitignore "$PROJECT_MEM"/*-overview.md "$PROJECT_MEM/MEMORY.md"
 # then commit when the user asks — do NOT auto-commit.
 ```
 
@@ -174,8 +179,8 @@ now USES the memory system, governed by THE PROACTIVE-USE CONTRACT in
   `/janitor-memory-update`, using the clean-the-fact-in-place + demote-the-error-
   to-a-`[^N]`-lesson correction protocol. Unprompted.
 - **MAINTAIN THE PROJECT WIKIMEM** — keep the PROJECT-scope pages current as you
-  work: the architecture hub (seeded above), the key-solution component pages, the
-  publish/deploy pipeline page — so the knowledge is git-tracked and shared.
+  work: the `<project>-overview` entry page (seeded above), the key-solution component
+  pages, the publish/deploy pipeline page — so the knowledge is git-tracked and shared.
 - **SCOPE ROUTING** — machine-private → LOCAL; project-shared (no secrets) →
   PROJECT; cross-project → USER; UNSURE → LOCAL.
 
@@ -183,7 +188,7 @@ now USES the memory system, governed by THE PROACTIVE-USE CONTRACT in
 
 One line: `Wikimem bootstrapped: PROJECT scope at <repo>/.claude/project/memory/
 (gitignore exception <added|already present|not needed>; seeded
-architecture hub + MEMORY.md <created|already existed>).` Do NOT echo the seeded
+<project>-overview + MEMORY.md stub <created|already existed>).` Do NOT echo the seeded
 page bodies back into the conversation.
 
 ## Examples
@@ -191,8 +196,8 @@ page bodies back into the conversation.
 <example>
 User: set up memory for this project
 → create .claude/project/memory/, add the `!.claude/project/memory/**` gitignore
-  exception (the repo's .gitignore had `.claude/**`), seed the architecture hub +
-  MEMORY index, and tell the agent recall-first / write-after.
+  exception (the repo's .gitignore had `.claude/**`), seed the `<project>-overview`
+  page + the MEMORY.md stub, and tell the agent recall-first / write-after.
 </example>
 
 <example>
