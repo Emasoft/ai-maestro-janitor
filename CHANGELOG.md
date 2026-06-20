@@ -2,26 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.13.0] - 2026-06-20
+## [0.14.0] - 2026-06-20
 
 ### Bug Fixes
 
-- Split candidate-scan excludes private/generated files + portable (TRDD-87935f21)
-- Resolve [[name]] wikilinks by frontmatter name:, not just file-stem (#49)
-- Clear CPV --strict on the new harvest skill + index-rule content (TRDD-a5780c23)
+- Gate gzip findings on inner bytes; allowlist tokenizer vocab; skip pkg-cache (#40)
+- Content-exact idempotency so a same-size rule edit still refreshes (#37)
+- Conflict needs a contradiction signal; aggregation skips coarse tags (#35, #38, #43)
+- Repoint ai-maestro self-trigger to the shipped CLI, not the server API (#42)
+- De-poison MD004 — no wrapped prose line may start with '+ '
+- Install SIGTERM handlers before publishing the pid file (startup race)
 
 ### Documentation
 
-- Scope-migration helper design — ai-maestro corpus option b (TRDD-47df698b)
-- Memgrep-managed index + editor anti-corruption (TRDD-a5780c23)
-- Part A done (MEMORY.md retired in rule+skills); remaining 3 itemized (TRDD-a5780c23)
-- Harvest chore — incorporate stray memory artifacts (MEMORY.md + loose .md) into the wiki daily, non-destructive (TRDD-a5780c23)
+- Memory-index re-architecture (A/B/C + overview + #49) SHIPPED in v0.13.0; gated re-enable remains (TRDD-a5780c23)
+- Memory-system page — index is memgrep-only (MEMORY.md retired) + overview + harvest (TRDD-a5780c23)
+- Refresh CLAUDE.md project map — harvest skill, memgrep overview, body-fidelity verify (v0.13.0)
+- Gated re-enable DONE — wikimem editor live on v0.13.0 (TRDD-a5780c23)
+- Daily memory-system migration — staggered harvest + gitignore enforcer (TRDD-3f7b6807)
+- Daily-migration P1+P2+P3(LOCAL) done; PROJECT scope surfaced (TRDD-3f7b6807)
+- Metadata.type is organizational-only, not retrieval-affecting (#46)
+- Refresh CLAUDE.md project map for v0.14.0 — memgrep lint, librarian/scanner fixes
 
 ### Features
 
-- Retire the context-loaded MEMORY.md — recall is memgrep-only (TRDD-a5780c23)
-- Add `overview`command — print the <project>-overview.md entry page (TRDD-a5780c23)
-- <project>-overview.md entry page + wire `memgrep overview`into the stub (TRDD-a5780c23)
-- Verify body-fact fidelity — passes can no longer paraphrase/drop a fact (TRDD-a5780c23, #48)
-- Harvest chore — daily non-destructive incorporation of stray memory into the wiki (TRDD-a5780c23 Part C)
+- Per-project phase staggering for editor cadences (TRDD-3f7b6807)
+- PROJECT-memory gitignore-exception enforcer (TRDD-3f7b6807, Phase 2)
+- Auto-recall hook ON by default with a triviality guard (#45)
+- Add 'lint' subcommand — deterministic note-integrity gate (#47)
+
+### Tests
+
+- Widen detached-worker wait to de-flake the full suite
 
