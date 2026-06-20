@@ -3,7 +3,7 @@ trdd-id: a5780c23-8481-4c8f-802c-99ce2365f0ea
 title: Memgrep-managed index + editor anti-corruption — retire the context-loaded MEMORY.md
 column: dispatch
 created: 2026-06-20T05:21:52+0200
-updated: 2026-06-20T08:50:04+0200
+updated: 2026-06-20T09:17:39+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 0
@@ -45,17 +45,27 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/48", "github.com/E
   a tiny self-documenting notice the harness loads (negligible bloat) telling any
   reader the index is memgrep-managed and to never add/trim it. Self-enforcing even
   for a harness-only Claude.
-- **PART A DONE (committed, rides next publish):** the recall rule + write / update /
-  split / consolidate / bootstrap (+ the merge-protocol ref) now retire MEMORY.md →
-  memgrep-only; bootstrap seeds the stub. markdownlint + consistency verified.
-- **NEXT ACTION — the remaining three:** (1) **reduce EXISTING MEMORY.md files to
-  the stub** via a MECHANISM (a detector/hook that backs up the old file via
-  safe-delete per RULE 0, then writes the stub — NEVER a hasty manual edit of an
-  untracked LOCAL file); (2) **Part B** — give `verify_split`/`verify_merge` a
-  parser-independent body-fact-fidelity check (catch issue #48's paraphrase) WITHOUT
-  false-failing on legitimate dedup, plus tests; (3) **re-enable** the editor
-  frequencies (restore consolidation=2.5 / split=4.5 / repair=3 / conflict=0.5) ONLY
-  after B passes its tests. Ship A + B + the mechanism via publish.
+- **PART A + OVERVIEW + memgrep-#49 DONE (committed, ride next publish):** Part A — the
+  recall rule and the write/update/split/consolidate/bootstrap skills retire MEMORY.md →
+  memgrep-only; bootstrap seeds the stub. The `<project>-overview.md` ENTRY-POINT page,
+  and the new `memgrep
+  overview` command (which the stub advertises). memgrep #49 fixed (`[[name]]` wikilinks
+  resolve by frontmatter `name:`, not just file-stem — killed the 59/94 false
+  broken-link reports). All tested (106 cargo tests), markdownlint clean.
+- **THE HARVEST CHORE (USER spec, 2026-06-20) — the existing-MEMORY.md reduction done
+  NON-DESTRUCTIVELY.** A permanent DAILY janitor pass: when a MEMORY.md carries added
+  memories (beyond the stub), do NOT delete them — HARVEST each into proper wikimem
+  pages under the FULL editorial model (same-theme-per-page, complete metadata, tier
+  expand/reduce, bidirectional links, `## See also`, atomic memories each with their own
+  Notes/lessons, correct LOCAL/PROJECT/USER scope routing, greppable + indexed), THEN
+  reduce MEMORY.md to the stub. Agent-intelligence editorial pass (like split/merge),
+  through the txn core with a verify that proves no memory is lost BEFORE the stub write.
+- **NEXT ACTION — remaining build:** (1) **the harvest pass** — new skill
+  `/janitor-memory-harvest` + `harvest_per_day=1` + a `[janitor-memory-harvest]` marker
+  (scheduler + dispatch + heartbeat prompt) + a verify + tests (Part C below); (2) **Part
+  B** — `verify_split`/`verify_merge` body-fact-fidelity (catch #48) without
+  false-failing dedup, + tests; (3) **re-enable** the editor frequencies ONLY after B +
+  the harvest verify pass their tests. Ship via publish.
 
 ## Part A — retire the context-loaded MEMORY.md (recall = memgrep only)
 
@@ -106,6 +116,34 @@ Fix:
    false-fails on legitimate dedup (the reason the original punted — solve it, do
    not skip it).
 3. Re-enable the passes only AFTER B's verifier guards are in place + tested.
+
+## Part C — the harvest chore (incorporate stray memory artifacts into the wiki, NON-destructive)
+
+A permanent DAILY janitor pass that NEVER deletes a memory. `/janitor-memory-harvest`
+(fired by a bare `[janitor-memory-harvest]` marker; `harvest_per_day=1`):
+
+1. **Detect (any non-wiki memory artifact).** In each scope, TWO sources: (a) a
+   `MEMORY.md` that is NOT already the stub (it carries pointers or added memory content
+   beyond the deprecation notice); AND (b) any OTHER stray memory `.md` file the agent
+   already has that is NOT yet a proper wikimem page (loose notes sitting outside the
+   model). Both are harvested into the wiki the same way, once a day.
+2. **Harvest, don't delete.** For each memory it holds: if it is a pointer to an EXISTING
+   note, that note already IS the memory (the repair pass fixes its shape); if it is
+   content NOT yet in a proper page, CREATE a wikimem page for it under the FULL editorial
+   model — same-theme memories share ONE page; complete frontmatter (name, description,
+   ocd, lmd, node_type, type, tier); tier expand(aspect)/reduce(component); bidirectional
+   `## Applies to`/`## Governed by` + `## See also`; each memory atomic with its own
+   `## Notes and lessons learned`; routed to the right scope (machine-private → LOCAL,
+   project-shared → PROJECT, cross-project → USER); greppable + indexed (`memgrep reindex`).
+3. **Verify then stub.** Only after a verify PROVES every memory in MEMORY.md now exists
+   in a proper wikimem page (greppable via memgrep) does the pass reduce MEMORY.md to the
+   stub. Through the txn core; a backup of the original MEMORY.md is kept (RULE 0). If the
+   verify cannot prove preservation it ABSTAINS (leaves MEMORY.md intact, surfaces a
+   finding) — never a lossy stub.
+4. **Permanent + bounded.** Once/day per scope; idempotent (a stub MEMORY.md is a no-op);
+   honors the kill-switch + `harvest_per_day=0`. It exists because agents WILL keep
+   mis-adding to MEMORY.md (the harness directive still nudges them); the chore quietly
+   re-files those into the wiki forever.
 
 ## Acceptance
 
