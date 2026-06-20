@@ -53,7 +53,7 @@ external-refs: []
   already handled by graceful grep-fallback + the recall rule; a heartbeat nudge
   there would risk nagging for marginal value. P6.2+P6.3 ship in the next publish.
 - **NEXT ACTION:** P5 — strengthen the consolidation (`janitor-memory-consolidate`)
-  + `memory-librarian` passes for Wikipedia-grade one-topic-per-page structure
+  and `memory-librarian` passes for Wikipedia-grade one-topic-per-page structure
   (judgment-heavy, mostly skill prose). The EXISTING ai-maestro corpus migration
   (LOCAL→PROJECT) still awaits the USER's a/b/c choice — skill-independent. New
   detectors are dormant in THIS session until the daemon rolls the cache forward
