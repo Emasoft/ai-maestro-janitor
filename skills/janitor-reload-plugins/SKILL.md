@@ -57,6 +57,17 @@ One short line to the user, then the turn ends. Side effect: launches a detached
 keystroke sender (osascript in iTerm, `tmux send-keys` in tmux) that sends
 ESC→`/reload-plugins` to this session's own pane.
 
+## Done when (terminating conditions)
+
+This skill fires once and ends the turn — it never loops or polls. It is complete
+when ONE of these holds:
+
+- [ ] **RELOAD_FIRED** — `reload_trigger.py` queued the detached ESC→`/reload-plugins`
+  at this pane: emit one short line (e.g. "Reloading plugins to pick up the update.")
+  and END THE TURN IMMEDIATELY (call no more tools). STOP.
+- [ ] **NO_ITERM** — not in an automatable terminal (iTerm/tmux), or `osascript`
+  unavailable: tell the user to run `/reload-plugins` manually, then STOP.
+
 ## Error handling
 
 - `NO_ITERM` → not in an automatable terminal (iTerm/tmux); ask the user to run

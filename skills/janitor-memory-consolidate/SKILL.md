@@ -268,6 +268,15 @@ One line: the survivor page + retired page + "(N lessons preserved, M backlinks
 redirected, ocd=<date>)" on success; or the abstain/refuse reason. Never echo full
 page bodies into the conversation.
 
+## Done when (terminating conditions)
+
+STOP on the first outcome (one scope, one merge, retry ≤ 3):
+
+- [ ] MERGED — commit exited 0 (step 8/9).
+- [ ] ABSTAINED — a certainty gate failed (step 2/3/4).
+- [ ] ABANDONED — verify failed 3× (step 9).
+- [ ] DEFERRED — lock contention / stale source.
+
 ## Scope of this skill
 
 ONLY consolidates a same-subject, same-type **pair** in ONE scope, through the

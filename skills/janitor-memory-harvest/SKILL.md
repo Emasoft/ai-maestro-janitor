@@ -142,6 +142,19 @@ the content now lives in the surviving page). PROJECT-scope writes are staged-no
   unproven. A crash mid-pass is safe: the backup remains and the next daily run re-files
   whatever is still stray.
 
+## Done when (terminating conditions)
+
+This pass is complete when ONE of these holds (one scope per pass; it never deletes a
+memory and never reduces `MEMORY.md` without both a verify AND a backup):
+
+- [ ] **NOTHING DUE** — no non-stub `MEMORY.md` and no stray `.md` in the scope: STOP
+  cleanly, emit nothing.
+- [ ] **HARVESTED** — every stray memory re-filed into a proper wikimem page AND
+  `harvest_preservation_ok` returned `PRESERVED` AND `MEMORY.md` reduced to the stub
+  (backup kept): emit `harvested <N> … MEMORY.md stubbed (backup kept)`. STOP.
+- [ ] **ABSTAINED** — `harvest_preservation_ok` returned `ABSTAIN`: `MEMORY.md` + the
+  `.bak` left intact, nothing reduced, `harvest abstained: <reasons>` surfaced. STOP.
+
 ## Scope of this skill
 
 ONLY incorporates STRAY memory artifacts (a non-stub `MEMORY.md`, loose `.md` memory files)

@@ -259,3 +259,13 @@ prints the reasons and aborts the txn (the live tree is untouched).
   dangling/orphan/one-sided links.
 - **Bounded & disable-able** — one page, one level per run; recursion across
   heartbeats; honors the kill-switch and `split_per_day: 0` (disabled).
+
+## Done when (terminating conditions)
+
+STOP on the first outcome (one page, one level, retry ≤ 3):
+
+- [ ] NOTHING DUE — no over-cap note (step 1).
+- [ ] LEFT INTACT — component or un-splittable leaf (step 2).
+- [ ] SPLIT — commit exited 0 (step 5/6).
+- [ ] FAILED — verify error 3× (step 6).
+- [ ] DEFERRED — lock contention / stale-hash loser.
