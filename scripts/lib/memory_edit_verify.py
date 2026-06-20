@@ -151,6 +151,65 @@ def lessons_preserved(sources: list[str], result: str) -> tuple[bool, list[str]]
 
 
 # --------------------------------------------------------------------------- #
+# body-fact fidelity (issue #48 — an editor pass must never paraphrase/drop a FACT)
+# --------------------------------------------------------------------------- #
+
+def _body_minus_lessons(text: str) -> str:
+    """The note's BODY: frontmatter stripped, and the `## Notes and lessons learned`
+    section stripped (lessons are guarded separately by lessons_preserved)."""
+    body = text
+    if body.startswith("---"):
+        parts = body.split("---", 2)
+        if len(parts) == 3:
+            body = parts[2]
+    idx = body.find(_LESSONS_HEADING)
+    if idx != -1:
+        body = body[:idx]
+    return body
+
+
+def _norm_body_blob(text: str) -> str:
+    """Whitespace-collapsed, lowercased body blob — the haystack a source fact line
+    must be a SUBSTRING of. Collapsing newlines means a fact merely reflowed or moved
+    to another section still matches (its words stay contiguous)."""
+    return re.sub(r"\s+", " ", _body_minus_lessons(text)).strip().lower()
+
+
+def _substantive_body_lines(text: str, min_len: int = 24) -> list[str]:
+    """The substantive FACT lines of a body (normalized, lowercased, leading list
+    marker stripped): non-blank, non-heading lines whose normalized length ≥ min_len.
+    Short/structural lines (headings, markers, blanks, dividers) are not facts."""
+    out: list[str] = []
+    for raw in _body_minus_lessons(text).splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        norm = re.sub(r"^[-*+]\s+", "", re.sub(r"\s+", " ", s).strip()).lower()
+        if len(norm) >= min_len:
+            out.append(norm)
+    return out
+
+
+def body_facts_preserved(
+    sources: list[str], result: str, min_len: int = 24
+) -> tuple[bool, list[str]]:
+    """STRICT anti-corruption (issue #48): every substantive body FACT line of every
+    source must survive into `result` — as a SUBSTRING of the result's normalized body
+    blob. Mirrors lessons_preserved, applied to the body. ALLOWS reorganization, an
+    added lead, and dedup (a deduped/identical fact still appears once → still a
+    substring); CATCHES a DROPPED or PARAPHRASED fact (its text is no longer a
+    contiguous substring of the result). The substring (not line-equality) basis is why
+    a reflow / section-move does not false-fail. Returns (ok, [missing facts, ≤8])."""
+    haystack = _norm_body_blob(result)
+    missing: list[str] = []
+    for src in sources:
+        for fact in _substantive_body_lines(src, min_len):
+            if fact not in haystack:
+                missing.append(fact)
+    return (not missing, missing[:8])
+
+
+# --------------------------------------------------------------------------- #
 # duplicate detection (a merge must REMOVE redundancy, never ADD it)
 # --------------------------------------------------------------------------- #
 
@@ -330,6 +389,10 @@ def verify_merge(
     if not ok:
         reasons.append("dropped/reworded lesson(s): " + "; ".join(missing))
 
+    ok, missing_facts = body_facts_preserved(source_texts, result_text)
+    if not ok:
+        reasons.append("dropped/paraphrased body fact(s): " + "; ".join(missing_facts))
+
     ok, why = ocd_lmd_ok_merge(source_metas, result_meta)
     if not ok:
         reasons.append("ocd/lmd: " + why)
@@ -386,6 +449,12 @@ def verify_split(
     ok, missing = lessons_preserved([source_text], concatenated)
     if not ok:
         reasons.append("source lesson(s) lost across sub-pages: " + "; ".join(missing))
+
+    ok, missing_facts = body_facts_preserved([source_text], concatenated)
+    if not ok:
+        reasons.append(
+            "source body fact(s) lost/paraphrased across sub-pages: " + "; ".join(missing_facts)
+        )
 
     if source_meta.get("tier") == "hub":
         ok, why = split_globs_partition_ok(

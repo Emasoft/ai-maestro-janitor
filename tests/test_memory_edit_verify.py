@@ -190,6 +190,98 @@ def test_lessons_preserved_strips_ocd_lmd_prefix():
     assert ok
 
 
+# ---- body-fact fidelity (issue #48) ----------------------------------------
+
+def test_body_facts_preserved_on_clean_move():
+    """Every substantive source fact appears in the result → preserved."""
+    a = _note(name="a", body="The rotator retries three times then fails after a backoff.")
+    result = _note(name="c", body="The rotator retries three times then fails after a backoff.")
+    ok, missing = v.body_facts_preserved([a], result)
+    assert ok and missing == []
+
+
+def test_body_facts_preserved_fails_on_dropped_fact():
+    """A substantive source fact absent from the result → FAIL (anti-corruption)."""
+    a = _note(name="a", body="The rotator retries three times then fails after a backoff.")
+    result = _note(name="c", body="An unrelated overview sentence about the whole system.")
+    ok, missing = v.body_facts_preserved([a], result)
+    assert not ok and any("rotator retries three times" in m for m in missing)
+
+
+def test_body_facts_preserved_fails_on_paraphrase():
+    """Issue #48: a PARAPHRASED body fact (a word changed) → FAIL."""
+    a = _note(name="a", body="The rotator retries three times then fails after a backoff.")
+    result = _note(name="c", body="The rotator retries five times then fails after a backoff.")
+    ok, _ = v.body_facts_preserved([a], result)
+    assert not ok
+
+
+def test_body_facts_preserved_tolerates_dedup():
+    """Two sources carrying the SAME fact → result keeps ONE copy → still preserved."""
+    fact = "Timeouts default to thirty seconds per the platform config file."
+    a = _note(name="a", body=fact)
+    b = _note(name="b", body=fact)
+    result = _note(name="c", body=fact)
+    ok, missing = v.body_facts_preserved([a, b], result)
+    assert ok and missing == []
+
+
+def test_body_facts_preserved_tolerates_reorg_and_lead():
+    """A reorganized result with an added lead, all facts kept verbatim → preserved."""
+    a = _note(name="a", body=(
+        "The rotator retries three times then fails after a backoff.\n"
+        "Timeouts default to thirty seconds per the platform config file."
+    ))
+    result = _note(name="c", body=(
+        "This page is the merged overview of the rotator behavior.\n\n"
+        "## Timeouts\nTimeouts default to thirty seconds per the platform config file.\n\n"
+        "## Retries\nThe rotator retries three times then fails after a backoff."
+    ))
+    ok, missing = v.body_facts_preserved([a], result)
+    assert ok and missing == []
+
+
+def test_body_facts_preserved_ignores_short_structural_lines():
+    """A short (<24 char) line is structure, not a fact — dropping it does not fail."""
+    a = _note(name="a", body="Retries: 3\nThe rotator retries three times then fails after a backoff.")
+    result = _note(name="c", body="The rotator retries three times then fails after a backoff.")
+    ok, _ = v.body_facts_preserved([a], result)
+    assert ok
+
+
+def test_verify_merge_fails_on_paraphrased_body_fact():
+    """End-to-end: verify_merge catches a paraphrased body fact (issue #48 for merge)."""
+    a = _note(name="a", body="The rotator retries three times then fails after a backoff.")
+    b = _note(name="b", body="Timeouts default to thirty seconds per the platform config file.")
+    result = _note(name="a", body=(
+        "The rotator retries five times then fails after a backoff.\n"
+        "Timeouts default to thirty seconds per the platform config file."
+    ))
+    ok, reasons = v.verify_merge(
+        [a, b], [v.parse_frontmatter(a), v.parse_frontmatter(b)],
+        result, v.parse_frontmatter(result), set(), {},
+    )
+    assert not ok and any("paraphrased body fact" in r for r in reasons)
+
+
+def test_verify_split_fails_on_paraphrased_body_fact():
+    """Issue #48: verify_split catches a sub-page that paraphrased a source fact."""
+    src = _note(name="page", body=(
+        "The USER scope lives in the plugin-data dir under dot-claude plugins.\n"
+        "The rotator retries three times then fails after a backoff."
+    ))
+    sub1 = _note(name="page-a", body="The USER scope lives in the home dot-claude memory directory.")
+    sub2 = _note(name="page-b", body="The rotator retries three times then fails after a backoff.")
+    overview = _note(name="page", body="Overview linking the sub-pages of this topic together.")
+    sizes = {"page.md": 100, "page-a.md": 100, "page-b.md": 100}
+    ok, reasons = v.verify_split(
+        src, v.parse_frontmatter(src), [sub1, sub2],
+        [v.parse_frontmatter(sub1), v.parse_frontmatter(sub2)],
+        overview, sizes, 12000,
+    )
+    assert not ok and any("body fact" in r for r in reasons)
+
+
 # ---- duplicate detection ---------------------------------------------------
 
 def test_no_new_duplicate_lines_flags_repeats():
