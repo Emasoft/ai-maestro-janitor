@@ -179,7 +179,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8c53ebca2aeb digest=30c1aa42acce generated=2026-06-17T19:41:22+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e2341de59c68 digest=9bcb6e63bfca generated=2026-06-20T10:29:37+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -223,10 +223,14 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/detectors/mcp-rugpull.py` — MCP rug-pull detector — fingerprint-drift audit on installed MCP servers.
   · main() -> int
+`scripts/detectors/memorize-nudge.py` — memorize-nudge — nudge the agent to MEMORIZE when code outran the wiki.
+  · main() -> int
 `scripts/detectors/memory-librarian.py` — memory-librarian — SURFACE (never mutate) memory aggregation/conflict candidates.
   · NoteMeta — Parsed metadata for one memory note (from `memgrep index --markdown`).
   · ScopeReport — Everything the librarian surfaces for ONE memory scope root.
   · ScopeReport.has_findings(self) -> bool — True iff this scope surfaces ANYTHING (candidate or integrity issue).
+  · main() -> int
+`scripts/detectors/memory-maintenance.py` — memory-maintenance — the wikimem-editor SCHEDULER (TRDD-b4b9e27c, the SCHEDULE layer).
   · main() -> int
 `scripts/detectors/memory-scope-leak.py` — memory-scope-leak — keep the PUSHED memory scope free of machine/user-private data.
   · main() -> int
@@ -285,6 +289,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/user-plugins-update.py` — Per-session shim — user-scope plugin updates are owned by the global daemon.
   · main() -> int
 `scripts/detectors/version-update.py` — Version-update detector — read-only after TRDD-be2efa56 §9 follow-up.
+  · main() -> int
+`scripts/detectors/why-in-commits.py` — why-in-commits — nudge when recent substantive commits carry no WHY.
   · main() -> int
 `scripts/detectors/workflow-security.py` — Workflow-security detector — heartbeat-cadenced GitHub Actions audit.
   · main() -> int
@@ -424,6 +430,22 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · write_manifest(manifest, path) -> None — Write the manifest atomically.
   · load_manifest(path) -> dict[str, str] — Load a manifest written by `write_manifest`.
   · verify_manifest(plugin_root, manifest_path, globs) -> tuple[list[str], list[str], list[str]] — Compare live files against the manifest baseline.
+`scripts/lib/memory_edit_verify.py` — Wikimem edit verifier (TRDD-b92a9dd0) — the oracle that proves an editorial
+  · parse_frontmatter(text) -> dict — Flatten a wikimem note's YAML frontmatter into one dict (top-level keys +
+  · extract_lessons(text) -> list[str] — Return the normalized body of every `[^N]: …` footnote definition in `text`
+  · lessons_preserved(sources, result) -> tuple[bool, list[str]] — STRICT: every source lesson's substantive body must survive into `result`.
+  · body_facts_preserved(sources, result, min_len) -> tuple[bool, list[str]] — STRICT anti-corruption (issue #48): every substantive body FACT line of every
+  · harvest_preservation_ok(memory_md_text, corpus_text, note_filenames) -> tuple[bool, list[str]] — Prove a HARVEST lost nothing BEFORE MEMORY.md is reduced to the stub: every memory
+  · no_new_duplicate_lines(result, min_len) -> tuple[bool, list[str]] — No substantive content line (length ≥ `min_len`, not a heading/list marker)
+  · no_dangling_refs(live_pages, retired_slugs) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
+  · ocd_lmd_ok_merge(source_metas, result_meta) -> tuple[bool, str] — The survivor of a merge keeps the OLDEST origin date and a fresh modify
+  · is_legal_merge(meta_a, meta_b) -> tuple[bool, str] — Refuse a structurally-illegal merge (the agent still decides SUBJECT
+  · is_legal_split(meta, body, min_sections) -> tuple[bool, str] — Refuse a structurally-illegal split. Per the wikimem model "one element =
+  · split_globs_partition_ok(parent_globs, subpage_globs_list) -> tuple[bool, str] — When a `hub` splits, its `globs:` ownership must PARTITION across the
+  · split_converged(page_sizes, max_bytes, unsplittable) -> tuple[bool, list[str]] — Every output page is within the size cap, OR explicitly flagged
+  · verify_merge(source_texts, source_metas, result_text, result_meta, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a MERGE lost nothing before its transaction commits.
+  · verify_split(source_text, source_meta, subpage_texts, subpage_metas, overview_text, page_sizes, max_bytes, unsplittable, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a SPLIT lost nothing before its transaction commits.
+  · verify_repair(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an in-place page REPAIR lost nothing AND actually completed the page.
 `scripts/lib/memory_guard.py` — Tier-1 OOM memory-guard primitives (TRDD-7100178d, Pillar 4 / Phase 5).
   · ProcRow — One parsed `ps -axo pid,ppid,rss,etime,command` row.
   · parse_etime(raw) -> int — Parse ps ELAPSED ([[dd-]hh:]mm:ss) into seconds. Unparseable -> 0.
@@ -435,6 +457,35 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · free_memory_mb() -> Optional[int] — System free memory in MB (macOS vm_stat / Linux meminfo). None = unknown.
   · snapshot_processes(snapshot_path) -> list[ProcRow] — `ps -axo pid,ppid,rss,etime,command` -> FILE -> parsed rows.
   · kill_process(pid, *, term_grace_s) -> bool — SIGTERM -> grace -> SIGKILL. True iff the process is gone afterwards.
+`scripts/lib/memory_scopes.py` — Shared three-scope memory-root resolution — the SINGLE SOURCE OF TRUTH.
+  · project_slug(project_dir) -> str — Harness per-project slug: the absolute path with every separator dashed.
+  · resolve_local_dir() -> Path — The per-project LOCAL agent-memory dir (parent of ``user-mem``). Not created.
+  · resolve_project_dir() -> Path | None — The PROJECT scope memory root ``<git-root>/.claude/project/memory/``, or
+  · resolve_user_dir() -> Path — The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
+  · resolve_scope_dirs() -> list[tuple[str, Path]] — The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT → USER.
+`scripts/lib/memory_settings.py` — Global wikimem-editor settings + scheduler-stamp primitives (TRDD-c1397102).
+  · settings_dir() -> Path — The janitor's persistent plugin-DATA dir, resolved by the EXPLICIT
+  · load() -> dict — Return the full settings dict (DEFAULTS overlaid by any persisted values).
+  · get(key) — Current value of one setting.
+  · set_value(key, raw) — Persist `key` = coerced(`raw`); `raw is None` reverts to the default.
+  · interval_s(key) -> float — Seconds-between-runs for a per-day rate key. inf when the rate is 0
+  · interval_s_for(intervention) -> float — Cadence (seconds) for an intervention, derived from its governing per-day
+  · read_last_run(intervention, scope, root) -> int
+  · mark_ran(intervention, scope, root, now) -> None — Stamp that `intervention` ran for (scope, root) at `now` (epoch seconds).
+  · is_due(intervention, scope, root, now) -> bool — True iff `intervention` is due for (scope, root): enabled AND at least one
+`scripts/lib/memory_txn.py` — Memory-edit transaction core (TRDD-b92a9dd0) — the safety substrate every
+  · MemoryTxnError — A transaction precondition failed (stale source, vanished source, lock
+  · editor_enabled() -> bool — Master kill gate for the entire wikimem editor.
+  · commit_lock(scope_root) -> Iterator[bool] — Yield True iff this process holds the scope's commit lock. Releases on exit.
+  · MemoryTxn — One journaled, crash-resumable, hash-guarded edit of a memory scope root.
+  · MemoryTxn.begin(cls, scope_root, op, source_rel_paths) -> 'MemoryTxn' — Open a transaction: snapshot each source's content hash and copy it into
+  · MemoryTxn.stage_write(self, rel_path, content) -> None — Stage the FULL new content of `rel_path` (created or overwritten on
+  · MemoryTxn.stage_delete(self, rel_path) -> None — Stage the removal of `rel_path` from the live tree on commit.
+  · MemoryTxn.staged_text(self, rel_path) -> str — Read a staged page's current bytes (the copy the agent edits).
+  · MemoryTxn.commit(self) -> None — Apply the transaction atomically-enough to be crash-recoverable.
+  · MemoryTxn.abort(self) -> None — Discard a not-yet-committed transaction. Safe to call any time before
+  · resume_pending(scope_root, stale_seconds) -> list[str] — Roll forward / clean every interrupted transaction under `scope_root`.
+  · apply_atomic(scope_root, op, source_rel_paths, writes, deletes, verify) -> str — begin → stage `writes`/`deletes` → optional `verify(txn)` → commit, all in
 `scripts/lib/output_formats.py` — Output formats — HMAC-signed scan badge, approval-gate protocol, FP-filters DSL.
   · make_badge(report_id, verdict, scanned_at, key, expiry_days) -> str — Build a signed badge token.
   · verify_badge(badge, key, *, now) -> tuple[bool, str] — Verify a signed badge token.
@@ -635,7 +686,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · UserMemStore.delete(self, number) -> bool — Remove memory #number's file. Returns True if a file was removed.
   · UserMemStore.search(self, query, *, memgrep, top) -> list[SearchResult] — Run `memgrep find <query> <this-dir> --use-index` and return numbered hits.
   · build_search_argv(query, store_dir, *, memgrep, top) -> list[str] — Build the `memgrep find <query> <store_dir> --use-index --top <top>` argv.
-  · previous_user_message(transcript_path) -> Optional[str] — Return the text of the user message immediately BEFORE the /to-user-mem line.
+  · previous_user_message(transcript_path) -> Optional[str] — Return the text of the user message immediately BEFORE the save-command line.
   · parse_command(prompt) -> tuple[Optional[str], str] — Classify a submitted prompt as one of our commands.
   · find_memgrep() -> Optional[str] — Resolve the memgrep binary path (env override → PATH → cargo bin).
 `scripts/lib/version_update_lib.py` — Shared janitor self-update helpers — used by the daemon's
@@ -650,6 +701,14 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · Classifier.classify(self, text) -> Iterator[Finding]
   · Classifier.re2_active(self) -> bool
 `scripts/lib/zizmor_patterns_extra.py` — Extension catalog for the janitor's second-pass workflow auditor.
+`scripts/memory_settings_cli.py` — Backing script for the /janitor-memory-*-frequency-{set,get} + -maxsize commands
+  · main() -> int
+`scripts/memory_txn_cli.py` — Backing CLI for ONE atomic wikimem memory edit (TRDD-b92a9dd0, TRDD-A foundation).
+  · cmd_begin(args) -> int
+  · cmd_commit(args) -> int
+  · cmd_abort(args) -> int
+  · cmd_resume(args) -> int
+  · main() -> int
 `scripts/oauth_rotator/cascade.py` — The OAuth-rotator cascade — ONE paradigm in three parts, each falling back to
   · CascadeLeg — Which leg of the ROTATE→RENEW→REAUTH cascade an ALTERNATE account sits in.
   · AccountState — The cascade-relevant facts about ONE account — all non-secret metadata.
