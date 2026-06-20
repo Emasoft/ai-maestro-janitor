@@ -3,7 +3,7 @@ trdd-id: 3f7b6807-c2be-4726-a098-4bcfee13d5d5
 title: Daily memory-system migration — staggered harvest + PROJECT gitignore-exception enforcer
 column: dev
 created: 2026-06-20T16:02:27+0200
-updated: 2026-06-20T16:02:27+0200
+updated: 2026-06-20T16:27:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -58,8 +58,17 @@ external-refs: []
   USER (round-robin + flock-dedup); the staggering spreads WHICH project does USER
   WHEN. No sharding code this TRDD (optional future enhancement) — the spec's
   "may divide" is satisfied by the existing any-project-can-do-USER design.
-- **NEXT ACTION:** Phase 1 — add phase-staggering to `memory_settings.is_due`
-  (+`stagger_enabled` setting) with unit tests; verify; checkpoint.
+- **PROGRESS (2026-06-20):** P1 (staggering — `is_due` phase-aligned + `stagger_enabled`,
+  7 tests) DONE+committed. P2 (gitignore enforcer `project_memory_tracked.ensure_tracked`
+  + `project-memory-tracked` detector + dispatch register, 6 tests, never `git add -f`)
+  DONE+committed. P3a (LOCAL `MEMORY.md` → stub, harvest_preservation_ok PRESERVED,
+  backup kept, reindexed) DONE. P3b (repaired ALL 19 malformed LOCAL pages → 0 remain;
+  every commit verify_repair-gated) DONE. 119 tests green, ruff clean.
+- **NEXT ACTION:** (1) ship — Phases 1+2 are working-tree only; they reach the live cache
+  via the next `publish.py` + daemon roll. (2) PROJECT-scope migration is SEPARATE and
+  NEEDS A USER CALL: the PROJECT `MEMORY.md` is a shared/pushed curated 28-line index;
+  retiring it to a stub per the new model requires first harvesting its navigation into a
+  `<repo>-overview.md` entry page (the user's overview-page concept) — surfaced, not done.
 
 ## Design — map requirements → components
 
