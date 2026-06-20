@@ -22,8 +22,9 @@ exists, else POST) so re-running converges instead of duplicating.
 
 The ratified baseline is TWO rulesets (single source of truth in
 `branch_protection_lib.baseline_ruleset_payloads`):
-  * `baseline-history-protect` — deletion + non_fast_forward +
-    required_linear_history; no bypass actors.
+  * `baseline-history-protect` — deletion + non_fast_forward (NO
+    required_linear_history — it jams the many-agent merge workflow);
+    no bypass actors.
   * `baseline-pr-and-checks` — pull_request (1 approval, dismiss-stale,
     thread-resolution) + required_status_checks (strict; CI contexts
     auto-detected at apply time); repo-admin role gets an `always`
@@ -210,7 +211,7 @@ def main() -> int:
     print(
         f"[guard] applied branch-protection baseline on {slug}@{default_branch} "
         f"({summary}). Rulesets: baseline-history-protect (deletion + "
-        f"non_fast_forward + required_linear_history), baseline-pr-and-checks "
+        f"non_fast_forward), baseline-pr-and-checks "
         f"(pull_request 1-approval/dismiss-stale/thread-resolution + "
         f"required_status_checks strict), and baseline-tag-protect "
         f"(tag refs/tags/v*.*.* deletion + update, no bypass); {check_note}. "

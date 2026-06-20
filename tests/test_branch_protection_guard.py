@@ -193,8 +193,9 @@ def test_baseline_payloads_return_exactly_three_named_rulesets(project_env: Path
 
 
 def test_history_protect_ruleset_shape(project_env: Path) -> None:
-    """baseline-history-protect: 3 history rules, NO bypass actors,
-    ~DEFAULT_BRANCH magic ref."""
+    """baseline-history-protect: 2 history rules (deletion + non_fast_forward),
+    NO bypass actors, ~DEFAULT_BRANCH magic ref. required_linear_history is
+    DELIBERATELY absent — it jams the many-agent merge workflow."""
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
     hist = bpl.baseline_ruleset_payloads("main")[0]
@@ -204,7 +205,10 @@ def test_history_protect_ruleset_shape(project_env: Path) -> None:
     assert hist["conditions"]["ref_name"]["exclude"] == []
     assert hist["bypass_actors"] == []
     rule_types = {r["type"] for r in hist["rules"]}
-    assert rule_types == {"deletion", "non_fast_forward", "required_linear_history"}
+    assert rule_types == {"deletion", "non_fast_forward"}
+    # Regression guard: linear history must NEVER come back — it is harmful for
+    # the multi-agent model (forbids merge commits → endless rebase churn).
+    assert "required_linear_history" not in rule_types
 
 
 def test_pr_and_checks_ruleset_shape(project_env: Path) -> None:

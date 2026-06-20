@@ -22,8 +22,11 @@ time — NOT `refs/heads/<name>`; this is what makes the JSON byte-
 identical and portable across repos that use main/master/custom):
 
 1. ``baseline-history-protect`` — ``bypass_actors: []`` (nobody bypasses
-   history protection). Rules: ``deletion``, ``non_fast_forward``,
-   ``required_linear_history``.
+   history protection). Rules: ``deletion``, ``non_fast_forward``.
+   DELIBERATELY NOT ``required_linear_history`` — it forbids merge commits
+   and jams the many-agent merge workflow (see the rules block below for
+   the full rationale); deletion + non_fast_forward are the genuine
+   protection, linear history is a harmful workflow opinion.
 2. ``baseline-pr-and-checks`` — ``bypass_actors`` grants the repo-admin
    role (``actor_id: 5``) an ``always`` bypass so a solo admin is not
    locked out of their own repo by the self-approval requirement.
@@ -138,7 +141,17 @@ def baseline_ruleset_payloads(
         "rules": [
             {"type": "deletion"},
             {"type": "non_fast_forward"},
-            {"type": "required_linear_history"},
+            # DELIBERATELY NO required_linear_history. It forbids merge commits,
+            # which forces every contributor onto rebase/squash against a default
+            # branch that OTHER agents are concurrently advancing — endless rebase
+            # churn that makes a many-agent repo effectively unmergeable. The AI
+            # Maestro model has many agents merging each other's branches; linear
+            # history actively jams that. `deletion` + `non_fast_forward` already
+            # give the genuine safety (no branch deletion, no history rewrite);
+            # linear history is a workflow OPINION, not protection — and a harmful
+            # one here. Removed per the user's direction (the guardian must not be
+            # the thing blocking the work). The maintainer plugin's matching
+            # baseline must drop it too — tracked as a cross-repo sync.
         ],
     }
     pr_and_checks = {
