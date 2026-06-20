@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-harvest
-description: HARVEST executor — the daily NON-DESTRUCTIVE chore that incorporates STRAY memory artifacts into the wiki. When a scope's MEMORY.md carries added memories (beyond the deprecation stub) OR an agent left loose memory .md files outside the wikimem model, harvest each into proper wikimem pages (same-theme per page, full metadata, expand/reduce tier, bidirectional links, See-also, atomic memories with their own Notes/lessons, correct LOCAL/PROJECT/USER scope, greppable + indexed) — then, only after a verify proves no memory was lost, reduce MEMORY.md to the stub (keeping a backup). Use on a [janitor-memory-harvest] marker, or "harvest the memory", "incorporate MEMORY.md / stray notes into the wiki".
+description: HARVEST executor — the daily NON-DESTRUCTIVE chore that re-files STRAY memory into the wiki. When a scope's MEMORY.md carries added memories (beyond the deprecation stub) or an agent left loose .md memory files outside the wikimem model, harvest each into proper wikimem pages (editorial model + scope routing), then — only after a verify proves no memory was lost — reduce MEMORY.md to the stub, keeping a backup. Use on a [janitor-memory-harvest] marker, or "harvest the memory", "incorporate MEMORY.md / stray notes into the wiki".
 ---
 
 # Janitor memory — HARVEST (incorporate stray memory artifacts into the wiki)
@@ -54,7 +54,8 @@ PROJECT is edited only when `edit_project_scope` is on, and then **staged-not-pu
 
 Two sources:
 
-- **A non-stub `MEMORY.md`** — it carries pointer lines (`- [Title](file.md) — hook`) or
+- **A non-stub `MEMORY.md`** — it carries pointer lines (each a markdown list item
+  linking a page Title to its note file, with a one-line hook) or
   actual memory content beyond the deprecation notice. (A MEMORY.md that already IS the
   stub — it contains "index retired (managed by memgrep)" and nothing else — is skipped.)
 - **Loose memory `.md` files** outside the model — a note with no/partial wikimem
@@ -151,6 +152,5 @@ a memory; never reduces `MEMORY.md` without both a verify AND a backup.
 ## Resources
 
 - `~/.claude/rules/markdown-memory-recall.md` — the memgrep-only index model + the stub.
-- [wikimem-model](../janitor-memory-write/references/wikimem-model.md) — tiers, the link
-  law, page anatomy, the lead.
-- `/janitor-memory-write` — the page-authoring discipline this pass applies.
+- `/janitor-memory-write` — the page-authoring discipline this pass applies (its
+  wikimem-model reference defines the tiers, the link law, page anatomy, and the lead).

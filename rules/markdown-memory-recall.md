@@ -256,8 +256,8 @@ never reads a human index. So there is **no human-maintained index** any more.
 `memory-index.md` is an optional throwaway doc. Do **NOT** append note pointers to
 `MEMORY.md`, do **NOT** load it as an index, and **NEVER hand-trim it** — agents who
 trimmed the old ever-growing index lost pointers and corrupted the corpus, which is
-exactly why the index moved entirely into memgrep. The canonical stub (what
-bootstrap writes, and what an existing MEMORY.md is reduced to):
+exactly why the index moved entirely into memgrep. The canonical stub content
+(seeded by bootstrap, kept current by the harvest chore):
 
 ```text
 # MEMORY — index retired (managed by memgrep)
