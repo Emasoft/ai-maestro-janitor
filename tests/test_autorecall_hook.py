@@ -1,14 +1,18 @@
 """Tests for the OPT-IN auto-recall UserPromptSubmit hook (issue #16, item 2).
 
 The hook (`on-prompt-submit-autorecall.py`) runs `memgrep recall` over the AGENT
-memory corpus and injects the top notes via `additionalContext` — but ONLY when
-`CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL` is truthy. These tests pin the contract:
+memory corpus and injects the top notes via `additionalContext`. It is ON BY
+DEFAULT (issue #45) and opts out only on an explicit
+`CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL=false|0|no|off`. These tests pin the
+contract:
 
-  off by default        → no-op (exit 0, empty stdout), even with a live corpus.
-  on + cron/slash prompt → no-op (cron `[janitor-…]` and `/…` aren't questions).
-  on + no memgrep        → no-op (binary absent ⇒ nothing injected).
-  on + a matching note   → additionalContext carries the recalled note line.
-  on + PRIVACY           → a user-mem/ note is NEVER surfaced (structural bound).
+  on by default          → a matching note IS recalled + injected (env unset).
+  explicit false         → no-op (exit 0, empty stdout), even with a live corpus.
+  cron/slash prompt      → no-op (cron `[janitor-…]` and `/…` aren't questions).
+  trivial (short) prompt → no-op (no recall signal; issue #45 triviality guard).
+  no memgrep             → no-op (binary absent ⇒ nothing injected).
+  a matching note        → additionalContext carries the recalled note line.
+  PRIVACY                → a user-mem/ note is NEVER surfaced (structural bound).
   garbage stdin          → no-op (never crash the turn).
 
 The corpus + the real memgrep binary: the hit/privacy tests need a working
@@ -133,21 +137,24 @@ def _prompt(text: str) -> dict:
 
 
 # --------------------------------------------------------------------------
-# OFF BY DEFAULT
+# ON BY DEFAULT (issue #45)
 # --------------------------------------------------------------------------
 
 
-def test_off_by_default_is_noop_even_with_corpus(tmp_path):
-    """With the opt-in unset, the hook is a no-op even when a matching note exists."""
+@_needs_memgrep
+def test_on_by_default_injects_with_corpus(tmp_path):
+    """With the opt-in UNSET, recall is ON (issue #45): a matching note is injected."""
     memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
-    _write_note(memdir, "n1", "zarvox flux compensator failed unexpectedly")
-    rc, out, _err = _run_hook(_prompt("how do I fix the zarvox flux compensator"), {}, tmp_path / "proj", tmp_path / "home")
+    _write_note(memdir, "zarvox", "zarvox flux compensator failed where is the reset switch", body="press the hidden reset")
+    rc, out, _err = _run_hook(_prompt("the zarvox flux compensator failed again"), {}, tmp_path / "proj", tmp_path / "home")
     assert rc == 0
-    assert out.strip() == ""
+    assert out.strip() != ""
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "zarvox.md" in ctx
 
 
-def test_off_explicit_false_is_noop(tmp_path):
-    """An explicit `false` for the opt-in keeps the hook a no-op."""
+def test_explicit_false_opts_out(tmp_path):
+    """An explicit `false` opts OUT — no-op even with a matching note + live corpus."""
     memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
     _write_note(memdir, "n1", "zarvox flux compensator failed unexpectedly")
     rc, out, _err = _run_hook(
@@ -156,6 +163,27 @@ def test_off_explicit_false_is_noop(tmp_path):
         tmp_path / "proj",
         tmp_path / "home",
     )
+    assert rc == 0
+    assert out.strip() == ""
+
+
+def test_default_on_no_memgrep_is_noop(tmp_path):
+    """ON by default (env UNSET) + no memgrep binary → clean no-op (degrades safely)."""
+    memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
+    _write_note(memdir, "n1", "zarvox flux compensator failed unexpectedly")
+    env = {"MEMGREP_BIN": str(tmp_path / "no" / "memgrep"), "PATH": str(tmp_path / "empty-bin")}
+    rc, out, _err = _run_hook(_prompt("how do I fix the zarvox flux compensator"), env, tmp_path / "proj", tmp_path / "home")
+    assert rc == 0
+    assert out.strip() == ""
+
+
+def test_trivial_short_prompt_is_noop(tmp_path):
+    """A sub-threshold prompt is skipped (issue #45 triviality guard) — no recall,
+    no injection, even ON-by-default with a matching corpus (guard short-circuits
+    before memgrep, so no binary is needed)."""
+    memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
+    _write_note(memdir, "n1", "zarvox flux compensator failed unexpectedly")
+    rc, out, _err = _run_hook(_prompt("yes ok"), {}, tmp_path / "proj", tmp_path / "home")
     assert rc == 0
     assert out.strip() == ""
 

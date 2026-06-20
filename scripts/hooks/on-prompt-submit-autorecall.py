@@ -11,10 +11,15 @@ reminded of "have we hit this before?" WITHOUT having to call recall by hand.
 
 Design contract (load-bearing — keep all of these):
 
-  - OFF BY DEFAULT. A no-op (instant `exit 0`, empty stdout) unless
-    `CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL` is truthy. The default is off
-    because this fires on EVERY prompt and shells out to a binary; opt-in keeps
-    the common install cost at one env read + one startswith.
+  - ON BY DEFAULT (issue #45). The memory system's entire value is realized at
+    RECALL time, and lived evidence shows discipline-only recall fails in
+    practice — a heavily memory-aware agent still re-derived a framework it had
+    itself authored because it did not recall first. So recall must be AUTOMATIC,
+    not opt-in. Set `CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL=false|0|no|off` to opt
+    OUT. The hook stays cheap: it no-ops the instant memgrep is absent, the corpus
+    is empty, or the prompt is a cron/slash/trivial line — so a janitor install
+    with no memory corpus pays only a couple of fast dir checks, never the recall
+    subprocess.
 
   - AGENT corpus only — PRIVACY BOUNDARY. It searches the agent-visible notes in
     `~/.claude/projects/<slug>/memory/`. It MUST NOT search the PRIVATE user-mem
@@ -54,6 +59,11 @@ _TIMEOUT_S = 4.0
 # Hard cap on the injected text so a corpus of very long descriptions can't bloat
 # the agent context; recall prints one `path — description` line per note.
 _MAX_CHARS = 1200
+# Triviality guard (issue #45). Now that recall is ON by default it fires on every
+# user turn, so a sub-threshold prompt ("yes", "ok", "do it", "go", "push") — which
+# carries no recall signal — must NOT trigger a recall+injection, or it would add
+# noise to every trivial confirmation. Prompts shorter than this are skipped.
+_MIN_PROMPT_CHARS = 12
 
 # Non-page files inside a PROJECT/USER memory root that must NOT be recalled
 # (loaded index, generated query index, the memory detectors' proposal files).
@@ -242,12 +252,11 @@ def _format_context(recall_out: str) -> str | None:
 
 
 def main() -> int:
-    # OFF BY DEFAULT — the first thing we do, before reading stdin or importing
-    # libs, so a disabled install costs exactly one env read.
-    if os.environ.get("CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL", "").strip() == "":
-        # Unset/empty → use the documented default (off) WITHOUT importing state.
-        return 0
-
+    # ON BY DEFAULT (issue #45): there is no off-by-default early-out. The toggle is
+    # resolved below via `is_truthy_env(default=True)` once `state` is imported, so
+    # an unset/empty env var means recall is ON and only an explicit false value
+    # (`false|0|no|off`) opts out. A no-corpus install still no-ops cheaply (no
+    # notes → return before the recall subprocess), so default-ON is not costly.
     try:
         raw = sys.stdin.read()
     except Exception:  # pragma: no cover - stdin closed
@@ -269,16 +278,20 @@ def main() -> int:
     if um is None or state is None:
         return 0
 
-    # Now honour the env var via the shared spelling-of-false rules. The bare
-    # presence check above already returned for unset/empty; a value of
-    # `false`/`0`/`no`/`off` disables the hook here.
-    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL", default=False):
+    # Honour the env var via the shared spelling-of-false rules — DEFAULT TRUE
+    # (issue #45): unset/empty → recall is ON; `false`/`0`/`no`/`off` opts out.
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_MEMORY_AUTORECALL", default=True):
         return 0
 
     stripped = prompt.strip()
     # Skip our own cron heartbeats (`[janitor-…]`) and any slash command — neither
     # is a user question, and recalling on them would inject noise every tick.
     if stripped.startswith("[janitor-") or stripped.startswith("/"):
+        return 0
+    # Triviality guard (issue #45): now that recall is ON by default it fires on
+    # every turn, so a very short prompt ("yes", "do it", "push") — which carries no
+    # recall signal — is skipped, or it would inject notes on bare confirmations.
+    if len(stripped) < _MIN_PROMPT_CHARS:
         return 0
 
     memgrep = um.find_memgrep()
