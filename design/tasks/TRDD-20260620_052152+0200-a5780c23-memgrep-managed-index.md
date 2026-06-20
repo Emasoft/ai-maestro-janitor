@@ -1,9 +1,9 @@
 ---
 trdd-id: a5780c23-8481-4c8f-802c-99ce2365f0ea
 title: Memgrep-managed index + editor anti-corruption — retire the context-loaded MEMORY.md
-column: design
+column: dispatch
 created: 2026-06-20T05:21:52+0200
-updated: 2026-06-20T05:21:52+0200
+updated: 2026-06-20T08:50:04+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 0
@@ -41,12 +41,21 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/48", "github.com/E
   - **B — editor anti-corruption** (the "corrupt memories" + issue #48): editor
     passes must move content VERBATIM, never paraphrase; verifiers must guard
     body-fact fidelity.
-- **OPEN DESIGN DECISION (needs USER):** how to retire MEMORY.md given the HARNESS
-  `# Memory` directive (un-changeable; it loads `<slug>/memory/MEMORY.md` into
-  context AND instructs maintaining it). Options below; recommend **(1) the
-  deprecation stub**.
-- **NEXT ACTION:** get the USER's call on the open decision, THEN implement A+B
-  (NOT to be rushed under rate-limits at the hour this was authored).
+- **DECISION (USER, 2026-06-20):** retire MEMORY.md via the **deprecation stub** —
+  a tiny self-documenting notice the harness loads (negligible bloat) telling any
+  reader the index is memgrep-managed and to never add/trim it. Self-enforcing even
+  for a harness-only Claude.
+- **PART A DONE (committed, rides next publish):** the recall rule + write / update /
+  split / consolidate / bootstrap (+ the merge-protocol ref) now retire MEMORY.md →
+  memgrep-only; bootstrap seeds the stub. markdownlint + consistency verified.
+- **NEXT ACTION — the remaining three:** (1) **reduce EXISTING MEMORY.md files to
+  the stub** via a MECHANISM (a detector/hook that backs up the old file via
+  safe-delete per RULE 0, then writes the stub — NEVER a hasty manual edit of an
+  untracked LOCAL file); (2) **Part B** — give `verify_split`/`verify_merge` a
+  parser-independent body-fact-fidelity check (catch issue #48's paraphrase) WITHOUT
+  false-failing on legitimate dedup, plus tests; (3) **re-enable** the editor
+  frequencies (restore consolidation=2.5 / split=4.5 / repair=3 / conflict=0.5) ONLY
+  after B passes its tests. Ship A + B + the mechanism via publish.
 
 ## Part A — retire the context-loaded MEMORY.md (recall = memgrep only)
 
