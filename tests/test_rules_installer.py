@@ -52,8 +52,8 @@ def test_installs_rule_to_project_scope(tmp_path, monkeypatch):
     assert str(dst) in copied
 
 
-def test_idempotent_same_size_skips(tmp_path, monkeypatch):
-    """A second install with identical content (same byte size) is a no-op."""
+def test_idempotent_identical_content_skips(tmp_path, monkeypatch):
+    """A second install with byte-identical content is a no-op (issue #37 content-exact)."""
     _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
     plugin = tmp_path / "plugin"
     _make_plugin(plugin, "RULE BODY v1\n")
@@ -70,6 +70,23 @@ def test_overwrite_on_size_change(tmp_path, monkeypatch):
     _make_plugin(plugin, "RULE BODY v2 - now a different length\n")
     copied = rules_installer.install_rules(plugin)
     assert dst.read_text(encoding="utf-8") == "RULE BODY v2 - now a different length\n"
+    assert str(dst) in copied
+
+
+def test_overwrite_on_same_size_different_content(tmp_path, monkeypatch):
+    """Issue #37 blind spot: a rule edit that PRESERVES the byte count but changes
+    content STILL overwrites — byte-exact comparison catches what a size-only check
+    would silently skip (the stale-rule failure mode #37 is about)."""
+    dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "RULE BODY v1\n")
+    rules_installer.install_rules(plugin)
+    # Same byte length, different content — a size-only check would WRONGLY skip this.
+    new_body = "RULE BODY v2\n"
+    assert len(new_body) == len("RULE BODY v1\n")
+    _make_plugin(plugin, new_body)
+    copied = rules_installer.install_rules(plugin)
+    assert dst.read_text(encoding="utf-8") == new_body
     assert str(dst) in copied
 
 
