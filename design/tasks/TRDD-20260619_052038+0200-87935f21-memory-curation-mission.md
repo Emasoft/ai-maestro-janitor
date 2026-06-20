@@ -3,7 +3,7 @@ trdd-id: 87935f21-392a-4022-8161-64f493663c44
 title: Memory curation at all scopes — the janitor's core self-maintaining mission
 column: dev
 created: 2026-06-19T05:20:38+0200
-updated: 2026-06-19T12:32:00+0200
+updated: 2026-06-20T04:01:30+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -51,13 +51,23 @@ external-refs: []
   (subprocess-based, hermetic), ruff-clean, full `tests/` suite 11118 green. **P6.1
   (machinery self-audit) consciously SKIPPED** — it reduces to "is memgrep on PATH",
   already handled by graceful grep-fallback + the recall rule; a heartbeat nudge
-  there would risk nagging for marginal value. P6.2+P6.3 ship in the next publish.
-- **NEXT ACTION:** P5 — strengthen the consolidation (`janitor-memory-consolidate`)
-  and `memory-librarian` passes for Wikipedia-grade one-topic-per-page structure
-  (judgment-heavy, mostly skill prose). The EXISTING ai-maestro corpus migration
-  (LOCAL→PROJECT) still awaits the USER's a/b/c choice — skill-independent. New
-  detectors are dormant in THIS session until the daemon rolls the cache forward
-  (or /reload-plugins) — they're verified via their tests + a live working-tree run.
+  there would risk nagging for marginal value. **P6.2+P6.3+SSOT SHIPPED in v0.12.0**
+  (verified ground-truth: tag `v0.12.0`, GH release, `origin/main..HEAD`=0 —
+  2026-06-20T04:00+0200). The publish first aborted at a FLAKY cargo-clippy (macOS
+  `/var/folders` reaper purged libsqlite3-sys's `bindgen.rs` from publish.py's reused
+  tmp target while the fingerprint said fresh); fixed by `rm -rf`-ing the stale target
+  + re-running. Recorded as LOCAL memory `reference_publish_cargo_clippy_bindgen_flaky`
+  with a publish.py-hardening follow-up (Step 3 should auto-clear+retry).
+- **NEXT ACTION:** P5 — strengthen the consolidation. EVIDENCE-FIRST: the merge
+  EXECUTOR (`janitor-memory-consolidate`) is already mature (abstain-default,
+  `is_legal_merge`, no-third-page, backlink-redirect, lesson-preservation), so the
+  real lever is the LIBRARIAN's SURFACING precision — re-check the issue-#35
+  keyword-overlap FP cluster (NPT TRDD-b3eae1cd: gate on subject-entity + cohesion,
+  not keyword overlap) + the structural quality of the merged page. The EXISTING
+  ai-maestro corpus migration (LOCAL→PROJECT) still awaits the USER's a/b/c choice —
+  skill-independent. The v0.12.0 detectors roll into running sessions on the next
+  daemon version-update (~6h) or `/reload-plugins`; verified meanwhile via tests + a
+  live working-tree run.
 - **Load-bearing finding (memgrep):** the documented filter command in
   `wikimem-model.md` / the recall rule — `memgrep -l . <dir> --where '…'` — is
   WRONG: the `.` is parsed as a second search PATH (= cwd), silently
