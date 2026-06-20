@@ -108,8 +108,17 @@ def _run_detector(env_paths: dict[str, Path]) -> subprocess.CompletedProcess[str
     )
 
 
-def _wait_for_worker(env_paths: dict[str, Path], deadline: float = 5.0) -> Path:
-    """Block until the detached worker finishes writing the claude log."""
+def _wait_for_worker(env_paths: dict[str, Path], deadline: float = 20.0) -> Path:
+    """Block until the detached worker finishes writing the claude log.
+
+    The worker is a DETACHED double-fork that acquires the marketplace flock
+    before exec'ing the stub `claude`, so its first log write can lag the
+    detector's own return. Under full-suite CPU contention that startup
+    occasionally exceeded the old 5s deadline (flaked ~1/11000 in the full run
+    while passing in isolation), yielding an empty log and a false failure. The
+    deadline is therefore generous; the happy path still returns in <1s, the
+    moment the log stabilizes, so the longer ceiling costs nothing when the
+    worker is prompt."""
     log = env_paths["claude_log"]
     start = time.time()
     while time.time() - start < deadline:
