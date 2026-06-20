@@ -1,9 +1,9 @@
 ---
 trdd-id: a5780c23-8481-4c8f-802c-99ce2365f0ea
 title: Memgrep-managed index + editor anti-corruption — retire the context-loaded MEMORY.md
-column: dispatch
+column: complete
 created: 2026-06-20T05:21:52+0200
-updated: 2026-06-20T09:58:39+0200
+updated: 2026-06-20T15:31:27+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 0
@@ -66,13 +66,16 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/48", "github.com/E
   verify_split/verify_merge); and Part C (the harvest chore — `/janitor-memory-harvest`
   skill, `harvest_per_day`, the `[janitor-memory-harvest]` marker, `harvest_preservation_ok`).
   Deeply tested before publish: 11127 Python tests, 106 cargo tests, CPV --strict exit 0.
-- **ONLY REMAINING — the gated re-enable.** The editor passes are still DISABLED
-  (frequencies=0 in the live settings store). They MUST stay disabled until the cache
-  actually rolls to v0.13.0 — the live cache is 0.12.1, whose `memory_edit_verify` lacks
-  Part B, so re-enabling now would re-expose #48 on the old passes. RE-ENABLE TRIGGER: when
-  a heartbeat shows `[janitor-reload]` (daemon rolled the cache to v0.13.0), or the cache
-  dir shows 0.13.0, restore the five frequencies (consolidation=2.5, split=4.5, repair=3,
-  conflict=0.5, harvest=1) via `memory_settings_cli.py set`. Until then the editor stays off.
+- **GATED RE-ENABLE — DONE (2026-06-20T15:31+0200).** The cache rolled to v0.13.0
+  (daemon version-update tick after the marketplace-refresh that taught the marketplace
+  about the release; the heartbeat then emitted the bare `[janitor-reload]` trigger). The
+  session was reloaded to 0.13.0 and the five frequencies were restored
+  (consolidation=2.5, split=4.5, repair=3, conflict=0.5, harvest=1) via
+  `memory_settings_cli.py set`; verified `editor_enabled()=True`, kill-switch absent. The
+  FIRST live pass — a `[janitor-memory-split]` marker — ran the 0.13.0 skill, found no
+  over-cap page in LOCAL/USER (cap 12000 B), and cleanly ABSTAINED with zero mutation,
+  validating the Part-B-protected editor is live and safe. The mission's core machinery is
+  operational; this TRDD is complete. Code rides nothing further — v0.13.0 already shipped.
 
 ## Part A — retire the context-loaded MEMORY.md (recall = memgrep only)
 
