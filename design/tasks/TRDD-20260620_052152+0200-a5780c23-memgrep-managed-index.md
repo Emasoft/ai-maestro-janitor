@@ -3,7 +3,7 @@ trdd-id: a5780c23-8481-4c8f-802c-99ce2365f0ea
 title: Memgrep-managed index + editor anti-corruption — retire the context-loaded MEMORY.md
 column: dispatch
 created: 2026-06-20T05:21:52+0200
-updated: 2026-06-20T09:17:39+0200
+updated: 2026-06-20T09:58:39+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 0
@@ -60,12 +60,19 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/48", "github.com/E
   Notes/lessons, correct LOCAL/PROJECT/USER scope routing, greppable + indexed), THEN
   reduce MEMORY.md to the stub. Agent-intelligence editorial pass (like split/merge),
   through the txn core with a verify that proves no memory is lost BEFORE the stub write.
-- **NEXT ACTION — remaining build:** (1) **the harvest pass** — new skill
-  `/janitor-memory-harvest` + `harvest_per_day=1` + a `[janitor-memory-harvest]` marker
-  (scheduler + dispatch + heartbeat prompt) + a verify + tests (Part C below); (2) **Part
-  B** — `verify_split`/`verify_merge` body-fact-fidelity (catch #48) without
-  false-failing dedup, + tests; (3) **re-enable** the editor frequencies ONLY after B +
-  the harvest verify pass their tests. Ship via publish.
+- **ALL SHIPPED IN v0.13.0** (verified: tag v0.13.0, GH release, origin synced —
+  2026-06-20): Part A; the `<project>-overview.md` entry-page and `memgrep overview`;
+  memgrep #49; Part B (the body-fact-fidelity verify — `body_facts_preserved` in
+  verify_split/verify_merge); and Part C (the harvest chore — `/janitor-memory-harvest`
+  skill, `harvest_per_day`, the `[janitor-memory-harvest]` marker, `harvest_preservation_ok`).
+  Deeply tested before publish: 11127 Python tests, 106 cargo tests, CPV --strict exit 0.
+- **ONLY REMAINING — the gated re-enable.** The editor passes are still DISABLED
+  (frequencies=0 in the live settings store). They MUST stay disabled until the cache
+  actually rolls to v0.13.0 — the live cache is 0.12.1, whose `memory_edit_verify` lacks
+  Part B, so re-enabling now would re-expose #48 on the old passes. RE-ENABLE TRIGGER: when
+  a heartbeat shows `[janitor-reload]` (daemon rolled the cache to v0.13.0), or the cache
+  dir shows 0.13.0, restore the five frequencies (consolidation=2.5, split=4.5, repair=3,
+  conflict=0.5, harvest=1) via `memory_settings_cli.py set`. Until then the editor stays off.
 
 ## Part A — retire the context-loaded MEMORY.md (recall = memgrep only)
 
