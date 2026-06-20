@@ -593,6 +593,63 @@ fn do_reindex(paths: &[PathBuf], hidden: bool, full: bool) -> Result<()> {
     Ok(())
 }
 
+#[derive(Parser)]
+#[command(
+    name = "memgrep overview",
+    about = "print the project's <name>-overview.md entry-point wiki page"
+)]
+struct OverviewArgs {
+    /// The memory dir to search (default `.`).
+    paths: Vec<PathBuf>,
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// The entry-point page: the single `*-overview.md` note (bootstrap seeds `<project>-overview.md`).
+/// Deterministic when several exist — the alphabetically-first path wins.
+fn find_overview_page(files: &[PathBuf]) -> Option<PathBuf> {
+    let mut overviews: Vec<&PathBuf> = files
+        .iter()
+        .filter(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .map(|n| n.to_ascii_lowercase().ends_with("-overview.md"))
+                .unwrap_or(false)
+        })
+        .collect();
+    overviews.sort();
+    overviews.first().map(|p| (*p).clone())
+}
+
+/// `memgrep overview [PATH]` — print the project's `*-overview.md` entry-point page (the
+/// Wikipedia-style overview that links out to the deeper wikimem pages). This is the navigation
+/// ENTRY POINT the recall protocol points the agent at; the MEMORY.md stub carries this exact
+/// command. Bails with guidance when no overview page exists.
+pub fn cmd_overview_cli(args: &[String]) -> Result<()> {
+    let a =
+        OverviewArgs::parse_from(std::iter::once("overview".to_string()).chain(args.iter().cloned()));
+    let paths = if a.paths.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        a.paths.clone()
+    };
+    let files = collect_md(&paths, a.hidden);
+    let Some(page) = find_overview_page(&files) else {
+        let where_ = paths
+            .first()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| ".".to_string());
+        anyhow::bail!(
+            "no <project>-overview.md under {where_}. Seed one with /janitor-memory-bootstrap, or \
+             recall by symptom: memgrep recall \"<symptom>\" <memdir>"
+        );
+    };
+    let text =
+        md::read_text(&page).ok_or_else(|| anyhow::anyhow!("could not read {}", page.display()))?;
+    print!("{text}");
+    Ok(())
+}
+
 /// The legacy `memory-index.md` doc-generator (the pre-SQLite `index` behavior), now reached via
 /// `index --markdown`. Emits one `##` section per note with summary/tags/TOC/backlinks; `--write`
 /// atomically writes `<root>/memory-index.md`.
@@ -1652,5 +1709,20 @@ mod tests {
             broken.is_empty(),
             "[[feedback-opus-for-security]] must resolve by the name: slug, not report BROKEN; got: {broken:?}"
         );
+    }
+
+    #[test]
+    fn overview_page_found_by_suffix() {
+        // `memgrep overview` locates the single `*-overview.md` entry-point page (None when absent).
+        let files = vec![
+            PathBuf::from("/m/feedback_x.md"),
+            PathBuf::from("/m/ai-maestro-janitor-overview.md"),
+            PathBuf::from("/m/reference_y.md"),
+        ];
+        assert_eq!(
+            find_overview_page(&files).as_deref(),
+            Some(Path::new("/m/ai-maestro-janitor-overview.md"))
+        );
+        assert!(find_overview_page(&[PathBuf::from("/m/feedback_x.md")]).is_none());
     }
 }
