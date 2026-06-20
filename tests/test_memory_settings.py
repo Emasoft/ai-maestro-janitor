@@ -12,6 +12,7 @@ the CLI's get/set/revert/error paths.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -192,3 +193,87 @@ def test_cli_bad_value_exits_nonzero(capsys, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["x", "set", "consolidation_per_day", "-2"])
     assert cli.main() == 2
     assert "error:" in capsys.readouterr().err
+
+
+# ---- per-project phase staggering (TRDD-3f7b6807) --------------------------
+
+def _next_boundary(phase: float, last: float, iv: float) -> float:
+    """First phase-aligned boundary k*iv+phase strictly greater than `last`."""
+    k = math.floor((last - phase) / iv) + 1
+    b = k * iv + phase
+    while b <= last:
+        k += 1
+        b = k * iv + phase
+    return b
+
+
+def test_stagger_enabled_default_on_and_toggles():
+    """stagger_enabled defaults True and parses on/off like every bool setting."""
+    assert ms.get("stagger_enabled") is True
+    assert ms.set_value("stagger_enabled", "off") is False
+    assert ms.get("stagger_enabled") is False
+    assert ms.set_value("stagger_enabled", "on") is True
+
+
+def test_phase_offset_in_range_stable_and_per_root():
+    """Phase is in [0, interval), stable for one root, and DIFFERENT across roots —
+    the staggering: two projects land on different time-of-day slots."""
+    iv = ms.interval_s_for("harvest")  # 86400 (1/day)
+    pa = ms._phase_offset("harvest", "LOCAL", "/proj/alpha", iv)
+    pb = ms._phase_offset("harvest", "LOCAL", "/proj/beta", iv)
+    assert 0.0 <= pa < iv and 0.0 <= pb < iv
+    assert ms._phase_offset("harvest", "LOCAL", "/proj/alpha", iv) == pa  # stable
+    assert pa != pb  # two projects -> different slots
+
+
+def test_stagger_two_roots_due_at_different_times():
+    """With the SAME last_run, two projects come due at DIFFERENT `now` — the core
+    rate-limit-smoothing property: at the earlier project's slot, the later one is
+    NOT yet due."""
+    iv = ms.interval_s_for("harvest")
+    t0 = _NOW
+    ms.mark_ran("harvest", "LOCAL", "/proj/alpha", t0)
+    ms.mark_ran("harvest", "LOCAL", "/proj/beta", t0)
+    nb_a = _next_boundary(ms._phase_offset("harvest", "LOCAL", "/proj/alpha", iv), t0, iv)
+    nb_b = _next_boundary(ms._phase_offset("harvest", "LOCAL", "/proj/beta", iv), t0, iv)
+    assert nb_a != nb_b  # staggered next-due moments
+    if nb_a < nb_b:
+        earlier, later, now = "/proj/alpha", "/proj/beta", int(nb_a)
+    else:
+        earlier, later, now = "/proj/beta", "/proj/alpha", int(nb_b)
+    assert ms.is_due("harvest", "LOCAL", earlier, now) is True
+    assert ms.is_due("harvest", "LOCAL", later, now) is False  # its slot is later
+
+
+def test_stagger_off_restores_plain_interval():
+    """With stagger disabled, is_due is the plain now-last_run>=interval cadence."""
+    ms.set_value("stagger_enabled", "off")
+    root, iv = "/proj/x", ms.interval_s_for("consolidate")
+    ms.mark_ran("consolidate", "USER", root, _NOW)
+    assert ms.is_due("consolidate", "USER", root, _NOW + int(iv) - 5) is False
+    assert ms.is_due("consolidate", "USER", root, _NOW + int(iv) + 5) is True
+
+
+def test_stagger_first_run_fires_promptly():
+    """A never-run intervention (last_run=0) is due immediately even with staggering
+    on — day-1 is serialized by the flock, not by withholding the first run."""
+    assert ms.is_due("harvest", "LOCAL", "/proj/fresh", _NOW) is True
+
+
+def test_stagger_fires_once_per_interval_at_the_slot():
+    """After a run at its slot, not due until the NEXT phase boundary; due again
+    exactly there (one fire per interval)."""
+    iv = ms.interval_s_for("harvest")
+    root = "/proj/cadence"
+    phase = ms._phase_offset("harvest", "LOCAL", root, iv)
+    b0 = _next_boundary(phase, _NOW, iv)
+    ms.mark_ran("harvest", "LOCAL", root, int(b0))
+    assert ms.is_due("harvest", "LOCAL", root, int(b0) + 100) is False  # same period
+    b1 = _next_boundary(phase, b0, iv)
+    assert ms.is_due("harvest", "LOCAL", root, int(b1)) is True  # next slot
+
+
+def test_stagger_disabled_rate_never_due():
+    """A 0 rate is never due even with staggering on."""
+    ms.set_value("harvest_per_day", "0")
+    assert ms.is_due("harvest", "LOCAL", "/proj/x", _NOW + 10_000_000) is False

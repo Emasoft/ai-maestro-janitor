@@ -35,13 +35,14 @@ DEFAULTS: dict = {
     "repair_per_day": 3.0,          # REPAIR pass (page-shape/metadata backfill — a few/day)
     "harvest_per_day": 1.0,         # HARVEST pass — incorporate stray MEMORY.md/.md memories into the wiki (once/day)
     "edit_project_scope": False,    # default LOCAL+USER only; PROJECT memory is in-repo
+    "stagger_enabled": True,        # spread each (project,intervention) to a deterministic time-of-day slot (rate-limit smoothing across projects)
 }
 
 _PER_DAY_KEYS = frozenset(
     {"consolidation_per_day", "split_per_day", "conflict_per_day", "repair_per_day", "harvest_per_day"}
 )
 _INT_KEYS = frozenset({"split_max_bytes"})
-_BOOL_KEYS = frozenset({"edit_project_scope"})
+_BOOL_KEYS = frozenset({"edit_project_scope", "stagger_enabled"})
 
 # intervention name -> the per-day settings key that governs its cadence
 INTERVENTIONS: dict = {
@@ -174,10 +175,41 @@ def mark_ran(intervention: str, scope: str, root, now: int) -> None:
     state.atomic_write(_stamp_path(intervention, scope, root), str(int(now)))
 
 
+def _phase_offset(intervention: str, scope: str, root, interval: float) -> float:
+    """Deterministic per-(intervention, scope, root) phase in [0, interval) seconds.
+
+    Different projects (roots) hash to different phases, so their daily passes land
+    at different times-of-day — the rate-limit smoothing the scheduler wants when
+    many projects come due at once. Stable for a given (intervention, scope, root);
+    keyed on the SAME tuple the stamp is, so a project's harvest and repair also
+    spread apart (bonus smoothing). Returns 0.0 for a non-finite/zero interval."""
+    if not math.isfinite(interval) or interval <= 0:
+        return 0.0
+    h = hashlib.sha256(f"{intervention}:{scope}:{root}".encode("utf-8")).hexdigest()
+    return float(int(h[:16], 16) % int(interval))
+
+
 def is_due(intervention: str, scope: str, root, now: int) -> bool:
-    """True iff `intervention` is due for (scope, root): enabled AND at least one
-    cadence interval has elapsed since the last run."""
+    """True iff `intervention` is due for (scope, root): enabled AND a cadence
+    interval has elapsed since the last run.
+
+    With `stagger_enabled` (default ON), the cadence is PHASE-ALIGNED: the due
+    moments are the boundaries `k*interval + phase` for a per-(intervention,scope,
+    root) phase, so different projects fire at different times-of-day instead of
+    clustering. (The machine-wide dispatch flock already serializes a same-window
+    pile-up; staggering additionally spreads the daily LOAD across the period.)
+    First run (last_run=0) still fires promptly — the most-recent boundary is far
+    past epoch-0 — and steady state then aligns to the project's slot.
+    `stagger_enabled=off` restores the plain `now - last_run >= interval` cadence."""
     iv = interval_s_for(intervention)
     if iv == math.inf:
         return False
-    return (now - read_last_run(intervention, scope, root)) >= iv
+    last = read_last_run(intervention, scope, root)
+    if not bool(load().get("stagger_enabled", True)):
+        return (now - last) >= iv
+    phase = _phase_offset(intervention, scope, root, iv)
+    # The most-recent phase-aligned boundary at or before `now` (always <= now for
+    # any real clock, since phase < iv). Due iff a NEW boundary has been crossed
+    # since the last run — which fires exactly once per interval, at the slot.
+    boundary = math.floor((now - phase) / iv) * iv + phase
+    return boundary > last
