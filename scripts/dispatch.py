@@ -478,24 +478,45 @@ def _phase_compact_resume() -> bool:
 
 
 def _phase_plugin_reload() -> None:
-    """Emit a bare `[janitor-reload]` marker once when the daemon flags a reload.
+    """Emit a bare `[janitor-reload]` marker once-per-session when the daemon's
+    reload GENERATION advances past what THIS project's heartbeat has acked.
 
-    The global daemon writes `reload-needed.flag` after a `claude plugin update`
-    actually changes a plugin's version. This phase reads + clears that flag and
-    surfaces a single bare marker line; the cron prompt's silent-execute clause
-    runs `/reload-plugins` without echoing the marker. Together with the
-    daemon-restart phase below, plugin auto-updates are fully autonomous: new
-    hook/skill code is in effect within one heartbeat cadence of an update.
+    The daemon stamps ONE machine-global reload generation (epoch) after a
+    `claude plugin update` actually changes a plugin's version. We compare it to
+    a per-PROJECT `reload-acked.ts` and advance only that stamp — we NEVER clear
+    the global generation.
 
-    No dedupe stamp — the flag itself is the source of truth, and clearing it
-    immediately after emission is enough. If a second update lands in the same
-    heartbeat window the daemon re-arms the flag and we emit again next fire.
+    WHY per-project ack and not a cleared global flag: the old design read a
+    single global boolean and CLEARED it here, so whichever session fired first
+    consumed the one-shot nudge and every OTHER live session (notably an
+    autonomous fleet agent in a different project) never saw `[janitor-reload]`
+    and stayed on stale plugin code until restart — the exact "CPV agents not
+    registered" failure a MANAGER-fleet session hit. A never-cleared generation
+    plus a per-project ack lets every project's heartbeat reload exactly once per
+    update, with no session starving another.
     """
-    if not gs.reload_flag_present():
+    gen = gs.reload_generation()
+    if gen <= 0:
         return
-    gs.clear_reload_flag()
+    acked_path = state.state_dir() / "reload-acked.ts"
+    # Per-project ack: reload once when the global generation exceeds what this
+    # project last acked. The SessionStart hook SEEDS this stamp to the at-start
+    # generation, so a fresh session (already on current plugins) has acked == gen
+    # and stays silent, while a session that was live across an update has
+    # acked < gen and reloads. Default 0 when the stamp is absent (a pre-feature
+    # or un-seeded session) is the SELF-HEAL path: emit once, write the stamp, then
+    # track normally — defaulting to `gen` instead would DEADLOCK an un-seeded
+    # session (it would never emit, so never write the stamp, so never reload).
+    acked = state.read_int_state(acked_path, 0)
+    if acked >= gen:
+        return
+    state.atomic_write(acked_path, str(gen))
     print("[janitor-reload]")
-    state.log_line("dispatch", "reload-needed.flag → [janitor-reload] emitted, flag cleared")
+    state.log_line(
+        "dispatch",
+        f"reload generation {gen} > project ack → [janitor-reload] emitted "
+        f"(per-project ack advanced; global generation left intact)",
+    )
 
 
 def _phase_daemon_restart_if_stale() -> None:

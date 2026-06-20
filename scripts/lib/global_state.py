@@ -470,26 +470,65 @@ def spawn_daemon_detached() -> Optional[int]:
         return None
 
 
-# ---------- reload flag (Claude /reload-plugins after plugin auto-update) ----
+# ---------- reload GENERATION (Claude /reload-plugins after plugin auto-update) --
 #
-# The daemon writes this flag when `claude plugin update` actually changed a
-# plugin's version on disk. The dispatch phase reads it, emits a bare
-# `[janitor-reload]` marker, and clears it — the cron prompt's silent-execute
-# clause then runs `/reload-plugins` to pick up the new hook/skill code
-# without user involvement. Together with the daemon-restart logic below,
-# this closes the last manual-touch gap: plugin updates are fully autonomous
-# across version bumps.
+# The daemon STAMPS this marker with the current epoch when `claude plugin
+# update` actually changed a plugin's version on disk. It is a MONOTONIC
+# GENERATION, never cleared by a reading session. Each session's heartbeat
+# compares it to a per-PROJECT `reload-acked.ts` (in dispatch._phase_plugin_reload)
+# and emits a bare `[janitor-reload]` exactly once when the generation advances
+# past what that project has acked.
+#
+# WHY a generation and not a single boolean flag: the old design wrote one global
+# boolean and the FIRST session's dispatch phase CLEARED it right after emitting —
+# so whichever session fired first consumed the one-shot nudge, and every OTHER
+# live session (notably an autonomous fleet agent in a DIFFERENT project) never saw
+# `[janitor-reload]` and kept running stale plugin code until restart. That is the
+# exact failure a MANAGER-fleet session hit ("CPV agents not registered" while the
+# on-disk plugin was fine). Stamping a never-cleared generation lets every
+# project's heartbeat independently reload once per update. The flag FILE path is
+# unchanged, so a still-running OLD-code session is surfaced once via its legacy
+# is-present check during the one transition update that ships this code.
+
+def reload_generation() -> int:
+    """Return the reload generation (epoch the daemon last stamped after a
+    plugin changed on disk), or 0 if none. NEVER mutated by a reader."""
+    p = _reload_flag_path()
+    if not p.is_file():
+        return 0
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    # The body is `<epoch>\t<reason>` on a single line — take the token before
+    # the tab, NOT the whole line (which would never be all-digits).
+    first_line = raw.splitlines()[0] if raw else ""
+    gen_tok = first_line.partition("\t")[0].strip()
+    if gen_tok.isdigit():
+        return int(gen_tok)
+    # Legacy content (a boolean "1" or a bare reason string) written by a daemon
+    # that predates the generation format → treat as "an update happened at an
+    # unknown time" so a never-acked session still reloads once (return 1, the
+    # smallest positive generation; any real epoch stamp dwarfs it).
+    return 1 if raw.strip() else 0
+
 
 def reload_flag_present() -> bool:
-    return _reload_flag_path().is_file()
+    return reload_generation() > 0
 
 
 def set_reload_flag(reason: str = "") -> None:
-    """Mark that a `/reload-plugins` is needed before the next user turn."""
-    state.atomic_write(_reload_flag_path(), reason or "1")
+    """Stamp the reload generation (current epoch) after a plugin changed on
+    disk. Format `<epoch>\\t<reason>`; the epoch is the generation each session
+    compares against its per-project ack. Monotonic (wall-clock only advances)
+    and NEVER cleared by a reader — clearing is precisely what starved concurrent
+    sessions in the old single-flag design."""
+    state.atomic_write(_reload_flag_path(), f"{int(time.time())}\t{reason}")
 
 
 def clear_reload_flag() -> None:
+    """Reset the reload generation. Used only by the disarm / manual-reset path;
+    the normal heartbeat flow NEVER clears it (see set_reload_flag's WHY)."""
     try:
         _reload_flag_path().unlink()
     except FileNotFoundError:

@@ -39,9 +39,33 @@ def main() -> int:
     # scans scripts/ for direct .py children and subdirs that contain
     # __init__.py — `lib` is now a package thanks to scripts/lib/__init__.py.
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
+    from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
     from lib import rules_installer, state  # noqa: E402  -- local package, not PyPI
 
     state.init_state()
+
+    # Seed this project's reload-ack to the CURRENT reload generation at a TRUE
+    # session start: a fresh process has just loaded the current plugin versions,
+    # so the heartbeat's `[janitor-reload]` nudge should fire only for updates
+    # that land AFTER now — not replay a past update. Seed ONLY on a fresh load
+    # (startup/resume); a `compact` or `clear` keeps the same plugins loaded in
+    # the SAME process, so re-seeding then would wrongly mark a since-gone-stale
+    # session "current" and suppress the reload it actually needs. The hook input
+    # JSON (on stdin) carries `source`; read it best-effort and never block a TTY.
+    import json  # noqa: E402  -- stdlib
+
+    source = "startup"
+    try:
+        if not sys.stdin.isatty():
+            raw = sys.stdin.read()
+            if raw.strip():
+                source = str(json.loads(raw).get("source", "startup"))
+    except Exception:  # noqa: BLE001 -- best-effort; never break session start
+        source = "startup"
+    if source in ("startup", "resume"):
+        state.atomic_write(
+            state.state_dir() / "reload-acked.ts", str(gs.reload_generation())
+        )
 
     # Clear any stale flag from a prior session crash. If the last session
     # ended mid-rate-limit, the flag is preserved and the heartbeat cron

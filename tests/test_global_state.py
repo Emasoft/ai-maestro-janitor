@@ -197,13 +197,32 @@ def test_reload_flag_clear_idempotent(state_dir: Path) -> None:
     assert gs.reload_flag_present() is False
 
 
-def test_reload_flag_stores_reason(state_dir: Path) -> None:
-    """The flag body holds the reason for diagnostic logs."""
+def test_reload_flag_stores_generation_and_reason(state_dir: Path) -> None:
+    """The flag body is `<epoch-generation>\\t<reason>`: the generation drives
+    per-session reload decisions, the reason is kept for diagnostic logs."""
     gs = _gs()
     gs.init_global_state()
     gs.set_reload_flag("plugin-a@mp,plugin-b@mp")
     body = (state_dir / "reload-needed.flag").read_text(encoding="utf-8")
-    assert body == "plugin-a@mp,plugin-b@mp"
+    gen_str, _, reason = body.partition("\t")
+    assert gen_str.isdigit() and int(gen_str) > 0, \
+        f"body must start with an epoch generation, got {body!r}"
+    assert reason == "plugin-a@mp,plugin-b@mp"
+    assert gs.reload_generation() == int(gen_str)
+
+
+def test_reload_generation_absent_and_legacy(state_dir: Path) -> None:
+    """reload_generation(): absent → 0; a legacy boolean body (written by a daemon
+    that predates the generation format) → 1, so a never-acked session still
+    reloads exactly once instead of being stuck."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.reload_generation() == 0
+    assert gs.reload_flag_present() is False
+    # Legacy content: a bare reason string, no leading epoch line.
+    (state_dir / "reload-needed.flag").write_text("ai-maestro-janitor@mp", encoding="utf-8")
+    assert gs.reload_generation() == 1
+    assert gs.reload_flag_present() is True
 
 
 # ---------- daemon-restart staleness check ---------------------------------

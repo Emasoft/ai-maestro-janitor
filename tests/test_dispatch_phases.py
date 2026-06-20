@@ -80,8 +80,10 @@ def test_phase_plugin_reload_silent_when_flag_absent(env_isolation: dict) -> Non
     assert out == "", f"phase must be silent when no flag is set, got {out!r}"
 
 
-def test_phase_plugin_reload_emits_marker_and_clears_flag(env_isolation: dict) -> None:
-    """flag present → bare [janitor-reload] line emitted, flag cleared."""
+def test_phase_plugin_reload_emits_marker_and_advances_ack(env_isolation: dict) -> None:
+    """generation present + project not yet acked → bare [janitor-reload] emitted,
+    per-project ack advanced, and the global generation LEFT INTACT (never cleared
+    by a reader — that is what starved concurrent sessions in the old design)."""
     dispatch = _import_dispatch()
     import global_state as gs
     gs.init_global_state()
@@ -90,16 +92,18 @@ def test_phase_plugin_reload_emits_marker_and_clears_flag(env_isolation: dict) -
     out = _capture_stdout(dispatch._phase_plugin_reload)
     assert out.strip() == "[janitor-reload]", \
         f"phase must emit exactly the bare marker, got {out!r}"
-    assert gs.reload_flag_present() is False, \
-        "phase must clear the flag after emission so the marker fires only once"
+    assert gs.reload_flag_present() is True, \
+        "phase must NOT clear the global generation — other projects still need it"
+    # The SAME project does not re-emit: its ack now equals the generation.
+    second = _capture_stdout(dispatch._phase_plugin_reload).strip()
+    assert second == "", "same project must not re-emit once it has acked the generation"
 
 
 def test_phase_plugin_reload_idempotent_within_same_fire(env_isolation: dict) -> None:
-    """Calling the phase twice in a row only emits one marker (flag self-clears).
-
-    A second consecutive call (without the daemon re-arming the flag in between)
-    must produce empty output — the dispatch is line-driven; one marker per
-    real update event.
+    """Calling the phase twice only emits one marker — the per-project ack advances
+    on the first emit, so the second consecutive call (no newer generation) is
+    silent. The dispatch is generation-driven: one marker per real update per
+    project.
     """
     dispatch = _import_dispatch()
     import global_state as gs
@@ -110,6 +114,36 @@ def test_phase_plugin_reload_idempotent_within_same_fire(env_isolation: dict) ->
     second = _capture_stdout(dispatch._phase_plugin_reload).strip()
     assert first == "[janitor-reload]"
     assert second == ""
+
+
+def test_phase_plugin_reload_per_project_no_starvation(env_isolation: dict) -> None:
+    """THE BUG FIX: the global generation is NEVER cleared by a reader, so a
+    project that has not yet acked still reloads even after another project
+    already did. The old single-flag design cleared the flag on the first emit,
+    so only the first session/project ever saw `[janitor-reload]` — every other
+    live session (e.g. an autonomous fleet agent in a different project) stayed on
+    stale plugin code until restart. We model a second, un-acked project by
+    removing this project's ack stamp: the generation is untouched, so it reloads.
+    """
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+    gs.init_global_state()
+    gs.set_reload_flag("plugin@mp")  # one global generation, shared by all projects
+
+    # Project A reloads, records its ack, and does NOT re-emit on a second call.
+    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "[janitor-reload]"
+    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "", \
+        "the same project must not re-emit once it has acked the generation"
+
+    # The global generation is still readable — a reader never cleared it.
+    assert gs.reload_flag_present() is True
+
+    # A DIFFERENT project has no ack yet (model it by removing this one's stamp).
+    # Because the generation was never cleared, the un-acked project reloads too.
+    (state.state_dir() / "reload-acked.ts").unlink()
+    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "[janitor-reload]", \
+        "an un-acked project still reloads — the generation was never consumed by project A"
 
 
 # ---------- Phase 1.65: daemon restart if stale ---------------------------
