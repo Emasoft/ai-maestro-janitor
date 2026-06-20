@@ -53,10 +53,10 @@ external-refs: []
   already handled by graceful grep-fallback + the recall rule; a heartbeat nudge
   there would risk nagging for marginal value. **P6.2+P6.3+SSOT SHIPPED in v0.12.0**
   (verified ground-truth: tag `v0.12.0`, GH release, `origin/main..HEAD`=0 —
-  2026-06-20T04:00+0200). The publish first aborted at a FLAKY cargo-clippy (macOS
-  `/var/folders` reaper purged libsqlite3-sys's `bindgen.rs` from publish.py's reused
-  tmp target while the fingerprint said fresh); fixed by `rm -rf`-ing the stale target
-  + re-running. Recorded as LOCAL memory `reference_publish_cargo_clippy_bindgen_flaky`
+  2026-06-20T04:00+0200). The publish first aborted at a FLAKY cargo-clippy (the OS
+  temp-dir reaper purged libsqlite3-sys's `bindgen.rs` from publish.py's reused tmp
+  cargo target while the fingerprint said fresh); fixed by clearing the stale target
+  then re-running. Recorded as LOCAL memory `reference_publish_cargo_clippy_bindgen_flaky`
   with a publish.py-hardening follow-up (Step 3 should auto-clear+retry).
 - **NEXT ACTION:** P5 — strengthen the consolidation. EVIDENCE-FIRST: the merge
   EXECUTOR (`janitor-memory-consolidate`) is already mature (abstain-default,

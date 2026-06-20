@@ -202,37 +202,24 @@ Now edit **only files under `$STAGING`**:
   keeps A's slug, only `[[B]]`→`[[A]]` redirects are needed; holders already
   linking `[[A]]` are correct.)
 
-### 7. Build the merged page `C` (content rules — some verifier-enforced, some YOURS)
+### 7. Build the merged page `C`
 
-`verify_merge` (run by `commit --op merge`) machine-checks the lesson, dedup, and
-ocd/lmd rules and FAILS the txn on any breach. The preserve-facts and lead rules
-are **yours** — the verifier does NOT enforce them — so hold to them yourself:
+`verify_merge` (at `commit --op merge`) machine-checks the lesson, dedup, and
+ocd/lmd rules below and FAILS on any breach; the **lead** and **body-fact
+preservation** rules are YOURS — the verifier does not enforce them:
 
-- **Every `[^N]` lesson from BOTH A and B survives, byte-identical.** Copy each
-  lesson's substantive body verbatim (you MAY compound — append later history —
-  but never reword or drop; a substring check catches both). Keep each lesson's
-  leading `[ocd:… lmd:…]` stamp unchanged.
-- **Intra-page dedup — keep the better-sourced duplicate.** When A and B carry the
-  *same* lesson/fact, keep the copy with the richer WHY / the citation / the
-  newer `lmd` and drop the other — the result must contain **no duplicate content
-  line** (a naive A+B union that re-introduces a duplicate FAILS
-  `no_new_duplicate_lines`). Merging *removes* redundancy; it never adds it.
-- **`ocd = min(A.ocd, B.ocd)`** (origin is never lost) and **`lmd = today`**
-  (`date +%F`), and `lmd` must be ≥ both sources' `lmd`.
-- **Preserve EVERY distinct body fact — the verifier guards only lessons.**
-  `verify_merge` checks the `[^N]` lessons byte-identically and forbids *duplicate*
-  lines, but it does NOT check body facts for *loss*: a distinct fact you drop while
-  reorganizing is silently gone forever. Fold both bodies KEEPING every distinct
-  fact; dedup only genuinely-identical facts (per the rule above); when unsure
-  whether two facts are the same, **keep both**. No-information-lost is the editor's
-  first law, and here YOU are the only thing enforcing it for the body.
-- **Open C with a one-sentence lead, then coherent sections.** C must read as ONE
-  topic, not two stapled pages: a one-sentence **lead** naming the single merged
-  subject (wikimem-model → Page anatomy → "The lead"), then the facets as `##`
-  sections, then one `## Notes and lessons learned` with the union of both lesson
-  sets (deduped). The lead only orients — it adds no fact not already below.
-- **No `[[link]]` to a retired slug** anywhere — C itself must not link `[[B]]`
-  (the slug you're retiring), and the holder edits in step 6 cover the rest.
+- **Every `[^N]` lesson from BOTH A and B survives byte-identical** — copy each
+  verbatim (you may compound, never reword/drop); keep its `[ocd:… lmd:…]` stamp.
+- **Intra-page dedup** — when A and B carry the same lesson/fact, keep the
+  better-sourced copy; the result must have **no duplicate content line**
+  (`no_new_duplicate_lines`). Merging removes redundancy, never adds it.
+- **`ocd = min(A.ocd, B.ocd)`**, **`lmd = today`** (`date +%F`, ≥ both sources).
+- **Preserve EVERY distinct body fact** — verify guards lessons, NOT body facts, so
+  a dropped body fact is silently lost; dedup only identical facts, unsure → keep both.
+- **Open C with a one-sentence lead** naming the merged subject (wikimem-model →
+  "The lead") so it reads as ONE topic, then facets as `##` sections + one deduped
+  `## Notes and lessons learned`. (Full rationale: the merge-protocol reference.)
+- **No `[[link]]` to a retired slug** — C must not link `[[B]]`; step 6 covers holders.
 
 Keep the frontmatter shape (`name`, `description`, `ocd`, `lmd`, `metadata.{tier,
 type,…}`); `name` stays the survivor's slug. Merge `## See also` / `## Governed
