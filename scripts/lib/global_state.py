@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 import state
 
@@ -229,6 +229,28 @@ def acquire_singleton_flock() -> Optional[int]:
         # Unexpected — surface to logs but don't crash the caller.
         state.log_line("daemon", f"unexpected flock error: {exc}")
         return None
+
+
+def acquire_singleton_flock_blocking(
+    should_stop: Callable[[], bool], poll_s: int = 5
+) -> Optional[int]:
+    """Wait (by polling the non-blocking acquire) until the singleton flock is free,
+    then return its fd; return None if ``should_stop()`` becomes true while waiting.
+
+    This is the OS-keepalive daemon's acquire (TRDD-324223a6 B). When a session-spawned
+    daemon already holds the flock, the launchd/systemd-launched daemon WAITS for it as
+    a live, idle process instead of exiting — so the OS keepalive does NOT churn
+    (exit→respawn every ThrottleInterval) against a long-lived session daemon. It takes
+    over the instant the holder dies. ``should_stop`` (the kill-switch check) lets a
+    deliberate disarm break the wait so the daemon can remove its own keepalive and exit.
+    """
+    while True:
+        fd = acquire_singleton_flock()
+        if fd is not None:
+            return fd
+        if should_stop():
+            return None
+        time.sleep(poll_s)
 
 
 def release_singleton_flock(fd: int) -> None:

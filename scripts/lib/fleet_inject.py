@@ -116,7 +116,12 @@ def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dic
     if command is None:
         return None  # esc_nudge / nuclear — not a command-typing injection
     pane = terminal.get("tmux_pane", "").strip()
-    if pane:
+    # Gate the tmux pane exactly as the iTerm UUID is gated below: only a bare `%<n>`
+    # may reach the `tmux send-keys -t <pane>` argv. A malformed pane (e.g. a
+    # leading `-`, which tmux would read as a FLAG) is rejected, and we fall through
+    # to the iTerm channel — mirroring the UUID decline path, so neither sink ever
+    # receives an unvalidated identity.
+    if pane and terminal_trigger.valid_tmux_pane(pane):
         return {
             "channel": "tmux",
             "command": command,
@@ -138,23 +143,32 @@ def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dic
 def fire(plan: dict | None) -> bool:
     """Fire a built injection plan fully DETACHED — so the daemon never blocks and
     is never killed by the very ESC the plan sends. Returns True iff a sender was
-    launched. Safe to call with None (a declined plan) → returns False."""
+    launched, False otherwise. Safe to call with None (a declined plan) → False.
+
+    A spawn failure (missing `osascript`, a PATH-stripped env, any OSError) returns
+    False rather than raising: the caller renders that as a per-instance FIRE-FAILED
+    log line, whereas an escaping exception would crash the WHOLE fleet beat through
+    Task.run's blanket handler and bump the task toward quarantine — one un-spawnable
+    sender must not disable the guardian for every other instance that tick."""
     if not plan:
         return False
-    if plan["channel"] == "iterm":
-        subprocess.Popen(  # noqa: S603 - fixed argv, no shell; script is UUID-gated
-            ["osascript", "-e", plan["osascript"]],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        return True
-    if plan["channel"] == "tmux":
-        # Reuse the proven detached runner — it interprets the RUN/SLEEP step tags
-        # and runs them in a base64-encoded detached child, so (a) the tags are
-        # honored (NOT exec'd as `RUN`/`SLEEP` commands) and (b) the ESC the steps
-        # send can't kill the daemon that launched them.
-        terminal_trigger._fire_detached_steps(plan["delay_s"], plan["steps"])
-        return True
+    try:
+        if plan["channel"] == "iterm":
+            subprocess.Popen(  # noqa: S603 - fixed argv, no shell; script is UUID-gated
+                ["osascript", "-e", plan["osascript"]],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True
+        if plan["channel"] == "tmux":
+            # Reuse the proven detached runner — it interprets the RUN/SLEEP step tags
+            # and runs them in a base64-encoded detached child, so (a) the tags are
+            # honored (NOT exec'd as `RUN`/`SLEEP` commands) and (b) the ESC the steps
+            # send can't kill the daemon that launched them.
+            terminal_trigger._fire_detached_steps(plan["delay_s"], plan["steps"])
+            return True
+    except (OSError, subprocess.SubprocessError):
+        return False
     return False

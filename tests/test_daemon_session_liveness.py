@@ -104,7 +104,14 @@ def test_crash_loop_alerts_once_then_stays_silent(tmp_path, monkeypatch) -> None
     rec = tmp_path / "recovery"
     rec.mkdir(parents=True)
     sf = daemon._recovery_state_path(rec, "/p/proj-x")
-    sf.write_text(json.dumps({"attempts": daemon.fr.MAX_ATTEMPTS, "last_ts": 1}), encoding="utf-8")
+    # Seed the spent budget WITH this exact session's identity (pid:tty) — otherwise
+    # the identity-stamp guard treats it as a different occupant and correctly resets
+    # it (which is itself covered by test_restarted_session_gets_a_fresh_budget below).
+    ident = f"{fleet[0].pid}:{fleet[0].tty or ''}"
+    sf.write_text(
+        json.dumps({"attempts": daemon.fr.MAX_ATTEMPTS, "last_ts": 1, "identity": ident}),
+        encoding="utf-8",
+    )
     daemon.task_session_liveness()
     assert fired == []
     assert "GIVING UP" in _log(tmp_path)
@@ -124,3 +131,37 @@ def test_recovered_instance_resets_its_attempt_budget(tmp_path, monkeypatch) -> 
     sf.write_text(json.dumps({"attempts": 3, "last_ts": 1}), encoding="utf-8")
     daemon.task_session_liveness()
     assert not sf.exists()
+
+
+def test_restarted_session_gets_a_fresh_budget(tmp_path, monkeypatch) -> None:
+    """A spent/alerted budget left by a PREVIOUS occupant of the same project dir
+    (different pid:tty) must NOT be inherited by a freshly-restarted session — the new
+    session did nothing wrong and gets a fresh budget, so it IS recovered (audit C3)."""
+    fleet = [_inst("frozen", "/p/proj-r", {"tmux_pane": "%2"})]   # identity 1:ttys1
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    rec = tmp_path / "recovery"
+    rec.mkdir(parents=True)
+    sf = daemon._recovery_state_path(rec, "/p/proj-r")
+    sf.write_text(
+        json.dumps({"attempts": daemon.fr.MAX_ATTEMPTS, "last_ts": 1,
+                    "alerted": True, "identity": "99999:ttysOLD"}),  # a vanished session
+        encoding="utf-8",
+    )
+    daemon.task_session_liveness()
+    assert len(fired) == 1                      # recovered, NOT refused by a stale budget
+    st = json.loads(sf.read_text(encoding="utf-8"))
+    assert st["identity"] == "1:ttys1"          # budget rebound to the NEW session
+    assert st["attempts"] == 1                  # fresh budget (1st attempt), not the old MAX
+
+
+def test_corrupt_state_file_does_not_crash_the_beat(tmp_path, monkeypatch) -> None:
+    """A valid-JSON-but-not-an-object state file (external tampering) degrades to a
+    fresh budget for that instance instead of crashing the whole beat (audit C4)."""
+    fleet = [_inst("frozen", "/p/proj-c", {"tmux_pane": "%3"})]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    rec = tmp_path / "recovery"
+    rec.mkdir(parents=True)
+    sf = daemon._recovery_state_path(rec, "/p/proj-c")
+    sf.write_text("[1, 2, 3]", encoding="utf-8")   # valid JSON, NOT a dict
+    daemon.task_session_liveness()                 # must not raise
+    assert len(fired) == 1                          # treated as fresh → recovered

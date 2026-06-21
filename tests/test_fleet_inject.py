@@ -88,6 +88,35 @@ def test_build_injection_declines_unreachable_and_noncommand() -> None:
     assert fi.build_injection({"tmux_pane": "%9"}, "resurrect") is None
 
 
+def test_build_injection_rejects_malformed_tmux_pane() -> None:
+    """A tmux pane that isn't a bare %<n> (e.g. a leading '-', which tmux would parse
+    as a FLAG, or an injection-shaped value) is REJECTED — symmetric with the iTerm
+    UUID gate (audit C1). It never reaches the `tmux send-keys` argv."""
+    # malformed pane + no iTerm fallback → declined entirely (never an unsafe argv)
+    assert fi.build_injection({"tmux_pane": "-X"}, "rearm") is None
+    assert fi.build_injection({"tmux_pane": "%5; rm -rf x"}, "rearm") is None
+    assert fi.build_injection({"tmux_pane": "session:1.0"}, "rearm") is None
+    # malformed pane BUT a valid iTerm id → falls through to the gated iTerm channel,
+    # never emitting a tmux plan carrying the bad pane
+    plan = fi.build_injection({"tmux_pane": "-X", "iterm_session_id": "ttys9:4C4A-9B7"}, "rearm")
+    assert plan is not None and plan["channel"] == "iterm"
+    # a well-formed pane still produces a tmux plan
+    good = fi.build_injection({"tmux_pane": "%5"}, "rearm")
+    assert good is not None and good["channel"] == "tmux"
+
+
+def test_fire_returns_false_on_spawn_failure(monkeypatch) -> None:
+    """A spawn failure (e.g. missing osascript) makes fire() return False — the caller
+    logs FIRE-FAILED — instead of letting the OSError escape and crash the whole
+    fleet beat through Task.run's blanket handler (audit C2)."""
+    def boom(*_a, **_k):
+        raise FileNotFoundError("osascript not found")
+    monkeypatch.setattr(fi.subprocess, "Popen", boom)
+    plan = fi.build_injection({"iterm_session_id": "ttys9:4C4A-9B7"}, "rearm")
+    assert plan is not None and plan["channel"] == "iterm"
+    assert fi.fire(plan) is False          # no exception escapes; reported as failure
+
+
 def test_fire_declines_empty_plan() -> None:
     """fire(None) is a safe no-op (a declined plan never raises) and reports that
     nothing was launched."""

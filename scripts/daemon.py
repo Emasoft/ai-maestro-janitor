@@ -66,6 +66,7 @@ import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import global_state as gs  # noqa: E402
+import launchd_keepalive as lk  # noqa: E402  # OS keepalive — daemon immortality (TRDD-324223a6 B)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
 import state  # noqa: E402
@@ -627,18 +628,27 @@ def _recovery_state_path(rec_dir: Path, project_root: str) -> Path:
 
 
 def _read_recovery_state(path: Path) -> dict:
-    """Load an instance's {attempts, last_ts, alerted}; {} when absent/corrupt."""
+    """Load an instance's {attempts, last_ts, alerted, identity}; {} when absent or
+    corrupt. Valid-JSON-but-not-an-object (e.g. a bare list/number from external
+    tampering) is treated as corrupt → {}, so one malformed file degrades to a fresh
+    budget for that instance instead of crashing the whole beat with AttributeError."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _write_recovery_state(path: Path, st: dict) -> None:
-    """Persist recovery state atomically (tmp + os.replace)."""
+    """Persist recovery state atomically (tmp + os.replace). Cleans up the tmp file
+    if the rename fails, so a cross-device/perms error can't litter orphans."""
     tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
     tmp.write_text(json.dumps(st), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def task_session_liveness() -> None:
@@ -677,13 +687,23 @@ def task_session_liveness() -> None:
             continue  # no .janitor project → nothing to re-arm; can't key state
         sf = _recovery_state_path(rec_dir, inst.project_root)
         if sl.recovery_for_diagnosis(inst.diagnosis) is None:
-            # healthy / unarmed → never poke. A now-healthy instance clears its
-            # attempt counter so the NEXT freeze starts with a fresh budget.
-            if inst.diagnosis == "healthy" and sf.exists():
+            # healthy / unarmed → never poke, and CLEAR any stale attempt counter so
+            # a later freeze — or a different session that reuses this project dir —
+            # starts with a fresh budget instead of inheriting a spent/alerted one.
+            if sf.exists():
                 sf.unlink(missing_ok=True)
             continue
         st = _read_recovery_state(sf)
-        attempts = int(st.get("attempts", 0))
+        # Identity-stamp: bind the budget to THIS exact session (pid+tty). If the
+        # stored identity differs (a restart → new pid, or a stale file a vanished
+        # session left behind), discard it — a freshly-restarted session must never
+        # inherit the previous occupant's spent/alerted budget and be refused help.
+        identity = f"{inst.pid}:{inst.tty or ''}"
+        if st.get("identity") != identity:
+            st = {}
+        attempts = state.coerce_int(
+            str(st.get("attempts", 0)), 0, detector_name="session-liveness", var_name="attempts"
+        )
         tag = f"{os.path.basename(inst.project_root)} [{inst.diagnosis}] attempt={attempts}"
         decision = fr.gate(last_ts=st.get("last_ts"), attempts=attempts, now=now)
         if decision == "crash_loop":
@@ -694,12 +714,17 @@ def task_session_liveness() -> None:
                     "— recovery is looping; a human must intervene",
                 )
                 st["alerted"] = True
+                st["identity"] = identity
                 _write_recovery_state(sf, st)
             continue
         if decision == "cooldown":
             continue
         action = fr.action_for(inst.diagnosis, attempts)
         if action is None:
+            # Reachable as a concept but not via a typed command (e.g. `dead` maps to
+            # the not-yet-wired nuclear `relaunch`): recovery_for_diagnosis (the gate
+            # above) and action_for DELIBERATELY diverge on `dead`. This re-check is
+            # what keeps the divergence safe — we never fire an unwired action.
             continue
         plan = fleet_inject.build_injection(inst.terminal, action)
         if plan is None:
@@ -715,7 +740,9 @@ def task_session_liveness() -> None:
             )
             continue
         ok = fleet_inject.fire(plan)
-        _write_recovery_state(sf, {"attempts": attempts + 1, "last_ts": now})
+        _write_recovery_state(
+            sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity}
+        )
         state.log_line(
             "daemon",
             f"session-liveness: {'FIRED' if ok else 'FIRE-FAILED'} {action} → "
@@ -809,6 +836,44 @@ def _build_tasks() -> list[Task]:
     ]
 
 
+def _daemon_runs_from_plugin_cache() -> bool:
+    """True iff THIS daemon.py lives under the installed plugin cache (production) —
+    NOT a dev checkout or a test tree. Installing a machine-level OS keepalive
+    (a LaunchAgent / systemd unit that survives reboot) must ONLY ever happen for the
+    real installed plugin: otherwise `pytest` (which spawns the daemon from the dev
+    checkout) or a developer running daemon.py by hand would silently register a
+    persistent LaunchAgent on the machine. The cache root matches daemon-launcher.py's
+    own resolution; a dev/test path is not relative to it → no auto-install."""
+    cache_root = (
+        Path.home() / ".claude" / "plugins" / "cache" / "ai-maestro-plugins" / "ai-maestro-janitor"
+    )
+    try:
+        _HERE.relative_to(cache_root)
+        return True
+    except ValueError:
+        return False
+
+
+def _ensure_os_keepalive() -> None:
+    """Install the OS keepalive (idempotent) if opted-in and not already present, so
+    the daemon survives its OWN death without depending on a Claude session firing a
+    heartbeat (TRDD-324223a6 B). Best-effort + loud: a failed install logs and is
+    never fatal — a keepalive that can't install must not kill the daemon it protects."""
+    if not _daemon_runs_from_plugin_cache():
+        return  # dev checkout / test tree — never auto-register a real OS keepalive
+    if not lk.opted_in() or lk.current_platform() == "other" or lk.is_installed():
+        return
+    source = _HERE / "daemon-launcher.py"
+    if not source.is_file():
+        state.log_line("daemon", f"os-keepalive: launcher source missing ({source}) — skipped")
+        return
+    try:
+        ok, msg = lk.install(source, gs.global_state_dir() / "logs")
+        state.log_line("daemon", f"os-keepalive: {'OK' if ok else 'FAILED'} — {msg}")
+    except Exception as exc:  # noqa: BLE001 - never let keepalive install kill the daemon
+        state.log_line("daemon", f"os-keepalive: install raised (ignored): {exc}")
+
+
 def main() -> int:
     # The daemon is a machine-wide singleton, but state.log_line() defaults to
     # a PROJECT-scoped logs/ dir keyed on whatever tree spawned us — so the
@@ -825,9 +890,22 @@ def main() -> int:
     # Singleton: the flock IS the truth. If we cannot acquire it, another
     # daemon is alive — exit silently. PID file / heartbeat are downstream
     # diagnostics; they cannot disagree with the kernel's flock state.
-    flock_fd = gs.acquire_singleton_flock()
-    if flock_fd is None:
-        return 0
+    #
+    # The OS keepalive launches us with --keepalive: WAIT patiently for the flock (a
+    # session-spawned daemon may already hold it) instead of exiting, so the OS keeper
+    # never churns (exit→respawn) and takes over the instant the holder dies. A
+    # deliberate kill-switch breaks the wait → we remove our OWN keepalive and exit so
+    # it can't resurrect a daemon the user stopped. A session-spawned daemon (no flag)
+    # keeps the original non-blocking semantic: exit immediately if another holds it.
+    if "--keepalive" in sys.argv:
+        flock_fd = gs.acquire_singleton_flock_blocking(gs.kill_switch_present)
+        if flock_fd is None:
+            lk.uninstall()
+            return 0
+    else:
+        flock_fd = gs.acquire_singleton_flock()
+        if flock_fd is None:
+            return 0
 
     pid = os.getpid()
     # Install the graceful-shutdown handlers BEFORE publishing the pid file.
@@ -857,6 +935,11 @@ def main() -> int:
         f"intervals={[t.interval_s for t in tasks]})",
     )
 
+    # L0 — make the daemon itself immortal: register an OS keepalive that respawns
+    # it regardless of any Claude session (closes the all-sessions-frozen circular
+    # gap). Idempotent + best-effort; uninstalled on a deliberate kill-switch below.
+    _ensure_os_keepalive()
+
     exit_reason = "signal"
     try:
         while _running:
@@ -882,6 +965,16 @@ def main() -> int:
                 time.sleep(1)
     finally:
         state.log_line("daemon", f"stopping ({exit_reason})")
+        # A deliberate kill-switch means the user STOPPED the janitor — remove the OS
+        # keepalive so it can't resurrect a daemon the user shut down. A plain signal
+        # exit (e.g. a plugin-version-roll SIGTERM) must NOT uninstall: launchd should
+        # respawn the launcher and roll to the new version.
+        if exit_reason == "kill-switch":
+            try:
+                ok, msg = lk.uninstall()
+                state.log_line("daemon", f"os-keepalive: {'removed' if ok else 'remove FAILED'} — {msg}")
+            except Exception as exc:  # noqa: BLE001 - shutdown cleanup must never raise
+                state.log_line("daemon", f"os-keepalive: uninstall raised (ignored): {exc}")
         gs.remove_daemon_pid()
         gs.release_singleton_flock(flock_fd)
         state.rotate_log_if_big("daemon")

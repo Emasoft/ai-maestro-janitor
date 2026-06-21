@@ -58,6 +58,15 @@ _DELEGATE_KINDS = frozenset({"tmux"})
 # pane. Validate before interpolating it into an argv — never trust an env var.
 _TMUX_PANE_RE = re.compile(r"^%[0-9]+$")
 
+
+def valid_tmux_pane(pane: str) -> bool:
+    """True iff `pane` is a bare tmux pane id (`%<n>`) safe to place on a
+    `tmux send-keys -t <pane>` argv. Anything else — notably a leading `-`, which
+    tmux would parse as a FLAG rather than a target — is rejected. This is the tmux
+    counterpart to the iTerm `valid_session_id` UUID gate, so BOTH injection sinks
+    are hardened symmetrically (a tampered TTY→pane map can't reach the argv)."""
+    return bool(_TMUX_PANE_RE.match(pane.strip()))
+
 # Sentinel: the caller should use its own iTerm-osascript path (covers iTerm and
 # every not-yet-automated terminal, whose fallback is "ask the human").
 USE_ITERM_PATH = "USE_ITERM_PATH"
@@ -283,7 +292,7 @@ def send_self_command(
         return USE_ITERM_PATH
     if kind == "tmux":
         pane = (e.get("TMUX_PANE") or "").strip()
-        if not _TMUX_PANE_RE.match(pane):
+        if not valid_tmux_pane(pane):
             return "NO_AUTO_TERMINAL:tmux"
         if dry_run:
             return f"DRY_RUN:tmux:{pane}:{command}@{delay_s}s"

@@ -85,6 +85,11 @@ def harness(tmp_path: Path):
     # user's real keychain / slots during a daemon test. Without this the daemon
     # would inherit whatever CLAUDE_PLUGIN_DATA happens to be in os.environ.
     base_env["CLAUDE_PLUGIN_DATA"] = str(tmp_path / "plugin-data")
+    # Belt-and-suspenders for the OS keepalive: the daemon already refuses to
+    # auto-install one unless it runs from the plugin cache (a daemon spawned from
+    # this dev-checkout path never does), but pin the opt-out explicitly so no test
+    # can ever register a real ~/Library/LaunchAgents plist on the dev machine.
+    base_env["CLAUDE_PLUGIN_OPTION_DAEMON_OS_KEEPALIVE"] = "0"
     # Fire tasks every second during tests so the assertion window is short.
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL"] = "1"
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL"] = "1"
