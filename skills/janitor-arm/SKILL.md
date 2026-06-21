@@ -36,14 +36,12 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    uninstall … / install … --scope user` commands are in the warning). Only
    proceed to step 1 when it prints `OK user-scope`.
 
-1. Clear any machine-wide STOP, then install (or refresh) the stub atomically.
-   Arming is the REVIVE half of the `/janitor-stop` ↔ `/janitor-arm` pair, so it
-   first clears the kill-switch — otherwise a daemon stopped via `/janitor-stop`
-   would never be re-spawned even after arming (`ensure_daemon_running` honors the
-   kill-switch). Best-effort: a clear failure must not block arming.
+1. Install (or refresh) the stub atomically. `/janitor-arm` arms only THIS project's
+   heartbeat; it deliberately does NOT touch the machine-wide global kill-switch — a
+   project arm must not silently undo a deliberate `/janitor-global-disarm`. To revive
+   a globally-disarmed daemon, use `/janitor-global-arm`.
 
    ```bash
-   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/kill_switch_cli.py" clear || true
    mkdir -p "${CLAUDE_PLUGIN_DATA}"
    STUB_SOURCE="${CLAUDE_PLUGIN_ROOT}/scripts/dispatcher-stub.py"
    STUB_DEST="${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py"

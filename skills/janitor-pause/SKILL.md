@@ -9,7 +9,7 @@ description: Suppresses ai-maestro-janitor heartbeat output without removing the
 
 Writes a sentinel file `.janitor/state/paused` that `dispatch.py` checks at the top of every heartbeat. While the file exists (and its expiry has not passed), all heartbeat fires exit silently with a single log entry — detectors do not run, drift lines are not emitted, the rate-limit resume cue is suppressed.
 
-The cron itself stays armed. No `CronDelete` happens. When the pause expires (or `/janitor-resume` runs), the next heartbeat fires normally.
+The cron itself stays armed. No `CronDelete` happens. When the pause expires (or `/janitor-unpause` runs), the next heartbeat fires normally.
 
 This is the lighter alternative to `/janitor-disarm`: pause when you want a quiet block of work; disarm when you're moving away from the project.
 
@@ -34,11 +34,11 @@ This is the lighter alternative to `/janitor-disarm`: pause when you want a quie
    mv -f "$STATE_DIR/paused.tmp.$$" "$STATE_DIR/paused"
    ```
 
-3. Report the outcome in one line. If `EXPIRY=0`: `Janitor paused (no expiry — run /janitor-resume to lift).` Otherwise: `Janitor paused until <local-time-with-offset> (~<N>h<M>m from now).`
+3. Report the outcome in one line. If `EXPIRY=0`: `Janitor paused (no expiry — run /janitor-unpause to lift).` Otherwise: `Janitor paused until <local-time-with-offset> (~<N>h<M>m from now).`
 
 ## Output
 
-One line confirming the pause and its expiry. The next heartbeat will emit nothing until the expiry passes or `/janitor-resume` runs.
+One line confirming the pause and its expiry. The next heartbeat will emit nothing until the expiry passes or `/janitor-unpause` runs.
 
 ## Error Handling
 
@@ -60,7 +60,7 @@ User: quiet the heartbeat for the rest of today
 
 ## Scope
 
-This skill ONLY writes the paused sentinel. It does not affect the cron, touch detector seen-files, modify state, or prune logs. To re-enable normal heartbeat behaviour, run `/janitor-resume` (or wait for the expiry to pass — `dispatch.py` auto-cleans the sentinel on the first heartbeat after expiry).
+This skill ONLY writes the paused sentinel. It does not affect the cron, touch detector seen-files, modify state, or prune logs. To re-enable normal heartbeat behaviour, run `/janitor-unpause` (or wait for the expiry to pass — `dispatch.py` auto-cleans the sentinel on the first heartbeat after expiry).
 
 ## Resources
 
