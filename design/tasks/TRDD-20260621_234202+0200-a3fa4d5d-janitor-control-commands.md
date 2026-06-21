@@ -1,9 +1,9 @@
 ---
 trdd-id: a3fa4d5d-d300-45d1-9613-be34ec2b677e
 title: Janitor control commands (disarm/pause × local/global) + Wikimem record-recent + terminology
-column: dev
+column: complete
 created: 2026-06-21T23:42:02+0200
-updated: 2026-06-21T23:42:02+0200
+updated: 2026-06-22T00:02:37+0200
 current-owner: claude-janitor-dev
 parent-trdd: TRDD-324223a6
 task-type: feature
@@ -46,7 +46,18 @@ launch when the claude agent is stopped by some error."* The internal
 mechanism and is **left untouched** — only the user-facing `/janitor-resume`
 command is renamed.
 
-### NEXT ACTIONS (phase order)
+### ✅ DONE (all phases shipped 2026-06-22, committed, NOT pushed)
+- Phase 1+2 — `216d995`: global-pause flag (`global_state`), daemon idles on it,
+  dispatch `_phase_global_paused()`, `kill_switch_cli`→`global_control_cli`
+  (disarm/arm/pause/unpause/status). 13 tests.
+- Phase 3 — `720b065`: skills — `janitor-global-{disarm,arm,pause,unpause}`,
+  `janitor-stop`→`janitor-global-disarm`, `janitor-resume`→`janitor-unpause`,
+  `janitor-memory-record-recent`, `/janitor-arm` revert. End-to-end CLI verified.
+- Phase 4 — `1073626`: README control matrix + Wikimem terminology + CLAUDE.md.
+- VERIFIED: 11,248 tests collect (no import break), 107 affected green, zero stale
+  refs. **Open for the USER: publish to ship (release-via: publish).**
+
+### Original NEXT ACTIONS (phase order) — all complete
 1. **Phase 1 (code, done-by-me):** `global_state` global-pause flag
    (`set/clear/global_pause_present` + path); rename `kill_switch_cli.py` →
    `global_control_cli.py` with subcommands `disarm|arm|pause|unpause|status`;
