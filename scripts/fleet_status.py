@@ -20,6 +20,7 @@ opt-in via ``--ci`` so the default stays fast.
 from __future__ import annotations
 
 import html
+import json
 import os
 import subprocess
 import sys
@@ -171,6 +172,62 @@ def _last_security_scan(root: str) -> int | None:
     return newest
 
 
+# The kanban columns, in lifecycle order. The first is the proposal stage, the
+# middle is the TRDD v2 pipeline (the 15+ statuses), and the tail is the terminal
+# / exception lanes. The source FOLDER pins the super-column (proposals→proposal,
+# refused→refused, archived→archived); design/tasks/ uses each TRDD's own column.
+_KANBAN_ORDER = (
+    "proposal", "backburner", "todo", "design", "dispatch", "dev", "testing",
+    "ai_review", "human_review", "complete", "publish", "published", "deploy",
+    "live", "live_auditing", "blocked", "failed", "superseded", "cancelled",
+    "refused", "archived",
+)
+# Columns that demand attention — used to color the lane + flag the project badge.
+_KANBAN_ALERT = {"blocked": "🔴", "failed": "❌", "refused": "🚫", "superseded": "⚰️"}
+
+
+def _trdd_meta(path: Path) -> dict[str, str]:
+    """Parse the grep-first frontmatter head of a TRDD (column, title, trdd-id,
+    severity) — reads only the first lines, never the body."""
+    meta: dict[str, str] = {}
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for n, ln in enumerate(fh):
+                if n > 40:
+                    break
+                for key in ("column", "title", "trdd-id", "severity", "status"):
+                    if ln.startswith(key + ":"):
+                        meta[key] = ln.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return meta
+
+
+def _gather_kanban(project_root: str) -> dict[str, list[dict[str, str]]]:
+    """Per-project TRDD board: ``{column: [{id, title, sev}]}`` (only non-empty
+    columns). v1 TRDDs that still use ``status:`` are mapped onto the column set."""
+    top = Path(_git_top(project_root))
+    v1map = {"not-started": "backburner", "in-progress": "dev", "completed": "complete"}
+    board: dict[str, list[dict[str, str]]] = {}
+    folders = {
+        "design/tasks": None, "design/proposals": "proposal",
+        "design/archived": "archived", "design/refused": "refused",
+    }
+    for rel, forced in folders.items():
+        d = top / rel
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("TRDD-*.md")):
+            m = _trdd_meta(f)
+            col = forced or m.get("column") or v1map.get(m.get("status", ""), "backburner")
+            board.setdefault(col, []).append({
+                "id": m.get("trdd-id", "")[:8],
+                "title": m.get("title", f.stem)[:90],
+                "sev": m.get("severity", ""),
+            })
+    return board
+
+
 def main() -> int:
     want_ci = "--ci" in sys.argv
     text_only = "--text" in sys.argv
@@ -248,6 +305,7 @@ def main() -> int:
             "uncommitted": g["uncommitted"], "ci": ci, "ghsec": ghsec,
             "locsec": _fmt_ts(_last_security_scan(root)),
             "prrd": _prrd_status(root),
+            "kanban": _gather_kanban(root),
             "last_job": _tail_last(os.path.join(root, ".janitor", "logs", "dispatch.log")),
             "last_err": _tail_last(os.path.join(root, ".janitor", "logs", "stop-failure.log")),
         })
@@ -279,14 +337,20 @@ def main() -> int:
 
 
 _COLUMNS = [
-    ("pid", "pid"), ("proj", "project"), ("model", "model"), ("branch", "git branch"),
-    ("repo", "github repo"), ("armed", "armed"), ("active", "active"), ("cron", "cron"),
-    ("wait", "waiting for"), ("dispatch", "dispatch age"), ("started", "started"),
-    ("total", "uptime"), ("uncommitted", "uncommitted"), ("ci", "CI"),
-    ("ghsec", "gh security"), ("locsec", "local sec scan"), ("prrd", "PRRD"),
-    ("proj_mem", "wikimem proj"), ("local_mem", "wikimem local"),
-    ("last_job", "last job"), ("last_err", "last error"),
+    ("flags", "⚑ status"), ("board", "kanban"), ("pid", "pid"), ("proj", "project"),
+    ("model", "model"), ("branch", "branch"), ("repo", "github repo"),
+    ("armed", "armed"), ("active", "active"), ("cron", "cron"), ("wait", "waiting for"),
+    ("dispatch", "dispatch"), ("started", "started"), ("total", "uptime"),
+    ("uncommitted", "uncommit"), ("ci", "CI"), ("ghsec", "gh sec"),
+    ("locsec", "loc sec scan"), ("prrd", "PRRD"), ("proj_mem", "wiki·proj"),
+    ("local_mem", "wiki·local"), ("last_job", "last job"), ("last_err", "last error"),
 ]
+
+_DIAG_EMOJI = {
+    "healthy": "🟢", "frozen": "🧟❄️", "cron_dead": "🔁💀",
+    "version_mismatch": "🔄", "unarmed": "🔇", "dead": "⚰️",
+}
+_CI_BAD = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
 
 
 def _row_class(diag: str, active: bool) -> str:
@@ -297,46 +361,166 @@ def _row_class(diag: str, active: bool) -> str:
     return "active" if active else "idle"
 
 
-def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
-    cells = []
-    for r in rows:
-        cls = _row_class(r["diag"], r["active"] == "yes")
-        tds = "".join(f"<td>{html.escape(str(r.get(k, '—')))}</td>" for k, _ in _COLUMNS)
-        cells.append(f'<tr class="{cls}">{tds}</tr>')
-    headers = "".join(f"<th>{html.escape(lbl)}</th>" for _, lbl in _COLUMNS)
-    legend = (
-        "<code>—</code> = not externally observable / not-yet-instrumented. "
-        "<b>local sec scan</b> = most-recent run of the janitor's continuous "
-        "security detectors (findings are surfaced live, not persisted per-run). "
-        "<b>gh security</b> / <b>CI</b> / <b>up-to-date</b> need <code>--ci</code>"
-        + ("" if want_ci else " (omitted this run)") + ". Deferred to Group-F "
-        "instrumentation: per-run security outcome, installed/project plugin "
-        "validation status, last-nudge, next-job-in-queue, memgrep errors, last-push. "
-        "<b>stopped</b> = running. <b>marketplace update outcome</b> = the daemon "
-        "stamps a completion time (shown in the summary); a richer pass/fail outcome "
-        "is a Group-F item."
-    )
-    # CSS: page-level scroll only — NO inner scrollbars (no overflow:auto on table/cells).
-    return _write_temp(f"""<!doctype html><html><head><meta charset="utf-8">
+def _flags(r: dict) -> str:
+    """At-a-glance attention emojis for one instance — what needs eyes NOW."""
+    out = [_DIAG_EMOJI.get(r["diag"], "❔")]
+    if r["armed"] == "no":
+        out.append("⚠️unarmed")
+    if r["ci"] in _CI_BAD:
+        out.append("❌CI")
+    if r["prrd"] == "none":
+        out.append("📋∅")
+    if r["ghsec"] not in ("—", "0 open"):
+        out.append("🔒" + r["ghsec"])
+    try:
+        if int(r["uncommitted"]) > 0:
+            out.append("✎" + r["uncommitted"])
+    except (ValueError, TypeError):
+        pass
+    kb = r.get("kanban", {})
+    if kb.get("blocked"):
+        out.append("🔴blocked×" + str(len(kb["blocked"])))
+    if kb.get("failed"):
+        out.append("❌fail×" + str(len(kb["failed"])))
+    return " ".join(out)
+
+
+# Template with @@PLACEHOLDERS@@ (NOT an f-string) so the CSS/JS braces stay
+# literal. The main table scrolls at the PAGE level (one document scrollbar — no
+# inner overflow box, per the no-nested-scrollbars rule). The kanban is a modal:
+# a fixed-viewport application surface, so its OWN h+v scrollbars are allowed.
+_HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
 <title>Janitor global status</title><style>
-html,body{{overflow-x:auto;margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
-font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
-h1{{font-size:18px;margin:0 0 4px}} .sum{{font-size:12px;color:#8b949e;margin-bottom:14px}}
-table{{border-collapse:collapse;max-width:none}}
-th,td{{border:1px solid #30363d;padding:3px 8px;white-space:nowrap;font-size:12px;
-font-family:ui-monospace,SFMono-Regular,Menlo,monospace}}
-th{{position:sticky;top:0;background:#161b22;text-align:left;z-index:1}}
-tr.broken td{{background:#3d1418}} tr.broken td:first-child{{border-left:3px solid #f85149}}
-tr.active td{{background:#0d2818}} tr.idle td{{background:#161b22}}
-tr.unarmed td{{background:#21262d;color:#6e7681}}
-.legend{{font-size:11px;color:#8b949e;margin-top:14px;max-width:none;line-height:1.6}}
-code{{background:#161b22;padding:1px 4px;border-radius:3px}}
+html,body{overflow-x:auto;margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+h1{font-size:18px;margin:0 0 4px} .sum{font-size:12px;color:#8b949e;margin-bottom:12px}
+table{border-collapse:collapse;max-width:none}
+th,td{border:1px solid #30363d;padding:3px 8px;white-space:nowrap;font-size:12px;
+font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+th{position:sticky;top:0;background:#161b22;text-align:left;z-index:2}
+td.flags{font-size:13px}
+tr.broken td{background:#3d1418} tr.broken td:first-child{border-left:3px solid #f85149}
+tr.active td{background:#0d2818} tr.idle td{background:#161b22}
+tr.unarmed td{background:#21262d;color:#6e7681}
+.kbtn{background:#1f6feb;color:#fff;border:0;border-radius:4px;padding:2px 8px;
+cursor:pointer;font-size:11px} .kbtn:hover{background:#388bfd} .muted{color:#6e7681}
+.legend{font-size:11px;color:#8b949e;margin-top:14px;line-height:1.8}
+.legend b{color:#c9d1d9} code{background:#161b22;padding:1px 4px;border-radius:3px}
+.lg{display:inline-block;margin-right:16px;white-space:nowrap}
+#kbmodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:100;
+align-items:center;justify-content:center}
+.kbwin{background:#0d1117;border:1px solid #30363d;border-radius:8px;width:94vw;
+height:90vh;display:flex;flex-direction:column;padding:12px;box-shadow:0 8px 40px #000}
+.kbhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.kbhead h2{font-size:15px;margin:0}
+.kbx{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;
+padding:3px 10px;cursor:pointer}
+.kbboard{display:flex;gap:8px;overflow:auto;flex:1;align-items:flex-start}
+.lane{min-width:190px;max-width:190px;background:#161b22;border:1px solid #30363d;
+border-radius:6px;padding:6px;flex:0 0 auto}
+.lane.blocked{background:#5a1117;border-color:#f85149}
+.laneh{font-size:11px;font-weight:700;text-transform:uppercase;margin-bottom:6px;
+color:#8b949e;letter-spacing:.3px} .lane.blocked .laneh{color:#ffc2c2}
+.card{background:#21262d;border:1px solid #30363d;border-left:3px solid #6e7681;
+border-radius:4px;padding:4px 6px;margin-bottom:4px;font-size:11px;line-height:1.35;
+white-space:normal} .lane.blocked .card{background:#7a1c22;border-color:#f85149}
+.card.sev-CRITICAL{border-left-color:#f85149} .card.sev-HIGH{border-left-color:#d29922}
+.cid{color:#6e7681;font-size:9px}
 </style></head><body>
 <h1>🧹 Janitor global status</h1>
-<div class="sum">{html.escape(summary)} · generated {time.strftime('%Y-%m-%d %H:%M:%S %z')}</div>
-<table><thead><tr>{headers}</tr></thead><tbody>{''.join(cells)}</tbody></table>
-<div class="legend">{legend}</div>
-</body></html>""")
+<div class="sum">@@SUMMARY@@ · generated @@GEN@@</div>
+<table><thead><tr>@@HEADERS@@</tr></thead><tbody>@@ROWS@@</tbody></table>
+<div class="legend">@@LEGEND@@</div>
+<div id="kbmodal" onclick="if(event.target.id==='kbmodal')closeKb()">
+  <div class="kbwin"><div class="kbhead"><h2 id="kbtitle"></h2>
+  <button class="kbx" onclick="closeKb()">✕ close</button></div>
+  <div class="kbboard" id="kbboard"></div></div></div>
+<script>
+var KB=@@KBDATA@@, ORDER=@@ORDER@@, ALERT=@@ALERT@@;
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function openKb(i){
+  var d=KB[i], h='';
+  for(var k=0;k<ORDER.length;k++){
+    var col=ORDER[k], cards=(d.cols[col]||[]);
+    h+='<div class="'+(col==='blocked'?'lane blocked':'lane')+'"><div class="laneh">'
+       +(ALERT[col]||'')+' '+col+' ('+cards.length+')</div>';
+    for(var j=0;j<cards.length;j++){var c=cards[j];
+      h+='<div class="card sev-'+(c.sev||'')+'">'+esc(c.title)
+         +'<div class="cid">'+(c.id||'')+'</div></div>';}
+    h+='</div>';
+  }
+  document.getElementById('kbtitle').textContent='📋 '+d.proj+' — TRDD kanban';
+  document.getElementById('kbboard').innerHTML=h;
+  document.getElementById('kbmodal').style.display='flex';
+}
+function closeKb(){document.getElementById('kbmodal').style.display='none';}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeKb();});
+</script>
+</body></html>"""
+
+
+def _legend_html(want_ci: bool) -> str:
+    emojis = [
+        ("🟢", "healthy"), ("🧟❄️", "frozen (rate-limited+stuck)"),
+        ("🔁💀", "cron_dead (dead heartbeat)"), ("🔄", "version mismatch"),
+        ("🔇", "unarmed/disarmed (sacrosanct)"), ("⚠️", "not armed"),
+        ("❌CI", "CI failed"), ("🔒", "open GitHub security alerts"),
+        ("📋∅", "no PRRD"), ("✎N", "N uncommitted"),
+        ("🔴", "blocked TRDD(s)"), ("📋N", "open kanban (N TRDDs)"),
+    ]
+    chips = "".join(
+        '<span class="lg">' + e + " " + html.escape(t) + "</span>" for e, t in emojis
+    )
+    note = (
+        "<code>—</code> = not externally observable / not-yet-instrumented. "
+        "<b>loc sec scan</b> = most-recent run of the janitor's continuous security "
+        "detectors (findings surface live, not persisted per-run). <b>gh sec</b> / "
+        "<b>CI</b> / <b>up-to-date</b> need <code>--ci</code>"
+        + ("" if want_ci else " (omitted this run)") + ". Deferred to Group-F: "
+        "per-run security outcome, plugin-validation status, last-nudge, "
+        "next-job-in-queue, memgrep errors, last-push. Click a <b>📋 kanban</b> badge "
+        "to open that project's TRDD board — the <b>blocked</b> lane is full red."
+    )
+    return chips + "<br>" + note
+
+
+def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
+    body: list[str] = []
+    kb_data: list[dict] = []
+    for idx, r in enumerate(rows):
+        kb = r.get("kanban", {})
+        kb_data.append({"proj": r["proj"], "cols": kb})
+        total = sum(len(v) for v in kb.values())
+        cls = _row_class(r["diag"], r["active"] == "yes")
+        tds: list[str] = []
+        for k, _ in _COLUMNS:
+            if k == "flags":
+                tds.append('<td class="flags">' + _flags(r) + "</td>")
+            elif k == "board":
+                if total:
+                    badge = "🔴" if kb.get("blocked") else ("❌" if kb.get("failed") else "")
+                    tds.append(
+                        '<td><button class="kbtn" onclick="openKb(' + str(idx)
+                        + ')">📋 ' + str(total) + badge + "</button></td>"
+                    )
+                else:
+                    tds.append('<td class="muted">—</td>')
+            else:
+                tds.append("<td>" + html.escape(str(r.get(k, "—"))) + "</td>")
+        body.append('<tr class="' + cls + '">' + "".join(tds) + "</tr>")
+    headers = "".join("<th>" + html.escape(lbl) + "</th>" for _, lbl in _COLUMNS)
+    out = (
+        _HTML_TEMPLATE
+        .replace("@@SUMMARY@@", html.escape(summary))
+        .replace("@@GEN@@", time.strftime("%Y-%m-%d %H:%M:%S %z"))
+        .replace("@@HEADERS@@", headers)
+        .replace("@@ROWS@@", "".join(body))
+        .replace("@@LEGEND@@", _legend_html(want_ci))
+        .replace("@@KBDATA@@", json.dumps(kb_data, ensure_ascii=False))
+        .replace("@@ORDER@@", json.dumps(list(_KANBAN_ORDER)))
+        .replace("@@ALERT@@", json.dumps(_KANBAN_ALERT, ensure_ascii=False))
+    )
+    return _write_temp(out)
 
 
 def _write_temp(content: str) -> str:
