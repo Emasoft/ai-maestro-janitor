@@ -185,6 +185,31 @@ _KANBAN_ORDER = (
 # Columns that demand attention — used to color the lane + flag the project badge.
 _KANBAN_ALERT = {"blocked": "🔴", "failed": "❌", "refused": "🚫", "superseded": "⚰️"}
 
+# Per-lane tooltip (hover a kanban column header to see what the status means).
+_KANBAN_COLTIP = {
+    "proposal": "Authored, awaiting approval (design/proposals/)",
+    "backburner": "Proto-TRDD parking lot",
+    "todo": "Promoted by MANAGER, awaiting design",
+    "design": "ARCHITECT shaping proto → full TRDD (may 1→N split)",
+    "dispatch": "Designed; awaiting an assignee",
+    "dev": "Assignee implementing (new code OR fixes)",
+    "testing": "Tests + audits running; failures bounce to dev",
+    "ai_review": "Code review by AI agents",
+    "human_review": "Human eyes required",
+    "complete": "Requirements met + tested; not yet shipped",
+    "publish": "Actively publishing the tool / package",
+    "published": "Terminal: users can install the version with this work",
+    "deploy": "Actively deploying the service",
+    "live": "Terminal: real traffic reaches this code",
+    "live_auditing": "Post-deploy soak / live investigation",
+    "blocked": "🔴 RED — blocked-by is non-empty; cannot proceed",
+    "failed": "Terminal: abandoned with a post-mortem",
+    "superseded": "Terminal: replaced by split/group children",
+    "cancelled": "Withdrawn — the work is no longer wanted",
+    "refused": "A proposal that was NEVER approved (design/refused/)",
+    "archived": "Once-approved, now terminal (design/archived/)",
+}
+
 
 def _trdd_meta(path: Path) -> dict[str, str]:
     """Parse the grep-first frontmatter head of a TRDD (column, title, trdd-id,
@@ -350,7 +375,45 @@ _DIAG_EMOJI = {
     "healthy": "🟢", "frozen": "🧟❄️", "cron_dead": "🔁💀",
     "version_mismatch": "🔄", "unarmed": "🔇", "dead": "⚰️",
 }
+_DIAG_TIP = {
+    "healthy": "healthy — transcript advancing (working OR heartbeat firing); never touched",
+    "frozen": "FROZEN — rate-limited + transcript silent (the overnight-freeze shape) → recovery ladder",
+    "cron_dead": "CRON DEAD — heartbeat not firing and no work; the in-session cron died → re-arm",
+    "version_mismatch": "VERSION MISMATCH — running an older janitor than cached → reload",
+    "unarmed": "unarmed — a disarmed.flag is present (user opted out) → sacrosanct, never touched",
+    "dead": "dead — the process/pane is gone",
+}
 _CI_BAD = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
+# Columns whose values can be long (log lines, messages) — these cells WRAP onto
+# multiple lines (white-space:normal + max-width) instead of forcing a wide table.
+_WRAP_COLS = {"last_job", "last_err", "wait", "repo", "model"}
+
+# Per-column header tooltips (hover any column title to see what it means).
+_COL_TIPS = {
+    "flags": "At-a-glance attention flags — hover each icon. The first is the janitor diagnosis.",
+    "board": "Open this project's TRDD kanban board (count = total TRDDs).",
+    "pid": "OS process id of the running claude instance.",
+    "proj": "Project folder (basename); the janitor maps each claude process to its .janitor project by cwd.",
+    "model": "Model id from the session's newest transcript (best-effort tail-read).",
+    "branch": "Current git branch of the project.",
+    "repo": "GitHub repo (owner/name) from the origin remote.",
+    "armed": "Is the janitor heartbeat armed here? (heartbeat-armed-at.ts present)",
+    "active": "Is the session actively working? (transcript advanced in the last 5 min)",
+    "cron": "Heartbeat liveness, derived from the transcript: alive / DEAD / alive (busy).",
+    "wait": "What the session is waiting on (rate-limit, dead cron, ending a turn, …).",
+    "dispatch": "Age of the last dispatch.log entry — INFORMATIONAL ONLY (liveness uses the transcript).",
+    "started": "When the claude process started (ps lstart).",
+    "total": "Process uptime (ps etime).",
+    "uncommitted": "Count of uncommitted files (git status --porcelain).",
+    "ci": "Conclusion of the latest GitHub Actions run (needs --ci).",
+    "ghsec": "Open GitHub code-scanning security alerts (needs --ci).",
+    "locsec": "Most-recent run of the janitor's continuous local security detectors.",
+    "prrd": "PRRD status: version of design/requirements/PRRD.md, or 'none'.",
+    "proj_mem": "PROJECT-scope wikimem page count (git-tracked, shared: .claude/project/memory/).",
+    "local_mem": "LOCAL-scope wikimem page count (machine-private: ~/.claude/projects/<slug>/memory/).",
+    "last_job": "Last line written to the janitor dispatch.log (last notable heartbeat event).",
+    "last_err": "Last line written to stop-failure.log (last rate-limit / turn-death capture).",
+}
 
 
 def _row_class(diag: str, active: bool) -> str:
@@ -361,28 +424,36 @@ def _row_class(diag: str, active: bool) -> str:
     return "active" if active else "idle"
 
 
+def _flag_span(emoji: str, tip: str) -> str:
+    """One status icon wrapped in a tooltip span."""
+    return '<span title="' + html.escape(tip) + '">' + emoji + "</span>"
+
+
 def _flags(r: dict) -> str:
-    """At-a-glance attention emojis for one instance — what needs eyes NOW."""
-    out = [_DIAG_EMOJI.get(r["diag"], "❔")]
+    """At-a-glance attention icons for one instance — each carries its own tooltip."""
+    diag = str(r["diag"])
+    spans = [_flag_span(_DIAG_EMOJI.get(diag) or "❔", _DIAG_TIP.get(diag) or diag)]
     if r["armed"] == "no":
-        out.append("⚠️unarmed")
+        spans.append(_flag_span("⚠️", "janitor NOT armed in this project — needs /janitor-arm"))
     if r["ci"] in _CI_BAD:
-        out.append("❌CI")
+        spans.append(_flag_span("❌", "latest CI run failed (" + r["ci"] + ")"))
     if r["prrd"] == "none":
-        out.append("📋∅")
+        spans.append(_flag_span("📋∅", "no PRRD — design/requirements/PRRD.md is missing"))
     if r["ghsec"] not in ("—", "0 open"):
-        out.append("🔒" + r["ghsec"])
+        spans.append(_flag_span("🔒", "open GitHub security alerts: " + r["ghsec"]))
     try:
         if int(r["uncommitted"]) > 0:
-            out.append("✎" + r["uncommitted"])
+            spans.append(_flag_span("✎" + r["uncommitted"], r["uncommitted"] + " uncommitted file(s)"))
     except (ValueError, TypeError):
         pass
     kb = r.get("kanban", {})
     if kb.get("blocked"):
-        out.append("🔴blocked×" + str(len(kb["blocked"])))
+        n = str(len(kb["blocked"]))
+        spans.append(_flag_span("🔴" + n, n + " BLOCKED TRDD(s) — open the kanban to see them"))
     if kb.get("failed"):
-        out.append("❌fail×" + str(len(kb["failed"])))
-    return " ".join(out)
+        n = str(len(kb["failed"]))
+        spans.append(_flag_span("❌" + n, n + " failed TRDD(s)"))
+    return " ".join(spans)
 
 
 # Template with @@PLACEHOLDERS@@ (NOT an f-string) so the CSS/JS braces stay
@@ -391,17 +462,26 @@ def _flags(r: dict) -> str:
 # a fixed-viewport application surface, so its OWN h+v scrollbars are allowed.
 _HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
 <title>Janitor global status</title><style>
-html,body{overflow-x:auto;margin:0;padding:16px;background:#0d1117;color:#c9d1d9;
+html,body{overflow-x:auto;margin:0;padding:22px;background:#0d1117;color:#c9d1d9;
 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-h1{font-size:18px;margin:0 0 4px} .sum{font-size:12px;color:#8b949e;margin-bottom:12px}
+h1{font-size:27px;font-weight:800;margin:0 0 8px;letter-spacing:.3px}
+.sum{font-size:13px;color:#9da7b3;margin-bottom:16px;font-style:italic}
 table{border-collapse:collapse;max-width:none}
-th,td{border:1px solid #30363d;padding:3px 8px;white-space:nowrap;font-size:12px;
-font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-th{position:sticky;top:0;background:#161b22;text-align:left;z-index:2}
-td.flags{font-size:13px}
-tr.broken td{background:#3d1418} tr.broken td:first-child{border-left:3px solid #f85149}
-tr.active td{background:#0d2818} tr.idle td{background:#161b22}
+/* thicker white grid + generous padding; cells top-align so wrapped rows read well */
+th,td{border:1.5px solid rgba(255,255,255,.5);padding:9px 13px;white-space:nowrap;
+font-size:12.5px;vertical-align:top;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+th{position:sticky;top:0;background:#1b2230;text-align:left;z-index:2;font-weight:800;
+font-size:12px;text-transform:uppercase;letter-spacing:.5px;
+font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+td.flags{font-size:15px;white-space:normal;max-width:240px;line-height:1.7}
+/* long values (log lines, messages) wrap onto multiple italic lines */
+td.wrap{white-space:normal;max-width:340px;font-style:italic;color:#9da7b3;line-height:1.45}
+td b{font-weight:800;color:#ff7b72}
+tr.broken td{background:#3d1418} tr.broken td:first-child{border-left:4px solid #f85149}
+tr.active td{background:#0d2818} tr.active td:first-child{border-left:4px solid #2ea043}
+tr.idle td{background:#161b22}
 tr.unarmed td{background:#21262d;color:#6e7681}
+tr.unarmed td:first-child{border-left:4px solid #6e7681}
 .kbtn{background:#1f6feb;color:#fff;border:0;border-radius:4px;padding:2px 8px;
 cursor:pointer;font-size:11px} .kbtn:hover{background:#388bfd} .muted{color:#6e7681}
 .legend{font-size:11px;color:#8b949e;margin-top:14px;line-height:1.8}
@@ -412,7 +492,7 @@ align-items:center;justify-content:center}
 .kbwin{background:#0d1117;border:1px solid #30363d;border-radius:8px;width:94vw;
 height:90vh;display:flex;flex-direction:column;padding:12px;box-shadow:0 8px 40px #000}
 .kbhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.kbhead h2{font-size:15px;margin:0}
+.kbhead h2{font-size:19px;font-weight:800;margin:0;letter-spacing:.3px}
 .kbx{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;
 padding:3px 10px;cursor:pointer}
 .kbboard{display:flex;gap:8px;overflow:auto;flex:1;align-items:flex-start}
@@ -436,16 +516,17 @@ white-space:normal} .lane.blocked .card{background:#7a1c22;border-color:#f85149}
   <button class="kbx" onclick="closeKb()">✕ close</button></div>
   <div class="kbboard" id="kbboard"></div></div></div>
 <script>
-var KB=@@KBDATA@@, ORDER=@@ORDER@@, ALERT=@@ALERT@@;
+var KB=@@KBDATA@@, ORDER=@@ORDER@@, ALERT=@@ALERT@@, COLTIP=@@COLTIP@@;
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function openKb(i){
   var d=KB[i], h='';
   for(var k=0;k<ORDER.length;k++){
     var col=ORDER[k], cards=(d.cols[col]||[]);
-    h+='<div class="'+(col==='blocked'?'lane blocked':'lane')+'"><div class="laneh">'
-       +(ALERT[col]||'')+' '+col+' ('+cards.length+')</div>';
+    h+='<div class="'+(col==='blocked'?'lane blocked':'lane')+'" title="'+esc(COLTIP[col]||col)
+       +'"><div class="laneh">'+(ALERT[col]||'')+' '+col+' ('+cards.length+')</div>';
     for(var j=0;j<cards.length;j++){var c=cards[j];
-      h+='<div class="card sev-'+(c.sev||'')+'">'+esc(c.title)
+      var ct=(c.sev?c.sev+' · ':'')+c.title+(c.id?' ('+c.id+')':'');
+      h+='<div class="card sev-'+(c.sev||'')+'" title="'+esc(ct)+'">'+esc(c.title)
          +'<div class="cid">'+(c.id||'')+'</div></div>';}
     h+='</div>';
   }
@@ -493,22 +574,32 @@ def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
         total = sum(len(v) for v in kb.values())
         cls = _row_class(r["diag"], r["active"] == "yes")
         tds: list[str] = []
-        for k, _ in _COLUMNS:
+        for k, lbl in _COLUMNS:
             if k == "flags":
-                tds.append('<td class="flags">' + _flags(r) + "</td>")
+                tds.append('<td class="flags" title="Attention flags — hover each icon">' + _flags(r) + "</td>")
             elif k == "board":
                 if total:
                     badge = "🔴" if kb.get("blocked") else ("❌" if kb.get("failed") else "")
+                    btip = html.escape("Open the TRDD kanban for " + r["proj"] + " (" + str(total) + " tasks)")
                     tds.append(
-                        '<td><button class="kbtn" onclick="openKb(' + str(idx)
+                        '<td><button class="kbtn" title="' + btip + '" onclick="openKb(' + str(idx)
                         + ')">📋 ' + str(total) + badge + "</button></td>"
                     )
                 else:
-                    tds.append('<td class="muted">—</td>')
+                    tds.append('<td class="muted" title="No TRDDs in design/ for this project">—</td>')
             else:
-                tds.append("<td>" + html.escape(str(r.get(k, "—"))) + "</td>")
+                val = str(r.get(k, "—"))
+                tip = html.escape(_COL_TIPS.get(k, lbl) + "  —  " + val)
+                disp = html.escape(val)
+                if k == "cron" and val.startswith("DEAD"):
+                    disp = "<b>" + disp + "</b>"  # bold-red the dead-heartbeat cells
+                cls_attr = ' class="wrap"' if k in _WRAP_COLS else ""
+                tds.append("<td" + cls_attr + ' title="' + tip + '">' + disp + "</td>")
         body.append('<tr class="' + cls + '">' + "".join(tds) + "</tr>")
-    headers = "".join("<th>" + html.escape(lbl) + "</th>" for _, lbl in _COLUMNS)
+    headers = "".join(
+        '<th title="' + html.escape(_COL_TIPS.get(k, lbl)) + '">' + html.escape(lbl) + "</th>"
+        for k, lbl in _COLUMNS
+    )
     out = (
         _HTML_TEMPLATE
         .replace("@@SUMMARY@@", html.escape(summary))
@@ -519,6 +610,7 @@ def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
         .replace("@@KBDATA@@", json.dumps(kb_data, ensure_ascii=False))
         .replace("@@ORDER@@", json.dumps(list(_KANBAN_ORDER)))
         .replace("@@ALERT@@", json.dumps(_KANBAN_ALERT, ensure_ascii=False))
+        .replace("@@COLTIP@@", json.dumps(_KANBAN_COLTIP, ensure_ascii=False))
     )
     return _write_temp(out)
 
