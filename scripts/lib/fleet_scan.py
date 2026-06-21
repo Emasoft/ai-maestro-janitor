@@ -1,0 +1,264 @@
+"""Daemon-side fleet scanner (TRDD-324223a6) — find EVERY running claude instance
+and diagnose its janitor's health from OUTSIDE it.
+
+The 2026-06-20→21 freeze was not one session — a live scan found 23 running
+claude instances on this host, 15 with a broken janitor (frozen, or a dead
+heartbeat stale for up to 23h). The mandate: the janitor must guard the whole
+fleet — re-arm a dead cron, reload a version-mismatch, run the freeze ladder —
+from outside, regardless of terminal env, leaving only deliberately-unarmed
+instances alone.
+
+This module is the daemon's eyes. The PARSERS are pure (tested against captured
+tool output, no mocks); ``gather_fleet`` runs the subprocesses (ps / lsof / tmux
+/ osascript) and composes them with the pure decision functions in
+``session_liveness``. Crucially it resolves each instance's terminal by its live
+TTY — NOT by a recorded id — so it can reach even an OLD/zombie instance whose
+janitor predates ``terminal-identity.json``. The daemon (which has no session
+env of its own) could never do this from inside a session.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from dataclasses import dataclass
+
+import session_liveness
+
+# A healthy heartbeat dispatches well within this window. The daemon gives a
+# just-started session this long before treating a missing/stale dispatch.log as
+# a dead cron — so a fresh session is never flagged mid-startup. (The in-session
+# heartbeat cadence is 5 min; 3× that absorbs a slow tick or a brief throttle.)
+DISPATCH_FRESH_S = 15 * 60
+
+# Read each iTerm session's controlling TTY + stable session id. Read-only — it
+# never brings a window to front and never relaunches iTerm (the caller only runs
+# it when iTerm is already in the process table). The id matches the daemon's
+# osascript inject filter (`if (id of s) is "<uuid>"`).
+_ITERM_TTY_OSASCRIPT = (
+    'tell application "iTerm2"\n'
+    "  set out to \"\"\n"
+    "  repeat with w in windows\n"
+    "    repeat with t in tabs of w\n"
+    "      repeat with s in sessions of t\n"
+    "        set out to out & (tty of s) & tab & (id of s) & linefeed\n"
+    "      end repeat\n"
+    "    end repeat\n"
+    "  end repeat\n"
+    "  return out\n"
+    "end tell"
+)
+
+
+@dataclass(frozen=True)
+class Instance:
+    """One running claude instance + its diagnosed janitor health. ``terminal`` is
+    the injection identity resolved from the live TTY (``{tmux_pane?,
+    iterm_session_id?}``); empty means the daemon cannot reach this pane by
+    keystroke (resolution failed — e.g. a terminal we don't drive)."""
+
+    pid: int
+    command: str
+    tty: str
+    project_root: str | None
+    terminal: dict[str, str]
+    diagnosis: str
+    recovery: str | None
+    dispatch_age_s: int | None
+
+
+def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
+    """``(pid, normalized_tty, command)`` for every claude process in
+    ``ps -eo pid=,tty=,command=`` output. A claude process = argv[0] basename
+    ``claude`` OR a ``/share/claude/versions/`` launcher path in the cmdline
+    (the two shapes the real install presents). Malformed rows are skipped."""
+    out: list[tuple[int, str, str]] = []
+    for ln in ps_text.splitlines():
+        if not ln.strip():
+            continue
+        parts = ln.split(None, 2)  # pid, tty, command (command keeps its spaces)
+        if len(parts) < 3:
+            continue
+        pid_s, tty_s, cmd = parts
+        try:
+            pid = int(pid_s)
+        except ValueError:
+            continue
+        toks = cmd.split()
+        first = toks[0] if toks else ""
+        if os.path.basename(first) == "claude" or "/share/claude/versions/" in cmd:
+            out.append((pid, session_liveness.normalize_tty(tty_s), cmd))
+    return out
+
+
+def parse_iterm_sessions(text: str) -> dict[str, str]:
+    """``{normalized_tty: iterm_session_id}`` from the osascript dump of
+    ``tty<TAB>session_id`` lines. Rows without both fields are skipped."""
+    out: dict[str, str] = {}
+    for ln in text.splitlines():
+        if "\t" not in ln:
+            continue
+        tty_s, sid = ln.split("\t", 1)
+        tty = session_liveness.normalize_tty(tty_s.strip())
+        sid = sid.strip()
+        if tty and sid:
+            out[tty] = sid
+    return out
+
+
+def parse_tmux_panes(text: str) -> dict[str, str]:
+    """``{normalized_tty: pane_id}`` from
+    ``tmux list-panes -a -F '#{pane_tty} #{pane_id}'``."""
+    out: dict[str, str] = {}
+    for ln in text.splitlines():
+        toks = ln.split()
+        if len(toks) < 2:
+            continue
+        tty = session_liveness.normalize_tty(toks[0])
+        if tty and toks[1]:
+            out[tty] = toks[1]
+    return out
+
+
+def find_janitor_root(cwd: str | None) -> str | None:
+    """Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
+    project where the janitor is/was active). ``None`` if ``cwd`` is unset or no
+    ancestor qualifies — a claude running where the janitor never ran is not our
+    concern (its SessionStart hook will set it up)."""
+    if not cwd:
+        return None
+    d = os.path.realpath(cwd)
+    for _ in range(8):  # bounded walk — never loop on a pathological tree
+        if os.path.isdir(os.path.join(d, ".janitor")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
+def _age(path: str, now: int) -> int | None:
+    """Seconds since ``path`` was last modified, or ``None`` if it does not exist."""
+    try:
+        return now - int(os.path.getmtime(path))
+    except OSError:
+        return None
+
+
+def diagnose_root(
+    root: str, *, now: int, fresh_s: int = DISPATCH_FRESH_S
+) -> tuple[str, str | None, int | None]:
+    """Read a project's ``.janitor`` state and diagnose its janitor health.
+    Returns ``(diagnosis, recovery, dispatch_age_s)``.
+
+    The opt-out is POSITIVE: only a ``disarmed.flag`` (written by
+    ``/janitor-disarm``) marks an instance ``deliberately_unarmed`` and therefore
+    sacrosanct. A merely-absent ``heartbeat-armed-at.ts`` is NOT proof of intent —
+    it could be a lapsed arm — so an un-armed, non-disarmed instance is treated as
+    a dead cron to re-arm, which is exactly what the user wants guarded.
+    """
+    sdir = os.path.join(root, ".janitor", "state")
+    ldir = os.path.join(root, ".janitor", "logs")
+    deliberately_unarmed = os.path.isfile(os.path.join(sdir, "disarmed.flag"))
+    rate_limited = os.path.isfile(os.path.join(sdir, "rate-limited.flag"))
+    dispatch_age = _age(os.path.join(ldir, "dispatch.log"), now)
+    dispatch_stale = dispatch_age is None or dispatch_age >= fresh_s
+    frozen = rate_limited and dispatch_stale
+    diagnosis = session_liveness.diagnose_instance(
+        deliberately_unarmed=deliberately_unarmed,
+        pane_alive=True,  # the caller only diagnoses processes found alive in ps
+        frozen=frozen,
+        version_stale=False,  # v1: cross-process version compare deferred (Group C)
+        dispatch_stale=dispatch_stale,
+    )
+    return diagnosis, session_liveness.recovery_for_diagnosis(diagnosis), dispatch_age
+
+
+def _run(cmd: list[str], *, timeout: int = 10) -> str:
+    """Run a read-only probe; never raise. Empty string on any failure/timeout."""
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout
+        ).stdout
+    except Exception:  # noqa: BLE001 -- a probe failure must never break the scan
+        return ""
+
+
+def _cwd_of(pid: int) -> str | None:
+    """The working directory of ``pid`` via ``lsof`` (macOS-friendly), or None."""
+    for line in _run(
+        ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], timeout=8
+    ).splitlines():
+        if line.startswith("n"):
+            return line[1:]
+    return None
+
+
+def gather_fleet(*, now: int) -> list[Instance]:
+    """Scan the whole host: every running claude instance whose cwd resolves to a
+    ``.janitor`` project, with its terminal (by TTY) and diagnosed janitor health.
+
+    Pure-ish I/O: one ``ps``, one ``tmux``, at most one ``osascript`` (only if
+    iTerm is actually running — so we NEVER relaunch a closed iTerm), and one
+    ``lsof`` per claude pid. Instances outside a janitor project are skipped.
+    """
+    ps_text = _run(["ps", "-eo", "pid=,tty=,command="])
+    claude = parse_ps_claude(ps_text)
+    tmux_by_tty = parse_tmux_panes(
+        _run(["tmux", "list-panes", "-a", "-F", "#{pane_tty} #{pane_id}"])
+    )
+    iterm_by_tty: dict[str, str] = {}
+    if "iTerm" in ps_text:  # only drive osascript when iTerm is already up
+        iterm_by_tty = parse_iterm_sessions(
+            _run(["osascript", "-e", _ITERM_TTY_OSASCRIPT], timeout=15)
+        )
+
+    fleet: list[Instance] = []
+    for pid, tty, cmd in claude:
+        root = find_janitor_root(_cwd_of(pid))
+        if not root:
+            continue
+        diagnosis, recovery, dispatch_age = diagnose_root(root, now=now)
+        terminal = session_liveness.resolve_terminal_for_tty(
+            tty, iterm_by_tty=iterm_by_tty, tmux_by_tty=tmux_by_tty
+        )
+        fleet.append(
+            Instance(
+                pid=pid,
+                command=cmd,
+                tty=tty,
+                project_root=root,
+                terminal=terminal,
+                diagnosis=diagnosis,
+                recovery=recovery,
+                dispatch_age_s=dispatch_age,
+            )
+        )
+    return fleet
+
+
+def _main() -> int:
+    """Live diagnostic: print the fleet, one line per instance. Read-only."""
+    import time
+
+    fleet = gather_fleet(now=int(time.time()))
+    broken = [i for i in fleet if i.recovery is not None]
+    print(f"fleet: {len(fleet)} janitor-project claude instance(s), {len(broken)} need recovery\n")
+    for inst in fleet:
+        chan = (
+            "tmux:" + inst.terminal["tmux_pane"]
+            if "tmux_pane" in inst.terminal
+            else "iterm:" + inst.terminal["iterm_session_id"]
+            if "iterm_session_id" in inst.terminal
+            else "UNREACHABLE"
+        )
+        age = f"{inst.dispatch_age_s // 60}m" if inst.dispatch_age_s is not None else "none"
+        rec = inst.recovery or "—"
+        print(f"  pid {inst.pid:>6}  {inst.diagnosis:<16} → {rec:<9} [{chan}]  dispatch {age}")
+        print(f"          {inst.project_root}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

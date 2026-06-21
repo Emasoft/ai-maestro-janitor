@@ -211,3 +211,41 @@ def recovery_for_diagnosis(diagnosis: str) -> str | None:
     (`unarmed` / `healthy`). Unknown diagnoses are treated as 'leave alone' —
     fail safe: we never invent an action for a state we don't recognize."""
     return _DIAGNOSIS_RECOVERY.get(diagnosis)
+
+
+def normalize_tty(raw: str) -> str:
+    """Normalize a TTY name to a comparable key (the device basename, e.g.
+    ``ttys003``). `ps -o tty=` reports ``s003`` (no ``tty`` prefix) on macOS,
+    while `lsof` and iTerm report ``/dev/ttys003`` — all three must compare equal
+    so a claude process's controlling TTY matches its terminal's TTY. Empty / no
+    controlling tty (``?``, ``-``) returns ``""``."""
+    t = (raw or "").strip()
+    if not t or t in ("?", "??", "-"):
+        return ""
+    if t.startswith("/dev/"):
+        t = t[len("/dev/"):]
+    if t.startswith("s") and not t.startswith("tty"):  # ps drops the 'tty' prefix
+        t = "tty" + t
+    return t
+
+
+def resolve_terminal_for_tty(
+    tty: str, *, iterm_by_tty: dict[str, str], tmux_by_tty: dict[str, str]
+) -> dict[str, str]:
+    """Resolve a process's terminal-injection identity from its (normalized) TTY,
+    using OS-gathered lookups — WITHOUT relying on the session having recorded its
+    own id. This is the load-bearing fleet-rescue path: the broken/zombie
+    instances run an OLD janitor that never wrote ``terminal-identity.json``, so
+    the only way to reach them is to map their live TTY to a terminal the daemon
+    can drive. Returns ``{tmux_pane?, iterm_session_id?}`` — tmux first (the
+    cleanest external channel) but both kept when a TTY resolves in both."""
+    out: dict[str, str] = {}
+    if not tty:
+        return out
+    pane = tmux_by_tty.get(tty)
+    if pane:
+        out["tmux_pane"] = pane
+    sid = iterm_by_tty.get(tty)
+    if sid:
+        out["iterm_session_id"] = sid
+    return out

@@ -182,3 +182,29 @@ def test_diagnose_recovery_mapping() -> None:
     assert sl.recovery_for_diagnosis("dead") == "relaunch"
     assert sl.recovery_for_diagnosis("healthy") is None
     assert sl.recovery_for_diagnosis("unknown_state") is None
+
+
+def test_normalize_tty_variants() -> None:
+    """ps ('s003'), lsof/iTerm ('/dev/ttys003'), and a bare 'ttys003' must all
+    compare EQUAL — that cross-source match is what lets the daemon map a claude
+    process's TTY to its terminal for a fleet rescue."""
+    assert sl.normalize_tty("/dev/ttys003") == "ttys003"
+    assert sl.normalize_tty("ttys003") == "ttys003"
+    assert sl.normalize_tty("s003") == "ttys003"
+    assert sl.normalize_tty("  /dev/ttys012  ") == "ttys012"
+    assert sl.normalize_tty("?") == ""
+    assert sl.normalize_tty("") == ""
+
+
+def test_resolve_terminal_for_tty() -> None:
+    """A process's TTY resolves to its terminal id WITHOUT the session having
+    recorded anything — the only path to an old/zombie instance running a janitor
+    too old to have written terminal-identity.json."""
+    iterm = {"ttys003": "w0t1p0:UUID"}
+    tmux = {"ttys004": "%5"}
+    assert sl.resolve_terminal_for_tty("ttys003", iterm_by_tty=iterm, tmux_by_tty=tmux) == {"iterm_session_id": "w0t1p0:UUID"}
+    assert sl.resolve_terminal_for_tty("ttys004", iterm_by_tty=iterm, tmux_by_tty=tmux) == {"tmux_pane": "%5"}
+    both = sl.resolve_terminal_for_tty("ttysX", iterm_by_tty={"ttysX": "u"}, tmux_by_tty={"ttysX": "%9"})
+    assert both == {"tmux_pane": "%9", "iterm_session_id": "u"}
+    assert sl.resolve_terminal_for_tty("", iterm_by_tty=iterm, tmux_by_tty=tmux) == {}
+    assert sl.resolve_terminal_for_tty("ttysZ", iterm_by_tty=iterm, tmux_by_tty=tmux) == {}
