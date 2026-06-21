@@ -63,9 +63,9 @@ def test_find_janitor_root(tmp_path: Path) -> None:
 
 
 def test_diagnose_root_health_progression(tmp_path: Path) -> None:
-    """Real .janitor state → the right diagnosis at each stage: fresh dispatch =
-    healthy; stale = cron_dead→rearm; +rate-limit = frozen→ladder; +disarm =
-    unarmed→leave alone (sacrosanct even though stale+rate-limited)."""
+    """Real .janitor state, IDLE session → the right diagnosis at each stage:
+    fresh dispatch = healthy; stale = cron_dead→rearm; +rate-limit = frozen→ladder;
+    +disarm = unarmed→leave alone (sacrosanct even though stale+rate-limited)."""
     root = tmp_path / "p"
     sdir = root / ".janitor" / "state"
     ldir = root / ".janitor" / "logs"
@@ -76,22 +76,39 @@ def test_diagnose_root_health_progression(tmp_path: Path) -> None:
     dispatch.write_text("x")
 
     os.utime(dispatch, (now - 60, now - 60))  # fresh
-    assert fs.diagnose_root(str(root), now=now)[:2] == ("healthy", None)
+    assert fs.diagnose_root(str(root), now=now, active=False)[:2] == ("healthy", None)
 
     os.utime(dispatch, (now - 3600, now - 3600))  # 1h stale
-    assert fs.diagnose_root(str(root), now=now)[:2] == ("cron_dead", "rearm")
+    assert fs.diagnose_root(str(root), now=now, active=False)[:2] == ("cron_dead", "rearm")
 
     (sdir / "rate-limited.flag").write_text("")
-    assert fs.diagnose_root(str(root), now=now)[:2] == ("frozen", "ladder")
+    assert fs.diagnose_root(str(root), now=now, active=False)[:2] == ("frozen", "ladder")
 
     (sdir / "disarmed.flag").write_text("")  # user opted out → sacrosanct
-    assert fs.diagnose_root(str(root), now=now)[:2] == ("unarmed", None)
+    assert fs.diagnose_root(str(root), now=now, active=False)[:2] == ("unarmed", None)
+
+
+def test_diagnose_root_active_session_is_healthy_despite_stale(tmp_path: Path) -> None:
+    """A busy session (active=True) with a 1h-stale dispatch AND a rate-limit flag
+    is HEALTHY — its heartbeat is queued behind the live turn; never nudge it.
+    The exact false positive the dashboard surfaced on the real fleet."""
+    root = tmp_path / "p"
+    sdir = root / ".janitor" / "state"
+    ldir = root / ".janitor" / "logs"
+    sdir.mkdir(parents=True)
+    ldir.mkdir(parents=True)
+    now = 1_000_000
+    dispatch = ldir / "dispatch.log"
+    dispatch.write_text("x")
+    os.utime(dispatch, (now - 3600, now - 3600))
+    (sdir / "rate-limited.flag").write_text("")
+    assert fs.diagnose_root(str(root), now=now, active=True)[:2] == ("healthy", None)
 
 
 def test_diagnose_root_missing_dispatch_log_is_cron_dead(tmp_path: Path) -> None:
-    """An armed project that has NEVER dispatched (no dispatch.log) is a dead
+    """An armed IDLE project that has NEVER dispatched (no dispatch.log) is a dead
     cron, not healthy — the absence of progress is itself the signal."""
     root = tmp_path / "p"
     (root / ".janitor" / "state").mkdir(parents=True)
     (root / ".janitor" / "logs").mkdir(parents=True)
-    assert fs.diagnose_root(str(root), now=1_000_000)[:2] == ("cron_dead", "rearm")
+    assert fs.diagnose_root(str(root), now=1_000_000, active=False)[:2] == ("cron_dead", "rearm")

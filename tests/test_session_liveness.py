@@ -156,16 +156,27 @@ def test_diagnose_instance_unarmed_is_sacrosanct() -> None:
     """A deliberately-unarmed instance is NEVER touched, even when every other
     signal screams broken — the user opted out and that overrides everything."""
     assert sl.diagnose_instance(
-        deliberately_unarmed=True, pane_alive=True, frozen=True,
+        deliberately_unarmed=True, pane_alive=True, frozen=True, active=False,
         version_stale=True, dispatch_stale=True,
     ) == "unarmed"
     assert sl.recovery_for_diagnosis("unarmed") is None
 
 
+def test_diagnose_instance_active_session_is_never_touched() -> None:
+    """A busy session (transcript advancing) is healthy even with a stale dispatch
+    and a stale version — its heartbeat is just queued behind the live turn, and
+    nudging it would corrupt real work. THE load-bearing false-positive guard."""
+    assert sl.diagnose_instance(
+        deliberately_unarmed=False, pane_alive=True, frozen=False, active=True,
+        version_stale=True, dispatch_stale=True,
+    ) == "healthy"
+
+
 def test_diagnose_instance_precedence() -> None:
-    """Most-severe/actionable wins: dead > frozen > version_mismatch > cron_dead >
-    healthy. This is the fleet-guardian's whole decision table."""
-    base = {"deliberately_unarmed": False}
+    """Most-severe/actionable wins: dead > frozen > active(healthy) >
+    version_mismatch > cron_dead > healthy. This is the fleet-guardian's whole
+    decision table."""
+    base = {"deliberately_unarmed": False, "active": False}
     assert sl.diagnose_instance(**base, pane_alive=False, frozen=True, version_stale=True, dispatch_stale=True) == "dead"
     assert sl.diagnose_instance(**base, pane_alive=True, frozen=True, version_stale=True, dispatch_stale=True) == "frozen"
     assert sl.diagnose_instance(**base, pane_alive=True, frozen=False, version_stale=True, dispatch_stale=True) == "version_mismatch"

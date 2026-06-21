@@ -181,6 +181,7 @@ def diagnose_instance(
     deliberately_unarmed: bool,
     pane_alive: bool,
     frozen: bool,
+    active: bool,
     version_stale: bool,
     dispatch_stale: bool,
 ) -> str:
@@ -190,19 +191,31 @@ def diagnose_instance(
     tested helpers so this stays a pure precedence table).
 
     Precedence is load-bearing — the most severe / most-actionable wins, and the
-    two "never touch" verdicts (`unarmed`, `healthy`) are what keep the guardian
-    from disrupting a session the user opted out of or one that is working fine.
+    three "never touch" verdicts (`unarmed`, an `active` session, `healthy`) are
+    what keep the guardian from disrupting a session the user opted out of, one
+    that is busy working, or one that is fine.
+
+    `active` (the transcript advanced in the last few minutes) is the critical
+    false-positive guard: a busy session runs ONE turn at a time, so its heartbeat
+    cron is simply QUEUED behind the live turn and `dispatch.log` legitimately
+    goes stale while real work proceeds. Injecting a recovery keystroke there
+    would corrupt that work — so an active session is healthy regardless of a
+    stale dispatch or version (those get fixed when it next goes idle / restarts).
+    `frozen` outranks `active` only because `is_session_frozen` already PROVED no
+    transcript progress, so the two are mutually exclusive by construction.
     """
     if deliberately_unarmed:
         return "unarmed"           # the user opted out — sacrosanct, never touch
     if not pane_alive:
         return "dead"              # gone — keystroke recovery is impossible
     if frozen:
-        return "frozen"            # rate-limited + stuck — the freeze ladder
+        return "frozen"            # rate-limited + PROVED stuck — the freeze ladder
+    if active:
+        return "healthy"           # busy working — heartbeat queued behind the turn; never disrupt
     if version_stale:
-        return "version_mismatch"  # running old code (the 'version mismatch' error)
+        return "version_mismatch"  # idle on old code (the 'version mismatch' error)
     if dispatch_stale:
-        return "cron_dead"         # armed but the heartbeat died — re-arm it
+        return "cron_dead"         # idle + the heartbeat died — re-arm it
     return "healthy"
 
 
