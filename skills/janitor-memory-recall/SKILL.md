@@ -5,6 +5,8 @@ description: RECALL — before working on a file or debugging/deciding, surface 
 
 # Janitor memory — RECALL
 
+> **Read-only.** Recall never edits the corpus — it is always a simple, safe op for any agent. Complex editorial maintenance is the janitor's `janitor-memory-subconscious-agent`, never a recall.
+
 ## Overview
 
 RECALL is the FIND/READ leg of the memory wiki. It does two things the flat-note

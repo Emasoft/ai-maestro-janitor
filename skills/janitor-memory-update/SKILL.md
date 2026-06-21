@@ -5,6 +5,8 @@ description: UPDATE — modify an existing memory WIKI page when something chang
 
 # Janitor memory — UPDATE
 
+> **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY for simple ops: create a new Wikimem page, add ONE atomic memory to an existing page, or update a single fact (correction protocol: clean the fact in place + demote the superseded statement to a dated `[^N]` lesson with its WHY). For COMPLEX re-editing — merging same-subject pages, splitting oversized pages, resolving cross-page contradictions, repairing page shape/metadata, deduplicating, checking/redirecting `[[links]]`, harvesting stray artifacts, or any multi-page reorganization — DO NOT do it yourself: the janitor's **`janitor-memory-subconscious-agent`** (launched async in the background by the heartbeat) owns ALL of it. If you notice such work is needed, just note it and move on; the `memory-maintenance` scheduler dispatches the subconscious agent.
+
 ## Overview
 
 UPDATE is the MODIFY leg of the memory wiki — distinct from MEMORIZE (create a

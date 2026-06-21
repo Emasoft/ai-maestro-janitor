@@ -5,6 +5,11 @@ description: SPLIT executor — breaks ONE oversized wikimem page (over split_ma
 
 # Janitor memory — SPLIT
 
+> **Execution context (TRDD-aebedbff):** the janitor dispatches this pass as a DEDICATED
+> background **opus** agent — you ARE that agent. Run the whole pass here in your own
+> context and return only a one-line result + the report path. A wikimem editorial pass is
+> never run inline in a main session (it must not burden CPV or any other session's context).
+
 ## Overview
 
 SPLIT is the size-triggered editorial leg of the wikimem autonomous librarian. A

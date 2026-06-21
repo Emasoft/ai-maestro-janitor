@@ -11,15 +11,19 @@ deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron tur
 acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
 only EMITS one of five bare markers:
 
-    [janitor-memory-split]       → silently run /janitor-memory-split
-    [janitor-memory-repair]      → silently run /janitor-memory-repair
-    [janitor-memory-harvest]     → silently run /janitor-memory-harvest
-    [janitor-memory-consolidate] → silently run /janitor-memory-consolidate
-    [janitor-memory-conflict]    → silently run /janitor-memory-conflict
+    [janitor-memory-split]       → dispatch a background opus agent: /janitor-memory-split
+    [janitor-memory-repair]      → dispatch a background opus agent: /janitor-memory-repair
+    [janitor-memory-harvest]     → dispatch a background opus agent: /janitor-memory-harvest
+    [janitor-memory-consolidate] → dispatch a background opus agent: /janitor-memory-consolidate
+    [janitor-memory-conflict]    → dispatch a background opus agent: /janitor-memory-conflict
 
 The cron turn (the EXECUTE layer) interprets the marker; this detector cannot
 spawn agents — the "a python detector cannot spawn agents, only the main loop can"
-contract holds through CC 2.1.181. (TRDD-b4b9e27c STATE block.)
+contract holds through CC 2.1.181. (TRDD-b4b9e27c STATE block.) Per TRDD-aebedbff the
+cron turn does NOT run the editorial pass in its own context: it spawns exactly ONE
+background opus agent (Agent tool, run_in_background) that reads & executes the matching
+`janitor-memory-<name>` skill on the due scope and returns, fire-and-forget — so the
+complex, verify-gated pass never burdens whatever main session fired the heartbeat.
 
 Three load-bearing safety properties, each from a CRITICAL correction in the plan:
 

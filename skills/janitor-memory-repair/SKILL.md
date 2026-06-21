@@ -5,6 +5,11 @@ description: REPAIR — the autonomous page-shape / metadata fixer for the memor
 
 # Janitor memory — REPAIR (page-shape / metadata backfill)
 
+> **Execution context (TRDD-aebedbff):** the janitor dispatches this pass as a DEDICATED
+> background **opus** agent — you ARE that agent. Run the whole pass here in your own
+> context and return only a one-line result + the report path. A wikimem editorial pass is
+> never run inline in a main session (it must not burden CPV or any other session's context).
+
 ## What this is
 
 The wikimem corpus accumulates malformed pages: notes the harness `# Memory`

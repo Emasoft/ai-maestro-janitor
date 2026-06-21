@@ -5,6 +5,11 @@ description: HARVEST executor — the daily NON-DESTRUCTIVE chore that re-files 
 
 # Janitor memory — HARVEST (incorporate stray memory artifacts into the wiki)
 
+> **Execution context (TRDD-aebedbff):** the janitor dispatches this pass as a DEDICATED
+> background **opus** agent — you ARE that agent. Run the whole pass here in your own
+> context and return only a one-line result + the report path. A wikimem editorial pass is
+> never run inline in a main session (it must not burden CPV or any other session's context).
+
 ## What this is
 
 The memory index moved entirely into `memgrep` (the agent-invisible SQLite index);
