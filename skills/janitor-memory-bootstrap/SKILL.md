@@ -168,7 +168,8 @@ git -C "$REPO" add .gitignore "$PROJECT_MEM"/*-overview.md "$PROJECT_MEM/MEMORY.
 ## Step 5 — point the agent at the system (the payload of bootstrap)
 
 After the dir exists, tell the agent (and record in your report) that this project
-now USES the memory system, governed by THE PROACTIVE-USE CONTRACT in
+now USES the **Wikimem** (the markdown memory system), governed by THE
+PROACTIVE-USE CONTRACT in
 `~/.claude/rules/markdown-memory-recall.md`:
 
 - **RECALL BEFORE ACTING** — before debugging a recurring problem / a design

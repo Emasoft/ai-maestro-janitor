@@ -166,7 +166,13 @@ confirmations/results via `systemMessage` (user-only); `/janitor-memory-user-sha
 is the sole path using `additionalContext` (which DOES reach the model). Fast
 no-op for any non-user-mem prompt; never crashes the session.
 
-**Skills (`skills/`)** — `janitor-arm` (install stub + arm cron; + `janitor-disarm`),
+**Skills (`skills/`)** — control surface (severity×scope, TRDD-a3fa4d5d): `janitor-arm`
+↔ `janitor-disarm` (local cron true-stop), `janitor-pause` ↔ `janitor-unpause` (local
+suspend, `.janitor/state/paused`), `janitor-global-disarm` ↔ `janitor-global-arm` +
+`janitor-global-pause` ↔ `janitor-global-unpause` (machine-wide, backed by
+`scripts/global_control_cli.py disarm|arm|pause|unpause|status` — kill-switch=disarm
+makes the daemon EXIT, global-pause flag=pause idles it). `janitor-memory-record-recent`
+(user-invoked Wikimem harvest of recent changes — active counterpart of memorize-nudge).
 `janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,
 `janitor-credential-window-audit`, `janitor-github-workflow-doctor`,
 `janitor-github-workflow-create`, `janitor-fork-pr-cache-audit`,
