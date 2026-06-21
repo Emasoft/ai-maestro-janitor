@@ -153,6 +153,25 @@ def kill_switch_present() -> bool:
     return _killswitch_path().is_file()
 
 
+def set_kill_switch(reason: str = "") -> None:
+    """Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
+    The running daemon sees it on its next loop and exits (and, under the OS keepalive,
+    removes its own LaunchAgent/systemd unit on the way out), AND ``ensure_daemon_running``
+    stops lazy-spawning it — so a deliberate stop is NOT resurrected by either path.
+    ``/janitor-arm`` clears it to revive. Written atomically; content is advisory."""
+    init_global_state()
+    path = _killswitch_path()
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(reason or "stopped", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def clear_kill_switch() -> None:
+    """Remove the kill-switch flag so the daemon can be lazy-spawned again — the revive
+    half of the stop/arm pair. Idempotent (a missing flag is fine)."""
+    _killswitch_path().unlink(missing_ok=True)
+
+
 # ---------- liveness ------------------------------------------------------
 
 def _process_exists(pid: int) -> bool:
