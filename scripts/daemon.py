@@ -947,6 +947,20 @@ def main() -> int:
                 exit_reason = "kill-switch"
                 break
 
+            # A global PAUSE (TRDD-a3fa4d5d) idles the daemon WITHOUT tearing it down:
+            # skip every task workload, but keep ticking the heartbeat so other sessions
+            # never see us as wedged, and stay responsive — the inner sleep breaks the
+            # instant the pause lifts (or a kill-switch/disarm supersedes it), so unpause
+            # resumes work within ~1 s with no re-spawn. This is the lighter sibling of
+            # the kill-switch (which EXITS); a pause is a temporary, teardown-free silence.
+            if gs.global_pause_present():
+                gs.write_heartbeat()
+                for _ in range(_LOOP_CEILING_SEC):
+                    if not _running or gs.kill_switch_present() or not gs.global_pause_present():
+                        break
+                    time.sleep(1)
+                continue
+
             for task in tasks:
                 if not _running or gs.kill_switch_present():
                     break

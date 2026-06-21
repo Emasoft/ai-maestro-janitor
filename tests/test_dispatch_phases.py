@@ -67,6 +67,26 @@ def _capture_stdout(fn):
     return buf.getvalue()
 
 
+# ---------- Phase 0: machine-wide global pause (TRDD-a3fa4d5d) -------------
+
+def test_phase_global_paused_false_when_flag_absent(env_isolation: dict) -> None:
+    """No global-pause flag → the phase returns False and the heartbeat proceeds."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    gs.init_global_state()
+    assert dispatch._phase_global_paused() is False
+
+
+def test_phase_global_paused_true_when_flag_set(env_isolation: dict) -> None:
+    """A machine-wide global pause → the phase returns True so main() exits early,
+    silencing THIS session's heartbeat with no teardown (the cron stays armed)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    gs.init_global_state()
+    gs.set_global_pause("test")
+    assert dispatch._phase_global_paused() is True
+
+
 # ---------- Phase 1.6: plugin reload --------------------------------------
 
 def test_phase_plugin_reload_silent_when_flag_absent(env_isolation: dict) -> None:

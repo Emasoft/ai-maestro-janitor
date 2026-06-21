@@ -158,7 +158,7 @@ def set_kill_switch(reason: str = "") -> None:
     The running daemon sees it on its next loop and exits (and, under the OS keepalive,
     removes its own LaunchAgent/systemd unit on the way out), AND ``ensure_daemon_running``
     stops lazy-spawning it — so a deliberate stop is NOT resurrected by either path.
-    ``/janitor-arm`` clears it to revive. Written atomically; content is advisory."""
+    ``/janitor-global-arm`` clears it to revive. Written atomically; content is advisory."""
     init_global_state()
     path = _killswitch_path()
     tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
@@ -168,8 +168,38 @@ def set_kill_switch(reason: str = "") -> None:
 
 def clear_kill_switch() -> None:
     """Remove the kill-switch flag so the daemon can be lazy-spawned again — the revive
-    half of the stop/arm pair. Idempotent (a missing flag is fine)."""
+    half of the disarm/arm pair. Idempotent (a missing flag is fine)."""
     _killswitch_path().unlink(missing_ok=True)
+
+
+def _global_pause_path() -> Path:
+    return global_state_dir() / "global-pause.flag"
+
+
+def global_pause_present() -> bool:
+    """True iff the machine-wide PAUSE flag is set (TRDD-a3fa4d5d). Distinct from the
+    kill-switch: a PAUSE leaves the daemon ALIVE but idle (it skips all task workloads
+    while this is present), and every session's heartbeat no-ops — a temporary,
+    teardown-free silence. `/janitor-global-pause` sets it; `/janitor-global-unpause`
+    clears it. Contrast the kill-switch, which makes the daemon EXIT (the true stop)."""
+    return _global_pause_path().is_file()
+
+
+def set_global_pause(reason: str = "") -> None:
+    """Set the machine-wide PAUSE flag — the daemon idles (stays alive, keeps ticking
+    its heartbeat so it is not seen as wedged) and per-session heartbeats no-op, until
+    `clear_global_pause`. Written atomically; content is advisory."""
+    init_global_state()
+    path = _global_pause_path()
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(reason or "paused", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def clear_global_pause() -> None:
+    """Clear the machine-wide PAUSE flag — the daemon resumes running due tasks on its
+    next loop and sessions resume emitting drift. Idempotent (a missing flag is fine)."""
+    _global_pause_path().unlink(missing_ok=True)
 
 
 # ---------- liveness ------------------------------------------------------

@@ -325,6 +325,16 @@ def _run_detector(name: str, interval: int) -> None:
     _mark_detector_ran(name)
 
 
+def _phase_global_paused() -> bool:
+    """Return True if the MACHINE-WIDE global pause is set (TRDD-a3fa4d5d) — silences
+    EVERY session's heartbeat, distinct from the per-project `paused` sentinel. A
+    teardown-free silence: the cron stays armed; `/janitor-global-unpause` lifts it."""
+    if gs.global_pause_present():
+        state.log_line("dispatch", "skipped: global-pause set")
+        return True
+    return False
+
+
 def _phase_paused() -> bool:
     """Return True if the heartbeat is paused (and we should exit early)."""
     paused_file = state.state_dir() / "paused"
@@ -670,8 +680,10 @@ def _phase_user_presence_breadcrumb() -> None:
 def main() -> int:
     state.init_state()
 
-    # Phase 0: paused sentinel.
-    if _phase_paused():
+    # Phase 0: paused sentinel. A machine-wide global pause (TRDD-a3fa4d5d) silences
+    # EVERY session's heartbeat; the per-project `.janitor/state/paused` sentinel
+    # silences only this one. Both exit the fire silently with no teardown.
+    if _phase_global_paused() or _phase_paused():
         return 0
 
     # Phase 0.4: refresh the user-presence breadcrumb liveness stamp. Runs on
