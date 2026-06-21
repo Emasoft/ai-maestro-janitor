@@ -156,32 +156,34 @@ def test_diagnose_instance_unarmed_is_sacrosanct() -> None:
     """A deliberately-unarmed instance is NEVER touched, even when every other
     signal screams broken — the user opted out and that overrides everything."""
     assert sl.diagnose_instance(
-        deliberately_unarmed=True, pane_alive=True, frozen=True, active=False,
-        version_stale=True, dispatch_stale=True,
+        deliberately_unarmed=True, pane_alive=True, transcript_stale=True,
+        rate_limited=True, version_stale=True,
     ) == "unarmed"
     assert sl.recovery_for_diagnosis("unarmed") is None
 
 
-def test_diagnose_instance_active_session_is_never_touched() -> None:
-    """A busy session (transcript advancing) is healthy even with a stale dispatch
-    and a stale version — its heartbeat is just queued behind the live turn, and
-    nudging it would corrupt real work. THE load-bearing false-positive guard."""
+def test_diagnose_instance_fresh_transcript_is_never_touched() -> None:
+    """A session whose transcript is advancing is healthy even with a rate-limit
+    flag and a stale version — it is working OR its heartbeat is firing (both
+    append to the transcript), and nudging it would corrupt live work. THE
+    load-bearing false-positive guard, and why dispatch.log (silent on quiet
+    fires) is the WRONG signal."""
     assert sl.diagnose_instance(
-        deliberately_unarmed=False, pane_alive=True, frozen=False, active=True,
-        version_stale=True, dispatch_stale=True,
+        deliberately_unarmed=False, pane_alive=True, transcript_stale=False,
+        rate_limited=True, version_stale=True,
     ) == "healthy"
 
 
 def test_diagnose_instance_precedence() -> None:
-    """Most-severe/actionable wins: dead > frozen > active(healthy) >
-    version_mismatch > cron_dead > healthy. This is the fleet-guardian's whole
+    """Most-severe/actionable wins: unarmed > dead > healthy(fresh transcript) >
+    frozen > version_mismatch > cron_dead. This is the fleet-guardian's whole
     decision table."""
-    base = {"deliberately_unarmed": False, "active": False}
-    assert sl.diagnose_instance(**base, pane_alive=False, frozen=True, version_stale=True, dispatch_stale=True) == "dead"
-    assert sl.diagnose_instance(**base, pane_alive=True, frozen=True, version_stale=True, dispatch_stale=True) == "frozen"
-    assert sl.diagnose_instance(**base, pane_alive=True, frozen=False, version_stale=True, dispatch_stale=True) == "version_mismatch"
-    assert sl.diagnose_instance(**base, pane_alive=True, frozen=False, version_stale=False, dispatch_stale=True) == "cron_dead"
-    assert sl.diagnose_instance(**base, pane_alive=True, frozen=False, version_stale=False, dispatch_stale=False) == "healthy"
+    base = {"deliberately_unarmed": False}
+    assert sl.diagnose_instance(**base, pane_alive=False, transcript_stale=True, rate_limited=True, version_stale=True) == "dead"
+    assert sl.diagnose_instance(**base, pane_alive=True, transcript_stale=False, rate_limited=True, version_stale=True) == "healthy"
+    assert sl.diagnose_instance(**base, pane_alive=True, transcript_stale=True, rate_limited=True, version_stale=True) == "frozen"
+    assert sl.diagnose_instance(**base, pane_alive=True, transcript_stale=True, rate_limited=False, version_stale=True) == "version_mismatch"
+    assert sl.diagnose_instance(**base, pane_alive=True, transcript_stale=True, rate_limited=False, version_stale=False) == "cron_dead"
 
 
 def test_diagnose_recovery_mapping() -> None:

@@ -180,43 +180,42 @@ def diagnose_instance(
     *,
     deliberately_unarmed: bool,
     pane_alive: bool,
-    frozen: bool,
-    active: bool,
+    transcript_stale: bool,
+    rate_limited: bool,
     version_stale: bool,
-    dispatch_stale: bool,
 ) -> str:
     """Classify ONE armed claude instance's janitor health from pre-gathered
-    boolean facts (the daemon computes each from the instance's state-dir + the
-    process table; the freeze/version/staleness comparisons live in their own
-    tested helpers so this stays a pure precedence table).
+    boolean facts (the daemon computes each from the instance's state-dir +
+    transcript + the process table; this stays a pure precedence table).
 
-    Precedence is load-bearing — the most severe / most-actionable wins, and the
-    three "never touch" verdicts (`unarmed`, an `active` session, `healthy`) are
-    what keep the guardian from disrupting a session the user opted out of, one
-    that is busy working, or one that is fine.
+    The pivotal signal is ``transcript_stale`` — the session's ``.jsonl``
+    transcript has NOT advanced within the liveness window. A healthy session's
+    transcript advances on EVERY heartbeat (the cron fires a turn, which is
+    recorded) AND continuously while it works — so a stale transcript means
+    NEITHER is happening: the heartbeat is dead and no work is in flight.
 
-    `active` (the transcript advanced in the last few minutes) is the critical
-    false-positive guard: a busy session runs ONE turn at a time, so its heartbeat
-    cron is simply QUEUED behind the live turn and `dispatch.log` legitimately
-    goes stale while real work proceeds. Injecting a recovery keystroke there
-    would corrupt that work — so an active session is healthy regardless of a
-    stale dispatch or version (those get fixed when it next goes idle / restarts).
-    `frozen` outranks `active` only because `is_session_frozen` already PROVED no
-    transcript progress, so the two are mutually exclusive by construction.
+    This is deliberately NOT ``dispatch.log``: dispatch.log is written only on
+    NOTABLE events (errors, resumes, pauses), never on a silent heartbeat fire,
+    so a quiet-but-healthy session would falsely look cron-dead. And it is not a
+    new heartbeat stamp: the broken/zombie instances run an OLD janitor that never
+    writes one. EVERY claude instance writes its transcript on every turn — so the
+    transcript is the one liveness signal that is both reliable AND works on the
+    legacy instances we must rescue. A fresh transcript is therefore the
+    false-positive guard: a busy session (continuous tool-call appends) and an
+    idle-but-cron-firing session (a heartbeat turn every few minutes) both keep it
+    fresh, and neither is ever flagged.
     """
     if deliberately_unarmed:
         return "unarmed"           # the user opted out — sacrosanct, never touch
     if not pane_alive:
         return "dead"              # gone — keystroke recovery is impossible
-    if frozen:
-        return "frozen"            # rate-limited + PROVED stuck — the freeze ladder
-    if active:
-        return "healthy"           # busy working — heartbeat queued behind the turn; never disrupt
+    if not transcript_stale:
+        return "healthy"           # transcript advancing = working OR heartbeat-firing; never touch
+    if rate_limited:
+        return "frozen"            # stuck + a rate-limit flag = the freeze → ladder
     if version_stale:
-        return "version_mismatch"  # idle on old code (the 'version mismatch' error)
-    if dispatch_stale:
-        return "cron_dead"         # idle + the heartbeat died — re-arm it
-    return "healthy"
+        return "version_mismatch"  # stuck on old code → reload
+    return "cron_dead"             # stuck, no rate-limit = a dead heartbeat → re-arm
 
 
 def recovery_for_diagnosis(diagnosis: str) -> str | None:

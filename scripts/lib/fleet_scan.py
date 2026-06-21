@@ -25,16 +25,18 @@ from dataclasses import dataclass
 
 import session_liveness
 
-# A healthy heartbeat dispatches well within this window. The daemon gives a
-# just-started session this long before treating a missing/stale dispatch.log as
-# a dead cron — so a fresh session is never flagged mid-startup. (The in-session
-# heartbeat cadence is 5 min; 3× that absorbs a slow tick or a brief throttle.)
-DISPATCH_FRESH_S = 15 * 60
+# A session whose transcript has NOT advanced in this window is treated as stuck
+# (dead heartbeat / frozen). A live heartbeat fires a turn every ~5 min and every
+# turn is appended to the transcript, so 3× the cadence tolerates two missed fires
+# (a slow tick / a brief throttle) before we ever flag it. This — NOT dispatch.log
+# (silent on quiet fires) and NOT a new heartbeat stamp (legacy instances lack it)
+# — is the reliable liveness signal that also works on old instances.
+STALE_S = 15 * 60
 
-# A session whose transcript advanced this recently is ACTIVELY WORKING — its
-# heartbeat is queued behind the live turn (Claude runs one turn at a time), so a
-# stale dispatch.log is expected and must NOT be read as a dead cron. This is the
-# false-positive guard that keeps the guardian from interrupting real work.
+# A transcript advanced this recently means the session is BUSY working (continuous
+# tool-call appends) — a display nuance over the merely-alive idle-but-cron-firing
+# case. Both are "fresh" (< STALE_S) and never flagged; this just distinguishes
+# "ending a turn now" from "idle but its heartbeat is keeping it alive".
 ACTIVE_FRESH_S = 5 * 60
 
 # Read each iTerm session's controlling TTY + stable session id. Read-only — it
@@ -179,37 +181,35 @@ def diagnose_root(
     root: str,
     *,
     now: int,
-    active: bool,
-    fresh_s: int = DISPATCH_FRESH_S,
+    transcript_age: int | None,
+    stale_s: int = STALE_S,
 ) -> tuple[str, str | None, int | None]:
-    """Read a project's ``.janitor`` state and diagnose its janitor health.
-    Returns ``(diagnosis, recovery, dispatch_age_s)``.
+    """Read a project's ``.janitor`` state + the session's ``transcript_age`` and
+    diagnose its janitor health. Returns ``(diagnosis, recovery, dispatch_age_s)``
+    — ``dispatch_age_s`` is INFORMATIONAL ONLY (dispatch.log logs notable events,
+    not liveness); the diagnosis runs entirely on the transcript.
 
-    ``active`` (the caller computed it from ``transcript_age``) is the
-    false-positive guard: a busy session's stale dispatch is expected, so it is
-    never flagged. The opt-out is POSITIVE: only a ``disarmed.flag`` (written by
-    ``/janitor-disarm``) marks an instance ``deliberately_unarmed`` and therefore
-    sacrosanct. A merely-absent ``heartbeat-armed-at.ts`` is NOT proof of intent —
-    it could be a lapsed arm — so an un-armed, non-disarmed, IDLE instance is
-    treated as a dead cron to re-arm, which is exactly what the user wants guarded.
+    A transcript that advanced within ``stale_s`` means the session is working OR
+    its heartbeat is firing — either way alive, never flagged. A stale transcript
+    means neither: stuck. An unknown transcript age (cannot locate the file) is
+    treated as NOT stale — we never flag what we cannot actually assess. The
+    opt-out is POSITIVE: only a ``disarmed.flag`` (written by ``/janitor-disarm``)
+    makes an instance sacrosanct; a merely-absent ``heartbeat-armed-at.ts`` is a
+    lapsed arm to restore, which is exactly what the user wants guarded.
     """
     sdir = os.path.join(root, ".janitor", "state")
     ldir = os.path.join(root, ".janitor", "logs")
     deliberately_unarmed = os.path.isfile(os.path.join(sdir, "disarmed.flag"))
     rate_limited = os.path.isfile(os.path.join(sdir, "rate-limited.flag"))
-    dispatch_age = _age(os.path.join(ldir, "dispatch.log"), now)
-    dispatch_stale = dispatch_age is None or dispatch_age >= fresh_s
-    # frozen requires a stuck signal AND no recent progress — an active session is
-    # by definition making progress, so frozen and active are mutually exclusive.
-    frozen = rate_limited and dispatch_stale and not active
+    transcript_stale = transcript_age is not None and transcript_age >= stale_s
     diagnosis = session_liveness.diagnose_instance(
         deliberately_unarmed=deliberately_unarmed,
         pane_alive=True,  # the caller only diagnoses processes found alive in ps
-        frozen=frozen,
-        active=active,
+        transcript_stale=transcript_stale,
+        rate_limited=rate_limited,
         version_stale=False,  # v1: cross-process version compare deferred (Group C)
-        dispatch_stale=dispatch_stale,
     )
+    dispatch_age = _age(os.path.join(ldir, "dispatch.log"), now)
     return diagnosis, session_liveness.recovery_for_diagnosis(diagnosis), dispatch_age
 
 
@@ -259,7 +259,9 @@ def gather_fleet(*, now: int) -> list[Instance]:
             continue
         tr_age = transcript_age(root, now)
         active = tr_age is not None and tr_age < ACTIVE_FRESH_S
-        diagnosis, recovery, dispatch_age = diagnose_root(root, now=now, active=active)
+        diagnosis, recovery, dispatch_age = diagnose_root(
+            root, now=now, transcript_age=tr_age
+        )
         terminal = session_liveness.resolve_terminal_for_tty(
             tty, iterm_by_tty=iterm_by_tty, tmux_by_tty=tmux_by_tty
         )
