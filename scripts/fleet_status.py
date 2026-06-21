@@ -1,6 +1,7 @@
 #!/usr/bin/env -S uv run --script --quiet
 # /// script
 # requires-python = ">=3.11"
+# dependencies = ["markdown>=3.5"]
 # ///
 """Backing script for /janitor-show-global-status (TRDD-324223a6, Group F2).
 
@@ -211,29 +212,55 @@ _KANBAN_COLTIP = {
 }
 
 
-def _trdd_meta(path: Path) -> dict[str, str]:
-    """Parse the grep-first frontmatter head of a TRDD (column, title, trdd-id,
-    severity) — reads only the first lines, never the body."""
-    meta: dict[str, str] = {}
+# Max bytes of a TRDD read + rendered into the dashboard (bounds the embed size;
+# the rare huge TRDD is truncated — the user can open the file on disk for the rest).
+_BODY_CAP = 80_000
+
+
+def _render_markdown(body: str) -> str:
+    """TRDD body markdown → dark-theme HTML (tables + fenced code). Falls back to an
+    escaped <pre> if the markdown lib is somehow unavailable, so the dashboard never
+    breaks on a rendering hiccup."""
     try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for n, ln in enumerate(fh):
-                if n > 40:
-                    break
-                for key in ("column", "title", "trdd-id", "severity", "status"):
-                    if ln.startswith(key + ":"):
-                        meta[key] = ln.split(":", 1)[1].strip()
-    except OSError:
-        pass
-    return meta
+        import markdown  # noqa: PLC0415 - declared in the script's inline deps
+        return markdown.markdown(
+            body, extensions=["tables", "fenced_code", "sane_lists"], output_format="html"
+        )
+    except Exception:  # noqa: BLE001 - any failure → safe escaped fallback
+        return "<pre>" + html.escape(body) + "</pre>"
 
 
-def _gather_kanban(project_root: str) -> dict[str, list[dict[str, str]]]:
-    """Per-project TRDD board: ``{column: [{id, title, sev}]}`` (only non-empty
-    columns). v1 TRDDs that still use ``status:`` are mapped onto the column set."""
+def _split_frontmatter(text: str) -> tuple[list[tuple[str, str]], str]:
+    """Split a TRDD into (frontmatter key/value pairs, body). The frontmatter is the
+    leading ``---``…``---`` block; nested keys (the ``metadata:`` mapping) are
+    flattened with a leading '· ' so they read as sub-rows in the composite table."""
+    pairs: list[tuple[str, str]] = []
+    if not text.startswith("---"):
+        return pairs, text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return pairs, text
+    fm = text[3:end].strip("\n")
+    body = text[end + 4:].lstrip("\n")
+    for ln in fm.splitlines():
+        stripped = ln.strip()
+        if not stripped or stripped.startswith("#") or ":" not in ln:
+            continue
+        key, _, val = ln.partition(":")
+        indent = len(key) - len(key.lstrip())
+        label = ("· " if indent else "") + key.strip()
+        pairs.append((label, val.strip()))
+    return pairs, body
+
+
+def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
+    """Per-project TRDD board: ``{column: [card, …]}`` (only non-empty columns).
+    Each card is rich — full uuid, title, severity, frontmatter rows, rendered body
+    HTML, raw body (for copy), and the file path. The source FOLDER pins the
+    super-column; design/tasks/ uses each TRDD's own column (v1 ``status:`` mapped)."""
     top = Path(_git_top(project_root))
     v1map = {"not-started": "backburner", "in-progress": "dev", "completed": "complete"}
-    board: dict[str, list[dict[str, str]]] = {}
+    board: dict[str, list[dict]] = {}
     folders = {
         "design/tasks": None, "design/proposals": "proposal",
         "design/archived": "archived", "design/refused": "refused",
@@ -243,12 +270,26 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict[str, str]]]:
         if not d.is_dir():
             continue
         for f in sorted(d.glob("TRDD-*.md")):
-            m = _trdd_meta(f)
-            col = forced or m.get("column") or v1map.get(m.get("status", ""), "backburner")
+            try:
+                raw = f.read_text(encoding="utf-8", errors="replace")[:_BODY_CAP]
+            except OSError:
+                raw = ""
+            pairs, body = _split_frontmatter(raw)
+            fm = dict(pairs)
+            col = forced or fm.get("column") or v1map.get(fm.get("status", ""), "backburner")
+            # full uuid: prefer frontmatter trdd-id; else the 8-hex from the filename.
+            uuid = fm.get("trdd-id") or ""
+            if not uuid:
+                parts = f.stem.split("-")
+                uuid = parts[2] if len(parts) > 2 else f.stem
             board.setdefault(col, []).append({
-                "id": m.get("trdd-id", "")[:8],
-                "title": m.get("title", f.stem)[:90],
-                "sev": m.get("severity", ""),
+                "id": uuid,
+                "title": (fm.get("title") or f.stem)[:120],
+                "sev": fm.get("severity", ""),
+                "fm": pairs,
+                "html": _render_markdown(body),
+                "text": body,
+                "path": str(f),
             })
     return board
 
@@ -505,7 +546,57 @@ color:#8b949e;letter-spacing:.3px} .lane.blocked .laneh{color:#ffc2c2}
 border-radius:4px;padding:4px 6px;margin-bottom:4px;font-size:11px;line-height:1.35;
 white-space:normal} .lane.blocked .card{background:#7a1c22;border-color:#f85149}
 .card.sev-CRITICAL{border-left-color:#f85149} .card.sev-HIGH{border-left-color:#d29922}
-.cid{color:#6e7681;font-size:9px}
+.ctitle{font-weight:600;color:#e6edf3;margin-bottom:2px}
+.cid{color:#7d8590;font-size:9px;font-family:ui-monospace,Menlo,monospace;
+word-break:break-all;margin-bottom:4px}
+.cbtns{display:flex;gap:3px;flex-wrap:wrap}
+.cbtn{background:#30363d;color:#c9d1d9;border:1px solid #44505c;border-radius:3px;
+padding:2px 5px;font-size:9px;cursor:pointer;line-height:1.2}
+.cbtn:hover{background:#3d4651} .cbtn.open{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.cbtn.open:hover{background:#388bfd}
+/* bigger, nicer modal close button + title */
+.kbx.big{font-size:18px;font-weight:700;padding:7px 18px;border-radius:6px}
+.kbx.big:hover{background:#30363d}
+.kbhead h2{font-size:22px}
+/* TRDD-file modal — fixed-viewport app surface, so its own scrollbars are allowed */
+#fmodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:110;
+align-items:center;justify-content:center}
+.fwin{background:#0d1117;border:1px solid #30363d;border-radius:8px;width:82vw;
+max-width:1000px;height:90vh;display:flex;flex-direction:column;padding:16px;
+box-shadow:0 8px 50px #000}
+.fhead{display:flex;justify-content:space-between;align-items:flex-start;
+margin-bottom:10px;gap:12px}
+.fhead h2{font-size:21px;font-weight:800;margin:0;color:#e6edf3}
+.fpath{font-size:10px;color:#6e7681;font-family:ui-monospace,Menlo,monospace;
+margin-top:3px;word-break:break-all}
+.fbody{overflow:auto;flex:1;padding:2px 6px 20px}
+/* frontmatter as a composite multi-cell table with its own background */
+.fmtable{border-collapse:collapse;width:100%;margin-bottom:18px;background:#11203a}
+.fmtable th,.fmtable td{border:1px solid #2b405c;
+padding:5px 10px;font-size:11.5px;text-align:left;font-family:ui-monospace,Menlo,monospace;
+vertical-align:top}
+.fmtable th{color:#79c0ff;font-weight:700;width:200px;white-space:nowrap;background:#16284a}
+.fmtable td{color:#c9d1d9;word-break:break-word}
+/* rendered markdown — dark theme */
+.md{color:#c9d1d9;font-size:13.5px;line-height:1.6;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.md h1,.md h2,.md h3,.md h4{color:#e6edf3;font-weight:800;margin:18px 0 8px;
+border-bottom:1px solid #21262d;padding-bottom:4px}
+.md h1{font-size:22px} .md h2{font-size:18px} .md h3{font-size:15px} .md h4{font-size:13px}
+.md p{margin:8px 0} .md ul,.md ol{margin:8px 0;padding-left:24px} .md li{margin:3px 0}
+.md a{color:#58a6ff;text-decoration:none} .md a:hover{text-decoration:underline}
+.md strong{color:#e6edf3} .md blockquote{border-left:3px solid #30363d;margin:8px 0;
+padding:2px 12px;color:#8b949e}
+.md code{background:#161b22;color:#79c0ff;padding:1px 5px;border-radius:4px;
+font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.md pre{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px;
+overflow:auto;margin:10px 0} .md pre code{background:none;color:#c9d1d9;padding:0}
+.md table{border-collapse:collapse;margin:10px 0;width:100%}
+.md th,.md td{border:1px solid #30363d;padding:6px 10px;font-size:12px;text-align:left}
+.md th{background:#161b22;color:#e6edf3;font-weight:700} .md tr:nth-child(even) td{background:#11161d}
+#toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#1f6feb;
+color:#fff;padding:9px 20px;border-radius:6px;font-size:13px;font-weight:600;opacity:0;
+transition:opacity .2s;pointer-events:none;z-index:200;box-shadow:0 4px 20px #000}
 </style></head><body>
 <h1>🧹 Janitor global status</h1>
 <div class="sum">@@SUMMARY@@ · generated @@GEN@@</div>
@@ -513,21 +604,33 @@ white-space:normal} .lane.blocked .card{background:#7a1c22;border-color:#f85149}
 <div class="legend">@@LEGEND@@</div>
 <div id="kbmodal" onclick="if(event.target.id==='kbmodal')closeKb()">
   <div class="kbwin"><div class="kbhead"><h2 id="kbtitle"></h2>
-  <button class="kbx" onclick="closeKb()">✕ close</button></div>
+  <button class="kbx big" onclick="closeKb()">✕ close</button></div>
   <div class="kbboard" id="kbboard"></div></div></div>
+<div id="fmodal" onclick="if(event.target.id==='fmodal')closeFile()">
+  <div class="fwin"><div class="fhead"><div><h2 id="ftitle"></h2>
+  <div class="fpath" id="fpath"></div></div>
+  <button class="kbx big" onclick="closeFile()">✕ close</button></div>
+  <div class="fbody" id="fbody"></div></div></div>
+<div id="toast"></div>
 <script>
 var KB=@@KBDATA@@, ORDER=@@ORDER@@, ALERT=@@ALERT@@, COLTIP=@@COLTIP@@;
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function openKb(i){
-  var d=KB[i], h='';
+  var d=KB[i], h=''; window._cur=[];   // flat per-render card list → button onclick uses one int index
   for(var k=0;k<ORDER.length;k++){
     var col=ORDER[k], cards=(d.cols[col]||[]);
     h+='<div class="'+(col==='blocked'?'lane blocked':'lane')+'" title="'+esc(COLTIP[col]||col)
        +'"><div class="laneh">'+(ALERT[col]||'')+' '+col+' ('+cards.length+')</div>';
-    for(var j=0;j<cards.length;j++){var c=cards[j];
-      var ct=(c.sev?c.sev+' · ':'')+c.title+(c.id?' ('+c.id+')':'');
-      h+='<div class="card sev-'+(c.sev||'')+'" title="'+esc(ct)+'">'+esc(c.title)
-         +'<div class="cid">'+(c.id||'')+'</div></div>';}
+    for(var j=0;j<cards.length;j++){var c=cards[j]; var n=window._cur.length; window._cur.push(c);
+      var ct=(c.sev?c.sev+' · ':'')+c.title;
+      h+='<div class="card sev-'+(c.sev||'')+'" title="'+esc(ct)+'">'
+         +'<div class="ctitle">'+esc(c.title)+'</div>'
+         +'<div class="cid">'+esc(c.id||'')+'</div>'
+         +'<div class="cbtns">'
+         +'<button class="cbtn" title="Copy the TRDD uuid to the clipboard" onclick="copyUuid('+n+')">⧉ id</button>'
+         +'<button class="cbtn" title="Copy the full TRDD description to the clipboard" onclick="copyDesc('+n+')">⧉ desc</button>'
+         +'<button class="cbtn open" title="Open the TRDD file in a reader" onclick="openFile('+n+')">🔍 file</button>'
+         +'</div></div>';}
     h+='</div>';
   }
   document.getElementById('kbtitle').textContent='📋 '+d.proj+' — TRDD kanban';
@@ -535,7 +638,32 @@ function openKb(i){
   document.getElementById('kbmodal').style.display='flex';
 }
 function closeKb(){document.getElementById('kbmodal').style.display='none';}
-document.addEventListener('keydown',function(e){if(e.key==='Escape')closeKb();});
+function _cp(s,label){
+  function ok(){toast('Copied '+label);} function no(){toast('Copy failed');}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(ok,no);}
+  else{var t=document.createElement('textarea');t.value=s;t.style.position='fixed';t.style.opacity='0';
+    document.body.appendChild(t);t.select();try{document.execCommand('copy');ok();}catch(e){no();}
+    document.body.removeChild(t);}
+}
+function copyUuid(n){var c=window._cur[n]; if(c)_cp(c.id||'','uuid');}
+function copyDesc(n){var c=window._cur[n]; if(c)_cp(c.text||'','description');}
+function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.opacity='1';
+  clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';},1500);}
+function openFile(n){
+  var c=window._cur[n]; if(!c)return;
+  var fm='<table class="fmtable">';
+  for(var k=0;k<(c.fm||[]).length;k++){fm+='<tr><th>'+esc(c.fm[k][0])+'</th><td>'+esc(c.fm[k][1])+'</td></tr>';}
+  fm+='</table>';
+  document.getElementById('ftitle').textContent='📄 '+(c.title||'TRDD');
+  document.getElementById('fpath').textContent=c.path||'';
+  document.getElementById('fbody').innerHTML=fm+'<div class="md">'+(c.html||'')+'</div>';
+  document.getElementById('fbody').scrollTop=0;
+  document.getElementById('fmodal').style.display='flex';
+}
+function closeFile(){document.getElementById('fmodal').style.display='none';}
+document.addEventListener('keydown',function(e){if(e.key!=='Escape')return;
+  if(document.getElementById('fmodal').style.display==='flex')closeFile();
+  else if(document.getElementById('kbmodal').style.display==='flex')closeKb();});
 </script>
 </body></html>"""
 
@@ -563,6 +691,21 @@ def _legend_html(want_ci: bool) -> str:
         "to open that project's TRDD board — the <b>blocked</b> lane is full red."
     )
     return chips + "<br>" + note
+
+
+def _json_for_script(obj) -> str:
+    """json.dumps SAFE to embed inside an inline <script>. A TRDD body can contain
+    a literal ``</script>`` (or ``<!--``), which would terminate the script tag and
+    break the page; escaping ``<``/``>`` to their \\uXXXX form prevents that while
+    staying valid JSON (JS parses ``\\u003c`` back to ``<``). U+2028/U+2029 are
+    escaped too — raw, they are illegal inside a JS string literal."""
+    return (
+        json.dumps(obj, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
 
 
 def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
@@ -600,17 +743,21 @@ def _render_html(rows: list[dict], summary: str, want_ci: bool) -> str:
         '<th title="' + html.escape(_COL_TIPS.get(k, lbl)) + '">' + html.escape(lbl) + "</th>"
         for k, lbl in _COLUMNS
     )
+    # Substitute the small fixed placeholders first; the big data blobs (@@ROWS@@,
+    # @@KBDATA@@) go LAST so a later placeholder-replace can never corrupt injected
+    # TRDD content. _json_for_script keeps a TRDD body's literal "</script>" from
+    # terminating the inline <script> tag (the bug that blanked the modals).
     out = (
         _HTML_TEMPLATE
         .replace("@@SUMMARY@@", html.escape(summary))
         .replace("@@GEN@@", time.strftime("%Y-%m-%d %H:%M:%S %z"))
         .replace("@@HEADERS@@", headers)
-        .replace("@@ROWS@@", "".join(body))
         .replace("@@LEGEND@@", _legend_html(want_ci))
-        .replace("@@KBDATA@@", json.dumps(kb_data, ensure_ascii=False))
-        .replace("@@ORDER@@", json.dumps(list(_KANBAN_ORDER)))
-        .replace("@@ALERT@@", json.dumps(_KANBAN_ALERT, ensure_ascii=False))
-        .replace("@@COLTIP@@", json.dumps(_KANBAN_COLTIP, ensure_ascii=False))
+        .replace("@@ORDER@@", _json_for_script(list(_KANBAN_ORDER)))
+        .replace("@@ALERT@@", _json_for_script(_KANBAN_ALERT))
+        .replace("@@COLTIP@@", _json_for_script(_KANBAN_COLTIP))
+        .replace("@@ROWS@@", "".join(body))
+        .replace("@@KBDATA@@", _json_for_script(kb_data))
     )
     return _write_temp(out)
 
