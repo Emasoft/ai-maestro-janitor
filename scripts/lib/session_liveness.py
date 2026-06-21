@@ -146,3 +146,68 @@ def crash_loop_tripped(nuclear_attempts_in_window: int, max_in_window: int) -> b
     storm. This is the ONE place auto-recovery yields to a human: precisely
     because recovery ITSELF is looping (a persistent, un-self-fixable fault)."""
     return nuclear_attempts_in_window >= max(1, max_in_window)
+
+
+# Fleet guardianship (TRDD-324223a6): the janitor must guard EVERY claude instance
+# that ever armed it — re-arming a dead cron, reloading a version-mismatch, running
+# the freeze ladder — from OUTSIDE, regardless of terminal environment. The ONLY
+# instance it never touches is one the USER deliberately unarmed. These two pure
+# functions are the decision core; the daemon gathers the booleans (from each
+# instance's state-dir + the process table) and dispatches the recovery.
+
+# Per-instance janitor-health diagnoses, most-severe / most-actionable first.
+DIAGNOSES: tuple[str, ...] = (
+    "unarmed",           # user opted out — NEVER touch
+    "dead",              # process/pane gone — a keystroke can't reach it
+    "frozen",            # rate-limited + no transcript progress — the freeze ladder
+    "version_mismatch",  # loaded an older plugin version than cached — reload/update
+    "cron_dead",         # armed but the heartbeat stopped firing — re-arm
+    "healthy",           # dispatch firing recently — no action
+)
+
+# Diagnosis → the recovery the daemon applies. None = leave the instance alone.
+_DIAGNOSIS_RECOVERY: dict[str, str | None] = {
+    "unarmed": None,
+    "healthy": None,
+    "frozen": "ladder",            # run recovery_action_for() (the 7-rung escalation)
+    "version_mismatch": "reload",  # inject /reload-plugins (+ ensure update)
+    "cron_dead": "rearm",          # inject /janitor-arm to restore the heartbeat
+    "dead": "relaunch",            # gated nuclear: claude --continue in the pane
+}
+
+
+def diagnose_instance(
+    *,
+    deliberately_unarmed: bool,
+    pane_alive: bool,
+    frozen: bool,
+    version_stale: bool,
+    dispatch_stale: bool,
+) -> str:
+    """Classify ONE armed claude instance's janitor health from pre-gathered
+    boolean facts (the daemon computes each from the instance's state-dir + the
+    process table; the freeze/version/staleness comparisons live in their own
+    tested helpers so this stays a pure precedence table).
+
+    Precedence is load-bearing — the most severe / most-actionable wins, and the
+    two "never touch" verdicts (`unarmed`, `healthy`) are what keep the guardian
+    from disrupting a session the user opted out of or one that is working fine.
+    """
+    if deliberately_unarmed:
+        return "unarmed"           # the user opted out — sacrosanct, never touch
+    if not pane_alive:
+        return "dead"              # gone — keystroke recovery is impossible
+    if frozen:
+        return "frozen"            # rate-limited + stuck — the freeze ladder
+    if version_stale:
+        return "version_mismatch"  # running old code (the 'version mismatch' error)
+    if dispatch_stale:
+        return "cron_dead"         # armed but the heartbeat died — re-arm it
+    return "healthy"
+
+
+def recovery_for_diagnosis(diagnosis: str) -> str | None:
+    """The recovery action for a diagnosis, or None to leave the instance alone
+    (`unarmed` / `healthy`). Unknown diagnoses are treated as 'leave alone' —
+    fail safe: we never invent an action for a state we don't recognize."""
+    return _DIAGNOSIS_RECOVERY.get(diagnosis)

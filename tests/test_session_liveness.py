@@ -150,3 +150,35 @@ def test_crash_loop_guard() -> None:
     assert not sl.crash_loop_tripped(2, 3)
     assert sl.crash_loop_tripped(3, 3)
     assert sl.crash_loop_tripped(5, 3)
+
+
+def test_diagnose_instance_unarmed_is_sacrosanct() -> None:
+    """A deliberately-unarmed instance is NEVER touched, even when every other
+    signal screams broken — the user opted out and that overrides everything."""
+    assert sl.diagnose_instance(
+        deliberately_unarmed=True, pane_alive=True, frozen=True,
+        version_stale=True, dispatch_stale=True,
+    ) == "unarmed"
+    assert sl.recovery_for_diagnosis("unarmed") is None
+
+
+def test_diagnose_instance_precedence() -> None:
+    """Most-severe/actionable wins: dead > frozen > version_mismatch > cron_dead >
+    healthy. This is the fleet-guardian's whole decision table."""
+    base = {"deliberately_unarmed": False}
+    assert sl.diagnose_instance(**base, pane_alive=False, frozen=True, version_stale=True, dispatch_stale=True) == "dead"
+    assert sl.diagnose_instance(**base, pane_alive=True, frozen=True, version_stale=True, dispatch_stale=True) == "frozen"
+    assert sl.diagnose_instance(**base, pane_alive=True, frozen=False, version_stale=True, dispatch_stale=True) == "version_mismatch"
+    assert sl.diagnose_instance(**base, pane_alive=True, frozen=False, version_stale=False, dispatch_stale=True) == "cron_dead"
+    assert sl.diagnose_instance(**base, pane_alive=True, frozen=False, version_stale=False, dispatch_stale=False) == "healthy"
+
+
+def test_diagnose_recovery_mapping() -> None:
+    """Each diagnosis maps to the right OUTSIDE recovery; healthy/unknown = leave
+    alone (fail-safe: never invent an action for a state we don't recognize)."""
+    assert sl.recovery_for_diagnosis("frozen") == "ladder"
+    assert sl.recovery_for_diagnosis("version_mismatch") == "reload"
+    assert sl.recovery_for_diagnosis("cron_dead") == "rearm"
+    assert sl.recovery_for_diagnosis("dead") == "relaunch"
+    assert sl.recovery_for_diagnosis("healthy") is None
+    assert sl.recovery_for_diagnosis("unknown_state") is None
