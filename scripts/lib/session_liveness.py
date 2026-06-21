@@ -103,3 +103,46 @@ def escalation_tier(attempts: int) -> int:
     if attempts < 0:
         attempts = 0
     return min(1 + attempts // 2, 3)
+
+
+# The recovery ladder (TRDD-324223a6): gentlest → nuclear. Each successive FAILED
+# wake escalates one rung; a rung that succeeds (the session makes progress)
+# resets the count to 0. "1 is not enough" — ESC+nudge is only the FIRST rung; a
+# hard freeze (dead process, corrupted config) needs the heavier rungs.
+RECOVERY_LADDER: tuple[str, ...] = (
+    "esc_nudge",      # 1 — inject ESC (dismiss any modal) + kick a fresh turn
+    "rearm",          # 2 — /janitor-arm: restore the heartbeat cron
+    "reload",         # 3 — /reload-plugins: pick up an auto-update's new hooks
+    "update",         # 4 — ensure latest plugin version, then nudge again
+    "relaunch",       # 5 — claude --continue in the SAME pane (resume transcript)
+    "force_restart",  # 6 — external kill of the stuck pid + claude --continue
+    "resurrect",      # 7 — background claude that kills+relaunches the stuck one
+)
+
+# Rungs that kill/replace the claude process — bounded by the crash-loop guard so
+# the guardian can never enter a restart storm.
+NUCLEAR_RUNGS: frozenset[str] = frozenset({"relaunch", "force_restart", "resurrect"})
+
+
+def recovery_action_for(attempt: int) -> str:
+    """The recovery action for the Nth (0-based) consecutive failed wake. Walks
+    ``RECOVERY_LADDER`` and CLAMPS to the last rung, so sustained failure stays at
+    the nuclear option (bounded by ``crash_loop_tripped``) rather than wrapping
+    back to a gentle no-op that would never recover a hard freeze."""
+    if attempt < 0:
+        attempt = 0
+    return RECOVERY_LADDER[min(attempt, len(RECOVERY_LADDER) - 1)]
+
+
+def is_nuclear_rung(action: str) -> bool:
+    """True iff ``action`` kills/replaces the claude process (subject to the
+    crash-loop guard)."""
+    return action in NUCLEAR_RUNGS
+
+
+def crash_loop_tripped(nuclear_attempts_in_window: int, max_in_window: int) -> bool:
+    """True iff the nuclear rungs have fired too many times in the guard window —
+    PAUSE the ladder for this session and page a human instead of a kill/relaunch
+    storm. This is the ONE place auto-recovery yields to a human: precisely
+    because recovery ITSELF is looping (a persistent, un-self-fixable fault)."""
+    return nuclear_attempts_in_window >= max(1, max_in_window)
