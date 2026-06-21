@@ -20,6 +20,31 @@ cost is high and the gate must be conservative.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+
+def capture_terminal_identity(env: Mapping[str, str]) -> dict[str, str]:
+    """Extract the stable terminal-pane identifiers the daemon needs to inject
+    recovery into THIS session from OUTSIDE, from the session's own environment.
+
+    PURE: returns only the keys that are PRESENT and non-empty, so the daemon can
+    choose an injection backend by what is available (``iterm_session_id`` →
+    iTerm osascript; ``tmux_pane`` → ``tmux send-keys``). The SESSION must record
+    this because a detached daemon cannot read another session's environment, and
+    ``TMUX_PANE`` / ``ITERM_SESSION_ID`` do not propagate to arbitrary
+    subprocesses — only a process the session itself spawns at start sees them.
+    """
+    out: dict[str, str] = {}
+    for env_key, out_key in (
+        ("ITERM_SESSION_ID", "iterm_session_id"),
+        ("TMUX_PANE", "tmux_pane"),
+        ("TERM_PROGRAM", "term_program"),
+    ):
+        val = (env.get(env_key) or "").strip()
+        if val:
+            out[out_key] = val
+    return out
+
 
 def is_session_frozen(
     *,

@@ -90,3 +90,22 @@ def test_escalation_tiers() -> None:
     assert sl.escalation_tier(3) == 2
     assert sl.escalation_tier(4) == 3
     assert sl.escalation_tier(99) == 3
+
+
+def test_capture_terminal_identity_extracts_present_keys() -> None:
+    """Records the iTerm session id + term program this session reports; ignores
+    unrelated env. This is exactly what was observed live: iTerm sets
+    ITERM_SESSION_ID, TMUX_PANE was absent in subprocesses."""
+    env = {"ITERM_SESSION_ID": "w0t9p0:ABC", "TERM_PROGRAM": "iTerm.app", "FOO": "bar"}
+    assert sl.capture_terminal_identity(env) == {
+        "iterm_session_id": "w0t9p0:ABC",
+        "term_program": "iTerm.app",
+    }
+
+
+def test_capture_terminal_identity_omits_absent_and_blank() -> None:
+    """Absent or whitespace-only ids are omitted so the daemon never targets a
+    bogus pane; a real tmux pane id is kept."""
+    assert sl.capture_terminal_identity({}) == {}
+    assert sl.capture_terminal_identity({"TMUX_PANE": "   "}) == {}
+    assert sl.capture_terminal_identity({"TMUX_PANE": "%3"}) == {"tmux_pane": "%3"}

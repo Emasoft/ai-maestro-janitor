@@ -77,6 +77,30 @@ def main() -> int:
     except FileNotFoundError:
         pass
 
+    # Record this session's terminal identity (TRDD-dccb0b8a NPT) so the GLOBAL
+    # daemon's session-liveness watchdog knows WHICH pane to inject recovery into
+    # if this session ever freezes. The 2026-06-20→21 freeze proved a dead
+    # in-session cron cannot rescue itself; the daemon must reach in from outside,
+    # and it can only target a pane it can name. A detached daemon cannot read
+    # this session's environment, and TMUX_PANE / ITERM_SESSION_ID do not
+    # propagate to arbitrary subprocesses — only this hook, spawned by the session
+    # at start, sees them. Best-effort; a failure must never break session start.
+    try:
+        from lib import session_liveness  # noqa: E402  -- local package, not PyPI
+
+        ident = session_liveness.capture_terminal_identity(os.environ)
+        if ident:
+            import time  # noqa: E402  -- stdlib
+
+            ident["pid"] = str(os.getppid())  # the session process, not this hook
+            ident["recorded_at"] = str(int(time.time()))
+            state.atomic_write(
+                state.state_dir() / "terminal-identity.json",
+                json.dumps(ident, separators=(",", ":")),
+            )
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        state.log_line("session-start", f"terminal-identity capture skipped: {exc}")
+
     # Propagate the plugin's shipped rules (rules/*.md) into the active
     # scope's .claude/rules/ directory so Claude Code's rule loader picks
     # them up on the next session-start. `install_rules` is idempotent:
