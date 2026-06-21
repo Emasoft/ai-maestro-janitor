@@ -37,11 +37,14 @@ def test_parse_ps_claude_recognizes_both_shapes() -> None:
 
 
 def test_parse_iterm_sessions() -> None:
-    """tty<TAB>id lines → {normalized_tty: id}; malformed/half rows dropped."""
-    txt = "/dev/ttys003\tw0t1p0:ABC\n/dev/ttys005\tw0t2p0:DEF\n\tonlyid\n/dev/ttys006\t\n"
+    """tty|id lines → {normalized_tty: id}; malformed/half rows dropped. The
+    delimiter is a literal '|' because AppleScript's `tab` constant emits the
+    three letters 'tab' via osascript -e, not a tab byte (the bug that made every
+    instance read UNREACHABLE)."""
+    txt = "/dev/ttys003|4C4A6F99-ABC\n/dev/ttys005|5FDB-DEF\n|onlyid\n/dev/ttys006|\n"
     assert fs.parse_iterm_sessions(txt) == {
-        "ttys003": "w0t1p0:ABC",
-        "ttys005": "w0t2p0:DEF",
+        "ttys003": "4C4A6F99-ABC",
+        "ttys005": "5FDB-DEF",
     }
 
 

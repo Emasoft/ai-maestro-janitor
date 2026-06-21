@@ -41,15 +41,21 @@ ACTIVE_FRESH_S = 5 * 60
 
 # Read each iTerm session's controlling TTY + stable session id. Read-only — it
 # never brings a window to front and never relaunches iTerm (the caller only runs
-# it when iTerm is already in the process table). The id matches the daemon's
-# osascript inject filter (`if (id of s) is "<uuid>"`).
+# it when iTerm is already in the process table). The id is the UUID that the
+# daemon's inject filter matches (`if (id of s) is "<uuid>"`).
+#
+# The delimiter is a literal "|", NOT the AppleScript `tab` constant: empirically
+# (od -c) `osascript -e '… & tab & …'` emits the THREE LETTERS "tab", not a tab
+# byte, so a "\t"-split silently matched nothing and every instance read
+# UNREACHABLE. A literal "|" round-trips correctly (neither a TTY path nor a UUID
+# contains it), resolving 20/21 live instances on the real host.
 _ITERM_TTY_OSASCRIPT = (
     'tell application "iTerm2"\n'
     "  set out to \"\"\n"
     "  repeat with w in windows\n"
     "    repeat with t in tabs of w\n"
     "      repeat with s in sessions of t\n"
-    "        set out to out & (tty of s) & tab & (id of s) & linefeed\n"
+    '        set out to out & (tty of s) & "|" & (id of s) & linefeed\n'
     "      end repeat\n"
     "    end repeat\n"
     "  end repeat\n"
@@ -103,12 +109,13 @@ def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
 
 def parse_iterm_sessions(text: str) -> dict[str, str]:
     """``{normalized_tty: iterm_session_id}`` from the osascript dump of
-    ``tty<TAB>session_id`` lines. Rows without both fields are skipped."""
+    ``tty|session_id`` lines (see _ITERM_TTY_OSASCRIPT for why the delimiter is a
+    literal ``|``, not a tab). Rows without both fields are skipped."""
     out: dict[str, str] = {}
     for ln in text.splitlines():
-        if "\t" not in ln:
+        if "|" not in ln:
             continue
-        tty_s, sid = ln.split("\t", 1)
+        tty_s, sid = ln.split("|", 1)
         tty = session_liveness.normalize_tty(tty_s.strip())
         sid = sid.strip()
         if tty and sid:
