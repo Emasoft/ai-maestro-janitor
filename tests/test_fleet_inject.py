@@ -21,7 +21,7 @@ import fleet_inject as fi  # type: ignore[import-not-found]  # noqa: E402
 
 def test_action_to_command_only_typing_rungs() -> None:
     """The gentle command-typing rungs map to a slash-command; esc_nudge (ESC only)
-    and the nuclear rungs (handled by the daemon) map to None."""
+    and the hard-restart rungs (handled by the daemon) map to None."""
     assert fi.action_to_command("rearm") == "/janitor-arm"
     assert fi.action_to_command("reload") == "/reload-plugins"
     assert fi.action_to_command("update") == "/janitor-arm"
@@ -80,7 +80,7 @@ def test_build_injection_iterm_fallback_strips_tty_prefix() -> None:
 
 def test_build_injection_declines_unreachable_and_noncommand() -> None:
     """No tmux pane + no valid UUID → no plan (don't fire blind). A non-typing
-    action → no plan even with a good terminal (esc_nudge/nuclear aren't injected
+    action → no plan even with a good terminal (esc_nudge/hard-restart aren't injected
     as commands here)."""
     assert fi.build_injection({}, "rearm") is None
     assert fi.build_injection({"iterm_session_id": "not a uuid !!"}, "rearm") is None

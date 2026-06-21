@@ -19,7 +19,7 @@ Two channels, both already proven elsewhere in the plugin:
 
 Everything here is PURE / dry-run-able: build the payload, inspect it, THEN fire.
 This module covers only the gentle, command-TYPING rungs (rearm/reload/update).
-``esc_nudge`` types no command (ESC only) and the nuclear rungs
+``esc_nudge`` types no command (ESC only) and the hard-restart rungs
 (relaunch/force_restart/resurrect) kill/spawn processes — those live in the
 daemon task behind the crash-loop guard, not here.
 """
@@ -41,7 +41,7 @@ _UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
 
 # The command-typing rungs → the slash-command each injects. `update` re-arms,
 # which re-bakes the rolled stub and picks up the new version. `esc_nudge`
-# (ESC only) and the nuclear rungs are deliberately absent — they don't type a
+# (ESC only) and the hard-restart rungs are deliberately absent — they don't type a
 # command, so action_to_command() returns None and build_injection() declines.
 _ACTION_COMMAND = {
     "rearm": "/janitor-arm",
@@ -52,7 +52,7 @@ _ACTION_COMMAND = {
 
 def action_to_command(action: str) -> str | None:
     """The slash-command a command-typing recovery `action` injects, or None when
-    the action types no command (esc_nudge = ESC only; nuclear rungs = daemon)."""
+    the action types no command (esc_nudge = ESC only; hard-restart rungs = daemon)."""
     return _ACTION_COMMAND.get(action)
 
 
@@ -114,7 +114,7 @@ def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dic
     """
     command = action_to_command(action)
     if command is None:
-        return None  # esc_nudge / nuclear — not a command-typing injection
+        return None  # esc_nudge / hard-restart — not a command-typing injection
     pane = terminal.get("tmux_pane", "").strip()
     # Gate the tmux pane exactly as the iTerm UUID is gated below: only a bare `%<n>`
     # may reach the `tmux send-keys -t <pane>` argv. A malformed pane (e.g. a

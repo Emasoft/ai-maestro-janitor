@@ -1,4 +1,4 @@
-"""Nuclear recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
+"""Hard-restart recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
 KILL and RESPAWN a claude process when the gentle command-typing rungs
 (rearm/reload/update) cannot revive a session.
 
@@ -15,8 +15,8 @@ THREE rungs, escalating:
 
 THE SAFETY MODEL (this module kills processes, so it is gated three ways):
 
-1. **DEFAULT-OFF.** ``nuclear_enabled()`` is false unless the user opts in with
-   ``CLAUDE_PLUGIN_OPTION_FLEET_NUCLEAR_ENABLED=1``. Until then ``fire_nuclear``
+1. **DEFAULT-OFF.** ``hard_restart_enabled()`` is false unless the user opts in with
+   ``CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1``. Until then ``fire_restart``
    builds + returns a ``DRY_RUN`` marker and executes NOTHING.
 2. **NEVER the user's working session.** ``is_killable`` refuses unless the pid is a
    real ``claude`` process, the instance is NOT ``active`` (transcript advancing),
@@ -24,12 +24,12 @@ THE SAFETY MODEL (this module kills processes, so it is gated three ways):
    process nor the daemon. ``diagnose_instance`` upstream already guarantees an
    active session is ``healthy`` (never ``frozen``/``dead``), so this is the second
    independent gate, not the only one.
-3. **BOUNDED.** The caller wraps every nuclear attempt in the crash-loop guard
+3. **BOUNDED.** The caller wraps every hard-restart attempt in the crash-loop guard
    (``session_liveness.crash_loop_tripped``) so a persistent fault pages a human
    instead of entering a kill/respawn storm.
 
 PURE where it can be: every ``build_*`` returns a plan dict you can inspect/dry-run;
-``fire_nuclear`` takes injectable ``killer``/``spawner`` so tests never touch a real
+``fire_restart`` takes injectable ``killer``/``spawner`` so tests never touch a real
 process. This module is INTENTIONALLY not yet wired into the daemon's live loop
 (TRDD-56d24c02 increment 2 does that, behind the opt-in) — it ships tested + inert.
 """
@@ -50,13 +50,13 @@ import terminal_trigger  # noqa: E402
 _RELAUNCH_CMD = "claude --continue"
 
 
-def nuclear_enabled() -> bool:
+def hard_restart_enabled() -> bool:
     """Master opt-in for the process-killing rungs. DEFAULT-OFF — these rungs kill and
     respawn processes, so they stay dry-run-only until the user deliberately enables
-    them with CLAUDE_PLUGIN_OPTION_FLEET_NUCLEAR_ENABLED=1 (the documented true
+    them with CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1 (the documented true
     spellings). Unlike the gentle rungs (idempotent, on by default), the irreversible
     rungs are opt-in."""
-    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_FLEET_NUCLEAR_ENABLED", "0").strip().lower()
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED", "0").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 
@@ -116,7 +116,7 @@ def build_relaunch(terminal: dict) -> dict | None:
 
 def build_force_restart(pid: int, terminal: dict) -> dict | None:
     """rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
-    DESCRIBES the kill (``kill_pid``) + the relaunch; ``fire_nuclear`` performs the
+    DESCRIBES the kill (``kill_pid``) + the relaunch; ``fire_restart`` performs the
     kill ONLY after ``is_killable`` passes. None when no pane resolves (then the caller
     escalates to resurrect)."""
     relaunch = build_relaunch(terminal)
@@ -128,7 +128,7 @@ def build_force_restart(pid: int, terminal: dict) -> dict | None:
 def build_resurrect(pid: int, project_root: str | None) -> dict:
     """rung 7 — the pane is unreachable: spawn a DETACHED background ``claude`` (a new
     tmux session) that, on launch, kills the stuck pid and resumes. The plan carries
-    the kill target + the detached-spawn argv; ``fire_nuclear`` runs it only when
+    the kill target + the detached-spawn argv; ``fire_restart`` runs it only when
     enabled AND ``is_killable`` passes. Always builds a plan (no pane needed) — it is
     the last resort precisely for the no-channel case."""
     cwd = project_root or os.path.expanduser("~")
@@ -140,7 +140,7 @@ def build_resurrect(pid: int, project_root: str | None) -> dict:
     return {"rung": "resurrect", "kill_pid": pid, "cwd": cwd, "spawn": argv}
 
 
-def fire_nuclear(
+def fire_restart(
     plan: dict | None,
     *,
     enabled: bool,
@@ -148,7 +148,7 @@ def fire_nuclear(
     killer=os.kill,
     spawner=None,
 ) -> str:
-    """Execute a nuclear plan — but ONLY when ``enabled`` (the opt-in) AND, for any
+    """Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
     rung that kills, ``killable`` (the ``is_killable`` verdict the caller computed).
     Returns a short status string for the daemon log; never raises.
 

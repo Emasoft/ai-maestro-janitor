@@ -401,7 +401,7 @@ def test_bun_no_cache_positive() -> None:
 
 
 def test_bun_no_verify_positive() -> None:
-    """bun install --no-verify is the bun nuclear option."""
+    """bun install --no-verify is the bun last-resort option."""
     assert _hits(
         "PKG-BYPASS-BUN-NO-CACHE-OR-VERIFY",
         "bun install --no-verify",

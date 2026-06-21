@@ -261,7 +261,7 @@ _GEM_BYPASS = _re(
 # but per-package). `--no-cache` forces a fresh fetch every time which
 # weakens the "I already verified this version" property of the local
 # cache (AND increases registry-MITM exposure). `--no-verify` is the
-# bun nuclear option.
+# bun last-resort option.
 #
 # We also match `--no-frozen-lockfile` and `--ignore-scripts=false` here
 # (defensive duplication of Rule 1's bun coverage — text scan needs full
@@ -390,7 +390,7 @@ RULES: tuple[Rule, ...] = (
             "A bun install/add command uses --trust <pkg> (per-package "
             "override of trustedDependencies), --no-cache (weakens cache-"
             "verified state + increases MITM exposure), --no-verify (bun "
-            "nuclear option), --no-frozen-lockfile, or --ignore-scripts=false."
+            "last-resort option), --no-frozen-lockfile, or --ignore-scripts=false."
         ),
         pattern=_BUN_NO_CACHE_VERIFY,
         owasp_asi="ASI-05",

@@ -664,7 +664,7 @@ def task_session_liveness() -> None:
     (rearm/reload/update) are idempotent — harmless even if fired on a merely-idle
     session (ESC is a no-op with no in-flight turn; the slash-commands just
     re-establish the heartbeat). Per-instance cooldown + a crash-loop guard bound
-    it; on the guard trip a human is alerted ONCE. The NUCLEAR rungs (kill+respawn)
+    it; on the guard trip a human is alerted ONCE. The hard-restart rungs (kill+respawn)
     are A5 — not wired; the ladder caps at `update`.
 
     DETECTION always runs and logs. FIRING is on by default for the gentle rungs;
@@ -722,7 +722,7 @@ def task_session_liveness() -> None:
         action = fr.action_for(inst.diagnosis, attempts)
         if action is None:
             # Reachable as a concept but not via a typed command (e.g. `dead` maps to
-            # the not-yet-wired nuclear `relaunch`): recovery_for_diagnosis (the gate
+            # the not-yet-wired hard-restart `relaunch`): recovery_for_diagnosis (the gate
             # above) and action_for DELIBERATELY diverge on `dead`. This re-check is
             # what keeps the divergence safe — we never fire an unwired action.
             continue

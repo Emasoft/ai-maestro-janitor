@@ -112,7 +112,7 @@ def test_capture_terminal_identity_omits_absent_and_blank() -> None:
 
 
 def test_recovery_ladder_full_sequence() -> None:
-    """The ladder escalates gentlest→nuclear — rung 1 (ESC+nudge) is NOT the whole
+    """The ladder escalates gentlest→hard-restart — rung 1 (ESC+nudge) is NOT the whole
     thing ('1 is not enough'): re-arm, reload, update, relaunch, force_restart,
     resurrect follow."""
     assert sl.recovery_action_for(0) == "esc_nudge"
@@ -124,23 +124,23 @@ def test_recovery_ladder_full_sequence() -> None:
     assert sl.recovery_action_for(6) == "resurrect"
 
 
-def test_recovery_ladder_clamps_to_nuclear() -> None:
-    """Sustained failure stays at the nuclear rung, never wraps to a gentle no-op
+def test_recovery_ladder_clamps_to_hard_restart() -> None:
+    """Sustained failure stays at the hard-restart rung, never wraps to a gentle no-op
     that could never recover a hard freeze."""
     assert sl.recovery_action_for(7) == "resurrect"
     assert sl.recovery_action_for(99) == "resurrect"
     assert sl.recovery_action_for(-1) == "esc_nudge"
 
 
-def test_nuclear_rung_classification() -> None:
-    """Only the process-killing/replacing rungs are nuclear (guard-bounded)."""
-    assert not sl.is_nuclear_rung("esc_nudge")
-    assert not sl.is_nuclear_rung("rearm")
-    assert not sl.is_nuclear_rung("reload")
-    assert not sl.is_nuclear_rung("update")
-    assert sl.is_nuclear_rung("relaunch")
-    assert sl.is_nuclear_rung("force_restart")
-    assert sl.is_nuclear_rung("resurrect")
+def test_hard_rung_classification() -> None:
+    """Only the process-killing/replacing rungs are hard-restart (guard-bounded)."""
+    assert not sl.is_hard_rung("esc_nudge")
+    assert not sl.is_hard_rung("rearm")
+    assert not sl.is_hard_rung("reload")
+    assert not sl.is_hard_rung("update")
+    assert sl.is_hard_rung("relaunch")
+    assert sl.is_hard_rung("force_restart")
+    assert sl.is_hard_rung("resurrect")
 
 
 def test_crash_loop_guard() -> None:

@@ -5,7 +5,7 @@ now (cooldown + crash-loop bounds). No I/O, no firing, no process control.
 
 The daemon walks a COMMAND-TYPING ladder for a stuck session — each action's
 injection (``fleet_inject``) sends ESC first, then types the slash-command, so a
-bare ESC-nudge is subsumed by ``rearm``. The genuinely-dangerous NUCLEAR rungs
+bare ESC-nudge is subsumed by ``rearm``. The genuinely-dangerous hard-restart rungs
 (relaunch / force_restart / resurrect — killing and respawning a process) are A5:
 deliberately NOT wired here. When the gentle ladder is exhausted the guard alerts
 a human instead of escalating to a process kill the daemon can't yet do safely.
@@ -45,7 +45,7 @@ def action_for(diagnosis: str, attempts: int) -> str | None:
     - ``version_mismatch`` → ``reload`` (running stale code → reload the new plugin)
     - ``frozen``           → walk ``_FROZEN_LADDER`` by attempt (rearm→reload→update)
     - ``healthy`` / ``unarmed`` → None  (never poke a working or opted-out session)
-    - ``dead``             → None       (no pane to type into → nuclear A5, not here)
+    - ``dead``             → None       (no pane to type into → hard-restart A5, not here)
     """
     if diagnosis == "cron_dead":
         return "rearm"

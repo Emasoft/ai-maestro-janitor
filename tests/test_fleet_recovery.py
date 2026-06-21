@@ -20,12 +20,12 @@ import fleet_recovery as fr  # type: ignore[import-not-found]  # noqa: E402
 
 def test_action_for_per_diagnosis() -> None:
     """cron_dead re-arms, version_mismatch reloads, and the never-touch diagnoses
-    (healthy/unarmed) plus the nuclear-only one (dead) yield no typed action."""
+    (healthy/unarmed) plus the hard-restart-only one (dead) yield no typed action."""
     assert fr.action_for("cron_dead", 0) == "rearm"
     assert fr.action_for("version_mismatch", 0) == "reload"
     assert fr.action_for("healthy", 0) is None
     assert fr.action_for("unarmed", 0) is None
-    assert fr.action_for("dead", 0) is None       # → nuclear A5, not a typed command
+    assert fr.action_for("dead", 0) is None       # → hard-restart A5, not a typed command
     assert fr.action_for("nonsense", 0) is None
 
 

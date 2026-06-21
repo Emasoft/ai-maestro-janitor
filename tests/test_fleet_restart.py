@@ -1,4 +1,4 @@
-"""Tests for the nuclear recovery rungs (TRDD-56d24c02 / A5).
+"""Tests for the hard-restart recovery rungs (TRDD-56d24c02 / A5).
 
 These rungs KILL and RESPAWN processes, so the tests are written so that NONE of
 them can ever touch a real process: every kill goes through an injected recorder,
@@ -16,20 +16,20 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
-import fleet_nuclear as fn  # type: ignore[import-not-found]  # noqa: E402
+import fleet_restart as fn  # type: ignore[import-not-found]  # noqa: E402
 
 
-def test_nuclear_disabled_by_default(monkeypatch) -> None:
+def test_hard_restart_disabled_by_default(monkeypatch) -> None:
     """The process-killing rungs are OFF unless explicitly opted in (the inverse of
     the gentle rungs, which are on by default) — killing is irreversible."""
-    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_FLEET_NUCLEAR_ENABLED", raising=False)
-    assert fn.nuclear_enabled() is False
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED", raising=False)
+    assert fn.hard_restart_enabled() is False
     for on in ("1", "true", "yes", "on"):
-        monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_FLEET_NUCLEAR_ENABLED", on)
-        assert fn.nuclear_enabled() is True
+        monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED", on)
+        assert fn.hard_restart_enabled() is True
     for off in ("0", "false", "no", "off", ""):
-        monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_FLEET_NUCLEAR_ENABLED", off)
-        assert fn.nuclear_enabled() is False
+        monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED", off)
+        assert fn.hard_restart_enabled() is False
 
 
 def test_is_killable_refuses_everything_but_a_wedged_claude() -> None:
@@ -83,62 +83,62 @@ def test_build_resurrect_always_builds_and_quotes_cwd() -> None:
     assert fn.build_resurrect(5, None)["spawn"][-1].startswith("kill 5")
 
 
-def test_fire_nuclear_dry_run_when_disabled_touches_nothing(monkeypatch) -> None:
-    """With the opt-in OFF, fire_nuclear executes NOTHING — no kill, no spawn, no
+def test_fire_restart_dry_run_when_disabled_touches_nothing(monkeypatch) -> None:
+    """With the opt-in OFF, fire_restart executes NOTHING — no kill, no spawn, no
     keystroke — and reports DRY_RUN. This is the default production posture."""
     killed: list = []
     spawned: list = []
     monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: spawned.append(p) or True)
     plan = fn.build_force_restart(123, {"tmux_pane": "%1"})
-    out = fn.fire_nuclear(plan, enabled=False, killable=True,
+    out = fn.fire_restart(plan, enabled=False, killable=True,
                           killer=lambda *a: killed.append(a), spawner=lambda a: spawned.append(a))
     assert out == "DRY_RUN:force_restart"
     assert killed == [] and spawned == []      # absolutely nothing fired
 
 
-def test_fire_nuclear_relaunch_needs_no_kill(monkeypatch) -> None:
+def test_fire_restart_relaunch_needs_no_kill(monkeypatch) -> None:
     """relaunch (dead pane, no live pid) fires the keystroke and never kills."""
     killed: list = []
     monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: True)
     plan = fn.build_relaunch({"tmux_pane": "%2"})
-    out = fn.fire_nuclear(plan, enabled=True, killable=False, killer=lambda *a: killed.append(a))
+    out = fn.fire_restart(plan, enabled=True, killable=False, killer=lambda *a: killed.append(a))
     assert out == "FIRED:relaunch" and killed == []   # killable irrelevant for relaunch
 
 
-def test_fire_nuclear_force_restart_kills_only_when_killable(monkeypatch) -> None:
+def test_fire_restart_force_restart_kills_only_when_killable(monkeypatch) -> None:
     """force_restart kills the pid (injected recorder) then relaunches — but ONLY when
     killable; a not-killable verdict refuses without touching the process."""
     monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: True)
     killed: list = []
     plan = fn.build_force_restart(777, {"tmux_pane": "%9"})
     # killable → kills 777 then relaunches
-    out = fn.fire_nuclear(plan, enabled=True, killable=True, killer=lambda pid, sig: killed.append(pid))
+    out = fn.fire_restart(plan, enabled=True, killable=True, killer=lambda pid, sig: killed.append(pid))
     assert out == "FIRED:force_restart" and killed == [777]
     # NOT killable → refuse, never kill
     killed.clear()
-    out = fn.fire_nuclear(plan, enabled=True, killable=False, killer=lambda pid, sig: killed.append(pid))
+    out = fn.fire_restart(plan, enabled=True, killable=False, killer=lambda pid, sig: killed.append(pid))
     assert out == "REFUSED:not-killable:force_restart" and killed == []
 
 
-def test_fire_nuclear_resurrect_kills_then_spawns() -> None:
+def test_fire_restart_resurrect_kills_then_spawns() -> None:
     """resurrect kills the stuck pid then spawns the detached background claude (both
     injected); refuses entirely when not killable."""
     killed: list = []
     spawned: list = []
     plan = fn.build_resurrect(888, "/proj")
-    out = fn.fire_nuclear(plan, enabled=True, killable=True,
+    out = fn.fire_restart(plan, enabled=True, killable=True,
                           killer=lambda pid, sig: killed.append(pid),
                           spawner=lambda argv: bool(spawned.append(argv)) or True)
     assert out == "FIRED:resurrect" and killed == [888] and len(spawned) == 1
     killed.clear()
     spawned.clear()
-    out = fn.fire_nuclear(plan, enabled=True, killable=False,
+    out = fn.fire_restart(plan, enabled=True, killable=False,
                           killer=lambda pid, sig: killed.append(pid),
                           spawner=lambda argv: spawned.append(argv))
     assert out == "REFUSED:not-killable:resurrect" and killed == [] and spawned == []
 
 
-def test_fire_nuclear_safe_on_none_and_unknown() -> None:
+def test_fire_restart_safe_on_none_and_unknown() -> None:
     """A None plan or an unknown rung is a safe no-op string, never an exception."""
-    assert fn.fire_nuclear(None, enabled=True, killable=True) == "NO_PLAN"
-    assert fn.fire_nuclear({"rung": "bogus"}, enabled=True, killable=True) == "UNKNOWN_RUNG:bogus"
+    assert fn.fire_restart(None, enabled=True, killable=True) == "NO_PLAN"
+    assert fn.fire_restart({"rung": "bogus"}, enabled=True, killable=True) == "UNKNOWN_RUNG:bogus"

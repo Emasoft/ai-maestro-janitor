@@ -99,13 +99,13 @@ def escalation_tier(attempts: int) -> int:
       * 2 — re-arm the in-session cron explicitly (a typed ``/janitor-arm``);
       * 3 — last resort: relaunch the claude process in the pane.
     Two attempts per tier before escalating, capped at 3 so the ladder never
-    loops past the nuclear option."""
+    loops past the hard-restart option."""
     if attempts < 0:
         attempts = 0
     return min(1 + attempts // 2, 3)
 
 
-# The recovery ladder (TRDD-324223a6): gentlest → nuclear. Each successive FAILED
+# The recovery ladder (TRDD-324223a6): gentlest → hard-restart. Each successive FAILED
 # wake escalates one rung; a rung that succeeds (the session makes progress)
 # resets the count to 0. "1 is not enough" — ESC+nudge is only the FIRST rung; a
 # hard freeze (dead process, corrupted config) needs the heavier rungs.
@@ -121,31 +121,31 @@ RECOVERY_LADDER: tuple[str, ...] = (
 
 # Rungs that kill/replace the claude process — bounded by the crash-loop guard so
 # the guardian can never enter a restart storm.
-NUCLEAR_RUNGS: frozenset[str] = frozenset({"relaunch", "force_restart", "resurrect"})
+HARD_RUNGS: frozenset[str] = frozenset({"relaunch", "force_restart", "resurrect"})
 
 
 def recovery_action_for(attempt: int) -> str:
     """The recovery action for the Nth (0-based) consecutive failed wake. Walks
     ``RECOVERY_LADDER`` and CLAMPS to the last rung, so sustained failure stays at
-    the nuclear option (bounded by ``crash_loop_tripped``) rather than wrapping
+    the hard-restart option (bounded by ``crash_loop_tripped``) rather than wrapping
     back to a gentle no-op that would never recover a hard freeze."""
     if attempt < 0:
         attempt = 0
     return RECOVERY_LADDER[min(attempt, len(RECOVERY_LADDER) - 1)]
 
 
-def is_nuclear_rung(action: str) -> bool:
+def is_hard_rung(action: str) -> bool:
     """True iff ``action`` kills/replaces the claude process (subject to the
     crash-loop guard)."""
-    return action in NUCLEAR_RUNGS
+    return action in HARD_RUNGS
 
 
-def crash_loop_tripped(nuclear_attempts_in_window: int, max_in_window: int) -> bool:
-    """True iff the nuclear rungs have fired too many times in the guard window —
+def crash_loop_tripped(hard_attempts_in_window: int, max_in_window: int) -> bool:
+    """True iff the hard-restart rungs have fired too many times in the guard window —
     PAUSE the ladder for this session and page a human instead of a kill/relaunch
     storm. This is the ONE place auto-recovery yields to a human: precisely
     because recovery ITSELF is looping (a persistent, un-self-fixable fault)."""
-    return nuclear_attempts_in_window >= max(1, max_in_window)
+    return hard_attempts_in_window >= max(1, max_in_window)
 
 
 # Fleet guardianship (TRDD-324223a6): the janitor must guard EVERY claude instance
@@ -172,7 +172,7 @@ _DIAGNOSIS_RECOVERY: dict[str, str | None] = {
     "frozen": "ladder",            # run recovery_action_for() (the 7-rung escalation)
     "version_mismatch": "reload",  # inject /reload-plugins (+ ensure update)
     "cron_dead": "rearm",          # inject /janitor-arm to restore the heartbeat
-    "dead": "relaunch",            # gated nuclear: claude --continue in the pane
+    "dead": "relaunch",            # gated hard-restart: claude --continue in the pane
 }
 
 
