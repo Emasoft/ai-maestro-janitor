@@ -62,8 +62,12 @@ sys.path.insert(0, str(_HERE / "lib"))
 sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix A)
+import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324223a6)
+import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
+import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import global_state as gs  # noqa: E402
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
+import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
 import state  # noqa: E402
 import supervisor as oauth_supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py
 import version_update_lib as vu  # noqa: E402
@@ -108,6 +112,13 @@ _INTERVAL_CACHE_PRUNE = int(
 )  # 6 h — plugin-cache prune (TRDD-a6d2fdaf, Fix A). The cache only bloats over
 #  hours/days (a plugin shipping several versions/day), so a 6 h cadence reclaims
 #  promptly without churn. The daemon owns it because the cache is machine-global.
+_INTERVAL_SESSION_LIVENESS = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_SESSION_LIVENESS_INTERVAL", "120")
+)  # 2 min — the fleet-guardian beat (TRDD-324223a6, A2). A cheap ps + transcript-age
+#  scan; an actual recovery only fires for a genuinely frozen / cron-dead /
+#  version-mismatched instance and is bounded by a 15 min per-instance cooldown, so
+#  the cadence costs ~nothing while the fleet is healthy. This is the immortality the
+#  in-session cron cannot provide — it recovers the very heartbeat that died.
 
 # Loop ceiling — heartbeat tick interval upper bound. Must be << the
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
@@ -608,6 +619,110 @@ def task_cache_prune() -> None:
         state.log_line("daemon", f"  cache-prune removed: {rel}")
 
 
+def _recovery_state_path(rec_dir: Path, project_root: str) -> Path:
+    """Per-instance recovery-state file, keyed by a filesystem-safe slug of the
+    project root (the identity fleet_scan + the dashboard both use)."""
+    slug = re.sub(r"[^A-Za-z0-9_.-]", "_", project_root).strip("_") or "root"
+    return rec_dir / f"{slug}.json"
+
+
+def _read_recovery_state(path: Path) -> dict:
+    """Load an instance's {attempts, last_ts, alerted}; {} when absent/corrupt."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_recovery_state(path: Path, st: dict) -> None:
+    """Persist recovery state atomically (tmp + os.replace)."""
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(st), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def task_session_liveness() -> None:
+    """Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
+    version-mismatched claude instances across the WHOLE host and recover them from
+    OUTSIDE by injecting ESC + /janitor-arm (or /reload-plugins) into each one's OWN
+    terminal — the immortality the in-session cron cannot provide, because the cron
+    is the very thing that died in the 20-hour freeze.
+
+    SAFETY (load-bearing): diagnose_instance NEVER classifies a session whose
+    transcript is advancing as recoverable, so an actively-working session is never
+    touched, and a `disarmed.flag` session is sacrosanct. The three gentle rungs
+    (rearm/reload/update) are idempotent — harmless even if fired on a merely-idle
+    session (ESC is a no-op with no in-flight turn; the slash-commands just
+    re-establish the heartbeat). Per-instance cooldown + a crash-loop guard bound
+    it; on the guard trip a human is alerted ONCE. The NUCLEAR rungs (kill+respawn)
+    are A5 — not wired; the ladder caps at `update`.
+
+    DETECTION always runs and logs. FIRING is on by default for the gentle rungs;
+    set CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED=0 for dry-run-log-only, or turn
+    the whole beat off via CLAUDE_PLUGIN_OPTION_SESSION_LIVENESS_ENABLED=0.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_SESSION_LIVENESS_ENABLED", True):
+        return
+    fire = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED", True)
+    now = int(time.time())
+    try:
+        fleet = fleet_scan.gather_fleet(now=now)
+    except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
+        state.log_line("daemon", f"session-liveness: fleet scan failed: {exc}")
+        return
+    rec_dir = gs.global_state_dir() / "recovery"
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    for inst in fleet:
+        if not inst.project_root:
+            continue  # no .janitor project → nothing to re-arm; can't key state
+        sf = _recovery_state_path(rec_dir, inst.project_root)
+        if sl.recovery_for_diagnosis(inst.diagnosis) is None:
+            # healthy / unarmed → never poke. A now-healthy instance clears its
+            # attempt counter so the NEXT freeze starts with a fresh budget.
+            if inst.diagnosis == "healthy" and sf.exists():
+                sf.unlink(missing_ok=True)
+            continue
+        st = _read_recovery_state(sf)
+        attempts = int(st.get("attempts", 0))
+        tag = f"{os.path.basename(inst.project_root)} [{inst.diagnosis}] attempt={attempts}"
+        decision = fr.gate(last_ts=st.get("last_ts"), attempts=attempts, now=now)
+        if decision == "crash_loop":
+            if not st.get("alerted"):  # alert ONCE, not every beat
+                state.log_line(
+                    "daemon",
+                    f"session-liveness: GIVING UP on {tag} after {attempts} attempts "
+                    "— recovery is looping; a human must intervene",
+                )
+                st["alerted"] = True
+                _write_recovery_state(sf, st)
+            continue
+        if decision == "cooldown":
+            continue
+        action = fr.action_for(inst.diagnosis, attempts)
+        if action is None:
+            continue
+        plan = fleet_inject.build_injection(inst.terminal, action)
+        if plan is None:
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} UNREACHABLE ({inst.terminal}) — would "
+                f"{action}; skipped (no injection channel)",
+            )
+            continue
+        if not fire:
+            state.log_line(
+                "daemon", f"session-liveness:DRY would {action} → {plan['channel']} for {tag}"
+            )
+            continue
+        ok = fleet_inject.fire(plan)
+        _write_recovery_state(sf, {"attempts": attempts + 1, "last_ts": now})
+        state.log_line(
+            "daemon",
+            f"session-liveness: {'FIRED' if ok else 'FIRE-FAILED'} {action} → "
+            f"{plan['channel']} for {tag}",
+        )
+
+
 class Task:
     """One periodic unit of work owned by the daemon.
 
@@ -690,6 +805,7 @@ def _build_tasks() -> list[Task]:
         Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_tick),
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
+        Task("session-liveness", _INTERVAL_SESSION_LIVENESS, task_session_liveness),
     ]
 
 
