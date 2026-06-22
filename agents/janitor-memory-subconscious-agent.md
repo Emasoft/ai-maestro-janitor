@@ -30,7 +30,7 @@ authoritative procedure — then return:
 
 The simple-op skills (`janitor-memory-write` / `-update` / `-recall`) define the
 conventions main agents author by — read them to understand the corpus you steward
-(especially `references/wikimem-model.md`, the canonical data model).
+(especially `skills/janitor-memory-write/references/wikimem-model.md`, the canonical data model).
 
 ## THE IRON RULES (every pass obeys all of them)
 
