@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-record-recent
-description: HARVEST recent changes into the Wikimem NOW — the on-demand counterpart of the memorize-nudge heartbeat. Use when you (or the user) realize Claude made many code changes but forgot to update memory, when the user says "/janitor-memory-record-recent", "record recent changes to memory", "I forgot to update the wikimem", "memorize what we just did", "harvest recent changes into wikimem", or "capture this session's decisions". Gathers recent changes (git log since last memory touch, edited files, git diff), and for EACH substantive change RECALLS first then ADDS/UPDATES/CREATES the right Wikimem page — leaning on /janitor-memory-write + /janitor-memory-update rather than re-implementing them. Only NUDGES a harvest of recent work; it does not reorganize the corpus.
+description: HARVEST recent changes into the Wikimem NOW — the on-demand counterpart of the memorize-nudge heartbeat. Use when Claude made many code changes but forgot to update memory, or the user says "/janitor-memory-record-recent", "record recent changes to memory", "memorize what we just did", or "harvest recent changes into wikimem". Gathers recent changes (git log since last memory touch, edited files, git diff), and for EACH substantive change RECALLS first then ADDS/UPDATES/CREATES the right Wikimem page via /janitor-memory-write + /janitor-memory-update. Only NUDGES a harvest; it does not reorganize the corpus.
 ---
 
 # Janitor memory — RECORD RECENT (harvest the session into the Wikimem)
@@ -19,7 +19,7 @@ UPDATE instead of duplicate, then (3) hands the actual page authoring to the two
 existing skills — `/janitor-memory-write` (MEMORIZE) and
 `/janitor-memory-update` (UPDATE) — which already own the wikimem editorial flow,
 the frontmatter schema, the tier/shape decision, and the bidirectional link law.
-Read [the wikimem model](../janitor-memory-write/references/wikimem-model.md) once
+See the `/janitor-memory-write` skill (it documents the wikimem model) once
 if you have not; this skill cites it instead of repeating it.
 
 Harvest only what is **non-obvious and reusable**: design/architecture decisions,
@@ -92,7 +92,7 @@ memgrep appends them). The result decides the editorial move for this change.
 
 ### 3. Decide the editorial move (per the wikimem flow) and DELEGATE it
 
-Apply [the editorial decision flow](../janitor-memory-write/references/wikimem-model.md#the-editorial-decision-flow-run-this-on-any-change-worth-remembering)
+Apply the editorial decision flow (documented by the `/janitor-memory-write` skill)
 to each change, then hand the work to the skill that owns it:
 
 - **A fitting page exists, fact still holds** → ADD the atomic memory to that page
@@ -208,9 +208,9 @@ calls.
   protocol). This skill delegates ADD/correct to it.
 - [`/janitor-memory-recall`](../janitor-memory-recall/SKILL.md) — RECALL: the
   per-change "have we recorded this already?" lookup run in step 2.
-- [references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
-  — the shared wiki data model (tiers hub/aspect/component, EXPAND=aspect /
-  REDUCE=component, the bidirectional link law, scope routing LOCAL/PROJECT/USER).
+- The `/janitor-memory-write` skill documents the shared wiki data model (tiers
+  hub/aspect/component, EXPAND=aspect / REDUCE=component, the bidirectional link
+  law, scope routing LOCAL/PROJECT/USER).
 - `~/.claude/rules/markdown-memory-recall.md` — THE PROACTIVE-USE CONTRACT
   (recall-before-write; index by the QUESTION) + the three-scope roots + memgrep.
 - `~/.claude/rules/commit-discipline.md` — commit code + memory together; WHY in

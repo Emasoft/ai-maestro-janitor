@@ -1,0 +1,11 @@
+# Internal / ephemeral markdown that is NOT shipped plugin content — exclude from
+# markdownlint so design notes don't gate the publish like distributed docs do.
+# (Shipped markdown — skills/, agents/, commands/, README, CLAUDE.md, CHANGELOG —
+# is still fully linted.)
+design/
+reports/
+reports_dev/
+docs_dev/
+scripts_dev/
+_corpus_dev/
+.trashcan/
