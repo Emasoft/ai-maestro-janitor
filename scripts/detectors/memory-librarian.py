@@ -70,6 +70,16 @@ PROPOSAL_NAME = "memory-reorg-proposed.md"
 # proposal). All compared case-sensitively by basename.
 _NON_NOTE_NAMES = frozenset({PROPOSAL_NAME, "MEMORY.md", "memory-index.md"})
 
+# Detector-output family (issue #54): the memory detectors drop plain-markdown
+# REPORTS named `<detector>-proposed.md` INTO the scanned memory dir (our own
+# `memory-reorg-proposed.md`, the scope-leak detector's
+# `memory-scope-leak-proposed.md`, and any future sibling). None of these are
+# notes — they carry no frontmatter — so scanning them as notes produced false
+# page-shape/sync findings + a spurious `[janitor-memory-repair]` marker each
+# heartbeat. A suffix match excludes the WHOLE family (not just the two known
+# names), so a new detector's output never re-introduces the collision.
+_DETECTOR_OUTPUT_SUFFIX = "-proposed.md"
+
 # The private user-authored memory store (TRDD-4334aad0) — a sibling subdir the
 # agent-corpus librarian MUST NOT walk into (privacy contract).
 _USER_MEM_DIRNAME = "user-mem"
@@ -171,13 +181,6 @@ _MAX_SHAPE_FINDINGS = 60
 # MEMORY.md index line: `- [Title](target.md) — hook.` (the write skill's shape).
 # We only need the link TARGET (the `.md` file the line points at) to diff the
 # index against the notes on disk. The target may be a bare basename or a
-# relative path; normalise to a basename in the caller. A markdown link with an
-# anchor/query is tolerated by stopping at the first `)` / `#`.
-_MEMORY_INDEX_LINE_RE = re.compile(
-    r"^\s*[-*+]\s+\[[^\]]*\]\((?P<target>[^)#?]+\.md)[^)]*\)"
-)
-# The canonical human index file (one line per note) — diffed against disk.
-_MEMORY_INDEX_NAME = "MEMORY.md"
 # Cap the rank-4 link/orphan/sync findings listed per scope.
 _MAX_LINK_FINDINGS = 60
 
@@ -417,8 +420,18 @@ def _basename(path_token: str) -> str:
 
 
 def _is_note_basename(name: str) -> bool:
-    """True iff a basename is a real memory note (markdown, not an excluded file)."""
-    return name.endswith(".md") and name not in _NON_NOTE_NAMES
+    """True iff a basename is a real memory note (markdown, not an excluded file).
+
+    Excludes both the named non-notes (the index stub + generated indices + our
+    own proposal) AND the whole `*-proposed.md` detector-output family (issue
+    #54) — sibling detectors write reports into this same dir and they are not
+    notes.
+    """
+    return (
+        name.endswith(".md")
+        and name not in _NON_NOTE_NAMES
+        and not name.endswith(_DETECTOR_OUTPUT_SUFFIX)
+    )
 
 
 def _slug_words(note_basename: str) -> str:
@@ -950,63 +963,22 @@ def _parse_orphans(stdout: str) -> list[str]:
     return sorted(out)[:_MAX_LINK_FINDINGS]
 
 
-def _parse_memory_index_targets(text: str) -> set[str]:
-    """Parse MEMORY.md → set of note basenames its index lines point at.
+def _collect_memory_sync_findings(_memdir: Path) -> list[str]:
+    """RETIRED (issue #55) — the MEMORY.md↔disk sync check no longer fires.
 
-    Each index line is `- [Title](target.md) — hook.`; we extract the link
-    target and normalise to a basename. Lines that are not index lines (the
-    heading, blank lines, prose) are ignored.
+    MEMORY.md used to be the authoritative human index, so a note on disk that
+    it did not list (or an index line pointing at a deleted note) was a real
+    drift. That ended when recall moved 100% into memgrep's SQLite index:
+    MEMORY.md is now a tiny DEPRECATED STUB the write protocol must NOT add
+    pointers to (see `markdown-memory-recall.md`). Diffing the stub against the
+    corpus therefore flagged EVERY note as "missing from MEMORY.md" — pure
+    false-positive noise. The check is retired to a no-op rather than deleted so
+    its callers (`_collect_link_findings`, the rank-4 renderer) stay wired and a
+    future index mechanism can re-home here if one is ever reintroduced.
+
+    `_memdir` is accepted (unchanged call sites) but unused.
     """
-    targets: set[str] = set()
-    for raw in text.splitlines():
-        m = _MEMORY_INDEX_LINE_RE.match(raw)
-        if m:
-            targets.add(_basename(m.group("target")))
-    return targets
-
-
-def _collect_memory_sync_findings(memdir: Path) -> list[str]:
-    """Diff MEMORY.md against the notes on disk → sync-mismatch findings.
-
-    Two failure modes, both surfaced (rank 4):
-      * an index line points at a `.md` file that does NOT exist on disk (a stale
-        entry left after a note was renamed/deleted);
-      * a note file on disk is NOT listed in MEMORY.md (a note added without the
-        index line the write protocol requires).
-    No MEMORY.md at all → no findings (the index is optional; a corpus may not
-    keep one yet). Bounded by `_MAX_LINK_FINDINGS`. Never crashes on a read
-    error.
-    """
-    index_path = memdir / _MEMORY_INDEX_NAME
-    if not index_path.is_file():
-        return []
-    try:
-        index_text = index_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return []
-    listed = _parse_memory_index_targets(index_text)
-
-    try:
-        on_disk = {
-            p.name for p in memdir.iterdir()
-            if p.is_file() and _is_note_basename(p.name)
-        }
-    except OSError:
-        return []
-
-    findings: list[str] = []
-    for missing in sorted(listed - on_disk):
-        # NOTE: the index-filename token is built on its own line, kept off the
-        # `findings.append(...)` call, so the literal `append … MEMORY.md`
-        # adjacency does not read as an agent-memory write (skillaudit
-        # AGENT_MEMORY_MOD keys on `append.*MEMORY\.md`); this is a drift
-        # *report*, never a write to MEMORY.md.
-        msg = f"MEMORY.md lists `{missing}` but the file is missing on disk"
-        findings.append(msg)
-    for unlisted in sorted(on_disk - listed):
-        msg = f"`{unlisted}` is on disk but missing from MEMORY.md"
-        findings.append(msg)
-    return findings[:_MAX_LINK_FINDINGS]
+    return []
 
 
 def _collect_link_findings(

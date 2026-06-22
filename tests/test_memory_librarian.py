@@ -796,8 +796,10 @@ class TestMemoryLibrarianLinksAndSync(unittest.TestCase):
             self.assertEqual(out.strip(), "")
             self.assertFalse((memdir / PROPOSAL_NAME).exists())
 
-    def test_index_line_to_deleted_note_surfaced(self):
-        """A MEMORY.md line pointing at a note absent on disk is a sync mismatch."""
+    def test_index_line_to_deleted_note_no_longer_surfaced(self):
+        """Issue #55: the MEMORY.md↔disk sync check is RETIRED. A stale index
+        line pointing at a deleted note is NO LONGER a sync mismatch (MEMORY.md
+        is the deprecated memgrep stub, never an authoritative index)."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:
             home, project = Path(h), Path(p)
             memdir = _build(home, project)
@@ -810,11 +812,13 @@ class TestMemoryLibrarianLinksAndSync(unittest.TestCase):
             )
             _run(home, project)
             sync = self._section(memdir, "MEMORY.md sync")
-            self.assertIn("deleted_note.md", sync)
-            self.assertIn("missing on disk", sync)
+            self.assertNotIn("deleted_note.md", sync)
+            self.assertNotIn("missing on disk", sync)
 
-    def test_note_missing_from_index_surfaced(self):
-        """A note on disk that MEMORY.md does not list is a sync mismatch."""
+    def test_note_missing_from_index_no_longer_surfaced(self):
+        """Issue #55: a note on disk that MEMORY.md does not list is NO LONGER a
+        sync mismatch — pointers were intentionally retired in favor of memgrep,
+        so 'missing from MEMORY.md' is never a finding."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:
             home, project = Path(h), Path(p)
             memdir = _build(home, project)
@@ -825,8 +829,8 @@ class TestMemoryLibrarianLinksAndSync(unittest.TestCase):
             )
             _run(home, project)
             sync = self._section(memdir, "MEMORY.md sync")
-            self.assertIn("unlisted.md", sync)
-            self.assertIn("missing from MEMORY.md", sync)
+            self.assertNotIn("unlisted.md", sync)
+            self.assertNotIn("missing from MEMORY.md", sync)
 
     def test_memory_md_in_sync_is_silent_on_sync(self):
         """A MEMORY.md that lists exactly the notes on disk surfaces no sync mismatch."""
@@ -1062,6 +1066,7 @@ class TestMemoryLibrarianReindex(unittest.TestCase):
             reindex_idx = next((i for i, ln in enumerate(lines) if ln.startswith("reindex ")), None)
             index_idx = next((i for i, ln in enumerate(lines) if ln.startswith("index ")), None)
             self.assertIsNotNone(reindex_idx, "reindex was never invoked")
+            assert reindex_idx is not None  # narrow int|None for the type-checker
             if index_idx is not None:
                 self.assertLess(reindex_idx, index_idx, "reindex must precede the index query")
 
@@ -1088,6 +1093,95 @@ class TestMemoryLibrarianReindex(unittest.TestCase):
             self.assertFalse(log.exists(), "reindex must not run on an empty scope")
 
 
+@unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
+class TestMemoryLibrarianDetectorOutputExclusion(unittest.TestCase):
+    """Issue #54: a SIBLING detector's `*-proposed.md` output dropped into the
+    memory dir must NOT be scanned as a memory note (page-shape / sync / cluster).
+
+    The librarian's own `memory-reorg-proposed.md` was already excluded by exact
+    name; the bug was that another detector's output (`memory-scope-leak-proposed.md`,
+    and the whole `*-proposed.md` family) still tripped the note scan.
+    """
+
+    def test_sibling_proposed_md_not_flagged_page_shape(self):
+        """`memory-scope-leak-proposed.md` (a plain report, no frontmatter) must
+        not surface as a malformed note."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # The exact file the issue reports: another detector's output — a
+            # frontmatter-less markdown report written INTO the memory dir.
+            (memdir / "memory-scope-leak-proposed.md").write_text(
+                "# Memory scope leak — PROPOSED\n\nSome report prose, not a note.\n")
+            # One real, shape-clean note so the scope is non-empty.
+            (memdir / "real_note.md").write_text(
+                _note("real_note", "a genuine memory note", []))
+            out = _run(home, project)
+            # The proposed-file basename must appear in NO output and NO proposal.
+            self.assertNotIn("memory-scope-leak-proposed.md", out)
+            if (memdir / PROPOSAL_NAME).exists():
+                proposal = (memdir / PROPOSAL_NAME).read_text()
+                self.assertNotIn("memory-scope-leak-proposed.md", proposal)
+
+    def test_arbitrary_proposed_md_excluded_by_pattern(self):
+        """ANY `*-proposed.md` (not just the two known names) is excluded — the
+        fix generalizes to the whole detector-output family (issue #54)."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # A future/unknown detector output name — still a `*-proposed.md`.
+            (memdir / "some-future-detector-proposed.md").write_text(
+                "no frontmatter here, just a report body\n")
+            (memdir / "real_note.md").write_text(
+                _note("real_note", "a genuine memory note", []))
+            out = _run(home, project)
+            self.assertNotIn("some-future-detector-proposed.md", out)
+            if (memdir / PROPOSAL_NAME).exists():
+                proposal = (memdir / PROPOSAL_NAME).read_text()
+                self.assertNotIn("some-future-detector-proposed.md", proposal)
+
+
+@unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
+class TestMemoryLibrarianMemoryMdSyncRetired(unittest.TestCase):
+    """Issue #55: the MEMORY.md-sync check is retired — MEMORY.md is the
+    DEPRECATED memgrep stub, not an index, so notes are never 'missing' from it
+    (recall is 100% memgrep). The check must surface NOTHING for any scope.
+    """
+
+    def test_notes_not_flagged_missing_from_memory_md(self):
+        """Notes on disk are never reported 'missing from MEMORY.md'."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            # The canonical deprecation stub — pointers intentionally retired.
+            (memdir / "MEMORY.md").write_text(
+                "# MEMORY — index retired (managed by memgrep)\n"
+                "⚠ DEPRECATED stub — do NOT add pointers here.\n")
+            (memdir / "one.md").write_text(_note("one", "first topic alpha", []))
+            (memdir / "two.md").write_text(_note("two", "second topic bravo", []))
+            out = _run(home, project)
+            self.assertNotIn("missing from MEMORY.md", out)
+            if (memdir / PROPOSAL_NAME).exists():
+                proposal = (memdir / PROPOSAL_NAME).read_text()
+                self.assertNotIn("missing from MEMORY.md", proposal)
+
+    def test_stale_index_line_no_longer_flagged(self):
+        """An old-style index line pointing at a deleted note is no longer a
+        sync finding either — the whole MEMORY.md↔disk diff is retired."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "present.md").write_text(_note("present", "a present topic", []))
+            (memdir / "MEMORY.md").write_text(
+                "# Memory index\n"
+                "- [Gone](deleted_note.md) — points at a deleted file.\n")
+            out = _run(home, project)
+            self.assertNotIn("missing on disk", out)
+            if (memdir / PROPOSAL_NAME).exists():
+                proposal = (memdir / PROPOSAL_NAME).read_text()
+                self.assertNotIn("deleted_note.md", proposal)
+
+
 class TestMemoryLibrarianRegistration(unittest.TestCase):
     """dispatch.py must register the detector with a low (≥6h) cadence."""
 
@@ -1112,6 +1206,7 @@ class TestMemoryLibrarianRegistration(unittest.TestCase):
                 if isinstance(cad, _ast.Constant) and isinstance(cad.value, int):
                     found_interval = cad.value
         self.assertIsNotNone(found_interval, "memory-librarian not found in roster tuple")
+        assert found_interval is not None  # narrow int|None for the type-checker
         self.assertGreaterEqual(found_interval, 21600, "background librarian must run no more often than 6h")
 
 
