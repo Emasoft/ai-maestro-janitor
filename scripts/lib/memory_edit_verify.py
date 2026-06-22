@@ -334,14 +334,26 @@ def is_legal_merge(meta_a: dict, meta_b: dict) -> tuple[bool, str]:
     return (True, "ok")
 
 
-def is_legal_split(meta: dict, body: str, min_sections: int = 2) -> tuple[bool, str]:
-    """Refuse a structurally-illegal split. Per the wikimem model "one element =
+def is_legal_split(
+    meta: dict, body: str, min_sections: int = 2, oversized: bool = False
+) -> tuple[bool, str]:
+    """Decide whether a page may be split. Per the wikimem model "one element =
     one page", a `component` is a single element and is NEVER fragmented (an
-    oversized component is flagged for a human and links UP to aspects instead);
-    only `hub`s (→ sub-hubs) and broad `aspect`s (→ sub-aspects) split. And a page
-    is splittable only if its body (excluding the mandatory `## Notes and lessons
-    learned` section) carries at least `min_sections` distinct `##` content
-    sections — otherwise it is one atomic note over the size cap, left intact."""
+    oversized component is a MIS-TIER — surfaced for re-tiering + linking UP to
+    aspects, never silently abstained); only `hub`s (→ sub-hubs) and broad
+    `aspect`s (→ sub-aspects) split.
+
+    A hub/aspect with >= `min_sections` distinct `##` content sections (excluding
+    the mandatory `## Notes and lessons learned`) splits at its natural seams.
+
+    A SEAMLESS hub/aspect (fewer sections) is FAIL-SAFE splittable when it is
+    `oversized` (issue #57/#58): the splitter SYNTHESIZES seams — paragraph- or
+    line-chunking with every line copied verbatim — so an over-cap page ALWAYS
+    converges instead of abstaining every cycle forever. `verify_split` proves
+    the synthesized split lost nothing (it checks output invariants, not the
+    source's seam count, so a synthesized split is already legal there). A
+    seamless page that is NOT oversized has nothing to gain from fragmenting, so
+    it is left intact."""
     if meta.get("tier") == "component":
         return (False, "a component is one element (one element = one page) — never fragmented")
     sections = 0
@@ -349,9 +361,13 @@ def is_legal_split(meta: dict, body: str, min_sections: int = 2) -> tuple[bool, 
         s = raw.strip()
         if s.startswith("## ") and s != _LESSONS_HEADING:
             sections += 1
-    if sections < min_sections:
-        return (False, f"un-splittable: {sections} content section(s) < {min_sections} (atomic element)")
-    return (True, "ok")
+    if sections >= min_sections:
+        return (True, "ok")
+    # Seamless body: fail-safe seam synthesis only makes sense for an over-cap
+    # page (an under-cap seamless page is fine as one element — don't fragment it).
+    if oversized:
+        return (True, "ok: synthesize seams (seamless oversized page)")
+    return (False, f"un-splittable: {sections} content section(s) < {min_sections} (not oversized)")
 
 
 # --------------------------------------------------------------------------- #

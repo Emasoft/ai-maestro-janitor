@@ -422,10 +422,36 @@ def test_is_legal_split_allows_multi_section_hub():
 
 
 def test_is_legal_split_refuses_atomic_aspect():
-    """A single-section aspect is one atomic note, not splittable."""
+    """A single-section aspect that is NOT oversized is one atomic note, left intact."""
     body = "## The only section\nbody\n## Notes and lessons learned\n[^1]: x\n"
     ok, why = v.is_legal_split({"tier": "aspect"}, body)
     assert not ok and "un-splittable" in why
+
+
+def test_is_legal_split_synthesizes_seams_for_oversized_seamless():
+    """Issue #57/#58 — a SEAMLESS hub/aspect that is OVER the cap is fail-safe
+    splittable: the splitter synthesizes seams so it always converges, instead of
+    abstaining every cycle forever."""
+    seamless = "one long unbroken reference archive with no ## seams at all\n" * 3
+    ok, why = v.is_legal_split({"tier": "aspect"}, seamless, oversized=True)
+    assert ok and "synthesize" in why
+    ok_hub, _ = v.is_legal_split({"tier": "hub"}, seamless, oversized=True)
+    assert ok_hub
+
+
+def test_is_legal_split_seamless_under_cap_left_intact():
+    """A seamless page that is NOT oversized has nothing to gain from splitting —
+    it stays one element (fail-safe synthesis is only for over-cap pages)."""
+    ok, why = v.is_legal_split({"tier": "aspect"}, "tiny seamless note\n", oversized=False)
+    assert not ok and "un-splittable" in why
+
+
+def test_is_legal_split_oversized_component_still_refused():
+    """Even oversized, a component is NEVER fragmented (one element = one page) —
+    it is a mis-tier to surface for re-tiering, not a fail-safe split target."""
+    big = "huge component body line\n" * 100
+    ok, why = v.is_legal_split({"tier": "component"}, big, oversized=True)
+    assert not ok and "component" in why
 
 
 # ---- split-specific structural checks --------------------------------------
