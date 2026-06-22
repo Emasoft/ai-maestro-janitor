@@ -55,14 +55,23 @@ going to finish. so you must switch oauth token soon."* Then `/go-on-yourself`.
   TRDD's STATE and do the next queue item. Fresh context each wake — so this STATE block
   is the ONLY memory; keep it current (update the done-log + NEXT ACTION every commit).
 
-### NEXT ACTION
-Continue M1 INLINE (NO subagents). Remaining: **#56** (repair serializer nests ocd/lmd
-under metadata: → emit top-level) then **#53** (scope-leak action@sha FP). One at a time,
-TDD, commit each — keep each small enough to FINISH+commit before any wall. AFTER the
-weekly resets (Jun 23 17:00) and budget is healthy: publish ONE coherent release via
-`uv run scripts/publish.py` bundling all memory FP fixes + the subconscious-agent
-(619cedd) + control commands → then /reload-plugins + /janitor-arm → close #54/#55/#59/#56/
-#53/#60 at once. DO NOT publish while 7d≥~85% (publish runs the full 11k-test suite).
+### NEXT ACTION (post-reset — weekly budget EXHAUSTED ~03:30)
+All cheap M1 inline fixes are DONE+committed+coordinated (#54/#55/#59/#53 fixed; #56
+decided+answered). Weekly budget is now spent: fmuaddib 7d=100% (dead), emanuele 7d=95%
+(live, ~5% left). **STOP starting new work — wind down clean.** The [night-work] cron keeps
+firing; turns die on the weekly limit until **Jun 23 17:00 Europe/Rome**, then auto-resume.
+
+POST-RESET, in order:
+1. **PUBLISH** one coherent release via `uv run scripts/publish.py` (only when 7d<~80%) —
+   bundles: the memory FP fixes (42099f5, 903e293, d0eaeb9), the subconscious-agent
+   architecture (619cedd), and the control commands (already shipped in prior commits).
+   Then `/reload-plugins` + `/janitor-arm` (activates the subconscious agent + new cron).
+2. **CLOSE** #54, #55, #59, #53, #60 (all fixed; #60 = the subconscious-agent dispatch).
+   Comment the published version on each.
+3. **#56** the real fix (repair serializer → top-level ocd/lmd + migration) — see its
+   investigation pointer above. Then close #56.
+4. Then M3 (granular subconscious-agent skills) / M4 (#57/#58 un-splittable) / C (#228
+   self-integrity) as budget allows.
 
 ### BUDGET REALITY (critical)
 WEEKLY limit was hit ~02:30 on fmuaddib (7d was 93%). User did manual `/login` → both
@@ -123,7 +132,15 @@ weekly wall). Inline, frugal, commit often. A 4-parallel-spark burst = instant t
 - BUDGET: 7d climbed to 94% on BOTH accounts (~6% weekly left until Jun 23 17:00 reset).
   Rotation can't help (both equal on 7d). If [night-work] turns start dying on the weekly
   limit, that's EXPECTED — the cron keeps firing; turns resume automatically after the
-  reset. Everything is committed clean; nothing is lost. (next: #56 then #53, post-budget.)
+  reset. Everything is committed clean; nothing is lost.
+- 03:20 — #56 DECIDED+answered (f9a2070): top-level ocd/lmd canonical (memgrep reads
+  top-level); real fix deferred post-reset with investigation pointer. Commented on #56.
+- 03:30 — #53 scope-leak action@sha FP FIXED+committed (d0eaeb9): _allow_ssh_host suppresses
+  a pure-hex 7-40 char SHA right-side; +2 tests, 30/30 green, ruff clean.
+- 03:30 — WEEKLY BUDGET EXHAUSTED: fmuaddib 7d=100% (dead), emanuele 7d=95% (live). Night
+  fixes COMPLETE for this budget window. Winding down clean. NEXT WAKE WITH BUDGET: publish
+  + close issues (see NEXT ACTION). 4 issues fixed (#54/#55/#59/#53), 1 decided (#56), all
+  committed, all coordinated on GitHub. A productive night despite the early weekly wall.
 
 ### SUPERSEDED — do NOT carry forward
 - The earlier idea of waiting for the user's naming calls on the granular skills — the
