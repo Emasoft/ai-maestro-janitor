@@ -56,11 +56,13 @@ going to finish. so you must switch oauth token soon."* Then `/go-on-yourself`.
   is the ONLY memory; keep it current (update the done-log + NEXT ACTION every commit).
 
 ### NEXT ACTION
-Continue M1 INLINE (NO subagents — they tripped the server throttle AND burn the most
-budget; weekly limit nearly hit). Remaining: #53 (scope-leak action@sha FP), #56 (repair
-serializer ocd/lmd shape), #59 (trdd-reminder backburner+age). Do one at a time, TDD,
-commit each. Then publish a coherent release bundling all memory FP fixes + the
-subconscious-agent (619cedd) + control commands → closes many issues at once.
+Continue M1 INLINE (NO subagents). Remaining: **#56** (repair serializer nests ocd/lmd
+under metadata: → emit top-level) then **#53** (scope-leak action@sha FP). One at a time,
+TDD, commit each — keep each small enough to FINISH+commit before any wall. AFTER the
+weekly resets (Jun 23 17:00) and budget is healthy: publish ONE coherent release via
+`uv run scripts/publish.py` bundling all memory FP fixes + the subconscious-agent
+(619cedd) + control commands → then /reload-plugins + /janitor-arm → close #54/#55/#59/#56/
+#53/#60 at once. DO NOT publish while 7d≥~85% (publish runs the full 11k-test suite).
 
 ### BUDGET REALITY (critical)
 WEEKLY limit was hit ~02:30 on fmuaddib (7d was 93%). User did manual `/login` → both
@@ -103,7 +105,14 @@ weekly wall). Inline, frugal, commit often. A 4-parallel-spark burst = instant t
   did manual /login. Lesson: NO subagent bursts; inline-only under budget.
 - 02:45 — #54+#55 librarian FP fixes DONE+committed (42099f5): completed the dying spark's
   work, retired _collect_memory_sync_findings to no-op, removed 3 dead helpers, +6 tests,
-  56/56 green, ruff clean. (next: comment+continue #53/#56/#59 inline)
+  56/56 green, ruff clean. Commented on #54+#55.
+- 03:05 — #59 trdd-reminder DONE+committed (903e293): trimmed _ACTIVE_COLUMNS to the 4 WORK
+  columns (backburner/todo/dispatch no longer "active"); age now from created: not mtime
+  (_created_epoch parser); +4 tests, 17/17 green, ruff clean.
+- BUDGET: 7d climbed to 94% on BOTH accounts (~6% weekly left until Jun 23 17:00 reset).
+  Rotation can't help (both equal on 7d). If [night-work] turns start dying on the weekly
+  limit, that's EXPECTED — the cron keeps firing; turns resume automatically after the
+  reset. Everything is committed clean; nothing is lost. (next: #56 then #53, post-budget.)
 
 ### SUPERSEDED — do NOT carry forward
 - The earlier idea of waiting for the user's naming calls on the granular skills — the
