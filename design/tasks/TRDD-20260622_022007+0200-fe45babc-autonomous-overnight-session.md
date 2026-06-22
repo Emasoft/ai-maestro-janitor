@@ -80,7 +80,18 @@ weekly wall). Inline, frugal, commit often. A 4-parallel-spark burst = instant t
   - #55 memory-librarian: MEMORY.md-sync flags every note "missing from MEMORY.md" but
     MEMORY.md is the deprecated stub.
   - #56 memory repair serializer nests ocd/lmd under `metadata:` — diverges from the
-    write-skill top-level shape (two frontmatter shapes coexist).
+    write-skill top-level shape (two frontmatter shapes coexist). **DECISION MADE
+    (verified, posted to #56): TOP-LEVEL is canonical** — memgrep reads top-level
+    `ocd`/`lmd` (`scripts/memgrep/src/memory.rs:195`, `has(["ocd","created"])`); a nested
+    page is seen as MISSING `ocd` (date lost), and the live corpus + the doc are top-level.
+    INVESTIGATION POINTER for the fix: grep found NO Python re-serializer building a nested
+    metadata dict — `_REQUIRED_FM_KEYS` (memory_edit_verify.py:524) lists ocd/lmd but
+    `parse_frontmatter` likely FLATTENS metadata→top-level so verify_repair passed on BOTH
+    shapes. So the nesting is either the repair-SKILL checklist wording leading the agent to
+    nest, OR a round-trip in parse/emit. FIX (post-reset): (a) make the repair skill +
+    verify_repair ENFORCE top-level ocd/lmd so a nested stage is rejected→repaired; (b) a
+    one-time migration moving metadata.ocd/lmd → top-level on existing nested pages. Needs
+    care (don't break already-nested pages mid-flight) → not a near-wall task.
   - #59 trdd-reminder: reports `backburner` proto-TRDDs as "active"; age is
     days-since-updated not true age.
 - **M2** — #60 (background-dispatch wikimem passes): ALREADY built (commit 619cedd, the
