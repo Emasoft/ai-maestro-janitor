@@ -40,7 +40,7 @@ def test_defaults_on_fresh_store():
     """A store that was never written returns the documented defaults."""
     assert ms.get("consolidation_per_day") == 2.5
     assert ms.get("split_per_day") == 4.5
-    assert ms.get("split_max_bytes") == 12000
+    assert ms.get("split_max_bytes") == 36000
     assert ms.get("conflict_per_day") == 0.5
     assert ms.get("edit_project_scope") is False
 

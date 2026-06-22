@@ -30,7 +30,7 @@ import state
 DEFAULTS: dict = {
     "consolidation_per_day": 2.5,   # MERGE pass
     "split_per_day": 4.5,           # SPLIT pass (cheaper, size-triggered)
-    "split_max_bytes": 12000,       # a page over this is a SPLIT candidate
+    "split_max_bytes": 36000,       # a page over this is a SPLIT candidate (raised 12k→36k: recall returns a memgrep CHUNK + lessons, not the whole page, so larger pages don't bloat context)
     "conflict_per_day": 0.5,        # CONFLICT + fact-verify (once/48h — the costly one)
     "repair_per_day": 3.0,          # REPAIR pass (page-shape/metadata backfill — a few/day)
     "harvest_per_day": 1.0,         # HARVEST pass — incorporate stray MEMORY.md/.md memories into the wiki (once/day)
