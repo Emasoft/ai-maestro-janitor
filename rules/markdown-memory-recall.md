@@ -370,15 +370,33 @@ from a clean framing, or have the symptom come from the user verbatim.
 | Authoring | `# Memory` harness directive + `janitor-memory-write` skill | write one fact per note; symptom-indexed `description`; the correction protocol (clean fact in place, demote error to a `[^N]` lesson) |
 | Recall | THIS rule + `janitor-memory-recall` skill + `memgrep recall`/`find` | symptom-ranked recall, lessons auto-appended |
 | Bootstrap | `janitor-memory-bootstrap` skill | stands up a project's wikimem once: creates the PROJECT-scope dir (+ gitignore exception), seeds an architecture-hub page + the MEMORY.md deprecation stub, points the agent at the proactive contract |
-| Organization | `memory-librarian` detector (janitor heartbeat) | SURFACES aggregation/conflict candidates to `memory-reorg-proposed.md`; never edits content (a session does the conscious reorg) |
+| Organization (SURFACE) | `memory-librarian` detector (janitor heartbeat) | SURFACES aggregation/conflict candidates to `memory-reorg-proposed.md`; never edits content |
+| Organization (EXECUTE) | the janitor's **`janitor-memory-subconscious-agent`** (async, opus, its own context) | runs the COMPLEX editorial passes — consolidate/merge, split (incl. fail-safe seam synthesis for seamless pages), conflict/harmonize, repair, harvest — through the crash-safe transaction core; dispatched in the BACKGROUND by the heartbeat's `[janitor-memory-*]` markers |
 | Tool | `memgrep` (`scripts/memgrep/SKILL.md`) | the engine all three lean on |
 | Private user store | `/janitor-memory-user-{add,search,share}` (legacy `/to-user-mem`, `/search-user-mem`, `/share-user-mem` still work, deprecated) | the USER's own agent-invisible memories — a SEPARATE corpus, not the agent notes; search routes through `memgrep find` |
 
-Separation of powers: the **janitor** reorganizes structure and *surfaces*
-contradictions but never edits a fact; an **agent** creates and corrects content
-but never reorganizes. (The background auto-merge — the librarian consolidating
-clusters into one wiki page — is DESIGNED but not yet shipped; today the detector
-only proposes, an agent applies.)
+### Division of labor — leave editorial work to the janitor's subconscious agent
+
+There are exactly **two** roles, and a main agent stays in the first:
+
+- **A MAIN agent (you, in any session) does ONLY SIMPLE ops, INLINE:** recall
+  (`/janitor-memory-recall`), create a page / add ONE atom (`/janitor-memory-write`),
+  update ONE fact via the correction protocol (`/janitor-memory-update`). That is the
+  whole surface. You **never** run a complex editorial pass yourself — not split, not
+  merge/consolidate, not conflict/harmonize, not dedupe, not repair, not harvest, not
+  any multi-page reorganization. They are transaction-gated, easy to get wrong, and
+  would burn your context on work that is not yours.
+- **The janitor's `janitor-memory-subconscious-agent` does ALL complex editorial work,
+  ASYNC, in its own context.** The heartbeat dispatches it in the background when a pass
+  is due (the `[janitor-memory-*]` markers). If you NOTICE editorial work is needed (a
+  page is too big, two pages overlap, a contradiction, a malformed page), just **note it
+  and move on** — the librarian surfaces it and the subconscious agent executes it. Do
+  NOT do it yourself, and do NOT block on it.
+
+So: **janitor** = surfaces (librarian) + executes the reorg (subconscious agent, async);
+**main agent** = creates/corrects atomic content only. This is why a seamless page that
+"can't be split" is not your problem to solve inline — the subconscious agent splits it
+fail-safe on its own schedule.
 
 ## Why this rule exists
 
