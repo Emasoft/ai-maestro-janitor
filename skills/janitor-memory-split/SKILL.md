@@ -111,22 +111,44 @@ Pick the **single largest** over-cap page as `$PAGE` (rel-path `$REL` under
 Read `$PAGE` and apply the wikimem-model rules (the same predicate
 `is_legal_split` enforces — do it up front so you never open a txn you must abort):
 
-- **`tier: component` → REFUSE.** One element = one page; a component is never
-  fragmented. An oversized component is left intact and links UP to aspects. Skip
-  it and surface: `[memory-split] skipped <slug>: component (one element = one
-  page) — left intact; review manually.`
-- **Fewer than 2 distinct `##` content sections** (excluding the mandatory
-  `## Notes and lessons learned` heading) → **un-splittable atomic leaf.** A
-  single big note has no natural seam. Leave it intact and surface:
-  `[memory-split] un-splittable <slug>: 1 atomic note over the cap — left intact.`
-  Do NOT loop trying to split it.
-- Otherwise (`tier: hub` → sub-hubs, or a broad `tier: aspect` → sub-aspects) it
-  is splittable. Proceed.
+- **`tier: component` → do NOT fragment; SURFACE for re-tiering.** One element =
+  one page; a component is never split into multiple elements. An oversized
+  component is a **mis-tier**, not a split target — surface
+  `[memory-split] re-tier <slug>: component over the cap — too big to be one
+  element; re-tier to hub/aspect (the conflict/repair pass), then it splits.` and
+  leave it intact this pass. (This is the ONLY non-converging case, and it is a
+  tagging fix, not a silent abstain.)
+- **Splittable tiers (`hub` → sub-hubs, broad `aspect` → sub-aspects) ALWAYS
+  converge — FAIL-SAFE (issue #57/#58).** An over-cap page is NEVER reported
+  "un-splittable":
+  - **≥ 2 distinct `##` content sections** (excluding the mandatory
+    `## Notes and lessons learned`) → split at those **natural seams** (step 3).
+  - **fewer than 2** — a seamless archive with no natural seam → do NOT abstain:
+    **SYNTHESIZE seams** (step 3a). The splitter always makes real progress this
+    level, so a seamless oversized page converges instead of being skipped every
+    cycle forever. `is_legal_split(meta, body, oversized=True)` returns ok here.
 
 ### 3. Plan the split (decide the seams; preserve type and every fact)
 
 Group the page's `##` content sections into **2–4 coherent sub-topics**, each
 becoming one sub-page. Then design the outputs:
+
+> **3a. Synthesize seams first (seamless oversized page — the fail-safe path).**
+> When the page has fewer than 2 natural `##` seams, MANUFACTURE them before
+> grouping — never abstain:
+> 1. Split the body into blank-line-separated paragraphs. Group consecutive
+>    paragraphs into **2–4 chunks**, each comfortably under the cap, cut at a
+>    coherent topic boundary. Head each chunk with a synthetic
+>    `## Part N — <2–4 word topic>` derived from its content.
+> 2. If the body has NO blank-line breaks (one unbroken blob), hard-chunk at
+>    **line boundaries** (never mid-line) into N under-cap pieces, each headed
+>    `## Part N (continued)`.
+>
+> Copy every body line **VERBATIM** into exactly one chunk — only the `## Part N`
+> headings are new. (`body_facts_preserved` FAILS on any reworded or dropped
+> line, so synthesis is partition-and-label, never paraphrase.) Then treat the
+> synthesized `## Part N` sections exactly like natural seams below. This is what
+> makes split **fail-safe**: an over-cap hub/aspect ALWAYS converges.
 
 - **Overview page** — REUSE the source's path/slug. It keeps the page's identity,
   frontmatter `name`, `ocd`, and `tier`, and becomes a concise map: it OPENS with a
@@ -270,7 +292,9 @@ prints the reasons and aborts the txn (the live tree is untouched).
 STOP on the first outcome (one page, one level, retry ≤ 3):
 
 - [ ] NOTHING DUE — no over-cap note (step 1).
-- [ ] LEFT INTACT — component or un-splittable leaf (step 2).
+- [ ] RE-TIER SURFACED — an over-cap `component` (mis-tier; left intact, flagged for
+  re-tiering — step 2). A hub/aspect is NEVER left intact: it splits at natural OR
+  synthesized seams (fail-safe, step 3a).
 - [ ] SPLIT — commit exited 0 (step 5/6).
 - [ ] FAILED — verify error 3× (step 6).
 - [ ] DEFERRED — lock contention / stale-hash loser.
