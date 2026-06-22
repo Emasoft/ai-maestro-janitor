@@ -215,6 +215,56 @@ class TestTrddDetectors(unittest.TestCase):
             self.assertIn("TRDD-bbbbbbbb", out)
             self.assertNotIn("TRDD-cccccccc", out)
 
+    # ---- issue #59: parking columns excluded; age from created --------------
+
+    def test_reminder_backburner_excluded(self):
+        """Issue #59: a `column: backburner` proto-TRDD is the parking lot — NOT
+        active work, so it is NEVER in the reminder (the primary false-positive)."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp)
+            _write(root / "design/tasks", "bbbbbbbb", _fm(column="backburner"))
+            out = _run(REMINDER, root)
+            self.assertEqual(out.strip(), "")
+
+    def test_reminder_todo_and_dispatch_excluded(self):
+        """Issue #59: the ENTRY/DESIGN columns `todo` and `dispatch` are queued,
+        not active work — also excluded from the 'currently active' reminder."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp)
+            _write(root / "design/tasks", "11111111", _fm(column="todo"))
+            _write(root / "design/tasks", "22222222", _fm(column="dispatch"))
+            out = _run(REMINDER, root)
+            self.assertEqual(out.strip(), "")
+
+    def test_reminder_age_is_from_created_not_mtime(self):
+        """Issue #59: the reported age is TRUE age (days since `created:`), not
+        days-since-last-edit. A TRDD created months ago but written just now (a
+        fresh mtime) still reports its real age, never `(0d)`."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp)
+            # _fm hard-codes created: 2026-01-01 — months before any run date;
+            # _write gives the file a brand-new mtime, so an mtime-based age
+            # would wrongly report ~0d.
+            _write(root / "design/tasks", "bbbbbbbb", _fm(column="dev"))
+            out = _run(REMINDER, root)
+            marker = "TRDD-bbbbbbbb ("
+            idx = out.index(marker) + len(marker)
+            age = int(out[idx:out.index("d)", idx)])
+            self.assertGreaterEqual(age, 150, f"age should be true age since 2026-01-01, got {age}d")
+
+    def test_reminder_age_falls_back_to_mtime_without_created(self):
+        """A legacy TRDD whose frontmatter has no `created:` still appears — the
+        age computation falls back to the file's last-touched time, never crashes."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp)
+            body = (
+                "---\ntrdd-id: 00000000-0000-0000-0000-000000000000\n"
+                "title: T\ncolumn: dev\n---\n\n# body\nx\n"
+            )
+            _write(root / "design/tasks", "33333333", body)
+            out = _run(REMINDER, root)
+            self.assertIn("TRDD-33333333", out)
+
 
 if __name__ == "__main__":
     unittest.main()

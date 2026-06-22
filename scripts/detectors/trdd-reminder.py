@@ -51,6 +51,10 @@ _TRDD_NAME_RE = re.compile(
 _FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL)
 _FM_STATUS_RE = re.compile(r"^status:[ \t]*(.+)$", re.MULTILINE)
 _FM_COLUMN_RE = re.compile(r"^column:[ \t]*(.+)$", re.MULTILINE)
+# The TRDD's birth date (issue #59 — TRUE age is days-since-`created:`, not
+# days-since-last-edit). ISO 8601 with a local offset, e.g.
+# `created: 2026-06-02T11:53:00+0200`; a bare date is also tolerated.
+_FM_CREATED_RE = re.compile(r"^created:[ \t]*(.+)$", re.MULTILINE)
 # Legacy `**Status:** ...` markdown body line (pre-frontmatter TRDDs only).
 _LEGACY_STATUS_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.+)$", re.MULTILINE)
 
@@ -59,11 +63,16 @@ _LEGACY_STATUS_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.+)$", re.MULTILINE)
 # without slurping a multi-thousand-line TRDD body.
 _HEAD_BYTES = 4096
 
-# v2 `column:` values that mean "actively in flight" (per the task spec).
-# Same set the trdd-drift detector uses.
-_ACTIVE_COLUMNS = frozenset(
-    {"dev", "testing", "backburner", "todo", "dispatch", "ai_review", "human_review"}
-)
+# v2 `column:` values that mean "actively in flight" — the WORK group per the
+# TRDD v2 model (~/.claude/rules/trdd-design-tasks.md). Issue #59: this set used
+# to also include the ENTRY/DESIGN columns `backburner`/`todo`/`dispatch`, which
+# made the reminder nag about deliberately-PARKED proto-TRDDs as "currently
+# active" — backburner is the parking lot, the OPPOSITE of active. Only the four
+# WORK columns are genuinely active work someone could forget mid-flight. (This
+# deliberately DIVERGES from trdd-drift's wider set: drift cares about any TRDD
+# whose git state drifted, including parked ones; the reminder only nags about
+# active work, so the two detectors legitimately scope differently now.)
+_ACTIVE_COLUMNS = frozenset({"dev", "testing", "ai_review", "human_review"})
 
 
 def _norm_state(value: str) -> str:
@@ -77,21 +86,43 @@ def _norm_state(value: str) -> str:
     return "-".join(value.strip().rstrip("\r").lower().split())
 
 
-def _parse_trdd_state(path: Path) -> tuple[str, str]:
-    """Return (status, column) for a TRDD, both normalised kebab-case or ''.
+def _created_epoch(raw: str) -> int | None:
+    """Parse a frontmatter `created:` value to an epoch, or None if unparseable.
 
-    Reads the YAML frontmatter `status:`/`column:` keys (the documented
+    Accepts the canonical ISO 8601 + local offset (`2026-06-02T11:53:00+0200`)
+    and a bare date (`2026-06-02`). A naive value is interpreted in local time.
+    Returns None on any malformed value so the caller can fall back to mtime.
+    """
+    token = raw.strip().rstrip("\r").strip("'\"")
+    try:
+        dt = datetime.fromisoformat(token)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.astimezone()  # treat a naive timestamp as local
+    return int(dt.timestamp())
+
+
+def _parse_trdd_state(path: Path) -> tuple[str, str, int | None]:
+    """Return (status, column, created_epoch) for a TRDD.
+
+    `status`/`column` are normalised kebab-case (or ''). `created_epoch` is the
+    epoch of the frontmatter `created:` date (issue #59 — true age is measured
+    from birth, not last edit), or None when absent/unparseable so the caller
+    falls back to the file's last-touched time. Returns ('', '', None) on any
+    read error. Reads the frontmatter `status:`/`column:` keys (the documented
     location), falling back to a legacy `**Status:**` body line when the
-    frontmatter has no `status:`. Returns ('', '') on any read error.
+    frontmatter has no `status:`.
     """
     try:
         with path.open("r", encoding="utf-8", errors="replace") as f:
             head = f.read(_HEAD_BYTES)
     except (FileNotFoundError, OSError):
-        return ("", "")
+        return ("", "", None)
 
     status = ""
     column = ""
+    created: int | None = None
     fm = _FRONTMATTER_RE.match(head)
     if fm:
         block = fm.group(1)
@@ -101,6 +132,9 @@ def _parse_trdd_state(path: Path) -> tuple[str, str]:
         cm = _FM_COLUMN_RE.search(block)
         if cm:
             column = _norm_state(cm.group(1))
+        crm = _FM_CREATED_RE.search(block)
+        if crm:
+            created = _created_epoch(crm.group(1))
 
     # Legacy fallback only when the frontmatter carried no status: key.
     if not status:
@@ -108,7 +142,7 @@ def _parse_trdd_state(path: Path) -> tuple[str, str]:
         if lm:
             status = _norm_state(lm.group(1))
 
-    return (status, column)
+    return (status, column, created)
 
 
 def _last_touched_epoch(path: Path, project_root: Path, fallback: int) -> int:
@@ -183,7 +217,7 @@ def main() -> int:
 
     entries: list[str] = []
     for f in sorted(trdd_dir.glob("TRDD-*.md")):
-        status, column = _parse_trdd_state(f)
+        status, column, created = _parse_trdd_state(f)
         # Remind about TRDDs that are actively in flight: v1 status
         # `in-progress`, or a v2 column in the actively-in-flight set.
         if status != "in-progress" and column not in _ACTIVE_COLUMNS:
@@ -196,8 +230,12 @@ def main() -> int:
         # one is set. Both feed the dedupe entry and the `[:8]` display ref.
         uuid = m.group(1) or m.group(2)
 
-        touched = _last_touched_epoch(f, root, fallback=now)
-        age_days = (now - touched) // 86400
+        # Issue #59: TRUE age is days-since-birth (`created:`), not
+        # days-since-last-edit — an actively-worked TRDD edited today is not
+        # "0d old". Fall back to the file's last-touched time only for a legacy
+        # TRDD whose frontmatter has no parseable `created:`.
+        age_base = created if created is not None else _last_touched_epoch(f, root, fallback=now)
+        age_days = (now - age_base) // 86400
         entries.append(f"TRDD-{uuid[:8]} ({age_days}d)")
 
     if not entries:
