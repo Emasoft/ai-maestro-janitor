@@ -158,6 +158,13 @@ def _allow_ssh_host(matched: str) -> bool:
     if at < 0:
         return True
     host = matched[at + 1 :]
+    # GitHub Action SHA-pin (issue #53): `owner/action@<7-40 hex>` —
+    # e.g. `astral-sh/setup-uv@d4b2f3b6…` — superficially matches `user@host`,
+    # but the right side is a git commit SHA, not a machine. A pure-hex token of
+    # 7-40 chars is a SHA (short..full), never a real ssh target, so documenting
+    # a SHA-pin decision in a shareable note must not read as machine-private.
+    if 7 <= len(host) <= 40 and all(c in "0123456789abcdefABCDEF" for c in host):
+        return True
     if _hostname_is_generic(host):
         return True
     # An email address (user@domain.tld with a public-looking TLD and NO

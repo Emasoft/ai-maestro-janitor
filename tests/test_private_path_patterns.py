@@ -152,6 +152,23 @@ def test_email_not_flagged_as_ssh() -> None:
     assert "private-path.ssh-user-host" not in _ids(findings)
 
 
+def test_github_action_sha_pin_not_flagged_as_ssh() -> None:
+    """Issue #53: a GitHub Action SHA-pin (`owner/action@<40-hex>`) is a public
+    action reference, NOT a machine host — documenting it in a shareable note
+    must not trip the machine-host classifier."""
+    findings = ppp.scan_text(
+        "pin it: astral-sh/setup-uv@abcdef0123456789abcdef0123456789abcdef01  # v3.1.0"
+    )
+    assert "private-path.ssh-user-host" not in _ids(findings)
+
+
+def test_real_ssh_host_still_flagged_after_sha_exclusion() -> None:
+    """Regression for #53: excluding hex SHA-pins must NOT weaken detection of a
+    genuine ssh `user@host` (a real LAN host still fires)."""
+    findings = ppp.scan_text("ssh into emanuele@macbook.local to restart it")
+    assert "private-path.ssh-user-host" in _ids(findings)
+
+
 # ---------- hostnames (.local / .lan) ------------------------------------
 
 
