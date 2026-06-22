@@ -56,9 +56,17 @@ going to finish. so you must switch oauth token soon."* Then `/go-on-yourself`.
   is the ONLY memory; keep it current (update the done-log + NEXT ACTION every commit).
 
 ### NEXT ACTION
-Start queue item **M1** (memory detector false-positive fixes) — spawn parallel spark
-agents (one per bug) to diagnose+fix+test #53/#54/#55/#56/#59. They are independent,
-well-scoped, cheap, high-ROI. Commit each separately; comment on each issue.
+Continue M1 INLINE (NO subagents — they tripped the server throttle AND burn the most
+budget; weekly limit nearly hit). Remaining: #53 (scope-leak action@sha FP), #56 (repair
+serializer ocd/lmd shape), #59 (trdd-reminder backburner+age). Do one at a time, TDD,
+commit each. Then publish a coherent release bundling all memory FP fixes + the
+subconscious-agent (619cedd) + control commands → closes many issues at once.
+
+### BUDGET REALITY (critical)
+WEEKLY limit was hit ~02:30 on fmuaddib (7d was 93%). User did manual `/login` → both
+accounts now 5h≈1% (fresh) but **7d=91%, resets Jun 23 17:00 Europe/Rome**. So only ~9%
+weekly budget until then. NO subagents (4-way burst throttled; a single one then hit the
+weekly wall). Inline, frugal, commit often. A 4-parallel-spark burst = instant throttle.
 
 ### TASK QUEUE (priority order — budget-aware: cheap+certain first)
 - **M0** — Make the rotator auto-rotate NEAR threshold configurable + lower the default
@@ -91,7 +99,11 @@ well-scoped, cheap, high-ROI. Commit each separately; comment on each issue.
 
 ### DONE LOG (append; most recent last)
 - 02:20 — OAuth force-rotated → fmuaddib (fresh 5h). Night infra set up (this TRDD).
-- (next: M1 fixes …)
+- 02:30 — hit WEEKLY limit (4-spark burst throttled, then 1 spark hit weekly wall). User
+  did manual /login. Lesson: NO subagent bursts; inline-only under budget.
+- 02:45 — #54+#55 librarian FP fixes DONE+committed (42099f5): completed the dying spark's
+  work, retired _collect_memory_sync_findings to no-op, removed 3 dead helpers, +6 tests,
+  56/56 green, ruff clean. (next: comment+continue #53/#56/#59 inline)
 
 ### SUPERSEDED — do NOT carry forward
 - The earlier idea of waiting for the user's naming calls on the granular skills — the
