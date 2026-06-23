@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T15:09:30+0200
+updated: 2026-06-23T17:15:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,30 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ⚡ UPDATE 2026-06-23 17:15 — MEMORY JOB DONE (phase g COMPLETE); publish blocker UNCHANGED + KNOWN
+- **The 15:09 "HOLD phase g / don't build" block below is now OBSOLETE.** The USER un-held it
+  ("now finish the job on the memory first") and phase g is **100% COMPLETE** — g1–g6 were
+  already done; **g3 (the shared-footnote MOVE-RULE verify)** landed this wake:
+  `footnote_refs_resolve` + `no_new_dangling_footnote_refs` (count-based/renumber-safe,
+  NEW-scoped) wired into verify_split/verify_merge; +10 tests; +a latent body-fact-haystack
+  truncation bug fixed. TRDD-3b9b2040 STATE marks phase g DONE. Memory FEATURE is shippable.
+- **Commits this wake (none pushed):** b03208d (MD004) · 9b09f34 (2 malformed-YAML CRITICALs) ·
+  7ace046 (g3) · 254f38f (2 over-cap descriptions) · 6b48ee2 (TRDD STATE + lint). CPV CRITICAL
+  dropped **6→4** — cleared everything that was MINE (the 4 left are immortal-janitor's).
+- **PUBLISH still blocked — UNCHANGED + already-known.** The 4 persistence CRITICALs (CPV #40,
+  documented at NEXT ACTION §1 below) are THE blocker: real + load-bearing + the no-exempt
+  policy ⇒ un-clearable until GROUP C lands or GROUP B is extracted off main. Memory work is
+  HOSTAGE to that shared branch. Write-up:
+  `reports/overnight-session/20260623_171000+0200-memory-job-done-publish-blocked.md` + LOCAL
+  memory `janitor-publish-blocked-immortal-persistence`.
+- **OAuth healthy this wake:** LIVE emanuele 5h=22%/7d=19%; fmuaddib MAX (no switch). Budget OK.
+- **NEXT (autonomous):** USER wanted "complete the immortality AND the memory system" — memory is
+  DONE, so the next user-wanted work is **immortality GROUP C #228 (self-integrity)**. It is
+  SECURITY-CRITICAL (the plan mandates an ultracode review loop) → build it in a FRESH/compacted
+  context, NOT this long one. Deferred memory-only CPV debt (does NOT block the memory feature;
+  a careful editorial pass): 3 oversized memory SKILLs + wikimem-model TOC embeds + the memgrep
+  resource_abuse CPV FP (index.rs:762 ATOM_PAGE test fixture — devitalize per policy).
 
 ### ⚡ UPDATE 2026-06-23 15:09 — USER ACTIVELY REFINING THE MEMORY MODEL (still HELD)
 - **USER is mid-design-conversation NOW** (sent a burst of directives ~minutes ago; a direct
@@ -71,8 +95,8 @@ going to finish. so you must switch oauth token soon."* Then `/go-on-yourself`.
   (Updated `/go-on-yourself` 2026-06-22: *"Do not push unless you are working on a plugin
   project. … If it is a plugin, publish using the publish.py script. It has strict quality
   and security gates."*) Publish COHERENT, TESTED milestones only — never half-done work.
-  Do NOT hand-`git push` / `gh release`; `publish.py` OWNS the version bump + tag + release
-  + all gates (validate --strict, lint, tests). After a publish: daemon auto-updates →
+  Do NOT hand-`git push` / `gh release`; `publish.py` OWNS the version bump + tag + release +
+  all gates (validate --strict, lint, tests). After a publish: daemon auto-updates →
   `/reload-plugins` → `/janitor-arm` (activates new hooks/skills/the subconscious agent).
 - **GitHub issue WRITES are ALLOWED** (the user explicitly asked to read+write issues and
   coordinate). Comment + close issues as their fix ships.
@@ -211,8 +235,8 @@ weekly wall). Inline, frugal, commit often. A 4-parallel-spark burst = instant t
 - 03:30 — #53 scope-leak action@sha FP FIXED+committed (d0eaeb9): _allow_ssh_host suppresses
   a pure-hex 7-40 char SHA right-side; +2 tests, 30/30 green, ruff clean.
 - 03:30 — WEEKLY BUDGET EXHAUSTED: fmuaddib 7d=100% (dead), emanuele 7d=95% (live). Night
-  fixes COMPLETE for this budget window. Winding down clean. NEXT WAKE WITH BUDGET: publish
-  + close issues (see NEXT ACTION). 4 issues fixed (#54/#55/#59/#53), 1 decided (#56), all
+  fixes COMPLETE for this budget window. Winding down clean. NEXT WAKE WITH BUDGET: publish +
+  close issues (see NEXT ACTION). 4 issues fixed (#54/#55/#59/#53), 1 decided (#56), all
   committed, all coordinated on GitHub. A productive night despite the early weekly wall.
 - 2026-06-23 10:13 (post-COMPACTION continuation) — BUDGET STILL CAPPED: both accounts
   7d=100% (reset Jun 23 **17:00** Europe/Rome, ~7h out). Actions: (1) Re-armed the EXPIRED
