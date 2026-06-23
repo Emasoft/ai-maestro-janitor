@@ -759,7 +759,7 @@ mod tests {
 
     // A page whose body carries two `^id [block-props]` atoms (one harvested, one not). LEADING markers:
     // each `^id [props]` line OPENS its atom; the prose BELOW it is that atom's body.
-    const ATOM_PAGE: &str = "---\nname: oauth-hub\nmetadata:\n  node_type: memory\n  tier: hub\n---\n# OAuth hub\n^rotate-drain [keywords: rotator drain rate-limit, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nThe rotator drains the live account first when near a limit.\n^keychain [keywords: keychain credentials macos]\nCredentials live in the OS secret store, never a slots dir.\n";
+    const ATOM_PAGE: &str = "---\nname: oauth-hub\nmetadata:\n  node_type: memory\n  tier: hub\n---\n# OAuth hub\n^rotate-failover [keywords: rotator failover handoff, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nThe rotator hands the live account to a backup first when busy.\n^keychain [keywords: keychain credentials macos]\nCredentials live in the OS secret store, never a slots dir.\n";
 
     #[test]
     fn reindex_populates_atoms_and_fts() {
@@ -771,12 +771,12 @@ mod tests {
         reindex(&d, &files, false).unwrap();
         let (total, fts) = atom_counts(&d, "rotator");
         assert_eq!(total, 2, "both atoms indexed");
-        assert_eq!(fts, 1, "the keyword 'rotator' surfaces exactly the rotate-drain atom");
+        assert_eq!(fts, 1, "the keyword 'rotator' surfaces exactly the rotate-failover atom");
         // Provenance + the second atom's keyword are stored too.
         let conn = open_existing(&d).unwrap();
         let cmref: String = conn
             .query_row(
-                "SELECT claude_mem_ref FROM atoms WHERE atom_id = 'rotate-drain'",
+                "SELECT claude_mem_ref FROM atoms WHERE atom_id = 'rotate-failover'",
                 [],
                 |r| r.get(0),
             )
