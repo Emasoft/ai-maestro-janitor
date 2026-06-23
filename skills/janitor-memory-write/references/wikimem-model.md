@@ -252,8 +252,8 @@ atom OWNS exactly the footnotes it cites and the wikilinks it makes.
 
 - A **lesson-learned** is a *previous version* of THIS atom: when an update supersedes the
   atom, the old version is demoted to a `[^N]` lesson the (now-corrected) atom body
-  references — metadata = the change-date + the original metadata, content = the old text
-  + a concise WHY it changed. The atom body moves forward clean; its history accretes as
+  references — metadata = the change-date + the original metadata, content = the old text +
+  a concise WHY it changed. The atom body moves forward clean; its history accretes as
   its own footnotes (the superseded-memory invariant below, applied per-atom).
 - A **note** is any other annotation the atom cites; **"also see"** are its related-memory
   `[[links]]`.
