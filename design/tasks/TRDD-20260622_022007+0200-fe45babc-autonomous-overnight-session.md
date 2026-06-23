@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-22T02:20:07+0200
+updated: 2026-06-23T10:13:41+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -62,10 +62,35 @@ decided+answered). Weekly budget is now spent: fmuaddib 7d=100% (dead), emanuele
 firing; turns die on the weekly limit until **Jun 23 17:00 Europe/Rome**, then auto-resume.
 
 POST-RESET, in order:
-1. **PUBLISH** one coherent release via `uv run scripts/publish.py` (only when 7d<~80%) —
-   bundles: the memory FP fixes (42099f5, 903e293, d0eaeb9), the subconscious-agent
-   architecture (619cedd), and the control commands (already shipped in prior commits).
-   Then `/reload-plugins` + `/janitor-arm` (activates the subconscious agent + new cron).
+1. **PUBLISH** — ⚠️ **BLOCKED on a USER DECISION** (discovered 2026-06-23 10:13, post-compaction).
+   `publish.py --minor --dry-run` FAILS CPV --strict (`CRITICAL=6 MAJOR=4`). Disposition:
+   - **4 persistence CRITICALs = THE REAL BLOCKER.** `scripts/daemon-launcher.py:63` +
+     `scripts/lib/launchd_keepalive.py:71/176/186` are the IMMORTALITY OS-keepalive (GROUP
+     A/B, on main). CPV's security gate flags them `skillaudit:persistence` and **refuses
+     suppression** — `_intentional_validator_false_positives` is NOT honored for security
+     findings (upstream CPV **#40** open for exactly this). They are LOAD-BEARING (CPV's own
+     `plugin-devitalizer` REFUSES to neutralize a genuine persistence feature), and the
+     immortality plan says *"No push until USER approves."* → cannot pass --strict by any
+     legitimate means tonight. **USER DECISION NEEDED — pick one, do NOT relax the gate / do
+     NOT devitalize (would break immortality):**
+       (a) WAIT for CPV #40 (an honored by-design exemption), then publish the whole batch; OR
+       (b) SEPARATE the release — gate the OS-keepalive behind an unshipped flag / move
+           `daemon-launcher.py`+`launchd_keepalive.py` out of the published tree so v0.16.0
+           ships the MEMORY work alone; immortality ships later as its own reviewed release.
+           (CARE: the daemon imports launchd_keepalive — real release-eng, not a delete.)
+   - **2 injection CRITICALs (plugin.json:703-704) — FIXED this turn:** they were OUR OWN
+     unicode allowlist strings tripping the injection scanner; pruned (the array doesn't
+     suppress anyway). 6→4 CRIT.
+   - **2 unicode MAJORs (fleet_status.py:706-707) — CLEAN-FIXABLE, not yet done:** the JS
+     sanitizer's `.replace()` needles are raw U+2028/U+2029; rewrite as Python ` `/` `
+     escapes (identical runtime, ASCII source). Edit can't match the invisible chars → needs a
+     careful full-function Write (read exact bytes, reconstruct).
+   - **2 skill-size MAJORs (split ~5350, consolidate ~5100):** CPV's "bpe estimate" ≈30% >
+     tiktoken (I trimmed against tiktoken: 4092/3909). Need body < ~14,650 chars → trim more /
+     move detail to references/. Moot while persistence blocks.
+   Bundles (when unblocked): memory FP fixes (42099f5,903e293,d0eaeb9), subconscious-agent
+   (619cedd), fail-safe seam-split (9ef9da1,a0f1fab), size raise (8cecaff), trims (04ab8a5).
+   Then `/reload-plugins` + `/janitor-arm`.
 2. **CLOSE** #54, #55, #59, #53, #60 (all fixed; #60 = the subconscious-agent dispatch).
    Comment the published version on each.
 3. **#56** the real fix (repair serializer → top-level ocd/lmd + migration) — see its
@@ -141,6 +166,22 @@ weekly wall). Inline, frugal, commit often. A 4-parallel-spark burst = instant t
   fixes COMPLETE for this budget window. Winding down clean. NEXT WAKE WITH BUDGET: publish
   + close issues (see NEXT ACTION). 4 issues fixed (#54/#55/#59/#53), 1 decided (#56), all
   committed, all coordinated on GitHub. A productive night despite the early weekly wall.
+- 2026-06-23 10:13 (post-COMPACTION continuation) — BUDGET STILL CAPPED: both accounts
+  7d=100% (reset Jun 23 **17:00** Europe/Rome, ~7h out). Actions: (1) Re-armed the EXPIRED
+  heartbeat — CronList was empty, the stacked `[janitor-renew]`s were correct; re-created
+  session-only `8f2ee482` WITH the `[night-work]` block preserved (a stock /janitor-arm would
+  have dropped the overnight loop). (2) Stopped the stale skill-trim spark `a3a1fab4` — it was
+  burning capped quota in a tiktoken-install retry loop; its trims were already on disk +
+  verified (tiktoken cl100k: split body 4092 / consolidate 3909 / record-recent 2889 / desc
+  147 — all under caps; the step-3a SEAM-SYNTHESIS fail-safe survived the trim, verified).
+  Committed trims + .markdownlintignore (**04ab8a5**). (3) Ran `publish.py --minor --dry-run`
+  → **DISCOVERED THE CPV --strict PUBLISH BLOCKER** (see NEXT ACTION §1): the immortality
+  launchd persistence can't pass CPV's security gate, can't be suppressed (CPV #40), can't be
+  devitalized → **USER DECISION needed (wait-for-#40 vs separate-the-release).** (4) Pruned the
+  2 self-inflicted injection CRITICALs (plugin.json:703-704). Did NOT publish (capped budget
+  AND the blocker). **M4 (#57/#58 seam-synthesis split) is DONE** (9ef9da1 is_legal_split
+  oversized + a0f1fab skill step-3a + 8cecaff size raise) — the M4 queue line is stale.
+  Winding down per the prior session's directive; the loop auto-resumes after the 17:00 reset.
 
 ### SUPERSEDED — do NOT carry forward
 - The earlier idea of waiting for the user's naming calls on the granular skills — the

@@ -699,9 +699,7 @@
       "Persistence mechanism (scripts/daemon-launcher.py):63",
       "Persistence mechanism (scripts/lib/launchd_keepalive.py):71",
       "Persistence mechanism (scripts/lib/launchd_keepalive.py):176",
-      "Persistence mechanism (scripts/lib/launchd_keepalive.py):186",
-      "Invisible character: Line separator (scripts/fleet_status.py):706",
-      "Invisible character: Paragraph separator (scripts/fleet_status.py):707"
+      "Persistence mechanism (scripts/lib/launchd_keepalive.py):186"
     ],
     "_intentional_validator_false_positives_upstream_issue": "https://github.com/Emasoft/claude-plugins-validation/issues/40"
   }
