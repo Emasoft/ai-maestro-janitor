@@ -127,12 +127,24 @@ def get(key: str):
 
 def set_value(key: str, raw=None):
     """Persist `key` = coerced(`raw`); `raw is None` reverts to the default.
-    Returns the stored value. Atomic write (tmp + os.replace)."""
+    Returns the stored value. Atomic write (tmp + os.replace).
+
+    Persists ONLY keys that DEVIATE from the current DEFAULTS — never the whole
+    dict. The old wholesale write froze EVERY key (including ones left at their
+    default) into the file, so a LATER change to a default was silently masked by
+    the stale captured value: the `split_max_bytes` 12k->36k raise was defeated
+    for anyone who had ever set any memory setting (the file kept the old 12000).
+    Deviation-only persistence lets a default change flow through to every key the
+    user never explicitly tuned. `load()` is unchanged — it overlays DEFAULTS with
+    whatever keys are present, so a deviations-only file (or `{}`) reads back as
+    pure defaults for untouched keys. [TRDD-378c85da]
+    """
     value = _coerce(key, raw)
     current = load()
     current[key] = value
+    deviations = {k: v for k, v in current.items() if k in DEFAULTS and DEFAULTS[k] != v}
     settings_dir().mkdir(parents=True, exist_ok=True)
-    state.atomic_write(_settings_path(), json.dumps(current, indent=2, sort_keys=True))
+    state.atomic_write(_settings_path(), json.dumps(deviations, indent=2, sort_keys=True))
     return value
 
 

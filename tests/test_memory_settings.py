@@ -12,6 +12,7 @@ the CLI's get/set/revert/error paths.
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -104,6 +105,59 @@ def test_load_is_resilient_to_a_corrupt_store():
     ms.settings_dir().mkdir(parents=True, exist_ok=True)
     (ms.settings_dir() / "memory-settings.json").write_text("{not json", encoding="utf-8")
     assert ms.get("consolidation_per_day") == 2.5
+
+
+# ---- deviation-only persistence (TRDD-378c85da) ----------------------------
+# The store must persist ONLY keys that deviate from the current DEFAULTS, never
+# the whole dict. The old wholesale write froze EVERY key (incl. ones left at
+# default), so a later default change was masked by the stale captured value —
+# the bug that defeated the split_max_bytes 12k->36k raise.
+
+def _stored() -> dict:
+    """The raw persisted settings dict (what landed on disk), or {} if absent."""
+    path = ms.settings_dir() / "memory-settings.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def test_set_persists_only_the_deviation():
+    """A non-default set writes ONLY that key — not the whole dict."""
+    ms.set_value("split_per_day", "9")
+    assert _stored() == {"split_per_day": 9.0}
+
+
+def test_set_to_default_persists_no_deviation():
+    """Setting a key to its CURRENT default freezes nothing in — the file holds no
+    deviation (an empty object), so the default still flows from DEFAULTS."""
+    ms.set_value("split_max_bytes", str(ms.DEFAULTS["split_max_bytes"]))
+    assert _stored() == {}
+    assert ms.get("split_max_bytes") == ms.DEFAULTS["split_max_bytes"]
+
+
+def test_multiple_deviations_accumulate():
+    """Independent non-default sets accumulate; an unrelated set keeps prior ones."""
+    ms.set_value("split_per_day", "9")
+    ms.set_value("conflict_per_day", "3")
+    assert _stored() == {"split_per_day": 9.0, "conflict_per_day": 3.0}
+
+
+def test_revert_drops_the_key_from_the_file():
+    """Reverting a key to its default removes it from the persisted file."""
+    ms.set_value("split_per_day", "9")
+    assert "split_per_day" in _stored()
+    ms.set_value("split_per_day", None)  # revert to default
+    assert "split_per_day" not in _stored()
+    assert ms.get("split_per_day") == ms.DEFAULTS["split_per_day"]
+
+
+def test_default_change_flows_through_untouched_key(monkeypatch):
+    """THE REGRESSION (split_max_bytes 12k->36k): tuning ONE key must not freeze the
+    OTHERS at their default, so a LATER default change flows through instead of being
+    masked by a stale captured value."""
+    ms.set_value("conflict_per_day", "3")            # a real deviation -> file is written
+    assert "split_max_bytes" not in _stored()        # untouched key is NOT frozen in
+    # Simulate a later default RAISE; the untouched key must follow it, not a stale capture.
+    monkeypatch.setitem(ms.DEFAULTS, "split_max_bytes", 99000)
+    assert ms.get("split_max_bytes") == 99000
 
 
 # ---- interval derivation ---------------------------------------------------
