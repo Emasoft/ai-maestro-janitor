@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T20:08:42+0200
+updated: 2026-06-23T20:54:05+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,33 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ✅ UPDATE 2026-06-23 20:50 — v0.17.0 PUBLISHED — janitor-security-agent (USER's new feature)
+- **SHIPPED `v0.17.0`** (HEAD `6321b21`; tag pushed; release live:
+  https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.17.0). publish.py exit 0;
+  CPV `--strict` 0/0/0/0; 11305 tests green. CI watched in background.
+- **What shipped (TRDD-f12cae1a, now `column: published`):** `agents/janitor-security-agent.md`
+  — ONE opus agent for ALL 8 security skills, DETECT + FIX fail-safe (auto-fix the safe, FLAG
+  credential rotation / destructive ops, never suppress/auto-rotate/force-push). 11 security
+  detectors SUGGEST it via `security_helpers.security_agent_hint()` (visible hint, NOT a silent
+  marker — security blast radius; opt-out `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`). The 4
+  detect-only skills gained `## Remediation (fix)`. +13 tests; docs (README + CLAUDE.md agents).
+- **Publish-blocker hit + fixed this cycle:** `CHANGELOG.md:38 MD018` (git-cliff renders a commit
+  subject whose text starts `#NN` after the type prefix as a heading-shaped bullet; Step 10 regen
+  runs AFTER Step 3 lint so it recurs forever). Durable fix `2df36fe`: a cliff.toml `[changelog]`
+  postprocessor escapes a `#` at bullet-start (`- #` → `- \#`), verified to clear MD018 and leave
+  mid-line `#NN` refs intact. (LESSON: don't write `type(scope): #NN …` commit subjects.)
+- **The Stop-hook error the USER asked about = NOT the janitor.** It is the **agentlens** Stop hook
+  in `~/.claude/settings.json` (`[ -f "$f" ] && cat "$f" && rm "$f"` exits 1 when the file is
+  absent). Fix = wrap `{ …; } || true`. SURFACED + offered to the user; NOT applied (their global
+  config, outside the project, agentlens' concern — needs their OK).
+- **NEXT (when the user directs / loop continues):** #52 (cross-project wikimem) is the named next
+  item BUT is cross-repo-blocked — its e2e needs the memgrep `publish-sync` verbs in
+  `ai-maestro-plugin` (TRDD-202ccfa2, not yet built), and adding the schema to wikimem-model.md now
+  needs re-embedding its 7-entry TOC in ~6 skills. Building the janitor half speculatively before
+  the memgrep half exists = over-engineering; HOLD until the memgrep verbs land or the user
+  re-prioritizes. The #52 WIP is intact in `stash@{0}`. Other backlog: the agentlens fix (user OK),
+  the L0 reboot-survival companion (preserved at `cd9c251`, future TRDD).
 
 ### ✅ UPDATE 2026-06-23 19:30 — v0.16.0 PUBLISHED (blocker resolved via option (a)) + 8 issues closed
 - **SHIPPED `v0.16.0`** (HEAD `1351ee7`; bump+CHANGELOG; annotated tag; 92 commits + tag pushed to
