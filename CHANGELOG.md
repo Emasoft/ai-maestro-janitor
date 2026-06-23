@@ -35,7 +35,7 @@ All notable changes to this project will be documented in this file.
 - Autonomous overnight session brain (TRDD-fe45babc)
 - Night-brain — #54+#55 done, budget reality, inline-only (TRDD-fe45babc)
 - Night-brain — #59 done, weekly-wall near, post-reset plan (TRDD-fe45babc)
-- #56 decision (top-level ocd/lmd canonical) + fix pointer (TRDD-fe45babc)
+- \#56 decision (top-level ocd/lmd canonical) + fix pointer (TRDD-fe45babc)
 - Night-brain — #53 done, budget exhausted, post-reset publish plan (TRDD-fe45babc)
 - Leave editorial work to the janitor subconscious agent (#58, #60)
 - Adopt the-skills-menu progressive-discovery architecture — backburner (TRDD-cf15d412)

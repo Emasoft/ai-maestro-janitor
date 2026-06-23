@@ -22,6 +22,17 @@ body = """
 {% endfor %}\n"""
 trim = true
 footer = ""
+# A CHANGELOG bullet whose text begins with an issue ref renders as a malformed
+# Atx heading and trips pymarkdown MD018 — re-failing the publish lint forever
+# (same failure class the commit_preprocessors below guard). This happens when a
+# commit subject's text after the conventional-commit prefix starts with `#NN`
+# (e.g. `docs(trdd): #56 …` → git-cliff strips the type → bullet `- #56 …`).
+# Escape a `#` at the very start of a list item so it is literal text, not a
+# heading; the visible "#56" is preserved. Postprocessors run on the FINAL
+# rendered changelog, so this catches the case regardless of which commit caused it.
+postprocessors = [
+  { pattern = '(?m)^(- )#', replace = '$1\#' },
+]
 
 [git]
 conventional_commits = true
