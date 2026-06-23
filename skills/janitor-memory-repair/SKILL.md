@@ -69,6 +69,12 @@ For each candidate page, diagnose and fix ONLY what is wrong:
   `ocd`/`lmd`, `metadata.{node_type: memory, type, tier}`.
 - **Missing `ocd`/`lmd`** → `lmd` = today (`date +%F`); `ocd` = the page's earliest
   known date (an existing `lmd`, else today). Never lower an existing `ocd`.
+- **Nested `metadata.ocd` / `metadata.lmd`** → MOVE them to the TOP level (the
+  canonical shape per the write skill + `markdown-memory-recall.md`). The VALUE is
+  preserved verbatim — same date (rule 4: `ocd` immutable) — only the LOCATION is
+  normalized: `metadata:` keeps `node_type`/`type`/`tier`/`originSessionId`, while
+  `ocd`/`lmd` belong as top-level keys above it. (Two frontmatter shapes coexisted
+  historically — issue #56; this converges a repaired page onto the canonical one.)
 - **Missing `node_type`** → `node_type: memory`. **Missing `type`** → infer
   `project|reference|feedback|user` from the content.
 - **Missing/invalid `tier`** → infer: has `globs:` → `hub`; has `## Applies to`
