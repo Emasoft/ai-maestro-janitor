@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T14:16:05+0200
+updated: 2026-06-23T14:53:35+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -168,9 +168,39 @@ gained a `user_version < SCHEMA_VERSION` gate (a pre-v2 index → walk, which DO
 SQL lookup beats re-parsing every wiki page each call — and live-scans otherwise; both apply the
 exact/basename match and emit byte-identical sorted output (proven by `find_claude_mem_ref_index_matches_live_scan`).
 clippy `-D warnings` clean (collapsed let-chain + dropped redundant `.trim()`); memgrep installed to
-`~/.cargo/bin`; full suite 123 green. **Rust engine (a–d) COMPLETE.** NEXT (markdown/python breadth) →
-**(e)** harvest-into-atoms skill + update all memory skills/scripts for atom grepping → **(f)**
-`[janitor-memory-atomize]` migration pass + atomize the corpus. ab232dbd unblocks at (e).
+`~/.cargo/bin`; full suite 123 green. **Rust engine (a–d) COMPLETE.**
+**(e)** ✅ DONE — docs/skills teach atom authoring + atom recall: `scripts/memgrep/SKILL.md` ("Atoms —
+per-fact recall"), `rules/markdown-memory-recall.md`, `skills/janitor-memory-write/SKILL.md` +
+`references/wikimem-model.md` ("Atoms — first-class body elements"), `skills/janitor-memory-recall/SKILL.md`
+("Results now include body ATOMS"). NOTE harvest-into-atoms is ab232dbd's separate large scope (buffer
+coexistence) — its buffer is DORMANT (MEMORY.md is a stub, 0 raw notes), so this TRDD ships the atom
+ENGINE + atom RECALL + the atomize MIGRATION; ab232dbd stays blocked-by this and owns the harvest rewrite.
+**(f)** ✅ DONE — `[janitor-memory-atomize]` migration pass: `verify_atomize` gate (memory_edit_verify) +
+`--op atomize` (memory_txn_cli, repair-class 1-write-0-delete) + `atomize_per_day` cadence
+(memory_settings) + the `[janitor-memory-atomize]` marker (memory-maintenance scheduler) + the
+janitor-arm cron clause + the subconscious-agent roster + the new `skills/janitor-memory-atomize/SKILL.md`
+executor. 5 verify tests + an e2e txn smoke (begin→stage→commit --op atomize→reindex→recall the atom) green.
+
+### ⚠ USER CORRECTION (2026-06-23) — notes/lessons/see-also are PER-ATOM, not per-PAGE
+I initially built recall so a returned atom carried the PAGE's `[^N]` lessons. **The USER corrected
+this: every ATOM owns its OWN notes/lessons-learned/also-see.** A lesson = a PREVIOUS VERSION of THAT
+atom (demoted on update, with the change-date + the original metadata + a concise WHY it was
+superseded). On the page the structure stays Wikipedia-shaped (the lead atom on top, the `[^N]`
+footnote pool + `also see` links at the bottom, tied by INLINE references), but **on recall memgrep
+returns each atom AGGREGATED into its full self-contained record**: `^memory-<id> [props]` locator →
+the atom's content (multi-paragraph/table/code/math/links) → its `[notes]` → its `[lessons learned]`
+→ its `[also see: [[…]]]`. Fixed in `render_atom_record` (memory.rs): an atom's notes = the `[^N]`
+footnotes ITS body references (regex `atom_referenced_labels`), its "also see" = the `[[wikilinks]]`
+in ITS body (`atom_wikilinks`). Also FIXED `resolve_atoms_from_text` (was absorbing the leading
+`---`frontmatter`---` + the H1 into the first atom's body — now skips frontmatter and treats ANY
+`#`-heading as a boundary; locked by `resolve_atoms_excludes_frontmatter_and_headings_from_body`).
+Full memgrep suite 125 green; all 6 atom docs corrected to the per-atom aggregation model.
+
+### STILL OPEN (the only remaining work on THIS TRDD)
+- The atomize pass is WIRED (cadence + marker + skill + verify) so the heartbeat atomizes the corpus
+  incrementally, one page/run — the design's chosen path over a risky big-bang of ~30 live pages.
+- PUBLISH: the USER authorized push+publish; this TRDD's atom engine is shippable via `publish.py`.
+  ab232dbd's harvest-coexistence rewrite is SEPARATE and stays deferred (its buffer is dormant).
 
 ## Implementation blueprint — mirror the lesson-indexing precedent (VERIFIED 2026-06-23)
 
