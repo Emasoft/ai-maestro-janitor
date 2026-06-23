@@ -1,9 +1,9 @@
 ---
 trdd-id: 5539cd6e-f0d3-49ff-9615-7ca9fc4871db
 title: CRITICAL — keychain slot write silently truncates every OAuth blob to 128 bytes
-column: testing
+column: complete
 created: 2026-06-06T02:33:30+0200
-updated: 2026-06-06T03:59:07+0200
+updated: 2026-06-23T21:02:40+0200
 implementation-commits: [655a870]
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
