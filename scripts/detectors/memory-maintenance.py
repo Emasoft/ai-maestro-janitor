@@ -9,7 +9,7 @@ DETECT → SCHEDULE → EXECUTE → VERIFY). The DETECT layer (`memory-librarian
 SURFACES reorg candidates; this detector decides WHEN an editorial pass is due,
 deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron turn
 acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
-only EMITS one of five bare markers:
+only EMITS one of six bare markers:
 
     [janitor-memory-split]       → dispatch a background opus agent: /janitor-memory-split
     [janitor-memory-repair]      → dispatch a background opus agent: /janitor-memory-repair
