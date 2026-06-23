@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T20:54:05+0200
+updated: 2026-06-23T21:09:57+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,20 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ✅ UPDATE 2026-06-23 21:05 — v0.17.1 PUBLISHED — #56 + #61 closed; queue now CLEAR except #52
+- **SHIPPED `v0.17.1`** (https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.17.1) — a
+  consistency/polish patch: **#56** repair now normalizes nested `metadata.ocd/lmd` → top-level
+  (`ced38b4`; the canonical shape — verified the janitor never serialized them; the nested shape
+  came from the repaired page, not janitor code); **security-agent dispatch examples** (`7433d35`,
+  cleared the CPV trigger-quality WARNING 16→15); **#61** reconciled 2 stale `testing` TRDDs
+  (5539cd6e, 924645bb — both PROVEN-done) → `complete` (`7d81cf3`). CPV 0/0/0/0; publish exit 0.
+- **#56 + #61 CLOSED** (verified ancestors of v0.17.1, PRRD G1.1 self-id).
+- **OPEN ISSUES NOW: only #52** (cross-project wikimem) — and it is **cross-repo-BLOCKED** (needs the
+  memgrep `publish-sync` verbs in `ai-maestro-plugin` TRDD-202ccfa2, not yet built). The actionable
+  queue is otherwise EMPTY. Backlog held: #52 (blocked), agentlens Stop-hook fix (user OK), L0
+  reboot-survival companion (`cd9c251`, future). **Next wakes: nothing safe-to-build until the
+  memgrep half lands or the user re-prioritizes — do NOT speculatively build #52's janitor half.**
 
 ### ✅ UPDATE 2026-06-23 20:50 — v0.17.0 PUBLISHED — janitor-security-agent (USER's new feature)
 - **SHIPPED `v0.17.0`** (HEAD `6321b21`; tag pushed; release live:
