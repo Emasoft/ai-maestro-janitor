@@ -757,8 +757,9 @@ mod tests {
         (total, fts)
     }
 
-    // A page whose body carries two `^id [block-props]` atoms (one harvested, one not).
-    const ATOM_PAGE: &str = "---\nname: oauth-hub\nmetadata:\n  node_type: memory\n  tier: hub\n---\nThe rotator drains the live account first when near a limit.\n^rotate-drain [keywords: rotator drain rate-limit, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nCredentials live in the macOS keychain, never a slots dir.\n^keychain [keywords: keychain credentials macos]\n";
+    // A page whose body carries two `^id [block-props]` atoms (one harvested, one not). LEADING markers:
+    // each `^id [props]` line OPENS its atom; the prose BELOW it is that atom's body.
+    const ATOM_PAGE: &str = "---\nname: oauth-hub\nmetadata:\n  node_type: memory\n  tier: hub\n---\n# OAuth hub\n^rotate-drain [keywords: rotator drain rate-limit, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nThe rotator drains the live account first when near a limit.\n^keychain [keywords: keychain credentials macos]\nCredentials live in the OS secret store, never a slots dir.\n";
 
     #[test]
     fn reindex_populates_atoms_and_fts() {
