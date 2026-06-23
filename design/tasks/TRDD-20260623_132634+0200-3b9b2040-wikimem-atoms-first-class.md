@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T15:29:49+0200
+updated: 2026-06-23T15:57:49+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -56,20 +56,32 @@ directives. The CORRECT model — memorized at USER scope in [[wikimem-atom-bloc
    Claude OR as an async background task, one chore/launch, **loading ONLY that chore's skill
    dynamically** to save tokens.
 
-**DELTA — what's BUILT vs the refined model (the remaining engine work, NOT yet done):**
-- BUILT: `resolve_atoms` segments by TRAILING `^id [props]`; recall interleaves atoms+pages+lessons;
-  `render_atom_record` ALREADY resolves an atom's `[^N]` footnotes (the CONFIRMED mechanism — keep!)
-  but mis-treats see-also as `[[links]]`.
-- TARGET: (i) flip the ATOM marker `resolve_atoms` to LEADING blocks; (ii) `render_atom_record` —
-  categorize an atom's `[^N]` footnotes by which bottom section (`# Notes`/`# Lessons Learned`/
-  `# See also`) holds each definition; treat see-also as `[^N]` (not `[[links]]`); (iii) the MOVE/verify
-  logic (split/merge/harvest) must ref-count shared footnotes before deleting one from a source page;
-  (iv) recall surfaces ELEMENTS with the page as context only (discourage full-page reads); (v) atomize
-  emits leading atom blocks + the # Notes/# Lessons Learned/# See also footnote-pool layout. Update all
-  authoring docs/skills to match. The `[^N]` footnote FOUNDATION is right — this REFINES it, not rips it.
-- This is a bounded re-architecture of the just-built engine; author it as the next build phase (g).
-  The trailing-marker engine is committed + tested (125 green) and works as an interim — the flip is
-  additive in spirit (same SQLite element-row model; the PARSER direction + element kinds change).
+**PHASE g — REFINE the engine to the confirmed model (the `[^N]` footnote foundation is RIGHT; this refines it, not rips it):**
+- **g1 ✅ DONE (commit a4e5d74)** — flipped the ATOM marker to LEADING: `first_block_property_marker`
+  returns `(start, end, id, props)`; `resolve_atoms_from_text` rewritten to an OPEN-atom accumulator
+  (marker opens an atom; content below it until the next marker / a `#`-heading / EOF is its body;
+  pre-first-marker + post-heading content belongs to no atom; fence + frontmatter handling preserved;
+  new `make_atom` helper). Flipped the memory.rs unit tests + cli.rs ATOM_CORPUS to leading. 125 green.
+- **g2 ✅ DONE (commit 3da1240)** — `render_atom_record` groups an atom's `[^N]` footnotes by section:
+  `footnote_sections(text)` classifies each `[^N]` def by its nearest preceding heading
+  (`classify_heading` priority see-also > lesson > notes); `enum SectionKind {Notes,Lessons,SeeAlso}`;
+  render emits non-empty labeled groups `notes:` / `lessons learned:` / `see also:`. Removed
+  `atom_wikilinks` + the `[[link]]`-as-see-also path (body keeps `[[links]]` inline as page-level text;
+  atom see-also is now `# See also` footnotes). New grouping test. 126 green, clippy clean.
+- **g3 ☐ TODO — shared-footnote ref-counting on atom MOVES** (Python verify layer:
+  `scripts/lib/memory_edit_verify.py` + `memory_txn`). When split/merge/harvest MOVES an atom to
+  another page, move its `[^N]` defs too, but do NOT delete a note/lesson/see-also def from the source
+  page while ANOTHER atom there still references it (ref-counting GC). Add a `verify_*` check.
+- **g4 ☐ TODO — recall presentation**: atoms already interleave with pages by score (DONE in phase c);
+  remaining is the UX/doc that recall surfaces ELEMENTS with the page as context only + discourage
+  full-page reads (largely a `janitor-memory-recall` skill + `memgrep SKILL.md` wording task).
+- **g5 ☐ TODO — atomize skill**: `skills/janitor-memory-atomize/SKILL.md` must emit LEADING atom blocks
+  + the `# Notes`/`# Lessons Learned`/`# See also` footnote-pool layout (currently describes trailing).
+- **g6 ☐ TODO — docs/skills**: `wikimem-model.md`, write/recall skills, `scripts/memgrep/SKILL.md` to
+  the leading + footnote model. USER-scope memory already updated ([[wikimem-atom-block-properties]] [^4]).
+- NEXT ACTION: g3 (the move-rule verify) is the next CODE piece; g4–g6 are doc/skill alignment. The
+  engine (g1+g2) is shippable interim. Reinstall the binary (`cargo install --path scripts/memgrep`)
+  so the live system runs the leading parser (moot today — live corpus is free-prose, no markers yet).
 
 ### WHY THIS TRDD EXISTS (the realization, USER-confirmed 2026-06-23)
 While building the MEMORY.md⇄Wikimem coexistence harvest (TRDD-ab232dbd), the USER asked:
