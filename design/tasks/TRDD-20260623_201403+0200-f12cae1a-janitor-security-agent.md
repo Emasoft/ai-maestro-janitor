@@ -1,9 +1,11 @@
 ---
 trdd-id: f12cae1a-1048-4c70-8acb-c7b59a84995a
 title: janitor-security-agent — ONE agent for all security skills (detect + fix), heartbeat-suggested
-column: dev
+column: published
 created: 2026-06-23T20:14:03+0200
-updated: 2026-06-23T20:14:03+0200
+updated: 2026-06-23T20:48:39+0200
+published-version: 0.17.0
+published-at: 2026-06-23T20:47:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 priority: 2
