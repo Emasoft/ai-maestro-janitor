@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T10:33:13+0200
+updated: 2026-06-23T13:35:50+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,28 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ⚡ UPDATE 2026-06-23 13:35 — MEMORY PIVOT + FRESH BUDGET (read before acting)
+- **MEMORY SYSTEM PIVOTED to an ATOM-INDEXING REDESIGN.** While building the buffer⇄wiki harvest
+  (TRDD-ab232dbd), the USER realized memgrep has NO atom-level metadata/recall (page+lesson
+  granularity only) → chose **"stop & redesign."** New design TRDD **[[TRDD-3b9b2040]]** covers:
+  atoms as first-class index rows; Obsidian Block Properties (`^id [key: value, …]`) + the
+  space-separated ARRAY-value extension (`keywords:` = the per-atom recall surface); harvest-into-
+  atoms; prose→atom migration. **BOTH ab232dbd (harvest) AND the memory redesign are BLOCKED on
+  USER review of design Q1–Q6** (atom boundary, marker placement, required props, recall ranking,
+  migration cadence, lesson/atom unification). **DO NOT auto-build memory work** until the USER
+  answers. Committed this session: design TRDD (49447cd), foundation memory_scopes wiki/+discriminator
+  (5acdd8f), memgrep find-claude-mem-ref v1 (4ebd891, needs atom-rework), convention MEMORIZED
+  (USER-scope `wikimem-atom-block-properties.md`). Superseded harvest-skill draft → `docs_dev/`.
+- **BUDGET RESET — real headroom now.** LIVE `emanuele.sabetta` 5h=55% / **7d=11%** (FRESH, the
+  weekly window dropped the old usage); `fmuaddib` 7d=100% (capped — do NOT switch to it). The
+  "9% weekly left" note below is OBSOLETE. No OAuth action needed this wake.
+- **PUBLISH still BLOCKED on USER** (immortality-persistence (b)-separate approach needs OK — see
+  NEXT ACTION §1). Unchanged.
+- **Both major tracks (memory redesign, publish) are USER-GATED.** Non-conflicting autonomous
+  candidates if the away-period extends: #56 page-frontmatter ocd/lmd top-level fix (orthogonal to
+  the atom redesign — page frontmatter persists), or immortality GROUP C self-integrity #228
+  (build/test/commit, defer the gated publish). Holding this wake — USER was mid-design-conversation.
 
 USER directive (verbatim, 2026-06-22 ~02:15): *"i will go to sleep. You must work all
 night to fix all the issues and complete the immortality and the memory system. be sure
