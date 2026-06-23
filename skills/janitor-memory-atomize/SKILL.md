@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-atomize
-description: ATOMIZE executor — the autonomous pass that migrates a FREE-PROSE wikimem page into first-class ATOMS. Segments a page body into durable facts, inserting a LEADING Obsidian block-property marker `^<id> [keywords: …]` (on its own line, ABOVE the fact it opens) before each fact so memgrep can recall it individually by its keywords and return its full per-atom record (content + its `[^N]` notes/lessons/see-also grouped by bottom section). Purely ADDITIVE + transaction-gated + verified — never drops or rewords a fact. Runs on a [janitor-memory-atomize] marker, or "atomize this page", "give the memory facts their atom markers".
+description: 'ATOMIZE executor — the autonomous pass that migrates a FREE-PROSE wikimem page into first-class ATOMS. Segments a page body into durable facts, inserting a LEADING Obsidian block-property marker `^<id> [keywords: …]` (on its own line, ABOVE the fact it opens) before each fact so memgrep can recall it individually by its keywords and return its full per-atom record (content + its `[^N]` notes/lessons/see-also grouped by bottom section). Purely ADDITIVE + transaction-gated + verified — never drops or rewords a fact. Runs on a [janitor-memory-atomize] marker, or "atomize this page", "give the memory facts their atom markers".'
 ---
 
 # Janitor memory — ATOMIZE (migrate a free-prose page into first-class atoms)
