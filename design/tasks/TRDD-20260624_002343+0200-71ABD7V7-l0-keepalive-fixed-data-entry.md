@@ -1,9 +1,9 @@
 ---
 trdd-id: 71ABD7V7
 title: Reintroduce L0 OS-keepalive as a fixed DATA-path verbatim-copied scanned entry (SHAPE 2)
-column: dispatch
+column: dev
 created: 2026-06-24T00:23:43+0200
-updated: 2026-06-24T00:23:43+0200
+updated: 2026-06-24T00:31:02+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -27,7 +27,7 @@ runtime-targets: [macos, linux]
 impacts: [install-script]
 attempts: 0
 last-test-result: not-run
-implementation-commits: []
+implementation-commits: [184b61c]
 external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/152"]
 ---
 
@@ -45,18 +45,22 @@ SHAPE 1 (`${CLAUDE_PLUGIN_ROOT}` cache + re-point). The launchd target is a
 **fixed DATA path that never changes**; plugin updates only refresh the staged
 code.
 
-**Current state:** DESIGN COMPLETE (this TRDD). NOT yet built. **Publish-BLOCKED
-on CPV #152** — the `cpv-remote-validate --strict` gate in `publish.py` (Step 4)
-pulls the latest CPV, and SHAPE 2's `$HOME`-anchored DATA target fails C1 until
-#152 ships. The USER is implementing #152 ("allow the `$HOME` folder if the whole
-path resolves under `~/.claude/plugins/data/*/`").
+**Current state:** PHASE 1 SHIPPED (commit 184b61c): the thin static entry
+`scripts/daemon_keepalive_entry.py` (mode 755) + 6 AST-inertness tests (green, ruff
+clean) — proven CPV-C2/C3-clean (imports only os/sys/daemon; no dynamic exec / RCE
+sink / listen socket; autodiscovers its dir via `__file__`). Phases 2-5 remain
+**publish-BLOCKED on CPV #152** — the `cpv-remote-validate --strict` gate in
+`publish.py` (Step 4) pulls the latest CPV, and SHAPE 2's `$HOME`-anchored DATA target
+fails C1 until #152 ships. The USER is implementing #152 ("allow the `$HOME` folder if
+the whole path resolves under `~/.claude/plugins/data/*/`").
 
-**NEXT ACTION:** build the #152-INDEPENDENT parts first (TDD): (1) ship the thin
-static entry `scripts/daemon_keepalive_entry.py`; (2) a guard test proving
-`daemon.py`'s transitive import closure is fully stageable + that the entry is
-clean/inert (no dynamic exec/import — passes CPV C2/C3). Then, once #152 lands:
-(3) the heredoc plist installer + DATA closure-stager; (4) restore the daemon.py /
-global_state wiring; (5) restore + adapt the 2 tests; (6) `publish.py` green.
+**NEXT ACTION (Phase 1 ✓ done):** once CPV #152 lands — Phase 2: the heredoc plist
+installer `scripts/keepalive_install.sh` + the DATA closure-stager (verbatim `cp`) +
+delete `daemon-launcher.py` + the closure-completeness guard test (stage list == live
+transitive closure). Phase 3: restore the daemon.py / global_state install/uninstall
+wiring + the version-update re-stage step. Phase 4: restore + adapt
+`test_launchd_keepalive.py` + `test_flock_blocking.py`. Phase 5: `publish.py` green
+(needs #152 live).
 
 **Load-bearing facts (verified against the live discriminator
 `scripts/cpv_persistence_target.py` @ CPV v2.145.1, copy at /tmp/cpv_persistence_target_latest.py):**
