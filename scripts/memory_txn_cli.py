@@ -18,7 +18,7 @@ The contract is two-phase so the agent can do its semantic work between them:
         - add a brand-new .md            → a WRITE (new page)
         - delete a copied source .md     → a DELETE (page removed)
 
-  commit <scope_root> <txn_id> --op <merge|split|repair>
+  commit <scope_root> <txn_id> --op <merge|split|repair|atomize>
       RECONSTRUCT the write/delete set by DIFFING staging vs the recorded sources
       (a new or content-changed staged file → stage_write; a recorded source whose
       staged copy was removed → stage_delete), run verify_merge / verify_split, and
@@ -209,6 +209,30 @@ def _verify_repair(txn, writes, deletes):
     return verify.verify_repair(source_text, source_meta, result_text, result_meta)
 
 
+def _verify_atomize(txn, writes, deletes):
+    """Build verify_atomize inputs. Atomize is a REPAIR-class in-place edit (TRDD-3b9b2040):
+    ONE write at the source's path, ZERO deletes — it only ADDS `^id [keywords:…]` markers to
+    a free-prose page's facts, losing nothing. A merge/split-shaped change set is a bug here."""
+    if len(txn.sources) != 1:
+        raise MemoryTxnError(
+            f"atomize expects exactly ONE source page, found {len(txn.sources)}"
+        )
+    if deletes:
+        raise MemoryTxnError(
+            f"atomize must not delete any page (found {len(deletes)} delete(s))"
+        )
+    source_rel = next(iter(txn.sources))
+    if list(writes) != [source_rel]:
+        raise MemoryTxnError(
+            f"atomize must write exactly the source page {source_rel!r}, got {sorted(writes)}"
+        )
+    source_text = (txn.scope_root / source_rel).read_text(encoding="utf-8")
+    source_meta = verify.parse_frontmatter(source_text)
+    result_text = writes[source_rel]
+    result_meta = verify.parse_frontmatter(result_text)
+    return verify.verify_atomize(source_text, source_meta, result_text, result_meta)
+
+
 def _split_max_bytes() -> int:
     """The configured split size cap (memory_settings is a sibling lib on the path;
     `get` degrades to its own default internally, so this never needs a fallback)."""
@@ -244,6 +268,8 @@ def cmd_commit(args) -> int:
         ok, reasons = _verify_merge(txn, writes, deletes)
     elif args.op == "split":
         ok, reasons = _verify_split(txn, writes, deletes)
+    elif args.op == "atomize":
+        ok, reasons = _verify_atomize(txn, writes, deletes)
     else:
         ok, reasons = _verify_repair(txn, writes, deletes)
 
@@ -297,7 +323,7 @@ def main() -> int:
     c = sub.add_parser("commit", help="verify the staged edit and apply it atomically")
     c.add_argument("scope_root")
     c.add_argument("txn_id")
-    c.add_argument("--op", required=True, choices=("merge", "split", "repair"))
+    c.add_argument("--op", required=True, choices=("merge", "split", "repair", "atomize"))
 
     a = sub.add_parser("abort", help="discard a not-yet-committed transaction")
     a.add_argument("scope_root")

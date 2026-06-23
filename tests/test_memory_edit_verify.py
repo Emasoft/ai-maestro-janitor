@@ -603,3 +603,64 @@ def test_verify_split_fails_on_dangling_ref():
         sizes, max_bytes=12000, retired_slugs={"plat"}, other_live_pages=others,
     )
     assert not ok and any("dangling" in r for r in reasons)
+
+
+# ---- verify_atomize (TRDD-3b9b2040 — prose -> atoms migration) -------------
+
+_F1 = "The rotator drains the live account first when it is near a usage limit."
+_F2 = "Credentials live in the macOS keychain, never in a plaintext slots directory."
+
+
+def test_verify_atomize_passes_when_only_markers_added():
+    """Atomize that appends `^id [keywords:..]` markers on their OWN lines, losing no
+    fact or lesson, PASSES — the canonical happy path of the prose->atom migration."""
+    source = _note(body=f"{_F1}\n\n{_F2}", lessons="[^1]: earlier said 5x; cap is 3.")
+    atom_body = f"{_F1}\n^drain [keywords: rotator drain limit]\n\n{_F2}\n^keychain [keywords: keychain creds]"
+    result = _note(body=atom_body, lessons="[^1]: earlier said 5x; cap is 3.")
+    ok, reasons = v.verify_atomize(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert ok, reasons
+
+
+def test_verify_atomize_fails_on_dropped_fact():
+    """Atomize must NEVER drop a body fact while adding markers (the strict anti-corruption gate)."""
+    source = _note(body=f"{_F1}\n\n{_F2}")
+    result = _note(body=f"{_F1}\n^drain [keywords: rotator drain limit]")  # _F2 gone
+    ok, reasons = v.verify_atomize(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert not ok and any("body fact" in r for r in reasons), reasons
+
+
+def test_verify_atomize_fails_when_no_marker_added():
+    """An atomize that added no `^id [..]` marker is a no-op and must not commit."""
+    source = _note(body=f"{_F1}\n\n{_F2}")
+    ok, reasons = v.verify_atomize(
+        source, v.parse_frontmatter(source), source, v.parse_frontmatter(source)
+    )
+    assert not ok and any("no atom marker" in r for r in reasons), reasons
+
+
+def test_verify_atomize_fails_on_non_marker_addition():
+    """Atomize may ONLY add marker lines — smuggling in new prose is refused (additive-markers-only)."""
+    atom_body = (
+        f"{_F1}\n^drain [keywords: rotator drain limit]\n\n{_F2}\n^keychain [keywords: keychain creds]"
+        "\n\nAn entirely new sentence that was never in the source page at all."
+    )
+    source = _note(body=f"{_F1}\n\n{_F2}")
+    result = _note(body=atom_body)
+    ok, reasons = v.verify_atomize(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert not ok and any("non-marker line" in r for r in reasons), reasons
+
+
+def test_verify_atomize_fails_on_dropped_lesson():
+    """A lesson is sacred even under atomize."""
+    source = _note(body=f"{_F1}\n\n{_F2}", lessons="[^1]: the cap is 3, verified.")
+    result = _note(body=f"{_F1}\n^drain [keywords: x]\n\n{_F2}\n^keychain [keywords: y]", lessons="")
+    ok, reasons = v.verify_atomize(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert not ok and any("lesson" in r for r in reasons), reasons

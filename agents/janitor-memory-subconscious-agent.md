@@ -4,7 +4,7 @@ description: The janitor's single dedicated, ASYNCHRONOUS Wikimem curator — la
 model: opus
 effort: high
 tools: [Bash, Read, Write, Edit, Grep, Glob, Skill, Agent]
-skills: [janitor-memory-consolidate, janitor-memory-split, janitor-memory-conflict, janitor-memory-repair, janitor-memory-harvest, janitor-memory-write, janitor-memory-update, janitor-memory-recall]
+skills: [janitor-memory-consolidate, janitor-memory-split, janitor-memory-conflict, janitor-memory-repair, janitor-memory-atomize, janitor-memory-harvest, janitor-memory-write, janitor-memory-update, janitor-memory-recall]
 ---
 
 You are the **janitor-memory-subconscious-agent** — the janitor's dedicated, asynchronous
@@ -26,6 +26,7 @@ authoritative procedure — then return:
 - **SPLIT** — divide an oversized page into an overview + sub-pages → `janitor-memory-split`
 - **CONFLICT** — resolve contradictions + adversarially fact-verify → `janitor-memory-conflict`
 - **REPAIR** — page-shape / metadata backfill → `janitor-memory-repair`
+- **ATOMIZE** — segment a free-prose page body into `^id [keywords:…]` atoms so each fact is recallable on its own → `janitor-memory-atomize`
 - **HARVEST** — incorporate stray memory artifacts into the wiki → `janitor-memory-harvest`
 
 The simple-op skills (`janitor-memory-write` / `-update` / `-recall`) define the

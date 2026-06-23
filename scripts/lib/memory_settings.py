@@ -34,12 +34,13 @@ DEFAULTS: dict = {
     "conflict_per_day": 0.5,        # CONFLICT + fact-verify (once/48h — the costly one)
     "repair_per_day": 3.0,          # REPAIR pass (page-shape/metadata backfill — a few/day)
     "harvest_per_day": 1.0,         # HARVEST pass — incorporate stray MEMORY.md/.md memories into the wiki (once/day)
+    "atomize_per_day": 2.0,         # ATOMIZE pass (TRDD-3b9b2040) — segment a free-prose page body into ^id [keywords:…] atoms so each fact is recallable on its own (a couple/day, incremental until the corpus is atomized)
     "edit_project_scope": False,    # default LOCAL+USER only; PROJECT memory is in-repo
     "stagger_enabled": True,        # spread each (project,intervention) to a deterministic time-of-day slot (rate-limit smoothing across projects)
 }
 
 _PER_DAY_KEYS = frozenset(
-    {"consolidation_per_day", "split_per_day", "conflict_per_day", "repair_per_day", "harvest_per_day"}
+    {"consolidation_per_day", "split_per_day", "conflict_per_day", "repair_per_day", "harvest_per_day", "atomize_per_day"}
 )
 _INT_KEYS = frozenset({"split_max_bytes"})
 _BOOL_KEYS = frozenset({"edit_project_scope", "stagger_enabled"})
@@ -51,6 +52,7 @@ INTERVENTIONS: dict = {
     "conflict": "conflict_per_day",
     "repair": "repair_per_day",
     "harvest": "harvest_per_day",
+    "atomize": "atomize_per_day",
 }
 
 _SECONDS_PER_DAY = 86400

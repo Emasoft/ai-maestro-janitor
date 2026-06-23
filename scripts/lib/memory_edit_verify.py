@@ -154,14 +154,21 @@ def lessons_preserved(sources: list[str], result: str) -> tuple[bool, list[str]]
 # body-fact fidelity (issue #48 — an editor pass must never paraphrase/drop a FACT)
 # --------------------------------------------------------------------------- #
 
+def _strip_frontmatter(text: str) -> str:
+    """The note minus its leading `--- … ---` YAML frontmatter block (the body + lessons section
+    that follow it). Frontmatter changes — e.g. an `lmd:` bump — are validated by their own checks,
+    so a body-shape comparison must exclude them."""
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) == 3:
+            return parts[2]
+    return text
+
+
 def _body_minus_lessons(text: str) -> str:
     """The note's BODY: frontmatter stripped, and the `## Notes and lessons learned`
     section stripped (lessons are guarded separately by lessons_preserved)."""
-    body = text
-    if body.startswith("---"):
-        parts = body.split("---", 2)
-        if len(parts) == 3:
-            body = parts[2]
+    body = _strip_frontmatter(text)
     idx = body.find(_LESSONS_HEADING)
     if idx != -1:
         body = body[:idx]
@@ -592,5 +599,71 @@ def verify_repair(
 
     if _LESSONS_HEADING not in result_text:
         reasons.append(f"missing '{_LESSONS_HEADING}' section")
+
+    return (not reasons, reasons)
+
+
+# An atom block-property marker on its own line: `^<id> [<props>]` (TRDD-3b9b2040). The atomize pass
+# adds markers on dedicated lines so every existing FACT line stays byte-identical — the regex matches
+# exactly that shape (optional indent, kebab id, optional space, a bracketed props blob).
+_ATOM_MARKER_RE = re.compile(r"^\s*\^[A-Za-z0-9_-]+\s*\[.*\]\s*$")
+
+
+def verify_atomize(
+    source_text: str,
+    source_meta: dict,
+    result_text: str,
+    result_meta: dict,
+) -> tuple[bool, list[str]]:
+    """Prove an ATOMIZE pass (TRDD-3b9b2040) ONLY added `^id [keywords:…]` markers and lost nothing.
+
+    Atomize segments a free-prose page body into first-class atoms by appending a block-property
+    marker on its OWN line after each fact — purely ADDITIVE, so every existing fact line stays
+    byte-identical. The verifier guarantees, STRICTLY (this mutates the live corpus — RULE 0):
+
+    - LESSON PRESERVATION — every `[^N]` lesson of the source survives (sacred, parser-independent).
+    - BODY-FACT FIDELITY — every substantive source body fact survives as a contiguous substring
+      (the strict anti-corruption check; an atomize must NEVER drop or reword a fact).
+    - METADATA UNTOUCHED — no frontmatter key dropped, `ocd` unchanged, `lmd` not regressed.
+    - ATOMIZATION HAPPENED — the result carries at least one atom marker (a no-op must not commit).
+    - ADDITIVE-MARKERS-ONLY — every NEW non-blank line (one not present in the source) is an atom
+      marker line; atomize adds markers and nothing else (so it cannot smuggle in a body change).
+
+    Returns (ok, [reasons])."""
+    reasons: list[str] = []
+
+    ok, missing = lessons_preserved([source_text], result_text)
+    if not ok:
+        reasons.append("lesson(s) lost in atomize: " + "; ".join(missing))
+
+    ok, dropped_facts = body_facts_preserved([source_text], result_text)
+    if not ok:
+        reasons.append("body fact(s) dropped/reworded in atomize: " + "; ".join(dropped_facts))
+
+    dropped = [k for k in source_meta if k not in result_meta]
+    if dropped:
+        reasons.append("atomize dropped frontmatter key(s): " + ", ".join(sorted(dropped)))
+
+    s_ocd, r_ocd = source_meta.get("ocd"), result_meta.get("ocd")
+    if s_ocd and r_ocd and str(s_ocd) != str(r_ocd):
+        reasons.append(f"ocd must not change in atomize: {s_ocd} -> {r_ocd}")
+
+    s_lmd, r_lmd = source_meta.get("lmd"), result_meta.get("lmd")
+    if s_lmd and r_lmd and str(r_lmd) < str(s_lmd):
+        reasons.append(f"lmd regressed in atomize: {s_lmd} -> {r_lmd}")
+
+    markers = [ln for ln in result_text.splitlines() if _ATOM_MARKER_RE.match(ln)]
+    if not markers:
+        reasons.append("no atom markers in the result — atomize must add at least one `^id [keywords:…]`")
+
+    # Every BODY line that is NOT in the source must be a marker line (atomize is additive-only). The
+    # FRONTMATTER is excluded — atomize legitimately bumps `lmd` there (guarded above); the additive
+    # guarantee is about the body, where the facts + the new markers live.
+    src_lines = {ln.rstrip() for ln in _strip_frontmatter(source_text).splitlines()}
+    for ln in _strip_frontmatter(result_text).splitlines():
+        r = ln.rstrip()
+        if r and r not in src_lines and not _ATOM_MARKER_RE.match(r):
+            reasons.append(f"atomize added a non-marker line (only `^id [..]` markers may be added): {r[:80]!r}")
+            break
 
     return (not reasons, reasons)

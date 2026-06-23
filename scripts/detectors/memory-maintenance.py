@@ -13,6 +13,7 @@ only EMITS one of five bare markers:
 
     [janitor-memory-split]       → dispatch a background opus agent: /janitor-memory-split
     [janitor-memory-repair]      → dispatch a background opus agent: /janitor-memory-repair
+    [janitor-memory-atomize]     → dispatch a background opus agent: /janitor-memory-atomize
     [janitor-memory-harvest]     → dispatch a background opus agent: /janitor-memory-harvest
     [janitor-memory-consolidate] → dispatch a background opus agent: /janitor-memory-consolidate
     [janitor-memory-conflict]    → dispatch a background opus agent: /janitor-memory-conflict
@@ -97,6 +98,7 @@ import state  # noqa: E402
 _MARKERS: list[tuple[str, str]] = [
     ("split", "[janitor-memory-split]"),
     ("repair", "[janitor-memory-repair]"),
+    ("atomize", "[janitor-memory-atomize]"),
     ("harvest", "[janitor-memory-harvest]"),
     ("consolidate", "[janitor-memory-consolidate]"),
     ("conflict", "[janitor-memory-conflict]"),
