@@ -233,6 +233,22 @@ threshold (default 7200 = ~5 days). Layers 1, 2, 3a, 3b, 6 run unattended at
 their cadences; layer 4 needs ONE explicit install action by you; layer 5 is
 on-demand when the doctor flags unpinned refs.
 
+### The single security agent
+
+When any security detector finds drift, the heartbeat now **suggests** running
+**`/janitor-security-agent`** (or `claude --agent janitor-security-agent`) — ONE
+agent that runs *every* security skill above and both **DETECTS and FIXES**,
+fail-safe. It mirrors the memory subconscious agent (one agent, many skills, its
+own context): each launch handles one security domain (or a `full-sweep`) and
+loads only that domain's skill. It **auto-fixes what is safe** (dependency bumps
+with the tests re-run green, GitHub-workflow hardening via zizmor, the hardened
+`dependabot.yml`, the ratified branch-protection baseline, prompt-injection
+sanitization) and **FLAGS what needs a human** (live credential *rotation*,
+history purge, production secrets) — it never auto-rotates a credential, never
+force-pushes, and never suppresses a finding to pass a gate. It honors
+`/janitor-autofix-off` (detect + flag only). Opt out of the heartbeat suggestion
+with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
+
 ## Skills
 
 - `/janitor-arm` — arms (or renews) the heartbeat cron. Idempotent: replaces

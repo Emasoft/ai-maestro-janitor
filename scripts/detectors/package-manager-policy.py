@@ -53,6 +53,7 @@ import yaml
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
 
 _NAME = "package-manager-policy"
@@ -454,10 +455,15 @@ def main() -> int:
     if len(issues) > cap:
         sample += f"\n  - …and {len(issues) - cap} more"
 
+    hint = sec.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[package-manager-policy] {len(issues)} supply-chain hardening gap(s). "
         f"See README §'Supply-chain defense stack' for the full layered model. "
         f"Issues:\n{sample}"
+        + (f"\n{hint}" if hint else "")
     )
     state.rotate_log_if_big(_NAME)
     return 0

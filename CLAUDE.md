@@ -179,6 +179,16 @@ makes the daemon EXIT, global-pause flag=pause idles it). `janitor-memory-record
 `janitor-compact-context` (agent-invocable self-compact + auto-resume; backed by
 `scripts/compact_trigger.py`).
 
+**Agents (`agents/`, 2)** — the TWO single-curator agents, each ONE agent that loads
+many per-task SKILLS (never one-agent-per-task), runs in its OWN context, returns one
+line + a report. `janitor-memory-subconscious-agent` (Wikimem editorial: consolidate/
+split/conflict/repair/atomize/harvest; auto-dispatched by `memory-maintenance` via bare
+`[janitor-memory-*]` markers). `janitor-security-agent` (TRDD-f12cae1a — ALL 8 security
+skills, DETECT + FIX fail-safe; the security detectors SUGGEST it via
+`security_helpers.security_agent_hint()` — a visible hint, NOT a silent marker, since
+security fixes have real blast radius; opt out `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`).
+Both `model: opus, effort: high`.
+
 **Tests (`tests/`)** — pytest; one `test_*_patterns.py` per pattern lib + core tests
 (`test_marketplace_lock`, `test_rules_installer`, `test_marketplace_refresh_daemon_stale`, …).
 Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`CLAUDE_PROJECT_DIR`.

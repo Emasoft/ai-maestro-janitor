@@ -64,6 +64,34 @@ User: audit fork PR cache
 User: TanStack-style cache poisoning scan
 ```
 
+## Remediation (fix)
+
+> **janitor-security-agent** runs this remediation after an audit finds findings.
+> If `/janitor-autofix-off` is set for the project, DETECT + FLAG only — apply no changes.
+
+### Per-class fix policy
+
+| Class | Fix | Mode |
+|---|---|---|
+| **D1** — `pull_request` + `actions/cache` | Gate the cache step: `if: github.event_name != 'pull_request' \|\| github.event.pull_request.head.repo.full_name == github.repository`. Re-scan to confirm 0 D1 findings. | **SAFE-TO-AUTO-FIX** |
+| **D2** — restore-only fence (SAVE exposed) | Apply the same fence expression to the SAVE step as well, matching the RESTORE step already in place. Re-scan to confirm 0 D2. | **SAFE-TO-AUTO-FIX** |
+| **D3** — `pull_request_target` + `actions/checkout` of PR head | Remove the `ref: ${{ github.event.pull_request.head.sha }}` (or `ref: refs/pull/…/head`) from checkout, restoring to the base ref. If the workflow genuinely needs to run fork code, flag it for human review — the remediation is architectural. | **FLAG-FOR-HUMAN** — auto-fix only when the unsafe `ref:` is the SOLE diff from a safe template |
+| **D4** — setup-action implicit cache on fork-PR workflow | Add `enable-cache: false` to the setup-action step. Re-scan to confirm 0 D4. | **SAFE-TO-AUTO-FIX** |
+
+### Auto-fix procedure
+
+1. For each SAFE-TO-AUTO-FIX finding, compute the minimal YAML patch (single-line `if:` insertion or `enable-cache: false` addition).
+2. Apply the patch to a working copy; do NOT touch the file in-place until all patches for that file are computed.
+3. Write the patched file atomically (write to tmp, then `os.replace`).
+4. Re-run the four detectors on the patched file. If the re-scan still emits a finding for the same file, **REVERT the patch** and FLAG the finding for human review.
+5. Stage the fixed file. Do NOT commit — leave that to the human or the release pipeline.
+
+### Flag-for-human procedure
+
+Write a `## Findings requiring human review` section to the audit report with: file:line, detector ID, reason auto-fix was skipped, and the surgical recipe-id from `references/cache-fencing-recipes.md` the human should apply.
+
+Never suppress a finding to pass a gate. Never force-push.
+
 ## Scope
 
 ONLY reads `.github/workflows/*.yml` and writes a report under `$MAIN_ROOT/reports/janitor-fork-pr-cache-audit/`. Does NOT modify workflows, commit, push, or call zizmor. For mechanical fixes use `/janitor-github-workflow-doctor`.

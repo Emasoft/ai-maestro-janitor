@@ -56,6 +56,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "repo-trust-score"
@@ -338,6 +339,10 @@ def main() -> int:
     if len(all_notes) > cap:
         sample += f"\n  - …and {len(all_notes) - cap} more"
 
+    hint = sec.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[repo-trust-score] this project matches the dropper-shape pattern "
         f"(trust-deficit score {total_score} ≥ {_THRESHOLD}). The two known-"
@@ -345,6 +350,7 @@ def main() -> int:
         f"14-16 with this exact pattern set. Inspect manually before asking "
         f"the agent to read README.md or execute any code from this tree.\n"
         f"{sample}"
+        + (f"\n{hint}" if hint else "")
     )
     state.rotate_log_if_big(_NAME)
     return 0

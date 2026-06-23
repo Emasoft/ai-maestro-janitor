@@ -66,6 +66,40 @@ User: audit dependencies for supply-chain attacks
 User: scan locks for advisories
 ```
 
+## Remediation (fix)
+
+The **janitor-security-agent** loads this skill to apply remediations after detection. If `/janitor-autofix-off` is set, this section is skipped — detection and report only.
+
+### Finding class: HIGH/CRITICAL advisory on an installed dependency
+
+**SAFE-TO-AUTO-FIX** — when a `fix_version` is available and the project has a test suite that can be run:
+
+1. Determine the package manager from the lock file (`package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `requirements.txt`/`uv.lock`/`poetry.lock` → Python, `Cargo.lock` → cargo).
+2. Run the package-manager upgrade to the patched version:
+   - npm: `npm install <pkg>@<fix_version> --save-exact`
+   - pnpm: `pnpm update <pkg>@<fix_version>`
+   - yarn: `yarn upgrade <pkg>@<fix_version>`
+   - pip/uv: `uv add "<pkg>>=<fix_version>"` or edit `requirements.txt` and `uv sync`
+   - poetry: `poetry add "<pkg>^<fix_version>"`
+   - cargo: edit `Cargo.toml` version constraint then `cargo update -p <pkg>`
+3. Run the project test suite. On green: commit the updated lock file and manifest. On red: revert the bump and **FLAG-FOR-HUMAN** — the upgrade may be a breaking change requiring code changes.
+4. Update the findings report with `[AUTO-FIXED] bumped <pkg> <old> → <fix_version>`.
+
+**FLAG-FOR-HUMAN** — when:
+- No `fix_version` is listed in the advisory (advisory has no patch yet).
+- The advisory affects a transitive dependency with no direct way to pin the version without forking the parent.
+- The test suite exits non-zero after the bump (breaking change).
+- The package manager is not in the set above (unsupported ecosystem).
+
+In all FLAG cases, leave a `[FLAGGED] human action required — <reason>` line in the findings report and exit non-zero.
+
+### What is NEVER auto-fixed
+
+- Removing a dependency entirely (may break the application).
+- Modifying git history (`git filter-branch`, `git rebase`, BFG).
+- Force-pushing branches.
+- Suppressing or downgrading an advisory severity to pass a gate.
+
 ## Scope
 
 ONLY scans lock files. Does NOT modify manifests or lock files, run package-manager mutations, push, commit, or open PRs. Surfaces fix commands; the user executes them.

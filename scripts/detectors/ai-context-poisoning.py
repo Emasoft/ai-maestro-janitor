@@ -287,11 +287,16 @@ def main() -> int:
     if len(issues) > cap:
         sample += f"\n  - …and {len(issues) - cap} more"
 
+    hint = sh.security_agent_hint(
+        "skill-bundle",
+        enabled=state.is_truthy_env(sh.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[ai-context-poisoning] {len(issues)} installed package(s) write to "
         f"agent-context file(s) (CLAUDE.md / .cursorrules / .claude/* / AGENTS.md / "
         f"etc.). Review each — this is the shape of disclosed supply-chain attacks "
         f"that silently modify agent behaviour at install time.\n{sample}"
+        + (f"\n{hint}" if hint else "")
     )
     state.rotate_log_if_big(_NAME)
     return 0

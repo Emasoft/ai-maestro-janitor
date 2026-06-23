@@ -442,3 +442,41 @@ def test_is_agent_context_path_devin_directory_entry() -> None:
     """Directory-style entries match descendant paths."""
     assert sh.is_agent_context_path(".devin/skills/foo.md")
     assert sh.is_agent_context_path("project/.devin/skills/x.md")
+
+
+# ---------- security_agent_hint (TRDD-f12cae1a) --------------------------
+
+
+def test_security_agent_hint_default_enabled_points_at_the_agent() -> None:
+    """The default (enabled) hint names the /janitor-security-agent command."""
+    hint = sh.security_agent_hint("workflow")
+    assert "/janitor-security-agent" in hint
+
+
+def test_security_agent_hint_disabled_returns_empty() -> None:
+    """The opt-out gate (enabled=False) suppresses the hint entirely."""
+    assert sh.security_agent_hint("workflow", enabled=False) == ""
+
+
+def test_security_agent_hint_includes_named_domain() -> None:
+    """A named domain is appended so the agent knows which area triggered it."""
+    assert "(domain: supply-chain)" in sh.security_agent_hint("supply-chain")
+
+
+def test_security_agent_hint_generic_when_no_domain() -> None:
+    """An empty domain yields the generic hint with no 'domain:' clause."""
+    hint = sh.security_agent_hint("")
+    assert "/janitor-security-agent" in hint
+    assert "domain:" not in hint
+
+
+def test_security_agent_hint_advertises_detect_and_fix() -> None:
+    """The hint states the agent both detects AND fixes (fail-safe)."""
+    hint = sh.security_agent_hint("credentials")
+    assert "detects" in hint.lower() and "fixes" in hint.lower()
+    assert "fail-safe" in hint.lower()
+
+
+def test_security_agent_hint_env_key_is_one_source_of_truth() -> None:
+    """The opt-out env key constant is the documented CLAUDE_PLUGIN_OPTION name."""
+    assert sh.SECURITY_AGENT_HINT_ENV == "CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT"

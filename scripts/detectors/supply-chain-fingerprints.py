@@ -89,6 +89,7 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "supply-chain-fingerprints"
@@ -792,12 +793,17 @@ def main() -> int:
     rule_counts = ", ".join(
         f"{r}={len(issues)}" for r, issues in findings.items() if issues
     )
+    hint = sec.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[supply-chain-fingerprints] {len(flat)} finding(s) across "
         f"{sum(1 for v in findings.values() if v)} sub-check(s): "
         f"{rule_counts}. Each is a distinct, deterministic supply-chain "
         f"fingerprint not covered by the typosquat / OSV-MAL / "
         f"historical-cache stack.\n{sample_lines}"
+        + (f"\n{hint}" if hint else "")
     )
 
     # Per-finding log so a user can pivot back through the full list

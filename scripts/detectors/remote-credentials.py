@@ -29,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
 
 # Pattern A — explicit basic-auth: `scheme://user:secret@host/...` with a
@@ -85,6 +86,10 @@ def main() -> int:
     if proc.returncode != 0:
         return 0
 
+    hint = sec.security_agent_hint(
+        "credentials",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     seen_remotes: set[str] = set()
     for line in proc.stdout.splitlines():
         # Format: `<name>\t<url> (fetch|push)` — split on whitespace, take
@@ -120,12 +125,16 @@ def main() -> int:
         # (which changes the URL) re-fires the alert with the new value.
         fp = _crc32(key)
 
+        msg = (
+            f"[remote-credentials] URGENT: git remote '{display_name}' embeds a secret in its URL — anyone with read "
+            f"access to the repo, CI logs, or your screen can see it. Strip with: git remote set-url {safe_name} "
+            f"{safe_clean}. Then rotate the leaked credential immediately."
+            + (f"\n{hint}" if hint else "")
+        )
         out = dedupe.emit_once(
             seen,
             f"creds@{name}@{fp}",
-            f"[remote-credentials] URGENT: git remote '{display_name}' embeds a secret in its URL — anyone with read "
-            f"access to the repo, CI logs, or your screen can see it. Strip with: git remote set-url {safe_name} "
-            f"{safe_clean}. Then rotate the leaked credential immediately.",
+            msg,
         )
         if out is not None:
             print(out)

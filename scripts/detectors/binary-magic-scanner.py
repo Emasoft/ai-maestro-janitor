@@ -51,6 +51,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "binary-magic-scanner"
@@ -525,7 +526,12 @@ def main() -> int:
         state.rotate_log_if_big(_NAME)
         return 0
 
-    print(_format_drift(hits, root))
+    hint = sec.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
+    msg = _format_drift(hits, root)
+    print(msg + (f"\n{hint}" if hint else ""))
     state.rotate_log_if_big(_NAME)
     return 0
 

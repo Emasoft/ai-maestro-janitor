@@ -174,6 +174,36 @@ User: /janitor-skill-bundle-audit --severity HIGH --strict
 User: /janitor-skill-bundle-audit --path skills/ --json
 ```
 
+## Remediation (fix)
+
+> **janitor-security-agent** runs this remediation after an audit finds findings.
+> If `/janitor-autofix-off` is set for the project, DETECT + FLAG only — apply no changes.
+
+### Per-class fix policy
+
+| Rule class | Fix | Mode |
+|---|---|---|
+| `prompt-injection-multilingual` | Strip the override directive (the matched line or span). Re-scan to confirm the pattern is gone. Run `git blame` on the offending line and record the commit hash in the report. | **SAFE-TO-AUTO-FIX** — strip invisible-unicode / embedded instruction spans; **FLAG-FOR-HUMAN** when the surrounding context is ambiguous |
+| `html-comment-impersonation` | Remove the offending HTML comment block. Re-scan to confirm 0 matches in the file. | **SAFE-TO-AUTO-FIX** |
+| `base-url-override` | Remove or restore the original endpoint. If the override is intentional and documented, move the config to a non-agent-context file and FLAG the original location. Auto-fix only when the override URL matches a known attacker-gateway pattern. Otherwise **FLAG-FOR-HUMAN**. | **FLAG-FOR-HUMAN** (default); **SAFE-TO-AUTO-FIX** when URL is a known malicious gateway |
+| `cross-skill-shadowing` | Remove the mandatory-invocation language from the skill description. Convert "always invoke skill-X first" to "consider skill-X for …". Re-scan to confirm 0 matches. | **SAFE-TO-AUTO-FIX** |
+| `exfil-webhook-sink` | Remove the webhook URL. Block-list the host in the report. Flag any nearby credentials for rotation. | **SAFE-TO-AUTO-FIX** (URL removal); **FLAG-FOR-HUMAN** (credential rotation) |
+| `dynamic-exec-in-skill-body` | If the exec call is an injected payload (not a legitimate feature), strip it. If it may be intentional, **FLAG-FOR-HUMAN** — auto-exec is a capability, not always an attack. | **FLAG-FOR-HUMAN** |
+| `git-hook-install-directive` | Remove the directive. If the hook installation is intentional, move it to a non-agent-context file and document its purpose. | **FLAG-FOR-HUMAN** |
+| `known-secret-path-reference` | Remove the path reference from the agent-context file. Verify no credential is exposed at that path. | **FLAG-FOR-HUMAN** |
+
+### Auto-fix procedure
+
+1. For each SAFE-TO-AUTO-FIX finding, compute the minimal text removal (matched span only — never alter surrounding prose).
+2. Strip any invisible-unicode characters (`security_helpers.strip_invisible_unicode`) from the matched line before writing back; log the character code points in the report.
+3. Write the patched file atomically (write to tmp, then `os.replace`).
+4. Re-scan the patched file through `agent_config_patterns.scan_text()`. If the same rule still fires, **REVERT the patch** and FLAG the finding for human review.
+5. Do NOT commit — leave staging to the human or the release pipeline.
+
+### Flag-for-human procedure
+
+Append a `## Findings requiring human review` section to the audit report with: file:line, rule-id, severity, matched text, and the reason auto-fix was skipped. Never suppress a finding to pass a gate. Never force-push.
+
 ## Scope
 
 This skill is the **content** audit: it looks for attacker directives

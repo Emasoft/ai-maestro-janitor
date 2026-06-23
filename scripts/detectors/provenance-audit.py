@@ -51,6 +51,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
 import provenance_patterns as pp  # type: ignore[import-not-found]  # noqa: E402
+import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "provenance-audit"
@@ -343,12 +344,17 @@ def main() -> int:
     body = "\n".join(f"  - {ln}" for ln in shown)
     if overflow > 0:
         body += f"\n  - …and {overflow} more finding(s)"
+    hint = sec.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[provenance-audit] provenance/SBOM issues in the release path "
         f"({len(findings_lines)} finding(s)). The release pipeline of "
         f"this repo lacks one or more SLSA-aligned controls — inspect "
         f"and either fix the workflow or set the relevant opt-out env "
         f"vars before publishing.\n{body}"
+        + (f"\n{hint}" if hint else "")
     )
     state.rotate_log_if_big(_NAME)
     return 0

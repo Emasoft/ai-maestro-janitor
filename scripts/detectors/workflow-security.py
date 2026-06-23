@@ -52,6 +52,7 @@ sys.path.insert(0, str(_SCRIPTS / "lib"))
 # package, exactly the way scripts/doctor_classify.py wires the scanner.
 sys.path.insert(0, str(_SCRIPTS))
 
+import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
 import suppression  # type: ignore[import-not-found]  # noqa: E402
 
@@ -223,12 +224,17 @@ def main() -> int:
         sample_lines.append(f"  - …and {count - _MAX_SAMPLE} more")
     sample = "\n".join(sample_lines)
 
+    hint = sec.security_agent_hint(
+        "workflow",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[workflow-security] URGENT: {count} high-severity workflow finding(s) "
         f"({crit} CRITICAL, {count - crit} HIGH) in .github/workflows/ — a CI "
         f"workflow can be exploited or leak secrets. Run "
         f"/janitor-github-workflow-doctor for the full report + per-finding "
         f"fixes. Findings:\n{sample}"
+        + (f"\n{hint}" if hint else "")
     )
 
     state.rotate_log_if_big("workflow-security")

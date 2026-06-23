@@ -312,11 +312,16 @@ def main() -> int:
     if len(issues) > cap:
         sample += f"\n  - …and {len(issues) - cap} more"
 
+    hint = sh.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sh.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[typosquat-watcher] {len(issues)} dependency name(s) match the "
         f"typosquat shape (Levenshtein ≤ {_max_distance()} from a popular "
         f"package). Review each before the next install — typosquats are "
         f"the documented #1 supply-chain attack vector.\n{sample}"
+        + (f"\n{hint}" if hint else "")
     )
     state.rotate_log_if_big(_NAME)
     return 0

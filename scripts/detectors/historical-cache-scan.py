@@ -52,6 +52,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "historical-cache-scan"
@@ -297,6 +298,10 @@ def main() -> int:
     if len(hits) > cap:
         sample += f"\n  - …and {len(hits) - cap} more"
 
+    hint = sec.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[historical-cache-scan] {len(hits)} known-malicious package "
         f"version(s) found in machine-wide caches / global installs. "
@@ -305,6 +310,7 @@ def main() -> int:
         f"(`npm cache clean --force` / `pnpm store prune` / `yarn cache "
         f"clean`) and rotate any token that may have been read by the "
         f"malicious version's postinstall.\n{sample}"
+        + (f"\n{hint}" if hint else "")
     )
     state.rotate_log_if_big(_NAME)
     return 0

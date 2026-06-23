@@ -569,3 +569,40 @@ def wrap_with_advisory_armor(message: str) -> str:
     if not message:
         return SELF_DEFENDING_ADVISORY
     return f"{SELF_DEFENDING_ADVISORY}\n{message}"
+
+
+# The opt-out gate for the security-agent suggestion (default ON). ONE source of
+# truth for the env key so every security detector references the same constant
+# instead of re-typing the string (TRDD-f12cae1a).
+SECURITY_AGENT_HINT_ENV = "CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT"
+
+
+def security_agent_hint(domain: str = "", *, enabled: bool = True) -> str:
+    """One-line pointer to `/janitor-security-agent` for a security detector that
+    found drift — or "" when ``enabled`` is False.
+
+    The janitor-security-agent is the SINGLE agent that runs every security skill
+    and DETECTS + FIXES (fail-safe). When a heartbeat security detector surfaces a
+    finding it appends this hint so the human/main session can dispatch the agent
+    to triage + remediate, rather than leaving the finding as a bare nag
+    (TRDD-f12cae1a — the USER's "suggest the security agent" request).
+
+    PURE + side-effect-free (the module contract): this function reads NO env and
+    does NO I/O. The CALLER reads the opt-out gate itself —
+    ``state.is_truthy_env(SECURITY_AGENT_HINT_ENV, True)`` — and passes the result
+    as ``enabled``, which keeps the gate testable and the helper deterministic.
+
+    ``domain`` is a FIXED caller-supplied label (one of the agent's domains:
+    ``supply-chain`` | ``credentials`` | ``dependabot`` | ``fork-pr-cache`` |
+    ``workflow`` | ``branch-protection`` | ``skill-bundle``), never untrusted text,
+    so it needs no sanitizing; it is appended only to tell the agent which domain
+    triggered the suggestion. An empty ``domain`` yields the generic hint.
+    """
+    if not enabled:
+        return ""
+    suffix = f" (domain: {domain})" if domain else ""
+    return (
+        f"→ Run /janitor-security-agent to triage + fix{suffix}: it detects AND "
+        "fixes (fail-safe — auto-fixes the safe, flags credential rotation / "
+        "destructive ops for a human)."
+    )

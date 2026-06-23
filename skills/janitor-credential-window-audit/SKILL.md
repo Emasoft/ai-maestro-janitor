@@ -66,6 +66,53 @@ User: how long is my token window
 User: find leaked tokens in the repo
 ```
 
+## Remediation (fix)
+
+The **janitor-security-agent** loads this skill to apply remediations after detection. If `/janitor-autofix-off` is set, this section is skipped — detect and report only.
+
+### Finding class: `.env*` not in `.gitignore` (CRITICAL — secret about to be committed)
+
+**SAFE-TO-AUTO-FIX** — add the missing gitignore pattern:
+
+1. Append the entry to `.gitignore` atomically (`echo '.env*' >> .gitignore`).
+2. If the file is already tracked by git (`git ls-files --error-unmatch <file>` exits 0), run `git rm --cached <file>` to stop tracking it (does NOT delete the file on disk).
+3. Commit only `.gitignore` (and the `git rm --cached` change if applicable). Never commit the secret file itself.
+4. Record `[AUTO-FIXED] added <pattern> to .gitignore` in the report.
+
+### Finding class: plaintext token/credential literal in a working-tree file (HIGH)
+
+**SAFE-TO-AUTO-FIX** (working tree only, file NOT committed with this content):
+
+1. Confirm the file is either untracked or the secret literal does not appear in `git log -S "<literal>" -- <file>` (not in history).
+2. Replace the literal with a reference to an env var or secret store (e.g. `os.getenv("MY_TOKEN")` / `process.env.MY_TOKEN`).
+3. Record `[AUTO-FIXED] redacted literal in <path>` in the report.
+
+**FLAG-FOR-HUMAN** — when the literal IS in git history (`git log -S` returns commits):
+
+- Do NOT touch git history automatically.
+- Record `[FLAGGED] secret in git history at <file> — rotate credential + purge history (git filter-branch / BFG)`.
+- Exit non-zero.
+
+### Finding class: CI workflow `persist-credentials: true` / missing `persist-credentials: false` (HIGH)
+
+**FLAG-FOR-HUMAN** — delegate to `/janitor-github-workflow-doctor` which owns the CI surface auto-fix via zizmor. Record `[FLAGGED] run /janitor-github-workflow-doctor to fix persist-credentials in <workflow>`.
+
+### Finding class: job-level `env:` sharing `${{ secrets.* }}` across steps (MEDIUM)
+
+**FLAG-FOR-HUMAN** — scoping changes require understanding the workflow's intent. Record `[FLAGGED] refactor env: block in <workflow>:<job> to step-level secrets`.
+
+### Finding class: suspicious env-var NAME in shell environment (MEDIUM/LOW)
+
+**Never auto-fix** — env vars are runtime state, not files. Record `[FLAGGED] stale/exposed env-var NAME <NAME> — unset in shell profile or CI configuration`.
+
+### What is NEVER auto-fixed
+
+- Rotating a live credential (call `gh secret set`, external APIs, OAuth flows).
+- Purging git history.
+- Force-pushing branches.
+- Touching secret VALUES anywhere in the process (the value-leak guardrail aborts before any fix path is reached).
+- Suppressing a finding to pass a gate.
+
 ## Scope
 
 ONLY reads. Does NOT rotate secrets, edit `.gitignore`, modify workflows, or call `gh secret set`. Pairs with `/janitor-github-workflow-doctor` for the CI surface auto-fix.

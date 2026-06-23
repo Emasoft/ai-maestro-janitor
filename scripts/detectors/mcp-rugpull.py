@@ -45,6 +45,7 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "mcp-rugpull"
@@ -320,10 +321,15 @@ def main() -> int:
     if len(issues) > cap:
         sample += f"\n  - …and {len(issues) - cap} more"
 
+    hint = sec.security_agent_hint(
+        "supply-chain",
+        enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
+    )
     print(
         f"[mcp-rugpull] {len(issues)} MCP server fingerprint change(s) detected. "
         f"Review each — silent drift is the rug-pull attack shape. "
         f"Use /mcp to inspect the affected server(s) before next agent invocation.\n{sample}"
+        + (f"\n{hint}" if hint else "")
     )
     state.rotate_log_if_big(_NAME)
     # Surface full fingerprints to the detector log for the user to grep
