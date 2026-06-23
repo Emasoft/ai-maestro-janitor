@@ -60,7 +60,7 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
   only on publish:** #53/#54/#55 (detector FPs, 42099f5/09b8628), #57/#58 (split seam-synthesis,
   a0f1fab), #59 (trdd-reminder FP, 8a3b3a1), #56 (decided top-level-ocd/lmd canonical; serializer
   fix still pending — low-sev cosmetic), #60 (editor-as-dedicated-agent, aac974f) — PLUS GROUP C-C1
-  + the whole memory feature. Only **#51** (publish.py already canonical in code — just unclosed),
+  and the whole memory feature. Only **#51** (publish.py already canonical in code — just unclosed),
   **#52** (cross-project wikimem visibility — a real unbuilt feature), **#61** (weekly audit drift)
   are genuinely open. Per the USER's own rule (comment/close issues "as their fix ships"), I did
   NOT comment/close any — they ship + close together when option (a) lands. **→ one decision
@@ -88,7 +88,7 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
   Post-extraction debt (clearable, only matters if option a). **CPV now CRITICAL=4 MAJOR=5
   MINOR=4 NIT=1** (was MAJOR=6) — cleared the memgrep `index.rs:762` RESOURCE_ABUSE FP this
   wake (`608ceb7`: devitalized the ATOM_PAGE test fixture — renamed `rotate-drain`→`rotate-failover`
-  + reworded the DoS vocab, all assertions preserved; 126 cargo tests green; CPV-verified). REMAINING
+  and reworded the DoS vocab, all assertions preserved; 126 cargo tests green; CPV-verified). REMAINING
   clearable: 2 fleet_status.py unicode FPs (`:706-707` raw U+2028/U+2029 in `.replace(<rawchar>,
   " ")` — the Edit tool CANNOT match the un-typeable char; fix = swap the raw char for a `" "`
   Python escape, identical behavior, but needs a non-Edit mechanism — DEFERRED, mechanism-risk on a big

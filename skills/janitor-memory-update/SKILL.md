@@ -22,6 +22,7 @@ and the expand/reduce shapes. The model doc's table of contents:
 - The three tiers (a page's role in the pyramid)
 - The edge model — EVERY link is bidirectional (the link law)
 - Page anatomy
+- Atoms — first-class body elements (block-properties)
 
 Three kinds of update, below. Always: **find the page first**, then bump `lmd:`
 to today on any edit.
@@ -200,6 +201,7 @@ non-destructive (fact cleaned, error demoted to a lesson) — never delete the W
   - The three tiers (a page's role in the pyramid)
   - The edge model — EVERY link is bidirectional (the link law)
   - Page anatomy
+  - Atoms — first-class body elements (block-properties)
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons-learned
   conventions + dual-test method.
 - `/janitor-memory-write` — MEMORIZE (create a page); the shape rules for the new

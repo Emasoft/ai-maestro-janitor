@@ -139,7 +139,15 @@ opt-in, never pushed standalone.
 
 - [wikimem-model](../janitor-memory-write/references/wikimem-model.md) — the shared data model; its
   **Atoms — first-class body elements** section defines the block-property syntax, the keyword
-  recall surface, and the per-atom notes/lessons/"also see" the aggregated record returns.
+  recall surface, and the per-atom notes/lessons/"also see" the aggregated record returns. Its
+  table of contents:
+  - A wiki, not a pile — and collaborative like Wikipedia
+  - The editorial decision flow (run this on any change worth remembering)
+  - EXPAND and REDUCE — radiating suns vs receiving terminals
+  - The three tiers (a page's role in the pyramid)
+  - The edge model — EVERY link is bidirectional (the link law)
+  - Page anatomy
+  - Atoms — first-class body elements (block-properties)
 - `scripts/memgrep/SKILL.md` — the atom grammar + the recall-output record shape.
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides (`begin`/`commit --op
   atomize`/`abort`/`resume`); `verify_atomize` is its gate.

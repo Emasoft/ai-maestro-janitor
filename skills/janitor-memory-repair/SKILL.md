@@ -158,6 +158,7 @@ scopes. PROJECT-scope editing is opt-in, never pushed standalone.
   - The three tiers (a page's role in the pyramid)
   - The edge model — EVERY link is bidirectional (the link law)
   - Page anatomy
+  - Atoms — first-class body elements (block-properties)
 - `scripts/memory_txn_cli.py` — the transaction CLI every mutation rides
   (`begin`/`commit --op repair`/`abort`/`resume`); `verify_repair` is its gate.
 - `scripts/lib/memory_settings.py` — cadence (`is_due`/`mark_ran`,

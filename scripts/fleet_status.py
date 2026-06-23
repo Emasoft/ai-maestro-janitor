@@ -703,8 +703,8 @@ def _json_for_script(obj) -> str:
         json.dumps(obj, ensure_ascii=False)
         .replace("<", "\\u003c")
         .replace(">", "\\u003e")
-        .replace(" ", "\\u2028")
-        .replace(" ", "\\u2029")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
     )
 
 

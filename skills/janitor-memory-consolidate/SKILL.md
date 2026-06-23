@@ -12,13 +12,12 @@ description: CONSOLIDATE (MERGE) executor — fuses two duplicate memory notes a
 
 ## What this is
 
-The MERGE leg of the autonomous wikimem editor. It finds two memory notes that
-describe the **same subject** and are the **same type/tier**, fuses them into one
-page, removes the redundancy, redirects every `[[backlink]]`, and preserves all
-lessons + the oldest origin date — **without losing a single fact**. It is the
-executor half of the librarian: the `memory-librarian` detector only *surfaces*
-candidates; this skill *performs* the merge, but only through the journaled,
-hash-guarded, flock-serialized **transaction core** (`scripts/memory_txn_cli.py`).
+The MERGE leg of the autonomous wikimem editor. It fuses two memory notes that
+describe the **same subject** and **same type/tier** into one page, redirects every
+`[[backlink]]`, and preserves all lessons + the oldest origin date — **without
+losing a single fact**. `memory-librarian` only *surfaces* candidates; this skill
+*performs* the merge through the journaled, hash-guarded **transaction core**
+(`scripts/memory_txn_cli.py`).
 
 **THE ONE HARD RULE: never edit a live memory page directly.** Every change is
 made to *copies* inside a staging dir that the CLI hands you; the CLI verifies the
@@ -174,14 +173,9 @@ Note every holder page — you will edit its *staged copy* to repoint the link t
 the survivor `C`. (Slug = the page's frontmatter `name:`, else its filename stem.)
 
 Separately, **prose** mentions of the retired names across OTHER scopes are NOT
-auto-edited — grep and **surface** them so a human can decide:
-
-```bash
-grep -rIl -- "$A_SLUG\|$B_SLUG" "$LOCAL_MEM" "$USER_MEM" "$PROJECT_MEM" 2>/dev/null
-```
-
-Report any cross-scope hits as `[janitor-memory] prose mentions of retired slug
-<A>/<B> in <scope>: <files> (review)`. Do not edit other scopes.
+auto-edited — grep for them and **surface** any hits as
+`[janitor-memory] prose mentions of retired slug <A>/<B> in <scope>: <files> (review)`.
+Do not edit other scopes.
 
 ### 6. Open the transaction (copies only — never the live tree)
 
@@ -209,26 +203,16 @@ Now edit **only files under `$STAGING`**:
 
 ### 7. Build the merged page `C`
 
-`verify_merge` (at `commit --op merge`) machine-checks the lesson, dedup, and
-ocd/lmd rules below and FAILS on any breach; the **lead** and **body-fact
-preservation** rules are YOURS — the verifier does not enforce them:
+`verify_merge` (at `commit --op merge`) machine-checks lesson preservation, dedup,
+and ocd/lmd — FAILS on any breach. Body-fact preservation and the opening lead are
+YOUR responsibility; the verifier does not enforce them. Key constraints: every
+`[^N]` lesson from both sources survives byte-identical; `ocd = min(A.ocd, B.ocd)`,
+`lmd = today`; no duplicate content lines; open with a one-sentence lead; no
+`[[link]]` to a retired slug; merge all `## See also` / `## Governed by` /
+`## Applies to` edges (deduped); keep the survivor's slug in `name:`.
 
-- **Every `[^N]` lesson from BOTH A and B survives byte-identical** — copy each
-  verbatim (you may compound, never reword/drop); keep its `[ocd:… lmd:…]` stamp.
-- **Intra-page dedup** — when A and B carry the same lesson/fact, keep the
-  better-sourced copy; the result must have **no duplicate content line**
-  (`no_new_duplicate_lines`). Merging removes redundancy, never adds it.
-- **`ocd = min(A.ocd, B.ocd)`**, **`lmd = today`** (`date +%F`, ≥ both sources).
-- **Preserve EVERY distinct body fact** — verify guards lessons, NOT body facts, so
-  a dropped body fact is silently lost; dedup only identical facts, unsure → keep both.
-- **Open C with a one-sentence lead** naming the merged subject (wikimem-model →
-  "The lead") so it reads as ONE topic, then facets as `##` sections + one deduped
-  `## Notes and lessons learned`. (Full rationale: the merge-protocol reference.)
-- **No `[[link]]` to a retired slug** — C must not link `[[B]]`; step 6 covers holders.
-
-Keep the frontmatter shape (`name`, `description`, `ocd`, `lmd`, `metadata.{tier,
-type,…}`); `name` stays the survivor's slug. Merge `## See also` / `## Governed
-by` / `## Applies to` edges from both (deduped) so the link web stays intact.
+See [merge-page-rules](references/merge-page-rules.md) for the full rule breakdown
+(what verify_merge enforces vs. what you must ensure, frontmatter shape).
 
 ### 8. Commit — the CLI verifies and applies atomically
 
@@ -262,10 +246,9 @@ writes-before-deletes via `os.replace`. On PASS it prints
 
 ## Idempotency & bounds
 
-One scope, one merge per pass. Re-running on an already-merged corpus is a no-op
-(the duplicate is gone, so no candidate pair is found). The candidate-set +
-journal `txn_id` make a re-fire safe. Every per-day frequency is disable-able
-(`consolidation_per_day=0`), and the editor honors the global kill-switch.
+One scope, one merge per pass. Re-running on an already-merged corpus is a no-op.
+Frequency is disable-able (`consolidation_per_day=0`); the editor honors the global
+kill-switch.
 
 ## Output
 

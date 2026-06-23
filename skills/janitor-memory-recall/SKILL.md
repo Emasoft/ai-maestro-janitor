@@ -23,6 +23,7 @@ contents:
 - The three tiers (a page's role in the pyramid)
 - The edge model — EVERY link is bidirectional (the link law)
 - Page anatomy
+- Atoms — first-class body elements (block-properties)
 
 ## PROACTIVE-USE CONTRACT — recall FIRST, unprompted (commitment 1)
 
@@ -207,6 +208,7 @@ Degrades to grep when memgrep is absent; never blocks on a missing binary.
   - The three tiers (a page's role in the pyramid)
   - The edge model — EVERY link is bidirectional (the link law)
   - Page anatomy
+  - Atoms — first-class body elements (block-properties)
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" recall
   law + schema + dual-test method.
 - `$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` — the memgrep instrument reference.
