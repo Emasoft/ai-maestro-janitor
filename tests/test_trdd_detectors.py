@@ -247,9 +247,12 @@ class TestTrddDetectors(unittest.TestCase):
             # would wrongly report ~0d.
             _write(root / "design/tasks", "bbbbbbbb", _fm(column="dev"))
             out = _run(REMINDER, root)
-            marker = "TRDD-bbbbbbbb ("
-            idx = out.index(marker) + len(marker)
-            age = int(out[idx:out.index("d)", idx)])
+            # The label is now "TRDD-bbbbbbbb (idle Nd, age Md)" — idle = days since
+            # last-touch (the staleness), age = TRUE age since `created:`. Extract the
+            # AGE (the issue-#59 invariant: it reflects 2026-01-01, not the fresh mtime).
+            self.assertIn("TRDD-bbbbbbbb (idle ", out)
+            ageidx = out.index("age ", out.index("TRDD-bbbbbbbb (")) + len("age ")
+            age = int(out[ageidx:out.index("d)", ageidx)])
             self.assertGreaterEqual(age, 150, f"age should be true age since 2026-01-01, got {age}d")
 
     def test_reminder_age_falls_back_to_mtime_without_created(self):
