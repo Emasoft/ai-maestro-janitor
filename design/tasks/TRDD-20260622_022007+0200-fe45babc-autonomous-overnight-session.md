@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T18:14:00+0200
+updated: 2026-06-23T18:27:34+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -52,9 +52,17 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
   L0 lives out-of-band; vs (c) hold / drop L0. I will NOT revert GROUP B autonomously (you
   explicitly wanted L0 immortality — it's an immortality-vs-shippability call). Full writeup:
   `reports/overnight-session/20260623_181417+0200-publish-blocker-accurately-diagnosed.md`.
-  Post-extraction debt (clearable, only matters if option a): 2 fleet_status unicode FPs
-  (fragile edit), 1 memgrep RESOURCE_ABUSE FP (needs rerun), 3 oversized memory SKILLs +
-  coupled TOC (editorial-risky).
+  Post-extraction debt (clearable, only matters if option a). **CPV now CRITICAL=4 MAJOR=5
+  MINOR=4 NIT=1** (was MAJOR=6) — cleared the memgrep `index.rs:762` RESOURCE_ABUSE FP this
+  wake (`608ceb7`: devitalized the ATOM_PAGE test fixture — renamed `rotate-drain`→`rotate-failover`
+  + reworded the DoS vocab, all assertions preserved; 126 cargo tests green; CPV-verified). REMAINING
+  clearable: 2 fleet_status.py unicode FPs (`:706-707` raw U+2028/U+2029 in `.replace(<rawchar>,
+  " ")` — the Edit tool CANNOT match the un-typeable char; fix = swap the raw char for a `" "`
+  Python escape, identical behavior, but needs a non-Edit mechanism — DEFERRED, mechanism-risk on a big
+  file for a non-blocking FP); 3 oversized memory SKILLs (consolidate/split/write, MAJOR×3) + coupled
+  wikimem-model TOC MINOR×4/NIT×1 — editorial-risky on load-bearing just-shipped memory instruction
+  surfaces, deserves a careful reviewable pass, NOT an overnight rush. NONE of this unblocks publish
+  (the 4 persistence CRITICALs remain — USER decision).
 
 ### ⚡ UPDATE 2026-06-23 17:15 — MEMORY JOB DONE (phase g COMPLETE); publish blocker UNCHANGED + KNOWN
 - **The 15:09 "HOLD phase g / don't build" block below is now OBSOLETE.** The USER un-held it
