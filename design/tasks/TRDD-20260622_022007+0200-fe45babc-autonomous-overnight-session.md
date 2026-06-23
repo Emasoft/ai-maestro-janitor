@@ -40,9 +40,12 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
     (4 tests incl. a REAL-subprocess `import daemon` from the staged tree). Commit `0345000`.
 - **BLOCKED on CPV #152** (the user is implementing it in CPV: fold `$HOME`/`~`/`Path.home()` +
   `/.claude/plugins/data/<slug>/` PREFIX → plugin-root R, then scan `R/scripts/daemon_keepalive_entry.py`).
-  Until #152 is in CPV `main`, Phase 2b+ (heredoc installer, rewrite `launchd_keepalive.py`, delete the
-  old dynamic `daemon-launcher.py` [commit-before-delete per RULE 0], daemon wiring, restore 2 tests,
-  publish.py green) cannot pass the strict gate. **The rest is mechanical once #152 merges.**
+  Until #152 is in CPV `main`, Phase 2b+ (heredoc installer `keepalive_install.sh`; (re)CREATE
+  `launchd_keepalive.py` as the install orchestrator → `keepalive_stage.stage_closure` + the installer;
+  daemon wiring; restore the 2 tests; publish.py green) cannot pass the strict gate. NOTE (verified
+  2026-06-24): all 4 old launchd files (`daemon-launcher.py`, `launchd_keepalive.py`, +2 tests) were
+  ALREADY removed in `eb109fb`/v0.16.0 — SHAPE 2 builds them FRESH (ref `cd9c251`); there is NO
+  `daemon-launcher.py` to delete. **The rest is mechanical once #152 merges.**
 - **OAuth survival gap FOUND + TRDD'd (TRDD-HJGR4I5W, committed `70b29e8`, `column: todo`, severity HIGH,
   audit-conclusion issue-confirmed).** Code-traced: a present-but-DEAD refresh token (`has_refresh=True`,
   expired, refresh keeps failing) is trapped in `cascade.classify`→`RENEW_REFRESH` forever and never

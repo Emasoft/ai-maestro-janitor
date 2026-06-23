@@ -60,9 +60,14 @@ the whole path resolves under `~/.claude/plugins/data/*/`").
 heredoc plist shape couples to it, so build once #152 is in CPV main, not against a guess):
 `scripts/keepalive_install.sh` (heredoc plist + systemd unit, with
 `$HOME/.claude/plugins/data/<slug>/scripts/daemon_keepalive_entry.py` as
-ProgramArguments[0]) + rewrite `scripts/lib/launchd_keepalive.py` install to call
-`keepalive_stage.stage_closure(...)` then run the heredoc installer; delete
-`scripts/daemon-launcher.py` (commit-before-delete per RULE 0). Phase 3: restore the
+ProgramArguments[0]) + (RE)CREATE `scripts/lib/launchd_keepalive.py` as the install
+orchestrator that calls `keepalive_stage.stage_closure(...)` then runs the heredoc
+installer. **NOTE (verified 2026-06-24, `git tag --contains eb109fb` → v0.16.0):** all 4
+old launchd files (`daemon-launcher.py`, `launchd_keepalive.py`, `test_launchd_keepalive.py`,
+`test_flock_blocking.py`) were ALREADY removed in eb109fb — SHAPE 2 builds them FRESH
+(reference the old logic at `cd9c251`). There is **NO `daemon-launcher.py` to delete** (its
+dynamic-exec role is replaced by the static `daemon_keepalive_entry.py`); the body's
+"delete daemon-launcher.py" Phase steps are SUPERSEDED by this note. Phase 3: restore the
 daemon.py / global_state install-on-opt-in + uninstall-on-kill-switch wiring + the
 version-update re-stage step. Phase 4: restore + adapt `test_launchd_keepalive.py` +
 `test_flock_blocking.py`. Phase 5: `publish.py` green (needs #152 live in CPV main).
