@@ -12,6 +12,7 @@ repeating it.
 - [The three tiers (a page's role in the pyramid)](#the-three-tiers-a-pages-role-in-the-pyramid)
 - [The edge model — EVERY link is bidirectional (the link law)](#the-edge-model--every-link-is-bidirectional-the-link-law)
 - [Page anatomy](#page-anatomy)
+- [Atoms — first-class body elements (block-properties)](#atoms--first-class-body-elements-block-properties)
 
 ## A wiki, not a pile — and collaborative like Wikipedia
 
@@ -203,6 +204,55 @@ structural half of one-element-one-page: the no-third-page / same-subject gates 
 *distinct* subjects apart; the lead keeps the *surviving* page reading as the single
 subject it is.
 
+## Atoms — first-class body elements (block-properties)
+
+A page body is not opaque prose — it is a sequence of **atoms**, the body
+counterpart of `[^N]` lessons. An atom is one durable fact (it may span several
+paragraphs, a table, a code block) and it carries **its own metadata** so memgrep
+can index and recall it **individually**, by its own keywords, not just as part of
+its page. This is the second of the **two metadata levels** — do NOT conflate them:
+
+1. **PAGE metadata** — the YAML `---` frontmatter (`name`, `description`, `tier`, …).
+   One per file; the page's identity.
+2. **ATOM metadata** — a per-atom **block-properties** marker attached to each fact
+   in the body. This is what delimits one atom from the next.
+
+**The syntax is the Obsidian Block-Properties plugin** (`^<block-id> [key: value,
+…]`), placed at the **END** of the block(s) it identifies:
+
+```markdown
+The rotator drains the live (near-limit) account first, then rotates to a safe
+alternate that is below SAFE on BOTH the 5h and 7d windows.
+^rotate-drain [keywords: rotator drain rate-limit oauth alternate, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
+```
+
+Parsing grammar (memgrep implements exactly this):
+- a **comma splits properties** (a `[[wikilink]]`/`^ref` value is depth-protected,
+  so a comma inside `[[A, B]]` is not a split);
+- the **first colon splits** `key: value` (colons inside a value — a URL — are kept);
+- the trimmed value is **split on whitespace into a VALUE ARRAY** (the AI-Maestro
+  extension — `keywords: a b c` is three values; a value with no space is a 1-array).
+
+**`keywords:` is the only REQUIRED prop** — it is the atom's **recall surface**, the
+array of terms a future search will use to find THIS fact (the page's `description`
+does the same job for the whole page). `ocd`/`lmd`/`type` are optional (an atom with
+none inherits the page's). Two more props are stamped only on **harvested** atoms (an
+atom imported from the Claude `MEMORY.md` buffer system): `claude_mem_ref:
+<buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — its provenance back to the
+source buffer note, which `memgrep find-claude-mem-ref <buffer.md>` queries.
+
+**How recall returns an atom:** `memgrep recall` ranks atoms by their keyword surface
+and prints them `path#atom-id — <keywords>`, interleaved with whole-page results by
+score. An atom has NO `[^N]` lessons of its own (its WHY/provenance lives in its
+block-props); a superseded ATOM fact is still demoted to a page-level `[^N]` lesson
+(the invariant below), the atom body cleaned to the new truth.
+
+**Authoring discipline:** give each durable fact its own `^id [keywords: …]` marker
+so it is findable on its own. Block-ids are page-unique kebab/`^memory-<uid>` slugs.
+A page whose body is still free prose (no markers) is valid — its facts are simply
+recalled at page granularity until the atomize migration (or a manual edit) gives
+them markers. One fact = one atom, mirroring one element = one page.
+
 ## The superseded-memory invariant (updates never delete)
 
 Whenever an update **supersedes** a memory — a corrected fact, a reversed
@@ -276,7 +326,8 @@ named note".
 
 | Operation | memgrep |
 |---|---|
-| Symptom recall | `memgrep recall "<symptom>" <roots…>` |
+| Symptom recall (pages + `[^N]` lessons + body atoms, interleaved) | `memgrep recall "<symptom>" <roots…>` |
+| Atoms harvested FROM a Claude buffer note (provenance) | `memgrep find-claude-mem-ref <buffer.md> <dir>` |
 | List hub pages (then match their `globs` against the file you're editing) | `memgrep -l <dir> --where 'fm.tier "hub"' \| sort -u` |
 | EXPAND: all elements to radiate onto | `memgrep -l <dir> --where 'fm.tier "component" and fm.functionality "<fn>"' \| sort -u` |
 | Where does this page point? (out-links) | `memgrep links --to <page> <dir>` |

@@ -152,6 +152,17 @@ subcommands `recall`/`index`/`links`/`fact`). Its own teaching doc is
 - **recall** `memgrep recall "SYMPTOM" <memdir>` — symptom-ranked notes,
   precision-first (surface matches suppress body-only matches unless nothing
   matched the surface), printed `path — description`, best first.
+- **atoms** — a page body is a sequence of first-class **atoms** (the body
+  counterpart of `[^N]` lessons), each delimited by a trailing Obsidian
+  block-property marker `^<id> [keywords: a b c, …]`. `recall` ALSO returns
+  matching atoms — ranked by the atom's `keywords:` surface, printed
+  `path#atom-id — <keywords>`, interleaved with page results by score. So a
+  single FACT is findable on its own, not only as part of its page. Author a
+  durable fact as an atom by giving it a `^id [keywords: …]` marker; the harvest
+  stamps `claude_mem_ref:`/`claude_mem_hash:` provenance props that
+  **find-claude-mem-ref** `memgrep find-claude-mem-ref <buffer.md> <memdir>`
+  queries (full grammar + recall-output shape in `scripts/memgrep/SKILL.md` and
+  the wikimem-model atom section).
 
 ## Read-the-notes rule — a memory's lessons are part of the memory
 
@@ -211,6 +222,16 @@ These are the actual flags on the shipped binary (verify with `memgrep recall
   memgrep find "+rotator +keychain -widget" <memdir>          # must have rotator AND keychain, not widget
   memgrep find '+"old approach" retry' <memdir>               # mandatory phrase + optional ranker
   memgrep find "+max_retries" <memdir> --only-notes           # search ONLY the lessons-learned
+  ```
+
+- **find-claude-mem-ref** — the harvest provenance query: list every wiki ATOM
+  whose `claude_mem_ref:` block-prop references a Claude-memory buffer file,
+  printed `path#atom-id\t<source-hash>`. The harvest diffs the buffer file's
+  current hash against the stored ones to skip already-harvested, unchanged
+  memories.
+
+  ```bash
+  memgrep find-claude-mem-ref feedback_oauth.md <memdir>      # atoms harvested from that buffer note
   ```
 
 - **index / reindex** (aliases) — build the persistent `.memgrep/index.db`

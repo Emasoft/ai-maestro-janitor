@@ -15,9 +15,10 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 
 | Subcommand | What it does |
 |---|---|
-| `recall "SYMPTOM" <memdir>` | rank notes by symptom match → `path — description`, best first; each note's `[^N]` lessons appended (default-on). Query the QUESTION's words, not the answer's |
+| `recall "SYMPTOM" <memdir>` | rank notes by symptom match → `path — description`, best first; each note's `[^N]` lessons appended (default-on). Also surfaces matching body **ATOMS** as `path#atom-id — <keywords>` (ranked by the atom's keyword surface), interleaved with pages by score. Query the QUESTION's words, not the answer's |
 | `find "<query>" <memdir>` | note-level `+`/`-`/wildcard/phrase keyword search (see below); `--only-notes` searches the lessons instead of pages |
-| `index <memdir>` / `reindex <memdir>` | build the persistent SQLite query index `.memgrep/index.db` (gitignored, git-incremental — re-parses only changed files); `--full` rebuilds from scratch |
+| `find-claude-mem-ref <buffer.md> <wikidir>` | list every wiki ATOM harvested FROM a Claude-memory buffer file → `path#atom-id\t<source-hash>` (the harvest provenance back-reference; see Atoms below) |
+| `index <memdir>` / `reindex <memdir>` | build the persistent SQLite query index `.memgrep/index.db` (gitignored, git-incremental — re-parses only changed files); `--full` rebuilds from scratch. Indexes pages, `[^N]` lessons, AND body atoms |
 | `index --markdown <memdir>` | the legacy doc-generator → `memory-index.md` (per-note title+summary+tags+TOC+backlinks); add `--write` to write the file instead of stdout |
 | `links --broken\|--orphans\|--to N\|--from N` | link graph / semijoin over the corpus |
 | `lint <memdir>` | deterministic, FP-free note-integrity check — footnote balance (every `[^N]` ref has a `[^N]:` def and vice-versa), the bidirectional LINK LAW (A links `[[B]]` ⟹ B links back), and required fields (`ocd`/`lmd`/`description` + a `## Notes and lessons learned` section). Prints `path:line — what is wrong`; exits non-zero on any violation (usable as a pre-commit / write-skill gate) |
@@ -33,15 +34,38 @@ Render is token-economical: an inline footnote ref shows as a bare `[9]`; after 
 
 `memgrep find "<query>" <memdir>` ranks whole notes (NOT line grep). The query is ONE whitespace-separated string (quote it): `+TERM` mandatory, `-TERM` exclude, bare `TERM` optional (ranks). A word may use `*` (wildcard, any run: `pro*`, `*debug`); a `"quoted phrase"` matches verbatim WITH the spaces and can itself be `+`/`-` prefixed. A `+`/`-` INSIDE a token is literal — `pro*-debug*` is ONE wildcard term, not `pro*` minus `debug*`. Result = notes with every `+` term and no `-` term, ranked by optional hits. `--only-notes` runs the same DSL over the resolved lessons and returns matching `[N] - …` lessons. Composes with every shared flag above.
 
+### Atoms — per-fact recall (block-properties)
+
+A page BODY is a sequence of **atoms** — the body counterpart of `[^N]` lessons. An atom is the
+content preceding a trailing **Obsidian block-property marker** `^<id> [key: value, key2: a b c]`
+(the [obsidian-block-properties-plugin](https://github.com/Querulantenkind/obsidian-block-properties-plugin)
+syntax). Grammar: **comma → properties** (a `[[wikilink]]` is depth-protected), **first colon →
+key/value** (colons in a value are kept), **whitespace → a VALUE ARRAY** (the AI-Maestro extension —
+`keywords: a b c` is three values). An atom may span multiple paragraphs / tables / code blocks; the
+marker closes it.
+
+`keywords:` is the atom's **recall surface** — the array of search terms that makes a single fact
+findable on its own. `recall` ranks atoms by it and prints them `path#atom-id — <keywords>`, interleaved
+with page results. The harvest stamps two more block-props as provenance — `claude_mem_ref:
+<buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — and `find-claude-mem-ref` lists the atoms that
+reference a given buffer file (with their stored hashes) so a re-harvest touches only NEW or CHANGED
+memories. Authoring a fact as an atom:
+
+```markdown
+The rotator drains the live account first when near a limit, then rotates to a safe alternate.
+^rotate-drain [keywords: rotator drain rate-limit oauth, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
+```
+
 ### Examples
 
 ```bash
-memgrep recall "oauth rotator failed had to log in" <memdir>     # symptom recall + lessons
+memgrep recall "oauth rotator failed had to log in" <memdir>     # symptom recall + lessons + atoms
 memgrep recall "rotator" <memdir> --since 2026-06-01 --sort lmd  # recent, newest-modified first
 memgrep find "+rotator +keychain -widget" <memdir>               # AND two terms, exclude one
 memgrep find '+"old approach" retry' <memdir>                    # mandatory phrase + optional ranker
 memgrep find "+max_retries" <memdir> --only-notes                # search ONLY the lessons-learned
-memgrep reindex <memdir>                                         # refresh the SQLite query index
+memgrep find-claude-mem-ref feedback_oauth.md <memdir>           # atoms harvested from a buffer file
+memgrep reindex <memdir>                                         # refresh the SQLite query index (pages+lessons+atoms)
 memgrep index --markdown --write <memdir>                        # regenerate memory-index.md
 memgrep lint <memdir>                                            # structural integrity gate (exit≠0 on any violation)
 ```
