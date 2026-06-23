@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T15:08:41+0200
+updated: 2026-06-23T15:29:49+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -43,22 +43,30 @@ directives. The CORRECT model — memorized at USER scope in [[wikimem-atom-bloc
 3. **A lesson-learned = a PREVIOUS VERSION of an atom.** Every UPDATE demotes the old atom into a
    lesson-learned: metadata = change-date + the atom's ORIGINAL metadata; content = the old version +
    a concise WHY it was superseded. Demote, never delete.
-4. **Returning an atom = the atom + its notes + lessons-learned + see-also**, aggregated. The atom's
-   body holds INLINE references to its bottom-section notes/lessons/see-also (Obsidian block refs);
-   memgrep resolves them and returns the full self-contained record. NEVER the bare atom.
+4. **notes / lessons / see-also are markdown FOOTNOTES `[^N]`** (USER-confirmed "yes", 2026-06-23).
+   All three use the SAME footnote syntax: a `[^N]` ref in the atom body → a `[^N]: …` definition in a
+   bottom `# Notes` / `# Lessons Learned` / `# See also` section. Notes are referenced mid-text;
+   lessons/see-also are clustered at the END of the atom text (inline allowed). Definitions are POOLED
+   at the bottom because **one footnote can be SHARED by multiple atoms**. **Returning an atom =**
+   the atom + its `[^N]`-referenced notes/lessons/see-also, aggregated (NEVER the bare atom). **MOVE
+   RULE:** moving an atom to another page ref-counts its footnotes — do NOT delete a `[^N]` definition
+   from the source if another atom there still references it (shared-footnote GC; merge/split/harvest).
 5. **ONE memory agent for ALL chores** (`janitor-memory-subconscious-agent`) — never one-agent-per-
    chore; the `janitor-memory-*` under `skills/` are PROCEDURES it loads, not agents. Invoked by main
    Claude OR as an async background task, one chore/launch, **loading ONLY that chore's skill
    dynamically** to save tokens.
 
 **DELTA — what's BUILT vs the refined model (the remaining engine work, NOT yet done):**
-- BUILT: `resolve_atoms` segments by TRAILING `^id [props]`; only atoms + `[^N]` footnote-lessons are
-  first-class; recall interleaves atoms+pages+lessons; `render_atom_record` aggregates an atom's `[^N]`
-  + `[[links]]`.
-- TARGET: flip `resolve_atoms` to LEADING blocks; make note + lesson-learned + see-also FIRST-CLASS
-  metadata-block elements (not `[^N]`); atom→element aggregation via inline block-refs; recall surfaces
-  ELEMENTS with the page as context only (discourage full-page reads); atomize emits leading blocks +
-  the # Notes/# Lessons Learned/# See also section layout. Update all authoring docs/skills to match.
+- BUILT: `resolve_atoms` segments by TRAILING `^id [props]`; recall interleaves atoms+pages+lessons;
+  `render_atom_record` ALREADY resolves an atom's `[^N]` footnotes (the CONFIRMED mechanism — keep!)
+  but mis-treats see-also as `[[links]]`.
+- TARGET: (i) flip the ATOM marker `resolve_atoms` to LEADING blocks; (ii) `render_atom_record` —
+  categorize an atom's `[^N]` footnotes by which bottom section (`# Notes`/`# Lessons Learned`/
+  `# See also`) holds each definition; treat see-also as `[^N]` (not `[[links]]`); (iii) the MOVE/verify
+  logic (split/merge/harvest) must ref-count shared footnotes before deleting one from a source page;
+  (iv) recall surfaces ELEMENTS with the page as context only (discourage full-page reads); (v) atomize
+  emits leading atom blocks + the # Notes/# Lessons Learned/# See also footnote-pool layout. Update all
+  authoring docs/skills to match. The `[^N]` footnote FOUNDATION is right — this REFINES it, not rips it.
 - This is a bounded re-architecture of the just-built engine; author it as the next build phase (g).
   The trailing-marker engine is committed + tested (125 green) and works as an interim — the flip is
   additive in spirit (same SQLite element-row model; the PARSER direction + element kinds change).
