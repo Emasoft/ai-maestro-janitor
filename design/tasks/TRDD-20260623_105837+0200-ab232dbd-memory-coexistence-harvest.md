@@ -1,9 +1,9 @@
 ---
 trdd-id: ab232dbd-59eb-4bff-8770-4dd7c65ac00e
 title: MEMORY.md buffer ⇄ Wikimem wiki coexistence — harvest-mirror, never stub
-column: dev
+column: blocked
 created: 2026-06-23T10:58:37+0200
-updated: 2026-06-23T11:28:38+0200
+updated: 2026-06-23T13:26:34+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -13,6 +13,8 @@ effort: L
 labels: [memory, wikimem, harvest, architecture, recall-rule]
 parent-trdd: TRDD-87935f21
 supersedes: []
+blocked-by: [TRDD-3b9b2040]
+pre-block-column: dev
 relevant-rules: []
 release-via: publish
 test-requirements: [unit]
@@ -22,6 +24,15 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/60"]
 # MEMORY.md (buffer) ⇄ Wikimem (wiki) coexistence — harvest mirrors, never stubs
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-23
+
+> 🔴 **BLOCKED (2026-06-23) by [[TRDD-3b9b2040]]** — the harvest MECHANICS in this TRDD
+> (frontmatter `claude_mem_refs` provenance, file-per-note) are SUPERSEDED. The USER realized
+> memgrep has NO atom-level indexing (page+lesson granularity only), and the per-atom metadata =
+> Obsidian Block Properties (`^id [key: value, …]`, values are whitespace-separated arrays). The
+> coexistence FOUNDATION here stays valid (buffer⇄wiki, the `memory/wiki/` namespace, additive
+> /never-touch-buffer, the raw-vs-curated discriminator); only "harvest-into-FILES + frontmatter
+> provenance" is replaced by "harvest-into-ATOMS + block-property provenance" designed in 3b9b2040.
+> RESUME this TRDD only after 3b9b2040's atom-indexing + block-properties + harvest-into-atoms land.
 
 ### USER DIRECTIVE (verbatim, 2026-06-23 ~10:50)
 *"there is an urgent issue with the MEMORY.md system. I told you to empty it and leave only
