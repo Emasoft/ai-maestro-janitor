@@ -844,16 +844,192 @@ pub fn cmd_links_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+// ─────────────────── block properties + ATOMS (TRDD-3b9b2040) ───────────────────
+//
+// A wikimem page body is a sequence of first-class ATOMS, the body counterpart of `[^N]` lessons.
+// Each atom is delimited by a TRAILING Obsidian block-property marker `^<id> [key: value, …]` (the
+// obsidian-block-properties-plugin syntax + the AI-Maestro array-value extension). The atom's
+// `keywords:` array is its recall surface; the harvest stamps `claude_mem_ref`/`claude_mem_hash`
+// here as provenance back to the source buffer note.
+
+/// Parse a block-property string (`key: value, key2: a b c`) into `key → VALUE-ARRAY`. Implements the
+/// Obsidian Block-Properties spec + the AI-Maestro ARRAY extension:
+///   • split on TOP-LEVEL commas → properties (a comma inside a `[[wikilink]]` is depth-protected);
+///   • split each property on its FIRST `:` → (key, value-string) (colons in values are allowed);
+///   • TRIM the value, then split it on WHITESPACE → the value array (no internal space → 1 element).
+/// Keys are trimmed; an empty key is dropped. Pure; markdown is data, never executed.
+fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
+    let bytes = props.as_bytes();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let mut items: Vec<&str> = Vec::new();
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'[' => depth += 1,
+            b']' => depth -= 1,
+            b',' if depth == 0 => {
+                items.push(&props[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    items.push(&props[start..]);
+    let mut map = BTreeMap::new();
+    for item in items {
+        if let Some((k, v)) = item.split_once(':') {
+            let key = k.trim();
+            if key.is_empty() {
+                continue;
+            }
+            let arr: Vec<String> = v.trim().split_whitespace().map(str::to_string).collect();
+            map.insert(key.to_string(), arr);
+        }
+    }
+    map
+}
+
+/// Find the FIRST Obsidian block-property marker `^<block-id> [<props>]` on a line, returning
+/// `(byte-offset-of-^, block_id, raw_props)`. The `[...]` is scanned with bracket-DEPTH tracking so a
+/// `[[wikilink]]` / `^ref` value inside the props cannot prematurely close it. Block-id charset is
+/// `[A-Za-z0-9_-]`. None when the line carries no marker. All slice boundaries are ASCII bytes (`^`,
+/// id chars, `[`, `]`), so UTF-8 content between them is never split on a non-boundary.
+fn first_block_property_marker(line: &str) -> Option<(usize, String, String)> {
+    let b = line.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        if b[i] == b'^' {
+            let id_start = i + 1;
+            let mut j = id_start;
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_') {
+                j += 1;
+            }
+            if j > id_start {
+                let mut k = j;
+                while k < b.len() && b[k] == b' ' {
+                    k += 1;
+                }
+                if k < b.len() && b[k] == b'[' {
+                    let mut depth = 0i32;
+                    let mut m = k;
+                    while m < b.len() {
+                        match b[m] {
+                            b'[' => depth += 1,
+                            b']' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    return Some((
+                                        i,
+                                        line[id_start..j].to_string(),
+                                        line[k + 1..m].to_string(),
+                                    ));
+                                }
+                            }
+                            _ => {}
+                        }
+                        m += 1;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// One memory ATOM parsed from a page body (TRDD-3b9b2040) — the first-class, individually-recallable
+/// body element, the counterpart of a `[^N]` lesson. Delimited by its trailing `^id [block-props]`
+/// marker; an atom may span multiple paragraphs / tables / code blocks.
+pub struct Atom {
+    pub id: String,
+    /// The recall surface — the `keywords:` block-prop ARRAY (the terms a future search will use).
+    pub keywords: Vec<String>,
+    pub atom_type: Option<String>,
+    pub ocd: Option<String>,
+    pub lmd: Option<String>,
+    pub claude_mem_ref: Option<String>,
+    pub claude_mem_hash: Option<String>,
+    /// The atom's content (everything since the prior marker / heading, up to its marker).
+    pub body: String,
+}
+
+/// First element of a block-prop's value array — for the single-valued keys (type/ocd/lmd/claude_*).
+fn first_val(m: &BTreeMap<String, Vec<String>>, key: &str) -> Option<String> {
+    m.get(key).and_then(|v| v.first()).cloned()
+}
+
+/// Parse a page's body into ATOMS (TRDD-3b9b2040). An atom is the contiguous body content preceding a
+/// trailing `^id [props]` marker, back to the prior marker or a `##` heading (a structural boundary).
+/// Fenced code is tracked so a `^x [...]`-looking line INSIDE a code block is content, not a marker.
+/// `[^N]` lessons use their own `[^N]:` syntax (not `^id [...]`) so they never collide.
+pub fn resolve_atoms(path: &Path) -> Vec<Atom> {
+    let Some(text) = md::read_text(path) else {
+        return Vec::new();
+    };
+    resolve_atoms_from_text(&text)
+}
+
+/// The text-level core of `resolve_atoms` (split out so it is unit-testable without a file).
+fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
+    let mut atoms = Vec::new();
+    let mut acc: Vec<String> = Vec::new();
+    let mut in_fence = false;
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            acc.push(line.to_string());
+            continue;
+        }
+        if !in_fence && t.starts_with("##") {
+            acc.clear(); // heading = structural boundary; unmarked content before it is not an atom
+            continue;
+        }
+        let marker = if in_fence {
+            None
+        } else {
+            first_block_property_marker(line)
+        };
+        if let Some((offset, id, props)) = marker {
+            let pre = &line[..offset];
+            if !pre.trim().is_empty() {
+                acc.push(pre.to_string());
+            }
+            let p = parse_block_props(&props);
+            atoms.push(Atom {
+                id,
+                keywords: p.get("keywords").cloned().unwrap_or_default(),
+                atom_type: first_val(&p, "type"),
+                ocd: first_val(&p, "ocd"),
+                lmd: first_val(&p, "lmd"),
+                claude_mem_ref: first_val(&p, "claude_mem_ref"),
+                claude_mem_hash: first_val(&p, "claude_mem_hash"),
+                body: acc.join("\n").trim().to_string(),
+            });
+            acc.clear();
+        } else {
+            acc.push(line.to_string());
+        }
+    }
+    atoms
+}
+
+/// Public wrapper for the SQLite indexer (`index.rs`) — atoms are indexed via the identical seam the
+/// recall walk uses, keeping indexed extraction byte-for-byte with the live walk.
+pub fn resolve_atoms_public(path: &Path) -> Vec<Atom> {
+    resolve_atoms(path)
+}
+
 // ─────────────────── `memgrep find-claude-mem-ref` ───────────────────
 
 #[derive(Parser)]
 #[command(
     name = "memgrep find-claude-mem-ref",
-    about = "list wiki atoms harvested FROM a given Claude-memory buffer file (provenance back-reference)"
+    about = "list wiki ATOMS harvested FROM a given Claude-memory buffer file (provenance back-reference)"
 )]
 struct FindClaudeMemRefArgs {
     /// The source Claude-memory `.md` buffer file (a harness MEMORY.md-system note) whose derived
-    /// wiki atoms to list. Matched by stored scope-relative path, with a basename fallback.
+    /// wiki atoms to list. Matched by the atom's stored scope-relative path, with a basename fallback.
     source: String,
     /// Wiki dir(s) / file(s) to search (default: current dir).
     paths: Vec<PathBuf>,
@@ -862,30 +1038,9 @@ struct FindClaudeMemRefArgs {
     hidden: bool,
 }
 
-/// Parse a `claude_mem_refs` frontmatter value — the lenient `parse_frontmatter` capture of a
-/// FLOW-style list whose items are `<rel-path>@<sha256>` (the `@` separates the source buffer file's
-/// path from the sha256 of its content at harvest time; the hash is optional → empty string). Strips
-/// the surrounding `[`/`]`, splits on commas, and de-quotes each item. Returns `(path, hash)` pairs.
-/// Buffer-note slugs never contain `@`, so the split is unambiguous.
-fn parse_claude_mem_refs(raw: &str) -> Vec<(String, String)> {
-    let inner = raw.trim().trim_start_matches('[').trim_end_matches(']');
-    let mut out = Vec::new();
-    for item in inner.split(',') {
-        let it = item.trim().trim_matches('"').trim_matches('\'').trim();
-        if it.is_empty() {
-            continue;
-        }
-        match it.split_once('@') {
-            Some((path, hash)) => out.push((path.trim().to_string(), hash.trim().to_string())),
-            None => out.push((it.to_string(), String::new())),
-        }
-    }
-    out
-}
-
-/// True iff a stored `claude_mem_refs` path-entry refers to the queried source file. Match is exact
-/// on the stored string, with a basename fallback (a top-level buffer note's scope-relative path IS
-/// its basename, so `feedback_x.md` matches a query of `/abs/path/feedback_x.md` or `feedback_x.md`).
+/// True iff a stored `claude_mem_ref` block-prop refers to the queried source file. Match is exact on
+/// the stored string, with a basename fallback (a top-level buffer note's scope-relative path IS its
+/// basename, so `feedback_x.md` matches a query of `/abs/path/feedback_x.md` or `feedback_x.md`).
 fn claude_mem_ref_matches(stored_path: &str, query: &str) -> bool {
     if stored_path == query.trim() {
         return true;
@@ -895,22 +1050,21 @@ fn claude_mem_ref_matches(stored_path: &str, query: &str) -> bool {
     qbase.is_some() && qbase == sbase
 }
 
-/// The matcher behind `find-claude-mem-ref`: every wiki atom whose `claude_mem_refs` references
-/// `source`, returned as `(page-path, stored-source-hash)` pairs, sorted + deduped. Pure data (no
-/// printing) so it is unit-testable. Markdown is UNTRUSTED data, parsed never executed.
-fn claude_mem_ref_hits(source: &str, paths: &[PathBuf], hidden: bool) -> Vec<(PathBuf, String)> {
-    let mut hits: Vec<(PathBuf, String)> = Vec::new();
+/// The matcher behind `find-claude-mem-ref`: every ATOM whose `claude_mem_ref` block-property
+/// references `source`, returned as `(page-path, atom-id, stored-source-hash)`, sorted + deduped.
+/// LIVE-scan via `resolve_atoms`; once atoms are in the SQLite index this is also queryable there.
+fn claude_mem_ref_hits(source: &str, paths: &[PathBuf], hidden: bool) -> Vec<(PathBuf, String, String)> {
+    let mut hits = Vec::new();
     for p in collect_md(paths, hidden) {
-        let Some(text) = md::read_text(&p) else {
-            continue;
-        };
-        let fm = md::parse_frontmatter(&text);
-        let Some(raw) = fm.get("claude_mem_refs") else {
-            continue;
-        };
-        for (ref_path, ref_hash) in parse_claude_mem_refs(raw) {
-            if claude_mem_ref_matches(&ref_path, source) {
-                hits.push((p.clone(), ref_hash));
+        for atom in resolve_atoms(&p) {
+            if let Some(refp) = &atom.claude_mem_ref {
+                if claude_mem_ref_matches(refp, source) {
+                    hits.push((
+                        p.clone(),
+                        atom.id,
+                        atom.claude_mem_hash.unwrap_or_default(),
+                    ));
+                }
             }
         }
     }
@@ -920,21 +1074,20 @@ fn claude_mem_ref_hits(source: &str, paths: &[PathBuf], hidden: bool) -> Vec<(Pa
 }
 
 /// `memgrep find-claude-mem-ref <source-mem-path> <wikidir>` — the HARVEST provenance query
-/// (TRDD-ab232dbd). The coexistence harvest mirrors a RAW Claude-memory buffer note into a SEPARATE
-/// curated wiki atom and stamps that atom's frontmatter with
-/// `claude_mem_refs: [<rel-path>@<sha256>, …]` — one entry per source buffer file the page harvested
-/// an atom from, each carrying the sha256 of the source's content AT HARVEST TIME. This command lists
-/// every wiki atom whose `claude_mem_refs` references `<source-mem-path>` (by stored path, basename
-/// fallback), printing `<wiki-page-rel-path>\t<stored-source-hash>` per match. The harvester then
-/// diffs the source file's CURRENT content-hash against the stored hashes: NO output → the memory is
-/// NEW (harvest it); a hash MISMATCH → the source CHANGED (re-harvest, update the atom); all hashes
-/// EQUAL → up-to-date (skip). Read-only.
+/// (TRDD-3b9b2040). The coexistence harvest imports each Claude-memory buffer note as a curated wiki
+/// ATOM and stamps that ATOM's block-properties with `claude_mem_ref: <rel-path>` +
+/// `claude_mem_hash: <sha256-16 of the source at harvest time>`. This command lists every atom whose
+/// `claude_mem_ref` references `<source-mem-path>` (by stored path, basename fallback), printing
+/// `<wiki-page-rel-path>#<atom-id>\t<stored-source-hash>` per match. The harvester then diffs the
+/// source file's CURRENT content-hash against the stored hashes: NO output → the memory is NEW
+/// (harvest it); a hash MISMATCH → the source CHANGED (re-harvest the atom); all hashes EQUAL →
+/// up-to-date (skip). Read-only; markdown is data, never executed.
 pub fn cmd_find_claude_mem_ref_cli(args: &[String]) -> Result<()> {
     let a = FindClaudeMemRefArgs::parse_from(
         std::iter::once("find-claude-mem-ref".to_string()).chain(args.iter().cloned()),
     );
-    for (path, hash) in claude_mem_ref_hits(&a.source, &a.paths, a.hidden) {
-        println!("{}\t{}", rel(&path), hash);
+    for (path, atom_id, hash) in claude_mem_ref_hits(&a.source, &a.paths, a.hidden) {
+        println!("{}#{}\t{}", rel(&path), atom_id, hash);
     }
     Ok(())
 }
@@ -1982,18 +2135,75 @@ mod tests {
     }
 
     #[test]
-    fn claude_mem_refs_parse_path_and_hash() {
-        // A flow-style `claude_mem_refs` value parses into (path, hash) pairs; the `@` splits the
-        // source path from its content-hash, a missing hash yields an empty string, quotes strip.
-        let got = parse_claude_mem_refs("[feedback_x.md@abc123, \"reference_y.md@def456\", lone.md]");
+    fn block_props_split_on_commas_first_colon_and_whitespace_arrays() {
+        // The full grammar (TRDD-3b9b2040): comma → properties; first-colon → key/value (colons in a
+        // value are kept); trimmed value → whitespace-split ARRAY. A value with no internal space is a
+        // 1-element array. A top-level comma inside a `[[wikilink]]` is depth-protected, not a split.
+        let m = parse_block_props(
+            "type: feat-req, blocked-by: #56 #123 #27, keywords: landing-page frontend next.js, see: [[A, B]], url: https://x/y",
+        );
+        assert_eq!(m.get("type").unwrap(), &vec!["feat-req".to_string()]);
         assert_eq!(
-            got,
-            vec![
-                ("feedback_x.md".to_string(), "abc123".to_string()),
-                ("reference_y.md".to_string(), "def456".to_string()),
-                ("lone.md".to_string(), String::new()),
+            m.get("blocked-by").unwrap(),
+            &vec!["#56".to_string(), "#123".to_string(), "#27".to_string()]
+        );
+        assert_eq!(
+            m.get("keywords").unwrap(),
+            &vec![
+                "landing-page".to_string(),
+                "frontend".to_string(),
+                "next.js".to_string()
             ]
         );
+        // Depth-protected comma: `[[A, B]]` stays one value (one element after whitespace-split? No —
+        // it splits on the inner space too, but it did NOT split into a separate `B]]` PROPERTY).
+        assert_eq!(m.get("see").unwrap(), &vec!["[[A,".to_string(), "B]]".to_string()]);
+        // First-colon only: the URL keeps its `:` in the value.
+        assert_eq!(m.get("url").unwrap(), &vec!["https://x/y".to_string()]);
+    }
+
+    #[test]
+    fn block_property_marker_finds_id_and_props_with_nested_brackets() {
+        // `^id [props]` is located with bracket-DEPTH tracking, so a `[[wikilink]]` inside the props
+        // can't prematurely close it. Returns (offset, id, raw-props).
+        let line = "tail content ^memory-DY12UB04 [keywords: a b, see: [[Other]]]";
+        let (off, id, props) = first_block_property_marker(line).expect("marker present");
+        assert_eq!(&line[off..off + 1], "^");
+        assert_eq!(id, "memory-DY12UB04");
+        assert_eq!(props, "keywords: a b, see: [[Other]]");
+        // A bare `^ref` with no `[...]` is NOT a block-property marker.
+        assert!(first_block_property_marker("see ^plain-ref here").is_none());
+    }
+
+    #[test]
+    fn resolve_atoms_segments_body_by_trailing_markers() {
+        // An atom is the content preceding its trailing `^id [props]` marker, back to the prior marker
+        // or a `##` heading. A multi-line atom (incl. a fenced block) is one atom; a `^x [...]`-looking
+        // line INSIDE a fence is content, not a marker.
+        let text = "\
+intro line one
+intro line two
+^a [keywords: alpha beta, type: reference]
+second atom para
+```
+^notamarker [k: v]
+```
+^b [keywords: gamma, claude_mem_ref: feedback_x.md, claude_mem_hash: deadbeef]
+## Notes and lessons learned
+[^1]: a lesson, not an atom
+";
+        let atoms = resolve_atoms_from_text(text);
+        assert_eq!(atoms.len(), 2, "two atoms, lesson excluded: {:?}", atoms.iter().map(|a| &a.id).collect::<Vec<_>>());
+        assert_eq!(atoms[0].id, "a");
+        assert_eq!(atoms[0].keywords, vec!["alpha".to_string(), "beta".to_string()]);
+        assert_eq!(atoms[0].atom_type.as_deref(), Some("reference"));
+        assert!(atoms[0].body.contains("intro line one") && atoms[0].body.contains("intro line two"));
+        assert_eq!(atoms[1].id, "b");
+        assert_eq!(atoms[1].keywords, vec!["gamma".to_string()]);
+        assert_eq!(atoms[1].claude_mem_ref.as_deref(), Some("feedback_x.md"));
+        assert_eq!(atoms[1].claude_mem_hash.as_deref(), Some("deadbeef"));
+        // The fenced `^notamarker [k: v]` is inside atom b's body, NOT a third atom.
+        assert!(atoms[1].body.contains("^notamarker"), "fenced marker stays as content: {:?}", atoms[1].body);
     }
 
     #[test]
@@ -2008,35 +2218,39 @@ mod tests {
 
     #[test]
     fn find_claude_mem_ref_lists_atoms_for_a_source_with_hashes() {
-        // The provenance query (TRDD-ab232dbd): given a source buffer file, list every wiki atom whose
-        // `claude_mem_refs` references it, with the stored source-hash for the harvester's change check.
+        // The provenance query (TRDD-3b9b2040): given a source buffer file, list every wiki ATOM whose
+        // `claude_mem_ref` block-property references it, with the stored source-hash for the harvester's
+        // change check. Output keys on (page-path, atom-id) — many atoms can share one page.
         let dir = std::env::temp_dir().join(format!("memgrep_cmref_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        // Two atoms harvested from feedback_oauth.md (one aggregating page references two sources).
+        // One page with TWO atoms, each harvested from a different source buffer note.
         std::fs::write(
             dir.join("oauth-rotation.md"),
-            "---\nname: oauth-rotation\nmetadata:\n  node_type: memory\n  tier: hub\n  claude_mem_refs: [feedback_oauth.md@hash1, reference_keychain.md@hashK]\n---\nbody\n",
+            "---\nname: oauth-rotation\nmetadata:\n  node_type: memory\n  tier: hub\n---\nThe rotator drains the live account first.\n^rotate-drain [keywords: rotator drain, claude_mem_ref: feedback_oauth.md, claude_mem_hash: hash1]\nCreds live in the keychain.\n^keychain [keywords: keychain creds, claude_mem_ref: reference_keychain.md, claude_mem_hash: hashK]\n",
         )
         .unwrap();
+        // A second page with ONE atom from the same first source.
         std::fs::write(
             dir.join("oauth-resume.md"),
-            "---\nname: oauth-resume\nmetadata:\n  node_type: memory\n  tier: component\n  claude_mem_refs: [feedback_oauth.md@hash1]\n---\nbody\n",
+            "---\nname: oauth-resume\nmetadata:\n  node_type: memory\n  tier: component\n---\nResume picks up after a 429.\n^resume-429 [keywords: resume rate-limit, claude_mem_ref: feedback_oauth.md, claude_mem_hash: hash1]\n",
         )
         .unwrap();
-        // A page derived from a DIFFERENT source — must NOT match.
+        // An atom derived from a DIFFERENT source — must NOT match.
         std::fs::write(
             dir.join("unrelated.md"),
-            "---\nname: unrelated\nmetadata:\n  claude_mem_refs: [feedback_other.md@hashO]\n---\nbody\n",
+            "---\nname: unrelated\nmetadata:\n  node_type: memory\n---\nOther.\n^other [keywords: x, claude_mem_ref: feedback_other.md, claude_mem_hash: hashO]\n",
         )
         .unwrap();
         let hits = claude_mem_ref_hits("feedback_oauth.md", &[dir.clone()], false);
         let names: Vec<String> = hits
             .iter()
-            .map(|(p, h)| format!("{}={}", p.file_stem().unwrap().to_str().unwrap(), h))
+            .map(|(p, id, h)| format!("{}#{}={}", p.file_stem().unwrap().to_str().unwrap(), id, h))
             .collect();
-        assert!(names.contains(&"oauth-rotation=hash1".to_string()), "{names:?}");
-        assert!(names.contains(&"oauth-resume=hash1".to_string()), "{names:?}");
+        assert!(names.contains(&"oauth-rotation#rotate-drain=hash1".to_string()), "{names:?}");
+        assert!(names.contains(&"oauth-resume#resume-429=hash1".to_string()), "{names:?}");
+        // The keychain atom is on the matched page but references a DIFFERENT source — excluded.
+        assert!(!names.iter().any(|n| n.contains("#keychain")), "{names:?}");
         assert!(!names.iter().any(|n| n.starts_with("unrelated")), "{names:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }

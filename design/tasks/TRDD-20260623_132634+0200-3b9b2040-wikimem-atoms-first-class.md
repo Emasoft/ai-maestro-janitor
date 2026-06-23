@@ -1,9 +1,9 @@
 ---
 trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
-column: design
+column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T13:41:54+0200
+updated: 2026-06-23T13:55:34+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -106,10 +106,10 @@ Base spec: https://github.com/Querulantenkind/obsidian-block-properties-plugin
 - ✅ KEEP (valid, tested, survives): `scripts/lib/memory_scopes.py` `resolve_wiki_dir()` +
   `is_curated_wiki_page()` + 4 tests (the buffer/`wiki/` separation + raw-vs-curated discriminator
   are model-agnostic). Currently UNCOMMITTED in the working tree.
-- ⚠ REWORK: `memgrep find-claude-mem-ref` (COMMITTED 4ebd891, installed) reads PAGE FRONTMATTER
-  `claude_mem_refs: [path@hash]` — WRONG model. Must be reworked to scan per-ATOM block-property
-  markers `^id [… claude_mem_ref: … claude_mem_hash: …]`. Harmless until then (new subcommand,
-  nobody calls it; full memgrep suite green).
+- ✅ REWORKED (Phase a): `memgrep find-claude-mem-ref` no longer reads PAGE FRONTMATTER
+  `claude_mem_refs:` — it now LIVE-scans per-ATOM block-property markers `^id [… claude_mem_ref: …
+  claude_mem_hash: …]` via `resolve_atoms` and prints `path#atom-id\thash`. Phase (d) will swap the
+  live scan for the indexed `atoms.claude_mem_ref` column once Phase (b) lands the index table.
 - ⚠ REWORK / SUPERSEDED: `skills/janitor-memory-harvest/SKILL.md` (UNCOMMITTED) was rewritten for
   the wrong model (frontmatter provenance, file-per-note). Redo for atoms-into-topic-pages.
 - ✅ ab232dbd valid parts carry forward: buffer⇄wiki coexistence, the `memory/wiki/` namespace,
@@ -131,12 +131,29 @@ Base spec: https://github.com/Querulantenkind/obsidian-block-properties-plugin
 - Q6 **Backward compat** — `[^N]` lessons already ARE atoms-with-metadata; unify them with the new
   atom model or keep both element kinds?
 
-### NEXT ACTION
-1. USER reviews this design + answers Q1–Q6 (or says "your call" per question).
-2. Split into build NPTs (likely: (a) block-properties parser + tests; (b) indexer atom rows;
-   (c) recall atom output; (d) harvest-into-atoms rework + find-claude-mem-ref rework;
-   (e) prose→atom migration pass). Each its own TRDD child, TDD, sequential commits.
-3. ab232dbd resumes on top once (a)–(d) land.
+### DESIGN DECISIONS — RESOLVED on USER "complete everything" delegation (2026-06-23)
+- **Q1/Q2 — atom = content + a TRAILING `^memory-<uid> [props]` marker (Obsidian).** The marker
+  CLOSES the atom; the atom body = the contiguous content preceding it, back to the prior marker /
+  `##` heading. A multi-paragraph/table/code atom is one span ended by one marker.
+- **Q3 — `keywords:` is the only REQUIRED prop** (the recall surface). `ocd`/`lmd`/`type` optional
+  (fall back to the page's); `claude_mem_ref`/`claude_mem_hash` only on harvested atoms.
+- **Q4 — recall returns ATOMS (ranked by keyword surface) + pages + lessons, interleaved by score.**
+  An atom result prints `path#atom-id — <keywords>`; the page stays recallable as its lead.
+- **Q5 — migration = a new autonomous `[janitor-memory-atomize]` pass** (one page/run, txn-guarded,
+  verify no fact lost) AND a one-time corpus atomization (agents, batched).
+- **Q6 — KEEP `notes` (lessons) + `atoms` as SEPARATE index tables** (don't merge a proven path;
+  unify later). Both are first-class sub-page recall elements.
+
+### NEXT ACTION — BUILD (USER authorized full implementation + migration 2026-06-23)
+Build order (TDD, sequential commits): **(a)** ✅ DONE — block-properties parser w/ array-values
+(`parse_block_props`, `first_block_property_marker`) + `resolve_atoms`/`resolve_atoms_from_text` +
+`struct Atom` in `memory.rs`; `find-claude-mem-ref` reworked off page-frontmatter onto a LIVE atom-scan
+of `claude_mem_ref` block-props (output `path#atom-id\thash`); 4 new tests, full suite 86 green. NEXT →
+**(b)** `atoms`/`atoms_fts` schema in `index.rs` + `insert_file` atoms-loop + `delete_rows_for_path` +
+schema bump + `--full` reindex → **(c)** recall atom candidates (keyword-surface ranked, interleaved) →
+**(d)** switch `find-claude-mem-ref` from the live scan to the indexed `atoms.claude_mem_ref` column →
+**(e)** harvest-into-atoms skill + update all memory skills/scripts for atom grepping → **(f)**
+`[janitor-memory-atomize]` migration pass + atomize the corpus. ab232dbd unblocks at (e).
 
 ## Implementation blueprint — mirror the lesson-indexing precedent (VERIFIED 2026-06-23)
 
