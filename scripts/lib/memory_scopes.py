@@ -33,6 +33,20 @@ from pathlib import Path
 # rather than read from ${CLAUDE_PLUGIN_DATA}.
 _JANITOR_DATA_DIR_NAME = "ai-maestro-janitor-ai-maestro-plugins"
 
+# The CURATED-wiki sub-namespace within every scope. The coexistence model
+# (TRDD-ab232dbd, USER decision 2026-06-23): a scope's root ``memory/`` holds the
+# harness BUFFER (MEMORY.md + raw notes, harness-owned); ``memory/wiki/`` holds the
+# janitor's CURATED wiki pages. Harvest mirrors raw buffer notes into ``wiki/`` as
+# SEPARATE curated copies — it never modifies the buffer. memgrep recall recurses
+# the scope root, so it covers both halves with no change.
+WIKI_SUBDIR = "wiki"
+
+# Frontmatter keys the wikimem skills write but the harness ``# Memory`` directive
+# never does (it writes only ``name`` / ``description`` / ``metadata.type``).
+# Presence of ANY one marks a page CURATED; absence marks a RAW buffer note. The
+# discriminator (is_curated_wiki_page) is by CONTENT SHAPE, not path.
+_WIKIMEM_ONLY_FM_KEYS = ("node_type", "tier")
+
 
 def project_slug(project_dir: str) -> str:
     """Harness per-project slug: the absolute path with every separator dashed.
@@ -94,6 +108,52 @@ def resolve_user_dir() -> Path:
     """
     home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
     return home / ".claude" / "plugins" / "data" / _JANITOR_DATA_DIR_NAME / "memory"
+
+
+def resolve_wiki_dir(scope_root: Path) -> Path:
+    """The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wiki``.
+
+    The coexistence model (TRDD-ab232dbd): the harness BUFFER (MEMORY.md + raw
+    notes) lives at the scope root; the janitor's CURATED wiki lives here. Harvest
+    mirrors raw buffer notes into this dir as separate curated pages and NEVER
+    modifies the buffer. memgrep recall recurses the scope root, so it naturally
+    covers both. Not created — the caller (bootstrap / harvest) mkdirs it.
+    """
+    return scope_root / WIKI_SUBDIR
+
+
+def is_curated_wiki_page(text: str) -> bool:
+    """True iff ``text`` is a CURATED wikimem page; False iff a RAW harness buffer note.
+
+    The coexistence discriminator (TRDD-ab232dbd): harvest mirrors only RAW buffer
+    notes into the wiki and must SKIP pages that are already curated. The harness
+    ``# Memory`` directive writes a MINIMAL frontmatter (``name`` / ``description`` /
+    ``metadata.type``); the wikimem skills add keys the harness never writes —
+    ``node_type: memory`` and ``tier`` (see ``_WIKIMEM_ONLY_FM_KEYS``). So the test
+    is by CONTENT SHAPE — the presence of a wikimem-only key anywhere in the leading
+    ``---`` frontmatter block — not by path. Cheap line scan; no YAML parse, no deps.
+    A file with no well-formed frontmatter block is treated as RAW (not curated).
+    """
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return False
+    closed = False
+    fm_lines: list[str] = []
+    for ln in lines[1:]:
+        if ln.strip() == "---":
+            closed = True
+            break
+        fm_lines.append(ln)
+    if not closed:
+        # No closing fence → malformed / absent frontmatter → treat as RAW.
+        return False
+    for ln in fm_lines:
+        # key = text before the first ':' (after stripping indent + any '-' list
+        # marker), so nested ``  node_type: memory`` and top-level ``tier:`` match.
+        key = ln.split(":", 1)[0].strip().lstrip("-").strip()
+        if key in _WIKIMEM_ONLY_FM_KEYS:
+            return True
+    return False
 
 
 def resolve_scope_dirs() -> list[tuple[str, Path]]:

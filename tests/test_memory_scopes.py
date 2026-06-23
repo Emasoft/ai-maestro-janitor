@@ -135,3 +135,36 @@ def test_resolve_scope_dirs_includes_project_in_git_repo(tmp_path, monkeypatch):
 
     out = msc.resolve_scope_dirs()
     assert [label for label, _ in out] == ["PROJECT"]
+
+
+# ---- coexistence primitives (TRDD-ab232dbd) --------------------------------
+
+def test_resolve_wiki_dir_is_the_wiki_subnamespace(tmp_path):
+    """The curated wiki lives at ``<scope_root>/wiki`` — the buffer at the root, the
+    wiki one level down, so memgrep recall (which recurses the root) covers both."""
+    assert msc.resolve_wiki_dir(tmp_path / "memory") == tmp_path / "memory" / "wiki"
+    assert msc.resolve_wiki_dir(tmp_path / "memory").name == msc.WIKI_SUBDIR
+
+
+def test_is_curated_wiki_page_true_for_full_frontmatter():
+    """A wikimem page (``node_type: memory`` and/or ``tier:``) reads as CURATED —
+    harvest SKIPS it. Both nested-under-metadata and top-level keys are detected."""
+    nested = "---\nname: x\nmetadata:\n  node_type: memory\n  tier: hub\n---\nbody\n"
+    top_tier = "---\nname: x\ndescription: y\ntier: component\n---\nbody\n"
+    assert msc.is_curated_wiki_page(nested)
+    assert msc.is_curated_wiki_page(top_tier)
+
+
+def test_is_curated_wiki_page_false_for_raw_harness_note():
+    """A raw harness BUFFER note (minimal frontmatter: name/description/metadata.type,
+    NO node_type/tier) reads as RAW — harvest MIRRORS it. The harness writes exactly
+    this shape, so it must never be mistaken for an already-curated page."""
+    raw = '---\nname: foo\ndescription: "a fact"\nmetadata:\n  type: feedback\n---\nbody\n'
+    assert not msc.is_curated_wiki_page(raw)
+
+
+def test_is_curated_wiki_page_false_without_frontmatter():
+    """No frontmatter block at all (or an unclosed fence) → RAW (a bare note is a
+    buffer artifact, not a curated wiki page)."""
+    assert not msc.is_curated_wiki_page("just plain text, no frontmatter\n")
+    assert not msc.is_curated_wiki_page("---\nname: x\ntier: hub\n(no closing fence)\n")
