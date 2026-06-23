@@ -1680,6 +1680,29 @@ Examples:
         if len(release_notes.splitlines()) > 10:
             print(f"    ... ({len(release_notes.splitlines()) - 10} more lines)")
 
+    # ── Step 10.5: Regenerate the self-integrity manifest ──
+    # The `janitor-self-integrity` heartbeat detector compares the INSTALLED
+    # plugin's prompt-surface files (README/CLAUDE/skills/commands/rules)
+    # against `.integrity/manifest-sha256.json`. That baseline must match the
+    # EXACT tree that ships, so we regenerate it HERE — after the bump (Step 9)
+    # and changelog (Step 10), neither of which touches a globbed file, and
+    # before the release commit (Step 11) stages it. Placed BEFORE the dry-run
+    # return so `--dry-run` exercises the generator end-to-end (in --dry-run it
+    # computes + reports the count but writes nothing, mutating the tree exactly
+    # zero — matching the dry-run "mutate NOTHING" contract). Fail-fast: run()
+    # aborts the publish if the generator errors, because shipping persistence
+    # without a verifiable self-integrity baseline is the exact gap the manifest
+    # exists to close.
+    print(f"\n{BLUE}=== Step 10.5: Regenerate self-integrity manifest ==={NC}")
+    gen_cmd = [
+        sys.executable,
+        str(plugin_root / "scripts" / "generate_integrity_manifest.py"),
+        "--root", str(plugin_root),
+    ]
+    if args.dry_run:
+        gen_cmd.append("--dry-run")
+    run(gen_cmd, cwd=git_root)
+
     if args.dry_run:
         print(f"\n{GREEN}ok Dry run complete -- no changes made.{NC}")
         return 0
@@ -1702,6 +1725,12 @@ Examples:
         "CHANGELOG.md",
         "cliff.toml",
         ".gitignore",
+        # The self-integrity baseline regenerated in Step 10.5 — it MUST ride
+        # in the same release commit so the shipped tag's tree carries the
+        # manifest that matches its own files (the cache the detector verifies
+        # is a checkout of this tag). On the first release that introduces it
+        # the file is newly created; on later releases it is overwritten.
+        ".integrity/manifest-sha256.json",
     ):
         if (plugin_root / name).exists():
             staged.append(name)
