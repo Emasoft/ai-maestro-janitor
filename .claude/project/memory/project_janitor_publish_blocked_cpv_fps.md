@@ -2,7 +2,7 @@
 name: project_janitor_publish_blocked_cpv_fps
 description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked"
 ocd: 2026-06-11
-lmd: 2026-06-13
+lmd: 2026-06-23
 metadata:
   node_type: memory
   type: project
@@ -46,9 +46,39 @@ ONLY validation (CPV plugin via uvx) — never add local validator copies. See a
 `[[project_rotator_let_429_happen_version_skew]]` (the rotator deadlock that this
 publish-block kept alive — a fix doesn't run until it's published).
 
+**2026-06-23 — a NEW block, SAME root policy (the immortality batch):** v0.16.0's
+unpublished batch fails `--strict` again: 4 CRITICAL `skillaudit:persistence` on
+the immortality OS-keepalive (`scripts/daemon-launcher.py`,
+`scripts/lib/launchd_keepalive.py`) + 2 self-inflicted injection CRITICALs. The
+self-inflicted ones came from a **re-grown exempt-list** — a
+`_intentional_validator_false_positives` array had been re-added to plugin.json
+(against the dropped-fleet-wide policy above); CPV does NOT honor it for
+`skillaudit` security findings anyway, and its unicode entries TRIPPED the
+injection scanner (CPV read the allowlist strings as suspicious tool output).
+Pruned those entries (30698b4). **Per the never-exempt policy the persistence
+CRITICALs cannot be allowlisted** — they must be devitalized or removed; but the
+launchd keepalive is LOAD-BEARING (CPV's own `plugin-devitalizer` refuses to
+neutralize a genuine persistence feature), so the ONLY policy-consistent path is
+to SEPARATE the immortality code into its own reviewed release (ship the memory
+work alone) — NOT to wait for a CPV exempt mechanism (issue #40), which would
+contradict this page's policy. Decision surfaced to USER; see TRDD-fe45babc
+STATE §1.[^2]
+
 ## Notes and lessons learned
 [^1]: [ocd:2026-06-11 lmd:2026-06-12] SUPERSEDED original note: "the publish is
   correctly BLOCKED until CPV #75 lands" — true 2026-06-11 morning; CPV's
   scanner-aware fixes + the session's devitalize/relocate batch cleared the gate
   the same evening. Kept as history: the 10-MAJOR-FP era is over; do not carry
   the "blocked" claim forward.
+[^2]: [ocd:2026-06-23 lmd:2026-06-23] A later session (the immortality work)
+  RE-ADDED a `_intentional_validator_false_positives` exempt-list to plugin.json,
+  NOT recalling the "exempt-lists dropped fleet-wide as exploitable" policy on
+  THIS page — it cost a publish cycle. The array did NOT suppress the security
+  findings (CPV ignores it for `skillaudit`), AND its unicode entries created NEW
+  injection CRITICALs (CPV reads the allowlist strings as suspicious tool output).
+  WHY it recurred: the immortality session never RECALLED this page before adding a
+  CPV suppression. Lesson: RECALL this page before any CPV-gate workaround — the
+  janitor's policy is devitalize-OR-remove-OR-separate, NEVER exempt. An
+  un-devitalizable load-bearing feature (e.g. launchd persistence) that trips the
+  gate must be SEPARATED into its own release, not exempted and not "waited out"
+  via a CPV exempt mechanism (#40).
