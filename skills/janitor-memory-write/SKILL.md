@@ -113,25 +113,31 @@ Include the **typed edge section for the page's tier** AND the standing
 a page that omits its edges or the lessons section).
 
 **Make each durable body fact an ATOM that owns its notes.** When you write a fact
-into the body, append an Obsidian block-property marker at the END of that fact's
-block so the fact is individually recallable, and attach the fact's **own** history +
-relations as INLINE references — its `[^N]` notes/lessons (defined in the page's
-bottom `## Notes and lessons learned` pool) and its `[[also-see]]` links. memgrep
-returns the atom as its FULL record (`path#atom-id — <keywords>`, then the content,
-then its `[^N]` lessons, then `also see: [[…]]`), not just a slice of the page:
+into the body, open it with an Obsidian block-property marker LEADING that fact's
+block (the marker line above, the fact's content below) so the fact is individually
+recallable, and attach the fact's **own** history + relations as INLINE `[^N]` footnote
+references — defined in the page's bottom pool under section headings (a note under
+`# Notes`, a lesson under `# Lessons Learned`, a see-also under `# See also` whose def
+links out to a related memory). memgrep returns the atom as its FULL record
+(`path#atom-id — <keywords>`, then the content, then its `[^N]` footnotes grouped as
+`notes:` / `lessons learned:` / `see also:`), not just a slice of the page:
 
 ```markdown
-The widget retries 3× then fails.[^1] See [[backoff-policy]].
 ^widget-retry [keywords: <terms a future search will use>, type: <type>, ocd: <today>, lmd: <today>]
+The widget retries 3× then fails.[^1][^2]
 
-## Notes and lessons learned
+## Lessons Learned
 [^1]: [ocd:<old> lmd:<today>] earlier this said 5×; the cap is 3 — <concise WHY it changed>.
+
+## See also
+[^2]: [[backoff-policy]]
 ```
 
 `keywords:` is the only REQUIRED prop — it is the atom's recall surface (the
 question words, NOT the answer's jargon); `ocd`/`lmd`/`type` are optional (an atom
-without them inherits the page's). notes/lessons/"also see" are **per-ATOM** (tied to
-it by the inline `[^N]`/`[[link]]` it cites), NOT page-wide. A free-prose page (no
+without them inherits the page's). notes/lessons/see-also are **per-ATOM** (tied to
+it by the inline `[^N]` footnotes it cites — a see-also is a footnote defined under
+`# See also`), NOT page-wide. A free-prose page (no
 markers) stays valid — its facts are recalled at page granularity — but NEW facts
 SHOULD be atoms. Full grammar (comma→property / first-colon→key-value /
 whitespace→value-array): the model's [Atoms](references/wikimem-model.md) section.

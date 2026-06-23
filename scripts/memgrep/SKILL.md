@@ -36,41 +36,47 @@ Render is token-economical: an inline footnote ref shows as a bare `[9]`; after 
 
 ### Atoms — per-fact recall (block-properties)
 
-A page BODY is a sequence of **atoms** — the body counterpart of `[^N]` lessons. An atom is the
-content preceding a trailing **Obsidian block-property marker** `^<id> [key: value, key2: a b c]`
+A page BODY is a sequence of **atoms** — the body counterpart of `[^N]` lessons. An atom is OPENED by a
+leading **Obsidian block-property marker** `^<id> [key: value, key2: a b c]`
 (the [obsidian-block-properties-plugin](https://github.com/Querulantenkind/obsidian-block-properties-plugin)
-syntax). Grammar: **comma → properties** (a `[[wikilink]]` is depth-protected), **first colon →
-key/value** (colons in a value are kept), **whitespace → a VALUE ARRAY** (the AI-Maestro extension —
-`keywords: a b c` is three values). An atom may span multiple paragraphs / tables / code blocks; the
-marker closes it.
+syntax): the marker line sits ABOVE the fact, and the content BELOW it — until the next marker or a
+`#`-heading — is the atom's body. Grammar: **comma → properties** (a `[[wikilink]]` is depth-protected),
+**first colon → key/value** (colons in a value are kept), **whitespace → a VALUE ARRAY** (the AI-Maestro
+extension — `keywords: a b c` is three values). An atom's body may span multiple paragraphs / tables /
+code blocks until the next marker or heading.
 
 `keywords:` is the atom's **recall surface** — the array of search terms that makes a single fact
-findable on its own. **An atom owns its notes/lessons/"also see"** — tied to it by INLINE references:
-the `[^N]` footnotes its body cites (defined in the page's bottom `## Notes and lessons learned` pool,
-Wikipedia-style) are its notes + lessons; the `[[wikilinks]]` in its body are its "also see". `recall`
-ranks atoms by their keyword surface, interleaves them with page results, and returns each atom as its
-**FULL aggregated record**:
+findable on its own. **An atom owns its notes/lessons/see-also** — tied to it by the INLINE `[^N]`
+footnotes its body cites. Those footnote DEFINITIONS are pooled at the page bottom under section
+headings, and `recall` GROUPS them by which section defines each: a footnote defined under
+`# Notes` prints in a `notes:` group, one under `# Lessons Learned` in a `lessons learned:` group,
+and one under `# See also` in a `see also:` group (its def text links out to a related memory/topic).
+Only non-empty groups print. `recall` ranks atoms by their keyword surface, interleaves them with page
+results, and returns each atom as its **FULL aggregated record**:
 
 ```text
 path#atom-id — <keywords>          # locator + the atom's keyword/metadata surface
 <the atom's main content>          # multi-paragraph / tables / code / math / links
-[N] - <the atom's lesson(s)>       # the [^N] footnotes its body references, resolved
-also see: [[related-memory]], …    # the [[wikilinks]] in its body
+notes: <the [^N] # Notes footnotes its body references, resolved>
+lessons learned: <the [^N] # Lessons Learned footnotes, resolved>
+see also: <the [^N] # See also footnotes — each links out to a related memory>
 ```
 
-(`--no-notes` keeps the body, drops the lessons + see-also.) The harvest stamps two more block-props as
+(`--no-notes` keeps the body, drops the grouped footnotes.) The harvest stamps two more block-props as
 provenance — `claude_mem_ref: <buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — and
 `find-claude-mem-ref` lists the atoms that reference a given buffer file (with their stored hashes) so a
 re-harvest touches only NEW or CHANGED memories. Authoring a fact as an atom (with its own history +
 relations as inline references):
 
 ```markdown
-The rotator drains the live account first when near a limit, then rotates to a safe alternate.[^1]
-See [[token-rotation]].
 ^rotate-drain [keywords: rotator drain rate-limit oauth, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
+The rotator drains the live account first when near a limit, then rotates to a safe alternate.[^1][^2]
 
-## Notes and lessons learned
+## Lessons Learned
 [^1]: [ocd:2026-06-22 lmd:2026-06-23] earlier this drained the alternate first; reversed — the live account hits the cap sooner.
+
+## See also
+[^2]: [[token-rotation]]
 ```
 
 ### Examples
