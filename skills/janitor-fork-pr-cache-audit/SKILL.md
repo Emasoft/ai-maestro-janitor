@@ -88,7 +88,7 @@ User: TanStack-style cache poisoning scan
 
 ### Flag-for-human procedure
 
-Write a `## Findings requiring human review` section to the audit report with: file:line, detector ID, reason auto-fix was skipped, and the surgical recipe-id from `references/cache-fencing-recipes.md` the human should apply.
+Write a `## Findings requiring human review` section to the audit report with: file:line, detector ID, reason auto-fix was skipped, and the surgical recipe-id from [cache-fencing-recipes](references/cache-fencing-recipes.md) the human should apply.
 
 Never suppress a finding to pass a gate. Never force-push.
 
