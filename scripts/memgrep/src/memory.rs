@@ -961,11 +961,13 @@ fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
 }
 
 /// Find the FIRST Obsidian block-property marker `^<block-id> [<props>]` on a line, returning
-/// `(byte-offset-of-^, block_id, raw_props)`. The `[...]` is scanned with bracket-DEPTH tracking so a
-/// `[[wikilink]]` / `^ref` value inside the props cannot prematurely close it. Block-id charset is
-/// `[A-Za-z0-9_-]`. None when the line carries no marker. All slice boundaries are ASCII bytes (`^`,
-/// id chars, `[`, `]`), so UTF-8 content between them is never split on a non-boundary.
-fn first_block_property_marker(line: &str) -> Option<(usize, String, String)> {
+/// `(byte-offset-of-^, byte-offset-one-past-closing-], block_id, raw_props)`. The `end_exclusive` is the
+/// index ONE PAST the `]` that closes the props, so `line[end_exclusive..]` is whatever trails the marker
+/// on the same line (the start of a LEADING atom's body). The `[...]` is scanned with bracket-DEPTH
+/// tracking so a `[[wikilink]]` / `^ref` value inside the props cannot prematurely close it. Block-id
+/// charset is `[A-Za-z0-9_-]`. None when the line carries no marker. All slice boundaries are ASCII bytes
+/// (`^`, id chars, `[`, `]`), so UTF-8 content between/after them is never split on a non-boundary.
+fn first_block_property_marker(line: &str) -> Option<(usize, usize, String, String)> {
     let b = line.as_bytes();
     let mut i = 0usize;
     while i < b.len() {
@@ -989,8 +991,11 @@ fn first_block_property_marker(line: &str) -> Option<(usize, String, String)> {
                             b']' => {
                                 depth -= 1;
                                 if depth == 0 {
+                                    // `m` is the closing `]`; `m + 1` is one-past it (the body start
+                                    // for a LEADING atom). Both are ASCII byte boundaries.
                                     return Some((
                                         i,
+                                        m + 1,
                                         line[id_start..j].to_string(),
                                         line[k + 1..m].to_string(),
                                     ));
@@ -1009,8 +1014,9 @@ fn first_block_property_marker(line: &str) -> Option<(usize, String, String)> {
 }
 
 /// One memory ATOM parsed from a page body (TRDD-3b9b2040) — the first-class, individually-recallable
-/// body element, the counterpart of a `[^N]` lesson. Delimited by its trailing `^id [block-props]`
-/// marker; an atom may span multiple paragraphs / tables / code blocks.
+/// body element, the counterpart of a `[^N]` lesson. A LEADING `^id [block-props]` marker line OPENS the
+/// atom; the content BELOW it — until the next marker, the next `#`-heading, or EOF — is its body. An
+/// atom may span multiple paragraphs / tables / code blocks.
 pub struct Atom {
     pub id: String,
     /// The recall surface — the `keywords:` block-prop ARRAY (the terms a future search will use).
@@ -1020,7 +1026,7 @@ pub struct Atom {
     pub lmd: Option<String>,
     pub claude_mem_ref: Option<String>,
     pub claude_mem_hash: Option<String>,
-    /// The atom's content (everything since the prior marker / heading, up to its marker).
+    /// The atom's content (everything BELOW its opening marker, up to the next marker / heading / EOF).
     pub body: String,
 }
 
@@ -1029,10 +1035,12 @@ fn first_val(m: &BTreeMap<String, Vec<String>>, key: &str) -> Option<String> {
     m.get(key).and_then(|v| v.first()).cloned()
 }
 
-/// Parse a page's body into ATOMS (TRDD-3b9b2040). An atom is the contiguous body content preceding a
-/// trailing `^id [props]` marker, back to the prior marker or a `##` heading (a structural boundary).
-/// Fenced code is tracked so a `^x [...]`-looking line INSIDE a code block is content, not a marker.
-/// `[^N]` lessons use their own `[^N]:` syntax (not `^id [...]`) so they never collide.
+/// Parse a page's body into ATOMS (TRDD-3b9b2040). A LEADING `^id [props]` marker line OPENS an atom; the
+/// content BELOW it — until the next marker, the next `#`-heading, or EOF — is that atom's body. Content
+/// BEFORE the first marker, or after a heading with no new marker, belongs to NO atom (ignored). Fenced
+/// code is tracked so a `^x [...]`-looking line INSIDE a code block is body content, not a marker. `[^N]`
+/// lessons use their own `[^N]:` syntax (not `^id [...]`) and live under bottom headings, so they are
+/// never atoms.
 pub fn resolve_atoms(path: &Path) -> Vec<Atom> {
     let Some(text) = md::read_text(path) else {
         return Vec::new();
@@ -1040,15 +1048,33 @@ pub fn resolve_atoms(path: &Path) -> Vec<Atom> {
     resolve_atoms_from_text(&text)
 }
 
+/// Build an `Atom` from an open marker's id + parsed block-props + the accumulated body lines. The body
+/// is the joined-then-trimmed `acc`; the single-valued keys come via `first_val`, keywords from the
+/// `keywords:` array. Shared by every flush site in `resolve_atoms_from_text` so the Atom shape is
+/// constructed in exactly one place.
+fn make_atom(id: String, p: BTreeMap<String, Vec<String>>, acc: &[String]) -> Atom {
+    Atom {
+        keywords: p.get("keywords").cloned().unwrap_or_default(),
+        atom_type: first_val(&p, "type"),
+        ocd: first_val(&p, "ocd"),
+        lmd: first_val(&p, "lmd"),
+        claude_mem_ref: first_val(&p, "claude_mem_ref"),
+        claude_mem_hash: first_val(&p, "claude_mem_hash"),
+        body: acc.join("\n").trim().to_string(),
+        id,
+    }
+}
+
 /// The text-level core of `resolve_atoms` (split out so it is unit-testable without a file).
 fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
     let mut atoms = Vec::new();
+    // The currently-OPEN atom (its id + parsed props) and the body lines accumulated since its marker.
+    // `None` = no atom open → non-marker lines are ignored (pre-first-marker / post-heading content).
+    let mut open: Option<(String, BTreeMap<String, Vec<String>>)> = None;
     let mut acc: Vec<String> = Vec::new();
     let mut in_fence = false;
     let mut lines = text.lines();
     // Skip a leading YAML frontmatter block (`--- … ---`) — it is PAGE metadata, never atom content.
-    // Without this the first atom's body would absorb the whole frontmatter (a page that opens with
-    // prose-then-marker, no heading in between, would mis-attribute it).
     if matches!(text.lines().next(), Some(l) if l.trim_end() == "---") {
         lines.next(); // opening ---
         for l in lines.by_ref() {
@@ -1061,13 +1087,19 @@ fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
         let t = line.trim_start();
         if t.starts_with("```") || t.starts_with("~~~") {
             in_fence = !in_fence;
-            acc.push(line.to_string());
+            // A fence-toggle line is body content of the open atom; ignored when none is open.
+            if open.is_some() {
+                acc.push(line.to_string());
+            }
             continue;
         }
         if !in_fence && t.starts_with('#') {
-            acc.clear(); // ANY heading (#/##/###…) = structural boundary — the page lead/title and a
-            // section heading both reset the accumulator, so an atom body never absorbs a heading or
-            // the preamble before the first marker.
+            // ANY heading (#/##/###…) = structural boundary: CLOSE the open atom (flush it) and clear
+            // the accumulator. Content after a heading with no new marker belongs to no atom.
+            if let Some((id, p)) = open.take() {
+                atoms.push(make_atom(id, p, &acc));
+            }
+            acc.clear();
             continue;
         }
         let marker = if in_fence {
@@ -1075,26 +1107,26 @@ fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
         } else {
             first_block_property_marker(line)
         };
-        if let Some((offset, id, props)) = marker {
-            let pre = &line[..offset];
-            if !pre.trim().is_empty() {
-                acc.push(pre.to_string());
+        if let Some((_start, end, id, props)) = marker {
+            // A marker OPENS a new atom: first CLOSE the previous one (flush its accumulated body).
+            if let Some((prev_id, prev_p)) = open.take() {
+                atoms.push(make_atom(prev_id, prev_p, &acc));
             }
-            let p = parse_block_props(&props);
-            atoms.push(Atom {
-                id,
-                keywords: p.get("keywords").cloned().unwrap_or_default(),
-                atom_type: first_val(&p, "type"),
-                ocd: first_val(&p, "ocd"),
-                lmd: first_val(&p, "lmd"),
-                claude_mem_ref: first_val(&p, "claude_mem_ref"),
-                claude_mem_hash: first_val(&p, "claude_mem_hash"),
-                body: acc.join("\n").trim().to_string(),
-            });
             acc.clear();
-        } else {
+            // Any text AFTER the marker on this same line starts the new atom's body.
+            let trailing = line[end..].trim();
+            if !trailing.is_empty() {
+                acc.push(trailing.to_string());
+            }
+            open = Some((id, parse_block_props(&props)));
+        } else if open.is_some() {
+            // A non-marker, non-heading line is body — but ONLY when an atom is open (else ignored).
             acc.push(line.to_string());
         }
+    }
+    // EOF: flush the still-open atom.
+    if let Some((id, p)) = open.take() {
+        atoms.push(make_atom(id, p, &acc));
     }
     atoms
 }
@@ -2360,63 +2392,53 @@ mod tests {
     }
 
     #[test]
-    fn block_property_marker_finds_id_and_props_with_nested_brackets() {
-        // `^id [props]` is located with bracket-DEPTH tracking, so a `[[wikilink]]` inside the props
-        // can't prematurely close it. Returns (offset, id, raw-props).
-        let line = "tail content ^memory-DY12UB04 [keywords: a b, see: [[Other]]]";
-        let (off, id, props) = first_block_property_marker(line).expect("marker present");
-        assert_eq!(&line[off..off + 1], "^");
-        assert_eq!(id, "memory-DY12UB04");
-        assert_eq!(props, "keywords: a b, see: [[Other]]");
-        // A bare `^ref` with no `[...]` is NOT a block-property marker.
+    fn marker_returns_start_end_id_props() {
+        let line = "^a [keywords: x] trailing body text";
+        let (start, end, id, props) = first_block_property_marker(line).expect("marker present");
+        assert_eq!(start, 0);
+        assert_eq!(&id, "a");
+        assert_eq!(props.trim(), "keywords: x");
+        assert_eq!(&line[end..], " trailing body text");
         assert!(first_block_property_marker("see ^plain-ref here").is_none());
     }
 
     #[test]
-    fn resolve_atoms_segments_body_by_trailing_markers() {
-        // An atom is the content preceding its trailing `^id [props]` marker, back to the prior marker
-        // or a `##` heading. A multi-line atom (incl. a fenced block) is one atom; a `^x [...]`-looking
-        // line INSIDE a fence is content, not a marker.
+    fn resolve_atoms_segments_body_by_leading_markers() {
         let text = "\
-intro line one
-intro line two
+chapter intro — belongs to no atom
 ^a [keywords: alpha beta, type: reference]
-second atom para
+first atom para
 ```
 ^notamarker [k: v]
 ```
 ^b [keywords: gamma, claude_mem_ref: feedback_x.md, claude_mem_hash: deadbeef]
+second atom para
 ## Notes and lessons learned
 [^1]: a lesson, not an atom
 ";
         let atoms = resolve_atoms_from_text(text);
-        assert_eq!(atoms.len(), 2, "two atoms, lesson excluded: {:?}", atoms.iter().map(|a| &a.id).collect::<Vec<_>>());
+        assert_eq!(atoms.len(), 2, "two atoms: {:?}", atoms.iter().map(|a| &a.id).collect::<Vec<_>>());
         assert_eq!(atoms[0].id, "a");
         assert_eq!(atoms[0].keywords, vec!["alpha".to_string(), "beta".to_string()]);
         assert_eq!(atoms[0].atom_type.as_deref(), Some("reference"));
-        assert!(atoms[0].body.contains("intro line one") && atoms[0].body.contains("intro line two"));
+        assert!(atoms[0].body.contains("first atom para"));
+        assert!(!atoms[0].body.contains("chapter intro"), "pre-first-marker content excluded");
+        assert!(atoms[0].body.contains("^notamarker"), "fenced marker stays content");
         assert_eq!(atoms[1].id, "b");
         assert_eq!(atoms[1].keywords, vec!["gamma".to_string()]);
+        assert!(atoms[1].body.contains("second atom para"));
         assert_eq!(atoms[1].claude_mem_ref.as_deref(), Some("feedback_x.md"));
         assert_eq!(atoms[1].claude_mem_hash.as_deref(), Some("deadbeef"));
-        // The fenced `^notamarker [k: v]` is inside atom b's body, NOT a third atom.
-        assert!(atoms[1].body.contains("^notamarker"), "fenced marker stays as content: {:?}", atoms[1].body);
+        assert!(!atoms[1].body.contains("a lesson"), "footnote def under heading excluded");
     }
 
     #[test]
     fn resolve_atoms_excludes_frontmatter_and_headings_from_body() {
-        // An atom body is the FACT only — never the page frontmatter (leading `--- … ---`) nor a
-        // heading (the lead/title `#` and section `##` are structural boundaries that reset the body).
-        let text = "---\nname: p\ndescription: d\n---\n# Title\n\nThe fact is X.[^1] See [[other]].\n^a [keywords: kw]\n## Notes and lessons learned\n[^1]: a note\n";
+        let text = "---\nname: p\ndescription: d\n---\n# Title\n^a [keywords: kw]\nThe fact is X.[^1] See [[other]].\n## Notes and lessons learned\n[^1]: a note\n";
         let atoms = resolve_atoms_from_text(text);
-        assert_eq!(atoms.len(), 1, "exactly one atom (the [^1]: def under ## is not an atom)");
+        assert_eq!(atoms.len(), 1, "exactly one atom");
         assert_eq!(atoms[0].body, "The fact is X.[^1] See [[other]].");
-        assert!(
-            !atoms[0].body.contains("name:") && !atoms[0].body.contains("# Title"),
-            "no frontmatter/heading leaked into the body: {:?}",
-            atoms[0].body
-        );
-        // The body's inline refs/links are the atom's own notes + see-also surfaces.
+        assert!(!atoms[0].body.contains("name:") && !atoms[0].body.contains("# Title"));
         assert_eq!(atom_referenced_labels(&atoms[0].body), vec!["1".to_string()]);
         assert_eq!(atom_wikilinks(&atoms[0].body), vec!["other".to_string()]);
     }

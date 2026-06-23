@@ -1591,7 +1591,7 @@ fn walk_and_dedups_overlapping_positional_paths() {
 
 /// A page whose body carries two `^id [block-props]` atoms with UNIQUE (zqx-prefixed) keywords that
 /// appear nowhere in the page surface, plus a page-level `[^1]` lesson sentinel.
-const ATOM_CORPUS: &str = "---\nname: oauth-hub\ndescription: oauth rotation overview notes\ntags: [oauth]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\nThe rotator drains the live account first when near a limit.\n^rotate-drain [keywords: zqxdrain rotator, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nCredentials live in the macOS keychain, never a slots dir.\n^keychain [keywords: zqxkeychain creds]\n\n## Notes and lessons learned\n[^1]: page-level lesson sentinel zqxlesson.\n";
+const ATOM_CORPUS: &str = "---\nname: oauth-hub\ndescription: oauth rotation overview notes\ntags: [oauth]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nThe rotator drains the live account first when near a limit.\n^keychain [keywords: zqxkeychain creds]\nCredentials live in the macOS keychain, never a slots dir.\n\n## Notes and lessons learned\n[^1]: page-level lesson sentinel zqxlesson.\n";
 
 #[test]
 fn recall_surfaces_atom_by_unique_keyword() {
@@ -1626,7 +1626,7 @@ fn recall_atom_aggregates_its_own_notes_and_see_also() {
     let d = TempDir::new("atom-aggregate");
     d.write(
         "oauth-hub.md",
-        "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\nThe rotator drains the live (near-limit) account first.[^1] See [[token-rotation]].\n^rotate-drain [keywords: zqxdrain rotator]\n\n## Notes and lessons learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n",
+        "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator]\nThe rotator drains the live (near-limit) account first.[^1] See [[token-rotation]].\n\n## Notes and lessons learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n",
     );
     let o = run(&["recall", "zqxdrain", d.as_str()]);
     assert!(o.contains("oauth-hub.md#rotate-drain"), "locator line:\n{o}");
