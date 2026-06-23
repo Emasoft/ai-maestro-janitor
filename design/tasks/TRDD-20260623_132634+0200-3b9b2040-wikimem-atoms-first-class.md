@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T15:57:49+0200
+updated: 2026-06-23T16:07:51+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -68,20 +68,29 @@ directives. The CORRECT model — memorized at USER scope in [[wikimem-atom-bloc
   render emits non-empty labeled groups `notes:` / `lessons learned:` / `see also:`. Removed
   `atom_wikilinks` + the `[[link]]`-as-see-also path (body keeps `[[links]]` inline as page-level text;
   atom see-also is now `# See also` footnotes). New grouping test. 126 green, clippy clean.
-- **g3 ☐ TODO — shared-footnote ref-counting on atom MOVES** (Python verify layer:
-  `scripts/lib/memory_edit_verify.py` + `memory_txn`). When split/merge/harvest MOVES an atom to
-  another page, move its `[^N]` defs too, but do NOT delete a note/lesson/see-also def from the source
-  page while ANOTHER atom there still references it (ref-counting GC). Add a `verify_*` check.
-- **g4 ☐ TODO — recall presentation**: atoms already interleave with pages by score (DONE in phase c);
-  remaining is the UX/doc that recall surfaces ELEMENTS with the page as context only + discourage
-  full-page reads (largely a `janitor-memory-recall` skill + `memgrep SKILL.md` wording task).
-- **g5 ☐ TODO — atomize skill**: `skills/janitor-memory-atomize/SKILL.md` must emit LEADING atom blocks
-  + the `# Notes`/`# Lessons Learned`/`# See also` footnote-pool layout (currently describes trailing).
-- **g6 ☐ TODO — docs/skills**: `wikimem-model.md`, write/recall skills, `scripts/memgrep/SKILL.md` to
-  the leading + footnote model. USER-scope memory already updated ([[wikimem-atom-block-properties]] [^4]).
-- NEXT ACTION: g3 (the move-rule verify) is the next CODE piece; g4–g6 are doc/skill alignment. The
-  engine (g1+g2) is shippable interim. Reinstall the binary (`cargo install --path scripts/memgrep`)
-  so the live system runs the leading parser (moot today — live corpus is free-prose, no markers yet).
+- **g3 ☐ TODO (the ONLY remaining piece) — shared-footnote ref-counting on atom MOVES** (Python verify
+  layer: `scripts/lib/memory_edit_verify.py` + `memory_txn`). When split/merge/harvest MOVES an atom to
+  another page, its `[^N]` footnote defs must travel with it, but a note/lesson/see-also def must NOT be
+  deleted from the source while ANOTHER atom there still references it (ref-counting GC). The clean,
+  page-local invariant to add: **a `footnote_refs_resolve(page_text)` helper — every `[^N]` REFERENCE in
+  a result page's body resolves to a `[^N]:` DEFINITION on that SAME page** — wired into verify_split /
+  verify_merge as a "no NEW dangling footnote ref on any result page" check (scoped to NEW, so it can't
+  trip on pre-existing corpus issues). Deferred for a FRESH pass: it's subtle verify logic guarding a
+  capability that's only partially built (the split/merge skills don't yet distribute atoms+footnotes at
+  atom granularity), and a degraded-context implementation could ship a wrong gate that blocks legit
+  edits. ~40 LOC + tests once designed against the actual verify_split/merge signatures.
+- **g4 ✅ DONE (via g6)** — recall already interleaves atoms with pages by score (phase c); the
+  element-primary / page-as-context / "no need to skim the page" wording now lives in the recall skill
+  (commit f59f2ed) + the existing "navigation contract (don't over-read)" section.
+- **g5 ✅ DONE (commit 64bd48f)** — `skills/janitor-memory-atomize/SKILL.md` now emits LEADING atom
+  blocks (marker ABOVE the fact) + the footnote-section model; the data-writing skill is correct.
+- **g6 ✅ DONE (commit f59f2ed)** — `scripts/memgrep/SKILL.md`, janitor-memory-recall, janitor-memory-write,
+  and `markdown-memory-recall.md` aligned to the leading + footnote-grouped model; the page-level
+  `[[wikilink]]` link law left intact. USER-scope memory already updated ([[wikimem-atom-block-properties]] [^4]).
+- NEXT ACTION: **g3 is the sole remainder** — author it fresh against the real verify_split/merge
+  signatures (read `memory_edit_verify.py` first). g1/g2/g4/g5/g6 are DONE — the model is consistently
+  implemented + documented. The engine is shippable; consider a `publish.py` milestone once g3 lands
+  (or ship g1-g6 now and add g3 next — g3 is a verify hardening, not a correctness blocker for recall).
 
 ### WHY THIS TRDD EXISTS (the realization, USER-confirmed 2026-06-23)
 While building the MEMORY.md⇄Wikimem coexistence harvest (TRDD-ab232dbd), the USER asked:
