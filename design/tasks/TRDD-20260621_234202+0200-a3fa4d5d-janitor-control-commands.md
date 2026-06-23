@@ -3,7 +3,7 @@ trdd-id: a3fa4d5d-d300-45d1-9613-be34ec2b677e
 title: Janitor control commands (disarm/pause × local/global) + Wikimem record-recent + terminology
 column: complete
 created: 2026-06-21T23:42:02+0200
-updated: 2026-06-22T00:02:37+0200
+updated: 2026-06-23T17:18:00+0200
 current-owner: claude-janitor-dev
 parent-trdd: TRDD-324223a6
 task-type: feature
@@ -71,8 +71,8 @@ command is renamed.
    create `janitor-memory-record-recent`. REVERT the kill-switch-clear added to
    `/janitor-arm` (now `/janitor-global-arm`'s job) — local arm must NOT silently
    undo a deliberate global disarm; instead it WARNS if globally disarmed.
-4. **Phase 4 (docs, agent):** "Wikimem" (capital W) as the official name in README
-   + all docs; README commands table; CLAUDE.md skills list.
+4. **Phase 4 (docs, agent):** "Wikimem" (capital W) as the official name in README +
+   all docs; README commands table; CLAUDE.md skills list.
 5. **Phase 5:** full test run + ruff + commit (NO push).
 
 ### Load-bearing facts
