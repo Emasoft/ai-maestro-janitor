@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T18:00:00+0200
+updated: 2026-06-23T18:14:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -37,12 +37,24 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 - **Publish still BLOCKED** (unchanged) on the USER's a/b/c persistence decision
   (`reports/overnight-session/20260623_171000+0200-…md`). C1 rides the next release once
   unblocked; it CANNOT publish standalone.
-- **NEXT (autonomous):** every remaining GROUP C piece is bricking-risk/user-gated. Non-risky
-  candidates that DON'T touch the exec path: (a) refine upstream **CPV #40**
-  (disclosed-legitimate-persistence — the RIGHT unblock, option b) with a concrete proposal —
-  this is the GitHub coordination the USER asked for and the real path to unblocking; (b) the
-  editorial memory-SKILL CPV debt (MAJOR×3, non-blocking, but editorial-risky). Everything
-  that ACTUALLY unblocks publish is USER-gated.
+- **PUBLISH BLOCKER — ACCURATELY DIAGNOSED THIS WAKE (corrects the 17:15/17:10 framing).**
+  Ran a FRESH CPV `--strict`: `CRITICAL=4 MAJOR=6 MINOR=4 NIT=1`; the 4 CRITICALs are ALL
+  `skillaudit:persistence` on GROUP B (`daemon-launcher.py:63`, `launchd_keepalive.py:71/176/186`).
+  Read the CPV issues: **option (b) "upstream a CPV disclosed-persistence feature" is DEAD** —
+  **#63** (the exact ask) is CLOSED **WON'T-FIX** (CPV intrinsic-only, no self-declared
+  suppression ever); **#40** (which the old report cited) is the unrelated doc-FP issue. So the
+  blocker is a PERMANENT design conflict: **in-tree launchd persistence ⊥ CPV-strict publishing.**
+  Precedent: `janitor-auto-manage-oauth-on` REMOVED its launchd agent ("No launchd agent, no
+  plist") to ship v0.15.0 — chose immortality-without-L0; GROUP B (`cd9c251`, a SINGLE commit)
+  added L0 back and became un-publishable.
+- **NEXT — USER DECISION (not autonomous):** (a) `git revert cd9c251` (one commit; coupling =
+  `daemon.py:69` import + `_ensure_os_keepalive()`) → `main` ships memory+A+C-C1 at CRITICAL=0,
+  L0 lives out-of-band; vs (c) hold / drop L0. I will NOT revert GROUP B autonomously (you
+  explicitly wanted L0 immortality — it's an immortality-vs-shippability call). Full writeup:
+  `reports/overnight-session/20260623_181417+0200-publish-blocker-accurately-diagnosed.md`.
+  Post-extraction debt (clearable, only matters if option a): 2 fleet_status unicode FPs
+  (fragile edit), 1 memgrep RESOURCE_ABUSE FP (needs rerun), 3 oversized memory SKILLs +
+  coupled TOC (editorial-risky).
 
 ### ⚡ UPDATE 2026-06-23 17:15 — MEMORY JOB DONE (phase g COMPLETE); publish blocker UNCHANGED + KNOWN
 - **The 15:09 "HOLD phase g / don't build" block below is now OBSOLETE.** The USER un-held it
