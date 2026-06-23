@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T18:55:00+0200
+updated: 2026-06-23T20:08:42+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,40 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ✅ UPDATE 2026-06-23 19:30 — v0.16.0 PUBLISHED (blocker resolved via option (a)) + 8 issues closed
+- **SHIPPED `v0.16.0`** (HEAD `1351ee7`; bump+CHANGELOG; annotated tag; 92 commits + tag pushed to
+  origin/main; GitHub release live: https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.16.0).
+  publish.py exit 0 — CPV `--strict` **CRITICAL=0** (all gates green). The split/memory fixes the
+  fleet was blocked on are LIVE.
+- **HOW the blocker cleared — option (a) "extract L0, publish now" (USER chose it):** branch
+  `extract-launchd-l0` → forward-removal commit **`eb109fb`** deleted the 2 launchd files + their 2
+  tests (`launchd_keepalive.py`, `daemon-launcher.py`, `test_launchd_keepalive.py`,
+  `test_flock_blocking.py`) and stripped the launchd wiring + dead `acquire_singleton_flock_blocking`
+  from `daemon.py`/`global_state.py`/`global_control_cli.py`/`plugin.json` — KEEPING the GROUP A
+  freeze-recovery fixes. **L0 reboot-survival is preserved in git history at `cd9c251`** for a future
+  out-of-band opt-in companion (NOT in the scanned plugin). Merged FF to main.
+- **Cleared the rest of the gate** (5 MAJOR + 4 MINOR + 2 NIT) via parallel sonnet agents (`5c380a0`,
+  `b64d1e5`): `fleet_status.py` U+2028/U+2029 → escapes; 3 oversized skills (consolidate/split/write)
+  → detail moved to `references/`; 4 TOC skills (atomize/recall/repair/update) embedded the
+  wikimem-model 7-entry TOC; the cascade NIT (atom-authoring.md TOC) fixed. `12ab07f` restored +x.
+- **8 issues CLOSED** (verified each fix is an ancestor of HEAD AND present in v0.16.0 code, then
+  closed with PRRD G1.1 self-id + fix commit): **#51** (publish canonical — demonstrated by this very
+  release), **#53** (d0eaeb9 action@sha allowlist), **#54/#55** (42099f5 `_NON_NOTE_NAMES`), **#57/#58**
+  (a0f1fab seam-synthesis), **#59** (8a3b3a1 idle+age label), **#60** (aac974f editor-as-agent).
+  Left OPEN: **#56** (serializer fix still pending — low-sev cosmetic), **#52** (unbuilt feature),
+  **#61** (weekly audit drift).
+- **NEXT (user's NEW request, this release-cycle's priority): build `janitor-security-agent`** — ONE
+  agent that runs every security skill (detect + FIX), mirroring `janitor-memory-subconscious-agent`.
+  Consolidate the ~7 security skills; make detect-skills also fix; wire the heartbeat to SUGGEST it
+  when security drift is found. Author a TRDD first. THEN #52 (cross-project wikimem, the stash@{0}
+  WIP is intact).
+- **SUPERSEDED — do NOT carry forward (these facts are now FALSE):**
+  - ✗ "Publish still BLOCKED" / "USER DECISION needed (option a/b/c)" — RESOLVED; (a) shipped as v0.16.0.
+  - ✗ "8 of 11 open issues are fixed-but-unpublished, did NOT close any" — they are PUBLISHED + CLOSED now.
+  - ✗ "BOTH accounts MAX/MAX, conserve" (18:55) — stale OAuth snapshot; re-check live before assuming.
+  - ✗ "#52 is the READY next-build / START HERE" (18:55) — superseded; the security-agent is the
+    user's stated next priority, #52 follows it.
 
 ### ⚡ UPDATE 2026-06-23 18:55 — ⚠ OAUTH CRUNCH (both accounts MAX) + #52 is the READY next-build
 - **OAUTH: BOTH `emanuele` AND `fmuaddib` are MAX/MAX (5h AND 7d), confirmed stable.** No fresh
