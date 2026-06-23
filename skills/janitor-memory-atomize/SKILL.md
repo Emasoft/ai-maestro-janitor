@@ -1,20 +1,21 @@
 ---
 name: janitor-memory-atomize
-description: ATOMIZE executor — the autonomous pass that migrates a FREE-PROSE wikimem page into first-class ATOMS. Segments a page body into durable facts, appending an Obsidian block-property marker `^<id> [keywords: …]` (on its own line) after each fact so memgrep can recall it individually by its keywords and return its full per-atom record (content + its `[^N]` notes/lessons + its `[[also see]]`). Purely ADDITIVE + transaction-gated + verified — never drops or rewords a fact. Runs on a [janitor-memory-atomize] marker, or "atomize this page", "give the memory facts their atom markers".
+description: ATOMIZE executor — the autonomous pass that migrates a FREE-PROSE wikimem page into first-class ATOMS. Segments a page body into durable facts, inserting a LEADING Obsidian block-property marker `^<id> [keywords: …]` (on its own line, ABOVE the fact it opens) before each fact so memgrep can recall it individually by its keywords and return its full per-atom record (content + its `[^N]` notes/lessons/see-also grouped by bottom section). Purely ADDITIVE + transaction-gated + verified — never drops or rewords a fact. Runs on a [janitor-memory-atomize] marker, or "atomize this page", "give the memory facts their atom markers".
 ---
 
 # Janitor memory — ATOMIZE (migrate a free-prose page into first-class atoms)
 
 ## What this is
 
-memgrep indexes and recalls **atoms** — body facts delimited by a trailing block-property
-marker `^<id> [keywords: …]` — so a single fact is findable by its OWN keywords and returned
-as its full self-contained record (content + the `[^N]` notes/lessons its body references +
-its `[[also see]]` links). Pages authored before atoms exist are **free prose**: their facts
-are recalled only at page granularity. ATOMIZE is the autonomous pass that migrates those
-pages — **one page per run, across heartbeats** — by giving each durable fact its marker.
+memgrep indexes and recalls **atoms** — body facts each OPENED by a LEADING block-property
+marker `^<id> [keywords: …]` (the marker line sits ABOVE the fact's content) — so a single fact
+is findable by its OWN keywords and returned as its full self-contained record (content + the
+`[^N]` notes/lessons/see-also its body references, grouped by bottom section). Pages authored
+before atoms exist are **free prose**: their facts are recalled only at page granularity.
+ATOMIZE is the autonomous pass that migrates those pages — **one page per run, across
+heartbeats** — by giving each durable fact its leading marker.
 
-It is **purely additive**: it appends a marker line after each fact and changes NOTHING else —
+It is **purely additive**: it inserts a marker line above each fact and changes NOTHING else —
 no fact reworded, no lesson dropped, no frontmatter touched. The `verify_atomize` gate proves
 it (this mutates the live corpus — RULE 0). It is the 6th wikimem-editor pass, alongside
 split / consolidate / conflict / repair / harvest.
@@ -24,7 +25,7 @@ split / consolidate / conflict / repair / harvest.
 1. **No knowledge lost.** Every fact survives BYTE-IDENTICAL; every `[^N]` lesson survives.
    The verifier proves it — you never reword a fact while marking it.
 2. **Additive markers ONLY.** The sole change is added `^id [keywords: …]` lines (each on its
-   OWN line, after the fact's block). Adding any other line is refused by the gate.
+   OWN line, LEADING — directly ABOVE the fact it opens). Adding any other line is refused by the gate.
 3. **Never edit a live page.** All edits happen on the STAGED copy; `commit --op atomize`
    applies atomically under the per-scope flock + stale-snapshot guard.
 4. **Single page, in place.** ONE write at the page's own path, ZERO deletes.
@@ -55,21 +56,29 @@ split / consolidate / conflict / repair / harvest.
 ## How to atomize ONE page (the editorial judgment)
 
 Read the page. For each **durable fact** in the body (a fact may span several paragraphs, a
-table, a code block), append on its OWN line, at the END of that fact's block:
+table, a code block), insert on its OWN line a **LEADING** marker IMMEDIATELY ABOVE that fact's
+content (the marker OPENS the atom; the content below it, up to the next marker / heading, is its
+body):
 
 ```markdown
 ^<page-unique-kebab-id> [keywords: <the search terms a future session will use for THIS fact>, type: <type>, ocd: <fact's date>, lmd: <today>]
+<the fact's content — the paragraph(s) / table / code block this atom holds>
 ```
 
+- **Marker PLACEMENT is LEADING, not trailing** — the `^id [...]` line goes BEFORE the fact's
+  content, never after it. memgrep's parser opens an atom at the marker and reads the lines below
+  it as the body. (A trailing marker would mis-attribute the WRONG content to the atom.)
 - **`keywords:` is the only REQUIRED prop** — the SYMPTOM/question words a future search will
   use, NOT the answer's jargon (this is the atom's recall surface). `type`/`ocd`/`lmd` optional.
-- **Per-atom notes are AUTOMATIC.** An atom OWNS the `[^N]` footnotes its body references inline
-  and the `[[wikilinks]]` in its body — those are already in the prose, so you DO NOT move them;
-  marking the fact is enough, memgrep aggregates the rest. (If a fact cites a `[^N]` that sits
-  under `## Notes and lessons learned`, that footnote becomes that atom's lesson automatically.)
+- **Per-atom notes/lessons/see-also are AUTOMATIC.** An atom OWNS the `[^N]` footnotes its body
+  references inline — those are already in the prose, so you DO NOT move them; marking the fact is
+  enough, memgrep aggregates the rest. memgrep groups each referenced `[^N]` by which bottom
+  section DEFINES it: `# Notes` → notes, `# Lessons Learned` → lessons, `# See also` → see-also
+  (see-also is a `[^N]` footnote whose def links out, NOT a bare `[[wikilink]]` in the body). A
+  footnote can be SHARED by multiple atoms, which is why the defs live POOLED at the page bottom.
 - **Block-ids** are page-unique kebab slugs (`^rotate-drain`) or `^memory-<uid>`.
 - Add **nothing else** — no rewording, no new prose, no moved lines. The page lead, the headings,
-  the `## Notes and lessons learned` pool, every fact line stay byte-identical.
+  the bottom footnote pool, every fact line stay byte-identical.
 - Bump the page frontmatter `lmd:` to today.
 
 ## EXECUTE through the transaction core
@@ -77,8 +86,8 @@ table, a code block), append on its OWN line, at the END of that fact's block:
 ```bash
 uv run scripts/memory_txn_cli.py begin "<scope_root>" atomize "<page.md>"
 #   → txn_id=<id>  staging=<abs dir>
-# Edit ONLY the staged copy of <page.md>: append `^id [keywords:…]` markers (own lines) after
-# each fact; bump lmd; change NOTHING else (no reword, no new prose, no deletes).
+# Edit ONLY the staged copy of <page.md>: insert LEADING `^id [keywords:…]` markers (own lines)
+# ABOVE each fact; bump lmd; change NOTHING else (no reword, no new prose, no deletes).
 uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op atomize
 #   → committed <id> (atomize): 1 write(s), 0 delete(s)
 #   verify_atomize proves: lessons preserved, every body FACT byte-identical, no frontmatter key
