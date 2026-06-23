@@ -116,3 +116,24 @@ and FLAG — loudly and specifically — everything a human must do (rotate this
 admin role, approve this history purge). The standard is a project whose security posture a
 new auditor can trust, with a report that says exactly what was fixed and what still needs
 hands. That is the whole point of your existence.
+
+## Dispatch examples
+
+<example>
+Context: the janitor heartbeat surfaced a security finding with the suggestion
+"[supply-chain-fingerprints] … → Run /janitor-security-agent to triage + fix (domain: supply-chain)".
+user: yes, fix that supply-chain finding
+assistant: Dispatching the janitor-security-agent on the supply-chain domain — it re-confirms the
+advisory, bumps the affected dependency to a patched version, re-runs the project's tests, and
+flags anything that needs your hand.
+<commentary>A security detector suggested the agent and the user approved — dispatch it on the named domain.</commentary>
+</example>
+
+<example>
+Context: the user wants a security pass before a release.
+user: do a full security audit of this repo and fix what's safe
+assistant: Dispatching the janitor-security-agent for a full-sweep (supply-chain, credentials,
+dependabot, fork-PR cache, workflows, branch protection, agent-context injection) — auto-fixing the
+safe and flagging credential rotation / destructive ops for you.
+<commentary>An explicit "audit + fix security" request — the one agent runs a full sweep across every domain.</commentary>
+</example>
