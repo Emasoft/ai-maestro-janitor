@@ -230,13 +230,20 @@ def main() -> int:
         # one is set. Both feed the dedupe entry and the `[:8]` display ref.
         uuid = m.group(1) or m.group(2)
 
-        # Issue #59: TRUE age is days-since-birth (`created:`), not
-        # days-since-last-edit — an actively-worked TRDD edited today is not
-        # "0d old". Fall back to the file's last-touched time only for a legacy
-        # TRDD whose frontmatter has no parseable `created:`.
-        age_base = created if created is not None else _last_touched_epoch(f, root, fallback=now)
-        age_days = (now - age_base) // 86400
-        entries.append(f"TRDD-{uuid[:8]} ({age_days}d)")
+        # Issue #59 Defect 2: the reminder's load-bearing signal is STALENESS —
+        # `idle` = days since the TRDD was last touched (git-commit time, else
+        # mtime). The TRUE age (`age` = days since the frontmatter `created:`) is
+        # shown as CONTEXT. Showing BOTH — `(idle Nd, age Md)` — removes the old
+        # bare-"(Nd)" ambiguity (it read as "age" but was actually days-since-touch,
+        # and the prior fix over-corrected to age-only, dropping the staleness the
+        # nag exists to surface). `age` is omitted for a legacy TRDD whose
+        # frontmatter has no parseable `created:`.
+        idle_days = (now - _last_touched_epoch(f, root, fallback=now)) // 86400
+        if created is not None:
+            label = f"idle {idle_days}d, age {(now - created) // 86400}d"
+        else:
+            label = f"idle {idle_days}d"
+        entries.append(f"TRDD-{uuid[:8]} ({label})")
 
     if not entries:
         return 0
