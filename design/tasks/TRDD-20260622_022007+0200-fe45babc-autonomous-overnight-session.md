@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T18:43:19+0200
+updated: 2026-06-23T18:55:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,24 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ⚡ UPDATE 2026-06-23 18:55 — ⚠ OAUTH CRUNCH (both accounts MAX) + #52 is the READY next-build
+- **OAUTH: BOTH `emanuele` AND `fmuaddib` are MAX/MAX (5h AND 7d), confirmed stable.** No fresh
+  account to switch to — budget critically low. The loop self-heals when the 5h window rolls
+  (rate-limited turns die, the cron refires, a later turn succeeds once budget returns). **CONSERVE:**
+  do only the OAuth check + minimal notes until a `usage` check shows real headroom again; do NOT
+  start substantial work while both read MAX.
+- **#52 (cross-project wikimem visibility) is the READY next substantive work** — it is
+  **USER-APPROVED + fully specced** (NOT a vague feature). memgrep engine half built separately
+  (`ai-maestro-plugin` TRDD-202ccfa2, forthcoming verbs `publish-sync`/`link`/symlink-aware recall).
+  **Janitor-side asks (THIS repo, buildable now, safe new code + TDD):** (1) `wikimem-model.md` — add
+  the `publish-globally: true` bare boolean (PROJECT-scope only; LOCAL never publishable) + document
+  the 🔒 PRIVACY INVARIANT (the ONLY thing committed is the bare boolean — NO slug/id/path, not even
+  `owner/repo`; the owning slug is derived machine-locally at sync time, lives only in the USER memdir
+  `published/<slug>/`); (2) the EDIT-AUTHORITY invariant (globally-published note is read-only from
+  foreign projects); (3) write/update skills + heartbeat + recall-rule updates. **START HERE when
+  budget recovers** (its end-to-end test needs the memgrep verbs, so build janitor-side + unit-test
+  the schema/rule docs; full e2e waits on TRDD-202ccfa2). Full spec: gh issue #52.
 
 ### ⚡ UPDATE 2026-06-23 18:00 — IMMORTALITY GROUP C C1 (self-integrity manifest) LANDED (non-bricking subset)
 - **Committed `9d53bfb` (TRDD-53a00e44, child of #324223a6).** The self-integrity
