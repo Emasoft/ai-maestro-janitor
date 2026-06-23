@@ -295,6 +295,60 @@ def no_dangling_refs(live_pages: dict, retired_slugs) -> tuple[bool, list[str]]:
 
 
 # --------------------------------------------------------------------------- #
+# footnote-ref resolution (THE SHARED-FOOTNOTE MOVE-RULE) — TRDD-3b9b2040 g3
+# --------------------------------------------------------------------------- #
+#
+# A page's notes / lessons / see-also live in a bottom footnote POOL (`[^N]: …`
+# defs) and are cited inline by `[^N]`. ONE def can be SHARED by several atoms on
+# the page, which is exactly why the defs are pooled at the bottom. When a
+# split/merge MOVES an atom between pages, its `[^N]` refs travel with it — and a
+# shared def must travel (be duplicated) onto every page that still cites it. The
+# user's load-bearing move-rule: "do not delete a `[^N]` def from the source if
+# another atom there still references it." Break it two ways and you get a
+# DANGLING footnote ref — silent knowledge loss, because the note/lesson the
+# footnote held becomes unreachable: (a) the def is dropped from the source while
+# a sibling atom there still cites it, or (b) a ref moves to a new page without
+# its def. This is the verify half of that rule.
+
+_FN_DEF_RE = re.compile(r"(?m)^\[\^([^\]]+)\]:")   # a footnote DEFINITION: line-start `[^id]:`
+_FN_ANY_RE = re.compile(r"\[\^([^\]]+)\]")          # ANY `[^id]` occurrence (refs + def markers)
+
+
+def footnote_refs_resolve(text: str) -> tuple[bool, list[str]]:
+    """Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
+    the SAME page. Returns (no unresolved refs, sorted unresolved ids).
+
+    A page is self-consistent iff every footnote it cites is also defined on it. A
+    def WITHOUT a ref (an orphan def) is allowed — only a ref without a def is a
+    dangling footnote. Computed by id: the def line `[^id]:` itself contains the
+    marker `[^id]`, so `all_ids - def_ids` is exactly the set of referenced-but-
+    undefined ids (an orphan def cancels itself out and is never flagged)."""
+    defs = set(_FN_DEF_RE.findall(text))
+    unresolved = sorted(set(_FN_ANY_RE.findall(text)) - defs)
+    return (not unresolved, unresolved)
+
+
+def no_new_dangling_footnote_refs(
+    source_texts: list[str], result_texts: list[str]
+) -> tuple[bool, list[str]]:
+    """A split/merge must not INTRODUCE a dangling footnote ref. Footnote ids may
+    be renumbered across the op (lesson preservation matches by BODY, not number),
+    so compare COUNTS not ids: the total number of unresolved `[^id]` refs across
+    all RESULT pages must not exceed the total across all SOURCE pages. This
+    enforces the shared-footnote move-rule (a def is never dropped while an atom
+    still cites it, and a moved ref carries its def) WITHOUT punishing a
+    pre-existing dangling ref the op merely carried forward. Returns (ok, sorted
+    result-side offenders) — the offenders make the failure actionable."""
+    src = sum(len(footnote_refs_resolve(t)[1]) for t in source_texts)
+    offenders: list[str] = []
+    for t in result_texts:
+        offenders.extend(f"[^{m}]" for m in footnote_refs_resolve(t)[1])
+    if len(offenders) > src:
+        return (False, sorted(set(offenders)))
+    return (True, [])
+
+
+# --------------------------------------------------------------------------- #
 # metadata invariants (ocd/lmd through a merge)
 # --------------------------------------------------------------------------- #
 
@@ -467,6 +521,10 @@ def verify_merge(
     if not ok:
         reasons.append("dangling refs to retired slug(s): " + "; ".join(dangling))
 
+    ok, fn = no_new_dangling_footnote_refs(source_texts, [result_text])
+    if not ok:
+        reasons.append("orphaned shared footnote ref(s) introduced: " + ", ".join(fn))
+
     return (not reasons, reasons)
 
 
@@ -510,7 +568,14 @@ def verify_split(
     if not ok:
         reasons.append("source lesson(s) lost across sub-pages: " + "; ".join(missing))
 
-    ok, missing_facts = body_facts_preserved([source_text], concatenated)
+    # body_facts_preserved's haystack (_body_minus_lessons) truncates at the FIRST
+    # `## Notes` heading, so a raw multi-page concatenation drops every sub-page
+    # after the first that carries a lessons section — false-failing a fact that
+    # legitimately moved to a later sub-page. Strip each page's lessons BEFORE
+    # joining so the haystack keeps every sub-page's body (lessons are guarded
+    # above by lessons_preserved on the raw concatenation).
+    bodies_only = "\n".join(_body_minus_lessons(t) for t in [*subpage_texts, overview_text])
+    ok, missing_facts = body_facts_preserved([source_text], bodies_only)
     if not ok:
         reasons.append(
             "source body fact(s) lost/paraphrased across sub-pages: " + "; ".join(missing_facts)
@@ -534,6 +599,10 @@ def verify_split(
     ok, dangling = no_dangling_refs(live_after, retired_slugs or set())
     if not ok:
         reasons.append("dangling refs to retired slug(s): " + "; ".join(dangling))
+
+    ok, fn = no_new_dangling_footnote_refs([source_text], [overview_text, *subpage_texts])
+    if not ok:
+        reasons.append("orphaned shared footnote ref(s) introduced: " + ", ".join(fn))
 
     return (not reasons, reasons)
 

@@ -664,3 +664,125 @@ def test_verify_atomize_fails_on_dropped_lesson():
         source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
     )
     assert not ok and any("lesson" in r for r in reasons), reasons
+
+
+# ---- footnote-ref resolution: the shared-footnote move-rule (TRDD-3b9b2040 g3) ----
+
+def test_footnote_refs_resolve_clean():
+    """A `[^1]` ref with a matching `[^1]:` def on the same page → resolved."""
+    ok, missing = v.footnote_refs_resolve("Fact.[^1]\n\n[^1]: the note.\n")
+    assert ok and missing == []
+
+
+def test_footnote_refs_resolve_flags_orphan_ref():
+    """A `[^1]` ref with NO def on the page → a dangling footnote ref."""
+    ok, missing = v.footnote_refs_resolve("Fact.[^1]\n\n(no def here)\n")
+    assert not ok and missing == ["1"]
+
+
+def test_footnote_refs_resolve_allows_orphan_def():
+    """A `[^1]:` def with NO ref → allowed; an unreferenced def is harmless, only a
+    ref-without-def is dangling (the def line's own `[^1]` marker cancels out)."""
+    ok, missing = v.footnote_refs_resolve("Fact.\n\n[^1]: an unused note.\n")
+    assert ok and missing == []
+
+
+def test_no_new_dangling_footnote_refs_clean_move():
+    """An atom + its SHARED def both land on each destination page → no new dangling."""
+    src = ["A.[^1] B.[^1]\n\n[^1]: shared.\n"]
+    res = ["A.[^1]\n\n[^1]: shared.\n", "B.[^1]\n\n[^1]: shared.\n"]  # def duplicated onto both
+    ok, offenders = v.no_new_dangling_footnote_refs(src, res)
+    assert ok and offenders == []
+
+
+def test_no_new_dangling_footnote_refs_flags_dropped_shared_def():
+    """The shared def is copied to only ONE result page while the other keeps the
+    ref → a NEW dangling footnote ref → FAIL (the user's move-rule, violated)."""
+    src = ["A.[^1] B.[^1]\n\n[^1]: shared.\n"]                        # 0 unresolved (def present)
+    res = ["A.[^1]\n\n[^1]: shared.\n", "B.[^1]\n\n(def NOT copied here)\n"]  # page 2 orphaned
+    ok, offenders = v.no_new_dangling_footnote_refs(src, res)
+    assert not ok and offenders == ["[^1]"]
+
+
+def test_no_new_dangling_footnote_refs_tolerates_preexisting():
+    """A source that ALREADY had a dangling ref is not punished when the op merely
+    carries it forward — the count does not INCREASE, so no new dangling."""
+    src = ["Fact.[^9]\n\n(already broken — no def)\n"]                # 1 unresolved on the source
+    res = ["Fact.[^9]\n\n(still broken — no def)\n"]                   # still 1, not more
+    ok, _ = v.no_new_dangling_footnote_refs(src, res)
+    assert ok
+
+
+def test_no_new_dangling_footnote_refs_renumber_safe():
+    """Renumbering a RESOLVED footnote keeps it resolved → no false positive (the
+    check counts unresolved refs, it does not compare ids across the op)."""
+    src = ["Fact.[^5]\n\n[^5]: note.\n"]
+    res = ["Fact.[^1]\n\n[^1]: note.\n"]                               # 5 -> 1, still resolved
+    ok, _ = v.no_new_dangling_footnote_refs(src, res)
+    assert ok
+
+
+def test_verify_split_fails_on_orphaned_shared_footnote():
+    """g3 END-TO-END: a split that moves a SHARED `[^N]` footnote's ref onto a
+    sub-page but fails to copy the def there → a dangling footnote ref on that
+    sub-page → verify_split FAILS. The user's shared-footnote move-rule, enforced."""
+    source = _hub("plat", ["src/a/**", "src/b/**"],
+                  "## Frontend\nUI uses the shared retry policy.[^1]\n"
+                  "## Backend\nServer uses the shared retry policy too.[^1]\n",
+                  lessons="[^1]: retry policy is 3 attempts, shared by both layers.\n")
+    overview = _hub("plat", ["src/a/**", "src/b/**"],
+                    "Overview: see [[plat-frontend]] and [[plat-backend]].\n")
+    sub1 = _hub("plat-frontend", ["src/a/**"],
+                "UI uses the shared retry policy.[^1]\n",
+                lessons="[^1]: retry policy is 3 attempts, shared by both layers.\n")
+    sub2 = _hub("plat-backend", ["src/b/**"],
+                "Server uses the shared retry policy too.[^1]\n")      # ref kept, def NOT copied
+    sizes = {"plat.md": 500, "plat-frontend.md": 500, "plat-backend.md": 500}
+    ok, reasons = v.verify_split(
+        source, v.parse_frontmatter(source), [sub1, sub2],
+        [v.parse_frontmatter(sub1), v.parse_frontmatter(sub2)], overview,
+        sizes, max_bytes=12000, retired_slugs=set(), other_live_pages={},
+    )
+    assert not ok and any("footnote" in r for r in reasons), reasons
+
+
+def test_verify_split_passes_when_shared_footnote_duplicated():
+    """g3 regression: the CORRECT split copies the shared def onto BOTH sub-pages →
+    every ref resolves → the new check does not block a clean split."""
+    source = _hub("plat", ["src/a/**", "src/b/**"],
+                  "## Frontend\nUI uses the shared retry policy.[^1]\n"
+                  "## Backend\nServer uses the shared retry policy too.[^1]\n",
+                  lessons="[^1]: retry policy is 3 attempts, shared by both layers.\n")
+    overview = _hub("plat", ["src/a/**", "src/b/**"],
+                    "Overview: see [[plat-frontend]] and [[plat-backend]].\n")
+    sub1 = _hub("plat-frontend", ["src/a/**"],
+                "UI uses the shared retry policy.[^1]\n",
+                lessons="[^1]: retry policy is 3 attempts, shared by both layers.\n")
+    sub2 = _hub("plat-backend", ["src/b/**"],
+                "Server uses the shared retry policy too.[^1]\n",
+                lessons="[^1]: retry policy is 3 attempts, shared by both layers.\n")  # def copied
+    sizes = {"plat.md": 500, "plat-frontend.md": 500, "plat-backend.md": 500}
+    ok, reasons = v.verify_split(
+        source, v.parse_frontmatter(source), [sub1, sub2],
+        [v.parse_frontmatter(sub1), v.parse_frontmatter(sub2)], overview,
+        sizes, max_bytes=12000, retired_slugs=set(), other_live_pages={},
+    )
+    assert ok, reasons
+
+
+def test_verify_merge_fails_on_orphaned_body_footnote():
+    """g3 END-TO-END: a merge whose result body cites `[^2]` but only defines `[^1]:`
+    → a dangling footnote ref → verify_merge FAILS (proves the merge wiring fires)."""
+    a = _note(name="a", ocd="2026-05-01", lmd="2026-05-10",
+              body="Auth uses JWT and rotates keys hourly.",
+              lessons="[^1]: the cap is 3, verified against the source.\n")
+    b = _note(name="b", ocd="2026-06-01", lmd="2026-06-09",
+              body="Tokens expire after thirty seconds.", lessons="")
+    result = _note(name="c", ocd="2026-05-01", lmd="2026-06-18",
+                   body="Auth uses JWT and rotates keys hourly. [^2] Tokens expire after thirty seconds.",
+                   lessons="[^1]: the cap is 3, verified against the source.\n")   # cites [^2], defines [^1]
+    ok, reasons = v.verify_merge(
+        [a, b], [v.parse_frontmatter(a), v.parse_frontmatter(b)],
+        result, v.parse_frontmatter(result), retired_slugs={"a", "b"}, other_live_pages={},
+    )
+    assert not ok and any("footnote" in r for r in reasons), reasons
