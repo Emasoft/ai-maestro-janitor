@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T13:35:50+0200
+updated: 2026-06-23T15:09:30+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,26 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ⚡ UPDATE 2026-06-23 15:09 — USER ACTIVELY REFINING THE MEMORY MODEL (still HELD)
+- **USER is mid-design-conversation NOW** (sent a burst of directives ~minutes ago; a direct
+  question is pending to them). Away-period has NOT extended → per the 13:35 rule below, HOLD the
+  memory work; do NOT start #56 / GROUP C #228 yet, and do NOT auto-build phase g.
+- **TRDD-3b9b2040 engine (atoms a–f) is BUILT + tested (125 memgrep green) + committed** this
+  session (atom parser/index/recall/find-cmref, per-atom-notes aggregation, the atomize migration
+  pass + its verify_atomize gate + scheduler/agent wiring; live corpus reindexed schema-v2, recall
+  verified). BUT the USER then **REFINED the model** in rapid directives — recorded in 3b9b2040's
+  STATE block "🔴 REFINED MODEL" section + memorized USER-scope ([[wikimem-atom-block-properties]],
+  NEW [[wikimem-single-memory-agent]]): LEADING metadata blocks (not trailing); FOUR first-class
+  element kinds (atom/note/lesson/see-also) each with a block; memgrep greps ELEMENTS not pages
+  (page = context, agent discouraged from reading the whole page); lesson = a demoted prior atom
+  version; recall returns atom AGGREGATED with its notes/lessons/see-also; ONE memory agent for all
+  chores, loading only the dispatched chore's skill dynamically. This is build phase (g) — a bounded
+  re-architecture of the just-built engine — **GATED on USER confirmation** (asked; awaiting answer).
+- OAuth healthy this wake: LIVE emanuele 5h=2%/7d=15%; fmuaddib 7d=100% (capped — no switch).
+- Commits this wake: 8ba718e (atomize) 7778c30 (3b9b2040 STATE) bc01db7 (scheduler-test fix)
+  7c62098 (one-agent def) 5dc7e41 (refined-model record). Publish still HELD (engine will be
+  re-architected by phase g; don't publish the interim trailing-marker version).
 
 ### ⚡ UPDATE 2026-06-23 13:35 — MEMORY PIVOT + FRESH BUDGET (read before acting)
 - **MEMORY SYSTEM PIVOTED to an ATOM-INDEXING REDESIGN.** While building the buffer⇄wiki harvest
