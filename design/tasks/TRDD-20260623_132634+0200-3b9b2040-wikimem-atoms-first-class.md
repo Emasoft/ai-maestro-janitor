@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T14:11:41+0200
+updated: 2026-06-23T14:16:05+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -162,9 +162,13 @@ fallback) both emit atom rows ranked by the keyword surface; `finalize_recall` p
 `path#atom-id — <keywords>` with NO lesson append (a page still appends its `[^N]` lessons). `is_fresh`
 gained a `user_version < SCHEMA_VERSION` gate (a pre-v2 index → walk, which DOES surface atoms) +
 `recall_atom_candidates` tolerates a missing atoms table (explicit `--use-index` on an un-migrated DB).
-3 integration tests (atom-by-keyword, walk==index parity, find-cmref CLI); full suite 122 green. NEXT →
-**(d)** switch `find-claude-mem-ref` to the indexed `atoms.claude_mem_ref` column when the index is fresh
-(idx_atoms_cmref), live-scan fallback otherwise →
+3 integration tests (atom-by-keyword, walk==index parity, find-cmref CLI); full suite 122 green.
+**(d)** ✅ DONE — `find-claude-mem-ref` uses the FRESH index (`index::claude_mem_ref_atoms`, covered by
+`idx_atoms_cmref`) when one exists — the harvest calls it once per buffer memory, so an O(matching-atoms)
+SQL lookup beats re-parsing every wiki page each call — and live-scans otherwise; both apply the
+exact/basename match and emit byte-identical sorted output (proven by `find_claude_mem_ref_index_matches_live_scan`).
+clippy `-D warnings` clean (collapsed let-chain + dropped redundant `.trim()`); memgrep installed to
+`~/.cargo/bin`; full suite 123 green. **Rust engine (a–d) COMPLETE.** NEXT (markdown/python breadth) →
 **(e)** harvest-into-atoms skill + update all memory skills/scripts for atom grepping → **(f)**
 `[janitor-memory-atomize]` migration pass + atomize the corpus. ab232dbd unblocks at (e).
 

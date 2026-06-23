@@ -628,6 +628,38 @@ pub fn recall_atom_candidates(conn: &Connection) -> Result<Vec<AtomCandidate>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Every indexed atom carrying a `claude_mem_ref` provenance block-prop, as `(page_path, atom_id,
+/// claude_mem_ref, claude_mem_hash)` — the index-backed source for `find-claude-mem-ref`
+/// (TRDD-3b9b2040). The `idx_atoms_cmref` B-tree covers the `IS NOT NULL` scan; the caller applies the
+/// exact/basename match (basename matching can't be expressed as a single index predicate). Tolerates a
+/// pre-v2 DB with no atoms table (returns empty), so an explicit query never errors on an old index.
+pub fn claude_mem_ref_atoms(conn: &Connection) -> Result<Vec<(String, String, String, String)>> {
+    let has_atoms: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='atoms'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_atoms {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT m.path, a.atom_id, a.claude_mem_ref, COALESCE(a.claude_mem_hash, '')
+         FROM atoms a JOIN memories m ON a.memory_id = m.id
+         WHERE a.claude_mem_ref IS NOT NULL ORDER BY m.path, a.id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// Is the index FRESH enough to answer a query without walking? True iff the DB exists, its ledger
 /// is non-empty, EVERY corpus file is unchanged vs its ledger row (precise `(size, mtime_ns)`/blob
 /// comparison — NOT a second-truncated timestamp compare, which races a same-second write), and the

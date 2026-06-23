@@ -882,7 +882,9 @@ fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
             if key.is_empty() {
                 continue;
             }
-            let arr: Vec<String> = v.trim().split_whitespace().map(str::to_string).collect();
+            // `split_whitespace` already skips leading/trailing/repeated whitespace, so it both trims
+            // and tokenises the value into the array in one pass (no separate `.trim()` needed).
+            let arr: Vec<String> = v.split_whitespace().map(str::to_string).collect();
             map.insert(key.to_string(), arr);
         }
     }
@@ -1051,20 +1053,34 @@ fn claude_mem_ref_matches(stored_path: &str, query: &str) -> bool {
 }
 
 /// The matcher behind `find-claude-mem-ref`: every ATOM whose `claude_mem_ref` block-property
-/// references `source`, returned as `(page-path, atom-id, stored-source-hash)`, sorted + deduped.
-/// LIVE-scan via `resolve_atoms`; once atoms are in the SQLite index this is also queryable there.
+/// references `source`, returned as `(page-path, atom-id, stored-source-hash)`, sorted + deduped. Uses
+/// the FRESH SQLite index (`idx_atoms_cmref`) when one exists — the harvest calls this once per buffer
+/// memory, so an O(matching-atoms) lookup beats re-parsing every wiki page each call — and falls back to
+/// a LIVE `resolve_atoms` scan otherwise, so the answer is ALWAYS correct (TRDD-3b9b2040). Both paths
+/// apply the exact/basename match and produce byte-identical sorted output.
 fn claude_mem_ref_hits(source: &str, paths: &[PathBuf], hidden: bool) -> Vec<(PathBuf, String, String)> {
+    let root = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+    if crate::index::is_fresh(&root, &collect_md(paths, hidden))
+        && let Some(conn) = crate::index::open_existing(&root)
+        && let Ok(rows) = crate::index::claude_mem_ref_atoms(&conn)
+    {
+        let mut hits: Vec<(PathBuf, String, String)> = rows
+            .into_iter()
+            .filter(|(_, _, cmref, _)| claude_mem_ref_matches(cmref, source))
+            .map(|(path, atom_id, _, hash)| (PathBuf::from(path), atom_id, hash))
+            .collect();
+        hits.sort();
+        hits.dedup();
+        return hits;
+    }
+    // Live-scan fallback (no / stale index): parse atoms straight from disk.
     let mut hits = Vec::new();
     for p in collect_md(paths, hidden) {
         for atom in resolve_atoms(&p) {
-            if let Some(refp) = &atom.claude_mem_ref {
-                if claude_mem_ref_matches(refp, source) {
-                    hits.push((
-                        p.clone(),
-                        atom.id,
-                        atom.claude_mem_hash.unwrap_or_default(),
-                    ));
-                }
+            if let Some(refp) = &atom.claude_mem_ref
+                && claude_mem_ref_matches(refp, source)
+            {
+                hits.push((p.clone(), atom.id, atom.claude_mem_hash.unwrap_or_default()));
             }
         }
     }

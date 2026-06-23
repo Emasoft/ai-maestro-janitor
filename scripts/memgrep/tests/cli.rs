@@ -1655,3 +1655,22 @@ fn find_claude_mem_ref_cli_lists_atoms_by_provenance() {
         "an atom with no claude_mem_ref must not be listed:\n{o}"
     );
 }
+
+#[test]
+fn find_claude_mem_ref_index_matches_live_scan() {
+    // find-claude-mem-ref uses the FRESH index (idx_atoms_cmref) when present and live-scans otherwise.
+    // Both paths must give byte-identical output (the harvest's new-vs-changed check depends on it).
+    let d = TempDir::new("cmref-parity");
+    d.write("oauth-hub.md", ATOM_CORPUS);
+    let live = run(&["find-claude-mem-ref", "feedback_oauth.md", d.as_str()]); // no index → live-scan
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["find-claude-mem-ref", "feedback_oauth.md", d.as_str()]); // fresh index → indexed
+    assert!(
+        live.contains("oauth-hub.md#rotate-drain"),
+        "live-scan must find the harvested atom:\n{live}"
+    );
+    assert_eq!(
+        live, indexed,
+        "indexed and live-scan find-cmref must match byte-for-byte:\nlive:\n{live}\nindexed:\n{indexed}"
+    );
+}
