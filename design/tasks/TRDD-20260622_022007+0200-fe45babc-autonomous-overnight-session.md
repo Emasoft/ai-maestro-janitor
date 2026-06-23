@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T17:15:00+0200
+updated: 2026-06-23T18:00:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,32 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ⚡ UPDATE 2026-06-23 18:00 — IMMORTALITY GROUP C C1 (self-integrity manifest) LANDED (non-bricking subset)
+- **Committed `9d53bfb` (TRDD-53a00e44, child of #324223a6).** The self-integrity
+  DETECTOR already existed (opt-in, alert-only) but was a permanent no-op — no manifest
+  ever shipped. Now `scripts/generate_integrity_manifest.py` + `publish.py` Step 10.5
+  regenerate `.integrity/manifest-sha256.json` as a fresh-per-release artifact (after
+  bump/changelog — neither touches a globbed file — staged into the release commit;
+  `--dry-run` exercises it writing nothing). +5 tests; 36 self-integrity+generator green;
+  ruff clean. This is the MISSING SAFETY LAYER for the GROUP B persistence that blocks the
+  branch (plan ordered C before B; B shipped first) — landing it makes that persistence
+  defensible.
+- **DEFERRED — user-gated / bricking-risk (did NOT do autonomously):** the C1 default-on
+  flip (machine-wide blast radius), C2 verify-before-exec gate in `dispatcher-stub` (bricks
+  THIS session's heartbeat lifeline if wrong), C3/C4 quarantine+rollback, and the plan's
+  MANDATED ultracode review loop (needs Workflow opt-in not granted this session). Detector
+  stays OPT-IN; the exec path is UNTOUCHED.
+- **OAuth healthy:** LIVE `fmuaddib` 5h=28%/7d=20%; `emanuele` 28%/20%. No switch (both ≪88%).
+- **Publish still BLOCKED** (unchanged) on the USER's a/b/c persistence decision
+  (`reports/overnight-session/20260623_171000+0200-…md`). C1 rides the next release once
+  unblocked; it CANNOT publish standalone.
+- **NEXT (autonomous):** every remaining GROUP C piece is bricking-risk/user-gated. Non-risky
+  candidates that DON'T touch the exec path: (a) refine upstream **CPV #40**
+  (disclosed-legitimate-persistence — the RIGHT unblock, option b) with a concrete proposal —
+  this is the GitHub coordination the USER asked for and the real path to unblocking; (b) the
+  editorial memory-SKILL CPV debt (MAJOR×3, non-blocking, but editorial-risky). Everything
+  that ACTUALLY unblocks publish is USER-gated.
 
 ### ⚡ UPDATE 2026-06-23 17:15 — MEMORY JOB DONE (phase g COMPLETE); publish blocker UNCHANGED + KNOWN
 - **The 15:09 "HOLD phase g / don't build" block below is now OBSOLETE.** The USER un-held it
