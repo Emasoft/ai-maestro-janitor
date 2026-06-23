@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T14:53:35+0200
+updated: 2026-06-23T15:08:41+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -24,6 +24,44 @@ external-refs: ["github.com/Querulantenkind/obsidian-block-properties-plugin"]
 # Wikimem ATOMS as first-class index elements (block-properties parse/index/recall + harvest-into-atoms + prose→atom migration)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-23
+
+### 🔴 REFINED MODEL — USER directives 2026-06-23 (SUPERSEDES the trailing/2-element build below)
+The atom engine (a–f below) was built with a model the USER then corrected in a rapid series of
+directives. The CORRECT model — memorized at USER scope in [[wikimem-atom-block-properties]] +
+[[wikimem-single-memory-agent]] (recall them) — is:
+
+1. **EVERY element carries a LEADING metadata block.** A wikimem page is `frontmatter → TOC →
+   ## chapter/### subsection headings (each holding memory ATOMS) → # Notes → # Lessons Learned →
+   # See also`. The FOUR element kinds — **atom, note, lesson-learned, see-also** — EACH begin with
+   a block-properties metadata block `^memory-<id> [keywords: …, …]` on its OWN line, with the
+   element's content BELOW it (LEADING, not trailing — the USER's examples always put the marker on
+   top). The metadata block OPENS the element; its content runs until the next block / heading.
+2. **memgrep greps the ELEMENTS, not the page.** The metadata blocks are what memgrep indexes/ranks
+   (by each element's `keywords:`). It reports the containing page only as CONTEXT. The agent is
+   DISCOURAGED from reading the whole page (read it only when wholly ignorant of a topic). Grepping a
+   topic returns ALL its atoms.
+3. **A lesson-learned = a PREVIOUS VERSION of an atom.** Every UPDATE demotes the old atom into a
+   lesson-learned: metadata = change-date + the atom's ORIGINAL metadata; content = the old version +
+   a concise WHY it was superseded. Demote, never delete.
+4. **Returning an atom = the atom + its notes + lessons-learned + see-also**, aggregated. The atom's
+   body holds INLINE references to its bottom-section notes/lessons/see-also (Obsidian block refs);
+   memgrep resolves them and returns the full self-contained record. NEVER the bare atom.
+5. **ONE memory agent for ALL chores** (`janitor-memory-subconscious-agent`) — never one-agent-per-
+   chore; the `janitor-memory-*` under `skills/` are PROCEDURES it loads, not agents. Invoked by main
+   Claude OR as an async background task, one chore/launch, **loading ONLY that chore's skill
+   dynamically** to save tokens.
+
+**DELTA — what's BUILT vs the refined model (the remaining engine work, NOT yet done):**
+- BUILT: `resolve_atoms` segments by TRAILING `^id [props]`; only atoms + `[^N]` footnote-lessons are
+  first-class; recall interleaves atoms+pages+lessons; `render_atom_record` aggregates an atom's `[^N]`
+  + `[[links]]`.
+- TARGET: flip `resolve_atoms` to LEADING blocks; make note + lesson-learned + see-also FIRST-CLASS
+  metadata-block elements (not `[^N]`); atom→element aggregation via inline block-refs; recall surfaces
+  ELEMENTS with the page as context only (discourage full-page reads); atomize emits leading blocks +
+  the # Notes/# Lessons Learned/# See also section layout. Update all authoring docs/skills to match.
+- This is a bounded re-architecture of the just-built engine; author it as the next build phase (g).
+  The trailing-marker engine is committed + tested (125 green) and works as an interim — the flip is
+  additive in spirit (same SQLite element-row model; the PARSER direction + element kinds change).
 
 ### WHY THIS TRDD EXISTS (the realization, USER-confirmed 2026-06-23)
 While building the MEMORY.md⇄Wikimem coexistence harvest (TRDD-ab232dbd), the USER asked:
