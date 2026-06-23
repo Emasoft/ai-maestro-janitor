@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T18:27:34+0200
+updated: 2026-06-23T18:34:59+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -45,11 +45,16 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
   suppression ever); **#40** (which the old report cited) is the unrelated doc-FP issue. So the
   blocker is a PERMANENT design conflict: **in-tree launchd persistence ⊥ CPV-strict publishing.**
   Precedent: `janitor-auto-manage-oauth-on` REMOVED its launchd agent ("No launchd agent, no
-  plist") to ship v0.15.0 — chose immortality-without-L0; GROUP B (`cd9c251`, a SINGLE commit)
-  added L0 back and became un-publishable.
-- **NEXT — USER DECISION (not autonomous):** (a) `git revert cd9c251` (one commit; coupling =
-  `daemon.py:69` import + `_ensure_os_keepalive()`) → `main` ships memory+A+C-C1 at CRITICAL=0,
-  L0 lives out-of-band; vs (c) hold / drop L0. I will NOT revert GROUP B autonomously (you
+  plist") to ship v0.15.0 — chose immortality-without-L0; GROUP B (`cd9c251`) added L0 back and
+  became un-publishable.
+- **NEXT — USER DECISION (not autonomous):** option (a) is **NOT a clean revert** (corrects my
+  earlier "one commit" claim): `cd9c251` is ENTANGLED — 11 files/762 ins bundling the 2 launchd
+  files + their tests WITH GROUP A audit fixes (`fleet_inject`, `terminal_trigger`) + launchd
+  wiring in `daemon.py`, which itself changed twice AFTER cd9c251 (216d995, fbfff71). So a revert
+  would undo GROUP A + conflict. The clean way = a NEW forward-removal commit (delete the 2
+  launchd files + their 2 tests, strip the launchd wiring from `daemon.py` + the dead
+  `acquire_singleton_flock_blocking`, KEEP the GROUP A fixes) → `main` at CRITICAL=0, L0
+  out-of-band; vs (c) hold / drop L0. I will NOT do this autonomously (you
   explicitly wanted L0 immortality — it's an immortality-vs-shippability call). Full writeup:
   `reports/overnight-session/20260623_181417+0200-publish-blocker-accurately-diagnosed.md`.
   Post-extraction debt (clearable, only matters if option a). **CPV now CRITICAL=4 MAJOR=5
