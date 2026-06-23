@@ -1621,30 +1621,39 @@ fn recall_surfaces_atom_by_unique_keyword() {
 
 #[test]
 fn recall_atom_aggregates_its_own_notes_and_see_also() {
-    // Per-atom notes (TRDD-3b9b2040): an atom hit returns its body + the [^N] lesson(s) ITS body
-    // references + its [[also see]] links — the full self-contained record, NOT a bare locator.
+    // Per-atom notes (TRDD-3b9b2040): an atom hit returns its body + the [^N] footnote(s) ITS body
+    // references, GROUPED by which pooled section (`# Notes` / `# Lessons Learned` / `# See also`)
+    // defines each — the full self-contained record, NOT a bare locator. (See-also is now a
+    // `# See also` footnote, not a `[[wikilink]]`; the inline `[[token-rotation]]` stays page link
+    // text in the body.)
     let d = TempDir::new("atom-aggregate");
     d.write(
         "oauth-hub.md",
-        "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator]\nThe rotator drains the live (near-limit) account first.[^1] See [[token-rotation]].\n\n## Notes and lessons learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n",
+        "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator]\nThe rotator drains the live (near-limit) account first.[^1] It changed.[^2] See [[token-rotation]].[^3]\n\n# Lessons Learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n# Notes\n[^2]: the near-limit threshold is the 5h window, not the 7d one.\n# See also\n[^3]: token-rotation — the sibling keepalive flow.\n",
     );
     let o = run(&["recall", "zqxdrain", d.as_str()]);
     assert!(o.contains("oauth-hub.md#rotate-drain"), "locator line:\n{o}");
     assert!(o.contains("The rotator drains the live"), "the atom body is returned:\n{o}");
     assert!(
-        o.contains("earlier this drained the alternate"),
-        "the atom's own [^1] lesson is aggregated:\n{o}"
+        o.contains("lessons learned:") && o.contains("earlier this drained the alternate"),
+        "the atom's own [^1] lesson is aggregated under the lessons group:\n{o}"
     );
     assert!(
-        o.contains("also see: [[token-rotation]]"),
-        "the atom's see-also is aggregated:\n{o}"
+        o.contains("notes:") && o.contains("the near-limit threshold is the 5h window"),
+        "the atom's [^2] note is aggregated under the notes group:\n{o}"
     );
-    // --no-notes keeps the body but drops the lessons + see-also.
+    assert!(
+        o.contains("see also:") && o.contains("token-rotation — the sibling keepalive flow"),
+        "the atom's see-also is aggregated under the see also group:\n{o}"
+    );
+    // --no-notes keeps the body but drops every section group.
     let nn = run(&["recall", "zqxdrain", d.as_str(), "--no-notes"]);
     assert!(nn.contains("The rotator drains the live"), "body still shows with --no-notes:\n{nn}");
     assert!(
-        !nn.contains("earlier this drained the alternate") && !nn.contains("also see:"),
-        "--no-notes suppresses the atom's lessons + see-also:\n{nn}"
+        !nn.contains("earlier this drained the alternate")
+            && !nn.contains("notes:")
+            && !nn.contains("see also:"),
+        "--no-notes suppresses the atom's section groups:\n{nn}"
     );
 }
 

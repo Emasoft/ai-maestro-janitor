@@ -236,6 +236,7 @@ fn read_note(path: &Path) -> Option<Note> {
 /// leading `[...]` metadata prefix (stripped by default, restored by `--full-notes`), and the WHY
 /// text (links/images/URLs always preserved — only the metadata prefix is strippable). A lesson is a
 /// FIRST-CLASS memory element, so it carries its own intrinsic OCD/LMD parsed from that prefix.
+#[derive(Clone)]
 pub(crate) struct ResolvedNote {
     pub(crate) num: String,
     meta: Option<String>,
@@ -414,26 +415,81 @@ fn atom_referenced_labels(body: &str) -> Vec<String> {
     out
 }
 
-/// The `[[wikilink]]` targets in an atom's body — the atom's "also see" related-memory links.
-fn atom_wikilinks(body: &str) -> Vec<String> {
-    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"\[\[([^\]]+)\]\]").expect("static regex"));
-    let mut out: Vec<String> = Vec::new();
-    for cap in re.captures_iter(body) {
-        let t = cap[1].trim().to_string();
-        if !t.is_empty() && !out.contains(&t) {
-            out.push(t);
+/// Which of the three pooled footnote sections defines a given `[^N]` (USER-confirmed model): a
+/// wikimem page's notes, lessons-learned, AND see-also are ALL standard markdown footnotes — the
+/// `[^N]:` definitions live POOLED at the page bottom under `# Notes` / `# Lessons Learned` /
+/// `# See also`. An atom's aggregated record groups its referenced footnotes by THIS section.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SectionKind {
+    Notes,
+    Lessons,
+    SeeAlso,
+}
+
+/// Classify a heading line's text (case-insensitive) into the section it opens. Priority is
+/// load-bearing: "see also" wins first (a `# See also` heading also contains neither "lesson" nor
+/// would default to Notes), then any "lesson" heading, else Notes — which is the default and so
+/// covers `# Notes` and the legacy combined `## Notes and lessons learned` form alike.
+fn classify_heading(text: &str) -> SectionKind {
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("see also") {
+        SectionKind::SeeAlso
+    } else if lower.contains("lesson") {
+        SectionKind::Lessons
+    } else {
+        SectionKind::Notes
+    }
+}
+
+/// Build `label → SectionKind` for every footnote DEFINITION in the page, classifying each by the
+/// NEAREST PRECEDING heading line (a line whose trimmed start is `#`). A def's start line comes from
+/// `build_context(...).footnote_defs` (1-based `.start`); we scan `text.lines()` upward from
+/// `start-1` to the first heading and classify its text. A def with no preceding heading defaults to
+/// Notes (the `else` branch of `classify_heading`).
+fn footnote_sections(text: &str) -> BTreeMap<String, SectionKind> {
+    let lines: Vec<&str> = text.lines().collect();
+    let ctx = md::build_context(text, lines.len());
+    let mut out: BTreeMap<String, SectionKind> = BTreeMap::new();
+    for d in &ctx.footnote_defs {
+        // `d.start` is 1-based; scan upward from the def line to the first heading line.
+        let mut section = SectionKind::Notes; // no preceding heading → Notes default
+        let start_idx = d.start.saturating_sub(1); // 0-based index of the def's first line
+        for i in (0..start_idx).rev() {
+            let line = lines[i];
+            if line.trim_start().starts_with('#') {
+                let heading_text = line.trim_start().trim_start_matches('#').trim();
+                section = classify_heading(heading_text);
+                break;
+            }
         }
+        out.entry(d.label.clone()).or_insert(section);
     }
     out
 }
 
+/// Render one section group of an atom record: the lowercase group-label line (`notes:` /
+/// `lessons learned:` / `see also:`) followed by that group's `[N] - <why>` lines (reusing
+/// `render_notes`' per-line format). Nothing is emitted for an empty group.
+fn render_atom_group(label: &str, notes: &[ResolvedNote], full_notes: bool) -> String {
+    if notes.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("{label}:\n");
+    // render_notes prefixes a leading blank line we don't want between the group label and its
+    // entries; strip it (the body-vs-groups blank line is emitted once by render_atom_record).
+    let block = render_notes(notes, full_notes);
+    out.push_str(block.strip_prefix('\n').unwrap_or(&block));
+    out
+}
+
 /// Render an ATOM as its FULL aggregated record (TRDD-3b9b2040): the atom's main content, then — when
-/// `with_notes` — its OWN notes/lessons (the page `[^N]` footnotes its body references inline, resolved
-/// and appended like a page's lessons but SCOPED to this atom) and its "also see" (`[[wikilinks]]` in
-/// its body). This is the per-atom counterpart of a page's read-the-notes append: each atom owns the
-/// footnotes it cites, so recall returns a single fact WITH its history + relations, self-contained.
-/// The body always prints; `--no-notes` (with_notes=false) suppresses only the lessons + see-also.
+/// `with_notes` — its OWN referenced footnotes (the page `[^N]` defs its body cites inline), grouped
+/// by which pooled section (`# Notes` / `# Lessons Learned` / `# See also`) DEFINES each, in
+/// body-reference order WITHIN each group. This is the per-atom counterpart of a page's
+/// read-the-notes append: each atom owns the footnotes it cites, so recall returns a single fact
+/// WITH its history + relations, self-contained. The body always prints; `--no-notes`
+/// (with_notes=false) suppresses ALL groups. A `[[wikilink]]` in the body stays inline as page link
+/// text — it no longer forms the atom's "see also" (that is the `# See also` footnotes now).
 fn render_atom_record(path: &Path, atom_id: &str, full_notes: bool, with_notes: bool) -> String {
     let Some(atom) = resolve_atoms(path).into_iter().find(|a| a.id == atom_id) else {
         return String::new();
@@ -447,21 +503,40 @@ fn render_atom_record(path: &Path, atom_id: &str, full_notes: bool, with_notes: 
     if !with_notes {
         return out;
     }
-    // The atom's notes + lessons: the page footnotes THIS atom's body references inline.
+    // The footnotes THIS atom's body references inline, resolved in body-reference order.
     let labels = atom_referenced_labels(&atom.body);
-    if !labels.is_empty() {
-        let notes: Vec<ResolvedNote> = resolve_notes(path)
-            .into_iter()
-            .filter(|n| labels.contains(&n.num))
-            .collect();
-        out.push_str(&render_notes(&notes, full_notes));
+    if labels.is_empty() {
+        return out;
     }
-    // The atom's "also see": the related memories its body links to.
-    let links = atom_wikilinks(&atom.body);
-    if !links.is_empty() {
-        let joined: Vec<String> = links.iter().map(|l| format!("[[{l}]]")).collect();
-        out.push_str(&format!("also see: {}\n", joined.join(", ")));
+    let notes: Vec<ResolvedNote> = resolve_notes(path)
+        .into_iter()
+        .filter(|n| labels.contains(&n.num))
+        .collect();
+    if notes.is_empty() {
+        return out;
     }
+    // Partition the referenced footnotes by their defining section, preserving body-reference order
+    // within each group (resolve_notes already returns them in body order).
+    let Some(text) = md::read_text(path) else {
+        return out;
+    };
+    let sections = footnote_sections(&text);
+    let group_notes = |kind: SectionKind| -> Vec<ResolvedNote> {
+        notes
+            .iter()
+            .filter(|n| sections.get(&n.num).copied().unwrap_or(SectionKind::Notes) == kind)
+            .cloned()
+            .collect()
+    };
+    let g_notes = group_notes(SectionKind::Notes);
+    let g_lessons = group_notes(SectionKind::Lessons);
+    let g_seealso = group_notes(SectionKind::SeeAlso);
+    // The single leading blank line that delimits body from the groups (emitted once, only when at
+    // least one group is non-empty — which is guaranteed here since `notes` is non-empty).
+    out.push('\n');
+    out.push_str(&render_atom_group("notes", &g_notes, full_notes));
+    out.push_str(&render_atom_group("lessons learned", &g_lessons, full_notes));
+    out.push_str(&render_atom_group("see also", &g_seealso, full_notes));
     out
 }
 
@@ -1867,9 +1942,10 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
             s.to_string()
         };
         // An ATOM result prints the locator `path#atom-id — <keywords>` then its FULL aggregated record
-        // (the main content + ITS OWN notes/lessons — the page `[^N]` footnotes its body references —
-        // + its `[[also see]]` links). A PAGE result prints `path — <summary>` and appends the page's
-        // resolved lessons (the read-the-notes rule). TRDD-3b9b2040: notes/lessons/see-also are PER-ATOM.
+        // (the main content + ITS OWN referenced `[^N]` footnotes, GROUPED by their defining pooled
+        // section: notes / lessons learned / see also). A PAGE result prints `path — <summary>` and
+        // appends the page's resolved lessons (the read-the-notes rule). TRDD-3b9b2040: notes/lessons/
+        // see-also are PER-ATOM and are ALL standard markdown footnotes.
         match &atom_id {
             Some(aid) => {
                 if shown.is_empty() {
@@ -2440,7 +2516,62 @@ second atom para
         assert_eq!(atoms[0].body, "The fact is X.[^1] See [[other]].");
         assert!(!atoms[0].body.contains("name:") && !atoms[0].body.contains("# Title"));
         assert_eq!(atom_referenced_labels(&atoms[0].body), vec!["1".to_string()]);
-        assert_eq!(atom_wikilinks(&atoms[0].body), vec!["other".to_string()]);
+    }
+
+    #[test]
+    fn render_atom_record_groups_footnotes_by_section() {
+        // An atom's aggregated record groups its referenced `[^N]` footnotes by which pooled section
+        // (`# Notes` / `# Lessons Learned` / `# See also`) DEFINES each — body-reference order within
+        // each group, only non-empty groups, body always printed.
+        let dir = std::env::temp_dir().join(format!("memgrep_atomgroups_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let page = "\
+---
+name: p
+description: d
+---
+# Topic
+^a [keywords: kw]
+The fact.[^1] It evolved.[^2] Compare.[^3]
+# Notes
+[^1]: a clarifying note.
+# Lessons Learned
+[^2]: earlier it was different; changed because reason.
+# See also
+[^3]: related — see [[other-topic]].
+";
+        let path = dir.join("p.md");
+        std::fs::write(&path, page).unwrap();
+
+        let out = render_atom_record(&path, "a", false, true);
+        // Body prints, then each non-empty group: notes → lessons learned → see also, in that order.
+        let notes_i = out.find("notes:").expect("notes group present");
+        let n1_i = out
+            .find("[1] - a clarifying note.")
+            .expect("notes entry present");
+        let lessons_i = out.find("lessons learned:").expect("lessons group present");
+        let n2_i = out
+            .find("[2] - earlier it was different; changed because reason.")
+            .expect("lessons entry present");
+        let seealso_i = out.find("see also:").expect("see also group present");
+        let n3_i = out
+            .find("[3] - related — see [[other-topic]].")
+            .expect("see also entry present");
+        // Ordering: notes-label < notes-entry < lessons-label < lessons-entry < seealso-label < seealso-entry.
+        assert!(
+            notes_i < n1_i && n1_i < lessons_i && lessons_i < n2_i && n2_i < seealso_i && seealso_i < n3_i,
+            "groups must render in section order with their entries:\n{out}"
+        );
+
+        // --no-notes suppresses ALL groups (body still prints).
+        let nn = render_atom_record(&path, "a", false, false);
+        assert!(nn.contains("The fact."), "body still prints with --no-notes:\n{nn}");
+        assert!(
+            !nn.contains("notes:") && !nn.contains("lessons learned:") && !nn.contains("see also:"),
+            "--no-notes drops every section group:\n{nn}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
