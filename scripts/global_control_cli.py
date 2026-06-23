@@ -14,8 +14,8 @@ ONE source of truth (never duplicated into a skill's bash):
     global_control_cli.py status             # show both flags
 
 Two SEPARATE mechanisms, deliberately distinct:
-  * DISARM = the kill-switch. The running daemon EXITS on its next loop and removes
-    its OS keepalive; per-session heartbeats stop re-spawning it. Revive = `arm`.
+  * DISARM = the kill-switch. The running daemon EXITS on its next loop, and
+    per-session heartbeats stop re-spawning it. Revive = `arm`.
   * PAUSE  = the global-pause flag. The daemon stays ALIVE but idles (skips all task
     workloads, keeps ticking its heartbeat), and every session's heartbeat no-ops —
     a teardown-free temporary silence. Revive = `unpause` (instant, no re-spawn).
@@ -46,8 +46,8 @@ def main() -> int:
     reason = " ".join(argv[1:]) if len(argv) > 1 else ""
     if cmd == "disarm":
         gs.set_kill_switch(reason)
-        print("janitor globally DISARMED — the daemon will exit on its next loop, remove "
-              "its OS keepalive, and per-session heartbeats will not re-spawn it. Run "
+        print("janitor globally DISARMED — the daemon will exit on its next loop, and "
+              "per-session heartbeats will not re-spawn it. Run "
               "/janitor-global-arm to revive.")
         return 0
     if cmd == "arm":

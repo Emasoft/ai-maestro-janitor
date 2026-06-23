@@ -66,7 +66,6 @@ import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import global_state as gs  # noqa: E402
-import launchd_keepalive as lk  # noqa: E402  # OS keepalive — daemon immortality (TRDD-324223a6 B)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
 import state  # noqa: E402
@@ -836,44 +835,6 @@ def _build_tasks() -> list[Task]:
     ]
 
 
-def _daemon_runs_from_plugin_cache() -> bool:
-    """True iff THIS daemon.py lives under the installed plugin cache (production) —
-    NOT a dev checkout or a test tree. Installing a machine-level OS keepalive
-    (a LaunchAgent / systemd unit that survives reboot) must ONLY ever happen for the
-    real installed plugin: otherwise `pytest` (which spawns the daemon from the dev
-    checkout) or a developer running daemon.py by hand would silently register a
-    persistent LaunchAgent on the machine. The cache root matches daemon-launcher.py's
-    own resolution; a dev/test path is not relative to it → no auto-install."""
-    cache_root = (
-        Path.home() / ".claude" / "plugins" / "cache" / "ai-maestro-plugins" / "ai-maestro-janitor"
-    )
-    try:
-        _HERE.relative_to(cache_root)
-        return True
-    except ValueError:
-        return False
-
-
-def _ensure_os_keepalive() -> None:
-    """Install the OS keepalive (idempotent) if opted-in and not already present, so
-    the daemon survives its OWN death without depending on a Claude session firing a
-    heartbeat (TRDD-324223a6 B). Best-effort + loud: a failed install logs and is
-    never fatal — a keepalive that can't install must not kill the daemon it protects."""
-    if not _daemon_runs_from_plugin_cache():
-        return  # dev checkout / test tree — never auto-register a real OS keepalive
-    if not lk.opted_in() or lk.current_platform() == "other" or lk.is_installed():
-        return
-    source = _HERE / "daemon-launcher.py"
-    if not source.is_file():
-        state.log_line("daemon", f"os-keepalive: launcher source missing ({source}) — skipped")
-        return
-    try:
-        ok, msg = lk.install(source, gs.global_state_dir() / "logs")
-        state.log_line("daemon", f"os-keepalive: {'OK' if ok else 'FAILED'} — {msg}")
-    except Exception as exc:  # noqa: BLE001 - never let keepalive install kill the daemon
-        state.log_line("daemon", f"os-keepalive: install raised (ignored): {exc}")
-
-
 def main() -> int:
     # The daemon is a machine-wide singleton, but state.log_line() defaults to
     # a PROJECT-scoped logs/ dir keyed on whatever tree spawned us — so the
@@ -890,22 +851,9 @@ def main() -> int:
     # Singleton: the flock IS the truth. If we cannot acquire it, another
     # daemon is alive — exit silently. PID file / heartbeat are downstream
     # diagnostics; they cannot disagree with the kernel's flock state.
-    #
-    # The OS keepalive launches us with --keepalive: WAIT patiently for the flock (a
-    # session-spawned daemon may already hold it) instead of exiting, so the OS keeper
-    # never churns (exit→respawn) and takes over the instant the holder dies. A
-    # deliberate kill-switch breaks the wait → we remove our OWN keepalive and exit so
-    # it can't resurrect a daemon the user stopped. A session-spawned daemon (no flag)
-    # keeps the original non-blocking semantic: exit immediately if another holds it.
-    if "--keepalive" in sys.argv:
-        flock_fd = gs.acquire_singleton_flock_blocking(gs.kill_switch_present)
-        if flock_fd is None:
-            lk.uninstall()
-            return 0
-    else:
-        flock_fd = gs.acquire_singleton_flock()
-        if flock_fd is None:
-            return 0
+    flock_fd = gs.acquire_singleton_flock()
+    if flock_fd is None:
+        return 0
 
     pid = os.getpid()
     # Install the graceful-shutdown handlers BEFORE publishing the pid file.
@@ -935,11 +883,16 @@ def main() -> int:
         f"intervals={[t.interval_s for t in tasks]})",
     )
 
-    # L0 — make the daemon itself immortal: register an OS keepalive that respawns
-    # it regardless of any Claude session (closes the all-sessions-frozen circular
-    # gap). Idempotent + best-effort; uninstalled on a deliberate kill-switch below.
-    _ensure_os_keepalive()
-
+    # Immortality here is L1 only: this daemon is detached (it outlives the session
+    # that spawned it) and the GROUP A watchdog recovers frozen sessions — so the
+    # all-sessions-frozen gap is closed WITHOUT any OS-level persistence. L0
+    # reboot/crash survival (a launchd/systemd KeepAlive that restarts this daemon
+    # across a reboot) is NOT shipped in the published plugin: an in-tree OS-keepalive
+    # installer is a true-positive `skillaudit:persistence` finding that CPV --strict
+    # (correctly, by design) will not waive, and the no-exempt policy forbids gaming
+    # the matcher. Reboot survival is therefore an out-of-band opt-in companion (the
+    # launchd installer lives in git history at cd9c251), launched separately by a
+    # user who wants it — never auto-installed by the scanned plugin.
     exit_reason = "signal"
     try:
         while _running:
@@ -979,16 +932,6 @@ def main() -> int:
                 time.sleep(1)
     finally:
         state.log_line("daemon", f"stopping ({exit_reason})")
-        # A deliberate kill-switch means the user STOPPED the janitor — remove the OS
-        # keepalive so it can't resurrect a daemon the user shut down. A plain signal
-        # exit (e.g. a plugin-version-roll SIGTERM) must NOT uninstall: launchd should
-        # respawn the launcher and roll to the new version.
-        if exit_reason == "kill-switch":
-            try:
-                ok, msg = lk.uninstall()
-                state.log_line("daemon", f"os-keepalive: {'removed' if ok else 'remove FAILED'} — {msg}")
-            except Exception as exc:  # noqa: BLE001 - shutdown cleanup must never raise
-                state.log_line("daemon", f"os-keepalive: uninstall raised (ignored): {exc}")
         gs.remove_daemon_pid()
         gs.release_singleton_flock(flock_fd)
         state.rotate_log_if_big("daemon")
