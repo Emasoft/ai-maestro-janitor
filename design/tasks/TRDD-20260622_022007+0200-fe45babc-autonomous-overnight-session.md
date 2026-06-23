@@ -18,6 +18,49 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
 
+### ⏳ UPDATE 2026-06-24 ~01:30 — L0 immortality (GROUP B) SHAPE 2 Phases 1+2a built+green; OAuth survival gap found (both committed, NOT published)
+- **Under /go-on-yourself + the immortality plan, took up GROUP B (L0 OS-keepalive / daemon
+  immortality, umbrella TRDD-324223a6).** L0 was extracted in v0.16.0 (`eb109fb`) because the pre-
+  discriminator CPV gate flagged its boot-persistence as malware; old L0 preserved at `cd9c251`.
+  Verified (not assumed) the 3 independent reasons old L0 fails CPV today: dynamic `os.execv` (C3),
+  programmatic plist the resolver can't parse (C1), `$HOME` literal not folded (C1 / CPV #152).
+- **Design = TRDD-71ABD7V7** (`design/tasks/TRDD-20260624_002343+0200-71ABD7V7-l0-keepalive-fixed-data-entry.md`,
+  `column: dev`). **SHAPE 2** (user-chosen): launchd/systemd target is a LITERALLY-FIXED
+  `~/.claude/plugins/data/<slug>/scripts/daemon_keepalive_entry.py` (NOT the ephemeral plugin-root
+  cache). The entry statically `import daemon`; the daemon's whole import closure is verbatim-copied
+  beside it in DATA; the plist is written via shell heredoc (so the scanned heredoc body carries a
+  literal `$HOME` that CPV #152 will fold). USER constraints (binding): copy CPV-scanned scripts into
+  DATA but NEVER generate/edit them (byte-identical); no plugin-root in a system-launched script; no
+  runtime daemon-script generation.
+- **SHIPPED THIS SESSION (committed, green, NOT pushed/published):**
+  - Phase 1 — `scripts/daemon_keepalive_entry.py` (thin static entry, mode 755) + `tests/test_daemon_keepalive_entry.py`
+    (6 AST-inertness tests proving CPV-C2/C3-clean). Commit `184b61c`.
+  - Phase 2a — `scripts/lib/keepalive_stage.py` (closure-stager: BFS over absolute imports →
+    16-file bounded closure, ZERO of the ~200 pattern libs; verbatim atomic copy) + `tests/test_keepalive_stage.py`
+    (4 tests incl. a REAL-subprocess `import daemon` from the staged tree). Commit `0345000`.
+- **BLOCKED on CPV #152** (the user is implementing it in CPV: fold `$HOME`/`~`/`Path.home()` +
+  `/.claude/plugins/data/<slug>/` PREFIX → plugin-root R, then scan `R/scripts/daemon_keepalive_entry.py`).
+  Until #152 is in CPV `main`, Phase 2b+ (heredoc installer, rewrite `launchd_keepalive.py`, delete the
+  old dynamic `daemon-launcher.py` [commit-before-delete per RULE 0], daemon wiring, restore 2 tests,
+  publish.py green) cannot pass the strict gate. **The rest is mechanical once #152 merges.**
+- **OAuth survival gap FOUND + TRDD'd (TRDD-HJGR4I5W, committed `70b29e8`, `column: todo`, severity HIGH,
+  audit-conclusion issue-confirmed).** Code-traced: a present-but-DEAD refresh token (`has_refresh=True`,
+  expired, refresh keeps failing) is trapped in `cascade.classify`→`RENEW_REFRESH` forever and never
+  escalates to the human `REAUTH_NUDGE` (which keys off `has_refresh is False`). Found live: alternate
+  `fmuaddib` stuck-expired 30+ min while the daemon ticked → **no usable rotation alternate**. NEEDS
+  USER DECISION (touches the authoritative cascade design — did NOT auto-fix). Immediate remediation =
+  re-login `fmuaddib`. Fix direction = per-slot consecutive-refresh-failure counter → escalate after N.
+- **Memory heartbeat passes handled (background subconscious-agent):** atomize earlier (+atoms),
+  consolidate ABSTAINED (correctly — nothing same-subject), split ABSTAINED ×2 (nothing over the 36k
+  cap; largest USER page 11869 B). Efficiency note surfaced to user: 2/3 passes abstained (~490k tokens)
+  — the scheduler emits on cadence without a cheap pre-check; an optimization, NOT auto-touched (memory
+  subsystem has in-progress TRDDs).
+- **NEXT on resume:** L0 is genuinely blocked on CPV #152 (user) and the OAuth fix needs the user's
+  call — neither is safe to push forward autonomously now. Keep heartbeats light (markers + cheap
+  survival checks); surface only on real findings, on #152 merging, or on the user's steer. Open
+  question to user: *pause L0 until #152 merges, or point me at other unblocked work?* Do NOT
+  `/janitor-arm` (clobbers the night-loop cron — see the v0.17.2 caveat below).
+
 ### ✅ UPDATE 2026-06-23 22:16 — v0.17.2 PUBLISHED — memory-settings deviation-filter (self-discovered bug)
 - **SHIPPED `v0.17.2`** (release https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.17.2;
   `552d925` fix + `dd07117` release). publish.py strict gates all green (tests/lint/CPV exit 0).
