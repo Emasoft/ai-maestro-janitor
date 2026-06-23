@@ -105,6 +105,16 @@ Read the top 1-3 pages; the fact is in the body, and from there you can follow
 See-also into related pages exactly as in Entry A. If recall returns nothing, the
 memory doesn't exist yet — solve it, then `/janitor-memory-write` (MEMORIZE).
 
+**Results now include body ATOMS, not just pages.** A page body is a sequence of
+first-class facts (the body counterpart of `[^N]` lessons), each tagged with a
+trailing block-property marker, and `recall` ranks matching atoms by their
+`keywords:` surface and interleaves them with whole-page hits by score. So a hit
+is one of two shapes: `path#atom-id — <keywords>` is ONE specific fact — open the
+page and read it directly at that anchor (no need to skim the whole page); a plain
+`path — description` is the WHOLE page (still with its `[^N]` lessons appended).
+Atom recall lands you on the exact fact when one matches. The atom grammar lives in
+`$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` ("Atoms — per-fact recall").
+
 If memgrep is not installed, install once (it ships in this plugin):
 `cargo install --path "$CLAUDE_PLUGIN_ROOT/scripts/memgrep"`.
 
@@ -159,8 +169,10 @@ About to edit src/frontend/panels/Login.tsx
 
 <example>
 User: the oauth rotator failed again and I had to log in manually
-→ Entry B: recall "oauth rotator failed had to log in manually" → the keychain +
-  resume-protocol pages with lessons appended; read them WHOLE before touching it.
+→ Entry B: recall "oauth rotator failed had to log in manually" → ranked hits like
+  `oauth-rotator.md#rotate-cascade — rotate renew reauth keychain` (one exact fact,
+  read it at that anchor) interleaved with `keychain-creds.md — where the creds live`
+  (a whole page, lessons appended); read the few you need before touching it.
 </example>
 
 <example>

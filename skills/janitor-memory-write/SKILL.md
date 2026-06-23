@@ -110,7 +110,23 @@ from a different subject. Never make `login-panel-style` beside `login-panel`.
 Author `"$MEMDIR/<slug>.md"` with the model's schema. Set `ocd`/`lmd` to TODAY.
 Include the **typed edge section for the page's tier** AND the standing
 `## Notes and lessons learned` section (the janitor's page-shape validator flags
-a page that omits its edges or the lessons section):
+a page that omits its edges or the lessons section).
+
+**Make each durable body fact an ATOM.** When you write a fact into the body,
+append an Obsidian block-property marker at the END of that fact's block so the
+fact is individually recallable (memgrep returns it `path#atom-id — <keywords>`,
+not only as part of the whole page):
+
+```markdown
+^<page-unique-kebab-id> [keywords: <terms a future search will use>, type: <type>, ocd: <today>, lmd: <today>]
+```
+
+`keywords:` is the only REQUIRED prop — it is the atom's recall surface (the
+question words, NOT the answer's jargon); `ocd`/`lmd`/`type` are optional (an atom
+without them inherits the page's). A free-prose page (no markers) stays valid — its
+facts are recalled at page granularity — but NEW facts SHOULD be atoms. Full
+grammar (comma→property / first-colon→key-value / whitespace→value-array): the
+model's [Atoms](references/wikimem-model.md) section.
 
 ```yaml
 ---
@@ -128,6 +144,8 @@ metadata:
 <the memories — LEAN. A hub: overview + parts map. An aspect: the shared rule.
 A component: only what is specific to this element (never re-copy a governing
 rule — link up to it). For feedback/project add **Why:** and **How to apply:**.>
+<each durable fact ends with its atom marker, e.g.:>
+^<id> [keywords: <the search words for THIS fact>, type: <type>, ocd: <today>, lmd: <today>]
 
 ## Applies to          # GENERAL pages (hub/aspect) ONLY — the radiating ray-list
 - [[governed-element-1]] · [[governed-element-2]]   # EVERY element this rule governs
@@ -246,6 +264,7 @@ Copy this checklist and track your progress:
 - [ ] Editorial decision made (new page vs UPDATE an existing page)
 - [ ] Frontmatter COMPLETE: `name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier` (+ `globs` on hubs)
 - [ ] Page written: one subject, symptom-indexed `description:`, correct tier
+- [ ] Each durable body fact carries a `^id [keywords: …]` atom marker (keywords = the search words for THAT fact)
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
 - [ ] `## Notes and lessons learned` section present (even if empty)
 - [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
