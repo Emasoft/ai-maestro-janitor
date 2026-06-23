@@ -45,15 +45,32 @@ key/value** (colons in a value are kept), **whitespace → a VALUE ARRAY** (the 
 marker closes it.
 
 `keywords:` is the atom's **recall surface** — the array of search terms that makes a single fact
-findable on its own. `recall` ranks atoms by it and prints them `path#atom-id — <keywords>`, interleaved
-with page results. The harvest stamps two more block-props as provenance — `claude_mem_ref:
-<buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — and `find-claude-mem-ref` lists the atoms that
-reference a given buffer file (with their stored hashes) so a re-harvest touches only NEW or CHANGED
-memories. Authoring a fact as an atom:
+findable on its own. **An atom owns its notes/lessons/"also see"** — tied to it by INLINE references:
+the `[^N]` footnotes its body cites (defined in the page's bottom `## Notes and lessons learned` pool,
+Wikipedia-style) are its notes + lessons; the `[[wikilinks]]` in its body are its "also see". `recall`
+ranks atoms by their keyword surface, interleaves them with page results, and returns each atom as its
+**FULL aggregated record**:
+
+```text
+path#atom-id — <keywords>          # locator + the atom's keyword/metadata surface
+<the atom's main content>          # multi-paragraph / tables / code / math / links
+[N] - <the atom's lesson(s)>       # the [^N] footnotes its body references, resolved
+also see: [[related-memory]], …    # the [[wikilinks]] in its body
+```
+
+(`--no-notes` keeps the body, drops the lessons + see-also.) The harvest stamps two more block-props as
+provenance — `claude_mem_ref: <buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — and
+`find-claude-mem-ref` lists the atoms that reference a given buffer file (with their stored hashes) so a
+re-harvest touches only NEW or CHANGED memories. Authoring a fact as an atom (with its own history +
+relations as inline references):
 
 ```markdown
-The rotator drains the live account first when near a limit, then rotates to a safe alternate.
+The rotator drains the live account first when near a limit, then rotates to a safe alternate.[^1]
+See [[token-rotation]].
 ^rotate-drain [keywords: rotator drain rate-limit oauth, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
+
+## Notes and lessons learned
+[^1]: [ocd:2026-06-22 lmd:2026-06-23] earlier this drained the alternate first; reversed — the live account hits the cap sooner.
 ```
 
 ### Examples

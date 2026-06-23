@@ -396,6 +396,75 @@ fn render_notes(notes: &[ResolvedNote], full: bool) -> String {
     s
 }
 
+/// The `[^N]` footnote-REFERENCE labels in an atom's body — its inline pointers to ITS OWN
+/// notes/lessons (TRDD-3b9b2040). A `[^N]:` DEFINITION never lives inside an atom body (defs sit in the
+/// page's bottom footnote pool, under a `##` heading that resolve_atoms treats as a boundary), so every
+/// `[^N]` in an atom body is a reference. De-duped, first-seen order. Reuses the lint ref pattern
+/// (`[^x]` not immediately followed by `:`).
+fn atom_referenced_labels(body: &str) -> Vec<String> {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\](?:[^:]|$)").expect("static regex"));
+    let mut out: Vec<String> = Vec::new();
+    for cap in re.captures_iter(body) {
+        let label = cap[1].to_string();
+        if !out.contains(&label) {
+            out.push(label);
+        }
+    }
+    out
+}
+
+/// The `[[wikilink]]` targets in an atom's body — the atom's "also see" related-memory links.
+fn atom_wikilinks(body: &str) -> Vec<String> {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"\[\[([^\]]+)\]\]").expect("static regex"));
+    let mut out: Vec<String> = Vec::new();
+    for cap in re.captures_iter(body) {
+        let t = cap[1].trim().to_string();
+        if !t.is_empty() && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
+/// Render an ATOM as its FULL aggregated record (TRDD-3b9b2040): the atom's main content, then — when
+/// `with_notes` — its OWN notes/lessons (the page `[^N]` footnotes its body references inline, resolved
+/// and appended like a page's lessons but SCOPED to this atom) and its "also see" (`[[wikilinks]]` in
+/// its body). This is the per-atom counterpart of a page's read-the-notes append: each atom owns the
+/// footnotes it cites, so recall returns a single fact WITH its history + relations, self-contained.
+/// The body always prints; `--no-notes` (with_notes=false) suppresses only the lessons + see-also.
+fn render_atom_record(path: &Path, atom_id: &str, full_notes: bool, with_notes: bool) -> String {
+    let Some(atom) = resolve_atoms(path).into_iter().find(|a| a.id == atom_id) else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let body = atom.body.trim();
+    if !body.is_empty() {
+        out.push_str(body);
+        out.push('\n');
+    }
+    if !with_notes {
+        return out;
+    }
+    // The atom's notes + lessons: the page footnotes THIS atom's body references inline.
+    let labels = atom_referenced_labels(&atom.body);
+    if !labels.is_empty() {
+        let notes: Vec<ResolvedNote> = resolve_notes(path)
+            .into_iter()
+            .filter(|n| labels.contains(&n.num))
+            .collect();
+        out.push_str(&render_notes(&notes, full_notes));
+    }
+    // The atom's "also see": the related memories its body links to.
+    let links = atom_wikilinks(&atom.body);
+    if !links.is_empty() {
+        let joined: Vec<String> = links.iter().map(|l| format!("[[{l}]]")).collect();
+        out.push_str(&format!("also see: {}\n", joined.join(", ")));
+    }
+    out
+}
+
 /// Resolve a raw link URL to a target file in the corpus. Returns (target, external).
 fn resolve(
     url: &str,
@@ -976,15 +1045,29 @@ fn resolve_atoms_from_text(text: &str) -> Vec<Atom> {
     let mut atoms = Vec::new();
     let mut acc: Vec<String> = Vec::new();
     let mut in_fence = false;
-    for line in text.lines() {
+    let mut lines = text.lines();
+    // Skip a leading YAML frontmatter block (`--- … ---`) — it is PAGE metadata, never atom content.
+    // Without this the first atom's body would absorb the whole frontmatter (a page that opens with
+    // prose-then-marker, no heading in between, would mis-attribute it).
+    if matches!(text.lines().next(), Some(l) if l.trim_end() == "---") {
+        lines.next(); // opening ---
+        for l in lines.by_ref() {
+            if l.trim_end() == "---" {
+                break; // closing --- (consumed); body starts after it
+            }
+        }
+    }
+    for line in lines {
         let t = line.trim_start();
         if t.starts_with("```") || t.starts_with("~~~") {
             in_fence = !in_fence;
             acc.push(line.to_string());
             continue;
         }
-        if !in_fence && t.starts_with("##") {
-            acc.clear(); // heading = structural boundary; unmarked content before it is not an atom
+        if !in_fence && t.starts_with('#') {
+            acc.clear(); // ANY heading (#/##/###…) = structural boundary — the page lead/title and a
+            // section heading both reset the accumulator, so an atom body never absorbs a heading or
+            // the preamble before the first marker.
             continue;
         }
         let marker = if in_fence {
@@ -1751,22 +1834,32 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         } else {
             s.to_string()
         };
-        // An ATOM result prints `path#atom-id — <keywords>` and has NO page-lessons of its own (its
-        // metadata/provenance lives in its block-props, not a `[^N]` footnote). A PAGE result prints
-        // `path — <summary>` and appends its resolved lessons (the read-the-notes rule). TRDD-3b9b2040.
-        let label = match &atom_id {
-            Some(aid) => format!("{path}#{aid}"),
-            None => path.clone(),
-        };
-        if shown.is_empty() {
-            println!("{label}");
-        } else {
-            println!("{label} — {shown}");
-        }
-        if want_notes && atom_id.is_none() {
-            let block = render_notes(&resolve_notes(&pathbuf), a.full_notes);
-            if !block.is_empty() {
-                print!("{block}");
+        // An ATOM result prints the locator `path#atom-id — <keywords>` then its FULL aggregated record
+        // (the main content + ITS OWN notes/lessons — the page `[^N]` footnotes its body references —
+        // + its `[[also see]]` links). A PAGE result prints `path — <summary>` and appends the page's
+        // resolved lessons (the read-the-notes rule). TRDD-3b9b2040: notes/lessons/see-also are PER-ATOM.
+        match &atom_id {
+            Some(aid) => {
+                if shown.is_empty() {
+                    println!("{path}#{aid}");
+                } else {
+                    println!("{path}#{aid} — {shown}");
+                }
+                // The body always prints (it IS the memory); `--no-notes` suppresses only lessons+see-also.
+                print!("{}", render_atom_record(&pathbuf, aid, a.full_notes, want_notes));
+            }
+            None => {
+                if shown.is_empty() {
+                    println!("{path}");
+                } else {
+                    println!("{path} — {shown}");
+                }
+                if want_notes {
+                    let block = render_notes(&resolve_notes(&pathbuf), a.full_notes);
+                    if !block.is_empty() {
+                        print!("{block}");
+                    }
+                }
             }
         }
     }
@@ -2308,6 +2401,24 @@ second atom para
         assert_eq!(atoms[1].claude_mem_hash.as_deref(), Some("deadbeef"));
         // The fenced `^notamarker [k: v]` is inside atom b's body, NOT a third atom.
         assert!(atoms[1].body.contains("^notamarker"), "fenced marker stays as content: {:?}", atoms[1].body);
+    }
+
+    #[test]
+    fn resolve_atoms_excludes_frontmatter_and_headings_from_body() {
+        // An atom body is the FACT only — never the page frontmatter (leading `--- … ---`) nor a
+        // heading (the lead/title `#` and section `##` are structural boundaries that reset the body).
+        let text = "---\nname: p\ndescription: d\n---\n# Title\n\nThe fact is X.[^1] See [[other]].\n^a [keywords: kw]\n## Notes and lessons learned\n[^1]: a note\n";
+        let atoms = resolve_atoms_from_text(text);
+        assert_eq!(atoms.len(), 1, "exactly one atom (the [^1]: def under ## is not an atom)");
+        assert_eq!(atoms[0].body, "The fact is X.[^1] See [[other]].");
+        assert!(
+            !atoms[0].body.contains("name:") && !atoms[0].body.contains("# Title"),
+            "no frontmatter/heading leaked into the body: {:?}",
+            atoms[0].body
+        );
+        // The body's inline refs/links are the atom's own notes + see-also surfaces.
+        assert_eq!(atom_referenced_labels(&atoms[0].body), vec!["1".to_string()]);
+        assert_eq!(atom_wikilinks(&atoms[0].body), vec!["other".to_string()]);
     }
 
     #[test]

@@ -152,17 +152,21 @@ subcommands `recall`/`index`/`links`/`fact`). Its own teaching doc is
 - **recall** `memgrep recall "SYMPTOM" <memdir>` — symptom-ranked notes,
   precision-first (surface matches suppress body-only matches unless nothing
   matched the surface), printed `path — description`, best first.
-- **atoms** — a page body is a sequence of first-class **atoms** (the body
-  counterpart of `[^N]` lessons), each delimited by a trailing Obsidian
-  block-property marker `^<id> [keywords: a b c, …]`. `recall` ALSO returns
-  matching atoms — ranked by the atom's `keywords:` surface, printed
-  `path#atom-id — <keywords>`, interleaved with page results by score. So a
-  single FACT is findable on its own, not only as part of its page. Author a
-  durable fact as an atom by giving it a `^id [keywords: …]` marker; the harvest
-  stamps `claude_mem_ref:`/`claude_mem_hash:` provenance props that
-  **find-claude-mem-ref** `memgrep find-claude-mem-ref <buffer.md> <memdir>`
-  queries (full grammar + recall-output shape in `scripts/memgrep/SKILL.md` and
-  the wikimem-model atom section).
+- **atoms** — a page body is a sequence of first-class **atoms**, each delimited
+  by a trailing Obsidian block-property marker `^<id> [keywords: a b c, …]`. An atom
+  **owns its own notes/lessons/"also see"**, tied to it by INLINE references: the
+  `[^N]` footnotes its body cites (pooled at the page bottom, Wikipedia-style) are its
+  notes + lessons; the `[[wikilinks]]` in its body are its see-also. `recall` ALSO
+  returns matching atoms — ranked by the `keywords:` surface, interleaved with pages
+  by score — and AGGREGATES each atom into its full self-contained record:
+  `path#atom-id — <keywords>`, then the atom's content, then its resolved `[^N]`
+  lessons, then `also see: [[…]]`. So a single FACT is recalled in full, with its
+  history + relations, not just as part of its page. Author a durable fact as an atom
+  by giving it a `^id [keywords: …]` marker and attaching its history/relations as the
+  atom's own `[^N]` references + `[[links]]`; the harvest stamps
+  `claude_mem_ref:`/`claude_mem_hash:` provenance props that **find-claude-mem-ref**
+  `memgrep find-claude-mem-ref <buffer.md> <memdir>` queries (full grammar +
+  recall-output shape in `scripts/memgrep/SKILL.md` and the wikimem-model atom section).
 
 ## Read-the-notes rule — a memory's lessons are part of the memory
 

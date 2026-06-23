@@ -106,13 +106,19 @@ See-also into related pages exactly as in Entry A. If recall returns nothing, th
 memory doesn't exist yet — solve it, then `/janitor-memory-write` (MEMORIZE).
 
 **Results now include body ATOMS, not just pages.** A page body is a sequence of
-first-class facts (the body counterpart of `[^N]` lessons), each tagged with a
-trailing block-property marker, and `recall` ranks matching atoms by their
-`keywords:` surface and interleaves them with whole-page hits by score. So a hit
-is one of two shapes: `path#atom-id — <keywords>` is ONE specific fact — open the
-page and read it directly at that anchor (no need to skim the whole page); a plain
-`path — description` is the WHOLE page (still with its `[^N]` lessons appended).
-Atom recall lands you on the exact fact when one matches. The atom grammar lives in
+first-class facts, each tagged with a trailing block-property marker, and `recall`
+ranks matching atoms by their `keywords:` surface and interleaves them with whole-page
+hits by score. A hit is one of two shapes:
+
+- `path#atom-id — <keywords>` is ONE specific fact, returned as its **FULL aggregated
+  record** — the locator line, then the atom's content, then its OWN `[^N]`
+  notes/lessons (the footnotes its body references), then `also see: [[…]]`. You get
+  the whole fact WITH its history + relations; no need to skim the page.
+- a plain `path — description` is the WHOLE page (a navigation surface), with the
+  page's `[^N]` lessons appended.
+
+notes/lessons/"also see" are **per-ATOM** (tied to the atom by its inline `[^N]`/`[[link]]`
+references), so an atom hit is self-contained. The atom grammar + record shape live in
 `$CLAUDE_PLUGIN_ROOT/scripts/memgrep/SKILL.md` ("Atoms — per-fact recall").
 
 If memgrep is not installed, install once (it ships in this plugin):

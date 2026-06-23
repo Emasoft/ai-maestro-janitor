@@ -1620,6 +1620,35 @@ fn recall_surfaces_atom_by_unique_keyword() {
 }
 
 #[test]
+fn recall_atom_aggregates_its_own_notes_and_see_also() {
+    // Per-atom notes (TRDD-3b9b2040): an atom hit returns its body + the [^N] lesson(s) ITS body
+    // references + its [[also see]] links — the full self-contained record, NOT a bare locator.
+    let d = TempDir::new("atom-aggregate");
+    d.write(
+        "oauth-hub.md",
+        "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\nThe rotator drains the live (near-limit) account first.[^1] See [[token-rotation]].\n^rotate-drain [keywords: zqxdrain rotator]\n\n## Notes and lessons learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n",
+    );
+    let o = run(&["recall", "zqxdrain", d.as_str()]);
+    assert!(o.contains("oauth-hub.md#rotate-drain"), "locator line:\n{o}");
+    assert!(o.contains("The rotator drains the live"), "the atom body is returned:\n{o}");
+    assert!(
+        o.contains("earlier this drained the alternate"),
+        "the atom's own [^1] lesson is aggregated:\n{o}"
+    );
+    assert!(
+        o.contains("also see: [[token-rotation]]"),
+        "the atom's see-also is aggregated:\n{o}"
+    );
+    // --no-notes keeps the body but drops the lessons + see-also.
+    let nn = run(&["recall", "zqxdrain", d.as_str(), "--no-notes"]);
+    assert!(nn.contains("The rotator drains the live"), "body still shows with --no-notes:\n{nn}");
+    assert!(
+        !nn.contains("earlier this drained the alternate") && !nn.contains("also see:"),
+        "--no-notes suppresses the atom's lessons + see-also:\n{nn}"
+    );
+}
+
+#[test]
 fn recall_atom_walk_matches_index() {
     // Walk/index parity for atoms: recall BEFORE any index (walk via resolve_atoms) must equal recall
     // AFTER reindex with --use-index (the atoms table) byte-for-byte.

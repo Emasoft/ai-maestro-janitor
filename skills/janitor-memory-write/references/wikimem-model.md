@@ -206,11 +206,12 @@ subject it is.
 
 ## Atoms — first-class body elements (block-properties)
 
-A page body is not opaque prose — it is a sequence of **atoms**, the body
-counterpart of `[^N]` lessons. An atom is one durable fact (it may span several
-paragraphs, a table, a code block) and it carries **its own metadata** so memgrep
-can index and recall it **individually**, by its own keywords, not just as part of
-its page. This is the second of the **two metadata levels** — do NOT conflate them:
+A page body is not opaque prose — it is a sequence of **atoms**. An atom is one
+durable fact (it may span several paragraphs, a table, a code block) that carries
+**its own metadata, its own notes, its own lessons-learned, and its own "also see"**
+— so memgrep indexes and recalls it **individually**, by its own keywords, and
+returns the **full self-contained record**, not just a slice of its page. This is the
+second of the **two metadata levels** — do NOT conflate them:
 
 1. **PAGE metadata** — the YAML `---` frontmatter (`name`, `description`, `tier`, …).
    One per file; the page's identity.
@@ -241,17 +242,43 @@ atom imported from the Claude `MEMORY.md` buffer system): `claude_mem_ref:
 <buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — its provenance back to the
 source buffer note, which `memgrep find-claude-mem-ref <buffer.md>` queries.
 
-**How recall returns an atom:** `memgrep recall` ranks atoms by their keyword surface
-and prints them `path#atom-id — <keywords>`, interleaved with whole-page results by
-score. An atom has NO `[^N]` lessons of its own (its WHY/provenance lives in its
-block-props); a superseded ATOM fact is still demoted to a page-level `[^N]` lesson
-(the invariant below), the atom body cleaned to the new truth.
+**An atom owns its notes, lessons, and "also see" — tied to it by INLINE references.**
+This is the part that is easy to get backwards: notes / lessons-learned / see-also are
+**per-ATOM, not per-page**. On the page they are stored **Wikipedia-style** — the atom's
+main content sits at the top of its block, and its notes/lessons live in the page's bottom
+`## Notes and lessons learned` footnote pool, **tied to the atom by the `[^N]` references
+inside the atom's body**; its "also see" are the `[[wikilinks]]` in the atom's body. So an
+atom OWNS exactly the footnotes it cites and the wikilinks it makes.
 
-**Authoring discipline:** give each durable fact its own `^id [keywords: …]` marker
-so it is findable on its own. Block-ids are page-unique kebab/`^memory-<uid>` slugs.
-A page whose body is still free prose (no markers) is valid — its facts are simply
-recalled at page granularity until the atomize migration (or a manual edit) gives
-them markers. One fact = one atom, mirroring one element = one page.
+- A **lesson-learned** is a *previous version* of THIS atom: when an update supersedes the
+  atom, the old version is demoted to a `[^N]` lesson the (now-corrected) atom body
+  references — metadata = the change-date + the original metadata, content = the old text
+  + a concise WHY it changed. The atom body moves forward clean; its history accretes as
+  its own footnotes (the superseded-memory invariant below, applied per-atom).
+- A **note** is any other annotation the atom cites; **"also see"** are its related-memory
+  `[[links]]`.
+
+**How recall returns an atom (memgrep AGGREGATES the full record):** `memgrep recall` ranks
+atoms by their keyword surface, interleaved with page results by score, and returns each
+atom hit as its complete record:
+
+```text
+path#atom-id — <keywords>          # the locator + the atom's metadata surface
+<the atom's main content>          # multi-paragraph / tables / code / math / links
+[N] - <the atom's lesson(s)>       # the [^N] footnotes its body references, resolved
+also see: [[related-memory]], …    # the [[wikilinks]] in its body
+```
+
+(`--no-notes` keeps the body, drops the lessons + see-also.) A PAGE hit, by contrast, stays
+a one-line `path — description` with the page's lessons appended — the page is a navigation
+surface, the atom is the granular memory returned in full.
+
+**Authoring discipline:** give each durable fact its own `^id [keywords: …]` marker so it is
+findable on its own, and attach its history/relations AS the fact's own `[^N]` references +
+`[[links]]` (defined in the bottom footnote pool / linked inline). Block-ids are page-unique
+kebab/`^memory-<uid>` slugs. A page whose body is still free prose (no markers) is valid —
+its facts are recalled at page granularity until the atomize migration (or a manual edit)
+gives them markers. One fact = one atom, mirroring one element = one page.
 
 ## The superseded-memory invariant (updates never delete)
 
