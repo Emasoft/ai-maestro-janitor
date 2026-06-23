@@ -1,9 +1,9 @@
 ---
 trdd-id: ab232dbd-59eb-4bff-8770-4dd7c65ac00e
 title: MEMORY.md buffer ⇄ Wikimem wiki coexistence — harvest-mirror, never stub
-column: design
+column: dev
 created: 2026-06-23T10:58:37+0200
-updated: 2026-06-23T10:58:37+0200
+updated: 2026-06-23T11:28:38+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -88,12 +88,40 @@ MEMORY.md 100% intact." Everything else about the editorial curation (step 3) is
   (SessionStart) + the heartbeat re-arm; note the rollout.
 - **Reverse, don't lose** — the old deprecation lessons (a5780c23) are demoted, not deleted.
 
-### TWO DESIGN FORKS (proposed; awaiting USER confirm)
-- **Q1 — recall scope.** PROPOSED: the harness already auto-loads MEMORY.md (buffer recalled
-  natively) + memgrep recalls the curated wiki → both covered at recall time; keep memgrep
-  wiki-focused. ALT: memgrep ALSO indexes un-harvested buffer notes for zero-gap recall.
-- **Q2 — harvest tracking.** PROPOSED: a per-scope watermark (hash/marker of what's already
-  mirrored) → harvest only the delta. Buffer left 100% intact.
+### RESOLVED ARCHITECTURE — USER decision 2026-06-23 ("Separate parallel copies")
+The USER chose **separate parallel copies** over promote-in-place: harvest NEVER modifies a raw
+buffer note (harness-owned); it creates a SEPARATE curated copy in a `wiki/` sub-namespace; the
+same fact lives in BOTH files (duplication accepted); a watermark tracks what's mirrored.
+
+**Grounding fact (verified 2026-06-23 on this machine's LOCAL+PROJECT scopes):** EVERY existing
+`memory/*.md` already carries FULL wikimem frontmatter (`node_type: memory` + `ocd`/`lmd`/`tier`)
+— even the type-prefixed `feedback_*`/`reference_*`/`project_*`/`local_*` notes. There are **ZERO
+raw buffer notes physically present** right now: the old in-place model curated everything, and
+MEMORY.md is the 548-byte deprecation stub. So the buffer is currently **dormant** — the harvest
+does NOTHING to the current corpus (all already curated); it ACTIVATES when the harness next
+writes a minimal-frontmatter note. This dissolves the migration risk: **no bulk move is needed.**
+
+**The physical layout (per scope — LOCAL `~/.claude/projects/<slug>/memory/`, PROJECT
+`<repo>/.claude/project/memory/`, USER `<plugin-data>/…/memory/`):**
+- **Buffer** = `memory/*.md` TOP-LEVEL + MEMORY.md — harness-owned, minimal frontmatter, grows
+  freely, auto-loaded each session. Harvest READS it; NEVER writes/trims/stubs it.
+- **Wiki** = `memory/wiki/*.md` — the curated layer's home GOING FORWARD (rich frontmatter, `[^N]`
+  lessons, bidirectional links). Harvest + the write/split/consolidate/conflict/repair skills
+  write HERE.
+- **Discriminator (frontmatter shape, NOT path):** a page with `metadata.tier` / `node_type:
+  memory` is CURATED (skip in harvest); a minimal note (no tier) is RAW BUFFER (harvest it). The
+  current full-frontmatter top-level pages are LEGACY curated — recallable + de-dup'd against;
+  their optional relocation into `wiki/` is a SEPARATE deferred tidy-up (not this ship).
+
+**Q1 — recall scope: RESOLVED.** memgrep recall stays UNCHANGED — it recurses `memory/`, so it
+naturally covers BOTH the top-level buffer notes (closing the pre-harvest recall gap) AND the
+`wiki/` curated pages. The harness additionally auto-loads MEMORY.md. No memgrep change; no
+recall gap.
+
+**Q2 — harvest tracking: RESOLVED.** A per-scope watermark (name + content-hash of each mirrored
+buffer note) → harvest only the un-mirrored delta, idempotent + crash-safe via the txn core.
+Buffer left 100% intact. **De-dup:** before mirroring a buffer note, RECALL its subject across
+`wiki/`; if a page exists → UPDATE it (correction protocol); else CREATE `wiki/<name>.md`.
 
 ### PUBLISH INTERACTION
 This REVERSES part of the unpublished v0.16.0 memory work (the stub/deprecation model). It folds
@@ -101,9 +129,19 @@ into the publish — the v0.16.0 (or v0.17.0) release now ships coexistence, not
 publish stays paused (also still blocked on the immortality-persistence decision — see
 TRDD-fe45babc §1).
 
-### NEXT ACTION
-1. USER confirms this matches "the original approach" + answers Q1/Q2 (or says "go" = my recs).
-2. Then: parallel-agent implementation (TDD) of the touchpoints, YOU commit sequentially.
-3. Then fold into the publish.
+### NEXT ACTION (architecture DECIDED — implement)
+1. ✅ Phase 1a — recall rule coexistence rewrite (committed 61ca557). Refine: memgrep recalls the
+   whole `memory/` tree (buffer + `wiki/`); name the `memory/wiki/` namespace explicitly.
+2. **Phase 1b (NOW)** — `memory_scopes.py`: add `resolve_wiki_dir()` per scope (`memory/wiki/`) +
+   tests. Then rewrite `skills/janitor-memory-harvest/SKILL.md`: scan top-level RAW buffer notes
+   (minimal frontmatter) NOT yet watermarked → RECALL across `wiki/` → UPDATE-or-CREATE
+   `wiki/<name>.md` → stamp watermark; DROP the step-5 re-stub; leave MEMORY.md + buffer intact.
+3. Phase 1c — write/bootstrap/split/consolidate/conflict/repair skills target `memory/wiki/` for
+   the curated layer; bootstrap creates `wiki/` + stops seeding the stub. `memory_settings.py`
+   watermark store. `harvest_preservation_ok` confirms the MIRROR (not a stub reduction).
+4. Phase 1d — README / CLAUDE.md coexistence story; detectors re-confirm (#55).
+5. DEFERRED (separate careful task): relocate LEGACY full-frontmatter top-level pages → `wiki/`
+   (PROJECT via git mv is safe; LOCAL via backup-first). NOT required for this ship.
+6. Fold into the publish (still paused — also blocked on immortality-persistence, TRDD-fe45babc §1).
 
 ## Notes and lessons learned
