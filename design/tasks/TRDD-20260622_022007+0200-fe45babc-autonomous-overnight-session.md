@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T10:13:41+0200
+updated: 2026-06-23T10:25:53+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -182,6 +182,19 @@ weekly wall). Inline, frugal, commit often. A 4-parallel-spark burst = instant t
   AND the blocker). **M4 (#57/#58 seam-synthesis split) is DONE** (9ef9da1 is_legal_split
   oversized + a0f1fab skill step-3a + 8cecaff size raise) — the M4 queue line is stale.
   Winding down per the prior session's directive; the loop auto-resumes after the 17:00 reset.
+- 10:20 (same wake — BUDGET RESTORED) — OAuth re-check: **emanuele 7d=2% / 5h=8%** (fresh — a
+  manual /login or token swap, NOT the scheduled 17:00 reset; fmuaddib reads `err`). With the
+  publish still BLOCKED on the USER a/b decision, did decision-INDEPENDENT investigation (not
+  risky/moot work): **#56 root-cause REFINED** — `parse_frontmatter` (memory_edit_verify.py:62)
+  HOISTS `metadata.*`→top-level, so the Python verify layer tolerates BOTH shapes (why
+  verify_repair passed on nested pages); memgrep (Rust) reads ONLY top-level `ocd`/`lmd`, so a
+  nested page loses its date in recall. grep confirms NO Python emitter writes nested → the
+  nesting is PRE-EXISTING on-disk pages, not a serializer bug. FIX (still not-a-near-wall):
+  verify_repair must inspect the RAW frontmatter (pre-hoist) to REJECT ocd/lmd-only-under-
+  metadata, + a careful one-time migration of existing nested pages (data-touching → RULE 0
+  care; NOT autonomous-while-asleep). #61 (weekly audit drift) = auto-generated; mostly the OLD
+  trdd-reminder behavior my #59 fix already corrects (ships in the publish) + 2 stuck-in-testing
+  TRDDs (minor). HOLDING for the user's a/b decision; nothing risky started. Tree clean @30698b4.
 
 ### SUPERSEDED — do NOT carry forward
 - The earlier idea of waiting for the user's naming calls on the granular skills — the
