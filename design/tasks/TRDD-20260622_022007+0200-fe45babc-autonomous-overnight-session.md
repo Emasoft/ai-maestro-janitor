@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T21:09:57+0200
+updated: 2026-06-23T22:16:19+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,37 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ✅ UPDATE 2026-06-23 22:16 — v0.17.2 PUBLISHED — memory-settings deviation-filter (self-discovered bug)
+- **SHIPPED `v0.17.2`** (release https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.17.2;
+  `552d925` fix + `dd07117` release). publish.py strict gates all green (tests/lint/CPV exit 0).
+  **CI: 5/6 workflows green** (CI, Release, zizmor, memgrep-binaries, Notify-Marketplace). The lone
+  failure `Graph Update: uv in /.` is GitHub-AUTOMATIC dependency-graph (NO repo workflow produces it),
+  TRANSIENT (succeeded on v0.17.1 an hour earlier with the same uv.lock bump) — not repo-fixable, not
+  caused by the change, auxiliary (dependency insights only). Release HEALTHY; do NOT re-investigate it.
+- **The bug (self-discovered via a heartbeat `[janitor-memory-split]` pass, TRDD-378c85da):**
+  `memory_settings.set_value` wrote the WHOLE settings dict wholesale, freezing every key (incl. ones
+  left at default) into `memory-settings.json`. So the `split_max_bytes` 12k→36k raise (`8cecaff`) was
+  MASKED on any machine that had captured the old 12000 → wikimem pages kept fragmenting at 12k. Surfaced
+  live: a split pass over-split a 14575B USER page that, under the intended 36k cap, should have stayed whole.
+- **Fix:** `set_value` now persists ONLY keys that DEVIATE from current DEFAULTS (a later default-change
+  flows through to every untouched key); `load()` unchanged; +5 TDD tests incl. the masking regression.
+  THIS machine's stale 12000 reset operationally → file now `{}`, active cap = 36000 (verified end-to-end).
+  Other machines: an existing 12000 ≠ a deliberate choice, so NOT auto-overridden — one explicit
+  `set split_max_bytes 36000` clears it (documented in the TRDD; no fragile historical-default migration).
+- **The split that surfaced it:** USER page `wikimem-atom-block-properties` (14575B) → overview + 3
+  sub-pages, verify_split PASS, no info lost (legit per the THEN-active 12k cap; left in place — valid, just
+  finer-grained than the 36k design intends; a future CONSOLIDATE pass may re-merge if it judges them related).
+- **POST-PUBLISH CAVEAT (important):** do NOT run `/janitor-arm` during this night-loop. The single
+  cron (`8f2ee482`, session-only) carries BOTH `[janitor-heartbeat]` AND the `[night-work]` directive in
+  its prompt; `/janitor-arm` CronDeletes any `[janitor-heartbeat]`-prefixed cron and recreates the
+  STANDARD heartbeat WITHOUT `[night-work]` → it would clobber the loop. Skipped it (loop-preservation).
+  `/reload-plugins` also skipped (cache not yet v0.17.2 — no-op; the daemon auto-update → `[janitor-reload]`
+  marker picks it up). Surface to the user: the directive's "run /janitor-arm after publish" is unsafe in
+  this custom-cron setup.
+- **NEXT:** queue CLEAR again except blocked #52 (memgrep verbs in ai-maestro-plugin still UNSHIPPED —
+  re-checked: only DESIGN commit `d8353db4`, no `publish-sync`/`link` verbs). Remaining immortality work
+  still gated (Workflow opt-in + user approval). /go-on-yourself otherwise.
 
 ### ✅ UPDATE 2026-06-23 21:05 — v0.17.1 PUBLISHED — #56 + #61 closed; queue now CLEAR except #52
 - **SHIPPED `v0.17.1`** (https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.17.1) — a
