@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T16:07:51+0200
+updated: 2026-06-23T17:09:35+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -68,17 +68,18 @@ directives. The CORRECT model — memorized at USER scope in [[wikimem-atom-bloc
   render emits non-empty labeled groups `notes:` / `lessons learned:` / `see also:`. Removed
   `atom_wikilinks` + the `[[link]]`-as-see-also path (body keeps `[[links]]` inline as page-level text;
   atom see-also is now `# See also` footnotes). New grouping test. 126 green, clippy clean.
-- **g3 ☐ TODO (the ONLY remaining piece) — shared-footnote ref-counting on atom MOVES** (Python verify
-  layer: `scripts/lib/memory_edit_verify.py` + `memory_txn`). When split/merge/harvest MOVES an atom to
-  another page, its `[^N]` footnote defs must travel with it, but a note/lesson/see-also def must NOT be
-  deleted from the source while ANOTHER atom there still references it (ref-counting GC). The clean,
-  page-local invariant to add: **a `footnote_refs_resolve(page_text)` helper — every `[^N]` REFERENCE in
-  a result page's body resolves to a `[^N]:` DEFINITION on that SAME page** — wired into verify_split /
-  verify_merge as a "no NEW dangling footnote ref on any result page" check (scoped to NEW, so it can't
-  trip on pre-existing corpus issues). Deferred for a FRESH pass: it's subtle verify logic guarding a
-  capability that's only partially built (the split/merge skills don't yet distribute atoms+footnotes at
-  atom granularity), and a degraded-context implementation could ship a wrong gate that blocks legit
-  edits. ~40 LOC + tests once designed against the actual verify_split/merge signatures.
+- **g3 ✅ DONE (commit 7ace046)** — shared-footnote ref-counting on atom MOVES (Python verify layer
+  `scripts/lib/memory_edit_verify.py`). Built EXACTLY the planned invariant: `footnote_refs_resolve(text)`
+  (every `[^id]` ref resolves to a `[^id]:` def on the SAME page; an orphan def — def without ref — is
+  allowed) + `no_new_dangling_footnote_refs(sources, results)` (the count of unresolved refs across result
+  pages must not exceed the source count — COUNT-based so footnote renumbering is safe, NEW-scoped so a
+  pre-existing dangling ref the op merely carries forward does not trip it). Wired into verify_merge
+  (sources → [result]) and verify_split (source → [overview, *subpages]); other_live_pages excluded
+  (footnotes are page-local, never redirected like `[[wikilinks]]`). 10 new tests (helper units +
+  end-to-end split/merge FAIL + clean-split regression). Also fixed a latent bug TDD surfaced:
+  verify_split's body-fact haystack (`_body_minus_lessons`) truncated at the FIRST `## Notes` heading,
+  dropping every sub-page after the first — false-failing legit splits that move a ≥24-char fact to a
+  later sub-page. Full suite green (73 verify + 38 txn/maintenance); ruff clean.
 - **g4 ✅ DONE (via g6)** — recall already interleaves atoms with pages by score (phase c); the
   element-primary / page-as-context / "no need to skim the page" wording now lives in the recall skill
   (commit f59f2ed) + the existing "navigation contract (don't over-read)" section.
@@ -87,10 +88,15 @@ directives. The CORRECT model — memorized at USER scope in [[wikimem-atom-bloc
 - **g6 ✅ DONE (commit f59f2ed)** — `scripts/memgrep/SKILL.md`, janitor-memory-recall, janitor-memory-write,
   and `markdown-memory-recall.md` aligned to the leading + footnote-grouped model; the page-level
   `[[wikilink]]` link law left intact. USER-scope memory already updated ([[wikimem-atom-block-properties]] [^4]).
-- NEXT ACTION: **g3 is the sole remainder** — author it fresh against the real verify_split/merge
-  signatures (read `memory_edit_verify.py` first). g1/g2/g4/g5/g6 are DONE — the model is consistently
-  implemented + documented. The engine is shippable; consider a `publish.py` milestone once g3 lands
-  (or ship g1-g6 now and add g3 next — g3 is a verify hardening, not a correctness blocker for recall).
+- NEXT ACTION: **PHASE g COMPLETE (g1–g6 + g3 all DONE).** The atom engine + the shared-footnote
+  move-rule verify are implemented, tested, and documented; the memory feature is shippable. PUBLISH is
+  BLOCKED — but NOT by the memory work: the `main` branch carries the unfinished immortal-janitor GROUP B
+  (launchd persistence) which trips 4 CPV `skillaudit:persistence` CRITICALs that cannot be cleared
+  (real + load-bearing + the no-exempt USER policy) until GROUP C lands or GROUP B is extracted off main.
+  The memory work is hostage to that branch state. See [[janitor-publish-blocked-immortal-persistence]]
+  for the full blocker + the USER decision needed. Remaining memory-only CPV debt (does NOT block the
+  memory feature's correctness; deferred for a careful editorial pass, not a rush): 3 oversized memory
+  SKILLs (consolidate/split/write >5000 tok bodies) + the wikimem-model TOC-embed MINORs.
 
 ### WHY THIS TRDD EXISTS (the realization, USER-confirmed 2026-06-23)
 While building the MEMORY.md⇄Wikimem coexistence harvest (TRDD-ab232dbd), the USER asked:
@@ -101,7 +107,7 @@ now."* Investigation (VERIFIED against `scripts/memgrep/src/index.rs` + `memory.
 The per-atom metadata model (the Obsidian Block Properties convention) was a SPEC that was never
 wired into memgrep's indexer. So "recall an atom by its keywords" never worked — atoms were only
 findable as part of their page. The USER chose **"Stop & redesign"**: pause implementation, write
-THIS design TRDD, then build from the agreed design.
+THIS design TRDD, then build from the agreed design.[^1]
 
 ### VERIFIED CURRENT ARCHITECTURE (memgrep, today)
 - The SQLite index (`index.rs`) has TWO recallable element kinds in the `memories` table
@@ -275,8 +281,8 @@ The atom build is NOT greenfield: `[^N]` lessons are ALREADY first-class index e
 mirror that machinery exactly. The ROW MODEL below is INVARIANT to the Q1–Q6 answers (those shape
 the PARSER + the ranking, not the row model) — so it can be locked in now.
 
-**How a lesson becomes a first-class index row today** (`scripts/memgrep/src/index.rs::insert_file`
-+ `memory.rs::resolve_notes`, verified):
+**How a lesson becomes a first-class index row today** (`scripts/memgrep/src/index.rs::insert_file` +
+`memory.rs::resolve_notes`, verified):
 1. The PAGE → one `memories` row (`element_type='memory'`, `body`=full text), FTS-shadowed in
    `memories_fts(title, description, body)`.
 2. Each lesson → `resolve_notes_public(path)` yields `ResolvedNote{num, ocd, lmd, text, urls}`; each
