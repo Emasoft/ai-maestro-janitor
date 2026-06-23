@@ -1417,8 +1417,10 @@ const STOPWORDS: &[&str] = &[
 ];
 
 /// One scored candidate BEFORE the precision-first filter: `(surface_hits, body_only, display_path,
-/// summary, pathbuf, ocd, lmd)`. Built identically from the live walk OR the SQLite index, so both
-/// paths feed the SAME finalize step and produce byte-identical output.
+/// summary, pathbuf, ocd, lmd, atom_id)`. Built identically from the live walk OR the SQLite index, so
+/// both paths feed the SAME finalize step and produce byte-identical output. The trailing `atom_id` is
+/// `Some(id)` when the row is a body ATOM (printed `path#id`, no lesson append) and `None` for a PAGE
+/// (TRDD-3b9b2040) — atoms and pages interleave in ONE ranked list by score.
 type RecallScored = (
     i64,
     bool,
@@ -1427,11 +1429,21 @@ type RecallScored = (
     PathBuf,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 /// The rank row AFTER the precision-first filter: `(score, display_path, summary, pathbuf, ocd,
-/// lmd)` — what the date filter + sort + print operate on.
-type RecallRanked = (i64, String, String, PathBuf, Option<String>, Option<String>);
+/// lmd, atom_id)` — what the date filter + sort + print operate on. `atom_id` survives so the print
+/// step formats atoms as `path#id` and suppresses their (page-level) lesson append.
+type RecallRanked = (
+    i64,
+    String,
+    String,
+    PathBuf,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 /// Is `path` one of the index FILES (`MEMORY.md` / `memory-index.md`)? Those are MAPS of the notes,
 /// not notes — ranking them lets a symptom query match the index's gloss lines and return the index
@@ -1453,6 +1465,9 @@ struct CandidateMeta {
     pathbuf: PathBuf,
     ocd: Option<String>,
     lmd: Option<String>,
+    /// `Some(atom-id)` when this candidate is a body ATOM (its surface is the keyword array, it prints
+    /// as `path#atom-id`, and it has no page-lessons of its own); `None` for a whole-page candidate.
+    atom_id: Option<String>,
 }
 
 /// Score one note's symptom surface (title + summary + tags) against the query terms, plus the
@@ -1484,14 +1499,41 @@ fn score_candidate(
             m.pathbuf,
             m.ocd,
             m.lmd,
+            m.atom_id,
         ))
     } else {
         None
     }
 }
 
-/// Gather scored candidates from the LIVE tree-walk (`collect_md` → `read_note`). The body is read
-/// lazily (only when the surface missed), preserving the walk's existing I/O profile.
+/// Build the recall `CandidateMeta` for ONE body atom (TRDD-3b9b2040): its keyword array is BOTH the
+/// ranked surface (title is empty, summary == tags == keywords) AND the display summary. `display_path`
+/// is the PAGE path — the print step composes `path#atom-id`. The page's date is passed as the already-
+/// resolved fallback for an atom that carries none.
+fn atom_meta(
+    display_path: String,
+    pathbuf: PathBuf,
+    atom_id: String,
+    keywords: String,
+    ocd: Option<String>,
+    lmd: Option<String>,
+) -> CandidateMeta {
+    CandidateMeta {
+        display_path,
+        title: String::new(),
+        summary: keywords.clone(),
+        tags_joined: keywords,
+        pathbuf,
+        ocd,
+        lmd,
+        atom_id: Some(atom_id),
+    }
+}
+
+/// Gather scored candidates from the LIVE tree-walk (`collect_md` → `read_note` for the PAGE, then
+/// `resolve_atoms` for its body ATOMS). The page body is read lazily (only on a surface miss),
+/// preserving the walk's I/O profile; atoms add one `resolve_atoms` parse per page. Pages and atoms
+/// land in ONE list so `finalize_recall` interleaves them by score.
 fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<RecallScored> {
     let mut all = Vec::new();
     for path in collect_md(paths, hidden) {
@@ -1502,6 +1544,8 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
             continue;
         };
         let p = path.clone();
+        // Keep the page's dates for the atom fallback BEFORE the page meta moves them.
+        let (page_ocd, page_lmd) = (note.ocd.clone(), note.lmd.clone());
         let meta = CandidateMeta {
             display_path: rel(&path),
             title: note.title,
@@ -1510,9 +1554,27 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
             pathbuf: path,
             ocd: note.ocd,
             lmd: note.lmd,
+            atom_id: None,
         };
         if let Some(row) = score_candidate(terms, meta, || md::read_text(&p)) {
             all.push(row);
+        }
+        // Body ATOMS: each ranks by its own keyword surface; the page's date is the fallback. A page
+        // with no `^id [props]` markers yields none (today's free-prose corpus is unaffected).
+        for atom in resolve_atoms(&p) {
+            let kw = atom.keywords.join(" ");
+            let body = atom.body.clone();
+            let meta = atom_meta(
+                rel(&p),
+                p.clone(),
+                atom.id,
+                kw,
+                atom.ocd.or_else(|| page_ocd.clone()),
+                atom.lmd.or_else(|| page_lmd.clone()),
+            );
+            if let Some(row) = score_candidate(terms, meta, || Some(body)) {
+                all.push(row);
+            }
         }
     }
     all
@@ -1533,7 +1595,24 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
             tags_joined: c.tags_joined,
             ocd: c.ocd,
             lmd: c.lmd,
+            atom_id: None,
         };
+        if let Some(row) = score_candidate(terms, meta, || Some(body)) {
+            all.push(row);
+        }
+    }
+    // Body ATOMS from the index (TRDD-3b9b2040) — same keyword-surface scoring as the walk, so an
+    // index-backed atom recall is byte-identical to `gather_from_walk`'s `resolve_atoms` pass.
+    for c in crate::index::recall_atom_candidates(conn)? {
+        let body = c.body;
+        let meta = atom_meta(
+            c.page_path.clone(),
+            PathBuf::from(&c.page_path),
+            c.atom_id,
+            c.keywords,
+            c.ocd,
+            c.lmd,
+        );
         if let Some(row) = score_candidate(terms, meta, || Some(body)) {
             all.push(row);
         }
@@ -1590,7 +1669,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     let mut scored: Vec<RecallRanked> = all
         .into_iter()
         .filter(|(h, body_only, ..)| !a.precision_first || *h > 0 || (!any_surface && *body_only))
-        .map(|(h, _, p, s, pb, ocd, lmd)| (h, p, s, pb, ocd, lmd))
+        .map(|(h, _, p, s, pb, ocd, lmd, aid)| (h, p, s, pb, ocd, lmd, aid))
         .collect();
 
     // Date-range filter (`--since`/`--until` on the `--date-field` date). A note with NO date in the
@@ -1598,7 +1677,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     // so it falls out (documented in `recall_missing_date_excluded_from_range_filter`). ISO-8601
     // strings compare lexicographically via the shared `Cmp` comparator (one comparator with --num).
     if a.since.is_some() || a.until.is_some() {
-        scored.retain(|(_, _, _, _, ocd, lmd)| {
+        scored.retain(|(_, _, _, _, ocd, lmd, _)| {
             let date = match a.date_field {
                 DateField::Ocd => ocd,
                 DateField::Lmd => lmd,
@@ -1649,20 +1728,26 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         }
     }
 
-    for (_score, path, summary, pathbuf, ..) in scored.into_iter().take(a.top) {
+    for (_score, path, summary, pathbuf, _ocd, _lmd, atom_id) in scored.into_iter().take(a.top) {
         let s = summary.trim();
         let shown: String = if s.chars().count() > 140 {
             s.chars().take(140).collect::<String>() + "…"
         } else {
             s.to_string()
         };
+        // An ATOM result prints `path#atom-id — <keywords>` and has NO page-lessons of its own (its
+        // metadata/provenance lives in its block-props, not a `[^N]` footnote). A PAGE result prints
+        // `path — <summary>` and appends its resolved lessons (the read-the-notes rule). TRDD-3b9b2040.
+        let label = match &atom_id {
+            Some(aid) => format!("{path}#{aid}"),
+            None => path.clone(),
+        };
         if shown.is_empty() {
-            println!("{path}");
+            println!("{label}");
         } else {
-            println!("{path} — {shown}");
+            println!("{label} — {shown}");
         }
-        // Read-the-notes: after the ranked note, append its resolved lessons (body-then-lessons).
-        if want_notes {
+        if want_notes && atom_id.is_none() {
             let block = render_notes(&resolve_notes(&pathbuf), a.full_notes);
             if !block.is_empty() {
                 print!("{block}");
@@ -1822,6 +1907,7 @@ fn find_score_note(q: &query_dsl::Query, m: CandidateMeta, body: &str) -> Option
         m.pathbuf,
         m.ocd,
         m.lmd,
+        m.atom_id,
     ))
 }
 
@@ -1846,6 +1932,7 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
             pathbuf: path,
             ocd: note.ocd,
             lmd: note.lmd,
+            atom_id: None,
         };
         if let Some(row) = find_score_note(q, meta, &body) {
             all.push(row);
@@ -1872,6 +1959,7 @@ fn find_gather_index(
             tags_joined: c.tags_joined,
             ocd: c.ocd,
             lmd: c.lmd,
+            atom_id: None,
         };
         if let Some(row) = find_score_note(q, meta, &body) {
             all.push(row);

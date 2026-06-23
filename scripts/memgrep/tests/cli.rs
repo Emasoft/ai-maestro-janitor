@@ -1586,3 +1586,72 @@ fn walk_and_dedups_overlapping_positional_paths() {
     let hits = o.lines().filter(|l| l.contains("note1.md")).count();
     assert_eq!(hits, 1, "overlapping positionals must not duplicate a file:\n{o}");
 }
+
+// ─────────────────── atom-level recall (TRDD-3b9b2040) ───────────────────
+
+/// A page whose body carries two `^id [block-props]` atoms with UNIQUE (zqx-prefixed) keywords that
+/// appear nowhere in the page surface, plus a page-level `[^1]` lesson sentinel.
+const ATOM_CORPUS: &str = "---\nname: oauth-hub\ndescription: oauth rotation overview notes\ntags: [oauth]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\nThe rotator drains the live account first when near a limit.\n^rotate-drain [keywords: zqxdrain rotator, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nCredentials live in the macOS keychain, never a slots dir.\n^keychain [keywords: zqxkeychain creds]\n\n## Notes and lessons learned\n[^1]: page-level lesson sentinel zqxlesson.\n";
+
+#[test]
+fn recall_surfaces_atom_by_unique_keyword() {
+    // The whole point of the redesign: a single fact is findable by ITS OWN keyword. Querying an
+    // atom-only keyword returns that atom as `path#atom-id`, NOT the page, NOT the sibling atom, and
+    // with NO page-lesson append (an atom has no `[^N]` lessons of its own).
+    let d = TempDir::new("atom-recall");
+    d.write("oauth-hub.md", ATOM_CORPUS);
+    let o = run(&["recall", "zqxdrain", d.as_str()]); // no index yet → walk path
+    assert!(
+        o.contains("oauth-hub.md#rotate-drain — zqxdrain rotator"),
+        "the atom must surface as path#atom-id — <keywords>:\n{o}"
+    );
+    assert!(!o.contains("#keychain"), "the sibling atom must not surface:\n{o}");
+    assert!(
+        !o.contains("zqxlesson"),
+        "an atom result must NOT append the page's [^N] lessons:\n{o}"
+    );
+    // The page itself is a body-only match (its body holds the marker line) — precision-first
+    // suppresses it because the atom matched the SURFACE. A page result has the `path — <desc>` form
+    // (no `#`); the atom result has `path#id — …`, so the bare page form proves the page was dropped.
+    assert!(
+        !o.contains("oauth-hub.md — "),
+        "the page (a body-only match) is suppressed by precision-first when the atom matched:\n{o}"
+    );
+}
+
+#[test]
+fn recall_atom_walk_matches_index() {
+    // Walk/index parity for atoms: recall BEFORE any index (walk via resolve_atoms) must equal recall
+    // AFTER reindex with --use-index (the atoms table) byte-for-byte.
+    let d = TempDir::new("atom-parity");
+    d.write("oauth-hub.md", ATOM_CORPUS);
+    let walk = run(&["recall", "zqxdrain", d.as_str()]); // no .memgrep yet → walk
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["recall", "zqxdrain", d.as_str(), "--use-index"]);
+    assert!(
+        walk.contains("#rotate-drain"),
+        "walk recall must surface the atom:\n{walk}"
+    );
+    assert_eq!(
+        walk, indexed,
+        "index-backed atom recall must match the walk byte-for-byte:\nwalk:\n{walk}\nindex:\n{indexed}"
+    );
+}
+
+#[test]
+fn find_claude_mem_ref_cli_lists_atoms_by_provenance() {
+    // The harvest provenance query end-to-end: list every atom whose claude_mem_ref block-prop points
+    // at a source buffer file, printed `path#atom-id\t<hash>`. The keychain atom (no claude_mem_ref)
+    // is excluded.
+    let d = TempDir::new("cmref-cli");
+    d.write("oauth-hub.md", ATOM_CORPUS);
+    let o = run(&["find-claude-mem-ref", "feedback_oauth.md", d.as_str()]);
+    assert!(
+        o.contains("oauth-hub.md#rotate-drain") && o.contains("abcd1234"),
+        "the harvested atom + its stored source-hash must be listed:\n{o}"
+    );
+    assert!(
+        !o.contains("#keychain"),
+        "an atom with no claude_mem_ref must not be listed:\n{o}"
+    );
+}

@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T14:01:21+0200
+updated: 2026-06-23T14:11:41+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -154,9 +154,17 @@ claude_mem_hash, body)` + `atoms_fts(keywords, body)` in `index.rs`; `insert_fil
 the lessons loop) via `resolve_atoms_public`; `delete_rows_for_path` clears atoms + FTS; `SCHEMA_VERSION
 = 2` migration clears the `files` ledger on a version bump so the next reindex re-parses an UNCHANGED
 corpus to fill atoms (verified by `schema_migration_reparses_unchanged_corpus_to_fill_atoms`); 3 new
-index tests, full suite 119 green (33 unit + 86 integration). NEXT →
-**(c)** recall atom candidates (keyword-surface ranked, interleaved) →
-**(d)** switch `find-claude-mem-ref` from the live scan to the indexed `atoms.claude_mem_ref` column →
+index tests, full suite 119 green (33 unit + 86 integration).
+**(c)** ✅ DONE — recall now surfaces ATOMS interleaved with pages by score. `CandidateMeta`/`RecallScored`/
+`RecallRanked` gained a trailing `atom_id` discriminator threaded through `score_candidate`; `gather_from_walk`
+(via `resolve_atoms`) + `gather_from_index` (via new `index::recall_atom_candidates`, page-date COALESCE
+fallback) both emit atom rows ranked by the keyword surface; `finalize_recall` prints an atom as
+`path#atom-id — <keywords>` with NO lesson append (a page still appends its `[^N]` lessons). `is_fresh`
+gained a `user_version < SCHEMA_VERSION` gate (a pre-v2 index → walk, which DOES surface atoms) +
+`recall_atom_candidates` tolerates a missing atoms table (explicit `--use-index` on an un-migrated DB).
+3 integration tests (atom-by-keyword, walk==index parity, find-cmref CLI); full suite 122 green. NEXT →
+**(d)** switch `find-claude-mem-ref` to the indexed `atoms.claude_mem_ref` column when the index is fresh
+(idx_atoms_cmref), live-scan fallback otherwise →
 **(e)** harvest-into-atoms skill + update all memory skills/scripts for atom grepping → **(f)**
 `[janitor-memory-atomize]` migration pass + atomize the corpus. ab232dbd unblocks at (e).
 

@@ -578,6 +578,56 @@ pub fn recall_candidates(conn: &Connection) -> Result<Vec<IndexCandidate>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// One ATOM row from the index as a recall candidate (TRDD-3b9b2040). The page path + atom id form the
+/// `path#atom-id` display; `keywords` (the space-joined block-prop array) is the recall surface; ocd/lmd
+/// COALESCE to the owning page's dates so an undated atom still inherits the page's place on the timeline
+/// (Q3: atom dates are optional, falling back to the page's).
+pub struct AtomCandidate {
+    pub page_path: String,
+    pub atom_id: String,
+    pub keywords: String,
+    pub body: String,
+    pub ocd: Option<String>,
+    pub lmd: Option<String>,
+}
+
+/// Load every atom row (joined to its page for the display path + date fallback) as recall candidates.
+/// The recall scorer (in `memory`) ranks these by the keyword surface exactly as the walk does, so an
+/// index-backed atom recall is byte-identical to the walk's `resolve_atoms` pass.
+pub fn recall_atom_candidates(conn: &Connection) -> Result<Vec<AtomCandidate>> {
+    // Tolerate a pre-v2 index that has no `atoms` table yet (an explicit `--use-index` on a DB an old
+    // binary built, before any migrating reindex ran): no table → no atom candidates, page recall is
+    // unaffected. The auto path can't reach here on such a DB (is_fresh's version gate routes it to the
+    // walk), but the explicit flag can — so fail SAFE, not with "no such table".
+    let has_atoms: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='atoms'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_atoms {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT m.path, a.atom_id, a.keywords, a.body,
+                COALESCE(a.ocd, m.ocd), COALESCE(a.lmd, m.lmd)
+         FROM atoms a JOIN memories m ON a.memory_id = m.id
+         WHERE m.element_type = 'memory' ORDER BY m.path, a.id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(AtomCandidate {
+            page_path: r.get(0)?,
+            atom_id: r.get(1)?,
+            keywords: r.get(2)?,
+            body: r.get(3)?,
+            ocd: r.get::<_, Option<String>>(4)?,
+            lmd: r.get::<_, Option<String>>(5)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// Is the index FRESH enough to answer a query without walking? True iff the DB exists, its ledger
 /// is non-empty, EVERY corpus file is unchanged vs its ledger row (precise `(size, mtime_ns)`/blob
 /// comparison — NOT a second-truncated timestamp compare, which races a same-second write), and the
@@ -588,6 +638,15 @@ pub fn is_fresh(root: &Path, files: &[PathBuf]) -> bool {
     let Some(conn) = open_existing(root) else {
         return false;
     };
+    // A pre-current-schema index is never "fresh": it predates a derived table (e.g. the v2 `atoms`
+    // table) and cannot answer atom recall yet. Treating it as stale routes recall to the WALK (which
+    // DOES surface atoms via `resolve_atoms`) until the next `reindex` migrates the DB. (TRDD-3b9b2040.)
+    let ver: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap_or(0);
+    if ver < SCHEMA_VERSION {
+        return false;
+    }
     let use_git = is_git_worktree(root);
     let ledger: std::collections::HashSet<String> = {
         let Ok(mut stmt) = conn.prepare("SELECT path FROM files") else {
