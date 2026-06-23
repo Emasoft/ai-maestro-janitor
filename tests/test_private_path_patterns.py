@@ -169,6 +169,29 @@ def test_real_ssh_host_still_flagged_after_sha_exclusion() -> None:
     assert "private-path.ssh-user-host" in _ids(findings)
 
 
+def test_github_action_sha_pin_short_and_comment_variants_not_flagged() -> None:
+    """Issue #53 (variants): a SHA-pin abbreviated to a short (7-39 hex) commit
+    AND the standard `# vX.Y.Z` trailing-comment form are still public action
+    refs, not machine hosts — every common pin spelling must stay portable so
+    documenting a pin decision in a PROJECT page never reads as machine-private."""
+    for note in (
+        "peter-evans/repository-dispatch@28959ce8",  # abbreviated 8-hex pin
+        "actions/checkout@8ade135",  # abbreviated 7-hex pin (git default width)
+        "shivammathur/setup-php@fcafdd6392932010c2bd5094439b8e33be2a8a09 # v2.37.0",
+    ):
+        assert "private-path.ssh-user-host" not in _ids(ppp.scan_text(note)), note
+
+
+def test_genuine_machine_host_still_classified_after_sha_exclusion() -> None:
+    """Regression guard for #53: the SHA-pin exclusion must not over-broaden —
+    genuine `user@<bare-host>` ssh targets and `<host>.local` LAN names must
+    still surface as the `machine-host` leak class (the kind the PROJECT scope
+    forbids), proving the fix narrowed only the action-pin shape."""
+    for note in ("run ssh deploy@buildbox to kick the job", "alice@macbook.local"):
+        kinds = {f.kind for f in ppp.scan_text(note)}
+        assert "machine-host" in kinds, note
+
+
 # ---------- hostnames (.local / .lan) ------------------------------------
 
 
