@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: design
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T13:26:34+0200
+updated: 2026-06-23T13:41:54+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -137,6 +137,42 @@ Base spec: https://github.com/Querulantenkind/obsidian-block-properties-plugin
    (c) recall atom output; (d) harvest-into-atoms rework + find-claude-mem-ref rework;
    (e) prose→atom migration pass). Each its own TRDD child, TDD, sequential commits.
 3. ab232dbd resumes on top once (a)–(d) land.
+
+## Implementation blueprint — mirror the lesson-indexing precedent (VERIFIED 2026-06-23)
+
+The atom build is NOT greenfield: `[^N]` lessons are ALREADY first-class index elements, and atoms
+mirror that machinery exactly. The ROW MODEL below is INVARIANT to the Q1–Q6 answers (those shape
+the PARSER + the ranking, not the row model) — so it can be locked in now.
+
+**How a lesson becomes a first-class index row today** (`scripts/memgrep/src/index.rs::insert_file`
++ `memory.rs::resolve_notes`, verified):
+1. The PAGE → one `memories` row (`element_type='memory'`, `body`=full text), FTS-shadowed in
+   `memories_fts(title, description, body)`.
+2. Each lesson → `resolve_notes_public(path)` yields `ResolvedNote{num, ocd, lmd, text, urls}`; each
+   becomes one `notes(memory_id FK, label, ocd, lmd, body, urls)` row + a `notes_fts(body)` shadow —
+   so a lesson carries its OWN ocd/lmd and its OWN FTS surface; it is individually recallable.
+3. `delete_rows_for_path` clears a page's `memories` + `notes` + both FTS shadows before re-insert.
+
+**The atom build mirrors this exactly:**
+- ADD `resolve_atoms_public(path)` (parallel to `resolve_notes`) — parse the body into atoms delimited
+  by their `^id [block-props]` markers; yield `Atom{ id, keywords[], ocd, lmd, atom_type,
+  claude_mem_ref, claude_mem_hash, body }`. (Block-props parser already specified: comma→props,
+  first-colon→k/v, whitespace→array. Q1/Q2 fix the body-span + marker-placement rule.)
+- ADD an `atoms(memory_id FK, atom_id, keywords, ocd, lmd, atom_type, claude_mem_ref, claude_mem_hash,
+  body)` table + `atoms_fts(keywords, body)` — exactly parallel to `notes`/`notes_fts`. The atom's
+  RECALL SURFACE is its `keywords:` array (mirroring how a page's surface is its `description`).
+- EXTEND `insert_file` with an atoms loop (after the lessons loop) + `delete_rows_for_path` to clear
+  atoms + `atoms_fts`.
+- `recall` gains atom candidates ranked by the keyword surface (Q4 decides atom-vs-page/lead
+  interleaving). `find-claude-mem-ref` then reads the indexed `atoms.claude_mem_ref` column instead of
+  live-scanning (replacing the committed v1, 4ebd891).
+- A schema bump + a `--full` reindex migrates existing indexes; pages with no atom markers yield zero
+  atom rows until the prose→atom migration (area 4) runs.
+
+**Q-dependence:** the ROW MODEL is invariant. Q1/Q2 shape `resolve_atoms`'s parser; Q3 shapes which
+`atoms` columns are NOT NULL; Q4 shapes recall interleaving; **Q6 (unify `[^N]` lessons with atoms)
+could MERGE the `notes` + `atoms` tables — decide BEFORE building the schema** (a lesson IS already an
+atom-with-metadata, so unifying is attractive but touches the proven lesson path).
 
 ## Notes and lessons learned
 [^1]: [ocd:2026-06-23 lmd:2026-06-23] The harvest was being built against a memory-atom model that
