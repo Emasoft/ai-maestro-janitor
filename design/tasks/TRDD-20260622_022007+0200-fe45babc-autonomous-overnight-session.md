@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T18:34:59+0200
+updated: 2026-06-23T18:43:19+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -37,6 +37,16 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 - **Publish still BLOCKED** (unchanged) on the USER's a/b/c persistence decision
   (`reports/overnight-session/20260623_171000+0200-…md`). C1 rides the next release once
   unblocked; it CANNOT publish standalone.
+- **STAKES of the blocker (mapped 2026-06-23, gh issue audit):** the publish decision gates FAR
+  more than the memory feature — **8 of 11 open GitHub issues are already FIXED-IN-GIT, blocked
+  only on publish:** #53/#54/#55 (detector FPs, 42099f5/09b8628), #57/#58 (split seam-synthesis,
+  a0f1fab), #59 (trdd-reminder FP, 8a3b3a1), #56 (decided top-level-ocd/lmd canonical; serializer
+  fix still pending — low-sev cosmetic), #60 (editor-as-dedicated-agent, aac974f) — PLUS GROUP C-C1
+  + the whole memory feature. Only **#51** (publish.py already canonical in code — just unclosed),
+  **#52** (cross-project wikimem visibility — a real unbuilt feature), **#61** (weekly audit drift)
+  are genuinely open. Per the USER's own rule (comment/close issues "as their fix ships"), I did
+  NOT comment/close any — they ship + close together when option (a) lands. **→ one decision
+  unblocks a large backlog at once.**
 - **PUBLISH BLOCKER — ACCURATELY DIAGNOSED THIS WAKE (corrects the 17:15/17:10 framing).**
   Ran a FRESH CPV `--strict`: `CRITICAL=4 MAJOR=6 MINOR=4 NIT=1`; the 4 CRITICALs are ALL
   `skillaudit:persistence` on GROUP B (`daemon-launcher.py:63`, `launchd_keepalive.py:71/176/186`).
