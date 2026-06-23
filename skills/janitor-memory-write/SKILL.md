@@ -239,6 +239,9 @@ Copy this checklist and track your progress:
   - Atoms — first-class body elements (block-properties)
 - [references/atom-authoring.md](references/atom-authoring.md) — full page schema
   (frontmatter fields, tier edge sections) and atom block-property grammar with examples.
+  Its table of contents:
+  - Full page schema
+  - Atom block-property grammar
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" law +
   schema + dual-test method.
 - `/janitor-memory-update` — MODIFY a page / correct a memory (the 2-step

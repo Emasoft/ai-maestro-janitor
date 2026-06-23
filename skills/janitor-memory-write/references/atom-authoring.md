@@ -1,5 +1,10 @@
 # Atom authoring — page schema and block-property grammar
 
+## Table of contents
+
+- Full page schema
+- Atom block-property grammar
+
 ## Full page schema
 
 Author `"$MEMDIR/<slug>.md"` with the following schema. Set `ocd`/`lmd` to TODAY.
