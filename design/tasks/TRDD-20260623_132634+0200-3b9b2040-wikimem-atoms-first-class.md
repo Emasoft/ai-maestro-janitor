@@ -3,7 +3,7 @@ trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
 column: dev
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T13:55:34+0200
+updated: 2026-06-23T14:01:21+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -148,9 +148,14 @@ Base spec: https://github.com/Querulantenkind/obsidian-block-properties-plugin
 Build order (TDD, sequential commits): **(a)** ✅ DONE — block-properties parser w/ array-values
 (`parse_block_props`, `first_block_property_marker`) + `resolve_atoms`/`resolve_atoms_from_text` +
 `struct Atom` in `memory.rs`; `find-claude-mem-ref` reworked off page-frontmatter onto a LIVE atom-scan
-of `claude_mem_ref` block-props (output `path#atom-id\thash`); 4 new tests, full suite 86 green. NEXT →
-**(b)** `atoms`/`atoms_fts` schema in `index.rs` + `insert_file` atoms-loop + `delete_rows_for_path` +
-schema bump + `--full` reindex → **(c)** recall atom candidates (keyword-surface ranked, interleaved) →
+of `claude_mem_ref` block-props (output `path#atom-id\thash`); 4 new tests, full suite 86 green.
+**(b)** ✅ DONE — `atoms(memory_id FK, atom_id, keywords, ocd, lmd, atom_type, claude_mem_ref,
+claude_mem_hash, body)` + `atoms_fts(keywords, body)` in `index.rs`; `insert_file` atoms-loop (after
+the lessons loop) via `resolve_atoms_public`; `delete_rows_for_path` clears atoms + FTS; `SCHEMA_VERSION
+= 2` migration clears the `files` ledger on a version bump so the next reindex re-parses an UNCHANGED
+corpus to fill atoms (verified by `schema_migration_reparses_unchanged_corpus_to_fill_atoms`); 3 new
+index tests, full suite 119 green (33 unit + 86 integration). NEXT →
+**(c)** recall atom candidates (keyword-surface ranked, interleaved) →
 **(d)** switch `find-claude-mem-ref` from the live scan to the indexed `atoms.claude_mem_ref` column →
 **(e)** harvest-into-atoms skill + update all memory skills/scripts for atom grepping → **(f)**
 `[janitor-memory-atomize]` migration pass + atomize the corpus. ab232dbd unblocks at (e).

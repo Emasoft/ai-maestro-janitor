@@ -73,14 +73,29 @@ pub fn open_existing(root: &Path) -> Option<Connection> {
     Connection::open(&path).ok()
 }
 
+/// The index schema version. Bumped whenever a binary adds a derived table/column that an existing
+/// on-disk index must be RE-PARSED to populate. v2 (TRDD-3b9b2040) adds the `atoms`/`atoms_fts`
+/// tables. `apply_schema` migrates an older DB forward by clearing the change-detection ledger so the
+/// next `reindex` re-parses every file (and thus fills the new rows). See [`apply_schema`].
+const SCHEMA_VERSION: i64 = 2;
+
 /// Create every table + virtual table + B-tree index, idempotently (`IF NOT EXISTS`). Exactly the
 /// schema the spec pins:
 /// - `files` — the change-detection ledger (one row per indexed `.md` file).
 /// - `memories` — one row per memory page/element (`element_type` ∈ {memory, note}).
 /// - `notes` — one row per resolved footnote/lesson, FK→memories.id.
-/// - `memories_fts` / `notes_fts` — external-content FTS5 over the recall-relevant text (no body
-///   copy: the FTS references the base-table rows).
-/// - B-tree indexes for the date-range / topic / FK lookups.
+/// - `atoms` — one row per body ATOM (a `^id [block-props]`-delimited element), FK→memories.id
+///   (TRDD-3b9b2040). The atom's `keywords:` array is its recall surface; `claude_mem_ref` is its
+///   harvest provenance back to the source buffer note.
+/// - `memories_fts` / `notes_fts` / `atoms_fts` — external-content FTS5 over the recall-relevant text
+///   (no body copy: the FTS references the base-table rows).
+/// - B-tree indexes for the date-range / topic / FK / provenance lookups.
+///
+/// After the DDL, a SCHEMA-VERSION migration runs: if the DB's `user_version` is below
+/// [`SCHEMA_VERSION`], the `files` ledger is cleared so the next `reindex` treats every file as new
+/// and re-parses it — the only way an unchanged corpus gains the v2 atom rows (an untouched file would
+/// otherwise stay "fresh" forever and never be re-extracted). Idempotent: runs once per version bump;
+/// recall stays correct meanwhile (an empty ledger makes [`is_fresh`] false → the walk answers).
 fn apply_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
@@ -118,6 +133,19 @@ CREATE TABLE IF NOT EXISTS notes (
     urls       TEXT
 );
 
+CREATE TABLE IF NOT EXISTS atoms (
+    id              INTEGER PRIMARY KEY,
+    memory_id       INTEGER,
+    atom_id         TEXT,
+    keywords        TEXT,
+    ocd             TEXT,
+    lmd             TEXT,
+    atom_type       TEXT,
+    claude_mem_ref  TEXT,
+    claude_mem_hash TEXT,
+    body            TEXT
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     title, description, body,
     content='memories', content_rowid='id'
@@ -128,14 +156,32 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     content='notes', content_rowid='id'
 );
 
+CREATE VIRTUAL TABLE IF NOT EXISTS atoms_fts USING fts5(
+    keywords, body,
+    content='atoms', content_rowid='id'
+);
+
 CREATE INDEX IF NOT EXISTS idx_mem_type_ocd  ON memories(element_type, ocd);
 CREATE INDEX IF NOT EXISTS idx_mem_type_lmd  ON memories(element_type, lmd);
 CREATE INDEX IF NOT EXISTS idx_mem_topic     ON memories(topic);
 CREATE INDEX IF NOT EXISTS idx_mem_path      ON memories(path);
 CREATE INDEX IF NOT EXISTS idx_notes_memid   ON notes(memory_id);
+CREATE INDEX IF NOT EXISTS idx_atoms_memid   ON atoms(memory_id);
+CREATE INDEX IF NOT EXISTS idx_atoms_cmref   ON atoms(claude_mem_ref);
 "#,
     )
     .context("applying index schema")?;
+    // Schema-version forward migration (see the doc comment). `PRAGMA user_version` cannot be
+    // parameterised, so the literal comes from the in-crate `SCHEMA_VERSION` constant (no injection).
+    let ver: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap_or(0);
+    if ver < SCHEMA_VERSION {
+        conn.execute_batch("DELETE FROM files")
+            .context("clearing ledger for schema migration")?;
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
+            .context("bumping schema version")?;
+    }
     Ok(())
 }
 
@@ -263,6 +309,24 @@ fn delete_rows_for_path(conn: &Connection, path: &str) -> Result<()> {
             )?;
         }
         conn.execute("DELETE FROM notes WHERE memory_id = ?1", params![mid])?;
+        // Clear the atoms_fts shadow for each atom, then the atoms themselves (mirrors notes).
+        let mut astmt = conn.prepare("SELECT id, keywords, body FROM atoms WHERE memory_id = ?1")?;
+        let atoms: Vec<(i64, String, String)> = astmt
+            .query_map(params![mid], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (aid, keywords, body) in atoms {
+            conn.execute(
+                "INSERT INTO atoms_fts(atoms_fts, rowid, keywords, body) VALUES('delete', ?1, ?2, ?3)",
+                params![aid, keywords, body],
+            )?;
+        }
+        conn.execute("DELETE FROM atoms WHERE memory_id = ?1", params![mid])?;
         // Clear the memories_fts shadow for this memory row.
         let mut mstmt =
             conn.prepare("SELECT title, description, body FROM memories WHERE id = ?1")?;
@@ -338,6 +402,33 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
         conn.execute(
             "INSERT INTO notes_fts(rowid, body) VALUES(?1, ?2)",
             params![note_id, ln.text],
+        )?;
+    }
+    // Resolved body ATOMS → atom rows + their FTS shadow (TRDD-3b9b2040). The keyword array is the
+    // recall surface (joined to a space-delimited string, mirroring how a page's tags are stored).
+    // A page with no `^id [props]` markers yields zero atoms — so today's free-prose pages produce
+    // no atom rows until the prose→atom migration runs.
+    for atom in crate::memory::resolve_atoms_public(path) {
+        let keywords_joined = atom.keywords.join(" ");
+        conn.execute(
+            "INSERT INTO atoms(memory_id, atom_id, keywords, ocd, lmd, atom_type, claude_mem_ref, claude_mem_hash, body)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                mem_id,
+                atom.id,
+                keywords_joined,
+                atom.ocd,
+                atom.lmd,
+                atom.atom_type,
+                atom.claude_mem_ref,
+                atom.claude_mem_hash,
+                atom.body
+            ],
+        )?;
+        let atom_row_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO atoms_fts(rowid, keywords, body) VALUES(?1, ?2, ?3)",
+            params![atom_row_id, keywords_joined, atom.body],
         )?;
     }
     Ok(())
@@ -541,4 +632,116 @@ pub fn is_fresh(root: &Path, files: &[PathBuf]) -> bool {
     }
     // A deleted file still in the ledger also means stale (the index would surface a gone note).
     on_disk == ledger
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A throwaway corpus dir under the system temp, named by the caller for isolation.
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("memgrep_idx_{}_{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+
+    /// Count atom rows for a corpus (via the index DB), plus an FTS hit count for a MATCH term.
+    fn atom_counts(dir: &Path, fts_term: &str) -> (i64, i64) {
+        let conn = open_existing(dir).expect("index db must exist");
+        let total: i64 = conn
+            .query_row("SELECT count(*) FROM atoms", [], |r| r.get(0))
+            .unwrap();
+        let fts: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM atoms_fts WHERE atoms_fts MATCH ?1",
+                params![fts_term],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (total, fts)
+    }
+
+    // A page whose body carries two `^id [block-props]` atoms (one harvested, one not).
+    const ATOM_PAGE: &str = "---\nname: oauth-hub\nmetadata:\n  node_type: memory\n  tier: hub\n---\nThe rotator drains the live account first when near a limit.\n^rotate-drain [keywords: rotator drain rate-limit, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nCredentials live in the macOS keychain, never a slots dir.\n^keychain [keywords: keychain credentials macos]\n";
+
+    #[test]
+    fn reindex_populates_atoms_and_fts() {
+        // A reindex over a page with `^id [props]` markers emits one `atoms` row per marker, and the
+        // keyword surface is FTS-searchable (the per-atom recall surface the whole redesign exists for).
+        let d = tmp("populate");
+        write(&d, "oauth-hub.md", ATOM_PAGE);
+        let files = vec![d.join("oauth-hub.md")];
+        reindex(&d, &files, false).unwrap();
+        let (total, fts) = atom_counts(&d, "rotator");
+        assert_eq!(total, 2, "both atoms indexed");
+        assert_eq!(fts, 1, "the keyword 'rotator' surfaces exactly the rotate-drain atom");
+        // Provenance + the second atom's keyword are stored too.
+        let conn = open_existing(&d).unwrap();
+        let cmref: String = conn
+            .query_row(
+                "SELECT claude_mem_ref FROM atoms WHERE atom_id = 'rotate-drain'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cmref, "feedback_oauth.md");
+        let kw_hit: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM atoms_fts WHERE atoms_fts MATCH 'keychain'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kw_hit, 1, "the second atom's keyword is searchable");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn reindex_prunes_atoms_when_file_removed() {
+        // Deleting the source page prunes its atom rows + their FTS shadow — no orphan atoms survive.
+        let d = tmp("prune");
+        write(&d, "oauth-hub.md", ATOM_PAGE);
+        let files = vec![d.join("oauth-hub.md")];
+        reindex(&d, &files, false).unwrap();
+        assert_eq!(atom_counts(&d, "rotator").0, 2);
+        std::fs::remove_file(d.join("oauth-hub.md")).unwrap();
+        reindex(&d, &[], false).unwrap();
+        let (total, fts) = atom_counts(&d, "rotator");
+        assert_eq!(total, 0, "atoms pruned with the file");
+        assert_eq!(fts, 0, "atoms_fts shadow pruned too (no orphan FTS rows)");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn schema_migration_reparses_unchanged_corpus_to_fill_atoms() {
+        // The migration contract: a pre-v2 index (memories/notes present, NO atoms) is upgraded by
+        // RE-PARSING an UNCHANGED corpus — the version bump clears the ledger so every file looks new.
+        // Simulate a v1 DB: build the index, then wipe the atoms + reset user_version to 1 by hand.
+        let d = tmp("migrate");
+        write(&d, "oauth-hub.md", ATOM_PAGE);
+        let files = vec![d.join("oauth-hub.md")];
+        reindex(&d, &files, false).unwrap();
+        {
+            let conn = open_existing(&d).unwrap();
+            conn.execute_batch(
+                "DELETE FROM atoms; INSERT INTO atoms_fts(atoms_fts) VALUES('delete-all'); PRAGMA user_version = 1;",
+            )
+            .unwrap();
+            let total: i64 = conn
+                .query_row("SELECT count(*) FROM atoms", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(total, 0, "precondition: simulated v1 db has no atoms");
+        }
+        // The file on disk is byte-identical (an incremental reindex would normally skip it), but the
+        // migration clears the ledger → it re-parses → atoms repopulate.
+        let summary = reindex(&d, &files, false).unwrap();
+        assert_eq!(summary.changed, 1, "the migration forced a re-parse of the unchanged file");
+        assert_eq!(atom_counts(&d, "rotator").0, 2, "atoms repopulated after migration");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }
