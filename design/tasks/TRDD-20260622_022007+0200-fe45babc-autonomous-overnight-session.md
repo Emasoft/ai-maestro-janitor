@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T10:25:53+0200
+updated: 2026-06-23T10:33:13+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -71,13 +71,19 @@ POST-RESET, in order:
      findings (upstream CPV **#40** open for exactly this). They are LOAD-BEARING (CPV's own
      `plugin-devitalizer` REFUSES to neutralize a genuine persistence feature), and the
      immortality plan says *"No push until USER approves."* → cannot pass --strict by any
-     legitimate means tonight. **USER DECISION NEEDED — pick one, do NOT relax the gate / do
-     NOT devitalize (would break immortality):**
-       (a) WAIT for CPV #40 (an honored by-design exemption), then publish the whole batch; OR
-       (b) SEPARATE the release — gate the OS-keepalive behind an unshipped flag / move
-           `daemon-launcher.py`+`launchd_keepalive.py` out of the published tree so v0.16.0
-           ships the MEMORY work alone; immortality ships later as its own reviewed release.
-           (CARE: the daemon imports launchd_keepalive — real release-eng, not a delete.)
+     legitimate means tonight. **POLICY RESOLUTION (recall 2026-06-23,
+     [[project_janitor_publish_blocked_cpv_fps]]):** the established USER policy is
+     *"exempt-lists dropped fleet-wide as exploitable — never suppress; devitalize/remove/
+     separate."* So **(b) is the policy-mandated answer; (a) CONTRADICTS the policy** (it's an
+     exempt path). Scoped: `daemon.py:69` HARD-imports `launchd_keepalive`; the daemon also
+     copies/installs `daemon-launcher.py` (daemon.py:866). So (b) = either lazy/guard that
+     import + move `daemon-launcher.py` + `lib/launchd_keepalive.py` out of the CPV-scanned
+     tree, OR `git revert` the GROUP-A/B commits onto a feature branch. Both touch immortality
+     core → **need USER OK on the approach** (the immortality plan gates it on approval). Options:
+       (b) SEPARATE the release [POLICY-MANDATED] — ship the MEMORY work as v0.16.0 alone;
+           immortality ships later as its own reviewed release. (Real release-eng, not a delete.)
+       (a) WAIT for CPV #40 (an honored by-design exemption) — ⚠ CONTRADICTS the never-exempt
+           policy; listed only for completeness.
    - **2 injection CRITICALs (plugin.json:703-704) — FIXED this turn:** they were OUR OWN
      unicode allowlist strings tripping the injection scanner; pruned (the array doesn't
      suppress anyway). 6→4 CRIT.
