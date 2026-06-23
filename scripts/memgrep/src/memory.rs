@@ -844,6 +844,101 @@ pub fn cmd_links_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+// ─────────────────── `memgrep find-claude-mem-ref` ───────────────────
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep find-claude-mem-ref",
+    about = "list wiki atoms harvested FROM a given Claude-memory buffer file (provenance back-reference)"
+)]
+struct FindClaudeMemRefArgs {
+    /// The source Claude-memory `.md` buffer file (a harness MEMORY.md-system note) whose derived
+    /// wiki atoms to list. Matched by stored scope-relative path, with a basename fallback.
+    source: String,
+    /// Wiki dir(s) / file(s) to search (default: current dir).
+    paths: Vec<PathBuf>,
+    /// Also descend into hidden files/dirs (off by default, mirroring the other subcommands).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// Parse a `claude_mem_refs` frontmatter value — the lenient `parse_frontmatter` capture of a
+/// FLOW-style list whose items are `<rel-path>@<sha256>` (the `@` separates the source buffer file's
+/// path from the sha256 of its content at harvest time; the hash is optional → empty string). Strips
+/// the surrounding `[`/`]`, splits on commas, and de-quotes each item. Returns `(path, hash)` pairs.
+/// Buffer-note slugs never contain `@`, so the split is unambiguous.
+fn parse_claude_mem_refs(raw: &str) -> Vec<(String, String)> {
+    let inner = raw.trim().trim_start_matches('[').trim_end_matches(']');
+    let mut out = Vec::new();
+    for item in inner.split(',') {
+        let it = item.trim().trim_matches('"').trim_matches('\'').trim();
+        if it.is_empty() {
+            continue;
+        }
+        match it.split_once('@') {
+            Some((path, hash)) => out.push((path.trim().to_string(), hash.trim().to_string())),
+            None => out.push((it.to_string(), String::new())),
+        }
+    }
+    out
+}
+
+/// True iff a stored `claude_mem_refs` path-entry refers to the queried source file. Match is exact
+/// on the stored string, with a basename fallback (a top-level buffer note's scope-relative path IS
+/// its basename, so `feedback_x.md` matches a query of `/abs/path/feedback_x.md` or `feedback_x.md`).
+fn claude_mem_ref_matches(stored_path: &str, query: &str) -> bool {
+    if stored_path == query.trim() {
+        return true;
+    }
+    let qbase = Path::new(query).file_name().and_then(|s| s.to_str());
+    let sbase = Path::new(stored_path).file_name().and_then(|s| s.to_str());
+    qbase.is_some() && qbase == sbase
+}
+
+/// The matcher behind `find-claude-mem-ref`: every wiki atom whose `claude_mem_refs` references
+/// `source`, returned as `(page-path, stored-source-hash)` pairs, sorted + deduped. Pure data (no
+/// printing) so it is unit-testable. Markdown is UNTRUSTED data, parsed never executed.
+fn claude_mem_ref_hits(source: &str, paths: &[PathBuf], hidden: bool) -> Vec<(PathBuf, String)> {
+    let mut hits: Vec<(PathBuf, String)> = Vec::new();
+    for p in collect_md(paths, hidden) {
+        let Some(text) = md::read_text(&p) else {
+            continue;
+        };
+        let fm = md::parse_frontmatter(&text);
+        let Some(raw) = fm.get("claude_mem_refs") else {
+            continue;
+        };
+        for (ref_path, ref_hash) in parse_claude_mem_refs(raw) {
+            if claude_mem_ref_matches(&ref_path, source) {
+                hits.push((p.clone(), ref_hash));
+            }
+        }
+    }
+    hits.sort();
+    hits.dedup();
+    hits
+}
+
+/// `memgrep find-claude-mem-ref <source-mem-path> <wikidir>` — the HARVEST provenance query
+/// (TRDD-ab232dbd). The coexistence harvest mirrors a RAW Claude-memory buffer note into a SEPARATE
+/// curated wiki atom and stamps that atom's frontmatter with
+/// `claude_mem_refs: [<rel-path>@<sha256>, …]` — one entry per source buffer file the page harvested
+/// an atom from, each carrying the sha256 of the source's content AT HARVEST TIME. This command lists
+/// every wiki atom whose `claude_mem_refs` references `<source-mem-path>` (by stored path, basename
+/// fallback), printing `<wiki-page-rel-path>\t<stored-source-hash>` per match. The harvester then
+/// diffs the source file's CURRENT content-hash against the stored hashes: NO output → the memory is
+/// NEW (harvest it); a hash MISMATCH → the source CHANGED (re-harvest, update the atom); all hashes
+/// EQUAL → up-to-date (skip). Read-only.
+pub fn cmd_find_claude_mem_ref_cli(args: &[String]) -> Result<()> {
+    let a = FindClaudeMemRefArgs::parse_from(
+        std::iter::once("find-claude-mem-ref".to_string()).chain(args.iter().cloned()),
+    );
+    for (path, hash) in claude_mem_ref_hits(&a.source, &a.paths, a.hidden) {
+        println!("{}\t{}", rel(&path), hash);
+    }
+    Ok(())
+}
+
 // ─────────────────────────── `memgrep lint` ───────────────────────────
 
 /// Scan ONE raw markdown line for footnote tokens, yielding `(label, is_def)` for each. A footnote
@@ -1884,6 +1979,66 @@ mod tests {
         let (ocd, lmd) = parse_meta_dates("lmd:2026-05-05 class:x");
         assert!(ocd.is_none());
         assert_eq!(lmd.as_deref(), Some("2026-05-05"));
+    }
+
+    #[test]
+    fn claude_mem_refs_parse_path_and_hash() {
+        // A flow-style `claude_mem_refs` value parses into (path, hash) pairs; the `@` splits the
+        // source path from its content-hash, a missing hash yields an empty string, quotes strip.
+        let got = parse_claude_mem_refs("[feedback_x.md@abc123, \"reference_y.md@def456\", lone.md]");
+        assert_eq!(
+            got,
+            vec![
+                ("feedback_x.md".to_string(), "abc123".to_string()),
+                ("reference_y.md".to_string(), "def456".to_string()),
+                ("lone.md".to_string(), String::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn claude_mem_ref_matches_exact_and_basename() {
+        // The query matches a stored ref by exact string OR by basename (a top-level buffer note's
+        // scope-relative path IS its basename), so an absolute-path query still resolves.
+        assert!(claude_mem_ref_matches("feedback_x.md", "feedback_x.md"));
+        assert!(claude_mem_ref_matches("feedback_x.md", "/abs/memory/feedback_x.md"));
+        assert!(claude_mem_ref_matches("sub/feedback_x.md", "feedback_x.md")); // basename fallback
+        assert!(!claude_mem_ref_matches("feedback_x.md", "feedback_y.md"));
+    }
+
+    #[test]
+    fn find_claude_mem_ref_lists_atoms_for_a_source_with_hashes() {
+        // The provenance query (TRDD-ab232dbd): given a source buffer file, list every wiki atom whose
+        // `claude_mem_refs` references it, with the stored source-hash for the harvester's change check.
+        let dir = std::env::temp_dir().join(format!("memgrep_cmref_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Two atoms harvested from feedback_oauth.md (one aggregating page references two sources).
+        std::fs::write(
+            dir.join("oauth-rotation.md"),
+            "---\nname: oauth-rotation\nmetadata:\n  node_type: memory\n  tier: hub\n  claude_mem_refs: [feedback_oauth.md@hash1, reference_keychain.md@hashK]\n---\nbody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("oauth-resume.md"),
+            "---\nname: oauth-resume\nmetadata:\n  node_type: memory\n  tier: component\n  claude_mem_refs: [feedback_oauth.md@hash1]\n---\nbody\n",
+        )
+        .unwrap();
+        // A page derived from a DIFFERENT source — must NOT match.
+        std::fs::write(
+            dir.join("unrelated.md"),
+            "---\nname: unrelated\nmetadata:\n  claude_mem_refs: [feedback_other.md@hashO]\n---\nbody\n",
+        )
+        .unwrap();
+        let hits = claude_mem_ref_hits("feedback_oauth.md", &[dir.clone()], false);
+        let names: Vec<String> = hits
+            .iter()
+            .map(|(p, h)| format!("{}={}", p.file_stem().unwrap().to_str().unwrap(), h))
+            .collect();
+        assert!(names.contains(&"oauth-rotation=hash1".to_string()), "{names:?}");
+        assert!(names.contains(&"oauth-resume=hash1".to_string()), "{names:?}");
+        assert!(!names.iter().any(|n| n.starts_with("unrelated")), "{names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

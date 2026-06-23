@@ -368,7 +368,8 @@ fn main() -> Result<()> {
     reset_sigpipe(); // die quietly on `… | head`, never panic on a closed pipe
 
     // Memory-helper subcommands dispatch before grep parsing. To grep for a literal "index" /
-    // "reindex" / "links" / "lint" / "fact" / "recall" / "find" / "overview" as the first word, use `memgrep -e index …`.
+    // "reindex" / "links" / "lint" / "fact" / "recall" / "find" / "overview" / "find-claude-mem-ref"
+    // as the first word, use `memgrep -e index …`.
     let raw: Vec<String> = std::env::args().collect();
     match raw.get(1).map(|s| s.as_str()) {
         Some("index") => return memory::cmd_index_cli(&raw[2..]),
@@ -378,6 +379,7 @@ fn main() -> Result<()> {
         Some("fact") => return memory::cmd_fact_cli(&raw[2..]),
         Some("recall") => return memory::cmd_recall_cli(&raw[2..]),
         Some("find") => return memory::cmd_find_cli(&raw[2..]),
+        Some("find-claude-mem-ref") => return memory::cmd_find_claude_mem_ref_cli(&raw[2..]),
         Some("overview") => return memory::cmd_overview_cli(&raw[2..]),
         _ => {}
     }
