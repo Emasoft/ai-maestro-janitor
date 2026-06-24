@@ -38,10 +38,15 @@ split / consolidate / conflict / repair / harvest.
 1. **Editor enabled + roll forward.** Run `uv run scripts/memory_txn_cli.py resume "<scope_root>"`
    first (rolls forward any interrupted txn). If the editor is kill-switched or
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
-2. **Due + scope.** Cadence-limited (`atomize_per_day`, default 2 → a couple/day). Use
-   `memory_settings.is_due("atomize", scope, root, now)`. Process **one scope per pass** (LOCAL +
-   USER by default; PROJECT only if `edit_project_scope` is True — a PROJECT atomize is
-   staged-not-pushed, rides the next `publish.py`). Scope roots resolve as in every wikimem skill.
+2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** The
+   `memory-maintenance.py` scheduler checked `is_due` and stamped the cadence at emit, so a
+   bare `[janitor-memory-atomize]` marker IS your cadence authorization. Re-checking
+   `memory_settings.is_due` here would read the stamp the scheduler just wrote and make you
+   abstain on the very scope it scheduled — the double-gate removed by TRDD-VJ8L465M (the
+   scheduler OWNS the cadence; the agent owns the content). Process **one scope per pass**
+   (LOCAL + USER by default; PROJECT only if `edit_project_scope` is True — a PROJECT atomize
+   is staged-not-pushed, rides the next `publish.py`). Scope roots resolve as in every wikimem
+   skill. (Cadence is `atomize_per_day`, default 2 → a couple/day, paced by the scheduler.)
 3. **Candidate set.** Scan the scope for **free-prose pages** — a curated wiki page (frontmatter
    carries `node_type: memory` or a `tier:`) whose body has substantive facts but **no atom
    markers** yet. Find pages already carrying markers and skip them:
@@ -99,8 +104,11 @@ uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op atomize
 non-marker line → remove it; no marker → actually add one) and re-commit. **Bounded retry ≤3**;
 after the 3rd failure run `abort "<scope_root>" <txn_id>`, mutate nothing, surface a finding.
 
-After a clean pass: `memgrep reindex "<scope_root>"` (so the new atoms are searchable) and
-`memory_settings.mark_ran("atomize", scope, root, now)` (respect the cadence).
+After a clean pass: `memgrep reindex "<scope_root>"` (so the new atoms are searchable). Do NOT
+call `memory_settings.mark_ran` here — the SCHEDULER already stamped the cadence at emit
+(`memory-maintenance.py`); a second agent-side stamp is redundant, and re-checking/re-stamping
+the cadence is exactly the double-gate TRDD-VJ8L465M removed (scheduler owns cadence, agent owns
+content work).
 
 ## EXIT / SUCCESS / idempotency contract
 

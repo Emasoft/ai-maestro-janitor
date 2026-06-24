@@ -60,8 +60,12 @@ spelled out in the iron rules below.
 1. **Editor enabled.** Run `uv run scripts/memory_txn_cli.py resume "<scope_root>"`
    first (rolls forward an interrupted txn). If kill-switched /
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — stop.
-2. **Due-check + scope.** Cadence-limited (`conflict_per_day`, default 0.5 ≈ once/48h):
-   `memory_settings.is_due("conflict", scope, root, now)` per scope. Scope roots (as in
+2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** A bare
+   `[janitor-memory-conflict]` marker IS your cadence authorization: `memory-maintenance.py`
+   checked `is_due` and stamped the cadence at emit, so re-checking `memory_settings.is_due`
+   here reads that fresh stamp and makes you abstain on the very scope it scheduled — the
+   double-gate removed by TRDD-VJ8L465M (scheduler owns cadence, agent owns content). Pick the
+   scope (cadence `conflict_per_day`, default 0.5 ≈ once/48h, paced by the scheduler). Scope roots (as in
    every wikimem skill): LOCAL `$HOME/.claude/projects/<dashed-cwd>/memory`; USER the
    janitor's **hard-coded** `…/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory`
    (NOT `${CLAUDE_PLUGIN_DATA}`); PROJECT `<git-root>/.claude/project/memory` **only if
@@ -138,7 +142,8 @@ verdict ALWAYS retires one page of the pair.)
 
 On verify FAIL the txn self-aborts (live tree intact); read the reason, fix the
 staged copy, re-commit — **bounded retry ≤3**, then `abort` + surface a finding. After
-a clean pass call `memory_settings.mark_ran("conflict", scope, root, now)`. The exact
+a clean pass do NOT call `memory_settings.mark_ran` — the scheduler already stamped the cadence
+at emit (the double-gate TRDD-VJ8L465M removed; scheduler owns cadence, agent owns content). The exact
 `begin → edit-staged → commit --op merge` recipes (both verdicts, with the why-a-
 same-slug-edit-fails derivation) are in
 [conflict-protocol](references/conflict-protocol.md).

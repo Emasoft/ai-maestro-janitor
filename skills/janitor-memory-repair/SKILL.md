@@ -51,11 +51,15 @@ the job of the other three passes; REPAIR only makes a page well-formed.
 1. **Editor enabled.** Run `uv run scripts/memory_txn_cli.py resume "<scope_root>"`
    first (rolls forward any interrupted txn). If the editor is kill-switched or
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
-2. **Due + scope.** This pass is cadence-limited (`repair_per_day`, default 3 →
-   a few/day). Use `memory_settings.is_due("repair", scope, root, now)`. Process
-   **one scope per pass** (LOCAL + USER by default; PROJECT only if
+2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** A bare
+   `[janitor-memory-repair]` marker IS your cadence authorization: `memory-maintenance.py`
+   checked `is_due` and stamped the cadence at emit, so re-checking
+   `memory_settings.is_due` here reads that fresh stamp and makes you abstain on the very
+   scope it scheduled — the double-gate removed by TRDD-VJ8L465M (scheduler owns cadence,
+   agent owns content). Process **one scope per pass** (LOCAL + USER by default; PROJECT only if
    `edit_project_scope` is True — a PROJECT repair is staged-not-pushed, rides the
-   next `publish.py`). Scope roots resolve exactly as in every wikimem skill.
+   next `publish.py`). Scope roots resolve exactly as in every wikimem skill. (Cadence is
+   `repair_per_day`, default 3 → a few/day, paced by the scheduler.)
 3. **Candidate set.** Read the librarian's `memory-reorg-proposed.md` in the scope
    (its page-shape / link findings), OR scan the scope for malformed pages
    (below). Bound the run to the **top-K most-broken pages** (K ≈ 5).
@@ -114,8 +118,10 @@ dropped lesson → restore it verbatim; a changed `ocd` → set it back; a still
 key → add it), and re-commit. **Bounded retry ≤3**; after the 3rd failure run
 `abort "<scope_root>" <txn_id>`, mutate nothing, and surface a finding.
 
-After a clean pass on the scope: `memory_settings.mark_ran("repair", scope, root,
-now)` so the cadence is respected and the next heartbeat doesn't re-fire.
+After a clean pass on the scope do NOT call `memory_settings.mark_ran` — the SCHEDULER already
+stamped the cadence at emit (`memory-maintenance.py`), so the next heartbeat won't re-fire; a
+second agent-side stamp is the double-gate TRDD-VJ8L465M removed (scheduler owns cadence, agent
+owns content).
 
 ## EXIT / SUCCESS / idempotency contract
 

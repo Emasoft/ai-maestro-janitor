@@ -1,9 +1,9 @@
 ---
 trdd-id: VJ8L465M
 title: Memory-maintenance scheduler double-gates on the cadence stamp — the scheduled scope's pass is skipped and a 236k-token agent no-ops
-column: todo
+column: complete
 created: 2026-06-24T02:39:52+0200
-updated: 2026-06-24T02:39:52+0200
+updated: 2026-06-24T03:02:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 2
@@ -30,12 +30,34 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST — 2026-06-24
 
-**NEEDS USER DECISION — the fix changes the SCHEDULER's documented cross-session
-dedupe contract (TRDD-b4b9e27c) and touches 6 agent skills + `memory_settings`; it
-is correctness-critical, multi-file, and in the sensitive memory subsystem. I
-confirmed the bug (code-traced) but did NOT fix it (a wrong change breaks the
-dedupe oracle or the forge-proof marker). Surfaced for the user to decide the fix
-shape.**
+### ✅ RESOLVED 2026-06-24 ~03:00 — the fix was MUCH simpler than the options below (skill-consistency, ZERO code change)
+**Under the USER's "finish + make trustworthy" mandate I fixed it. Re-verification
+flipped my initial premise:** the double-gate did NOT affect all 6 skills — only
+**atomize / conflict / repair** re-checked `is_due` (the double-gate). **split /
+consolidate / harvest already DON'T** (split was trimmed of it in `04ab8a5`/`5c380a0`;
+its model, SKILL.md line ~38: *"the scheduler decided a SPLIT pass is due and set the
+flock+stamp"* — the agent TRUSTS the marker and abstains only on CONTENT). So the
+fix is NOT the multi-file contract change (options A/B/C below) — it is **aligning the
+3 stragglers to the proven split model**: removed their agent-side `is_due` re-check
+(precondition 2) and their post-pass `memory_settings.mark_ran` so the SCHEDULER is the
+sole cadence authority (it already `is_due`-checks + stamps at emit, `memory-maintenance.py:278`).
+- **NO code change, NO `memory_settings` change, NO scheduler change, NO contract change**
+  → the earlier "NEEDS USER DECISION / breaks the dedupe oracle" concern was based on the
+  wrong premise (all-6-double-gate). The dedupe oracle + forge-proof marker are untouched.
+- The scheduler-owns-cadence contract the skills now rely on is **already TESTED**:
+  `tests/test_memory_maintenance.py::test_not_due_after_just_running_is_silent` proves the
+  emit-stamp makes `is_due` False (i.e. WHY a re-check abstains) — plus `test_due_emits_*`
+  + `test_only_one_marker_per_fire_*`. 48 memory_settings/maintenance tests green post-edit.
+- Residual (inherent, NOT a bug): a CONTENT-abstain no-op can still happen when a scope is
+  cadence-due but has no work — the scheduler can't know content-due-ness cheaply (split has
+  always had this). The fix eliminates the CADENCE-abstain no-ops (the bug), not these.
+- Files: `skills/janitor-memory-{atomize,conflict,repair}/SKILL.md`. Ships in the Tier-1 release.
+
+---
+**(historical — the initial over-complex framing, kept for the record):** NEEDS USER
+DECISION — the fix changes the SCHEDULER's documented cross-session dedupe contract
+(TRDD-b4b9e27c) and touches 6 agent skills + `memory_settings`… [SUPERSEDED above: only 3
+skills double-gated; the other 3 were already correct, so no code/contract change was needed].
 
 **Discovered live, 2026-06-24, during the autonomous overnight session:** the
 heartbeat scheduler emitted `[janitor-memory-atomize]`, spawning the background
