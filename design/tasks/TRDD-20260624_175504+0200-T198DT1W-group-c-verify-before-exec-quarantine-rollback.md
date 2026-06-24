@@ -1,9 +1,9 @@
 ---
 trdd-id: T198DT1W
 title: Immortal janitor GROUP C — C2 verify-before-exec gate + C3 pin-good/quarantine-bad + C4 bad-self-update auto-rollback
-column: design
+column: dev
 created: 2026-06-24T17:55:04+0200
-updated: 2026-06-24T17:55:04+0200
+updated: 2026-06-24T18:20:09+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 2
@@ -24,11 +24,39 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
 
-### Status: DESIGN authored, NOT implemented — needs review before any dispatcher-stub edit
+### Status: C2 IMPLEMENTED + TDD-GREEN + committed LOCALLY (NOT published) — C3/C4 still design-only
+- **C2 = DONE in source** (2026-06-24 18:20). `scripts/dispatcher-stub.py` now has `_verify_version()`
+  (inlined stdlib hashlib+json) and a verify-before-exec ladder in `main()`. 14 new tests in
+  `tests/test_dispatcher_stub.py` cover the whole fail-open ladder (clean-latest→latest;
+  corrupt-latest→older-clean; missing-listed-file→fall-back; no/malformed/wrong-shape/empty-hash
+  manifest→fail-open; all-corrupt→newest-runnable; missing-dispatch→older; no-versions/no-runnable
+  →SystemExit; + 3 direct `_verify_version` units). **14 passed, ruff + pyright clean.**
+- **PROVEN on the REAL cache**: `_verify_version` returns `verified` for the live 0.17.2 + 0.18.0
+  (manifest-shipping) trees and `no-manifest` (fail-open) for every older version — ZERO
+  false-rejection, so the real heartbeat execs 0.18.0 exactly as before, now gated.
+- **NOT YET ACTIVE**: committed locally only. C2 does not run until the stub is RE-COPIED into
+  `${CLAUDE_PLUGIN_DATA}` by a `/janitor-arm` re-arm (the stub is NOT auto-rolling — see the rollout
+  caveat below). Per the bricking-risk gate, the USER reviews this commit before any publish + re-arm.
+- **DESIGN CORRECTION (load-bearing) — the manifest is WRAPPED, not flat.** This TRDD's C2 section
+  below originally assumed the manifest is `{relpath: sha256hex}`. The REAL shipped shape (verified
+  against the live 0.18.0 file + `janitor_self_integrity.write_manifest`) is
+  `{"version": 1, "files": {relpath: sha256hex}}` — `_verify_version` reads `obj["files"]`. An
+  empty expected hash (compute_manifest records `""` for a file that vanished at build time) is
+  treated as fail-open-skip, not a mismatch.
+- **SCOPE HONESTY — what C2 actually gates.** The manifest's hashed set is the plugin's INSTRUCTION
+  SURFACE only (README/CLAUDE.md/skills/commands/rules — `DEFAULT_MANIFEST_GLOBS`), NOT `dispatch.py`
+  or the lib code. So C2 is a clean-download canary + instruction-tamper guard: a partial download
+  truncates/loses some of those 59 files → C2 detects it and falls back; a corrupt `dispatch.py`
+  with an intact instruction surface is NOT caught by C2 alone. Closing that gap = either C3's HMAC
+  trust anchor or a separate manifest-scope expansion (out of scope here; noted, not silently
+  dropped). C2-alone remains a strict corruption-resilience win at near-zero bricking risk.
+- **NEXT**: (1) USER reviews the stub commit; (2) publish C2 alone (Tier-2 release step — MANAGER/USER
+  gate) → then re-arm to activate; (3) C3 (daemon pin-writer + stub HMAC cross-check); (4) C4
+  (crash-loop rollback). C3/C4 below are still design-only.
+
 C1 (ship `.integrity/manifest-sha256.json` every release) is DONE + published in v0.18.0
-(TRDD-53a00e44). This TRDD designs the remaining GROUP C exec-path. **No code is written yet** —
-the dispatcher-stub is the boot-critical single point of failure (cron → stub → `dispatch.py` →
-daemon), so the design (and its CARDINAL fail-open rule) is reviewed before a single stub edit.
+(TRDD-53a00e44). The dispatcher-stub is the boot-critical single point of failure (cron → stub →
+`dispatch.py` → daemon), so every C2 path obeys the CARDINAL fail-open rule below.
 
 ### THE CARDINAL RULE (every sub-task obeys it): FAIL-OPEN, ALWAYS
 A bricked stub = a dead janitor = the OPPOSITE of immortal. So every verification/quarantine/
