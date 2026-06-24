@@ -1,7 +1,7 @@
 ---
 trdd-id: 71ABD7V7
 title: Reintroduce L0 OS-keepalive as a fixed DATA-path verbatim-copied scanned entry (SHAPE 2)
-column: dev
+column: published
 created: 2026-06-24T00:23:43+0200
 updated: 2026-06-24T04:30:39+0200
 current-owner: ai-maestro-janitor
@@ -26,8 +26,10 @@ review-requirements: []
 runtime-targets: [macos, linux]
 impacts: [install-script]
 attempts: 0
-last-test-result: not-run
-implementation-commits: [184b61c, 0345000]
+last-test-result: pass
+implementation-commits: [184b61c, 0345000, 0c8929d, 40c473c, 8d2cb64, cb9e299]
+published-version: 0.18.0
+published-at: 2026-06-24T04:37:06+0200
 external-refs: ["github.com/Emasoft/claude-plugins-validation/issues/152"]
 ---
 

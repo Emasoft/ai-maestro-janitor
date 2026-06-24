@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-24T02:46:00+0200
+updated: 2026-06-24T04:37:06+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,17 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### ✅ 2026-06-24 ~04:40 — TIER 1 COMPLETE + SHIPPED (two releases). Then WINDING DOWN on OAuth budget.
+**Shipped tonight:**
+- **v0.17.3** — both Tier-1 trust bugs: **VJ8L465M** (memory-scheduler double-gate — was causing the 236k no-op agent spawns) + **HJGR4I5W** (OAuth dead-but-present refresh now escalates to the REAUTH nudge). Both TRDDs `column: complete`. (One incidental MD004 lint NIT in the VJ8L465M TRDD was cleared to unblock the publish.)
+- **v0.18.0** — **L0 OS-keepalive immortality layer SHIPPED** (TRDD-71ABD7V7, ALL phases 1–5). launchd/systemd respawns the global daemon at boot/crash even with ZERO Claude sessions — the structural fix for the 20-hour freeze. **CPV `--strict` CLEAN (CRITICAL=0)** — the #152 fold resolves the installer heredoc → the in-tree, scanned, inert `daemon_keepalive_entry.py`, validated against the REAL discriminator. Token-free orchestrator + blocking-flock (no churn) + `daemon_needs_restart` keepalive exemption (no SIGTERM-loop) + self-heal currency, all tested (99-test cluster green, ruff+pyright+shellcheck clean). The immortality stack **L0→L1→L2→L3 is COMPLETE**. The running daemon auto-rolls to v0.18.0 on its next version-update (≤6h) → then L0 activates on the daemon restart.
+
+**⚠ WHY HOLDING further heavy work:** LIVE (emanuele.sabetta) is at **5h=86% / 7d=60%** and the alternate **fmuaddib is DEAD** (5h/7d=err — dead refresh token; v0.17.3 SURFACES it but the USER must re-login to restore it). With NO rotation safety net and the 5h window near the 88% threshold, a big GROUP-C/TIER-2 build (more publish runs + test suites) risks burning LIVE's budget → stuck rate-limited (the very failure the immortality work prevents). Per the mandate's own "ship few rock-solid, not many half-baked" + the HJGR4I5W keep-usage-LOW prudence → HOLD until the 5h window eases or the USER returns.
+
+**🙋 USER ACTION NEEDED:** re-login **`fmuaddib@gmail.com`** (e.g. `~/.claude/account-rotator/open-login.sh fmuaddib@gmail.com`, or the rotator reauth path) to restore the OAuth rotation alternate — until then this and every unattended session has no safety net.
+
+**NEXT (when budget allows / user returns):** TIER 2 (field-agent governance — #230/aebedbff, GATED on the USER confirming the granular `janitor-memory-*` skill list + naming) and the remaining immortality groups (GROUP C self-integrity #228/53a00e44, D config-self-heal, E per-scenario handlers, F observability + ai-maestro). design/proposals/ is EMPTY.
 
 ### 🌙 UPDATE 2026-06-24 ~02:45 — USER MANDATE: finish everything, make the janitor a TRUSTWORTHY immortal guardian (CPV #152 PUBLISHED → L0 UNBLOCKED)
 **User went to sleep with this directive (verbatim intent):** "finish implementing the
