@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.18.2] - 2026-06-24
+## [0.18.3] - 2026-06-24
 
-### Tests
+### Bug Fixes
 
-- Isolate ROOT/LOG_FILE to tmp so the suite stops polluting the production rotator.log (TRDD-14IY6MAD)
+- Oauth detectors must read the daemon's canonical state, not a stale legacy one (TRDD-5EUYV08H)
 
