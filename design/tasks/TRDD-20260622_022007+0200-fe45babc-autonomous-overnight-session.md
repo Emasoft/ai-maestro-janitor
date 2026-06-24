@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-24T08:24:31+0200
+updated: 2026-06-24T08:42:09+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,24 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-24
+
+### ✅ 2026-06-24 ~08:42 — post-compact resume → 3XS3PDCF split content-precheck LANDED, still HOLDING
+Resumed post-compact; re-checked the two gates: budget **HEALTHY** (5h=22% / 7d=67%, self-consistent),
+`fmuaddib` **STILL DEAD** (refresh token expired ~10h, usage=err — can't restore autonomously, it's a
+human OAuth re-login). The hold guards against FREEZE (heavy/fleet work), NOT all progress — so I landed
+the safest high-value mandate item, single-context (no fleet), TDD:
+- **TRDD-3XS3PDCF split-MVP** (commit **441d467**, local, rides next publish; TRDD → `column: dev`): the
+  scheduler now gates `[janitor-memory-split]` on `is_due AND content_has_work` via the new fail-open
+  `scripts/lib/memory_content_precheck.py`. Kills the single biggest no-op drain — `split_per_day=4.5` ×
+  ~235k with NO page over the 36000-byte cap ≈ **~1M tokens/day** of pure no-op opus spawns (the drain
+  that worsened the near-freeze). 29/29 TDD green, ruff clean. Non-exec-path, fail-soft, fail-open (zero
+  wrong-suppress — only a PROVEN-idle scope is suppressed). harvest/repair/atomize prechecks = documented
+  follow-ups (need each skill's exact predicate; their fail-open default = current behavior, zero regression).
+
+**STILL HOLDING** — same gate as before: budget fine but NO rotation alternate. Did NOT publish (a full
+test+CPV+push cycle is the budget I defer at deep-night-no-alternate; ships on the next release). All other
+mandate work unchanged-gated (GROUP C exec-path C2/C3/C4 design-review, TIER-2 #230 USER skill-naming,
+GROUPs D/E/F). Unblocks unchanged: re-login fmuaddib OR USER returns.
 
 ### ✅ 2026-06-24 ~08:20 — RESUMED after the ~04:40 wind-down (budget recovered) → 6 more pieces committed, then HOLDING again
 The 5h window aged out the heavy bursts (budget swung 100%→single-digit; a transient usage-API glitch briefly read MAX/MAX — see lesson). With real headroom I resumed and committed SIX pieces (all local; ride next publish):
