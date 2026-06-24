@@ -158,6 +158,31 @@ def _rotator_root() -> Path:
     return canonical
 
 
+def configured_rotator_home() -> Path | None:
+    """The rotator home the daemon ACTUALLY uses, or None when none is configured (opt-in by
+    presence). This is the SINGLE SOURCE OF TRUTH the user-facing detectors (oauth-login-needed,
+    oauth-cookie-reminder) MUST resolve through, so they read the SAME state.json the daemon does.
+
+    The detectors used to resolve their OWN home `~/.claude/account-rotator` FIRST, opposite to
+    `_rotator_root()`'s canonical-first order. On a MIGRATED install both state.json files exist
+    (migrate_root_to_canonical keeps the legacy copy non-destructively), so the detector read the
+    STALE legacy file (e.g. refresh_failures=0) while the daemon read the live CANONICAL file
+    (refresh_failures over the dead-refresh threshold) — the detector classified the account
+    healthy and the REAUTH login-nudge NEVER reached the user even though the daemon was nudging
+    internally every tick (TRDD-5EUYV08H). Delegating here also inherits `_canonical_rotator_root`'s
+    foreign-`CLAUDE_PLUGIN_DATA` guard (TRDD-7100178d), which the detectors' own resolver lacked.
+
+    `CLAUDE_ROTATOR_HOME` (the tests' + the standalone seed-login setup's explicit override) still
+    wins when it holds a state.json; otherwise the daemon's canonical-first resolution applies.
+    Returns None when no state.json exists anywhere — the opt-in-by-presence semantic the detectors
+    rely on to stay a silent no-op on a machine with no rotator configured."""
+    env_home = os.environ.get("CLAUDE_ROTATOR_HOME", "").strip()
+    if env_home and (Path(env_home) / "state.json").is_file():
+        return Path(env_home)
+    root = _rotator_root()
+    return root if (root / "state.json").is_file() else None
+
+
 def migrate_root_to_canonical() -> tuple[Path, Path, bool]:
     """One-time: copy ``state.json`` + ``opt-in.flag`` from the legacy standalone root
     into the canonical DATA-dir root (atomic, NON-destructive — the legacy copy is kept

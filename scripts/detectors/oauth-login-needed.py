@@ -49,24 +49,13 @@ import supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py (keychain
 
 
 def _rotator_home() -> Path | None:
-    """First rotator home that contains a state.json, or None (opt-in no-op).
-
-    Identical resolution to oauth-cookie-reminder._rotator_home so the two
-    sibling detectors agree on which home is "configured" — honours
-    CLAUDE_ROTATOR_HOME (used by the standalone seed-login setup + the tests),
-    then ~/.claude/account-rotator, then $CLAUDE_PLUGIN_DATA/oauth-rotator."""
-    candidates: list[Path] = []
-    env_home = os.environ.get("CLAUDE_ROTATOR_HOME", "").strip()
-    if env_home:
-        candidates.append(Path(env_home))
-    candidates.append(Path.home() / ".claude" / "account-rotator")
-    data = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
-    if data:
-        candidates.append(Path(data) / "oauth-rotator")
-    for c in candidates:
-        if (c / "state.json").is_file():
-            return c
-    return None
+    """The rotator home the DAEMON uses, or None (opt-in no-op). Delegates to the SSOT
+    `rotator.configured_rotator_home()` so this detector and the daemon ALWAYS read the same
+    state.json. The old per-detector resolver checked the legacy `~/.claude/account-rotator`
+    BEFORE the canonical `$CLAUDE_PLUGIN_DATA/oauth-rotator`, opposite to the daemon — so on a
+    migrated install (both present) the detector read STALE legacy state (refresh_failures=0) and
+    stayed silent while the daemon nudged every tick on the live canonical state (TRDD-5EUYV08H)."""
+    return rotator.configured_rotator_home()
 
 
 def slot_needs_login(

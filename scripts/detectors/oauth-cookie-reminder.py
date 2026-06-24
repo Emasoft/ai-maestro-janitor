@@ -46,19 +46,11 @@ _EPOCH_OFFSET_SEC = 11644473600
 
 
 def _rotator_home() -> Path | None:
-    """First rotator home that contains a state.json, or None (opt-in no-op)."""
-    candidates: list[Path] = []
-    env_home = os.environ.get("CLAUDE_ROTATOR_HOME", "").strip()
-    if env_home:
-        candidates.append(Path(env_home))
-    candidates.append(Path.home() / ".claude" / "account-rotator")
-    data = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
-    if data:
-        candidates.append(Path(data) / "oauth-rotator")
-    for c in candidates:
-        if (c / "state.json").is_file():
-            return c
-    return None
+    """The rotator home the DAEMON uses, or None (opt-in no-op). Delegates to the SSOT
+    `rotator.configured_rotator_home()` so this detector and the daemon ALWAYS read the same
+    state.json — the old legacy-first resolver diverged from the daemon's canonical-first order on a
+    migrated install and read stale state (TRDD-5EUYV08H)."""
+    return rotator.configured_rotator_home()
 
 
 def _cookie_days(profiles_root: Path, email: str, now: float) -> float | None:

@@ -1126,3 +1126,63 @@ def test_decision_log_carries_emails_and_usage_but_never_tokens(tmp_path: Path, 
     assert "a@x.com" in body and "b@y.com" in body                      # emails kept (diagnosable)
     assert "accessToken" not in body and "refreshToken" not in body     # no token KEYS
     assert "sk-ant-" not in body                                        # no token VALUES
+
+
+def test_configured_rotator_home_prefers_canonical_over_stale_legacy(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """REGRESSION (TRDD-5EUYV08H): on a MIGRATED install BOTH the legacy
+    ~/.claude/account-rotator/state.json (kept non-destructively by migrate_root_to_canonical) AND
+    the canonical $CLAUDE_PLUGIN_DATA/<janitor>/oauth-rotator/state.json exist. configured_rotator_home
+    MUST return the CANONICAL one the daemon uses — the user-facing detectors delegate here, and the
+    OLD per-detector resolver returned legacy-FIRST, so it read 25-day-stale state (refresh_failures=0)
+    and never nudged the user while the daemon nudged every tick on the live canonical state."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_ROTATOR_HOME", raising=False)
+    data = tmp_path / "data" / rotator._JANITOR_DATA_DIRNAME
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    legacy = home / ".claude" / "account-rotator"
+    canonical = data / "oauth-rotator"
+    legacy.mkdir(parents=True)
+    canonical.mkdir(parents=True)
+    (legacy / "state.json").write_text("{}")
+    (canonical / "state.json").write_text("{}")
+    assert rotator.configured_rotator_home() == canonical  # the daemon's home, NOT the stale legacy
+
+
+def test_configured_rotator_home_falls_back_to_legacy_when_only_legacy(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A not-yet-migrated standalone install (ONLY the legacy state.json) still resolves —
+    canonical-first means 'canonical WHEN it has state.json', else fall back to legacy."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_ROTATOR_HOME", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    legacy = home / ".claude" / "account-rotator"
+    legacy.mkdir(parents=True)
+    (legacy / "state.json").write_text("{}")
+    assert rotator.configured_rotator_home() == legacy
+
+
+def test_configured_rotator_home_env_override_wins(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE_ROTATOR_HOME (the tests' + the standalone seed-login setup's explicit override) wins
+    when it holds a state.json, even if a canonical home also exists."""
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+    (explicit / "state.json").write_text("{}")
+    monkeypatch.setenv("CLAUDE_ROTATOR_HOME", str(explicit))
+    data = tmp_path / "data" / rotator._JANITOR_DATA_DIRNAME
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    (data / "oauth-rotator").mkdir(parents=True)
+    (data / "oauth-rotator" / "state.json").write_text("{}")
+    assert rotator.configured_rotator_home() == explicit
+
+
+def test_configured_rotator_home_none_when_absent(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No state.json anywhere → None (opt-in by presence; the detectors stay a silent no-op)."""
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.delenv("CLAUDE_ROTATOR_HOME", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    assert rotator.configured_rotator_home() is None
