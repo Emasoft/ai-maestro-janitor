@@ -1,9 +1,11 @@
 ---
 trdd-id: 53a00e44-e4b5-4b92-a4e5-9083ac017728
 title: Immortal janitor GROUP C — ship the self-integrity manifest as a release artifact (C1-bounded)
-column: dev
+column: published
 created: 2026-06-23T17:58:01+0200
-updated: 2026-06-23T17:58:01+0200
+updated: 2026-06-24T06:06:23+0200
+published-version: 0.18.0
+published-at: 2026-06-24T04:37:06+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 parent-trdd: TRDD-324223a6
@@ -17,14 +19,22 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 
 # GROUP C — self-integrity: ship the file-hash manifest as a release artifact (C1-bounded)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-23
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
+
+**✅ C1 SHIPPED in v0.18.0 (2026-06-24).** Verified: `.integrity/manifest-sha256.json`
+is git-tracked and present in the `v0.18.0` tag — `publish.py` Step 10.5 regenerated
+it during tonight's release (GROUP B's persistence now clears CPV via the #152 fold,
+so `main` was no longer publish-blocked). Self-integrity is now FUNCTIONAL data-wise;
+the detector stays OPT-IN + alert-only (the default-on flip + C2/C3/C4 remain DEFERRED
+below — exec-path / machine-wide, USER-review-gated). This C1 TRDD is now terminal
+(`column: published`).
 
 **Scope of THIS TRDD = the NON-BRICKING subset of GROUP C C1 only.** The plan
 (`glittery-hatching-shell.md`, GROUP C) bundles four sub-pieces; this TRDD ships
 exactly the one that is safe to land autonomously and DEFERS the three that are
 bricking-risk or machine-wide-blast-radius (see "DEFERRED" below). Task #228.
 
-### ✅ DONE this wake (committed; NOT pushed — branch is publish-blocked)
+### ✅ DONE + SHIPPED (committed, pushed, released in v0.18.0)
 - **`scripts/generate_integrity_manifest.py`** (NEW) — regenerates
   `.integrity/manifest-sha256.json` (sha256 of the prompt surface:
   README/CLAUDE/skills/commands/rules = `DEFAULT_MANIFEST_GLOBS`). Thin glue over
@@ -68,14 +78,14 @@ self-integrity FUNCTIONAL — the bounded, additive, non-bricking core of C1.
    the multi-agent opus review loop. That needs USER opt-in to Workflow
    orchestration (not granted this session). **OWED before the group is closed.**
 
-### NEXT ACTION
-- This C1 slice is implemented + unit-tested + committed. It ships with the next
-  `publish.py` release (the generator runs automatically at Step 10.5). It CANNOT
-  publish standalone — `main` is blocked by GROUP B's persistence CRITICALs (the
-  USER's a/b/c decision in `reports/overnight-session/20260623_171000+0200-…md`).
-- When the USER is present: (a) review the default-on flip (#1), (b) opt into the
-  ultracode review loop for the whole of GROUP C, (c) decide the C2 exec-gate
-  design. Until then, leave the detector OPT-IN and the exec path UNTOUCHED.
+### NEXT ACTION (C1 done; remaining GROUP C work is the DEFERRED set below)
+- ✅ C1 shipped in v0.18.0 — manifest verified in the tag. Nothing left for THIS TRDD.
+- The remaining GROUP C pieces (default-on flip, C2 exec-gate, C3/C4 rollback, the
+  ultracode review loop) stay DEFERRED — every one touches the heartbeat EXEC PATH
+  (a bug bricks the lifeline) or is MACHINE-WIDE (every project on the host). With
+  no OAuth rotation alternate, an autonomous exec-path mistake is hard to recover,
+  so they are authored as DESIGN before any live deploy. Each becomes its own child
+  TRDD under TRDD-324223a6 when taken up — NOT folded back into this terminal C1 TRDD.
 
 ### Load-bearing facts
 - Generator root resolution: the script is at `scripts/…` so plugin root =
