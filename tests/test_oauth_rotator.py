@@ -675,16 +675,22 @@ def test_cmd_auto_stays_put_when_api_down_but_live_valid(
     assert switches == []                                  # transient blip → no rotation
 
 
-def test_cmd_auto_never_rotates_onto_expired_alternate(
+def test_cmd_auto_never_rotates_onto_unrenewable_expired_alternate(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The only alternate is itself locally expired → it is skipped and no switch happens."""
+    """An expired alternate with NO refresh token is UNRENEWABLE → excluded outright, and NO refresh
+    grant is even attempted (nothing could re-mint it). The 'never rotate onto a dead token' floor,
+    sharpened by the residual fix (TRDD-1IKF0A6D): only a slot that can plausibly be re-minted (has a
+    refresh token) is refresh-retried; a no-refresh expired slot is dropped without a wasted grant."""
     monkeypatch.setattr(rotator, "EXPIRY_GRACE_H", 0.5)
     live = _blob("LIVE", expires_ms=_ms_in(50))
-    dead_alt = _blob("DEAD", expires_ms=_ms_in(-5))       # expired target — must be rejected
+    dead_alt = _blob("DEAD", refresh=None, expires_ms=_ms_in(-5))   # expired AND unrenewable (no refresh token)
     switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
-                           slot_blobs={"dead@x": dead_alt}, usage={"LIVE": (401, None), "DEAD": (200, _usage_ok())})
+                           slot_blobs={"dead@x": dead_alt}, usage={"LIVE": (401, None)})
+    refreshed: list = []
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: refreshed.append(_tok(b)) or None)
     rotator.cmd_auto()
-    assert switches == []
+    assert switches == []          # no rotation onto a dead, unrenewable token
+    assert refreshed == []         # and no wasted refresh grant on a no-refresh-token slot
 
 
 def test_cmd_auto_proactive_swap_on_locally_expiring_live(
@@ -725,6 +731,46 @@ def test_cmd_auto_refreshes_expired_alternate_before_excluding(
     assert [s[0] for s in switches] == ["alt@x"]           # rotated instead of deadlocking
     assert _tok(switches[0][1]) == "ALT_NEW"               # onto the FRESH token, not the stale one
     assert healed == [("alt@x", "ALT_NEW")]                # the lapsed slot was re-minted in the keychain
+
+
+def test_cmd_auto_refreshes_locally_expired_alternate_with_refresh_token(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RENEW residual (TRDD-1IKF0A6D, lesson [^2] of oauth-rotation-renew-reauth.md): an alternate
+    whose ACCESS token is LOCALLY EXPIRED but which still carries a refreshToken is refresh-retried
+    + healed BEFORE the locally-expired guard drops it (its keepalive merely missed a tick). The
+    switch lands on the FRESH token and the slot is re-minted — so a lapsed-but-rescuable alternate
+    can never deadlock rotation. (Pre-fix: the guard `continue`d and excluded it outright.)"""
+    monkeypatch.setattr(rotator, "EXPIRY_GRACE_H", 0.5)
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    expired_alt = _blob("ALT_OLD", refresh="r", expires_ms=_ms_in(-5))   # LOCALLY EXPIRED, has refresh grant
+    fresh_alt = _blob("ALT_NEW", expires_ms=_ms_in(80))                  # what the refresh mints
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": expired_alt},
+                           usage={"LIVE": (401, None), "ALT_NEW": (200, _usage_ok())})
+    monkeypatch.setattr(rotator, "refresh_oauth_token",
+                        lambda b: fresh_alt if _tok(b) == "ALT_OLD" else None)
+    healed: list = []
+    monkeypatch.setattr(rotator, "write_slot", lambda e, b: healed.append((e, _tok(b))))
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"]           # rotated, not dropped, despite the local expiry
+    assert _tok(switches[0][1]) == "ALT_NEW"               # onto the FRESH token
+    assert healed == [("alt@x", "ALT_NEW")]                # the lapsed slot was re-minted in the keychain
+
+
+def test_cmd_auto_excludes_locally_expired_alternate_when_refresh_fails(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other side of the residual fix: a locally-expired alternate whose in-tick refresh FAILS
+    (None) — or whose refreshed token is STILL expired — is excluded; we never rotate onto a
+    still-dead token. (A locally-expired slot is NOT degraded-eligible — degraded requires a
+    not-locally-expired token — so a plain exclude is correct, no degraded rotate onto a corpse.)"""
+    monkeypatch.setattr(rotator, "EXPIRY_GRACE_H", 0.5)
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    expired_alt = _blob("ALT_OLD", refresh="r", expires_ms=_ms_in(-5))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": expired_alt}, usage={"LIVE": (401, None)})
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: None)  # in-tick refresh fails
+    rotator.cmd_auto()
+    assert switches == []                                  # still-dead → excluded, no rotation
 
 
 def test_cmd_auto_does_not_refresh_maxed_429_alternate(

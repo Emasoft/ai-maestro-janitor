@@ -1,9 +1,9 @@
 ---
 trdd-id: 1IKF0A6D
 title: cmd_auto excludes a locally-expired alternate without a refresh-retry — close the documented RENEW-before-rotate residual
-column: dev
+column: complete
 created: 2026-06-24T16:45:28+0200
-updated: 2026-06-24T16:45:28+0200
+updated: 2026-06-24T16:56:50+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 1
@@ -23,6 +23,23 @@ external-refs: []
 # TRDD-1IKF0A6D — cmd_auto: refresh-retry a locally-expired alternate before excluding it
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
+
+### ✅ IMPLEMENTED + TESTED (2026-06-24 16:56) — ships on the next publish.py
+Done exactly as designed: `_refresh_and_heal_slot(email, blob, state) -> (fresh|None, changed)`
+extracted as the shared refresh+keychain-heal+index-update kernel; the locally-expired guard now
+refresh-retries a slot that carries a `refreshToken` when `network_up` (falls through to the normal
+candidate flow on a fresh non-expired token, excludes on None/still-expired — the guard's "never
+rotate onto a dead token" invariant preserved); the existing refresh-on-err block refactored onto
+the SAME kernel with the 2026-06-20 degraded-fallback preserved byte-for-byte. Also fixed a latent
+import-fragility surfaced while testing: rotator.py now self-adds its own dir to `sys.path` so
+`import cascade` resolves under ANY loader (it had depended on test_cascade.py inserting the path
+first — running `test_oauth_rotator.py` in isolation failed with ModuleNotFoundError). **61/61
+rotator tests pass** (the 3 new/updated cmd_auto tests + the full refresh-on-err regression set),
+**ruff clean**. Live-health (16:56) confirmed the target case in the wild: `fmuaddib` ACCESS token
+expired ~19h with a refresh grant PRESENT — pre-fix dropped at the guard; post-fix refresh-retried
+(rescued if the grant works, excluded if the server rejects — correct either way, and it validates
+the "don't trust the compaction summary; `refresh=yes` means present-not-working" lesson). NEXT:
+`publish.py` (USER present).
 
 ### The bug (the documented RENEW residual, lesson [^2] of `oauth-rotation-renew-reauth.md`)
 `scripts/oauth_rotator/rotator.py::cmd_auto` builds the alternate-candidate list. At the

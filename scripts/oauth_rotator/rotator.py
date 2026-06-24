@@ -51,11 +51,16 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# scripts/lib holds janitor_integrity (backup + corruption-recovery, TRDD-7100178d).
-# rotator.py runs both standalone (`uv run …/rotator.py`) and under the daemon (which
-# already puts scripts/lib on sys.path); the insert below makes the import work in the
-# standalone case too. janitor_integrity is pure-stdlib, so it adds no PEP-723 deps.
+# scripts/lib holds janitor_integrity (backup + corruption-recovery, TRDD-7100178d); the
+# sibling `cascade` lives in THIS dir (scripts/oauth_rotator). rotator.py runs standalone
+# (`uv run …/rotator.py`), under the daemon, AND under a test that loads it by importlib
+# spec — the two inserts below make BOTH imports resolve in all three. The own-dir insert is
+# load-bearing: importlib spec-load does NOT auto-add the file's directory, so without it
+# `import cascade` depended on another test (test_cascade.py) inserting the path first — a
+# hidden ordering leak that broke running test_oauth_rotator.py in isolation. janitor_integrity
+# is pure-stdlib, so it adds no PEP-723 deps.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # this dir — so `import cascade` resolves under any loader
 import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
@@ -1049,6 +1054,41 @@ def _reconcile_live_email(state: dict, live_blob: dict) -> dict:
     return state
 
 
+def _refresh_and_heal_slot(email: str, blob: dict, state: dict) -> tuple[dict | None, bool]:
+    """Refresh ONE slot's OAuth token and heal both stores — the shared kernel of cmd_auto's two
+    refresh paths (the locally-expired RENEW-before-rotate guard and the refresh-on-err net).
+
+    Returns ``(fresh_blob, index_changed)``:
+      - ``fresh_blob`` is ``None`` when the refresh grant yielded nothing — the CALLER decides
+        whether to keep the slot as a degraded fallback or drop it (the two call sites differ).
+      - otherwise ``fresh_blob`` is the re-minted token and ``write_slot`` has mirrored it to the
+        keychain. FAIL-SOFT: a locked/declined keychain is logged and tolerated — the fresh token
+        is still returned for in-memory use (a rotation writes the LIVE credential, a DIFFERENT
+        keychain item, so a refused slot-write never blocks the decision; same accepted hazard as
+        _keepalive_refresh's skip-on-refusal: if the token endpoint ROTATES refresh tokens the
+        slot's stored grant may now be spent, but a locked keychain already degrades every persist
+        path equally and NOT refreshing would deadlock rotation outright). ``index_changed`` is
+        True iff the state.json slot meta (fp/expires_at) was updated — the F3 self-heal invariant,
+        and so MUST be persisted by the caller BEFORE any _switch_blob (which re-loads state from
+        disk, so an unsaved update would be lost).
+    """
+    refreshed = refresh_oauth_token(blob)
+    if refreshed is None:
+        return None, False
+    try:
+        write_slot(email, refreshed)  # heal the lapsed slot in the keychain (as keepalive would)
+    except SlotKeychainWriteError as exc:
+        _log("[auto] %s: keychain write refused after refresh (%s) — using fresh token in-memory"
+             % (email, exc))
+        return refreshed, False
+    meta = state.get("slots", {}).get(email)
+    if isinstance(meta, dict):
+        meta["fp"] = fingerprint(refreshed)
+        meta["expires_at"] = _oauth(refreshed).get("expiresAt")
+        return refreshed, True
+    return refreshed, False
+
+
 def cmd_auto() -> int:
     """Proactive usage-based rotation. No-op unless the LIVE account is near a
     limit AND a safer alternate slot exists. Reads quota from /api/oauth/usage
@@ -1131,7 +1171,25 @@ def cmd_auto() -> int:
         if not b:
             continue
         if _blob_locally_expired(b):
-            continue  # never rotate ONTO a dead/dying token
+            # RENEW-before-rotate (TRDD-1IKF0A6D, lesson [^2] of oauth-rotation-renew-reauth.md):
+            # this slot's ACCESS token is locally expired, but it may merely have MISSED a keepalive
+            # tick (the daemon was down, a tick was skipped, a transient refresh 1010'd) while its
+            # refresh grant is still good. Before excluding it — the documented residual, "a slot
+            # excluded EARLIER by the locally-expired guard is not yet refresh-retried" — refresh-
+            # retry-then-heal it when it carries a refreshToken AND the network is up (mirroring the
+            # refresh-on-err net below), so a lapsed-but-rescuable alternate REJOINS the candidate
+            # flow instead of deadlocking rotation. A slot with no refresh grant, an unreachable API
+            # (network down → a refresh HTTP call would also fail), a refresh that yields nothing, or
+            # a refreshed token STILL locally expired is excluded exactly as before — the guard's
+            # invariant (never rotate ONTO a dead/dying token) is preserved.
+            if not (network_up and _oauth(b).get("refreshToken")):
+                continue
+            refreshed, healed = _refresh_and_heal_slot(email, b, state)
+            if refreshed is None or _blob_locally_expired(refreshed):
+                continue
+            index_healed = index_healed or healed
+            b = refreshed
+            # fall through: `b` is now a fresh, non-expired token — handled like any candidate below
         if network_up:
             st2, d2 = usage_request(b)
             if st2 not in (200, 429):
@@ -1143,7 +1201,7 @@ def cmd_auto() -> int:
                 # silently 1010'd). Refresh the token and re-probe BEFORE excluding, so one stale
                 # access token can never again deadlock rotation. 429 is deliberately NOT refreshed
                 # (the account is maxed, not the token expired — a refresh would not help).
-                refreshed = refresh_oauth_token(b)
+                refreshed, healed = _refresh_and_heal_slot(email, b, state)
                 if refreshed is None:
                     # The in-tick refresh grant returned nothing. If the slot is
                     # STRUCTURALLY renewable — carries a refresh token AND a future
@@ -1164,28 +1222,7 @@ def cmd_auto() -> int:
                     ):
                         degraded.append((email, b, _eh))
                     continue
-                try:
-                    write_slot(email, refreshed)  # heal the lapsed slot in the keychain (as keepalive would)
-                except SlotKeychainWriteError as exc:
-                    # FAIL SOFT: a locked/declined keychain refused the persist. Still use the fresh
-                    # token IN MEMORY for this decision — the goal is to not deadlock; a rotation
-                    # onto it writes the live credential (a different keychain item), not this slot.
-                    # Accepted hazard (same as _keepalive_refresh's skip-on-refusal): if the token
-                    # endpoint ROTATES refresh tokens, the slot's stored refresh token may now be
-                    # spent — but a locked keychain already degrades every persist path equally,
-                    # and NOT refreshing would deadlock rotation outright.
-                    _log("[auto] %s: keychain write refused after refresh-on-err (%s) — "
-                         "using fresh token in-memory" % (email, exc))
-                else:
-                    # Keep the state.json index in lockstep with the keychain (the F3 self-heal
-                    # invariant; a fp/expires_at left stale here is exactly the blocker-6 drift
-                    # class of TRDD-7100178d). Persisted after the loop, BEFORE any switch —
-                    # _switch_blob re-loads state from disk, so an unsaved update would be lost.
-                    meta = state.get("slots", {}).get(email)
-                    if isinstance(meta, dict):
-                        meta["fp"] = fingerprint(refreshed)
-                        meta["expires_at"] = _oauth(refreshed).get("expiresAt")
-                        index_healed = True
+                index_healed = index_healed or healed
                 b = refreshed
                 st2, d2 = usage_request(b)  # re-probe with the fresh token
             if st2 != 200:
