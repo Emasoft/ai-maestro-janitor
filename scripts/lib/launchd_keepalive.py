@@ -24,6 +24,7 @@ install must not kill the very daemon it was meant to protect.
 
 from __future__ import annotations
 
+import filecmp
 import os
 import shutil
 import subprocess
@@ -37,6 +38,13 @@ import keepalive_stage  # sibling in scripts/lib/; computes + verbatim-stages th
 # daemon). The same hard-coded location the arm skill + the memory subsystem use.
 _DATA_DIR = Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
 _INSTALLER_NAME = "keepalive_install.sh"
+# The FIXED plugin-cache location (the marketplace install path). The OS-spawned daemon
+# runs from DATA and cannot see the cache via its own __file__, so it resolves the freshest
+# version from this hard-coded path to re-stage from — reading the dirs only to COPY, never
+# to exec (so it is not the dynamic-loading anti-pattern the design forbids).
+_CACHE_PARENT = (
+    Path.home() / ".claude" / "plugins" / "cache" / "ai-maestro-plugins" / "ai-maestro-janitor"
+)
 
 
 def data_dir() -> Path:
@@ -100,19 +108,81 @@ def _stage_installer(source_scripts_dir: Path) -> Path:
     return dest
 
 
+def _version_key(name: str) -> tuple[int, ...]:
+    """Sort key for a semver-ish cache dir name (``0.18.0`` → ``(0, 18, 0)``). A
+    non-numeric name sorts lowest so it never wins over a real version."""
+    try:
+        return tuple(int(p) for p in name.split("."))
+    except ValueError:
+        return (-1,)
+
+
+def latest_cache_scripts_dir() -> Path | None:
+    """The ``scripts/`` dir of the NEWEST cached plugin version (from the fixed cache
+    location), or ``None`` when no usable cache is present (e.g. an inline/dev install).
+    Only versions that actually carry the entry + daemon are considered. The OS-spawned
+    daemon — which runs from DATA and cannot see the cache via its own ``__file__`` — uses
+    this to re-stage the freshest closure into DATA, so it self-heals toward the current
+    version. Dirs are read only to COPY from, never to exec."""
+    if not _CACHE_PARENT.is_dir():
+        return None
+    candidates = [
+        d
+        for d in _CACHE_PARENT.iterdir()
+        if d.is_dir()
+        and (d / "scripts" / "daemon.py").is_file()
+        and (d / "scripts" / "daemon_keepalive_entry.py").is_file()
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda d: _version_key(d.name))
+    return candidates[-1] / "scripts"
+
+
+def restage(source_scripts_dir: Path) -> None:
+    """Verbatim-refresh the DATA closure + installer from ``source_scripts_dir`` WITHOUT
+    touching the OS service manager (no activation, no bootout). Safe to call on every
+    daemon startup: it keeps the FIXED-path DATA copy current so the next OS respawn runs
+    the freshest scanned code. Raises OSError on an I/O failure (callers wrap best-effort)."""
+    keepalive_stage.stage_closure(source_scripts_dir, data_scripts_dir())
+    _stage_installer(source_scripts_dir)
+
+
+def activate() -> tuple[bool, str]:
+    """Run the STAGED installer's ``install`` to register the OS service (idempotent).
+    Kept SEPARATE from ``restage`` so the daemon can refresh DATA on every startup but
+    register the OS service only ONCE — re-running the registration on a launchd-spawned
+    daemon's own startup would bootout the running process (a self-kill loop)."""
+    installer = data_scripts_dir() / _INSTALLER_NAME
+    if not installer.is_file():
+        return False, "no staged installer to activate"
+    return _run(["bash", str(installer), "install"])
+
+
+def staged_is_current(source_scripts_dir: Path) -> bool:
+    """True iff the staged DATA ``daemon.py`` is byte-identical to ``source_scripts_dir``'s
+    ``daemon.py``. When False, a newer/different version is available and the OS-spawned
+    daemon should ``restage`` + exit so launchd respawns it on the fresh code. False if
+    either file is missing (the caller only acts when a real source dir was resolved)."""
+    staged = data_scripts_dir() / "daemon.py"
+    src = source_scripts_dir / "daemon.py"
+    if not staged.is_file() or not src.is_file():
+        return False
+    return filecmp.cmp(staged, src, shallow=False)
+
+
 def install(source_scripts_dir: Path) -> tuple[bool, str]:
-    """Stage the daemon closure + the installer into DATA, then run the installer.
-    Idempotent + best-effort; never raises. ``source_scripts_dir`` is the shipped
-    ``scripts/`` dir (cache or repo) holding ``daemon_keepalive_entry.py``, ``daemon.py``
-    + its import closure, and ``keepalive_install.sh``."""
+    """Stage the daemon closure + installer into DATA, then register the OS service —
+    ``restage`` + ``activate`` in one. Idempotent + best-effort; never raises.
+    ``source_scripts_dir`` is the shipped ``scripts/`` dir (cache or repo) holding
+    ``daemon_keepalive_entry.py``, ``daemon.py`` + its closure, and ``keepalive_install.sh``."""
     if current_platform() == "other":
         return False, f"no OS keepalive for platform {sys.platform}"
     try:
-        keepalive_stage.stage_closure(source_scripts_dir, data_scripts_dir())
-        installer = _stage_installer(source_scripts_dir)
+        restage(source_scripts_dir)
     except OSError as exc:
         return False, f"could not stage keepalive: {exc}"
-    return _run(["bash", str(installer), "install"])
+    return activate()
 
 
 def uninstall() -> tuple[bool, str]:

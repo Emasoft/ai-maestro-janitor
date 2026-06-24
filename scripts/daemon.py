@@ -66,11 +66,22 @@ import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import global_state as gs  # noqa: E402
+import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
 import state  # noqa: E402
 import supervisor as oauth_supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py
 import version_update_lib as vu  # noqa: E402
+
+# L0 OS-keepalive (TRDD-71ABD7V7): True iff this process was launched by the OS service
+# manager via daemon_keepalive_entry.py (which passes --keepalive). Captured at import time —
+# launchd already passes --keepalive as argv[1] and the entry sets argv before main(), so this
+# is correct for the OS-spawned daemon and False for a session-spawned one.
+_KEEPALIVE_INSTANCE = "--keepalive" in sys.argv
+_INTERVAL_KEEPALIVE_SELF_HEAL = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_KEEPALIVE_SELF_HEAL_INTERVAL", "600")
+)  # 10 min — how often the OS-spawned daemon checks the cache for a newer version to
+#  re-stage + exit-for-respawn. Cheap (one dir list + one filecmp); only acts on a real change.
 
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
@@ -835,6 +846,62 @@ def _build_tasks() -> list[Task]:
     ]
 
 
+def _setup_os_keepalive() -> None:
+    """Best-effort L0 OS-keepalive setup at daemon startup (singleton only — runs after the
+    flock is held). Refresh the DATA closure from the FRESHEST cache so a future OS respawn
+    runs current code, then register the OS service ONCE. Registration is gated on
+    `not is_installed()` because re-running it on the launchd-spawned daemon's OWN startup
+    would bootout the running process — a self-kill loop (TRDD-71ABD7V7). Never raises."""
+    try:
+        if not ka.opted_in():
+            return
+        src = ka.latest_cache_scripts_dir() or _HERE
+        try:
+            ka.restage(src)  # refresh DATA (safe: no OS activation, no bootout)
+        except OSError as exc:
+            state.log_line("daemon", f"os-keepalive restage skipped: {exc}")
+        if not ka.is_installed():
+            ok, msg = ka.activate()
+            state.log_line("daemon", f"os-keepalive activate: ok={ok} ({msg})")
+    except Exception as exc:  # noqa: BLE001 — keepalive must NEVER kill the daemon it protects
+        state.log_line("daemon", f"os-keepalive setup skipped: {exc}")
+
+
+def _keepalive_self_heal() -> bool:
+    """For the OS-spawned (`--keepalive`) daemon ONLY: when a newer cache version exists,
+    re-stage it into DATA and return True to signal a graceful exit so launchd respawns on
+    the fresh code (the launched entry path is stable; only the daemon.py beside it is
+    refreshed). Returns False (keep running) otherwise. Exits ONLY after verifying the
+    re-stage actually made the staged code current, so a persistent copy failure can't loop
+    exit→respawn→exit. Never raises."""
+    if not _KEEPALIVE_INSTANCE:
+        return False
+    try:
+        if not ka.opted_in():
+            return False
+        src = ka.latest_cache_scripts_dir()
+        if src is None or ka.staged_is_current(src):
+            return False
+        ka.restage(src)
+        if ka.staged_is_current(src):
+            state.log_line("daemon", "os-keepalive: newer version staged → exit for respawn")
+            return True
+    except Exception as exc:  # noqa: BLE001
+        state.log_line("daemon", f"os-keepalive self-heal skipped: {exc}")
+    return False
+
+
+def _uninstall_os_keepalive() -> None:
+    """Best-effort: remove the OS keepalive on a machine-wide kill-switch stop so launchd
+    never resurrects a daemon the user deliberately disarmed. A no-op if nothing was
+    installed. Never raises."""
+    try:
+        ok, msg = ka.uninstall()
+        state.log_line("daemon", f"os-keepalive uninstall: ok={ok} ({msg})")
+    except Exception as exc:  # noqa: BLE001
+        state.log_line("daemon", f"os-keepalive uninstall skipped: {exc}")
+
+
 def main() -> int:
     # The daemon is a machine-wide singleton, but state.log_line() defaults to
     # a PROJECT-scoped logs/ dir keyed on whatever tree spawned us — so the
@@ -883,17 +950,20 @@ def main() -> int:
         f"intervals={[t.interval_s for t in tasks]})",
     )
 
-    # Immortality here is L1 only: this daemon is detached (it outlives the session
-    # that spawned it) and the GROUP A watchdog recovers frozen sessions — so the
-    # all-sessions-frozen gap is closed WITHOUT any OS-level persistence. L0
-    # reboot/crash survival (a launchd/systemd KeepAlive that restarts this daemon
-    # across a reboot) is NOT shipped in the published plugin: an in-tree OS-keepalive
-    # installer is a true-positive `skillaudit:persistence` finding that CPV --strict
-    # (correctly, by design) will not waive, and the no-exempt policy forbids gaming
-    # the matcher. Reboot survival is therefore an out-of-band opt-in companion (the
-    # launchd installer lives in git history at cd9c251), launched separately by a
-    # user who wants it — never auto-installed by the scanned plugin.
+    # L0 reboot/crash survival (TRDD-71ABD7V7): install (once) + refresh the OS keepalive so
+    # a launchd/systemd service respawns this daemon even with ZERO Claude sessions — the
+    # deepest immortality layer, closing the all-sessions-frozen gap that caused the 20-hour
+    # freeze. This was held back in v0.16.0 because the pre-#152 CPV persistence gate could
+    # not resolve an in-tree OS-keepalive installer and (correctly) flagged it. Issue #152
+    # added the plugin-data-sandbox fold, so the installer now points the OS service at the
+    # in-tree, CPV-scanned, provably-inert daemon_keepalive_entry.py and the gate resolves it
+    # as a CLEAN persistence target — the discriminator used AS DESIGNED, not gamed (the entry
+    # is genuinely exec/eval/network/listen-free). Best-effort, never fatal; a no-op when
+    # CLAUDE_PLUGIN_OPTION_DAEMON_OS_KEEPALIVE=0.
+    _setup_os_keepalive()
+
     exit_reason = "signal"
+    last_keepalive_check = 0.0  # wall-clock stamp gating the keepalive self-heal cadence
     try:
         while _running:
             if gs.kill_switch_present():
@@ -922,6 +992,16 @@ def main() -> int:
 
             gs.write_heartbeat()
 
+            # L0 self-heal (OS-spawned daemon ONLY): on a slow cadence, re-stage + exit for
+            # respawn when a newer cache version exists, so it converges to current code with
+            # no session involvement. Instant no-op for a session-spawned daemon.
+            now_s = time.time()
+            if _KEEPALIVE_INSTANCE and now_s - last_keepalive_check >= _INTERVAL_KEEPALIVE_SELF_HEAL:
+                last_keepalive_check = now_s
+                if _keepalive_self_heal():
+                    exit_reason = "self-update-respawn"
+                    break
+
             # Sleep precisely until the next task is due, but in 1-second
             # increments so signals interrupt promptly.
             next_due = min((t.time_until_due() for t in tasks), default=_LOOP_CEILING_SEC)
@@ -931,6 +1011,12 @@ def main() -> int:
                     break
                 time.sleep(1)
     finally:
+        if exit_reason == "kill-switch":
+            # A machine-wide kill-switch (e.g. /janitor-global-disarm) is a deliberate stop —
+            # remove the OS keepalive so launchd/systemd does not immediately resurrect us
+            # (KeepAlive would otherwise fight the user's explicit disarm). NOT done on a
+            # plain signal/self-update exit, where a respawn is exactly what we want.
+            _uninstall_os_keepalive()
         state.log_line("daemon", f"stopping ({exit_reason})")
         gs.remove_daemon_pid()
         gs.release_singleton_flock(flock_fd)

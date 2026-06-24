@@ -300,3 +300,93 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
         text = cfg.read_text(encoding="utf-8")
         assert f"ExecStart={expected_entry} --keepalive" in text
         assert "$HOME" not in text
+
+
+# ── Currency: cache resolution + restage/activate split + self-heal predicate ─
+
+
+def test_latest_cache_scripts_dir_picks_newest_complete_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """latest_cache_scripts_dir() returns the newest version that actually has BOTH the
+    entry and daemon — a numerically-newer but incomplete version is ignored."""
+    cache = tmp_path / "cache"
+    for ver in ("0.9.0", "0.17.3", "0.18.0", "0.8.0"):
+        s = cache / ver / "scripts"
+        s.mkdir(parents=True)
+        (s / "daemon.py").write_text("x", encoding="utf-8")
+        (s / "daemon_keepalive_entry.py").write_text("y", encoding="utf-8")
+    incomplete = cache / "0.19.0" / "scripts"  # newer number but NO entry → must be skipped
+    incomplete.mkdir(parents=True)
+    (incomplete / "daemon.py").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(launchd_keepalive, "_CACHE_PARENT", cache)
+    assert launchd_keepalive.latest_cache_scripts_dir() == cache / "0.18.0" / "scripts"
+
+
+def test_latest_cache_scripts_dir_none_without_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No cache dir (e.g. an inline/dev install) → None (caller falls back to its own dir)."""
+    monkeypatch.setattr(launchd_keepalive, "_CACHE_PARENT", tmp_path / "absent")
+    assert launchd_keepalive.latest_cache_scripts_dir() is None
+
+
+def test_staged_is_current_true_when_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """staged_is_current() is True iff the staged daemon.py byte-matches the source's."""
+    data = tmp_path / "data"
+    (data / "scripts").mkdir(parents=True)
+    src = tmp_path / "src"
+    src.mkdir()
+    (data / "scripts" / "daemon.py").write_text("SAME", encoding="utf-8")
+    (src / "daemon.py").write_text("SAME", encoding="utf-8")
+    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    assert launchd_keepalive.staged_is_current(src) is True
+
+
+def test_staged_is_current_false_when_differs_or_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A content difference (a newer version) OR a missing staged file → not current."""
+    data = tmp_path / "data"
+    (data / "scripts").mkdir(parents=True)
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "daemon.py").write_text("NEW", encoding="utf-8")
+    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    assert launchd_keepalive.staged_is_current(src) is False  # staged daemon.py missing
+    (data / "scripts" / "daemon.py").write_text("OLD", encoding="utf-8")
+    assert launchd_keepalive.staged_is_current(src) is False  # content differs
+
+
+def test_restage_stages_without_ever_activating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """restage() refreshes the DATA closure + installer but NEVER runs the installer — the
+    property that lets the launchd daemon refresh itself on startup without self-bootout."""
+    data = tmp_path / "data"
+    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(launchd_keepalive, "_run", lambda cmd: (calls.append(cmd) or (True, "")))
+    launchd_keepalive.restage(SCRIPTS)
+    assert (data / "scripts" / "daemon_keepalive_entry.py").is_file()
+    assert (data / "scripts" / "keepalive_install.sh").is_file()
+    assert calls == [], "restage must never activate the OS service"
+
+
+def test_activate_runs_staged_installer_or_reports_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """activate() runs the staged installer's `install`; with none staged it fails cleanly."""
+    data = tmp_path / "data"
+    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    ok, msg = launchd_keepalive.activate()
+    assert ok is False and "no staged installer" in msg
+    (data / "scripts").mkdir(parents=True)
+    (data / "scripts" / "keepalive_install.sh").write_text("x", encoding="utf-8")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(launchd_keepalive, "_run", lambda cmd: (calls.append(cmd) or (True, "")))
+    ok, _ = launchd_keepalive.activate()
+    assert ok
+    assert calls == [["bash", str(data / "scripts" / "keepalive_install.sh"), "install"]]

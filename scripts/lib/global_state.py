@@ -636,6 +636,16 @@ def daemon_needs_restart() -> bool:
     cmdline = _read_process_cmdline(pid)
     if not cmdline:
         return False
+    # The OS-keepalive (L0) daemon runs the STABLE entry `daemon_keepalive_entry.py` from
+    # the FIXED DATA path (TRDD-71ABD7V7); its argv is that entry, never a cache
+    # `daemon.py`. The cache-path comparison below would therefore ALWAYS judge it "stale"
+    # and SIGTERM it — and launchd would immediately respawn it, so the next heartbeat
+    # SIGTERMs it again: an endless restart loop. It is NOT stale by that measure: launchd
+    # owns its lifecycle and it re-stages its own DATA copy toward the freshest cache on
+    # respawn (launchd_keepalive.restage / staged_is_current). Session-side restart must
+    # leave it alone.
+    if "daemon_keepalive_entry.py" in cmdline:
+        return False
     expected = str(daemon_script_path().resolve())
     # The argv may have `uv run --script --quiet /path/to/daemon.py` OR
     # `python /path/to/daemon.py` — we just check that the EXPECTED path is

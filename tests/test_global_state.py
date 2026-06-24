@@ -272,6 +272,24 @@ def test_daemon_needs_restart_true_when_cmdline_mismatches(state_dir: Path) -> N
     assert gs.daemon_needs_restart() is True
 
 
+def test_daemon_needs_restart_false_for_os_keepalive_daemon(state_dir: Path) -> None:
+    """The OS-spawned (L0) daemon runs the stable entry daemon_keepalive_entry.py from the
+    FIXED DATA path, so its argv never contains a cache daemon.py path. It MUST be exempt
+    from the staleness check — otherwise every heartbeat would mark it stale + SIGTERM it,
+    launchd would respawn it, and the next heartbeat would SIGTERM it again: an endless
+    restart loop (TRDD-71ABD7V7)."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.write_daemon_pid(os.getpid())
+    # A keepalive-entry argv that does NOT contain the expected cache daemon.py path.
+    gs._read_process_cmdline = lambda _pid: (  # type: ignore[attr-defined]
+        "/usr/bin/python3 "
+        "/Users/x/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/daemon_keepalive_entry.py "
+        "--keepalive"
+    )
+    assert gs.daemon_needs_restart() is False
+
+
 def test_request_daemon_restart_no_daemon_returns_false(state_dir: Path) -> None:
     """Asking to restart a non-running daemon is a silent no-op (False)."""
     gs = _gs()
