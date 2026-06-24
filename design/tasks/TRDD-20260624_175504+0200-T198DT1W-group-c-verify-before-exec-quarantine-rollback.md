@@ -50,9 +50,17 @@ external-refs: []
   with an intact instruction surface is NOT caught by C2 alone. Closing that gap = either C3's HMAC
   trust anchor or a separate manifest-scope expansion (out of scope here; noted, not silently
   dropped). C2-alone remains a strict corruption-resilience win at near-zero bricking risk.
-- **NEXT**: (1) USER reviews the stub commit; (2) publish C2 alone (Tier-2 release step — MANAGER/USER
-  gate) → then re-arm to activate; (3) C3 (daemon pin-writer + stub HMAC cross-check); (4) C4
-  (crash-loop rollback). C3/C4 below are still design-only.
+- **C3 HAND-OFF NOTE (channel nuance found in C2 self-review)**: C2's fall-back/all-corrupt warning
+  is written to **stderr**, deliberately NOT stdout — the heartbeat surfaces the stub's *stdout*
+  verbatim (and parses it for bare `[janitor-*]` markers), so a warning on stdout would risk
+  polluting that marker-parsed stream and could prepend dispatch.py's output. The price: a
+  stderr-only warning may not reach the human via the heartbeat. That is acceptable for C2-alone
+  (its job is availability — don't brick); the PROPER human-facing alert on a detected-bad version
+  is **C3/C4's** responsibility via the daemon (quarantine.json + a PushNotification / drift line),
+  exactly as the C3 design below already states. Do not move C2's warning to stdout to "fix" this.
+- **NEXT**: (1) USER reviews the stub commit (9773ff3); (2) publish C2 alone (Tier-2 release step —
+  MANAGER/USER gate) → then re-arm to activate; (3) C3 (daemon pin-writer + stub HMAC cross-check);
+  (4) C4 (crash-loop rollback). C3/C4 below are still design-only.
 
 C1 (ship `.integrity/manifest-sha256.json` every release) is DONE + published in v0.18.0
 (TRDD-53a00e44). The dispatcher-stub is the boot-critical single point of failure (cron → stub →
