@@ -69,7 +69,7 @@ not hold). Acted in-session and SHIPPED the OAuth ROTATE/RENEW/REAUTHENTICATE ro
   exist, so the detector read a 25-day-STALE legacy file (`fmuaddib` refresh_failures=0 → looked healthy)
   while the daemon read the live canonical (refresh_failures=374 → REAUTH) — so the login-nudge was SILENT
   and the user was never told. Fixed with ONE SSOT resolver `rotator.configured_rotator_home()` (canonical-first
-  + the foreign-`CLAUDE_PLUGIN_DATA` guard); both detectors delegate. PROVEN live: the detector now emits the
+  plus the foreign-`CLAUDE_PLUGIN_DATA` guard); both detectors delegate. PROVEN live: the detector now emits the
   fmuaddib login nudge where it was silent.
 Memory note `oauth-rotation-renew-reauth.md` updated with both lessons ([^6] a shared SSOT is only an SSOT if
 both callers resolve the SAME inputs; [^7] tests must isolate the log too, not just state+keychain).

@@ -123,7 +123,7 @@ last-good. Reuses the daemon liveness signals from GROUP A.
 - C2: a tmp cache root with N version dirs; (a) clean latest → execs latest; (b) latest manifest
   hash mismatch → execs the next clean version; (c) latest has NO manifest → execs latest (fail-open);
   (d) malformed manifest / unreadable → execs latest (fail-open); (e) NO version clean → execs latest
-  + emits a drift line (fail-open). Assert via a fake `dispatch.py` that records which version ran
+  and emits a drift line (fail-open). Assert via a fake `dispatch.py` that records which version ran
   (monkeypatch `os.execv` to capture argv rather than actually exec).
 - C3: pin present + candidate HMAC matches → accept; pin present + HMAC mismatch → fall back +
   quarantine; no pin → C2-only behavior. Real HMAC with a tmp DATA-dir key.
