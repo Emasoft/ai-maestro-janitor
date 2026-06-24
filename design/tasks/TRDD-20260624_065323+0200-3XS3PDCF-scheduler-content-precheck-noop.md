@@ -1,9 +1,9 @@
 ---
 trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
-column: backburner
+column: dev
 created: 2026-06-24T06:53:23+0200
-updated: 2026-06-24T06:53:23+0200
+updated: 2026-06-24T08:42:09+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -23,6 +23,45 @@ external-refs: []
 # TRDD-3XS3PDCF — scheduler-side cheap content-precheck to eliminate no-op memory-agent spawns
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
+
+### ✅ SPLIT-MVP IMPLEMENTED + TESTED (2026-06-24 ~08:42, committed locally, NOT yet published)
+The highest-value slice — the **SPLIT** content-precheck — is done, TDD'd, ruff-clean,
+and committed locally (deferred publish: deep-night, no OAuth rotation alternate; ships
+on the next `publish.py` release). Split is the single biggest no-op drain: `split_per_day=4.5`
+with a corpus where NO page is over the 36000-byte cap (largest ~12 KB) = ~4.5 × 235k ≈
+**~1M tokens/day of pure no-op spawns**, now eliminated.
+
+What landed:
+- **`scripts/lib/memory_content_precheck.py`** (NEW) — `content_has_work(intervention, root,
+  *, split_max_bytes)` + `split_has_work(root, *, max_bytes)`. FAIL-OPEN: only a chore whose
+  idleness is cheaply PROVEN (today: split's size gate, excluding `.maint-staging/`) is
+  suppressed; every other chore returns True (unchanged cadence-only). A non-positive cap →
+  fail-open (never suppress on a config glitch). This is the SSOT for the size gate, sharing
+  the cap (`memory_settings split_max_bytes`) + the staging-exclusion with the split skill.
+- **`scripts/detectors/memory-maintenance.py`** — `_first_due_intervention` now gates on
+  `is_due AND content_has_work` (+ `_split_max_bytes()` fail-open cap reader). Option A falls
+  out for free: a suppressed split is never *picked* → never `mark_ran`-stamped → stays due →
+  re-checks each fire (a cheap rglob, zero LLM, NO agent spawn) → emits the instant a page goes
+  over cap. NO VJ8L465M double-gate (scheduler stays the sole cadence authority; agent still
+  trusts the marker; no agent change).
+- **Tests**: `tests/test_memory_content_precheck.py` (10 pure unit tests) +
+  `tests/test_memory_maintenance.py` (4 NEW precheck tests incl. the Option-A
+  not-stamped-then-fires invariant + the `.maint-staging` exclusion; 3 existing split-fires
+  tests seeded an over-cap page). **29/29 pass, ruff clean.**
+
+### 🔻 FOLLOW-UPS (deliberately NOT in this MVP — the dispatch is built to extend)
+- **HARVEST precheck** — needs the harvest skill's EXACT predicate (MEMORY.md-not-stub OR a
+  stray raw `.md` via `memory_scopes.is_curated_wiki_page`); guessing risks a wrong-suppress
+  (worse than the no-op). Its fail-open default = current cadence-only (zero regression).
+- **REPAIR / ATOMIZE prechecks** — per-page shape scans (malformed frontmatter / un-atomized
+  body). Cheap-ish but need each skill's predicate read; repair is a LOWER-value target (it
+  often has genuine work, unlike split). Also fail-open today.
+- **SPLIT refinement** — the size gate is the COMMON-case fix; refine to "over-cap AND
+  splittable (not tier:component, ≥2 sections)" to also suppress the rare over-cap-but-
+  unsplittable no-op.
+- **PUBLISH** — ship the whole thing via `publish.py` when an OAuth alternate exists or the
+  USER is present (a full test-suite + CPV cycle at deep-night-no-alternate is the budget I
+  deferred).
 
 ### The finding (observed live, autonomous overnight session 2026-06-24)
 Two background `janitor-memory-subconscious-agent` opus passes spawned by heartbeat

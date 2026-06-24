@@ -71,6 +71,17 @@ def _user_scope_dir(home: Path) -> Path:
     )
 
 
+def _write_oversized_page(scope_dir: Path, *, cap: int = 36000, name: str = "big.md") -> Path:
+    """Drop a page strictly larger than the split cap into `scope_dir` so SPLIT has
+    real work. Since the content-precheck (TRDD-3XS3PDCF) suppresses a cadence-due
+    split when NO page exceeds the cap, every case that expects split to fire must
+    seed one of these first."""
+    scope_dir.mkdir(parents=True, exist_ok=True)
+    page = scope_dir / name
+    page.write_text("x" * (cap + 100), encoding="utf-8")
+    return page
+
+
 def _write_settings(settings_dir: Path, **values: object) -> None:
     """Write the wikimem settings store the detector reads via
     JANITOR_MEMORY_SETTINGS_DIR. Only the given keys are set; the rest take the
@@ -146,6 +157,9 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
     values = {k: 0.0 for k in rate_key.values()}
     values[rate_key[intervention]] = 1000.0
     _write_settings(fixture["settings"], **values)
+    if intervention == "split":
+        # split now also requires real work — a page over the cap (TRDD-3XS3PDCF).
+        _write_oversized_page(fixture["local"])
 
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     # Exactly one non-empty line, and it is the bare marker (no trailing text).
@@ -179,6 +193,8 @@ def test_not_due_after_just_running_is_silent(fixture):
         split_per_day=1000.0, consolidation_per_day=0.0, conflict_per_day=0.0,
         repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
     )
+    # split needs a page over the cap to have real work (TRDD-3XS3PDCF).
+    _write_oversized_page(fixture["local"])
     env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
     first = _run(env)
     assert [ln for ln in first.splitlines() if ln.strip()] == ["[janitor-memory-split]"], first
@@ -189,6 +205,66 @@ def test_not_due_after_just_running_is_silent(fixture):
 
 
 # --------------------------------------------------------------------------- #
+# the content-precheck (TRDD-3XS3PDCF) — split suppressed when there is no work
+# --------------------------------------------------------------------------- #
+
+def _split_only(settings_dir: Path) -> None:
+    """Enable ONLY split (high rate, always due on a fresh stamp); disable every
+    other chore so split's content-precheck behavior is what's under test (a
+    fail-open chore would otherwise fire and mask the suppression)."""
+    _write_settings(
+        settings_dir,
+        split_per_day=1000.0, consolidation_per_day=0.0, conflict_per_day=0.0,
+        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
+    )
+
+
+def test_split_suppressed_when_no_oversized_page(fixture):
+    """split is cadence-due but NO page exceeds the cap -> the content-precheck
+    suppresses the marker (no ~240k no-op agent spawn). The LOCAL scope exists but
+    holds no over-cap page, so the fire is silent."""
+    _split_only(fixture["settings"])
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out
+
+
+def test_split_fires_when_a_page_exceeds_the_cap(fixture):
+    """A page over the split cap -> split has real work -> the marker fires."""
+    _split_only(fixture["settings"])
+    _write_oversized_page(fixture["local"])
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-split]"], out
+
+
+def test_split_not_stamped_when_suppressed_then_fires_when_content_appears(fixture):
+    """Option A — the key TRDD-3XS3PDCF invariant. A cadence-due split with no
+    content is suppressed WITHOUT being stamped, so when an over-cap page appears on
+    a LATER fire it emits immediately (the suppressed fire did not consume the
+    cadence slot — proving there is no second cadence gate)."""
+    _split_only(fixture["settings"])
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    # Fire 1: no over-cap page -> suppressed, and crucially NOT stamped.
+    first = _run(env)
+    assert first.strip() == "", first
+    # An over-cap page appears; Fire 2 must emit split (fire 1 left the slot unused).
+    _write_oversized_page(fixture["local"])
+    second = _run(env)
+    lines = [ln for ln in second.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-split]"], second
+
+
+def test_oversized_page_in_staging_dir_does_not_count(fixture):
+    """A page over the cap but inside the transaction staging dir (.maint-staging/)
+    is NOT a real candidate (the split skill excludes it) -> split stays suppressed."""
+    _split_only(fixture["settings"])
+    staging = fixture["local"] / ".maint-staging"
+    _write_oversized_page(staging, name="staged-big.md")
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out
+
+
+# --------------------------------------------------------------------------- #
 # the dispatch flock held by a peer -> skip (silent) even when due
 # --------------------------------------------------------------------------- #
 
@@ -196,6 +272,9 @@ def test_flock_held_by_peer_is_skipped(fixture):
     """When another process holds the machine-wide dispatch flock, the detector
     skips this fire silently — even though an intervention is due."""
     _write_settings(fixture["settings"], split_per_day=1000.0)
+    # Give split real work so it (the named intervention) is the due trigger the
+    # flock skips — not a fail-open peer (TRDD-3XS3PDCF).
+    _write_oversized_page(fixture["local"])
     gstate = fixture["gstate"]
     gstate.mkdir(parents=True, exist_ok=True)
     lock_path = gstate / "memory-maint-dispatch.lock"
@@ -320,6 +399,8 @@ def test_project_scope_fires_when_opted_in():
         subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
         project_mem = repo / ".claude" / "project" / "memory"
         project_mem.mkdir(parents=True, exist_ok=True)
+        # split needs a page over the cap to have real work (TRDD-3XS3PDCF).
+        _write_oversized_page(project_mem)
         gstate = root / "gstate"
         settings = root / "settings"
         _write_settings(settings, split_per_day=1000.0, edit_project_scope=True)

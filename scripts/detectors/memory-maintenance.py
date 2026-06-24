@@ -85,6 +85,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import global_state  # noqa: E402
+import memory_content_precheck  # noqa: E402
 import memory_scopes  # noqa: E402
 import memory_settings  # noqa: E402
 import memory_txn  # noqa: E402
@@ -200,11 +201,42 @@ def _release_dispatch_lock(fd: int) -> None:
 # the scheduling decision (pure given a clock + the resolved scopes)
 # --------------------------------------------------------------------------- #
 
+def _split_max_bytes() -> int:
+    """The split size cap (memory_settings split_max_bytes) as an int, or 0 if it
+    can't be read — 0 makes content_has_work fail-open for split (never suppress a
+    chore on a config glitch; suppressing only ever happens on a PROVEN-idle scope)."""
+    try:
+        return int(memory_settings.get("split_max_bytes"))
+    except (ValueError, TypeError):
+        return 0
+
+
 def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
-    """The first DUE intervention for (scope, root) in the stable cost order, or
-    None. NEAR-FREE: each `is_due` is a stat + int-compare on the global stamp."""
+    """The first intervention for (scope, root) that is BOTH cadence-due AND has
+    actual work, in the stable cost order, or None.
+
+    Cadence-due (`is_due`) is NEAR-FREE (a stat + int-compare on the global stamp).
+    The content precheck (`memory_content_precheck.content_has_work`) is a cheap,
+    zero-LLM filesystem check that suppresses a cadence-due chore with NOTHING to do
+    so it never spawns a ~240k no-op opus agent (TRDD-3XS3PDCF). It is FAIL-OPEN:
+    only a chore whose idleness is cheaply proven (today: SPLIT's size gate) is
+    suppressed; every other chore returns work=True and keeps its cadence-only
+    behavior. Because a suppressed chore is simply NOT returned here, it is never
+    picked and never stamped (`mark_ran`) — so it re-checks every heartbeat and
+    emits the instant work appears (Option A), with NO second cadence gate (the
+    scheduler stays the sole cadence authority; the agent still trusts the marker).
+    The `and` short-circuits, so the filesystem check runs ONLY for an already
+    cadence-due intervention; a fire where nothing is cadence-due stays a pure
+    stat-compare. A split that is cadence-due but content-suppressed is not stamped,
+    so it stays due and re-checks (a cheap rglob, zero LLM, NO agent spawn) on each
+    fire until a page goes over the cap — the deliberate Option-A trade (TRDD-3XS3PDCF):
+    ~288 trivial filesystem scans/day instead of ~4.5 240k-token no-op agent spawns."""
+    split_cap = _split_max_bytes()
     for intervention, _marker in _MARKERS:
-        if memory_settings.is_due(intervention, scope, root, now):
+        if memory_settings.is_due(intervention, scope, root, now) and \
+           memory_content_precheck.content_has_work(
+               intervention, root, split_max_bytes=split_cap
+           ):
             return intervention
     return None
 
