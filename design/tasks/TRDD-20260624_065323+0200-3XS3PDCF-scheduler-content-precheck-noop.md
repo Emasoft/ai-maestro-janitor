@@ -3,7 +3,7 @@ trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
 column: dev
 created: 2026-06-24T06:53:23+0200
-updated: 2026-06-24T09:07:47+0200
+updated: 2026-06-24T12:12:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -69,9 +69,16 @@ What landed:
 - **SPLIT refinement** — the size gate is the COMMON-case fix; refine to "over-cap AND
   splittable (not tier:component, ≥2 sections)" to also suppress the rare over-cap-but-
   unsplittable no-op.
-- **PUBLISH** — ship the whole thing via `publish.py` when an OAuth alternate exists or the
-  USER is present (a full test-suite + CPV cycle at deep-night-no-alternate is the budget I
-  deferred).
+- **PUBLISH** — ship the whole thing via `publish.py` when the USER is present (or returns).
+  CORRECTED WHY (2026-06-24, supersedes the earlier "budget" reason): the test-suite + CPV
+  cycle is LOCAL compute (pytest + `validate_plugin.py`), so it costs almost no OAuth budget —
+  only the handful of orchestration turns. The real reason to keep the fix banked is that
+  `publish.py` performs an OUTWARD-FACING, hard-to-reverse GitHub release + marketplace
+  publish; running that UNATTENDED at deep-night with the USER away is the wrong solo risk —
+  a mid-way failure leaves a partial release whose cleanup (revert version, delete tag, delete
+  GH release) is destructive and user-visible. That is a "confirm-first" action INDEPENDENT of
+  budget, so it waits for the USER's PRESENCE, not merely for a rotation alternate. The
+  split-MVP is done + tested (29/29) and ready to ship the moment the USER is back.
 
 ### The finding (observed live, autonomous overnight session 2026-06-24)
 Two background `janitor-memory-subconscious-agent` opus passes spawned by heartbeat
