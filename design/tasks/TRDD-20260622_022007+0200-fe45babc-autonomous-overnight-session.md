@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-24T04:37:06+0200
+updated: 2026-06-24T08:24:31+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -16,7 +16,19 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 
 # Autonomous overnight session — the night brain (read on every wake)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-24
+
+### ✅ 2026-06-24 ~08:20 — RESUMED after the ~04:40 wind-down (budget recovered) → 6 more pieces committed, then HOLDING again
+The 5h window aged out the heavy bursts (budget swung 100%→single-digit; a transient usage-API glitch briefly read MAX/MAX — see lesson). With real headroom I resumed and committed SIX pieces (all local; ride next publish):
+- **C1 self-integrity CLOSED** (TRDD-53a00e44 → `published`, commit 573fdbd): `.integrity/manifest-sha256.json` verified present in the v0.18.0 tag (publish.py Step 10.5 ships it every release). Self-integrity now FUNCTIONAL data-wise; detector stays opt-in.
+- **Rotator trustworthiness VERIFIED** (no code change): `cmd_auto`/`is_near_limit` are ALREADY fail-safe vs usage-API glitches (429-debounce, refresh-on-err, exclude-unknown, local-expiry death signal). False-alarm investigation → positive confirmation a core immortality component is sound.
+- **Architecture hub ENRICHED** with the L0-L3 immortality model (cb0ea25) + **project map REFRESHED** for the v0.18.0 files (0c32340).
+- **TRDD-3XS3PDCF authored** (727af59, backburner): scheduler-side cheap content-precheck to kill the ~240k no-op memory-agent spawns — VJ8L465M's "inherent" residual was too broad (split/harvest/atomize/repair ARE cheaply pre-checkable). DEFERRED to a clean-budget window.
+- Cadence memory agents (budget-gated): harvest no-op, split no-op, **repair fixed 5 LOCAL pages** (nested-ocd/lmd → canonical frontmatter; 11 remain for next passes).
+
+**LESSON (usage API):** the OAuth /usage endpoint returns transient glitch sentinels (`MAX`/`err`/`0%`) — a single dramatic swing is NOT trustworthy; the **7d window is the tell** (it can't jump in minutes). Re-verify a self-consistent reading before acting. The rotator's DECISION logic already handles this (verified); only the DISPLAY shows raw sentinels.
+
+**STILL HOLDING** — budget healthy (5h ~19%) but `fmuaddib` STILL DEAD (no rotation alternate). Remaining mandate work all GATED: GROUP C exec-path C2/C3/C4 (bricking-risk → design-review), TIER-2 #230 (USER skill-naming), 3XS3PDCF (clean-budget window). Tree clean, v0.18.0 live. Unblocks unchanged: re-login fmuaddib OR USER returns.
 
 ### ✅ 2026-06-24 ~04:40 — TIER 1 COMPLETE + SHIPPED (two releases). Then WINDING DOWN on OAuth budget.
 **Shipped tonight:**
