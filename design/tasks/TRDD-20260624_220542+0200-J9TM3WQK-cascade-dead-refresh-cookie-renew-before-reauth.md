@@ -1,9 +1,9 @@
 ---
 trdd-id: J9TM3WQK
 title: Cascade — dead-refresh + live-cookie alternate must RENEW_COOKIE before REAUTH_NUDGE
-column: dev
+column: published
 created: 2026-06-24T22:05:42+0200
-updated: 2026-06-24T22:05:42+0200
+updated: 2026-06-24T22:31:50+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 1
@@ -20,13 +20,16 @@ test-requirements: [unit]
 runtime-targets: [macos, linux]
 impacts: []
 external-refs: []
+implementation-commits: [0acd523]
+published-version: 0.19.1
+published-at: 2026-06-24T22:26:00+0200
 ---
 
 # TRDD-J9TM3WQK — dead-refresh + live-cookie ⇒ RENEW_COOKIE (not REAUTH_NUDGE)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
 
-### Status: dev — fix specified + the leg validated live; implementing TDD-first
+### Status: published — SHIPPED in v0.19.1 (fix commit 0acd523, release 396aec8); all gates green (full tests + CPV --strict)
 - **THE BUG** (regression from TRDD-HJGR4I5W / #235): `cascade.classify` escalates a
   **dead-but-present** refresh token (`has_refresh ∧ refresh_failures ≥ max`)
   **straight to `REAUTH_NUDGE`** — it never checks `has_session_cookie`. The
@@ -60,8 +63,12 @@ external-refs: []
   HEALTHY/RENEW_REFRESH, never RENEW_COOKIE again. (Verified in
   `slot_capture_browser.capture()`: `st.setdefault("slots",{})[email] = {captured_at,
   fp, expires_at, via}` — no refresh_failures key.)
-- **NEXT**: failing unit tests (test_cascade.py + test_oauth_bootstrap.py) → implement
-  the 3 edits → run both suites → ruff + pyright → commit → publish (own release).
+- **DONE**: 6 source edits (cascade.classify dead-refresh→cookie + _bootstrap_eligible +
+  _bootstrap_seeded_slots + the slot_capture_stalled detector ripple) + 4 new tests (55 pass,
+  ruff clean); committed 0acd523, published v0.19.1. Memory updated (LOCAL transport note +
+  PROJECT 3-layer page: agent-browser driver, dead-refresh→cookie routing, the user's REAUTH
+  passkey-is-OS-level decision, + a janitor OAuth skills/commands list). **NEXT**: Phase 2 —
+  swap slot_capture_browser's drive half to PREFER agent-browser (Playwright fallback); own TRDD.
 
 ### Why REAUTH-before-cookie is wrong (the cascade contract)
 The point of ROTATE→RENEW→REAUTH (TRDD-dfc0959a): REAUTH (a human re-login) is the

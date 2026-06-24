@@ -94,15 +94,20 @@ nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
   to recovering from it. The LIVE account is deliberately NOT keepalive-refreshed — Claude
   Code owns its own single-use rotating refresh grant, and refreshing it underneath would
   race that grant.
-- `RENEW_COOKIE`: the slot has NO refresh token but DOES have a live claude.ai **session
-  cookie** for its seeded Chrome profile → `rotator._bootstrap_seeded_slots` /
-  `_invoke_slot_capture` launches the CDP-attach capture (`slot_capture_browser.py`) to
-  mint a fresh refresh-bearing slot from that session. This is what makes the "log me in
-  once, the rotator manages the rest" UX work. It is launched DETACHED (the visible
-  browser flow can take tens of seconds and polls the consent page up to ~300 s; running
-  it inline under the tick cap would starve real rotation), with a per-email PID lock
-  (skip-if-running, so a slow capture spanning several ticks is launched once), and DEAD
-  LAST in the tick (after `cmd_auto`) so usage-based rotation is never starved.
+- `RENEW_COOKIE`: the slot has no USABLE refresh token — either NONE, or one whose exchange
+  is persistently FAILING (`refresh_failures` ≥ max) — but DOES have a live claude.ai
+  **session cookie** for its seeded Chrome profile → `rotator._bootstrap_seeded_slots` /
+  `_invoke_slot_capture` launches the CDP-attach capture to mint a fresh refresh-bearing slot
+  from that session.[^8] This is what makes the "log me in once, the rotator manages the rest"
+  UX work. The capture DRIVER is the Vercel **agent-browser** CLI (validated preferred,
+  2026-06-24 — native AX-tree button clicking, no Playwright dependency) OR
+  **`slot_capture_browser.py`** (Playwright-CDP, the currently-shipped path + fallback); BOTH
+  CDP-attach to the seeded REAL Chrome (never a mock-keychain LAUNCH) and DISMISS the cookie
+  banner before clicking Authorize. It is launched DETACHED (the visible browser flow can take
+  tens of seconds and polls the consent page up to ~300 s; running it inline under the tick cap
+  would starve real rotation), with a per-email PID lock (skip-if-running, so a slow capture
+  spanning several ticks is launched once), and DEAD LAST in the tick (after `cmd_auto`) so
+  usage-based rotation is never starved.
 - Recovery net (`cmd_auto` refresh-on-err): when an alternate's usage probe returns
   non-200 AND non-429, its slot token is `refresh_oauth_token`'d, healed back into the
   keychain, and re-probed BEFORE exclusion — so one stale access token can never deadlock
@@ -111,8 +116,8 @@ nothing healthy to rotate TO, or a slot is expiring).** Two sub-legs:
 - RENEW is fully automatic but REQUIRES a still-valid cookie for the cookie sub-leg — when
   the cookie is dead too, it falls back to layer 3.
 
-**3. REAUTHENTICATE — the cookies themselves (fallback when RENEW can't: no refresh AND no
-live cookie, token dead/near-dead).** Each account's claude.ai login cookie lasts ~1 month.
+**3. REAUTHENTICATE — the cookies themselves (fallback when RENEW can't: no USABLE refresh —
+none OR dead — AND no live cookie, token dead/near-dead).** Each account's claude.ai login cookie lasts ~1 month.
 When it expires (age, or the user logged in on another device), RENEW is impossible for
 that account, and the ONLY non-behind-the-scenes step remains: a human re-login. The
 janitor proactively NUDGES via the heartbeat detector (`oauth-login-needed` →
@@ -124,6 +129,15 @@ already-logged-in dedicated debug Chrome over CDP to click Authorize, reads the
 `<code>#<state>` from the manual paste-callback page, and `tmux send-keys`-es it back into
 claude's "Paste code here >" prompt — so PKCE, the token exchange, and the keychain write
 stay Claude's job. `reauth.py --manual` lets the human click Authorize.
+
+**Why the human is UNAVOIDABLE at this layer (user decision 2026-06-24):** the claude.ai
+login authenticates with a **passkey / Google-OAuth 2FA**, and that passkey/2FA prompt is
+**OS-level — outside the browser** — so NO browser automation (Playwright, agent-browser, or
+anything else) can satisfy it. The ONLY way to make REAUTH hands-free would be a plain
+username+password login (no Google), which is **less secure** → that is deliberately the
+**least-favoured option and is NOT adopted**. So REAUTH stays a human step, and the janitor's
+ENTIRE job for this layer is the **~monthly reminder** (`oauth-login-needed` → `REAUTH_NUDGE`
+nudge) to run `/refresh-claude-logins` — nothing more.
 
 `WAIT_SETUP_TOKEN` is the benign in-between: a setup-token slot (no refresh, no session)
 that still has runway — nothing to do yet, do NOT nudge. (`classify()` also returns
@@ -208,6 +222,25 @@ The opt-in for daemon-managed rotation is flag-only: `/janitor-auto-manage-oauth
 After ANY capture: VERIFY `read_slot` round-trips (non-empty accessToken + a real future
 expiry) — only reliable since the keychain-write fix (lesson [^4]).
 
+## Janitor skills & commands for OAuth (the control surface — what each does, when to use it)
+
+The scripts above are the engine; these are the user-facing slash-commands + the automatic
+heartbeat nudges you actually interact with. The whole point: turn rotation ON once, then the
+only thing you ever do BY HAND is heed the ~monthly reauth nudge.
+
+| Skill / command | What it does | When to use it |
+|---|---|---|
+| `/janitor-auto-manage-oauth-on` (skill) | Opts THIS machine INTO the unattended rotator — sets the opt-in flag the daemon's 60 s `oauth-rotator-tick` reads, so ROTATE + RENEW run hands-free. Default OFF, macOS, idempotent; REFUSES if a credential-pinning env var would defeat rotation. | Once, to enable hands-free multi-account survival (e.g. before unattended / overnight work). Needs ≥2 seeded accounts to have somewhere to rotate TO. |
+| `/janitor-auto-manage-oauth-off` (skill) | Clears the opt-in flag → the tick STOPS rotating (no more credential backups or account swaps), and tears down any legacy launchd agent. Leaves your captured slots untouched. | To pause rotation (debugging, a deliberate single-account stint). Re-enable any time with `-on`; your slots survive. |
+| `oauth-login-needed` (heartbeat detector — AUTOMATIC, surface-only) | When the rotator is set up, SURFACES the REAUTH nudge: an account that can neither self-renew (no / dead refresh) NOR auto-bootstrap (no live cookie), token expired / near-expired → emits `REAUTH_NUDGE` pointing at `/refresh-claude-logins`. Machine-scoped daily-dedupe (~one nudge/day). | You don't run it — it nudges YOU (~monthly). Heed it: do the reauth for the named account (the one human step). |
+| `oauth-cookie-reminder` (heartbeat detector — AUTOMATIC, surface-only) | The PROACTIVE sibling: SURFACES a reminder BEFORE a seeded claude.ai cookie expires (warn before RENEW can fail, not after). | You don't run it — heed it: re-seed (one-time login) the warned account before its cookie lapses, so RENEW never falls to REAUTH by surprise. |
+| `/refresh-claude-logins` (USER-scope command, NOT janitor-shipped) | The orchestrating REAUTH flow the `REAUTH_NUDGE` points to: guides the human login per expired account, saves + scrubs the cookie, then triggers RENEW with the fresh cookies. | ~Monthly, when `oauth-login-needed` nudges — the ONE unavoidable human step (passkey / 2FA is OS-level; see layer 3). |
+
+The two `/janitor-auto-manage-oauth-*` skills toggle the daemon's rotation; the two detectors
+are part of the always-on heartbeat (active once the rotator is set up) and surface the
+human-only moments — you never invoke them. The engine SCRIPTS (`rotator.py`, `reauth.py`,
+`slot_capture_browser.py`, `slot_capture_token.py`, `open-login.sh`) are in "## The exact commands".
+
 ## Diagnostic entry points (when "rotator failed to keep the session alive")
 
 1. `oauth-rotator/rotator.log` — rotation DECISIONS (switch / refuse / within-limits) + the
@@ -283,7 +316,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   incident record and the now-obsolete hotpatch. Residual: a slot excluded EARLIER by the
   locally-expired guard is not yet refresh-retried.
 
-[^3]: [ocd:2026-06-08 lmd:2026-06-13] **Playwright mock-keychain browser-transport bug
+[^3]: [ocd:2026-06-08 lmd:2026-06-24] **Playwright mock-keychain browser-transport bug
   (RENEW shows the LOGIN page) — attach over CDP to a REAL Chrome, never let Playwright
   LAUNCH it.** Symptom: the renew/capture shows the claude.ai LOGIN page instead of the
   **Authorize** button; cookies "can't be decrypted" → renew silently does nothing. Root
@@ -302,8 +335,10 @@ The documented past errors — each folded in so the symptom finds the fix:
   human's login) so it decrypts the persisted cookies with no mock key and no prompt;
   Playwright just drives the already-open page. **Run HEADFUL** (pure headless is
   Cloudflare-blocked regardless of flags — use headful, or headful-on-Xvfb for "behind the
-  scenes"). The Authorize-click selector MUST exclude the cookie dialog's "Accept All
-  Cookies" button (it mis-clicked that once). NEVER automate the one-time login itself —
+  scenes"). The driver DISMISSES the cookie banner FIRST — click "Accept All
+  Cookies" if present, THEN click Authorize (a non-blocking lower-right legal overlay,
+  idempotent — it appears once and persists after accept; this SUPERSEDES the earlier "craft a
+  selector that EXCLUDES the cookie dialog" guidance, which mis-clicked it once). NEVER automate the one-time login itself —
   automation-flagged / headless browsers are Cloudflare-blocked (verified). Detailed
   transport+protocol stack in the 51-project browser audit.
 
@@ -357,6 +392,25 @@ The documented past errors — each folded in so the symptom finds the fix:
   `rotator.LOG_FILE` to a per-test tmp dir (PATH-redirect, not a `_log` no-op, so the dedicated
   `_log` tests still assert on content). Lesson: isolate EVERY real-path side effect a test can
   trigger — state + keychain is not the whole surface; the log is operational state too.
+
+[^8]: [ocd:2026-06-24 lmd:2026-06-24] **A dead-but-present refresh + a LIVE cookie was nudged
+  for a manual human re-login instead of auto-recovering (the recurring "had to rotate the auth
+  manually" pain).** Symptom: an alternate whose refresh token kept failing (`refresh_failures` ≥
+  max) but whose claude.ai cookie was ALIVE was routed to `REAUTH_NUDGE` every tick, so the user
+  re-authenticated by hand while the rotator could have auto-minted a fresh refresh from the
+  cookie. Cause (TRDD-J9TM3WQK, fixed v0.19.1; regression from TRDD-HJGR4I5W): `cascade.classify`
+  escalated a dead refresh STRAIGHT to `REAUTH_NUDGE` without checking `has_session_cookie` — the
+  `RENEW_COOKIE` leg was only reachable when `has_refresh` was False, so it JUMPED the cookie rung.
+  Fix: a dead refresh falls through the SAME RENEW→REAUTH cascade a MISSING one does —
+  `has_session_cookie` → `RENEW_COOKIE`; only no-cookie → `REAUTH_NUDGE`. `_bootstrap_eligible` +
+  the `slot_capture_stalled` detector were threaded `refresh_failures` to match (else the daemon
+  never launched the capture for a dead-refresh slot). No re-capture loop: a successful capture
+  REPLACES the slot meta (`refresh_failures`→0 → classify HEALTHY). Lesson: REAUTH (a human login)
+  is the LAST cascade resort — reached only when BOTH refresh AND cookie are dead; any "refresh is
+  dead → nudge the human" shortcut that skips the cookie rung defeats the whole point of the
+  three-layer fallback. First LIVE validation of the `RENEW_COOKIE` leg on this machine was
+  2026-06-24 (both the agent-browser and Playwright drivers drove the seeded Chrome hands-free),
+  so the leg this fix routes TO is proven real.
 
 ## See also
 
