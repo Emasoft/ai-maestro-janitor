@@ -3,7 +3,7 @@ trdd-id: 71ABD7V7
 title: Reintroduce L0 OS-keepalive as a fixed DATA-path verbatim-copied scanned entry (SHAPE 2)
 column: dev
 created: 2026-06-24T00:23:43+0200
-updated: 2026-06-24T00:42:22+0200
+updated: 2026-06-24T04:04:22+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -56,7 +56,20 @@ tests green. Phases 2b-5 remain **publish-BLOCKED on CPV #152** — the `cpv-rem
 fails C1 until #152 ships. The USER is implementing #152 ("allow the `$HOME` folder if
 the whole path resolves under `~/.claude/plugins/data/*/`").
 
-**NEXT ACTION (Phases 1 + 2a ✓ done):** Phase 2b — BUILD AGAINST #152's FINAL FOLD (the
+### ✅ 2026-06-24 ~03:40 — #152 IS LIVE (v0.17.3 publish used CPV main that includes it). Phase 2b UNBLOCKED + contract re-verified against the LIVE discriminator (/tmp/cpv_pt_live.py, 1101 lines):
+- `_PLUGIN_DATA_LITERAL_RE` (line 111) `^(?:~|\$HOME|\$\{HOME\})/\.claude/plugins/data/[^/]+/(.+)$` folds `$HOME/.claude/plugins/data/<slug>/<rest>` → `R/<rest>`; `R/<rest>` must be an EXISTING in-tree regular file (`_resolve_in_tree`, line 222). `scripts/daemon_keepalive_entry.py` exists (Phase 1) → resolves. ✓
+- `_HEREDOC_OPEN_RE` (276) accepts UNQUOTED `<<EOF` (group 3) → shell expands `$HOME` at install time; the discriminator scans the literal body. `_extract_heredoc_body(full_content, ".plist")` (280) needs the heredoc-OPENER line to contain the literal `.plist` → I hard-code `cat > "$HOME/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist" <<EOF`.
+- `_plist_program` (319) prefers `ProgramArguments` → `argv[0]` is the program; `_interp_script_target` (163) returns `argv[0]` when it is NOT an interpreter name → so the entry `.py` MUST be `ProgramArguments[0]` (shebang'd, chmod+x), NOT `[python3, entry]`. ✓
+- `_plist_extra_sources` (333) fails C3 on `EnvironmentVariables` with a code-inject key (BASH_ENV/LD_PRELOAD/…); JANITOR_LOG_DIR is safe — but I OMIT EnvironmentVariables entirely (daemon.py:847 `setdefault`s JANITOR_LOG_DIR to the global-state dir, the right place) → zero inject risk.
+- `_MECHANISM_TOKENS` (619): a line with `launchctl`/`.plist`/`launchagents` OR `.service`/`systemctl` dispatches the resolver with full_content. **SAFETY RULE (the old `.py`'s fatal flaw): ALL persistence tokens live ONLY in `keepalive_install.sh` (which carries the resolving heredoc); `launchd_keepalive.py` contains NONE — it only runs `bash keepalive_install.sh <cmd>`** (the `bash …keepalive_install.sh` command has no launchd token → not flagged). The old `launchd_keepalive.py` had `subprocess.run(["launchctl","bootstrap",…])` + a programmatic `plistlib.dumps` plist → the discriminator saw `launchctl` but found no heredoc in the `.py` → C1 fail → CRITICAL.
+- `daemon.main()` IGNORES argv (verified daemon.py:838) → the entry's `--keepalive` is a harmless marker; no crash.
+- **daemon.py:886-895 has a now-STALE comment** ("L0 … is NOT shipped … CPV --strict will not waive") — Phase 3 must update it (#152 makes the clean-inert-target persistence legitimately resolvable; using the discriminator AS DESIGNED is not "gaming the matcher" — the entry is genuinely exec/eval/network/listen-free).
+
+### ✅ 2026-06-24 ~04:00 — Phase 2b BUILT + TESTED (committed). Shipped `scripts/keepalive_install.sh` (the ONLY file carrying persistence tokens: heredoc plist + systemd unit + `status`/`install`/`uninstall` + a `KEEPALIVE_SKIP_ACTIVATION` write-config-only mode for staged installs/tests) and rewrote `scripts/lib/launchd_keepalive.py` (token-free orchestrator: stage the verbatim closure + the installer into DATA, then `bash keepalive_install.sh <cmd>`). 17 tests green (`tests/test_launchd_keepalive.py`): the #152 fold + heredoc contract proven with ZERO CPV dependency (plist `ProgramArguments[0]` + systemd `ExecStart` both fold to the in-tree entry), orchestrator staging/delegation, the no-persistence-token invariant on the `.py`, AND a real sandboxed-`$HOME` install proving `$HOME` expands to a valid plist. ruff + shellcheck clean; full install→status→uninstall lifecycle verified. **A test CAUGHT a real bug**: a comment carrying the `.plist … <<EOF` shape was mis-read by the heredoc extractor as the opener (would have made the discriminator parse garbage → C1 fail → CRITICAL → publish blocked) — comments now stay free of the opener shape.
+
+**NEXT ACTION:** Phase 3 — wire it into the daemon: on opted-in daemon startup call `launchd_keepalive.install(<its own scripts dir>)`; on kill-switch exit call `uninstall()`; have the version-update task re-stage the closure after a plugin update; and UPDATE the now-stale `daemon.py:886-895` comment ("L0 … is NOT shipped … CPV --strict will not waive" — #152 makes the clean-inert-target legitimately resolvable). Then Phase 4 (any remaining tests, e.g. flock coexistence of the `--keepalive` daemon) + Phase 5 (`publish.py` → v0.18.0). The original detailed Phase-2b plan (kept for reference):
+
+(Phase 2b plan, now DONE) — BUILD AGAINST #152's FINAL FOLD (the
 heredoc plist shape couples to it, so build once #152 is in CPV main, not against a guess):
 `scripts/keepalive_install.sh` (heredoc plist + systemd unit, with
 `$HOME/.claude/plugins/data/<slug>/scripts/daemon_keepalive_entry.py` as
