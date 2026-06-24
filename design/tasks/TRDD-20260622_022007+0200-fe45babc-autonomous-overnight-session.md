@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-24T08:42:09+0200
+updated: 2026-06-24T17:50:59+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,47 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-24
+
+### ✅ 2026-06-24 ~17:50 — USER RETURNED ("one last chance. go") → OAuth triad COMPLETED + SHIPPED (v0.18.1/2/3). THE HOLD IS OVER.
+The USER returned and rejected the deep-night HOLD as procrastination (a working LIVE token = room to WORK,
+not hold). Acted in-session and SHIPPED the OAuth ROTATE/RENEW/REAUTHENTICATE robustness — THREE releases:
+- **v0.18.1** (TRDD-1IKF0A6D) — the documented RENEW-before-rotate residual: `cmd_auto` now refresh-retries
+  a LOCALLY-EXPIRED alternate that still carries a refresh grant (via the shared `_refresh_and_heal_slot`
+  kernel) before excluding it — a rescuable account can no longer deadlock rotation. Also carried the banked
+  3XS3PDCF split-MVP (441d467) + a rotator `import cascade` fragility fix.
+- **v0.18.2** (TRDD-14IY6MAD) — test hygiene found while verifying: the rotator unit tests wrote fixture
+  rotation lines (`live@x`/`alt@x`) into the PRODUCTION `rotator.log`; isolated via an autouse ROOT/LOG_FILE
+  redirect (path-redirect, not a `_log` no-op — the `_log` tests still assert on content).
+- **v0.18.3** (TRDD-5EUYV08H) — **THE bug that made REAUTH look broken**: the user-facing
+  `oauth-login-needed` detector resolved a DIFFERENT rotator home than the daemon (its `_rotator_home` was
+  legacy-FIRST; the daemon's `_rotator_root` is canonical-first). On this MIGRATED install both `state.json`
+  exist, so the detector read a 25-day-STALE legacy file (`fmuaddib` refresh_failures=0 → looked healthy)
+  while the daemon read the live canonical (refresh_failures=374 → REAUTH) — so the login-nudge was SILENT
+  and the user was never told. Fixed with ONE SSOT resolver `rotator.configured_rotator_home()` (canonical-first
+  + the foreign-`CLAUDE_PLUGIN_DATA` guard); both detectors delegate. PROVEN live: the detector now emits the
+  fmuaddib login nudge where it was silent.
+Memory note `oauth-rotation-renew-reauth.md` updated with both lessons ([^6] a shared SSOT is only an SSOT if
+both callers resolve the SAME inputs; [^7] tests must isolate the log too, not just state+keychain).
+Triad VERIFIED LIVE: ROTATE no-ops correctly (live `emanuele.sabetta` 5h≈18%/7d≈88%, within limits), RENEW
+keeps it fresh, REAUTH now surfaces the dead account. Tree clean; v0.18.3 live on GitHub.
+
+**🙋 THE ONE IRREDUCIBLE USER ACTION:** re-login `fmuaddib@gmail.com`
+(`~/.claude/account-rotator/open-login.sh fmuaddib@gmail.com`) — its refresh token is genuinely dead (374
+failed renewals); only a human OAuth consent restores it. The janitor now correctly TELLS the user (v0.18.3);
+the login itself is irreducibly theirs. After it, the rotator auto-captures the new refresh hands-free.
+
+**NEXT (autonomous — no longer gated on a rotation alternate: the USER is present + a healthy LIVE token):**
+the remaining immortality mandate — GROUP C exec-path **C2/C3/C4** (verify-before-exec gate + pin-good/
+quarantine-bad + bad-self-update auto-rollback for the dispatcher-stub; these touch the stub that execs the
+daemon → BRICKING-RISK → DESIGN-review first, never blind implement), then D (config self-heal), E
+(per-scenario handlers), F (observability + ai-maestro). TIER-2 #230 stays USER-gated (skill-naming
+confirmation). Asked the USER which direction at the end of the report; the OAuth mandate is DONE so this is
+a genuine pick-the-next-effort point, not held work.
+
+#### Superseded — do NOT carry forward
+- ✗ "STILL HOLDING / no rotation alternate so defer heavy work" (every entry below) — the USER returned and
+  the OAuth work is shipped; the hold is OVER. The banked commits (split-MVP, C1, architecture, project-map)
+  all rode v0.18.1+. fmuaddib being dead is NOT a reason to hold anymore — it's a surfaced user-action.
 
 ### ✅ 2026-06-24 ~08:42 — post-compact resume → 3XS3PDCF split content-precheck LANDED, still HOLDING
 Resumed post-compact; re-checked the two gates: budget **HEALTHY** (5h=22% / 7d=67%, self-consistent),
