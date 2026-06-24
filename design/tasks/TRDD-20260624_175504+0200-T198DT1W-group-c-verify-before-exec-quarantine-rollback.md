@@ -100,6 +100,20 @@ last-good. Reuses the daemon liveness signals from GROUP A.
 - C3's daemon-side pin-writer + C4's crash-loop detector are the larger pieces; C2 is shippable
   ALONE first (accidental-corruption resilience) and is the lowest-risk increment.
 
+### Rollout caveat (LOAD-BEARING — the stub is NOT auto-rolling)
+Unlike `dispatch.py` (which the stub re-resolves to the latest cache EACH fire), the
+**dispatcher-stub itself is installed ONCE into `${CLAUDE_PLUGIN_DATA}` by `/janitor-arm` and does
+NOT auto-update** — by design (it is the stable trusted bootstrap). So a C2/C3/C4 change to the stub
+source does NOT go live until the user RE-ARMS (`/janitor-arm` re-copies the stub) or the 7-day
+`[janitor-renew]` auto-re-arm fires. Implications: (1) the release notes MUST tell the user to
+re-arm to activate it sooner than the 7-day boundary. (2) A BUGGY stub shipped this way is NOT
+auto-rolled-back by a later publish — the user is stuck on the bad stub until they re-arm to a fixed
+one, so a stub bug is STICKIER than a normal-code bug. This doubles down on the fail-open imperative.
+(3) Why the gate must live in the stub anyway: `dispatch.py` lives INSIDE the versioned cache being
+verified (circular trust — a tampered version supplies its own verifier), so the verify-before-exec
+anchor genuinely belongs in the trusted, non-auto-rolling stub. The stickiness is the price of the
+trust anchor; mitigate with maximal fail-open + a TINY, audited, rarely-changed inlined verify.
+
 ### Ship sequence (smallest safe increments)
 1. **C2 alone** → publish (corruption resilience, fail-open, near-zero bricking risk).
 2. **C3** (daemon pin-writer + stub HMAC cross-check) → publish (malicious-replacement resistance).
