@@ -3,7 +3,7 @@ trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
 column: dev
 created: 2026-06-24T06:53:23+0200
-updated: 2026-06-24T08:42:09+0200
+updated: 2026-06-24T09:07:47+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -50,9 +50,19 @@ What landed:
   tests seeded an over-cap page). **29/29 pass, ruff clean.**
 
 ### 🔻 FOLLOW-UPS (deliberately NOT in this MVP — the dispatch is built to extend)
-- **HARVEST precheck** — needs the harvest skill's EXACT predicate (MEMORY.md-not-stub OR a
-  stray raw `.md` via `memory_scopes.is_curated_wiki_page`); guessing risks a wrong-suppress
-  (worse than the no-op). Its fail-open default = current cadence-only (zero regression).
+- **HARVEST precheck — BLOCKED (not merely deferred): the harvest WORK-predicate is in
+  active flux.** Verified 2026-06-24 by reading the actual sources: the harvest `SKILL.md`
+  still describes the OLD stub-reduction behavior (verify → reduce `MEMORY.md` to the stub),
+  but `memory_scopes.py` already carries the NEW coexistence model (TRDD-ab232dbd, "USER
+  decision 2026-06-23"): `WIKI_SUBDIR` + `is_curated_wiki_page` — raw buffer at the scope
+  root, curated pages in `wiki/`, harvest MIRRORS raw→wiki and NEVER touches the buffer. And
+  the coexistence-harvest itself (TRDD-ab232dbd, #231) is PENDING while atom-indexing
+  harvest/migration (TRDD-3b9b2040, #232) is IN-PROGRESS. A precheck written against EITHER
+  model would wrong-suppress against the other or go stale the moment #231/#232 land — the
+  exact wrong-suppress hazard fail-open exists to avoid. So this stays BLOCKED until harvest
+  behavior stabilizes (after #231/#232); meanwhile `content_has_work`'s fail-open default
+  keeps harvest at zero-regression cadence-only. (Split was safe to ship precisely because
+  its predicate — size > cap — is STABLE; harvest's is not, yet.)
 - **REPAIR / ATOMIZE prechecks** — per-page shape scans (malformed frontmatter / un-atomized
   body). Cheap-ish but need each skill's predicate read; repair is a LOWER-value target (it
   often has genuine work, unlike split). Also fail-open today.
