@@ -249,23 +249,43 @@ def daemon_is_alive(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
 
 # ---------- singleton flock ----------------------------------------------
 
-def acquire_singleton_flock() -> Optional[int]:
-    """Acquire the exclusive non-blocking flock on daemon.flock.
+def acquire_singleton_flock(*, blocking: bool = False) -> Optional[int]:
+    """Acquire the exclusive flock on daemon.flock.
 
-    Return the fd on success — caller MUST keep it open for the daemon's
-    lifetime. Returns None when another instance already holds the lock
-    (the only safe semantic for a singleton: don't block, just abort).
+    Default (``blocking=False``): NON-blocking. Returns the fd on success — caller
+    MUST keep it open for the daemon's lifetime — or None when another instance
+    already holds the lock (the safe singleton semantic for a session-spawned
+    daemon that loses the race: don't block, just abort).
 
-    The flock is the source of truth for "is a daemon alive RIGHT NOW".
-    The PID file and heartbeat are diagnostic conveniences; the flock is
-    what actually prevents two daemons from running.
+    ``blocking=True``: WAIT for the lock instead of aborting. This is for the
+    OS-keepalive (L0) daemon, which runs under launchd/systemd KeepAlive: if it
+    aborted on a held lock it would IMMEDIATELY be respawned, busy-looping
+    spawn→abort→respawn every ThrottleInterval whenever a session-spawned daemon
+    holds the singleton. Instead it blocks (idle, zero churn) until the holder
+    exits, then takes over (TRDD-71ABD7V7). Safe because while blocked it has not
+    yet written its pid or installed signal handlers, so a launchd bootout SIGTERM
+    kills it cleanly via the default disposition with nothing to unwind.
+
+    The flock is the source of truth for "is a daemon alive RIGHT NOW". The PID
+    file and heartbeat are diagnostic conveniences; the flock is what actually
+    prevents two daemons from running.
     """
     init_global_state()
     path = _flock_path()
     fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
+    lock_op = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
+        while True:
+            try:
+                fcntl.flock(fd, lock_op)
+                return fd
+            except InterruptedError:
+                # A signal interrupted a BLOCKING wait → retry. (Non-blocking never
+                # blocks, so it never raises this; if it somehow does, fall through to
+                # the unexpected-error path below.)
+                if blocking:
+                    continue
+                raise
     except (BlockingIOError, OSError) as exc:
         # EAGAIN / EWOULDBLOCK → already held; anything else → unexpected.
         try:

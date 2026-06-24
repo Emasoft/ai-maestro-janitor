@@ -918,7 +918,12 @@ def main() -> int:
     # Singleton: the flock IS the truth. If we cannot acquire it, another
     # daemon is alive — exit silently. PID file / heartbeat are downstream
     # diagnostics; they cannot disagree with the kernel's flock state.
-    flock_fd = gs.acquire_singleton_flock()
+    # The OS-keepalive (L0) instance BLOCKS for the singleton instead of aborting: under
+    # launchd/systemd KeepAlive, aborting on a held lock would busy-loop spawn→abort→respawn
+    # while a session-spawned daemon holds it. Blocking makes it wait idle (zero churn) and
+    # take over when the holder exits. A session-spawned daemon stays non-blocking (loser
+    # exits). (TRDD-71ABD7V7.)
+    flock_fd = gs.acquire_singleton_flock(blocking=_KEEPALIVE_INSTANCE)
     if flock_fd is None:
         return 0
 

@@ -81,6 +81,40 @@ def test_singleton_flock_released_lets_next_acquire(state_dir: Path) -> None:
     gs.release_singleton_flock(fd2)
 
 
+def test_singleton_flock_blocking_waits_then_takes_over(state_dir: Path) -> None:
+    """blocking=True WAITS for a held lock and acquires it once released — instead of
+    returning None — so the L0 keepalive daemon idles rather than spawn→abort→respawn
+    churning under launchd's KeepAlive while a session daemon holds the singleton
+    (TRDD-71ABD7V7). flock is per-open-file-description, so a second open in this same
+    process genuinely conflicts."""
+    import threading
+
+    gs = _gs()
+    gs.init_global_state()
+    holder = gs.acquire_singleton_flock()
+    assert holder is not None
+    assert gs.acquire_singleton_flock() is None, "non-blocking acquire must fail while held"
+
+    result: dict[str, int | None] = {}
+    started = threading.Event()
+
+    def waiter() -> None:
+        started.set()
+        result["fd"] = gs.acquire_singleton_flock(blocking=True)  # must BLOCK until released
+
+    t = threading.Thread(target=waiter, daemon=True)
+    t.start()
+    assert started.wait(2)
+    time.sleep(0.3)
+    assert "fd" not in result, "blocking acquire returned while the lock was still held"
+
+    gs.release_singleton_flock(holder)  # now the waiter should wake and take over
+    t.join(3)
+    assert not t.is_alive(), "blocking acquire never returned after the lock was released"
+    assert result.get("fd") is not None
+    gs.release_singleton_flock(result["fd"])  # type: ignore[arg-type]
+
+
 def test_daemon_is_alive_no_pid_file(state_dir: Path) -> None:
     """A missing pid file means definitely-not-alive."""
     gs = _gs()

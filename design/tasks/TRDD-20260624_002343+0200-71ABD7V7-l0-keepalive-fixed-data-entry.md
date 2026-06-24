@@ -3,7 +3,7 @@ trdd-id: 71ABD7V7
 title: Reintroduce L0 OS-keepalive as a fixed DATA-path verbatim-copied scanned entry (SHAPE 2)
 column: dev
 created: 2026-06-24T00:23:43+0200
-updated: 2026-06-24T04:19:44+0200
+updated: 2026-06-24T04:30:39+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -69,7 +69,9 @@ the whole path resolves under `~/.claude/plugins/data/*/`").
 
 ### ✅ 2026-06-24 ~04:20 — Phase 3 + 4 DONE (committed). Wired into `scripts/daemon.py`: `_setup_os_keepalive()` on startup (restage from the freshest cache, then `activate()` ONCE — gated `not is_installed()` to avoid a self-bootout of the launchd-spawned process); a loop self-heal (the `--keepalive` instance re-stages + exits-for-respawn on a newer cache version, with verify-before-exit so a copy failure can't loop exit→respawn→exit); `_uninstall_os_keepalive()` on a kill-switch exit; and the stale `daemon.py` "L0 … NOT shipped" comment REPLACED with the #152 reality. **Essential fix in `global_state.daemon_needs_restart`**: exempt the DATA keepalive daemon — its argv is `daemon_keepalive_entry.py`, never a cache `daemon.py`, so the cache-path staleness check would mark it stale → SIGTERM → launchd respawn → SIGTERM … an endless restart loop; now it returns False for that argv (tested). Currency model: the launchd daemon converges to the latest cache code via restage-on-startup + the slow loop self-heal (`_INTERVAL_KEEPALIVE_SELF_HEAL`, default 10 min); `daemon.py` now `import launchd_keepalive`, so it + `keepalive_stage` join the staged closure (the closure-completeness guard re-verifies a real `import daemon` from the staged tree). 129 tests green (launchd_keepalive 26 + global_state incl. the exemption + keepalive_stage closure guard + daemon/daemon-liveness 39). ruff + pyright + shellcheck clean.
 
-**NEXT ACTION:** Phase 5 — `publish.py` dry-run to confirm CPV `--strict` resolves the L0 persistence as a CLEAN inert target (the real gate that validates the whole #152 design end-to-end), then ship v0.18.0. The original detailed Phase-2b plan (kept for reference):
+### ✅ 2026-06-24 ~04:35 — Phase 5 dry-run PASSED the L0 SECURITY GATE. `publish.py --minor --dry-run` → CPV `--strict` reported **CRITICAL=0** with ZERO persistence/launchd/systemd/skillaudit findings: the #152 fold resolves the installer's heredoc → the in-tree, CPV-scanned, inert `daemon_keepalive_entry.py` → CLEAN. This validates the entire SHAPE-2 design against the REAL discriminator (not just the test re-implementation). The only finding was a trivial MAJOR (`keepalive_install.sh` not executable) → FIXED (`chmod +x`, mode committed). Phase 3b also added the BLOCKING-flock churn fix: the `--keepalive` daemon now WAITS for the singleton (zero churn) instead of spawn→abort→respawn under launchd KeepAlive while a session-spawned daemon holds it (`global_state.acquire_singleton_flock(blocking=…)` + the threaded `test_singleton_flock_blocking_waits_then_takes_over`). 99-test cluster green; ruff + pyright + shellcheck clean.
+
+**NEXT ACTION:** real `publish.py --minor` → ship v0.18.0 (the L0 immortality layer goes LIVE). The original detailed Phase-2b plan (kept for reference):
 
 (Phase 2b plan, now DONE) — BUILD AGAINST #152's FINAL FOLD (the
 heredoc plist shape couples to it, so build once #152 is in CPV main, not against a guess):
