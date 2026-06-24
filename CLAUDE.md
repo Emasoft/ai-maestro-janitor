@@ -195,7 +195,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=bc1728b2f662 digest=69832097563d generated=2026-06-20T23:13:13+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=d81c138c1270 digest=6ca605d9b464 generated=2026-06-24T06:28:19+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -209,11 +209,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · task_oauth_rotator_tick() -> None — 60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
   · task_memory_guard() -> None — Tier-1 OOM guard (TRDD-7100178d Pillar 4, Decision 1 — user-signed 2026-05-31).
   · task_cache_prune() -> None — Prune stale plugin-cache version dirs (TRDD-a6d2fdaf, Fix A).
+  · task_session_liveness() -> None — Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
   · Task — One periodic unit of work owned by the daemon.
   · Task.time_until_due(self) -> int
   · Task.is_due(self) -> bool
   · Task.run(self) -> None
   · main() -> int
+`scripts/daemon_keepalive_entry.py` — L0 OS-keepalive entry point (TRDD-71ABD7V7) — run the co-located daemon.
 `scripts/detectors/ai-context-poisoning.py` — AI-context-poisoning detector — npm + pip postinstall write audit.
   · main() -> int
 `scripts/detectors/binary-magic-scanner.py` — binary-magic-scanner — magic-byte sniff for binaries in unexpected paths.
@@ -256,7 +258,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/oauth-cookie-reminder.py` — OAuth-cookie refresh reminder (opt-in) — surfacing half of the OAuth-rotator
   · main() -> int
 `scripts/detectors/oauth-login-needed.py` — OAuth one-time-login nudge (opt-in) — the reactive sibling of
-  · slot_needs_login(has_refresh, token_days, has_session_key, grace_days) -> bool — PURE: does this account need a ONE-TIME human login?
+  · slot_needs_login(has_refresh, token_days, has_session_key, grace_days, refresh_failures) -> bool — PURE: does this account need a ONE-TIME human login?
   · slot_capture_stalled(has_refresh, has_session_key) -> bool — PURE (B3): is this account LOGGED IN but its OAuth capture has NOT completed?
   · main() -> int
 `scripts/detectors/package-manager-policy.py` — Package-manager-policy detector — supply-chain hardening audit.
@@ -320,6 +322,12 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/dispatcher-stub.py` — ai-maestro-janitor cron dispatcher stub — auto-rolling dispatcher.
   · main() -> int
 `scripts/doctor_classify.py` — Doctor's second-pass workflow classifier — CLI driver.
+  · main() -> int
+`scripts/fleet_status.py` — Backing script for /janitor-show-global-status (TRDD-324223a6, Group F2).
+  · main() -> int
+`scripts/generate_integrity_manifest.py` — generate_integrity_manifest — write .integrity/manifest-sha256.json.
+  · main() -> int
+`scripts/global_control_cli.py` — Backing CLI for the MACHINE-WIDE janitor control flags (TRDD-a3fa4d5d).
   · main() -> int
 `scripts/guard/branch_protection_apply.py` — Tier 2 GUARDED AUTO-REMEDIATION — branch-protection baseline applier.
   · main() -> int
@@ -404,6 +412,31 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/lib/dedupe.py` — Dedupe helper — Python port of scripts/lib/dedupe.sh.
   · emit_once(seen_file, key, message) -> Optional[str] — Return `message` the FIRST time `key` is seen, None on repeats.
   · emit_forget(seen_file, key) -> None — Forget a key so the next occurrence re-emits.
+`scripts/lib/fleet_inject.py` — Fleet recovery injector (TRDD-324223a6, GROUP A / A3) — the ACTUATION layer.
+  · action_to_command(action) -> str | None — The slash-command a command-typing recovery `action` injects, or None when
+  · valid_session_id(session_id) -> bool — True iff `session_id` is a bare iTerm UUID safe to interpolate into an
+  · iterm_osascript(session_id, command, *, delay_s, esc_first) -> str — AppleScript that targets ONLY the iTerm session whose id == `session_id`,
+  · build_injection(terminal, action, *, delay_s) -> dict | None — Build the keystroke-injection PLAN for a recovery `action` into a resolved
+  · fire(plan) -> bool — Fire a built injection plan fully DETACHED — so the daemon never blocks and
+`scripts/lib/fleet_recovery.py` — Fleet recovery POLICY (TRDD-324223a6, GROUP A / A2) — the PURE decisions the
+  · action_for(diagnosis, attempts) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
+  · gate(*, last_ts, attempts, now) -> str — Decide whether to attempt recovery on an instance NOW. Returns:
+`scripts/lib/fleet_restart.py` — Hard-restart recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
+  · hard_restart_enabled() -> bool — Master opt-in for the process-killing rungs. DEFAULT-OFF — these rungs kill and
+  · is_killable(*, pid, command, active, diagnosis, self_pid, daemon_pid) -> bool — The hard gate before any ``os.kill``. True ONLY when killing this pid is safe:
+  · build_relaunch(terminal) -> dict | None — rung 5 — resume a `dead` (pid-gone) session by typing ``claude --continue`` into
+  · build_force_restart(pid, terminal) -> dict | None — rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
+  · build_resurrect(pid, project_root) -> dict — rung 7 — the pane is unreachable: spawn a DETACHED background ``claude`` (a new
+  · fire_restart(plan, *, enabled, killable, killer, spawner) -> str — Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
+`scripts/lib/fleet_scan.py` — Daemon-side fleet scanner (TRDD-324223a6) — find EVERY running claude instance
+  · Instance — One running claude instance + its diagnosed janitor health. ``terminal`` is
+  · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude process in
+  · parse_iterm_sessions(text) -> dict[str, str] — ``{normalized_tty: iterm_session_id}`` from the osascript dump of
+  · parse_tmux_panes(text) -> dict[str, str] — ``{normalized_tty: pane_id}`` from
+  · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
+  · transcript_age(root, now) -> int | None — Seconds since this project's NEWEST session transcript was written, or
+  · diagnose_root(root, *, now, transcript_age, stale_s) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
+  · gather_fleet(*, now) -> list[Instance] — Scan the whole host: every running claude instance whose cwd resolves to a
 `scripts/lib/git_utils.py` — Shared git helpers — Python port of scripts/lib/git-utils.sh.
   · is_squash_merged(branch_ref, base_ref, cwd) -> bool — Detect whether <branch_ref> was squash-merged into <base_ref>.
   · scope_tracking_status(rel) -> str — Probe git tracking status of `rel` (relative to project root).
@@ -416,8 +449,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · write_heartbeat(now) -> None
   · read_heartbeat() -> int
   · kill_switch_present() -> bool
+  · set_kill_switch(reason) -> None — Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
+  · clear_kill_switch() -> None — Remove the kill-switch flag so the daemon can be lazy-spawned again — the revive
+  · global_pause_present() -> bool — True iff the machine-wide PAUSE flag is set (TRDD-a3fa4d5d). Distinct from the
+  · set_global_pause(reason) -> None — Set the machine-wide PAUSE flag — the daemon idles (stays alive, keeps ticking
+  · clear_global_pause() -> None — Clear the machine-wide PAUSE flag — the daemon resumes running due tasks on its
   · daemon_is_alive(max_silence_s) -> bool — True iff the daemon's PID is alive AND its heartbeat is recent.
-  · acquire_singleton_flock() -> Optional[int] — Acquire the exclusive non-blocking flock on daemon.flock.
+  · acquire_singleton_flock(*, blocking) -> Optional[int] — Acquire the exclusive flock on daemon.flock.
   · release_singleton_flock(fd) -> None — Close the fd; the kernel releases the flock as a side effect.
   · acquire_marketplace_lock() -> Optional[int] — Non-blocking exclusive flock on marketplace-op.lock.
   · release_marketplace_lock(fd) -> None — Release the marketplace-op flock and close the fd. Best-effort.
@@ -458,6 +496,21 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · write_manifest(manifest, path) -> None — Write the manifest atomically.
   · load_manifest(path) -> dict[str, str] — Load a manifest written by `write_manifest`.
   · verify_manifest(plugin_root, manifest_path, globs) -> tuple[list[str], list[str], list[str]] — Compare live files against the manifest baseline.
+`scripts/lib/keepalive_stage.py` — Stage daemon.py's import closure into the persistent DATA dir (TRDD-71ABD7V7).
+  · daemon_closure(scripts_dir) -> list[Path] — Every in-tree .py the L0 daemon needs (the verbatim DATA stage list), absolute
+  · stage_closure(scripts_dir, dest_scripts_dir) -> list[Path] — Verbatim-copy the closure into `dest_scripts_dir`, preserving the relative layout
+`scripts/lib/launchd_keepalive.py` — OS keepalive orchestrator for the global daemon (TRDD-71ABD7V7, GROUP B / L0).
+  · data_dir() -> Path
+  · data_scripts_dir() -> Path — Where the verbatim daemon closure + the installer are staged (beside the entry the
+  · current_platform() -> str — 'macos' | 'linux' | 'other' — whether an OS keepalive is available here.
+  · opted_in() -> bool — Master opt-in for the OS keepalive. Default ON (the user mandated OS-level
+  · latest_cache_scripts_dir() -> Path | None — The ``scripts/`` dir of the NEWEST cached plugin version (from the fixed cache
+  · restage(source_scripts_dir) -> None — Verbatim-refresh the DATA closure + installer from ``source_scripts_dir`` WITHOUT
+  · activate() -> tuple[bool, str] — Run the STAGED installer's ``install`` to register the OS service (idempotent).
+  · staged_is_current(source_scripts_dir) -> bool — True iff the staged DATA ``daemon.py`` is byte-identical to ``source_scripts_dir``'s
+  · install(source_scripts_dir) -> tuple[bool, str] — Stage the daemon closure + installer into DATA, then register the OS service —
+  · uninstall() -> tuple[bool, str] — Run the STAGED installer's uninstall (idempotent, best-effort, never raises). Uses
+  · is_installed() -> bool — True iff the OS-keepalive artifact for this platform is on disk, as reported by the
 `scripts/lib/memory_edit_verify.py` — Wikimem edit verifier (TRDD-b92a9dd0) — the oracle that proves an editorial
   · parse_frontmatter(text) -> dict — Flatten a wikimem note's YAML frontmatter into one dict (top-level keys +
   · extract_lessons(text) -> list[str] — Return the normalized body of every `[^N]: …` footnote definition in `text`
@@ -466,14 +519,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · harvest_preservation_ok(memory_md_text, corpus_text, note_filenames) -> tuple[bool, list[str]] — Prove a HARVEST lost nothing BEFORE MEMORY.md is reduced to the stub: every memory
   · no_new_duplicate_lines(result, min_len) -> tuple[bool, list[str]] — No substantive content line (length ≥ `min_len`, not a heading/list marker)
   · no_dangling_refs(live_pages, retired_slugs) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
+  · footnote_refs_resolve(text) -> tuple[bool, list[str]] — Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
+  · no_new_dangling_footnote_refs(source_texts, result_texts) -> tuple[bool, list[str]] — A split/merge must not INTRODUCE a dangling footnote ref. Footnote ids may
   · ocd_lmd_ok_merge(source_metas, result_meta) -> tuple[bool, str] — The survivor of a merge keeps the OLDEST origin date and a fresh modify
   · is_legal_merge(meta_a, meta_b) -> tuple[bool, str] — Refuse a structurally-illegal merge (the agent still decides SUBJECT
-  · is_legal_split(meta, body, min_sections) -> tuple[bool, str] — Refuse a structurally-illegal split. Per the wikimem model "one element =
+  · is_legal_split(meta, body, min_sections, oversized) -> tuple[bool, str] — Decide whether a page may be split. Per the wikimem model "one element =
   · split_globs_partition_ok(parent_globs, subpage_globs_list) -> tuple[bool, str] — When a `hub` splits, its `globs:` ownership must PARTITION across the
   · split_converged(page_sizes, max_bytes, unsplittable) -> tuple[bool, list[str]] — Every output page is within the size cap, OR explicitly flagged
   · verify_merge(source_texts, source_metas, result_text, result_meta, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a MERGE lost nothing before its transaction commits.
   · verify_split(source_text, source_meta, subpage_texts, subpage_metas, overview_text, page_sizes, max_bytes, unsplittable, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a SPLIT lost nothing before its transaction commits.
   · verify_repair(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an in-place page REPAIR lost nothing AND actually completed the page.
+  · verify_atomize(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an ATOMIZE pass (TRDD-3b9b2040) ONLY added `^id [keywords:…]` markers and lost nothing.
 `scripts/lib/memory_guard.py` — Tier-1 OOM memory-guard primitives (TRDD-7100178d, Pillar 4 / Phase 5).
   · ProcRow — One parsed `ps -axo pid,ppid,rss,etime,command` row.
   · parse_etime(raw) -> int — Parse ps ELAPSED ([[dd-]hh:]mm:ss) into seconds. Unparseable -> 0.
@@ -490,6 +546,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · resolve_local_dir() -> Path — The per-project LOCAL agent-memory dir (parent of ``user-mem``). Not created.
   · resolve_project_dir() -> Path | None — The PROJECT scope memory root ``<git-root>/.claude/project/memory/``, or
   · resolve_user_dir() -> Path — The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
+  · resolve_wiki_dir(scope_root) -> Path — The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wiki``.
+  · is_curated_wiki_page(text) -> bool — True iff ``text`` is a CURATED wikimem page; False iff a RAW harness buffer note.
   · resolve_scope_dirs() -> list[tuple[str, Path]] — The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT → USER.
 `scripts/lib/memory_settings.py` — Global wikimem-editor settings + scheduler-stamp primitives (TRDD-c1397102).
   · settings_dir() -> Path — The janitor's persistent plugin-DATA dir, resolved by the EXPLICIT
@@ -569,6 +627,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · find_authority_impersonation(text) -> list[str] — Return every match of an authority-impersonation pattern in `text`.
   · nfkc_diff(text) -> str — Return the NFKC-normalised form of `text` IFF it differs from the
   · wrap_with_advisory_armor(message) -> str — Prefix a finding message with the self-defending advisory boilerplate
+  · security_agent_hint(domain, *, enabled) -> str — One-line pointer to `/janitor-security-agent` for a security detector that
 `scripts/lib/sentinel/__init__.py` — Sentinel structural-rule tier for the janitor workflow auditor.
 `scripts/lib/sentinel/model.py` — Shared contract for the Sentinel structural rule tier.
   · Workflow — Parsed GitHub Actions workflow with raw-line + structured access.
@@ -656,6 +715,18 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · SecretBareInRun.check(self, wf) -> list
 `scripts/lib/sentinel/rules_repo.py` — Repo-level Sentinel rules — checks that span the whole repository rather
   · missing_zizmor(workflow_texts) -> list[Finding] — Repo-level: no workflow runs the zizmor static analyzer anywhere.
+`scripts/lib/session_liveness.py` — Session-liveness detection primitives (TRDD-dccb0b8a, Phase 1).
+  · capture_terminal_identity(env) -> dict[str, str] — Extract the stable terminal-pane identifiers the daemon needs to inject
+  · is_session_frozen(*, transcript_mtime, rate_limited_since, flag_present, now, heartbeat_interval_s, freeze_factor, grace_s) -> bool — True iff a session is FROZEN-AND-STUCK and needs an external wake.
+  · recovery_cooldown_ok(last_attempt, now, cooldown_s) -> bool — True iff enough time has elapsed since the last wake attempt on this
+  · escalation_tier(attempts) -> int — Map prior FAILED wake attempts to a recovery TIER (1..3):
+  · recovery_action_for(attempt) -> str — The recovery action for the Nth (0-based) consecutive failed wake. Walks
+  · is_hard_rung(action) -> bool — True iff ``action`` kills/replaces the claude process (subject to the
+  · crash_loop_tripped(hard_attempts_in_window, max_in_window) -> bool — True iff the hard-restart rungs have fired too many times in the guard window —
+  · diagnose_instance(*, deliberately_unarmed, pane_alive, transcript_stale, rate_limited, version_stale) -> str — Classify ONE armed claude instance's janitor health from pre-gathered
+  · recovery_for_diagnosis(diagnosis) -> str | None — The recovery action for a diagnosis, or None to leave the instance alone
+  · normalize_tty(raw) -> str — Normalize a TTY name to a comparable key (the device basename, e.g.
+  · resolve_terminal_for_tty(tty, *, iterm_by_tty, tmux_by_tty) -> dict[str, str] — Resolve a process's terminal-injection identity from its (normalized) TTY,
 `scripts/lib/state.py` — Shared state helpers for ai-maestro-janitor hooks and detectors —
   · set_project_dir_override(cwd) -> None — Record a fallback project dir used only when CLAUDE_PROJECT_DIR is unset.
   · project_root(cwd_override) -> Path
@@ -694,6 +765,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · SuppressionTable.is_suppressed(self, rule_id, file, sha) -> bool
   · load(project_root) -> SuppressionTable — Load the project's suppression table.
 `scripts/lib/terminal_trigger.py` — Terminal-aware self-trigger send-abstraction (TRDD-db169d9e R3).
+  · valid_tmux_pane(pane) -> bool — True iff `pane` is a bare tmux pane id (`%<n>`) safe to place on a
   · build_tmux_steps(pane, command) -> list[list[str]] — The ordered send sequence for a tmux pane: ESC, settle, the command (literal),
   · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
   · send_self_command(command, *, delay_s, dry_run, env) -> str — Send `command` (a fixed literal like `/compact`) to this session's own pane,
@@ -742,10 +814,10 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/oauth_rotator/cascade.py` — The OAuth-rotator cascade — ONE paradigm in three parts, each falling back to
   · CascadeLeg — Which leg of the ROTATE→RENEW→REAUTH cascade an ALTERNATE account sits in.
   · AccountState — The cascade-relevant facts about ONE account — all non-secret metadata.
-  · classify(acct, *, keepalive_ahead_h, login_grace_days) -> CascadeLeg — Classify ONE account into its cascade leg. The SSOT both daemon + detectors use.
+  · classify(acct, *, keepalive_ahead_h, login_grace_days, max_refresh_failures) -> CascadeLeg — Classify ONE account into its cascade leg. The SSOT both daemon + detectors use.
   · CascadePlan — The fleet-level RENEW/REAUTH buckets, in cascade order. ROTATE is reported
   · CascadePlan.summary_line(self) -> str — A compact, log-friendly one-liner naming the non-empty fallback legs.
-  · cascade_plan(accounts, *, keepalive_ahead_h, login_grace_days) -> CascadePlan — Classify every account and bucket the ALTERNATES into the cascade's fallback
+  · cascade_plan(accounts, *, keepalive_ahead_h, login_grace_days, max_refresh_failures) -> CascadePlan — Classify every account and bucket the ALTERNATES into the cascade's fallback
 `scripts/oauth_rotator/cookie_vault.py` — Cookie-jar mechanics for the rotator (TRDD-dfc0959a Phase 2): EXTRACT a Chrome
   · CookieJar — A portable snapshot of one account's claude.ai cookies.
   · CookieJar.names(self) -> tuple[str, ...] — The cookie names in the jar (for logging / assertions — never the values).
