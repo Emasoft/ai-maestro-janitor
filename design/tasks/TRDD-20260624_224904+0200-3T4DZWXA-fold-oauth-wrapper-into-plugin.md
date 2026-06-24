@@ -1,9 +1,9 @@
 ---
 trdd-id: 3T4DZWXA
 title: Complete the rotator fold — integrate the user-scope OAuth wrapper (command + helpers) into the plugin
-column: dev
+column: published
 created: 2026-06-24T22:49:04+0200
-updated: 2026-06-24T22:49:04+0200
+updated: 2026-06-24T23:33:41+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 2
@@ -19,6 +19,9 @@ target-branch: main
 test-requirements: [unit]
 runtime-targets: [macos, linux]
 impacts: [install-script]
+implementation-commits: [2a87a03]
+published-version: 0.20.0
+published-at: 2026-06-24T23:33:41+0200
 external-refs: []
 ---
 
@@ -26,7 +29,7 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
 
-### Status: dev — scoped + classified; porting the valid artifacts into the plugin
+### Status: published — SHIPPED in v0.20.0 (port commit 2a87a03, release 9a49dad); all gates green (full tests + CPV --strict 0/0/0/0). The one iteration: skill→command, because CPV's N11 forbids "claude" in skill NAMES; commands carry no such rule, so the command keeps the user's exact requested name (see [^9] on the OAuth memory page).
 
 - **WHY (the gap):** the OAuth rotator was first built standalone in user-scope
   `~/.claude/account-rotator/` (TRDD-32acd15f, 2026-05-28). The 2026-05-31 fold
@@ -88,8 +91,14 @@ external-refs: []
   keeps the user's exact requested name); updated 15 refs across 5 files (incl. the memory reframe
   of the now-false "USER-scope, NOT janitor-shipped" label); added `tests/test_oauth_helper_scripts.py`
   (9 tests). 69 + 391 oauth/cascade tests green, ruff clean.
-- **NEXT (Phase 4)**: publish; then hand the USER the user-scope `rm` list (the legacy
-  `~/.claude/commands/refresh-claude-logins.md` + `~/.claude/account-rotator/*.sh`/stale `.py`/`.plist`).
+- **DONE (Phase 4)**: published v0.20.0 (pushed origin/main 9a49dad; GH release live). The fold
+  is complete — the janitor now owns the whole REAUTH flow; nothing OAuth-related lives outside it.
+- **REMAINING (USER ONLY — outside the project tree, I cannot delete there)**: remove the
+  now-superseded user-scope originals — `~/.claude/commands/refresh-claude-logins.md` +
+  `~/.claude/account-rotator/{open-login,check-login,lifetime-status,reauth,capture_via_login}.sh` +
+  the stale `rotator.py`/`slot_capture_token.py`/`slot_login.py`/`_probe_identity.py` +
+  `com.emasoft.claude-account-rotator.plist`. KEEP the legacy DATA (`state.json`, `slots/`,
+  `profiles/`, `rotator.log`) — the read-fallback until the canonical DATA dir is confirmed complete.
 
 ## Scope guards / non-goals
 - Do NOT port the stale `.py` copies (plugin has current) or the retired shim/plist.
