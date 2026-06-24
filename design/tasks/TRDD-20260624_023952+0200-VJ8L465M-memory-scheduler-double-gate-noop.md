@@ -3,7 +3,7 @@ trdd-id: VJ8L465M
 title: Memory-maintenance scheduler double-gates on the cadence stamp — the scheduled scope's pass is skipped and a 236k-token agent no-ops
 column: complete
 created: 2026-06-24T02:39:52+0200
-updated: 2026-06-24T03:02:00+0200
+updated: 2026-06-24T03:38:57+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 2
@@ -47,7 +47,7 @@ sole cadence authority (it already `is_due`-checks + stamps at emit, `memory-mai
 - The scheduler-owns-cadence contract the skills now rely on is **already TESTED**:
   `tests/test_memory_maintenance.py::test_not_due_after_just_running_is_silent` proves the
   emit-stamp makes `is_due` False (i.e. WHY a re-check abstains) — plus `test_due_emits_*`
-  + `test_only_one_marker_per_fire_*`. 48 memory_settings/maintenance tests green post-edit.
+  and `test_only_one_marker_per_fire_*`. 48 memory_settings/maintenance tests green post-edit.
 - Residual (inherent, NOT a bug): a CONTENT-abstain no-op can still happen when a scope is
   cadence-due but has no work — the scheduler can't know content-due-ness cheaply (split has
   always had this). The fix eliminates the CADENCE-abstain no-ops (the bug), not these.
