@@ -36,6 +36,22 @@ def _load_rotator():
 rotator = _load_rotator()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_rotator_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect the rotator's module-global ROOT + LOG_FILE to a throwaway tmp dir for EVERY test,
+    so running the suite can NEVER write to the real operational state under
+    ~/.claude/plugins/data/.../oauth-rotator/. Without this, the cmd_auto tests — which exercise the
+    real cmd_auto → _decide → _log (the `_setup_auto` helper patches load_state/save_state/read_slot/
+    write_slot but NOT `_log`) — appended fake `live@x`/`alt@x` rotation lines to the production
+    `rotator.log` on every `pytest` run (observed 2026-06-24 during a publish gate; TRDD-14IY6MAD).
+    `_log` reads BOTH globals at call time (`ROOT.mkdir`, the trim tmp under ROOT, and `LOG_FILE`),
+    so both are redirected. `_log` stays fully functional (it writes into the tmp ROOT), so the
+    dedicated `_log` tests — which re-patch `LOG_FILE` to their own tmp INSIDE the test body, AFTER
+    this fixture runs — are unaffected and still assert on real log content."""
+    monkeypatch.setattr(rotator, "ROOT", tmp_path)
+    monkeypatch.setattr(rotator, "LOG_FILE", tmp_path / "rotator.log")
+
+
 def _blob(token: str, *, refresh: str | None = "r", expires_ms: int | None = None) -> dict:
     inner: dict = {"accessToken": token}
     if refresh is not None:
