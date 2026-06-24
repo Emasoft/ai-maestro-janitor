@@ -3,7 +3,7 @@ trdd-id: 3T4DZWXA
 title: Complete the rotator fold — integrate the user-scope OAuth wrapper (command + helpers) into the plugin
 column: published
 created: 2026-06-24T22:49:04+0200
-updated: 2026-06-24T23:33:41+0200
+updated: 2026-06-25T00:10:19+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 2
@@ -90,7 +90,7 @@ external-refs: []
   skill-name reserved-word check on "claude"; commands carry no such rule, so the command form
   keeps the user's exact requested name); updated 15 refs across 5 files (incl. the memory reframe
   of the now-false "USER-scope, NOT janitor-shipped" label); added `tests/test_oauth_helper_scripts.py`
-  (9 tests). 69 + 391 oauth/cascade tests green, ruff clean.
+  (14 tests). 69 + 391 oauth/cascade tests green, ruff clean.
 - **DONE (Phase 4)**: published v0.20.0 (pushed origin/main 9a49dad; GH release live). The fold
   is complete — the janitor now owns the whole REAUTH flow; nothing OAuth-related lives outside it.
 - **REMAINING (USER ONLY — outside the project tree, I cannot delete there)**: remove the
@@ -99,6 +99,10 @@ external-refs: []
   the stale `rotator.py`/`slot_capture_token.py`/`slot_login.py`/`_probe_identity.py` +
   `com.emasoft.claude-account-rotator.plist`. KEEP the legacy DATA (`state.json`, `slots/`,
   `profiles/`, `rotator.log`) — the read-fallback until the canonical DATA dir is confirmed complete.
+- **POST-PUBLISH RECHECK (2026-06-25)**: a recheck of the shipped change refined the command's engine
+  call `uv run "$ROT/rotator.py"` → `python3 …` (×3) — rotator.py is stdlib-only, so `uv run` only
+  risked syncing the caller's cwd uv-project; `python3` matches the 3 sibling `.sh` and removes that
+  risk. Renamed the stale test fn `…_skill` → `…_command`. 14 helper tests green; rides the next publish.
 
 ## Scope guards / non-goals
 - Do NOT port the stale `.py` copies (plugin has current) or the retired shim/plist.

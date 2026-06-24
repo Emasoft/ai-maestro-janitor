@@ -31,7 +31,9 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
 
 > Run every rotator invocation with `env -u CLAUDE_PLUGIN_DATA` so the engine resolves the
 > JANITOR's data dir via its own guard (a foreign `CLAUDE_PLUGIN_DATA` from another plugin's
-> context would otherwise mis-route the state — TRDD-7100178d / TRDD-5EUYV08H).
+> context would otherwise mis-route the state — TRDD-7100178d / TRDD-5EUYV08H). Invoke the engine
+> with `python3` (NOT `uv run`) — rotator.py is stdlib-only, so `uv run` would only sync the
+> caller's cwd uv-project for no gain; the helper `.sh` drive it the same way (TRDD-3T4DZWXA).
 
 ## When to use
 
@@ -50,7 +52,7 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
    for f in rotator.py open-login.sh check-login.sh lifetime-status.sh; do
      [ -f "$ROT/$f" ] || { echo "missing: $ROT/$f"; exit 1; }
    done
-   env -u CLAUDE_PLUGIN_DATA uv run "$ROT/rotator.py" known-emails   # the roster, one email/line
+   env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" known-emails   # the roster, one email/line
    ```
 
 2. **Show current status first.** Surface `lifetime-status.sh`'s table so the user sees which
@@ -76,12 +78,12 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
    and `connect_over_cdp`-attaches to decrypt the cookies you just saved):
 
    ```bash
-   env -u CLAUDE_PLUGIN_DATA uv run "$ROT/rotator.py" tick   # _bootstrap_seeded_slots → capture per eligible slot (detached)
+   env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" tick   # _bootstrap_seeded_slots → capture per eligible slot (detached)
    ```
 
    Captures run DETACHED (a real Chrome window may flash per account, then close). Poll each
    account until its slot holds a refresh token before declaring success
-   (`env -u CLAUDE_PLUGIN_DATA uv run "$ROT/rotator.py" list`). If a capture keeps failing,
+   (`env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" list`). If a capture keeps failing,
    re-check `check-login.sh` — the session may not have persisted.
 
 5. **Finish.** Run `lifetime-status.sh` once more to confirm. If every account is ✓ AND its

@@ -63,7 +63,7 @@ def test_helper_no_legacy_home_default(name: str) -> None:
     )
 
 
-def test_lifetime_status_points_at_janitor_skill() -> None:
+def test_lifetime_status_points_at_janitor_command() -> None:
     """lifetime-status.sh's action prompt points at the renamed /janitor-refresh-claude-logins
     (the old un-prefixed name is gone — note /janitor-... does not contain the '/refresh-' stem)."""
     text = (OAUTH_DIR / "lifetime-status.sh").read_text()
