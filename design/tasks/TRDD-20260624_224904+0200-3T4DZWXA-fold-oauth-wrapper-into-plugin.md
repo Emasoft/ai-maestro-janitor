@@ -38,7 +38,7 @@ external-refs: []
 
 - **INVENTORY + classification** (full `~/.claude/account-rotator/` + `~/.claude/commands/`):
   - PORT (valid, no plugin equivalent):
-    - `~/.claude/commands/refresh-claude-logins.md` → SKILL `skills/janitor-refresh-claude-logins/SKILL.md`.
+    - `~/.claude/commands/refresh-claude-logins.md` → COMMAND `commands/janitor-refresh-claude-logins.md` (kept a COMMAND, not a skill — CPV's skill-name check forbids "claude"; commands carry no such rule).
     - `open-login.sh` (human SEED: clean real Chrome login) → `scripts/oauth_rotator/`.
     - `check-login.sh` (verify a profile holds a live session, read-only) → `scripts/oauth_rotator/`.
     - `lifetime-status.sh` (cookie-vs-OAuth lifetime table) → `scripts/oauth_rotator/`.
@@ -75,20 +75,28 @@ external-refs: []
 
 - **PHASES (≤5 files each):**
   1. Port the 3 helper scripts into `scripts/oauth_rotator/` (path-adjusted) + author the
-     `janitor-refresh-claude-logins` skill (pointing at the in-plugin scripts).
+     `janitor-refresh-claude-logins` command (pointing at the in-plugin scripts).
   2. Update the 5 in-repo `/refresh-claude-logins` references.
-  3. Tests (the ported scripts run + resolve paths; the skill preflight) + CPV validate.
+  3. Tests (the ported scripts run + resolve paths; the command preflight) + CPV validate.
   4. Publish; then hand the USER the exact user-scope `rm` list.
 
-- **NEXT**: Phase 1 — read open-login.sh / check-login.sh / lifetime-status.sh in full, port them
-  path-adjusted into `scripts/oauth_rotator/`, author the skill.
+- **DONE (Phases 1-3)**: ported open-login.sh / check-login.sh / lifetime-status.sh into
+  `scripts/oauth_rotator/` (sibling-rotator path, canonical DATA dir; smoke-tested live — exit 0,
+  both accounts resolved, zero cache-glob/legacy-path errors); authored the
+  `janitor-refresh-claude-logins` COMMAND (a command, not a skill — CPV `--strict` flagged the
+  skill-name reserved-word check on "claude"; commands carry no such rule, so the command form
+  keeps the user's exact requested name); updated 15 refs across 5 files (incl. the memory reframe
+  of the now-false "USER-scope, NOT janitor-shipped" label); added `tests/test_oauth_helper_scripts.py`
+  (9 tests). 69 + 391 oauth/cascade tests green, ruff clean.
+- **NEXT (Phase 4)**: publish; then hand the USER the user-scope `rm` list (the legacy
+  `~/.claude/commands/refresh-claude-logins.md` + `~/.claude/account-rotator/*.sh`/stale `.py`/`.plist`).
 
 ## Scope guards / non-goals
 - Do NOT port the stale `.py` copies (plugin has current) or the retired shim/plist.
 - Do NOT touch the user's generic `oauth-implementation` / `anthropic-claude-development` skills.
 - Do NOT delete user-scope files (outside the project) — hand the USER the exact list.
 - Path-correctness is the #1 risk: the ported scripts must resolve the plugin's OWN `rotator.py`
-  + the canonical DATA-dir profiles, never the cache-glob or the legacy home.
+  and the canonical DATA-dir profiles, never the cache-glob or the legacy home.
 
 ## Why this exists
 Completes the 2026-05-31 fold (TRDD-f892e109): the rotator's user-facing wrapper escaped the
