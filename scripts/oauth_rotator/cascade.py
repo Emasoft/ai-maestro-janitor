@@ -49,6 +49,12 @@ from enum import Enum
 # only matter when classify is used standalone (e.g. a unit test).
 DEFAULT_KEEPALIVE_AHEAD_H = 2.0
 DEFAULT_LOGIN_GRACE_DAYS = 1.0
+# Consecutive `_keepalive_refresh` failures after which a present-but-FAILING refresh
+# token is treated as DEAD and escalated from RENEW_REFRESH to REAUTH_NUDGE
+# (TRDD-HJGR4I5W). A few ticks (~minutes at the 60 s OAuth-rotator beat): long enough to
+# ride out a transient token-endpoint flake, short enough to surface a truly-dead token
+# within the hour so the alternate is never a silent dead rotation target.
+DEFAULT_MAX_REFRESH_FAILURES = 3
 
 
 class CascadeLeg(str, Enum):
@@ -72,7 +78,11 @@ class AccountState:
     ``token_expires_h`` is hours until the OAuth token's local ``expiresAt``
     (``None`` when undatable). ``has_session_cookie`` is whether a live claude.ai
     ``sessionKey`` cookie exists for the account's seeded Chrome profile
-    (``rotator._profile_has_session_key``).
+    (``rotator._profile_has_session_key``). ``refresh_failures`` is the per-slot count of
+    CONSECUTIVE failed ``_keepalive_refresh`` exchanges (reset to 0 on any success),
+    persisted in the state-index slot metadata — what lets ``classify`` tell a renewable
+    refresh token apart from a present-but-DEAD one (TRDD-HJGR4I5W). Defaults to 0 so
+    synthetic call sites that don't track it (the bootstrap-eligibility probe) are unaffected.
     """
 
     email: str
@@ -80,6 +90,7 @@ class AccountState:
     has_refresh: bool
     token_expires_h: float | None
     has_session_cookie: bool
+    refresh_failures: int = 0
 
 
 def classify(
@@ -87,6 +98,7 @@ def classify(
     *,
     keepalive_ahead_h: float = DEFAULT_KEEPALIVE_AHEAD_H,
     login_grace_days: float = DEFAULT_LOGIN_GRACE_DAYS,
+    max_refresh_failures: int = DEFAULT_MAX_REFRESH_FAILURES,
 ) -> CascadeLeg:
     """Classify ONE account into its cascade leg. The SSOT both daemon + detectors use.
 
@@ -109,6 +121,13 @@ def classify(
         return CascadeLeg.HEALTHY
 
     if acct.has_refresh:
+        # A refresh token that EXISTS but whose exchange keeps FAILING is dead — escalate to
+        # the human re-login nudge instead of looping RENEW_REFRESH forever, silently, on a
+        # token that can never come back (TRDD-HJGR4I5W). The counter is incremented by
+        # rotator._keepalive_refresh on each None return and reset on any success, so a single
+        # transient token-endpoint flake never trips this; only a persistently-dead token does.
+        if acct.refresh_failures >= max_refresh_failures:
+            return CascadeLeg.REAUTH_NUDGE
         # Datable AND within the keepalive window → the daemon will refresh it.
         if acct.token_expires_h is not None and acct.token_expires_h <= keepalive_ahead_h:
             return CascadeLeg.RENEW_REFRESH
@@ -161,6 +180,7 @@ def cascade_plan(
     *,
     keepalive_ahead_h: float = DEFAULT_KEEPALIVE_AHEAD_H,
     login_grace_days: float = DEFAULT_LOGIN_GRACE_DAYS,
+    max_refresh_failures: int = DEFAULT_MAX_REFRESH_FAILURES,
 ) -> CascadePlan:
     """Classify every account and bucket the ALTERNATES into the cascade's fallback
     legs (sorted, stable). Live accounts land in ``healthy`` (see ``classify``)."""
@@ -170,6 +190,7 @@ def cascade_plan(
             acct,
             keepalive_ahead_h=keepalive_ahead_h,
             login_grace_days=login_grace_days,
+            max_refresh_failures=max_refresh_failures,
         )
         buckets[leg].append(acct.email)
     return CascadePlan(

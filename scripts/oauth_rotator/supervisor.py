@@ -87,6 +87,8 @@ class SlotFact:
     email: str
     has_refresh: bool
     expires_days: float | None  # days until the token's expiresAt, or None
+    refresh_failures: int = 0  # consecutive failed keepalive refreshes (TRDD-HJGR4I5W); a dead
+    #                            present refresh token escalates to the REAUTH login nudge
 
 
 @dataclass(frozen=True)
@@ -180,11 +182,13 @@ def _slot_facts(root: Path, now: float) -> tuple[SlotFact, ...]:
     cmd_list/cmd_auto enumerate — and each blob is read keychain-first, with a legacy
     plaintext-file fallback for any slot not migrated yet."""
     emails: list[str] = []
+    idx: dict = {}  # the state-index slots map, kept so the per-slot loop can read refresh_failures
     sf = root / "state.json"
     if sf.is_file():
         try:
-            idx = json.loads(sf.read_text()).get("slots")
-            if isinstance(idx, dict):
+            parsed = json.loads(sf.read_text()).get("slots")
+            if isinstance(parsed, dict):
+                idx = parsed
                 emails = list(idx.keys())
         except (json.JSONDecodeError, OSError):
             emails = []
@@ -215,7 +219,9 @@ def _slot_facts(root: Path, now: float) -> tuple[SlotFact, ...]:
         if isinstance(exp, (int, float)):
             secs = exp / 1000 if exp > 1e12 else exp
             days = (secs - now) / 86400.0
-        out.append(SlotFact(email=email, has_refresh=has_refresh, expires_days=days))
+        slot_meta = idx.get(email)
+        rf = int(slot_meta.get("refresh_failures", 0)) if isinstance(slot_meta, dict) else 0
+        out.append(SlotFact(email=email, has_refresh=has_refresh, expires_days=days, refresh_failures=rf))
     return tuple(out)
 
 

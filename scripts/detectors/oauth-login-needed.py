@@ -74,11 +74,14 @@ def slot_needs_login(
     token_days: float | None,
     has_session_key: bool,
     grace_days: float,
+    refresh_failures: int = 0,
 ) -> bool:
     """PURE: does this account need a ONE-TIME human login?
 
     Needs a human login iff it can't self-renew AND has no seeded session to
-    auto-bootstrap from AND its token is expired / near-expired.
+    auto-bootstrap from AND its token is expired / near-expired — OR its refresh token is
+    present but DEAD (``refresh_failures`` ≥ the cascade's max consecutive keepalive-refresh
+    failures), which is equally only fixable by a human re-login (TRDD-HJGR4I5W).
 
     Delegates to the cascade SSOT (TRDD-dfc0959a): a LOGIN is needed ⇔ the account
     lands in the cascade's REAUTH_NUDGE leg, so the daemon's cascade and this nudge
@@ -90,6 +93,7 @@ def slot_needs_login(
             email="", is_live=False, has_refresh=has_refresh,
             token_expires_h=(token_days * 24.0 if token_days is not None else None),
             has_session_cookie=has_session_key,
+            refresh_failures=refresh_failures,
         ),
         login_grace_days=grace_days,
     ) is cascade.CascadeLeg.REAUTH_NUDGE
@@ -169,7 +173,7 @@ def main() -> int:
     stalled: list[str] = []   # B3: logged in (has session) but OAuth capture not yet completed
     for f in facts:
         has_session = _has_live_session(f.email, now)
-        if slot_needs_login(f.has_refresh, f.expires_days, has_session, grace):
+        if slot_needs_login(f.has_refresh, f.expires_days, has_session, grace, f.refresh_failures):
             needing.append(f.email)
         elif slot_capture_stalled(f.has_refresh, has_session):
             stalled.append(f.email)

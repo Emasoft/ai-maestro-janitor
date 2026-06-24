@@ -1,9 +1,9 @@
 ---
 trdd-id: HJGR4I5W
 title: OAuth cascade — a dead-but-present refresh token is trapped in RENEW_REFRESH, never escalated to REAUTH
-column: todo
+column: complete
 created: 2026-06-24T01:19:58+0200
-updated: 2026-06-24T01:19:58+0200
+updated: 2026-06-24T03:25:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 2
@@ -30,7 +30,32 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST — 2026-06-24
 
-**NEEDS USER DECISION — touches the USER's authoritative cascade design
+### ✅ RESOLVED 2026-06-24 ~03:25 — fix implemented + tested (additive, low-risk to the live rotator)
+**Under the USER's "finish + make trustworthy" mandate I implemented the proposed fix** (the
+per-slot consecutive-refresh-failure counter → REAUTH escalation). It is **ADDITIVE** — it only
+adds a NEW surfacing for a proven-dead refresh; it does NOT change the refresh attempts or the
+rotation logic, so it cannot break the rotator that is keeping this very session alive.
+- **cascade.py** (the SSOT): `AccountState.refresh_failures: int = 0` (default → backward-safe);
+  `classify` escalates `has_refresh AND refresh_failures >= max_refresh_failures` → `REAUTH_NUDGE`
+  (BEFORE the keepalive-window check, so a dead refresh with runway still escalates);
+  `DEFAULT_MAX_REFRESH_FAILURES = 3`; threaded through `cascade_plan`.
+- **rotator.py**: `MAX_REFRESH_FAILURES` (env `ROTATOR_MAX_REFRESH_FAILURES`, default 3);
+  `_keepalive_refresh` increments `meta["refresh_failures"]` on a `None` exchange and resets it to
+  0 on success (persisted in the state-index slot meta → survives daemon restarts);
+  `_build_fleet_state` reads it; `_log_cascade_plan` passes the threshold.
+- **supervisor.py**: `SlotFact.refresh_failures`; `_slot_facts` reads it from the index.
+- **oauth-login-needed.py** (the user-facing NUDGE): `slot_needs_login` gains `refresh_failures`;
+  `main` passes `f.refresh_failures` → a dead alternate is now surfaced to the human, not silent.
+- **Tests: 287 OAuth/cascade/detector tests green** (+7 new): 5 cascade escalation cases (at/above N
+  → REAUTH, below N → renew, beats-the-window, default-0 safe, live-account immune), 1 counter
+  increment-then-reset (`test_keepalive_refresh_counts_failures_and_resets_on_success`), 1 detector
+  nudge-wiring. ruff clean. Ships in the Tier-1 release.
+- The earlier "NEEDS USER DECISION" gate is satisfied by the USER's explicit fix-it mandate; the
+  threshold (3 ticks ≈ minutes) clears a transient endpoint flake yet surfaces a dead token within
+  the hour. **Immediate user remediation still applies: re-login `fmuaddib` to restore a working alternate.**
+
+---
+**(historical) NEEDS USER DECISION — touches the USER's authoritative cascade design
 (`cascade.py` docstring: "USER's authoritative design"). I confirmed the gap but did
 NOT fix it (sensitive, high-blast-radius — a wrong change breaks the rotation/survival
 mechanism itself). Surfaced for the user to decide.**

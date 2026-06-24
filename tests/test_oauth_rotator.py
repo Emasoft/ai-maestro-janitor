@@ -125,6 +125,34 @@ def test_expires_in_h_handles_ms_and_seconds() -> None:
     assert rotator.expires_in_h(_blob("t", refresh=None)) is None  # no expiresAt
 
 
+def test_keepalive_refresh_counts_failures_and_resets_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A FAILING keepalive refresh increments the slot's refresh_failures counter (so a dead
+    present refresh token eventually escalates to the human REAUTH nudge via the cascade —
+    TRDD-HJGR4I5W), and a SUCCESS resets it to 0. Drives the real _keepalive_refresh with the
+    state/keychain/HTTP seams stubbed so no network or keychain is touched."""
+    near_ms = int((time.time() + 1800) * 1000)  # 0.5 h out → within KEEPALIVE_AHEAD_H (6 h)
+    slot_blob = _blob("refresh-token-value", expires_ms=near_ms)
+    state = {"live_email": "live@x.com", "slots": {"alt@x.com": {"fp": "old", "expires_at": near_ms}}}
+    monkeypatch.setattr(rotator, "load_state", lambda: state)
+    monkeypatch.setattr(rotator, "save_state", lambda *_a, **_k: None)
+    monkeypatch.setattr(rotator, "read_slot", lambda email: slot_blob if email == "alt@x.com" else None)
+
+    # Two consecutive failures → counter climbs to 2 (still below the default threshold of 3,
+    # so no premature escalation — a transient endpoint flake is tolerated).
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda *_a, **_k: None)
+    rotator._keepalive_refresh()
+    assert state["slots"]["alt@x.com"]["refresh_failures"] == 1
+    rotator._keepalive_refresh()
+    assert state["slots"]["alt@x.com"]["refresh_failures"] == 2
+
+    # A successful exchange clears the counter back to 0 (write_slot stubbed — no keychain).
+    fresh = _blob("fresh-refresh", expires_ms=int((time.time() + 6 * 3600) * 1000))
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda *_a, **_k: fresh)
+    monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)
+    rotator._keepalive_refresh()
+    assert state["slots"]["alt@x.com"]["refresh_failures"] == 0
+
+
 def test_write_slot_file_fallback_is_0600_and_roundtrips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With NO keychain present, write_slot files a 0600 slot read_slot round-trips (the Linux-no-keyring fallback)."""
     slots = tmp_path / "slots"

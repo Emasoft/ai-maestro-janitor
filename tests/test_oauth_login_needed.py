@@ -59,6 +59,19 @@ def test_has_refresh_never_needs_login() -> None:
     assert det.slot_needs_login(True, -5.0, True, 1.0) is False
 
 
+def test_has_refresh_but_dead_counter_needs_login() -> None:
+    """A present refresh token whose exchange keeps FAILING is dead → the detector NUDGES the
+    user to re-login even though has_refresh is True (the bug-fix wiring — refresh_failures
+    reaches the cascade SSOT; default threshold is 3) (TRDD-HJGR4I5W)."""
+    # Below the threshold a transient flake does NOT nudge.
+    assert det.slot_needs_login(True, -5.0, False, 1.0, 2) is False
+    # At / above the threshold the dead refresh escalates to a login nudge.
+    assert det.slot_needs_login(True, -5.0, False, 1.0, 3) is True
+    assert det.slot_needs_login(True, None, False, 1.0, 5) is True
+    # Default (omitted) refresh_failures=0 stays backward-compatible: no nudge.
+    assert det.slot_needs_login(True, -5.0, False, 1.0) is False
+
+
 def test_has_session_is_bootstrap_case_not_login() -> None:
     """No refresh but a live Chrome session → bootstrap-eligible (Part B), NOT a login nudge."""
     assert det.slot_needs_login(False, None, True, 1.0) is False

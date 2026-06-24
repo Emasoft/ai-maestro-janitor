@@ -23,20 +23,22 @@ import rotator  # noqa: E402  # for the _bootstrap_eligible equivalence proof
 
 KA = 2.0   # keepalive_ahead_h (hours) — rotator.KEEPALIVE_AHEAD_H default
 GRACE = 1.0  # login_grace_days — oauth-login-needed._grace_days default
+MRF = 3    # max_refresh_failures — cascade.DEFAULT_MAX_REFRESH_FAILURES / rotator.MAX_REFRESH_FAILURES
 
 
-def _acct(*, is_live=False, has_refresh=False, token_h=None, session=False):
+def _acct(*, is_live=False, has_refresh=False, token_h=None, session=False, refresh_failures=0):
     return cascade.AccountState(
         email="a@x.com",
         is_live=is_live,
         has_refresh=has_refresh,
         token_expires_h=token_h,
         has_session_cookie=session,
+        refresh_failures=refresh_failures,
     )
 
 
 def _c(acct):
-    return cascade.classify(acct, keepalive_ahead_h=KA, login_grace_days=GRACE)
+    return cascade.classify(acct, keepalive_ahead_h=KA, login_grace_days=GRACE, max_refresh_failures=MRF)
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +63,40 @@ def test_has_refresh_near_expiry_renew_refresh() -> None:
 def test_keepalive_boundary_is_inclusive() -> None:
     """token_expires_h exactly == keepalive_ahead_h is within the window (<=) → RENEW_REFRESH."""
     assert _c(_acct(has_refresh=True, token_h=2.0)) is cascade.CascadeLeg.RENEW_REFRESH
+
+
+def test_has_refresh_dead_after_N_failures_is_reauth() -> None:
+    """A present refresh token that has failed to exchange >= max_refresh_failures times is DEAD
+    → escalate to the human REAUTH nudge even though has_refresh is True (TRDD-HJGR4I5W). This is
+    the bug fix: a dead-but-present refresh was trapped in RENEW_REFRESH forever and never surfaced."""
+    assert _c(_acct(has_refresh=True, token_h=-2.4, refresh_failures=MRF)) is cascade.CascadeLeg.REAUTH_NUDGE
+    assert _c(_acct(has_refresh=True, token_h=-2.4, refresh_failures=MRF + 5)) is cascade.CascadeLeg.REAUTH_NUDGE
+
+
+def test_has_refresh_failures_below_threshold_still_renews() -> None:
+    """Below the threshold the slot is NOT escalated — a transient endpoint flake keeps
+    RENEW_REFRESH (near expiry) / HEALTHY (ample runway); we never nudge a human prematurely."""
+    assert _c(_acct(has_refresh=True, token_h=-2.4, refresh_failures=MRF - 1)) is cascade.CascadeLeg.RENEW_REFRESH
+    assert _c(_acct(has_refresh=True, token_h=10.0, refresh_failures=MRF - 1)) is cascade.CascadeLeg.HEALTHY
+
+
+def test_dead_refresh_escalation_beats_the_expiry_window() -> None:
+    """The dead-refresh escalation fires regardless of the expiry window: a dead refresh with
+    ample remaining runway is still dead (it can never be exchanged) → REAUTH, not HEALTHY."""
+    assert _c(_acct(has_refresh=True, token_h=100.0, refresh_failures=MRF)) is cascade.CascadeLeg.REAUTH_NUDGE
+
+
+def test_zero_failures_default_never_escalates() -> None:
+    """The default refresh_failures=0 (a healthy or freshly-reset slot) never escalates —
+    backward-safe for every existing AccountState construction site that omits the field."""
+    assert _c(_acct(has_refresh=True, token_h=-2.4)) is cascade.CascadeLeg.RENEW_REFRESH
+    assert _c(_acct(has_refresh=True, token_h=10.0)) is cascade.CascadeLeg.HEALTHY
+
+
+def test_live_account_never_escalates_on_failures() -> None:
+    """The LIVE account is ROTATE's concern and always HEALTHY here — even a stuck failure count
+    must not turn it into a REAUTH nudge (Claude Code owns its own refresh grant)."""
+    assert _c(_acct(is_live=True, has_refresh=True, token_h=-2.4, refresh_failures=MRF + 9)) is cascade.CascadeLeg.HEALTHY
 
 
 def test_has_refresh_undatable_is_healthy() -> None:

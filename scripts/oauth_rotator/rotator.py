@@ -265,6 +265,11 @@ EXPIRY_GRACE_H = float(os.environ.get("ROTATOR_EXPIRY_GRACE_H", "0.5"))
 # classifier reads the SAME constant (cascade_plan keepalive_ahead_h=…), so keepalive and the
 # RENEW classification stay consistent. Env-overridable for loop tests.
 KEEPALIVE_AHEAD_H = float(os.environ.get("ROTATOR_KEEPALIVE_AHEAD_H", "6"))
+# Consecutive _keepalive_refresh failures after which the cascade SSOT treats a slot's refresh
+# token as DEAD and escalates it from RENEW_REFRESH to the human REAUTH nudge (TRDD-HJGR4I5W) —
+# so a present-but-dead refresh token can never sit as a silent dead rotation alternate. Mirrors
+# cascade.DEFAULT_MAX_REFRESH_FAILURES; env-overridable for power users / loop tests.
+MAX_REFRESH_FAILURES = int(os.environ.get("ROTATOR_MAX_REFRESH_FAILURES", str(cascade.DEFAULT_MAX_REFRESH_FAILURES)))
 # A 429 on /api/oauth/usage can mean EITHER the account is genuinely rate-limited
 # OR our polling tripped the endpoint's own throttle (transient). A genuinely
 # maxed account 429s persistently; a throttle clears within a tick. So require
@@ -1277,7 +1282,17 @@ def _keepalive_refresh() -> list[str]:
             continue  # plenty of runway (or undatable) — leave it
         fresh = refresh_oauth_token(blob)
         if fresh is None:
-            continue  # refresh failed — keep the old token; F2a rotates away if it lapses
+            # Refresh FAILED — keep the old token (F2a rotates away if it lapses) AND record the
+            # failure. A refresh token that keeps failing to exchange is DEAD; N consecutive
+            # failures escalate this slot from RENEW_REFRESH to the human REAUTH nudge via the
+            # cascade SSOT (TRDD-HJGR4I5W) so a dead alternate is never silent. The counter lives
+            # in the slot's state-index meta so it survives daemon restarts; it is reset to 0 on
+            # any successful exchange below.
+            meta = slots.get(email)
+            if isinstance(meta, dict):
+                meta["refresh_failures"] = int(meta.get("refresh_failures", 0)) + 1
+                changed = True
+            continue
         try:
             write_slot(email, fresh)
         except SlotKeychainWriteError as exc:
@@ -1293,6 +1308,7 @@ def _keepalive_refresh() -> list[str]:
         if isinstance(meta, dict):
             meta["fp"] = fingerprint(fresh)
             meta["expires_at"] = _oauth(fresh).get("expiresAt")
+            meta["refresh_failures"] = 0  # a successful exchange clears the dead-refresh counter (TRDD-HJGR4I5W)
             changed = True
         actions.append(email)
     if changed:
@@ -1568,12 +1584,14 @@ def _build_fleet_state(state: dict, now: float) -> list[cascade.AccountState]:
         if blob is None and email == live_email:
             blob = read_live_blob()  # the live token lives in the live store, not a slot
         inner = _oauth(blob) if blob else {}
+        slot_meta = (state.get("slots") or {}).get(email)
         out.append(cascade.AccountState(
             email=email,
             is_live=(email == live_email),
             has_refresh=bool(inner.get("refreshToken") or inner.get("refresh_token")),
             token_expires_h=(expires_in_h(blob) if blob else None),
             has_session_cookie=_profile_has_session_key(email, now=now),
+            refresh_failures=(int(slot_meta.get("refresh_failures", 0)) if isinstance(slot_meta, dict) else 0),
         ))
     return out
 
@@ -1591,7 +1609,8 @@ def _log_cascade_plan() -> None:
     than in the nudge — the detector nudge is the source of truth."""
     try:
         fleet = _build_fleet_state(load_state(), time.time())
-        _log(cascade.cascade_plan(fleet, keepalive_ahead_h=KEEPALIVE_AHEAD_H).summary_line())
+        _log(cascade.cascade_plan(fleet, keepalive_ahead_h=KEEPALIVE_AHEAD_H,
+                                  max_refresh_failures=MAX_REFRESH_FAILURES).summary_line())
     except Exception as exc:  # noqa: BLE001 — explicit-cascade visibility log is best-effort
         _log("cascade: plan unavailable (%r)" % exc)
 
