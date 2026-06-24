@@ -195,7 +195,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8eb73fe537f5 digest=85e07c392df1 generated=2026-06-24T10:55:21+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=2c06d780d6c4 digest=a20fcc4894ae generated=2026-06-24T18:01:18+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -844,6 +844,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main(argv) -> int
 `scripts/oauth_rotator/rotator.py` — Claude Code multi-subscription account rotator.
   · SlotKeychainWriteError — A keychain/keyring was PRESENT but refused a slot write — fail CLOSED.
+  · configured_rotator_home() -> Path | None — The rotator home the daemon ACTUALLY uses, or None when none is configured (opt-in by
   · migrate_root_to_canonical() -> tuple[Path, Path, bool] — One-time: copy ``state.json`` + ``opt-in.flag`` from the legacy standalone root
   · read_live_blob() -> dict | None — The live credential, robust against a corrupt/missing primary: the PRIMARY store ladder
   · write_live_blob(blob) -> None — Overwrite the live credential with `blob`, cross-platform.
