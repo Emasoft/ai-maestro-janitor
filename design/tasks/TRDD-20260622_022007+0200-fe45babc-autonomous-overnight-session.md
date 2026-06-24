@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-23T22:16:19+0200
+updated: 2026-06-24T02:46:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,46 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-22
+
+### 🌙 UPDATE 2026-06-24 ~02:45 — USER MANDATE: finish everything, make the janitor a TRUSTWORTHY immortal guardian (CPV #152 PUBLISHED → L0 UNBLOCKED)
+**User went to sleep with this directive (verbatim intent):** "finish implementing the
+pending tasks. the CPV is been published, so now everything works… make the janitor
+finally work as the immortal guardian it was supposed to be. Make the agents of each
+field govern all action, and make them able to use any skill in the right moment.
+Produce a version that is truly trustworthy." → MAXIMAL autonomy authorized
+(/go-on-yourself standing): act without approval, TRDD + TDD per change, commit often,
+publish via publish.py strict gates. CPV #152 is LIVE → **L0 is unblocked.**
+
+**PRIORITIZED PLAN (trustworthiness > coverage — ship few rock-solid, not many half-baked):**
+- **TIER 1 (concrete, unblocked, survival-critical) — DO FIRST, batch into ONE release:**
+  1. **VJ8L465M** memory-scheduler double-gate fix. Designed (Option C): scheduler writes a
+     SHORT-TTL `dispatched` stamp (re-emit guard) instead of `mark_ran`; the cadence stamp
+     stays owned by the AGENT (it already `mark_ran`s after the pass). Breaks the double-gate;
+     preserves re-emit-storm protection + dead-agent recovery (TTL). Verify all 6 skills
+     mark_ran post-pass first. memory_settings + memory-maintenance.py + tests.
+  2. **HJGR4I5W** OAuth dead-refresh → REAUTH escalation. ADDITIVE + low-risk to the LIVE
+     rotator (only adds a surfacing): per-slot consecutive-refresh-failure counter in
+     `_keepalive_refresh`; `refresh_failures` fact in AccountState; classify escalates
+     `has_refresh=True AND failures>=N` → REAUTH_NUDGE. cascade.py + rotator.py + tests.
+  3. **L0 keepalive (71ABD7V7) Phases 2b-5** — now unblocked. Build the install layer FRESH
+     (keepalive_install.sh heredoc + recreate launchd_keepalive.py orchestrator calling
+     keepalive_stage.stage_closure + the installer; daemon wiring; restore the 2 tests).
+     VERIFY against the LIVE CPV #152 fold (pull latest discriminator first; the heredoc path
+     shape couples to #152's accepted form). publish.py CPV --strict must be 0 CRITICAL.
+- **TIER 2 (the user's architectural ask) — AFTER Tier 1 is solid + shipped:** "agents of each
+  field govern all action + use any skill at the right moment" = the field-agent governance
+  layer. #230 granular `janitor-memory-*` skill set (aebedbff PLANNED list) + the security
+  agent, as the governing dispatch with dynamic skill access. DESIGN carefully (TRDD); don't
+  over-engineer a vague vision.
+- **TIER 3:** open GitHub issues, remaining real TRDDs (#228/GROUP C 53a00e44 self-integrity,
+  #232 atom-indexing, #209 scope-migration). design/proposals/ is EMPTY (verified).
+- **METHOD:** subtle correctness (the 2 bug fixes) done by ME with the deep diagnosis;
+  parallel spark agents for mechanical/independent work with detailed specs; SERIALIZE git
+  (never parallel git agents); recheck every change; publish.py gates = the trust backstop.
+- **DO NOT:** `/janitor-arm` (clobbers the night-loop cron — see v0.17.2 caveat); break the
+  LIVE rotator (HJGR4I5W fix is additive-only); reconcile dev-column TRDDs wholesale (low value).
+
+
 
 ### ⏳ UPDATE 2026-06-24 ~01:30 — L0 immortality (GROUP B) SHAPE 2 Phases 1+2a built+green; OAuth survival gap found (both committed, NOT published)
 - **Under /go-on-yourself + the immortality plan, took up GROUP B (L0 OS-keepalive / daemon
