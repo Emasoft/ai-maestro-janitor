@@ -1378,25 +1378,35 @@ def _keepalive_refresh() -> list[str]:
     return actions
 
 
-def _bootstrap_eligible(has_refresh: bool, has_session_key: bool) -> bool:
+def _bootstrap_eligible(
+    has_refresh: bool,
+    has_session_key: bool,
+    *,
+    refresh_failures: int = 0,
+    max_refresh_failures: int = MAX_REFRESH_FAILURES,
+) -> bool:
     """PURE: is this slot a candidate for post-login auto-bootstrap?
 
-    Eligible iff it CANNOT self-renew (no refreshToken — so keepalive can't keep
-    it alive) but DOES have a live claude.ai Chrome session we can mint a fresh
-    refresh-bearing slot from (slot_capture_browser auto-clicks Authorize on the
-    seeded session). A slot that already has a refreshToken needs nothing; a slot
-    with no live session has nothing to bootstrap FROM (that one needs a human
-    login — surfaced by the oauth-login-needed detector).
+    Eligible iff it CANNOT self-renew — either NO refreshToken, OR a refreshToken whose
+    exchange is persistently FAILING (``refresh_failures`` ≥ the dead-refresh threshold) —
+    but DOES have a live claude.ai Chrome session we can mint a fresh refresh-bearing slot
+    from (slot_capture_browser auto-clicks Authorize on the seeded session). A slot that
+    still self-renews needs nothing; a slot with no live session has nothing to bootstrap
+    FROM (that one needs a human login — surfaced by the oauth-login-needed detector).
 
-    Delegates to the cascade SSOT (TRDD-dfc0959a): bootstrap-eligible ⇔ the
-    account lands in the cascade's RENEW_COOKIE leg. Token expiry is irrelevant to
-    this leg (the cookie, not the token, is what gets minted from), so it is
-    passed as None. test_cascade proves this equals the historical truth table."""
+    Delegates to the cascade SSOT (TRDD-dfc0959a): bootstrap-eligible ⇔ the account lands in
+    the cascade's RENEW_COOKIE leg. ``refresh_failures`` MUST be threaded through so a
+    dead-refresh + live-cookie slot is eligible (TRDD-J9TM3WQK) instead of nudging REAUTH;
+    omitting it (default 0) reproduces the historical no-refresh-only truth table exactly.
+    Token expiry is irrelevant to this leg (the cookie, not the token, is what gets minted
+    from), so it is passed as None. test_cascade proves this equals classify exactly."""
     return cascade.classify(
         cascade.AccountState(
             email="", is_live=False, has_refresh=has_refresh,
             token_expires_h=None, has_session_cookie=has_session_key,
-        )
+            refresh_failures=refresh_failures,
+        ),
+        max_refresh_failures=max_refresh_failures,
     ) is cascade.CascadeLeg.RENEW_COOKIE
 
 
@@ -1573,7 +1583,13 @@ def _bootstrap_seeded_slots() -> list[str]:
         inner = _oauth(blob) if blob else {}
         has_refresh = bool(inner.get("refreshToken") or inner.get("refresh_token"))
         has_session = _profile_has_session_key(email, now=now)
-        if not _bootstrap_eligible(has_refresh, has_session):
+        # Thread refresh_failures so a DEAD-but-present refresh + live cookie is bootstrap-
+        # eligible (TRDD-J9TM3WQK) — the cookie mints a fresh refresh with no human, instead
+        # of the slot silently nudging REAUTH. A successful capture REPLACES the slot meta
+        # (dropping refresh_failures → 0), so a recovered slot is never re-captured in a loop.
+        meta = (state.get("slots") or {}).get(email)
+        rf = int(meta.get("refresh_failures", 0)) if isinstance(meta, dict) else 0
+        if not _bootstrap_eligible(has_refresh, has_session, refresh_failures=rf):
             continue
         try:
             if _invoke_slot_capture(email):  # True = LAUNCHED, False = skipped (already running)

@@ -79,6 +79,19 @@ def test_bootstrap_eligible_only_no_refresh_with_session() -> None:
     assert rotator._bootstrap_eligible(True, False) is False
 
 
+def test_dead_refresh_with_session_is_bootstrap_eligible() -> None:
+    """TRDD-J9TM3WQK: a slot whose refresh token is DEAD (failures >= MAX) but whose claude.ai
+    session is ALIVE is bootstrap-eligible — the cookie mints a fresh refresh with no human,
+    instead of nudging REAUTH. A live refresh (failures < MAX) still needs nothing; a dead
+    refresh with NO session still has nothing to mint from."""
+    mrf = rotator.MAX_REFRESH_FAILURES
+    assert rotator._bootstrap_eligible(True, True, refresh_failures=mrf) is True       # dead refresh + cookie → recover
+    assert rotator._bootstrap_eligible(True, True, refresh_failures=mrf + 9) is True
+    assert rotator._bootstrap_eligible(True, True, refresh_failures=mrf - 1) is False  # still self-renews (transient)
+    assert rotator._bootstrap_eligible(True, True, refresh_failures=0) is False        # healthy refresh
+    assert rotator._bootstrap_eligible(True, False, refresh_failures=mrf) is False     # dead refresh, no session
+
+
 # ---------------------------------------------------------------------------
 # _bootstrap_seeded_slots integration — only the browser subprocess is faked.
 # ---------------------------------------------------------------------------
@@ -98,7 +111,8 @@ def _wire(
     monkeypatch.setattr(rotator, "SLOTS", root / "slots")
     monkeypatch.setattr(rotator, "STATE_FILE", root / "state.json")
     rotator.save_state({"live_email": None, "live_fp": None,
-                        "slots": {e: {} for e in slots}})
+                        "slots": {e: ({"refresh_failures": spec["rf"]} if "rf" in spec else {})
+                                  for e, spec in slots.items()}})
 
     blobs = {e: _blob(e.split("@", 1)[0].upper(), refresh=spec["refresh"])
              for e, spec in slots.items()}
@@ -130,6 +144,24 @@ def test_bootstraps_only_seeded_no_refresh_slot(tmp_path: Path, monkeypatch: pyt
     done = rotator._bootstrap_seeded_slots()
     assert captured == ["seeded@x.com"]
     assert done == ["seeded@x.com"]
+
+
+def test_bootstraps_dead_refresh_with_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-J9TM3WQK: a slot that HAS a refresh token but whose exchange is DEAD
+    (refresh_failures >= MAX) AND has a live session must be captured — the cookie mints a
+    fresh refresh, no human. A has-refresh slot with failures BELOW the threshold (transient)
+    still self-renews and is skipped."""
+    captured = _wire(
+        tmp_path,
+        monkeypatch,
+        {
+            "deadrefresh@x.com": {"refresh": "r", "session": 20.0, "rf": rotator.MAX_REFRESH_FAILURES},
+            "transient@x.com": {"refresh": "r", "session": 20.0, "rf": rotator.MAX_REFRESH_FAILURES - 1},
+        },
+    )
+    done = rotator._bootstrap_seeded_slots()
+    assert captured == ["deadrefresh@x.com"]
+    assert done == ["deadrefresh@x.com"]
 
 
 def test_expired_session_is_not_bootstrappable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

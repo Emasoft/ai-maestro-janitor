@@ -86,6 +86,18 @@ def test_dead_refresh_escalation_beats_the_expiry_window() -> None:
     assert _c(_acct(has_refresh=True, token_h=100.0, refresh_failures=MRF)) is cascade.CascadeLeg.REAUTH_NUDGE
 
 
+def test_dead_refresh_with_live_session_renews_cookie() -> None:
+    """THE FIX (TRDD-J9TM3WQK): a dead-but-present refresh (failures >= max) with a LIVE
+    claude.ai cookie must fall to RENEW_COOKIE — the cookie mints a fresh refresh with no
+    human. REAUTH is the LAST resort, reached only when BOTH the refresh AND the cookie are
+    dead. HJGR4I5W routed dead-refresh straight to REAUTH, jumping the cookie rung; proven
+    live 2026-06-24 that the cookie leg recovers it."""
+    assert _c(_acct(has_refresh=True, refresh_failures=MRF, session=True, token_h=-2.4)) is cascade.CascadeLeg.RENEW_COOKIE
+    assert _c(_acct(has_refresh=True, refresh_failures=MRF + 5, session=True, token_h=100.0)) is cascade.CascadeLeg.RENEW_COOKIE
+    # No live cookie → still the human nudge (unchanged — only BOTH-dead reaches REAUTH).
+    assert _c(_acct(has_refresh=True, refresh_failures=MRF, session=False, token_h=-2.4)) is cascade.CascadeLeg.REAUTH_NUDGE
+
+
 def test_zero_failures_default_never_escalates() -> None:
     """The default refresh_failures=0 (a healthy or freshly-reset slot) never escalates —
     backward-safe for every existing AccountState construction site that omits the field."""

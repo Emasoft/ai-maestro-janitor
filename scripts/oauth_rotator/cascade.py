@@ -113,20 +113,28 @@ def classify(
     - ``RENEW_REFRESH`` ⇔ ``_keepalive_refresh`` eligibility (has refresh, datable,
       within ``keepalive_ahead_h`` of expiry).
     - ``RENEW_COOKIE`` ⇔ ``rotator._bootstrap_eligible`` / the detector's
-      ``slot_capture_stalled`` (``not has_refresh and has_session_cookie``).
-    - ``REAUTH_NUDGE`` ⇔ the detector's ``slot_needs_login`` (no refresh, no
+      ``slot_capture_stalled`` (no USABLE refresh — absent OR present-but-dead
+      (``refresh_failures`` ≥ max) — AND has_session_cookie; TRDD-J9TM3WQK added the
+      dead-refresh case so a live cookie auto-recovers instead of nudging REAUTH).
+    - ``REAUTH_NUDGE`` ⇔ the detector's ``slot_needs_login`` (no usable refresh AND no
       session, token ``None``/within ``login_grace_days``).
     """
     if acct.is_live:
         return CascadeLeg.HEALTHY
 
     if acct.has_refresh:
-        # A refresh token that EXISTS but whose exchange keeps FAILING is dead — escalate to
-        # the human re-login nudge instead of looping RENEW_REFRESH forever, silently, on a
-        # token that can never come back (TRDD-HJGR4I5W). The counter is incremented by
-        # rotator._keepalive_refresh on each None return and reset on any success, so a single
-        # transient token-endpoint flake never trips this; only a persistently-dead token does.
+        # A refresh token that EXISTS but whose exchange keeps FAILING is dead — it can never
+        # come back, so do NOT loop RENEW_REFRESH on it forever (TRDD-HJGR4I5W). The counter is
+        # incremented by rotator._keepalive_refresh on each None return and reset on any success,
+        # so a single transient token-endpoint flake never trips this; only a persistently-dead
+        # token does. A dead refresh then falls through the SAME RENEW→REAUTH cascade a MISSING
+        # one does: a live claude.ai cookie mints a fresh refresh with NO human (RENEW_COOKIE,
+        # proven live 2026-06-24); only with NO cookie is the human nudged. TRDD-J9TM3WQK fixes
+        # HJGR4I5W, which jumped straight to REAUTH and skipped the cookie rung — the recurring
+        # "had to rotate the auth manually" cause.
         if acct.refresh_failures >= max_refresh_failures:
+            if acct.has_session_cookie:
+                return CascadeLeg.RENEW_COOKIE
             return CascadeLeg.REAUTH_NUDGE
         # Datable AND within the keepalive window → the daemon will refresh it.
         if acct.token_expires_h is not None and acct.token_expires_h <= keepalive_ahead_h:

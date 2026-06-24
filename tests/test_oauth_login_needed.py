@@ -87,6 +87,18 @@ def test_capture_stalled_truth_table() -> None:
     assert det.slot_capture_stalled(True, False) is False
 
 
+def test_capture_stalled_dead_refresh_with_session() -> None:
+    """TRDD-J9TM3WQK: a DEAD-but-present refresh (failures >= max) WITH a live session is
+    'stalled' too — same RENEW_COOKIE set the daemon captures from, so a stuck dead-refresh
+    capture still surfaces. A live refresh (failures < max) self-renews; no session is a LOGIN
+    nudge, not stalled."""
+    mrf = det.cascade.DEFAULT_MAX_REFRESH_FAILURES
+    assert det.slot_capture_stalled(True, True, mrf) is True       # dead refresh + session → stalled
+    assert det.slot_capture_stalled(True, True, mrf + 4) is True
+    assert det.slot_capture_stalled(True, True, mrf - 1) is False  # transient → still self-renews
+    assert det.slot_capture_stalled(True, False, mrf) is False     # dead refresh, no session → LOGIN nudge
+
+
 def test_no_refresh_token_has_runway_no_login() -> None:
     """No refresh, no session, but the setup-token still has runway (> grace) → no nudge yet."""
     assert det.slot_needs_login(False, 10.0, False, 1.0) is False

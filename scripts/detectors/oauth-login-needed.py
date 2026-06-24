@@ -88,25 +88,28 @@ def slot_needs_login(
     ) is cascade.CascadeLeg.REAUTH_NUDGE
 
 
-def slot_capture_stalled(has_refresh: bool, has_session_key: bool) -> bool:
+def slot_capture_stalled(has_refresh: bool, has_session_key: bool, refresh_failures: int = 0) -> bool:
     """PURE (B3): is this account LOGGED IN but its OAuth capture has NOT completed?
 
     True iff it has a live claude.ai session (so it IS bootstrap-eligible — the human
-    already did the one thing only they can do) yet STILL has no refreshToken. The
-    automatic detached capture launches every tick, but if it keeps failing (CF
-    challenge, missing playwright, a wedged consent page) the slot stays stuck in this
-    state forever. That stuck-ness is itself the signal to nudge the user to run the
-    capture MANUALLY once. A slot that already self-renews (has_refresh) or has no
-    session (that's slot_needs_login's LOGIN nudge, not this one) is NOT stalled.
+    already did the one thing only they can do) yet has no USABLE refresh — either NO
+    refreshToken, OR a DEAD one (``refresh_failures`` ≥ max; TRDD-J9TM3WQK). The automatic
+    detached capture launches every tick, but if it keeps failing (CF challenge, missing
+    playwright, a wedged consent page) the slot stays stuck in this state forever. That
+    stuck-ness is itself the signal to nudge the user to run the capture MANUALLY once. A
+    slot that still self-renews (a live refresh below the dead threshold) or has no session
+    (that's slot_needs_login's LOGIN nudge, not this one) is NOT stalled.
 
-    Delegates to the cascade SSOT (TRDD-dfc0959a): stalled ⇔ the cascade's
-    RENEW_COOKIE leg (bootstrap-eligible) — the SAME set rotator._bootstrap_eligible
-    drives the daemon's capture launches from, so the launch set and the stalled-nudge
-    set can never diverge."""
+    Delegates to the cascade SSOT (TRDD-dfc0959a): stalled ⇔ the cascade's RENEW_COOKIE leg
+    (bootstrap-eligible) — the SAME set rotator._bootstrap_eligible drives the daemon's
+    capture launches from, so the launch set and the stalled-nudge set can never diverge.
+    ``refresh_failures`` MUST be threaded so the dead-refresh + cookie case (now RENEW_COOKIE)
+    stays inside that invariant."""
     return cascade.classify(
         cascade.AccountState(
             email="", is_live=False, has_refresh=has_refresh,
             token_expires_h=None, has_session_cookie=has_session_key,
+            refresh_failures=refresh_failures,
         )
     ) is cascade.CascadeLeg.RENEW_COOKIE
 
@@ -164,7 +167,7 @@ def main() -> int:
         has_session = _has_live_session(f.email, now)
         if slot_needs_login(f.has_refresh, f.expires_days, has_session, grace, f.refresh_failures):
             needing.append(f.email)
-        elif slot_capture_stalled(f.has_refresh, has_session):
+        elif slot_capture_stalled(f.has_refresh, has_session, f.refresh_failures):
             stalled.append(f.email)
 
     day = int(now // 86400)
