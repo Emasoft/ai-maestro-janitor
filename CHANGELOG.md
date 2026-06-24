@@ -2,14 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.20.0] - 2026-06-24
+## [0.20.1] - 2026-06-24
+
+### Bug Fixes
+
+- Recheck refinements on the v0.20.0 wrapper fold (TRDD-3T4DZWXA)
 
 ### Documentation
 
-- OAuth wikimem — agent-browser RENEW driver, dead-refresh→cookie routing, REAUTH passkey decision, janitor OAuth command list (TRDD-J9TM3WQK)
-- Add TRDD-3T4DZWXA — complete the rotator fold (user-scope OAuth wrapper → plugin)
+- TRDD-3T4DZWXA published in v0.20.0 — record skill→command resolution
 
-### Features
+### Miscellaneous
 
-- Fold the rotator's user-scope REAUTH wrapper into the plugin (TRDD-3T4DZWXA)
+- Refresh CLAUDE.md project-map digest (project-map-drift nudge)
 

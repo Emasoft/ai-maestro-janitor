@@ -1,6 +1,6 @@
 {
   "files": {
-    "CLAUDE.md": "69a6a58ed750b9536662aaa2a14cd73769ae25930d8cdb3c6d200335de008ff5",
+    "CLAUDE.md": "6cb33336a9f79faf1ee54276ec648d8f05128a7a062ae241220c7cdd7f351d19",
     "README.md": "63f5a20b1cadfb19d794664f368a244951e333901f2b5b2e7c8963d8c98a9956",
     "commands/janitor-identify-environment.md": "94c58281c3d42285c90ef3e9f72663782db286b8078374db9ee2b920487696a1",
     "commands/janitor-memory-conflict-frequency-get.md": "27bc20306e296614c4c4bd78b978a04717799b89f7c7054f2cf9b7b2f374f21b",
@@ -14,7 +14,7 @@
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
-    "commands/janitor-refresh-claude-logins.md": "3acd014dfc8fe0c998a2c986458ca80de73fad37f4303032cbef4b87ef3387bb",
+    "commands/janitor-refresh-claude-logins.md": "f797dd73b9c1e6a01db7d373bccdfb935b90d985f4d02d0c01e205606f1110a7",
     "commands/janitor-show-global-status.md": "a4bc6cd727f86ef86b8a81521ba91851cd7d133dbfeaa390c8afa87c10f76698",
     "commands/janitor-token-report.md": "d3727db64c82262c49fd30583642467bf909246d348e034f6008f91a5ab7b64e",
     "rules/commit-discipline.md": "980926ab4aa376e1746e4491bc327a5fef168b5d12a12b747348fe23ec93a4e6",
