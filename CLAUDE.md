@@ -195,7 +195,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=387ca59c05f9 digest=8829149dcf07 generated=2026-06-25T00:01:49+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=0d7a820a5152 digest=fdbe2251e169 generated=2026-06-25T06:14:52+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -358,6 +358,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/hooks/pre-bash-safety.py` — PreToolUse hook — compositional bash-exfil + sensitive-write blocker.
   · check_compositional_exfil(command) -> str | None — Return a deny-reason if the command is a source+sink exfil chain.
   · check_sensitive_write(command) -> str | None — Return a deny-reason if the command writes to a sensitive path.
+  · main() -> int
+`scripts/hooks/pre-compact-handoff.py` — PreCompact hook — write a FILESYSTEM-GROUNDED handoff before each compaction.
   · main() -> int
 `scripts/hooks/pre-tool-context-usage.py` — PreToolUse hook — surface the live context-window % to the agent on every tool call.
   · main() -> int
@@ -544,6 +546,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · free_memory_mb() -> Optional[int] — System free memory in MB (macOS vm_stat / Linux meminfo). None = unknown.
   · snapshot_processes(snapshot_path) -> list[ProcRow] — `ps -axo pid,ppid,rss,etime,command` -> FILE -> parsed rows.
   · kill_process(pid, *, term_grace_s) -> bool — SIGTERM -> grace -> SIGKILL. True iff the process is gone afterwards.
+`scripts/lib/memory_migrate.py` — Memory scope-migration core (TRDD-47df698b) — the read-only Phase-1 classifier
+  · privacy_scan(text) -> list[str] — Return the sorted, deduped leak-CLASS labels found in `text`.
+  · NoteVerdict — The classification of ONE note. `leak_classes` is empty iff privacy-clean;
+  · classify_text(rel_path, text) -> NoteVerdict — Classify ONE note from its relative path + full text. Pure (no I/O).
+  · iter_notes(memdir) -> list[Path] — Every real note `*.md` under `memdir`, excluding non-note files and the
+  · classify_corpus(memdir) -> list[NoteVerdict] — Classify every real note under `memdir`. Read-only. A note larger than the
+  · render_plan(memdir, verdicts, *, project_repo) -> str — Render the migration PLAN: every note with its verdict, the deciding
 `scripts/lib/memory_scopes.py` — Shared three-scope memory-root resolution — the SINGLE SOURCE OF TRUTH.
   · project_slug(project_dir) -> str — Harness per-project slug: the absolute path with every separator dashed.
   · resolve_local_dir() -> Path — The per-project LOCAL agent-memory dir (parent of ``user-mem``). Not created.
@@ -800,6 +809,11 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · resolve_latest_published(plugin_root) -> str | None — GitHub releases/latest tag for the repo declared in plugin.json.
   · attempt_auto_update(log_writer, update_log_path) -> bool — Refresh marketplace + run `claude plugin update` per scope.
   · do_auto_update_if_needed(plugin_root, log_writer, update_log_path) -> tuple[bool, str] — Run the cache-vs-GitHub check + auto-update in one go.
+  · manifest_hmac(version_dir, *, key) -> str | None — HMAC-SHA256(manifest BYTES, key), base64 — the C3 trust anchor for one
+  · read_last_good() -> dict | None — The pinned last-GOOD record ``{"version": str, "manifest_hmac": str}``,
+  · pin_good_version(version_dir, version) -> bool — Certify ``version`` as the last-GOOD version: compute its manifest HMAC
+  · read_quarantine() -> set[str] — The set of quarantined (proven-bad) version strings, or an EMPTY set on
+  · add_quarantine(version, reason) -> bool — Record ``version`` as proven-bad so the stub skips it fast on later
 `scripts/lib/zizmor_classifier.py` — One-pass workflow classifier — google-re2 RegexSet primary, Python re fallback.
   · Finding
   · Classifier — Single-pass workflow classifier. Build once, reuse across files.
@@ -813,6 +827,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · cmd_commit(args) -> int
   · cmd_abort(args) -> int
   · cmd_resume(args) -> int
+  · main() -> int
+`scripts/migrate_memory_scope.py` — Memory scope-migration helper (TRDD-47df698b) — re-scope a LOCAL memory corpus
   · main() -> int
 `scripts/oauth_rotator/cascade.py` — The OAuth-rotator cascade — ONE paradigm in three parts, each falling back to
   · CascadeLeg — Which leg of the ROTATE→RENEW→REAUTH cascade an ALTERNATE account sits in.
