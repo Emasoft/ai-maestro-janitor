@@ -51,7 +51,9 @@ Each cron fire is a fresh user turn that runs `dispatcher-stub.py` →
 The heartbeat also keeps the Anthropic prompt cache warm — every fire inside
 the 5-minute cache TTL refreshes it — and catches rate-limit recovery without
 a dedicated retry loop, because queued fires deliver in batch as soon as the
-window clears.
+window clears. For how the heartbeat, the daemon, and the OS keepalive keep
+each other alive through crashes and bad self-updates, see
+[Immortality](#immortality-self-healing-daemon).
 
 ## Detectors
 
@@ -137,6 +139,66 @@ bulk, the session does the project-narrow set.
 The daemon NEVER touches per-project plugin state (`local-plugins-update`,
 `project-plugins-update`, `plugin-updates` remain per-session) and NEVER
 modifies your repos — it only operates on `~/.claude/plugins/`.
+
+## Immortality (self-healing daemon)
+
+Across v0.21.0 → v0.24.1 the janitor gained a self-healing spine so an
+unattended overnight session keeps running through crashes, bad self-updates,
+compaction, and frozen sessions. The full design lives in the
+[CLAUDE.md project map](./CLAUDE.md) and
+`design/tasks/TRDD-*-fe45babc-*.md`; the summary:
+
+**Four layers, each resurrecting the one below.** L0 — an OS keepalive
+(macOS launchd LaunchAgent with `KeepAlive`+`RunAtLoad`, Linux systemd user
+unit with `Restart=always`) respawns the global daemon on crash, logout, or
+reboot **even with zero Claude sessions open** — closing the circular gap
+where a dead daemon can't restart the very sessions whose heartbeats would
+restart it. L1 — the [global singleton daemon](#global-janitor-daemon-since-v052).
+L2 — the [session hooks](#hooks) that re-arm and resume. L3 — the in-session
+cron [heartbeat](#how-it-works). A session heartbeat still lazy-spawns the
+daemon (L3→L1); the OS keepalive is the floor that holds when no session is
+alive.
+
+**Self-integrity — never run a corrupted or tampered self.** Before
+`os.execv`-ing into a cached version, the auto-rolling stub verifies it
+against its shipped integrity manifest (C2), pins the last-*GOOD* version and
+quarantines a proven-bad one (C3), and auto-rolls-back a crash-looping bad
+self-update to the last good version (C4). This now runs at **both** the
+heartbeat path **and** the daemon / L0 keepalive path (the keepalive's
+version selection skips quarantined versions, so a bad-*daemon* update can't
+self-resurrect via launchd forever). The trust-anchor files (HMAC key,
+last-good pin, quarantine list) live in the fixed DATA dir, *outside* the
+cache being verified, so a tampered version can't forge them. **Cardinal rule:
+FAIL-OPEN** — a version that *can't* be checked is accepted; only one *proven*
+corrupt is rejected, because a dead heartbeat is worse than a maybe-corrupt
+one.
+
+**OS-keepalive resilience.** The service config bakes a concrete absolute
+interpreter so launchd/systemd can start the daemon even when their login PATH
+lacks `python3` (D-α). And the OS entry point runs a pre-launch verify-or-restage
+of the staged daemon closure (D-β) — a torn or truncated DATA stage self-heals
+from the trusted cache instead of crash-looping.
+
+**Fleet guardian.** A daemon beat (`task_session_liveness`) detects a
+frozen / rate-limited session and recovers it via a **gentle ladder** —
+ESC-nudge → `/janitor-arm` re-arm → `/reload-plugins` — terminal-env-aware
+(iTerm / tmux / ai-maestro). The process-**killing** hard-restart rungs
+(kill + relaunch) exist but are **default-OFF and opt-in**
+(`CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED`), so the guardian never
+kills your active session; a crash-loop guard pages a human instead of a
+restart storm. Detection always runs and logs; firing the gentle rungs is on
+by default (`CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED=0` for dry-run-log-only).
+
+**Recovery audit log.** Every recovery decision (which rung fired, on which
+session, when, outcome) is appended to a tamper-evident HMAC-chained NDJSON
+log — a pure forensic side-channel that, like every immortality call, is
+FAIL-OPEN: a logging fault never perturbs the survival-critical recovery beat.
+
+The opt-in / safety knobs above (`CLAUDE_PLUGIN_OPTION_DAEMON_OS_KEEPALIVE`,
+`CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED`,
+`CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED`) are environment options
+read directly by the daemon — set them in your project's
+`.claude/settings.json` `env` block.
 
 ## Hooks
 
