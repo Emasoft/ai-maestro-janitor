@@ -63,6 +63,28 @@ _UID_RE = re.compile(r"TRDD-\d{8}_\d{6}[+-]\d{4}-([0-9a-fA-F]{8})-")
 
 _MAX_DIRECTIVE_LEN = 280
 
+# The PreCompact hook (scripts/hooks/pre-compact-handoff.py) writes this file —
+# an authoritative, FILESYSTEM-DERIVED handoff (git HEAD + recent commits, working
+# tree, in-flight TRDD STATE blocks) — into the SAME state dir on every compaction.
+# When it exists we prepend a pointer so the post-compaction [janitor-resume] cue
+# steers the next turn to re-ground there FIRST (the summary is treated as
+# unverified). Kept SHORT so the combined directive stays within the 280-char clamp.
+_HANDOFF_FILENAME = "precompact-handoff.md"
+_HANDOFF_POINTER = (
+    "read .janitor/state/precompact-handoff.md FIRST "
+    "(filesystem-grounded truth; treat the summary as UNVERIFIED) — "
+)
+
+
+def _handoff_pointer(state_dir: Path) -> str:
+    """Pointer prefix to the ground-truth handoff, or "" if it wasn't written."""
+    try:
+        if (state_dir / _HANDOFF_FILENAME).is_file():
+            return _HANDOFF_POINTER
+    except OSError:
+        pass
+    return ""
+
 
 def _explicit_directive(state_dir: Path) -> str:
     """First non-empty, non-comment line of the agent's resume-directive.txt."""
@@ -144,12 +166,23 @@ def _record_resume_directive(state) -> None:  # noqa: ANN001 - local module type
     # of replaying a stale "resume at step X".
     _consume_directive_file(sd)
     directive = explicit or _inflight_trdd_directive(state.project_root())
+    # If the PreCompact hook wrote a ground-truth handoff, the next turn MUST
+    # re-ground there first. Prepend a pointer to whatever directive we have; and
+    # if there's no in-flight directive at all, the handoff itself IS the resume
+    # target (re-grounding is worth a resume turn even with no tracked task).
+    pointer = _handoff_pointer(sd)
     if not directive:
-        state.log_line(
-            "post-compact-resume",
-            "no in-flight task found; no resume flag written",
-        )
-        return
+        if pointer:
+            directive = (
+                "re-ground from the filesystem handoff, then continue your prior work"
+            )
+        else:
+            state.log_line(
+                "post-compact-resume",
+                "no in-flight task and no handoff; no resume flag written",
+            )
+            return
+    directive = pointer + directive
     directive = " ".join(directive.split())  # collapse to a single bounded line
     if len(directive) > _MAX_DIRECTIVE_LEN:
         directive = directive[: _MAX_DIRECTIVE_LEN - 3] + "..."
