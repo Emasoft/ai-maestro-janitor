@@ -26,8 +26,9 @@ most one drift line per fire):
      Surface "mutated/missing/extra" file counts.
 
   2. Audit-chain verification
-     If `${CLAUDE_PLUGIN_DATA}/janitor-chain.ndjson` exists, walk the
-     chain and surface the first broken link.
+     If `<FIXED janitor DATA dir>/janitor-chain.ndjson` exists (the SAME
+     fixed dir the C3 pin path uses — TRDD-DKEYCHN7; NOT $CLAUDE_PLUGIN_DATA),
+     walk the chain and surface the first broken link.
 
   3. SKILL.md integrity-notice preamble drift
      If a janitor SKILL.md is missing the canonical integrity-notice
@@ -49,7 +50,6 @@ Heartbeat invariants:
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -57,6 +57,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
 import state  # type: ignore[import-not-found]  # noqa: E402
+import version_update_lib  # type: ignore[import-not-found]  # noqa: E402
 from janitor_self_integrity import (  # type: ignore[import-not-found]  # noqa: E402
     INTEGRITY_NOTICE_PREAMBLE,  # noqa: F401  -- re-exported for callers
     AuditChain,
@@ -78,17 +79,46 @@ _MANIFEST_PATH = _PLUGIN_ROOT / ".integrity" / "manifest-sha256.json"
 _AUDIT_CHAIN_DEFAULT = "janitor-chain.ndjson"
 
 
-def _resolve_audit_chain_path() -> Path | None:
-    """Audit chain lives in CLAUDE_PLUGIN_DATA (survives plugin updates).
+def _fixed_data_dir() -> Path | None:
+    """The FIXED janitor DATA dir — the SAME dir the C3 pin path uses.
 
-    Returns None if the env var is unset — chain check is silently
-    skipped. The first heartbeat after armed-with-data-dir mints the
-    chain via the library's AuditChain.append() helper.
+    TRDD-DKEYCHN7: BOTH this detector's HMAC key AND its audit chain used to
+    resolve via ``$CLAUDE_PLUGIN_DATA``, which is the foot-gun the project
+    CLAUDE.md warns about — that env var points at whichever plugin owns the
+    RUNNING turn, so the key + chain scattered into other plugins' data dirs
+    and did not match across sessions (the finding-HMAC / chain tamper-evidence
+    became unverifiable). We REUSE ``version_update_lib._data_dir()`` — the one
+    canonical resolver of the FIXED dir (hard-coded path, ``JANITOR_DATA_DIR``
+    test override, NEVER ``${CLAUDE_PLUGIN_DATA}``) so the detector's key + chain
+    live in exactly the same place the C3 daemon/stub pin already lives. Do NOT
+    re-derive the FIXED dir here — that would re-open the same drift the C3
+    constant-parity guard exists to prevent.
     """
-    raw = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
-    if not raw:
+    return version_update_lib._data_dir()
+
+
+def _resolve_audit_chain_path() -> Path | None:
+    """Audit chain lives in the FIXED janitor DATA dir (survives plugin updates).
+
+    TRDD-DKEYCHN7: was ``$CLAUDE_PLUGIN_DATA / janitor-chain.ndjson`` (the
+    running-turn plugin's dir → scatter + cross-session mismatch); now the FIXED
+    janitor dir, keyed by the SAME key as the chain HMAC. Returns None only if
+    the FIXED dir is unresolvable (HOME missing) — chain check is then silently
+    skipped (fail-open). The first heartbeat with a resolvable dir mints the
+    chain via the library's AuditChain.append() helper.
+
+    MIGRATION (documented RESET, fail-open): a chain that a prior buggy session
+    wrote under some other plugin's ``$CLAUDE_PLUGIN_DATA`` is intentionally
+    ABANDONED in place (we never scan or delete another plugin's data — fragile
+    + privacy-invasive). The chain is append-only tamper-evidence keyed by the
+    DATA-dir key; re-establishing it fresh in the FIXED dir simply restarts the
+    evidence trail there, which is exactly the conservative fail-open posture
+    (no key/chain ⇒ "no opinion", never a crash or a false tamper alarm).
+    """
+    base = _fixed_data_dir()
+    if base is None:
         return None
-    return Path(raw) / _AUDIT_CHAIN_DEFAULT
+    return base / _AUDIT_CHAIN_DEFAULT
 
 
 def _check_manifest() -> str | None:
@@ -135,7 +165,10 @@ def _check_audit_chain() -> str | None:
     chain_path = _resolve_audit_chain_path()
     if chain_path is None or not chain_path.is_file():
         return None
-    key = load_or_create_key()
+    # TRDD-DKEYCHN7: key MUST come from the FIXED dir (same dir as the chain),
+    # NOT $CLAUDE_PLUGIN_DATA — otherwise the verify key wouldn't match the key
+    # the chain was written with.
+    key = load_or_create_key(_fixed_data_dir())
     if key is None:
         return None
     chain = AuditChain(chain_path, key)
@@ -148,7 +181,7 @@ def _check_audit_chain() -> str | None:
     safe_reason = state.sanitize_for_drift_line(reason)
     return (
         f"audit-log tamper-evidence broken at entry index {idx} ({safe_reason}) — "
-        f"the janitor-chain.ndjson under CLAUDE_PLUGIN_DATA has been "
+        f"the janitor-chain.ndjson in the janitor DATA dir has been "
         f"truncated, reordered, or edited"
     )
 
@@ -197,7 +230,9 @@ def _record_fire(verdict: str) -> None:
     chain_path = _resolve_audit_chain_path()
     if chain_path is None:
         return
-    key = load_or_create_key()
+    # TRDD-DKEYCHN7: key from the FIXED dir so the chain we APPEND to is signed
+    # with the same key a later session VERIFIES it with (was $CLAUDE_PLUGIN_DATA).
+    key = load_or_create_key(_fixed_data_dir())
     if key is None:
         return
     try:

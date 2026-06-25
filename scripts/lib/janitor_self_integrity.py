@@ -84,9 +84,14 @@ def has_integrity_notice(text: str) -> bool:
 # Section 2 — Finding-integrity HMAC (JAN-SELF-FINDING-HMAC)
 # ----------------------------------------------------------------------------
 
-# Key path inside `${CLAUDE_PLUGIN_DATA}` — survives plugin updates because
-# CLAUDE_PLUGIN_DATA is outside the versioned cache (same property
-# `dispatcher-stub.py` already relies on).
+# Key filename. The DIRECTORY is supplied by the CALLER (`data_dir`): the
+# detector + the C3 pin path both pass the FIXED janitor DATA dir (resolved by
+# version_update_lib._data_dir()), so the key lives in a STABLE location that
+# survives plugin updates AND is identical across sessions (TRDD-DKEYCHN7). The
+# `_plugin_data_dir()` / `$CLAUDE_PLUGIN_DATA` fallback below is ONLY for callers
+# that pass no `data_dir` (e.g. a bare compute_finding_hmac with key=None) — it
+# is NOT the path the detector uses, precisely because $CLAUDE_PLUGIN_DATA points
+# at whichever plugin owns the running turn.
 _INTEGRITY_KEY_FILENAME = ".integrity-key"
 
 # Base32 truncation length — 12 chars ≈ 60 bits, enough that blind
