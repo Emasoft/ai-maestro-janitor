@@ -21,15 +21,32 @@
 # silently breaks a chore — strictly worse than the no-op it prevents. So a chore is
 # suppressed ONLY when its idleness is cheaply PROVEN; every chore without an exact
 # cheap precheck (and any precheck that can't determine its inputs) returns True =
-# unchanged cadence-only behavior. Today only SPLIT has a precheck (the size gate);
+# unchanged cadence-only behavior. Today SPLIT has a precheck (the size gate) and
+# CONSOLIDATE has a STRUCTURAL-only precheck (TRDD-8UD3Q7K5, issue #64 — see below);
 # HARVEST/REPAIR/ATOMIZE are documented follow-ups (their predicates need each
-# skill's exact shape-check), and CONSOLIDATE/CONFLICT are genuinely SEMANTIC
-# (duplicate-subject / contradictory-fact discovery) and stay agent-discovered.
+# skill's exact shape-check), and CONFLICT is genuinely SEMANTIC (contradictory-fact
+# discovery) and stays agent-discovered.
+#
+# CONSOLIDATE's precheck is STRUCTURAL-ONLY, not a full content gate. A merge is
+# governed by `memory_edit_verify.is_legal_merge`, whose THREE refusal grounds are
+# structural (cross-tier / tier not in {aspect, component} / cross-type) and read
+# from frontmatter alone, plus a FOURTH that is SEMANTIC (same subject? a 3rd
+# same-subject page?) and only the agent can decide. The precheck checks ONLY the
+# structural NECESSARY condition — "does the corpus hold >=2 pages sharing the same
+# (tier, type) with a mergeable tier?". No pair => is_legal_merge would categorically
+# refuse EVERY pair => the agent can only abstain => suppress (PROVEN idle). A pair
+# present => still dispatch (fail-open on subject); the agent applies the semantic
+# gate. This kills the issue #64 drain: a corpus of categorically-unmergeable
+# singletons (e.g. a feedback x reference pair, or keyword-only over-clustering of
+# distinct subjects) no longer re-spawns a ~226k-token opus agent every consolidate
+# cadence (~2.5x/day) just to re-abstain.
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
+import memory_edit_verify  # sibling in scripts/lib/ — the SSOT for merge legality
 import memory_scopes  # sibling in scripts/lib/ (the caller puts lib on sys.path)
 
 
@@ -68,6 +85,46 @@ def split_has_work(root: Path, *, max_bytes: int) -> bool:
     return False
 
 
+def consolidate_has_work(root: Path) -> bool:
+    """True iff some pair of candidate pages in `root` COULD be a legal merge —
+    the cheap, zero-LLM STRUCTURAL necessary condition of `is_legal_merge`
+    (TRDD-8UD3Q7K5, issue #64).
+
+    `is_legal_merge` refuses a merge unless both pages share the SAME `metadata.tier`
+    AND that tier is in `_MERGEABLE_TIERS` (= {aspect, component} — a `hub` is an
+    overview, not a leaf) AND both share the SAME `metadata.type`. So a structural
+    merge pair exists iff >=2 candidate pages share the same (tier, type) key with a
+    mergeable tier. If NO such pair exists, `is_legal_merge` would categorically
+    refuse EVERY pair, the agent can only abstain, and the dispatch is provably idle
+    → suppress. If a pair DOES exist, return True (fail-open) and let the agent apply
+    the SEMANTIC gate (same subject? a 3rd same-subject page?) — we never suppress a
+    possibly-real merge.
+
+    Cost: one rglob over the shared candidate SSOT + a tiny leading-frontmatter parse
+    per page (no body read, no YAML engine, no LLM, no agent). Uses the SAME SSOTs the
+    EXECUTOR uses — `memory_scopes.iter_note_files` (excludes `.maint-staging/`,
+    `user-mem/`, generated/index basenames, `-proposed.md` reports) and
+    `memory_edit_verify.parse_frontmatter` / `_MERGEABLE_TIERS` — so the precheck and
+    the commit-time `is_legal_merge` can never drift (cf. TRDD-87935f21: one source of
+    truth for merge legality)."""
+    by_key: Counter[tuple[object, object]] = Counter()
+    for p in _candidate_pages(root):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            # An unreadable page is not provably part of a mergeable pair — skip it.
+            # If nothing else pairs, we (correctly) report no work for the rest.
+            continue
+        fm = memory_edit_verify.parse_frontmatter(text)
+        tier = fm.get("tier")
+        if tier not in memory_edit_verify._MERGEABLE_TIERS:
+            continue  # hub / tier-less raw note → never a legal-merge leaf
+        by_key[(tier, fm.get("type"))] += 1
+        if by_key[(tier, fm.get("type"))] >= 2:
+            return True  # found a structural pair — short-circuit (fail-open)
+    return False
+
+
 def content_has_work(intervention: str, root: Path, *, split_max_bytes: int) -> bool:
     """True iff `intervention` has actual work on the `root` corpus.
 
@@ -79,6 +136,9 @@ def content_has_work(intervention: str, root: Path, *, split_max_bytes: int) -> 
         if split_max_bytes <= 0:
             return True  # cap unreadable/disabled → fail-open (do not suppress)
         return split_has_work(root, max_bytes=split_max_bytes)
+    if intervention == "consolidate":
+        # STRUCTURAL-only gate (subject-sameness stays agent-discovered, fail-open).
+        return consolidate_has_work(root)
     # harvest/repair/atomize: precheck is a documented follow-up (need each skill's
-    # exact shape predicate). consolidate/conflict: semantic, agent-discovered.
+    # exact shape predicate). conflict: semantic, agent-discovered.
     return True

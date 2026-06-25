@@ -82,6 +82,21 @@ def _write_oversized_page(scope_dir: Path, *, cap: int = 36000, name: str = "big
     return page
 
 
+def _write_mergeable_pair(scope_dir: Path, *, tier: str = "component", type_: str = "project") -> None:
+    """Drop TWO curated pages sharing the same (tier, type) with a mergeable tier so
+    CONSOLIDATE's structural precheck (TRDD-8UD3Q7K5) sees a possible legal-merge
+    pair and fires. Every case that expects consolidate to fire must seed this first
+    (the precheck now suppresses a cadence-due consolidate when no structural pair
+    exists)."""
+    scope_dir.mkdir(parents=True, exist_ok=True)
+    for n in ("merge-a.md", "merge-b.md"):
+        (scope_dir / n).write_text(
+            f"---\nname: {n[:-3]}\ndescription: a page\nnode_type: memory\n"
+            f"tier: {tier}\nmetadata:\n  type: {type_}\n---\n\nbody.\n",
+            encoding="utf-8",
+        )
+
+
 def _write_settings(settings_dir: Path, **values: object) -> None:
     """Write the wikimem settings store the detector reads via
     JANITOR_MEMORY_SETTINGS_DIR. Only the given keys are set; the rest take the
@@ -160,6 +175,10 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
     if intervention == "split":
         # split now also requires real work — a page over the cap (TRDD-3XS3PDCF).
         _write_oversized_page(fixture["local"])
+    elif intervention == "consolidate":
+        # consolidate now also requires real work — a structural merge pair
+        # (TRDD-8UD3Q7K5).
+        _write_mergeable_pair(fixture["local"])
 
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     # Exactly one non-empty line, and it is the bare marker (no trailing text).
@@ -262,6 +281,67 @@ def test_oversized_page_in_staging_dir_does_not_count(fixture):
     _write_oversized_page(staging, name="staged-big.md")
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     assert out.strip() == "", out
+
+
+# --------------------------------------------------------------------------- #
+# the content-precheck (TRDD-8UD3Q7K5, issue #64) — consolidate suppressed when
+# no structural merge pair exists (categorically-unmergeable corpus)
+# --------------------------------------------------------------------------- #
+
+def _consolidate_only(settings_dir: Path) -> None:
+    """Enable ONLY consolidate (high rate, always due on a fresh stamp); disable every
+    other chore so consolidate's structural precheck is what's under test (a fail-open
+    chore would otherwise fire and mask the suppression)."""
+    _write_settings(
+        settings_dir,
+        consolidation_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
+        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
+    )
+
+
+def test_consolidate_suppressed_when_no_mergeable_pair(fixture):
+    """consolidate is cadence-due but the LOCAL corpus has NO structural merge pair
+    (the issue #64 case: cross-type / keyword-only) -> the precheck suppresses the
+    marker (no ~226k no-op agent spawn). Seed exactly the issue's cross-type pair."""
+    _consolidate_only(fixture["settings"])
+    # feedback/aspect + reference/aspect — a hard is_legal_merge cross-type refusal.
+    (fixture["local"] / "fb.md").write_text(
+        "---\nname: fb\ndescription: x\nnode_type: memory\ntier: aspect\n"
+        "metadata:\n  type: feedback\n---\n\nbody.\n", encoding="utf-8",
+    )
+    (fixture["local"] / "ref.md").write_text(
+        "---\nname: ref\ndescription: x\nnode_type: memory\ntier: aspect\n"
+        "metadata:\n  type: reference\n---\n\nbody.\n", encoding="utf-8",
+    )
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out
+
+
+def test_consolidate_fires_when_a_mergeable_pair_exists(fixture):
+    """>=2 pages sharing (tier, type) with a mergeable tier -> consolidate has
+    possible work -> the marker fires (the agent then decides subject-sameness)."""
+    _consolidate_only(fixture["settings"])
+    _write_mergeable_pair(fixture["local"])
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-consolidate]"], out
+
+
+def test_consolidate_not_stamped_when_suppressed_then_fires_when_pair_appears(fixture):
+    """Option A — no second cadence gate. A cadence-due consolidate with no merge
+    pair is suppressed WITHOUT being stamped, so when a structural pair appears on a
+    LATER fire it emits immediately (the suppressed fire did not consume the cadence
+    slot)."""
+    _consolidate_only(fixture["settings"])
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    # Fire 1: no merge pair -> suppressed, and crucially NOT stamped.
+    first = _run(env)
+    assert first.strip() == "", first
+    # A merge pair appears; Fire 2 must emit consolidate (fire 1 left the slot unused).
+    _write_mergeable_pair(fixture["local"])
+    second = _run(env)
+    lines = [ln for ln in second.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-consolidate]"], second
 
 
 # --------------------------------------------------------------------------- #

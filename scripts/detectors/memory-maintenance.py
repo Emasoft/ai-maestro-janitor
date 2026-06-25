@@ -218,9 +218,10 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
     Cadence-due (`is_due`) is NEAR-FREE (a stat + int-compare on the global stamp).
     The content precheck (`memory_content_precheck.content_has_work`) is a cheap,
     zero-LLM filesystem check that suppresses a cadence-due chore with NOTHING to do
-    so it never spawns a ~240k no-op opus agent (TRDD-3XS3PDCF). It is FAIL-OPEN:
-    only a chore whose idleness is cheaply proven (today: SPLIT's size gate) is
-    suppressed; every other chore returns work=True and keeps its cadence-only
+    so it never spawns a ~226-240k no-op opus agent (TRDD-3XS3PDCF, TRDD-8UD3Q7K5).
+    It is FAIL-OPEN: only a chore whose idleness is cheaply proven (today: SPLIT's
+    size gate, and CONSOLIDATE's structural "no legal-merge pair" gate — issue #64)
+    is suppressed; every other chore returns work=True and keeps its cadence-only
     behavior. Because a suppressed chore is simply NOT returned here, it is never
     picked and never stamped (`mark_ran`) — so it re-checks every heartbeat and
     emits the instant work appears (Option A), with NO second cadence gate (the
