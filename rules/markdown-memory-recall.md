@@ -166,7 +166,11 @@ subcommands `recall`/`index`/`links`/`fact`). Its own teaching doc is
   footnotes in those section-named groups. So a single FACT is recalled in full, with its
   history + relations, not just as part of its page. Author a durable fact as an atom
   by giving it a `^id [keywords: …]` marker and attaching its history/relations as the
-  atom's own `[^N]` references (a see-also is a footnote defined under `# See also`); the harvest stamps
+  atom's own `[^N]` references (a see-also is a footnote defined under `# See also`). An
+  atom may also carry an optional `desc:` — a ≤64-char snake_case slug, a one-line summary
+  memgrep + the handoff display `_`→space beside the atom id (DISPLAY-only, never a recall
+  surface; distinct from the PAGE-level `description:` frontmatter — a different key at a
+  different level). The harvest stamps
   `claude_mem_ref:`/`claude_mem_hash:` provenance props that **find-claude-mem-ref**
   `memgrep find-claude-mem-ref <buffer.md> <memdir>` queries (full grammar +
   recall-output shape in `scripts/memgrep/SKILL.md` and the wikimem-model atom section).

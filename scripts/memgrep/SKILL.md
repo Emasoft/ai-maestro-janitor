@@ -46,7 +46,10 @@ extension — `keywords: a b c` is three values). An atom's body may span multip
 code blocks until the next marker or heading.
 
 `keywords:` is the atom's **recall surface** — the array of search terms that makes a single fact
-findable on its own. **An atom owns its notes/lessons/see-also** — tied to it by the INLINE `[^N]`
+findable on its own. An optional **`desc:`** prop is a one-line summary slug (`[a-z0-9_]+`, ≤64
+chars) that `recall`/`find` append to an atom's result line, rendered `_`→space (stored as the slug,
+shown as the phrase) — a DISPLAY field only, never FTS-indexed (keywords is the recall surface).
+**An atom owns its notes/lessons/see-also** — tied to it by the INLINE `[^N]`
 footnotes its body cites. Those footnote DEFINITIONS are pooled at the page bottom under section
 headings, and `recall` GROUPS them by which section defines each: a footnote defined under
 `# Notes` prints in a `notes:` group, one under `# Lessons Learned` in a `lessons learned:` group,
@@ -55,7 +58,7 @@ Only non-empty groups print. `recall` ranks atoms by their keyword surface, inte
 results, and returns each atom as its **FULL aggregated record**:
 
 ```text
-path#atom-id — <keywords>          # locator + the atom's keyword/metadata surface
+path#atom-id — <keywords> — <desc>  # locator + keyword surface + the one-line desc (if present, _→space)
 <the atom's main content>          # multi-paragraph / tables / code / math / links
 notes: <the [^N] # Notes footnotes its body references, resolved>
 lessons learned: <the [^N] # Lessons Learned footnotes, resolved>
@@ -69,7 +72,7 @@ re-harvest touches only NEW or CHANGED memories. Authoring a fact as an atom (wi
 relations as inline references):
 
 ```markdown
-^rotate-drain [keywords: rotator drain rate-limit oauth, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
+^rotate-drain [desc: rotator_drains_busy_account_first, keywords: rotator drain rate-limit oauth, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
 The rotator drains the live account first when near a limit, then rotates to a safe alternate.[^1][^2]
 
 ## Lessons Learned

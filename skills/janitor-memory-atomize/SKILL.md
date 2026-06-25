@@ -66,7 +66,7 @@ content (the marker OPENS the atom; the content below it, up to the next marker 
 body):
 
 ```markdown
-^<page-unique-kebab-id> [keywords: <the search terms a future session will use for THIS fact>, type: <type>, ocd: <fact's date>, lmd: <today>]
+^<page-unique-kebab-id> [desc: <snake_case_slug_summary>, keywords: <the search terms a future session will use for THIS fact>, type: <type>, ocd: <fact's date>, lmd: <today>]
 <the fact's content — the paragraph(s) / table / code block this atom holds>
 ```
 
@@ -75,6 +75,12 @@ body):
   it as the body. (A trailing marker would mis-attribute the WRONG content to the atom.)
 - **`keywords:` is the only REQUIRED prop** — the SYMPTOM/question words a future search will
   use, NOT the answer's jargon (this is the atom's recall surface). `type`/`ocd`/`lmd` optional.
+- **Author a `desc:` slug too** — a ≤64-char snake_case **SLUG** summarising the atom's topic
+  ("almost a title", e.g. `rotator_drains_busy_account_first`). Derive it from the fact: emit
+  ONLY `[a-z0-9_]`, spaces→`_`, punctuation dropped, then truncate to 64 chars. It is DISPLAY-only
+  (memgrep + the handoff render it `_`→space beside the atom id so a reader knows what the atom is
+  without fetching its body) — NOT a recall surface, so do NOT duplicate keywords into it. The
+  slug is a single token, so it can never break the bracket grammar.
 - **Per-atom notes/lessons/see-also are AUTOMATIC.** An atom OWNS the `[^N]` footnotes its body
   references inline — those are already in the prose, so you DO NOT move them; marking the fact is
   enough, memgrep aggregates the rest. memgrep groups each referenced `[^N]` by which bottom
@@ -91,8 +97,8 @@ body):
 ```bash
 uv run scripts/memory_txn_cli.py begin "<scope_root>" atomize "<page.md>"
 #   → txn_id=<id>  staging=<abs dir>
-# Edit ONLY the staged copy of <page.md>: insert LEADING `^id [keywords:…]` markers (own lines)
-# ABOVE each fact; bump lmd; change NOTHING else (no reword, no new prose, no deletes).
+# Edit ONLY the staged copy of <page.md>: insert LEADING `^id [desc:…, keywords:…]` markers (own
+# lines) ABOVE each fact; bump lmd; change NOTHING else (no reword, no new prose, no deletes).
 uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op atomize
 #   → committed <id> (atomize): 1 write(s), 0 delete(s)
 #   verify_atomize proves: lessons preserved, every body FACT byte-identical, no frontmatter key

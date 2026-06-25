@@ -224,7 +224,7 @@ second of the **two metadata levels** — do NOT conflate them:
 ```markdown
 The rotator drains the live (near-limit) account first, then rotates to a safe
 alternate that is below SAFE on BOTH the 5h and 7d windows.
-^rotate-drain [keywords: rotator drain rate-limit oauth alternate, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
+^rotate-drain [desc: rotator_drains_busy_account_first, keywords: rotator drain rate-limit oauth alternate, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
 ```
 
 Parsing grammar (memgrep implements exactly this):
@@ -237,10 +237,22 @@ Parsing grammar (memgrep implements exactly this):
 **`keywords:` is the only REQUIRED prop** — it is the atom's **recall surface**, the
 array of terms a future search will use to find THIS fact (the page's `description`
 does the same job for the whole page). `ocd`/`lmd`/`type` are optional (an atom with
-none inherits the page's). Two more props are stamped only on **harvested** atoms (an
-atom imported from the Claude `MEMORY.md` buffer system): `claude_mem_ref:
-<buffer-rel-path>` + `claude_mem_hash: <sha256-16>` — its provenance back to the
-source buffer note, which `memgrep find-claude-mem-ref <buffer.md>` queries.
+none inherits the page's). **`desc:`** is an optional **one-line summary** of the atom —
+"almost a title" — that memgrep results and the PreCompact handoff show beside the atom
+id so a future session knows what an atom is WITHOUT fetching its body. Its value is a
+snake_case **SLUG** (`[a-z0-9_]+`, ≤64 chars, e.g.
+`rotator_drains_busy_account_first`): STORED as the slug but DISPLAYED with `_`→space
+("rotator drains busy account first"). `desc` is a **DISPLAY** field, NOT a recall
+surface — `keywords` stays the only thing FTS ranks on; `desc` is never indexed. The
+slug form is the Obsidian-safety guarantee: a single `[a-z0-9_]` token has no space,
+comma, `:`, `[`, or `]`, so it cannot perturb the comma-splits-properties /
+whitespace-splits-into-array grammar above or the Obsidian Block-Properties rendering.
+It is a different KEY at a different LEVEL from the page frontmatter `description:`
+(the two-metadata-levels rule) — naming it `desc` keeps them distinct. Two more props
+are stamped only on **harvested** atoms (an atom imported from the Claude `MEMORY.md`
+buffer system): `claude_mem_ref: <buffer-rel-path>` + `claude_mem_hash: <sha256-16>` —
+its provenance back to the source buffer note, which `memgrep find-claude-mem-ref
+<buffer.md>` queries.
 
 **An atom owns its notes, lessons, and "also see" — tied to it by INLINE references.**
 This is the part that is easy to get backwards: notes / lessons-learned / see-also are

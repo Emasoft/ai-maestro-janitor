@@ -57,7 +57,7 @@ recallable, and attach the fact's **own** history + relations as INLINE `[^N]` f
 references — defined in the page's bottom pool under section headings:
 
 ```markdown
-^widget-retry [keywords: <terms a future search will use>, type: <type>, ocd: <today>, lmd: <today>]
+^widget-retry [desc: <a_snake_case_slug_summarising_this_fact>, keywords: <terms a future search will use>, type: <type>, ocd: <today>, lmd: <today>]
 The widget retries 3× then fails.[^1][^2]
 
 ## Lessons Learned
@@ -69,8 +69,14 @@ The widget retries 3× then fails.[^1][^2]
 
 `keywords:` is the only REQUIRED prop — it is the atom's recall surface (the
 question words, NOT the answer's jargon); `ocd`/`lmd`/`type` are optional (an atom
-without them inherits the page's). notes/lessons/see-also are **per-ATOM** (tied to
-it by the inline `[^N]` footnotes it cites — a see-also is a footnote defined under
+without them inherits the page's). Author an optional **`desc:`** too — a one-line
+summary of the atom as a snake_case **slug** (`[a-z0-9_]+`, ≤64 chars, e.g.
+`widget_retries_3x_then_fails`): memgrep + the handoff display it `_`→space beside the
+atom id so a reader knows what the atom is without fetching its body. `desc` is
+DISPLAY-only (never a recall surface — that is `keywords`), and the slug is a single
+token (no space/comma/`:`/`[`/`]`) so it can't break the grammar; it is a distinct key
+from the page frontmatter `description:`. notes/lessons/see-also are **per-ATOM** (tied
+to it by the inline `[^N]` footnotes it cites — a see-also is a footnote defined under
 `# See also`), NOT page-wide.
 
 Full grammar (comma→property / first-colon→key-value / whitespace→value-array):

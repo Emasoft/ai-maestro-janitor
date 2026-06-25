@@ -110,8 +110,10 @@ from a different subject. Never make `login-panel-style` beside `login-panel`.
 
 Author `"$MEMDIR/<slug>.md"` with the model's page schema (frontmatter + tier-typed
 edge sections + `## Notes and lessons learned`). **Make each durable body fact an ATOM**
-with a `^id [keywords: …]` block-property marker so it is individually recallable.
-Full schema, atom grammar, and examples: [references/atom-authoring.md](references/atom-authoring.md).
+with a `^id [keywords: …]` block-property marker so it is individually recallable; add an
+optional `desc:` snake_case slug (≤64 chars, a one-line summary memgrep + the handoff show
+beside the atom id). Full schema, atom grammar, and examples:
+[references/atom-authoring.md](references/atom-authoring.md).
 
 Required frontmatter fields: `name`, `description` (symptom-indexed), `ocd`, `lmd`,
 `metadata.{node_type: memory, type, tier}` (+ `functionality`; + `globs` on hubs).
@@ -220,7 +222,7 @@ Copy this checklist and track your progress:
 - [ ] Editorial decision made (new page vs UPDATE an existing page)
 - [ ] Frontmatter COMPLETE: `name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier` (+ `globs` on hubs)
 - [ ] Page written: one subject, symptom-indexed `description:`, correct tier
-- [ ] Each durable body fact carries a `^id [keywords: …]` atom marker (keywords = the search words for THAT fact)
+- [ ] Each durable body fact carries a `^id [keywords: …]` atom marker (keywords = the search words for THAT fact); optional `desc:` slug = a ≤64-char one-line summary
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
 - [ ] `## Notes and lessons learned` section present (even if empty)
 - [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
