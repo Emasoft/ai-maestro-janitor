@@ -68,6 +68,14 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("trdd-drift",       3600,  "CLAUDE_PLUGIN_OPTION_TRDD_DRIFT_INTERVAL"),
     ("trdd-reminder",    14400, "CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL"),
     ("report-to-trdd-drift", 21600, "CLAUDE_PLUGIN_OPTION_REPORT_TO_TRDD_INTERVAL"),
+    # trdd-state-reconciliation cross-checks a TRDD's CLAIMED column against the
+    # GROUND TRUTH of whether its code is in a released tag (TRDD-15ECPBSA).
+    # Board drift is SLOW (a TRDD ships, the column lags) and the check runs
+    # `git log` + `git tag --contains`, so a DAILY cadence is right — frequent
+    # enough to surface a shipped-but-open TRDD within a day, rare enough that
+    # the git work is negligible. SURFACE-ONLY (report + drift line; mutates no
+    # TRDD); per-(TRDD,verdict) seen-file dedupe avoids re-nagging.
+    ("trdd-state-reconciliation", 86400, "CLAUDE_PLUGIN_OPTION_TRDD_RECONCILIATION_INTERVAL"),
     ("task-pr-mismatch", 1800,  "CLAUDE_PLUGIN_OPTION_TASK_PR_MISMATCH_INTERVAL"),
     ("stale-task",       1800,  "CLAUDE_PLUGIN_OPTION_STALE_TASK_INTERVAL"),
     ("dirty-tree",       300,   "CLAUDE_PLUGIN_OPTION_DIRTY_TREE_INTERVAL"),

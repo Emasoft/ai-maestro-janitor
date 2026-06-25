@@ -12,7 +12,6 @@ actively-in-flight set — that have not been touched for too long.
 from __future__ import annotations
 
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -21,93 +20,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+import trdd_common  # noqa: E402
 
-# Matches both TRDD filename formats and captures a stable id used for the
-# dedupe key + the short display ref:
-#   * current (~/.claude/rules/trdd-design-tasks.md):
-#       TRDD-<YYYYMMDD_HHMMSS±HHMM>-<uid-first-8>-<slug>.md  → capture the uid8
-#   * legacy: TRDD-<full-UUID>-<slug>.md                     → capture the UUID
-# The hex-length floor (8 for the new uid, 36 for the legacy UUID) prevents
-# the collision the old too-permissive regex allowed (`TRDD-deadbeef.md`
-# landing id="" and colliding on `drift@@bucket-N`). The two alternatives are
-# mutually exclusive — a `_` in the timestamp can't appear in a UUID, and a
-# UUID has no `_`, so neither branch can steal the other's filenames.
-_TRDD_NAME_RE = re.compile(
-    r"^TRDD-"
-    r"(?:"
-    r"\d{8}_\d{6}[+-]\d{4}-([0-9a-f]{8})"   # current: <timestamp>-<uid8>
-    r"|([0-9a-f-]{36})"                      # legacy:  <full-uuid>
-    r")"
-    r"-.+\.md$"
-)
-
-# The canonical TRDD format (~/.claude/rules/trdd-design-tasks.md) puts the
-# task state in YAML frontmatter — `status:` (v1) and/or `column:` (v2) —
-# NOT a `**Status:**` markdown body line. We parse the frontmatter first and
-# keep the legacy `**Status:**` body line as a fallback for pre-frontmatter
-# TRDDs. All matches are anchored MULTILINE within the opening `---` block.
-_FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL)
-_FM_STATUS_RE = re.compile(r"^status:[ \t]*(.+)$", re.MULTILINE)
-_FM_COLUMN_RE = re.compile(r"^column:[ \t]*(.+)$", re.MULTILINE)
-# Legacy `**Status:** ...` markdown body line (pre-frontmatter TRDDs only).
-_LEGACY_STATUS_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.+)$", re.MULTILINE)
-
-# Read only the head of the file — frontmatter lives at the very top, and a
-# legacy `**Status:**` line sits just under the title. 4 KiB covers both
-# without slurping a multi-thousand-line TRDD body.
-_HEAD_BYTES = 4096
-
-# v2 `column:` values that mean "actively in flight" (per the task spec).
-# Used by both trdd-drift and trdd-reminder.
-_ACTIVE_COLUMNS = frozenset(
-    {"dev", "testing", "backburner", "todo", "dispatch", "ai_review", "human_review"}
-)
-
-
-def _norm_state(value: str) -> str:
-    """Normalise a status/column token to lowercase kebab-case.
-
-    Maps the legacy title-case body values (`In progress`, `Not started`)
-    onto their frontmatter spellings (`in-progress`, `not-started`) by
-    lowercasing and collapsing internal whitespace to a single hyphen, so a
-    single membership set covers both formats.
-    """
-    return "-".join(value.strip().rstrip("\r").lower().split())
-
-
-def _parse_trdd_state(path: Path) -> tuple[str, str]:
-    """Return (status, column) for a TRDD, both normalised kebab-case or ''.
-
-    Reads the YAML frontmatter `status:`/`column:` keys (the documented
-    location), falling back to a legacy `**Status:**` body line when the
-    frontmatter has no `status:`. Returns ('', '') on any read error.
-    """
-    try:
-        with path.open("r", encoding="utf-8", errors="replace") as f:
-            head = f.read(_HEAD_BYTES)
-    except (FileNotFoundError, OSError):
-        return ("", "")
-
-    status = ""
-    column = ""
-    fm = _FRONTMATTER_RE.match(head)
-    if fm:
-        block = fm.group(1)
-        sm = _FM_STATUS_RE.search(block)
-        if sm:
-            status = _norm_state(sm.group(1))
-        cm = _FM_COLUMN_RE.search(block)
-        if cm:
-            column = _norm_state(cm.group(1))
-
-    # Legacy fallback only when the frontmatter carried no status: key.
-    if not status:
-        lm = _LEGACY_STATUS_RE.search(head)
-        if lm:
-            status = _norm_state(lm.group(1))
-
-    return (status, column)
-
+# The TRDD filename / frontmatter parsing is shared across the TRDD detectors —
+# it lives in trdd_common now (TRDD-15ECPBSA). `extract_uid` is the SINGLE id
+# matcher (base36 UPPERCASE id + legacy lowercase-hex/UUID, case preserved): it
+# catches the modern uppercase-base36 ids that the old `[0-9a-f]{8}` matcher
+# silently DROPPED, so a stale v2 TRDD is no longer invisible to this detector.
+_parse_trdd_state = trdd_common.parse_trdd_state
+_ACTIVE_COLUMNS = trdd_common.ACTIVE_COLUMNS
 
 # Status values (v1 frontmatter / legacy body) that warrant a drift nudge.
 _DRIFT_ACTIVE_STATUSES = frozenset({"not-started", "in-progress"})
@@ -190,12 +111,12 @@ def main() -> int:
         if age_days < stale_days:
             continue
 
-        m = _TRDD_NAME_RE.match(f.name)
-        if not m:
+        # The SINGLE id matcher: base36 UPPERCASE id or legacy UUID, case
+        # preserved; None for a non-TRDD filename. Feeds the dedupe key (unique)
+        # and the `[:8]` display ref.
+        uuid = trdd_common.extract_uid(f.name)
+        if uuid is None:
             continue
-        # group(1) = current-format uid8, group(2) = legacy full UUID; exactly
-        # one is set. Both feed the dedupe key (unique) and the `[:8]` display.
-        uuid = m.group(1) or m.group(2)
         bucket = age_days // 7
 
         # `active_label` is whatever the human author wrote in the

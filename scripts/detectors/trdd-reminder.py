@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import socket
 import sys
 import time
@@ -25,43 +24,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+import trdd_common  # noqa: E402
 
-# Matches both TRDD filename formats and captures a stable id used for the
-# dedupe entry + the short display ref:
-#   * current (~/.claude/rules/trdd-design-tasks.md):
-#       TRDD-<YYYYMMDD_HHMMSS±HHMM>-<uid-first-8>-<slug>.md  → capture the uid8
-#   * legacy: TRDD-<full-UUID>-<slug>.md                     → capture the UUID
-# The hex-length floor (8 / 36) prevents the collision the old too-permissive
-# regex allowed. The two alternatives are mutually exclusive — a `_` in the
-# timestamp can't appear in a UUID, and a UUID has no `_`.
-_TRDD_NAME_RE = re.compile(
-    r"^TRDD-"
-    r"(?:"
-    r"\d{8}_\d{6}[+-]\d{4}-([0-9a-f]{8})"   # current: <timestamp>-<uid8>
-    r"|([0-9a-f-]{36})"                      # legacy:  <full-uuid>
-    r")"
-    r"-.+\.md$"
-)
-
-# The canonical TRDD format (~/.claude/rules/trdd-design-tasks.md) puts the
-# task state in YAML frontmatter — `status:` (v1) and/or `column:` (v2) —
-# NOT a `**Status:**` markdown body line. We parse the frontmatter first and
-# keep the legacy `**Status:**` body line as a fallback for pre-frontmatter
-# TRDDs. All matches are anchored MULTILINE within the opening `---` block.
-_FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL)
-_FM_STATUS_RE = re.compile(r"^status:[ \t]*(.+)$", re.MULTILINE)
-_FM_COLUMN_RE = re.compile(r"^column:[ \t]*(.+)$", re.MULTILINE)
+# Shared TRDD filename / frontmatter parsing lives in trdd_common now
+# (TRDD-15ECPBSA). The reminder uses the SINGLE `extract_uid` id matcher (it
+# catches the modern uppercase-base36 ids the old `[0-9a-f]{8}` matcher silently
+# dropped), the shared frontmatter regexes, `_norm_state`, and `_HEAD_BYTES` —
+# but keeps its OWN `_parse_trdd_state` (3-tuple, with `created:`) and its OWN
+# narrower `_ACTIVE_COLUMNS` (the WORK columns only).
+_FRONTMATTER_RE = trdd_common.FRONTMATTER_RE
+_FM_STATUS_RE = trdd_common.FM_STATUS_RE
+_FM_COLUMN_RE = trdd_common.FM_COLUMN_RE
 # The TRDD's birth date (issue #59 — TRUE age is days-since-`created:`, not
 # days-since-last-edit). ISO 8601 with a local offset, e.g.
 # `created: 2026-06-02T11:53:00+0200`; a bare date is also tolerated.
-_FM_CREATED_RE = re.compile(r"^created:[ \t]*(.+)$", re.MULTILINE)
+_FM_CREATED_RE = trdd_common.FM_CREATED_RE
 # Legacy `**Status:** ...` markdown body line (pre-frontmatter TRDDs only).
-_LEGACY_STATUS_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.+)$", re.MULTILINE)
-
+_LEGACY_STATUS_RE = trdd_common.LEGACY_STATUS_RE
 # Read only the head of the file — frontmatter lives at the very top, and a
-# legacy `**Status:**` line sits just under the title. 4 KiB covers both
-# without slurping a multi-thousand-line TRDD body.
-_HEAD_BYTES = 4096
+# legacy `**Status:**` line sits just under the title.
+_HEAD_BYTES = trdd_common.HEAD_BYTES
+_norm_state = trdd_common.norm_state
 
 # v2 `column:` values that mean "actively in flight" — the WORK group per the
 # TRDD v2 model (~/.claude/rules/trdd-design-tasks.md). Issue #59: this set used
@@ -73,17 +56,6 @@ _HEAD_BYTES = 4096
 # whose git state drifted, including parked ones; the reminder only nags about
 # active work, so the two detectors legitimately scope differently now.)
 _ACTIVE_COLUMNS = frozenset({"dev", "testing", "ai_review", "human_review"})
-
-
-def _norm_state(value: str) -> str:
-    """Normalise a status/column token to lowercase kebab-case.
-
-    Maps the legacy title-case body values (`In progress`) onto their
-    frontmatter spellings (`in-progress`) by lowercasing and collapsing
-    internal whitespace to a single hyphen, so a single membership set
-    covers both formats.
-    """
-    return "-".join(value.strip().rstrip("\r").lower().split())
 
 
 def _created_epoch(raw: str) -> int | None:
@@ -223,12 +195,12 @@ def main() -> int:
         if status != "in-progress" and column not in _ACTIVE_COLUMNS:
             continue
 
-        m = _TRDD_NAME_RE.match(f.name)
-        if not m:
+        # The SINGLE id matcher: base36 UPPERCASE id or legacy UUID, case
+        # preserved; None for a non-TRDD filename. Feeds the dedupe entry and
+        # the `[:8]` display ref.
+        uuid = trdd_common.extract_uid(f.name)
+        if uuid is None:
             continue
-        # group(1) = current-format uid8, group(2) = legacy full UUID; exactly
-        # one is set. Both feed the dedupe entry and the `[:8]` display ref.
-        uuid = m.group(1) or m.group(2)
 
         # Issue #59 Defect 2: the reminder's load-bearing signal is STALENESS —
         # `idle` = days since the TRDD was last touched (git-commit time, else
