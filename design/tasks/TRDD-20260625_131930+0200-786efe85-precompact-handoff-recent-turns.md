@@ -1,9 +1,9 @@
 ---
 trdd-id: 786efe85-c650-422d-9eda-3724fa0dca29
 title: PreCompact handoff also carries the last N verbatim user-assistant turns
-column: complete
+column: published
 created: 2026-06-25T13:19:30+0200
-updated: 2026-06-25T13:49:00+0200
+updated: 2026-06-25T13:55:36+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 priority: 3
@@ -21,6 +21,9 @@ runtime-targets: [macos, linux]
 last-test-result: pass
 last-test-at: 2026-06-25T13:49:00+0200
 test-failures: 0
+implementation-commits: [f227c2d]
+published-version: 0.24.3
+published-at: 2026-06-25T13:55:36+0200
 external-refs: []
 ---
 
@@ -121,8 +124,9 @@ Add ONE new section to the handoff, sourced from the PreCompact payload's `trans
    handoff contents if they enumerate the sections.
 
 ### NEXT ACTION
-DONE (implemented + tested). Remaining: commit → `uv run scripts/publish.py --patch` → verify
-CI green → set `column: published` + `published-version`. Then author the `desc` follow-up TRDD.
+SHIPPED in **v0.24.3** (feature commit `f227c2d`, release `adfda76`, tag `v0.24.3`, pushed
+2026-06-25). Release CI finalizing the binaries. Follow-up `desc` field tracked in
+TRDD-056384eb. This TRDD is terminal (published).
 
 ## Why this TRDD exists
 USER reviewed the handoff content on 2026-06-25 and identified that it omits the recent
