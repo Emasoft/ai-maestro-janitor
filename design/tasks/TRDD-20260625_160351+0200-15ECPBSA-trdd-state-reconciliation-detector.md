@@ -1,9 +1,9 @@
 ---
 trdd-id: 15ECPBSA
 title: TRDD state-reconciliation detector — flag shipped-but-open board drift, surface-only
-column: dev
+column: published
 created: 2026-06-25T16:03:51+0200
-updated: 2026-06-25T16:03:51+0200
+updated: 2026-06-25T16:57:13+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -22,6 +22,9 @@ test-requirements: [unit]
 audit-requirements: []
 review-requirements: []
 impacts: []
+implementation-commits: [bf95575, 708d198, 5602d92]
+published-version: 0.24.9
+published-at: 2026-06-25T16:57:13+0200
 ---
 
 # TRDD state-reconciliation detector — catch shipped-but-open board drift
@@ -44,16 +47,30 @@ impacts: []
   work. So the detector pairs the keystone with a remaining-work signal, and it
   SURFACES candidates for a human/agent to confirm — it NEVER mutates a TRDD's
   `column:` itself (surface-not-mutate, like the memory-librarian).
-- **NEXT ACTION (build order, TDD):**
-  1. Read `scripts/detectors/trdd-drift.py` + `trdd-reminder.py` to decide
-     EXTEND-vs-NEW (avoid duplicating their scope). Default assumption: a NEW
-     detector `trdd-state-reconciliation.py`, since the commit-in-tag cross-ref
-     is a distinct concern; fold in if trdd-drift already owns column hygiene.
-  2. Write the pure helpers + their unit tests FIRST (the 4 checks below are pure
-     functions over parsed inputs — testable with fixture TRDDs + a fake tag map).
-  3. Wire the detector script (cadence + seen-file dedupe + report + drift line).
-  4. Register it in `dispatch.py`'s roster at a LOW cadence (board drift is slow).
-  5. `publish.py` dry-run green (tests + lint + CPV --strict) before shipping.
+- **✅ SHIPPED + CLOSED — 2026-06-25 (column: published, v0.24.9):** built TDD,
+  shipped across THREE releases. The build (`bf95575`): new SSOT
+  `scripts/lib/trdd_common.py` (the 4 pure checks — keystone commit-in-tag PAIRED
+  with a remaining-work gate so partially-shipped ≠ closeable; prose↔frontmatter
+  mismatch; stale blocker), the surface-only detector
+  `scripts/detectors/trdd-state-reconciliation.py`, registered in dispatch at
+  86400s — shipped **v0.24.7**. It ALSO fixed a real pre-existing bug it surfaced:
+  the `[0-9a-f]{8}` TRDD-id matcher silently dropped every modern UPPERCASE base36
+  id, so trdd-drift/reminder never flagged a stale v2 TRDD — consolidated to one
+  `extract_uid` matcher (the old test that cemented the bug was replaced).
+- **✅ Precision-tuned on the REAL board (unit fixtures could not catch these):**
+  the live smoke test surfaced two genuine bugs the fixtures missed.
+  **v0.24.8** (`708d198`) — Check 2 scoped the done-marker to the NEXT-ACTION LINE
+  (a ✅ on a finished sub-part no longer masks a pending action): closeable 16→3.
+  **v0.24.9** (`5602d92`) — Check 3 now excludes TERMINAL TRDDs (a closed TRDD's
+  historical "blocked" prose is not live drift; mirrors Check 4's guard):
+  prose-mismatch 15→0. Net 36 noisy candidates → 21 high-signal (3 closeable, 18
+  partially-shipped-review, 0 noise). The detector ran LIVE in the heartbeat.
+- **Surface-only validated (the detector NARROWS, the verifier CONFIRMS):** hand-
+  verifying the 3 "closeable" candidates showed 2 (TRDD-aebedbff #230 pending,
+  TRDD-T198DT1W GROUP C mid-phase) still have remaining work Check 2's NEXT-ACTION
+  heuristic did not parse — the design WORKING (never auto-close; a conscious pass
+  confirms). Board reconciliation of the ~21 surfaced candidates continues
+  incrementally; the detector re-surfaces them each heartbeat until closed.
 - **Load-bearing facts / gotchas:**
   - Detectors are PROJECT-scoped, `--one-shot`, surface-only; they emit drift
     lines + a report, never mutate project files. This one must obey that.
