@@ -1101,13 +1101,36 @@ pub struct Atom {
     pub lmd: Option<String>,
     pub claude_mem_ref: Option<String>,
     pub claude_mem_hash: Option<String>,
+    /// A ≤64-char one-line summary of the atom (TRDD-056384eb). STORED as a snake_case slug
+    /// (`[a-z0-9_]+`, a single token — so the existing single-valued `first_val` path parses it with
+    /// no `parse_block_props` change), DISPLAYED with `_`→space. DISPLAY-only: it is NOT a recall
+    /// surface (`keywords` stays what FTS ranks on). Absent → `None`.
+    pub desc: Option<String>,
     /// The atom's content (everything BELOW its opening marker, up to the next marker / heading / EOF).
     pub body: String,
 }
 
-/// First element of a block-prop's value array — for the single-valued keys (type/ocd/lmd/claude_*).
+/// First element of a block-prop's value array — for the single-valued keys (type/ocd/lmd/claude_*/desc).
 fn first_val(m: &BTreeMap<String, Vec<String>>, key: &str) -> Option<String> {
     m.get(key).and_then(|v| v.first()).cloned()
+}
+
+/// Truncate `s` to at most `max` CHARACTERS (not bytes) — guards the `desc` 64-char cap on multibyte
+/// input without ever splitting a UTF-8 boundary (TRDD-056384eb). A clean defensive cap; the authoring
+/// skill already emits a short slug, so this rarely fires.
+fn truncate_chars(s: String, max: usize) -> String {
+    if s.chars().count() <= max {
+        s
+    } else {
+        s.chars().take(max).collect()
+    }
+}
+
+/// Render a stored `desc` SLUG for display: `_`→space (TRDD-056384eb). Storage stays the single-token
+/// slug; the reader sees a natural phrase (`new_handoff_carries_recent_turns` → "new handoff carries
+/// recent turns").
+fn desc_display(slug: &str) -> String {
+    slug.replace('_', " ")
 }
 
 /// Parse a page's body into ATOMS (TRDD-3b9b2040). A LEADING `^id [props]` marker line OPENS an atom; the
@@ -1135,6 +1158,10 @@ fn make_atom(id: String, p: BTreeMap<String, Vec<String>>, acc: &[String]) -> At
         lmd: first_val(&p, "lmd"),
         claude_mem_ref: first_val(&p, "claude_mem_ref"),
         claude_mem_hash: first_val(&p, "claude_mem_hash"),
+        // `desc` is a single-token slug → the SAME single-valued path as type/ocd/lmd, capped to 64
+        // chars defensively (TRDD-056384eb). No `parse_block_props` change: the slug whitespace-splits
+        // to a 1-element array, so `first_val` returns it.
+        desc: first_val(&p, "desc").map(|s| truncate_chars(s, 64)),
         body: acc.join("\n").trim().to_string(),
         id,
     }
@@ -1623,10 +1650,13 @@ const STOPWORDS: &[&str] = &[
 ];
 
 /// One scored candidate BEFORE the precision-first filter: `(surface_hits, body_only, display_path,
-/// summary, pathbuf, ocd, lmd, atom_id)`. Built identically from the live walk OR the SQLite index, so
-/// both paths feed the SAME finalize step and produce byte-identical output. The trailing `atom_id` is
+/// summary, pathbuf, ocd, lmd, atom_id, atom_desc)`. Built identically from the live walk OR the SQLite
+/// index, so both paths feed the SAME finalize step and produce byte-identical output. `atom_id` is
 /// `Some(id)` when the row is a body ATOM (printed `path#id`, no lesson append) and `None` for a PAGE
-/// (TRDD-3b9b2040) — atoms and pages interleave in ONE ranked list by score.
+/// (TRDD-3b9b2040). `atom_desc` is the atom's stored ≤64-char one-line summary SLUG (TRDD-056384eb),
+/// `Some` only for an atom that carries one — threaded so the print step shows it WITHOUT re-parsing the
+/// page (and so the index readback is the single source on the index path). Atoms and pages interleave
+/// in ONE ranked list by score.
 type RecallScored = (
     i64,
     bool,
@@ -1636,16 +1666,19 @@ type RecallScored = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 /// The rank row AFTER the precision-first filter: `(score, display_path, summary, pathbuf, ocd,
-/// lmd, atom_id)` — what the date filter + sort + print operate on. `atom_id` survives so the print
-/// step formats atoms as `path#id` and suppresses their (page-level) lesson append.
+/// lmd, atom_id, atom_desc)` — what the date filter + sort + print operate on. `atom_id` survives so the
+/// print step formats atoms as `path#id` and suppresses their (page-level) lesson append; `atom_desc`
+/// survives so the print step renders the one-line summary (TRDD-056384eb).
 type RecallRanked = (
     i64,
     String,
     String,
     PathBuf,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -1674,6 +1707,10 @@ struct CandidateMeta {
     /// `Some(atom-id)` when this candidate is a body ATOM (its surface is the keyword array, it prints
     /// as `path#atom-id`, and it has no page-lessons of its own); `None` for a whole-page candidate.
     atom_id: Option<String>,
+    /// The atom's stored ≤64-char one-line summary SLUG (TRDD-056384eb); `Some` only for an atom that
+    /// carries a `desc:` block-prop. Threaded to the print step so the one-line summary shows without a
+    /// re-parse. Always `None` for a page candidate.
+    atom_desc: Option<String>,
 }
 
 /// Score one note's symptom surface (title + summary + tags) against the query terms, plus the
@@ -1706,6 +1743,7 @@ fn score_candidate(
             m.ocd,
             m.lmd,
             m.atom_id,
+            m.atom_desc,
         ))
     } else {
         None
@@ -1723,6 +1761,7 @@ fn atom_meta(
     keywords: String,
     ocd: Option<String>,
     lmd: Option<String>,
+    desc: Option<String>,
 ) -> CandidateMeta {
     CandidateMeta {
         display_path,
@@ -1733,6 +1772,7 @@ fn atom_meta(
         ocd,
         lmd,
         atom_id: Some(atom_id),
+        atom_desc: desc,
     }
 }
 
@@ -1761,6 +1801,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
             ocd: note.ocd,
             lmd: note.lmd,
             atom_id: None,
+            atom_desc: None,
         };
         if let Some(row) = score_candidate(terms, meta, || md::read_text(&p)) {
             all.push(row);
@@ -1777,6 +1818,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
                 kw,
                 atom.ocd.or_else(|| page_ocd.clone()),
                 atom.lmd.or_else(|| page_lmd.clone()),
+                atom.desc,
             );
             if let Some(row) = score_candidate(terms, meta, || Some(body)) {
                 all.push(row);
@@ -1802,13 +1844,16 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
             ocd: c.ocd,
             lmd: c.lmd,
             atom_id: None,
+            atom_desc: None,
         };
         if let Some(row) = score_candidate(terms, meta, || Some(body)) {
             all.push(row);
         }
     }
     // Body ATOMS from the index (TRDD-3b9b2040) — same keyword-surface scoring as the walk, so an
-    // index-backed atom recall is byte-identical to `gather_from_walk`'s `resolve_atoms` pass.
+    // index-backed atom recall is byte-identical to `gather_from_walk`'s `resolve_atoms` pass. The
+    // stored `desc` (TRDD-056384eb) is carried straight from the index readback, so the index path
+    // shows the one-line summary WITHOUT re-parsing the page.
     for c in crate::index::recall_atom_candidates(conn)? {
         let body = c.body;
         let meta = atom_meta(
@@ -1818,6 +1863,7 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
             c.keywords,
             c.ocd,
             c.lmd,
+            c.desc,
         );
         if let Some(row) = score_candidate(terms, meta, || Some(body)) {
             all.push(row);
@@ -1875,7 +1921,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     let mut scored: Vec<RecallRanked> = all
         .into_iter()
         .filter(|(h, body_only, ..)| !a.precision_first || *h > 0 || (!any_surface && *body_only))
-        .map(|(h, _, p, s, pb, ocd, lmd, aid)| (h, p, s, pb, ocd, lmd, aid))
+        .map(|(h, _, p, s, pb, ocd, lmd, aid, desc)| (h, p, s, pb, ocd, lmd, aid, desc))
         .collect();
 
     // Date-range filter (`--since`/`--until` on the `--date-field` date). A note with NO date in the
@@ -1883,7 +1929,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     // so it falls out (documented in `recall_missing_date_excluded_from_range_filter`). ISO-8601
     // strings compare lexicographically via the shared `Cmp` comparator (one comparator with --num).
     if a.since.is_some() || a.until.is_some() {
-        scored.retain(|(_, _, _, _, ocd, lmd, _)| {
+        scored.retain(|(_, _, _, _, ocd, lmd, _, _)| {
             let date = match a.date_field {
                 DateField::Ocd => ocd,
                 DateField::Lmd => lmd,
@@ -1934,7 +1980,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         }
     }
 
-    for (_score, path, summary, pathbuf, _ocd, _lmd, atom_id) in scored.into_iter().take(a.top) {
+    for (_score, path, summary, pathbuf, _ocd, _lmd, atom_id, atom_desc) in scored.into_iter().take(a.top) {
         let s = summary.trim();
         let shown: String = if s.chars().count() > 140 {
             s.chars().take(140).collect::<String>() + "…"
@@ -1948,10 +1994,20 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         // see-also are PER-ATOM and are ALL standard markdown footnotes.
         match &atom_id {
             Some(aid) => {
-                if shown.is_empty() {
+                // Prefer the atom's one-line `desc` SLUG (rendered `_`→space) as the locator summary so
+                // the agent can pick WITHOUT opening the atom (TRDD-056384eb); fall back to the keyword
+                // surface `shown` when the atom carries no `desc` (today's behaviour for un-described
+                // atoms). `atom_desc` is threaded from the gather step (walk: parsed once; index: read
+                // straight from the `atoms.desc` column) — no re-parse here.
+                let desc = atom_desc.as_deref().map(desc_display);
+                let line_summary: &str = match desc.as_deref() {
+                    Some(d) if !d.is_empty() => d,
+                    _ => shown.as_str(),
+                };
+                if line_summary.is_empty() {
                     println!("{path}#{aid}");
                 } else {
-                    println!("{path}#{aid} — {shown}");
+                    println!("{path}#{aid} — {line_summary}");
                 }
                 // The body always prints (it IS the memory); `--no-notes` suppresses only lessons+see-also.
                 print!("{}", render_atom_record(&pathbuf, aid, a.full_notes, want_notes));
@@ -2125,6 +2181,7 @@ fn find_score_note(q: &query_dsl::Query, m: CandidateMeta, body: &str) -> Option
         m.ocd,
         m.lmd,
         m.atom_id,
+        m.atom_desc,
     ))
 }
 
@@ -2150,6 +2207,7 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
             ocd: note.ocd,
             lmd: note.lmd,
             atom_id: None,
+            atom_desc: None,
         };
         if let Some(row) = find_score_note(q, meta, &body) {
             all.push(row);
@@ -2177,6 +2235,7 @@ fn find_gather_index(
             ocd: c.ocd,
             lmd: c.lmd,
             atom_id: None,
+            atom_desc: None,
         };
         if let Some(row) = find_score_note(q, meta, &body) {
             all.push(row);
@@ -2516,6 +2575,55 @@ second atom para
         assert_eq!(atoms[0].body, "The fact is X.[^1] See [[other]].");
         assert!(!atoms[0].body.contains("name:") && !atoms[0].body.contains("# Title"));
         assert_eq!(atom_referenced_labels(&atoms[0].body), vec!["1".to_string()]);
+    }
+
+    #[test]
+    fn resolve_atoms_parses_desc_slug_via_single_valued_path() {
+        // TRDD-056384eb: `desc` is a snake_case slug parsed through the EXISTING single-valued path
+        // (no parse_block_props change). It is STORED as the slug; an atom with no `desc` → None.
+        let text = "\
+^a [desc: a_concise_title, keywords: x y]
+body of a
+^b [keywords: only-keywords]
+body of b
+";
+        let atoms = resolve_atoms_from_text(text);
+        assert_eq!(atoms.len(), 2);
+        assert_eq!(
+            atoms[0].desc.as_deref(),
+            Some("a_concise_title"),
+            "the desc slug is stored verbatim (underscores kept)"
+        );
+        assert_eq!(
+            atoms[0].keywords,
+            vec!["x".to_string(), "y".to_string()],
+            "keywords still parse independently of desc"
+        );
+        assert_eq!(atoms[1].desc, None, "a desc-less atom has desc == None");
+    }
+
+    #[test]
+    fn resolve_atoms_truncates_over_64_char_desc_to_64_chars() {
+        // The 64-char cap is enforced in make_atom (defensive). A 70-`a` slug truncates to exactly 64.
+        let slug = "a".repeat(70);
+        let text = format!("^a [desc: {slug}, keywords: kw]\nbody\n");
+        let atoms = resolve_atoms_from_text(&text);
+        assert_eq!(atoms.len(), 1);
+        let d = atoms[0].desc.as_deref().expect("desc present");
+        assert_eq!(d.chars().count(), 64, "desc is capped to 64 chars");
+        assert_eq!(d, "a".repeat(64), "the cap keeps the first 64 chars");
+    }
+
+    #[test]
+    fn desc_display_renders_slug_underscores_as_spaces() {
+        // The DISPLAY transform: storage stays the slug, the reader sees a phrase (TRDD-056384eb).
+        assert_eq!(
+            desc_display("new_handoff_carries_recent_turns"),
+            "new handoff carries recent turns"
+        );
+        // truncate_chars is a no-op below the cap and char-safe (never splits a UTF-8 boundary).
+        assert_eq!(truncate_chars("short".to_string(), 64), "short");
+        assert_eq!(truncate_chars("héllo_wörld".to_string(), 5).chars().count(), 5);
     }
 
     #[test]

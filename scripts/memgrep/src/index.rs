@@ -75,9 +75,10 @@ pub fn open_existing(root: &Path) -> Option<Connection> {
 
 /// The index schema version. Bumped whenever a binary adds a derived table/column that an existing
 /// on-disk index must be RE-PARSED to populate. v2 (TRDD-3b9b2040) adds the `atoms`/`atoms_fts`
-/// tables. `apply_schema` migrates an older DB forward by clearing the change-detection ledger so the
-/// next `reindex` re-parses every file (and thus fills the new rows). See [`apply_schema`].
-const SCHEMA_VERSION: i64 = 2;
+/// tables. v3 (TRDD-056384eb) adds the `atoms.desc` column (a ≤64-char one-line atom summary). On a
+/// version bump `apply_schema` migrates an older DB forward by clearing the change-detection ledger so
+/// the next `reindex` re-parses every file (and thus fills the new column). See [`apply_schema`].
+const SCHEMA_VERSION: i64 = 3;
 
 /// Create every table + virtual table + B-tree index, idempotently (`IF NOT EXISTS`). Exactly the
 /// schema the spec pins:
@@ -92,10 +93,12 @@ const SCHEMA_VERSION: i64 = 2;
 /// - B-tree indexes for the date-range / topic / FK / provenance lookups.
 ///
 /// After the DDL, a SCHEMA-VERSION migration runs: if the DB's `user_version` is below
-/// [`SCHEMA_VERSION`], the `files` ledger is cleared so the next `reindex` treats every file as new
-/// and re-parses it — the only way an unchanged corpus gains the v2 atom rows (an untouched file would
-/// otherwise stay "fresh" forever and never be re-extracted). Idempotent: runs once per version bump;
-/// recall stays correct meanwhile (an empty ledger makes [`is_fresh`] false → the walk answers).
+/// [`SCHEMA_VERSION`], (a) any additive column the DDL's `CREATE TABLE IF NOT EXISTS` could NOT add to
+/// an already-existing table is `ALTER TABLE … ADD COLUMN`-ed in (v3's `atoms.desc`), and (b) the
+/// `files` ledger is cleared so the next `reindex` treats every file as new and re-parses it — the only
+/// way an unchanged corpus gains the new rows/columns (an untouched file would otherwise stay "fresh"
+/// forever and never be re-extracted). Idempotent: runs once per version bump; recall stays correct
+/// meanwhile (an empty ledger makes [`is_fresh`] false → the walk answers).
 fn apply_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
@@ -143,6 +146,7 @@ CREATE TABLE IF NOT EXISTS atoms (
     atom_type       TEXT,
     claude_mem_ref  TEXT,
     claude_mem_hash TEXT,
+    desc            TEXT,
     body            TEXT
 );
 
@@ -177,6 +181,16 @@ CREATE INDEX IF NOT EXISTS idx_atoms_cmref   ON atoms(claude_mem_ref);
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
     if ver < SCHEMA_VERSION {
+        // Additive column migration (v3, TRDD-056384eb): an `atoms` table created by a pre-v3 binary
+        // exists already, so the `CREATE TABLE IF NOT EXISTS` above skipped it and the new `desc` column
+        // is missing. Add it idempotently — a duplicate-column error (already present, e.g. a fresh DB
+        // just built by the DDL) is benign and ignored; any other failure propagates.
+        if let Err(e) = conn.execute_batch("ALTER TABLE atoms ADD COLUMN desc TEXT") {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column name") {
+                return Err(e).context("adding atoms.desc column for schema migration");
+            }
+        }
         conn.execute_batch("DELETE FROM files")
             .context("clearing ledger for schema migration")?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
@@ -411,8 +425,8 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
     for atom in crate::memory::resolve_atoms_public(path) {
         let keywords_joined = atom.keywords.join(" ");
         conn.execute(
-            "INSERT INTO atoms(memory_id, atom_id, keywords, ocd, lmd, atom_type, claude_mem_ref, claude_mem_hash, body)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO atoms(memory_id, atom_id, keywords, ocd, lmd, atom_type, claude_mem_ref, claude_mem_hash, desc, body)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 mem_id,
                 atom.id,
@@ -422,6 +436,7 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
                 atom.atom_type,
                 atom.claude_mem_ref,
                 atom.claude_mem_hash,
+                atom.desc, // TRDD-056384eb: the ≤64-char one-line summary slug (display-only, not FTS-indexed)
                 atom.body
             ],
         )?;
@@ -589,6 +604,9 @@ pub struct AtomCandidate {
     pub body: String,
     pub ocd: Option<String>,
     pub lmd: Option<String>,
+    /// The atom's ≤64-char one-line summary slug (TRDD-056384eb), read back from the `atoms.desc`
+    /// column so the index round-trips it. DISPLAY-only — the recall scorer never ranks on it.
+    pub desc: Option<String>,
 }
 
 /// Load every atom row (joined to its page for the display path + date fallback) as recall candidates.
@@ -611,7 +629,7 @@ pub fn recall_atom_candidates(conn: &Connection) -> Result<Vec<AtomCandidate>> {
     }
     let mut stmt = conn.prepare(
         "SELECT m.path, a.atom_id, a.keywords, a.body,
-                COALESCE(a.ocd, m.ocd), COALESCE(a.lmd, m.lmd)
+                COALESCE(a.ocd, m.ocd), COALESCE(a.lmd, m.lmd), a.desc
          FROM atoms a JOIN memories m ON a.memory_id = m.id
          WHERE m.element_type = 'memory' ORDER BY m.path, a.id",
     )?;
@@ -623,6 +641,7 @@ pub fn recall_atom_candidates(conn: &Connection) -> Result<Vec<AtomCandidate>> {
             body: r.get(3)?,
             ocd: r.get::<_, Option<String>>(4)?,
             lmd: r.get::<_, Option<String>>(5)?,
+            desc: r.get::<_, Option<String>>(6)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

@@ -1676,6 +1676,61 @@ fn recall_atom_walk_matches_index() {
     );
 }
 
+/// SHARED grammar-parity fixture (TRDD-056384eb, DERIVED task 4): a page with TWO atoms — one carrying
+/// a `desc:` slug and one without. The SAME `^id [desc: …]` marker line is the contract both memgrep's
+/// Rust desc-parse AND the hook's Python desc-parse (Phase 2) must extract identically. The `zqxd*`
+/// keywords are unique so a recall returns exactly the intended atom.
+const DESC_CORPUS: &str = "---\nname: handoff-hub\ndescription: handoff overview\ntags: [handoff]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# Handoff hub\n\n^new-handoff [desc: new_handoff_carries_recent_turns, keywords: zqxdesc handoff]\nThe new handoff lists recent turns and memory ids.\n^plain [keywords: zqxplain bare]\nThis atom carries no desc slug.\n";
+
+#[test]
+fn recall_atom_renders_desc_slug_as_spaced_phrase() {
+    // TRDD-056384eb: an atom with a `desc:` slug shows it on the locator line, rendered `_`→space, so
+    // the agent can pick WITHOUT opening the atom. The STORED slug (with underscores) must NOT appear.
+    let d = TempDir::new("atom-desc-show");
+    d.write("handoff-hub.md", DESC_CORPUS);
+    let o = run(&["recall", "zqxdesc", d.as_str()]); // no index → walk
+    assert!(
+        o.contains("handoff-hub.md#new-handoff — new handoff carries recent turns"),
+        "the atom locator shows the desc as a spaced phrase:\n{o}"
+    );
+    assert!(
+        !o.contains("new_handoff_carries_recent_turns"),
+        "the stored underscore slug must be rendered, never printed raw:\n{o}"
+    );
+}
+
+#[test]
+fn recall_atom_without_desc_falls_back_to_keywords() {
+    // A desc-less atom keeps today's behaviour: the locator shows the keyword surface, not a desc.
+    let d = TempDir::new("atom-desc-none");
+    d.write("handoff-hub.md", DESC_CORPUS);
+    let o = run(&["recall", "zqxplain", d.as_str()]);
+    assert!(
+        o.contains("handoff-hub.md#plain — zqxplain bare"),
+        "a desc-less atom falls back to its keyword summary:\n{o}"
+    );
+}
+
+#[test]
+fn recall_atom_desc_walk_matches_index() {
+    // Walk/index parity for the desc display: the stored `atoms.desc` column (index path) and the live
+    // `resolve_atoms` parse (walk path) must render the same locator line byte-for-byte. This also
+    // exercises the v2→v3 schema bump (the reindex rebuilds with the new desc column).
+    let d = TempDir::new("atom-desc-parity");
+    d.write("handoff-hub.md", DESC_CORPUS);
+    let walk = run(&["recall", "zqxdesc", d.as_str()]); // no .memgrep yet → walk
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["recall", "zqxdesc", d.as_str(), "--use-index"]);
+    assert!(
+        walk.contains("— new handoff carries recent turns"),
+        "walk recall must render the desc phrase:\n{walk}"
+    );
+    assert_eq!(
+        walk, indexed,
+        "index-backed desc display must match the walk byte-for-byte:\nwalk:\n{walk}\nindex:\n{indexed}"
+    );
+}
+
 #[test]
 fn find_claude_mem_ref_cli_lists_atoms_by_provenance() {
     // The harvest provenance query end-to-end: list every atom whose claude_mem_ref block-prop points
