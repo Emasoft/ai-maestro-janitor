@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline
 description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, and the CPV-only validate policy"
 ocd: 2026-06-13
-lmd: 2026-06-13
+lmd: 2026-06-25
 metadata:
   node_type: memory
   type: project
@@ -52,7 +52,7 @@ ordered set of gates; **any gate failing exits non-zero and the release stops**
 7. **Step 4 — CPV `--strict` VALIDATE** (only when the project is a claude
    plugin): `uvx --from git+<CPV repo> cpv-remote-validate plugin <plugin-root>
    --strict`. This is the SOLE validation invocation — it covers the full plugin
-   schema check + the strict rule set. (Historical: a separate `cpv … lint` step
+   schema check + the strict rule set.[^2] (Historical: a separate `cpv … lint` step
    existed; CPV ≥ v2.71.0 retired it after fixing its gitignore-walk bug, so the
    single `plugin --strict` pass now covers everything.)
 8. **Step 6 — version consistency** across plugin.json / pyproject.toml /
@@ -125,3 +125,15 @@ name, never literal paths or secrets).
   any existing release-history line still hit. Lesson: when removing a pipeline
   stage, preserve downstream step numbering if logs are grepped by it, rather
   than renumbering and breaking historical log queries.
+[^2]: [ocd:2026-06-25 lmd:2026-06-25] Step-4 CPV `--strict` runs a markdownlint
+  that scans MORE files than Step-3's own pymarkdown — notably `design/tasks/*.md`
+  (the TRDDs), which Step 3 does NOT scan. So a markdown formatting bug in a TRDD
+  passes the local lint and only fails at the CPV gate (v0.24.6 hit this). The trap
+  (issue #113): a hard-wrapped prose line beginning `+ ` (or `* `) is read by
+  markdownlint MD004/ul-style as a rogue `+`-marker list item, "mixing" it with the
+  file's `-` bullets → a blocking NIT. Lesson: never start a wrapped markdown
+  continuation with `+ `/`* `/`- `. Companion gotcha, same incident: a background
+  `publish.py > LOG; echo "EXIT=$?"` wrapper reports exit 0 (the echo's status, not
+  publish.py's), MASKING a validate failure — drop the trailing echo, and ALWAYS
+  recheck version+branch after a "successful" publish (a failed validate bumps
+  nothing and pushes nothing).
