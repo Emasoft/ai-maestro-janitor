@@ -1,9 +1,9 @@
 ---
 trdd-id: 786efe85-c650-422d-9eda-3724fa0dca29
 title: PreCompact handoff also carries the last N verbatim user-assistant turns
-column: dev
+column: complete
 created: 2026-06-25T13:19:30+0200
-updated: 2026-06-25T13:19:30+0200
+updated: 2026-06-25T13:49:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 priority: 3
@@ -18,12 +18,45 @@ delivery: direct-push
 target-branch: main
 test-requirements: [unit, lint]
 runtime-targets: [macos, linux]
+last-test-result: pass
+last-test-at: 2026-06-25T13:49:00+0200
+test-failures: 0
 external-refs: []
 ---
 
 # TRDD-786efe85 — PreCompact handoff carries the recent verbatim conversation
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-25
+
+### STATUS: COMPLETE — implemented, tested (23/23), shipping via publish.py
+Both handoff enhancements are built, tested (`tests/test_precompact_handoff_hook.py`,
+real subprocess, no mocks — 23/23), ruff-clean, pyright 0/0/0, and verified against the
+REAL 164 MB session transcript + the live memory corpus.
+
+**Shipped — two new handoff sections:**
+1. `## Recent conversation` (Req A) — `_recent_turns(transcript_path, n=5)` tail-reads the
+   transcript, filters heartbeat / meta / sidechain / tool-only turns, keeps each user/
+   assistant turn's text (≤1500 chars), newest last. VERBATIM raw messages, NOT the summary.
+2. `## Recent memory changes` (Req B) — `_recent_memory_atoms` lists the most-recently-updated
+   memory pages (24 h, top 8) with atom IDs only; >5 atoms → collapse to the FILE+count; a
+   prose page → filename. Scope-labelled `[LOCAL|PROJECT|USER]`, de-duped by resolved path.
+
+**Load-bearing fixes found by running against REAL data (verify-before-report):**
+- *All-ASSISTANT window* — a long autonomous assistant streak pushed the user's last ask off a
+  pure last-5 window; `_recent_turns` now PREPENDS the most-recent user turn so the handoff
+  always shows WHAT WAS ASKED.
+- *2 MB tail* (was 512 KB) — the driving user-text turn sat ~800 KB from EOF (the log is 164 MB;
+  user turns are sparse, dwarfed by tool_result/assistant turns). 512 KB held zero user text.
+- *Exclusions (correctness + PRIVACY)* — skips detector artifacts (`MEMORY.md`,
+  `memory-reorg-proposed.md`, `memory-index.md`) and NEVER lists the PRIVATE `user-mem/` store
+  (the handoff is agent-read; user-mem is agent-invisible by design — listing it would leak it).
+
+**FOLLOW-UP (NEW user request 2026-06-25 — its OWN TRDD):** add a `desc` atom-metadata field
+(≤64 chars, a concise title) so memgrep shows a one-line summary in search results AND the
+handoff can show `id — desc` (no memgrep round-trip per recent memory). MULTI-COMPONENT (atom
+block-property grammar — `desc` is a PHRASE, exempt from the space-split-into-array rule the
+other keys use — + memgrep Rust parse/display + the handoff render + authoring skills + docs).
+The handoff `id — desc` rendering lands with that feature; THIS TRDD stays id-only.
 
 ### The gap (USER-reported, VERIFIED)
 `scripts/hooks/pre-compact-handoff.py` builds the handoff from ONLY filesystem/git/TRDD
@@ -88,10 +121,8 @@ Add ONE new section to the handoff, sourced from the PreCompact payload's `trans
    handoff contents if they enumerate the sections.
 
 ### NEXT ACTION
-TDD: add the failing tests for `_recent_turns(transcript_path, n)` + the rendered section, then
-implement the helper + wire it into `_build_handoff` (it needs `transcript_path` threaded from
-`main()`), keep fail-open. Run `pytest tests/test_precompact_handoff_hook.py` + ruff. Then
-`uv run scripts/publish.py --patch` (it is a plugin → publish is in-mandate) and verify CI green.
+DONE (implemented + tested). Remaining: commit → `uv run scripts/publish.py --patch` → verify
+CI green → set `column: published` + `published-version`. Then author the `desc` follow-up TRDD.
 
 ## Why this TRDD exists
 USER reviewed the handoff content on 2026-06-25 and identified that it omits the recent

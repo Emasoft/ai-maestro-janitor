@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -320,3 +321,215 @@ def test_resume_handoff_alone_yields_reground_directive(state_mod) -> None:
     flag = flag_path.read_text()
     assert flag.startswith("read .janitor/state/precompact-handoff.md FIRST")
     assert "re-ground" in flag
+
+
+# ---------- recent conversation (transcript-derived) -----------------------
+
+def _umsg(text: str, **flags) -> dict:
+    """A user TEXT turn (the real Claude Code user-message shape)."""
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        **flags,
+    }
+
+
+def _amsg(text: str) -> dict:
+    """An assistant TEXT turn."""
+    return {
+        "type": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+    }
+
+
+def _tool_result_turn() -> dict:
+    """A user turn carrying a tool_result (no text block) — NOT conversation."""
+    return {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "out"}]}}
+
+
+def _thinking_turn() -> dict:
+    """An assistant turn that is only thinking — NOT visible conversation."""
+    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "h"}]}}
+
+
+def _write_jsonl(path: Path, entries: list[dict]) -> None:
+    path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+
+
+def test_extract_text_shapes() -> None:
+    """_extract_text pulls text blocks only; tool/thinking → ''; string → itself; junk → ''."""
+    hook = _hook()
+    assert hook._extract_text("plain") == "plain"
+    assert hook._extract_text([{"type": "text", "text": "a"}, {"type": "tool_use", "name": "x"}]) == "a"
+    assert hook._extract_text([{"type": "tool_result", "content": "z"}]) == ""
+    assert hook._extract_text([{"type": "thinking", "thinking": "h"}]) == ""
+    assert hook._extract_text(None) == ""
+    assert hook._extract_text(12345) == ""
+
+
+def test_recent_turns_filters_and_order(tmp_path: Path) -> None:
+    """Returns user+assistant TEXT turns newest-last; heartbeat / meta / tool / thinking excluded."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("first real question"),
+        _amsg("first answer"),
+        _tool_result_turn(),
+        _thinking_turn(),
+        _umsg("[janitor-heartbeat]\n/path/to/stub ... long cron prompt"),  # excluded
+        _amsg("Clean — holding."),
+        _umsg("second question", isMeta=True),  # meta excluded
+        _umsg("third question"),
+        _amsg("third answer"),
+    ])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert ("user", "first real question") in turns
+    assert ("assistant", "Clean — holding.") in turns
+    assert ("user", "third question") in turns
+    assert turns[-1] == ("assistant", "third answer")  # chronological, newest last
+    assert all("janitor-heartbeat" not in t for _, t in turns)
+    assert all(t != "second question" for _, t in turns)
+
+
+def test_recent_turns_prepends_last_user_on_assistant_streak(tmp_path: Path) -> None:
+    """A long assistant streak (last n all assistant) still surfaces the most recent user ask."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [
+        _umsg("the driving request"),
+        _amsg("step 1"), _amsg("step 2"), _amsg("step 3"),
+        _amsg("step 4"), _amsg("step 5"), _amsg("step 6"),
+    ])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert turns[0] == ("user", "the driving request")  # prepended despite being >n back
+    assert sum(1 for r, _ in turns if r == "user") >= 1
+
+
+def test_recent_turns_truncates_long_turn(tmp_path: Path) -> None:
+    """An over-long turn is truncated with a marker so the handoff stays bounded."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [_umsg("u"), _amsg("X" * (hook._MAX_TURN_CHARS + 500))])
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    long = next(t for _, t in turns if t.startswith("X"))
+    assert long.endswith("… (truncated)")
+    assert len(long) <= hook._MAX_TURN_CHARS + len(" … (truncated)")
+
+
+def test_recent_turns_missing_or_empty(tmp_path: Path) -> None:
+    """Missing path / nonexistent file / only-noise → None (fail-open)."""
+    hook = _hook()
+    assert hook._recent_turns("", n=5) is None
+    assert hook._recent_turns(str(tmp_path / "nope.jsonl"), n=5) is None
+    noise = tmp_path / "n.jsonl"
+    _write_jsonl(noise, [_tool_result_turn(), _thinking_turn()])
+    assert hook._recent_turns(str(noise), n=5) is None
+
+
+def test_recent_turns_skips_malformed_lines(tmp_path: Path) -> None:
+    """A malformed JSONL line is skipped, never fatal — the good turns still return."""
+    hook = _hook()
+    tx = tmp_path / "t.jsonl"
+    tx.write_text(
+        json.dumps(_umsg("good one")) + "\n"
+        + "{ this is not json\n"
+        + json.dumps(_amsg("good answer")) + "\n",
+        encoding="utf-8",
+    )
+    turns = hook._recent_turns(str(tx), n=5)
+    assert turns is not None
+    assert ("user", "good one") in turns
+    assert ("assistant", "good answer") in turns
+
+
+# ---------- recent memory atoms (filesystem-derived) -----------------------
+
+def _mem_page(d: Path, name: str, atom_ids: list[str], *, prose: str = "topic prose") -> None:
+    d.mkdir(parents=True, exist_ok=True)
+    body = "---\nname: x\ndescription: y\n---\n\n" + prose + "\n\n"
+    for a in atom_ids:
+        body += f"^{a} [keywords: alpha beta]\nA fact owned by {a}.\n\n"
+    (d / name).write_text(body, encoding="utf-8")
+
+
+def test_recent_memory_atoms_lists_collapses_and_pages(tmp_path: Path) -> None:
+    """≤N atoms → list ids; >N atoms → collapse to file; prose page (no atoms) → page row."""
+    hook = _hook()
+    mem = tmp_path / "mem"
+    _mem_page(mem, "few.md", ["memory-a1", "memory-a2"])
+    _mem_page(mem, "many.md", [f"memory-b{i}" for i in range(hook._MEM_ATOMS_COLLAPSE + 2)])
+    _mem_page(mem, "prose.md", [])
+    rows = hook._recent_memory_atoms([("local", mem)], now=time.time())
+    by_name = {name: (kind, count, ids) for kind, _scope, name, count, ids in rows}
+    assert by_name["few.md"][0] == "atoms"
+    assert by_name["few.md"][2] == ["memory-a1", "memory-a2"]
+    assert by_name["many.md"][0] == "collapsed"
+    assert by_name["many.md"][1] == hook._MEM_ATOMS_COLLAPSE + 2
+    assert by_name["prose.md"][0] == "page"
+
+
+def test_recent_memory_atoms_excludes_artifacts_and_private(tmp_path: Path) -> None:
+    """MEMORY.md + librarian artifacts are skipped; the private user-mem/ is NEVER listed."""
+    hook = _hook()
+    mem = tmp_path / "mem"
+    _mem_page(mem, "real.md", ["memory-x1"])
+    _mem_page(mem, "MEMORY.md", ["memory-stub"])
+    _mem_page(mem, "memory-reorg-proposed.md", ["memory-reorg"])
+    _mem_page(mem / "user-mem", "0001.md", ["memory-private"])  # PRIVATE store
+    rows = hook._recent_memory_atoms([("local", mem)], now=time.time())
+    names = {name for _k, _s, name, _c, _i in rows}
+    assert "real.md" in names
+    assert "MEMORY.md" not in names
+    assert "memory-reorg-proposed.md" not in names
+    assert "0001.md" not in names  # user-mem privacy boundary
+    all_ids = [i for _k, _s, _n, _c, ids in rows for i in ids]
+    assert "memory-private" not in all_ids  # no private atom id leaked
+
+
+def test_recent_memory_atoms_window_excludes_old(tmp_path: Path) -> None:
+    """A page older than the recency window is not listed."""
+    hook = _hook()
+    mem = tmp_path / "mem"
+    _mem_page(mem, "fresh.md", ["memory-f1"])
+    _mem_page(mem, "stale.md", ["memory-s1"])
+    old = time.time() - hook._MEM_RECENT_WINDOW_S - 3600
+    os.utime(mem / "stale.md", (old, old))
+    rows = hook._recent_memory_atoms([("local", mem)], now=time.time())
+    names = {name for _k, _s, name, _c, _i in rows}
+    assert "fresh.md" in names
+    assert "stale.md" not in names
+
+
+def test_recent_memory_atoms_dedupes_overlapping_scopes(tmp_path: Path) -> None:
+    """The same physical file reached via two scope entries is listed once."""
+    hook = _hook()
+    mem = tmp_path / "mem"
+    _mem_page(mem, "one.md", ["memory-o1"])
+    rows = hook._recent_memory_atoms([("local", mem), ("project", mem)], now=time.time())
+    assert sum(1 for _k, _s, name, _c, _i in rows if name == "one.md") == 1
+
+
+# ---------- the two new sections appear in the composed handoff -------------
+
+def test_build_handoff_has_conversation_and_memory_sections(tmp_path: Path) -> None:
+    """_build_handoff renders both new sections; a transcript fixture surfaces a user turn."""
+    hook = _hook()
+    _init_git_repo(tmp_path)
+    tx = tmp_path / "t.jsonl"
+    _write_jsonl(tx, [_umsg("what did I ask"), _amsg("my reply")])
+    handoff = hook._build_handoff(tmp_path, str(_PROJECT_ROOT), "manual", str(tx))
+    assert "## Recent conversation" in handoff
+    assert "**USER:**" in handoff
+    assert "what did I ask" in handoff
+    assert "## Recent memory changes" in handoff
+
+
+def test_build_handoff_no_transcript_degrades_conversation(tmp_path: Path) -> None:
+    """No transcript → the conversation section degrades gracefully, never crashes (fail-open)."""
+    hook = _hook()
+    handoff = hook._build_handoff(tmp_path, str(_PROJECT_ROOT), "auto")  # transcript_path default ""
+    assert "## Recent conversation" in handoff
+    assert "(recent conversation unavailable)" in handoff

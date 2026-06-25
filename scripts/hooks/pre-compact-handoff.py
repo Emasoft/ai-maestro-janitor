@@ -12,15 +12,22 @@ hypotheses to "fact". A compaction summary is lossy and can PROMOTE a transient
 wrong hypothesis to a stated fact.
 
 This hook gives the post-compaction turn an AUTHORITATIVE, un-hallucinatable
-re-grounding point. On every PreCompact it writes a handoff built ONLY from
-on-disk truth — never transcript prose — to a STABLE path under the project's
-janitor state dir (`<state>/precompact-handoff.md`):
+re-grounding point. On every PreCompact it writes a handoff built from on-disk
+truth + VERBATIM transcript MESSAGES (never the lossy SUMMARY — raw recent turns
+are ground truth, not a summary) to a STABLE path under the project's janitor
+state dir (`<state>/precompact-handoff.md`):
 
   * git HEAD + the last ~12 commits (oneline),
   * `git status --short` (the real working-tree state),
   * the plugin version,
   * the newest in-flight TRDD(s) on the design board, with their `## ⏵ STATE`
     blocks copied VERBATIM,
+  * the last N user↔assistant turns VERBATIM from the transcript (raw messages,
+    NOT the summary; heartbeat / tool-result / meta turns filtered out, each turn
+    bounded + truncated, the most-recent user ask always surfaced),
+  * the most-recently-updated memory pages — IDs ONLY (the atom ids, or the page
+    itself when it holds >5 atoms); detector artifacts and the PRIVATE user-mem
+    store are never listed,
   * a standing faithfulness instruction (treat the summary as UNVERIFIED).
 
 Because every line is read from disk at compaction time, NONE of it can be
@@ -77,6 +84,21 @@ MAX_TRDDS = 3              # how many in-flight TRDDs to copy STATE blocks for
 MAX_STATE_LINES = 160      # cap STATE lines per TRDD so the handoff stays bounded
 MAX_COMMITS = 12           # recent commits in the oneline log
 _FRONT = 4000              # bytes of head to scan for frontmatter fields
+RECENT_TURNS = 5           # verbatim user/assistant turns to carry from the transcript
+_TAIL_BYTES = 2_000_000    # scan the transcript TAIL (the log can be 100s of MB; user-text
+                           #   turns are sparse — dwarfed by tool_result/assistant turns — so
+                           #   the tail must be generous to contain the recent real exchange)
+_MAX_TURN_CHARS = 1500     # truncate each turn so the handoff stays bounded
+_MEM_RECENT_WINDOW_S = 86_400  # a memory page counts as "recently updated" within 24h
+_MEM_MAX_FILES = 8             # cap the recent-memory section
+_MEM_ATOMS_COLLAPSE = 5        # > this many atoms in one file → list the FILE, not the atoms
+
+# Detector artifacts that live under a memory dir but are NOT memories — never list them
+# (the librarian's reorg/index files regenerate constantly, and MEMORY.md is a dead stub).
+_MEM_EXCLUDE_NAMES = frozenset({"MEMORY.md", "memory-reorg-proposed.md", "memory-index.md"})
+
+# Leading Obsidian block-property atom marker: `^memory-<id> [keywords: …]` (TRDD-3b9b2040).
+_ATOM_ID_RE = re.compile(r"(?m)^\s*\^([A-Za-z0-9][\w-]*)\s*\[")
 
 
 def _run_git(args: list[str], cwd: Path, *, timeout: float = 5.0) -> str:
@@ -180,8 +202,187 @@ def _inflight_trdds(project_root: Path) -> list[tuple[str, str, str, str]]:
     return rows[:MAX_TRDDS]
 
 
-def _build_handoff(project_root: Path, plugin_root: str, trigger: str) -> str:
-    """Compose the filesystem-grounded handoff. Every section is best-effort."""
+def _extract_text(content: object) -> str:
+    """Concatenate the TEXT of a transcript message's content, ignoring tool_use /
+    tool_result / thinking blocks. Content is a plain string OR a list of typed
+    blocks (the real Claude Code transcript shape). Defensive: an unknown shape → ""."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                txt = block.get("text")
+                if isinstance(txt, str) and txt:
+                    parts.append(txt)
+        return "\n".join(parts)
+    return ""
+
+
+def _recent_turns(transcript_path: str, n: int = RECENT_TURNS) -> list[tuple[str, str]] | None:
+    """The last `n` GENUINE user/assistant TEXT turns from the session transcript.
+
+    Sourced from the PreCompact payload's `transcript_path` (a JSONL log). This is
+    the one handoff section that is conversation-derived rather than disk/git — but
+    it is VERBATIM (the recorded turns), NOT the lossy summary, so it stays an
+    un-hallucinatable anchor: what the user just asked and what was just answered.
+
+    Robustness (the hook must NEVER break a compaction):
+      * Only the TAIL (`_TAIL_BYTES`) is read — the transcript can be many MB; a
+        seek-to-tail bounds the work regardless of session length (a fragmentary
+        first line after the seek is dropped).
+      * Every line is parsed defensively — a malformed line is skipped, never fatal.
+      * Heartbeat-cron `user` prompts, `isMeta`/`isSidechain`/`isCompactSummary`
+        turns, and pure tool_use / tool_result / thinking turns are filtered out so
+        the `n` slots hold real exchange.
+      * Each kept turn is truncated to `_MAX_TURN_CHARS`.
+    Any failure (or nothing usable) returns None → the caller renders
+    "(recent conversation unavailable)". Returns (role, text) newest-LAST.
+    """
+    if not transcript_path:
+        return None
+    path = Path(transcript_path)
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            seeked = size > _TAIL_BYTES
+            if seeked:
+                fh.seek(size - _TAIL_BYTES)
+            raw = fh.read()
+    except OSError:
+        return None
+    lines = raw.decode("utf-8", errors="replace").splitlines()
+    if seeked and lines:
+        lines = lines[1:]  # drop the probably-partial first line after the tail seek
+
+    turns: list[tuple[str, str]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if obj.get("type") not in ("user", "assistant"):
+            continue
+        if obj.get("isMeta") or obj.get("isSidechain") or obj.get("isCompactSummary"):
+            continue
+        message = obj.get("message")
+        role = str((message.get("role") if isinstance(message, dict) else None) or obj.get("type") or "")
+        content = message.get("content") if isinstance(message, dict) else obj.get("content")
+        text = _extract_text(content).strip()
+        if not text:
+            continue  # pure tool_use / tool_result / thinking turn — no conversation
+        if role == "user" and text.startswith("[janitor-heartbeat]"):
+            continue  # the cron heartbeat prompt, not user conversation
+        turns.append((role, text))
+
+    if not turns:
+        return None
+    window = turns[-n:]
+    # A long ASSISTANT work-streak (autonomous building) would push the user's most
+    # recent ask off a pure last-n window — leaving only my replies with no context
+    # of what was asked. Always include the most recent user turn.
+    if not any(role == "user" for role, _ in window):
+        last_user = next(
+            (i for i in range(len(turns) - 1, -1, -1) if turns[i][0] == "user"), None
+        )
+        if last_user is not None and last_user < len(turns) - n:
+            window = [turns[last_user], *window]
+    out: list[tuple[str, str]] = []
+    for role, text in window:
+        if len(text) > _MAX_TURN_CHARS:
+            text = text[:_MAX_TURN_CHARS] + " … (truncated)"
+        out.append((role, text))
+    return out
+
+
+def _memory_scope_dirs(project_root: Path) -> list[tuple[str, Path]]:
+    """Best-effort: the (scope, root) memory dirs to scan (LOCAL + PROJECT + USER).
+
+    Prefers the shared `lib.memory_scopes` resolver (the SSOT for the three scopes);
+    on ANY failure falls back to the PROJECT-scope dir under `project_root`. Returns
+    only existing dirs, SCOPE-LABELLED so a same-named page in two scopes is
+    distinguishable. Never raises — a resolution fault must not break the handoff."""
+    try:
+        from lib import memory_scopes  # noqa: PLC0415 - local package, best-effort
+
+        pairs = [(scope, Path(root)) for scope, root in memory_scopes.resolve_scope_dirs()]
+    except Exception:  # noqa: BLE001 - import/resolution must never break the handoff
+        pairs = [("project", project_root / ".claude" / "project" / "memory")]
+    return [(scope, d) for scope, d in pairs if d.is_dir()]
+
+
+def _recent_memory_atoms(
+    scope_dirs: list[tuple[str, Path]], *, now: float
+) -> list[tuple[str, str, str, int, list[str]]]:
+    """Recently-updated memory pages across `scope_dirs`, with their atom IDs only.
+
+    A best-effort proxy for "memories created/updated this session": the `*.md`
+    pages modified within `_MEM_RECENT_WINDOW_S`, newest first, capped at
+    `_MEM_MAX_FILES`. For each we extract the LEADING block-property atom IDs
+    (`^memory-<id> [...]`) — IDS ONLY, never content. Collapse rule: a page with
+    more than `_MEM_ATOMS_COLLAPSE` atoms is reported as the FILE (with a count),
+    not its individual atoms; a prose page (no atoms) is reported by filename (the
+    page IS the memory unit). Rows are (kind, scope, name, atom_count, ids) with
+    kind ∈ {"atoms", "collapsed", "page"}.
+
+    EXCLUSIONS: `_MEM_EXCLUDE_NAMES` (detector artifacts, not memories) are skipped;
+    the PRIVATE `user-mem/` store is NEVER listed — the handoff is read by the agent
+    and user-mem is agent-invisible by design, so surfacing its ids would leak it.
+    Same physical file reached via overlapping scopes is de-duplicated. Never raises."""
+    candidates: list[tuple[float, str, Path]] = []
+    seen_paths: set[str] = set()
+    for scope, d in scope_dirs:
+        try:
+            for path in d.rglob("*.md"):
+                if path.name in _MEM_EXCLUDE_NAMES:
+                    continue
+                if "user-mem" in path.parts:  # PRIVATE store — never surface to the agent
+                    continue
+                key = str(path.resolve())
+                if key in seen_paths:  # same physical file via overlapping scope roots
+                    continue
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    continue
+                if now - mtime <= _MEM_RECENT_WINDOW_S:
+                    seen_paths.add(key)
+                    candidates.append((mtime, scope, path))
+        except OSError:
+            continue
+    candidates.sort(key=lambda r: r[0], reverse=True)
+
+    rows: list[tuple[str, str, str, int, list[str]]] = []
+    for _, scope, path in candidates[:_MEM_MAX_FILES]:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        ids: list[str] = []
+        seen_ids: set[str] = set()
+        for atom_id in _ATOM_ID_RE.findall(text):
+            if atom_id not in seen_ids:
+                seen_ids.add(atom_id)
+                ids.append(atom_id)
+        if not ids:
+            rows.append(("page", scope, path.name, 0, []))
+        elif len(ids) > _MEM_ATOMS_COLLAPSE:
+            rows.append(("collapsed", scope, path.name, len(ids), []))
+        else:
+            rows.append(("atoms", scope, path.name, len(ids), ids))
+    return rows
+
+
+def _build_handoff(
+    project_root: Path, plugin_root: str, trigger: str, transcript_path: str = ""
+) -> str:
+    """Compose the handoff. Disk/git sections + the VERBATIM recent conversation;
+    every section is best-effort (fail-open)."""
     now = time.time()
     local = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(now))
     utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
@@ -196,8 +397,9 @@ def _build_handoff(project_root: Path, plugin_root: str, trigger: str) -> str:
     out: list[str] = []
     out.append("# PreCompact ground-truth handoff")
     out.append(
-        "_Authoritative, FILESYSTEM-DERIVED state captured at compaction time. "
-        "Every line below was read from disk/git — it is un-hallucinatable._"
+        "_Authoritative state captured at compaction time. The disk/git sections are "
+        "read from the filesystem; the Recent-conversation section is the VERBATIM "
+        "transcript turns — NEITHER is a lossy summary, so none of it is hallucinated._"
     )
     out.append("")
     out.append("## ⚠️ FAITHFULNESS INSTRUCTION — read before trusting any summary")
@@ -206,8 +408,9 @@ def _build_handoff(project_root: Path, plugin_root: str, trigger: str) -> str:
         "promote stale or wrong hypotheses (e.g. a service's health %, "
         "\"published vs not\", whole narratives) to \"fact\". Treat EVERY technical "
         "claim in the summary as UNVERIFIED until you have checked it against this "
-        "handoff and the TRDD `## STATE` blocks below. Do NOT promote an uncertain "
-        "hypothesis to fact. Re-ground here first, then act."
+        "handoff, the TRDD `## STATE` blocks, and the VERBATIM Recent-conversation "
+        "turns below (reliable, but RECENT-ONLY — not the whole history). Do NOT "
+        "promote an uncertain hypothesis to fact. Re-ground here first, then act."
     )
     out.append("")
     out.append("## Capture metadata")
@@ -249,6 +452,50 @@ def _build_handoff(project_root: Path, plugin_root: str, trigger: str) -> str:
     else:
         out.append("## In-flight TRDD STATE blocks")
         out.append("(no in-flight TRDD found on the design board)")
+
+    # Recent conversation — the ONLY conversation-derived section. VERBATIM turns
+    # (not the lossy summary), bounded + fail-open: a parser fault degrades to
+    # "(recent conversation unavailable)" and never breaks the handoff.
+    try:
+        turns = _recent_turns(transcript_path)
+    except Exception:  # noqa: BLE001 - a parser bug must never break the handoff
+        turns = None
+    out.append("")
+    out.append(
+        f"## Recent conversation (last {RECENT_TURNS} turns — VERBATIM transcript, not the summary)"
+    )
+    if turns:
+        for role, text in turns:
+            out.append("")
+            out.append(f"**{role.upper()}:**")
+            out.append("")
+            out.append(text)
+    else:
+        out.append("(recent conversation unavailable)")
+
+    # Recent memory changes — IDs/hashes ONLY (never content). Most-recently-updated
+    # memory pages across scopes; a page with > _MEM_ATOMS_COLLAPSE atoms collapses to
+    # just its filename. Fail-open: any fault degrades to "(unavailable)".
+    try:
+        mem_rows: list[tuple[str, str, str, int, list[str]]] | None = _recent_memory_atoms(
+            _memory_scope_dirs(project_root), now=now
+        )
+    except Exception:  # noqa: BLE001 - never break the handoff
+        mem_rows = None
+    out.append("")
+    out.append("## Recent memory changes (IDs only — most-recently-updated atoms/pages)")
+    if mem_rows is None:
+        out.append("(recent memory changes unavailable)")
+    elif not mem_rows:
+        out.append("(no memory pages updated recently)")
+    else:
+        for kind, scope, name, count, ids in mem_rows:
+            if kind == "atoms":
+                out.append(f"- [{scope}] {name}: " + " ".join("^" + i for i in ids))
+            elif kind == "collapsed":
+                out.append(f"- [{scope}] {name} ({count} atoms — file listed, >{_MEM_ATOMS_COLLAPSE})")
+            else:
+                out.append(f"- [{scope}] {name}")
     out.append("")
     return "\n".join(out) + "\n"
 
@@ -286,6 +533,7 @@ def main() -> int:
 
     cwd_fallback = ""
     trigger = ""
+    transcript_path = ""
     if raw.strip():
         try:
             payload = json.loads(raw)
@@ -294,6 +542,8 @@ def main() -> int:
                 # `trigger` is read opportunistically — the docs don't guarantee it
                 # in the payload (it's the matcher value), so we never depend on it.
                 trigger = str(payload.get("trigger", "") or "")
+                # transcript_path → the VERBATIM recent-conversation section.
+                transcript_path = str(payload.get("transcript_path", "") or "")
         except (ValueError, TypeError):
             cwd_fallback = ""
 
@@ -330,7 +580,7 @@ def main() -> int:
             sd = project_dir / ".janitor" / "state"
             sd.mkdir(parents=True, exist_ok=True)
 
-        handoff = _build_handoff(project_dir, plugin_root, trigger)
+        handoff = _build_handoff(project_dir, plugin_root, trigger, transcript_path)
         handoff_path = sd / HANDOFF_FILENAME
 
         if state is not None:
