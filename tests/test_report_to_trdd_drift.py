@@ -141,6 +141,68 @@ class TestReportToTrddDrift(unittest.TestCase):
             self.assertIn("[report-to-trdd]", first)
             self.assertEqual(second.strip(), "")
 
+    def _mem_proj(self, tmp: str) -> Path:
+        """A project whose reports/ also holds the memory-curator subdir."""
+        root = Path(tmp)
+        (root / "design" / "tasks").mkdir(parents=True)
+        (root / "reports" / "memory-subconscious-agent").mkdir(parents=True)
+        (root / "design/tasks/TRDD-20260530_100000+0200-aaaaaaaa-x.md").write_text(
+            _trdd("in-progress", "Active"))
+        return root
+
+    def test_memory_abstain_report_not_flagged(self):
+        """An ABSTAINED memory-subconscious pass report carries no decision → not flagged.
+
+        Its filename matches the DECISION regex (substring 'consolidat'), but the
+        body's `**Outcome:** ABSTAINED … nothing mutated` marks a no-op pass. Issue #63.
+        """
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            rep = root / "reports/memory-subconscious-agent/20260625_153512+0200-consolidate-abstain-no-candidates.md"
+            rep.write_text(
+                "# CONSOLIDATE pass — report\n\n"
+                "- **Pass:** CONSOLIDATE (MERGE leg of the wikimem editor)\n"
+                "- **Outcome:** **ABSTAINED — no merge performed, nothing mutated.** "
+                "Zero same-subject aggregation candidates exist in any editable scope.\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertEqual(out.strip(), "")
+
+    def test_memory_nothing_due_report_not_flagged(self):
+        """A 'NOTHING DUE' memory-subconscious pass report is a no-op → not flagged."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            # Filename matches DECISION regex via the '-plan' fragment in the slug.
+            rep = root / "reports/memory-subconscious-agent/20260624_021706+0200-consolidate-no-merge-plan-due.md"
+            rep.write_text(
+                "# CONSOLIDATE pass — NOTHING DUE\n\n"
+                "- **Pass:** CONSOLIDATE\n"
+                "- **Outcome:** NOTHING DUE — no scope crossed its cadence boundary; "
+                "mutated nothing, emitted nothing into any corpus.\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertEqual(out.strip(), "")
+
+    def test_memory_decision_report_still_flagged(self):
+        """A GENUINE decision report under the SAME curator dir is still flagged.
+
+        Proves the fix keys on the no-op OUTCOME marker, not a blanket exclusion of
+        the memory-subconscious-agent dir: a pass that actually merged + recommends
+        follow-up has a real decision to convert.
+        """
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            rep = root / "reports/memory-subconscious-agent/20260625_160000+0200-security-trio-consolidation-plan.md"
+            rep.write_text(
+                "# CONSOLIDATE pass — report\n\n"
+                "- **Pass:** CONSOLIDATE\n"
+                "- **Outcome:** MERGED the security-trio pages; recommend a follow-up "
+                "TRDD to wire the chosen option into the heartbeat.\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertIn("[report-to-trdd]", out)
+            self.assertIn("security-trio-consolidation-plan.md", out)
+
 
 if __name__ == "__main__":
     unittest.main()

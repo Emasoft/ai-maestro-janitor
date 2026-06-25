@@ -45,6 +45,24 @@ _DECISION_RE = re.compile(
     r"(consolidat|synthes|verdict|recommendation|proposal|decision|roadmap|[-_]plan)",
     re.IGNORECASE,
 )
+# The janitor-memory-subconscious-agent writes a report for EVERY editorial pass
+# under this exact dir — including ABSTAIN / no-op passes (nothing due, no qualifying
+# candidate, 0 mutations). Those reports carry no decision to convert, yet their
+# filenames trip `_DECISION_RE` (e.g. "…-consolidat-e-abstain…"), so they were nagged
+# every cadence and buried the real signal (issue #63). We scope the no-op skip to
+# THIS dir only, then key off the curator's own outcome marker in the body — a genuine
+# decision report (one that actually merged/split and recommends follow-up) lacks that
+# marker and is STILL flagged.
+_MEMORY_CURATOR_DIR = "memory-subconscious-agent"
+# The curator opens its report with an `**Outcome:** <ABSTAINED|NOTHING DUE> …` line on
+# a no-op pass (verified across every real abstain/nothing-due report). Matching the
+# OUTCOME marker — not just the bare word — avoids excluding a real decision report that
+# merely *mentions* an abstained sub-candidate further down its body.
+_MEMORY_NOOP_RE = re.compile(
+    r"^[\s\-\*>|]*\*\*outcome:\*\*.*?\b(abstain(?:ed)?|nothing\s+due)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+_NOOP_SCAN_BYTES = 4096  # the outcome marker is always in the report's opening lines
 _FRESH_GRACE_S = 90  # skip reports written in the last 90s (may be mid-write)
 _MAX_LISTED = 6      # cap how many unconverted reports we name in one line
 
@@ -66,6 +84,23 @@ def _contained(child: Path, root: Path) -> bool:
         return True
     except (ValueError, OSError):
         return False
+
+
+def _is_memory_noop_report(rep: Path, reports_dir: Path) -> bool:
+    """True iff `rep` is a janitor-memory-subconscious-agent ABSTAIN / no-op report.
+
+    Scoped to `reports/memory-subconscious-agent/` so it can never silence a decision
+    report living elsewhere; then keyed off the curator's own `**Outcome:**
+    ABSTAINED|NOTHING DUE` opening marker (issue #63). A pass that actually mutated the
+    corpus and recommends follow-up lacks that marker → still flagged for conversion.
+    """
+    if (reports_dir / _MEMORY_CURATOR_DIR) not in rep.parents:
+        return False
+    try:
+        head = rep.read_text(encoding="utf-8", errors="replace")[:_NOOP_SCAN_BYTES]
+    except OSError:
+        return False
+    return _MEMORY_NOOP_RE.search(head) is not None
 
 
 def _trdd_corpus(tasks_dir: Path) -> str:
@@ -114,6 +149,9 @@ def main() -> int:
         mtime = state.file_mtime(rep)
         if mtime > 0 and (now - mtime) < _FRESH_GRACE_S:
             continue  # too fresh — may still be writing
+        # Memory-curator ABSTAIN / no-op pass report → no decision to convert (issue #63).
+        if _is_memory_noop_report(rep, reports_dir):
+            continue
         # Referenced by any TRDD (cited by basename) → already converted.
         if rep.name in corpus:
             continue
