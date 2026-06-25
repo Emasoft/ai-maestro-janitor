@@ -3,7 +3,7 @@ trdd-id: 8UD3Q7K5
 title: Memory scheduler should cheap-pre-check that a STRUCTURAL merge pair exists before emitting the consolidate marker — kill the ~226k no-op agent spawns
 column: dev
 created: 2026-06-25T21:38:45+0200
-updated: 2026-06-25T21:38:45+0200
+updated: 2026-06-25T22:10:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -26,31 +26,39 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/64"]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-25
 
-### Current state
+### Current state — ✅ IMPLEMENTED + TESTED (2026-06-25, committed locally, NOT pushed)
 - **ROOT CAUSE confirmed by reading the source** (file:line below). The
-  `[janitor-memory-consolidate]` marker is emitted on cadence alone; the
+  `[janitor-memory-consolidate]` marker was emitted on cadence alone; the
   per-chore content precheck (`memory_content_precheck.content_has_work`)
-  returns `True` UNCONDITIONALLY for `consolidate`, so a corpus of
-  categorically-unmergeable pages re-spawns a ~226k-token opus agent that can
+  returned `True` UNCONDITIONALLY for `consolidate`, so a corpus of
+  categorically-unmergeable pages re-spawned a ~226k-token opus agent that can
   only re-abstain, every consolidate cadence (~2.5×/day).
-- **FIX DESIGN settled**: add a cheap, zero-LLM `consolidate_has_work(root)`
-  to `scripts/lib/memory_content_precheck.py` that returns True iff ≥2 candidate
-  pages share the same `(tier, type)` with `tier ∈ memory_edit_verify._MERGEABLE_TIERS`
-  (= `{"aspect","component"}`) — the EXACT necessary condition of `is_legal_merge`.
-  Wire it into `content_has_work` exactly where SPLIT's `split_has_work` is wired.
-  FAIL-OPEN; SUBJECT-sameness stays semantic/agent-discovered.
-- **Tests + impl**: NOT YET DONE in this STATE block's first write. (Update on
-  completion.)
+- **FIX LANDED** (commit `636e7df`): `consolidate_has_work(root)` added to
+  `scripts/lib/memory_content_precheck.py` — returns True iff ≥2 candidate pages
+  share the same `(tier, type)` with `tier ∈ memory_edit_verify._MERGEABLE_TIERS`
+  (= `{"aspect","component"}`), the EXACT structural necessary condition of
+  `is_legal_merge`. Wired into `content_has_work` alongside SPLIT's gate. FAIL-OPEN;
+  SUBJECT-sameness stays semantic/agent-discovered. Imports `_MERGEABLE_TIERS` +
+  `parse_frontmatter` from `memory_edit_verify` (SSOT, no fork) and uses
+  `memory_scopes.iter_note_files` for the candidate set. Scheduler docstring in
+  `memory-maintenance.py` updated to reflect the new precheck.
+- **Tests**: `tests/test_memory_content_precheck.py` (+12 precheck tests, incl. the
+  issue's cross-type + raw-buffer-keyword-only cases, hub-not-mergeable, lone page,
+  staging/user-mem exclusion, cross-subdir) + `tests/test_memory_maintenance.py`
+  (+3 scheduler-wiring tests incl. the Option-A not-stamped-then-fires invariant;
+  the parametrized due-marker test + fail-open test updated for consolidate).
+  **44 target tests pass; 100 adjacent memory tests pass; ruff + pyright clean.**
 
-### NEXT ACTION
-1. Extend `memory_content_precheck.py` with `consolidate_has_work` + route
-   `consolidate` through it inside `content_has_work`.
-2. Add failing-first TDD tests in `tests/test_memory_content_precheck.py`
-   (structural precheck) + `tests/test_memory_maintenance.py` (scheduler wiring:
-   unmergeable corpus → no marker; mergeable corpus → marker).
-3. `uv run pytest tests/test_memory_content_precheck.py tests/test_memory_maintenance.py -q` → all pass.
-4. `uv run ruff check` + `uv run pyright` on the two changed files → clean.
-5. Commit TRDD, then code+tests, citing issue #64. DO NOT push/publish.
+### COMPLETE — remaining is the orchestrator's job
+- DO NOT push/publish from this session — the orchestrator ships it via `publish.py`.
+- TRDD commit `d549553`; fix commit `636e7df`.
+
+### (historical) NEXT ACTION — all done
+1. ✅ `consolidate_has_work` added + routed through `content_has_work`.
+2. ✅ failing-first TDD tests (precheck + scheduler wiring).
+3. ✅ pytest target files green (44 passed).
+4. ✅ ruff + pyright clean on changed files.
+5. ✅ TRDD committed, then code+tests committed, citing issue #64.
 
 ### Load-bearing facts / gotchas
 - `is_legal_merge(meta_a, meta_b)` (`scripts/lib/memory_edit_verify.py:~417`)
