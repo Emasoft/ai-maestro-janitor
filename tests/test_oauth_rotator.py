@@ -169,6 +169,43 @@ def test_keepalive_refresh_counts_failures_and_resets_on_success(monkeypatch: py
     assert state["slots"]["alt@x.com"]["refresh_failures"] == 0
 
 
+def test_refresh_and_heal_slot_resets_failures_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """cmd_auto's refresh kernel (_refresh_and_heal_slot) must ALSO reset refresh_failures to 0 on a
+    successful exchange — the SAME invariant _keepalive_refresh enforces. REGRESSION (this agent,
+    2026-06-25): the kernel updated fp/expires_at but NOT refresh_failures, so a slot whose refresh
+    transiently failed >= MAX_REFRESH_FAILURES (cascade → REAUTH_NUDGE) and was then RESCUED here
+    (refresh-on-err / locally-expired guard) but not rotated onto kept refresh_failures >= max
+    forever — keepalive skips a freshly-refreshed token (outside KEEPALIVE_AHEAD_H), so nothing else
+    cleared it — and the cascade nudged the human to manually re-login a now-healthy account. Drives
+    the REAL kernel with the keychain/HTTP seams stubbed (no network, no keychain)."""
+    fresh = _blob("fresh-access", refresh="fresh-refresh",
+                  expires_ms=int((time.time() + 6 * 3600) * 1000))
+    state = {"slots": {"alt@x.com": {"fp": "old", "expires_at": 0, "refresh_failures": 5}}}
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda *_a, **_k: fresh)
+    monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)
+
+    refreshed, changed = rotator._refresh_and_heal_slot("alt@x.com", _blob("stale"), state)
+
+    assert refreshed is fresh and changed is True
+    assert state["slots"]["alt@x.com"]["refresh_failures"] == 0  # dead-refresh counter cleared
+    assert state["slots"]["alt@x.com"]["fp"] == rotator.fingerprint(fresh)
+
+
+def test_refresh_and_heal_slot_keeps_failures_when_refresh_yields_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A FAILED refresh (grant yields None) returns (None, False) and leaves the slot meta — and its
+    refresh_failures — untouched, so the kernel never spuriously CLEARS the counter that
+    _keepalive_refresh is busy incrementing toward the dead-refresh escalation."""
+    state = {"slots": {"alt@x.com": {"fp": "old", "expires_at": 0, "refresh_failures": 4}}}
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda *_a, **_k: None)
+
+    refreshed, changed = rotator._refresh_and_heal_slot("alt@x.com", _blob("stale"), state)
+
+    assert refreshed is None and changed is False
+    assert state["slots"]["alt@x.com"]["refresh_failures"] == 4  # unchanged on failure
+
+
 def test_write_slot_file_fallback_is_0600_and_roundtrips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With NO keychain present, write_slot files a 0600 slot read_slot round-trips (the Linux-no-keyring fallback)."""
     slots = tmp_path / "slots"

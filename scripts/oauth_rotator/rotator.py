@@ -1110,6 +1110,18 @@ def _refresh_and_heal_slot(email: str, blob: dict, state: dict) -> tuple[dict | 
     if isinstance(meta, dict):
         meta["fp"] = fingerprint(refreshed)
         meta["expires_at"] = _oauth(refreshed).get("expiresAt")
+        # A SUCCESSFUL exchange clears the dead-refresh counter — the SAME invariant
+        # _keepalive_refresh enforces (TRDD-HJGR4I5W). cmd_auto's refresh paths are the
+        # OTHER place a slot's refresh succeeds, so they must reset it too: a slot whose
+        # refresh transiently failed >= MAX_REFRESH_FAILURES (cascade → REAUTH_NUDGE) and is
+        # then rescued HERE (refresh-on-err / locally-expired guard) but NOT rotated onto —
+        # it loses drain-first or is kept only as a degraded fallback — would otherwise keep
+        # refresh_failures >= max forever (keepalive skips it: a freshly-refreshed token is
+        # outside KEEPALIVE_AHEAD_H, so it never re-runs the reset), so the cascade nudges the
+        # human to manually re-login a now-healthy account — the exact "had to rotate the auth
+        # manually" pain TRDD-J9TM3WQK eliminated. Clearing it here strictly REDUCES spurious
+        # REAUTH nudges and never touches a token, so it cannot affect live auth.
+        meta["refresh_failures"] = 0
         return refreshed, True
     return refreshed, False
 
