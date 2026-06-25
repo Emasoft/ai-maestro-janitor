@@ -419,6 +419,24 @@ def task_version_update() -> None:
             f"  version-update: janitor self-updated to {new_latest}; "
             f"reload-needed.flag SET (heartbeat will emit [janitor-reload])",
         )
+        # C3 (TRDD-T198DT1W): certify the freshly-installed version as the
+        # last-GOOD pin so the dispatcher-stub can cross-check its manifest HMAC
+        # on future fires (the malicious-replacement anchor C2's unsigned
+        # manifest can't provide). We pin the NEW version's CACHE dir
+        # (<cache-parent>/<new_latest>), computing the HMAC over its shipped
+        # manifest with the DATA-dir key. Best-effort + FAIL-OPEN: pin_good_version
+        # is a no-op when the version shipped no manifest or no key resolves, and
+        # any failure just leaves the stub on its C2-only gate — never blocking.
+        try:
+            new_version_dir = plugin_root.parent / new_latest
+            if vu.pin_good_version(new_version_dir, new_latest):
+                state.log_line(
+                    "daemon",
+                    f"  version-update: pinned last-good={new_latest} "
+                    f"(C3 manifest-HMAC trust anchor written)",
+                )
+        except Exception as exc:  # noqa: BLE001 — pinning must NEVER break self-update
+            state.log_line("daemon", f"  version-update: last-good pin skipped: {exc}")
 
 
 def task_oauth_rotator_supervisor() -> None:

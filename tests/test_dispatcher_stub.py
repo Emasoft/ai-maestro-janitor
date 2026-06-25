@@ -19,7 +19,9 @@ test process.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import importlib.util
 import json
 from pathlib import Path
@@ -90,10 +92,16 @@ def _clean_files(vdir: Path) -> dict:
     }
 
 
-def _run_main(monkeypatch, stub, cache_root: Path) -> str:
-    """Run stub.main() with PLUGIN_CACHE_ROOT redirected and os.execv stubbed;
-    return the path of the dispatch.py that would have been execed."""
+def _run_main(monkeypatch, stub, cache_root: Path, data_root: Path | None = None) -> str:
+    """Run stub.main() with PLUGIN_CACHE_ROOT (and, for C3, PLUGIN_DATA_ROOT)
+    redirected and os.execv stubbed; return the path of the dispatch.py that
+    would have been execed. When `data_root` is None it points at a guaranteed-
+    empty tmp dir so the C3 reader finds no pin/quarantine (pure C2 behavior)."""
     monkeypatch.setattr(stub, "PLUGIN_CACHE_ROOT", cache_root)
+    if data_root is None:
+        data_root = cache_root.parent / "_empty_data"
+        data_root.mkdir(exist_ok=True)
+    monkeypatch.setattr(stub, "PLUGIN_DATA_ROOT", data_root)
     captured: dict[str, str] = {}
 
     def fake_execv(path, argv):
@@ -105,6 +113,46 @@ def _run_main(monkeypatch, stub, cache_root: Path) -> str:
     with pytest.raises(_Execed):
         stub.main()
     return captured["path"]
+
+
+# ── C3 fixture builders (TRDD-T198DT1W) ──────────────────────────────────────
+#
+# The stub's C3 reader is stdlib-only and reads three DATA-dir artifacts the
+# DAEMON writes:  <data>/.integrity-key  (raw 32-byte HMAC key),
+# <data>/integrity/last-good.json  ({version, manifest_hmac}),
+# <data>/integrity/quarantine.json ({versions: [...]}).  These builders write
+# the exact on-disk PRIMARY shapes (the bytes janitor_integrity.backup_and_write
+# leaves as the primary) so the stub recomputes the same HMAC.
+
+
+def _write_key(data_root: Path) -> bytes:
+    key = b"k3-test-key-32-bytes-padding!!!!!"[:32]
+    assert len(key) == 32
+    data_root.mkdir(parents=True, exist_ok=True)
+    (data_root / ".integrity-key").write_bytes(key)
+    return key
+
+
+def _manifest_bytes(vdir: Path) -> bytes:
+    return (vdir / ".integrity" / "manifest-sha256.json").read_bytes()
+
+
+def _manifest_hmac(vdir: Path, key: bytes) -> str:
+    return base64.b64encode(
+        hmac.new(key, _manifest_bytes(vdir), hashlib.sha256).digest()
+    ).decode("ascii")
+
+
+def _write_pin(data_root: Path, version: str, manifest_hmac: str) -> None:
+    p = data_root / "integrity" / "last-good.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"version": version, "manifest_hmac": manifest_hmac}, sort_keys=True))
+
+
+def _write_quarantine(data_root: Path, versions: list[str]) -> None:
+    p = data_root / "integrity" / "quarantine.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"versions": versions}, sort_keys=True))
 
 
 # ── the common path ─────────────────────────────────────────────────────────
@@ -276,3 +324,202 @@ def test_verify_version_no_manifest_true(stub, tmp_path):
     v = _make_version(tmp_path, "0.18.1")  # no manifest
     ok, reason = stub._verify_version(v)
     assert ok and reason == "no-manifest"
+
+
+# ── C3 pin + quarantine (TRDD-T198DT1W) ──────────────────────────────────────
+#
+# C3 adds a DATA-dir trust anchor the cache-writer can't forge (an HMAC of a
+# GOOD version's manifest, keyed by the DATA-dir key) plus a quarantine list.
+# It can ONLY ADD ONE new rejection: a candidate whose pin names IT but whose
+# manifest HMAC differs (proven tamper). Every other state is FAIL-OPEN —
+# C3 has no opinion and the C2 verdict stands. These tests prove both the new
+# rejection AND that C3 never blocks a version C2 would have run.
+
+
+def test_c3_no_pin_no_quarantine_is_c2_only(stub, tmp_path, monkeypatch):
+    """Fresh install: no key, no pin, no quarantine → C3 is a pure no-op; the
+    newest clean version runs exactly as C2 alone (the ZERO-false-rejection
+    invariant on every machine that never ran the daemon's pin-writer)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v0 = _make_version(cache, "0.20.0")
+    _write_manifest(v0, _clean_files(v0))
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"  # empty → no key/pin/quarantine
+    data.mkdir()
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")
+
+
+def test_c3_pin_matches_accepts(stub, tmp_path, monkeypatch):
+    """Pin names the newest version AND its manifest HMAC matches → strong
+    accept (the certified-good happy path)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    key = _write_key(data)
+    _write_pin(data, "0.20.1", _manifest_hmac(v1, key))
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")
+
+
+def test_c3_pin_mismatch_falls_back(stub, tmp_path, monkeypatch):
+    """Pin names the newest version but the manifest HMAC DIFFERS → proven
+    tamper (the manifest was rewritten by someone without the DATA key) → fall
+    back to the next version, even though the plaintext manifest self-verifies.
+    This is the SOLE new rejection C3 introduces — the malicious-replacement
+    case an unsigned C2 manifest cannot catch."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v0 = _make_version(cache, "0.20.0")
+    _write_manifest(v0, _clean_files(v0))
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    _write_key(data)
+    # Pin a WRONG hmac for 0.20.1 → its recomputed hmac won't match the pin.
+    _write_pin(data, "0.20.1", "Zm9yZ2VkLWhtYWMtdmFsdWU=")  # base64("forged-hmac-value")
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v0 / "scripts" / "dispatch.py")
+
+
+def test_c3_pin_for_older_version_does_not_block_newer(stub, tmp_path, monkeypatch):
+    """The pin names an OLDER version than the newest clean one. C3 has no
+    anchor for the newer version → no opinion → the newer clean version still
+    runs (a self-update past the last pin must NOT be blocked)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v0 = _make_version(cache, "0.20.0")
+    _write_manifest(v0, _clean_files(v0))
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    key = _write_key(data)
+    _write_pin(data, "0.20.0", _manifest_hmac(v0, key))  # pin the OLDER one
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")  # newest still wins
+
+
+def test_c3_quarantined_version_is_skipped(stub, tmp_path, monkeypatch):
+    """A quarantined version is skipped fast even if it verifies clean → run the
+    next (older) clean version. This is the bad-self-update self-heal hook."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v0 = _make_version(cache, "0.20.0")
+    _write_manifest(v0, _clean_files(v0))
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    _write_quarantine(data, ["0.20.1"])
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v0 / "scripts" / "dispatch.py")
+
+
+def test_c3_all_quarantined_fail_open_runs_newest(stub, tmp_path, monkeypatch):
+    """Every runnable version is quarantined → FAIL-OPEN: run the newest
+    runnable version anyway (a possibly-bad heartbeat beats a dead one — the
+    cardinal rule trumps the quarantine when nothing else is left)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v0 = _make_version(cache, "0.20.0")
+    _write_manifest(v0, _clean_files(v0))
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    _write_quarantine(data, ["0.20.0", "0.20.1"])
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")  # newest, despite quarantine
+
+
+def test_c3_malformed_pin_is_fail_open(stub, tmp_path, monkeypatch):
+    """A corrupt last-good.json → C3 has no opinion → newest clean version runs
+    (a broken pin must NEVER divert the boot path)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    _write_key(data)
+    (data / "integrity").mkdir(parents=True, exist_ok=True)
+    (data / "integrity" / "last-good.json").write_text("{ not json")
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")
+
+
+def test_c3_malformed_quarantine_is_fail_open(stub, tmp_path, monkeypatch):
+    """A corrupt quarantine.json → empty set → nothing is skipped → newest clean
+    version runs (a broken quarantine must NEVER skip a good version)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    (data / "integrity").mkdir(parents=True, exist_ok=True)
+    (data / "integrity" / "quarantine.json").write_text("][ not json")
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")
+
+
+def test_c3_pin_present_but_no_key_is_fail_open(stub, tmp_path, monkeypatch):
+    """A pin exists but the DATA key is GONE → C3 cannot recompute the HMAC → no
+    opinion → newest clean version runs (a lost key must not brick the boot)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    data.mkdir()
+    # Pin present, but NO .integrity-key written.
+    _write_pin(data, "0.20.1", "Zm9yZ2VkLWhtYWMtdmFsdWU=")  # would mismatch IF a key existed
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")
+
+
+def test_c3_pin_mismatch_then_no_fallback_fail_open(stub, tmp_path, monkeypatch):
+    """Pin names the ONLY version and its HMAC mismatches (proven tamper), with
+    no older version to fall back to → FAIL-OPEN to that newest-runnable version
+    anyway. Even a proven-bad single version beats a dead heartbeat — the
+    cardinal rule is the final backstop."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    v1 = _make_version(cache, "0.20.1")
+    _write_manifest(v1, _clean_files(v1))
+    data = tmp_path / "data"
+    _write_key(data)
+    _write_pin(data, "0.20.1", "Zm9yZ2VkLWhtYWMtdmFsdWU=")  # mismatch
+    chosen = _run_main(monkeypatch, stub, cache, data)
+    assert chosen == str(v1 / "scripts" / "dispatch.py")  # fail-open backstop
+
+
+# ── direct unit coverage of the C3 stub readers ──────────────────────────────
+
+
+def test_read_pin_and_key_round_trip(stub, tmp_path):
+    """_read_pin + _read_key recover what the daemon writes."""
+    data = tmp_path / "data"
+    key = _write_key(data)
+    _write_pin(data, "0.20.1", "abc123")
+    assert stub._read_key(data) == key
+    assert stub._read_pin(data) == {"version": "0.20.1", "manifest_hmac": "abc123"}
+
+
+def test_read_quarantine_set(stub, tmp_path):
+    """_read_quarantine parses the versions list into a set; malformed → empty."""
+    data = tmp_path / "data"
+    _write_quarantine(data, ["0.20.0", "0.20.1"])
+    assert stub._read_quarantine(data) == {"0.20.0", "0.20.1"}
+    (data / "integrity" / "quarantine.json").write_text("nope")
+    assert stub._read_quarantine(data) == set()
+
+
+def test_pin_hmac_matches_helper(stub, tmp_path):
+    """_pin_hmac recomputes base64(HMAC(manifest-bytes, key)) — identical to the
+    daemon-side version_update_lib.manifest_hmac value."""
+    data = tmp_path / "data"
+    key = _write_key(data)
+    v = _make_version(tmp_path, "0.20.1")
+    _write_manifest(v, _clean_files(v))
+    assert stub._pin_hmac(v, key) == _manifest_hmac(v, key)

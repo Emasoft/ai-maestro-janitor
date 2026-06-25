@@ -30,6 +30,9 @@ Functions:
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -38,8 +41,27 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+import janitor_integrity  # crash-safe DATA-dir read/write (backup_and_write / read_or_restore)
+import janitor_self_integrity  # the DATA-dir HMAC key (load_or_create_key)
+
 PLUGIN_NAME = "ai-maestro-janitor"
 MARKETPLACE_NAME = "ai-maestro-plugins"
+
+# C3 (TRDD-T198DT1W) — the janitor's FIXED persistent DATA dir, hard-coded the
+# SAME way launchd_keepalive._DATA_DIR and the arm skill resolve it. It is
+# resolved by this explicit path, NOT via ${CLAUDE_PLUGIN_DATA} — that env var
+# points at whichever plugin owns the running turn (wrong in the detached,
+# session-less daemon that writes the pin). Overridable via JANITOR_DATA_DIR for
+# tests so no test touches the real ~/.claude tree.
+_FIXED_DATA_DIR = (
+    Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+)
+# Sub-namespace under DATA for the C3 trust-anchor files (outside the cache).
+_INTEGRITY_SUBDIR = "integrity"
+_LAST_GOOD_NAME = "last-good.json"
+_QUARANTINE_NAME = "quarantine.json"
+# The version's shipped manifest, relative to its cache dir (the C2 shape).
+_MANIFEST_REL = Path(".integrity") / "manifest-sha256.json"
 
 _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _GH_REPO_RE = re.compile(r"^https?://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$")
@@ -268,3 +290,167 @@ def do_auto_update_if_needed(plugin_root: Path,
         )
         return (False, latest_installed)
     return (True, new_latest)
+
+
+# ---------------------------------------------------------------------------
+# C3 (TRDD-T198DT1W) — pin last-GOOD version + quarantine bad version.
+#
+# The trust anchor the stub (C2) cross-checks lives HERE, in the persistent
+# DATA dir OUTSIDE the version-stamped cache. A malicious cache push can
+# rewrite a version's plaintext manifest, but it cannot forge the HMAC of that
+# manifest keyed by the DATA-dir `.integrity-key` (it lacks the key) — so the
+# pin lets the stub distinguish "this version's manifest is the one the daemon
+# certified" from "someone rewrote both the file AND its manifest entry".
+#
+# The DAEMON (the single global writer) calls `pin_good_version` after a
+# self-update lands; it calls `add_quarantine` to mark a proven-bad version.
+# The STUB does NOT import these (importing the cache's own verifier to check
+# that same cache is circular trust) — it inlines its own stdlib readers and
+# recomputes the HMAC independently. These functions are the canonical
+# WRITER + the daemon/test-side reader.
+#
+# CARDINAL RULE — FAIL-OPEN: every reader returns "no opinion" (None / empty
+# set) on EVERY uncertainty — no key, no manifest, unreadable / malformed
+# state — so the stub's C2-only behavior is preserved whenever C3 cannot PROVE
+# anything. Only an explicit, completed mismatch ever diverts the boot path.
+# ---------------------------------------------------------------------------
+
+
+def _data_dir() -> Path | None:
+    """The FIXED DATA dir (overridable via JANITOR_DATA_DIR for tests), or None
+    only if HOME itself is unresolvable (it never is in practice)."""
+    override = os.environ.get("JANITOR_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
+    return _FIXED_DATA_DIR
+
+
+def _integrity_dir() -> Path | None:
+    base = _data_dir()
+    return None if base is None else base / _INTEGRITY_SUBDIR
+
+
+def _load_key() -> bytes | None:
+    """The DATA-dir HMAC key, minted on first use by janitor_self_integrity.
+    Returns None when no DATA dir is resolvable (→ the pin can't be computed,
+    so C3 is a no-op and the stub stays C2-only)."""
+    return janitor_self_integrity.load_or_create_key(_data_dir())
+
+
+def manifest_hmac(version_dir: Path, *, key: bytes | None) -> str | None:
+    """HMAC-SHA256(manifest BYTES, key), base64 — the C3 trust anchor for one
+    cached version, or None when there is no manifest or no key.
+
+    Hashing the raw manifest BYTES (not a re-parse) means the stub can recompute
+    this from the exact on-disk file with stdlib only and `hmac.compare_digest`
+    the two, with no JSON-canonicalisation ambiguity. A version that shipped no
+    manifest (older releases) yields None — it simply isn't pinnable; the stub
+    then treats it as the C2 no-manifest fail-open case."""
+    if key is None:
+        return None
+    manifest_path = version_dir / _MANIFEST_REL
+    try:
+        raw = manifest_path.read_bytes()
+    except OSError:
+        return None
+    return base64.b64encode(hmac.new(key, raw, hashlib.sha256).digest()).decode("ascii")
+
+
+def read_last_good() -> dict | None:
+    """The pinned last-GOOD record ``{"version": str, "manifest_hmac": str}``,
+    crash-recovered from its .bak mirror if the primary is torn, or None on any
+    uncertainty (no pin yet / unreadable / malformed / missing fields).
+
+    FAIL-OPEN: a None here means the stub has no pin to cross-check and falls
+    back to its C2-only (accidental-corruption) gate — never a block."""
+    idir = _integrity_dir()
+    if idir is None:
+        return None
+    raw = janitor_integrity.read_or_restore(idir / _LAST_GOOD_NAME)
+    if raw is None:
+        return None
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    version = obj.get("version")
+    mac = obj.get("manifest_hmac")
+    if not isinstance(version, str) or not version:
+        return None
+    if not isinstance(mac, str) or not mac:
+        return None
+    return {"version": version, "manifest_hmac": mac}
+
+
+def pin_good_version(version_dir: Path, version: str) -> bool:
+    """Certify ``version`` as the last-GOOD version: compute its manifest HMAC
+    with the DATA-dir key and persist ``{version, manifest_hmac}`` crash-safely.
+
+    Returns False (a NO-OP, never a partial pin) when the version has no
+    manifest or no key is available — there is nothing to anchor, so the pin is
+    left untouched and the stub stays C2-only for it. The daemon calls this
+    after a self-update lands and the new version has run (its manifest is the
+    one we certify)."""
+    key = _load_key()
+    if key is None:
+        return False
+    mac = manifest_hmac(version_dir, key=key)
+    if mac is None:
+        return False  # no manifest → not pinnable; never write a keyless/empty pin
+    idir = _integrity_dir()
+    if idir is None:
+        return False
+    blob = json.dumps(
+        {"version": version, "manifest_hmac": mac}, sort_keys=True
+    ).encode("utf-8")
+    try:
+        janitor_integrity.backup_and_write(idir / _LAST_GOOD_NAME, blob)
+    except OSError:
+        return False
+    return True
+
+
+def read_quarantine() -> set[str]:
+    """The set of quarantined (proven-bad) version strings, or an EMPTY set on
+    any uncertainty (no file / unreadable / malformed).
+
+    FAIL-OPEN is doubly important here: a corrupt quarantine file must NEVER be
+    interpreted as "skip everything" — an empty set means the stub skips
+    nothing, exactly as if no quarantine existed."""
+    idir = _integrity_dir()
+    if idir is None:
+        return set()
+    raw = janitor_integrity.read_or_restore(idir / _QUARANTINE_NAME)
+    if raw is None:
+        return set()
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return set()
+    if not isinstance(obj, dict):
+        return set()
+    versions = obj.get("versions")
+    if not isinstance(versions, list):
+        return set()
+    return {v for v in versions if isinstance(v, str) and v}
+
+
+def add_quarantine(version: str, reason: str = "") -> bool:
+    """Record ``version`` as proven-bad so the stub skips it fast on later
+    fires. Unions with the existing set (never replaces), idempotent, written
+    crash-safely. Returns False only on a DATA-dir / I/O failure."""
+    idir = _integrity_dir()
+    if idir is None:
+        return False
+    current = read_quarantine()
+    current.add(version)
+    blob = json.dumps(
+        {"versions": sorted(current), "last_reason": reason}, sort_keys=True
+    ).encode("utf-8")
+    try:
+        janitor_integrity.backup_and_write(idir / _QUARANTINE_NAME, blob)
+    except OSError:
+        return False
+    return True

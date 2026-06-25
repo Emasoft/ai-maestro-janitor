@@ -26,7 +26,9 @@ pre-stub world we're moving away from.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import json
 import os
 import sys
@@ -35,6 +37,20 @@ from pathlib import Path
 PLUGIN_CACHE_ROOT = (
     Path.home() / ".claude" / "plugins" / "cache" / "ai-maestro-plugins" / "ai-maestro-janitor"
 )
+
+# C3 (TRDD-T198DT1W) — the janitor's FIXED persistent DATA dir, resolved the SAME
+# hard-coded way the daemon (launchd_keepalive._DATA_DIR) and the arm skill do,
+# NOT via ${CLAUDE_PLUGIN_DATA} (which points at whichever plugin owns the running
+# turn). This stub lives in this dir; the C3 trust-anchor files (the DATA-dir HMAC
+# key, the last-good pin, the quarantine list) live under it, OUTSIDE the cache
+# being verified — so a tampered cache version cannot forge them.
+PLUGIN_DATA_ROOT = (
+    Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+)
+_INTEGRITY_KEY_NAME = ".integrity-key"  # 32 raw bytes (janitor_self_integrity convention)
+_LAST_GOOD_REL = Path("integrity") / "last-good.json"
+_QUARANTINE_REL = Path("integrity") / "quarantine.json"
+_MANIFEST_REL = Path(".integrity") / "manifest-sha256.json"
 
 
 def _version_key(d: Path) -> tuple[int, ...]:
@@ -96,6 +112,103 @@ def _verify_version(version_dir: Path) -> tuple[bool, str]:
     return True, "verified"
 
 
+# ── C3 — pin last-GOOD version + quarantine bad version (TRDD-T198DT1W) ───────
+#
+# C2 (above) catches ACCIDENTAL corruption with an UNSIGNED manifest. C3 closes
+# the MALICIOUS-replacement gap: the DAEMON certifies a good version by writing
+# an HMAC of its manifest — keyed by the DATA-dir `.integrity-key` the cache
+# writer cannot read — into `<data>/integrity/last-good.json`. The stub
+# recomputes that HMAC and compares; a version that rewrote BOTH a file AND its
+# plaintext manifest still fails the HMAC. A `<data>/integrity/quarantine.json`
+# lets the stub skip a proven-bad version fast.
+#
+# The stub INLINES its own stdlib readers (it must NOT import the cache's own
+# `version_update_lib` / `janitor_self_integrity` to check that same cache —
+# circular trust). FAIL-OPEN is preserved everywhere: any uncertainty (no key,
+# no pin, pin for another version, no manifest, unreadable/malformed state)
+# means C3 has NO OPINION and the C2 verdict stands. C3 adds exactly ONE new
+# rejection: a candidate whose pin names IT but whose recomputed manifest HMAC
+# differs.
+
+
+def _read_key(data_root: Path) -> bytes | None:
+    """The 32-byte DATA-dir HMAC key, or None when absent/wrong-size/unreadable.
+    The stub only READS the key (it never mints one — minting belongs to the
+    daemon/detector); a missing key simply means C3 cannot cross-check → C2-only."""
+    try:
+        blob = (data_root / _INTEGRITY_KEY_NAME).read_bytes()
+    except OSError:
+        return None
+    return blob if len(blob) == 32 else None
+
+
+def _read_pin(data_root: Path) -> dict | None:
+    """The last-GOOD pin ``{"version", "manifest_hmac"}`` or None on any
+    uncertainty (no file / unreadable / malformed / missing fields). The stub
+    reads the PRIMARY file the daemon's crash-safe writer leaves in place; a torn
+    primary just reads as no-pin → fail-open (uncertainty never blocks)."""
+    try:
+        obj = json.loads((data_root / _LAST_GOOD_REL).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    version = obj.get("version")
+    mac = obj.get("manifest_hmac")
+    if not isinstance(version, str) or not version:
+        return None
+    if not isinstance(mac, str) or not mac:
+        return None
+    return {"version": version, "manifest_hmac": mac}
+
+
+def _read_quarantine(data_root: Path) -> set[str]:
+    """The set of quarantined version strings, or an EMPTY set on any uncertainty.
+    FAIL-OPEN is critical: a corrupt quarantine file must NEVER read as "skip
+    everything" — an empty set skips nothing, exactly as if no file existed."""
+    try:
+        obj = json.loads((data_root / _QUARANTINE_REL).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(obj, dict):
+        return set()
+    versions = obj.get("versions")
+    if not isinstance(versions, list):
+        return set()
+    return {v for v in versions if isinstance(v, str) and v}
+
+
+def _pin_hmac(version_dir: Path, key: bytes) -> str | None:
+    """base64(HMAC-SHA256(manifest BYTES, key)) for a cached version, or None if
+    the version shipped no manifest. Recomputed from the exact on-disk bytes —
+    identical to the daemon's ``version_update_lib.manifest_hmac`` — so a
+    constant-time compare against the pin is unambiguous."""
+    try:
+        raw = (version_dir / _MANIFEST_REL).read_bytes()
+    except OSError:
+        return None
+    return base64.b64encode(hmac.new(key, raw, hashlib.sha256).digest()).decode("ascii")
+
+
+def _pin_rejects(version_dir: Path, version: str, data_root: Path) -> bool:
+    """True ONLY when C3 can PROVE this version is bad via the pin: a pin exists,
+    it names THIS version, the DATA key is present, this version has a manifest,
+    and its recomputed HMAC differs from the pinned one. Every other state
+    returns False (no opinion → fail-open; the C2 verdict already decided)."""
+    pin = _read_pin(data_root)
+    if pin is None or pin["version"] != version:
+        return False  # no pin, or pin is about a DIFFERENT version → no opinion
+    key = _read_key(data_root)
+    if key is None:
+        return False  # can't recompute without the key → no opinion (fail-open)
+    actual = _pin_hmac(version_dir, key)
+    if actual is None:
+        return False  # this version has no manifest to anchor → no opinion
+    # constant-time compare; a difference is PROVEN tamper (manifest rewritten
+    # by someone lacking the DATA key) → reject this version.
+    return not hmac.compare_digest(actual, pin["manifest_hmac"])
+
+
 def main() -> int:
     if not PLUGIN_CACHE_ROOT.is_dir():
         sys.exit(f"ai-maestro-janitor cache root missing: {PLUGIN_CACHE_ROOT}")
@@ -105,27 +218,41 @@ def main() -> int:
     )
     if not versions:
         sys.exit("no ai-maestro-janitor versions cached")
-    # C2 verify-before-exec (TRDD-T198DT1W): exec the NEWEST cached version that has a
-    # runnable dispatch.py AND verifies clean against its integrity manifest. On an
-    # EXPLICIT verify-fail (proven corruption) walk DOWN to the next-older clean
-    # version. FAIL-OPEN cardinal rule: if NOTHING verifies clean, exec the newest
-    # runnable version anyway — a possibly-corrupt heartbeat beats a DEAD one (a
-    # bricked stub is the immortality bug this gate exists to prevent) — and warn on
-    # stderr so a human learns. A version with no/unreadable/malformed manifest is
-    # ACCEPTED by _verify_version (we never block what we cannot check).
+    # C2 + C3 verify-before-exec (TRDD-T198DT1W): exec the NEWEST cached version that
+    # has a runnable dispatch.py, is NOT quarantined (C3), verifies clean against its
+    # integrity manifest (C2), AND is not proven-bad by the DATA-dir pin (C3). On any
+    # EXPLICIT rejection (proven corruption, proven manifest-tamper, or a quarantine
+    # entry) walk DOWN to the next-older acceptable version. FAIL-OPEN cardinal rule:
+    # if NOTHING is acceptable, exec the newest RUNNABLE version anyway — a
+    # possibly-bad heartbeat beats a DEAD one (a bricked stub is the immortality bug
+    # this gate exists to prevent) — and warn on stderr so a human learns. Every
+    # uncertainty (no/unreadable/malformed manifest, no key, no pin, pin for another
+    # version, unreadable/malformed quarantine) is ACCEPTED — we never block what we
+    # cannot prove bad. The quarantine read is hoisted out of the loop (one read).
+    quarantined = _read_quarantine(PLUGIN_DATA_ROOT)
     newest_runnable: Path | None = None
     for version_dir in reversed(versions):  # newest first
         target = version_dir / "scripts" / "dispatch.py"
         if not target.is_file():
             continue
         if newest_runnable is None:
-            newest_runnable = target  # remember the fail-open fallback
+            # The fail-open backstop is the newest RUNNABLE version regardless of
+            # quarantine/pin/verify — when all else is rejected, a heartbeat must
+            # still fire. Captured BEFORE the quarantine skip on purpose.
+            newest_runnable = target
+        if version_dir.name in quarantined:
+            sys.stderr.write(
+                f"ai-maestro-janitor: cached version {version_dir.name} is "
+                f"quarantined — trying an older version\n"
+            )
+            continue
         ok, reason = _verify_version(version_dir)
-        if ok:
+        if ok and not _pin_rejects(version_dir, version_dir.name, PLUGIN_DATA_ROOT):
             os.execv(str(target), [str(target), *sys.argv[1:]])
+        why = reason if not ok else "pin-mismatch"
         sys.stderr.write(
             f"ai-maestro-janitor: cached version {version_dir.name} failed integrity "
-            f"verify ({reason}) — trying an older version\n"
+            f"verify ({why}) — trying an older version\n"
         )
     if newest_runnable is not None:
         sys.stderr.write(
