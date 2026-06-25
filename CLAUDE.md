@@ -195,7 +195,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=0d7a820a5152 digest=fdbe2251e169 generated=2026-06-25T06:14:52+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=f99d5d7c01d7 digest=9c3c43a17aa5 generated=2026-06-25T06:41:11+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -473,6 +473,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · clear_reload_flag() -> None — Reset the reload generation. Used only by the disarm / manual-reset path;
   · daemon_needs_restart() -> bool — True iff the running daemon's script path doesn't match the current cache.
   · request_daemon_restart() -> bool — Send SIGTERM to a stale daemon so the next heartbeat lazy-spawns a new one.
+  · crash_loop_active(now) -> bool — PUBLIC read-only: True iff the daemon spawn breaker is tripped (the
+  · recent_spawn_count(window_s, now) -> int — PUBLIC read-only: how many daemon spawn attempts landed within the last
   · ensure_daemon_running(max_silence_s) -> bool — If the daemon is dead AND not kill-switched AND enabled, spawn it.
 `scripts/lib/ioc_taxonomy.py` — IOC taxonomy primitives — distilled from the deep-forensics-ioc audit
   · IOCTaxonomyError — Raised when an IOC bundle cannot be parsed.
@@ -522,6 +524,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · lessons_preserved(sources, result) -> tuple[bool, list[str]] — STRICT: every source lesson's substantive body must survive into `result`.
   · body_facts_preserved(sources, result, min_len) -> tuple[bool, list[str]] — STRICT anti-corruption (issue #48): every substantive body FACT line of every
   · harvest_preservation_ok(memory_md_text, corpus_text, note_filenames) -> tuple[bool, list[str]] — Prove a HARVEST lost nothing BEFORE MEMORY.md is reduced to the stub: every memory
+  · mirror_preservation_ok(buffer_notes, wiki_corpus, min_len) -> tuple[bool, list[str]] — Prove a coexistence HARVEST mirrored every raw buffer note into the wiki.
   · no_new_duplicate_lines(result, min_len) -> tuple[bool, list[str]] — No substantive content line (length ≥ `min_len`, not a heading/list marker)
   · no_dangling_refs(live_pages, retired_slugs) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
   · footnote_refs_resolve(text) -> tuple[bool, list[str]] — Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
@@ -571,6 +574,10 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · read_last_run(intervention, scope, root) -> int
   · mark_ran(intervention, scope, root, now) -> None — Stamp that `intervention` ran for (scope, root) at `now` (epoch seconds).
   · is_due(intervention, scope, root, now) -> bool — True iff `intervention` is due for (scope, root): enabled AND a cadence
+  · harvest_watermark_path(scope, root) -> Path
+  · harvest_watermark_read(scope, root) -> dict — Return the ``{note_name: content_sha256}`` map of buffer notes already mirrored
+  · harvest_note_is_mirrored(scope, root, note_name, note_text) -> bool — True iff `note_name` was mirrored AND its content is unchanged since (the stored
+  · harvest_mark_mirrored(scope, root, note_name, note_text) -> None — Record that `note_name` (with this exact content) has been mirrored into the
 `scripts/lib/memory_txn.py` — Memory-edit transaction core (TRDD-b92a9dd0) — the safety substrate every
   · MemoryTxnError — A transaction precondition failed (stale source, vanished source, lock
   · editor_enabled() -> bool — Master kill gate for the entire wikimem editor.
@@ -814,6 +821,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · pin_good_version(version_dir, version) -> bool — Certify ``version`` as the last-GOOD version: compute its manifest HMAC
   · read_quarantine() -> set[str] — The set of quarantined (proven-bad) version strings, or an EMPTY set on
   · add_quarantine(version, reason) -> bool — Record ``version`` as proven-bad so the stub skips it fast on later
+  · older_runnable_version(cache_parent, newest) -> str | None — The highest installed version STRICTLY OLDER than ``newest`` whose
+  · plan_crash_loop_rollback(cache_parent, *, crash_loop) -> tuple[str, str] | None — Decide whether to auto-rollback a crash-looping self-update. PURE — it
 `scripts/lib/zizmor_classifier.py` — One-pass workflow classifier — google-re2 RegexSet primary, Python re fallback.
   · Finding
   · Classifier — Single-pass workflow classifier. Build once, reuse across files.
