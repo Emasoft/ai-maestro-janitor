@@ -1,9 +1,9 @@
 ---
 trdd-id: c1b0affc-ea1c-4230-9e5c-36bbf66a4744
 title: Fail-safe wikimem split — synthesize seams so a seamless oversized page ALWAYS converges
-column: dev
+column: published
 created: 2026-06-22T10:45:04+0200
-updated: 2026-06-22T10:45:04+0200
+updated: 2026-06-25T10:22:22+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 parent-trdd: TRDD-aebedbff

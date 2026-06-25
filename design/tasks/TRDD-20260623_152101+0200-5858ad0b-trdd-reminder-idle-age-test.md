@@ -1,9 +1,9 @@
 ---
 trdd-id: 5858ad0b-d197-400a-a953-8bb40b06fdfd
 title: Complete issue #59 — trdd-reminder idle+age label + first test (backburner-exclusion regression)
-column: dev
+column: published
 created: 2026-06-23T15:21:01+0200
-updated: 2026-06-23T15:21:01+0200
+updated: 2026-06-25T10:22:22+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: bugfix

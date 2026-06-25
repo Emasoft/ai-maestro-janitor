@@ -1,9 +1,9 @@
 ---
 trdd-id: 378c85da-a7f5-47e8-ba95-4afd90ce65da
 title: memory-settings persists defaults wholesale — a later default-raise is silently masked
-column: dev
+column: published
 created: 2026-06-23T22:07:04+0200
-updated: 2026-06-23T22:07:04+0200
+updated: 2026-06-25T10:22:22+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 priority: 3

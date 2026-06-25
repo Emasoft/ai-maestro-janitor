@@ -1,9 +1,9 @@
 ---
 trdd-id: a6d2fdaf-3f86-45ac-9e05-51bd54402bb9
 title: Janitor plugin-update reliability — per-session reload nudge + cache prune
-column: dev
+column: published
 created: 2026-06-20T22:34:28+0200
-updated: 2026-06-20T22:34:28+0200
+updated: 2026-06-25T10:22:22+0200
 current-owner: ai-maestro-janitor-session
 task-type: bugfix
 release-via: publish
