@@ -1,9 +1,9 @@
 ---
 trdd-id: a4e41e89-e995-4309-bd15-8e247a34b960
 title: Heartbeat token meter + push automation into scripts to minimize per-fire agent tokens
-column: dev
+column: published
 created: 2026-06-14T19:42:55+0200
-updated: 2026-06-17T13:18:37+0200
+updated: 2026-06-25T10:22:22+0200
 current-owner: ai-maestro-janitor
 task-type: feature
 priority: 2

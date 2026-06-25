@@ -1,9 +1,9 @@
 ---
 trdd-id: c77dae09-fccb-4e91-b3cf-1534492f0896
 title: Memory librarian — background auto-aggregation of per-topic memory pages with linked tangents
-column: dev
+column: published
 created: 2026-06-09T17:53:01+0200
-updated: 2026-06-10T05:59:15+0200
+updated: 2026-06-25T10:22:22+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 4
