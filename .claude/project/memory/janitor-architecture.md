@@ -232,6 +232,17 @@ invariant above); **S3.1** (atomic user-scope file writes); **S4.1** (state in
 clear a finding by devitalizing/removing code, never by suppressing a rule or
 relaxing `--strict`); **S6.1** (every detector is fail-soft).
 
+## Self-healing must reach every respawn path
+
+The daemon has TWO respawn paths: the session/heartbeat path (the stub →
+`ensure_daemon_running` → `spawn_daemon_detached`) and the OS path
+(launchd/systemd KeepAlive → `daemon_keepalive_entry` → `daemon.main`). A
+self-healing SIGNAL — the C3 quarantine (a proven-bad version) and the
+crash-loop breaker — only heals if EVERY respawn path both *consults* it and
+*feeds* it. A signal wired to one path silently covers half the failure
+surface; the keepalive and the stub must agree on which version is bad and both
+must report a crash.[^3]
+
 ## See also
 
 - `CLAUDE.md` — the auto-generated, always-current project map (file → symbol
@@ -260,3 +271,22 @@ relaxing `--strict`); **S6.1** (every detector is fail-soft).
   in LOCAL scope" and documented generically with `$HOME` / `<repo-root>` /
   `<email>`. The janitor's own `memory-scope-leak` detector polices exactly this
   invariant on the PUSHED memory scope.
+
+[^3]: [ocd:2026-06-25 lmd:2026-06-25] A bad janitor self-update kept
+  self-resurrecting at the OS level even though C4 had a rollback
+  (TRDD-KEEPQRTN, fixed v0.24.1). Symptom: a bad-DAEMON version relaunched by
+  launchd forever — "auto-rollback didn't work for the daemon." Cause: C4's
+  quarantine was consulted ONLY by the dispatcher-stub (the heartbeat path); the
+  keepalive's `latest_cache_scripts_dir()` picked the newest version REGARDLESS
+  of quarantine, and OS-respawns never called `_record_spawn_attempt`, so
+  `crash_loop_active` (which counts `daemon.spawn-history`) never saw the
+  OS-driven loop → C4 never fired. Fix: the keepalive now SKIPS quarantined
+  versions (mirroring the stub's C3 walk, fail-open) AND the keepalive-launched
+  daemon records a spawn attempt (fail-open, keepalive-gated so it never
+  double-counts the session path). Lesson: this is the SAME shape as the
+  rotator's divergent-input-path bug (see [[oauth-rotation-renew-reauth]]) — a
+  signal that gates self-healing must be consulted by EVERY path that can act on
+  it; wiring it to one path is hidden half-coverage. It survived the per-group
+  reviews because C4 (heartbeat) and the keepalive (OS path) each looked correct
+  in isolation; only the whole-immortality-surface review caught the cross-group
+  seam.

@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-25T08:40:10+0200
+updated: 2026-06-25T09:23:14+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,37 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-25
+
+### ✅ 2026-06-25 (09:23) — IMMORTALITY COMPLETE + final-review SOUND + the one found gap CLOSED (5 releases, all CI-green). Only E2/E3 awaits the USER.
+Since the 08:40 entry below: **F3 shipped (v0.24.0)**, then the plan's mandated FINAL whole-immortality-surface
+adversarial review ran (`reports/immortality-final-review/20260625_090258+0200-whole-surface-audit.md`) — verdict:
+the chain is **fail-open / never-kill / trust-anchor SOUND, NO CRITICAL** (E2/E3 confirmed genuinely inert). It found
+ONE real HIGH cross-group gap: **C4 auto-rollback covered the heartbeat path but NOT the daemon/L0 path** — the
+keepalive's version selection was quarantine-blind + OS-respawns didn't feed the crash signal, so a bad-DAEMON
+self-update self-resurrected via launchd forever. **FIXED in v0.24.1 (TRDD-KEEPQRTN, CI-green):** (A) quarantine-aware
+`latest_cache_scripts_dir()` mirroring the stub's C3 walk (fail-open: all-quarantined→newest, read-raises→newest,
+never None due to quarantine); (B) the OS-launched daemon records a spawn attempt (keepalive-gated, fail-open) so
+`crash_loop_active` sees the OS-driven loop → C4 quarantines. The daemon now auto-rolls-back a bad update at BOTH
+layers. The review's LOW/NIT are accept-as-is (LOW-1 stub env-immunity is INTENTIONAL security; the dispatch-self-
+crash Mode-A sub-case is noted out-of-scope for a future follow-up).
+
+**STATUS — the immortality mandate is DELIVERED:** GROUP A/B/C/D + F3 COMPLETE + shipped across **5 releases
+(v0.21.0 → v0.24.1, every one CI-green)** + the final whole-surface review SOUND + the single found gap CLOSED. The
+janitor now: self-updates + self-rolls-back a bad update (C3/C4 at heartbeat AND daemon/L0), self-arms, self-resumes
+(incl. post-compaction via the PreCompact handoff hook), OS-respawns (launchd/systemd keepalive with interpreter
+fallback + staged-closure verify-or-restage), self-recovers frozen sessions (the gentle fleet ladder), and records a
+tamper-evident recovery audit log — all fail-open, never-kill-the-user.
+
+**NEXT — everything remaining is USER-gated; await the USER:**
+1. **E2/E3** — the process-KILLING hard-restart rungs (the nuclear option) are built+tested+default-OFF but UNWIRED;
+   say **"wire E2/E3"** to greenlight (held only because killing processes warrants one human word — Tier-3/destructive).
+2. **Re-login `fmuaddib@gmail.com`** via `/janitor-refresh-claude-logins` — the IRREDUCIBLE human OAuth consent
+   (dead refresh token, 374 failed renewals; the rotator auto-captures after).
+3. #209 (scope-migration Phase 2 — needs the target corpus) and #230 (3-tier memory architecture — needs structural
+   sign-off) remain USER-gated.
+
+There is NO remaining SAFE autonomous immortality work — the roadmap is done and reviewed. Do NOT invent more; the
+correct state now is to keep the heartbeat alive and await the USER's E2/E3 / re-login / #209 / #230 calls.
 
 ### ✅ 2026-06-25 (08:40) — immortality A/B/C/D COMPLETE + shipped (v0.21.0→v0.23.0 CI-green); E+F eval ~88% covered; the ~05:27 HOLD stance is SUPERSEDED
 **Authority shift:** the ~05:27 "HOLD the safety-critical exec-path work / await the USER / it needs the
