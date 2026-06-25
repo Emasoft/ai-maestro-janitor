@@ -791,6 +791,23 @@ def recent_spawn_count(window_s: Optional[int] = None, now: Optional[int] = None
     )
 
 
+def record_spawn_attempt(now: Optional[int] = None) -> None:
+    """PUBLIC: record one daemon spawn attempt into the crash-loop ring.
+
+    The crash-loop breaker (`_crash_loop_active`) only counts attempts written by
+    `_record_spawn_attempt`, which is reached ONLY via `spawn_daemon_detached` — the
+    SESSION/heartbeat spawn path. An OS-keepalive (launchd/systemd) respawn execs the
+    daemon entry directly, never `spawn_daemon_detached`, so an OS-respawned die-on-start
+    daemon used to loop forever with an EMPTY spawn-history → `crash_loop_active()` False →
+    C4 never quarantined the bad version (KEEPQRTN HIGH-2). The OS-launched daemon calls
+    THIS at startup so the OS-driven crash loop becomes visible to the breaker and C4 can
+    roll back. Public (not the `_`-private) so `daemon.main()` records without reaching into
+    a private. The session path keeps recording via `spawn_daemon_detached` — callers MUST
+    record on the OS path ONLY, or the session path would double-count and falsely trip the
+    breaker."""
+    _record_spawn_attempt(now)
+
+
 def _kill_wedged_daemon(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
     """Kill a WEDGED daemon — pid alive but heartbeat provably stale — so the kernel
     releases the singleton flock it still holds and a respawn can actually take over.

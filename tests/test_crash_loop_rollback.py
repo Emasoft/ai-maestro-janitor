@@ -191,6 +191,28 @@ def test_public_recent_spawn_count(gs):
     assert gs.recent_spawn_count(now=now) == 2  # the two recent ones, not the aged-out one
 
 
+def test_public_record_spawn_attempt_appends_one(gs):
+    """KEEPQRTN HIGH-2: record_spawn_attempt() (the OS-keepalive path's recorder)
+    appends EXACTLY ONE entry — the same ring _record_spawn_attempt writes — so the
+    OS-respawn loop becomes visible to the breaker without double-counting."""
+    now = int(time.time())
+    assert gs.recent_spawn_count(now=now) == 0
+    gs.record_spawn_attempt(now=now)
+    assert gs.recent_spawn_count(now=now) == 1
+    gs.record_spawn_attempt(now=now)
+    assert gs.recent_spawn_count(now=now) == 2  # one entry per call, never more
+
+
+def test_public_record_spawn_attempt_trips_breaker(gs):
+    """Enough OS-keepalive records inside the window trip crash_loop_active() — the
+    signal C4 reads to quarantine a die-on-start OS-respawned daemon."""
+    now = int(time.time())
+    assert gs.crash_loop_active(now=now) is False
+    for i in range(gs._CRASH_LOOP_SPAWN_LIMIT):
+        gs.record_spawn_attempt(now=now - i)  # all inside the window
+    assert gs.crash_loop_active(now=now) is True
+
+
 # ── dispatch._phase_crash_loop_rollback (the producer) ──────────────────────
 
 

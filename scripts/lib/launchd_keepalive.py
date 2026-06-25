@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 import keepalive_stage  # sibling in scripts/lib/; computes + verbatim-stages the closure
+import version_update_lib  # sibling in scripts/lib/; the C3 quarantine reader (read_quarantine)
 
 # The janitor's FIXED persistent DATA dir — hard-coded (NOT ${CLAUDE_PLUGIN_DATA}, which
 # resolves to whichever plugin owns the current turn, wrong in a detached/session-less
@@ -117,13 +118,40 @@ def _version_key(name: str) -> tuple[int, ...]:
         return (-1,)
 
 
+def _read_quarantine() -> set[str]:
+    """The C3 quarantine set (proven-bad version strings), FAIL-OPEN: any fault →
+    EMPTY set. C4 auto-rollback covers the heartbeat via the dispatcher-stub's C3
+    skip, but the OS-respawn path is otherwise quarantine-blind — so the keepalive's
+    version selection MUST consult the same set, or launchd resurrects a quarantined
+    daemon forever (KEEPQRTN HIGH-1/MEDIUM-1). The read is wrapped so a raising /
+    unreadable / corrupt quarantine NEVER makes us select a WORSE version than today:
+    an empty set means "skip nothing", exactly as if no quarantine existed — and
+    `version_update_lib.read_quarantine` is itself fail-open, this `except` is the
+    second belt against any unexpected import/attr error."""
+    try:
+        return version_update_lib.read_quarantine()
+    except Exception:  # noqa: BLE001 — fail-open: a quarantine fault must never starve the daemon
+        return set()
+
+
 def latest_cache_scripts_dir() -> Path | None:
-    """The ``scripts/`` dir of the NEWEST cached plugin version (from the fixed cache
-    location), or ``None`` when no usable cache is present (e.g. an inline/dev install).
-    Only versions that actually carry the entry + daemon are considered. The OS-spawned
-    daemon — which runs from DATA and cannot see the cache via its own ``__file__`` — uses
-    this to re-stage the freshest closure into DATA, so it self-heals toward the current
-    version. Dirs are read only to COPY from, never to exec."""
+    """The ``scripts/`` dir of the newest cached plugin version that is NOT C3-quarantined
+    (from the fixed cache location), or ``None`` when no usable cache is present (e.g. an
+    inline/dev install). Only versions that actually carry the entry + daemon are
+    considered. The OS-spawned daemon — which runs from DATA and cannot see the cache via
+    its own ``__file__`` — uses this to re-stage the freshest closure into DATA, so it
+    self-heals toward the current GOOD version. Dirs are read only to COPY from, never to
+    exec.
+
+    QUARANTINE-AWARE (KEEPQRTN, mirrors the dispatcher-stub's C3 walk at
+    ``dispatcher-stub.py:232-263`` exactly — same policy, not a new one): walk versions
+    newest→oldest and SKIP any that the C3 quarantine marks proven-bad, returning the
+    newest NON-quarantined version. FAIL-OPEN cardinal rule (the stub's): the newest
+    runnable version is captured BEFORE the quarantine skip as the backstop, so if EVERY
+    cached version is quarantined we still select the newest (a running daemon beats none),
+    and a raising/unreadable quarantine reads as EMPTY (select newest, never worse than
+    today). We never return ``None`` because of quarantine — only because the cache itself
+    is absent or carries no complete version."""
     if not _CACHE_PARENT.is_dir():
         return None
     candidates = [
@@ -136,7 +164,17 @@ def latest_cache_scripts_dir() -> Path | None:
     if not candidates:
         return None
     candidates.sort(key=lambda d: _version_key(d.name))
-    return candidates[-1] / "scripts"
+    # newest runnable = the fail-open backstop, captured BEFORE the quarantine skip (the
+    # stub's invariant: when all else is rejected, the daemon must still have code to run).
+    newest_runnable = candidates[-1] / "scripts"
+    quarantined = _read_quarantine()
+    for version_dir in reversed(candidates):  # newest first, like the stub
+        if version_dir.name in quarantined:
+            continue
+        return version_dir / "scripts"
+    # Every cached version is quarantined → select the newest anyway (a running daemon
+    # beats none — the stub's cardinal rule); never starve the OS keepalive on quarantine.
+    return newest_runnable
 
 
 def restage(source_scripts_dir: Path) -> None:

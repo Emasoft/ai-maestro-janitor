@@ -96,11 +96,13 @@ def harness(tmp_path: Path):
 
     spawned: list[subprocess.Popen[bytes]] = []
 
-    def spawn() -> subprocess.Popen[bytes]:
+    def spawn(*extra_args: str) -> subprocess.Popen[bytes]:
         # Invoke via the shebang (`uv run --script --quiet`); uv is on PATH on
         # any host running these tests (uvx is what's running pytest itself).
+        # extra_args lets a test pass daemon flags (e.g. "--keepalive") — they go
+        # AFTER the script so the daemon's `"--keepalive" in sys.argv` sees them.
         proc = subprocess.Popen(
-            [str(_DAEMON)],
+            [str(_DAEMON), *extra_args],
             env=base_env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -179,6 +181,41 @@ def test_daemon_writes_pid_and_heartbeat(harness: dict) -> None:
     # The pid written by the daemon is its OWN process; with the `uv run`
     # shebang the daemon is a python child of the uv launcher (proc.pid),
     # so written_pid ≠ proc.pid in general but both are alive.
+
+
+def test_keepalive_daemon_records_a_spawn_attempt(harness: dict) -> None:
+    """KEEPQRTN HIGH-2: a daemon launched on the OS-keepalive path (--keepalive) records a
+    spawn-attempt stamp in daemon.spawn-history at startup, so a die-on-start OS-respawn loop
+    becomes visible to crash_loop_active() and C4 can quarantine the bad version. Without
+    this the OS path wrote NOTHING and the breaker never tripped (the rollback gap)."""
+    harness["spawn"]("--keepalive")
+    hist = harness["state_dir"] / "daemon.spawn-history"
+    assert _wait_for(lambda: hist.is_file() and hist.read_text(encoding="utf-8").strip()), \
+        "the --keepalive daemon must record a spawn attempt within 8 s"
+    lines = [ln for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip().isdigit()]
+    assert len(lines) == 1, f"exactly one spawn-attempt stamp expected, got {lines}"
+
+
+def test_session_daemon_does_not_double_record_in_main(harness: dict) -> None:
+    """KEEPQRTN HIGH-2 (the don't-double-count half): a daemon whose main() runs WITHOUT
+    --keepalive (the session path) records NOTHING in main() — the session path's stamp is
+    written by spawn_daemon_detached, not main(). Recording in BOTH would double-count and
+    falsely trip the breaker on the normal session path. Proven by: main() comes up (pid +
+    heartbeat appear) yet leaves daemon.spawn-history absent/empty."""
+    harness["spawn"]()  # no --keepalive → the session-style invocation of main()
+    pid_path = harness["state_dir"] / "daemon.pid"
+    hb_path = harness["state_dir"] / "daemon.heartbeat.ts"
+    assert _wait_for(lambda: pid_path.is_file() and hb_path.is_file()), \
+        "the session daemon must come up (pid + heartbeat) within 8 s"
+    # main() is well past the spawn-attempt record point now (pid + heartbeat are written
+    # AFTER it). It must NOT have written a spawn-history entry from main() itself.
+    hist = harness["state_dir"] / "daemon.spawn-history"
+    lines = (
+        [ln for ln in hist.read_text(encoding="utf-8").splitlines() if ln.strip().isdigit()]
+        if hist.is_file()
+        else []
+    )
+    assert lines == [], f"main() must not record a spawn attempt off the keepalive path, got {lines}"
 
 
 def test_daemon_runs_marketplace_refresh_and_user_plugins_update(harness: dict) -> None:

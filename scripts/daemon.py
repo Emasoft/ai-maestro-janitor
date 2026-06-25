@@ -966,6 +966,23 @@ def main() -> int:
 
     gs.init_global_state()
 
+    # KEEPQRTN HIGH-2 — feed the crash-loop signal on the OS-respawn path. The crash-loop
+    # breaker only counts spawn attempts written by the SESSION path (spawn_daemon_detached).
+    # An OS keepalive (launchd/systemd) respawn execs this daemon directly, so a die-on-start
+    # daemon respawned by the OS would loop forever invisibly to crash_loop_active() → C4
+    # never quarantines the bad version. Record a spawn-attempt stamp HERE (earliest safe
+    # point — after init_global_state so the state dir exists, before the flock so a daemon
+    # that dies at/after the flock still counted its attempt) so the OS-driven crash loop is
+    # visible to the breaker and C4 rolls the bad version back. ONLY on the keepalive path:
+    # the session path already records via spawn_daemon_detached, so recording on both would
+    # double-count and falsely trip the breaker. FAIL-OPEN: wrapped so a bookkeeping fault
+    # can NEVER break daemon startup — this is the deepest immortality layer.
+    if _KEEPALIVE_INSTANCE:
+        try:
+            gs.record_spawn_attempt()
+        except Exception as exc:  # noqa: BLE001 — must never brick the OS-respawned daemon
+            state.log_line("daemon", f"keepalive spawn-attempt record skipped: {exc}")
+
     # Singleton: the flock IS the truth. If we cannot acquire it, another
     # daemon is alive — exit silently. PID file / heartbeat are downstream
     # diagnostics; they cannot disagree with the kernel's flock state.

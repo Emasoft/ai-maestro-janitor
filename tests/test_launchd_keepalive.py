@@ -350,6 +350,72 @@ def test_latest_cache_scripts_dir_none_without_cache(
     assert launchd_keepalive.latest_cache_scripts_dir() is None
 
 
+# ── KEEPQRTN Part A: quarantine-aware version selection (mirrors the stub's C3 walk) ──
+
+
+def _complete_cache(parent: Path, versions: tuple[str, ...]) -> None:
+    """Build a cache-parent tree where every version carries the entry + daemon (so all
+    are 'complete' keepalive candidates) — the keepalive's selection input."""
+    for ver in versions:
+        s = parent / ver / "scripts"
+        s.mkdir(parents=True)
+        (s / "daemon.py").write_text("x", encoding="utf-8")
+        (s / "daemon_keepalive_entry.py").write_text("y", encoding="utf-8")
+
+
+def test_latest_cache_scripts_dir_skips_quarantined_newest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KEEPQRTN HIGH-1/MEDIUM-1: when the NEWEST cached version is C3-quarantined, the
+    keepalive selects the newest NON-quarantined version instead — mirroring the
+    dispatcher-stub's C3 skip so launchd restages the GOOD older version, not the bad N."""
+    cache = tmp_path / "cache"
+    _complete_cache(cache, ("0.20.1", "0.21.0", "0.22.0"))
+    data = tmp_path / "data"
+    data.mkdir()
+    # Real quarantine round-trip (no mock): write the proven-bad newest via version_update_lib,
+    # which read_quarantine reads back through the same JANITOR_DATA_DIR.
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    monkeypatch.setattr(launchd_keepalive, "_CACHE_PARENT", cache)
+    assert launchd_keepalive.version_update_lib.add_quarantine("0.22.0", "crash-loop")
+    assert launchd_keepalive.latest_cache_scripts_dir() == cache / "0.21.0" / "scripts"
+
+
+def test_latest_cache_scripts_dir_all_quarantined_picks_newest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KEEPQRTN fail-open cardinal rule: when EVERY cached version is quarantined, the
+    keepalive still selects the NEWEST (a running daemon beats none — the stub's rule). It
+    never returns None on account of quarantine."""
+    cache = tmp_path / "cache"
+    _complete_cache(cache, ("0.20.1", "0.21.0", "0.22.0"))
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    monkeypatch.setattr(launchd_keepalive, "_CACHE_PARENT", cache)
+    for ver in ("0.20.1", "0.21.0", "0.22.0"):
+        assert launchd_keepalive.version_update_lib.add_quarantine(ver, "all-bad")
+    assert launchd_keepalive.latest_cache_scripts_dir() == cache / "0.22.0" / "scripts"
+
+
+def test_latest_cache_scripts_dir_quarantine_raises_picks_newest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KEEPQRTN fail-open: a raising/unreadable quarantine reads as EMPTY → select the
+    newest (never worse than today). The keepalive's own `except` backstop catches even an
+    unexpected error from read_quarantine, so a quarantine fault can never starve the OS
+    keepalive of a version to launch."""
+    cache = tmp_path / "cache"
+    _complete_cache(cache, ("0.20.1", "0.21.0", "0.22.0"))
+    monkeypatch.setattr(launchd_keepalive, "_CACHE_PARENT", cache)
+
+    def _boom() -> set[str]:
+        raise RuntimeError("simulated quarantine read failure")
+
+    monkeypatch.setattr(launchd_keepalive.version_update_lib, "read_quarantine", _boom)
+    assert launchd_keepalive.latest_cache_scripts_dir() == cache / "0.22.0" / "scripts"
+
+
 def test_staged_is_current_true_when_identical(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
