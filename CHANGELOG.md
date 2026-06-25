@@ -2,15 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.20.1] - 2026-06-24
+## [0.21.0] - 2026-06-25
 
 ### Bug Fixes
 
-- Recheck refinements on the v0.20.0 wrapper fold (TRDD-3T4DZWXA)
+- Reset refresh_failures=0 on a successful cmd_auto refresh (TRDD-HJGR4I5W)
+- MD004 ul-style — rephrase a '+ '-prefixed wrapped line in fe45babc STATE (TRDD-fe45babc)
 
 ### Documentation
 
-- TRDD-3T4DZWXA published in v0.20.0 — record skill→command resolution
+- Resolve TRDD-e247a349 → complete (trdd-drift: 14d stale in dev)
+- Night-brain STATE — bring fe45babc current (TRDD-fe45babc)
+
+### Features
+
+- Scope-migration classifier — Phase 1 of the corpus-migration helper (TRDD-47df698b)
+- GROUP C C3 — pin-last-good + quarantine-bad-version (TRDD-T198DT1W)
+- PreCompact ground-truth handoff — anti-hallucination resume (TRDD-7DVNHLOP)
 
 ### Miscellaneous
 
