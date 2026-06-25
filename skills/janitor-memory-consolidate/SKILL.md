@@ -104,12 +104,22 @@ duplicate is the common case), then narrow with memgrep:
 
 ```bash
 MEMDIR="$LOCAL_MEM"   # or $USER_MEM — the ONE scope for this pass
-# Most-recently-touched pages (the likely fresh dup), newest first:
-memgrep recall "" "$MEMDIR" --sort lmd --top 12 2>/dev/null || \
+# Most-recently-touched pages (the likely fresh dup), newest first. memgrep RECURSES
+# the scope root and has NO exclude flag, so it can surface the PRIVATE user-mem/
+# store (TRDD-4334aad0 — agent-invisible by design). Filter it out of every memgrep
+# result here (mirrors the split skill + the librarian's memory_scopes.is_note_file
+# SSOT, which excludes user-mem/). The `ls` fallback is flat (no recursion), so it
+# never sees user-mem/.
+memgrep recall "" "$MEMDIR" --sort lmd --top 12 2>/dev/null | grep -v '/user-mem/' || \
   ls -t "$MEMDIR"/*.md 2>/dev/null | head -12
 # For a recent page's apparent subject, find same-scope notes that overlap:
-memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 8
+memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 8 | grep -v '/user-mem/'
 ```
+
+**Privacy guard:** NEVER open, read, merge, or even name a page whose path contains
+`user-mem/` — that is the user's PRIVATE agent-invisible store; it is not part of the
+curated wiki and must never enter a consolidation. The `grep -v '/user-mem/'` above
+strips it from memgrep's recursive output.
 
 Read ONLY the handful memgrep returns (their bodies + frontmatter). Pick at most
 ONE pair `(A, B)` that looks like the same subject. If none is convincing,
@@ -151,7 +161,8 @@ scope is also about this subject, merging only A+B leaves a fragment — wrong. 
 the scope for the subject and confirm only A and B match:
 
 ```bash
-memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 10   # expect only A and B
+# Drop user-mem/ (private, recursive) so a private note can't masquerade as a third page.
+memgrep find "+<subject-term-1> +<subject-term-2>" "$MEMDIR" --top 10 | grep -v '/user-mem/'   # expect only A and B
 ```
 
 If a third page appears, **abstain** and surface all three for a human (they may

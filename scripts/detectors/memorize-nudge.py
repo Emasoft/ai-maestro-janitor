@@ -74,8 +74,6 @@ _BOOKKEEPING_PREFIXES = (
 _BOOKKEEPING_BASENAMES = frozenset(
     {"CHANGELOG.md", "MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"}
 )
-# Files in a memory dir that are NOT notes (indexes / the librarian's proposal).
-_NON_NOTE_BASENAMES = _BOOKKEEPING_BASENAMES
 # A commit whose subject matches this is bookkeeping regardless of its files.
 _RELEASE_SUBJECT = ("chore(release)", "chore: release", "bump version")
 
@@ -96,19 +94,12 @@ def _session_key() -> str:
 
 
 def _note_files(scope_dir: Path) -> list[Path]:
-    """Real memory NOTES under `scope_dir` (excludes indexes, the reorg proposal,
-    and the private user-mem/ subtree)."""
-    out: list[Path] = []
-    try:
-        for p in scope_dir.rglob("*.md"):
-            if p.name in _NON_NOTE_BASENAMES:
-                continue
-            if "user-mem" in p.parts:
-                continue
-            out.append(p)
-    except OSError:
-        return []
-    return out
+    """Real memory NOTES under `scope_dir`, via the shared SSOT.
+
+    `memory_scopes.iter_note_files` excludes the generated/index files, the
+    detector-proposal reports (`-proposed.md`), and the PRIVATE user-mem/ subtree
+    — the same filter every editor/librarian site now shares (TRDD-87935f21)."""
+    return memory_scopes.iter_note_files(scope_dir)
 
 
 def _last_memory_mtime(scope_dirs: list[tuple[str, Path]]) -> tuple[int, int]:

@@ -135,7 +135,9 @@ Both `metadata: {tier: component, type: project}`. A reader says "same incident,
 one page".
 
 1. **Narrow:** `memgrep recall "" "$LOCAL_MEM" --sort lmd --top 12` surfaces both;
-   `memgrep find "+rotator +429" "$LOCAL_MEM"` returns exactly these two.
+   `memgrep find "+rotator +429" "$LOCAL_MEM"` returns exactly these two. (In the
+   live SKILL these recursive memgrep calls are piped through `grep -v '/user-mem/'`
+   — the private store is never a merge candidate; see the SKILL's privacy guard.)
 2. **Subject:** read both — same incident, different facets → mergeable.
 3. **Legality:** `is_legal_merge` → `(True, "ok")` (same tier `component`, same
    type `project`).

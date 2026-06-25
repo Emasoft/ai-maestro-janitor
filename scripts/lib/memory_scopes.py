@@ -47,6 +47,86 @@ WIKI_SUBDIR = "wiki"
 # discriminator (is_curated_wiki_page) is by CONTENT SHAPE, not path.
 _WIKIMEM_ONLY_FM_KEYS = ("node_type", "tier")
 
+# --------------------------------------------------------------------------- #
+# What is and is not a real NOTE in a memory dir — the SINGLE SOURCE OF TRUTH
+# (TRDD-87935f21 mandate #3). Before this, every editor/librarian scan site
+# (memory-librarian, memory_migrate, memorize-nudge, the memory-maintenance
+# content-precheck) carried its OWN copy of "exclude the generated/index files +
+# the detector-proposal artifacts + the PRIVATE user-mem store", with "mirrors
+# the librarian's _NON_NOTE_NAMES" comments — a latent divergence bug (and an
+# actual privacy gap: the consolidate skill's memgrep scan never excluded
+# user-mem). is_note_file / iter_note_files below are that SSOT.
+#
+# NOTE the deliberate non-consumer: the `memory-scope-leak` SECURITY detector
+# keeps its OWN, narrower filter on purpose. It scans the PUSHED PROJECT scope
+# for leaked secrets, where a leak is a leak regardless of which subdir it sits
+# in — so it must NOT skip user-mem/ or .maint-staging/. Routing it through this
+# editor SSOT would silently weaken the leak scan; it is intentionally excluded.
+# --------------------------------------------------------------------------- #
+
+# Generated / index files written INTO a memory dir that are NOT notes. The
+# MEMORY.md stub + memgrep's optional human-readable ``memory-index.md`` doc.
+# Compared by basename, case-sensitively (the names are always written exactly so).
+NON_NOTE_BASENAMES: frozenset[str] = frozenset({"MEMORY.md", "memory-index.md"})
+
+# The detector-output family: the memory detectors drop plain-markdown REPORTS
+# named ``<detector>-proposed.md`` into the scanned memory dir (the librarian's
+# ``memory-reorg-proposed.md``, the scope-leak detector's
+# ``memory-scope-leak-proposed.md``, any future sibling). None carry frontmatter,
+# none are notes. A SUFFIX match excludes the WHOLE family — so a new detector's
+# output never re-introduces the collision (issue #54).
+DETECTOR_OUTPUT_SUFFIX = "-proposed.md"
+
+# The PRIVATE user-authored store (TRDD-4334aad0) — a sibling subdir the agent
+# corpus tooling MUST NOT walk into (privacy contract: it is agent-invisible by
+# design). Excluding it here is the load-bearing fix of mandate #3.
+USER_MEM_DIRNAME = "user-mem"
+
+# Non-note sub-dirs inside a memory dir, never walked into: the private store,
+# memgrep's SQLite sidecar cache, and the transaction staging dir (a staged copy
+# mid-edit is not a committed note).
+EXCLUDED_DIRNAMES: frozenset[str] = frozenset(
+    {USER_MEM_DIRNAME, ".memgrep", ".maint-staging"}
+)
+
+
+def is_note_file(path: str | os.PathLike[str]) -> bool:
+    """True iff ``path`` is a real memory NOTE — the SSOT discriminator.
+
+    A real note is a ``*.md`` file that is NOT a generated/index file
+    (``NON_NOTE_BASENAMES``), NOT a detector-proposal report (``-proposed.md``
+    suffix), and does NOT live under any excluded sub-dir (``EXCLUDED_DIRNAMES``
+    — most importantly the PRIVATE ``user-mem/`` store). Purely path-based; no I/O.
+    """
+    p = Path(path)
+    name = p.name
+    if not name.endswith(".md"):
+        return False
+    if name in NON_NOTE_BASENAMES or name.endswith(DETECTOR_OUTPUT_SUFFIX):
+        return False
+    # Any path component naming an excluded dir disqualifies (defence-in-depth:
+    # even a memgrep result path that recursed into user-mem is filtered here).
+    return not any(part in EXCLUDED_DIRNAMES for part in p.parts)
+
+
+def iter_note_files(memdir: str | os.PathLike[str]) -> list[Path]:
+    """Every real memory NOTE under ``memdir`` (recursive), filtered by ``is_note_file``.
+
+    Recursive ``rglob`` matches the existing scan behavior of every editor/librarian
+    site this SSOT replaces (the librarian, memory_migrate, memorize-nudge, and the
+    content-precheck all recursed). Returns sorted for deterministic output; ``[]``
+    when ``memdir`` is missing or unreadable (silent, never raises).
+    """
+    root = Path(memdir)
+    if not root.is_dir():
+        return []
+    try:
+        return sorted(
+            p for p in root.rglob("*.md") if p.is_file() and is_note_file(p)
+        )
+    except OSError:
+        return []
+
 
 def project_slug(project_dir: str) -> str:
     """Harness per-project slug: the absolute path with every separator dashed.

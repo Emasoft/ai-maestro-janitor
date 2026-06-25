@@ -38,30 +38,11 @@ if _LIB_DIR not in sys.path:
 
 import cicd_secret_leak_patterns as cicd  # noqa: E402
 import cloud_credential_patterns as cloud  # noqa: E402
+import memory_scopes  # noqa: E402
 import privacy_patterns as privacy  # noqa: E402
 import private_path_patterns as ppp  # noqa: E402
 import security_helpers as sec  # noqa: E402
 from memory_edit_verify import parse_frontmatter  # noqa: E402
-
-# --------------------------------------------------------------------------- #
-# What is and is not a note (the inline exclusion — adopt the memory_scopes SSOT
-# once it grows one; today it mirrors the librarian's `_NON_NOTE_NAMES` set).
-# --------------------------------------------------------------------------- #
-
-# Files inside a memory dir that are NOT notes (indices + the detectors' proposal
-# artifacts). Compared by basename, case-sensitively.
-NON_NOTE_NAMES = frozenset(
-    {
-        "MEMORY.md",
-        "memory-index.md",
-        "memory-reorg-proposed.md",  # the librarian's proposal
-        "memory-scope-leak-proposed.md",  # the scope-leak detector's proposal
-    }
-)
-
-# The PRIVATE user-authored store (never harvested, never migrated) and the
-# generated/maintenance sub-dirs — none are notes, none are walked into.
-EXCLUDED_DIRNAMES = frozenset({"user-mem", ".memgrep", ".maint-staging"})
 
 # Bound a pathologically large "note" so a corpus can never blow up the scan
 # (mirrors memory-scope-leak's `_MAX_BYTES_PER_PAGE`).
@@ -248,22 +229,14 @@ def classify_text(rel_path: str, text: str) -> NoteVerdict:
 
 
 def iter_notes(memdir: Path) -> list[Path]:
-    """Every real note `*.md` under `memdir`, excluding non-note files and the
-    excluded sub-dirs (`user-mem/`, `.memgrep/`, `.maint-staging/`). Sorted for a
-    deterministic plan. Read-only."""
-    out: list[Path] = []
-    for path in sorted(memdir.rglob("*.md")):
-        if path.name in NON_NOTE_NAMES:
-            continue
-        # Skip anything inside an excluded sub-dir (any depth).
-        try:
-            rel_parts = path.relative_to(memdir).parts
-        except ValueError:
-            continue
-        if any(part in EXCLUDED_DIRNAMES for part in rel_parts[:-1]):
-            continue
-        out.append(path)
-    return out
+    """Every real note `*.md` under `memdir`, via the shared SSOT.
+
+    `memory_scopes.iter_note_files` excludes the generated/index files, the
+    detector-proposal reports (`-proposed.md`), and the excluded sub-dirs
+    (`user-mem/`, `.memgrep/`, `.maint-staging/`), sorted for a deterministic
+    plan. Read-only. The migration's own duplicated exclusion sets are gone —
+    one source of truth (TRDD-87935f21 mandate #3)."""
+    return memory_scopes.iter_note_files(memdir)
 
 
 def classify_corpus(memdir: Path) -> list[NoteVerdict]:

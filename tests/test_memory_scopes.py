@@ -168,3 +168,85 @@ def test_is_curated_wiki_page_false_without_frontmatter():
     buffer artifact, not a curated wiki page)."""
     assert not msc.is_curated_wiki_page("just plain text, no frontmatter\n")
     assert not msc.is_curated_wiki_page("---\nname: x\ntier: hub\n(no closing fence)\n")
+
+
+# ---- is_note_file (the non-note / user-mem SSOT, TRDD-87935f21) -------------
+
+def test_is_note_file_true_for_a_plain_note():
+    """A bare `*.md` basename or relative note path reads as a real note."""
+    assert msc.is_note_file("feedback_oauth_rotator.md")
+    assert msc.is_note_file("sub/project_auth.md")
+
+
+def test_is_note_file_false_for_generated_index_files():
+    """The generated/index files (MEMORY.md stub, memory-index.md) are NOT notes."""
+    assert not msc.is_note_file("MEMORY.md")
+    assert not msc.is_note_file("memory-index.md")
+    assert not msc.is_note_file("any/dir/MEMORY.md")
+
+
+def test_is_note_file_false_for_detector_proposal_family():
+    """The whole `*-proposed.md` detector-output family is excluded by SUFFIX —
+    so a future detector's report never re-introduces the collision (issue #54)."""
+    assert not msc.is_note_file("memory-reorg-proposed.md")
+    assert not msc.is_note_file("memory-scope-leak-proposed.md")
+    assert not msc.is_note_file("some-future-detector-proposed.md")
+
+
+def test_is_note_file_false_under_user_mem_at_any_depth():
+    """A path that recurses into the PRIVATE user-mem/ store is NOT a note — the
+    load-bearing privacy fix of mandate #3 (agent-invisible by design)."""
+    assert not msc.is_note_file("user-mem/000001.md")
+    assert not msc.is_note_file("memory/user-mem/000001.md")
+    assert not msc.is_note_file("/abs/memory/user-mem/deep/n.md")
+
+
+def test_is_note_file_false_under_other_excluded_dirs():
+    """The memgrep cache + the transaction staging dir are never notes either."""
+    assert not msc.is_note_file(".memgrep/index.md")
+    assert not msc.is_note_file("memory/.maint-staging/staged.md")
+
+
+def test_is_note_file_false_for_non_markdown():
+    """Only markdown is a note — a `.txt`/`.json` sibling is not."""
+    assert not msc.is_note_file("notes.txt")
+    assert not msc.is_note_file(".memgrep/index.db")
+
+
+def test_iter_note_files_yields_only_real_notes(tmp_path):
+    """A real corpus with a note + a NON_NOTE_BASENAME + a proposal + a user-mem
+    note + a .memgrep cache file → ONLY the real notes are yielded, sorted."""
+    mem = tmp_path / "memory"
+    mem.mkdir()
+    (mem / "project_auth.md").write_text("real note\n", encoding="utf-8")
+    (mem / "feedback_x.md").write_text("another real note\n", encoding="utf-8")
+    # Non-notes that MUST be excluded:
+    (mem / "MEMORY.md").write_text("# stub\n", encoding="utf-8")
+    (mem / "memory-index.md").write_text("# generated\n", encoding="utf-8")
+    (mem / "memory-reorg-proposed.md").write_text("# proposal\n", encoding="utf-8")
+    um = mem / "user-mem"
+    um.mkdir()
+    (um / "000001.md").write_text("PRIVATE user memory\n", encoding="utf-8")
+    mg = mem / ".memgrep"
+    mg.mkdir()
+    (mg / "stray.md").write_text("cache\n", encoding="utf-8")
+
+    got = {p.name for p in msc.iter_note_files(mem)}
+    assert got == {"project_auth.md", "feedback_x.md"}
+
+
+def test_iter_note_files_is_recursive(tmp_path):
+    """Notes in sub-dirs (e.g. the curated wiki/ sub-namespace) are included —
+    iter_note_files recurses, matching every editor/librarian scan it replaces."""
+    mem = tmp_path / "memory"
+    (mem / "wiki").mkdir(parents=True)
+    (mem / "root_note.md").write_text("root\n", encoding="utf-8")
+    (mem / "wiki" / "hub_frontend.md").write_text("curated\n", encoding="utf-8")
+
+    got = {p.name for p in msc.iter_note_files(mem)}
+    assert got == {"root_note.md", "hub_frontend.md"}
+
+
+def test_iter_note_files_empty_for_missing_dir(tmp_path):
+    """A missing memory dir yields [] (silent, never raises)."""
+    assert msc.iter_note_files(tmp_path / "does-not-exist") == []

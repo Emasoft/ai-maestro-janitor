@@ -30,21 +30,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# The transaction staging dir the SPLIT skill itself excludes from its candidate
-# scan (`find … -not -path '*/.maint-staging/*'`). A staged copy mid-transaction is
-# not a real over-cap page, so it must never make split look due.
-_STAGING_DIR = ".maint-staging"
+import memory_scopes  # sibling in scripts/lib/ (the caller puts lib on sys.path)
 
 
 def _candidate_pages(root: Path) -> list[Path]:
-    """Every committed .md under `root`, excluding the transaction staging dir —
-    the exact candidate set the janitor-memory-split skill scans."""
-    if not root.is_dir():
-        return []
-    return [
-        p for p in root.rglob("*.md")
-        if _STAGING_DIR not in p.parts and p.is_file()
-    ]
+    """Every real committed NOTE under `root` — the exact candidate set the
+    janitor-memory-split skill scans, via the shared SSOT.
+
+    `memory_scopes.iter_note_files` excludes the transaction staging dir AND the
+    PRIVATE user-mem store AND the generated/index files — matching the split
+    skill's own `find` (which excludes `.maint-staging/`, `user-mem/`, and the
+    generated basenames). Before the SSOT this used a raw `*.md` scan that
+    excluded only `.maint-staging`, so it could count a private user-mem note or a
+    detector-proposal report as an over-cap "page" (TRDD-87935f21 mandate #3)."""
+    return memory_scopes.iter_note_files(root)
 
 
 def split_has_work(root: Path, *, max_bytes: int) -> bool:

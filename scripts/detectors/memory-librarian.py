@@ -62,27 +62,11 @@ import memory_scopes  # noqa: E402
 import state  # noqa: E402
 
 # The librarian's own output file — written into the memory dir but it is NOT a
-# memory note. Never scanned, never clustered, never mutated-as-a-note.
+# memory note. Never scanned, never clustered, never mutated-as-a-note. (The
+# non-note exclusion itself — this name, the index files, the whole `-proposed.md`
+# detector-output family, and the PRIVATE user-mem store — now lives in the
+# shared SSOT `memory_scopes.is_note_file`; see `_is_note_basename` below.)
 PROPOSAL_NAME = "memory-reorg-proposed.md"
-
-# Files inside the memory dir that are NOT memory notes and must be excluded
-# from the candidate scan (the loaded index, the generated query index, our own
-# proposal). All compared case-sensitively by basename.
-_NON_NOTE_NAMES = frozenset({PROPOSAL_NAME, "MEMORY.md", "memory-index.md"})
-
-# Detector-output family (issue #54): the memory detectors drop plain-markdown
-# REPORTS named `<detector>-proposed.md` INTO the scanned memory dir (our own
-# `memory-reorg-proposed.md`, the scope-leak detector's
-# `memory-scope-leak-proposed.md`, and any future sibling). None of these are
-# notes — they carry no frontmatter — so scanning them as notes produced false
-# page-shape/sync findings + a spurious `[janitor-memory-repair]` marker each
-# heartbeat. A suffix match excludes the WHOLE family (not just the two known
-# names), so a new detector's output never re-introduces the collision.
-_DETECTOR_OUTPUT_SUFFIX = "-proposed.md"
-
-# The private user-authored memory store (TRDD-4334aad0) — a sibling subdir the
-# agent-corpus librarian MUST NOT walk into (privacy contract).
-_USER_MEM_DIRNAME = "user-mem"
 
 # Bounds so a huge corpus can never blow up the heartbeat. We cap the number of
 # notes parsed, the clusters reported, and the conflict pairs reported.
@@ -420,18 +404,15 @@ def _basename(path_token: str) -> str:
 
 
 def _is_note_basename(name: str) -> bool:
-    """True iff a basename is a real memory note (markdown, not an excluded file).
+    """True iff a basename is a real memory note — via the shared SSOT.
 
-    Excludes both the named non-notes (the index stub + generated indices + our
-    own proposal) AND the whole `*-proposed.md` detector-output family (issue
-    #54) — sibling detectors write reports into this same dir and they are not
-    notes.
+    Delegates to `memory_scopes.is_note_file`, which excludes the index files
+    (MEMORY.md / memory-index.md), the whole `*-proposed.md` detector-output
+    family (issue #54), and the PRIVATE user-mem store. Callers pass a bare
+    basename here (the user-mem path-component check is a no-op on a basename and
+    is enforced separately where full paths are available — see `_parse_index`).
     """
-    return (
-        name.endswith(".md")
-        and name not in _NON_NOTE_NAMES
-        and not name.endswith(_DETECTOR_OUTPUT_SUFFIX)
-    )
+    return memory_scopes.is_note_file(name)
 
 
 def _slug_words(note_basename: str) -> str:
@@ -463,15 +444,13 @@ def _parse_index(stdout: str) -> dict[str, NoteMeta]:
         block = _BLOCK_RE.match(raw)
         if block:
             token = block.group("path")
-            # user-mem exclusion: any path component equal to user-mem/ disqualifies.
-            parts = Path(token.strip()).parts
-            if _USER_MEM_DIRNAME in parts:
+            # SSOT note test on the FULL token: rejects the index/proposal files
+            # AND any path that recursed into the PRIVATE user-mem/ store (defence
+            # in depth — we also never pass user-mem to memgrep).
+            if not memory_scopes.is_note_file(token.strip()):
                 current = None
                 continue
             name = _basename(token)
-            if not _is_note_basename(name):
-                current = None
-                continue
             current = name
             # Seed tokens from the filename stem immediately (always available);
             # the summary: line (if any) augments them below.

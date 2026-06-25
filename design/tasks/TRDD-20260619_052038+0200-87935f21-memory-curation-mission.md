@@ -3,7 +3,7 @@ trdd-id: 87935f21-392a-4022-8161-64f493663c44
 title: Memory curation at all scopes — the janitor's core self-maintaining mission
 column: dev
 created: 2026-06-19T05:20:38+0200
-updated: 2026-06-20T04:35:49+0200
+updated: 2026-06-25T15:27:28+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -71,14 +71,21 @@ external-refs: []
   and the 3 generated/index basenames (mirrors the librarian's `_NON_NOTE_NAMES`). The
   SPLIT pass itself correctly ABSTAINED (no real page over the 12000-byte cap; largest
   notes ~5-6 KB).
-- **NEXT ACTION (mandate #3 — the proper SSOT fix):** hoist the non-note/user-mem
-  exclusion into `memory_scopes.py` (`NON_NOTE_BASENAMES`, `USER_MEM_DIRNAME`,
-  `is_note_file`/`iter_note_files`) plus a thin CLI, DEDUP the librarian's local
-  copies, and switch every editor scan to it (including excluding user-mem from the
-  consolidate skill's memgrep calls — the one minor remaining gap; repair is
-  unaffected, it consumes the librarian's filtered output). The EXISTING ai-maestro
-  corpus migration (LOCAL→PROJECT) still awaits the USER's a/b/c choice —
-  skill-independent.
+- **SSOT note-filter fix — DONE (2026-06-25, ships next patch):** hoisted
+  `NON_NOTE_BASENAMES`/`DETECTOR_OUTPUT_SUFFIX`/`USER_MEM_DIRNAME`/`EXCLUDED_DIRNAMES`,
+  plus `is_note_file`/`iter_note_files`, into `memory_scopes.py`; switched 5 sites
+  (librarian, migrate, memorize-nudge, content-precheck, consolidate skill),
+  removing the duplicated exclusion logic. CLOSED two privacy gaps: (a) the
+  consolidate skill's recursive memgrep scans now `grep -v '/user-mem/'` (gap VERIFIED
+  REAL — memgrep has no `--exclude` and does not skip user-mem in its walk), and (b)
+  `content-precheck` was raw-`*.md`, so a private user-mem or a `-proposed.md` file
+  could falsely make SPLIT look due. `memory-scope-leak.py` (security scanner) is
+  deliberately NOT routed through the editor SSOT — a leak is a leak regardless of
+  subdir. +9 tests, full suite 11549 pass, ruff/mypy/pyright clean.
+- **NEXT ACTION (the only remaining item — USER-GATED):** the EXISTING ai-maestro
+  corpus migration (LOCAL→PROJECT) awaits the USER's a/b/c choice — skill-independent.
+  All autonomous BUILD work for this mission is shipped; the 6 priorities continue as
+  standing automatic passes (repair/atomize/consolidate ran clean this session).
 - **Load-bearing finding (memgrep):** the documented filter command in
   `wikimem-model.md` / the recall rule — `memgrep -l . <dir> --where '…'` — is
   WRONG: the `.` is parsed as a second search PATH (= cwd), silently
