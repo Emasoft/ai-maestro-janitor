@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-25T05:27:38+0200
+updated: 2026-06-25T08:40:10+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -17,6 +17,50 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 # Autonomous overnight session — the night brain (read on every wake)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-25
+
+### ✅ 2026-06-25 (08:40) — immortality A/B/C/D COMPLETE + shipped (v0.21.0→v0.23.0 CI-green); E+F eval ~88% covered; the ~05:27 HOLD stance is SUPERSEDED
+**Authority shift:** the ~05:27 "HOLD the safety-critical exec-path work / await the USER / it needs the
+ultracode-Workflow opt-in" stance (below) is SUPERSEDED by the USER's pivotal correction — *cost is NOT my concern;
+BUILD the OAuth 3 Rs, the memory architecture, and all pending tasks; do NOT procrastinate* — plus the USER
+REJECTING my "what should I focus on next?" question = a standing DECIDE-AND-ACT directive. I proceeded through the
+roadmap; every ship TDD + adversarial spark-review + CI-green:
+- **v0.21.0** — C3 (pin-last-GOOD + quarantine-bad) + OAuth refresh_failures-reset fix + memory scope-migration
+  Phase-1 classifier + **PreCompact anti-hallucination handoff hook** (the USER's explicit ask).
+- **v0.22.0** — C4 (crash-loop auto-rollback: dispatch Phase-1.64 producer + stub C3 quarantine-skip consumer;
+  fail-OPEN) + MEMORY.md⇄Wikimem coexistence harvest (#231).
+- **v0.23.0** — DKEYCHN7 fix (self-integrity detector key+chain → FIXED janitor dir, off $CLAUDE_PLUGIN_DATA) +
+  GROUP **D** (D-α keepalive interpreter fallback + D-β verify-or-restage staged closure; fail-open/fail-loud,
+  CPV-#152-clean) + NIT-1 constant-parity guard.
+- GROUP C **adversarially-reviewed CLEAN**; GROUP D eval proved D ~85% already-covered → shipped only the 2 residuals.
+
+**immortality GROUP A/B/C/D = ALL COMPLETE + shipped + CI-green.**
+
+**GROUP E+F eval (read-only, grounded — `reports/immortality-group-ef/20260625_083745+0200-group-ef-scope-eval.md`):
+~88% already built. Only TWO genuine gaps:**
+1. **E2/E3 — wire the hard-restart rungs (`fleet_restart`) into `daemon.task_session_liveness`.** This IS the
+   existing open **TRDD-56d24c02 (column: dev), Increment 2** — the kill+respawn ladder is built+tested+default-OFF
+   but has ZERO importers. **HELD for explicit USER opt-in: it adds a process-KILLING capability** (never-kill-the-
+   user's-session cardinal rule + "NEVER relax security" + Tier-3-destructive). This is NOT the forbidden
+   procrastination (that was holding SAFE work) — a destructive capability warrants a human OK even behind its
+   default-OFF gate. Ready-to-wire; awaits the USER's go-ahead.
+2. **F3 — recovery audit log (append-only NDJSON, reuse `janitor_self_integrity.AuditChain`) + fold in F2 augments
+   (launchd-registration / self-integrity-verdict / last-N-recoveries into `fleet_status.py`).** Pure observability,
+   ZERO blast radius → **building autonomously now** (new thin TRDD-F3AUDLOG, TDD).
+   E1/E4/E5/E6/F1/F4 all EXISTS-ALREADY or NOT-APPLICABLE-as-drafted (cited file:line in the report).
+
+**NEXT:** (a) build F3 (safe, in flight); (b) surface E2/E3 to the USER as the one immortality piece awaiting their
+explicit opt-in (it kills processes). **THE ONE IRREDUCIBLE USER ACTION still stands:** re-login
+`fmuaddib@gmail.com` via `/janitor-refresh-claude-logins` (dead refresh token, 374 failed renewals; only a human
+OAuth consent restores it, then the rotator auto-captures).
+
+#### Superseded — do NOT carry forward
+- ✗ "HOLD the safety-critical exec-path work / await USER's do-C3 / needs ultracode-Workflow opt-in" (the ~05:27
+  entry) — SUPERSEDED by the USER's build-it-all correction + the rejected "what next" question. C3/C4/D SHIPPED +
+  CI-green + adversarially reviewed. Do NOT re-enter a blanket "hold + wait" stance — that is the forbidden
+  procrastination. (The ONE correctly-held exception is E2/E3's process-killing wiring — destructive, Tier-3.)
+- ✗ "C2 published-but-DORMANT, activation = USER re-arm" — C2/C3/C4 are SHIPPED in cache; the dispatch-side
+  producers auto-roll (already live), the live-stub C3/C4 consumer activates on the next daemon `[janitor-reload]`
+  → `/janitor-arm` (the normal non-auto-rolling-stub path).
 
 ### ✅ 2026-06-25 — OAuth wrapper FOLD shipped (v0.19.1→v0.20.1) + daemon auto-update/reload; C2 now PUBLISHED-but-DORMANT (safe)
 Since the ~18:20 checkpoint the USER stayed silent across many heartbeats; per "don't procrastinate when a
