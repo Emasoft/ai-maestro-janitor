@@ -31,6 +31,7 @@ candidate is not re-nagged every heartbeat.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -64,16 +65,42 @@ def _released_tags_for(sha: str, root: Path) -> list[str]:
     return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip().startswith("v")]
 
 
+def _citation_re(uid: str) -> re.Pattern[str]:
+    """Compile the CANONICAL-citation matcher for `uid` in a commit subject.
+
+    Commit-discipline cites a TRDD as `TRDD-<id8>` (subject) or the casual
+    `#<id8>`. A bare substring match (the previous `f"trdd-{uid}" in subj`) wrongly
+    attributed a commit whose subject merely EMBEDS the id inside a code
+    identifier or filename — `fix_TRDD-<id>_path`, `trdd-<id>.bak`, `noTRDD-<id>` —
+    making a never-implemented TRDD read as shipped (issue #65 class b). The
+    look-arounds require the citation to stand on its own: not glued left to an
+    identifier char / `<alnum><connector>`, and the id must END cleanly (no longer
+    base36 run = a different id, and no trailing `<connector><alnum>` filename/path
+    join). Matched case-insensitively so the verbatim-cased id still resolves.
+    """
+    return re.compile(
+        r"(?<![A-Za-z0-9_])"            # not glued left to an identifier char (incl _)
+        r"(?<![A-Za-z0-9][-./])"       # not <alnum><connector> before the prefix (mid-identifier)
+        r"(?:TRDD-|#)"                  # canonical citation prefix: `TRDD-<id8>` or `#<id8>`
+        + re.escape(uid) +
+        r"(?![0-9A-Za-z])"             # id ends here (a longer base36 run = a different id)
+        r"(?![-_./][A-Za-z0-9])",      # not joined right by <connector><alnum> (filename/path)
+        re.IGNORECASE,
+    )
+
+
 def _subject_commits_for_uid(uid: str, log_lines: list[tuple[str, str]]) -> list[str]:
-    """SHAs whose commit SUBJECT references `TRDD-<uid>` (case-insensitive).
+    """SHAs whose commit SUBJECT carries a CANONICAL `TRDD-<uid>` / `#<uid>` citation.
 
     Commit-discipline puts `TRDD-<id8>` in commit subjects, so a TRDD's commits
     are greppable even when `implementation-commits:` is unpopulated. `log_lines`
     is the pre-fetched `[(sha, subject)]` board log so we grep it once, not once
-    per TRDD.
+    per TRDD. The match is the canonical citation SHAPE (see `_citation_re`), not a
+    bare 8-char run, so an id embedded inside a code token / filename does not
+    falsely attribute the commit (issue #65 class b).
     """
-    needle = f"trdd-{uid}".lower()
-    return [sha for sha, subj in log_lines if needle in subj.lower()]
+    pat = _citation_re(uid)
+    return [sha for sha, subj in log_lines if pat.search(subj)]
 
 
 def _load_git_log(root: Path) -> list[tuple[str, str]]:

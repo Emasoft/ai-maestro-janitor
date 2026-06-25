@@ -328,3 +328,117 @@ def test_context_gate_off_outside_ai_maestro(repo: Path):
     )
     assert res.returncode == 0, res.stderr
     assert res.stdout.strip() == "", "gate OFF → silent outside ai-maestro"
+
+
+# ── issue #65: three remaining false-positive classes ────────────────────────
+#
+# The advisory observed on the core plugin flagged 4 verified false positives.
+# The design-doc-commit class (a TRDD's own `docs: add` authoring commit read as
+# shipped) was fixed in v0.24.10 (`_commit_touches_impl`); the cases below cover
+# the two REMAINING classes: (a) terminal-column TRDDs flagged at all, and (b)
+# a code-tag / script-name / embedded-id token mis-read as a current block or as
+# a shipping commit attribution.
+
+
+def test_terminal_column_with_blocked_prose_and_shipped_commit_never_flagged(repo: Path):
+    """issue #65 class (a): a TERMINAL TRDD (`published`/`complete`) is done — its
+    body is frozen by the TRDD rules and it is NEVER a reconciliation candidate,
+    even when its STATE prose mentions a (historical) block AND a real shipping
+    commit referencing it is in a released tag. TRDD-90c8ad35 / TRDD-fabb5c42
+    (published) and TRDD-P83T33EN (complete) were all flagged as
+    prose-frontmatter-mismatch; a terminal TRDD must surface nothing. A genuinely
+    open, shipped sibling proves the detector still ran and emitted."""
+    published = "90c8ad35"
+    complete = "p83t33en"
+    open_uid = "aaaaaaaa"
+    # Terminal TRDDs whose STATE prose carries past-tense "blocked" narrative.
+    _write_trdd(repo, published, column="published",
+                body="\n## STATE\nColumn -> blocked (ai-maestro#36); now shipped.\n")
+    _write_trdd(repo, complete, column="complete",
+                body="\n## STATE\nThe work-loop reports done/blocked status.\n")
+    # An OPEN, shipped, clean sibling so the run isn't trivially empty.
+    _write_trdd(repo, open_uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: real ship (TRDD-{open_uid}) "
+                      f"(TRDD-{published}) (TRDD-{complete})")
+    _tag(repo, "v0.10.0")
+
+    out = _run(repo)
+    assert f"TRDD-{open_uid}" in out          # the open sibling surfaces
+    assert "closeable-candidate" in out
+    assert f"TRDD-{published}" not in out      # terminal → never flagged
+    assert f"TRDD-{complete}" not in out
+
+
+def test_prose_block_inside_code_tag_or_script_name_not_flagged(repo: Path):
+    """issue #65 class (b), prose half: on a NON-terminal TRDD the
+    `prose-frontmatter-mismatch` check must not fire merely because 'block'
+    appears INSIDE a code-tag (`DECOUPLE-BLOCKED`), a script/file name
+    (`amp-task-blocked.sh`), or a slashed token (`done/blocked`). Those are code
+    identifiers, not a current-state declaration. A sibling whose prose carries a
+    genuine 'BLOCKED on X' declaration proves the check still fires on real
+    blocks."""
+    code_uid = "bbbbbbbb"
+    real_uid = "cccccccc"
+    _write_trdd(
+        repo, code_uid, column="dev", blocked_by="[]",
+        body=(
+            "\n## STATE\n"
+            "The DECOUPLE-BLOCKED code-tag is referenced; runs "
+            "amp-task-blocked.sh which reports done/blocked status. "
+            "Nothing is actually blocked-by anything.\n"
+        ),
+    )
+    # Genuine current-state block declaration in plain prose.
+    _write_trdd(repo, real_uid, column="dev", blocked_by="[]",
+                body="\n## STATE\npublish is BLOCKED on GROUP B\n")
+    _commit_all(repo, "feat: board")  # no tag — Check 3 is prose-based, not git
+
+    out = _run(repo)
+    # the genuine block surfaces...
+    assert f"TRDD-{real_uid}" in out
+    assert "prose-frontmatter-mismatch" in out
+    # ...but the code-token-only TRDD does NOT.
+    assert f"TRDD-{code_uid}" not in out
+
+
+def test_commit_subject_embedded_id_token_not_attributed_as_shipped(repo: Path):
+    """issue #65 class (b), commit half: the commit-subject→uid resolution must
+    require the canonical `TRDD-<id8>` / `#<id8>` CITATION shape, not a bare
+    8-char run that collides with a code identifier or filename. A never-shipped
+    TRDD whose id only appears glued inside a code token (`fix_TRDD-<id>_path`,
+    `<id>.bak`) in a released-tag commit must NOT read as shipped. A sibling with
+    a real `(TRDD-<id>)` citation proves canonical citations are still attributed."""
+    embedded_uid = "a1b2c3d4"
+    cited_uid = "e5f6a7b8"
+    # Both TRDDs are non-terminal with no implementation-commits of their own.
+    _write_trdd(repo, embedded_uid, column="dev", body="\n# body\nnot yet shipped.\n")
+    _write_trdd(repo, cited_uid, column="dev", body="\n# body\nshipped.\n")
+    # ONE real code commit whose subject mentions the embedded uid ONLY inside a
+    # code identifier / filename (no canonical citation), and the cited uid as a
+    # proper parenthesized citation.
+    _commit_all(
+        repo,
+        f"refactor: rename fix_TRDD-{embedded_uid}_path, dump to "
+        f"trdd-{embedded_uid}.bak (TRDD-{cited_uid})",
+    )
+    _tag(repo, "v0.11.0")
+
+    out = _run(repo)
+    assert f"TRDD-{cited_uid}" in out          # real citation → attributed → shipped
+    assert "closeable-candidate" in out
+    assert f"TRDD-{embedded_uid}" not in out    # embedded-in-code token → not attributed
+
+
+def test_casual_hash_citation_in_commit_subject_is_attributed(repo: Path):
+    """issue #65 class (b) guard: the canonical-citation tightening must KEEP the
+    casual `#<id8>` commit-subject citation shape (a documented TRDD reference
+    form), not only `TRDD-<id8>`. A TRDD whose shipping commit cites it as
+    `#<id8>` in a released tag surfaces as a closeable-candidate."""
+    uid = "d4c3b2a1"
+    _write_trdd(repo, uid, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: ship the thing for #{uid} fully")
+    _tag(repo, "v0.12.0")
+
+    out = _run(repo)
+    assert f"TRDD-{uid}" in out
+    assert "closeable-candidate" in out

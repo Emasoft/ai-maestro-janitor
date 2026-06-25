@@ -311,10 +311,44 @@ _UNCHECKED_BOX_RE = re.compile(r"^[ \t]*[-*][ \t]+\[ \][ \t]", re.MULTILINE)
 # it is NOT annotated as done.
 _NEXT_ACTION_RE = re.compile(r"^.*\bNEXT[ \t-]*ACTION(S)?\b.*$", re.IGNORECASE | re.MULTILINE)
 # Prose that asserts a block the frontmatter may not encode (Check 3).
+#
+# The word must stand on its own as a CURRENT-STATE declaration — not appear
+# spliced into a code identifier, script/file name, or path. The original
+# letter-only boundary let `block` leak through whenever a code-token connector
+# (`- . / _`) glued it to surrounding alnums: `DECOUPLE-BLOCKED` (a greppable
+# code-tag), `amp-task-blocked.sh` (a script name), `done/blocked` (a slashed
+# token) all fired a spurious prose-frontmatter-mismatch (issue #65 class b). The
+# two extra look-arounds reject "block" when an alnum<connector> precedes it
+# (mid-identifier left) or a connector<alnum> follows it (mid-identifier /
+# filename right) — while still firing on a real sentence-ending "…is blocked."
+# (period followed by space/EOL, NOT connector+alnum). Backtick inline-code is
+# masked before matching (see `_mask_inline_code`) so a `code sample` mentioning
+# block is ignored too. Verified MUST-fire: "BLOCKED on GROUP B", "blocked by the
+# migration", "(blocked)", "is blocked."; MUST-NOT: the three code-token cases
+# above + `is_blocked_flag`.
 _BLOCKED_PROSE_RE = re.compile(
-    r"(?<![A-Za-z])(blocked(?:[ \t]+on| on| by)?|BLOCKED|hostage[ \t]+to|blocked-on)(?![A-Za-z])",
+    r"(?<![A-Za-z])"               # original: not glued to a letter on the left
+    r"(?<![A-Za-z0-9][-./])"      # NEW: not <alnum><connector>block… (mid-identifier left)
+    r"(blocked(?:[ \t]+on| on| by)?|BLOCKED|hostage[ \t]+to|blocked-on)"
+    r"(?![A-Za-z])"               # original: not glued to a letter on the right
+    r"(?![-_./][A-Za-z0-9])",     # NEW: not block…<connector><alnum> (mid-identifier / filename right)
     re.IGNORECASE,
 )
+
+# Backtick-fenced inline-code span: `like this`. Masked to same-length blanks
+# before the blocked-prose scan so a "block" inside a `code sample` (a code
+# identifier, not a state declaration) cannot trip Check 3 (issue #65 class b).
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
+
+
+def _mask_inline_code(text: str) -> str:
+    """Replace backtick-fenced inline-code spans with same-length spaces.
+
+    Length-preserving (not deletion) so byte offsets of the surrounding prose are
+    unchanged. Used by Check 3 so 'block' appearing inside `inline code` (a code
+    token quoted as code, never a live block declaration) is not matched.
+    """
+    return _INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def check1_shipped_but_open(record: TrddRecord, commit_in_released_tag) -> bool:
@@ -383,7 +417,9 @@ def check3_prose_frontmatter_mismatch(record: TrddRecord) -> bool:
         return False
     if record.blocked_by:
         return False
-    return bool(_BLOCKED_PROSE_RE.search(record.body))
+    # Mask inline-code before the scan so 'block' inside `code`/code-tags/script
+    # names is not read as a live block declaration (issue #65 class b).
+    return bool(_BLOCKED_PROSE_RE.search(_mask_inline_code(record.body)))
 
 
 def check4_stale_blockers(record: TrddRecord, column_of) -> list[str]:
@@ -398,8 +434,10 @@ def check4_stale_blockers(record: TrddRecord, column_of) -> list[str]:
     if is_terminal_column(record.column):
         return []
     candidates: list[str] = list(record.blocked_by)
-    # Prose-named blockers count only when the TRDD prose actually says blocked.
-    if _BLOCKED_PROSE_RE.search(record.body):
+    # Prose-named blockers count only when the TRDD prose actually says blocked
+    # (inline-code masked, so a code-tag like `DECOUPLE-BLOCKED` doesn't qualify —
+    # issue #65 class b; the same discrimination Check 3 uses).
+    if _BLOCKED_PROSE_RE.search(_mask_inline_code(record.body)):
         for uid in extract_trdd_refs(record.body):
             if uid not in candidates and uid != record.uid:
                 candidates.append(uid)
@@ -448,6 +486,17 @@ def reconcile(record: TrddRecord, commit_in_released_tag, column_of) -> Reconcil
     shipped+clean (closeable-candidate) are the keystone outcomes; the prose
     mismatch and stale-blocker checks are independent signals that also surface.
     """
+    # AUTHORITATIVE terminal guard (issue #65 class a): a TRDD in a terminal
+    # column (published/complete/live/failed/superseded/cancelled/refused) is
+    # DONE — its body is frozen by the TRDD rules and it is NEVER a board-drift
+    # candidate. The four checks each carry their own terminal guard, but this
+    # single early-return is the SINGLE SOURCE OF TRUTH so a future check added
+    # without that guard can't leak a terminal TRDD into the report. Do NOT
+    # remove: it is what keeps `published`/`complete` TRDDs (whose settled STATE
+    # often mentions a historical block) off the candidate board.
+    if is_terminal_column(record.column):
+        return ReconcileVerdict(uid=record.uid, column=record.column, label="")
+
     shipped = check1_shipped_but_open(record, commit_in_released_tag)
     shipped_commits = (
         [sha for sha in record.impl_commits if commit_in_released_tag(sha)]
