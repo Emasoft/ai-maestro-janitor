@@ -182,6 +182,75 @@ def test_build_handoff_degrades_without_git(tmp_path: Path) -> None:
     assert "no in-flight TRDD found" in handoff
 
 
+# ---------- git-root resolution: repo as a SUBDIR of $CLAUDE_PROJECT_DIR (issue #66) ----
+
+def test_resolve_git_root_repo_at_project_root(tmp_path: Path) -> None:
+    """Repo AT project_root → resolves to project_root (historical behavior preserved)."""
+    hook = _hook()
+    _init_git_repo(tmp_path)
+    assert hook._resolve_git_root(tmp_path).resolve() == tmp_path.resolve()
+
+
+def test_resolve_git_root_repo_in_subdir(tmp_path: Path) -> None:
+    """Repo in a CHILD of project_root → resolved by the child-scan (the issue #66 fix)."""
+    hook = _hook()
+    repo = tmp_path / "myrepo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    # project_root has NO .git of its own; git run there exits 128. The fix scans children.
+    assert hook._resolve_git_root(tmp_path).resolve() == repo.resolve()
+
+
+def test_resolve_git_root_prefers_subdir_containing_cwd(tmp_path: Path) -> None:
+    """With two sibling sub-repos, the one containing the session cwd wins."""
+    hook = _hook()
+    a = tmp_path / "alpha"
+    b = tmp_path / "beta"
+    a.mkdir()
+    b.mkdir()
+    _init_git_repo(a)
+    _init_git_repo(b)
+    # cwd is inside `beta` → that repo is the right ground-truth even though `alpha` sorts first.
+    assert hook._resolve_git_root(tmp_path, str(b)).resolve() == b.resolve()
+
+
+def test_resolve_git_root_cwd_inside_subdir_repo(tmp_path: Path) -> None:
+    """A session cwd that is itself inside a repo resolves to that repo's toplevel directly."""
+    hook = _hook()
+    repo = tmp_path / "repo"
+    sub = repo / "pkg"
+    sub.mkdir(parents=True)
+    _init_git_repo(repo)
+    # cwd points DEEP inside the repo; show-toplevel (step 1) finds the repo root.
+    assert hook._resolve_git_root(tmp_path, str(sub)).resolve() == repo.resolve()
+
+
+def test_resolve_git_root_no_repo_anywhere_falls_back(tmp_path: Path) -> None:
+    """No repo at project_root and none in any child → fall back to project_root unchanged."""
+    hook = _hook()
+    (tmp_path / "plain_child").mkdir()
+    assert hook._resolve_git_root(tmp_path).resolve() == tmp_path.resolve()
+
+
+def test_build_handoff_finds_git_in_subdir(tmp_path: Path) -> None:
+    """REGRESSION (issue #66): repo in a subdir → git sections POPULATE, not '(unavailable)'.
+
+    Before the fix the four git commands ran with cwd=project_root (== $CLAUDE_PROJECT_DIR),
+    which exits 128 when the repo lives one level below, so Branch/HEAD/Recent-commits/Working
+    tree all silently degraded to their '(unavailable)' fallbacks despite a healthy repo."""
+    hook = _hook()
+    repo = tmp_path / "the-plugin"
+    repo.mkdir()
+    _init_git_repo(repo)
+    handoff = hook._build_handoff(tmp_path, str(_PROJECT_ROOT), "manual")
+    assert "## Git HEAD" in handoff
+    assert "initial commit" in handoff  # the real recent-commit log from the SUBDIR repo
+    # The git sections must NOT have degraded to their unavailable fallbacks.
+    assert "- Branch: (unavailable)" not in handoff
+    assert "- HEAD: (unavailable)" not in handoff
+    assert "## Recent commits" in handoff
+
+
 # ---------- end-to-end subprocess ------------------------------------------
 
 def test_hook_subprocess_writes_handoff(tmp_path: Path) -> None:
@@ -236,6 +305,40 @@ def test_hook_subprocess_writes_handoff(tmp_path: Path) -> None:
         emitted = json.loads(proc.stdout.strip())
         assert emitted.get("decision") != "block"
         assert "precompact-handoff.md" in emitted.get("systemMessage", "")
+
+
+def test_hook_subprocess_writes_handoff_with_subdir_repo(tmp_path: Path) -> None:
+    """End-to-end (issue #66): $CLAUDE_PROJECT_DIR is the PARENT of the repo → git sections
+    populate from the discovered subdir repo, not '(unavailable)'. No mocks."""
+    project = tmp_path / "project"  # $CLAUDE_PROJECT_DIR — NO .git of its own
+    repo = project / "the-repo"     # the actual git repo, one level below
+    repo.mkdir(parents=True)
+    _init_git_repo(repo)
+
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
+        "CLAUDE_PROJECT_DIR": str(project),
+    }
+    payload = json.dumps(
+        {"session_id": "s2", "cwd": str(project), "hook_event_name": "PreCompact"}
+    )
+    proc = subprocess.run(
+        [sys.executable, str(_HOOK_PATH)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"hook must always exit 0; stderr={proc.stderr!r}"
+
+    handoff = project / ".janitor" / "state" / "precompact-handoff.md"
+    assert handoff.exists(), f"handoff not written; stderr={proc.stderr!r}"
+    text = handoff.read_text(encoding="utf-8")
+    assert "initial commit" in text  # real git log resolved from the subdir repo
+    assert "- Branch: (unavailable)" not in text
+    assert "- HEAD: (unavailable)" not in text
 
 
 def test_hook_subprocess_never_blocks_on_missing_project(tmp_path: Path) -> None:

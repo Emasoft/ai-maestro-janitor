@@ -128,6 +128,76 @@ def _run_git(args: list[str], cwd: Path, *, timeout: float = 5.0) -> str:
     return proc.stdout.rstrip("\n")
 
 
+def _git_toplevel(start: Path) -> str:
+    """The work-tree root of the repo containing `start`, or "" if `start` is not in a repo.
+
+    `git rev-parse --show-toplevel` walks UP only — so it finds a repo at `start` or any
+    ancestor of it, but never a repo in a CHILD of `start`. That asymmetry is the whole
+    bug this resolution exists to work around (issue #66)."""
+    return _run_git(["rev-parse", "--show-toplevel"], start)
+
+
+def _resolve_git_root(project_root: Path, cwd: str = "") -> Path:
+    """Resolve the actual git work-tree root to run the handoff's git sections from.
+
+    WHY (issue #66): the git commands used to run with `cwd=$CLAUDE_PROJECT_DIR`, but
+    `git rev-parse` only walks UP toward parents — never DOWN into children. In the common
+    multi-repo layout where `$CLAUDE_PROJECT_DIR` is the PARENT of the actual repo
+    (`<project>/<repo>/.git`), every git command exits 128 and each section silently
+    degraded to "(unavailable)" even though a healthy repo sits one level below.
+
+    Resolution order (strictly ADDITIVE — the repo-at-root case is unchanged, and we fall
+    back to `project_root` so a genuinely repo-less tree still renders "(unavailable)"):
+      1. the session `cwd` (if it is inside a repo) — handles a session launched within a
+         subdir-repo, and is preferred so the RIGHT repo wins when several siblings exist;
+      2. `project_root` itself (the historical behavior — repo at, or above, $CLAUDE_PROJECT_DIR);
+      3. a shallow scan of `project_root`'s IMMEDIATE children for a `.git` entry (a dir for a
+         normal repo, a FILE for a worktree/submodule), verified to be a real repo; when more
+         than one child matches, prefer the one that contains `cwd`, else the first by name;
+      4. `project_root` unchanged — nothing found, preserve today's degraded output.
+    """
+    # 1. The session cwd, if it sits inside a repo (subdir-repo session, or any descendant).
+    if cwd:
+        top = _git_toplevel(Path(cwd))
+        if top:
+            return Path(top)
+    # 2. project_root itself — repo at or above $CLAUDE_PROJECT_DIR (the historical path).
+    top = _git_toplevel(project_root)
+    if top:
+        return Path(top)
+    # 3. Shallow-scan immediate children for a repo `project_root` can't see by walking up.
+    cwd_path = Path(cwd).resolve() if cwd else None
+    matches: list[Path] = []
+    try:
+        children = sorted(project_root.iterdir(), key=lambda p: p.name)
+    except OSError:
+        children = []
+    for child in children:
+        try:
+            if not child.is_dir():
+                continue
+            if not (child / ".git").exists():  # .git is a dir (normal) OR a file (worktree/submodule)
+                continue
+        except OSError:
+            continue
+        top = _git_toplevel(child)
+        if not top:
+            continue
+        root = Path(top)
+        # Prefer the repo that actually contains the session cwd when siblings both match.
+        if cwd_path is not None:
+            try:
+                cwd_path.relative_to(root.resolve())
+                return root
+            except ValueError:
+                pass
+        matches.append(root)
+    if matches:
+        return matches[0]
+    # 4. Nothing found — keep the historical fallback (renders "(unavailable)" if repo-less).
+    return project_root
+
+
 def _plugin_version(plugin_root: str) -> str:
     """Read the plugin's declared version from .claude-plugin/plugin.json."""
     if not plugin_root:
@@ -407,7 +477,7 @@ def _format_memory_rows(
 
 
 def _build_handoff(
-    project_root: Path, plugin_root: str, trigger: str, transcript_path: str = ""
+    project_root: Path, plugin_root: str, trigger: str, transcript_path: str = "", cwd: str = ""
 ) -> str:
     """Compose the handoff. Disk/git sections + the VERBATIM recent conversation;
     every section is best-effort (fail-open)."""
@@ -416,10 +486,16 @@ def _build_handoff(
     utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     version = _plugin_version(plugin_root)
 
-    head_sha = _run_git(["rev-parse", "HEAD"], project_root) or "(unavailable)"
-    branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], project_root) or "(unavailable)"
-    log = _run_git(["log", "-n", str(MAX_COMMITS), "--oneline", "--no-decorate"], project_root)
-    status = _run_git(["status", "--short"], project_root)
+    # Run the git sections from the ACTUAL repo root — which may be a SUBDIR of
+    # $CLAUDE_PROJECT_DIR (issue #66). `git rev-parse` only walks up, so without this the
+    # sections silently degrade to "(unavailable)" in a parent-dir-holds-the-repo layout.
+    git_root = _resolve_git_root(project_root, cwd)
+    head_sha = _run_git(["rev-parse", "HEAD"], git_root) or "(unavailable)"
+    branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], git_root) or "(unavailable)"
+    log = _run_git(["log", "-n", str(MAX_COMMITS), "--oneline", "--no-decorate"], git_root)
+    status = _run_git(["status", "--short"], git_root)
+    # TRDD + memory sections stay rooted at $CLAUDE_PROJECT_DIR — design/tasks/ and the
+    # memory scopes are project-dir-relative, NOT git-root-relative.
     trdds = _inflight_trdds(project_root)
 
     out: list[str] = []
@@ -602,7 +678,7 @@ def main() -> int:
             sd = project_dir / ".janitor" / "state"
             sd.mkdir(parents=True, exist_ok=True)
 
-        handoff = _build_handoff(project_dir, plugin_root, trigger, transcript_path)
+        handoff = _build_handoff(project_dir, plugin_root, trigger, transcript_path, cwd_fallback)
         handoff_path = sd / HANDOFF_FILENAME
 
         if state is not None:
