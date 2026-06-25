@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-25T10:11:47+0200
+updated: 2026-06-25T10:56:39+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -18,17 +18,16 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-25
 
-### ✅ 2026-06-25 (post-reload) — v0.24.2 README immortality docs shipped (6th release); its CI Validate is RED on a NETWORK flake, NOT a defect — do NOT panic-investigate
+### ✅ 2026-06-25 (post-reload) — v0.24.2 README immortality docs shipped (6th release); CI Validate flaked on the network then went GREEN on re-run — v0.24.2 fully green
 The README had a daemon section but did not document the immortality work; **v0.24.2** adds a 60-line
 `## Immortality (self-healing daemon)` section (the L0–L3 layers, C2/C3/C4 + KEEPQRTN, D-α/D-β, the fleet ladder,
 F3) + a How-it-works pointer, with all three opt-in env-var names verified verbatim against source. CPV `--strict`
 was pre-checked CLEAN (exit 0) and every publish.py gate passed locally before push; the session was then reloaded
 onto v0.24.2 (the PreCompact handoff + all immortality hooks are now active in THIS session). A wikimem HARVEST pass
-also ran clean (LOCAL, nothing due — corpus is well-formed). **⚠ v0.24.2's CI `Validate` job is RED — but ONLY
-because the network-dependent `cpv-remote-validate` step hit a persistent transient HANG tonight (FAILED on 3 separate
-attempts, each ~600s timeout; the SAME flake that hit v0.22.0). It is NOT a code/release defect: the other 3 CI jobs
-are green and every local publish gate passed. Do NOT panic-investigate the red v0.24.2 check — re-run it with
-`gh run rerun 28154458118 --failed` once the network recovers.** The immortality conclusion below is UNCHANGED:
+also ran clean (LOCAL, nothing due — corpus is well-formed). **✓ RESOLVED — v0.24.2 is now FULLY CI-green.** The `Validate` job first failed several times on a transient
+`cpv-remote-validate` network hang (the same flake that hit v0.22.0), but the re-run after the network recovered
+PASSED — run 28154458118 + all 4 CI jobs `completed success`. (Kept here so the earlier "red" framing isn't later
+mistaken for a real defect.) The immortality conclusion below is UNCHANGED:
 maintain-and-await.
 
 ### ✅ 2026-06-25 (09:23) — IMMORTALITY COMPLETE + final-review SOUND + the one found gap CLOSED (5 releases, all CI-green). Only E2/E3 awaits the USER.
