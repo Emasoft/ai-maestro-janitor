@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-bootstrap
-description: BOOTSTRAP — stand up the wiki-memory system in a project that doesn't have it yet (the one-time fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir under .claude/project/memory/ (adding the gitignore exception when .claude/ is ignored), seeds the project's <name>-overview entry page (NEVER a MEMORY.md stub — that file is Anthropic's harness-owned buffer the harvest mirrors into the wiki), and points the agent at the recall rule + the write/recall/update skills + the proactive-use contract. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
+description: BOOTSTRAP — stand up the three-scope wiki-memory system in a project that doesn't have it yet (the one-time adoption / fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir, seeds the project's overview entry page (never a MEMORY.md stub — that file is the harness-owned buffer the harvest mirrors into the wiki), and points the agent at the recall rule + the write/recall/update skills. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
 ---
 
 # Janitor memory — BOOTSTRAP
