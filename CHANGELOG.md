@@ -2,13 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.24.6] - 2026-06-25
+## [0.24.7] - 2026-06-25
 
 ### Documentation
 
-- TRDD-WQAJZ5V6 → published (v0.24.5, CI green, no flake this run)
+- Capture the markdownlint MD004 +-wrap publish-gate trap (janitor-publish-pipeline)
+- Close TRDD-3b9b2040 -> published (atom engine Phase g complete + shipped)
+- Add TRDD-15ECPBSA -- TRDD state-reconciliation detector (board-drift prevention)
 
-### Refactor
+### Features
 
-- SSOT note-filter + close consolidate user-mem privacy gap (TRDD-87935f21)
+- Trdd-state-reconciliation -- surface shipped-but-open board drift (TRDD-15ECPBSA)
 
