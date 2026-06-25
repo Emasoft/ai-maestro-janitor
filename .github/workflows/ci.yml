@@ -63,23 +63,30 @@ jobs:
       - name: Validate plugin (strict)
         run: |
           # CPV remote validation occasionally HANGS on a flaky remote/network
-          # call (observed on the v0.8.5 CI run: the step ran 10min+ with no
+          # call (observed v0.8.5 AND v0.24.4: the REPO-LINT stage ran with no
           # progress while publish.py's identical local CPV --strict had already
-          # passed). Bound each attempt with `timeout` and retry ONCE on a hang
-          # (exit 124) so a transient hang self-heals; a real validation failure
-          # (any other non-zero) fails fast without a pointless retry. The
-          # job-level timeout-minutes is the hard backstop.
+          # passed on the same commit). Bound each attempt with `timeout` and
+          # retry up to TWICE on a hang (exit 124) — v0.24.4 hit the hang on BOTH
+          # the first attempt and the single retry, so retry-once was empirically
+          # insufficient (false-red on a good release, needed a manual re-run); 3
+          # attempts self-heal that case. A real validation failure (any other
+          # non-zero — CPV's 1-4 severity exits) fails fast WITHOUT a pointless
+          # retry. The job-level timeout-minutes is the hard backstop.
           run_cpv() {
             timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
-          run_cpv && { echo "Validation passed"; exit 0; }
-          rc=$?
-          if [ "$rc" -eq 124 ]; then
-            echo "::warning::CPV validation hung (timed out at 300s) — retrying once"
-            run_cpv && { echo "Validation passed on retry"; exit 0; }
+          # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
+          # `&&` form leaves $? = run_cpv's real exit code on failure, whereas an
+          # if-with-no-else swallows it (returns 0), which would make a real
+          # failure look like a pass. This is the proven set-e-safe pattern.
+          rc=0
+          for attempt in 1 2 3; do
+            run_cpv && { echo "Validation passed (attempt $attempt)"; exit 0; }
             rc=$?
-          fi
+            if [ "$rc" -ne 124 ]; then break; fi   # real validation failure → fail fast, no retry
+            echo "::warning::CPV validation hung (timed out at 300s) — attempt $attempt/3"
+          done
           echo "::error::Validation failed (exit code $rc)"
           exit "$rc"
 
