@@ -1,9 +1,9 @@
 ---
 trdd-id: 7C787DUS
 title: Reconciliation detector — exclude a TRDD's own design-only commits from the shipped check
-column: complete
+column: published
 created: 2026-06-25T17:10:27+0200
-updated: 2026-06-25T17:24:26+0200
+updated: 2026-06-25T17:43:41+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 4
@@ -23,22 +23,30 @@ audit-requirements: []
 review-requirements: []
 impacts: []
 implementation-commits: [1279054]
+published-version: 0.24.10
+published-at: 2026-06-25T17:43:41+0200
 ---
 
 # Reconciliation detector — a TRDD's own design-only commits must not count as "shipped"
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-25
 
-- **✅ IMPLEMENTED + TESTED (2026-06-25, commit `1279054`) — column: complete;
-  awaiting the v0.24.10 publish:** `_commit_touches_impl` added to the detector
-  (keeps a subject-matched commit only if it touches a file OUTSIDE
-  `design/tasks/`); the integration fixtures were made realistic (`_commit_all`
-  writes real code by default, `spec_only=True` opts out) plus a regression test.
-  Live board: candidates 21 → 17 (cf15d412 + the backburner-doc false positives
-  dropped). 90 trdd tests green, ruff + pyright clean. THE PUBLISH IS HELD: the
-  v0.24.9 Release job is stuck (>19 min) on slow GitHub transit (this connection's
-  documented issue), so a v0.24.10 publish would hang too — ship once transit
-  recovers and v0.24.9's release resolves.
+- **✅ SHIPPED — PUBLISHED v0.24.10 (2026-06-25, commit `1279054`):**
+  `_commit_touches_impl` added to the detector (keeps a subject-matched commit
+  only if it touches a file OUTSIDE `design/tasks/`); the integration fixtures
+  were made realistic (`_commit_all` writes real code by default, `spec_only=True`
+  opts out) plus a regression test. Live board: candidates 21 → 17 (cf15d412 + the
+  backburner-doc false positives dropped). 90 trdd tests green, ruff + pyright
+  clean; publish.py gates all green.
+- **CI-zombie learning (do not re-misdiagnose this):** the v0.24.9 Release CI job
+  appeared "stuck" 42 min and I wrongly read it as "publish blocked on transit."
+  In fact v0.24.9 + v0.24.10 BOTH published fine — `publish.py` creates the GH
+  release + uploads assets LOCALLY; the CI `Release` job's `Validate plugin
+  (strict)` step (a `uvx` git-clone of CPV) had ZOMBIED when transit briefly
+  degraded at 14:55 and never self-recovered (no `timeout-minutes` to bound it).
+  The release object existed the whole time (`gh release view` proved it). The
+  zombie was cancelled; the missing `timeout-minutes` on release-class workflows
+  is captured as task #243.
 - **THE BUG (found 2026-06-25 by verifying a v0.24.9 "closeable" candidate):** the
   trdd-state-reconciliation detector's Check 1 ("shipped-but-open") resolves a
   TRDD's commits from `implementation-commits:` OR — as a fallback — by grepping
