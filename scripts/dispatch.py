@@ -43,9 +43,20 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
 
+# The cache-version PARENT — the dir that holds every cached `<version>/` of the
+# janitor (the same dir the dispatcher-stub's PLUGIN_CACHE_ROOT points at). This
+# dispatch.py lives at `<cache-parent>/<version>/scripts/dispatch.py`, so two
+# parents up from `scripts/` is the version-list root the C4 rollback decision
+# (`_phase_crash_loop_rollback`) reasons over. Overridable for tests via
+# JANITOR_CACHE_PARENT so no test touches the real ~/.claude cache tree.
+_PLUGIN_CACHE_PARENT = Path(
+    os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.parent.parent)
+)
+
 import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
+import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD-T198DT1W)
 
 # Detector roster: (name, default cadence in seconds, env-var override).
 # Order matches dispatch.sh — detectors with shorter cadences run first
@@ -529,6 +540,71 @@ def _phase_plugin_reload() -> None:
     )
 
 
+def _phase_crash_loop_rollback() -> None:
+    """C4 (TRDD-T198DT1W) — auto-rollback a self-update that won't STAY alive.
+
+    Symptom this defends against: a janitor self-update lands a new cache version
+    whose daemon/heartbeat crashes or loops on start (a bad release). The
+    dispatcher-stub auto-rolls into the newest version on every fire, so a bad
+    newest version would keep killing the heartbeat. The global-state spawn
+    breaker already DETECTS the dying daemon (it refuses to keep re-spawning it);
+    this phase is the PRODUCER half of the rollback: when the breaker is tripped
+    AND a strictly-older runnable version exists to fall back to, it QUARANTINES
+    the newest version (``version_update_lib.add_quarantine``). The stub's C3
+    quarantine-skip (already shipped) then walks down to the known-good older
+    version on the next fire — auto-rollback, no new stub change — and a human is
+    alerted once via ``[janitor-rollback]``.
+
+    CARDINAL RULE — FAIL-OPEN / ZERO-FALSE-ROLLBACK: the decision
+    (``vu.plan_crash_loop_rollback``) returns a target ONLY when the daemon is
+    PROVABLY crash-looping (a healthy update spawns once and stays alive, so the
+    breaker never trips → a good version is NEVER rolled back), a fallback exists,
+    and the newest is not already quarantined (idempotent → alert once). With no
+    fallback the phase does nothing and the stub's own fail-open backstop still
+    runs the newest — a bad heartbeat beats a dead one. The whole phase is wrapped
+    defensively so a global-state / cache fault can never crash the heartbeat;
+    worst case the rollback simply doesn't happen this fire.
+
+    Phase order: this precedes ``_phase_daemon_restart_if_stale`` so the
+    quarantine lands BEFORE we consider restarting the daemon — though the stub
+    (not this phase) is what actually picks the version on the next fire.
+    """
+    try:
+        if not gs.crash_loop_active():
+            return  # not crash-looping → nothing to roll back (the common case)
+        plan = vu.plan_crash_loop_rollback(
+            _PLUGIN_CACHE_PARENT, crash_loop=True,
+        )
+        if plan is None:
+            return  # crash-looping but no safe fallback / already quarantined
+        bad, fallback = plan
+        if not vu.add_quarantine(bad, "crash-loop"):
+            state.log_line(
+                "dispatch",
+                f"crash-loop rollback: add_quarantine({bad}) failed (DATA-dir I/O) "
+                "— stub fail-open backstop still runs the newest",
+            )
+            return
+        respawns = gs.recent_spawn_count()
+        state.log_line(
+            "dispatch",
+            f"crash-loop rollback: quarantined newest={bad} (daemon respawned "
+            f"~{respawns}x) → stub falls back to {fallback}",
+        )
+        # Alert the human ONCE per distinct bad version (dedupe key = the version),
+        # so a still-crash-looping cache doesn't re-emit every fire.
+        line = dedupe.emit_once(
+            state.state_dir() / "crash-loop-rollback-seen.txt",
+            f"rollback@{bad}",
+            f"[janitor-rollback] janitor self-update {bad} crash-looped — "
+            f"quarantined and rolled back to {fallback}. Investigate {bad} before re-updating.",
+        )
+        if line is not None:
+            print(line)
+    except Exception as exc:  # noqa: BLE001 — a rollback fault must never crash the heartbeat
+        state.log_line("dispatch", f"crash-loop rollback phase failed: {exc}")
+
+
 def _phase_daemon_restart_if_stale() -> None:
     """SIGTERM the daemon when its script path no longer matches the live cache.
 
@@ -724,6 +800,15 @@ def main() -> int:
     # daemon's user-plugins-update task reports a real version change. The
     # cron prompt's silent-execute clause runs /reload-plugins.
     _phase_plugin_reload()
+
+    # Phase 1.64: C4 bad-self-update auto-rollback. When the global-state spawn
+    # breaker shows the daemon is crash-looping (a bad new version that won't stay
+    # alive) AND a strictly-older runnable version exists, quarantine the newest so
+    # the dispatcher-stub's C3 quarantine-skip rolls back to the known-good one on
+    # the next fire. FAIL-OPEN: never fires for a healthy update (the breaker never
+    # trips), never quarantines without a fallback; defensively wrapped. Precedes
+    # the daemon-restart phase so the quarantine is in place first.
+    _phase_crash_loop_rollback()
 
     # Phase 1.65: daemon staleness — if the running daemon's script path
     # doesn't match the current cache version, SIGTERM it so Phase 1.7 can

@@ -752,6 +752,45 @@ def _crash_loop_active(now: Optional[int] = None) -> bool:
     return len(recent) >= _CRASH_LOOP_SPAWN_LIMIT
 
 
+# ---------- C4 (TRDD-T198DT1W) — public read-only crash-loop signal ----------
+#
+# C4 (bad-self-update auto-rollback) needs to ANSWER "is the daemon dying on
+# every start?" from OUTSIDE this module — the dispatch heartbeat reads it to
+# decide whether to quarantine the crash-looping newest version (so the
+# dispatcher-stub's C3 quarantine-skip falls back to a known-good older one).
+# These are thin, READ-ONLY views over the EXISTING spawn-history breaker
+# (`_crash_loop_active` / `daemon.spawn-history`); they record nothing, mutate
+# nothing, and change no spawn behavior — they only EXPOSE the signal the
+# breaker already computes, so dispatch never reaches into a `_`-private. Both
+# fail-open (an unreadable history reads as "not crash-looping" / count 0), so
+# C4 never quarantines on a bookkeeping fault.
+
+
+def crash_loop_active(now: Optional[int] = None) -> bool:
+    """PUBLIC read-only: True iff the daemon spawn breaker is tripped (the
+    daemon is dying on start — ``_CRASH_LOOP_SPAWN_LIMIT`` spawns inside
+    ``_CRASH_LOOP_WINDOW_S``). The C4 rollback signal. Pure read; fail-open
+    (an unreadable history → False)."""
+    return _crash_loop_active(now)
+
+
+def recent_spawn_count(window_s: Optional[int] = None, now: Optional[int] = None) -> int:
+    """PUBLIC read-only: how many daemon spawn attempts landed within the last
+    ``window_s`` seconds (default ``_CRASH_LOOP_WINDOW_S``). Diagnostic for C4's
+    alert text ("daemon respawned N times"). Pure read; returns 0 on a
+    missing/unreadable history (fail-open — C4 never rolls back on count 0)."""
+    win = int(window_s if window_s is not None else _CRASH_LOOP_WINDOW_S)
+    ts = int(now if now is not None else time.time())
+    try:
+        raw = _spawn_history_path().read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return 0
+    return sum(
+        1 for ln in raw.splitlines()
+        if ln.strip().isdigit() and ts - int(ln.strip()) <= win
+    )
+
+
 def _kill_wedged_daemon(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
     """Kill a WEDGED daemon — pid alive but heartbeat provably stale — so the kernel
     releases the singleton flock it still holds and a respawn can actually take over.

@@ -454,3 +454,85 @@ def add_quarantine(version: str, reason: str = "") -> bool:
     except OSError:
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# C4 (TRDD-T198DT1W) — bad-self-update auto-rollback DECISION (pure).
+#
+# C3 (above) ships the CONSUMING half: the dispatcher-stub already SKIPS a
+# quarantined version and walks down to the next-older runnable one, with a
+# fail-open backstop that runs the newest regardless when nothing is
+# acceptable. C4 is the PRODUCER of that quarantine entry: when a self-update
+# lands a version whose daemon/heartbeat won't STAY alive (it crash-loops),
+# quarantine that newest version so the next stub fire falls back to a
+# known-good older version — auto-rollback, no new stub change.
+#
+# These functions are PURE decisions (no I/O beyond a cache `iterdir`/`is_file`
+# probe; they NEVER write the quarantine — the caller does). The crash-loop
+# SIGNAL is supplied by the caller (global_state.crash_loop_active); decoupling
+# it keeps this testable and keeps the live-system read in one place.
+#
+# CARDINAL RULE — FAIL-OPEN / ZERO-FALSE-ROLLBACK: a rollback is proposed ONLY
+# when (a) the daemon is PROVABLY crash-looping AND (b) a strictly-OLDER runnable
+# version exists in the cache to fall back to AND (c) the newest is not already
+# quarantined. A HEALTHY update never trips (a) — a healthy daemon spawns once
+# and stays alive, so the spawn breaker never fires — so a good version is NEVER
+# rolled back. With no older fallback, (b) fails and we propose nothing (the
+# stub's own fail-open backstop still runs the newest — a bad heartbeat beats a
+# dead one). The decision touches NOTHING until all three hold.
+# ---------------------------------------------------------------------------
+
+
+def older_runnable_version(cache_parent: Path, newest: str) -> str | None:
+    """The highest installed version STRICTLY OLDER than ``newest`` whose
+    ``scripts/dispatch.py`` exists (a real fallback the stub can run), or None
+    when there is no such version.
+
+    This is the fallback-exists guard for the rollback decision: quarantining
+    the crash-looping newest is only WORTH doing — and only provably safe — when
+    an older runnable version is on disk for the stub to walk down to. Pure: a
+    cache `iterdir` + per-candidate `is_file` probe, no mutation."""
+    newest_t = _semver_tuple(newest)
+    if newest_t == (-1,):
+        return None
+    candidates = [
+        v for v in list_installed_versions(cache_parent)
+        if _semver_tuple(v) < newest_t
+        and (cache_parent / v / "scripts" / "dispatch.py").is_file()
+    ]
+    if not candidates:
+        return None
+    # list_installed_versions is sorted ascending → the last strictly-older
+    # candidate is the highest (closest) known-good fallback.
+    return candidates[-1]
+
+
+def plan_crash_loop_rollback(cache_parent: Path, *, crash_loop: bool) -> tuple[str, str] | None:
+    """Decide whether to auto-rollback a crash-looping self-update. PURE — it
+    quarantines NOTHING; the caller passes the result to ``add_quarantine``.
+
+    Returns ``(bad_version, fallback_version)`` — the NEWEST cached version (the
+    one the dying daemon is spawned from) and the older runnable version the stub
+    would fall back to — ONLY when ALL hold:
+      1. ``crash_loop`` is True (the daemon is PROVABLY dying on start);
+      2. a strictly-OLDER runnable version exists (``older_runnable_version``);
+      3. the newest is not ALREADY quarantined (idempotent — never re-alert).
+    Returns None otherwise (fail-open: no proof, no fallback, or already done →
+    do nothing). The newest is recomputed from the cache here so the caller never
+    has to identify the bad version itself."""
+    if not crash_loop:
+        return None  # no proof the daemon is dying → never roll back (fail-open)
+    installed = list_installed_versions(cache_parent)
+    if not installed:
+        return None  # nothing installed to reason about
+    newest = installed[-1]
+    # Only quarantine a version that is actually RUNNABLE-but-bad; a newest dir
+    # with no dispatch.py is already unrunnable and the stub skips it on its own.
+    if not (cache_parent / newest / "scripts" / "dispatch.py").is_file():
+        return None
+    if newest in read_quarantine():
+        return None  # already quarantined → idempotent, never re-alert
+    fallback = older_runnable_version(cache_parent, newest)
+    if fallback is None:
+        return None  # no known-good older version → leave it to the stub's backstop
+    return (newest, fallback)
