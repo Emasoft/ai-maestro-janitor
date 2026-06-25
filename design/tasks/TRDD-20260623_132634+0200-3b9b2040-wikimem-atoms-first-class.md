@@ -1,9 +1,9 @@
 ---
 trdd-id: 3b9b2040-42b1-4217-8268-d787b389fd05
 title: Wikimem atoms as first-class index elements — block-properties parse/index/recall, harvest-into-atoms, prose→atom migration
-column: dev
+column: published
 created: 2026-06-23T13:26:34+0200
-updated: 2026-06-23T17:09:35+0200
+updated: 2026-06-25T15:50:09+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor
@@ -24,6 +24,16 @@ external-refs: ["github.com/Querulantenkind/obsidian-block-properties-plugin"]
 # Wikimem ATOMS as first-class index elements (block-properties parse/index/recall + harvest-into-atoms + prose→atom migration)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-23
+
+### ✅ SHIPPED + CLOSED — 2026-06-25 (column: published)
+PHASE g COMPLETE (g1–g6 + g3, per the NEXT ACTION below). The atom engine plus the
+shared-footnote move-rule verify are implemented, tested, documented, AND shipped:
+the atom features live in the published memgrep crate, and the `desc`-field child
+(TRDD-056384eb) shipped in v0.24.4 — proof the engine is live in released versions.
+The 2026-06-23 publish-block (GROUP B persistence CRITICALs on `main`) is RESOLVED:
+GROUP C landed (self-integrity) and many releases have shipped since (through
+v0.24.6). Nothing remains on this TRDD; closing it as published. The refined-model
+detail below is retained as the historical design record.
 
 ### 🔴 REFINED MODEL — USER directives 2026-06-23 (SUPERSEDES the trailing/2-element build below)
 The atom engine (a–f below) was built with a model the USER then corrected in a rapid series of
