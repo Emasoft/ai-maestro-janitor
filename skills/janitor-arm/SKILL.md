@@ -114,6 +114,14 @@ and ai-maestro-janitor#23.
    so the active cron self-corrects on the next arm; orphaned dirs are harmless
    but accumulate.
 
+**Assessed-safe CC interactions (no mitigation needed).** CC 2.1.183 reclassified
+scheduled-task and webhook-trigger deliveries as *task-notifications*: in auto mode
+they can no longer auto-approve a pending action or set the session title. The
+heartbeat was verified UNAFFECTED on CC 2.1.191 — a heartbeat fire starts a fresh
+turn whose tools are policy-approved; it never relied on the scheduled delivery
+auto-approving a *pending* prompt. Recorded so the next CC-version compatibility
+audit has a baseline (TRDD-6F7F7D60).
+
 ## Error Handling
 
 - `${CLAUDE_PLUGIN_ROOT}` unset → abort "plugin not installed".
