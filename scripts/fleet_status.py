@@ -173,6 +173,76 @@ def _last_security_scan(root: str) -> int | None:
     return newest
 
 
+# ---------------------------------------------------------------------------
+# Immortality F2 dashboard augments (TRDD-F3AUDLOG) — three READ-ONLY signals the
+# dashboard already has the libs for but did not surface: OS-keepalive registration,
+# the self-integrity manifest verdict, and a recovery-history rollup. All three are
+# FAIL-OPEN — a missing lib / manifest / key / file renders a neutral string, never
+# crashes the dashboard (the honesty-over-completeness rule).
+# ---------------------------------------------------------------------------
+
+
+def _keepalive_status() -> str:
+    """OS-keepalive (launchd/systemd) registration state, fail-open.
+
+    'registered' iff the staged installer reports the service is on disk; 'not
+    registered' when it isn't; 'unknown' if the lib is unavailable or the probe
+    raises (e.g. no DATA-staged installer yet)."""
+    try:
+        import launchd_keepalive as ka  # noqa: PLC0415 -- local lib, lazy so an import error degrades to 'unknown'
+        return "registered" if ka.is_installed() else "not registered"
+    except Exception:  # noqa: BLE001 -- a probe must never break the dashboard
+        return "unknown"
+
+
+def _integrity_verdict() -> str:
+    """Self-integrity manifest verdict, fail-open.
+
+    Verifies the janitor's own prompt-surface file hashes against
+    .integrity/manifest-sha256.json. Renders 'clean' when nothing drifted,
+    'DRIFT (mutated/missing/extra counts)' when it did, 'no manifest' before a
+    manifest is published, and 'unknown' if the lib/verify raises. Never crashes —
+    the manifest verdict is observability, not a gate."""
+    try:
+        import janitor_self_integrity as jsi  # noqa: PLC0415 -- local lib, lazy
+        plugin_root = Path(__file__).resolve().parent.parent
+        manifest_path = plugin_root / ".integrity" / "manifest-sha256.json"
+        if not manifest_path.is_file():
+            return "no manifest"
+        mutated, missing, extra = jsi.verify_manifest(plugin_root, manifest_path)
+        if not (mutated or missing or extra):
+            return "clean"
+        return f"DRIFT (mutated={len(mutated)} missing={len(missing)} extra={len(extra)})"
+    except Exception:  # noqa: BLE001 -- never crash the dashboard on an integrity probe
+        return "unknown"
+
+
+def _recovery_rollup() -> str:
+    """Last-N-recoveries rollup from the F3 recovery-audit.ndjson, fail-open.
+
+    Renders e.g. 'recoveries: 12 (7 fired) latest 06-25 09:14 — fired×7, dry_run×5'
+    or 'recoveries: none' when no recovery has ever been logged, or 'recoveries:
+    unknown' if the lib/read raises. Read-only — the dashboard never writes the log."""
+    try:
+        import recovery_audit as ra  # noqa: PLC0415 -- local lib, lazy
+        records = ra.load_records()
+        summ = ra.summarize_recent(records)
+        if summ is None:
+            return "recoveries: none"
+        by = summ.get("by_outcome", {}) or {}
+        # Most-frequent outcomes first → a compact at-a-glance breakdown.
+        breakdown = ", ".join(
+            f"{k}×{v}" for k, v in sorted(by.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
+        latest = _fmt_ts(summ.get("latest_ts"))
+        return (
+            f"recoveries: {summ['total']} ({summ['fired']} fired) latest {latest}"
+            + (f" — {breakdown}" if breakdown else "")
+        )
+    except Exception:  # noqa: BLE001 -- never crash the dashboard on the rollup read
+        return "recoveries: unknown"
+
+
 # The kanban columns, in lifecycle order. The first is the proposal stage, the
 # middle is the TRDD v2 pipeline (the 15+ statuses), and the tail is the terminal
 # / exception lanes. The source FOLDER pins the super-column (proposals→proposal,
@@ -377,11 +447,18 @@ def main() -> int:
         })
 
     broken = [r for r in rows if r["diag"] in ("frozen", "cron_dead", "version_mismatch")]
+    # Immortality F2 augments (TRDD-F3AUDLOG): keepalive registration, self-integrity
+    # verdict, and the recovery-history rollup — each fail-open (renders a neutral
+    # string, never crashes the dashboard).
+    keepalive = _keepalive_status()
+    integrity = _integrity_verdict()
+    recovery = _recovery_rollup()
     summary = (
         f"{len(rows)} running claude instance(s) · {len(broken)} with a broken janitor · "
         f"janitor v{jver} (up-to-date: {uptodate}) · daemon: "
-        f"{'alive' if daemon_alive else 'DOWN'} · marketplace last refresh: {_fmt_ts(mkt_ts)} · "
-        f"global wikimem: {global_wikimem}"
+        f"{'alive' if daemon_alive else 'DOWN'} · OS keepalive: {keepalive} · "
+        f"self-integrity: {integrity} · marketplace last refresh: {_fmt_ts(mkt_ts)} · "
+        f"global wikimem: {global_wikimem} · {recovery}"
     )
 
     if text_only:
@@ -685,10 +762,14 @@ def _legend_html(want_ci: bool) -> str:
         "<b>loc sec scan</b> = most-recent run of the janitor's continuous security "
         "detectors (findings surface live, not persisted per-run). <b>gh sec</b> / "
         "<b>CI</b> / <b>up-to-date</b> need <code>--ci</code>"
-        + ("" if want_ci else " (omitted this run)") + ". Deferred to Group-F: "
-        "per-run security outcome, plugin-validation status, last-nudge, "
-        "next-job-in-queue, memgrep errors, last-push. Click a <b>📋 kanban</b> badge "
-        "to open that project's TRDD board — the <b>blocked</b> lane is full red."
+        + ("" if want_ci else " (omitted this run)") + ". The summary line carries the "
+        "immortality signals: <b>OS keepalive</b> (launchd/systemd registration), "
+        "<b>self-integrity</b> (file-hash manifest verdict — clean/DRIFT/no manifest), "
+        "and <b>recoveries</b> (the fleet-guardian's audit-log rollup: total, fired, "
+        "latest, per-outcome). Still deferred: per-run security outcome, "
+        "plugin-validation status, next-job-in-queue, memgrep errors, last-push. "
+        "Click a <b>📋 kanban</b> badge to open that project's TRDD board — the "
+        "<b>blocked</b> lane is full red."
     )
     return chips + "<br>" + note
 

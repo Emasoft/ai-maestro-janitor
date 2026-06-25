@@ -68,6 +68,7 @@ import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import global_state as gs  # noqa: E402
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
+import recovery_audit as ra  # noqa: E402  # F3 recovery audit log (TRDD-F3AUDLOG) — fail-open side-channel
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
 import state  # noqa: E402
 import supervisor as oauth_supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py
@@ -710,6 +711,29 @@ def task_session_liveness() -> None:
         return
     rec_dir = gs.global_state_dir() / "recovery"
     rec_dir.mkdir(parents=True, exist_ok=True)
+
+    def _audit(inst, outcome: str, rung: str | None, channel: str | None) -> None:
+        """Append ONE recovery-decision record to the F3 audit log (TRDD-F3AUDLOG).
+
+        FAIL-OPEN belt-and-suspenders: ra.record_recovery is already fully guarded
+        (an audit fault returns None, never raises), but we re-wrap here too so that
+        even an unexpected error constructing the args can NEVER perturb the recovery
+        beat — the audit is a pure side-channel; the beat's logic stays untouched.
+        """
+        try:
+            ra.record_recovery(
+                ts=now,
+                project_root=inst.project_root,
+                pid=inst.pid,
+                tty=inst.tty,
+                diagnosis=inst.diagnosis,
+                rung=rung,
+                channel=channel,
+                outcome=outcome,
+            )
+        except Exception:  # noqa: BLE001 -- an audit fault must NEVER crash the recovery beat
+            pass
+
     for inst in fleet:
         if not inst.project_root:
             continue  # no .janitor project → nothing to re-arm; can't key state
@@ -744,6 +768,10 @@ def task_session_liveness() -> None:
                 st["alerted"] = True
                 st["identity"] = identity
                 _write_recovery_state(sf, st)
+                # Audit ONCE too (gated on the same not-yet-alerted flag) so a
+                # permanently-looping instance records the give-up exactly once
+                # rather than appending every beat forever.
+                _audit(inst, "declined_crash_loop", None, None)
             continue
         if decision == "cooldown":
             continue
@@ -753,6 +781,7 @@ def task_session_liveness() -> None:
             # the not-yet-wired hard-restart `relaunch`): recovery_for_diagnosis (the gate
             # above) and action_for DELIBERATELY diverge on `dead`. This re-check is
             # what keeps the divergence safe — we never fire an unwired action.
+            _audit(inst, "declined_unwired", action, None)
             continue
         plan = fleet_inject.build_injection(inst.terminal, action)
         if plan is None:
@@ -761,11 +790,14 @@ def task_session_liveness() -> None:
                 f"session-liveness: {tag} UNREACHABLE ({inst.terminal}) — would "
                 f"{action}; skipped (no injection channel)",
             )
+            # No injection channel exists (that's WHY it's unreachable), so channel=None.
+            _audit(inst, "unreachable", action, None)
             continue
         if not fire:
             state.log_line(
                 "daemon", f"session-liveness:DRY would {action} → {plan['channel']} for {tag}"
             )
+            _audit(inst, "dry_run", action, str(plan["channel"]))
             continue
         ok = fleet_inject.fire(plan)
         _write_recovery_state(
@@ -776,6 +808,7 @@ def task_session_liveness() -> None:
             f"session-liveness: {'FIRED' if ok else 'FIRE-FAILED'} {action} → "
             f"{plan['channel']} for {tag}",
         )
+        _audit(inst, "fired" if ok else "fire_failed", action, str(plan["channel"]))
 
 
 class Task:
