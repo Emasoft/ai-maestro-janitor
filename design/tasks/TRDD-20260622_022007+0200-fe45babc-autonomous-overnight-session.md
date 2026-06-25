@@ -27,7 +27,7 @@ TRDD-f892e109) — porting the user-scope OAuth wrapper INTO the plugin, consist
   exact requested name is honored with NO gate relaxed) + the 3 helpers (open-login/check-login/lifetime-status)
   ported beside `rotator.py` (sibling-resolve + canonical DATA dir, NEVER the cache-glob/legacy home); 14 helper
   tests → **v0.20.1** post-publish recheck: command engine-call `uv run`→`python3` ×3 (rotator.py is stdlib-only)
-  + test fn rename. All CI-green, pushed.
+  plus a test-fn rename. All CI-green, pushed.
 - **C2 SIDE-EFFECT (safe):** the verify-before-exec commit **9773ff3** was already on main, so it RODE these
   publishes → C2 SOURCE is now PUBLISHED. Harmless: the stub is NON-auto-rolling, so the published C2 stub sits
   DORMANT in the cache until a `/janitor-arm` re-arm copies it into the live DATA stub. Activation (re-arm) is
