@@ -147,10 +147,11 @@ edges, but it is a safety net — the author wires both ends now.
 
 ### 6. Index it (memgrep only — do NOT touch MEMORY.md)
 
-The index is 100% memgrep's — the agent-invisible, unlimited SQLite
-`.memgrep/index.db`. Do **NOT** append a pointer to `MEMORY.md` (it is a retired
-deprecation stub; hand-maintaining a human index is what grew unbounded and
-corrupted memories). Just refresh the search index: `memgrep reindex "$MEMDIR"`
+The wiki index is 100% memgrep's — the agent-invisible, unlimited SQLite
+`.memgrep/index.db`. Do **NOT** write to `MEMORY.md` (it is Anthropic's harness-owned
+memory BUFFER, not a wiki index — the harvest mirrors FROM it INTO the wiki; the wiki
+skills never write the buffer, and hand-maintaining a human index is what grew unbounded
+and corrupted memories). Just refresh the search index: `memgrep reindex "$MEMDIR"`
 if memgrep is present (optional — recall auto-reindexes). Recall finds the new
 page by its `description`/body, never by a human index.
 

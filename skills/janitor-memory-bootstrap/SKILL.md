@@ -1,6 +1,6 @@
 ---
 name: janitor-memory-bootstrap
-description: BOOTSTRAP — stand up the wiki-memory system in a project that doesn't have it yet (the one-time fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir under .claude/project/memory/ (adding the gitignore exception when .claude/ is ignored), seeds the project's <name>-overview entry page + the MEMORY.md deprecation stub, and points the agent at the recall rule + the write/recall/update skills + the proactive-use contract. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
+description: BOOTSTRAP — stand up the wiki-memory system in a project that doesn't have it yet (the one-time fleet-rollout step). Creates the git-tracked PROJECT-scope memory dir under .claude/project/memory/ (adding the gitignore exception when .claude/ is ignored), seeds the project's <name>-overview entry page (NEVER a MEMORY.md stub — that file is Anthropic's harness-owned buffer the harvest mirrors into the wiki), and points the agent at the recall rule + the write/recall/update skills + the proactive-use contract. Use when a project has no wikimem and you want to "set up memory for this project", "bootstrap the wiki memory", "adopt the memory system", or onboard the project's memory. Run ONCE per project; idempotent if re-run.
 ---
 
 # Janitor memory — BOOTSTRAP
@@ -86,7 +86,7 @@ git -C "$REPO" check-ignore -v ".claude/project/memory/MEMORY.md"; echo "exit=$?
 # `.claude/**`); fix it and re-check.
 ```
 
-## Step 3 — seed the `<project>-overview` entry page + the MEMORY.md stub
+## Step 3 — seed the `<project>-overview` entry page (NOT a MEMORY.md stub)
 
 Don't overwrite an existing wikimem. Only seed when the dir is empty of pages:
 
@@ -94,7 +94,11 @@ Don't overwrite an existing wikimem. Only seed when the dir is empty of pages:
 ls "$PROJECT_MEM"/*.md >/dev/null 2>&1 && echo "wikimem already exists — skip seeding"
 ```
 
-If empty, create two files with the **Write tool** (real content, not echo).
+If empty, create the overview page with the **Write tool** (real content, not echo).
+**Do NOT create or seed `MEMORY.md`** — in the coexistence model (TRDD-ab232dbd) `MEMORY.md`
+is Anthropic's native, harness-owned memory BUFFER (the `# Memory` directive writes + auto-
+loads it). The janitor never stubs/seeds/trims it; the harvest chore READS it and mirrors new
+buffer memories into the curated wiki. Bootstrap seeds only the wiki entry page.
 
 The project's **overview ENTRY POINT** page — file `<project-name>-overview.md` in
 `$PROJECT_MEM/`, its `name:` is `<project-name>-overview` (Step 4 stages the exact
@@ -135,21 +139,9 @@ the deeper pages below rather than detailing them here.
 ## Notes and lessons learned
 ```
 
-`$PROJECT_MEM/MEMORY.md` — the **deprecation stub** (the index is retired to
-memgrep; this file is NOT an index and is never maintained, loaded-as-index, or
-trimmed):
-
-```markdown
-# MEMORY — index retired (managed by memgrep)
-
-⚠ DEPRECATED stub — do NOT add pointers here, load this as an index, or trim it.
-The memory index is 100% managed by `memgrep` (agent-invisible, unlimited SQLite
-index at `.memgrep/index.db`). To use project memory:
-- ENTRY POINT — navigate the project: `memgrep overview <memdir>`
-  (prints the project's overview page, which links out to the deeper wiki pages)
-- RECALL by symptom: `memgrep recall "<symptom>" <memdir>` (or `memgrep find …`)
-Protocol: `~/.claude/rules/markdown-memory-recall.md` (run `/janitor-memory-recall`).
-```
+`MEMORY.md` is **not** created here — it is the harness-owned buffer (see Step 3). If a
+`MEMORY.md` already exists in the scope it stays exactly as the harness left it; bootstrap
+neither stubs nor touches it.
 
 ## Step 4 — index it (optional) + commit guidance
 
@@ -161,8 +153,9 @@ Stage the new PROJECT-scope files **by name** (never `git add -A`) when the user
 wants them committed — this scope is meant to be pushed so every dev shares it:
 
 ```bash
-git -C "$REPO" add .gitignore "$PROJECT_MEM"/*-overview.md "$PROJECT_MEM/MEMORY.md"
-# then commit when the user asks — do NOT auto-commit.
+git -C "$REPO" add .gitignore "$PROJECT_MEM"/*-overview.md
+# then commit when the user asks — do NOT auto-commit. (MEMORY.md is the harness-owned
+# buffer — bootstrap never creates it, so it is not staged here.)
 ```
 
 ## Step 5 — point the agent at the system (the payload of bootstrap)
@@ -189,7 +182,7 @@ PROACTIVE-USE CONTRACT in
 
 One line: `Wikimem bootstrapped: PROJECT scope at <repo>/.claude/project/memory/
 (gitignore exception <added|already present|not needed>; seeded
-<project>-overview + MEMORY.md stub <created|already existed>).` Do NOT echo the seeded
+<project>-overview <created|already existed>).` Do NOT echo the seeded
 page bodies back into the conversation.
 
 ## Examples
@@ -198,7 +191,8 @@ page bodies back into the conversation.
 User: set up memory for this project
 → create .claude/project/memory/, add the `!.claude/project/memory/**` gitignore
   exception (the repo's .gitignore had `.claude/**`), seed the `<project>-overview`
-  page + the MEMORY.md stub, and tell the agent recall-first / write-after.
+  page (NOT a MEMORY.md stub — that file is the harness-owned buffer), and tell the
+  agent recall-first / write-after.
 </example>
 
 <example>

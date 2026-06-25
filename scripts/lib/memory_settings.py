@@ -227,3 +227,59 @@ def is_due(intervention: str, scope: str, root, now: int) -> bool:
     # since the last run — which fires exactly once per interval, at the slot.
     boundary = math.floor((now - phase) / iv) * iv + phase
     return boundary > last
+
+
+# --------------------------------------------------------------------------- #
+# harvest watermark store (TRDD-ab232dbd — the coexistence mirror's idempotency)
+#
+# The coexistence harvest MIRRORS each raw buffer note into a separate curated
+# `memory/wiki/` page and leaves the buffer 100% intact. Re-running it must NOT
+# re-mirror an already-mirrored note (else duplicate wiki pages). The watermark is a
+# per-(scope, root) JSON map ``{note_name: content_sha256}`` of what has been
+# mirrored. Keyed by content hash, not just name, so an EDITED buffer note (new hash)
+# correctly re-mirrors instead of going stale. Lives in the global-state dir (like the
+# cadence stamps) so two sessions on the same host share one watermark per scope.
+# --------------------------------------------------------------------------- #
+
+def harvest_watermark_path(scope: str, root) -> Path:
+    # Same per-(scope, root) hash keying as `_stamp_path`, so each concrete root in a
+    # scope gets its own watermark (LOCAL/PROJECT/USER never collide, and two projects
+    # sharing a scope don't share a mirror ledger).
+    h = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:12]
+    return global_state.global_state_dir() / f"memory-harvest-watermark-{scope}-{h}.json"
+
+
+def harvest_watermark_read(scope: str, root) -> dict:
+    """Return the ``{note_name: content_sha256}`` map of buffer notes already mirrored
+    for (scope, root). A missing or CORRUPT watermark degrades to ``{}`` (the harvest
+    re-mirrors — safe, additive, never loses a memory) rather than crashing the pass."""
+    p = harvest_watermark_path(scope, root)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    # Defensive: a hand-edited / wrong-shape file degrades to empty, not a type error.
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def harvest_note_is_mirrored(scope: str, root, note_name: str, note_text: str) -> bool:
+    """True iff `note_name` was mirrored AND its content is unchanged since (the stored
+    hash matches the hash of `note_text`). An edited buffer note → False → re-mirror."""
+    wm = harvest_watermark_read(scope, root)
+    return wm.get(note_name) == _content_hash(note_text)
+
+
+def harvest_mark_mirrored(scope: str, root, note_name: str, note_text: str) -> None:
+    """Record that `note_name` (with this exact content) has been mirrored into the
+    wiki. Read-modify-write the per-scope map atomically (tmp + os.replace via
+    `state.atomic_write`), accumulating across notes within and across passes."""
+    global_state.init_global_state()
+    wm = harvest_watermark_read(scope, root)
+    wm[note_name] = _content_hash(note_text)
+    state.atomic_write(harvest_watermark_path(scope, root), json.dumps(wm, sort_keys=True))
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()

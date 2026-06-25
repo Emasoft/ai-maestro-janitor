@@ -331,3 +331,50 @@ def test_stagger_disabled_rate_never_due():
     """A 0 rate is never due even with staggering on."""
     ms.set_value("harvest_per_day", "0")
     assert ms.is_due("harvest", "LOCAL", "/proj/x", _NOW + 10_000_000) is False
+
+
+# --------------------------------------------------------------------------- #
+# harvest watermark store (TRDD-ab232dbd — idempotent coexistence mirror)
+# --------------------------------------------------------------------------- #
+
+def test_harvest_watermark_empty_by_default():
+    """A scope with no watermark yet → empty map, nothing mirrored."""
+    assert ms.harvest_watermark_read("LOCAL", "/proj/wm") == {}
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/wm", "note.md", "anytext") is False
+
+
+def test_harvest_watermark_marks_and_recognises_by_content_hash():
+    """After marking a note mirrored, the SAME content is recognised; CHANGED content
+    is NOT (so an edited buffer note re-mirrors, never goes stale)."""
+    ms.harvest_mark_mirrored("LOCAL", "/proj/wm", "note.md", "original body")
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/wm", "note.md", "original body") is True
+    # An edit to the buffer note changes the hash → NOT mirrored → harvest re-mirrors it.
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/wm", "note.md", "EDITED body") is False
+
+
+def test_harvest_watermark_is_per_scope_and_per_root():
+    """The watermark is keyed by (scope, root) — a mark in one does not leak to another."""
+    ms.harvest_mark_mirrored("LOCAL", "/proj/a", "note.md", "body")
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/a", "note.md", "body") is True
+    assert ms.harvest_note_is_mirrored("USER", "/proj/a", "note.md", "body") is False
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/b", "note.md", "body") is False
+
+
+def test_harvest_watermark_accumulates_multiple_notes():
+    """Marking several notes accumulates them all in the one per-scope map."""
+    ms.harvest_mark_mirrored("LOCAL", "/proj/m", "a.md", "ba")
+    ms.harvest_mark_mirrored("LOCAL", "/proj/m", "b.md", "bb")
+    wm = ms.harvest_watermark_read("LOCAL", "/proj/m")
+    assert set(wm) == {"a.md", "b.md"}
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/m", "a.md", "ba") is True
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/m", "b.md", "bb") is True
+
+
+def test_harvest_watermark_survives_corrupt_file(tmp_path, monkeypatch):
+    """A corrupt watermark JSON degrades to empty (re-mirror), never crashes harvest."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    p = ms.harvest_watermark_path("LOCAL", "/proj/corrupt")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{ this is not json", encoding="utf-8")
+    assert ms.harvest_watermark_read("LOCAL", "/proj/corrupt") == {}
+    assert ms.harvest_note_is_mirrored("LOCAL", "/proj/corrupt", "n.md", "x") is False

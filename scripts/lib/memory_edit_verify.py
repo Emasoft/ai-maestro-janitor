@@ -254,6 +254,46 @@ def harvest_preservation_ok(
 
 
 # --------------------------------------------------------------------------- #
+# mirror preservation (TRDD-ab232dbd — the COEXISTENCE gate)
+#
+# The coexistence model REVERSES the stub-reduction: harvest no longer touches the
+# harness BUFFER (MEMORY.md + raw notes at the scope root). It MIRRORS each raw
+# buffer note into a SEPARATE curated wiki page under `memory/wiki/`. The invariant
+# this proves is the OPPOSITE direction of harvest_preservation_ok: not "is every
+# MEMORY.md memory in the wiki before we stub MEMORY.md", but "is every RAW BUFFER
+# NOTE's content now present in the wiki" — with the buffer left 100% intact, so a
+# failure means "mirror more", never "do not stub" (there is no stub step any more).
+# --------------------------------------------------------------------------- #
+
+def mirror_preservation_ok(
+    buffer_notes, wiki_corpus: str, min_len: int = 24
+) -> tuple[bool, list[str]]:
+    """Prove a coexistence HARVEST mirrored every raw buffer note into the wiki.
+
+    `buffer_notes` is an iterable of ``(name, text)`` pairs — the RAW harness buffer
+    notes (minimal/no wikimem frontmatter) the harvest was asked to mirror. `wiki_corpus`
+    is the union of the curated wiki page bodies (the mirror target). A buffer note is
+    MIRRORED iff every substantive BODY fact line of it (≥ `min_len` chars, frontmatter
+    + headings + `[^N]` lessons excluded — those are not memories) is a SUBSTRING of the
+    normalized wiki body blob. The substring (not line-equality) basis lets the agent
+    reorganize / add a lead in the curated copy without false-failing; a DROPPED or
+    paraphrased fact still fails. The buffer is NEVER modified, so a failure means the
+    agent must mirror more — it never gates a reduction of the buffer.
+
+    Returns ``(ok, [unmirrored, ≤8])`` where each entry NAMES the note plus the first
+    missing fact, so the agent knows WHICH note to (re)mirror. An empty buffer (the
+    dormant-corpus case — every note already curated) is trivially ``(True, [])``."""
+    haystack = _norm_body_blob(wiki_corpus)
+    unmirrored: list[str] = []
+    for name, text in buffer_notes:
+        for fact in _substantive_body_lines(text, min_len):
+            if fact not in haystack:
+                unmirrored.append(f"{name}: {fact}")
+                break  # one missing fact is enough to flag the note; mirror the whole note
+    return (not unmirrored, unmirrored[:8])
+
+
+# --------------------------------------------------------------------------- #
 # duplicate detection (a merge must REMOVE redundancy, never ADD it)
 # --------------------------------------------------------------------------- #
 

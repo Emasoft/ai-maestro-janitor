@@ -1,31 +1,40 @@
 ---
 name: janitor-memory-harvest
-description: HARVEST executor — the daily NON-DESTRUCTIVE chore that re-files STRAY memory into the wiki. When a scope's MEMORY.md carries added memories (beyond the deprecation stub) or an agent left loose .md memory files outside the wikimem model, harvest each into proper wikimem pages (editorial model + scope routing), then — only after a verify proves no memory was lost — reduce MEMORY.md to the stub, keeping a backup. Use on a [janitor-memory-harvest] marker, or "harvest the memory", "incorporate MEMORY.md / stray notes into the wiki".
+description: HARVEST executor — the daily NON-DESTRUCTIVE chore that MIRRORS newly-created harness BUFFER memories into the curated wiki. MEMORY.md + the raw notes at the scope root are the harness-owned buffer (auto-loaded each session); the janitor never touches them. For each RAW buffer note not yet mirrored, RECALL its subject across memory/wiki/ then UPDATE-or-CREATE a curated wiki/<name>.md copy and stamp a watermark. The buffer is left 100% intact (separate parallel copies coexist). Use on a [janitor-memory-harvest] marker, or "harvest the memory", "mirror new MEMORY.md memories into the wiki".
 ---
 
-# Janitor memory — HARVEST (incorporate stray memory artifacts into the wiki)
+# Janitor memory — HARVEST (mirror new buffer memories into the curated wiki)
 
 > **Execution context (TRDD-aebedbff):** the janitor dispatches this pass as a DEDICATED
 > background **opus** agent — you ARE that agent. Run the whole pass here in your own
 > context and return only a one-line result + the report path. A wikimem editorial pass is
 > never run inline in a main session (it must not burden CPV or any other session's context).
 
-## What this is
+## What this is (the COEXISTENCE model — TRDD-ab232dbd)
 
-The memory index moved entirely into `memgrep` (the agent-invisible SQLite index);
-`MEMORY.md` is a deprecation stub and recall is memgrep-only (see
-`~/.claude/rules/markdown-memory-recall.md`). But agents WILL keep mis-adding memories to
-`MEMORY.md`, and some leave loose memory `.md` files outside the wikimem model. HARVEST is
-the permanent DAILY chore that re-files those stray artifacts into the proper wiki —
-**without ever deleting a memory**.
+Two memory systems live in PARALLEL in every scope and cooperate:
 
-It is NON-DESTRUCTIVE by construction: it CREATES proper wikimem pages for any memory not
-yet in one, and only reduces `MEMORY.md` to the stub AFTER a verify proves every memory it
-held now lives in a wikimem page — and it ALWAYS keeps a backup of the original first.
+- **The BUFFER** — `MEMORY.md` + the raw `*.md` notes at the scope ROOT. This is
+  Anthropic/harness-owned (the harness `# Memory` directive writes it and auto-loads it
+  every session; Claude Code keeps evolving it). It is an unorganized, freely-growing
+  buffer. **The janitor NEVER stubs, trims, or modifies it.**
+- **The WIKI** — the curated pages under `memory/wiki/`: rich frontmatter (`ocd`/`lmd`/
+  `tier`), `[^N]` lessons, bidirectional links, git-versioned, memgrep-indexed.
 
-**THE IRON RULE: never lose a memory.** When unsure a memory is safely in the wiki, leave
-the artifact intact, keep the backup, and surface a finding. A missed re-file is
-recoverable next run; a deleted memory is not.
+HARVEST is the BRIDGE: it incrementally finds NEWLY-created buffer memories and **MIRRORS**
+each into the wiki as a SEPARATE curated page. The same fact lives in BOTH files
+(duplication is accepted, by USER decision — "separate parallel copies"). A per-scope
+watermark tracks what has been mirrored so the pass is idempotent.
+
+**THE IRON RULE: never lose a memory, and never touch the buffer.** Harvest is purely
+ADDITIVE — it only ever creates/updates wiki pages. When unsure, mirror nothing, leave the
+buffer intact, and surface a finding. A missed mirror is recoverable next run.
+
+> **DORMANT today:** every existing top-level `memory/*.md` already carries full wikimem
+> frontmatter (it was curated in-place under the old model), and `MEMORY.md` is the legacy
+> deprecation stub. So on the CURRENT corpus the discriminator finds ZERO raw buffer notes
+> and harvest is a clean no-op. It ACTIVATES the moment the harness next writes a
+> minimal-frontmatter note. No bulk move is needed.
 
 ## Preconditions (cheap gate, run first)
 
@@ -51,45 +60,60 @@ PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory
 ```
 
 PROJECT is edited only when `edit_project_scope` is on, and then **staged-not-pushed**
-(rides the next `publish.py`). Otherwise restrict to LOCAL + USER.
+(rides the next `publish.py`). Otherwise restrict to LOCAL + USER. The curated wiki for a
+scope is `<scope>/wiki/` (`memory_scopes.resolve_wiki_dir`).
 
 ## The procedure
 
-### 1. Find the stray artifacts in the ONE scope
+### 1. Find the un-mirrored RAW buffer notes in the ONE scope
 
-Two sources:
+A **RAW buffer note** is a top-level `<scope>/*.md` whose frontmatter shape is the harness
+minimal form — NO wikimem-only key (`node_type` / `tier`). The discriminator is
+`memory_scopes.is_curated_wiki_page(text)` (by CONTENT SHAPE, not path): it returns True for
+a CURATED page (SKIP it) and False for a RAW buffer note (a harvest candidate). EXCLUDE the
+`wiki/` sub-dir itself, `MEMORY.md`, the generated index files (`memory-index.md`,
+`memory-reorg-proposed.md`), and the private `user-mem/`.
 
-- **A non-stub `MEMORY.md`** — it carries pointer lines (each a markdown list item
-  linking a page Title to its note file, with a one-line hook) or
-  actual memory content beyond the deprecation notice. (A MEMORY.md that already IS the
-  stub — it contains "index retired (managed by memgrep)" and nothing else — is skipped.)
-- **Loose memory `.md` files** outside the model — a note with no/partial wikimem
-  frontmatter sitting outside the wiki. EXCLUDE the stub `MEMORY.md`, the generated index
-  files (`memory-index.md`, `memory-reorg-proposed.md`), and the private `user-mem/`.
-
-If neither exists, nothing is due — STOP cleanly (emit nothing).
-
-### 2. Back up FIRST (RULE 0 — recoverability before any reduction)
-
-Before touching anything, copy each artifact you will reduce to a sibling backup:
+Then drop every candidate already mirrored, via the watermark:
 
 ```bash
-cp "$MEMDIR/MEMORY.md" "$MEMDIR/MEMORY.md.pre-harvest-$(date +%F).bak"
+uv run --quiet - <<PY
+import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
+import memory_scopes as msc, memory_settings as ms, pathlib
+scope, root = "LOCAL", pathlib.Path("$LOCAL_MEM")   # one scope/root per pass
+wiki = msc.resolve_wiki_dir(root)
+todo = []
+for p in sorted(root.glob("*.md")):
+    if p.name in {"MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"}:
+        continue
+    text = p.read_text(encoding="utf-8")
+    if msc.is_curated_wiki_page(text):          # already curated → not a buffer note
+        continue
+    if ms.harvest_note_is_mirrored(scope, str(root), p.name, text):  # unchanged & mirrored
+        continue
+    todo.append(p.name)
+print("\n".join(todo))
+PY
 ```
 
-The backup is the guarantee — the original is always recoverable even if the harvest is
-imperfect. (In PROJECT scope the git history is an additional backup.)
+If the list is empty, nothing is due — STOP cleanly (emit nothing). The harness BUFFER
+(MEMORY.md + the raw notes) is **never** read for "pointer lines" any more and is **never**
+reduced — it is owned by the harness.
 
-### 3. Harvest each memory into a proper wikimem page (the editorial work)
+### 2. Mirror each un-mirrored buffer note into the curated wiki (the editorial work)
 
-For each memory the artifact holds:
+For each candidate note, **RECALL-before-write** to de-dup against the existing wiki, then
+UPDATE-or-CREATE a curated copy in `<scope>/wiki/`:
 
-- **A pointer to an EXISTING note** → that note already IS the memory; nothing to create
-  (the repair pass fixes its shape). Just confirm the target file exists in the scope.
-- **Content NOT yet in a page** → CREATE a proper wikimem page for it — this is the
-  `/janitor-memory-write` discipline applied here:
-  - **One subject per page; same-theme memories share ONE page** — group the strays by
-    subject BEFORE creating, so you never fragment one topic across pages.
+```bash
+memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
+```
+
+- **A wiki page on the same subject already exists** → UPDATE it (the
+  `/janitor-memory-update` correction protocol — clean the fact in place, demote a
+  superseded statement to a dated `[^N]` lesson). Do NOT create a duplicate.
+- **No existing page** → CREATE `wiki/<name>.md` — the `/janitor-memory-write` discipline:
+  - **One subject per page; same-theme memories share ONE page.**
   - **Complete frontmatter** — `name`, symptom-indexed `description`, `ocd`, `lmd`,
     `metadata.{node_type: memory, type, tier}`.
   - **Tier expand/reduce** — a general rule → `aspect` (radiates `## Applies to`); one
@@ -99,76 +123,101 @@ For each memory the artifact holds:
   - **Atomic memories, each with its own `## Notes and lessons learned`** section.
   - **Scope routing** — machine-private (local paths / hostnames / secrets) → LOCAL;
     project-shared (no secrets) → PROJECT; cross-project → USER; **UNSURE → LOCAL**.
-  Create pages through the transaction core (`memory_txn_cli.py` — the same crash-safe,
-  flock-guarded path the other passes use) or the write skill; then `memgrep reindex
-  "$MEMDIR"`.
 
-### 4. Verify EVERY memory is now in the wiki (BEFORE any stub reduction)
+  Write through the transaction core (`memory_txn_cli.py` — the crash-safe, flock-guarded
+  path the other passes use) so the wiki edit is atomic; then `memgrep reindex "$MEMDIR"`.
+  **The buffer note is left exactly as it was** — you mirror its content into `wiki/`, you
+  do not move, edit, or delete it.
 
-Prove preservation with the formal check — it GATES the stub reduction:
+### 3. Verify the mirror is complete (the gate — NOT a stub reduction)
+
+Prove every un-mirrored buffer note's content now lives in the wiki, with the formal check
+`memory_edit_verify.mirror_preservation_ok` — it GATES the watermark stamp:
 
 ```bash
 uv run --quiet - <<PY
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
-import memory_edit_verify as v, pathlib
-memdir = pathlib.Path("$MEMDIR")
-mem = (memdir / "MEMORY.md").read_text(encoding="utf-8")
-notes = {p.name for p in memdir.glob("*.md") if p.name != "MEMORY.md"}
-corpus = "\n".join(p.read_text(encoding="utf-8") for p in memdir.glob("*.md"))
-ok, missing = v.harvest_preservation_ok(mem, corpus, notes)
-print("PRESERVED" if ok else "ABSTAIN: " + "; ".join(missing))
+import memory_edit_verify as v, memory_scopes as msc, pathlib
+root = pathlib.Path("$MEMDIR")
+wiki = msc.resolve_wiki_dir(root)
+# the buffer notes this pass set out to mirror (recompute the same candidate list)
+buffer_notes = []
+for p in sorted(root.glob("*.md")):
+    if p.name in {"MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"}:
+        continue
+    t = p.read_text(encoding="utf-8")
+    if not msc.is_curated_wiki_page(t):
+        buffer_notes.append((p.name, t))
+wiki_corpus = "\n".join(p.read_text(encoding="utf-8") for p in wiki.glob("*.md")) if wiki.is_dir() else ""
+ok, missing = v.mirror_preservation_ok(buffer_notes, wiki_corpus)
+print("MIRRORED" if ok else "ABSTAIN: " + "; ".join(missing))
 sys.exit(0 if ok else 1)
 PY
 ```
 
-`harvest_preservation_ok` confirms every MEMORY.md memory now lives in the wiki — a
-POINTER's target note exists; a CONTENT memory is a substring of some page. If it prints
-`ABSTAIN`, leave `MEMORY.md` + the `.bak` intact, do NOT reduce, and surface
-`[janitor-memory] harvest abstained: <reasons>`. Only on `PRESERVED` proceed to step 5.
+If it prints `ABSTAIN`, a note was not fully mirrored — finish mirroring it (or, if it can't
+be mirrored this pass, leave its watermark UNSTAMPED so the next run retries) and surface
+`[janitor-memory] harvest abstained: <reasons>`. Only on `MIRRORED` proceed to stamp the
+watermark.
 
-### 5. Reduce MEMORY.md to the stub (only after step 4 passes)
+### 4. Stamp the watermark (idempotency — only after step 3 passes for a note)
 
-Overwrite `MEMORY.md` with the canonical deprecation stub from the recall rule (it carries
-the `memgrep overview` entry-point + `memgrep recall` commands). A loose `.md` that became
-its own proper wikimem page stays as that page (it is not deleted — it BECAME the page); a
-loose `.md` whose content was folded into another page is reduced the same way (backup +
-the content now lives in the surviving page). PROJECT-scope writes are staged-not-pushed.
+For each note that is now provably mirrored, record it so the next run skips it:
+
+```bash
+uv run --quiet - <<PY
+import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
+import memory_settings as ms, pathlib
+scope, root = "LOCAL", pathlib.Path("$MEMDIR")
+for name in """<the mirrored note names, one per line>""".split():
+    text = (root / name).read_text(encoding="utf-8")
+    ms.harvest_mark_mirrored(scope, str(root), name, text)
+PY
+```
+
+The watermark keys on the note's CONTENT HASH, so if the harness later EDITS that buffer
+note its hash changes and the next harvest re-mirrors the new content (the wiki stays in
+sync). The buffer is never modified by this step.
 
 ## EXIT / idempotency / bounds
 
-- **SUCCESS** = every memory re-filed into a wikimem page AND `MEMORY.md` reduced to the
-  stub (backup kept). Report `[janitor-memory] harvested <N> memory(ies) → wiki; MEMORY.md
-  stubbed (backup kept)`.
-- **Idempotent + daily** — a stub `MEMORY.md` with no stray files is a no-op; runs once/day
-  (`harvest_per_day`, default 1; `0` disables). The chore is PERMANENT — it re-files
-  whatever agents mis-add, forever.
+- **SUCCESS** = every un-mirrored buffer note mirrored into a `wiki/` page AND its watermark
+  stamped; the buffer (MEMORY.md + raw notes) untouched. Report `[janitor-memory] mirrored
+  <N> buffer memory(ies) → wiki (buffer intact)`.
+- **Idempotent + daily** — a scope whose buffer notes are all already mirrored (the watermark
+  covers them) is a no-op; runs once/day (`harvest_per_day`, default 1; `0` disables). The
+  chore is PERMANENT — it mirrors whatever new memories the harness adds, forever.
 - **Bounded** — one scope per pass; honors the kill-switch + `harvest_per_day=0`.
-- **Never destructive** — backup before any reduction; ABSTAIN when preservation is
-  unproven. A crash mid-pass is safe: the backup remains and the next daily run re-files
-  whatever is still stray.
+- **Never destructive, never touches the buffer** — only creates/updates `wiki/` pages and
+  stamps the watermark. A crash mid-pass is safe: the buffer remains, the watermark records
+  only proven-mirrored notes, and the next daily run mirrors whatever is still un-mirrored.
 
 ## Done when (terminating conditions)
 
-This pass is complete when ONE of these holds (one scope per pass; it never deletes a
-memory and never reduces `MEMORY.md` without both a verify AND a backup):
+This pass is complete when ONE of these holds (one scope per pass; it never deletes a memory
+and NEVER modifies the harness buffer):
 
-- [ ] **NOTHING DUE** — no non-stub `MEMORY.md` and no stray `.md` in the scope: STOP
-  cleanly, emit nothing.
-- [ ] **HARVESTED** — every stray memory re-filed into a proper wikimem page AND
-  `harvest_preservation_ok` returned `PRESERVED` AND `MEMORY.md` reduced to the stub
-  (backup kept): emit `harvested <N> … MEMORY.md stubbed (backup kept)`. STOP.
-- [ ] **ABSTAINED** — `harvest_preservation_ok` returned `ABSTAIN`: `MEMORY.md` + the
-  `.bak` left intact, nothing reduced, `harvest abstained: <reasons>` surfaced. STOP.
+- [ ] **NOTHING DUE** — no un-mirrored RAW buffer note in the scope (all curated or already
+  watermarked): STOP cleanly, emit nothing.
+- [ ] **MIRRORED** — every un-mirrored buffer note copied into a `wiki/` page AND
+  `mirror_preservation_ok` returned `MIRRORED` AND its watermark stamped; the buffer left
+  intact: emit `mirrored <N> buffer memory(ies) → wiki (buffer intact)`. STOP.
+- [ ] **ABSTAINED** — `mirror_preservation_ok` returned `ABSTAIN`: the un-mirrored note's
+  watermark left UNSTAMPED (retry next run), buffer untouched, `harvest abstained: <reasons>`
+  surfaced. STOP.
 
 ## Scope of this skill
 
-ONLY incorporates STRAY memory artifacts (a non-stub `MEMORY.md`, loose `.md` memory files)
-into the proper wikimem, then stubs `MEMORY.md` — non-destructively, in ONE scope per pass.
-Does NOT split/merge/repair existing wiki pages (those are the other passes); never deletes
-a memory; never reduces `MEMORY.md` without both a verify AND a backup.
+ONLY mirrors RAW harness-buffer memories (a top-level `<scope>/*.md` with minimal frontmatter)
+into the curated `memory/wiki/`, idempotently, in ONE scope per pass. NEVER stubs, trims, or
+modifies `MEMORY.md` or any buffer note (they are harness-owned). Does NOT split/merge/repair
+existing wiki pages (those are the other passes); never deletes a memory.
 
 ## Resources
 
-- `~/.claude/rules/markdown-memory-recall.md` — the memgrep-only index model + the stub.
+- `~/.claude/rules/markdown-memory-recall.md` — the coexistence model (buffer ⇄ wiki) +
+  memgrep as the unlimited agent-invisible WIKI index.
 - `/janitor-memory-write` — the page-authoring discipline this pass applies (its
   wikimem-model reference defines the tiers, the link law, page anatomy, and the lead).
+- `/janitor-memory-update` — the correction protocol used when a buffer memory's subject
+  already has a wiki page (UPDATE, never duplicate).

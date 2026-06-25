@@ -323,6 +323,56 @@ def test_harvest_preservation_stub_only_is_clean():
     assert ok and missing == []
 
 
+# ---- mirror preservation (TRDD-ab232dbd coexistence: buffer -> wiki) --------
+
+def test_mirror_preservation_ok_when_buffer_fact_in_wiki():
+    """A raw buffer note whose fact now lives in a curated wiki page → mirrored."""
+    buffer = [("rotator.md", "The OAuth rotator retries three times then fails after a backoff.")]
+    wiki = "## Rotator\nThe OAuth rotator retries three times then fails after a backoff.\n"
+    ok, missing = v.mirror_preservation_ok(buffer, wiki)
+    assert ok and missing == []
+
+
+def test_mirror_preservation_fails_when_buffer_fact_absent():
+    """A buffer note NOT yet mirrored into any wiki page → unmirrored (names the note)."""
+    buffer = [("rotator.md", "The OAuth rotator retries three times then fails after a backoff.")]
+    ok, missing = v.mirror_preservation_ok(buffer, "an unrelated wiki page about other matters")
+    assert not ok
+    assert any("rotator.md" in m for m in missing)
+
+
+def test_mirror_preservation_ok_for_empty_buffer():
+    """No raw buffer notes at all → trivially mirrored (the dormant-corpus case)."""
+    ok, missing = v.mirror_preservation_ok([], "anything")
+    assert ok and missing == []
+
+
+def test_mirror_preservation_ignores_frontmatter_and_lessons():
+    """Only substantive BODY facts must be mirrored — frontmatter/heading/lessons are
+    not memories, so a buffer note whose only body fact is mirrored passes even though
+    its frontmatter + a lessons footnote are absent from the wiki blob."""
+    buffer = [(
+        "cap.md",
+        '---\nname: cap\ndescription: "d"\nmetadata:\n  type: feedback\n---\n'
+        "The retry cap is three attempts then a hard fail.\n\n"
+        "## Notes and lessons learned\n[^1]: earlier this said five — wrong.\n",
+    )]
+    wiki = "## Cap\nThe retry cap is three attempts then a hard fail.\n"
+    ok, missing = v.mirror_preservation_ok(buffer, wiki)
+    assert ok and missing == []
+
+
+def test_mirror_preservation_reports_each_unmirrored_note():
+    """Two unmirrored buffer notes → BOTH names surface (the agent mirrors them all)."""
+    buffer = [
+        ("a.md", "The first fact is a long enough sentence to count as substantive."),
+        ("b.md", "The second fact is also a long enough sentence to be substantive."),
+    ]
+    ok, missing = v.mirror_preservation_ok(buffer, "")
+    assert not ok
+    assert any("a.md" in m for m in missing) and any("b.md" in m for m in missing)
+
+
 # ---- duplicate detection ---------------------------------------------------
 
 def test_no_new_duplicate_lines_flags_repeats():
