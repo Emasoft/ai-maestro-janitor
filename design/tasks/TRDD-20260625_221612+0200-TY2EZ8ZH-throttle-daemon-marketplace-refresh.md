@@ -117,7 +117,7 @@ low_priority_prefix(platform: str, *, has_taskpolicy: bool,
 
 - `platform == 'darwin'` AND `has_taskpolicy` → `['taskpolicy', '-b']`
 - `platform.startswith('linux')` → `['nice','-n','19']` (if `has_nice`)
-  + `['ionice','-c','3']` (if `has_ionice`)
+  plus `['ionice','-c','3']` (if `has_ionice`)
 - otherwise / nothing available → `[]`
 
 ### Thin caller (detects, then calls the pure function)
