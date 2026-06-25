@@ -463,9 +463,11 @@ def test_recent_memory_atoms_lists_collapses_and_pages(tmp_path: Path) -> None:
     _mem_page(mem, "many.md", [f"memory-b{i}" for i in range(hook._MEM_ATOMS_COLLAPSE + 2)])
     _mem_page(mem, "prose.md", [])
     rows = hook._recent_memory_atoms([("local", mem)], now=time.time())
-    by_name = {name: (kind, count, ids) for kind, _scope, name, count, ids in rows}
+    by_name = {name: (kind, count, atoms) for kind, _scope, name, count, atoms in rows}
     assert by_name["few.md"][0] == "atoms"
-    assert by_name["few.md"][2] == ["memory-a1", "memory-a2"]
+    # rows carry (id, desc) pairs; these fixture markers have no desc, so every desc is None
+    assert [aid for aid, _d in by_name["few.md"][2]] == ["memory-a1", "memory-a2"]
+    assert all(desc is None for _aid, desc in by_name["few.md"][2])
     assert by_name["many.md"][0] == "collapsed"
     assert by_name["many.md"][1] == hook._MEM_ATOMS_COLLAPSE + 2
     assert by_name["prose.md"][0] == "page"
@@ -485,7 +487,7 @@ def test_recent_memory_atoms_excludes_artifacts_and_private(tmp_path: Path) -> N
     assert "MEMORY.md" not in names
     assert "memory-reorg-proposed.md" not in names
     assert "0001.md" not in names  # user-mem privacy boundary
-    all_ids = [i for _k, _s, _n, _c, ids in rows for i in ids]
+    all_ids = [aid for _k, _s, _n, _c, atoms in rows for aid, _d in atoms]
     assert "memory-private" not in all_ids  # no private atom id leaked
 
 
@@ -510,6 +512,45 @@ def test_recent_memory_atoms_dedupes_overlapping_scopes(tmp_path: Path) -> None:
     _mem_page(mem, "one.md", ["memory-o1"])
     rows = hook._recent_memory_atoms([("local", mem), ("project", mem)], now=time.time())
     assert sum(1 for _k, _s, name, _c, _i in rows if name == "one.md") == 1
+
+
+def test_recent_memory_atoms_parses_desc_slug(tmp_path: Path) -> None:
+    """The `desc:` SLUG is parsed per atom (PARITY with memgrep's DESC_CORPUS); absent → None."""
+    hook = _hook()
+    mem = tmp_path / "mem"
+    mem.mkdir()
+    # The SAME marker lines as memgrep's DESC_CORPUS parity fixture (TRDD-056384eb DERIVED #4) —
+    # both parsers MUST extract the same desc from the same line.
+    (mem / "handoff-hub.md").write_text(
+        "---\nname: handoff-hub\n---\n# Handoff hub\n\n"
+        "^new-handoff [desc: new_handoff_carries_recent_turns, keywords: zqxdesc handoff]\n"
+        "The new handoff lists recent turns and memory ids.\n"
+        "^plain [keywords: zqxplain bare]\nThis atom carries no desc slug.\n",
+        encoding="utf-8",
+    )
+    rows = hook._recent_memory_atoms([("local", mem)], now=time.time())
+    atoms = next(a for _k, _s, name, _c, a in rows if name == "handoff-hub.md")
+    by_id = dict(atoms)
+    assert by_id["new-handoff"] == "new_handoff_carries_recent_turns"  # STORED as the slug
+    assert by_id["plain"] is None  # an atom with no desc → None
+
+
+def test_format_memory_rows_renders_desc_as_spaced_phrase() -> None:
+    """An atom's desc slug renders `_`→space; a desc-less atom shows the bare id; collapse/page kept."""
+    hook = _hook()
+    lines = hook._format_memory_rows([
+        ("atoms", "LOCAL", "h.md", 2,
+         [("new-handoff", "new_handoff_carries_recent_turns"), ("plain", None)]),
+        ("collapsed", "USER", "big.md", 9, []),
+        ("page", "PROJECT", "prose.md", 0, []),
+    ])
+    text = "\n".join(lines)
+    assert "^new-handoff — new handoff carries recent turns" in text  # slug shown as a phrase
+    assert "new_handoff_carries_recent_turns" not in text  # the raw slug is never shown
+    assert "    ^plain" in text  # desc-less atom → bare id
+    assert "^plain —" not in text
+    assert "big.md (9 atoms — file listed" in text
+    assert "- [PROJECT] prose.md" in text
 
 
 # ---------- the two new sections appear in the composed handoff -------------

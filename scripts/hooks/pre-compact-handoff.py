@@ -97,8 +97,13 @@ _MEM_ATOMS_COLLAPSE = 5        # > this many atoms in one file → list the FILE
 # (the librarian's reorg/index files regenerate constantly, and MEMORY.md is a dead stub).
 _MEM_EXCLUDE_NAMES = frozenset({"MEMORY.md", "memory-reorg-proposed.md", "memory-index.md"})
 
-# Leading Obsidian block-property atom marker: `^memory-<id> [keywords: …]` (TRDD-3b9b2040).
-_ATOM_ID_RE = re.compile(r"(?m)^\s*\^([A-Za-z0-9][\w-]*)\s*\[")
+# An atom's LEADING block-property marker `^<id> [<props>]` (TRDD-3b9b2040): group 1 = the atom
+# id; group 2 = the rest of the marker line after `[` (where a `desc:` slug, if any, lives).
+_ATOM_MARKER_RE = re.compile(r"(?m)^\s*\^([A-Za-z0-9][\w-]*)\s*\[([^\n]*)")
+# The atom `desc:` value is a snake_case SLUG (`[a-z0-9_]+`, TRDD-056384eb) — a single token,
+# stored AS the slug, DISPLAYED `_`→space (mirrors memgrep's desc_display). memgrep's Rust parser
+# is the authoritative grammar; this is a best-effort, fail-open single-line scan, never the SSOT.
+_ATOM_DESC_RE = re.compile(r"desc:\s*([a-z0-9_]+)")
 
 
 def _run_git(args: list[str], cwd: Path, *, timeout: float = 5.0) -> str:
@@ -318,17 +323,18 @@ def _memory_scope_dirs(project_root: Path) -> list[tuple[str, Path]]:
 
 def _recent_memory_atoms(
     scope_dirs: list[tuple[str, Path]], *, now: float
-) -> list[tuple[str, str, str, int, list[str]]]:
-    """Recently-updated memory pages across `scope_dirs`, with their atom IDs only.
+) -> list[tuple[str, str, str, int, list[tuple[str, str | None]]]]:
+    """Recently-updated memory pages across `scope_dirs`, with their atom IDs + `desc`.
 
     A best-effort proxy for "memories created/updated this session": the `*.md`
     pages modified within `_MEM_RECENT_WINDOW_S`, newest first, capped at
-    `_MEM_MAX_FILES`. For each we extract the LEADING block-property atom IDs
-    (`^memory-<id> [...]`) — IDS ONLY, never content. Collapse rule: a page with
-    more than `_MEM_ATOMS_COLLAPSE` atoms is reported as the FILE (with a count),
-    not its individual atoms; a prose page (no atoms) is reported by filename (the
-    page IS the memory unit). Rows are (kind, scope, name, atom_count, ids) with
-    kind ∈ {"atoms", "collapsed", "page"}.
+    `_MEM_MAX_FILES`. For each we extract the LEADING block-property atom markers
+    (`^<id> [...]`) — the atom ID and its optional one-line `desc:` SLUG, never the
+    atom BODY content. Collapse rule: a page with more than `_MEM_ATOMS_COLLAPSE`
+    atoms is reported as the FILE (with a count), not its individual atoms; a prose
+    page (no atoms) is reported by filename (the page IS the memory unit). Rows are
+    (kind, scope, name, atom_count, atoms) — `atoms` a list of `(id, desc_slug|None)`
+    — with kind ∈ {"atoms", "collapsed", "page"}.
 
     EXCLUSIONS: `_MEM_EXCLUDE_NAMES` (detector artifacts, not memories) are skipped;
     the PRIVATE `user-mem/` store is NEVER listed — the handoff is read by the agent
@@ -357,25 +363,47 @@ def _recent_memory_atoms(
             continue
     candidates.sort(key=lambda r: r[0], reverse=True)
 
-    rows: list[tuple[str, str, str, int, list[str]]] = []
+    rows: list[tuple[str, str, str, int, list[tuple[str, str | None]]]] = []
     for _, scope, path in candidates[:_MEM_MAX_FILES]:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        ids: list[str] = []
+        atoms: list[tuple[str, str | None]] = []
         seen_ids: set[str] = set()
-        for atom_id in _ATOM_ID_RE.findall(text):
-            if atom_id not in seen_ids:
-                seen_ids.add(atom_id)
-                ids.append(atom_id)
-        if not ids:
+        for m in _ATOM_MARKER_RE.finditer(text):
+            atom_id = m.group(1)
+            if atom_id in seen_ids:
+                continue
+            seen_ids.add(atom_id)
+            dm = _ATOM_DESC_RE.search(m.group(2))  # the desc slug on this marker line, if any
+            atoms.append((atom_id, dm.group(1) if dm else None))
+        if not atoms:
             rows.append(("page", scope, path.name, 0, []))
-        elif len(ids) > _MEM_ATOMS_COLLAPSE:
-            rows.append(("collapsed", scope, path.name, len(ids), []))
+        elif len(atoms) > _MEM_ATOMS_COLLAPSE:
+            rows.append(("collapsed", scope, path.name, len(atoms), []))
         else:
-            rows.append(("atoms", scope, path.name, len(ids), ids))
+            rows.append(("atoms", scope, path.name, len(atoms), atoms))
     return rows
+
+
+def _format_memory_rows(
+    rows: list[tuple[str, str, str, int, list[tuple[str, str | None]]]],
+) -> list[str]:
+    """Render the recent-memory rows as handoff lines. An atom's `desc` SLUG is shown `_`→space
+    (mirrors memgrep's desc_display, so the reader sees a phrase, not the raw slug); a page with
+    more than `_MEM_ATOMS_COLLAPSE` atoms collapses to the FILE; a prose page is its filename."""
+    lines: list[str] = []
+    for kind, scope, name, count, atoms in rows:
+        if kind == "atoms":
+            lines.append(f"- [{scope}] {name}:")
+            for atom_id, desc in atoms:
+                lines.append(f"    ^{atom_id} — {desc.replace('_', ' ')}" if desc else f"    ^{atom_id}")
+        elif kind == "collapsed":
+            lines.append(f"- [{scope}] {name} ({count} atoms — file listed, >{_MEM_ATOMS_COLLAPSE})")
+        else:
+            lines.append(f"- [{scope}] {name}")
+    return lines
 
 
 def _build_handoff(
@@ -477,25 +505,19 @@ def _build_handoff(
     # memory pages across scopes; a page with > _MEM_ATOMS_COLLAPSE atoms collapses to
     # just its filename. Fail-open: any fault degrades to "(unavailable)".
     try:
-        mem_rows: list[tuple[str, str, str, int, list[str]]] | None = _recent_memory_atoms(
+        mem_rows: list[tuple[str, str, str, int, list[tuple[str, str | None]]]] | None = _recent_memory_atoms(
             _memory_scope_dirs(project_root), now=now
         )
     except Exception:  # noqa: BLE001 - never break the handoff
         mem_rows = None
     out.append("")
-    out.append("## Recent memory changes (IDs only — most-recently-updated atoms/pages)")
+    out.append("## Recent memory changes (atom IDs + one-line desc — most-recently-updated)")
     if mem_rows is None:
         out.append("(recent memory changes unavailable)")
     elif not mem_rows:
         out.append("(no memory pages updated recently)")
     else:
-        for kind, scope, name, count, ids in mem_rows:
-            if kind == "atoms":
-                out.append(f"- [{scope}] {name}: " + " ".join("^" + i for i in ids))
-            elif kind == "collapsed":
-                out.append(f"- [{scope}] {name} ({count} atoms — file listed, >{_MEM_ATOMS_COLLAPSE})")
-            else:
-                out.append(f"- [{scope}] {name}")
+        out.extend(_format_memory_rows(mem_rows))
     out.append("")
     return "\n".join(out) + "\n"
 
