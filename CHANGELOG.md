@@ -2,26 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.23.0] - 2026-06-25
-
-### Bug Fixes
-
-- Resolve detector key + audit chain via the FIXED janitor dir, not $CLAUDE_PLUGIN_DATA (TRDD-DKEYCHN7)
+## [0.24.0] - 2026-06-25
 
 ### Documentation
 
-- TRDD-DKEYCHN7 — track detector key+chain $CLAUDE_PLUGIN_DATA foot-gun (C3/C4 review INFO)
-- TRDD-DGROUPAB — GROUP D scope (ship only D-alpha + D-beta; ~85% already covered)
+- Umbrella STATE refresh (A/B/C/D done, v0.21-23 CI-green) + TRDD-F3AUDLOG (F3 recovery audit log)
 
 ### Features
 
-- GROUP D — interpreter fallback (D-alpha) + verify-or-restage gate (D-beta) (TRDD-DGROUPAB)
+- Immortality F3 — tamper-evident recovery audit log + F2 dashboard augments (TRDD-F3AUDLOG)
 
 ### Miscellaneous
 
-- Refresh CLAUDE.md project-map digest — keepalive_boot module (GROUP D D-beta)
-
-### Tests
-
-- Constant-parity guard for the C3 trust-anchor paths (TRDD-T198DT1W, NIT-1)
+- Refresh CLAUDE.md project-map digest — recovery_audit module (F3)
 
