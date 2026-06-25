@@ -1,9 +1,11 @@
 ---
 trdd-id: TY2EZ8ZH
 title: Throttle the daemon marketplace-refresh subprocess to low CPU+IO priority
-column: dev
+column: published
 created: 2026-06-25T22:16:12+0200
-updated: 2026-06-25T22:20:00+0200
+updated: 2026-06-25T22:46:43+0200
+published-version: 0.24.16
+published-at: 2026-06-25T22:46:43+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2

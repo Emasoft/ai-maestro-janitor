@@ -1,9 +1,11 @@
 ---
 trdd-id: 8UD3Q7K5
 title: Memory scheduler should cheap-pre-check that a STRUCTURAL merge pair exists before emitting the consolidate marker — kill the ~226k no-op agent spawns
-column: dev
+column: published
 created: 2026-06-25T21:38:45+0200
-updated: 2026-06-25T22:10:00+0200
+updated: 2026-06-25T22:46:43+0200
+published-version: 0.24.15
+published-at: 2026-06-25T22:46:43+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
