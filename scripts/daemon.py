@@ -62,6 +62,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix A)
+import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
 import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324223a6)
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
@@ -204,7 +205,8 @@ def _on_signal(signum: int, _frame: Optional[FrameType]) -> None:
 
 
 def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
-                       heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC) -> Optional[subprocess.CompletedProcess[str]]:
+                       heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC,
+                       preexec_fn: Optional[Callable[[], None]] = None) -> Optional[subprocess.CompletedProcess[str]]:
     """Run a subprocess ONCE to completion, ticking the daemon heartbeat periodically.
 
     Returns the CompletedProcess on a normal exit (whatever the returncode),
@@ -214,6 +216,12 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
 
     This is the single-attempt primitive; `_run_workload` wraps it with the
     Pillar-1 retry-on-non-zero-exit policy.
+
+    `preexec_fn` (optional, TRDD-TY2EZ8ZH): a callable run in the forked child
+    just before `exec` — used by `task_marketplace_refresh` to renice the heavy
+    refresh to low CPU priority. Defaults to None, so every other caller's
+    Popen is byte-identical to before. POSIX-only; harmless where unsupported
+    (callers pass None there).
     """
     short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     try:
@@ -224,6 +232,7 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
             stderr=subprocess.PIPE,
             text=True,
             close_fds=True,
+            preexec_fn=preexec_fn,
         )
     except FileNotFoundError:
         state.log_line("daemon", f"  binary not in PATH: {cmd[0]}")
@@ -259,7 +268,8 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
 
 def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
                   heartbeat_tick: int = _WORKLOAD_HEARTBEAT_TICK_SEC,
-                  max_attempts: int = _WORKLOAD_MAX_ATTEMPTS) -> Optional[subprocess.CompletedProcess[str]]:
+                  max_attempts: int = _WORKLOAD_MAX_ATTEMPTS,
+                  preexec_fn: Optional[Callable[[], None]] = None) -> Optional[subprocess.CompletedProcess[str]]:
     """Run a workload with the Pillar-1 retry policy (TRDD-7100178d Phase 4).
 
     Calls `_run_workload_once` up to `max_attempts` times, retrying ONLY on a
@@ -269,11 +279,15 @@ def _run_workload(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
     The retried exit code is logged so a recurring failure is visible. Every
     caller is idempotent (re-running a marketplace refresh / plugin update / usage
     probe has no side effect beyond the intended one), so a single retry is safe.
+
+    `preexec_fn` (optional, TRDD-TY2EZ8ZH) is threaded into every attempt's
+    `_run_workload_once`. Default None ⇒ unchanged behavior for every existing
+    caller.
     """
     short = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
     result: Optional[subprocess.CompletedProcess[str]] = None
     for attempt in range(1, max(1, max_attempts) + 1):
-        result = _run_workload_once(cmd, timeout=timeout, heartbeat_tick=heartbeat_tick)
+        result = _run_workload_once(cmd, timeout=timeout, heartbeat_tick=heartbeat_tick, preexec_fn=preexec_fn)
         if result is None or result.returncode == 0:
             return result
         if attempt < max_attempts:
@@ -300,7 +314,25 @@ def task_marketplace_refresh() -> None:
         if not got:
             state.log_line("daemon", "  marketplace-refresh deferred (another marketplace op holds the lock)")
             return
-        proc = _run_workload(["claude", "plugin", "marketplace", "update"])
+        # TRDD-TY2EZ8ZH (#244): run this CPU+IO-heavy refresh at LOW priority so it
+        # yields to the user's foreground work (it was timing out their Bash/agents/CI).
+        # FAIL-OPEN — ANY error building the throttle prefix or the renice preexec
+        # falls through to the CURRENT un-throttled invocation. A throttle defect must
+        # NEVER break marketplace-refresh or wedge the machine-wide singleton daemon.
+        base_cmd = ["claude", "plugin", "marketplace", "update"]
+        try:
+            prefix = dt._low_priority_prefix()
+            preexec = dt.nice_preexec()
+        except Exception as exc:  # noqa: BLE001 — throttle is best-effort; never block the refresh
+            state.log_line("daemon", f"  marketplace-refresh: throttle skipped ({exc})")
+            prefix, preexec = [], None
+        if prefix or preexec:
+            state.log_line(
+                "daemon",
+                f"  marketplace-refresh: running at low priority (prefix={prefix or '[]'}, "
+                f"nice={'yes' if preexec else 'no'})",
+            )
+        proc = _run_workload(prefix + base_cmd, preexec_fn=preexec)
         if proc is None:
             return
         if proc.returncode != 0:

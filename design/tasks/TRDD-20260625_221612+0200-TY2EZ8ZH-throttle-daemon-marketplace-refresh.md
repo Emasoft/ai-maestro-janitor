@@ -3,7 +3,7 @@ trdd-id: TY2EZ8ZH
 title: Throttle the daemon marketplace-refresh subprocess to low CPU+IO priority
 column: dev
 created: 2026-06-25T22:16:12+0200
-updated: 2026-06-25T22:16:12+0200
+updated: 2026-06-25T22:20:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -29,7 +29,7 @@ runtime-targets: [macos, linux]
 impacts: []
 attempts: 0
 test-failures: 0
-last-test-result: not-run
+last-test-result: pass
 implementation-commits: []
 external-refs: ["task #244"]
 ---
@@ -38,7 +38,8 @@ external-refs: ["task #244"]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-25
 
-**Current state:** IMPLEMENTING.
+**Current state:** DONE (implemented + verified). TRDD committed `22fc199`;
+code+tests committed in this session's implementation commit.
 
 - `scripts/lib/daemon_throttle.py` — NEW module. Holds the PURE
   `low_priority_prefix(platform, *, has_taskpolicy, has_nice, has_ionice)` and the
@@ -47,14 +48,18 @@ external-refs: ["task #244"]
 - `scripts/daemon.py` — `task_marketplace_refresh` prepends the prefix to the
   `claude plugin marketplace update` argv and passes the nice preexec; ANY error
   falls through to the CURRENT un-throttled invocation. `_run_workload` /
-  `_run_workload_once` gain an OPTIONAL `preexec_fn=None` param (behavior
+  `_run_workload_once` gained an OPTIONAL `preexec_fn=None` param (behavior
   unchanged for every other caller).
-- `tests/test_daemon_throttle.py` — NEW. Parametrized pure-function tests + a
-  wiring test that the prefix is applied when tools are present and falls back
-  cleanly when absent.
+- `tests/test_daemon_throttle.py` — NEW. 25 tests: parametrized pure-function
+  matrix + detector seam + `nice_preexec` + 3 wiring tests (prefix applied when
+  tools present, bare fallback when absent, fail-open on build error).
 
-**NEXT ACTION:** run `uv run pytest tests/test_daemon_throttle.py -q`, then
-`uv run ruff check` + `uv run pyright` on the changed files; commit TRDD + code.
+**VERIFIED:** `uv run pytest tests/test_daemon_throttle.py -q` → 25 passed.
+Regression: `test_daemon.py` + 3 marketplace tests → 54 passed. `uv run ruff
+check` + `uv run pyright` on the 3 changed files → clean (0 errors).
+
+**NEXT ACTION:** none — task complete. (Future ship: this rides to `published`
+via the normal publish pipeline; not part of this task.)
 
 **Load-bearing facts / gotchas:**
 - FAIL-OPEN is NON-NEGOTIABLE: the daemon is a machine-wide singleton. A throttle
