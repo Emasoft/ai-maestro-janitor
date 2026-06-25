@@ -2,17 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.24.0] - 2026-06-25
+## [0.24.1] - 2026-06-25
+
+### Bug Fixes
+
+- Extend C4 auto-rollback to the daemon/L0 path — quarantine-aware keepalive + OS-respawn crash signal (TRDD-KEEPQRTN)
 
 ### Documentation
 
-- Umbrella STATE refresh (A/B/C/D done, v0.21-23 CI-green) + TRDD-F3AUDLOG (F3 recovery audit log)
-
-### Features
-
-- Immortality F3 — tamper-evident recovery audit log + F2 dashboard augments (TRDD-F3AUDLOG)
+- TRDD-KEEPQRTN — extend C4 auto-rollback to the daemon/L0 keepalive path (final-review HIGH)
 
 ### Miscellaneous
 
-- Refresh CLAUDE.md project-map digest — recovery_audit module (F3)
+- Refresh CLAUDE.md project-map digest — KEEPQRTN (keepalive quarantine-aware + spawn-attempt)
 
