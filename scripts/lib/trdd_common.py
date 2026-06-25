@@ -342,8 +342,9 @@ def check2_has_remaining_work(record: TrddRecord) -> bool:
     True iff the TRDD still encodes unfinished in-scope work — ANY of:
       * `column: blocked`;
       * an unchecked `- [ ]` task box in the body;
-      * a NEXT-ACTION line whose latest STATE status is NOT a DONE/SHIPPED/✅
-        marker (i.e. a NEXT-ACTION exists and the body shows no done-marker).
+      * a NEXT-ACTION line whose OWN text carries no DONE/SHIPPED/✅ marker
+        (scoped to the line, so a ✅ on a finished SUB-part can't mask a still-
+        pending next action).
 
     This is what separates "closeable candidate" (Check1 & !remaining) from
     "partially shipped, review" (Check1 & remaining) — the exact distinction
@@ -353,7 +354,13 @@ def check2_has_remaining_work(record: TrddRecord) -> bool:
         return True
     if _UNCHECKED_BOX_RE.search(record.body):
         return True
-    if _NEXT_ACTION_RE.search(record.body) and not _DONE_MARKER_RE.search(record.body):
+    # Scope the done-marker check to the NEXT-ACTION line(s) THEMSELVES, not the
+    # whole body: a ✅ on a finished SUB-part (e.g. "g1 ✅ DONE") must not mask a
+    # still-pending NEXT-ACTION ("implement the two residuals", a "USER-GATED"
+    # item). The real-board smoke test proved the whole-body check mislabeled
+    # standing / partly-done TRDDs as closeable (TRDD-15ECPBSA precision fix).
+    na_lines = [m.group(0) for m in _NEXT_ACTION_RE.finditer(record.body)]
+    if na_lines and not any(_DONE_MARKER_RE.search(ln) for ln in na_lines):
         return True
     return False
 

@@ -195,6 +195,22 @@ def test_check2_clean_body_is_not_remaining():
     assert tc.check2_has_remaining_work(rec) is False
 
 
+def test_check2_done_marker_on_subpart_does_not_mask_pending_next_action():
+    """A ✅/DONE on a finished SUB-part must NOT mask a still-pending NEXT-ACTION:
+    the done-marker check is scoped to the NEXT-ACTION line itself. The real-board
+    smoke test caught the old whole-body check mislabeling standing / partly-done
+    TRDDs (e.g. a USER-GATED next action) as closeable (TRDD-15ECPBSA)."""
+    rec = _record(
+        body=(
+            "\n## STATE\n"
+            "- g1 step ✅ DONE\n"
+            "- g2 step ✅ SHIPPED\n"
+            "- NEXT ACTION (the only remaining item — USER-GATED): the migration\n"
+        )
+    )
+    assert tc.check2_has_remaining_work(rec) is True
+
+
 # ── Check 3 — prose↔frontmatter mismatch ─────────────────────────────────────
 
 
