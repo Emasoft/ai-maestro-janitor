@@ -195,7 +195,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=f99d5d7c01d7 digest=9c3c43a17aa5 generated=2026-06-25T06:41:11+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=5ccfa1aa547f digest=48f4594b685d generated=2026-06-25T08:29:39+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -500,6 +500,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · write_manifest(manifest, path) -> None — Write the manifest atomically.
   · load_manifest(path) -> dict[str, str] — Load a manifest written by `write_manifest`.
   · verify_manifest(plugin_root, manifest_path, globs) -> tuple[list[str], list[str], list[str]] — Compare live files against the manifest baseline.
+`scripts/lib/keepalive_boot.py` — Pre-launch integrity gate for the L0 OS-keepalive (TRDD-DGROUPAB, D-β).
+  · stage_mismatches(staged_scripts_dir, cache_scripts_dir) -> list[str] — Return the relative names of closure files that are MISSING or whose sha256 differs
+  · verify_or_restage(staged_scripts_dir) -> bool — Pre-launch gate the OS-keepalive entry calls BEFORE ``import daemon``.
 `scripts/lib/keepalive_stage.py` — Stage daemon.py's import closure into the persistent DATA dir (TRDD-71ABD7V7).
   · daemon_closure(scripts_dir) -> list[Path] — Every in-tree .py the L0 daemon needs (the verbatim DATA stage list), absolute
   · stage_closure(scripts_dir, dest_scripts_dir) -> list[Path] — Verbatim-copy the closure into `dest_scripts_dir`, preserving the relative layout
