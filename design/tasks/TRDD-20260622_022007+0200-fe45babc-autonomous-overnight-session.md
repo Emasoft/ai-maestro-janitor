@@ -3,7 +3,7 @@ trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
 column: dev
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-24T18:24:34+0200
+updated: 2026-06-25T05:27:38+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -16,7 +16,47 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
 
 # Autonomous overnight session — the night brain (read on every wake)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-24
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; the task queue + next action) — 2026-06-25
+
+### ✅ 2026-06-25 — OAuth wrapper FOLD shipped (v0.19.1→v0.20.1) + daemon auto-update/reload; C2 now PUBLISHED-but-DORMANT (safe)
+Since the ~18:20 checkpoint the USER stayed silent across many heartbeats; per "don't procrastinate when a
+SAFE designed increment is ready," I completed the rotator-fold mandate item (TRDD-3T4DZWXA, parent
+TRDD-f892e109) — porting the user-scope OAuth wrapper INTO the plugin, consistently `janitor-*`. THREE releases:
+- **v0.19.1** cascade fix → **v0.20.0** the fold (commit 2a87a03): `/janitor-refresh-claude-logins` COMMAND
+  (a command, NOT a skill — CPV N11 forbids "claude" in skill NAMES; commands carry no such rule, so the user's
+  exact requested name is honored with NO gate relaxed) + the 3 helpers (open-login/check-login/lifetime-status)
+  ported beside `rotator.py` (sibling-resolve + canonical DATA dir, NEVER the cache-glob/legacy home); 14 helper
+  tests → **v0.20.1** post-publish recheck: command engine-call `uv run`→`python3` ×3 (rotator.py is stdlib-only)
+  + test fn rename. All CI-green, pushed.
+- **C2 SIDE-EFFECT (safe):** the verify-before-exec commit **9773ff3** was already on main, so it RODE these
+  publishes → C2 SOURCE is now PUBLISHED. Harmless: the stub is NON-auto-rolling, so the published C2 stub sits
+  DORMANT in the cache until a `/janitor-arm` re-arm copies it into the live DATA stub. Activation (re-arm) is
+  STILL the USER's (it CLOBBERS the night-loop cron driving these heartbeats) → nothing bricked; C2 just shipped-
+  dormant instead of held-local. The ~18:20 "hold C2 for PUBLISH" is superseded — what remains is ACTIVATION + review.
+- **Daemon auto-updated + session RELOADED** onto the new cache (a `[janitor-reload]` marker fired → ran
+  /reload-plugins: 46 plugins/160 skills live); the running session now carries the v0.20.x janitor incl. the
+  fold + the dormant C2 source. The new `/janitor-refresh-claude-logins` command is live in the skills list.
+- Housekeeping: stale TRDD-e247a349 (auto-project-map) resolved → `complete`; Task #209 (corpus-migration-helper,
+  TRDD-47df698b, column dispatch — designed-not-started) recorded as deliberately-parked (not abandoned); a
+  background memory-consolidate pass ran + correctly ABSTAINED (no over-merge).
+
+**NEXT (reconfirmed against this STATE — unchanged hold):** still HOLD the safety-critical exec-path work.
+(1) C2 activation = USER `/janitor-arm` re-arm (IRREDUCIBLE — clobbers these heartbeats), preceded by USER
+review of 9773ff3. (2) Do NOT stack C3/C4 on not-yet-activated C2 (boot-critical stacking, phased-execution
+violation). (3) The remaining immortality GROUPS — E (per-scenario handlers), F (observability + ai-maestro) —
+are a genuine USER pick-the-next-effort fork, and the safety-critical pieces need the plan's ultracode-review
+Workflow (USER opt-in, which `/go-on-yourself` does not grant). So await the USER's "do C3 / continue immortality
+/ pick effort X" or a fresh thin session. **THE ONE IRREDUCIBLE USER ACTION remains: re-login
+`fmuaddib@gmail.com`** — now via `/janitor-refresh-claude-logins` (post-fold; the legacy
+`~/.claude/account-rotator/open-login.sh` path is superseded by the in-plugin helper). Its refresh token is dead
+(374 failed renewals); only a human OAuth consent restores it, after which the rotator auto-captures hands-free.
+
+#### Superseded — do NOT carry forward
+- ✗ "C2 committed LOCAL, **NOT published** / HOLD C2 for publish" (the ~18:20 entry) — C2 SOURCE is now PUBLISHED
+  (rode v0.19.1→v0.20.1 via commit 9773ff3 already on main). What remains is C2 **ACTIVATION** (the re-arm) +
+  USER review, NOT the publish. C2 is published-but-DORMANT (non-auto-rolling stub) → safe.
+- ✗ "re-login via `~/.claude/account-rotator/open-login.sh fmuaddib@gmail.com`" — the wrapper folded into the
+  plugin (v0.20.0); use `/janitor-refresh-claude-logins` (or `$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator/open-login.sh`).
 
 ### ✅ 2026-06-24 ~18:20 — immortality GROUP C **C2 IMPLEMENTED** (committed LOCAL, NOT published) → deliberate phased checkpoint before C3
 After the OAuth triad shipped (below) the USER stayed silent across several heartbeats; standing by is the
