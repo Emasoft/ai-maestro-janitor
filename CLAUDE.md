@@ -195,7 +195,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=5ccfa1aa547f digest=48f4594b685d generated=2026-06-25T08:29:39+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=84500fa7071c digest=63ec489c2b89 generated=2026-06-25T08:54:58+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -614,6 +614,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · compliance_map(rule_id) -> dict[str, list[str]] — Return the compliance framework cross-walk for a janitor rule_id.
 `scripts/lib/project_memory_tracked.py` — PROJECT-memory gitignore-exception enforcer (TRDD-3f7b6807, Phase 2).
   · ensure_tracked(repo_root) -> tuple[str, str] — Guarantee `<repo>/.claude/project/memory/` is git-trackable via a
+`scripts/lib/recovery_audit.py` — Recovery audit log (immortality F3, TRDD-F3AUDLOG) — append-only, tamper-evident
+  · recovery_audit_path() -> Path — The recovery-audit NDJSON path: ``<global_state_dir>/recovery-audit.ndjson``.
+  · record_recovery(*, ts, project_root, pid, tty, diagnosis, rung, channel, outcome, path) -> Optional[dict] — Append ONE recovery-decision record to the audit chain. FAIL-OPEN.
+  · trim_recovery_audit(path, *, keep_lines, max_bytes) -> None — Cap the append-only audit log — mirror of ``token_meter.trim_log``.
+  · load_records(path) -> list[dict] — Every audit record as a dict, file order. Fail-open ``[]`` on a missing /
+  · load_recent(path, *, limit) -> list[dict] — The most-recent ``limit`` records, newest LAST (file order is chronological
+  · summarize_recent(records) -> Optional[dict] — A compact rollup of recovery history for the dashboard, or None on empty input.
 `scripts/lib/repomap/__init__.py` — Auto-maintained project-map extractor/renderer (TRDD-e247a349).
 `scripts/lib/repomap/extractor.py` — Project-map extractor — language-agnostic interface + Python adapter.
   · Symbol — One public symbol in a file.
