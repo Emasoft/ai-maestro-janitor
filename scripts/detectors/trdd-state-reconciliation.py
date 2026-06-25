@@ -98,6 +98,35 @@ def _load_git_log(root: Path) -> list[tuple[str, str]]:
     return out
 
 
+def _commit_touches_impl(sha: str, root: Path) -> bool:
+    """True iff `sha` changes at least one file OUTSIDE `design/tasks/`.
+
+    A TRDD's OWN authoring commits (`docs: add TRDD-<id8> …`, `docs(trdd): …`)
+    touch only the spec under `design/tasks/` — that is authoring, not
+    implementation. Once a release tags such a commit, the bare subject-grep
+    would otherwise make a never-implemented `backburner` design doc read as
+    "shipped" (TRDD-7C787DUS: TRDD-cf15d412 was flagged closeable purely because
+    its `docs: add` commit landed in a tag). A commit that also touches code/docs
+    elsewhere IS implementation and is kept.
+
+    Fail OPEN on any git error (return True): the detector is surface-only, so a
+    stray false-"shipped" candidate is caught by the human verifier, whereas
+    DROPPING a real implementation commit would MISS genuine drift — the worse
+    error for a board-drift detector.
+    """
+    proc = state.run_subprocess(
+        ["git", "-C", str(root), "diff-tree", "--no-commit-id", "--name-only", "-r", sha],
+        timeout=8,
+        detector_name="trdd-state-reconciliation",
+    )
+    if proc is None or proc.returncode != 0:
+        return True
+    files = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    if not files:
+        return True
+    return any(not f.startswith("design/tasks/") for f in files)
+
+
 def _main_root(root: Path) -> Path:
     """Resolve the MAIN repo root (worktree-safe), falling back to `root`.
 
@@ -246,7 +275,14 @@ def main() -> int:
         if candidate_for_keystone and rec.uid is not None:
             if log_lines is None:
                 log_lines = _load_git_log(root)
-            subj_commits = _subject_commits_for_uid(rec.uid, log_lines)
+            # Exclude the TRDD's OWN authoring commits (which touch only its spec
+            # under design/tasks/) so a never-implemented backburner design doc
+            # does not read as "shipped" once a release tags it (TRDD-7C787DUS).
+            subj_commits = [
+                s
+                for s in _subject_commits_for_uid(rec.uid, log_lines)
+                if _commit_touches_impl(s, root)
+            ]
             merged = list(dict.fromkeys([*rec.impl_commits, *subj_commits]))
             rec = trdd_common.TrddRecord(
                 uid=rec.uid,

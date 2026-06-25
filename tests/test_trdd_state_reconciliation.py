@@ -80,7 +80,16 @@ def _write_trdd(
     return p
 
 
-def _commit_all(root: Path, subject: str) -> str:
+def _commit_all(root: Path, subject: str, *, spec_only: bool = False) -> str:
+    # By default a fixture commit represents REAL IMPLEMENTATION, so it must
+    # touch code — the detector excludes commits that touch ONLY design/tasks/
+    # from the shipped check (TRDD-7C787DUS), since a TRDD's own `docs: add`
+    # spec commit is authoring, not implementation. `spec_only=True` opts OUT
+    # (used to test that a spec-only authoring commit does NOT read as shipped).
+    # Content varies by subject so every implementation commit makes a real diff.
+    if not spec_only:
+        (root / "scripts").mkdir(exist_ok=True)
+        (root / "scripts" / "impl.py").write_text(f"# {subject}\n", encoding="utf-8")
     _git(["add", "-A"], root)
     _git(["commit", "-q", "-m", subject], root)
     res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
@@ -149,6 +158,27 @@ def test_shipped_via_implementation_commits_field(repo: Path):
     out = _run(repo)
     assert f"TRDD-{uid}" in out
     assert "closeable-candidate" in out
+
+
+def test_spec_only_authoring_commit_does_not_read_as_shipped(repo: Path):
+    """TRDD-7C787DUS regression: a backburner TRDD whose ONLY `TRDD-<id>`-subject
+    commit touches just its own spec under design/tasks/ (its `docs: add` authoring
+    commit) must NOT read as shipped — even in a released tag. A genuinely-shipped
+    sibling (a real code commit) proves the detector ran and emitted."""
+    real = "11111111"
+    spec = "22222222"
+    # genuine implementation — touches code (default), in the tag → shipped.
+    _write_trdd(repo, real, column="dev", body="\n# body\nall shipped.\n")
+    _commit_all(repo, f"feat: real code (TRDD-{real})")
+    # backburner design doc — its ONLY commit touches only its own spec.
+    _write_trdd(repo, spec, column="backburner", body="\n# body\nplan only, no code.\n")
+    _commit_all(repo, f"docs: add TRDD-{spec} -- spec only", spec_only=True)
+    _tag(repo, "v0.9.0")
+
+    out = _run(repo)
+    assert f"TRDD-{real}" in out            # genuine implementation surfaces
+    assert "closeable-candidate" in out
+    assert f"TRDD-{spec}" not in out        # spec-only authoring commit excluded
 
 
 # ── the load-bearing regression: shipped-but-blocked → review, NOT closeable ──
