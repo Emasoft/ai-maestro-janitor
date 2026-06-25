@@ -8,6 +8,12 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Bound the job so a transit-degraded `uvx` clone in "Validate plugin
+    # (strict)" fails fast instead of zombie-hanging to GitHub's 6h max
+    # (task #243; see memory: stuck-release-ci-not-publish-blocked). The
+    # release itself is created locally by publish.py — this job is a
+    # redundant post-hoc check, so a tight bound is safe.
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
