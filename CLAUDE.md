@@ -195,7 +195,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=84500fa7071c digest=63ec489c2b89 generated=2026-06-25T08:54:58+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=813b406e8329 digest=5d54fc8c8b4c generated=2026-06-25T09:16:14+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -475,6 +475,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · request_daemon_restart() -> bool — Send SIGTERM to a stale daemon so the next heartbeat lazy-spawns a new one.
   · crash_loop_active(now) -> bool — PUBLIC read-only: True iff the daemon spawn breaker is tripped (the
   · recent_spawn_count(window_s, now) -> int — PUBLIC read-only: how many daemon spawn attempts landed within the last
+  · record_spawn_attempt(now) -> None — PUBLIC: record one daemon spawn attempt into the crash-loop ring.
   · ensure_daemon_running(max_silence_s) -> bool — If the daemon is dead AND not kill-switched AND enabled, spawn it.
 `scripts/lib/ioc_taxonomy.py` — IOC taxonomy primitives — distilled from the deep-forensics-ioc audit
   · IOCTaxonomyError — Raised when an IOC bundle cannot be parsed.
@@ -511,7 +512,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · data_scripts_dir() -> Path — Where the verbatim daemon closure + the installer are staged (beside the entry the
   · current_platform() -> str — 'macos' | 'linux' | 'other' — whether an OS keepalive is available here.
   · opted_in() -> bool — Master opt-in for the OS keepalive. Default ON (the user mandated OS-level
-  · latest_cache_scripts_dir() -> Path | None — The ``scripts/`` dir of the NEWEST cached plugin version (from the fixed cache
+  · latest_cache_scripts_dir() -> Path | None — The ``scripts/`` dir of the newest cached plugin version that is NOT C3-quarantined
   · restage(source_scripts_dir) -> None — Verbatim-refresh the DATA closure + installer from ``source_scripts_dir`` WITHOUT
   · activate() -> tuple[bool, str] — Run the STAGED installer's ``install`` to register the OS service (idempotent).
   · staged_is_current(source_scripts_dir) -> bool — True iff the staged DATA ``daemon.py`` is byte-identical to ``source_scripts_dir``'s
