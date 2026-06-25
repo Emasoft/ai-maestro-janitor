@@ -1,12 +1,15 @@
 ---
 trdd-id: WQAJZ5V6
 title: Harden ci.yml CPV-validate against the flaky REPO-LINT hang — retry-once was insufficient
-column: complete
+column: published
 created: 2026-06-25T14:57:20+0200
-updated: 2026-06-25T15:01:54+0200
+updated: 2026-06-25T15:10:50+0200
 last-test-result: pass
 last-test-at: 2026-06-25T15:01:54+0200
 test-failures: 0
+implementation-commits: [e63e4b8]
+published-version: 0.24.5
+published-at: 2026-06-25T15:10:50+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 priority: 4
