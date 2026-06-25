@@ -1,9 +1,9 @@
 ---
 trdd-id: 6F7F7D60
 title: Audit Claude Code v2.1.170-191 changelog for ai-maestro-janitor plugin compatibility
-column: dev
+column: published
 created: 2026-06-25T20:48:22+0200
-updated: 2026-06-25T20:48:22+0200
+updated: 2026-06-25T20:56:15+0200
 current-owner: claude-go-on-yourself
 assignee: claude-go-on-yourself
 priority: 3
@@ -25,7 +25,9 @@ review-requirements: []
 impacts: []
 attempts: 1
 last-test-result: not-run
-implementation-commits: []
+implementation-commits: [463426e]
+published-version: 0.24.12
+published-at: 2026-06-25T20:56:15+0200
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/65"]
 ---
 
