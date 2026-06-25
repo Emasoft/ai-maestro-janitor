@@ -371,7 +371,14 @@ def check3_prose_frontmatter_mismatch(record: TrddRecord) -> bool:
     True iff the body contains blocked/BLOCKED/hostage-to/blocked-on prose, but
     the frontmatter `column != blocked` AND `blocked-by: []` (empty). The human
     prose and the machine state disagree — reconcile one to the other.
+
+    A TERMINAL TRDD is excluded (mirrors Check 4's guard): it is CLOSED, so a
+    historical "blocked" mention in its settled STATE is not live board drift.
+    The real-board smoke test proved Check 3 was flagging `complete` TRDDs whose
+    prose said "blocked on a CPV" (about a long-shipped version) — TRDD-15ECPBSA.
     """
+    if is_terminal_column(record.column):
+        return False
     if record.column == "blocked":
         return False
     if record.blocked_by:

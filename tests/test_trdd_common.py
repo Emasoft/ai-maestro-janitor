@@ -246,6 +246,16 @@ def test_check3_no_false_positive_on_unblocked_or_blocker():
         assert tc.check3_prose_frontmatter_mismatch(rec) is False, body
 
 
+def test_check3_silent_on_terminal_trdd_with_historical_blocked_prose():
+    """A TERMINAL (complete/published/…) TRDD whose STATE mentions a past block is
+    CLOSED — its prose is settled, not live drift, so Check 3 must skip it (mirrors
+    Check 4's terminal guard). The real-board smoke test caught Check 3 flagging
+    `complete` TRDDs whose prose said 'blocked on a CPV' (a long-shipped version)."""
+    for col in ("complete", "published", "superseded", "failed"):
+        rec = _record(column=col, blocked_by="[]", body="\npublish was BLOCKED on a CPV bug\n")
+        assert tc.check3_prose_frontmatter_mismatch(rec) is False, col
+
+
 # ── Check 4 — stale blocker ──────────────────────────────────────────────────
 
 
