@@ -36,7 +36,23 @@ import sys
 # below resolves to the exact daemon staged beside this file. daemon.py then inserts
 # its own ``<here>/lib`` + ``<here>/oauth_rotator`` (it reads them from its __file__),
 # so the whole closure resolves from the staged tree with zero edits.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.join(_HERE, "lib"))
+
+# D-β pre-launch integrity gate (TRDD-DGROUPAB): verify the staged closure is complete
+# + uncorrupted vs the trusted cache and restage on any mismatch, BEFORE ``import
+# daemon`` — so a torn/truncated DATA stage self-heals instead of crash-looping with no
+# re-stage trigger (the exact all-sessions-down scenario the OS keepalive exists for).
+# keepalive_boot lives in the staged closure (the entry imports it ⇒ it is staged
+# beside this file); CPV's persistence discriminator does NOT follow ``import``, so the
+# heavy I/O it does stays off the entry's inertness surface — exactly like ``daemon``
+# below. FAIL-OPEN/FAIL-LOUD: the gate never raises and never blocks the launch when a
+# runnable stage exists; when nothing is runnable it logs loudly, then the import below
+# fails VISIBLY rather than silently.
+import keepalive_boot  # noqa: E402 — static import of a co-located, CPV-scanned lib
+
+keepalive_boot.verify_or_restage(_HERE)
 
 import daemon  # noqa: E402 — static literal import of the co-located, same-scan daemon
 

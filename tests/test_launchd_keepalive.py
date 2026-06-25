@@ -288,17 +288,36 @@ def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) 
     expected_entry = str(
         fake_home / ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/daemon_keepalive_entry.py"
     )
+    # D-α: the WRITTEN config now carries a baked ABSOLUTE interpreter (the test host has
+    # uv + python3, so one always resolves), with the FIXED entry as the launched SCRIPT and
+    # --keepalive last. (The SCANNED heredoc still keeps the entry as program[0] — that
+    # CPV-#152 contract is pinned by the test_*_folds_to_existing_in_tree_entry tests; this
+    # test asserts the RUNTIME file, which is what launchd/systemd actually exec.)
     if plat == "macos":
         cfg = fake_home / "Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist"
         assert cfg.is_file()
         data = plistlib.loads(cfg.read_bytes())
-        assert data["ProgramArguments"] == [expected_entry, "--keepalive"]
-        assert "$" not in data["ProgramArguments"][0]  # $HOME fully expanded
+        pa = data["ProgramArguments"]
+        # An absolute interpreter was prepended → program[0] is NOT the entry, the entry is
+        # present as a later element, and --keepalive is last. $HOME is fully expanded.
+        assert pa[0] != expected_entry, "expected a baked interpreter before the entry"
+        assert pa[0].startswith("/"), f"interpreter must be an absolute path: {pa[0]!r}"
+        assert expected_entry in pa, f"entry missing from ProgramArguments: {pa!r}"
+        assert pa[-1] == "--keepalive"
+        assert pa.index(expected_entry) == len(pa) - 2  # entry immediately before --keepalive
+        assert not any("$" in tok for tok in pa)  # $HOME fully expanded everywhere
     else:  # linux
         cfg = fake_home / ".config/systemd/user/com.ai-maestro-janitor.daemon.service"
         assert cfg.is_file()
         text = cfg.read_text(encoding="utf-8")
-        assert f"ExecStart={expected_entry} --keepalive" in text
+        exec_line = next(ln for ln in text.splitlines() if ln.startswith("ExecStart="))
+        toks = shlex.split(exec_line[len("ExecStart=") :])
+        assert toks[0].startswith("/") and toks[0] != expected_entry, (
+            f"expected a baked absolute interpreter before the entry: {exec_line!r}"
+        )
+        assert expected_entry in toks, f"entry missing from ExecStart: {exec_line!r}"
+        assert toks[-1] == "--keepalive"
+        assert toks.index(expected_entry) == len(toks) - 2
         assert "$HOME" not in text
 
 

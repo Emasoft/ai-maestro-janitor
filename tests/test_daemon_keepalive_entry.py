@@ -17,9 +17,13 @@ ENTRY_PATH = Path(__file__).resolve().parents[1] / "scripts" / "daemon_keepalive
 SRC = ENTRY_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SRC)
 
-# Only these three modules may be imported — this alone bars subprocess / socket /
-# importlib / ctypes etc. from ever being used in the launched file.
-ALLOWED_IMPORTS = {"os", "sys", "daemon"}
+# Only these modules may be imported — this alone bars subprocess / socket /
+# importlib / ctypes etc. from ever being used in the launched file. ``daemon`` and
+# ``keepalive_boot`` are co-located, separately-CPV-scanned in-tree libs the entry
+# statically imports (the discriminator scans the launched file + its exec/source chain
+# but does NOT follow ``import``, so their heavy I/O stays off the entry's inert surface).
+# ``keepalive_boot`` is the D-β pre-launch integrity gate (TRDD-DGROUPAB).
+ALLOWED_IMPORTS = {"os", "sys", "daemon", "keepalive_boot"}
 
 # Call targets (a bare name or the final attribute) that signal dynamic code
 # execution or an RCE surface — the exact shapes CPV's C3 (_non_exploitable)
