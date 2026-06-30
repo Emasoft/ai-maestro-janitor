@@ -72,8 +72,8 @@ implementation-commits: [3f76b65]
 
 The user lost a month of tokens to context bloat: turns executing at ~999k re-read the
 whole context each time. Native auto-compact under-fires on the 1M window. The janitor
-already ships the compaction machinery (`janitor-compact-context` + `compact_trigger.py`
-+ `post-compact-resume`) but only as an OPT-IN, ADVISORY watchdog the agent can ignore.
+already ships the compaction machinery (`janitor-compact-context` + `compact_trigger.py` +
+`post-compact-resume`) but only as an OPT-IN, ADVISORY watchdog the agent can ignore.
 This makes it DEFAULT-ON and ENFORCING near the cap, where compaction is the only fix.
 
 ## Config (plugin.json userConfig)
