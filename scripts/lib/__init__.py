@@ -11,8 +11,9 @@
 # `[attr-defined] Module "lib" has no attribute "state"` because it
 # does not auto-discover submodules of an empty package.
 
-__all__ = ["rules_installer", "state"]
+__all__ = ["leanctx_allowlist", "rules_installer", "state"]
 from . import (
+    leanctx_allowlist,
     rules_installer,
     state,
 )

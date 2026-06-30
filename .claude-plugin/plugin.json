@@ -164,6 +164,13 @@
       "default": true,
       "sensitive": false
     },
+    "leanctx_autoallow": {
+      "title": "Auto-allow janitor commands in the lean-ctx shell allowlist",
+      "description": "When true (DEFAULT), the SessionStart hook additively runs `lean-ctx allow <cmd>` for each command the janitor heartbeat needs (dispatcher-stub.py, uv, python3, git, memgrep, -d) on machines that run the lean-ctx Bash-allowlist wrapper. This self-heals the block that otherwise stops the cron's bare `dispatcher-stub.py` invocation and tempts dangerous bypasses. It is ADDITIVE and idempotent and NEVER disables shell security or redefines the allowlist; it is a silent no-op when lean-ctx is not installed. Set to false to manage the lean-ctx allowlist yourself.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
     "daemon_marketplace_refresh_interval": {
       "title": "Daemon Marketplace Refresh Cadence (seconds)",
       "description": "Minimum seconds the daemon waits between bulk `claude plugin marketplace update` runs (no args = every configured marketplace). Default: 1200 (20 min). The daemon is the only writer of the GLOBAL refresh, so a moderate cadence is enough \u2014 there is no per-session contention to compensate for. Narrower per-session refreshes of just the local+project plugins' marketplaces still run every 5 min (see marketplace_refresh_interval), so newly-installed marketplaces in `.claude/settings.json` / `.claude/settings.local.json` reach the catalog quickly even while the daemon is between fires. Heartbeat per-session shim emits a stale-daemon drift line when the actual last-run is older than 2\u00d7 this value.",

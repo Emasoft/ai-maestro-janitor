@@ -115,6 +115,27 @@ def main() -> int:
             f"installed plugin rule(s): {', '.join(copied)}",
         )
 
+    # Self-heal the lean-ctx shell allowlist (TRDD-ZGLCGC6A). On a machine that
+    # runs the lean-ctx Bash-allowlist wrapper, the heartbeat cron's bare
+    # `dispatcher-stub.py` invocation is BLOCKED until the allowlist permits it,
+    # which can stall an armed session (and tempts dangerous bypasses like
+    # `shell_security=off`). The ONLY correct fix is the ADDITIVE
+    # `lean-ctx allow <cmd>`, so we run it here once per janitor-required token.
+    # No-op when lean-ctx is absent or the feature is disabled, and it NEVER
+    # disables shell security. Best-effort and fully isolated: any failure must
+    # NEVER disrupt session start, so it is wrapped and swallowed.
+    try:
+        from lib import leanctx_allowlist  # noqa: E402  -- local package, not PyPI
+
+        allowed = leanctx_allowlist.ensure_janitor_allowed()
+        if allowed:
+            state.log_line(
+                "session-start",
+                f"lean-ctx allowlist self-heal: ensured {', '.join(allowed)}",
+            )
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        state.log_line("session-start", f"lean-ctx allowlist self-heal skipped: {exc}")
+
     # OAuth-rotator supervisor FAST-PATH (TRDD-32acd15f, P2). The daemon Task
     # runs the same alert-only governance on a 10-min cadence; firing it here too
     # surfaces the human-actionable conditions (pinning env var, expiring
