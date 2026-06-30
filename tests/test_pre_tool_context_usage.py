@@ -64,11 +64,17 @@ def _ctx(proc: subprocess.CompletedProcess) -> str | None:
 
 def test_truthy_spellings() -> None:
     hook = _import_hook()
-    assert hook._truthy("true") is True
-    assert hook._truthy("1") is True
-    assert hook._truthy("yes") is True
-    for falsey in (None, "", "  ", "false", "0", "no", "off", "FALSE"):
-        assert hook._truthy(falsey) is False, f"{falsey!r} should be falsey"
+    # Explicit truthy spellings return True regardless of the (now mandatory) default.
+    assert hook._truthy("true", default=False) is True
+    assert hook._truthy("1", default=False) is True
+    assert hook._truthy("yes", default=False) is True
+    # Explicit false spellings (incl. whitespace, which strips to "") return False.
+    for falsey in ("  ", "false", "0", "no", "off", "FALSE"):
+        assert hook._truthy(falsey, default=True) is False, f"{falsey!r} is falsey"
+    # Unset/empty falls back to the supplied default (the default-ON path).
+    assert hook._truthy(None, default=True) is True
+    assert hook._truthy("", default=True) is True
+    assert hook._truthy(None, default=False) is False
 
 
 def test_coerce_int_defaults_on_junk() -> None:
@@ -89,56 +95,71 @@ def test_fmt_tokens() -> None:
 
 def test_build_line_below_threshold_no_suggestion() -> None:
     hook = _import_hook()
-    snap = {"pct": 30, "tokens": 300_000, "window": 1_000_000, "ts": 1000}
-    line = hook._build_context_line(snap, now=1000, suggest_pct=60)
-    assert line is not None
+    # _format_line takes already-resolved (pct, tokens, window, stale, suggest_pct).
+    line = hook._format_line(30, 300_000, 1_000_000, False, 60)
     assert "30% (300k/1.0m)" in line
     assert "janitor-compact-context" not in line
 
 
 def test_build_line_at_or_above_threshold_suggests() -> None:
     hook = _import_hook()
-    snap = {"pct": 60, "tokens": 600_000, "window": 1_000_000, "ts": 1000}
-    line = hook._build_context_line(snap, now=1000, suggest_pct=60)
+    line = hook._format_line(60, 600_000, 1_000_000, False, 60)
+    assert "60%" in line
     assert "/janitor-compact-context" in line, "must suggest the skill at the threshold"
 
 
-def test_build_line_stale_marks_age() -> None:
+def test_build_line_stale_marks_lag() -> None:
     hook = _import_hook()
-    snap = {"pct": 40, "tokens": 400_000, "window": 1_000_000, "ts": 1000}
-    line = hook._build_context_line(snap, now=1000 + 999, suggest_pct=60)
-    assert "old" in line and "999s" in line
+    # The render fn no longer computes age (that moved to _resolve_context); it takes a
+    # stale bool and appends the lag caveat, which coexists with the usage detail.
+    line = hook._format_line(40, 400_000, 1_000_000, True, 60)
+    assert "40% (400k/1.0m)" in line
+    assert "snapshot may lag" in line
+    assert "/janitor-compact-context" not in line
 
 
-def test_build_line_missing_pct_returns_none() -> None:
+def test_build_line_missing_pct_returns_none(tmp_path: Path) -> None:
+    # The missing/non-int-pct -> None decision moved from the old render helper into
+    # _resolve_context: a snapshot whose pct is absent or a non-int yields no usable
+    # source, so (with no transcript) resolution returns the all-None tuple.
     hook = _import_hook()
-    assert hook._build_context_line({"tokens": 1}, now=1, suggest_pct=60) is None
-    assert hook._build_context_line({"pct": "67"}, now=1, suggest_pct=60) is None  # str, not int
+    sid = "s1"
+    snapdir = tmp_path / ".claude" / "janitor"
+    snapdir.mkdir(parents=True)
+    snap = snapdir / f"context-usage.{sid}.json"
+    snap.write_text(json.dumps({"tokens": 1}), encoding="utf-8")  # pct absent
+    got = hook._resolve_context(str(tmp_path), sid, "", 1_000_000, now=1)
+    assert got == (None, None, None, False)
+    snap.write_text(json.dumps({"pct": "67"}), encoding="utf-8")  # str pct
+    got = hook._resolve_context(str(tmp_path), sid, "", 1_000_000, now=1)
+    assert got == (None, None, None, False)
 
 
 # ---------- full main() via subprocess (no mocks) -------------------------
 
-def test_disabled_by_default_no_output(tmp_path: Path) -> None:
-    """Opt-in off (env unset) → no output even with a valid snapshot present."""
+def test_disabled_explicitly_no_output(tmp_path: Path) -> None:
+    """The guard is DEFAULT-ON, so disabling is explicit: WATCHDOG_ENABLED=false -> a
+    silent no-op even with a high-context snapshot present."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run({"session_id": "s1"}, enabled=False,
                 snapshot={"pct": 80, "tokens": 800_000, "window": 1_000_000, "ts": int(time.time())},
-                project=p)
+                project=p,
+                extra_env={"CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED": "false"})
     assert proc.returncode == 0
-    assert proc.stdout.strip() == "", "must be a silent no-op when not enabled"
+    assert proc.stdout.strip() == "", "must be a silent no-op when explicitly disabled"
 
 
-def test_enabled_fresh_low_injects_pct_no_suggestion(tmp_path: Path) -> None:
+def test_enabled_fresh_low_silent_below_suggest(tmp_path: Path) -> None:
+    """Enabled + a fresh snapshot below the suggest threshold -> NO output: the guard
+    stays silent until near the cap so it adds zero per-turn context cost."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run({"session_id": "s1"}, enabled=True,
                 snapshot={"pct": 30, "tokens": 300_000, "window": 1_000_000, "ts": int(time.time())},
                 project=p)
     assert proc.returncode == 0
-    ctx = _ctx(proc)
-    assert ctx is not None and "30%" in ctx
-    assert "janitor-compact-context" not in ctx
+    assert proc.stdout.strip() == "", "below the suggest threshold the guard must be silent"
 
 
 def test_enabled_high_injects_suggestion(tmp_path: Path) -> None:
