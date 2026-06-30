@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.24.16",
+  "version": "0.25.0",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -591,7 +591,8 @@
       "default": true,
       "sensitive": false
     },
-    "context_window_tokens": { "title": "Context-Size Guard - Fallback Window (tokens)",
+    "context_window_tokens": {
+      "title": "Context-Size Guard - Fallback Window (tokens)",
       "description": "The context-window size (in tokens) the guard uses to compute the usage % when reading occupancy from the TRANSCRIPT fallback (no statusline snapshot present). Default 1000000 (the 1M window). When the statusline snapshot is available it carries the real window and this value is ignored. Set to match your model's actual context window if you run a non-1M window and rely on the transcript fallback. Only consulted when context_watchdog_enabled is true.",
       "type": "number",
       "default": 1000000,
