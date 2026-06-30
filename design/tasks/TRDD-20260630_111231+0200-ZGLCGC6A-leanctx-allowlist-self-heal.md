@@ -3,7 +3,7 @@ trdd-id: ZGLCGC6A
 title: Armed sessions self-heal the lean-ctx shell allowlist additively — never bypass shell security
 column: complete
 created: 2026-06-30T11:12:31+0200
-updated: 2026-06-30T11:12:31+0200
+updated: 2026-06-30T11:23:41+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -25,7 +25,7 @@ impacts: [config-schema]
 attempts: 1
 last-test-result: pass
 last-test-at: 2026-06-30T11:12:31+0200
-implementation-commits: []
+implementation-commits: [ee26d69]
 external-refs: []
 ---
 
@@ -33,7 +33,7 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-06-30
 
-### Current state — ✅ IMPLEMENTED + TESTED (2026-06-30, committed locally, NOT pushed)
+### Current state — ✅ IMPLEMENTED + TESTED (2026-06-30, committed locally as `ee26d69`, NOT pushed)
 - New module `scripts/lib/leanctx_allowlist.py`:
   - PURE `required_tokens()` → `["dispatcher-stub.py","uv","python3","git","memgrep","-d"]`.
   - I/O `ensure_janitor_allowed()` — runs `lean-ctx allow <tok>` per token (10 s
