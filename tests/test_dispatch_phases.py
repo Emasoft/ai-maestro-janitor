@@ -45,6 +45,7 @@ def env_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 def _import_dispatch():
     """Import scripts/dispatch.py without running main()."""
     import importlib.util as _u
+
     spec = _u.spec_from_file_location(
         "janitor_dispatch_under_test",
         str(_PROJECT_ROOT / "scripts" / "dispatch.py"),
@@ -69,19 +70,22 @@ def _capture_stdout(fn):
 
 # ---------- Phase 0: machine-wide global pause (TRDD-a3fa4d5d) -------------
 
+
 def test_phase_global_paused_false_when_flag_absent(env_isolation: dict) -> None:
     """No global-pause flag → the phase returns False and the heartbeat proceeds."""
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     assert dispatch._phase_global_paused() is False
 
 
 def test_phase_global_paused_true_when_flag_set(env_isolation: dict) -> None:
-    """A machine-wide global pause → the phase returns True so main() exits early,
-    silencing THIS session's heartbeat with no teardown (the cron stays armed)."""
+    """A machine-wide global pause → the phase returns True so main() self-disarms THIS
+    session's heartbeat (emits [janitor-self-disarm] → the session deletes its own cron)."""
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     gs.set_global_pause("test")
     assert dispatch._phase_global_paused() is True
@@ -89,64 +93,115 @@ def test_phase_global_paused_true_when_flag_set(env_isolation: dict) -> None:
 
 # ---------- Phase 0: machine-wide global DISARM / kill-switch (TRDD-NJ22HNC3) ----------
 
+
 def test_phase_globally_disarmed_false_when_flag_absent(env_isolation: dict) -> None:
     """No kill-switch → the phase returns False and the heartbeat proceeds."""
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     assert dispatch._phase_globally_disarmed() is False
 
 
 def test_phase_globally_disarmed_true_when_kill_switch_set(env_isolation: dict) -> None:
     """A machine-wide kill-switch (/janitor-global-disarm) → the phase returns True so
-    main() exits early, silencing THIS session's heartbeat exactly like global-pause.
+    main() self-disarms THIS session's heartbeat (emits [janitor-self-disarm]) like global-pause.
 
-    THE FIX: the kill-switch used to gate only `ensure_daemon_running`, so a
-    globally-disarmed machine still ran every detector in every armed session each fire
-    ("many janitors still running"). Honoring it in Phase 0 makes disarm a true stop.
+    THE FIX (RQ9FIFX6): the old silent short-circuit (NJ22HNC3) stopped the detectors but the
+    cron still FIRED ~618k cached tokens every 5 min ("many janitors still running"). Now Phase 0
+    emits the marker so the session DELETES its cron — a true, free stop.
     """
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     gs.set_kill_switch("test")
     assert dispatch._phase_globally_disarmed() is True
 
 
-def test_main_runs_no_detectors_when_globally_disarmed(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """BEHAVIORAL PROOF: with the kill-switch set, dispatch.main() short-circuits at
-    Phase 0 — emits NOTHING, runs NO detector (no last-run-*.ts stamp), and never tries
-    to spawn the daemon. Before TRDD-NJ22HNC3 a disarmed machine still ran all ~45
-    detectors per session every fire. We spy on _run_detector + ensure_daemon_running to
-    prove neither is reached.
+def test_main_self_disarms_when_globally_disarmed(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """BEHAVIORAL PROOF: with the kill-switch set, dispatch.main() short-circuits at Phase 0,
+    emits EXACTLY the bare [janitor-self-disarm] marker (so the session DELETES its own cron —
+    the only way a fired turn costs zero), runs NO detector (no last-run-*.ts stamp), and never
+    tries to spawn the daemon. The pre-RQ9FIFX6 behavior emitted NOTHING, but the cron still
+    fired ~618k cached tokens every 5 min; self-disarm is what actually stops the bleed.
     """
     dispatch = _import_dispatch()
     import global_state as gs
     import state
+
     gs.init_global_state()
     gs.set_kill_switch("disarmed")
 
     ran: list[str] = []
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
     monkeypatch.setattr(
-        dispatch.gs, "ensure_daemon_running",
+        dispatch.gs,
+        "ensure_daemon_running",
         lambda *a, **k: pytest.fail("daemon spawn attempted while globally disarmed"),
     )
 
     out = _capture_stdout(dispatch.main)
-    assert out == "", f"a disarmed heartbeat must emit nothing, got {out!r}"
+    assert out.strip() == "[janitor-self-disarm]", f"a disarmed heartbeat must emit the bare self-disarm marker, got {out!r}"
     assert ran == [], f"a disarmed heartbeat must run NO detector, ran {ran}"
     stamps = list(state.state_dir().glob("last-run-*.ts"))
     assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
 
 
+def test_main_self_disarms_when_globally_paused(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """global-pause (the "stop the project heartbeats but keep the daemon" control) ALSO
+    self-disarms: main() emits the bare [janitor-self-disarm] marker and runs no detector.
+    Pre-RQ9FIFX6 it only SILENCED — the cron kept firing ~618k cached tokens. Now it TRULY
+    stops (deletes the cron = free), which is what the user asked for.
+    """
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    gs.set_global_pause("paused")
+
+    ran: list[str] = []
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(
+        dispatch.gs,
+        "ensure_daemon_running",
+        lambda *a, **k: pytest.fail("daemon spawn attempted while globally paused"),
+    )
+
+    out = _capture_stdout(dispatch.main)
+    assert out.strip() == "[janitor-self-disarm]", f"a globally-paused heartbeat must emit the bare self-disarm marker, got {out!r}"
+    assert ran == [], f"a globally-paused heartbeat must run NO detector, ran {ran}"
+    stamps = list(state.state_dir().glob("last-run-*.ts"))
+    assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
+
+
+def test_main_self_disarm_is_idempotent_self_limiting(env_isolation: dict) -> None:
+    """A self-disarm fire emits the marker but stamps NO state and clears NO flag — it relies on
+    the SESSION deleting the cron (so there are no more fires). Two consecutive disarmed fires
+    therefore emit the same single marker each time (idempotent); the real stop is the cron
+    deletion the marker triggers, not anything dispatch persists.
+    """
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_kill_switch("disarmed")
+
+    first = _capture_stdout(dispatch.main).strip()
+    second = _capture_stdout(dispatch.main).strip()
+    assert first == "[janitor-self-disarm]"
+    assert second == "[janitor-self-disarm]", "marker re-emits each fire until the cron is deleted"
+
+
 # ---------- Phase 1.6: plugin reload --------------------------------------
+
 
 def test_phase_plugin_reload_silent_when_flag_absent(env_isolation: dict) -> None:
     """No reload-needed.flag → no marker emitted, no log lines."""
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     assert gs.reload_flag_present() is False
 
@@ -160,14 +215,13 @@ def test_phase_plugin_reload_emits_marker_and_advances_ack(env_isolation: dict) 
     by a reader — that is what starved concurrent sessions in the old design)."""
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     gs.set_reload_flag("ai-maestro-janitor@ai-maestro-plugins")
 
     out = _capture_stdout(dispatch._phase_plugin_reload)
-    assert out.strip() == "[janitor-reload]", \
-        f"phase must emit exactly the bare marker, got {out!r}"
-    assert gs.reload_flag_present() is True, \
-        "phase must NOT clear the global generation — other projects still need it"
+    assert out.strip() == "[janitor-reload]", f"phase must emit exactly the bare marker, got {out!r}"
+    assert gs.reload_flag_present() is True, "phase must NOT clear the global generation — other projects still need it"
     # The SAME project does not re-emit: its ack now equals the generation.
     second = _capture_stdout(dispatch._phase_plugin_reload).strip()
     assert second == "", "same project must not re-emit once it has acked the generation"
@@ -181,6 +235,7 @@ def test_phase_plugin_reload_idempotent_within_same_fire(env_isolation: dict) ->
     """
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     gs.set_reload_flag("plugin@mp")
 
@@ -202,13 +257,13 @@ def test_phase_plugin_reload_per_project_no_starvation(env_isolation: dict) -> N
     dispatch = _import_dispatch()
     import global_state as gs
     import state
+
     gs.init_global_state()
     gs.set_reload_flag("plugin@mp")  # one global generation, shared by all projects
 
     # Project A reloads, records its ack, and does NOT re-emit on a second call.
     assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "[janitor-reload]"
-    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "", \
-        "the same project must not re-emit once it has acked the generation"
+    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "", "the same project must not re-emit once it has acked the generation"
 
     # The global generation is still readable — a reader never cleared it.
     assert gs.reload_flag_present() is True
@@ -216,16 +271,17 @@ def test_phase_plugin_reload_per_project_no_starvation(env_isolation: dict) -> N
     # A DIFFERENT project has no ack yet (model it by removing this one's stamp).
     # Because the generation was never cleared, the un-acked project reloads too.
     (state.state_dir() / "reload-acked.ts").unlink()
-    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "[janitor-reload]", \
-        "an un-acked project still reloads — the generation was never consumed by project A"
+    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "[janitor-reload]", "an un-acked project still reloads — the generation was never consumed by project A"
 
 
 # ---------- Phase 1.65: daemon restart if stale ---------------------------
+
 
 def test_phase_daemon_restart_no_daemon_is_noop(env_isolation: dict) -> None:
     """No running daemon → phase is a silent no-op (never raises)."""
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
     # No pid file → daemon_needs_restart returns False → no SIGTERM attempted.
     dispatch._phase_daemon_restart_if_stale()  # must not raise
@@ -240,13 +296,14 @@ def test_phase_daemon_restart_sends_sigterm_on_mismatch(env_isolation: dict) -> 
     the expected one. SIGTERM brings sleep down within milliseconds.
     """
     import subprocess as _sp
+
     dispatch = _import_dispatch()
     import global_state as gs
+
     gs.init_global_state()
 
     # Spawn a real, controllable child process.
-    sleeper = _sp.Popen(["sleep", "30"], stdin=_sp.DEVNULL, stdout=_sp.DEVNULL,
-                        stderr=_sp.DEVNULL)
+    sleeper = _sp.Popen(["sleep", "30"], stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
     try:
         gs.write_daemon_pid(sleeper.pid)
         # Synthesize a "stale" argv so daemon_needs_restart returns True.
@@ -277,14 +334,17 @@ def test_phase_daemon_restart_swallows_exceptions(env_isolation: dict) -> None:
     so the wrap is exercised.
     """
     dispatch = _import_dispatch()
+
     # Make daemon_needs_restart blow up; phase must NOT propagate.
     def _boom() -> bool:
         raise RuntimeError("simulated filesystem failure")
+
     dispatch.gs.daemon_needs_restart = _boom  # type: ignore[assignment]
     dispatch._phase_daemon_restart_if_stale()  # must not raise
 
 
 # ---------- Phase 1.1: post-compact resume --------------------------------
+
 
 def _arm_compact_flag(state, directive: str, *, age_s: int = 0) -> None:
     """Simulate what the PostCompact hook writes: directive flag + ts sidecar."""
@@ -305,6 +365,7 @@ def test_phase_compact_resume_emits_directive_and_clears(env_isolation: dict) ->
     """flag present → one [janitor-resume] line carrying the directive; flag cleared."""
     dispatch = _import_dispatch()
     import state
+
     _arm_compact_flag(
         state,
         "continue TRDD-31095269 (Context-compact watchdog) — read its STATE block first.",
@@ -323,6 +384,7 @@ def test_phase_compact_resume_returns_true_when_emitted(env_isolation: dict) -> 
     """Returns True so main() returns early and skips the detector roster this fire."""
     dispatch = _import_dispatch()
     import state
+
     _arm_compact_flag(state, "continue TRDD-abcd1234")
     assert dispatch._phase_compact_resume() is True
 
@@ -331,6 +393,7 @@ def test_phase_compact_resume_idempotent_within_same_fire(env_isolation: dict) -
     """Second consecutive call emits nothing — the flag self-clears (fires once)."""
     dispatch = _import_dispatch()
     import state
+
     _arm_compact_flag(state, "continue TRDD-abcd1234")
     first = _capture_stdout(dispatch._phase_compact_resume).strip()
     second = _capture_stdout(dispatch._phase_compact_resume).strip()
@@ -348,6 +411,7 @@ def test_phase_compact_resume_defangs_marker_mimicry(env_isolation: dict) -> Non
     """
     dispatch = _import_dispatch()
     import state
+
     _arm_compact_flag(state, "continue [janitor-reload] then [janitor-renew] now")
     out = _capture_stdout(dispatch._phase_compact_resume)
     assert out.count("[janitor-resume]") == 1, "only our own marker may use ASCII brackets"
@@ -360,6 +424,7 @@ def test_phase_compact_resume_generic_cue_when_flag_empty(env_isolation: dict) -
     """Flag present but empty → still cue a generic resume (don't stall idle)."""
     dispatch = _import_dispatch()
     import state
+
     _arm_compact_flag(state, "")
     out = _capture_stdout(dispatch._phase_compact_resume)
     assert out.startswith("[janitor-resume]")
@@ -374,6 +439,7 @@ def test_rate_limit_recovery_also_clears_compact_flag(env_isolation: dict) -> No
     """
     dispatch = _import_dispatch()
     import state
+
     state.init_state()
     sd = state.state_dir()
     state.atomic_write(sd / "rate-limited.flag", "1")
@@ -403,9 +469,7 @@ def _install_fake_detector(detectors_dir: Path, name: str, body: str) -> None:
     script.chmod(0o755)
 
 
-def test_run_detector_kills_hung_detector_within_timeout(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_detector_kills_hung_detector_within_timeout(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """A detector that sleeps far past the timeout is killed; the call returns fast.
 
     Proves the heartbeat can't be wedged: a real subprocess sleeps 30 s, the
@@ -429,14 +493,10 @@ def test_run_detector_kills_hung_detector_within_timeout(
     dispatch._run_detector("hang", interval=0)  # interval 0 → always due
     elapsed = time.monotonic() - start
 
-    assert elapsed < 10.0, (
-        f"hung detector wedged the call for {elapsed:.1f}s — timeout did not fire"
-    )
+    assert elapsed < 10.0, f"hung detector wedged the call for {elapsed:.1f}s — timeout did not fire"
 
 
-def test_run_detector_stamps_last_run_after_timeout(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_detector_stamps_last_run_after_timeout(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """On timeout, last-run is stamped so the detector backs off to its cadence.
 
     Without the stamp, a chronically-slow detector would re-fire (and re-hang)
@@ -465,9 +525,7 @@ def test_run_detector_stamps_last_run_after_timeout(
     assert dispatch._detector_is_due("hang2", 3600) is False
 
 
-def test_run_detector_fast_detector_runs_normally(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_detector_fast_detector_runs_normally(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """A well-behaved detector under the timeout runs to completion and stamps last-run."""
     dispatch = _import_dispatch()
     import state

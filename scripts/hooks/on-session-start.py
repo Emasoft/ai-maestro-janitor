@@ -63,9 +63,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001 -- best-effort; never break session start
         source = "startup"
     if source in ("startup", "resume"):
-        state.atomic_write(
-            state.state_dir() / "reload-acked.ts", str(gs.reload_generation())
-        )
+        state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
 
     # Clear any stale flag from a prior session crash. If the last session
     # ended mid-rate-limit, the flag is preserved and the heartbeat cron
@@ -159,8 +157,7 @@ def main() -> int:
                 )
                 state.log_line(
                     "session-start",
-                    f"oauth-rotator-supervisor (fast-path): "
-                    f"alerts={_res.alerts or '[]'}",
+                    f"oauth-rotator-supervisor (fast-path): alerts={_res.alerts or '[]'}",
                 )
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
         state.log_line("session-start", f"oauth-supervisor fast-path skipped: {exc}")
@@ -170,15 +167,21 @@ def main() -> int:
     # session-start nudge below is what callers actually rely on.
     state.log_line("session-start", f"state initialized at {state.state_dir()}")
 
-    # Stdout from this hook becomes additional context for the first user
-    # turn. Remind Claude to arm the heartbeat cron. /janitor-arm is
-    # idempotent, so even if the durable cron survived a previous
+    # Stdout from this hook becomes additional context for the first user turn. Normally we
+    # remind Claude to arm the heartbeat cron — but when a MACHINE-WIDE stop flag is set
+    # (/janitor-global-disarm or /janitor-global-pause), re-arming would re-create the very
+    # heartbeat the user globally stopped (the pre-RQ9FIFX6 bug where a disarmed machine kept
+    # re-arming a fresh ~618k-token-per-fire cron on every new/resumed session). So when stopped,
+    # do NOT nudge /janitor-arm; tell the user how to resume. /janitor-global-arm (or -unpause)
+    # clears the flag and the next session start re-arms normally.
+    if gs.kill_switch_present() or gs.global_pause_present():
+        state.log_line("session-start", "global stop active -> not nudging /janitor-arm")
+        print("[ai-maestro-janitor] The janitor heartbeat is globally stopped (/janitor-global-disarm or /janitor-global-pause) — NOT arming. This keeps the per-project heartbeats off (each fire re-reads the whole context). Run /janitor-global-arm (or /janitor-global-unpause) to resume drift detection.")
+        return 0
+
+    # /janitor-arm is idempotent, so even if the durable cron survived a previous
     # session, re-arming is safe.
-    print(
-        "[ai-maestro-janitor] The janitor heartbeat keeps drift detection and rate-limit recovery "
-        "running in this session. If you have not done so yet (or if the previous cron hit its 7-day "
-        "auto-expiry), run /janitor-arm to arm it. The skill is idempotent — safe to re-run."
-    )
+    print("[ai-maestro-janitor] The janitor heartbeat keeps drift detection and rate-limit recovery running in this session. If you have not done so yet (or if the previous cron hit its 7-day auto-expiry), run /janitor-arm to arm it. The skill is idempotent — safe to re-run.")
     return 0
 
 
