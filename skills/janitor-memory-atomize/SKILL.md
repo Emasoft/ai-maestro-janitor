@@ -46,7 +46,7 @@ split / consolidate / conflict / repair / harvest.
    scheduler OWNS the cadence; the agent owns the content). Process **one scope per pass**
    (LOCAL + USER by default; PROJECT only if `edit_project_scope` is True — a PROJECT atomize
    is staged-not-pushed, rides the next `publish.py`). Scope roots resolve as in every wikimem
-   skill. (Cadence is `atomize_per_day`, default 2 → a couple/day, paced by the scheduler.)
+   skill. (Cadence is `atomize_per_day`, off by default (opt-in); paced by the scheduler when enabled.)
 3. **Candidate set.** Scan the scope for **free-prose pages** — a curated wiki page (frontmatter
    carries `node_type: memory` or a `tier:`) whose body has substantive facts but **no atom
    markers** yet. Find pages already carrying markers and skip them:

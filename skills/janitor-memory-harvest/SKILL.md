@@ -185,7 +185,7 @@ sync). The buffer is never modified by this step.
   stamped; the buffer (MEMORY.md + raw notes) untouched. Report `[janitor-memory] mirrored
   <N> buffer memory(ies) → wiki (buffer intact)`.
 - **Idempotent + daily** — a scope whose buffer notes are all already mirrored (the watermark
-  covers them) is a no-op; runs once/day (`harvest_per_day`, default 1; `0` disables). The
+  covers them) is a no-op; off by default (opt-in via `harvest_per_day`; `0` disables). The
   chore is PERMANENT — it mirrors whatever new memories the harness adds, forever.
 - **Bounded** — one scope per pass; honors the kill-switch + `harvest_per_day=0`.
 - **Never destructive, never touches the buffer** — only creates/updates `wiki/` pages and

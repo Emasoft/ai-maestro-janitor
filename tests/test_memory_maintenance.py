@@ -189,9 +189,12 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
 def test_only_one_marker_per_fire_when_several_due(fixture):
     """Even with every intervention due, ONE scope/heartbeat means at most one
     marker per fire (round-robin one-scope rule)."""
+    # Enable ALL six explicitly (the per-day defaults are now 0/off, 2026-06-30), so
+    # several interventions are genuinely due — the precondition this test exercises.
     _write_settings(
         fixture["settings"],
         split_per_day=1000.0, consolidation_per_day=1000.0, conflict_per_day=1000.0,
+        repair_per_day=1000.0, atomize_per_day=1000.0, harvest_per_day=1000.0,
     )
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     lines = [ln for ln in out.splitlines() if ln.strip()]

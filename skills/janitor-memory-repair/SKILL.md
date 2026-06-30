@@ -59,7 +59,7 @@ the job of the other three passes; REPAIR only makes a page well-formed.
    agent owns content). Process **one scope per pass** (LOCAL + USER by default; PROJECT only if
    `edit_project_scope` is True — a PROJECT repair is staged-not-pushed, rides the
    next `publish.py`). Scope roots resolve exactly as in every wikimem skill. (Cadence is
-   `repair_per_day`, default 3 → a few/day, paced by the scheduler.)
+   `repair_per_day`, off by default (opt-in); paced by the scheduler when enabled.)
 3. **Candidate set.** Read the librarian's `memory-reorg-proposed.md` in the scope
    (its page-shape / link findings), OR scan the scope for malformed pages
    (below). Bound the run to the **top-K most-broken pages** (K ≈ 5).

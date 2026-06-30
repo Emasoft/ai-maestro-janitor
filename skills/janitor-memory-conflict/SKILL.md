@@ -65,7 +65,7 @@ spelled out in the iron rules below.
    checked `is_due` and stamped the cadence at emit, so re-checking `memory_settings.is_due`
    here reads that fresh stamp and makes you abstain on the very scope it scheduled — the
    double-gate removed by TRDD-VJ8L465M (scheduler owns cadence, agent owns content). Pick the
-   scope (cadence `conflict_per_day`, default 0.5 ≈ once/48h, paced by the scheduler). Scope roots (as in
+   scope (cadence `conflict_per_day`, off by default (opt-in), paced by the scheduler when enabled). Scope roots (as in
    every wikimem skill): LOCAL `$HOME/.claude/projects/<dashed-cwd>/memory`; USER the
    janitor's **hard-coded** `…/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory`
    (NOT `${CLAUDE_PLUGIN_DATA}`); PROJECT `<git-root>/.claude/project/memory` **only if

@@ -29,7 +29,7 @@ nothing):
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the txn CLI refuses — honor
    it and stop.
 2. **Due-check + scope selection.** This pass is cadence-limited
-   (`conflict_per_day`, default 0.5 → ~once/48h). Use the settings lib:
+   (`conflict_per_day`, off by default (opt-in)). Use the settings lib:
 
    ```bash
    uv run python3 - <<'PY'

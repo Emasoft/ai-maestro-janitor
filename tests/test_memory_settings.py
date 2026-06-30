@@ -38,11 +38,12 @@ def _isolate(tmp_path, monkeypatch):
 # ---- settings store --------------------------------------------------------
 
 def test_defaults_on_fresh_store():
-    """A store that was never written returns the documented defaults."""
-    assert ms.get("consolidation_per_day") == 2.5
-    assert ms.get("split_per_day") == 4.5
+    """A store that was never written returns the documented defaults — the six
+    per-day editorial rates are 0 (autonomous curation OFF by default, 2026-06-30)."""
+    assert ms.get("consolidation_per_day") == 0
+    assert ms.get("split_per_day") == 0
     assert ms.get("split_max_bytes") == 36000
-    assert ms.get("conflict_per_day") == 0.5
+    assert ms.get("conflict_per_day") == 0
     assert ms.get("edit_project_scope") is False
 
 
@@ -55,8 +56,8 @@ def test_set_and_get_roundtrip():
 def test_set_none_reverts_to_default():
     """set_value(key, None) reverts that key to its default."""
     ms.set_value("split_per_day", "9")
-    assert ms.set_value("split_per_day", None) == 4.5
-    assert ms.get("split_per_day") == 4.5
+    assert ms.set_value("split_per_day", None) == 0
+    assert ms.get("split_per_day") == 0
 
 
 def test_set_zero_is_allowed_and_disables():
@@ -104,7 +105,7 @@ def test_load_is_resilient_to_a_corrupt_store():
     """A corrupt store file degrades to defaults, never crashes."""
     ms.settings_dir().mkdir(parents=True, exist_ok=True)
     (ms.settings_dir() / "memory-settings.json").write_text("{not json", encoding="utf-8")
-    assert ms.get("consolidation_per_day") == 2.5
+    assert ms.get("consolidation_per_day") == 0
 
 
 # ---- deviation-only persistence (TRDD-378c85da) ----------------------------
@@ -163,7 +164,8 @@ def test_default_change_flows_through_untouched_key(monkeypatch):
 # ---- interval derivation ---------------------------------------------------
 
 def test_interval_s_from_rate():
-    """interval_s = 86400 / per-day; default 2.5/day -> 34560s."""
+    """interval_s = 86400 / per-day (e.g. 2.5/day -> 34560s); a 0 rate -> inf (disabled)."""
+    ms.set_value("consolidation_per_day", "2.5")  # enable (the default is now 0/off)
     assert ms.interval_s("consolidation_per_day") == 86400 / 2.5
     ms.set_value("consolidation_per_day", "0")
     assert ms.interval_s("consolidation_per_day") == float("inf")
@@ -178,7 +180,8 @@ def test_interval_s_for_intervention_maps_to_its_key():
 # ---- scheduler stamps ------------------------------------------------------
 
 def test_due_then_not_due_after_mark_ran():
-    """A never-run intervention is due; mark_ran makes it not-due immediately."""
+    """A never-run (enabled) intervention is due; mark_ran makes it not-due immediately."""
+    ms.set_value("consolidation_per_day", "2.5")  # enable (the default is now 0/off)
     root = "/some/scope/root"
     assert ms.is_due("consolidate", "USER", root, _NOW) is True
     ms.mark_ran("consolidate", "USER", root, _NOW)
@@ -186,10 +189,11 @@ def test_due_then_not_due_after_mark_ran():
 
 
 def test_due_again_after_interval_elapses():
-    """Once a full cadence interval passes, the intervention is due again."""
+    """Once a full cadence interval passes, the (enabled) intervention is due again."""
+    ms.set_value("consolidation_per_day", "2.5")  # enable (the default is now 0/off)
     root = "/some/scope/root"
     ms.mark_ran("consolidate", "USER", root, _NOW)
-    # default 2.5/day -> 34560s interval; advance beyond it
+    # 2.5/day -> 34560s interval; advance beyond it
     assert ms.is_due("consolidate", "USER", root, _NOW + 40000) is True
 
 
@@ -201,6 +205,7 @@ def test_disabled_intervention_is_never_due():
 
 def test_stamps_are_per_root_independent():
     """Marking root A run does NOT make root B not-due (no starvation across roots)."""
+    ms.set_value("split_per_day", "4.5")  # enable (the default is now 0/off)
     ms.mark_ran("split", "LOCAL", "/root/a", _NOW)
     assert ms.is_due("split", "LOCAL", "/root/a", _NOW) is False
     assert ms.is_due("split", "LOCAL", "/root/b", _NOW) is True
@@ -217,7 +222,8 @@ def test_stamp_is_shared_machine_wide():
 # ---- the CLI ---------------------------------------------------------------
 
 def test_cli_get_shows_cadence(capsys, monkeypatch):
-    """`get` prints the rate + derived interval."""
+    """`get` prints the rate + derived interval for an enabled pass."""
+    ms.set_value("consolidation_per_day", "2.5")  # enable (the default is now 0/off)
     monkeypatch.setattr(sys, "argv", ["x", "get", "consolidation_per_day"])
     assert cli.main() == 0
     out = capsys.readouterr().out
@@ -239,7 +245,7 @@ def test_cli_bare_set_reverts(capsys, monkeypatch):
     assert cli.main() == 0
     out = capsys.readouterr().out
     assert "reverted to default" in out
-    assert ms.get("conflict_per_day") == 0.5
+    assert ms.get("conflict_per_day") == 0
 
 
 def test_cli_bad_value_exits_nonzero(capsys, monkeypatch):
@@ -272,6 +278,7 @@ def test_stagger_enabled_default_on_and_toggles():
 def test_phase_offset_in_range_stable_and_per_root():
     """Phase is in [0, interval), stable for one root, and DIFFERENT across roots —
     the staggering: two projects land on different time-of-day slots."""
+    ms.set_value("harvest_per_day", "1")  # enable (the default is now 0/off)
     iv = ms.interval_s_for("harvest")  # 86400 (1/day)
     pa = ms._phase_offset("harvest", "LOCAL", "/proj/alpha", iv)
     pb = ms._phase_offset("harvest", "LOCAL", "/proj/beta", iv)
@@ -284,6 +291,7 @@ def test_stagger_two_roots_due_at_different_times():
     """With the SAME last_run, two projects come due at DIFFERENT `now` — the core
     rate-limit-smoothing property: at the earlier project's slot, the later one is
     NOT yet due."""
+    ms.set_value("harvest_per_day", "1")  # enable (the default is now 0/off)
     iv = ms.interval_s_for("harvest")
     t0 = _NOW
     ms.mark_ran("harvest", "LOCAL", "/proj/alpha", t0)
@@ -302,6 +310,7 @@ def test_stagger_two_roots_due_at_different_times():
 def test_stagger_off_restores_plain_interval():
     """With stagger disabled, is_due is the plain now-last_run>=interval cadence."""
     ms.set_value("stagger_enabled", "off")
+    ms.set_value("consolidation_per_day", "2.5")  # enable (the default is now 0/off)
     root, iv = "/proj/x", ms.interval_s_for("consolidate")
     ms.mark_ran("consolidate", "USER", root, _NOW)
     assert ms.is_due("consolidate", "USER", root, _NOW + int(iv) - 5) is False
@@ -309,14 +318,16 @@ def test_stagger_off_restores_plain_interval():
 
 
 def test_stagger_first_run_fires_promptly():
-    """A never-run intervention (last_run=0) is due immediately even with staggering
-    on — day-1 is serialized by the flock, not by withholding the first run."""
+    """A never-run (enabled) intervention (last_run=0) is due immediately even with
+    staggering on — day-1 is serialized by the flock, not by withholding the first run."""
+    ms.set_value("harvest_per_day", "1")  # enable (the default is now 0/off)
     assert ms.is_due("harvest", "LOCAL", "/proj/fresh", _NOW) is True
 
 
 def test_stagger_fires_once_per_interval_at_the_slot():
     """After a run at its slot, not due until the NEXT phase boundary; due again
     exactly there (one fire per interval)."""
+    ms.set_value("harvest_per_day", "1")  # enable (the default is now 0/off)
     iv = ms.interval_s_for("harvest")
     root = "/proj/cadence"
     phase = ms._phase_offset("harvest", "LOCAL", root, iv)
