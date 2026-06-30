@@ -1,9 +1,9 @@
 ---
 trdd-id: RQ9FIFX6
 title: Disarm/pause must STOP the heartbeat FIRE (delete cron), not just silence output
-column: dev
+column: complete
 created: 2026-06-30T15:33:39+0200
-updated: 2026-06-30T15:33:39+0200
+updated: 2026-06-30T16:10:21+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 0
@@ -17,8 +17,8 @@ delivery: direct-push
 target-branch: main
 test-requirements: [unit]
 impacts: []
-attempts: 0
-implementation-commits: []
+attempts: 1
+implementation-commits: [b3a60fd]
 ---
 
 # Disarm/pause must STOP the heartbeat FIRE (delete cron), not just silence output
@@ -64,9 +64,11 @@ implementation-commits: []
   makes crons armed AFTER this ships self-stop. The 20 EXISTING crons need a one-time manual
   `/janitor-disarm` (or a re-arm to pick up the new clause). Fix B (re-arm guard, a HOOK that
   loads fresh on session start/reload) drains the fleet going forward regardless.
-- **NEXT ACTION:** implement A (dispatch.py) + B (on-session-start.py) + C (janitor-arm SKILL.md)
-  + tests + docs (CLAUDE.md, README, disarm/pause skills). ruff + pyright + run tests. Commit,
-  do NOT push. Then ASK USER to publish (publish.py auto-rolls the daemon back — wanted).
+- **✅ DONE (2026-06-30):** A+B+C shipped in b3a60fd (code+tests); docs in 238e6df; the orphaned
+  #tg test file repaired separately in c7cacb4. Full suite 11708 GREEN (was 7 red from the #tg
+  orphaned tests); ruff + pyright clean. NOT pushed — PUBLISH IS USER-GATED (publish.py auto-rolls
+  the daemon back, which the user wants). Deployment caveat stands: the ~20 already-armed crons
+  need a one-time manual /janitor-disarm to stop firing NOW (re-arm rollout lag).
 
 ## Why
 
