@@ -57,9 +57,14 @@ thing a machine can't: the human sign-in.
   untouched, and you do **not** need to make Chrome your default — Chrome only
   needs to be installed. Accounts that already self-renew are never nudged.
 - **Auto-bootstrap** — once you've signed in (a live session now exists in that
-  account's Chrome profile), the daemon's next `oauth-rotator-tick` runs
-  `slot_capture_browser.py` (via `uv run --with playwright`) to mint a
-  refresh-bearing slot from the seeded session, with **no further human action**.
+  account's Chrome profile), the daemon does **not** auto-open a browser by
+  default (TRDD-5OJX3SCF - opening a visible window unprompted is a surprise, and
+  on a dead account it re-launched every ~60s tick). Instead the
+  `[oauth-capture-stalled]` nudge points you at `/janitor-refresh-claude-logins`,
+  which does the visible capture as a deliberate, user-initiated action. Power
+  users who want the daemon to mint `slot_capture_browser.py` slots hands-free set
+  `CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1` (then it is per-slot launch-capped + announced
+  in `rotator.log`).
   It runs **visible** (a real Chrome window appears briefly — Cloudflare blocks
   headless on the consent page; opt into headless with
   `CLAUDE_ROTATOR_BOOTSTRAP_HEADLESS=1` only if your environment allows it) and

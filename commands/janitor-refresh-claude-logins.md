@@ -78,10 +78,13 @@ ROT="$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator"
    and `connect_over_cdp`-attaches to decrypt the cookies you just saved):
 
    ```bash
-   env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" tick   # _bootstrap_seeded_slots → capture per eligible slot (detached)
+   env -u CLAUDE_PLUGIN_DATA CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1 python3 "$ROT/rotator.py" tick   # _bootstrap_seeded_slots → capture per eligible slot (detached)
    ```
 
-   Captures run DETACHED (a real Chrome window may flash per account, then close). Poll each
+   Captures run DETACHED (a real Chrome window may flash per account, then close). The
+   `CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1` above authorizes the capture's visible browser for THIS
+   user-initiated run; the unattended daemon keeps auto-bootstrap OFF by default (and caps it
+   per slot) so it never opens a surprise window (TRDD-5OJX3SCF). Poll each
    account until its slot holds a refresh token before declaring success
    (`env -u CLAUDE_PLUGIN_DATA python3 "$ROT/rotator.py" list`). If a capture keeps failing,
    re-check `check-login.sh` — the session may not have persisted.

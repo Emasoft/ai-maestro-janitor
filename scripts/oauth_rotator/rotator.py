@@ -300,6 +300,12 @@ KEEPALIVE_AHEAD_H = float(os.environ.get("ROTATOR_KEEPALIVE_AHEAD_H", "6"))
 # so a present-but-dead refresh token can never sit as a silent dead rotation alternate. Mirrors
 # cascade.DEFAULT_MAX_REFRESH_FAILURES; env-overridable for power users / loop tests.
 MAX_REFRESH_FAILURES = int(os.environ.get("ROTATOR_MAX_REFRESH_FAILURES", str(cascade.DEFAULT_MAX_REFRESH_FAILURES)))
+# Per-slot cap on AUTO-bootstrap browser LAUNCHES (the RENEW_COOKIE analogue of
+# MAX_REFRESH_FAILURES, TRDD-5OJX3SCF / TRDD-HJGR4I5W): a capture that never mints a
+# refresh-bearing slot leaves the slot eligible forever, so without a cap the daemon re-opens
+# a browser every ~60s tick. After this many launches without success the auto-bootstrap STOPS
+# and the oauth-capture-stalled detector nudges the human. Env-overridable for power users / tests.
+MAX_BOOTSTRAP_LAUNCHES = int(os.environ.get("ROTATOR_MAX_BOOTSTRAP_LAUNCHES", "3"))
 # A 429 on /api/oauth/usage can mean EITHER the account is genuinely rate-limited
 # OR our polling tripped the endpoint's own throttle (transient). A genuinely
 # maxed account 429s persistently; a throttle clears within a tick. So require
@@ -1568,6 +1574,23 @@ def _invoke_slot_capture(email: str) -> bool:
     return True
 
 
+def _bootstrap_action(*, eligible: bool, auto_on: bool, attempts: int, max_launches: int) -> str:
+    """PURE: what should _bootstrap_seeded_slots do for ONE slot this tick? Returns one of:
+    'reset' (self-renewing slot carrying a stale launch counter to clear, so a future
+    dead-refresh gets a fresh cap), 'noop' (nothing to do - self-renewing with a zero counter,
+    OR eligible but auto-launch is opted OFF so the detector nudges the human instead),
+    'cap-announce' (just reached the launch cap: log once + bump the counter past it), 'capped'
+    (already past the cap: stay silent), or 'launch' (open a capture this tick). No I/O -
+    a unit-testable truth table; the caller owns every state write + log (TRDD-5OJX3SCF)."""
+    if not eligible:
+        return "reset" if attempts != 0 else "noop"
+    if not auto_on:
+        return "noop"
+    if attempts >= max_launches:
+        return "cap-announce" if attempts == max_launches else "capped"
+    return "launch"
+
+
 def _bootstrap_seeded_slots() -> list[str]:
     """Post-login auto-bootstrap (P4d): for every indexed slot that was SEEDED by a
     human login (a live claude.ai Chrome session) but cannot yet self-renew (no
@@ -1586,10 +1609,20 @@ def _bootstrap_seeded_slots() -> list[str]:
 
     Best-effort and defensive: each launch is wrapped so a spawn failure (uv/Playwright
     missing, bad env, missing profile) is logged and SKIPPED, never aborting the loop or the
-    tick (a non-fatal helper must not crash the beat it runs in)."""
+    tick (a non-fatal helper must not crash the beat it runs in).
+
+    AUTO-LAUNCH is OPT-IN, default OFF (CLAUDE_ROTATOR_AUTO_BOOTSTRAP), SEPARATE from the
+    rotation opt-in: opening a VISIBLE browser from the unattended daemon is a higher-surprise
+    act, so it never fires unless explicitly enabled (TRDD-5OJX3SCF). Even when on, each slot is
+    LAUNCH-CAPPED at MAX_BOOTSTRAP_LAUNCHES (the RENEW_COOKIE analogue of MAX_REFRESH_FAILURES,
+    TRDD-HJGR4I5W) so a never-minting capture cannot re-open a browser every tick; a successful
+    mint replaces the slot meta (counter gone) and a recovered slot resets to 0. Every launch and
+    the cap boundary are announced via _log."""
     launched: list[str] = []
+    auto_on = _env_truthy(os.environ.get("CLAUDE_ROTATOR_AUTO_BOOTSTRAP"))
     state = load_state()
     now = time.time()
+    changed = False
     for email in list((state.get("slots") or {}).keys()):
         blob = read_slot(email)
         inner = _oauth(blob) if blob else {}
@@ -1601,10 +1634,37 @@ def _bootstrap_seeded_slots() -> list[str]:
         # (dropping refresh_failures → 0), so a recovered slot is never re-captured in a loop.
         meta = (state.get("slots") or {}).get(email)
         rf = int(meta.get("refresh_failures", 0)) if isinstance(meta, dict) else 0
-        if not _bootstrap_eligible(has_refresh, has_session, refresh_failures=rf):
+        attempts = int(meta.get("bootstrap_attempts", 0)) if isinstance(meta, dict) else 0
+        action = _bootstrap_action(
+            eligible=_bootstrap_eligible(has_refresh, has_session, refresh_failures=rf),
+            auto_on=auto_on, attempts=attempts, max_launches=MAX_BOOTSTRAP_LAUNCHES,
+        )
+        if action == "reset":  # self-renewing again -> clear the launch counter (fresh future cap)
+            if isinstance(meta, dict):
+                meta["bootstrap_attempts"] = 0
+                changed = True
             continue
-        try:
+        if action == "noop":  # not eligible (zero counter), OR eligible but auto-launch opted OFF
+            continue          # (the oauth-capture-stalled detector nudges the human in the OFF case)
+        if action == "cap-announce":  # just hit the cap: announce ONCE, then never auto-launch it again
+            _log("auto-bootstrap: %s capped at %d launches without a refresh-bearing mint - "
+                 "STOPPING auto-launch; run /janitor-refresh-claude-logins to capture it manually"
+                 % (email, MAX_BOOTSTRAP_LAUNCHES))
+            if isinstance(meta, dict):
+                meta["bootstrap_attempts"] = attempts + 1  # bump past the cap so the log fires once
+                changed = True
+            continue
+        if action == "capped":  # already past the cap: stay silent, do not launch
+            continue
+        try:  # action == "launch"
             if _invoke_slot_capture(email):  # True = LAUNCHED, False = skipped (already running)
+                # Announce the visible window so it is never "without reason" (TRDD-5OJX3SCF).
+                _log("auto-bootstrap: opening a browser to mint a refresh token for %s "
+                     "(expected - post-login auto-bootstrap); live account untouched" % email)
+                if isinstance(meta, dict):
+                    meta["bootstrap_attempts"] = attempts + 1
+                    meta["last_bootstrap_at"] = int(now)
+                    changed = True
                 launched.append(email)
         except Exception as exc:  # noqa: BLE001 — documented best-effort contract
             # Best-effort by design: a launch failure (uv/Playwright spawn error, missing
@@ -1614,6 +1674,8 @@ def _bootstrap_seeded_slots() -> list[str]:
             # and continue to the next eligible slot.
             print("[bootstrap] %s: capture launch failed (%r) — skipped" % (email, exc),
                   file=sys.stderr)
+    if changed:
+        save_state(state)  # persist bootstrap_attempts / last_bootstrap_at across ticks
     return launched
 
 
