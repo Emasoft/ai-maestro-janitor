@@ -1,26 +1,35 @@
 ---
 name: janitor-global-pause
-description: Temporarily SUSPENDS the ai-maestro-janitor machine-wide without tearing it down — the global daemon stays alive but idles (runs no tasks), and every session's heartbeat goes silent. The teardown-free sibling of /janitor-global-disarm. Use for a quiet block across ALL projects. Trigger with /janitor-global-pause, "pause all janitors", "globally quiet the janitor", "silence every janitor heartbeat".
+description: Temporarily SUSPENDS the ai-maestro-janitor machine-wide without tearing the daemon down — the global daemon stays alive but idles (runs no tasks), and every armed session's heartbeat self-disarms (deletes its own cron) so it is truly free, not just silenced. The keep-the-daemon sibling of /janitor-global-disarm (which also exits the daemon). Use for a quiet block across ALL projects. Trigger with /janitor-global-pause, "pause all janitors", "globally quiet the janitor", "silence every janitor heartbeat".
 ---
 
 # Janitor global pause (machine-wide suspend)
 
 ## Overview
 
-Suspends ALL janitor activity machine-wide **without tearing anything down** by
-setting the global-pause flag:
+Suspends the janitor machine-wide **without tearing down the daemon** by setting the
+global-pause flag:
 
 - the daemon stays **alive** (keeps ticking its heartbeat so it is never seen as
   wedged) but **idles** — it runs no task workloads while paused;
-- every session's heartbeat fire exits silently — no detectors, no drift lines.
+- every armed session's heartbeat **self-disarms** — on its next fire `dispatch.py`
+  sees the global-pause flag and emits a bare `[janitor-self-disarm]` marker, so the
+  session runs `/janitor-disarm` and **deletes its own cron** (TRDD-RQ9FIFX6). This is
+  a TRUE stop, not a silence: a cron FIRE is a full Claude turn that re-reads the whole
+  session context (~618k cached tokens, billed at the 0.1× cache-read rate, **not**
+  free) whether or not detectors run, so the only way a fired turn costs zero is to
+  stop firing.
 
-This is the lighter, instant-resume sibling of `/janitor-global-disarm` (which makes
-the daemon EXIT and removes its keepalive). Pause when you want a quiet block across
-every project; disarm when you want a true machine-wide stop. The per-project
-equivalent is `/janitor-pause`.
+So `/janitor-global-pause` is the **"stop every project's heartbeat but keep the
+daemon"** control — the sibling of `/janitor-global-disarm`, which ALSO makes the
+daemon EXIT and removes its keepalive. The per-project equivalent is `/janitor-pause`.
 
-To resume: `/janitor-global-unpause` (instant — the daemon was never stopped, so
-there is no re-spawn).
+To resume: `/janitor-global-unpause` clears the flag (the daemon was never stopped, so
+it needs no re-spawn); re-arm each session with `/janitor-arm` to restart its heartbeat.
+
+**Rollout caveat.** The `[janitor-self-disarm]` marker is baked into the cron prompt at
+arm time, so crons armed BEFORE this shipped won't self-disarm on their own — run
+`/janitor-disarm` once in each such session (or `/janitor-arm` to pick up the new prompt).
 
 ## Instructions
 
@@ -36,8 +45,8 @@ there is no re-spawn).
 ## Output
 
 One line confirming the janitor is paused machine-wide, with the reminder that
-`/janitor-global-unpause` resumes it. Only the global-pause flag is written; nothing
-is torn down.
+`/janitor-global-unpause` resumes it. Only the global-pause flag is written; the daemon
+is not torn down.
 
 ## Error Handling
 
@@ -56,9 +65,11 @@ User: globally quiet the janitor
 
 ## Scope
 
-ONLY sets the machine-wide global-pause flag (via the backing CLI). Does NOT remove
-any cron, does NOT stop the daemon process, does NOT remove the OS keepalive, and
-does NOT delete state. It is a teardown-free, instantly-reversible suspend.
+ONLY sets the machine-wide global-pause flag (via the backing CLI); it does not itself
+touch any cron, the daemon process, the OS keepalive, or state. The flag's downstream
+effect is that each armed session's heartbeat self-disarms (deletes its own cron) on its
+next fire, while the daemon idles — both reverse via `/janitor-global-unpause` (the
+daemon needs no re-spawn; sessions re-arm with `/janitor-arm`).
 
 ## Resources
 

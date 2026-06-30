@@ -9,6 +9,8 @@ description: Stops the ai-maestro-janitor heartbeat cron. Use when pausing janit
 
 Removes the janitor heartbeat entirely. After this skill runs, no further cron fires of `[janitor-heartbeat]` will occur, no drift lines will be emitted from dispatch.py, and the auto-renewal nudge chain stops. Detectors can still be invoked manually via `/janitor-audit`.
 
+This is also the command the heartbeat **self-disarms** with: when a machine-wide stop flag is set (`/janitor-global-disarm` or `/janitor-global-pause`), `dispatch.py` emits a bare `[janitor-self-disarm]` marker and the session silently runs `/janitor-disarm` to delete its own cron — the only way a fired heartbeat turn costs zero (TRDD-RQ9FIFX6).
+
 Use this when you want to pause janitor activity without uninstalling the plugin, when debugging heartbeat behaviour, or when moving to another project and want the current project's janitor silenced.
 
 ## Prerequisites

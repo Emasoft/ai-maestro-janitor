@@ -174,7 +174,14 @@ no-op for any non-user-mem prompt; never crashes the session.
 suspend, `.janitor/state/paused`), `janitor-global-disarm` ↔ `janitor-global-arm` +
 `janitor-global-pause` ↔ `janitor-global-unpause` (machine-wide, backed by
 `scripts/global_control_cli.py disarm|arm|pause|unpause|status` — kill-switch=disarm
-makes the daemon EXIT, global-pause flag=pause idles it). `janitor-memory-record-recent`
+makes the daemon EXIT, global-pause flag=pause keeps the daemon ALIVE). Both global stops
+now TRULY STOP the heartbeat (free), not just silence it (TRDD-RQ9FIFX6): a set stop flag makes
+`dispatch.py` emit a bare `[janitor-self-disarm]` marker → the session runs `/janitor-disarm` →
+the cron DELETES ITSELF, because a cron FIRE is a full Claude turn that re-reads ~618k cached
+tokens (billed at the 0.1× cache-read rate, NOT free) whether or not detectors run — only NOT
+firing costs zero. The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays).
+Rollout caveat: crons armed BEFORE this shipped don't self-disarm (the cron prompt is baked at
+arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 (user-invoked Wikimem harvest of recent changes — active counterpart of memorize-nudge).
 `janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,
 `janitor-credential-window-audit`, `janitor-github-workflow-doctor`,

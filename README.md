@@ -470,19 +470,33 @@ quadrants:
 | | Local (this project) | Global (daemon + all instances) |
 |---|---|---|
 | **Disarm** = true stop / teardown | `/janitor-disarm` ↔ `/janitor-arm` | `/janitor-global-disarm` ↔ `/janitor-global-arm` |
-| **Pause** = suspend in place (no teardown) | `/janitor-pause` ↔ `/janitor-unpause` | `/janitor-global-pause` ↔ `/janitor-global-unpause` |
+| **Pause** = suspend (no daemon teardown) | `/janitor-pause` ↔ `/janitor-unpause` | `/janitor-global-pause` ↔ `/janitor-global-unpause` |
 
 **DISARM tears down.** Locally it removes the heartbeat cron, so nothing
 fires until you `/janitor-arm` again. Globally it sets the kill-switch — the
-daemon **exits** on its next loop tick and removes its OS keepalive;
-`/janitor-global-arm` clears the switch so the next heartbeat lazy-spawns a
-fresh daemon.
+daemon **exits** on its next loop tick and removes its OS keepalive — and it
+also stops every armed session's heartbeat: on the next fire `dispatch.py`
+sees the stop flag and emits a bare `[janitor-self-disarm]` marker, so the
+session runs `/janitor-disarm` and the cron **deletes itself**
+(TRDD-RQ9FIFX6). `/janitor-global-arm` clears the switch; re-arm a session
+with `/janitor-arm` and its next heartbeat lazy-spawns a fresh daemon.
 
-**PAUSE stays installed but idles.** Locally the cron keeps firing on
-schedule but `dispatch.py` no-ops (no drift lines surface). Globally the
-daemon stays alive but skips all of its tasks, and every session goes
-silent — so a paused janitor resumes instantly (no re-arm, no re-spawn) the
-moment you `/janitor-unpause` (local) or `/janitor-global-unpause` (global).
+**PAUSE keeps the daemon alive.** Locally the cron keeps firing on schedule
+but `dispatch.py` no-ops in place (no drift lines surface), so a locally
+paused janitor resumes instantly the moment you `/janitor-unpause` — no
+re-arm, no re-spawn. Globally the daemon stays alive (it just idles its
+tasks), but every armed session's heartbeat **self-disarms** exactly as under
+a global disarm: a cron FIRE is a full Claude turn that re-reads the whole
+session context (~618k cached tokens, billed at the 0.1× cache-read rate,
+**not** free) whether or not detectors run, so silencing the output saved
+nothing — only deleting the cron makes a fire cost zero. So
+`/janitor-global-pause` is the "stop every project's heartbeat but keep the
+daemon" control; re-arm each session to resume.
+
+**Rollout caveat.** The `[janitor-self-disarm]` marker is baked into the cron
+prompt at arm time, so crons armed BEFORE this shipped won't self-disarm on
+their own — run `/janitor-disarm` once in each such session (or `/janitor-arm`
+to pick up the new prompt).
 
 The four global commands are backed by
 `scripts/global_control_cli.py disarm|arm|pause|unpause|status` (the

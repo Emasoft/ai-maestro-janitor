@@ -13,6 +13,8 @@ The cron itself stays armed. No `CronDelete` happens. When the pause expires (or
 
 This is the lighter alternative to `/janitor-disarm`: pause when you want a quiet block of work; disarm when you're moving away from the project.
 
+(Note: this LOCAL pause leaves the cron firing on schedule — it only no-ops the output, so it does NOT save the per-fire token cost. The machine-wide `/janitor-global-pause` and `/janitor-global-disarm` instead make each session **self-disarm** — delete its cron — so a fired heartbeat turn truly costs zero, TRDD-RQ9FIFX6.)
+
 ## Prerequisites
 
 - `$CLAUDE_PROJECT_DIR` set (used to locate `.janitor/state/`).
