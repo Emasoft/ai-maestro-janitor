@@ -1,9 +1,9 @@
 ---
 trdd-id: 5OJX3SCF
 title: OAuth auto-bootstrap opens a surprise headful Chrome + uncapped relaunch
-column: dev
+column: complete
 created: 2026-06-30T14:04:54+0200
-updated: 2026-06-30T14:04:54+0200
+updated: 2026-06-30T14:20:40+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -17,8 +17,8 @@ delivery: direct-push
 target-branch: main
 test-requirements: [unit]
 impacts: []
-attempts: 0
-implementation-commits: []
+attempts: 1
+implementation-commits: [b35121c]
 ---
 
 # OAuth auto-bootstrap opens a surprise headful Chrome + uncapped relaunch
@@ -63,7 +63,13 @@ implementation-commits: []
     recovered account gets a fresh cap. Bounds the every-tick-browser runaway even when opted in.
   - **C — announce** each launch + the cap-boundary via `_log` (rotator.log), so an opted-in
     user's visible window is never "without reason."
-- **NEXT ACTION:** implement A+B+C in `_bootstrap_seeded_slots` (+ the `MAX_BOOTSTRAP_LAUNCHES`
+- **✅ DONE (2026-06-30, b35121c):** shipped A+B+C + a pure `_bootstrap_action` truth table
+  (the loop is a thin dispatcher). 488 rotator/oauth/daemon tests green; ruff+pyright clean.
+  DERIVED (EHT) handled in the same commit: `/janitor-refresh-claude-logins` sets
+  `CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1` on its user-initiated `rotator.py tick` so the manual
+  capture still works, and the `/janitor-auto-manage-oauth-on` skill's auto-bootstrap section
+  is corrected to the default-off reality. PUBLISH is USER-GATED (auto-rolls the daemon).
+- **(original plan):** implement A+B+C in `_bootstrap_seeded_slots` (+ the `MAX_BOOTSTRAP_LAUNCHES`
   constant near `MAX_REFRESH_FAILURES` L302); add tests (gate-off no-launch, gate-on launch +
   increment + announce, cap reached → no launch, recovered slot resets counter); ruff+pyright;
   run rotator tests; commit. PUBLISH is USER-GATED (auto-rolls the daemon).
