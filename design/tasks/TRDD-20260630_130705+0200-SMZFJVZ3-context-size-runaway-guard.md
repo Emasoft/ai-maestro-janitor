@@ -3,7 +3,7 @@ trdd-id: SMZFJVZ3
 title: Context-size runaway guard — force a compaction near the window cap
 column: complete
 created: 2026-06-30T13:07:05+0200
-updated: 2026-06-30T13:47:25+0200
+updated: 2026-06-30T13:50:23+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -18,7 +18,7 @@ target-branch: main
 test-requirements: [unit]
 impacts: [config-schema]
 attempts: 1
-implementation-commits: []
+implementation-commits: [3f76b65]
 ---
 
 # Context-size runaway guard — force a compaction near the window cap
