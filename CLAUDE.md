@@ -127,9 +127,10 @@ STRIPS covert invisible/bidi unicode and REPLACES the payload via CC's
 `updatedToolOutput`, with a homoglyph-only weak-signal warn-not-replace
 safeguard; opt out `…POST_MCP_SANITIZER_ENABLED=false`, warn-only
 `…_STRIP=false`),
-`pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage` (OPT-IN
-PreToolUse → injects live context % on every tool call, suggests
-/janitor-compact-context ≥60%), `post-compact-resume` (PostCompact → writes
+`pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage` (DEFAULT-ON
+PreToolUse → context-size runaway guard: ADVISORY nudge ≥60%, ENFORCEMENT
+(auto-compact + deny the tool call) ≥85%; statusline snapshot or transcript
+fallback; fail-open — TRDD-SMZFJVZ3), `post-compact-resume` (PostCompact → writes
 `resume-after-compact.flag` so the next heartbeat emits `[janitor-resume]
 …continue TRDD-xxxx…`; closes the watchdog loop so a compact doesn't stall an
 unattended session — TRDD-31095269), `on-prompt-submit-user-mem` (UserPromptSubmit
@@ -144,8 +145,10 @@ advisory `additionalContext` self-consumption warning — OPT-IN via
 `…TOKEN_BUDGET_TURN_OUTPUT` (default 10000); advisory-only, no permissionDecision —
 TRDD-a4e41e89). The context-watchdog trio
 (pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
-skill + `scripts/compact_trigger.py`) is OPT-IN via
-`CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`.
+skill + `scripts/compact_trigger.py`) is DEFAULT-ON (advisory ≥60%, enforcing
+≥85%; fail-open) via `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`
+(`…CONTEXT_HARDSTOP_PCT`, `…CONTEXT_AUTOCOMPACT_ENABLED`,
+`…CONTEXT_WINDOW_TOKENS`) — TRDD-SMZFJVZ3.
 
 **USER-MEMORY subsystem (`commands/janitor-memory-user-{add,search,share}.md` +
 `scripts/hooks/on-prompt-submit-user-mem.py` + `scripts/lib/user_mem_lib.py`,

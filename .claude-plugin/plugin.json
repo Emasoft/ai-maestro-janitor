@@ -564,17 +564,38 @@
       "sensitive": false
     },
     "context_watchdog_enabled": {
-      "title": "Context-Compact Watchdog Enabled (OPT-IN)",
-      "description": "When true, the `pre-tool-context-usage` PreToolUse hook fires on every tool call and injects the live context-window % (read from the statusline's project-local snapshot at <project>/.claude/janitor/context-usage.<session>.json) into the agent's context via additionalContext \u2014 advisory only, never altering the tool's permission flow. At or above context_compact_suggest_pct it appends a nudge to run /janitor-compact-context so the agent can compact its own context before the 1M window fills (native auto-compact is unreliable on this window). OPT-IN by default (false) because it fires on EVERY tool call. Part of the context-compact watchdog (TRDD-31095269); pairs with the post-compact-resume PostCompact hook and the /janitor-compact-context skill for an auto-resuming compaction loop for unattended overnight work.",
+      "title": "Context-Size Runaway Guard Enabled",
+      "description": "When true (DEFAULT), the `pre-tool-context-usage` PreToolUse hook fires on every tool call and guards the per-turn CONTEXT-SIZE token bleed \u2014 two-tiered. ADVISORY (at/above context_compact_suggest_pct): injects the % + a /janitor-compact-context nudge via additionalContext, without altering the tool's permission flow. ENFORCEMENT (at/above context_hardstop_pct, gated by context_autocompact_enabled): queues a compaction on this pane and DENIES the tool call so the turn ends cleanly for /compact, after which post-compact-resume continues the work at a reduced context. Occupancy is read from the statusline snapshot at <project>/.claude/janitor/context-usage.<session>.json, or (no statusline) falls back to the transcript's latest assistant input+cache occupancy (token_meter.latest_context_size) over context_window_tokens. Every path FAILS OPEN: a read error or no automatable terminal degrades to the advisory, never a stuck deny. DEFAULT-ON because the per-turn context bleed it prevents cost the user a month of tokens (every turn re-reads the WHOLE context, so a session near the 1M cap burns ~its size in tokens per turn); set false to disable both tiers, or context_autocompact_enabled=false to keep only the advisory. Part of the context watchdog (TRDD-31095269, TRDD-SMZFJVZ3); pairs with the post-compact-resume PostCompact hook and the /janitor-compact-context skill.",
       "type": "boolean",
-      "default": false,
+      "default": true,
       "sensitive": false
     },
     "context_compact_suggest_pct": {
-      "title": "Context-Compact Suggest Threshold (%)",
-      "description": "Context-window usage % at or above which the watchdog's PreToolUse hook appends a suggestion to run /janitor-compact-context. Default 60 \u2014 leaves ~40% headroom so /compact can still run (wait too long, e.g. to ~999k on the 1M window, and /compact itself fails, forcing a total-loss /clear). Only consulted when context_watchdog_enabled is true.",
+      "title": "Context-Size Guard - Advisory (Warn) Threshold (%)",
+      "description": "Context-window usage % at or above which the watchdog's PreToolUse hook appends a suggestion to run /janitor-compact-context. Default 60 \u2014 leaves ~40% headroom so /compact can still run (wait too long, e.g. to ~999k on the 1M window, and /compact itself fails, forcing a total-loss /clear). This is the soft WARN level; the hard ENFORCE level is context_hardstop_pct. Only consulted when context_watchdog_enabled is true.",
       "type": "number",
       "default": 60,
+      "sensitive": false
+    },
+    "context_hardstop_pct": {
+      "title": "Context-Size Guard - Enforcement (Hard-Stop) Threshold (%)",
+      "description": "Context-window usage % at or above which the guard's ENFORCEMENT tier queues a compaction on this session's pane and DENIES the in-flight tool call so the turn ends cleanly for /compact (post-compact-resume then continues at a reduced context). Default 85 - high enough to be rare, low enough that /compact still succeeds. Gated by context_autocompact_enabled (set that false to keep only the advisory nudge). The deny fires at most once per compaction episode (180s dedupe) and ONLY when a compaction can actually be queued (an automatable iTerm/tmux pane); with no such terminal, or on any error, it degrades to the advisory - never a stuck deny. Set 0 to disable enforcement by threshold. Only consulted when context_watchdog_enabled is true.",
+      "type": "number",
+      "default": 85,
+      "sensitive": false
+    },
+    "context_autocompact_enabled": {
+      "title": "Context-Size Guard - Auto-Compact Enforcement Enabled",
+      "description": "When true (DEFAULT), the guard's ENFORCEMENT tier is active: at or above context_hardstop_pct it auto-queues /compact on this pane and denies the tool call to end the turn (auto-resumed afterward). When false, the guard is advisory-only - it still injects the context % and the /janitor-compact-context nudge at context_compact_suggest_pct, but NEVER denies a tool call (the agent decides when to compact). Set false if you do not want the guard to ever interrupt a turn. Only consulted when context_watchdog_enabled is true.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "context_window_tokens": {
+      "title": "Context-Size Guard - Fallback Window (tokens)",
+      "description": "The context-window size (in tokens) the guard uses to compute the usage % when reading occupancy from the TRANSCRIPT fallback (no statusline snapshot present). Default 1000000 (the 1M window). When the statusline snapshot is available it carries the real window and this value is ignored. Set to match your model's actual context window if you run a non-1M window and rely on the transcript fallback. Only consulted when context_watchdog_enabled is true.",
+      "type": "number",
+      "default": 1000000,
       "sensitive": false
     },
     "memory_autorecall": {

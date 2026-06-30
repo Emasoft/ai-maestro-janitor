@@ -178,6 +178,54 @@ def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsa
     )
 
 
+def latest_context_size(transcript_path: str | os.PathLike[str]) -> Optional[int]:
+    """Total INPUT context (input + cache_read + cache_creation tokens) the model
+    processed for the MOST RECENT assistant message — i.e. the live context-window
+    occupancy. This is the cost-driving number the user named: every turn re-reads
+    ~this many tokens, so a session bloated near the window cap bleeds ~this much PER
+    TURN regardless of how much it produces ("a context of 999k executed each turn").
+    The context-watchdog uses it to FORCE a compaction before the next turn pays it
+    again (TRDD-SMZFJVZ3).
+
+    Distinct from `tail_turn_usage`, which SUMS a turn's assistant messages (per-turn
+    COST). Here we want the LATEST single message's input occupancy — the live size.
+
+    Returns None when the file is absent/unreadable or no assistant `usage` sits in the
+    tail window (correct-by-omission: the watchdog then stays silent rather than guess).
+    """
+    p = Path(transcript_path)
+    if not p.is_file():
+        return None
+    try:
+        lines = _read_tail_lines(p)
+    except OSError:
+        return None
+    for line in reversed(lines):
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            obj = json.loads(s)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict) or obj.get("type") != "assistant":
+            continue
+        msg = obj.get("message")
+        if not isinstance(msg, dict):
+            continue
+        usage = msg.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        total = (
+            int(usage.get("input_tokens") or 0)
+            + int(usage.get("cache_read_input_tokens") or 0)
+            + int(usage.get("cache_creation_input_tokens") or 0)
+        )
+        if total > 0:
+            return total
+    return None
+
+
 def append_log(log_path: str | os.PathLike[str], turn_usage: TurnUsage, now_epoch: int) -> None:
     """Append one JSON line for a heartbeat turn's usage (append is atomic enough
     for single-line writes on local fs; the meter is the only writer)."""
