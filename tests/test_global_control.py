@@ -1,10 +1,12 @@
 """Tests for the machine-wide janitor control flags (TRDD-a3fa4d5d).
 
 Two distinct global flags, each with its own semantics:
-  * the kill-switch (DISARM) — daemon exits; set by /janitor-global-disarm, cleared
-    by /janitor-global-arm. The daemon + ensure_daemon_running already honor it.
-  * the global-pause flag (PAUSE) — daemon idles but stays alive; set by
-    /janitor-global-pause, cleared by /janitor-global-unpause.
+  * the kill-switch (DISARM) — daemon exits AND every heartbeat goes silent. The
+    daemon + ensure_daemon_running + dispatch.py Phase 0 all honor it (TRDD-NJ22HNC3).
+    The `disarm` CLI raises the kill-switch AND the pause flag (so already-cached
+    heartbeats silence immediately); `arm` clears both.
+  * the global-pause flag (PAUSE) — daemon idles but stays alive, heartbeats silent;
+    set ALONE by /janitor-global-pause, cleared by /janitor-global-unpause.
 
 These cover the global_state primitives + the global_control_cli surface against an
 isolated state dir (no real daemon, no real ~/.claude). The daemon-idle and
@@ -74,16 +76,33 @@ def test_disarm_and_pause_are_independent(tmp_path, monkeypatch) -> None:
 # ---------- the global_control_cli surface ----------
 
 def test_cli_disarm_arm_roundtrip(tmp_path, monkeypatch, capsys) -> None:
+    """DISARM is the TRUE STOP: it raises BOTH the kill-switch AND the global-pause flag
+    so per-session heartbeats go silent IMMEDIATELY — even one running a pre-fix cached
+    dispatch.py that honors only global-pause (TRDD-NJ22HNC3). ARM clears BOTH (full
+    revive)."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
     monkeypatch.setattr(cli.sys, "argv", ["x", "disarm", "because"])
     assert cli.main() == 0
     assert gs.kill_switch_present() is True
+    assert gs.global_pause_present() is True, \
+        "disarm must ALSO raise the pause flag so already-cached heartbeats go silent now"
     monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
     cli.main()
     assert "DISARMED" in capsys.readouterr().out
     monkeypatch.setattr(cli.sys, "argv", ["x", "arm"])
     assert cli.main() == 0
     assert gs.kill_switch_present() is False
+    assert gs.global_pause_present() is False, "arm must clear BOTH flags (full revive)"
+
+
+def test_cli_pause_does_not_disarm(tmp_path, monkeypatch) -> None:
+    """PAUSE stays pause-only — it raises ONLY the global-pause flag, never the
+    kill-switch. (Disarm is the superset that raises both; pause is the soft idle.)"""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(cli.sys, "argv", ["x", "pause", "soft idle"])
+    assert cli.main() == 0
+    assert gs.global_pause_present() is True
+    assert gs.kill_switch_present() is False, "pause must NOT set the kill-switch"
 
 
 def test_cli_pause_unpause_roundtrip(tmp_path, monkeypatch, capsys) -> None:

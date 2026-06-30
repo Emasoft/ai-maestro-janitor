@@ -344,6 +344,28 @@ def _run_detector(name: str, interval: int) -> None:
     _mark_detector_ran(name)
 
 
+def _phase_globally_disarmed() -> bool:
+    """Return True if the MACHINE-WIDE kill-switch is set (/janitor-global-disarm).
+
+    The kill-switch is the TRUE STOP — it makes the global daemon EXIT and per-session
+    heartbeats stop re-spawning it (TRDD-a3fa4d5d). But historically it gated ONLY
+    `ensure_daemon_running()`, so a globally-disarmed machine still ran every detector
+    in every armed session each fire — the USER-reported "many janitors still running"
+    after a disarm (TRDD-NJ22HNC3). Honoring it HERE — the SAME teardown-free
+    short-circuit as global-pause — makes disarm do what its name promises: the daemon
+    stops AND every heartbeat goes silent. `/janitor-global-arm` clears it.
+
+    WHY a separate phase rather than folding into `_phase_global_paused`: the two flags
+    are distinct STATES the daemon treats differently — pause IDLES a live daemon,
+    disarm EXITS it — but for the heartbeat both mean the same thing: emit nothing, run
+    nothing. Keeping them separate keeps the daemon-side semantics honest while sharing
+    the heartbeat-side silence."""
+    if gs.kill_switch_present():
+        state.log_line("dispatch", "skipped: global-disarm (kill-switch) set")
+        return True
+    return False
+
+
 def _phase_global_paused() -> bool:
     """Return True if the MACHINE-WIDE global pause is set (TRDD-a3fa4d5d) — silences
     EVERY session's heartbeat, distinct from the per-project `paused` sentinel. A
@@ -764,10 +786,13 @@ def _phase_user_presence_breadcrumb() -> None:
 def main() -> int:
     state.init_state()
 
-    # Phase 0: paused sentinel. A machine-wide global pause (TRDD-a3fa4d5d) silences
-    # EVERY session's heartbeat; the per-project `.janitor/state/paused` sentinel
-    # silences only this one. Both exit the fire silently with no teardown.
-    if _phase_global_paused() or _phase_paused():
+    # Phase 0: machine-wide STOP/PAUSE sentinels + per-project pause. The kill-switch
+    # (/janitor-global-disarm, TRDD-NJ22HNC3) and the global-pause flag
+    # (/janitor-global-pause, TRDD-a3fa4d5d) each silence EVERY session's heartbeat;
+    # the per-project `.janitor/state/paused` sentinel silences only this one. All three
+    # exit the fire silently with no teardown — so a globally-disarmed machine runs NO
+    # detectors anywhere, not just stops the daemon.
+    if _phase_globally_disarmed() or _phase_global_paused() or _phase_paused():
         return 0
 
     # Phase 0.4: refresh the user-presence breadcrumb liveness stamp. Runs on

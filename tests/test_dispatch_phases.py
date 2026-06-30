@@ -87,6 +87,60 @@ def test_phase_global_paused_true_when_flag_set(env_isolation: dict) -> None:
     assert dispatch._phase_global_paused() is True
 
 
+# ---------- Phase 0: machine-wide global DISARM / kill-switch (TRDD-NJ22HNC3) ----------
+
+def test_phase_globally_disarmed_false_when_flag_absent(env_isolation: dict) -> None:
+    """No kill-switch → the phase returns False and the heartbeat proceeds."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    gs.init_global_state()
+    assert dispatch._phase_globally_disarmed() is False
+
+
+def test_phase_globally_disarmed_true_when_kill_switch_set(env_isolation: dict) -> None:
+    """A machine-wide kill-switch (/janitor-global-disarm) → the phase returns True so
+    main() exits early, silencing THIS session's heartbeat exactly like global-pause.
+
+    THE FIX: the kill-switch used to gate only `ensure_daemon_running`, so a
+    globally-disarmed machine still ran every detector in every armed session each fire
+    ("many janitors still running"). Honoring it in Phase 0 makes disarm a true stop.
+    """
+    dispatch = _import_dispatch()
+    import global_state as gs
+    gs.init_global_state()
+    gs.set_kill_switch("test")
+    assert dispatch._phase_globally_disarmed() is True
+
+
+def test_main_runs_no_detectors_when_globally_disarmed(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BEHAVIORAL PROOF: with the kill-switch set, dispatch.main() short-circuits at
+    Phase 0 — emits NOTHING, runs NO detector (no last-run-*.ts stamp), and never tries
+    to spawn the daemon. Before TRDD-NJ22HNC3 a disarmed machine still ran all ~45
+    detectors per session every fire. We spy on _run_detector + ensure_daemon_running to
+    prove neither is reached.
+    """
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+    gs.init_global_state()
+    gs.set_kill_switch("disarmed")
+
+    ran: list[str] = []
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(
+        dispatch.gs, "ensure_daemon_running",
+        lambda *a, **k: pytest.fail("daemon spawn attempted while globally disarmed"),
+    )
+
+    out = _capture_stdout(dispatch.main)
+    assert out == "", f"a disarmed heartbeat must emit nothing, got {out!r}"
+    assert ran == [], f"a disarmed heartbeat must run NO detector, ran {ran}"
+    stamps = list(state.state_dir().glob("last-run-*.ts"))
+    assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
+
+
 # ---------- Phase 1.6: plugin reload --------------------------------------
 
 def test_phase_plugin_reload_silent_when_flag_absent(env_isolation: dict) -> None:

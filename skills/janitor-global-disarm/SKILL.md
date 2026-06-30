@@ -1,6 +1,6 @@
 ---
 name: janitor-global-disarm
-description: TRUE machine-wide STOP of the global ai-maestro-janitor daemon. Sets the kill-switch so the daemon exits and removes its OS keepalive, and per-session heartbeats stop re-spawning it — halting the janitor across ALL projects and instances. The teardown sibling of /janitor-global-pause (which only idles). Trigger with /janitor-global-disarm, "stop all janitors", "globally disarm the janitor", "halt the janitor daemon everywhere".
+description: TRUE machine-wide STOP of the global ai-maestro-janitor daemon AND every per-session heartbeat. Sets the kill-switch so the daemon exits and removes its OS keepalive, AND raises the global-pause flag so every armed session's heartbeat goes silent (runs no detectors) on its next fire — halting all janitor activity across ALL projects and instances, not just the daemon. The teardown sibling of /janitor-global-pause (which only idles). Trigger with /janitor-global-disarm, "stop all janitors", "globally disarm the janitor", "halt the janitor daemon everywhere".
 ---
 
 # Janitor global disarm (machine-wide TRUE stop)
@@ -16,7 +16,13 @@ heartbeat cron). It stops the singleton daemon that serves ALL projects:
 - if the OS keepalive (LaunchAgent / systemd unit) is installed, the daemon
   **removes it on the way out**, so launchd/systemd cannot resurrect it;
 - per-session heartbeats stop lazy-spawning a new daemon (`ensure_daemon_running`
-  honors the kill-switch), so the stop **holds**.
+  honors the kill-switch), so the stop **holds**;
+- **every armed session's heartbeat goes SILENT** — `disarm` also raises the
+  global-pause flag, which `dispatch.py` honors at Phase 0, so the heartbeat runs
+  NO detectors on its next fire (TRDD-NJ22HNC3). This closes the gap where a
+  disarmed machine kept running ~45 detectors per session every 5 min. The cron
+  itself stays armed (the silence is teardown-free); to remove a project's cron
+  entirely use `/janitor-disarm` in that session.
 
 To revive: run `/janitor-global-arm` (clears the kill-switch; the next heartbeat
 spawns a fresh daemon). For a temporary, teardown-free silence use
@@ -64,10 +70,11 @@ User: globally disarm the janitor daemon
 
 ## Scope
 
-ONLY sets the machine-wide kill-switch flag (via the backing CLI). Does NOT remove
-any per-project heartbeat cron (that is `/janitor-disarm`), does NOT uninstall the
+ONLY sets the two machine-wide flags via the backing CLI — the kill-switch (daemon
+exits) AND the global-pause flag (heartbeats go silent). Does NOT remove any
+per-project heartbeat cron (that is `/janitor-disarm`), does NOT uninstall the
 plugin, and does NOT delete any state. The daemon's own shutdown path removes the OS
-keepalive; this skill just trips the switch.
+keepalive; this skill just trips the switches.
 
 ## Resources
 

@@ -1,16 +1,18 @@
 ---
 name: janitor-global-arm
-description: Revives a globally-disarmed ai-maestro-janitor daemon by clearing the machine-wide kill-switch, so the next heartbeat re-spawns the daemon. The revive half of /janitor-global-disarm. Trigger with /janitor-global-arm, "revive the janitor daemon", "globally re-arm the janitor", "undo the global disarm".
+description: Revives a globally-disarmed ai-maestro-janitor by clearing BOTH machine-wide flags that /janitor-global-disarm set — the kill-switch AND the global-pause flag — so the next heartbeat re-spawns the daemon and every per-session heartbeat resumes running detectors. The full-revive half of /janitor-global-disarm. Trigger with /janitor-global-arm, "revive the janitor daemon", "globally re-arm the janitor", "undo the global disarm".
 ---
 
 # Janitor global arm (machine-wide revive)
 
 ## Overview
 
-Clears the machine-wide kill-switch set by `/janitor-global-disarm`, so the daemon
-can be lazy-spawned again. This is the **revive** half of the global true-stop pair.
-After this runs, the next per-session heartbeat will spawn a fresh daemon (which, on
-a published install, re-installs its OS keepalive).
+Clears BOTH machine-wide flags `/janitor-global-disarm` set — the kill-switch (so the
+daemon can be lazy-spawned again) AND the global-pause flag (so every per-session
+heartbeat resumes running detectors). This is the **full-revive** half of the global
+true-stop pair. After this runs, the next per-session heartbeat will spawn a fresh
+daemon (which, on a published install, re-installs its OS keepalive) and stop being
+silent.
 
 This is distinct from `/janitor-arm`, which arms only THIS project's heartbeat cron
 and deliberately does not touch the global kill-switch. Use `/janitor-global-arm`
@@ -49,10 +51,11 @@ User: undo the global disarm
 
 ## Scope
 
-ONLY clears the machine-wide kill-switch flag (via the backing CLI). Does NOT arm any
-per-project heartbeat cron (that is `/janitor-arm`), does NOT spawn the daemon itself
-(the next heartbeat does), and does NOT lift a global PAUSE (that is
-`/janitor-global-unpause`).
+Clears BOTH machine-wide flags (the kill-switch + the global-pause flag) via the
+backing CLI — the full reverse of `/janitor-global-disarm`. Does NOT arm any
+per-project heartbeat cron (that is `/janitor-arm`) and does NOT spawn the daemon
+itself (the next heartbeat does). A pause set ALONE via `/janitor-global-pause` is
+more precisely lifted by `/janitor-global-unpause`, though `arm` also clears it.
 
 ## Resources
 
