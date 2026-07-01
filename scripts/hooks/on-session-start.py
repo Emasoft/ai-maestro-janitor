@@ -16,6 +16,56 @@ import sys
 from pathlib import Path
 
 
+def _active_global_stop(gs) -> tuple[str, str, int] | None:
+    """(kind, reason, since_epoch) for the active machine-wide stop, or None.
+
+    Read STRAIGHT from the flag file so the SessionStart reminder can name WHEN the
+    stop was set and WHY. The bare "the janitor is stopped" line this replaces was
+    ignored for ~33 h once (the disarmed-and-forgotten failure): a temporary
+    /janitor-global-disarm for a token-burn fix was never re-armed, and nothing carried
+    the duration or reason that would have made it stick. Kill-switch (disarm) dominates
+    a pause when both are set. Pure read; a stat/read failure degrades to empty, never
+    raises — this must never break session start.
+    """
+    gsd = gs.global_state_dir()
+    for kind, fname in (("DISARMED", "kill-switch.flag"), ("PAUSED", "global-pause.flag")):
+        p = gsd / fname
+        if not p.exists():
+            continue
+        try:
+            reason = p.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            reason = ""
+        try:
+            since = int(p.stat().st_mtime)
+        except OSError:
+            since = 0
+        return (kind, reason, since)
+    return None
+
+
+def _format_stop_reminder(kind: str, reason: str, since: int, now: int) -> str:
+    """Build the rich SessionStart disarmed-state reminder. Pure (clock + flag data are
+    passed in) so it unit-tests without touching the filesystem or the real clock. Names
+    the duration (days+hours) and the reason so a forgotten temporary stop is impossible
+    to miss — the bare line it replaces carried neither and was ignored for ~33 h."""
+    import time  # stdlib -- local keeps module scope import-clean
+
+    ago = ""
+    if since > 0:
+        secs = max(0, now - since)
+        days, hours = secs // 86400, (secs % 86400) // 3600
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(since))
+        ago = f" since {when} ({days}d {hours}h ago)" if days else f" since {when} ({hours}h ago)"
+    reason_str = f' — reason: "{reason}"' if reason else ""
+    return (
+        f"⚠ [ai-maestro-janitor] The janitor is globally {kind}{ago}{reason_str}. "
+        "Drift detection, rate-limit recovery, and post-compaction auto-resume are OFF "
+        "until you run /janitor-global-arm (or /janitor-global-unpause). "
+        "(SessionStart safety net so a temporary stop can't silently persist.)"
+    )
+
+
 def main() -> int:
     # All side-effecting code lives inside main() so the hook script is
     # safely importable (no module-scope sys.exit, no module-scope
@@ -207,9 +257,21 @@ def main() -> int:
     # re-arming a fresh ~618k-token-per-fire cron on every new/resumed session). So when stopped,
     # do NOT nudge /janitor-arm; tell the user how to resume. /janitor-global-arm (or -unpause)
     # clears the flag and the next session start re-arms normally.
-    if gs.kill_switch_present() or gs.global_pause_present():
-        state.log_line("session-start", "global stop active -> not nudging /janitor-arm")
-        print("[ai-maestro-janitor] The janitor heartbeat is globally stopped (/janitor-global-disarm or /janitor-global-pause) — NOT arming. This keeps the per-project heartbeats off (each fire re-reads the whole context). Run /janitor-global-arm (or /janitor-global-unpause) to resume drift detection.")
+    # Machine-wide stop set → do NOT nudge /janitor-arm (re-arming re-creates the very
+    # heartbeat the user globally stopped). Surface a RICH reminder — WHEN it was set +
+    # WHY — so a temporary stop can't silently persist (the disarmed-and-forgotten
+    # failure: a bare "it's stopped" line went unnoticed for ~33 h). This is the ONLY
+    # surface while stopped (the heartbeat is deliberately silent — RQ9FIFX6), but hooks
+    # fire even while disarmed, so it is free (SessionStart runs anyway). It only helps
+    # the NEXT session start, not a session disarmed mid-flight — that residual case
+    # needs an out-of-band reminder (documented follow-up).
+    stop = _active_global_stop(gs)
+    if stop is not None:
+        kind, reason, since = stop
+        state.log_line("session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
+        import time  # noqa: E402  -- stdlib
+
+        print(_format_stop_reminder(kind, reason, since, int(time.time())))
         return 0
 
     # /janitor-arm is idempotent, so even if the durable cron survived a previous
