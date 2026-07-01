@@ -2,34 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.25.0] - 2026-06-30
+## [0.26.0] - 2026-07-01
 
 ### Bug Fixes
 
-- Autonomous wikimem curation OFF by default + curator off Opus (TRDD-KTP79T8P)
-- Silence per-session heartbeats, not just the daemon (TRDD-NJ22HNC3)
-- Gate auto-bootstrap browser behind opt-in + cap per-slot launches (TRDD-5OJX3SCF)
-- Disarm/pause now DELETE the cron (self-disarm), not just silence (TRDD-RQ9FIFX6)
-- Clear CPV skillaudit CROSS_TOOL_ACCESS false-positive blocking publish
+- Cache cargo target off the auto-purged macOS tempdir (clippy flake)
+- Tighten 3 skill descriptions <=200 tokens + clear skillaudit/markdownlint FPs
+- Trim janitor-reload-skills description under the 200-token limit
 
 ### Documentation
 
-- Mark 8UD3Q7K5 (v0.24.15) + TY2EZ8ZH (v0.24.16) published
-- Record implementation commit ee26d69 for TRDD-ZGLCGC6A
-- Record implementation commit 3f76b65 for TRDD-SMZFJVZ3
-- Add TRDD-5OJX3SCF — OAuth auto-bootstrap surprise-browser + uncapped relaunch fix
-- Mark TRDD-5OJX3SCF complete + record implementation commit b35121c
-- Add TRDD-RQ9FIFX6 — disarm must STOP the heartbeat fire, not just silence
-- Document disarm/pause self-disarm semantics (TRDD-RQ9FIFX6)
-- Mark TRDD-RQ9FIFX6 complete + record implementation commit b3a60fd
-- Add TRDD-ME8V2YJF — daemon-driven fleet disarm/pause (janitor controls all sessions itself, no human)
+- Add TRDD-LQU7OXXV — /janitor-compact-context --soft and --handoff flags + /janitor-write-handoff skill
+- Add TRDD-GFT33HT9 — relocate USER memory out of the auto-deleted data dir (survives uninstall)
+- Standardize TRDD-ME8V2YJF list markers to clear CPV MD004 NIT (TRDD-ME8V2YJF)
 
 ### Features
 
-- Self-heal lean-ctx shell allowlist additively (TRDD-ZGLCGC6A)
-- Default-ON context-size runaway guard + enforce near cap (TRDD-SMZFJVZ3)
+- --soft/--handoff compaction, /janitor-write-handoff, /reload-skills
+- Disarm/uninstall inert-guard on shipped rules + provenance orphan cleanup
+- USER memory survives uninstall via a synced backup mirror (TRDD-GFT33HT9)
+- Real-time token-spike + cache-miss monitor with stop-the-subagents nudge (TRDD-KI24GR5Z)
+- Adaptive per-5-min baseline + anomaly detector + 5h/7d window report (TRDD-EDSFEQ5C)
+- Log window-exhaustion events at rate-limits → empirical 5h/7d cap discovery (TRDD-EDSFEQ5C)
+- Daemon-driven fleet disarm/pause — reach every armed session, no human (TRDD-ME8V2YJF)
+- Rich disarmed-state reminder — a temporary global stop can't silently persist (TRDD-3MEUT9VW)
 
-### Tests
+### Miscellaneous
 
-- Repair orphaned pre-rewrite tests (TRDD-SMZFJVZ3 follow-up)
+- Mark reload_skills_trigger.py executable (has shebang)
 
