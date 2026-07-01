@@ -251,6 +251,27 @@ def trim_log(log_path: str | os.PathLike[str], *, keep_lines: int = 5000, max_by
         pass
 
 
+def append_exhaustion_event(
+    path: str | os.PathLike[str], event: dict, *, max_events: int = 500
+) -> None:
+    """Append ONE window-exhaustion snapshot (a turn-ending API error / rate-limit) as a
+    JSON line, then cap the file to the last `max_events`. Best-effort — NEVER raises, so a
+    logging glitch can never break the StopFailure hook's critical resume-cue capture. The
+    MAX `roll_5h`/`roll_7d` across these events is the empirical window-cap lower bound
+    ("log when the window is exhausted before the time" — TRDD-EDSFEQ5C)."""
+    try:
+        p = Path(path)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, separators=(",", ":")) + "\n")
+        lines = [ln for ln in p.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+        if len(lines) > max_events:
+            tmp = p.with_name(p.name + ".tmp")
+            tmp.write_text("\n".join(lines[-max_events:]) + "\n", encoding="utf-8")
+            os.replace(tmp, p)
+    except (OSError, ValueError, TypeError):
+        pass
+
+
 def load_log(log_path: str | os.PathLike[str]) -> list[dict]:
     p = Path(log_path)
     if not p.is_file():

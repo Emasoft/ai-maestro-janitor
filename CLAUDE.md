@@ -144,7 +144,11 @@ unattended session — TRDD-31095269), `on-prompt-submit-user-mem` (UserPromptSu
 → the PRIVATE user-memory subsystem, TRDD-4334aad0), `on-stop-token-meter` (Stop
 → logs each heartbeat turn's token cost to `token-meter.jsonl` for
 `/janitor-token-report`; separate from the survival-critical on-stop hooks so a
-meter bug can't break resume — TRDD-a4e41e89), `pre-tool-token-budget` (PreToolUse
+meter bug can't break resume — TRDD-a4e41e89). `on-stop-failure` also — STRICTLY
+after its critical `rate-limited.flag` write, best-effort/never-raises — snapshots
+the 5h/7d token windows to `window-exhaustion.jsonl` at each turn-ending API error;
+the MAX 5h/7d sum across those events is the empirical Opus window-cap lower bound
+surfaced by `/janitor-token-report` (TRDD-EDSFEQ5C). `pre-tool-token-budget` (PreToolUse
 → token-meter **Phase 3** real-time spike + cache-miss guard, TRDD-KI24GR5Z:
 reuses `token_meter.tail_turn_usage` + the pure `token_meter.evaluate_turn_budget`
 to classify the IN-PROGRESS turn on TWO signals — `output` (full-price work) AND

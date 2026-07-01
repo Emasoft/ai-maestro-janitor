@@ -50,11 +50,34 @@ def main() -> int:
     state.init_state()
     flag = state.state_dir() / "rate-limited.flag"
     flag.touch()
-    state.atomic_write(state.state_dir() / "rate-limited-since.ts", str(int(time.time())))
+    now = int(time.time())
+    state.atomic_write(state.state_dir() / "rate-limited-since.ts", str(now))
     state.log_line(
         "stop-failure",
         "rate-limit captured; dispatch will emit resume cue on next heartbeat fire",
     )
+
+    # Best-effort — STRICTLY AFTER the critical flag write above, wrapped so a logging
+    # bug can NEVER break the resume-cue capture (this hook's one hard contract). Snapshot
+    # the 5h/7d token windows at this turn-ending API error; over time the MAX 5h/7d sum
+    # across these events reveals the empirical Opus-4.8 window cap — "log when the window
+    # is exhausted before the time" (TRDD-EDSFEQ5C). A non-rate-limit error logs a
+    # low-usage snapshot that doesn't move the max, so the cap estimate stays sound.
+    try:
+        from lib import token_baseline, token_meter  # noqa: E402  -- local package
+
+        records = token_meter.load_log(state.state_dir() / "token-meter.jsonl")
+        token_meter.append_exhaustion_event(
+            state.state_dir() / "window-exhaustion.jsonl",
+            {
+                "ts": now,
+                "roll_5h": token_baseline.rolling_sum(records, 5 * 3600, now),
+                "roll_7d": token_baseline.rolling_sum(records, 7 * 86400, now),
+                "n": len(records),
+            },
+        )
+    except Exception:  # noqa: BLE001 -- telemetry MUST NOT break the resume-cue capture
+        pass
     return 0
 
 

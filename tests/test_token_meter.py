@@ -250,5 +250,31 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         self.assertEqual(v.tier, "ok")
 
 
+class TestExhaustionLog(unittest.TestCase):
+    """The window-exhaustion event log (TRDD-EDSFEQ5C) — best-effort, capped, never raises."""
+
+    def test_append_and_load(self):
+        with TemporaryDirectory() as d:
+            p = Path(d) / "window-exhaustion.jsonl"
+            for i in range(3):
+                token_meter.append_exhaustion_event(p, {"ts": i, "roll_5h": i * 100, "roll_7d": i * 200})
+            recs = token_meter.load_log(p)
+            self.assertEqual(len(recs), 3)
+            self.assertEqual(recs[-1]["roll_5h"], 200)
+
+    def test_caps_to_max_events(self):
+        with TemporaryDirectory() as d:
+            p = Path(d) / "we.jsonl"
+            for i in range(10):
+                token_meter.append_exhaustion_event(p, {"ts": i}, max_events=5)
+            recs = token_meter.load_log(p)
+            self.assertEqual(len(recs), 5)
+            self.assertEqual(recs[0]["ts"], 5)  # oldest kept is event #5 (0-4 trimmed)
+
+    def test_bad_path_never_raises(self):
+        with TemporaryDirectory() as d:
+            token_meter.append_exhaustion_event(d, {"ts": 1})  # d is a DIR → open() fails, swallowed
+
+
 if __name__ == "__main__":
     unittest.main()

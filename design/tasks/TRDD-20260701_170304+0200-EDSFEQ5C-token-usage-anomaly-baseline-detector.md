@@ -80,9 +80,17 @@ implementation-commits: []
 - **DATA the report surfaced (this session's log):** busiest 5h ever = 20.2M weighted, busiest 7d
   = 152.3M weighted — the empirical LOWER BOUNDS on the Opus-4.8 caps (exact cap needs the live
   utilization% pairing, which `--util5h/--util7d` does).
+- **SHIPPED (follow-up commit) — "log when the window is exhausted before the time":** the
+  StopFailure hook (`on-stop-failure.py`), STRICTLY after its critical `rate-limited.flag` write
+  and best-effort/never-raises, now snapshots the 5h/7d weighted sums to `window-exhaustion.jsonl`
+  at every turn-ending API error via `token_meter.append_exhaustion_event` (capped 500). The report
+  surfaces `empirical cap ≥ <max roll_5h/7d at an event>`. Verified end-to-end (2 hook tests prove
+  the flag STILL writes even if the snapshot is skipped; 3 append unit tests; a live report smoke
+  showed `--util5h 87.5 → est cap 524.6k + exhausts ~0.7h` and `empirical cap ≥ 21.0M/150.0M`).
 - **NEXT ACTION:** none — shipped. Ships with the v0.26.0 batch (task #250, gated on CPV#154). The
   cross-session GLOBAL 5h/7d monitor (account-wide via the OAuth endpoint, in the rotator/daemon)
-  reusing this lib is the deferred follow-up (TRDD-ME8V2YJF territory).
+  reusing this lib — and auto-polling the live utilization into the report — is the deferred
+  follow-up (TRDD-ME8V2YJF territory).
 
 ## Why
 

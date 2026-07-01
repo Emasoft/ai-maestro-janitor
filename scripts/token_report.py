@@ -48,10 +48,12 @@ def _fmt_k(n: float) -> str:
     return f"{n:.0f}"
 
 
-def _window_metrics(records: list[dict], now: int, util5h: float | None, util7d: float | None) -> dict:
+def _window_metrics(records: list[dict], now: int, util5h: float | None, util7d: float | None,
+                    events: list[dict]) -> dict:
     """Rolling 5h/7d weighted sums + per-min rates, the busiest observed windows (cap
-    lower bounds), the per-5-min robust baseline, and — when a live utilization% is
-    supplied — the estimated absolute cap + minutes-to-exhaustion at the recent rate."""
+    lower bounds), the per-5-min robust baseline, the empirical cap from logged
+    window-exhaustion events, and — when a live utilization% is supplied — the estimated
+    absolute cap + minutes-to-exhaustion at the recent rate."""
     roll5h = tb.rolling_sum(records, _5H, now)
     roll7d = tb.rolling_sum(records, _7D, now)
     buckets = sorted(tb.bucketize(records, 300).values())
@@ -75,6 +77,10 @@ def _window_metrics(records: list[dict], now: int, util5h: float | None, util7d:
             remaining = int(cap * (1.0 - util / 100.0))
             rate_min = tb.per_minute(roll, wsec)
             out[f"exhaust_min_{label}"] = tb.project_exhaustion_minutes(remaining, rate_min)
+    if events:
+        out["exhaustion_events"] = len(events)
+        out["exhaustion_max_5h"] = max(int(e.get("roll_5h", 0) or 0) for e in events)
+        out["exhaustion_max_7d"] = max(int(e.get("roll_7d", 0) or 0) for e in events)
     return out
 
 
@@ -108,6 +114,11 @@ def _render_window(window: dict) -> None:
     if window.get("est_cap_5h") is None and window.get("est_cap_7d") is None:
         print("    (pass --util5h/--util7d from /api/oauth/usage — or /janitor-oauth-health — "
               "to estimate the absolute cap + pace)")
+    if window.get("exhaustion_events"):
+        print(f"    window-exhaustion events logged: {window['exhaustion_events']}  ·  "
+              f"empirical cap ≥ {_fmt_k(window['exhaustion_max_5h'])} (5h) / "
+              f"{_fmt_k(window['exhaustion_max_7d'])} (7d) — the max window sum seen at a "
+              f"turn-ending rate-limit")
 
 
 def main() -> int:
@@ -136,7 +147,8 @@ def main() -> int:
     assert out_stats is not None and in_stats is not None
     p95_out = out_stats["p95"]
     spikes = [r for r in records if int(r.get("output", 0) or 0) >= max(_SPIKE_OUTPUT, p95_out)]
-    window = _window_metrics(records, int(time.time()), args.util5h, args.util7d)
+    events = token_meter.load_log(_state_dir() / "window-exhaustion.jsonl")
+    window = _window_metrics(records, int(time.time()), args.util5h, args.util7d, events)
 
     if args.json:
         print(json.dumps({
