@@ -777,14 +777,22 @@ def language_lint_step(info: ProjectInfo) -> None:
         # Redirect cargo's build output OUTSIDE the plugin tree. Otherwise artifacts land in
         # <crate>/target/, and a later validation step (CPV's private-path scan) filesystem-walks
         # the plugin dir and flags every absolute path baked into the compiled output as a leaked
-        # private path — thousands of false CRITICALs (one publish saw 21,182). A temp target dir
-        # also leaves the developer's in-tree target/ untouched and caches the build across runs.
+        # private path — thousands of false CRITICALs (one publish saw 21,182). Caching the build
+        # across runs keeps publishes fast; it also leaves the developer's in-tree target/ untouched.
+        #
+        # It MUST live under a STABLE cache root, NOT the OS tempdir: macOS periodically auto-purges
+        # `/var/folders/.../T`, and it deletes SMALL files (e.g. libsqlite3-sys's generated
+        # `out/bindgen.rs`) while leaving the big artifacts (`libsqlite3.a`) and cargo's build-script
+        # FINGERPRINT intact. cargo then thinks the crate is up-to-date, skips re-running the build
+        # script, and clippy dies on `include!(concat!(env!("OUT_DIR"), "/bindgen.rs"))` — a
+        # non-deterministic publish blocker. `~/.cache/` is not auto-purged, so the cache stays
+        # self-consistent between runs. (Still outside the plugin tree → the CPV scan never sees it.)
         import hashlib
-        import tempfile
         os.environ["CARGO_TARGET_DIR"] = str(
-            Path(tempfile.gettempdir())
-            / ("publish-cargo-target-" + hashlib.sha256(str(info.root).encode()).hexdigest()[:12])
+            Path.home() / ".cache" / "ai-maestro-janitor-publish"
+            / ("cargo-target-" + hashlib.sha256(str(info.root).encode()).hexdigest()[:12])
         )
+        Path(os.environ["CARGO_TARGET_DIR"]).mkdir(parents=True, exist_ok=True)
         for m in outermost:
             run(["cargo", "clippy", "--manifest-path", str(m), "--", "-D", "warnings"], cwd=info.root)
         print(f"{GREEN}ok cargo clippy passed ({len(outermost)} crate(s)){NC}")
