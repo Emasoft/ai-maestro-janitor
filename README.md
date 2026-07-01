@@ -669,6 +669,48 @@ iterating `scripts/detectors/`, so `<detector>` above expands to every
 detector script at HEAD (20 at v0.4.0; the dispatcher auto-discovers any
 new ones added in future releases).
 
+### Installed rules — lifecycle & cleanup
+
+The SessionStart hook copies the plugin's shipped rules (`rules/*.md`) into the
+active scope's rules dir — `~/.claude/rules/` (user install) or
+`<project>/.claude/rules/` (project/local install) — because Claude Code's rule
+loader only reads those, not a plugin's bundled `rules/`. Each installed rule
+carries a **conditional inert-guard** at its top plus an
+`ai-maestro-janitor:installed-rule` provenance marker:
+
+- **Disarmed** (`/janitor-global-disarm` set the kill-switch) → the rule tells
+  the agent to treat it as **inert** this session.
+- **Uninstalled** (the plugin's data dir is gone) → the rule declares itself an
+  **orphan** the plugin could not remove and asks the agent to surface it for
+  deletion — while forbidding any memory deletion.
+
+Because Claude Code has **no uninstall hook** and does **not** clean a plugin's
+`~/.claude/rules/` on uninstall, the janitor removes its own orphaned rules two
+ways, both **provenance-marker-gated** (a rule you wrote yourself is never
+touched, and **no memory store is ever touched**): SessionStart strips janitor
+rules from any scope it was uninstalled from (partial uninstall / redundant
+project mirror), and the global daemon's `rules-cleanup` task removes user-scope
+orphans once the plugin is fully uninstalled (it outlives the plugin on its
+orphaned cache for ~7 days). Opt out with
+`CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED=0`; tune the daemon cadence with
+`CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL` (default 3600 s).
+
+### ⚠ Uninstalling — preserve your memories with `--keep-data`
+
+The **USER-scope memory corpus** lives inside the plugin's persistent data dir
+(`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`), and
+`claude plugin uninstall` **deletes the data dir by default** when removing the
+last scope. To keep your memories, always uninstall with:
+
+```bash
+claude plugin uninstall ai-maestro-janitor --keep-data
+```
+
+(The **LOCAL** `~/.claude/projects/<slug>/memory/` and **PROJECT**
+`<repo>/.claude/project/memory/` stores live outside the data dir and survive
+uninstall regardless.) A future release will relocate the USER store out of the
+auto-deleted data dir so memories survive an uninstall unconditionally.
+
 ## Verified behaviour
 
 End-to-end rate-limit recovery was validated on 2026-04-19 against a live

@@ -70,6 +70,7 @@ import global_state as gs  # noqa: E402
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import recovery_audit as ra  # noqa: E402  # F3 recovery audit log (TRDD-F3AUDLOG) — fail-open side-channel
+import rules_installer as ri  # noqa: E402  # post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W)
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
 import state  # noqa: E402
 import supervisor as oauth_supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py
@@ -132,6 +133,13 @@ _INTERVAL_SESSION_LIVENESS = int(
 #  version-mismatched instance and is bounded by a 15 min per-instance cooldown, so
 #  the cadence costs ~nothing while the fleet is healthy. This is the immortality the
 #  in-session cron cannot provide — it recovers the very heartbeat that died.
+_INTERVAL_RULES_CLEANUP = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", "3600")
+)  # 1 h — post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W). Steady state is one
+#  cheap check (scopes + data-dir stat); it only removes files when the janitor is
+#  CONFIRMED fully uninstalled. Hourly is ample: after uninstall the daemon lingers on
+#  its orphaned cache for up to ~7 days, so an hourly beat fires many times in that
+#  window while the plugin's own hooks can no longer run.
 
 # Loop ceiling — heartbeat tick interval upper bound. Must be << the
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
@@ -712,6 +720,30 @@ def _write_recovery_state(path: Path, st: dict) -> None:
         raise
 
 
+def task_rules_cleanup() -> None:
+    """Post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W).
+
+    Claude Code has NO uninstall hook and does not remove a plugin's `~/.claude/rules/`
+    files on uninstall, so the janitor's installed rules would sit forever as orphans.
+    This daemon beat is the only actor that can remove them after a FULL uninstall: the
+    daemon keeps running from its now-orphaned cache for up to ~7 days (until the cache is
+    GC'd), a window in which the plugin's own hooks can no longer fire. When — and ONLY
+    when — the janitor is CONFIRMED fully uninstalled (referenced in no settings.json
+    scope AND its data dir gone), it removes the provenance-marked janitor rules from the
+    USER `~/.claude/rules/` dir. It NEVER touches a user's own rule (marker-gated) and
+    NEVER touches any MEMORY store. Opt out with CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED=0.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED", True):
+        return
+    removed = ri.cleanup_user_orphans_if_uninstalled()
+    if removed:
+        state.log_line(
+            "daemon",
+            f"janitor uninstalled → removed {len(removed)} orphaned user-scope rule(s): "
+            + ", ".join(removed),
+        )
+
+
 def task_session_liveness() -> None:
     """Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
     version-mismatched claude instances across the WHOLE host and recover them from
@@ -925,6 +957,7 @@ def _build_tasks() -> list[Task]:
         Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_tick),
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
+        Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),
         Task("session-liveness", _INTERVAL_SESSION_LIVENESS, task_session_liveness),
     ]
 

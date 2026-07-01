@@ -120,6 +120,20 @@ def main() -> int:
             f"installed plugin rule(s): {', '.join(copied)}",
         )
 
+    # Partial-uninstall self-heal (TRDD-H9IBY95W): remove provenance-marked janitor
+    # rules from any KNOWN .claude/rules/ dir the janitor is NO LONGER installed into
+    # (e.g. the project scope after a project-scope uninstall while still user-installed,
+    # or a redundant project mirror of a user-scope rule per issue #36). Marker-gated,
+    # so a user's own rule and every MEMORY store are untouched. Full last-scope
+    # uninstall can't self-heal from a hook (the plugin is gone) — the daemon's
+    # cleanup_user_orphans_if_uninstalled + each rule's own inert-guard cover that.
+    removed = rules_installer.remove_orphaned_rules()
+    if removed:
+        state.log_line(
+            "session-start",
+            f"removed orphaned janitor rule(s) from non-install scope(s): {', '.join(removed)}",
+        )
+
     # Self-heal the lean-ctx shell allowlist (TRDD-ZGLCGC6A). On a machine that
     # runs the lean-ctx Bash-allowlist wrapper, the heartbeat cron's bare
     # `dispatcher-stub.py` invocation is BLOCKED until the allowlist permits it,

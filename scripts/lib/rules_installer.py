@@ -45,6 +45,115 @@ from pathlib import Path
 
 PLUGIN_NAME = "ai-maestro-janitor"
 
+# Provenance marker every shipped rule carries in its guard block (rules/*.md). It is
+# the SOLE identifier the cleanup uses to decide a rule file was installed by THIS plugin
+# and is therefore safe to remove — a user's own hand-written rule of the same name (no
+# marker) is NEVER touched, and NO memory store is ever touched. Keep this string in sync
+# with the `<!-- ai-maestro-janitor:installed-rule … -->` comment prepended to each rule.
+PROVENANCE_MARKER = "ai-maestro-janitor:installed-rule"
+
+
+def _data_dir() -> Path:
+    """The janitor's canonical persistent DATA dir. Its ABSENCE is one of the two
+    signals that the plugin has been fully uninstalled (Claude Code deletes the data dir
+    when the plugin is removed from its last scope, unless `--keep-data`)."""
+    return Path.home() / ".claude" / "plugins" / "data" / f"{PLUGIN_NAME}-ai-maestro-plugins"
+
+
+def _known_rules_dirs() -> list[Path]:
+    """Every `.claude/rules/` dir the janitor could have installed into: the USER dir
+    always, plus the PROJECT dir when a `$CLAUDE_PROJECT_DIR` is in scope. The daemon
+    (no project context) sees only the user dir; a session sees both."""
+    dirs = [Path.home() / ".claude" / "rules"]
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if project_dir:
+        dirs.append(Path(project_dir) / ".claude" / "rules")
+    return dirs
+
+
+def _is_janitor_installed_rule(path: Path) -> bool:
+    """True iff `path` is a rule file THIS plugin installed — i.e. it carries the
+    provenance marker. Fail-closed: an unreadable file returns False (never removed)."""
+    try:
+        return PROVENANCE_MARKER in path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def _remove_janitor_rules_in(rules_dir: Path) -> list[str]:
+    """Remove every provenance-marked janitor rule from `rules_dir` (a `.claude/rules/`
+    dir). Returns the removed paths. SAFETY: only `*.md` files carrying the marker are
+    removed — a user's own rule (no marker) is left alone — and nothing OUTSIDE
+    `rules_dir` is ever touched, so no memory store can be affected."""
+    removed: list[str] = []
+    if not rules_dir.is_dir():
+        return removed
+    for p in sorted(rules_dir.glob("*.md")):
+        if not _is_janitor_installed_rule(p):
+            continue
+        try:
+            p.unlink()
+            removed.append(str(p))
+        except OSError:
+            continue
+    return removed
+
+
+def _current_target_dirs() -> set[str]:
+    """The set of `str(rules_dir)` the janitor SHOULD currently install into, mirroring
+    `install_rules`'s scope logic (user-scope wins, dedup by path). Any KNOWN rules dir
+    not in this set is one the janitor was uninstalled from → its janitor rules are
+    orphans to remove."""
+    scopes = _detect_install_scopes()
+    if "user" in scopes:
+        scopes = ["user"]
+    keep: set[str] = set()
+    for scope in scopes:
+        td = _target_rules_dir(scope)
+        if td is not None:
+            keep.add(str(td))
+    return keep
+
+
+def remove_orphaned_rules() -> list[str]:
+    """Partial-uninstall self-heal: remove janitor-installed rules from every KNOWN rules
+    dir that is NOT a current install target — e.g. the PROJECT scope after the janitor
+    was uninstalled from it while still user-installed (also the "redundant project mirror
+    of a user-scope rule" cleanup, issue #36). Marker-gated; never touches a user's own
+    rule or any memory store. Returns removed paths."""
+    keep = _current_target_dirs()
+    removed: list[str] = []
+    for d in _known_rules_dirs():
+        if str(d) in keep:
+            continue
+        removed.extend(_remove_janitor_rules_in(d))
+    return removed
+
+
+def janitor_uninstalled() -> bool:
+    """True iff the janitor appears FULLY uninstalled: referenced in NO settings.json
+    scope AND its persistent DATA dir is gone. BOTH must hold — requiring the two
+    independent signals to agree resists a transient false positive (a momentary
+    settings-read miss AND a vanished data dir do not co-occur under normal operation).
+    A merely DISABLED plugin still appears in settings.json, so this returns False for
+    it (we must not delete rules for a plugin the user only paused)."""
+    if _detect_install_scopes():
+        return False
+    return not _data_dir().exists()
+
+
+def cleanup_user_orphans_if_uninstalled() -> list[str]:
+    """Daemon entry point (TRDD-H9IBY95W): when the janitor is FULLY uninstalled, remove
+    its provenance-marked orphaned rules from the USER rules dir (`~/.claude/rules/`).
+    Claude Code has NO uninstall hook and does not clean a plugin's `~/.claude/rules/`, so
+    the still-running daemon (alive until its orphaned cache is GC'd, ~7 days) is the only
+    actor that can remove them. The daemon is global (no project context) → user scope
+    only; per-session `remove_orphaned_rules` covers project scope. Returns [] while the
+    janitor is still installed. NEVER touches any memory store."""
+    if not janitor_uninstalled():
+        return []
+    return _remove_janitor_rules_in(Path.home() / ".claude" / "rules")
+
 
 def _detect_install_scopes() -> list[str]:
     """Return every scope where the plugin is referenced in settings.json.

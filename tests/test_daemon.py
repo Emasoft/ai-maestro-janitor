@@ -400,6 +400,47 @@ def test_stdout_parser_classifies_correctly(stdout: str, expected: bool) -> None
     assert daemon._stdout_proves_plugin_updated(stdout) is expected
 
 
+# ---------- rules-cleanup task (TRDD-H9IBY95W) -----------------------------
+#
+# Post-uninstall orphaned-rule cleanup. Registered at 1 h; delegates to
+# rules_installer.cleanup_user_orphans_if_uninstalled (which no-ops unless the
+# janitor is fully uninstalled). Opt-out via CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED.
+
+
+def test_rules_cleanup_registered_at_1h() -> None:
+    daemon = _import_daemon_module()
+    tasks = {t.name: t for t in daemon._build_tasks()}
+    assert "rules-cleanup" in tasks
+    assert tasks["rules-cleanup"].interval_s == 3600
+
+
+def test_rules_cleanup_noop_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The opt-out env var short-circuits before the installer is ever consulted."""
+    daemon = _import_daemon_module()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED", "0")
+    called = {"n": 0}
+    monkeypatch.setattr(
+        daemon.ri, "cleanup_user_orphans_if_uninstalled",
+        lambda: (called.__setitem__("n", called["n"] + 1) or []),
+    )
+    daemon.task_rules_cleanup()
+    assert called["n"] == 0, "disabled → the installer cleanup is never called"
+
+
+def test_rules_cleanup_delegates_to_installer_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabled (default) → the task calls the installer's uninstall-gated cleanup."""
+    daemon = _import_daemon_module()
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED", raising=False)
+    called = {"n": 0}
+    monkeypatch.setattr(
+        daemon.ri, "cleanup_user_orphans_if_uninstalled",
+        lambda: (called.__setitem__("n", called["n"] + 1) or ["/home/x/.claude/rules/commit-discipline.md"]),
+    )
+    monkeypatch.setattr(daemon.state, "log_line", lambda *_a, **_k: None)
+    daemon.task_rules_cleanup()
+    assert called["n"] == 1, "enabled → delegates to the installer cleanup exactly once"
+
+
 # ---------- oauth-rotator-tick task (TRDD-f892e109 decision 3) --------------
 #
 # The daemon's 60 s oauth-rotator-tick Task REPLACED the launchd agent. These

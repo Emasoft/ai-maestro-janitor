@@ -41,6 +41,125 @@ def _isolate_project_scope(monkeypatch, home: Path, project: Path) -> Path:
     return claude / "rules" / _DST_NAME
 
 
+# ---- provenance-marked orphan cleanup (TRDD-H9IBY95W) ---------------------
+
+_MARKER = rules_installer.PROVENANCE_MARKER
+_MARKED_BODY = f"<!-- {_MARKER} — installed by the janitor -->\n# Some rule\nbody\n"
+
+
+def _mk_home(monkeypatch, tmp_path, *, user_installed: bool, data_dir: bool) -> Path:
+    """Isolate a HOME with the janitor optionally user-installed (settings.json ref) and
+    its data dir optionally present. Clears CLAUDE_PROJECT_DIR (the daemon has none)."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    if user_installed:
+        (home / ".claude" / "settings.json").write_text(
+            '{"enabledPlugins":["ai-maestro-janitor@marketplace"]}', encoding="utf-8"
+        )
+    if data_dir:
+        (home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins").mkdir(
+            parents=True, exist_ok=True
+        )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    return home
+
+
+def test_shipped_rules_all_carry_the_provenance_marker():
+    """Every real shipped rule under rules/ carries the marker — else the cleanup can't
+    recognize it as janitor-installed and it would never be removed after uninstall."""
+    rules_dir = _PROJECT_ROOT / "rules"
+    md = sorted(rules_dir.glob("*.md"))
+    assert md, "expected shipped rules under rules/"
+    missing = [p.name for p in md if _MARKER not in p.read_text(encoding="utf-8")]
+    assert not missing, f"shipped rules missing the provenance marker: {missing}"
+
+
+def test_janitor_uninstalled_requires_no_scope_and_no_data_dir(tmp_path, monkeypatch):
+    _mk_home(monkeypatch, tmp_path, user_installed=False, data_dir=False)
+    assert rules_installer.janitor_uninstalled() is True
+    # A present data dir alone → NOT uninstalled (installed elsewhere / --keep-data).
+    _mk_home(monkeypatch, tmp_path, user_installed=False, data_dir=True)
+    assert rules_installer.janitor_uninstalled() is False
+    # A settings.json reference alone (e.g. still enabled, or DISABLED) → NOT uninstalled.
+    _mk_home(monkeypatch, tmp_path, user_installed=True, data_dir=False)
+    assert rules_installer.janitor_uninstalled() is False
+
+
+def test_cleanup_removes_marked_user_rules_only_when_uninstalled(tmp_path, monkeypatch):
+    home = _mk_home(monkeypatch, tmp_path, user_installed=False, data_dir=False)
+    rules = home / ".claude" / "rules"
+    rules.mkdir(parents=True, exist_ok=True)
+    marked = rules / "commit-discipline.md"
+    marked.write_text(_MARKED_BODY, encoding="utf-8")
+    mine = rules / "my-own-rule.md"
+    mine.write_text("# my own rule, no janitor marker\n", encoding="utf-8")
+
+    removed = rules_installer.cleanup_user_orphans_if_uninstalled()
+    assert str(marked) in removed
+    assert not marked.exists(), "the janitor-marked orphan is removed"
+    assert mine.exists(), "a user's own (unmarked) rule is NEVER removed"
+
+
+def test_cleanup_is_noop_while_still_installed(tmp_path, monkeypatch):
+    home = _mk_home(monkeypatch, tmp_path, user_installed=True, data_dir=True)
+    rules = home / ".claude" / "rules"
+    rules.mkdir(parents=True, exist_ok=True)
+    marked = rules / "commit-discipline.md"
+    marked.write_text(_MARKED_BODY, encoding="utf-8")
+
+    assert rules_installer.cleanup_user_orphans_if_uninstalled() == []
+    assert marked.exists(), "an installed janitor must never remove its own live rules"
+
+
+def test_cleanup_never_touches_non_rule_or_memory_files(tmp_path, monkeypatch):
+    home = _mk_home(monkeypatch, tmp_path, user_installed=False, data_dir=False)
+    rules = home / ".claude" / "rules"
+    rules.mkdir(parents=True, exist_ok=True)
+    (rules / "commit-discipline.md").write_text(_MARKED_BODY, encoding="utf-8")
+    # A memory-store markdown OUTSIDE ~/.claude/rules/ (cleanup globs rules/*.md only).
+    mem = home / ".claude" / "projects" / "slug" / "memory"
+    mem.mkdir(parents=True, exist_ok=True)
+    note = mem / "some-memory.md"
+    note.write_text(f"<!-- {_MARKER} -->\na memory note\n", encoding="utf-8")  # even WITH the marker
+    # A non-.md file inside rules/ carrying the marker text.
+    idx = rules / "index.db"
+    idx.write_text(_MARKER, encoding="utf-8")
+
+    rules_installer.cleanup_user_orphans_if_uninstalled()
+    assert note.exists(), "cleanup must NEVER touch a memory store, even a marker-bearing one outside rules/"
+    assert idx.exists(), "cleanup only removes *.md rule files, never other artifacts"
+
+
+def test_remove_orphaned_rules_clears_redundant_project_mirror(tmp_path, monkeypatch):
+    """User-scope install → the user rules dir is the only target; a janitor-marked copy
+    in the PROJECT .claude/rules/ is a redundant orphan and is removed (issue #36)."""
+    home = tmp_path / "home"
+    project = tmp_path / "proj"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    (home / ".claude" / "settings.json").write_text(
+        '{"enabledPlugins":["ai-maestro-janitor@marketplace"]}', encoding="utf-8"
+    )
+    (project / ".claude").mkdir(parents=True, exist_ok=True)
+    (project / ".claude" / "settings.json").write_text(
+        '{"enabledPlugins":["ai-maestro-janitor@marketplace"]}', encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+
+    proj_rules = project / ".claude" / "rules"
+    proj_rules.mkdir(parents=True, exist_ok=True)
+    orphan = proj_rules / "commit-discipline.md"
+    orphan.write_text(_MARKED_BODY, encoding="utf-8")
+    user_own = proj_rules / "my-own.md"
+    user_own.write_text("# mine, unmarked\n", encoding="utf-8")
+
+    removed = rules_installer.remove_orphaned_rules()
+    assert str(orphan) in removed
+    assert not orphan.exists(), "the redundant project mirror of a janitor rule is removed"
+    assert user_own.exists(), "a user's own project rule is spared"
+
+
 def test_installs_rule_to_project_scope(tmp_path, monkeypatch):
     """install_rules copies a shipped rule into <project>/.claude/rules/ with matching content."""
     dst = _isolate_project_scope(monkeypatch, tmp_path / "home", tmp_path / "proj")

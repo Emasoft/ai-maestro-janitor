@@ -79,7 +79,11 @@ run each due `Task`; `_run_workload` runs subprocess with **1800s cap** +
 periodic heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts`
 **unconditionally** in `finally` (so stale last-run = task not *running*, not
 failing-silently). Tasks: `marketplace-refresh` (1200s, bulk), `user-plugins-update`
-(3600s, `--scope user`), `version-update` (21600s, self-update + sets reload-flag).
+(3600s, `--scope user`), `version-update` (21600s, self-update + sets reload-flag),
+`rules-cleanup` (3600s, TRDD-H9IBY95W — when the janitor is CONFIRMED uninstalled, removes
+provenance-marked orphaned rules from `~/.claude/rules/`; the only actor that can act after a
+full uninstall since CC has no uninstall hook + the daemon outlives the plugin on its orphaned
+cache ~7d; opt-out `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED`; NEVER touches memory).
 All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
 
 ## Core files (verified)
@@ -98,7 +102,7 @@ All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
 - `global_state.py` — daemon contract: `global_state_dir` (⚠️ unofficial path), singleton flock (`acquire/release_singleton_flock`), **`marketplace_lock`/`acquire/release_marketplace_lock`** (cross-process serialization), daemon lifecycle (`daemon_pid`, `write/read_heartbeat`, `kill_switch_present`, `daemon_is_alive`, `ensure_daemon_running`, `spawn_daemon_detached`, `daemon_needs_restart`, `set/clear_reload_flag`).
 - `dedupe.py` — `emit_once` (content-hash dedupe → unchanged findings stay silent).
 - `version_update_lib.py` — janitor self-update helpers (`attempt_auto_update`, `do_auto_update_if_needed`, `detect_install_scopes`); daemon-only caller.
-- `rules_installer.py` — `install_rules` copies plugin `rules/*.md` into the active scope's `.claude/rules/` (atomic tmp+replace; size-based idempotency). Called by `on-session-start`.
+- `rules_installer.py` — `install_rules` copies plugin `rules/*.md` into the active scope's `.claude/rules/` (atomic tmp+replace; content-exact idempotency). Called by `on-session-start`. **Rules lifecycle (TRDD-H9IBY95W):** each shipped rule carries a leading inert-guard + `PROVENANCE_MARKER` comment (`ai-maestro-janitor:installed-rule`) → the rule self-disables when the janitor is DISARMED (kill-switch flag) and flags itself INERT + never-delete-memory when UNINSTALLED (data dir absent). `remove_orphaned_rules` (per-session, called by on-session-start after install) strips marker-bearing rules from any scope that's no longer an install target (partial uninstall / redundant project mirror); `cleanup_user_orphans_if_uninstalled` (daemon `rules-cleanup` task) removes user-scope orphans once `janitor_uninstalled()` (no settings scope AND no data dir). ALL removal is marker-gated `*.md`-only → never a user's own rule, never a memory store.
 - others: `branch_protection_lib`, `git_utils`, `git_ops_patterns`, `posture`/`posture_modes`, `suppression`, `output_formats`, `security_helpers`, `ioc_taxonomy`, `janitor_self_integrity`, `zizmor_classifier`/`zizmor_patterns*`, `sentinel/` (workflow-doctor rule engine: `model`, `rules_absence/context/injection/extra/repo`).
 
 ## Conventions (breadth — list, don't per-symbol-dump)
