@@ -2,30 +2,43 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""PreToolUse hook — warn the agent when ITS OWN token consumption is high.
+"""PreToolUse hook — real-time token-spike + cache-miss guard (TRDD-KI24GR5Z).
 
-Phase 2 of the heartbeat token meter (TRDD-a4e41e89), per the USER re-scope: the
-Stop-hook meter MEASURES per-turn cost; this hook turns that measurement into a
-REAL-TIME self-awareness warning so an over-consuming agent learns, mid-turn,
-that it is burning too much — and can choose to be terse, wrap up the step, or
-compact. The two purposes the USER named: control janitor/agent cost AND inform
-the instance that IT is consuming too much.
+Phase 3 of the heartbeat token meter (TRDD-a4e41e89). The Stop-hook meter MEASURES
+per-turn cost (passive, after the turn); this hook turns that measurement into a
+REAL-TIME CAP: on every tool call it reads the IN-PROGRESS turn's cumulative usage and,
+when the turn SPIKES, nudges the agent to STOP the runaway before the cost compounds. It
+watches the TWO cost signals the user named:
 
-Mirrors the context-watchdog (`pre-tool-context-usage`): it emits advisory
-`hookSpecificOutput.additionalContext` with NO `permissionDecision`, so the
-tool's normal permission flow is completely untouched — purely informational,
-never auto-approves or blocks.
+  * OUTPUT tokens — full-price agent work (long replies / many tool calls).
+  * CACHE_CREATION tokens — a CACHE-MISS cache WRITE: the prompt prefix changed, so the
+    new prefix is re-written to cache at ~1.25x premium. The cheap 0.1x cache_READ
+    re-read is NOT billed here — only the miss-driven WRITE, which is what the user asked
+    to catch ("any cache write caused by cache miss").
 
-CONFIG (everything configurable):
-  * CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED — opt-in (default OFF). Firing on
-    every tool call + reading the transcript tail is intrusive, so installs that
-    don't want it pay nothing.
-  * CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT — per-turn output-token budget
-    (default 10000); at/above it the nudge fires. Set 0 to disable the turn check.
+Two tiers (mirrors the context-watchdog `pre-tool-context-usage`):
+  * advisory — `additionalContext` nudge naming the tripped signal(s); be terse / wrap up.
+  * hard     — a STRONG stop nudge (end the step, `TaskStop` background subagents,
+               `/compact`). AND, when the tool being called is a SUBAGENT SPAWNER
+               (`Task`/`Agent`) and enforcement is opted in, `permissionDecision: deny`
+               the spawn — subagents are the biggest token multiplier, so the guard stops
+               MORE of them from starting mid-runaway.
 
-DATA: reuses `token_meter.tail_turn_usage(transcript_path)` — the SAME tested
-turn-boundary parser the Stop-hook meter uses — to sum the CURRENT (in-progress)
-turn's output tokens so far. No new accounting logic; one source of truth.
+DEFAULT-ON (opt-out): the user asked for an always-present monitor; the thresholds are
+generous so it stays SILENT in normal use and only fires on a genuine spike. The DENY is
+OPT-IN — advisory is the default, matching the user's word "nudge".
+
+CONFIG (all `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`; any threshold of 0 disables that check):
+  * ENABLED                  — master switch, DEFAULT ON (false/0/no/off disables).
+  * TURN_OUTPUT              — advisory output budget (default 10000).
+  * TURN_OUTPUT_HARD         — hard output budget (default 40000).
+  * TURN_CACHE_CREATION      — advisory cache-miss-write budget (default 25000).
+  * TURN_CACHE_CREATION_HARD — hard cache-miss-write budget (default 75000).
+  * ENFORCE                  — DEFAULT OFF; when on, a `Task`/`Agent` spawn at the hard
+                               tier is DENIED (not just advised).
+
+DATA: reuses `token_meter.tail_turn_usage` (the tested turn-boundary parser the Stop-hook
+meter uses) + `token_meter.evaluate_turn_budget` (a pure decision fn). No new accounting.
 """
 
 from __future__ import annotations
@@ -40,10 +53,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import token_meter  # noqa: E402
 
 _DEFAULT_TURN_OUTPUT = 10_000
+_DEFAULT_TURN_OUTPUT_HARD = 40_000
+_DEFAULT_TURN_CACHE_CREATION = 25_000
+_DEFAULT_TURN_CACHE_CREATION_HARD = 75_000
+
+# The tools that SPAWN a subagent — the biggest token multiplier. `Task` is Claude Code's
+# built-in; `Agent` is the same capability in the AI-Maestro harness. A hard-tier spawn of
+# either is what ENFORCE denies.
+_SPAWNER_TOOLS = frozenset({"Task", "Agent"})
 
 
-def _truthy(raw: str | None) -> bool:
-    """Empty/unset → False; `false`/`0`/`no`/`off` → False; anything else → True."""
+def _enabled(raw: str | None) -> bool:
+    """DEFAULT-ON: unset/empty → True; explicit false/0/no/off → False."""
+    if raw is None or raw.strip() == "":
+        return True
+    return raw.strip().lower() not in ("false", "0", "no", "off")
+
+
+def _optin(raw: str | None) -> bool:
+    """DEFAULT-OFF: only an explicit truthy value enables it."""
     if not raw:
         return False
     return raw.strip().lower() not in ("false", "0", "no", "off", "")
@@ -60,10 +88,64 @@ def _coerce_int(raw: str | None, default: int) -> int:
     return val if val >= 0 else default
 
 
+def _emit(obj: dict) -> None:
+    sys.stdout.write(json.dumps(obj))
+
+
+def _context(line: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": line}}
+
+
+def _deny(reason: str) -> dict:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
+def _response(
+    verdict: "token_meter.BudgetVerdict",
+    usage: "token_meter.TurnUsage",
+    tool_name: str,
+    enforce: bool,
+) -> dict | None:
+    """The hook payload for a budget `verdict`, or None when nothing to emit (tier ok).
+
+    Pure (given the verdict + tool + enforce flag) so the deny-vs-nudge decision is
+    unit-tested directly:
+      * hard + a `Task`/`Agent` spawn + ENFORCE → deny the spawn (stop the multiplier).
+      * hard otherwise → a strong stop nudge (TaskStop background subagents, /compact).
+      * advisory → a soft be-terse/wrap-up nudge.
+    """
+    if verdict.tier == "ok":
+        return None
+    signals = "; ".join(verdict.reasons)
+    span = f"{usage.assistant_messages} msg / {usage.tool_calls} tool call(s)"
+    if verdict.tier == "hard":
+        if enforce and tool_name in _SPAWNER_TOOLS:
+            return _deny(
+                f"[token-guard] STOP — token runaway ({signals}; {span}). Do NOT spawn "
+                f"another subagent (the biggest token multiplier). End this step, TaskStop "
+                f"any background subagents, and /compact before continuing. (Disable: "
+                f"CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE=false.)"
+            )
+        return _context(
+            f"⚠⚠ TOKEN RUNAWAY: this turn {signals} ({span}). STOP NOW — finish the current "
+            f"step, stop background subagents with TaskStop, and consider /compact or "
+            f"/janitor-compact-context. Sustained output + cache-miss writes burn "
+            f"subscription usage fastest."
+        )
+    return _context(
+        f"⚠ Token spike: this turn {signals} ({span}). Be terse, wrap up the step, or compact "
+        f"— a cache-miss write is billed ~1.25x, and long output is full price."
+    )
+
+
 def main() -> int:
-    # OPT-IN — zero cost unless explicitly enabled (reading the transcript tail on
-    # every tool call is intrusive; the user opts in when they want the guardrail).
-    if not _truthy(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED")):
+    if not _enabled(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED")):
         return 0
 
     try:
@@ -83,35 +165,36 @@ def main() -> int:
 
     usage = token_meter.tail_turn_usage(transcript)
     if usage is None:
-        # Turn boundary not in the tail window (or transcript unreadable) — stay
-        # silent rather than guess. A turn long enough to push the boundary past
-        # the 512KB tail is rare; correctness-by-omission beats a wrong number.
+        # Turn boundary not in the tail window (or transcript unreadable) — stay silent
+        # rather than guess (correctness-by-omission, same as the meter + context guard).
         return 0
 
-    budget = _coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT"),
-        _DEFAULT_TURN_OUTPUT,
+    verdict = token_meter.evaluate_turn_budget(
+        usage,
+        output_advisory=_coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT"), _DEFAULT_TURN_OUTPUT
+        ),
+        output_hard=_coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"),
+            _DEFAULT_TURN_OUTPUT_HARD,
+        ),
+        cache_creation_advisory=_coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION"),
+            _DEFAULT_TURN_CACHE_CREATION,
+        ),
+        cache_creation_hard=_coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION_HARD"),
+            _DEFAULT_TURN_CACHE_CREATION_HARD,
+        ),
     )
-    if budget <= 0 or usage.output_tokens < budget:
-        return 0
-
-    line = (
-        f"⚠ Token budget: this turn has already produced ~{usage.output_tokens} "
-        f"output tokens (at/above the {budget}-token budget) across "
-        f"{usage.assistant_messages} assistant message(s) / {usage.tool_calls} "
-        f"tool call(s). Consider being more concise, wrapping up the current step, "
-        f"or compacting — sustained high output burns subscription usage fastest."
+    resp = _response(
+        verdict,
+        usage,
+        str(payload.get("tool_name", "") or ""),
+        _optin(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE")),
     )
-    sys.stdout.write(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "additionalContext": line,
-                }
-            }
-        )
-    )
+    if resp is not None:
+        _emit(resp)
     return 0
 
 

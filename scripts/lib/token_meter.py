@@ -280,6 +280,58 @@ def _percentile(sorted_vals: list[int], pct: float) -> int:
     return sorted_vals[max(0, min(n - 1, k))]
 
 
+@dataclass
+class BudgetVerdict:
+    """The budget-tier decision for the IN-PROGRESS turn (TRDD-KI24GR5Z).
+
+    `tier` is the WORST tier any signal tripped: ``ok`` | ``advisory`` | ``hard``.
+    `reasons` names every tripped signal (hard before advisory) for the nudge text.
+    """
+
+    tier: str
+    reasons: list[str]
+
+
+def evaluate_turn_budget(
+    usage: TurnUsage,
+    *,
+    output_advisory: int,
+    output_hard: int,
+    cache_creation_advisory: int,
+    cache_creation_hard: int,
+) -> BudgetVerdict:
+    """Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
+
+    - **output** tokens — full-price agent work (long replies / many tool calls).
+    - **cache_creation** tokens — a CACHE-MISS cache WRITE (the prompt prefix changed, so
+      the new prefix is written to cache at ~1.25× premium). A large value in one turn is
+      the "cache write caused by a cache miss" the guard must catch — distinct from the
+      cheap 0.1× ``cache_read`` re-read, which is NOT billed here.
+
+    Each threshold is checked INDEPENDENTLY; a threshold of ``0`` DISABLES that check
+    (so a user can watch only output, only cache-miss, or both). ``tier`` is the worst
+    tripped tier; ``reasons`` lists every tripped signal, hard first. Pure — no I/O, so
+    it is unit-tested with plain ``TurnUsage`` values.
+    """
+    reasons_hard: list[str] = []
+    reasons_advisory: list[str] = []
+    o = usage.output_tokens
+    c = usage.cache_creation_input_tokens
+    if output_hard > 0 and o >= output_hard:
+        reasons_hard.append(f"output {o} ≥ hard {output_hard}")
+    elif output_advisory > 0 and o >= output_advisory:
+        reasons_advisory.append(f"output {o} ≥ {output_advisory}")
+    if cache_creation_hard > 0 and c >= cache_creation_hard:
+        reasons_hard.append(f"cache-miss write {c} ≥ hard {cache_creation_hard}")
+    elif cache_creation_advisory > 0 and c >= cache_creation_advisory:
+        reasons_advisory.append(f"cache-miss write {c} ≥ {cache_creation_advisory}")
+    if reasons_hard:
+        return BudgetVerdict(tier="hard", reasons=reasons_hard + reasons_advisory)
+    if reasons_advisory:
+        return BudgetVerdict(tier="advisory", reasons=reasons_advisory)
+    return BudgetVerdict(tier="ok", reasons=[])
+
+
 def summarize(records: list[dict], *, field: str = "output") -> Optional[dict]:
     """Distribution stats for `field` over the per-heartbeat records.
 

@@ -922,8 +922,23 @@ any plugin-side change — staying on a recent CC build is recommended:
 - **Duplicate fires**: the dedupe seen-files are per-key. If you want to
   force a re-emit, delete the matching line from
   `$CLAUDE_PROJECT_DIR/.janitor/state/<detector>-seen.txt`.
-- **Token cost feels high**: raise `heartbeat_cron` to `*/10 * * * *` or
-  longer. Accept that cache-keepalive becomes best-effort past the 5-min TTL.
+- **Token cost feels high**: run `/janitor-token-report` to see per-turn
+  output/input + cache-creation, mean/p50/p95/max, and spike flags — the cost
+  driver is almost always long agent replies, not detection. Raise
+  `heartbeat_cron` to `*/10 * * * *` or longer (cache-keepalive becomes
+  best-effort past the 5-min TTL), and/or `/janitor-disarm` when you don't need
+  the heartbeat (it then truly stops firing, costing zero).
+- **Real-time token-spike + cache-miss guard** (default-ON, TRDD-KI24GR5Z): a
+  PreToolUse hook watches the in-progress turn and nudges you to stop when it
+  spikes. It fires on **output** (long replies) AND **cache-miss cache writes**
+  (`cache_creation`, billed ~1.25× — the cheap 0.1× cache re-read is not counted).
+  All configurable via `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`:
+  `ENABLED` (default on; set `false` to silence), advisory budgets `TURN_OUTPUT`
+  (10000) / `TURN_CACHE_CREATION` (25000), hard budgets `TURN_OUTPUT_HARD`
+  (40000) / `TURN_CACHE_CREATION_HARD` (75000), and `ENFORCE` (default off) which,
+  when on, DENIES a new `Task`/`Agent` subagent spawn at the hard tier — the
+  strongest cap, since subagents are the biggest token multiplier. Any budget of
+  0 disables that signal.
 
 ## License
 

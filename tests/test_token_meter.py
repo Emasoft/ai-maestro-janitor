@@ -198,5 +198,57 @@ class TestTokenMeter(unittest.TestCase):
             self.assertEqual(recs[-1]["ts"], 99)
 
 
+def _usage(*, output: int = 0, cache_creation: int = 0) -> token_meter.TurnUsage:
+    return token_meter.TurnUsage(
+        is_heartbeat=False, input_tokens=0, output_tokens=output,
+        cache_read_input_tokens=0, cache_creation_input_tokens=cache_creation,
+        assistant_messages=1, tool_calls=1,
+    )
+
+
+class TestEvaluateTurnBudget(unittest.TestCase):
+    """The pure real-time budget classifier (TRDD-KI24GR5Z)."""
+
+    _TH = dict(output_advisory=100, output_hard=1000, cache_creation_advisory=200, cache_creation_hard=2000)
+
+    def test_ok_below_both_advisory(self):
+        v = token_meter.evaluate_turn_budget(_usage(output=50, cache_creation=50), **self._TH)
+        self.assertEqual(v.tier, "ok")
+        self.assertEqual(v.reasons, [])
+
+    def test_output_advisory(self):
+        v = token_meter.evaluate_turn_budget(_usage(output=150), **self._TH)
+        self.assertEqual(v.tier, "advisory")
+        self.assertTrue(any("output 150" in r for r in v.reasons))
+
+    def test_output_hard(self):
+        v = token_meter.evaluate_turn_budget(_usage(output=1500), **self._TH)
+        self.assertEqual(v.tier, "hard")
+
+    def test_cache_miss_advisory_independent_of_output(self):
+        """A cache-miss write over its advisory budget trips even with zero output."""
+        v = token_meter.evaluate_turn_budget(_usage(output=0, cache_creation=300), **self._TH)
+        self.assertEqual(v.tier, "advisory")
+        self.assertTrue(any("cache-miss write 300" in r for r in v.reasons))
+
+    def test_cache_miss_hard(self):
+        v = token_meter.evaluate_turn_budget(_usage(cache_creation=2500), **self._TH)
+        self.assertEqual(v.tier, "hard")
+
+    def test_hard_wins_over_advisory_across_signals(self):
+        """One signal hard + the other advisory → tier is hard; reasons name both."""
+        v = token_meter.evaluate_turn_budget(_usage(output=1500, cache_creation=300), **self._TH)
+        self.assertEqual(v.tier, "hard")
+        self.assertEqual(len(v.reasons), 2)
+
+    def test_zero_threshold_disables_that_signal(self):
+        """output budgets = 0 → output never trips, even at a huge value."""
+        v = token_meter.evaluate_turn_budget(
+            _usage(output=10_000_000),
+            output_advisory=0, output_hard=0, cache_creation_advisory=200, cache_creation_hard=2000,
+        )
+        self.assertEqual(v.tier, "ok")
+
+
 if __name__ == "__main__":
     unittest.main()

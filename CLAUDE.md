@@ -144,12 +144,16 @@ unattended session — TRDD-31095269), `on-prompt-submit-user-mem` (UserPromptSu
 → logs each heartbeat turn's token cost to `token-meter.jsonl` for
 `/janitor-token-report`; separate from the survival-critical on-stop hooks so a
 meter bug can't break resume — TRDD-a4e41e89), `pre-tool-token-budget` (PreToolUse
-→ token-meter **Phase 2**: reuses `token_meter.tail_turn_usage` to sum the
-in-progress turn's output and, at/above a configurable budget, injects an
-advisory `additionalContext` self-consumption warning — OPT-IN via
-`CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED`, budget
-`…TOKEN_BUDGET_TURN_OUTPUT` (default 10000); advisory-only, no permissionDecision —
-TRDD-a4e41e89). The context-watchdog trio
+→ token-meter **Phase 3** real-time spike + cache-miss guard, TRDD-KI24GR5Z:
+reuses `token_meter.tail_turn_usage` + the pure `token_meter.evaluate_turn_budget`
+to classify the IN-PROGRESS turn on TWO signals — `output` (full-price work) AND
+`cache_creation` (a CACHE-MISS cache WRITE, ~1.25×; the cheap 0.1× cache_read is
+NOT billed) — into ok/advisory/hard. **DEFAULT-ON** (opt-out
+`CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED`); silent below `…TURN_OUTPUT` (10000) /
+`…TURN_CACHE_CREATION` (25000); a strong stop-the-subagents/skill nudge at
+`…TURN_OUTPUT_HARD` (40000) / `…TURN_CACHE_CREATION_HARD` (75000); and — opt-in
+`…TOKEN_BUDGET_ENFORCE` — a `permissionDecision: deny` of a `Task`/`Agent` spawn at
+the hard tier (subagents are the biggest multiplier). Any threshold 0 disables it. The context-watchdog trio
 (pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
 skill + `scripts/compact_trigger.py`) is DEFAULT-ON (advisory ≥60%, enforcing
 ≥85%; fail-open) via `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`
