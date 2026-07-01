@@ -39,9 +39,12 @@ def _linux_env(**extra: str) -> dict[str, str]:
 # --- build_wtype_steps (pure) ----------------------------------------------
 
 def test_build_wtype_steps_sequence():
-    """Hard default (esc_first=True): a leading Escape keypress then the single command
-    typed + Return, mirroring build_tmux_steps."""
+    """Hard default (esc_first=True): TWO leading Escape keypresses (HARD_INTERRUPT_ESC_COUNT —
+    one clears a running tool, one ends the turn) then the single command typed + Return,
+    mirroring build_tmux_steps."""
     assert tt.build_wtype_steps("/compact") == [
+        ["RUN", "wtype", "-k", "Escape"],
+        ["SLEEP", "0.6"],
         ["RUN", "wtype", "-k", "Escape"],
         ["SLEEP", "0.6"],
         ["RUN", "wtype", "/compact"],
@@ -81,8 +84,11 @@ def test_build_wtype_steps_bare_string_not_per_character():
 # --- build_xdotool_steps (pure) --------------------------------------------
 
 def test_build_xdotool_steps_sequence():
-    """Hard default: `key Escape`, then `type --clearmodifiers -- <cmd>`, then `key Return`."""
+    """Hard default: TWO `key Escape` (HARD_INTERRUPT_ESC_COUNT — tool then turn), then
+    `type --clearmodifiers -- <cmd>`, then `key Return`."""
     assert tt.build_xdotool_steps("/compact") == [
+        ["RUN", "xdotool", "key", "Escape"],
+        ["SLEEP", "0.6"],
         ["RUN", "xdotool", "key", "Escape"],
         ["SLEEP", "0.6"],
         ["RUN", "xdotool", "type", "--clearmodifiers", "--", "/compact"],

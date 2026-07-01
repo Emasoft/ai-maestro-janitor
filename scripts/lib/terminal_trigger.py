@@ -77,6 +77,34 @@ def valid_tmux_pane(pane: str) -> bool:
 # every not-yet-automated terminal, whose fallback is "ask the human").
 USE_ITERM_PATH = "USE_ITERM_PATH"
 
+# On this Claude Code build a SINGLE ESC only cancels the in-flight TOOL (e.g. a running
+# Bash command), NOT the whole turn — so a HARD self-trigger interrupt must send TWO ESCs:
+# the first clears the running tool, the second ends the turn. With one ESC, a command typed
+# while the agent is still mid-turn merely ENQUEUES behind the live turn and doesn't run until
+# the turn happens to end — the "/compact stuck in the command queue" bug (TRDD-L87BQ2Y9,
+# user-observed 2026-07-01). Both ESCs are harmless on an already-idle pane, so the
+# double-press is safe whether or not a tool is actually running. This is the ONE source of
+# truth for every hard-interrupt builder: the tmux/wtype/xdotool steps below AND the iTerm
+# osascript builders in compact_trigger / reload_trigger / reload_skills_trigger / fleet_inject
+# (via iterm_esc_lines()).
+HARD_INTERRUPT_ESC_COUNT = 2
+# Per-ESC settle. A str so it drops cleanly into BOTH a tmux SLEEP step (`["SLEEP", "0.6"]`)
+# and an iTerm osascript `delay 0.6`.
+_ESC_SETTLE_S = "0.6"
+
+
+def iterm_esc_lines(indent: str = "            ") -> list[str]:
+    """AppleScript lines for a HARD interrupt inside an iTerm ``tell s`` block:
+    ``HARD_INTERRUPT_ESC_COUNT`` raw-ESC writes, each followed by a settle delay. Shared by
+    every iTerm self-trigger / fleet-recovery osascript builder so the two-ESC rule (see
+    ``HARD_INTERRUPT_ESC_COUNT``) has a single source of truth. ``indent`` is the leading
+    whitespace matching the builder's ``tell s`` block (default 12 spaces)."""
+    out: list[str] = []
+    for _ in range(HARD_INTERRUPT_ESC_COUNT):
+        out.append(f"{indent}write text (character id 27) without newline")
+        out.append(f"{indent}delay {_ESC_SETTLE_S}")
+    return out
+
 
 def build_tmux_steps(
     pane: str, commands: str | Sequence[str], *, esc_first: bool = True
@@ -104,8 +132,10 @@ def build_tmux_steps(
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     steps: list[list[str]] = []
     if esc_first:
-        steps.append(["RUN", "tmux", "send-keys", "-t", pane, "Escape"])
-        steps.append(["SLEEP", "0.6"])
+        # TWO ESCs (HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one ends the turn.
+        for _ in range(HARD_INTERRUPT_ESC_COUNT):
+            steps.append(["RUN", "tmux", "send-keys", "-t", pane, "Escape"])
+            steps.append(["SLEEP", _ESC_SETTLE_S])
     for i, command in enumerate(cmds):
         if i:
             steps.append(["SLEEP", "0.4"])  # let each enqueued command register before the next
@@ -132,8 +162,10 @@ def build_wtype_steps(
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     steps: list[list[str]] = []
     if esc_first:
-        steps.append(["RUN", "wtype", "-k", "Escape"])
-        steps.append(["SLEEP", "0.6"])
+        # TWO ESCs (HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one ends the turn.
+        for _ in range(HARD_INTERRUPT_ESC_COUNT):
+            steps.append(["RUN", "wtype", "-k", "Escape"])
+            steps.append(["SLEEP", _ESC_SETTLE_S])
     for i, command in enumerate(cmds):
         if i:
             steps.append(["SLEEP", "0.4"])
@@ -159,8 +191,10 @@ def build_xdotool_steps(
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     steps: list[list[str]] = []
     if esc_first:
-        steps.append(["RUN", "xdotool", "key", "Escape"])
-        steps.append(["SLEEP", "0.6"])
+        # TWO ESCs (HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one ends the turn.
+        for _ in range(HARD_INTERRUPT_ESC_COUNT):
+            steps.append(["RUN", "xdotool", "key", "Escape"])
+            steps.append(["SLEEP", _ESC_SETTLE_S])
     for i, command in enumerate(cmds):
         if i:
             steps.append(["SLEEP", "0.4"])

@@ -137,8 +137,9 @@ def _build_osascript(
         "          tell s",
     ]
     if esc_first:
-        lines.append("            write text (character id 27) without newline")
-        lines.append("            delay 0.6")
+        # TWO ESCs (terminal_trigger.HARD_INTERRUPT_ESC_COUNT): one clears a running tool,
+        # one ends the turn — else /compact enqueues behind the still-alive turn.
+        lines += terminal_trigger.iterm_esc_lines()
     for i, command in enumerate(commands):
         if i:
             lines.append("            delay 0.4")  # let each enqueued command register

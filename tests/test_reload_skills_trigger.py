@@ -53,7 +53,7 @@ def test_build_osascript_targets_uuid_and_sends_esc_then_reload_skills() -> None
     mod = _import()
     osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0)
     assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa, "must match the specific session id"
-    assert "character id 27" in osa, "must send a raw ESC byte"
+    assert osa.count("character id 27") == 2, "a HARD interrupt sends TWO ESCs (tool + turn)"
     assert '"/reload-skills"' in osa, "must send /reload-skills"
     assert '"/reload-plugins"' not in osa, "must NOT send /reload-plugins (that is a different command)"
     assert '"/compact"' not in osa, "must NOT send /compact"

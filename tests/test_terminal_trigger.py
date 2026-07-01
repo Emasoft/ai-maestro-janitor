@@ -60,14 +60,28 @@ def _spy_aimaestro_cli(tmp_path, agents_payload):
 # --- build_tmux_steps (pure) -----------------------------------------------
 
 def test_build_tmux_steps_sequence():
-    # Hard default (esc_first=True): a leading Escape then the single command.
+    # Hard default (esc_first=True): TWO leading Escapes (one clears a running tool, one ends
+    # the turn on this CC build — HARD_INTERRUPT_ESC_COUNT) then the single command.
     steps = tt.build_tmux_steps("%3", ["/compact"])
     assert steps == [
+        ["RUN", "tmux", "send-keys", "-t", "%3", "Escape"],
+        ["SLEEP", "0.6"],
         ["RUN", "tmux", "send-keys", "-t", "%3", "Escape"],
         ["SLEEP", "0.6"],
         ["RUN", "tmux", "send-keys", "-t", "%3", "-l", "/compact"],
         ["RUN", "tmux", "send-keys", "-t", "%3", "Enter"],
     ]
+
+
+def test_build_tmux_steps_hard_sends_two_escapes():
+    # Regression guard (TRDD-L87BQ2Y9): a HARD interrupt sends HARD_INTERRUPT_ESC_COUNT (=2)
+    # ESCs — one cancels a running tool, the second ends the turn. A single ESC left a
+    # self-triggered /compact enqueued behind the still-alive turn (user-observed 2026-07-01).
+    steps = tt.build_tmux_steps("%3", ["/compact"])
+    escapes = [i for i, s in enumerate(steps) if s[-1] == "Escape"]
+    assert len(escapes) == tt.HARD_INTERRUPT_ESC_COUNT == 2
+    first_literal = next(i for i, s in enumerate(steps) if "-l" in s)
+    assert all(i < first_literal for i in escapes), "every ESC precedes the command literal-send"
 
 
 def test_build_tmux_steps_sends_command_literally():

@@ -47,7 +47,7 @@ def test_iterm_osascript_targets_one_session_with_esc() -> None:
     dead turn), then types the command — and never touches a non-matching pane."""
     s = fi.iterm_osascript("UUID-1234", "/janitor-arm", delay_s=2.0)
     assert 'if (id of s) is "UUID-1234" then' in s
-    assert "character id 27" in s          # ESC byte
+    assert s.count("character id 27") == 2  # TWO ESC bytes: one clears the tool, one ends the (frozen) turn
     assert 'write text "/janitor-arm"' in s
     assert s.startswith("delay 2.0")
     # esc_first=False omits the ESC for an idle (non-stuck) target

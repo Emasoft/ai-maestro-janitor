@@ -74,10 +74,9 @@ def iterm_osascript(
     this function trusts it (the UUID is the only interpolated-from-state value;
     `command` is a fixed internal literal from `_ACTION_COMMAND`, never user input).
     """
-    esc = (
-        "            write text (character id 27) without newline\n"
-        "            delay 0.6\n"
-    ) if esc_first else ""
+    # TWO ESCs (terminal_trigger.HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one
+    # ends the (frozen) turn — else the injected command enqueues behind it.
+    esc = ("\n".join(terminal_trigger.iterm_esc_lines()) + "\n") if esc_first else ""
     return (
         f"delay {delay_s}\n"
         'tell application "iTerm2"\n'
