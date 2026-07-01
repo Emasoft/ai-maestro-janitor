@@ -104,6 +104,16 @@ def _command_plan(terminal: dict, command: str, *, esc_first: bool) -> dict | No
     return None
 
 
+def command_injection_plan(terminal: dict, command: str, *, esc_first: bool) -> dict | None:
+    """PUBLIC raw-command channel builder — the single source of truth for typing an
+    ARBITRARY command into another session's validated pane (tmux pane / iTerm UUID).
+    The daemon's fleet-stop beat (TRDD-ME8V2YJF) reuses THIS rather than duplicating
+    the channel logic, so both the recovery rungs and fleet-stop share one validated
+    path (a tampered identity can never reach the argv/osascript). Returns a plan for
+    ``fleet_inject.fire``, or None when no safe channel resolves."""
+    return _command_plan(terminal, command, esc_first=esc_first)
+
+
 def build_relaunch(terminal: dict) -> dict | None:
     """rung 5 — resume a `dead` (pid-gone) session by typing ``claude --continue`` into
     its still-living pane. No ESC (a dead pane sits at a shell prompt, no modal). None

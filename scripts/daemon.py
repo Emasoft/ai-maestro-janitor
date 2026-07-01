@@ -65,7 +65,9 @@ import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix
 import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
 import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324223a6)
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
+import fleet_restart  # noqa: E402  # raw-command channel builder reused by fleet-stop (TRDD-ME8V2YJF)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
+import fleet_stop  # noqa: E402  # daemon-driven disarm/pause policy (TRDD-ME8V2YJF)
 import global_state as gs  # noqa: E402
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
@@ -133,6 +135,13 @@ _INTERVAL_SESSION_LIVENESS = int(
 #  version-mismatched instance and is bounded by a 15 min per-instance cooldown, so
 #  the cadence costs ~nothing while the fleet is healthy. This is the immortality the
 #  in-session cron cannot provide — it recovers the very heartbeat that died.
+_INTERVAL_FLEET_STOP = int(
+    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_STOP_INTERVAL", "60")
+)  # 1 min — the daemon-driven fleet disarm/pause beat (TRDD-ME8V2YJF). A cheap ps +
+#  transcript-age scan that no-ops unless a machine-wide disarm/pause flag is set AND
+#  the opt-in (CLAUDE_PLUGIN_OPTION_FLEET_STOP_ENABLED=1) is on. A responsive cadence so
+#  a global /janitor-global-disarm reaches every already-armed session within ~1 min,
+#  with no human — the reach-every-session half of the self-disarm story (RQ9FIFX6).
 _INTERVAL_RULES_CLEANUP = int(
     os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", "3600")
 )  # 1 h — post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W). Steady state is one
@@ -258,7 +267,12 @@ def _run_workload_once(cmd: list[str], *, timeout: int = _WORKLOAD_TIMEOUT_SEC,
             return subprocess.CompletedProcess(cmd, rc, stdout or "", stderr or "")
         except subprocess.TimeoutExpired:
             gs.write_heartbeat()
-            if time.time() > deadline or not _running or gs.kill_switch_present():
+            if (
+                time.time() > deadline
+                or not _running
+                or gs.kill_switch_present()
+                or gs.global_pause_present()  # component B: abort a long chore on pause
+            ):
                 state.log_line("daemon", f"  killing `{short}` (timeout or shutdown)")
                 proc.kill()
                 # communicate() (not wait()) is the documented reap after a
@@ -875,6 +889,89 @@ def task_session_liveness() -> None:
         _audit(inst, "fired" if ok else "fire_failed", action, str(plan["channel"]))
 
 
+def _fire_fleet_stop(inst, plan: dict, flag_state: str, now: int) -> None:
+    """Fire ONE fleet-stop injection through the validated tmux/iTerm channel, stamp on
+    a successful fire (so a held flag hits each session once), and F3-audit (fail-open).
+    Extracted from task_fleet_stop so the beat stays under the complexity cap; `inst`
+    is the fleet Instance (for audit fields) or None."""
+    cmd_plan = fleet_restart.command_injection_plan(plan["terminal"], plan["command"], esc_first=True)
+    if cmd_plan is None:
+        state.log_line(
+            "daemon",
+            f"fleet-stop: pid {plan['pid']} UNREACHABLE ({plan['terminal']}) — "
+            f"would {plan['command']}; skipped (no injection channel)",
+        )
+        return
+    ok = fleet_inject.fire(cmd_plan)
+    if ok:
+        # Stamp ONLY on a successful fire, so a transient fire failure retries next beat.
+        gs.record_fleet_injection(plan["pid"], flag_state, now)
+    state.log_line(
+        "daemon",
+        f"fleet-stop: {'FIRED' if ok else 'FIRE-FAILED'} {plan['command']} → "
+        f"{cmd_plan['channel']} for pid {plan['pid']} [{flag_state}]",
+    )
+    if inst is not None:
+        try:
+            ra.record_recovery(
+                ts=now,
+                project_root=inst.project_root,
+                pid=inst.pid,
+                tty=inst.tty,
+                diagnosis=inst.diagnosis,
+                rung=f"fleet-stop:{flag_state}",
+                channel=str(cmd_plan["channel"]),
+                outcome="fired" if ok else "fire_failed",
+            )
+        except Exception:  # noqa: BLE001 -- an audit fault must NEVER crash the beat
+            pass
+
+
+def task_fleet_stop() -> None:
+    """Daemon-driven fleet disarm/pause beat (TRDD-ME8V2YJF): when the machine-wide
+    disarm (kill-switch) or pause flag is set, type the STOP command into every OTHER
+    running janitor session so an ALREADY-armed fleet stops with NO human present — the
+    reach-every-session half of the self-disarm story (RQ9FIFX6 is the in-session half,
+    inert on crons baked before it shipped). REUSES the freeze-recovery machinery:
+    fleet_scan discovery + the validated tmux/iTerm channel (fleet_restart) + fleet_inject.fire.
+
+    SAFETY (three gates, mirroring the hard-restart rungs):
+    1. DEFAULT-OFF — CLAUDE_PLUGIN_OPTION_FLEET_STOP_ENABLED=1 to arm. Typing into
+       another session's pane is powerful, so it ships INERT (no-op until opted in).
+    2. NEVER this process, the daemon, a non-claude pid, or a session whose transcript
+       is ADVANCING (inst.active → the user's live work) — fleet_stop.is_injectable.
+    3. DEDUPE per (pid, flag): a held flag injects each session exactly once
+       (global_state stamps); clearing the flag forgets the stamps so a re-set re-injects.
+    Never raises — a scan fault logs and returns.
+    """
+    if not fleet_stop.fleet_stop_enabled():
+        return  # dormant until the user opts in — the whole capability ships inert
+    flag_state = gs.fleet_stop_flag_state()
+    if flag_state is None:
+        # No fleet-stop flag set → forget every stamp so a FUTURE disarm/pause re-injects
+        # each session fresh (else a stamp from a prior flag would suppress the next one).
+        gs.clear_fleet_injections(None)
+        return
+    now = int(time.time())
+    try:
+        fleet = fleet_scan.gather_fleet(now=now)
+    except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
+        state.log_line("daemon", f"fleet-stop: fleet scan failed: {exc}")
+        return
+    by_pid = {i.pid: i for i in fleet}
+    sessions = [{"pid": i.pid, "command": i.command, "terminal": i.terminal} for i in fleet]
+    plans = fleet_stop.select_stop_targets(
+        sessions,
+        flag_state=flag_state,
+        self_pid=os.getpid(),
+        daemon_pid=gs.daemon_pid(),
+        already_injected=gs.fleet_injections_seen(),
+        user_active_pids={i.pid for i in fleet if i.active},
+    )
+    for p in plans:
+        _fire_fleet_stop(by_pid.get(p["pid"]), p, flag_state, now)
+
+
 class Task:
     """One periodic unit of work owned by the daemon.
 
@@ -959,6 +1056,7 @@ def _build_tasks() -> list[Task]:
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
         Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),
         Task("session-liveness", _INTERVAL_SESSION_LIVENESS, task_session_liveness),
+        Task("fleet-stop", _INTERVAL_FLEET_STOP, task_fleet_stop),
     ]
 
 
@@ -1105,6 +1203,12 @@ def main() -> int:
     try:
         while _running:
             if gs.kill_switch_present():
+                # DISARM must reach every OTHER armed session BEFORE we exit: the loop
+                # short-circuits here ahead of the task list, so the fleet-stop beat can
+                # only act from this branch — a registered Task would NEVER run under a set
+                # flag (the whole point of TRDD-ME8V2YJF's reach-every-session half). No-op
+                # unless CLAUDE_PLUGIN_OPTION_FLEET_STOP_ENABLED=1 (ships dormant).
+                task_fleet_stop()
                 exit_reason = "kill-switch"
                 break
 
@@ -1115,6 +1219,11 @@ def main() -> int:
             # resumes work within ~1 s with no re-spawn. This is the lighter sibling of
             # the kill-switch (which EXITS); a pause is a temporary, teardown-free silence.
             if gs.global_pause_present():
+                # PAUSE must reach every OTHER armed session too: this branch `continue`s
+                # BEFORE the task list, so the fleet-stop beat can only fire from here (a
+                # registered Task never runs while a flag is set). Deduped per (pid,flag) +
+                # opt-in-gated → a no-op unless FLEET_STOP_ENABLED=1 (TRDD-ME8V2YJF).
+                task_fleet_stop()
                 gs.write_heartbeat()
                 for _ in range(_LOOP_CEILING_SEC):
                     if not _running or gs.kill_switch_present() or not gs.global_pause_present():
@@ -1123,7 +1232,11 @@ def main() -> int:
                 continue
 
             for task in tasks:
-                if not _running or gs.kill_switch_present():
+                # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
+                # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause joins the
+                # kill-switch in the per-task gate so "immediately skip the chores if paused"
+                # actually holds; the top-of-loop pause branch then does the fleet sweep.
+                if not _running or gs.kill_switch_present() or gs.global_pause_present():
                     break
                 if task.is_due():
                     task.run()

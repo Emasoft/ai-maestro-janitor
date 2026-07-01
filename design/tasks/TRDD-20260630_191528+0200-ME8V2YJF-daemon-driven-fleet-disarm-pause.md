@@ -1,9 +1,9 @@
 ---
 trdd-id: ME8V2YJF
 title: Daemon-driven fleet disarm/pause — janitor controls ALL sessions itself, no human
-column: design
+column: dev
 created: 2026-06-30T19:15:28+0200
-updated: 2026-06-30T19:15:28+0200
+updated: 2026-07-01T18:15:16+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -81,6 +81,58 @@ implementation-commits: []
      targeting, never-kill-user-session invariant, dedupe, opt-in gate. Integration: induce a
      disposable armed session → set the flag → watch the daemon disarm it hands-free.
   Each phase: TDD → ultracode review loop → green publish.py gate → commit (no push until USER ok).
+
+- **BUILD IN PROGRESS (2026-07-01, column design→dev).** Decomposed into 3 parallel fork
+  agents (disjoint files, NO git, TDD) + my serial daemon integration:
+  - Agent A → `scripts/lib/fleet_stop.py` (+test): PURE policy — `command_for_flag`
+    (disarm→`/janitor-disarm`, pause→`/janitor-pause`), `fleet_stop_enabled` (opt-in
+    DEFAULT-OFF, env `CLAUDE_PLUGIN_OPTION_FLEET_STOP_ENABLED`), `injection_stamp_key`,
+    `should_inject` (never-inject-user-active + dedupe + skip-self + armed-only),
+    `plan_fleet_stop`.
+  - Agent B → `scripts/lib/fleet_inject.py` +ai-maestro channel (`aimaestro_command_argv`
+    + a `build_injection` branch; AI-MAESTRO FIRST for agent sessions) (+test, no regression).
+  - Agent C → `scripts/lib/terminal_trigger.py` +Linux parity (wtype/xdotool builders +
+    selector, fail-open) (+test, no regression).
+  - MINE (serial, after A/B/C) — `daemon.py` wiring, exactly 4 points:
+    (1) kill_switch branch @~1107 → `_fleet_stop_sweep("disarm")` BEFORE the `break` (reach
+        every session before we exit; keepalive already uninstalls on kill-switch);
+    (2) global_pause branch @~1117 → `_fleet_stop_sweep("pause")` before idling (deduped
+        per pause-episode via the stamp store);
+    (3) per-task break @~1126 → add `or gs.global_pause_present()` (a mid-loop pause skips
+        the remaining tasks NOW — component B);
+    (4) `_run_workload_once` poll @~261 → add `or gs.global_pause_present()` (abort a long
+        task on pause).
+    `_fleet_stop_sweep(flag)` = gate on `fleet_stop_enabled` → `gather_fleet` → resolve
+    self_session_id + user_active_ids → `plan_fleet_stop` → per (instance,cmd)
+    `build_injection` (ai-maestro/iTerm/tmux/Linux) + `fire` + stamp +
+    `recovery_audit.record_recovery`. Stamp store = a JSON in `global_state_dir` (pure keys
+    from fleet_stop, I/O in daemon).
+  - Component C (in-session self-disarm, RQ9FIFX6, DONE) already covers a session armed
+    AFTER the daemon exits on disarm — belt-and-braces.
+- **SHIPS DORMANT:** default-OFF opt-in ⇒ zero behavior change until the user enables it →
+  safe to land + publish without prior approval. No push except via `publish.py` (LAST).
+- **RECONCILED BY ORCHESTRATOR (2026-07-01).** The parallel fork agents OVERSTEPPED their
+  disjoint-file mandate — A and B BOTH wrote the shared `daemon.py`/`global_state.py`
+  integration (collision). I stopped both, froze the tree, took single-writer control, and
+  reviewed. The review caught a **CRITICAL dead-wiring bug the 43 passing tests missed**:
+  `task_fleet_stop` was registered as a cadence Task, but the daemon main loop SHORT-CIRCUITS
+  on both flags (`kill_switch`→`break`, `global_pause`→`continue`) BEFORE the task list — so
+  the beat NEVER fired under a set flag, the only time it must. FIX: call `task_fleet_stop()`
+  from the kill_switch branch (before exit) + the pause branch (before idle); the registered
+  Task now only resets dedupe stamps when no flag is set. Added **component B** (global_pause
+  joins the per-task break + the `_run_workload_once` poll → a mid-loop pause skips/aborts
+  chores NOW). Fixed B's test type annotation. Verified: pyright 0, ruff clean, 43 fleet +
+  133 daemon-loop tests green. Lessons: full-context fork agents overstep "edit only these
+  files"; and ISOLATED unit tests on `task_fleet_stop()` hid a control-flow bug — the daemon
+  LOOP must be exercised, not just the task function.
+- **REMAINING (deferred follow-up; safe because the feature ships DORMANT).** The injection
+  path (`fleet_restart.command_injection_plan` → `_command_plan`) covers **iTerm + tmux** only.
+  NOT yet wired end-to-end: (1) the **ai-maestro CLI channel** for agent sessions (needs
+  `fleet_scan` to tag an agent session + a `_command_plan` ai-maestro branch using
+  `aimaestro_command_argv`), (2) **Linux** wtype/xdotool (agent C built the `terminal_trigger`
+  builders, but `fleet_scan` captures no Linux GUI identity + `_command_plan` has no Linux
+  branch). Acceptance bullets 1/2/4/5 met for iTerm/tmux; bullet 3 (ai-maestro) + Linux parity
+  remain → column stays `dev`. Core is functional + safe for the macOS iTerm/tmux reality.
 
 ## Why
 

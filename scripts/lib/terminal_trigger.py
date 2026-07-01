@@ -15,6 +15,12 @@ Division of labour with the two entry scripts (`compact_trigger.py` /
   - This module owns the NON-iTerm backends. Today that is **tmux** (the terminal
     ai-maestro agents run in): a detached, delayed `tmux send-keys` ESC -> command
     -> Enter at the pane named by `$TMUX_PANE`.
+  - On **Linux with no tmux**, a best-effort keystroke send into the FOCUSED
+    GUI-terminal window via the compositor's input tool — `wtype` (Wayland) or
+    `xdotool` (X11) — reaches a session running directly in gnome-terminal /
+    konsole / xterm. tmux stays PREFERRED (per-pane, focus-independent) whenever
+    present; this is only the fallback for a GUI terminal with no tmux, and it is
+    Linux-only so macOS/iTerm dispatch is untouched. (TRDD-ME8V2YJF)
   - For **iTerm** (and any terminal we don't yet automate) `send_self_command`
     returns the sentinel `USE_ITERM_PATH`, and the caller falls back to its own
     proven iTerm osascript path (or prints its degrade marker when even that
@@ -105,6 +111,61 @@ def build_tmux_steps(
             steps.append(["SLEEP", "0.4"])  # let each enqueued command register before the next
         steps.append(["RUN", "tmux", "send-keys", "-t", pane, "-l", command])
         steps.append(["RUN", "tmux", "send-keys", "-t", pane, "Enter"])
+    return steps
+
+
+def build_wtype_steps(
+    commands: str | Sequence[str], *, esc_first: bool = True
+) -> list[list[str]]:
+    """The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
+    leading ESC, then each command typed as LITERAL text and submitted with Enter.
+    Pure — returns RUN/SLEEP-tagged argv steps.
+
+    Like the tmux builder, a bare string is normalized to a one-element list (a str is
+    itself a `Sequence[str]` of characters, so iterating it would send one keystroke
+    per character). `wtype -k Escape` / `wtype -k Return` press keys by keysym; a bare
+    positional arg is typed VERBATIM (`wtype /compact` types "/compact") — the janitor's
+    commands are slash-tokens that never lead with a dash, so no literal guard is needed.
+    Unlike tmux there is no per-pane target: `wtype` types into the FOCUSED window.
+    (TRDD-ME8V2YJF)
+    """
+    cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
+    steps: list[list[str]] = []
+    if esc_first:
+        steps.append(["RUN", "wtype", "-k", "Escape"])
+        steps.append(["SLEEP", "0.6"])
+    for i, command in enumerate(cmds):
+        if i:
+            steps.append(["SLEEP", "0.4"])
+        steps.append(["RUN", "wtype", command])
+        steps.append(["RUN", "wtype", "-k", "Return"])
+    return steps
+
+
+def build_xdotool_steps(
+    commands: str | Sequence[str], *, esc_first: bool = True
+) -> list[list[str]]:
+    """The X11 (`xdotool`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
+    leading ESC, then each command typed as LITERAL text and submitted with Enter.
+    Pure — returns RUN/SLEEP-tagged argv steps.
+
+    A bare string is normalized to a one-element list (same char-iteration trap as the
+    tmux/wtype builders). `xdotool key Escape` / `xdotool key Return` press keys;
+    `xdotool type --clearmodifiers -- <text>` types the literal command (`--clearmodifiers`
+    releases any held modifier; `--` ends option parsing so even a dash-leading command is
+    safe). Like `wtype`, there is no per-pane target — it types into the FOCUSED window.
+    (TRDD-ME8V2YJF)
+    """
+    cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
+    steps: list[list[str]] = []
+    if esc_first:
+        steps.append(["RUN", "xdotool", "key", "Escape"])
+        steps.append(["SLEEP", "0.6"])
+    for i, command in enumerate(cmds):
+        if i:
+            steps.append(["SLEEP", "0.4"])
+        steps.append(["RUN", "xdotool", "type", "--clearmodifiers", "--", command])
+        steps.append(["RUN", "xdotool", "key", "Return"])
     return steps
 
 
@@ -287,6 +348,58 @@ def _try_ai_maestro_send(commands: Sequence[str], *, dry_run: bool, env: Mapping
     return "FIRED:aimaestro"
 
 
+# --- Linux GUI-terminal channel (wtype on Wayland / xdotool on X11) ---------
+#
+# A Linux janitor session that is NOT inside tmux runs directly in a GUI terminal
+# (gnome-terminal, konsole, xterm, …). Those have no per-pane addressing like tmux's
+# $TMUX_PANE, so we type into the FOCUSED window via the compositor's input tool:
+# `wtype` under Wayland, `xdotool` under X11. Best-effort by nature — it only lands
+# correctly when this session's terminal has focus — which matches the module's
+# degrade philosophy (a miss = "the human notices nothing happened"). tmux stays
+# PREFERRED (focus-independent) and is chosen first in send_self_command; this is the
+# fallback path only. Linux-only by construction so macOS/iTerm never changes.
+
+
+def _resolve_linux_gui_channel(env: Mapping[str, str]) -> str | None:
+    """Pick the Linux GUI-terminal keystroke tool, or None to degrade.
+
+    Wayland (`$WAYLAND_DISPLAY`) → `wtype`; X11 (`$DISPLAY`) → `xdotool` — but only
+    when the tool is actually on PATH. Returns None when off Linux (so a macOS host
+    with XQuartz's `$DISPLAY` set never diverts off the iTerm path), when the session
+    has no graphical display, or when neither tool is installed — the caller then fails
+    open to `USE_ITERM_PATH`. Wayland is tried first because `xdotool` via XWayland
+    can't inject into native Wayland windows. (TRDD-ME8V2YJF)
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    if env.get("WAYLAND_DISPLAY") and shutil.which("wtype"):
+        return "wtype"
+    if env.get("DISPLAY") and shutil.which("xdotool"):
+        return "xdotool"
+    return None
+
+
+def _try_linux_gui_send(
+    commands: Sequence[str], *, delay_s: float, esc_first: bool, dry_run: bool,
+    env: Mapping[str, str],
+) -> str | None:
+    """Best-effort Linux GUI-terminal send via wtype/xdotool into the FOCUSED window.
+    Returns a `FIRED:`/`DRY_RUN:` status on success, or None to fall through to
+    `USE_ITERM_PATH`. The detached delayed child + step machinery is shared with the
+    tmux path, so the ESC-first / soft-enqueue semantics carry over unchanged.
+    (TRDD-ME8V2YJF)
+    """
+    channel = _resolve_linux_gui_channel(env)
+    if channel is None:
+        return None
+    builder = build_wtype_steps if channel == "wtype" else build_xdotool_steps
+    if dry_run:
+        keys = ("ESC+" if esc_first else "") + "+".join(commands)
+        return f"DRY_RUN:{channel}:focused:{keys}@{delay_s}s"
+    _fire_detached_steps(delay_s, builder(list(commands), esc_first=esc_first))
+    return f"FIRED:{channel}"
+
+
 def send_self_command(
     commands: str | Sequence[str], *, delay_s: float = 2.0, esc_first: bool = True,
     dry_run: bool = False, env: Mapping[str, str] | None = None,
@@ -325,7 +438,14 @@ def send_self_command(
             return api
     kind = state.terminal_kind()
     if kind not in _DELEGATE_KINDS:
-        return USE_ITERM_PATH
+        # tmux is PREFERRED (the delegate kind, handled below). With no tmux, a Linux
+        # GUI-terminal session can still be reached by typing into its focused window
+        # via wtype/xdotool. Off Linux or with neither tool present this returns None,
+        # so macOS/iTerm keeps its unchanged USE_ITERM_PATH degrade. (TRDD-ME8V2YJF)
+        # _try_linux_gui_send returns None (degrade) or a truthy FIRED:/DRY_RUN: status.
+        return _try_linux_gui_send(
+            cmds, delay_s=delay_s, esc_first=esc_first, dry_run=dry_run, env=e
+        ) or USE_ITERM_PATH
     if kind == "tmux":
         pane = (e.get("TMUX_PANE") or "").strip()
         if not valid_tmux_pane(pane):

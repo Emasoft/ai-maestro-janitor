@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import fcntl
+import json
 import os
 import subprocess
 import sys
@@ -200,6 +201,86 @@ def clear_global_pause() -> None:
     """Clear the machine-wide PAUSE flag — the daemon resumes running due tasks on its
     next loop and sessions resume emitting drift. Idempotent (a missing flag is fine)."""
     _global_pause_path().unlink(missing_ok=True)
+
+
+# ---------- fleet-stop flag + injection stamps (TRDD-ME8V2YJF) ------------
+#
+# The daemon-driven fleet disarm/pause (fleet_stop.py) reaches every OTHER running
+# janitor session and types the stop command into it. `fleet_stop_flag_state`
+# collapses the two existing machine-wide flags into the single state that policy
+# consumes; the injection-stamp map dedupes so a flag that stays set does not
+# re-inject every daemon beat. The stamps are pure runtime state — losing them only
+# risks a harmless re-inject (the target session ignores a redundant /janitor-disarm),
+# so every writer here is fail-open (FS errors are swallowed, logic bugs are not).
+
+def fleet_stop_flag_state() -> str | None:
+    """The current machine-wide fleet-stop flag, or None when neither is set. ``disarm``
+    (the kill-switch) DOMINATES ``pause``: a disarm is the true stop (delete the cron),
+    so it takes precedence over the softer pause. The daemon's fleet-stop beat reads
+    this to decide which slash command to inject into every other session."""
+    if kill_switch_present():
+        return "disarm"
+    if global_pause_present():
+        return "pause"
+    return None
+
+
+def _fleet_injections_path() -> Path:
+    return global_state_dir() / "fleet-injections.json"
+
+
+def _read_fleet_injections_raw() -> dict:
+    """The `{dedupe_key: epoch}` map, or {} on a missing/corrupt file (fail-open)."""
+    try:
+        data = json.loads(_fleet_injections_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_fleet_injection(pid: int, flag_state: str, now: int) -> None:
+    """Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
+    every daemon beat. Keyed ``"{pid}:{flag_state}"`` → epoch ``now`` (passed in, never
+    read from the clock here). Atomic write; fail-OPEN on FS error (a lost stamp only
+    risks a redundant inject, which the target session no-ops)."""
+    data = _read_fleet_injections_raw()
+    data[f"{pid}:{flag_state}"] = int(now)
+    try:
+        init_global_state()
+        path = _fleet_injections_path()
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def fleet_injections_seen() -> set[str]:
+    """The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
+    empty on a missing/corrupt file). The daemon passes this to
+    ``fleet_stop.select_stop_targets`` so already-stopped sessions are skipped."""
+    return set(_read_fleet_injections_raw().keys())
+
+
+def clear_fleet_injections(flag_state: str | None = None) -> None:
+    """Forget injection stamps so a re-set flag re-injects. ``flag_state=None`` clears
+    ALL (called when no fleet-stop flag is set); a specific state clears only its
+    stamps. Idempotent, atomic, fail-open."""
+    if flag_state is None:
+        _fleet_injections_path().unlink(missing_ok=True)
+        return
+    data = _read_fleet_injections_raw()
+    remaining = {k: v for k, v in data.items() if not k.endswith(f":{flag_state}")}
+    try:
+        path = _fleet_injections_path()
+        if not remaining:
+            path.unlink(missing_ok=True)
+            return
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(remaining), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 # ---------- liveness ------------------------------------------------------
