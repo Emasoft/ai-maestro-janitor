@@ -40,7 +40,7 @@ def main() -> int:
     # __init__.py — `lib` is now a package thanks to scripts/lib/__init__.py.
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
     from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
-    from lib import rules_installer, state  # noqa: E402  -- local package, not PyPI
+    from lib import memory_scopes, rules_installer, state  # noqa: E402  -- local package, not PyPI
 
     state.init_state()
 
@@ -132,6 +132,18 @@ def main() -> int:
         state.log_line(
             "session-start",
             f"removed orphaned janitor rule(s) from non-install scope(s): {', '.join(removed)}",
+        )
+
+    # USER-memory backup MIRROR (TRDD-GFT33HT9): keep `~/.claude/ai-maestro-janitor-memory/`
+    # in sync with the canonical corpus in the plugin DATA dir, so a plain `claude plugin
+    # uninstall` (which deletes the data dir) never loses memory — and on a fresh install
+    # with an empty primary, RESTORE it from the mirror. Additive, best-effort, NEVER
+    # deletes a note; a mirror hiccup can't break session start.
+    synced = memory_scopes.sync_user_memory_mirror()
+    if synced == "restored":
+        state.log_line(
+            "session-start",
+            "restored USER memory from the uninstall-safe mirror (primary was empty)",
         )
 
     # Self-heal the lean-ctx shell allowlist (TRDD-ZGLCGC6A). On a machine that

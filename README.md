@@ -695,21 +695,28 @@ orphaned cache for ~7 days). Opt out with
 `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED=0`; tune the daemon cadence with
 `CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL` (default 3600 s).
 
-### ⚠ Uninstalling — preserve your memories with `--keep-data`
+### Uninstalling — your memories are safe
 
 The **USER-scope memory corpus** lives inside the plugin's persistent data dir
-(`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`), and
-`claude plugin uninstall` **deletes the data dir by default** when removing the
-last scope. To keep your memories, always uninstall with:
+(`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`), which
+`claude plugin uninstall` deletes by default when removing the last scope. Two
+things keep your memories from ever being lost:
 
-```bash
-claude plugin uninstall ai-maestro-janitor --keep-data
-```
+- **A synced backup mirror at `~/.claude/ai-maestro-janitor-memory/`.** Every
+  session start syncs the corpus there (additive — it never deletes a note). The
+  mirror lives **outside** the data dir, so a plain uninstall leaves it intact; on
+  your next install the memory is **restored from the mirror** automatically. You
+  don't have to do anything.
+- **`--keep-data` preserves the primary directly** — use it to keep the canonical
+  store in place across an uninstall:
+
+  ```bash
+  claude plugin uninstall ai-maestro-janitor --keep-data
+  ```
 
 (The **LOCAL** `~/.claude/projects/<slug>/memory/` and **PROJECT**
 `<repo>/.claude/project/memory/` stores live outside the data dir and survive
-uninstall regardless.) A future release will relocate the USER store out of the
-auto-deleted data dir so memories survive an uninstall unconditionally.
+uninstall regardless.)
 
 ## Verified behaviour
 

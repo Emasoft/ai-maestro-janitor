@@ -1,9 +1,9 @@
 ---
 trdd-id: GFT33HT9
-title: Relocate USER memory OUT of the auto-deleted data dir so it survives uninstall
-column: design
+title: USER memory survives uninstall via a synced backup mirror (not a move)
+column: complete
 created: 2026-07-01T12:06:13+0200
-updated: 2026-07-01T12:06:13+0200
+updated: 2026-07-01T12:30:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -23,69 +23,72 @@ attempts: 0
 implementation-commits: []
 ---
 
-# Relocate USER memory OUT of the auto-deleted data dir so it survives uninstall
+# USER memory survives uninstall via a synced backup mirror (not a move)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-01
 
 - **USER DIRECTIVE (verbatim, firm):** "uninstalling the janitor must not remove the memories."
+  **CLARIFICATION (verbatim):** "anyway, it must only be a **mirror**. the data folder of the
+  janitor can be preserved when uninstalling it using the `--keep-data` flag."
 - **THE BUG:** the USER-scope memory corpus lives at
   `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/` — INSIDE the plugin DATA
-  dir. `claude plugin uninstall` **deletes the data dir by default** on last-scope removal (docs
-  verified 2026-07-01; only `--keep-data` preserves it). So uninstalling WITHOUT `--keep-data`
-  **destroys the USER memory**. LOCAL (`~/.claude/projects/<slug>/memory/`) and PROJECT
-  (`<repo>/.claude/project/memory/`) stores are OUTSIDE the data dir → already survive.
-- **NO hook can intercept uninstall** (TRDD-H9IBY95W investigation). The ONLY fix is to keep the
-  USER memory somewhere the uninstall does not delete → relocate it OUT of the data dir.
-- **IMMEDIATE MITIGATION (already shipped in the README, TRDD-H9IBY95W):**
-  `claude plugin uninstall ai-maestro-janitor --keep-data`.
-- **RECOMMENDED TARGET (pending USER confirmation):** `~/.claude/ai-maestro-janitor-memory/`
-  — a dedicated, clearly-named dir UNDER `~/.claude/` (discoverable, parallels the LOCAL
-  `~/.claude/projects/<slug>/memory/`), OUTSIDE the plugin cache+data so uninstall never touches
-  it and updates never touch it. TRADEOFF (the USER already accepted survival over these): it is a
-  custom `~/.claude/<dir>` — NOT covered by the plugin-data backup tooling, and the janitor's own
-  `janitor-footprint` + memory-scope docs currently call such folders "orphan-prone" (those docs
-  must be updated to bless THIS one as the canonical USER memory root). Alternatives: `~/.claude/memory/`
-  (generic global) or `~/.ai-maestro/memory/` (outside `.claude` entirely).
-- **BLAST RADIUS (measured 2026-07-01) — ~14 source files hardcode the old path:**
-  SSOT `scripts/lib/memory_scopes.py::resolve_user_dir` (change here) + `scripts/hooks/
-  on-prompt-submit-autorecall.py` + the `rules/markdown-memory-recall.md` rule + ~11 memory SKILLs
-  (`janitor-memory-{bootstrap,conflict,consolidate,harvest,recall,record-recent,split,update,write}`
-  + conflict `references/`). Every hardcoded bash snippet `USER_MEM="$HOME/.claude/plugins/data/…"`
-  must move to the new root. (Historical `reports/`, `docs_dev/` copies are NOT touched.)
-- **PLAN (implement AFTER the target is confirmed):**
-  1. Change `resolve_user_dir()` to the new root (the SSOT); keep an `_LEGACY_USER_DIR` constant.
-  2. **One-time data migration** (SessionStart + a `migrate_*` script): if the legacy dir has
-     memories AND the new dir is absent/empty, MOVE the corpus (files + `.memgrep/` index) to the
-     new root, verify nothing lost (reuse `memory_edit_verify` fidelity checks), leave a
-     `MIGRATED-TO.txt` pointer in the legacy dir. Idempotent + crash-safe.
-  3. Update the rule + all ~11 skills' hardcoded paths to the new root.
-  4. Update `janitor-footprint` + CLAUDE.md + README to declare the new root canonical (and that it
-     survives uninstall). Remove the now-stale `--keep-data`-for-memory caveat.
-  5. Tests: `resolve_user_dir` returns the new root; migration moves + verifies + is idempotent +
-     never loses a note; recall/write still resolve USER scope; a marker file proves no double-migrate.
-  6. Consider whether the daemon's memory chores + memgrep index paths need the new root (they use
-     the SSOT resolver → should follow automatically; verify).
-- **WHY NOT rushed into the current session:** HIGH blast radius on CRITICAL infra (the memory
-  system) + a data migration + a genuine location decision. Must confirm the target first (the new
-  path is baked permanently everywhere) and test the migration hard (a lost memory is unacceptable).
-- **NEXT ACTION:** confirm the relocation target with the USER, then implement steps 1-6 as a
-  focused effort with the migration tested to zero-loss.
+  dir. `claude plugin uninstall` **deletes the data dir by default** (only `--keep-data` preserves
+  it), so a plain uninstall **destroys the USER memory**. LOCAL + PROJECT stores are OUTSIDE the
+  data dir → already survive.
+- **DESIGN (per the user's clarification) — MIRROR, not move:**
+  - **Canonical USER store STAYS in the data dir.** `resolve_user_dir()` is UNCHANGED → every
+    read/write still resolves there, and the ~14 skill/rule hardcodes need NO edit (huge
+    simplification vs the abandoned move-the-root approach).
+  - **`~/.claude/ai-maestro-janitor-memory/` is a synced BACKUP MIRROR** OUTSIDE the data dir
+    (`resolve_user_mirror_dir()`). It survives a plain uninstall.
+  - **`--keep-data` preserves the primary directly** — the mirror is the safety net for the
+    common uninstall WITHOUT `--keep-data`.
+- **SHIPPED (this session, all tested):**
+  - `memory_scopes.py`: `resolve_user_dir` reverted to canonical (data dir); NEW
+    `resolve_user_mirror_dir` + `sync_user_memory_mirror` (primary has memory → SYNC primary→mirror;
+    primary EMPTY but mirror has memory → RESTORE mirror→primary; neither → no-op). Copy is ADDITIVE
+    (`copytree(dirs_exist_ok=True)`) — NEVER deletes a note from either side; best-effort (any
+    OSError swallowed so a backup hiccup can't break session start).
+  - `on-session-start.py` calls `sync_user_memory_mirror()` each session (immediate protection +
+    the restore path on a fresh install with an empty primary).
+  - Tests (`test_memory_scopes.py`): mirror path is outside plugins/data; mirror direction; restore
+    direction; no-op when empty; additive-never-deletes; carries `user-mem/` + `.memgrep/`;
+    idempotent. Full suite green; ruff + pyright clean.
+  - Docs: README (uninstall section → mirror + `--keep-data`), CLAUDE.md (memory mirror), the
+    `janitor-footprint` + `markdown-memory-recall` rules (mirror added to the on-disk inventory as
+    a real store — NOT a stray).
+- **WHY THE MIRROR APPROACH WINS:** it keeps the canonical path stable (zero churn across the 11
+  skills + the recall rule), matches the user's explicit "only a mirror" instruction, and still
+  guarantees no memory is lost on a plain uninstall. The abandoned "move the USER root out of the
+  data dir" approach would have rewritten the path in ~14 files for no added safety.
+- **NEXT ACTION:** none — shipped. (Restore is exercised on the next fresh install whose primary is
+  empty while the mirror has content.)
 
 ## Why
 
-`uninstalling must not remove the memories` is unsatisfiable while the USER memory lives in the
-data dir CC deletes on uninstall. Relocating it out is the only unconditional fix (the `--keep-data`
-mitigation relies on the user remembering a flag). The change is mechanical but wide — one SSOT
-function + a data migration + ~13 hardcode updates — and touches the most critical subsystem, so it
-is scoped as its own careful TRDD rather than rushed.
+`uninstalling must not remove the memories`, and the user's clarification "only a mirror … the data
+folder can be preserved with `--keep-data`". So: keep the canonical store where it is (stable,
+`--keep-data`-preservable) and add a synced backup mirror OUTSIDE the data dir that survives a plain
+uninstall and repopulates the primary on the next install. No path churn, no data-move risk, and
+memory is never lost.
 
 ## Acceptance
 
-- After `claude plugin uninstall ai-maestro-janitor` (NO `--keep-data`), the USER memory corpus
-  still exists at the new root.
-- `resolve_user_dir()` returns the new root; every skill/rule/hook resolves USER scope there.
-- The one-time migration moves the full legacy corpus (notes + index) with ZERO loss (verified),
-  is idempotent, and crash-safe; a second run is a no-op.
-- Docs (janitor-footprint, CLAUDE.md, README, markdown-memory-recall) declare the new canonical root.
+- Canonical `resolve_user_dir()` unchanged (data dir); the mirror is `~/.claude/ai-maestro-janitor-memory/`.
+- SessionStart syncs primary→mirror when the primary has memory, and RESTORES mirror→primary when
+  the primary is empty but the mirror has content.
+- The sync is additive (never deletes a note from either side), idempotent, and best-effort (a
+  mirror error never breaks session start). It carries the whole corpus (notes + `user-mem/` +
+  `.memgrep/`).
+- Docs (README, CLAUDE.md, janitor-footprint, markdown-memory-recall) describe the mirror as a real
+  store + note `--keep-data` preserves the primary.
 
 ## Notes and lessons learned
+
+[^1]: [ocd:2026-07-01 lmd:2026-07-01] First designed this as MOVING the USER memory root out of the
+  data dir (repointing `resolve_user_dir`), which would have rewritten the path in ~14 files. The
+  user corrected: make it "only a mirror" — the data dir stays canonical (`--keep-data` preserves
+  it), and a synced backup outside the data dir is the uninstall safety net. Lesson: a backup mirror
+  beats relocating a load-bearing, widely-hardcoded root — same safety, near-zero blast radius.
+  Confirm the SHAPE of a fix (move vs mirror) with the user before rewriting a path baked into many
+  files.

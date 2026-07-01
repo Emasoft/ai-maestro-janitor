@@ -9,7 +9,9 @@ The wikimem corpus is layered across three scopes (TRDD-c77dae09):
               because a bare ``memory/`` collides with the very common GitHub
               root-folder name; ``.claude/project/memory`` is collision-free.
 - **USER**    ``~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/``
-              — the janitor's FIXED plugin-DATA dir, cross-project.
+              — the janitor's FIXED plugin-DATA dir, cross-project (canonical). A synced
+              backup MIRROR at ``~/.claude/ai-maestro-janitor-memory/`` survives an
+              uninstall so memory is never lost (TRDD-GFT33HT9).
 
 Every consumer (the memory-maintenance scheduler, the memory-librarian, and the
 memorize-nudge detector) MUST resolve scopes through this module so they agree
@@ -25,13 +27,22 @@ Stdlib only — importable from any detector that has ``scripts/lib`` on sys.pat
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
-# The janitor's FIXED plugin-DATA directory name (NOT a marketplace id). The
-# USER memory scope lives under it; see resolve_user_dir for why it is hard-coded
-# rather than read from ${CLAUDE_PLUGIN_DATA}.
+# The janitor's FIXED plugin-DATA directory name (NOT a marketplace id). The CANONICAL
+# USER memory scope lives under it; see resolve_user_dir for why it is hard-coded rather
+# than read from ${CLAUDE_PLUGIN_DATA}. A ``--keep-data`` uninstall preserves it directly.
 _JANITOR_DATA_DIR_NAME = "ai-maestro-janitor-ai-maestro-plugins"
+
+# The USER-memory MIRROR dir name under ``~/.claude/`` (TRDD-GFT33HT9). The canonical USER
+# corpus lives in the plugin DATA dir (above), which ``claude plugin uninstall`` DELETES
+# unless ``--keep-data``. This is a SYNCED BACKUP MIRROR kept OUTSIDE the data dir so it
+# survives an uninstall and the memory is never lost: SessionStart syncs primary→mirror,
+# and on a fresh install whose primary is empty it RESTORES mirror→primary. The mirror is
+# a backup, NOT the canonical store — every read/write still resolves to the data dir.
+_USER_MEMORY_MIRROR_DIR_NAME = "ai-maestro-janitor-memory"
 
 # The CURATED-wiki sub-namespace within every scope. The coexistence model
 # (TRDD-ab232dbd, USER decision 2026-06-23): a scope's root ``memory/`` holds the
@@ -174,20 +185,82 @@ def resolve_project_dir() -> Path | None:
     return (Path(top) / ".claude" / "project" / "memory") if top else None
 
 
+def _home() -> Path:
+    return Path(os.environ.get("HOME") or os.path.expanduser("~"))
+
+
 def resolve_user_dir() -> Path:
     """The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
-    ``~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/``.
+    ``~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`` (CANONICAL).
 
     Resolved by this EXPLICIT hard-coded path, NEVER via ``${CLAUDE_PLUGIN_DATA}``:
-    that env var holds the *currently-running* plugin's data dir, which at
-    heartbeat time is whatever plugin owns the turn — verified to be some other
-    plugin, not the janitor — so reading it would route USER recall/write to the
-    wrong plugin's dir. The fixed dir also survives plugin updates + a
-    ``--keep-data`` uninstall (NOT a ``~/.claude/<custom>/`` folder a cleanup
-    pass could wipe). Not created.
+    that env var holds the *currently-running* plugin's data dir, which at heartbeat
+    time is whatever plugin owns the turn — verified to be some other plugin, not the
+    janitor — so reading it would route USER recall/write to the wrong plugin's dir.
+
+    This is the CANONICAL store every read/write resolves to. It survives plugin updates
+    and a ``--keep-data`` uninstall. A plain ``claude plugin uninstall`` DELETES it, so a
+    synced backup MIRROR (``resolve_user_mirror_dir``) OUTSIDE the data dir guarantees the
+    memory is never lost (TRDD-GFT33HT9). Not created.
     """
-    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "plugins" / "data" / _JANITOR_DATA_DIR_NAME / "memory"
+    return _home() / ".claude" / "plugins" / "data" / _JANITOR_DATA_DIR_NAME / "memory"
+
+
+def resolve_user_mirror_dir() -> Path:
+    """The USER-memory BACKUP MIRROR ``~/.claude/ai-maestro-janitor-memory/`` (TRDD-GFT33HT9).
+
+    A synced copy of the canonical USER corpus, kept OUTSIDE the plugin data dir so it
+    survives ``claude plugin uninstall`` (which deletes the data dir unless ``--keep-data``).
+    It is a backup only — never the store consumers resolve to. ``sync_user_memory_mirror``
+    keeps it fresh and restores from it after a data-dir loss. Not created.
+    """
+    return _home() / ".claude" / _USER_MEMORY_MIRROR_DIR_NAME
+
+
+def _dir_has_memory(d: Path) -> bool:
+    """True iff ``d`` exists and holds at least one real corpus entry (a ``*.md`` note,
+    the ``user-mem`` private store, the ``.memgrep`` index, or the curated ``wiki``). An
+    empty or missing dir → False."""
+    if not d.is_dir():
+        return False
+    for child in d.iterdir():
+        name = child.name
+        if name.endswith(".md") or name in ("user-mem", ".memgrep", WIKI_SUBDIR):
+            return True
+    return False
+
+
+def sync_user_memory_mirror() -> str | None:
+    """Keep the uninstall-surviving USER-memory MIRROR in step with the canonical store
+    (TRDD-GFT33HT9). Returns ``"mirrored"`` / ``"restored"`` when it acted, else None.
+
+    Two directions, decided by which side holds memory:
+    - **primary has memory** → SYNC primary→mirror (refresh the backup). Steady state.
+    - **primary EMPTY but mirror has memory** → RESTORE mirror→primary. This is the
+      recovery path: a plain uninstall deleted the data dir, and on the next (re)install
+      the mirror repopulates the canonical store so nothing is lost.
+    - **neither has memory** → nothing to do (fresh install).
+
+    The copy is ADDITIVE (``copytree(dirs_exist_ok=True)`` — overwrites changed files,
+    keeps files the other side lacks): it NEVER deletes a note from either side, erring
+    toward keeping memory. Best-effort — any OSError is swallowed so a mirror hiccup can
+    never break session start. Cheap: the USER corpus is small markdown + a regeneratable
+    index.
+    """
+    primary = resolve_user_dir()
+    mirror = resolve_user_mirror_dir()
+    try:
+        if _dir_has_memory(primary):
+            mirror.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(primary, mirror, dirs_exist_ok=True)
+            return "mirrored"
+        if _dir_has_memory(mirror):
+            primary.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(mirror, primary, dirs_exist_ok=True)
+            return "restored"
+    except OSError:
+        return None  # a backup hiccup must never break session start
+    return None
 
 
 def resolve_wiki_dir(scope_root: Path) -> Path:

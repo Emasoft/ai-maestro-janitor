@@ -250,3 +250,69 @@ def test_iter_note_files_is_recursive(tmp_path):
 def test_iter_note_files_empty_for_missing_dir(tmp_path):
     """A missing memory dir yields [] (silent, never raises)."""
     assert msc.iter_note_files(tmp_path / "does-not-exist") == []
+
+
+# ---- USER-memory backup mirror (TRDD-GFT33HT9) -----------------------------
+
+def _seed(d: Path, name: str, body: str) -> None:
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(body, encoding="utf-8")
+
+
+def test_resolve_user_mirror_dir_is_outside_the_data_dir(_isolate):
+    """The mirror lives at ~/.claude/ai-maestro-janitor-memory/ — NOT under plugins/data,
+    so a plain uninstall (which deletes the data dir) never touches it."""
+    got = msc.resolve_user_mirror_dir()
+    assert got == _isolate / ".claude" / "ai-maestro-janitor-memory"
+    assert "plugins/data" not in str(got)
+
+
+def test_sync_mirrors_primary_to_mirror():
+    """Primary has memory → sync copies it into the mirror and reports 'mirrored'."""
+    _seed(msc.resolve_user_dir(), "note.md", "canonical fact\n")
+    assert msc.sync_user_memory_mirror() == "mirrored"
+    assert (msc.resolve_user_mirror_dir() / "note.md").read_text(encoding="utf-8") == "canonical fact\n"
+
+
+def test_sync_restores_mirror_to_primary_when_primary_empty():
+    """Primary absent but mirror has memory (post-uninstall reinstall) → RESTORE."""
+    _seed(msc.resolve_user_mirror_dir(), "note.md", "survived the uninstall\n")
+    assert not msc.resolve_user_dir().exists()
+    assert msc.sync_user_memory_mirror() == "restored"
+    assert (msc.resolve_user_dir() / "note.md").read_text(encoding="utf-8") == "survived the uninstall\n"
+
+
+def test_sync_noop_when_neither_side_has_memory():
+    """Fresh install (no primary, no mirror) → nothing to sync."""
+    assert msc.sync_user_memory_mirror() is None
+
+
+def test_sync_is_additive_and_never_deletes():
+    """Primary drives the sync, but a note only in the mirror is KEPT (never deleted) —
+    the backup errs toward retaining memory."""
+    _seed(msc.resolve_user_dir(), "a.md", "in primary\n")
+    _seed(msc.resolve_user_mirror_dir(), "b.md", "only in mirror\n")
+    assert msc.sync_user_memory_mirror() == "mirrored"
+    mirror = msc.resolve_user_mirror_dir()
+    assert (mirror / "a.md").exists(), "primary note is mirrored"
+    assert (mirror / "b.md").read_text(encoding="utf-8") == "only in mirror\n", "mirror-only note survives"
+
+
+def test_sync_carries_user_mem_and_index_subdirs():
+    """The private user-mem store and the .memgrep index mirror too (whole corpus)."""
+    primary = msc.resolve_user_dir()
+    _seed(primary, "note.md", "x\n")
+    _seed(primary / "user-mem", "0001.md", "private\n")
+    _seed(primary / ".memgrep", "index.db", "SQLITE\n")
+    assert msc.sync_user_memory_mirror() == "mirrored"
+    mirror = msc.resolve_user_mirror_dir()
+    assert (mirror / "user-mem" / "0001.md").read_text(encoding="utf-8") == "private\n"
+    assert (mirror / ".memgrep" / "index.db").exists()
+
+
+def test_sync_is_idempotent():
+    """Running the sync twice is stable — same result, no error, corpus intact."""
+    _seed(msc.resolve_user_dir(), "note.md", "stable\n")
+    assert msc.sync_user_memory_mirror() == "mirrored"
+    assert msc.sync_user_memory_mirror() == "mirrored"
+    assert (msc.resolve_user_mirror_dir() / "note.md").read_text(encoding="utf-8") == "stable\n"

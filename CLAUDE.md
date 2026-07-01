@@ -49,7 +49,8 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 
 ```
 ~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<ver>/  ephemeral plugin (scripts/skills/hooks)
-~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/         DATA: dispatcher-stub.py  (← daemon state SHOULD move here)
+~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/         DATA: dispatcher-stub.py + CANONICAL USER memory/  (← daemon state SHOULD move here)
+~/.claude/ai-maestro-janitor-memory/                                  USER-memory backup MIRROR (TRDD-GFT33HT9): SessionStart syncs primary→mirror + restores mirror→primary; survives a plain uninstall (data dir deleted). memory_scopes.{resolve_user_mirror_dir,sync_user_memory_mirror}
 ~/.claude/janitor-global-state/                                       UNOFFICIAL daemon state (migrate → DATA):
     daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
     marketplace-op.lock (NEW) · {marketplace-refresh,user-plugins-update,version-update}.last-run.ts

@@ -50,7 +50,8 @@ are safe to remove.
 |---|---|---|
 | `~/.claude/rules/*.md` | the janitor's shipped GLOBAL rules (this one, `markdown-memory-recall`, `use-safe-delete`) | no — canonical. A **project-local copy** of any of these is a redundant mirror: gitignore or delete it, **never commit** it (it would impose a personal global rule on every contributor) |
 | `~/.claude/projects/<slug>/memory/` | **LOCAL**-scope wiki memory — machine-private notes (paths, hostnames, hints) | **NO** — real knowledge |
-| `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | the janitor's **DATA** dir — dispatcher stub, **USER**-scope memory, OAuth-rotator + daemon state | **NO** — persistent state |
+| `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | the janitor's **DATA** dir — dispatcher stub, **USER**-scope memory (canonical), OAuth-rotator + daemon state | **NO** — persistent state |
+| `~/.claude/ai-maestro-janitor-memory/` | the **USER-scope memory MIRROR** — a synced backup of the canonical USER corpus, kept OUTSIDE the data dir so it survives a plain `plugin uninstall` (TRDD-GFT33HT9). SessionStart syncs it and restores from it after a data-dir loss | **NO** — real knowledge (a memory store) |
 | `~/.claude/janitor-global-state/` | the machine-wide daemon singleton (pid / flock / locks / timestamps) | no — the daemon recreates what it needs |
 
 **Rule of thumb:** any `…/memory/…` directory and the plugin **DATA** dir hold
