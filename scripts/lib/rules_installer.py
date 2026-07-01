@@ -49,7 +49,7 @@ PLUGIN_NAME = "ai-maestro-janitor"
 # the SOLE identifier the cleanup uses to decide a rule file was installed by THIS plugin
 # and is therefore safe to remove — a user's own hand-written rule of the same name (no
 # marker) is NEVER touched, and NO memory store is ever touched. Keep this string in sync
-# with the `<!-- ai-maestro-janitor:installed-rule … -->` comment prepended to each rule.
+# with the leading provenance comment prepended to each shipped rule file.
 PROVENANCE_MARKER = "ai-maestro-janitor:installed-rule"
 
 

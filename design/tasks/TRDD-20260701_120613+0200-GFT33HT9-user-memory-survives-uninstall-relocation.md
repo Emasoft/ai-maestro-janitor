@@ -85,7 +85,7 @@ memory is never lost.
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-01 lmd:2026-07-01] First designed this as MOVING the USER memory root out of the
+- [2026-07-01] First designed this as MOVING the USER memory root out of the
   data dir (repointing `resolve_user_dir`), which would have rewritten the path in ~14 files. The
   user corrected: make it "only a mirror" — the data dir stays canonical (`--keep-data` preserves
   it), and a synced backup outside the data dir is the uninstall safety net. Lesson: a backup mirror

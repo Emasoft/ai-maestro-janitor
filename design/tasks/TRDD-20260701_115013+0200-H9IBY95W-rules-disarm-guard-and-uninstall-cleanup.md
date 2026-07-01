@@ -51,10 +51,10 @@ implementation-commits: []
     (`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` absent) → rule INERT + tell
     the user it's an orphan they may delete, **NEVER delete any MEMORY** — only this rule file;
     **DISARMED** (`~/.claude/janitor-global-state/kill-switch.flag` present) → INERT; else ACTIVE.
-  - **rules_installer.py**: `PROVENANCE_MARKER` + `_remove_janitor_rules_in` (marker-gated `*.md`
-    only) + `remove_orphaned_rules` (partial-scope self-heal: strip janitor rules from any KNOWN
-    rules dir that is no longer an install target — incl. the redundant project mirror, issue #36)
-    + `janitor_uninstalled` (no settings scope AND data dir gone — BOTH required) +
+  - **rules_installer.py**: `PROVENANCE_MARKER`; `_remove_janitor_rules_in` (marker-gated `*.md`
+    only); `remove_orphaned_rules` (partial-scope self-heal: strip janitor rules from any KNOWN
+    rules dir that is no longer an install target — incl. the redundant project mirror, issue #36);
+    `janitor_uninstalled` (no settings scope AND data dir gone — BOTH required); and
     `cleanup_user_orphans_if_uninstalled` (daemon entry).
   - **on-session-start.py** now calls `remove_orphaned_rules()` after install (project + user).
   - **daemon.py** `task_rules_cleanup` (1 h, opt-out `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED`):
@@ -99,7 +99,7 @@ rule `.md` files, never a memory store.
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-01 lmd:2026-07-01] Claude Code has NO plugin-uninstall hook (verified against
+- [2026-07-01] Claude Code has NO plugin-uninstall hook (verified against
   plugins-reference.md 2026-07-01) and does NOT clean a plugin's `~/.claude/rules/` on uninstall, so
   a plugin that installs global rules cannot fully self-clean from a hook. The durable pattern is a
   self-evaluating inert-guard in the rule content + a provenance marker + best-effort removal by the

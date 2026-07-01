@@ -1,6 +1,6 @@
 ---
 name: janitor-compact-context
-description: Self-compact the current Claude Code session's context window mid-work, then auto-resume. Invoke when context usage is high (for example the watchdog injected a context-window percentage warning at or above the threshold) and you want to compact before hitting the wall where /compact itself fails. Records a one-line resume directive, then fires ESC then /compact at this session's own terminal pane (iTerm or tmux). Supports --soft (enqueue /compact WITHOUT pressing ESC, so the current turn finishes first and no in-flight work is lost) and --handoff (write a rich agent-authored handoff via /janitor-write-handoff BEFORE compacting, for delicate junctures); the two combine. Trigger with /janitor-compact-context, /janitor-compact-context --soft, or by asking to compact the context now.
+description: Self-compact the current Claude Code session's context, then auto-resume. Invoke when context usage is high (e.g. the watchdog warned at or above threshold) and you want to compact before the wall where /compact itself fails. Records a resume directive, then fires ESC+/compact at this session's own pane (iTerm/tmux). --soft enqueues /compact WITHOUT ESC (the current turn finishes; no in-flight work lost); --handoff writes a rich handoff via /janitor-write-handoff first (delicate junctures); the two combine. Trigger with /janitor-compact-context [--soft] [--handoff], or by asking to compact now.
 ---
 
 # Janitor compact-context

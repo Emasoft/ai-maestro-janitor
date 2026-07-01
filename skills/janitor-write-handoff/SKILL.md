@@ -1,6 +1,6 @@
 ---
 name: janitor-write-handoff
-description: Write a rich, agent-authored session handoff to .janitor/state/agent-handoff.md before a context compaction, so the post-compaction turn re-grounds from YOUR semantic account (what you were doing, the plan, the next concrete action, the traps already hit) — not just the mechanical PreCompact snapshot. Invoke for a delicate juncture where the always-on zero-cost pre-compact-handoff hook is not enough. Usually run automatically by /janitor-compact-context --handoff (which passes --then-compact so this skill chains to /compact when done); a bare /janitor-write-handoff writes the handoff and stops. Trigger with /janitor-write-handoff or by asking to write a handoff before compacting.
+description: Write a rich, agent-authored session handoff to .janitor/state/agent-handoff.md before a context compaction, so the next turn re-grounds from YOUR semantic account (what you were doing, the plan, the next action, the traps hit) — not just the mechanical PreCompact snapshot. Invoke for a delicate juncture where the always-on zero-cost pre-compact-handoff hook isn't enough. Usually run by /janitor-compact-context --handoff (which passes --then-compact so this chains to /compact when done); a bare /janitor-write-handoff writes the handoff and stops. Trigger with /janitor-write-handoff, or by asking to write a handoff before compacting.
 ---
 
 # Janitor write-handoff
