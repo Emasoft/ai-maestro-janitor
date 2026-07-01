@@ -53,7 +53,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 ~/.claude/janitor-global-state/                                       UNOFFICIAL daemon state (migrate → DATA):
     daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
     marketplace-op.lock (NEW) · {marketplace-refresh,user-plugins-update,version-update}.last-run.ts
-    kill-switch.flag · reload-needed.flag
+    kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)
 $PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·
     rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
     resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files
@@ -72,6 +72,7 @@ plugin updates auto-roll with NO re-arm) → `dispatch.py`:
 5. daemon stale/old-version → request restart (auto-roll the daemon too).
 6. run each **due** detector `--one-shot`; emit only NEW findings (seen-file dedupe).
 7. `reload-needed.flag` → emit `[janitor-reload]` (Claude runs /reload-plugins).
+8. `skills-reload-needed.flag` (bumped by `/janitor-global-reload-skills`) → emit `[janitor-reload-skills]` once-per-session (per-project ack) → Claude runs /janitor-reload-skills → /reload-skills (standalone non-plugin skills/commands). TRDD-LQU7OXXV.
 
 **Daemon loop (`daemon.py`):** acquire singleton flock (else exit) → every tick,
 run each due `Task`; `_run_workload` runs subprocess with **1800s cap** +
@@ -187,7 +188,21 @@ arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 `janitor-credential-window-audit`, `janitor-github-workflow-doctor`,
 `janitor-github-workflow-create`, `janitor-fork-pr-cache-audit`,
 `janitor-compact-context` (agent-invocable self-compact + auto-resume; backed by
-`scripts/compact_trigger.py`).
+`scripts/compact_trigger.py`; `--soft` = enqueue `/compact` WITHOUT ESC so the turn
+finishes first, `--handoff` = run `/janitor-write-handoff` first — combinable —
+TRDD-LQU7OXXV), `janitor-write-handoff` (rich agent-authored handoff to
+`.janitor/state/agent-handoff.md`, the OPT-IN semantic complement to the always-on
+zero-cost `pre-compact-handoff.py`; `--then-compact` chains to `/compact`),
+`janitor-reload-plugins` (→ `/reload-plugins`; `--soft`), `janitor-reload-skills`
+(→ CC's `/reload-skills` for STANDALONE non-plugin skills/commands at local/project/user
+scope — `/reload-plugins` only reloads plugin-bundled ones; backed by
+`scripts/reload_skills_trigger.py`; `--soft`) ↔ `janitor-global-reload-skills` (machine-wide:
+`global_control_cli.py reload-skills` stamps a `skills-reload-needed.flag` generation that
+`dispatch.py _phase_skills_reload` emits `[janitor-reload-skills]` for once-per-session,
+mirroring the `[janitor-reload]` path — TRDD-LQU7OXXV). The self-trigger commands share
+`scripts/lib/terminal_trigger.py`, which now parameterizes `esc_first` (hard=ESC-interrupt /
+soft=enqueue) + multi-command sends — the substrate TRDD-ME8V2YJF reuses for daemon-driven
+fleet injection.
 
 **Agents (`agents/`, 2)** — the TWO single-curator agents, each ONE agent that loads
 many per-task SKILLS (never one-agent-per-task), runs in its OWN context, returns one

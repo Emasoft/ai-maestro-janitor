@@ -2,27 +2,32 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Backing script for /janitor-reload-plugins (analogue of compact_trigger.py).
+"""Backing script for /janitor-reload-skills (analogue of reload_trigger.py).
 
-Fires a DETACHED, delayed ESC -> /reload-plugins at THIS session's own iTerm pane
-so the agent can pick up freshly auto-updated plugin hooks/skills WITHOUT the
-human typing the command. The heartbeat's `[janitor-reload]` marker asks the
-agent to "silently run /reload-plugins", but the Skill tool refuses built-in
-slash commands — so, exactly like the compact trigger, the only working path is
-to type the command into this session's own pane via osascript.
+Fires a DETACHED, delayed ESC -> /reload-skills at THIS session's own iTerm pane so
+the agent can pick up freshly installed STANDALONE (non-plugin) skills and commands
+WITHOUT the human typing the command. Claude Code's `/reload-plugins` only reloads
+skills/commands bundled INSIDE a plugin; a standalone skill or command dropped into
+`~/.claude/skills`, `.claude/skills`, `~/.claude/commands`, etc. (local / project /
+user scope, not part of any plugin) is picked up by `/reload-skills` instead. The
+Skill tool refuses built-in slash commands, so — exactly like the compact and reload
+triggers — the only working path is to type the command into this session's own pane
+via osascript (iTerm) or `tmux send-keys`.
 
-UNLIKE the compact trigger there is NO resume directive: /reload-plugins reloads
-plugin code in place and does NOT discard the conversation, so nothing needs to
-be recorded for an auto-resume — the turn simply continues after the reload.
+Like the reload trigger there is NO resume directive: /reload-skills reloads standalone
+skills/commands in place and does NOT discard the conversation, so nothing needs to be
+recorded for an auto-resume — the turn simply continues after the reload.
 
-The delay + detach are load-bearing: the script must NOT be killed by the very
-ESC it sends, so it returns immediately and the keystrokes fire ~delay seconds
-later (after the agent ends its turn). It targets ONLY the session whose UUID
-matches $ITERM_SESSION_ID — never other panes — so concurrent Claude instances
-are untouched.
+The delay + detach are load-bearing: the script must NOT be killed by the very ESC it
+sends, so it returns immediately and the keystrokes fire ~delay seconds later (after the
+agent ends its turn). It targets ONLY the session whose UUID matches $ITERM_SESSION_ID —
+never other panes — so concurrent Claude instances are untouched.
 
-Outside iTerm ($ITERM_SESSION_ID unset) self-trigger isn't available: the script
-prints NO_ITERM and the skill asks the user to run /reload-plugins manually.
+`--soft` omits the ESC: /reload-skills is TYPED and ENQUEUED so it runs after the current
+turn ends, never interrupting in-flight work.
+
+Outside iTerm ($ITERM_SESSION_ID unset) self-trigger isn't available: the script prints
+NO_ITERM and the skill asks the user to run /reload-skills manually.
 """
 
 from __future__ import annotations
@@ -47,14 +52,14 @@ _UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
 
 def _build_osascript(uuid: str, delay_s: float, *, esc_first: bool = True) -> str:
     """AppleScript that targets ONLY the session whose id == uuid, then (optionally) a
-    raw ESC followed by /reload-plugins.
+    raw ESC followed by /reload-skills.
 
     `esc_first=True` (default) writes a raw ESC byte first
     (`write text (character id 27)`), clearing any half-typed input / interrupting an
     in-flight turn so the reload runs NOW — the HARD path. `esc_first=False` (SOFT)
-    sends NO ESC, so `/reload-plugins` is typed while the agent is mid-turn and Claude
+    sends NO ESC, so `/reload-skills` is typed while the agent is mid-turn and Claude
     Code enqueues it until the turn ends (the reload then applies without cutting the
-    turn short). `write text "/reload-plugins"` types and submits the command (iTerm's
+    turn short). `write text "/reload-skills"` types and submits the command (iTerm's
     write text appends a return)."""
     lines = [
         f"delay {delay_s}",
@@ -68,7 +73,7 @@ def _build_osascript(uuid: str, delay_s: float, *, esc_first: bool = True) -> st
     if esc_first:
         lines.append("            write text (character id 27) without newline")
         lines.append("            delay 0.6")
-    lines.append('            write text "/reload-plugins"')
+    lines.append('            write text "/reload-skills"')
     lines += [
         "          end tell",
         "        end if",
@@ -92,17 +97,17 @@ def _fire(script: str) -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Self-trigger /reload-plugins at this session's pane.")
+    ap = argparse.ArgumentParser(description="Self-trigger /reload-skills at this session's pane.")
     ap.add_argument(
         "--delay",
         type=float,
         default=2.0,
-        help="seconds to wait before sending ESC -> /reload-plugins (lets the turn settle)",
+        help="seconds to wait before sending ESC -> /reload-skills (lets the turn settle)",
     )
     ap.add_argument(
         "--soft",
         action="store_true",
-        help="do NOT press ESC — enqueue /reload-plugins so it runs AFTER the current "
+        help="do NOT press ESC — enqueue /reload-skills so it runs AFTER the current "
         "turn ends (no in-flight work interrupted); default is a hard ESC-interrupt reload",
     )
     ap.add_argument(
@@ -117,11 +122,11 @@ def main() -> int:
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
     sent = terminal_trigger.send_self_command(
-        "/reload-plugins", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
+        "/reload-skills", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
     )
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
-            print("RELOAD_FIRED")
+            print("RELOAD_SKILLS_FIRED")
         elif sent.startswith("DRY_RUN:"):
             print(f"DRY_RUN {sent.split(':', 1)[1]}")
         else:  # NO_AUTO_TERMINAL:<kind> — can't auto-send; ask the human (legacy marker)
@@ -140,11 +145,11 @@ def main() -> int:
         print("NO_ITERM")
         return 0
     if args.dry_run:
-        plan = ("ESC->" if esc_first else "") + "/reload-plugins"
+        plan = ("ESC->" if esc_first else "") + "/reload-skills"
         print(f"DRY_RUN would fire {plan} at iTerm session {uuid} after {args.delay}s")
         return 0
     _fire(_build_osascript(uuid, args.delay, esc_first=esc_first))
-    print("RELOAD_FIRED")
+    print("RELOAD_SKILLS_FIRED")
     return 0
 
 

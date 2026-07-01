@@ -36,6 +36,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -47,6 +48,39 @@ import terminal_trigger  # noqa: E402
 # and a value like `x:" then do shell script "rm -rf ~" --` would otherwise
 # inject AppleScript. A security plugin must not ship its own injection sink.
 _UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
+
+# The slash-commands the three modes type into the pane. These are FIXED module
+# constants (never user/env input), so interpolating them into the tmux/osascript
+# send is not an injection sink (unlike the UUID, which is validated above).
+COMPACT_CMD = "/compact"
+HANDOFF_CMD = "/janitor-write-handoff"
+# In HARD --handoff the detached sender can't observe when the handoff skill finishes,
+# so the ordering is delegated to the skill: it writes the handoff then, seeing this
+# arg, chains to /compact itself. In SOFT --handoff no chaining is needed — both
+# commands are enqueued and the input queue serialises them (handoff turn, then compact).
+HANDOFF_THEN_COMPACT_CMD = "/janitor-write-handoff --then-compact"
+
+
+def plan_compact(*, soft: bool, handoff: bool) -> tuple[list[str], bool]:
+    """Map the (--soft, --handoff) flags to the (commands, esc_first) send plan.
+
+    Four modes, each a keystroke sequence typed into this session's own pane:
+      - default (hard):    ESC → /compact                     (interrupt now, compact)
+      - --soft:            /compact                            (no ESC → runs at turn end)
+      - --handoff (hard):  ESC → /janitor-write-handoff …      (skill then chains /compact)
+      - --handoff --soft:  /janitor-write-handoff, /compact    (no ESC → both enqueued)
+
+    Returns (commands, esc_first). `esc_first=False` is the SOFT contract: omit the ESC
+    so the agent's in-flight turn is NOT interrupted — the command(s) enqueue and run
+    only once the turn ends, losing no work.
+    """
+    if handoff and soft:
+        return [HANDOFF_CMD, COMPACT_CMD], False
+    if handoff:
+        return [HANDOFF_THEN_COMPACT_CMD], True
+    if soft:
+        return [COMPACT_CMD], False
+    return [COMPACT_CMD], True
 
 
 def _project_root() -> Path:
@@ -78,31 +112,46 @@ def _write_directive(directive: str) -> Path:
     return target
 
 
-def _build_osascript(uuid: str, delay_s: float) -> str:
-    """AppleScript that targets ONLY the session whose id == uuid, then ESC -> /compact.
+def _build_osascript(
+    uuid: str, delay_s: float, *, commands: Sequence[str] = (COMPACT_CMD,), esc_first: bool = True
+) -> str:
+    """AppleScript that targets ONLY the session whose id == uuid, then (optionally) a
+    raw ESC followed by each command typed and submitted.
 
-    `write text (character id 27) without newline` sends a raw ESC byte (interrupts
-    an in-flight turn). After a short settle, `write text "/compact"` types and
-    submits the command (iTerm's write text appends a return).
+    `esc_first=True` (default) writes a raw ESC byte first
+    (`write text (character id 27)`), interrupting an in-flight turn so the command runs
+    NOW — the HARD path. `esc_first=False` (SOFT) sends NO ESC, so the command is typed
+    while the agent is mid-turn and Claude Code enqueues it until the turn ends. Each
+    command in `commands` is typed via `write text "<cmd>"` (iTerm appends a return), so
+    a two-command list enqueues both in order. The commands are FIXED module constants
+    (never user/env input), so interpolating them is not an injection sink — unlike
+    `uuid`, which `_UUID_RE` validates before it reaches here.
     """
-    return (
-        f"delay {delay_s}\n"
-        'tell application "iTerm2"\n'
-        "  repeat with w in windows\n"
-        "    repeat with t in tabs of w\n"
-        "      repeat with s in sessions of t\n"
-        f'        if (id of s) is "{uuid}" then\n'
-        "          tell s\n"
-        "            write text (character id 27) without newline\n"
-        "            delay 0.6\n"
-        '            write text "/compact"\n'
-        "          end tell\n"
-        "        end if\n"
-        "      end repeat\n"
-        "    end repeat\n"
-        "  end repeat\n"
-        "end tell\n"
-    )
+    lines = [
+        f"delay {delay_s}",
+        'tell application "iTerm2"',
+        "  repeat with w in windows",
+        "    repeat with t in tabs of w",
+        "      repeat with s in sessions of t",
+        f'        if (id of s) is "{uuid}" then',
+        "          tell s",
+    ]
+    if esc_first:
+        lines.append("            write text (character id 27) without newline")
+        lines.append("            delay 0.6")
+    for i, command in enumerate(commands):
+        if i:
+            lines.append("            delay 0.4")  # let each enqueued command register
+        lines.append(f'            write text "{command}"')
+    lines += [
+        "          end tell",
+        "        end if",
+        "      end repeat",
+        "    end repeat",
+        "  end repeat",
+        "end tell",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def _fire(script: str) -> None:
@@ -130,6 +179,18 @@ def main() -> int:
         help="seconds to wait before sending ESC -> /compact (lets the turn settle)",
     )
     ap.add_argument(
+        "--soft",
+        action="store_true",
+        help="do NOT press ESC — enqueue the command(s) so they run AFTER the current "
+        "turn ends (no in-flight work lost); default is a hard ESC-interrupt compact",
+    )
+    ap.add_argument(
+        "--handoff",
+        action="store_true",
+        help="run /janitor-write-handoff (a rich agent-authored handoff) BEFORE /compact "
+        "— for delicate junctures; combinable with --soft",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="write the directive + print the plan, but do NOT fire osascript (for tests)",
@@ -141,10 +202,14 @@ def main() -> int:
         path = _write_directive(directive)
         print(f"DIRECTIVE_WRITTEN {path}")
 
+    commands, esc_first = plan_compact(soft=args.soft, handoff=args.handoff)
+
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
-    sent = terminal_trigger.send_self_command("/compact", delay_s=args.delay, dry_run=args.dry_run)
+    sent = terminal_trigger.send_self_command(
+        commands, delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
+    )
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("COMPACT_FIRED")
@@ -167,9 +232,10 @@ def main() -> int:
         print("NO_ITERM")
         return 0
     if args.dry_run:
-        print(f"DRY_RUN would fire ESC->/compact at iTerm session {uuid} after {args.delay}s")
+        plan = ("ESC->" if esc_first else "") + "->".join(commands)
+        print(f"DRY_RUN would fire {plan} at iTerm session {uuid} after {args.delay}s")
         return 0
-    _fire(_build_osascript(uuid, args.delay))
+    _fire(_build_osascript(uuid, args.delay, commands=commands, esc_first=esc_first))
     print("COMPACT_FIRED")
     return 0
 

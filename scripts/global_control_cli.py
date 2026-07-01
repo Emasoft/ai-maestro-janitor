@@ -11,6 +11,7 @@ ONE source of truth (never duplicated into a skill's bash):
     global_control_cli.py arm                # /janitor-global-arm    — revive after a disarm
     global_control_cli.py pause [reason]     # /janitor-global-pause  — SUSPEND (idle, no teardown)
     global_control_cli.py unpause            # /janitor-global-unpause— resume after a pause
+    global_control_cli.py reload-skills [reason]  # /janitor-global-reload-skills — fleet skills reload
     global_control_cli.py status             # show both flags
 
 Two SEPARATE mechanisms, deliberately distinct:
@@ -83,10 +84,27 @@ def main() -> int:
         print("janitor global pause lifted — the daemon resumes running tasks and sessions "
               "resume emitting drift.")
         return 0
+    if cmd == "reload-skills":
+        # FLEET standalone-skills reload. Stamp the machine-wide generation; each live
+        # session's heartbeat emits [janitor-reload-skills] once (per-project ack) on its
+        # next fire, which runs /janitor-reload-skills → /reload-skills locally. Unlike
+        # disarm/pause this is a MONOTONIC generation, never a persistent stop-state — it
+        # requests a one-time reload, not an ongoing posture. Rollout caveat (mirrors the
+        # [janitor-reload] path): a heartbeat whose cron prompt was baked BEFORE this
+        # marker shipped won't act on it until the session re-arms.
+        gs.set_skills_reload_flag(reason)
+        print("janitor global reload-skills requested — every live session's next heartbeat "
+              "will emit [janitor-reload-skills] once and run /reload-skills locally, so newly "
+              "installed STANDALONE skills/commands load fleet-wide. (Already-armed sessions "
+              "honor the new marker only after a re-arm.)")
+        return 0
     if cmd == "status":
         print(_status_line())
         return 0
-    sys.exit(f"unknown command: {cmd!r} (use: disarm [reason] | arm | pause [reason] | unpause | status)")
+    sys.exit(
+        f"unknown command: {cmd!r} "
+        "(use: disarm [reason] | arm | pause [reason] | unpause | reload-skills [reason] | status)"
+    )
 
 
 if __name__ == "__main__":

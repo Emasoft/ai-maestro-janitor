@@ -259,6 +259,56 @@ def test_reload_generation_absent_and_legacy(state_dir: Path) -> None:
     assert gs.reload_flag_present() is True
 
 
+# ---------- standalone-skills reload generation (TRDD-LQU7OXXV) -------------
+
+def test_skills_reload_flag_round_trip(state_dir: Path) -> None:
+    """set → present, clear → absent — the standalone-skills sibling of the
+    plugin-reload flag."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.skills_reload_flag_present() is False
+    gs.set_skills_reload_flag("via /janitor-global-reload-skills")
+    assert gs.skills_reload_flag_present() is True
+    gs.clear_skills_reload_flag()
+    assert gs.skills_reload_flag_present() is False
+
+
+def test_skills_reload_flag_stores_generation_and_reason(state_dir: Path) -> None:
+    """Body is `<epoch-generation>\\t<reason>`, in its OWN flag file — distinct from
+    the plugin reload flag so a plugin update never forces a skills reload."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.set_skills_reload_flag("standalone-skill-x")
+    body = (state_dir / "skills-reload-needed.flag").read_text(encoding="utf-8")
+    gen_str, _, reason = body.partition("\t")
+    assert gen_str.isdigit() and int(gen_str) > 0, f"expected epoch generation, got {body!r}"
+    assert reason == "standalone-skill-x"
+    assert gs.skills_reload_generation() == int(gen_str)
+    # The two reload generations are independent files: stamping skills must NOT
+    # create the plugin reload flag.
+    assert gs.reload_generation() == 0
+
+
+def test_skills_reload_generation_absent_and_legacy(state_dir: Path) -> None:
+    """skills_reload_generation(): absent → 0; a legacy non-epoch body → 1 (a
+    never-acked session still reloads exactly once instead of being stuck)."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.skills_reload_generation() == 0
+    (state_dir / "skills-reload-needed.flag").write_text("reload please", encoding="utf-8")
+    assert gs.skills_reload_generation() == 1
+    assert gs.skills_reload_flag_present() is True
+
+
+def test_skills_reload_clear_idempotent(state_dir: Path) -> None:
+    """clear_skills_reload_flag on a missing flag is a silent no-op."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.clear_skills_reload_flag()  # must not raise
+    gs.clear_skills_reload_flag()
+    assert gs.skills_reload_flag_present() is False
+
+
 # ---------- daemon-restart staleness check ---------------------------------
 
 def test_daemon_needs_restart_false_when_no_daemon(state_dir: Path) -> None:

@@ -1,9 +1,9 @@
 ---
 trdd-id: LQU7OXXV
 title: /janitor-compact-context --soft and --handoff flags + /janitor-write-handoff skill
-column: todo
+column: complete
 created: 2026-07-01T03:25:25+0200
-updated: 2026-07-01T03:25:25+0200
+updated: 2026-07-01T04:01:26+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -25,6 +25,17 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-01
 
+- **DONE (this session):** all four compact modes ship (default hard `ESC→/compact`; `--soft`
+  enqueue-no-ESC; `--handoff` hard → `/janitor-write-handoff --then-compact` which chains `/compact`;
+  `--handoff --soft` enqueues both). New skill `skills/janitor-write-handoff/SKILL.md` writes the
+  rich handoff to `.janitor/state/agent-handoff.md` + records the resume directive, and chains
+  `/compact` (via `compact_trigger.py --soft`) ONLY on `--then-compact`. `compact_trigger.py` gained
+  `plan_compact(soft, handoff)` + multi-command / `esc_first` osascript. Shared substrate
+  `terminal_trigger.send_self_command`/`build_tmux_steps` now take `esc_first` + a command LIST;
+  `reload_trigger.py` also gained `--soft` (per the user's "add --soft to ALL instruction-sending
+  janitor commands"). Tests: 45 across test_terminal_trigger/test_compact_trigger/test_reload_trigger.
+  ruff + pyright clean. The SIBLING follow-up `/janitor-reload-skills` (+ global) is TRDD-U63YEFF3,
+  built the same session on the same `esc_first` substrate.
 - **USER SPEC (verbatim intent):** add two flags to `/janitor-compact-context`:
   - **`--soft`** — the janitor WAITS for the agent to finish its turn before compacting. It does
     NOT press ESC immediately; instead it ENQUEUES the `/compact` command (just TYPES it and presses

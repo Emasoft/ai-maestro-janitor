@@ -274,6 +274,68 @@ def test_phase_plugin_reload_per_project_no_starvation(env_isolation: dict) -> N
     assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "[janitor-reload]", "an un-acked project still reloads — the generation was never consumed by project A"
 
 
+# ---------- Phase 1.62: standalone-skills reload (TRDD-LQU7OXXV) ------------
+
+
+def test_phase_skills_reload_silent_when_flag_absent(env_isolation: dict) -> None:
+    """No skills-reload-needed.flag → no marker emitted."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    assert gs.skills_reload_flag_present() is False
+    out = _capture_stdout(dispatch._phase_skills_reload)
+    assert out == "", f"phase must be silent when no flag is set, got {out!r}"
+
+
+def test_phase_skills_reload_emits_marker_and_advances_ack(env_isolation: dict) -> None:
+    """generation present + project not yet acked → bare [janitor-reload-skills],
+    per-project ack advanced, global generation LEFT INTACT; same project silent next."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_skills_reload_flag("via /janitor-global-reload-skills")
+
+    out = _capture_stdout(dispatch._phase_skills_reload)
+    assert out.strip() == "[janitor-reload-skills]", f"expected the bare marker, got {out!r}"
+    assert gs.skills_reload_flag_present() is True, "must NOT clear the global generation"
+    assert _capture_stdout(dispatch._phase_skills_reload).strip() == "", "same project must not re-emit after acking"
+
+
+def test_phase_skills_reload_per_project_no_starvation(env_isolation: dict) -> None:
+    """The generation is never cleared by a reader, so an un-acked project still
+    reloads after another already did (modelled by removing this project's ack)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    gs.set_skills_reload_flag("skill-x")
+    assert _capture_stdout(dispatch._phase_skills_reload).strip() == "[janitor-reload-skills]"
+    assert _capture_stdout(dispatch._phase_skills_reload).strip() == ""
+    (state.state_dir() / "skills-reload-acked.ts").unlink()
+    assert _capture_stdout(dispatch._phase_skills_reload).strip() == "[janitor-reload-skills]", "an un-acked project still reloads"
+
+
+def test_phase_skills_reload_independent_of_plugin_reload(env_isolation: dict) -> None:
+    """The two reload signals are INDEPENDENT: a plugin-reload generation must NOT
+    make _phase_skills_reload fire, and a skills-reload generation must NOT make
+    _phase_plugin_reload fire (separate flag files, separate acks)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    # Only the PLUGIN reload flag is set → skills phase stays silent.
+    gs.set_reload_flag("plugin@mp")
+    assert _capture_stdout(dispatch._phase_skills_reload).strip() == "", "skills phase must ignore a plugin-only generation"
+    # Now only the SKILLS reload flag advances → plugin phase (already acked) stays silent.
+    _capture_stdout(dispatch._phase_plugin_reload)  # ack the plugin generation first
+    gs.set_skills_reload_flag("skill-y")
+    assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "", "plugin phase must ignore a skills-only generation"
+    assert _capture_stdout(dispatch._phase_skills_reload).strip() == "[janitor-reload-skills]"
+
+
 # ---------- Phase 1.65: daemon restart if stale ---------------------------
 
 

@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-plugins
-description: Run /reload-plugins for the current Claude Code session so freshly auto-updated plugin hooks and skills take effect, without the human typing the command. Invoke in response to a [janitor-reload] heartbeat marker (emitted after the daemon auto-updates the janitor plugin), or whenever plugin code changed on disk and the session must pick it up. Fires ESC then /reload-plugins at this session's own terminal pane (iTerm or tmux). Trigger with /janitor-reload-plugins or by asking to reload plugins now.
+description: Run /reload-plugins for the current Claude Code session so freshly auto-updated plugin hooks and skills take effect, without the human typing the command. Invoke in response to a [janitor-reload] heartbeat marker (emitted after the daemon auto-updates the janitor plugin), or whenever plugin code changed on disk and the session must pick it up. Fires ESC then /reload-plugins at this session's own terminal pane (iTerm or tmux). Supports --soft (enqueue /reload-plugins WITHOUT pressing ESC, so the current turn finishes first and no in-flight work is interrupted). Trigger with /janitor-reload-plugins, /janitor-reload-plugins --soft, or by asking to reload plugins now.
 ---
 
 # Janitor reload-plugins
@@ -30,10 +30,17 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
 ## Instructions
 
 1. **Run the backing script** (fires the detached ESC→/reload-plugins at this
-   pane after a short delay):
+   pane after a short delay). Add `--soft` to enqueue the reload instead of
+   interrupting the current turn:
 
    ```bash
+   # HARD (default): ESC → /reload-plugins (interrupts the current turn)
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/reload_trigger.py"
+
+   # SOFT: enqueue /reload-plugins (no ESC — runs after the current turn ends,
+   # so no in-flight work is cut short). Prefer this when you're mid-task and the
+   # reload can wait for a safe boundary.
+   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/reload_trigger.py" --soft
    ```
 
    Read the one-word result:
@@ -54,8 +61,9 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
 ## Output
 
 One short line to the user, then the turn ends. Side effect: launches a detached
-keystroke sender (osascript in iTerm, `tmux send-keys` in tmux) that sends
-ESC→`/reload-plugins` to this session's own pane.
+keystroke sender (osascript in iTerm, `tmux send-keys` in tmux) that types
+`/reload-plugins` into this session's own pane — HARD mode (default) prepends a raw
+ESC (interrupt), `--soft` omits it (enqueue, runs after the current turn ends).
 
 ## Done when (terminating conditions)
 

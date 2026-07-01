@@ -560,6 +560,40 @@ def _phase_plugin_reload() -> None:
     )
 
 
+def _phase_skills_reload() -> None:
+    """Emit a bare `[janitor-reload-skills]` marker once-per-session when the
+    STANDALONE-skills reload generation advances past what THIS project's heartbeat
+    has acked (TRDD-LQU7OXXV follow-up).
+
+    The SEPARATE sibling of `_phase_plugin_reload`: `/janitor-global-reload-skills`
+    stamps `skills-reload-needed.flag` (a never-cleared epoch generation), and each
+    session's heartbeat reloads exactly once per bump via a per-project
+    `skills-reload-acked.ts` — the same generation+ack design that stops one session
+    starving another. The cron prompt maps `[janitor-reload-skills]` → silently run
+    `/janitor-reload-skills` (which types `/reload-skills` into this pane), so newly
+    installed STANDALONE (non-plugin) skills/commands load fleet-wide. Distinct from
+    `/reload-plugins`, which only reloads plugin-bundled skills.
+    """
+    gen = gs.skills_reload_generation()
+    if gen <= 0:
+        return
+    acked_path = state.state_dir() / "skills-reload-acked.ts"
+    # Per-project ack, seeded at SessionStart to the at-start generation so a FRESH
+    # session (already carrying the current standalone skills) stays silent, while a
+    # session live across a `/janitor-global-reload-skills` sees acked < gen and
+    # reloads once. Default 0 when absent is the SELF-HEAL path (emit once, write the
+    # stamp, track normally); defaulting to `gen` would DEADLOCK an un-seeded session.
+    acked = state.read_int_state(acked_path, 0)
+    if acked >= gen:
+        return
+    state.atomic_write(acked_path, str(gen))
+    print("[janitor-reload-skills]")
+    state.log_line(
+        "dispatch",
+        f"skills-reload generation {gen} > project ack → [janitor-reload-skills] emitted (per-project ack advanced; global generation left intact)",
+    )
+
+
 def _phase_crash_loop_rollback() -> None:
     """C4 (TRDD-T198DT1W) — auto-rollback a self-update that won't STAY alive.
 
@@ -833,6 +867,12 @@ def main() -> int:
     # daemon's user-plugins-update task reports a real version change. The
     # cron prompt's silent-execute clause runs /reload-plugins.
     _phase_plugin_reload()
+
+    # Phase 1.62: standalone-skills reload signal — emit [janitor-reload-skills]
+    # once when /janitor-global-reload-skills bumped the skills-reload generation.
+    # The cron prompt's silent-execute clause runs /janitor-reload-skills, which
+    # types /reload-skills into this pane (reloads NON-plugin skills/commands).
+    _phase_skills_reload()
 
     # Phase 1.64: C4 bad-self-update auto-rollback. When the global-state spawn
     # breaker shows the daemon is crash-looping (a bad new version that won't stay

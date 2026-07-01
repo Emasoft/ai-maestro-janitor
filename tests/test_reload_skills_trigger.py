@@ -1,12 +1,13 @@
-"""Tests for the /janitor-reload-plugins backing script (scripts/reload_trigger.py).
+"""Tests for the /janitor-reload-skills backing script (scripts/reload_skills_trigger.py).
 
 SAFETY: every test that exercises main() passes --dry-run and a controlled env, so
-the real osascript ESC->/reload-plugins is NEVER fired (it would reload the
-developer's own live pane). The pure helper is tested directly; main() is tested
-via real subprocess runs with --dry-run.
+the real osascript ESC->/reload-skills is NEVER fired (it would reload the developer's
+own live pane). The pure helper is tested directly; main() is tested via real
+subprocess runs with --dry-run.
 
-Unlike the compact trigger, reload records NO resume directive (reloading plugins
-does not discard the conversation), so there is no file side effect to assert.
+/reload-skills is DISTINCT from /reload-plugins: it reloads STANDALONE (non-plugin)
+skills and commands. Like the reload-plugins trigger it records NO resume directive
+(reloading skills does not discard the conversation), so there is no file side effect.
 """
 
 from __future__ import annotations
@@ -18,11 +19,11 @@ import sys
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SCRIPT = _PROJECT_ROOT / "scripts" / "reload_trigger.py"
+_SCRIPT = _PROJECT_ROOT / "scripts" / "reload_skills_trigger.py"
 
 
 def _import():
-    spec = _u.spec_from_file_location("reload_trigger_under_test", str(_SCRIPT))
+    spec = _u.spec_from_file_location("reload_skills_trigger_under_test", str(_SCRIPT))
     assert spec is not None and spec.loader is not None
     mod = _u.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -48,22 +49,23 @@ def _run(args: list[str], *, iterm: str | None) -> subprocess.CompletedProcess:
 
 # ---------- pure helper -----------------------------------------------------
 
-def test_build_osascript_targets_uuid_and_sends_esc_then_reload() -> None:
+def test_build_osascript_targets_uuid_and_sends_esc_then_reload_skills() -> None:
     mod = _import()
     osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0)
     assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa, "must match the specific session id"
     assert "character id 27" in osa, "must send a raw ESC byte"
-    assert '"/reload-plugins"' in osa, "must send /reload-plugins"
-    assert '"/compact"' not in osa, "must NOT send /compact (this is the reload trigger)"
+    assert '"/reload-skills"' in osa, "must send /reload-skills"
+    assert '"/reload-plugins"' not in osa, "must NOT send /reload-plugins (that is a different command)"
+    assert '"/compact"' not in osa, "must NOT send /compact"
     assert "delay 2.0" in osa, "must delay before firing so the parent returns first"
 
 
 def test_build_osascript_soft_omits_esc() -> None:
-    """SOFT: no raw ESC byte — /reload-plugins enqueues instead of interrupting the turn."""
+    """SOFT: no raw ESC byte — /reload-skills enqueues instead of interrupting the turn."""
     mod = _import()
     osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0, esc_first=False)
     assert "character id 27" not in osa, "soft mode must NOT send an ESC byte"
-    assert '"/reload-plugins"' in osa, "must still type /reload-plugins"
+    assert '"/reload-skills"' in osa, "must still type /reload-skills"
 
 
 def test_uuid_regex_accepts_real_rejects_injection() -> None:
@@ -86,17 +88,18 @@ def test_dry_run_reports_plan_and_does_not_fire() -> None:
     proc = _run(["--dry-run"], iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert proc.returncode == 0
     assert "DRY_RUN" in proc.stdout and "789D8299-5AA2-48CF-9325-3BC972B9BEAE" in proc.stdout
-    assert "reload-plugins" in proc.stdout
-    assert "RELOAD_FIRED" not in proc.stdout, "dry-run must not fire"
+    assert "reload-skills" in proc.stdout
+    assert "ESC->" in proc.stdout, "hard default interrupts first"
+    assert "RELOAD_SKILLS_FIRED" not in proc.stdout, "dry-run must not fire"
 
 
 def test_soft_dry_run_omits_esc_from_plan() -> None:
     """--soft: the printed iTerm plan has NO `ESC->` prefix (enqueue, don't interrupt)."""
     proc = _run(["--dry-run", "--soft"], iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert proc.returncode == 0
-    assert "DRY_RUN" in proc.stdout and "/reload-plugins" in proc.stdout
+    assert "DRY_RUN" in proc.stdout and "/reload-skills" in proc.stdout
     assert "ESC->" not in proc.stdout, "soft mode must not interrupt with an ESC"
-    assert "RELOAD_FIRED" not in proc.stdout
+    assert "RELOAD_SKILLS_FIRED" not in proc.stdout
 
 
 def test_no_iterm_reports_noop() -> None:
@@ -104,7 +107,7 @@ def test_no_iterm_reports_noop() -> None:
     proc = _run([], iterm=None)
     assert proc.returncode == 0
     assert proc.stdout.strip() == "NO_ITERM"
-    assert "RELOAD_FIRED" not in proc.stdout
+    assert "RELOAD_SKILLS_FIRED" not in proc.stdout
 
 
 def test_malformed_iterm_id_refuses_to_fire() -> None:
@@ -112,4 +115,4 @@ def test_malformed_iterm_id_refuses_to_fire() -> None:
     proc = _run([], iterm='x:" then do shell script "touch /tmp/pwned" --')
     assert proc.returncode == 0
     assert "NO_ITERM" in proc.stdout
-    assert "RELOAD_FIRED" not in proc.stdout
+    assert "RELOAD_SKILLS_FIRED" not in proc.stdout

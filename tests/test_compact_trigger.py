@@ -68,6 +68,42 @@ def test_build_osascript_targets_uuid_and_sends_esc_then_compact() -> None:
     assert "delay 2.0" in osa, "must delay before firing so the parent returns first"
 
 
+def test_plan_compact_maps_the_four_modes() -> None:
+    """(--soft, --handoff) → (commands, esc_first). The soft contract is esc_first=False."""
+    mod = _import()
+    # default (hard): interrupt now, compact.
+    assert mod.plan_compact(soft=False, handoff=False) == (["/compact"], True)
+    # --soft: enqueue /compact, no interrupt.
+    assert mod.plan_compact(soft=True, handoff=False) == (["/compact"], False)
+    # --handoff (hard): interrupt, run the handoff skill (which then chains /compact itself).
+    assert mod.plan_compact(soft=False, handoff=True) == (["/janitor-write-handoff --then-compact"], True)
+    # --handoff --soft: no interrupt, enqueue BOTH in order.
+    assert mod.plan_compact(soft=True, handoff=True) == (["/janitor-write-handoff", "/compact"], False)
+
+
+def test_build_osascript_soft_omits_esc() -> None:
+    """SOFT: no raw ESC byte — the command enqueues instead of interrupting the turn."""
+    mod = _import()
+    osa = mod._build_osascript(
+        "789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0, commands=["/compact"], esc_first=False
+    )
+    assert "character id 27" not in osa, "soft mode must NOT send an ESC byte"
+    assert '"/compact"' in osa, "must still type /compact"
+
+
+def test_build_osascript_handoff_soft_types_both_no_esc() -> None:
+    """SOFT --handoff: both commands typed (no ESC), handoff before compact."""
+    mod = _import()
+    osa = mod._build_osascript(
+        "789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+        2.0,
+        commands=["/janitor-write-handoff", "/compact"],
+        esc_first=False,
+    )
+    assert "character id 27" not in osa, "soft mode must NOT send an ESC byte"
+    assert osa.index('"/janitor-write-handoff"') < osa.index('"/compact"'), "handoff before compact"
+
+
 # ---------- main() via subprocess, ALWAYS --dry-run -----------------------
 
 def test_dry_run_writes_directive_and_reports_plan(tmp_path: Path) -> None:
@@ -85,6 +121,46 @@ def test_dry_run_writes_directive_and_reports_plan(tmp_path: Path) -> None:
     assert "COMPACT_FIRED" not in proc.stdout, "dry-run must not fire"
     written = (p / ".janitor" / "state" / "resume-directive.txt").read_text(encoding="utf-8")
     assert written.strip() == "continue TRDD-31095269 at P3 — read STATE block"
+
+
+def test_soft_dry_run_omits_esc_from_plan(tmp_path: Path) -> None:
+    """--soft: the printed iTerm plan has NO `ESC->` prefix (enqueue, don't interrupt)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run(
+        ["--dry-run", "--soft"], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE"
+    )
+    assert proc.returncode == 0
+    assert "DRY_RUN" in proc.stdout and "/compact" in proc.stdout
+    assert "ESC->" not in proc.stdout, "soft mode must not interrupt with an ESC"
+    assert "COMPACT_FIRED" not in proc.stdout
+
+
+def test_handoff_dry_run_runs_handoff_skill_first(tmp_path: Path) -> None:
+    """--handoff (hard): the plan is ESC -> /janitor-write-handoff (which then chains /compact)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run(
+        ["--dry-run", "--handoff"], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE"
+    )
+    assert proc.returncode == 0
+    assert "ESC->" in proc.stdout, "hard --handoff interrupts first"
+    assert "/janitor-write-handoff --then-compact" in proc.stdout
+
+
+def test_handoff_soft_dry_run_enqueues_both(tmp_path: Path) -> None:
+    """--handoff --soft: no ESC; /janitor-write-handoff then /compact both enqueued."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run(
+        ["--dry-run", "--handoff", "--soft"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+    )
+    assert proc.returncode == 0
+    assert "ESC->" not in proc.stdout, "soft mode must not interrupt"
+    out = proc.stdout
+    assert out.index("/janitor-write-handoff") < out.index("/compact"), "handoff before compact"
 
 
 def test_no_iterm_reports_and_still_records_directive(tmp_path: Path) -> None:

@@ -64,6 +64,13 @@ def main() -> int:
         source = "startup"
     if source in ("startup", "resume"):
         state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
+        # Same seed for the STANDALONE-skills reload generation (TRDD-LQU7OXXV): a
+        # fresh process already carries the current non-plugin skills, so it should
+        # act on `[janitor-reload-skills]` only for a /janitor-global-reload-skills
+        # issued AFTER now — not replay a past one.
+        state.atomic_write(
+            state.state_dir() / "skills-reload-acked.ts", str(gs.skills_reload_generation())
+        )
 
     # Clear any stale flag from a prior session crash. If the last session
     # ended mid-rate-limit, the flag is preserved and the heartbeat cron

@@ -400,15 +400,37 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
   next heartbeat. iTerm-only for the trigger; elsewhere it records the directive
   and asks you to `/compact`. Backed by `scripts/compact_trigger.py`. Part of the
   context-compact watchdog (opt-in — see Hooks).
+  - **`--soft`** — do NOT press ESC; the `/compact` is TYPED and ENQUEUED so it
+    runs only after the current turn ends (no in-flight work discarded). Use when
+    you want to compact at a safe boundary, not lose the turn's work.
+  - **`--handoff`** — run `/janitor-write-handoff` (a rich, agent-authored
+    handoff) BEFORE `/compact`, for delicate junctures where the free mechanical
+    PreCompact handoff isn't enough. Combinable with `--soft`.
+- `/janitor-write-handoff` — writes a rich, agent-authored session handoff to
+  `<project>/.janitor/state/agent-handoff.md` (the semantic layer — the plan, the
+  next concrete action, the traps already hit) that COMPLEMENTS the always-on,
+  zero-cost `pre-compact-handoff.py` mechanical handoff. Usually run by
+  `/janitor-compact-context --handoff` (which passes `--then-compact`, so the skill
+  chains to `/compact` when done); a bare `/janitor-write-handoff` writes the
+  handoff and stops. Opt-in because authoring it costs tokens — reserve it for
+  delicate junctures.
 - `/janitor-reload-plugins` — agent-invocable `/reload-plugins` trigger (the
   analogue of `/janitor-compact-context` for reloads). Fires a detached
   ESC→`/reload-plugins` at this session's own iTerm pane (same `$ITERM_SESSION_ID`
   UUID matching, strictly validated) so the running session picks up freshly
-  auto-updated plugin hooks/skills without the human typing the command — the
+  auto-updated PLUGIN hooks/skills without the human typing the command — the
   working path for the heartbeat's `[janitor-reload]` marker, since the Skill
   tool refuses built-in slash commands. Records NO state (reloading does not
-  discard the conversation). iTerm-only for the trigger; elsewhere it asks you to
-  `/reload-plugins`. Backed by `scripts/reload_trigger.py`.
+  discard the conversation). Supports **`--soft`** (enqueue `/reload-plugins`
+  without ESC, so the current turn finishes first). iTerm-only for the trigger;
+  elsewhere it asks you to `/reload-plugins`. Backed by `scripts/reload_trigger.py`.
+- `/janitor-reload-skills` — agent-invocable `/reload-skills` trigger, for
+  STANDALONE (non-plugin) skills and commands installed at local / project / user
+  scope. `/reload-plugins` reloads only plugin-bundled skills, so after adding a
+  standalone skill/command you need `/reload-skills` instead — this skill types it
+  into this session's own pane. Supports **`--soft`** (enqueue, no ESC). The
+  machine-wide sibling is **`/janitor-global-reload-skills`** (reloads standalone
+  skills across every running session). Backed by `scripts/reload_skills_trigger.py`.
 - `/janitor-audit` — on-demand aggregate scan. Runs every detector
   synchronously and prints a consolidated markdown report with proposed
   remediation commands (never executed automatically).

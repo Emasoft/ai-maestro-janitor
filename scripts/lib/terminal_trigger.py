@@ -42,7 +42,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -72,20 +72,40 @@ def valid_tmux_pane(pane: str) -> bool:
 USE_ITERM_PATH = "USE_ITERM_PATH"
 
 
-def build_tmux_steps(pane: str, command: str) -> list[list[str]]:
-    """The ordered send sequence for a tmux pane: ESC, settle, the command (literal),
-    then Enter to submit. Pure — returns argv steps tagged RUN / SLEEP.
+def build_tmux_steps(
+    pane: str, commands: str | Sequence[str], *, esc_first: bool = True
+) -> list[list[str]]:
+    """The ordered send sequence for a tmux pane: an OPTIONAL leading ESC, then each
+    command typed as LITERAL text and submitted with Enter. Pure — returns argv steps
+    tagged RUN / SLEEP.
 
-    `send-keys ... Escape` interrupts an in-flight turn / clears partial input;
-    `send-keys ... -l <command>` sends the command as LITERAL text (so `/compact`
-    isn't parsed as a tmux key name); `send-keys ... Enter` submits it.
+    `commands` is a SINGLE command string OR a list of them. A bare string is normalized
+    to a one-element list — CRITICAL, because a str is itself a `Sequence[str]` of
+    characters, so iterating it directly would send one keystroke PER CHARACTER. Direct
+    callers that pass a single command string (`fleet_inject`, `fleet_restart`) rely on
+    this normalization.
+
+    `esc_first=True` (the HARD default) prepends `send-keys … Escape`, which interrupts
+    an in-flight turn / clears partial input so the command runs NOW. `esc_first=False`
+    (the SOFT path) OMITS the ESC: the command is typed while the agent is mid-turn and
+    Claude Code ENQUEUES it — it runs only after the current turn ends, so no in-flight
+    work is discarded. Multiple commands are typed back-to-back (all ESC-free after the
+    single optional leading ESC), so `["/janitor-write-handoff", "/compact"]` enqueues
+    both in order — the input queue then serialises them across turns.
+    `-l <command>` sends the command as LITERAL text (so `/compact` isn't parsed as a
+    tmux key name); a trailing `Enter` submits each.
     """
-    return [
-        ["RUN", "tmux", "send-keys", "-t", pane, "Escape"],
-        ["SLEEP", "0.6"],
-        ["RUN", "tmux", "send-keys", "-t", pane, "-l", command],
-        ["RUN", "tmux", "send-keys", "-t", pane, "Enter"],
-    ]
+    cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
+    steps: list[list[str]] = []
+    if esc_first:
+        steps.append(["RUN", "tmux", "send-keys", "-t", pane, "Escape"])
+        steps.append(["SLEEP", "0.6"])
+    for i, command in enumerate(cmds):
+        if i:
+            steps.append(["SLEEP", "0.4"])  # let each enqueued command register before the next
+        steps.append(["RUN", "tmux", "send-keys", "-t", pane, "-l", command])
+        steps.append(["RUN", "tmux", "send-keys", "-t", pane, "Enter"])
+    return steps
 
 
 def _encode_payload(delay_s: float, steps: list[list[str]]) -> str:
@@ -220,13 +240,17 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
     return None
 
 
-def _try_ai_maestro_send(command: str, *, dry_run: bool, env: Mapping[str, str]) -> str | None:
+def _try_ai_maestro_send(commands: Sequence[str], *, dry_run: bool, env: Mapping[str, str]) -> str | None:
     """Best-effort ai-maestro send via the shipped CLI (issue #42). Returns a status
     string on success, or None to fall through to the local terminal send.
 
     Repointed off the direct `/api/...` calls to `aimaestro-agent.sh` (the frozen
     CLI interface). CLI absent / server down / unconfirmed → None → caller degrades
-    to the tmux keystroke send.
+    to the tmux keystroke send. A multi-command list (the soft-handoff case) is typed
+    one CLI call per command, in order. NOTE: the frozen CLI has no raw-ESC primitive,
+    so `esc_first` is not honored on this channel — typing a command into a mid-turn
+    agent ENQUEUES it (effectively soft) regardless of the requested mode; the local
+    tmux/iTerm paths are the ones that honor a hard ESC interrupt.
     """
     cli = _resolve_aimaestro_cli(env)
     if not cli:
@@ -249,42 +273,54 @@ def _try_ai_maestro_send(command: str, *, dry_run: bool, env: Mapping[str, str])
     if not tmux:
         return None
     if dry_run:
-        return f"DRY_RUN:aimaestro:{tmux}:{command}"
-    # 2) Type the command into that agent's terminal via the CLI (frozen interface
+        return f"DRY_RUN:aimaestro:{tmux}:{'+'.join(commands)}"
+    # 2) Type each command into that agent's terminal via the CLI (frozen interface
     #    over POST /api/sessions/<tmux>/command). `--newline` presses Enter;
     #    requireIdle stays False (flag omitted). `--` guards a dash-leading command.
-    sent = _run_aimaestro_cli(
-        cli, ["session", "command", tmux, "--newline", "--", command],
-        env=env, timeout=6.0,
-    )
-    if sent is not None and sent.returncode == 0:
-        return "FIRED:aimaestro"
-    return None  # unconfirmed → caller falls back to the tmux keystroke send
+    for command in commands:
+        sent = _run_aimaestro_cli(
+            cli, ["session", "command", tmux, "--newline", "--", command],
+            env=env, timeout=6.0,
+        )
+        if sent is None or sent.returncode != 0:
+            return None  # unconfirmed → caller falls back to the tmux keystroke send
+    return "FIRED:aimaestro"
 
 
 def send_self_command(
-    command: str, *, delay_s: float = 2.0, dry_run: bool = False,
-    env: Mapping[str, str] | None = None,
+    commands: str | Sequence[str], *, delay_s: float = 2.0, esc_first: bool = True,
+    dry_run: bool = False, env: Mapping[str, str] | None = None,
 ) -> str:
-    """Send `command` (a fixed literal like `/compact`) to this session's own pane,
-    choosing the mechanism by `state.terminal_kind()`.
+    """Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
+    pane, choosing the mechanism by `state.terminal_kind()`.
+
+    `commands` is a single command string OR a list of them (typed back-to-back — the
+    soft-handoff case enqueues `["/janitor-write-handoff", "/compact"]`). `esc_first`
+    selects HARD vs SOFT: `True` (default) prepends a raw ESC that interrupts the
+    in-flight turn so the command runs NOW; `False` OMITS the ESC so the command is
+    merely typed while the agent is mid-turn and Claude Code enqueues it until the turn
+    ends (no in-flight work lost). ESC honoring is per-channel: the local tmux/iTerm
+    paths obey `esc_first`; the ai-maestro CLI has no raw-ESC primitive, so it always
+    enqueues (documented in `_try_ai_maestro_send`).
 
     Returns a status string:
       - `USE_ITERM_PATH` — kind is iTerm or a terminal we don't automate; the caller
         should use its own iTerm-osascript path (which itself degrades to "ask the
         human" when iTerm isn't actually available).
       - `FIRED:<kind>` — a detached delayed send was launched.
-      - `DRY_RUN:<kind>:<pane>:<command>@<delay>s` — dry-run plan (nothing fired).
+      - `DRY_RUN:<kind>:<keys>@<delay>s` — dry-run plan (nothing fired); `<keys>` shows
+        an `ESC+` prefix for a hard send and the `+`-joined command list.
       - `NO_AUTO_TERMINAL:<kind>` — the kind is delegated but its target was
         unresolvable (e.g. `$TMUX_PANE` malformed); caller degrades.
     """
+    cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     e: Mapping[str, str] = os.environ if env is None else env
     # Inside an ai-maestro agent the server API is the authoritative way to reach
     # the agent's own terminal. Best-effort — any failure (server down, no match,
     # unconfirmed POST) falls through to the local terminal send below; ai-maestro
     # agents run in tmux, so that fallback works too (TRDD-db169d9e R4).
     if state.in_ai_maestro_agent_env(e):
-        api = _try_ai_maestro_send(command, dry_run=dry_run, env=e)
+        api = _try_ai_maestro_send(cmds, dry_run=dry_run, env=e)
         if api is not None:
             return api
     kind = state.terminal_kind()
@@ -295,8 +331,9 @@ def send_self_command(
         if not valid_tmux_pane(pane):
             return "NO_AUTO_TERMINAL:tmux"
         if dry_run:
-            return f"DRY_RUN:tmux:{pane}:{command}@{delay_s}s"
-        _fire_detached_steps(delay_s, build_tmux_steps(pane, command))
+            keys = ("ESC+" if esc_first else "") + "+".join(cmds)
+            return f"DRY_RUN:tmux:{pane}:{keys}@{delay_s}s"
+        _fire_detached_steps(delay_s, build_tmux_steps(pane, cmds, esc_first=esc_first))
         return "FIRED:tmux"
     return f"NO_AUTO_TERMINAL:{kind}"  # unreachable while _DELEGATE_KINDS == {"tmux"}
 
@@ -311,9 +348,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Type a slash-command into this session's own pane.")
     ap.add_argument("command", help="the slash-command to send, e.g. /compact")
     ap.add_argument("--delay", type=float, default=2.0, help="seconds before sending (lets the turn settle)")
+    ap.add_argument(
+        "--soft",
+        action="store_true",
+        help="do NOT press ESC — enqueue the command so it runs after the current turn ends",
+    )
     ap.add_argument("--dry-run", action="store_true", help="print the plan, do not fire")
     args = ap.parse_args()
-    print(send_self_command(args.command, delay_s=args.delay, dry_run=args.dry_run))
+    print(send_self_command(args.command, delay_s=args.delay, esc_first=not args.soft, dry_run=args.dry_run))
     return 0
 
 

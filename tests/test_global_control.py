@@ -105,6 +105,26 @@ def test_cli_pause_does_not_disarm(tmp_path, monkeypatch) -> None:
     assert gs.kill_switch_present() is False, "pause must NOT set the kill-switch"
 
 
+def test_cli_reload_skills_stamps_only_its_own_flag(tmp_path, monkeypatch, capsys) -> None:
+    """`reload-skills` stamps ONLY the standalone-skills reload generation — NOT the
+    kill-switch, NOT the pause flag. Status stays RUNNING (it is a one-time reload
+    request, not a stop-state)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    assert gs.skills_reload_flag_present() is False
+    monkeypatch.setattr(cli.sys, "argv", ["x", "reload-skills", "installed skill-x"])
+    assert cli.main() == 0
+    out = capsys.readouterr().out
+    assert "reload-skills requested" in out
+    assert gs.skills_reload_flag_present() is True
+    body = (tmp_path / "skills-reload-needed.flag").read_text(encoding="utf-8")
+    assert body.partition("\t")[2] == "installed skill-x"
+    # It is NOT a stop: neither the kill-switch nor the pause flag is raised.
+    assert gs.kill_switch_present() is False and gs.global_pause_present() is False
+    monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
+    cli.main()
+    assert "RUNNING" in capsys.readouterr().out
+
+
 def test_cli_pause_unpause_roundtrip(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
     monkeypatch.setattr(cli.sys, "argv", ["x", "pause"])

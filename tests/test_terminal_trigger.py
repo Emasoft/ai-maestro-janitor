@@ -60,7 +60,8 @@ def _spy_aimaestro_cli(tmp_path, agents_payload):
 # --- build_tmux_steps (pure) -----------------------------------------------
 
 def test_build_tmux_steps_sequence():
-    steps = tt.build_tmux_steps("%3", "/compact")
+    # Hard default (esc_first=True): a leading Escape then the single command.
+    steps = tt.build_tmux_steps("%3", ["/compact"])
     assert steps == [
         ["RUN", "tmux", "send-keys", "-t", "%3", "Escape"],
         ["SLEEP", "0.6"],
@@ -71,9 +72,41 @@ def test_build_tmux_steps_sequence():
 
 def test_build_tmux_steps_sends_command_literally():
     # `-l` precedes the command so `/reload-plugins` is literal text, not a key name.
-    steps = tt.build_tmux_steps("%12", "/reload-plugins")
+    steps = tt.build_tmux_steps("%12", ["/reload-plugins"])
     literal = [s for s in steps if "-l" in s][0]
     assert literal[-2:] == ["-l", "/reload-plugins"]
+
+
+def test_build_tmux_steps_accepts_bare_string_not_per_char():
+    # A bare command STRING must be treated as ONE command, NOT iterated char-by-char.
+    # Direct callers (fleet_inject / fleet_restart) pass a single string; a str is a
+    # Sequence[str] of characters, so without normalization this would send one
+    # keystroke per character. Regression guard for that footgun.
+    steps = tt.build_tmux_steps("%5", "/janitor-arm")
+    literals = [s[-1] for s in steps if "-l" in s]
+    assert literals == ["/janitor-arm"], "a bare string must send exactly ONE literal command"
+    assert ["RUN", "tmux", "send-keys", "-t", "%5", "-l", "/janitor-arm"] in steps
+
+
+def test_build_tmux_steps_soft_omits_escape():
+    # SOFT (esc_first=False): NO leading Escape — the command is typed while the agent
+    # is mid-turn and Claude Code enqueues it until the turn ends. Just type + Enter.
+    steps = tt.build_tmux_steps("%3", ["/compact"], esc_first=False)
+    assert steps == [
+        ["RUN", "tmux", "send-keys", "-t", "%3", "-l", "/compact"],
+        ["RUN", "tmux", "send-keys", "-t", "%3", "Enter"],
+    ]
+    assert not any("Escape" in s for s in steps), "soft mode must never send ESC"
+
+
+def test_build_tmux_steps_multi_command_enqueues_both_no_esc():
+    # SOFT --handoff: both commands typed back-to-back (no ESC), each submitted with
+    # Enter and separated by a settle so the input queue registers them in order.
+    steps = tt.build_tmux_steps("%3", ["/janitor-write-handoff", "/compact"], esc_first=False)
+    literals = [s[-1] for s in steps if "-l" in s]
+    assert literals == ["/janitor-write-handoff", "/compact"], "both commands, in order"
+    assert not any("Escape" in s for s in steps), "soft multi-command must never send ESC"
+    assert [s for s in steps if s[0] == "SLEEP"], "a settle between the two enqueued commands"
 
 
 # --- send_self_command dispatch (forced kind) ------------------------------
@@ -95,10 +128,29 @@ def test_apple_terminal_degrades_to_use_iterm_path(monkeypatch):
 
 
 def test_tmux_dry_run_reports_plan(monkeypatch):
+    # Hard default: the plan carries an `ESC+` prefix (the interrupt) then the command.
     _force(monkeypatch, "tmux")
     monkeypatch.setenv("TMUX_PANE", "%5")
     out = tt.send_self_command("/compact", delay_s=2.0, dry_run=True)
+    assert out == "DRY_RUN:tmux:%5:ESC+/compact@2.0s"
+
+
+def test_tmux_soft_dry_run_omits_esc(monkeypatch):
+    # SOFT: no `ESC+` prefix — the command enqueues instead of interrupting.
+    _force(monkeypatch, "tmux")
+    monkeypatch.setenv("TMUX_PANE", "%5")
+    out = tt.send_self_command("/compact", delay_s=2.0, esc_first=False, dry_run=True)
     assert out == "DRY_RUN:tmux:%5:/compact@2.0s"
+
+
+def test_tmux_soft_multi_command_dry_run(monkeypatch):
+    # SOFT --handoff shape: a command LIST, no ESC, joined by `+` in the plan.
+    _force(monkeypatch, "tmux")
+    monkeypatch.setenv("TMUX_PANE", "%5")
+    out = tt.send_self_command(
+        ["/janitor-write-handoff", "/compact"], delay_s=2.0, esc_first=False, dry_run=True
+    )
+    assert out == "DRY_RUN:tmux:%5:/janitor-write-handoff+/compact@2.0s"
 
 
 def test_tmux_bad_pane_degrades(monkeypatch):
@@ -212,6 +264,23 @@ def test_ai_maestro_cli_send_end_to_end(monkeypatch, tmp_path):
     assert "session command agent-sess-1 --newline -- /compact" in log.read_text()
 
 
+def test_ai_maestro_cli_multi_command_types_each_in_order(monkeypatch, tmp_path):
+    """A command LIST (soft --handoff) types each command via its own CLI call, in
+    order. The frozen CLI has no raw-ESC primitive, so esc_first is moot here."""
+    wd = str(tmp_path)
+    agents = [{"id": "a1", "workingDirectory": wd, "session": {"tmuxSessionName": "sess-h"}}]
+    cli, log = _spy_aimaestro_cli(tmp_path, agents)
+    _force(monkeypatch, "iterm")
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")
+    monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
+    out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False)
+    assert out == "FIRED:aimaestro"
+    calls = log.read_text().splitlines()
+    assert "session command sess-h --newline -- /janitor-write-handoff" in calls[0]
+    assert "session command sess-h --newline -- /compact" in calls[1]
+
+
 def test_ai_maestro_cli_dry_run_does_not_send(monkeypatch, tmp_path):
     wd = str(tmp_path)
     agents = [{"workingDirectory": wd, "session": {"tmuxSessionName": "sess-x"}}]
@@ -237,7 +306,7 @@ def test_ai_maestro_cli_failure_falls_back_to_tmux(monkeypatch, tmp_path):
     monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
     monkeypatch.setenv("TMUX_PANE", "%5")
     out = tt.send_self_command("/compact", dry_run=True)
-    assert out == "DRY_RUN:tmux:%5:/compact@2.0s"
+    assert out == "DRY_RUN:tmux:%5:ESC+/compact@2.0s"
 
 
 def test_not_in_agent_skips_cli(monkeypatch, tmp_path):

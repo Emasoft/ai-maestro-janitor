@@ -109,6 +109,7 @@ def _killswitch_path() -> Path: return global_state_dir() / "kill-switch.flag"
 def _spawn_marker_path() -> Path: return global_state_dir() / "daemon.spawn-attempt.ts"
 def _spawn_history_path() -> Path: return global_state_dir() / "daemon.spawn-history"
 def _reload_flag_path() -> Path: return global_state_dir() / "reload-needed.flag"
+def _skills_reload_flag_path() -> Path: return global_state_dir() / "skills-reload-needed.flag"
 def _marketplace_lock_path() -> Path: return global_state_dir() / "marketplace-op.lock"
 def _oauth_rotator_lock_path() -> Path: return global_state_dir() / "oauth-rotator-tick.lock"
 
@@ -599,6 +600,61 @@ def clear_reload_flag() -> None:
     the normal heartbeat flow NEVER clears it (see set_reload_flag's WHY)."""
     try:
         _reload_flag_path().unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
+# ---------- STANDALONE-skills reload generation (TRDD-LQU7OXXV follow-up) -----
+#
+# The plugin-reload generation above tracks `/reload-plugins` (skills/commands
+# bundled INSIDE a plugin). This PARALLEL generation tracks `/reload-skills` —
+# the command that reloads STANDALONE (non-plugin) skills/commands installed at
+# local/project/user scope. `/janitor-global-reload-skills` stamps it; each
+# session's heartbeat (dispatch `_phase_skills_reload`) compares it to a
+# per-project `skills-reload-acked.ts` and emits `[janitor-reload-skills]` exactly
+# once per bump — the same never-cleared-generation + per-project-ack design that
+# stops one session starving another (see set_reload_flag's WHY). Kept a SEPARATE
+# flag file so a plugin auto-update (which stamps ONLY the plugin generation) never
+# forces a redundant standalone-skills reload, and vice-versa.
+
+def skills_reload_generation() -> int:
+    """Return the standalone-skills reload generation (epoch of the last
+    `/janitor-global-reload-skills`), or 0 if none. NEVER mutated by a reader."""
+    p = _skills_reload_flag_path()
+    if not p.is_file():
+        return 0
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    first_line = raw.splitlines()[0] if raw else ""
+    gen_tok = first_line.partition("\t")[0].strip()
+    if gen_tok.isdigit():
+        return int(gen_tok)
+    # Legacy/garbled content → treat as "a reload was requested at an unknown time"
+    # so a never-acked session still reloads once (1 is the smallest positive gen).
+    return 1 if raw.strip() else 0
+
+
+def skills_reload_flag_present() -> bool:
+    return skills_reload_generation() > 0
+
+
+def set_skills_reload_flag(reason: str = "") -> None:
+    """Stamp the standalone-skills reload generation (current epoch). Format
+    `<epoch>\\t<reason>`; each session compares the epoch against its per-project
+    ack. Monotonic (wall-clock only advances) and NEVER cleared by a reader —
+    clearing would starve concurrent sessions (see set_reload_flag's WHY)."""
+    state.atomic_write(_skills_reload_flag_path(), f"{int(time.time())}\t{reason}")
+
+
+def clear_skills_reload_flag() -> None:
+    """Reset the standalone-skills reload generation. Used only by a manual-reset
+    path; the normal heartbeat flow NEVER clears it."""
+    try:
+        _skills_reload_flag_path().unlink()
     except FileNotFoundError:
         pass
     except OSError:
