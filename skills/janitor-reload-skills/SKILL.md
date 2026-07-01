@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-skills
-description: Run /reload-skills for this Claude Code session so freshly installed STANDALONE (non-plugin) skills and commands take effect, without the human typing it. Use after adding a standalone skill/command at any scope — /reload-plugins reloads ONLY plugin-bundled skills, so a standalone one needs /reload-skills instead. Invoke on a [janitor-reload-skills] heartbeat marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk and this session must pick it up. Fires ESC+/reload-skills at this session's own pane (iTerm/tmux); --soft enqueues without ESC (the current turn finishes first). Trigger with /janitor-reload-skills [--soft], or by asking to reload skills now.
+description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect without the human typing it. /reload-plugins reloads ONLY plugin-bundled skills, so standalone ones (added at any scope) need /reload-skills. Invoke on a [janitor-reload-skills] heartbeat marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. Fires ESC+/reload-skills at this session's own pane (iTerm/tmux); --soft enqueues without ESC. Trigger with /janitor-reload-skills [--soft], or by asking to reload skills now.
 ---
 
 # Janitor reload-skills
