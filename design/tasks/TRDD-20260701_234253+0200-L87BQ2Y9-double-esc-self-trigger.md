@@ -1,9 +1,9 @@
 ---
 trdd-id: L87BQ2Y9
 title: Self-trigger hard interrupt must send TWO ESCs — one clears the tool, one ends the turn
-column: dev
+column: published
 created: 2026-07-01T23:42:53+0200
-updated: 2026-07-01T23:55:25+0200
+updated: 2026-07-02T00:00:42+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -19,7 +19,9 @@ merge-strategy: squash
 test-requirements: [unit]
 impacts: []
 attempts: 0
-implementation-commits: []
+implementation-commits: [072e161]
+published-version: 0.26.1
+published-at: 2026-07-02T00:00:42+0200
 external-refs: []
 ---
 
@@ -81,7 +83,8 @@ agent's own discipline of ending its turn immediately after firing the trigger.[
 - Every HARD builder emits `HARD_INTERRUPT_ESC_COUNT` (=2) ESCs before the command; SOFT
   emits zero. MET (pinned by tests).
 - The single `HARD_INTERRUPT_ESC_COUNT` constant governs all 7 builders. MET.
-- ruff/pyright clean; full `tests/` suite green. (verify before publish)
+- ruff clean; full `tests/` suite green (publish.py gate); CPV `--strict` NIT=0. MET — published
+  **v0.26.1** (feature commit `072e161`, release `4e6daf9`).
 
 ## Notes and lessons learned
 
