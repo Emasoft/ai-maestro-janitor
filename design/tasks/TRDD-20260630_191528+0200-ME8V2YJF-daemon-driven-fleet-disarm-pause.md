@@ -3,7 +3,7 @@ trdd-id: ME8V2YJF
 title: Daemon-driven fleet disarm/pause — janitor controls ALL sessions itself, no human
 column: dev
 created: 2026-06-30T19:15:28+0200
-updated: 2026-07-01T18:15:16+0200
+updated: 2026-07-01T21:16:08+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -90,7 +90,7 @@ implementation-commits: []
     `should_inject` (never-inject-user-active + dedupe + skip-self + armed-only),
     `plan_fleet_stop`.
   - Agent B → `scripts/lib/fleet_inject.py` +ai-maestro channel (`aimaestro_command_argv`
-    + a `build_injection` branch; AI-MAESTRO FIRST for agent sessions) (+test, no regression).
+    plus a `build_injection` branch; AI-MAESTRO FIRST for agent sessions) (+test, no regression).
   - Agent C → `scripts/lib/terminal_trigger.py` +Linux parity (wtype/xdotool builders +
     selector, fail-open) (+test, no regression).
   - MINE (serial, after A/B/C) — `daemon.py` wiring, exactly 4 points:
