@@ -3,7 +3,7 @@
 > **Purpose of this file:** a compact map so a session can recall how the
 > janitor works WITHOUT re-reading the tree. Keep it current when structure
 > changes. Verified-detail for the core wiring; grouped lists + conventions
-> for the breadth (37 detectors, ~200 pattern libs).
+> for the breadth (38 detectors, ~200 pattern libs).
 
 ## What it is
 
@@ -108,13 +108,14 @@ All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
 
 ## Conventions (breadth — list, don't per-symbol-dump)
 
-**Detectors (`scripts/detectors/`, 37)** — each a standalone `--one-shot` script
+**Detectors (`scripts/detectors/`, 38)** — each a standalone `--one-shot` script
 run by `dispatch.py`; emits drift lines; slow ones use a PID-tracked detached-worker
 that skips if the prior worker is alive; per-detector cadence + seen-file dedupe.
 **Project-scoped — never touch user-scope.** Groups:
 - *git/workflow hygiene:* pr-reconciler, worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
 - *TRDD/task:* trdd-drift, trdd-reminder.
 - *cleanup:* screenshot-purge, trashcan-purge.
+- *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; default-on, per-bucket-deduped, 5-min cadence).
 - *scope drift:* settings-scope-drift, claude-md-scope-drift, cross-scope-reference-drift, subagent-scope-drift, mcp-config-drift.
 - *supply-chain/security:* mcp-rugpull, remote-credentials, supply-chain-fingerprints, typosquat-watcher, provenance-audit, repo-trust-score, package-manager-policy, workflow-security, historical-cache-scan, binary-magic-scanner, ai-context-poisoning, subagent-report, janitor-self-integrity.
 - *updates (some daemon-delegating shims):* marketplace-refresh, plugin-updates, local-plugins-update, project-plugins-update, **user-plugins-update (shim → daemon)**, version-update (shim → daemon).

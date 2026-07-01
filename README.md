@@ -939,6 +939,24 @@ any plugin-side change — staying on a recent CC build is recommended:
   when on, DENIES a new `Task`/`Agent` subagent spawn at the hard tier — the
   strongest cap, since subagents are the biggest token multiplier. Any budget of
   0 disables that signal.
+- **Adaptive token-usage anomaly detector** (default-on, TRDD-EDSFEQ5C): the
+  SLOW, pattern-based companion to the per-turn guard. Each heartbeat it reads
+  `token-meter.jsonl`, learns a **robust** per-5-min baseline (median + MAD —
+  never mean/stddev, because the log is heavy-tailed and bursty: measured, the
+  top 10% of 5-min buckets held ~61% of all tokens), and alarms only on a
+  **sudden outlier** — a bucket clearing `max(p99-floor, robust-z band,
+  median×ratio)`, so a normal agent-spawn burst does not false-alarm but a real
+  runaway does. Per-bucket deduped, disable-able via
+  `CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_ENABLED=false` (also `…_Z`, `…_FLOOR_PCT`,
+  `…_BUCKET_SECONDS`).
+- **`/janitor-token-report` window view**: alongside the per-fire distribution it
+  now shows the rolling **5h and 7d** weighted-token sums + per-minute rate, the
+  **busiest 5h/7d window ever observed** (an empirical *lower bound* on the
+  account's real cap), and the per-5-min baseline. Pass `--util5h`/`--util7d`
+  (the live utilization% from `/api/oauth/usage`) to turn those into an
+  **estimated absolute cap** (`spent ÷ util%`) + minutes-to-exhaustion at the
+  recent rate — the answer to "what is the max Opus tokens allowed in a 5h/7d
+  window, and am I about to blow through it early".
 
 ## License
 
