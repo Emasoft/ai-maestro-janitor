@@ -173,6 +173,39 @@ def clear_kill_switch() -> None:
     _killswitch_path().unlink(missing_ok=True)
 
 
+def _maintenance_path() -> Path:
+    return global_state_dir() / "maintenance-mode.flag"
+
+
+def maintenance_mode_present() -> bool:
+    """True iff the machine-wide MAINTENANCE flag is set (/janitor-global-maintenance,
+    TRDD-FPL60EKV). Distinct from the kill-switch and global-pause: those STOP every
+    session's heartbeat (self-disarm → the prompt cache dies → the next real turn pays a
+    1.0x REWRITE), whereas maintenance KEEPS every session's heartbeat firing but does ONLY
+    the cache refresh (no detectors, no daemon tasks). It is the fleet-wide "keep every
+    project's cache warm at the 0.1x cache-READ rate instead of letting it die and paying
+    the 1.0x rewrite" control — ~1/10 the cost. The daemon idles its task workloads while it
+    is set (like a pause); `/janitor-global-maintenance` sets it, `-off` clears it."""
+    return _maintenance_path().is_file()
+
+
+def set_maintenance_mode(reason: str = "") -> None:
+    """Set the machine-wide MAINTENANCE flag — every session's heartbeat drops to
+    cache-refresh-only fires (no chores) and the daemon idles its task workloads, until
+    `clear_maintenance_mode`. Written atomically; content is advisory."""
+    init_global_state()
+    path = _maintenance_path()
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(reason or "maintenance", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def clear_maintenance_mode() -> None:
+    """Clear the machine-wide MAINTENANCE flag so heartbeats resume FULL fires (chores) and
+    the daemon resumes its task workloads. Idempotent (a missing flag is fine)."""
+    _maintenance_path().unlink(missing_ok=True)
+
+
 def _global_pause_path() -> Path:
     return global_state_dir() / "global-pause.flag"
 

@@ -649,3 +649,39 @@ def test_ensure_daemon_kills_wedge_then_spawns(state_dir: Path, tmp_path: Path) 
         assert len(calls) == 1, "a replacement spawn must be issued after the kill"
     finally:
         _reap(proc)
+
+
+# ---------- maintenance-mode flag (TRDD-FPL60EKV) ----------
+
+
+def test_maintenance_mode_present_detects_flag(state_dir: Path) -> None:
+    """maintenance_mode_present() is False until set, True after set, False after clear."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.maintenance_mode_present() is False
+    gs.set_maintenance_mode("test")
+    assert gs.maintenance_mode_present() is True
+    gs.clear_maintenance_mode()
+    assert gs.maintenance_mode_present() is False
+
+
+def test_maintenance_mode_clear_idempotent(state_dir: Path) -> None:
+    """Clearing an absent maintenance flag is a safe no-op (missing_ok)."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.clear_maintenance_mode()  # must not raise even though nothing is set
+    assert gs.maintenance_mode_present() is False
+
+
+def test_maintenance_mode_orthogonal_to_kill_switch_and_pause(state_dir: Path) -> None:
+    """The maintenance flag is a distinct file — setting it never sets the kill-switch or
+    global-pause, and vice-versa (they are orthogonal machine-wide controls)."""
+    gs = _gs()
+    gs.init_global_state()
+    gs.set_maintenance_mode("m")
+    assert gs.maintenance_mode_present() is True
+    assert gs.kill_switch_present() is False
+    assert gs.global_pause_present() is False
+    gs.clear_maintenance_mode()
+    gs.set_kill_switch("k")
+    assert gs.maintenance_mode_present() is False, "kill-switch must not imply maintenance"

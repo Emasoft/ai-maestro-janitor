@@ -12,9 +12,11 @@ ONE source of truth (never duplicated into a skill's bash):
     global_control_cli.py pause [reason]     # /janitor-global-pause  — SUSPEND (idle, no teardown)
     global_control_cli.py unpause            # /janitor-global-unpause— resume after a pause
     global_control_cli.py reload-skills [reason]  # /janitor-global-reload-skills — fleet skills reload
-    global_control_cli.py status             # show both flags
+    global_control_cli.py maintenance [reason]    # /janitor-global-maintenance — cache-warm cheap fires
+    global_control_cli.py maintenance-off         # /janitor-global-maintenance-off — resume full mode
+    global_control_cli.py status             # show the active flag
 
-Two SEPARATE mechanisms, deliberately distinct:
+Three SEPARATE mechanisms, deliberately distinct:
   * DISARM = the TRUE STOP. The running daemon EXITS on its next loop, per-session
     heartbeats stop re-spawning it, AND every session's heartbeat goes SILENT (runs no
     detectors) — `disarm` raises the kill-switch AND the global-pause flag so the
@@ -25,6 +27,12 @@ Two SEPARATE mechanisms, deliberately distinct:
     task workloads, keeps ticking its heartbeat), and every session's heartbeat no-ops
     — a teardown-free temporary silence that keeps the daemon resident. Revive =
     `unpause` (instant, no re-spawn).
+  * MAINTENANCE = the maintenance flag (TRDD-FPL60EKV). Unlike disarm/pause, sessions
+    KEEP firing — but each fire is cache-refresh-ONLY (no detectors, no daemon tasks). The
+    daemon idles its workloads. This keeps every project's prompt cache warm at the 0.1x
+    cache-READ rate (~1/10 the 1.0x REWRITE a dead cache costs on the next real turn), so
+    it is the cheap alternative to disarm when the fleet is idle-but-returning. Revive =
+    `maintenance-off`.
 
 `status` is the safe read-only default. Exits 0 on success; prints a one-line result.
 """
@@ -39,12 +47,17 @@ import global_state as gs  # noqa: E402  (bare sibling import; lib/ is on sys.pa
 
 
 def _status_line() -> str:
+    # Precedence mirrors dispatch's mode resolution: MAINTENANCE wins over a stop, because
+    # a maintenance fire is an explicit keep-warm intent (TRDD-FPL60EKV).
+    if gs.maintenance_mode_present():
+        return ("MAINTENANCE (heartbeats stay armed but fire cache-refresh-only — no "
+                "detectors, daemon idle; run /janitor-global-maintenance-off to resume full mode)")
     if gs.kill_switch_present():
         return ("DISARMED (kill-switch set — daemon stopped AND every per-session "
                 "heartbeat silent; run /janitor-global-arm to revive)")
     if gs.global_pause_present():
         return "PAUSED (daemon idle, heartbeats silent; run /janitor-global-unpause to resume)"
-    return "RUNNING (no global stop or pause)"
+    return "RUNNING (no global stop, pause, or maintenance)"
 
 
 def main() -> int:
@@ -84,6 +97,22 @@ def main() -> int:
         print("janitor global pause lifted — the daemon resumes running tasks and sessions "
               "resume emitting drift.")
         return 0
+    if cmd == "maintenance":
+        # MAINTENANCE (TRDD-FPL60EKV): sessions stay ARMED and keep firing, but each fire is
+        # cache-refresh-only (dispatch resolves mode=maintenance → no detectors, no daemon
+        # spawn), and the daemon idles its task workloads. The cheap way to keep every
+        # project's prompt cache warm (0.1x read) instead of letting it die (1.0x rewrite).
+        gs.set_maintenance_mode(reason)
+        print("janitor globally in MAINTENANCE mode — every session's heartbeat stays ARMED but "
+              "fires cache-refresh-only (no detectors, no daemon tasks), keeping every project's "
+              "prompt cache warm at ~1/10 the cost of letting it die. Run "
+              "/janitor-global-maintenance-off to resume full mode.")
+        return 0
+    if cmd == "maintenance-off":
+        gs.clear_maintenance_mode()
+        print("janitor global maintenance lifted — heartbeats resume FULL fires (detectors) and "
+              "the daemon resumes its task workloads.")
+        return 0
     if cmd == "reload-skills":
         # FLEET standalone-skills reload. Stamp the machine-wide generation; each live
         # session's heartbeat emits [janitor-reload-skills] once (per-project ack) on its
@@ -103,7 +132,8 @@ def main() -> int:
         return 0
     sys.exit(
         f"unknown command: {cmd!r} "
-        "(use: disarm [reason] | arm | pause [reason] | unpause | reload-skills [reason] | status)"
+        "(use: disarm [reason] | arm | pause [reason] | unpause | maintenance [reason] | "
+        "maintenance-off | reload-skills [reason] | status)"
     )
 
 

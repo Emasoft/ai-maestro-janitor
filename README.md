@@ -486,13 +486,14 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
 ### Control commands (severity × scope)
 
 Janitor activity is controlled along two axes — **severity** (how hard you
-stop it) and **scope** (this project only, or the whole machine). The four
+stop it) and **scope** (this project only, or the whole machine). The
 quadrants:
 
 | | Local (this project) | Global (daemon + all instances) |
 |---|---|---|
 | **Disarm** = true stop / teardown | `/janitor-disarm` ↔ `/janitor-arm` | `/janitor-global-disarm` ↔ `/janitor-global-arm` |
 | **Pause** = suspend (no daemon teardown) | `/janitor-pause` ↔ `/janitor-unpause` | `/janitor-global-pause` ↔ `/janitor-global-unpause` |
+| **Maintenance** = keep firing, cache-refresh-only | `/janitor-maintenance-mode` ↔ `/janitor-maintenance-mode off` | `/janitor-maintenance-mode global` ↔ `/janitor-maintenance-mode global off` |
 
 **DISARM tears down.** Locally it removes the heartbeat cron, so nothing
 fires until you `/janitor-arm` again. Globally it sets the kill-switch — the
@@ -515,14 +516,28 @@ nothing — only deleting the cron makes a fire cost zero. So
 `/janitor-global-pause` is the "stop every project's heartbeat but keep the
 daemon" control; re-arm each session to resume.
 
+**MAINTENANCE keeps firing — but cheap.** This is the middle ground between
+full and disarm. Each fire does the MINIMUM: the turn re-reads the session
+context at the 0.1× prompt-cache **read** rate (which resets the 5-minute cache
+TTL), then `dispatch.py` returns immediately — no detectors, no daemon spawn, no
+output. It exists because letting the cache **die** (disarm → no fires) forces
+the next real turn to **rewrite** the whole context at the 1.0× rate — ~10× a
+cache read. So a maintenance fire costs ~1/10 of a cache-death rewrite: the
+cheapest way to keep a session (and thus its whole project's cache) warm.
+Maintenance **wins over** a global stop, so one session can stay warm while the
+fleet stays down (the daemon idles its tasks and is not respawned). Use it for
+idle-but-returning work; `/janitor-maintenance-mode off` restores full fires.
+
 **Rollout caveat.** The `[janitor-self-disarm]` marker is baked into the cron
 prompt at arm time, so crons armed BEFORE this shipped won't self-disarm on
 their own — run `/janitor-disarm` once in each such session (or `/janitor-arm`
 to pick up the new prompt).
 
-The four global commands are backed by
-`scripts/global_control_cli.py disarm|arm|pause|unpause|status` (the
-`status` subcommand reports the daemon's current armed/paused state).
+The global commands are backed by
+`scripts/global_control_cli.py disarm|arm|pause|unpause|maintenance|maintenance-off|status`
+(the `status` subcommand reports the daemon's current armed / paused / maintenance
+state; maintenance takes precedence in the readout, mirroring dispatch's mode
+resolution).
 
 ### The `.trashcan/` directory
 

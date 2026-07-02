@@ -1212,6 +1212,27 @@ def main() -> int:
                 exit_reason = "kill-switch"
                 break
 
+            # A global MAINTENANCE (TRDD-FPL60EKV) idles the daemon's expensive task
+            # workloads WITHOUT tearing it down and — unlike pause/disarm — WITHOUT stopping
+            # any session: the sessions are meant to KEEP firing cheap (cache-refresh-only) to
+            # stay warm, so this branch must NOT fleet-stop. Skip every task workload, keep
+            # ticking the heartbeat (so we are not seen as wedged), and stay responsive — the
+            # inner sleep breaks the instant maintenance lifts or a kill-switch/pause supersedes
+            # it. Placed ABOVE the pause branch so maintenance wins when both are set, matching
+            # dispatch's mode resolution (a session fires cheap, it is NOT disarmed).
+            if gs.maintenance_mode_present():
+                gs.write_heartbeat()
+                for _ in range(_LOOP_CEILING_SEC):
+                    if (
+                        not _running
+                        or gs.kill_switch_present()
+                        or gs.global_pause_present()
+                        or not gs.maintenance_mode_present()
+                    ):
+                        break
+                    time.sleep(1)
+                continue
+
             # A global PAUSE (TRDD-a3fa4d5d) idles the daemon WITHOUT tearing it down:
             # skip every task workload, but keep ticking the heartbeat so other sessions
             # never see us as wedged, and stay responsive — the inner sleep breaks the
@@ -1233,10 +1254,15 @@ def main() -> int:
 
             for task in tasks:
                 # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
-                # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause joins the
-                # kill-switch in the per-task gate so "immediately skip the chores if paused"
-                # actually holds; the top-of-loop pause branch then does the fleet sweep.
-                if not _running or gs.kill_switch_present() or gs.global_pause_present():
+                # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause + maintenance
+                # join the kill-switch in the per-task gate so "immediately skip the chores"
+                # actually holds; the top-of-loop pause/maintenance branches then idle.
+                if (
+                    not _running
+                    or gs.kill_switch_present()
+                    or gs.global_pause_present()
+                    or gs.maintenance_mode_present()
+                ):
                     break
                 if task.is_due():
                     task.run()

@@ -187,14 +187,21 @@ no-op for any non-user-mem prompt; never crashes the session.
 **Skills (`skills/`)** — control surface (severity×scope, TRDD-a3fa4d5d): `janitor-arm`
 ↔ `janitor-disarm` (local cron true-stop), `janitor-pause` ↔ `janitor-unpause` (local
 suspend, `.janitor/state/paused`), `janitor-global-disarm` ↔ `janitor-global-arm` +
-`janitor-global-pause` ↔ `janitor-global-unpause` (machine-wide, backed by
-`scripts/global_control_cli.py disarm|arm|pause|unpause|status` — kill-switch=disarm
-makes the daemon EXIT, global-pause flag=pause keeps the daemon ALIVE). Both global stops
-now TRULY STOP the heartbeat (free), not just silence it (TRDD-RQ9FIFX6): a set stop flag makes
-`dispatch.py` emit a bare `[janitor-self-disarm]` marker → the session runs `/janitor-disarm` →
-the cron DELETES ITSELF, because a cron FIRE is a full Claude turn that re-reads ~618k cached
+`janitor-global-pause` ↔ `janitor-global-unpause` + `janitor-maintenance-mode` (local +
+`global`, TRDD-FPL60EKV) (machine-wide, backed by
+`scripts/global_control_cli.py disarm|arm|pause|unpause|maintenance|maintenance-off|status` —
+kill-switch=disarm makes the daemon EXIT, global-pause=pause keeps the daemon ALIVE,
+maintenance-mode.flag=daemon idles but sessions keep firing CHEAP). THREE heartbeat modes
+(`dispatch._resolve_heartbeat_mode`): FULL (fire + due chores + daemon), MAINTENANCE (fire
+cache-refresh-ONLY — no chores/daemon/output; keeps the prompt cache warm at the 0.1× READ
+rate ≈ 1/10 the 1.0× REWRITE a dead cache costs on the next real turn; maintenance WINS over a
+global stop so ONE session stays warm while the fleet is down), STOP (self-disarm). Both global
+STOPS now TRULY STOP the heartbeat (free), not just silence it (TRDD-RQ9FIFX6): a set stop flag
+makes `dispatch.py` emit a bare `[janitor-self-disarm]` marker → the session runs `/janitor-disarm`
+→ the cron DELETES ITSELF, because a cron FIRE is a full Claude turn that re-reads ~618k cached
 tokens (billed at the 0.1× cache-read rate, NOT free) whether or not detectors run — only NOT
-firing costs zero. The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays).
+firing costs zero (MAINTENANCE is the middle option: keep the fire but at that 0.1× floor).
+The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays).
 Rollout caveat: crons armed BEFORE this shipped don't self-disarm (the cron prompt is baked at
 arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 (user-invoked Wikimem harvest of recent changes — active counterpart of memorize-nudge).

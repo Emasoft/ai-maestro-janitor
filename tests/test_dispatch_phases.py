@@ -606,3 +606,141 @@ def test_run_detector_fast_detector_runs_normally(env_isolation: dict, monkeypat
 
     last_run = state.state_dir() / "last-run-fast.ts"
     assert last_run.is_file(), "a fast detector must still stamp last-run on success"
+
+
+# ---------- Phase 0: maintenance-mode (TRDD-FPL60EKV) ----------
+
+
+def test_maintenance_mode_active_false_when_no_flags(env_isolation: dict) -> None:
+    """No local or global maintenance flag → maintenance-mode is not active."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    assert dispatch._maintenance_mode_active() is False
+
+
+def test_maintenance_mode_active_true_from_local_flag(env_isolation: dict) -> None:
+    """The per-session .janitor/state/maintenance-mode flag activates maintenance-mode."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
+    assert dispatch._maintenance_mode_active() is True
+
+
+def test_maintenance_mode_active_true_from_global_flag(env_isolation: dict) -> None:
+    """The machine-wide /janitor-global-maintenance flag activates maintenance-mode."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_maintenance_mode("test")
+    assert dispatch._maintenance_mode_active() is True
+
+
+def test_resolve_heartbeat_mode_full_when_no_flags(env_isolation: dict) -> None:
+    """No stop and no maintenance → the heartbeat runs in FULL mode."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    assert dispatch._resolve_heartbeat_mode() == "full"
+
+
+def test_resolve_heartbeat_mode_stop_on_kill_switch(env_isolation: dict) -> None:
+    """A kill-switch with no maintenance opt-in resolves to STOP (self-disarm)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_kill_switch("test")
+    assert dispatch._resolve_heartbeat_mode() == "stop"
+
+
+def test_resolve_heartbeat_mode_stop_on_global_pause(env_isolation: dict) -> None:
+    """A global-pause with no maintenance opt-in resolves to STOP (self-disarm)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_global_pause("test")
+    assert dispatch._resolve_heartbeat_mode() == "stop"
+
+
+def test_resolve_heartbeat_mode_maintenance_wins_over_kill_switch(env_isolation: dict) -> None:
+    """Maintenance is the highest-priority intent: even with the kill-switch set, a session
+    that opted into maintenance resolves to MAINTENANCE (keep the cache warm), NOT stop. This
+    is the "keep one session warm while the fleet stays down" property (TRDD-FPL60EKV)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    gs.set_kill_switch("fleet-down")
+    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
+    assert dispatch._resolve_heartbeat_mode() == "maintenance"
+
+
+def test_main_maintenance_fires_cheap_no_chores_no_daemon(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BEHAVIORAL PROOF: in maintenance-mode main() returns having done the MINIMUM — it emits
+    NO output (the fire itself already refreshed the prompt cache at the 0.1x read rate), runs
+    NO detector, and never tries to spawn the daemon. This is the ~1/10-cost cache-refresh fire
+    that keeps a session + its project cache warm instead of letting it die (TRDD-FPL60EKV)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
+
+    ran: list[str] = []
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(
+        dispatch.gs,
+        "ensure_daemon_running",
+        lambda *a, **k: pytest.fail("daemon spawn attempted in maintenance-mode"),
+    )
+
+    out = _capture_stdout(dispatch.main)
+    assert "[janitor-self-disarm]" not in out, "maintenance must NOT self-disarm (that kills the warm cache)"
+    assert out.strip() == "", f"a maintenance fire must emit nothing, got {out!r}"
+    assert ran == [], f"a maintenance fire must run NO detector, ran {ran}"
+    stamps = list(state.state_dir().glob("last-run-*.ts"))
+    assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
+
+
+def test_main_maintenance_under_kill_switch_keeps_beating(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The keep-warm-while-fleet-down property end-to-end: with the kill-switch set AND the
+    maintenance flag set, main() does NOT self-disarm and does NOT spawn the daemon — the
+    session keeps a cheap cache-refresh beat while the fleet/daemon stay down (TRDD-FPL60EKV).
+    The daemon-stays-down half composes with test_ensure_daemon_running_respects_kill_switch."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    gs.set_kill_switch("fleet-down")
+    (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
+
+    ran: list[str] = []
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(
+        dispatch.gs,
+        "ensure_daemon_running",
+        lambda *a, **k: pytest.fail("daemon spawn attempted while the fleet is kill-switched"),
+    )
+
+    out = _capture_stdout(dispatch.main)
+    assert "[janitor-self-disarm]" not in out, "maintenance must override the kill-switch self-disarm"
+    assert ran == [], "maintenance runs no detectors"

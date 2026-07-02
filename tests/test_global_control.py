@@ -156,3 +156,43 @@ def test_cli_default_command_is_status(tmp_path, monkeypatch, capsys) -> None:
     assert cli.main() == 0
     assert "RUNNING" in capsys.readouterr().out
     assert gs.kill_switch_present() is False and gs.global_pause_present() is False
+
+
+# ---------- MAINTENANCE (maintenance flag, TRDD-FPL60EKV) ----------
+
+def test_cli_maintenance_roundtrip(tmp_path, monkeypatch, capsys) -> None:
+    """`maintenance` sets the maintenance flag and status reports MAINTENANCE;
+    `maintenance-off` clears it and status returns to RUNNING."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(cli.sys, "argv", ["x", "maintenance", "keep caches warm"])
+    assert cli.main() == 0
+    assert gs.maintenance_mode_present() is True
+    assert (tmp_path / "maintenance-mode.flag").read_text(encoding="utf-8") == "keep caches warm"
+    monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
+    cli.main()
+    assert "MAINTENANCE" in capsys.readouterr().out
+    monkeypatch.setattr(cli.sys, "argv", ["x", "maintenance-off"])
+    assert cli.main() == 0
+    assert gs.maintenance_mode_present() is False
+
+
+def test_cli_maintenance_does_not_disarm_or_pause(tmp_path, monkeypatch) -> None:
+    """MAINTENANCE raises ONLY its own flag — never the kill-switch or global-pause. It is
+    the opposite intent (keep firing cheap, not stop), so it must not imply a stop."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(cli.sys, "argv", ["x", "maintenance"])
+    assert cli.main() == 0
+    assert gs.maintenance_mode_present() is True
+    assert gs.kill_switch_present() is False, "maintenance must NOT disarm"
+    assert gs.global_pause_present() is False, "maintenance must NOT pause"
+
+
+def test_cli_status_maintenance_wins_over_disarm(tmp_path, monkeypatch, capsys) -> None:
+    """When maintenance AND a stop are both set, status reports MAINTENANCE — precedence
+    mirrors dispatch's mode resolution (maintenance is the explicit keep-warm intent)."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    gs.set_kill_switch()
+    gs.set_maintenance_mode()
+    monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
+    cli.main()
+    assert "MAINTENANCE" in capsys.readouterr().out

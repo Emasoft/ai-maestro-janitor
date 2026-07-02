@@ -376,6 +376,45 @@ def _phase_global_paused() -> bool:
     return False
 
 
+def _maintenance_mode_active() -> bool:
+    """Return True iff maintenance-mode is active for THIS session — either the
+    per-session flag (`.janitor/state/maintenance-mode`) or the machine-wide flag
+    (`/janitor-global-maintenance`).
+
+    Maintenance-mode (TRDD-FPL60EKV) keeps the heartbeat ARMED but makes each fire do
+    the MINIMUM: the fired turn re-reads the session context at the 0.1x prompt-cache
+    READ rate, which RESETS the 5-minute cache TTL, and dispatch then returns
+    immediately — no detectors, no daemon spawn, no agent work, no output. WHY it
+    matters: letting the cache DIE (disarm → no fires) forces the next real turn to
+    REWRITE the whole context at the 1.0x rate (~10x a cache read). So a maintenance
+    fire costs ~1/10 of a cache-death rewrite — the cheapest way to keep a session
+    (and thus its whole project's cache) warm. It is the middle ground between FULL
+    (fire + all due chores) and DISARM (stop firing, cache dies)."""
+    if (state.state_dir() / "maintenance-mode").is_file():
+        return True
+    return gs.maintenance_mode_present()
+
+
+def _resolve_heartbeat_mode() -> str:
+    """Resolve what THIS fire does: 'full' | 'maintenance' | 'stop'.
+
+    - 'maintenance' (highest priority — an explicit keep-warm intent, local OR
+      global): refresh the cache and do nothing else. Chosen EVEN under a global
+      stop, so a session can stay cache-warm while the fleet's expensive daemon +
+      fleet-recovery stay DOWN — closing the "keep one session alive => clear the
+      global switch => wake the whole fleet" gap (the July-budget burn).
+    - 'stop' (a machine-wide /janitor-global-disarm or -pause, and NO maintenance
+      opt-in): self-disarm — delete this cron so a fire costs zero (TRDD-RQ9FIFX6);
+      the right choice for LONG idle, where one 1.0x rewrite on return beats many
+      cache-read fires.
+    - 'full': the normal heartbeat — cache refresh + DUE detectors + daemon."""
+    if _maintenance_mode_active():
+        return "maintenance"
+    if _phase_globally_disarmed() or _phase_global_paused():
+        return "stop"
+    return "full"
+
+
 def _phase_paused() -> bool:
     """Return True if the heartbeat is paused (and we should exit early)."""
     paused_file = state.state_dir() / "paused"
@@ -806,21 +845,33 @@ def _phase_user_presence_breadcrumb() -> None:
 def main() -> int:
     state.init_state()
 
-    # Phase 0: machine-wide STOP. A global stop flag — /janitor-global-disarm (kill-switch,
-    # TRDD-NJ22HNC3) or /janitor-global-pause (TRDD-a3fa4d5d) — makes the heartbeat DELETE its
-    # own cron via a bare [janitor-self-disarm] marker. A fired turn re-reads the whole session
-    # context (~618k cached tokens, billed at the 0.1x cache-read rate but NOT free) BEFORE any
-    # detector runs, so the pre-RQ9FIFX6 silent short-circuit saved nothing — the expensive fire
-    # still happened every 5 min in every armed session (the user-reported token bleed). The only
-    # way a fire costs zero is to STOP FIRING; dispatch can't call CronDelete (a session tool), so
-    # it signals the session to run /janitor-disarm. Self-limiting: once the cron is gone there
-    # are no more fires (TRDD-RQ9FIFX6).
-    if _phase_globally_disarmed() or _phase_global_paused():
-        # Bare marker on its own line — the cron prompt maps an exact [janitor-self-disarm] line
-        # to "silently run /janitor-disarm". Crons armed before that clause shipped surface it
-        # verbatim (harmless) and need a one-time manual /janitor-disarm (the prompt is baked at
-        # arm-time — re-arm rollout lag).
+    # Phase 0: resolve this fire's MODE — full | maintenance | stop (TRDD-FPL60EKV).
+    # A fired turn re-reads the whole session context (~618k cached tokens at the 0.1x
+    # cache-READ rate — NOT free, but 1/10 of the 1.0x REWRITE the next real turn pays
+    # if the cache DIES). So there are THREE intents, not two:
+    #   * stop        — a machine-wide /janitor-global-disarm (kill-switch, TRDD-NJ22HNC3)
+    #                   or -pause (TRDD-a3fa4d5d) with NO maintenance opt-in → self-disarm:
+    #                   delete this cron so a fire costs zero (TRDD-RQ9FIFX6). Best for LONG
+    #                   idle. dispatch can't call CronDelete (a session tool), so it signals
+    #                   the session to run /janitor-disarm; self-limiting once the cron is gone.
+    #   * maintenance — keep firing but do ONLY the cache refresh (no detectors, no daemon, no
+    #                   output). Best for keeping a session/project cache warm at 1/10 the cost
+    #                   of letting it die and rewriting.
+    #   * full        — the normal heartbeat (cache refresh + due detectors + daemon).
+    mode = _resolve_heartbeat_mode()
+    if mode == "stop":
+        # Bare marker on its own line — the cron prompt maps an exact [janitor-self-disarm]
+        # line to "silently run /janitor-disarm". Crons armed before that clause shipped
+        # surface it verbatim (harmless) and need a one-time manual /janitor-disarm (the
+        # prompt is baked at arm-time — re-arm rollout lag).
         print("[janitor-self-disarm]")
+        return 0
+    if mode == "maintenance":
+        # The fire already refreshed the prompt cache (the turn re-read the context at the
+        # 0.1x cache-READ rate, resetting the 5-min TTL). Do NOTHING else — no detectors, no
+        # daemon spawn, no output — so the fire costs only the unavoidable cache read
+        # (~1/10 of a cache-death rewrite), keeping this session + its project cache warm.
+        state.log_line("dispatch", "maintenance-mode: cache-refresh fire, no chores")
         return 0
 
     # Phase 0.05: per-project TEMPORARY pause (.janitor/state/paused) — auto-expires and resumes
