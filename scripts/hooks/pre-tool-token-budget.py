@@ -96,6 +96,25 @@ def _coerce_int(raw: str | None, default: int) -> int:
     return val if val >= 0 else default
 
 
+def _bucket_tokens(n: int) -> str:
+    """Floor `n` to the nearest 10k and render it as a cache-STABLE label.
+
+    TRDD-YRPUSIFY (cache-stability): this hook injects its nudge text into model
+    context on EVERY tool call. A raw per-call token count ("output 43053") makes each
+    injection a unique string that can never share the prompt cache and compounds
+    across a session. Flooring to a 10k bucket collapses a whole band of raw counts to
+    ONE label ("~40k"), so two turns in the same spike band emit byte-identical text
+    and stay cache-shareable. Pure + deterministic (unit-tested): same bucket → same
+    string, always. `~1.3M` for >=1M, `~40k` otherwise, `~0k` for <10k.
+    """
+    if n < 0:
+        n = 0
+    b = (n // 10_000) * 10_000
+    if b >= 1_000_000:
+        return f"~{b / 1_000_000:.1f}M"
+    return f"~{b // 1_000}k"
+
+
 def _resume_after_compact_ts_path(project_dir: str) -> Path:
     return Path(project_dir) / ".janitor" / "state" / "resume-after-compact.ts"
 
@@ -173,29 +192,41 @@ def _response(
     """
     if verdict.tier == "ok":
         return None
-    signals = "; ".join(verdict.reasons)
-    span = f"{usage.assistant_messages} msg / {usage.tool_calls} tool call(s)"
     has_output = _has_signal(verdict.reasons, "output ")
     has_cache_miss = _has_signal(verdict.reasons, "cache-miss write")
 
+    # TRDD-YRPUSIFY (cache-stability): build the signal text from BUCKETED usage + which
+    # signals tripped — never from `verdict.reasons`, whose raw counts + exact thresholds
+    # ("output 43053 ≥ hard 40000") vary every call and would make each injected nudge a
+    # unique, non-cache-shareable string. The per-call span ("N msg / M tool call(s)") is
+    # DROPPED entirely: it carries no advisory value and is pure per-call noise. What
+    # remains is ONE canonical phrase per (signal-set, tier), byte-identical whenever the
+    # turn sits in the same bucket band, so identical situations share the prompt cache.
+    parts: list[str] = []
+    if has_output:
+        parts.append(f"output {_bucket_tokens(usage.output_tokens)}")
+    if has_cache_miss:
+        parts.append(f"cache-miss write {_bucket_tokens(usage.cache_creation_input_tokens)}")
+    signals = "; ".join(parts)
+
     if verdict.tier == "hard":
         if enforce and tool_name in _SPAWNER_TOOLS:
-            return _deny(f"[token-guard] STOP — token runaway ({signals}; {span}). Do NOT spawn another subagent (the biggest token multiplier). End this step, TaskStop any background subagents, and /compact before continuing. (Disable: CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE=false.)")
+            return _deny(f"[token-guard] STOP — token runaway ({signals}). Do NOT spawn another subagent (the biggest token multiplier). End this step, TaskStop any background subagents, and /compact before continuing. (Disable: CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE=false.)")
         if has_output:
-            msg = f"⚠⚠ TOKEN RUNAWAY: this turn {signals} ({span}). STOP NOW — finish the current step, stop background subagents with TaskStop, and consider /compact or /janitor-compact-context. Sustained output burns subscription usage fastest."
+            msg = f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. STOP NOW — finish the current step, stop background subagents with TaskStop, and consider /compact or /janitor-compact-context. Sustained output burns subscription usage fastest."
             if has_cache_miss:
                 msg += f" {_CACHE_MISS_NOTE}"
             return _context(msg)
         # cache-miss-only hard trip: NOT an output/context problem — see _CACHE_MISS_NOTE.
-        return _context(f"⚠⚠ TOKEN RUNAWAY: this turn {signals} ({span}). {_CACHE_MISS_NOTE}")
+        return _context(f"⚠⚠ TOKEN RUNAWAY: this turn {signals}. {_CACHE_MISS_NOTE}")
 
     # advisory tier
     if has_output:
-        msg = f"⚠ Token spike: this turn {signals} ({span}). Be terse, wrap up the step, or compact — long output is billed at full price."
+        msg = f"⚠ Token spike: this turn {signals}. Be terse, wrap up the step, or compact — long output is billed at full price."
         if has_cache_miss:
             msg += f" {_CACHE_MISS_NOTE}"
         return _context(msg)
-    return _context(f"⚠ Token spike: this turn {signals} ({span}). {_CACHE_MISS_NOTE}")
+    return _context(f"⚠ Token spike: this turn {signals}. {_CACHE_MISS_NOTE}")
 
 
 def main() -> int:

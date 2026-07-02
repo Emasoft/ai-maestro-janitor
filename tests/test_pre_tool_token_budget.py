@@ -13,6 +13,7 @@ Verify:
 
 from __future__ import annotations
 
+import importlib.util as _u
 import json
 import os
 import subprocess
@@ -23,6 +24,17 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _HOOK = _PROJECT_ROOT / "scripts" / "hooks" / "pre-tool-token-budget.py"
 
 assert _HOOK.is_file(), f"hook not found at {_HOOK}"
+
+
+def _import_hook():
+    """Load the dash-named hook by path so the pure helpers can be unit-tested directly
+    (name != __main__, so main() never runs on import)."""
+    spec = _u.spec_from_file_location("pre_tool_token_budget_under_test", str(_HOOK))
+    assert spec is not None and spec.loader is not None
+    mod = _u.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 _ENABLED = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENABLED"
 _BUDGET = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT"
@@ -113,7 +125,9 @@ def test_warns_over_budget(tmp_path: Path) -> None:
     ctx = _ctx(_run(str(t)))
     assert ctx is not None
     assert "Token spike" in ctx
-    assert "150" in ctx
+    # TRDD-YRPUSIFY: the raw per-call count is bucketed away — the exact output (150) must
+    # NOT appear (a raw count makes the injected nudge a unique, non-cacheable string).
+    assert "150" not in ctx
 
 
 def test_default_on_when_unset(tmp_path: Path) -> None:
@@ -132,7 +146,7 @@ def test_cache_miss_spike_fires_independently_of_output(tmp_path: Path) -> None:
     )
     ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}))
     assert ctx is not None
-    assert "cache-miss" in ctx and "30000" in ctx
+    assert "cache-miss" in ctx and "~30k" in ctx  # 30_000 floored to the ~30k bucket (TRDD-YRPUSIFY)
 
 
 def test_hard_tier_emits_strong_stop_nudge(tmp_path: Path) -> None:
@@ -199,7 +213,9 @@ def test_multistep_turn_sums_output(tmp_path: Path) -> None:
     )
     ctx = _ctx(_run(str(t)))
     assert ctx is not None
-    assert "120" in ctx  # 60 + 60 summed across the turn
+    # 60 + 60 = 120 crosses the 100 budget (a single 60 stays silent), proving the sum;
+    # TRDD-YRPUSIFY buckets the raw total away, so we assert it FIRED, not the literal 120.
+    assert "Token spike" in ctx
 
 
 def test_malformed_input_silent() -> None:
@@ -250,7 +266,7 @@ def test_stale_compact_ts_does_not_suppress(tmp_path: Path) -> None:
     t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
     ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}, project_dir=str(proj)))
     assert ctx is not None
-    assert "cache-miss" in ctx and "30000" in ctx
+    assert "cache-miss" in ctx and "~30k" in ctx  # bucketed (TRDD-YRPUSIFY)
 
 
 def test_absent_compact_ts_does_not_suppress(tmp_path: Path) -> None:
@@ -314,3 +330,31 @@ def test_output_only_wording_keeps_compact_recommendation(tmp_path: Path) -> Non
     assert ctx is not None
     assert "/compact" in ctx
 
+
+def test_bucket_tokens_floors_to_10k() -> None:
+    """TRDD-YRPUSIFY: the pure bucketer floors to the nearest 10k so a whole band of raw
+    counts renders as ONE cache-stable label; sub-10k and negatives clamp to ~0k."""
+    hook = _import_hook()
+    assert hook._bucket_tokens(43_366) == "~40k"
+    assert hook._bucket_tokens(47_912) == "~40k"  # same 10k bucket as 43_366
+    assert hook._bucket_tokens(50_000) == "~50k"
+    assert hook._bucket_tokens(9_999) == "~0k"
+    assert hook._bucket_tokens(-5) == "~0k"
+    assert hook._bucket_tokens(1_340_000) == "~1.3M"
+
+
+def test_same_bucket_emits_identical_text(tmp_path: Path) -> None:
+    """TRDD-YRPUSIFY: two turns whose raw output differs but falls in the SAME 10k bucket
+    emit BYTE-IDENTICAL additionalContext (cache-shareable); a different bucket differs.
+    Hard budget is raised so all three stay ADVISORY — isolating the bucket from the tier."""
+
+    def ctx_for(out: int) -> str | None:
+        t = _write_transcript(tmp_path, _user("do real work"), _assistant(out, tool=True))
+        return _ctx(_run(str(t), env_extra={_BUDGET_HARD: "1000000"}))
+
+    a = ctx_for(43_366)
+    b = ctx_for(47_912)  # same ~40k bucket as 43_366
+    c = ctx_for(53_000)  # ~50k bucket — a different band
+    assert a is not None and b is not None and c is not None
+    assert a == b, "same bucket -> identical string (cache-stable)"
+    assert a != c, "different bucket -> different string"

@@ -29,15 +29,12 @@ def _import_hook():
     return mod
 
 
-def _run(payload: dict, *, enabled: bool, snapshot: dict | None, project: Path,
-         extra_env: dict | None = None) -> subprocess.CompletedProcess:
+def _run(payload: dict, *, enabled: bool, snapshot: dict | None, project: Path, extra_env: dict | None = None) -> subprocess.CompletedProcess:
     """Run the hook as a real subprocess; optionally pre-write the snapshot."""
     if snapshot is not None:
         d = project / ".claude" / "janitor"
         d.mkdir(parents=True, exist_ok=True)
-        (d / f"context-usage.{payload['session_id']}.json").write_text(
-            json.dumps(snapshot), encoding="utf-8"
-        )
+        (d / f"context-usage.{payload['session_id']}.json").write_text(json.dumps(snapshot), encoding="utf-8")
     env = {"PATH": os.environ.get("PATH", ""), "CLAUDE_PROJECT_DIR": str(project)}
     if enabled:
         env["CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED"] = "true"
@@ -62,6 +59,7 @@ def _ctx(proc: subprocess.CompletedProcess) -> str | None:
 
 # ---------- pure helpers ---------------------------------------------------
 
+
 def test_truthy_spellings() -> None:
     hook = _import_hook()
     # Explicit truthy spellings return True regardless of the (now mandatory) default.
@@ -85,19 +83,27 @@ def test_coerce_int_defaults_on_junk() -> None:
     assert hook._coerce_int("-5", 60) == 60  # negative rejected → default
 
 
-def test_fmt_tokens() -> None:
+def test_bucket_tokens_and_pct() -> None:
+    """TRDD-YRPUSIFY: the cache-stable bucketers floor tokens to 10k and pct to 5-pt
+    steps, so a band of raw values renders as ONE identical label."""
     hook = _import_hook()
-    assert hook._fmt_tokens(650_000) == "650k"
-    assert hook._fmt_tokens(1_000_000) == "1.0m"
-    assert hook._fmt_tokens(674_300) == "674k"
-    assert hook._fmt_tokens(512) == "512"
+    assert hook._bucket_tokens(650_000) == "~650k"
+    assert hook._bucket_tokens(674_300) == "~670k"  # floored to the 10k bucket
+    assert hook._bucket_tokens(1_000_000) == "~1.0M"
+    assert hook._bucket_tokens(1_340_000) == "~1.3M"
+    assert hook._bucket_tokens(9_999) == "~0k"
+    assert hook._bucket_tokens(-5) == "~0k"
+    assert hook._bucket_pct(71) == "~70%"
+    assert hook._bucket_pct(72) == "~70%"  # same 5-pt band as 71
+    assert hook._bucket_pct(85) == "~85%"
+    assert hook._bucket_pct(-1) == "~0%"
 
 
 def test_build_line_below_threshold_no_suggestion() -> None:
     hook = _import_hook()
     # _format_line takes already-resolved (pct, tokens, window, stale, suggest_pct).
     line = hook._format_line(30, 300_000, 1_000_000, False, 60)
-    assert "30% (300k/1.0m)" in line
+    assert "~30% (~300k/~1.0M)" in line  # bucketed (TRDD-YRPUSIFY)
     assert "janitor-compact-context" not in line
 
 
@@ -113,7 +119,7 @@ def test_build_line_stale_marks_lag() -> None:
     # The render fn no longer computes age (that moved to _resolve_context); it takes a
     # stale bool and appends the lag caveat, which coexists with the usage detail.
     line = hook._format_line(40, 400_000, 1_000_000, True, 60)
-    assert "40% (400k/1.0m)" in line
+    assert "~40% (~400k/~1.0M)" in line  # bucketed (TRDD-YRPUSIFY)
     assert "snapshot may lag" in line
     assert "/janitor-compact-context" not in line
 
@@ -137,15 +143,13 @@ def test_build_line_missing_pct_returns_none(tmp_path: Path) -> None:
 
 # ---------- full main() via subprocess (no mocks) -------------------------
 
+
 def test_disabled_explicitly_no_output(tmp_path: Path) -> None:
     """The guard is DEFAULT-ON, so disabling is explicit: WATCHDOG_ENABLED=false -> a
     silent no-op even with a high-context snapshot present."""
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run({"session_id": "s1"}, enabled=False,
-                snapshot={"pct": 80, "tokens": 800_000, "window": 1_000_000, "ts": int(time.time())},
-                project=p,
-                extra_env={"CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED": "false"})
+    proc = _run({"session_id": "s1"}, enabled=False, snapshot={"pct": 80, "tokens": 800_000, "window": 1_000_000, "ts": int(time.time())}, project=p, extra_env={"CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED": "false"})
     assert proc.returncode == 0
     assert proc.stdout.strip() == "", "must be a silent no-op when explicitly disabled"
 
@@ -155,9 +159,7 @@ def test_enabled_fresh_low_silent_below_suggest(tmp_path: Path) -> None:
     stays silent until near the cap so it adds zero per-turn context cost."""
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run({"session_id": "s1"}, enabled=True,
-                snapshot={"pct": 30, "tokens": 300_000, "window": 1_000_000, "ts": int(time.time())},
-                project=p)
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 30, "tokens": 300_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
     assert proc.returncode == 0
     assert proc.stdout.strip() == "", "below the suggest threshold the guard must be silent"
 
@@ -165,9 +167,7 @@ def test_enabled_fresh_low_silent_below_suggest(tmp_path: Path) -> None:
 def test_enabled_high_injects_suggestion(tmp_path: Path) -> None:
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run({"session_id": "s1"}, enabled=True,
-                snapshot={"pct": 70, "tokens": 700_000, "window": 1_000_000, "ts": int(time.time())},
-                project=p)
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 70, "tokens": 700_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
     ctx = _ctx(proc)
     assert ctx is not None and "70%" in ctx
     assert "/janitor-compact-context" in ctx
@@ -187,10 +187,7 @@ def test_threshold_env_override(tmp_path: Path) -> None:
     p = tmp_path / "proj"
     p.mkdir()
     # pct=50 is below default 60 (no nudge) but at/above an override of 50.
-    proc = _run({"session_id": "s1"}, enabled=True,
-                snapshot={"pct": 50, "tokens": 500_000, "window": 1_000_000, "ts": int(time.time())},
-                project=p,
-                extra_env={"CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT": "50"})
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 50, "tokens": 500_000, "window": 1_000_000, "ts": int(time.time())}, project=p, extra_env={"CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT": "50"})
     ctx = _ctx(proc)
     assert ctx is not None and "/janitor-compact-context" in ctx
 
@@ -199,10 +196,7 @@ def test_no_permission_decision_emitted(tmp_path: Path) -> None:
     """The advisory hook must NEVER emit permissionDecision (would alter tool flow)."""
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run({"session_id": "s1"}, enabled=True,
-                snapshot={"pct": 90, "tokens": 900_000, "window": 1_000_000, "ts": int(time.time())},
-                project=p)
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 90, "tokens": 900_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
     out = json.loads(proc.stdout)
-    assert "permissionDecision" not in out["hookSpecificOutput"], \
-        "advisory-only: permissionDecision must be absent so the tool's permission flow is untouched"
+    assert "permissionDecision" not in out["hookSpecificOutput"], "advisory-only: permissionDecision must be absent so the tool's permission flow is untouched"
     assert "permissionDecision" not in out

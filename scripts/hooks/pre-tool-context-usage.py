@@ -82,12 +82,36 @@ def _coerce_int(raw: str | None, default: int) -> int:
     return val if val >= 0 else default
 
 
-def _fmt_tokens(n: int) -> str:
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}m"
-    if n >= 1_000:
-        return f"{n // 1000}k"
-    return str(n)
+def _bucket_tokens(n: int) -> str:
+    """Floor `n` to the nearest 10k and render it as a cache-STABLE label.
+
+    TRDD-YRPUSIFY (cache-stability): this hook injects its context-window line into
+    model context on EVERY tool call above the suggest threshold. A raw per-call token
+    count ("650k") makes each injection a unique string that can never share the prompt
+    cache and compounds across a session. Flooring to a 10k bucket collapses a whole
+    band of raw counts to ONE label ("~650k"), so consecutive tool calls at the same
+    occupancy emit byte-identical text. Pure + deterministic (unit-tested): same bucket
+    → same string, always. `~1.3M` for >=1M, `~40k` otherwise, `~0k` for <10k.
+    """
+    if n < 0:
+        n = 0
+    b = (n // 10_000) * 10_000
+    if b >= 1_000_000:
+        return f"~{b / 1_000_000:.1f}M"
+    return f"~{b // 1_000}k"
+
+
+def _bucket_pct(p: int) -> str:
+    """Floor a percentage to a 5-point step and render it as a cache-STABLE label.
+
+    TRDD-YRPUSIFY: same rationale as `_bucket_tokens` — the live occupancy % drifts a
+    point or two between tool calls, so a raw "71%" makes each injected line unique.
+    Flooring to a 5-point band ("~70%") keeps the line byte-identical across a band of
+    occupancies. Gating still uses the RAW %; only the DISPLAYED value is bucketed.
+    """
+    if p < 0:
+        p = 0
+    return f"~{(p // 5) * 5}%"
 
 
 def _resolve_context(project_dir: str, session_id: str, transcript: str, window_default: int, *, now: int) -> tuple[int | None, int | None, int | None, bool]:
@@ -98,11 +122,18 @@ def _resolve_context(project_dir: str, session_id: str, transcript: str, window_
 
 
 def _format_line(pct: int, tokens, window, stale: bool, suggest_pct: int) -> str:
-    usage = f"{pct}%"
+    # TRDD-YRPUSIFY (cache-stability): render the pct + token counts through the BUCKETING
+    # helpers so two tool calls at nearly-the-same occupancy inject the byte-identical
+    # line (cache-shareable). The `pct >= suggest_pct` gate below still uses the RAW pct,
+    # so the trip point is unchanged; only the displayed numbers are bucketed. The
+    # `suggest_pct` in the nudge is a fixed config threshold (an exact boundary, already
+    # constant every call), so it stays exact rather than bucketed.
+    pct_b = _bucket_pct(pct)
+    usage = pct_b
     if isinstance(tokens, int) and isinstance(window, int) and window > 0:
-        usage = f"{pct}% ({_fmt_tokens(tokens)}/{_fmt_tokens(window)})"
+        usage = f"{pct_b} ({_bucket_tokens(tokens)}/{_bucket_tokens(window)})"
     elif isinstance(tokens, int):
-        usage = f"{pct}% (~{_fmt_tokens(tokens)})"
+        usage = f"{pct_b} ({_bucket_tokens(tokens)})"
     line = f"Context window: {usage} used."
     if stale:
         line += " (snapshot may lag)"
@@ -115,15 +146,20 @@ def _format_prepare_line(pct: int, pred: token_meter.CompactPrediction) -> str:
     """The PREPARE-for-auto-compact alert (TRDD-TKNSTP82 C). Keyed on the EXACT predicted
     auto-compact point (window − the routine's ~34k summary cost), not a %, so it warns just
     before the forced compaction — while the agent can still finish its step and hand off."""
-    eff = _fmt_tokens(pred.effective_compact_point)
+    # TRDD-YRPUSIFY (cache-stability): bucket every count + the % so the PREPARE line
+    # (injected on every tool call while in the pre-compact zone) is byte-identical across
+    # the band. `effective_compact_point`, `auto_window`, `overhead` are already
+    # per-session constants; bucketing them is harmless and keeps one uniform surface.
+    # (`_bucket_tokens` already prefixes "~", so the literal "~" before `until` is gone.)
+    eff = _bucket_tokens(pred.effective_compact_point)
     until = pred.tokens_until_compact
     if until > 0:
-        head = f"⚠ PREPARE for auto-compact: ~{_fmt_tokens(until)} until the auto-compact point ({eff})."
+        head = f"⚠ PREPARE for auto-compact: {_bucket_tokens(until)} until the auto-compact point ({eff})."
     else:
-        head = f"⚠ Auto-compact IMMINENT — {_fmt_tokens(-until)} PAST the auto-compact point ({eff})."
+        head = f"⚠ Auto-compact IMMINENT — {_bucket_tokens(-until)} PAST the auto-compact point ({eff})."
     return (
-        f"Context window: {pct}% used. {head} "
-        f"(point = CLAUDE_CODE_AUTO_COMPACT_WINDOW {_fmt_tokens(pred.auto_window)} − {_fmt_tokens(pred.overhead)} summary cost.) "
+        f"Context window: {_bucket_pct(pct)} used. {head} "
+        f"(point = CLAUDE_CODE_AUTO_COMPACT_WINDOW {_bucket_tokens(pred.auto_window)} − {_bucket_tokens(pred.overhead)} summary cost.) "
         "Finish the current step and run /janitor-write-handoff (or /janitor-compact-context to "
         "compact NOW on your terms) so the compaction summary captures your plan."
     )
@@ -163,7 +199,9 @@ def _run_compact_trigger(pct: int) -> str:
     script = Path(plugin_root) / "scripts" / "compact_trigger.py"
     if not script.is_file():
         return "ERROR"
-    directive = f"resume your in-flight task — the context-size guard auto-compacted at {pct}% to stop the per-turn token bleed; re-check the TRDD board / your handoff first."
+    # TRDD-YRPUSIFY: bucket the % here too — this directive is later surfaced as a
+    # [janitor-resume] injection, so keep it on the same cache-stable surface.
+    directive = f"resume your in-flight task — the context-size guard auto-compacted at {_bucket_pct(pct)} to stop the per-turn token bleed; re-check the TRDD board / your handoff first."
     try:
         r = subprocess.run(
             ["uv", "run", "--script", "--quiet", str(script), "--directive", directive],
@@ -182,13 +220,18 @@ def _run_compact_trigger(pct: int) -> str:
 
 
 def _deny(pct: int, tokens) -> dict:
-    size = f"~{_fmt_tokens(tokens)}" if isinstance(tokens, int) else f"{pct}%"
+    # TRDD-YRPUSIFY (cache-stability): bucket the % + token size so the deny reason is
+    # byte-identical for any tool call in the same occupancy band. The dedupe window
+    # already limits this to ~once per compaction episode, but bucketing keeps it uniform
+    # with the advisory/prepare surfaces. (`_bucket_tokens` already prefixes "~".)
+    pct_b = _bucket_pct(pct)
+    size = _bucket_tokens(tokens) if isinstance(tokens, int) else pct_b
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": (
-                f"[context-guard] Context is at {pct}% ({size}) — every turn now re-reads the "
+                f"[context-guard] Context is at {pct_b} ({size}) — every turn now re-reads the "
                 "whole context, burning ~its size in tokens PER TURN. Auto-compacting now to "
                 "stop the bleed: END THIS TURN so /compact can run; post-compact-resume will "
                 "continue your task at a reduced context. (Disable: "

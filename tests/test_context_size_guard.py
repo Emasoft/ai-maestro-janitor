@@ -66,22 +66,29 @@ def _payload(session_id: str = "s", transcript: str = "", cwd: str = "") -> dict
 
 # ---------- token_meter.latest_context_size --------------------------------
 
+
 def test_latest_context_size_sums_input_and_cache(tmp_path: Path) -> None:
     """input + cache_read + cache_creation of the latest assistant message."""
-    tp = _write_transcript(tmp_path / "t.jsonl", [
-        {"type": "user", "message": {"content": "hi"}},
-        _assistant(inp=1000, cache_read=800000, cache_creation=5000, output=200),
-    ])
+    tp = _write_transcript(
+        tmp_path / "t.jsonl",
+        [
+            {"type": "user", "message": {"content": "hi"}},
+            _assistant(inp=1000, cache_read=800000, cache_creation=5000, output=200),
+        ],
+    )
     assert token_meter.latest_context_size(tp) == 806000
 
 
 def test_latest_context_size_picks_most_recent_assistant(tmp_path: Path) -> None:
     """The NEWEST assistant message wins, not an earlier one."""
-    tp = _write_transcript(tmp_path / "t.jsonl", [
-        _assistant(inp=100, cache_read=100, cache_creation=0),       # older: 200
-        {"type": "user", "message": {"content": "x"}},
-        _assistant(inp=2000, cache_read=300000, cache_creation=0),   # newest: 302000
-    ])
+    tp = _write_transcript(
+        tmp_path / "t.jsonl",
+        [
+            _assistant(inp=100, cache_read=100, cache_creation=0),  # older: 200
+            {"type": "user", "message": {"content": "x"}},
+            _assistant(inp=2000, cache_read=300000, cache_creation=0),  # newest: 302000
+        ],
+    )
     assert token_meter.latest_context_size(tp) == 302000
 
 
@@ -92,23 +99,30 @@ def test_latest_context_size_missing_file_is_none(tmp_path: Path) -> None:
 
 def test_latest_context_size_no_assistant_usage_is_none(tmp_path: Path) -> None:
     """No assistant `usage` in the tail -> None rather than guess."""
-    tp = _write_transcript(tmp_path / "t.jsonl", [
-        {"type": "user", "message": {"content": "hi"}},
-        {"type": "assistant", "message": {"content": "no usage block"}},
-    ])
+    tp = _write_transcript(
+        tmp_path / "t.jsonl",
+        [
+            {"type": "user", "message": {"content": "hi"}},
+            {"type": "assistant", "message": {"content": "no usage block"}},
+        ],
+    )
     assert token_meter.latest_context_size(tp) is None
 
 
 def test_latest_context_size_skips_zero_total(tmp_path: Path) -> None:
     """A zero-total assistant message is skipped; the earlier nonzero one is returned."""
-    tp = _write_transcript(tmp_path / "t.jsonl", [
-        _assistant(inp=500, cache_read=0, cache_creation=0),  # 500
-        _assistant(inp=0, cache_read=0, cache_creation=0),    # 0 -> skipped
-    ])
+    tp = _write_transcript(
+        tmp_path / "t.jsonl",
+        [
+            _assistant(inp=500, cache_read=0, cache_creation=0),  # 500
+            _assistant(inp=0, cache_read=0, cache_creation=0),  # 0 -> skipped
+        ],
+    )
     assert token_meter.latest_context_size(tp) == 500
 
 
-# ---------- _truthy / _coerce_int / _fmt_tokens ----------------------------
+# ---------- _truthy / _coerce_int / _bucket_tokens / _bucket_pct ------------
+
 
 def test_truthy_default_when_empty() -> None:
     """Unset/empty -> the supplied default (default-ON is the load-bearing case)."""
@@ -137,15 +151,20 @@ def test_coerce_int() -> None:
     assert mod._coerce_int("0", 60) == 0
 
 
-def test_fmt_tokens() -> None:
-    """Human token formatting: m for millions, k for thousands, raw below 1k."""
+def test_bucket_tokens_and_pct() -> None:
+    """TRDD-YRPUSIFY: tokens floor to 10k and pct floors to 5-pt steps — the cache-stable
+    labels the injected lines use so a band of raw values renders identically."""
     mod = _import_hook()
-    assert mod._fmt_tokens(806000) == "806k"
-    assert mod._fmt_tokens(1_000_000) == "1.0m"
-    assert mod._fmt_tokens(500) == "500"
+    assert mod._bucket_tokens(806000) == "~800k"  # floored to the 10k bucket
+    assert mod._bucket_tokens(1_000_000) == "~1.0M"
+    assert mod._bucket_tokens(9_999) == "~0k"
+    assert mod._bucket_tokens(-5) == "~0k"
+    assert mod._bucket_pct(72) == "~70%"
+    assert mod._bucket_pct(85) == "~85%"
 
 
 # ---------- _resolve_context -----------------------------------------------
+
 
 def test_resolve_context_prefers_snapshot(tmp_path: Path) -> None:
     """The statusline snapshot (real window) is preferred over the transcript."""
@@ -153,9 +172,7 @@ def test_resolve_context_prefers_snapshot(tmp_path: Path) -> None:
     sid = "sess-1"
     snapdir = tmp_path / ".claude" / "janitor"
     snapdir.mkdir(parents=True)
-    (snapdir / f"context-usage.{sid}.json").write_text(
-        json.dumps({"pct": 73, "tokens": 730000, "window": 1000000, "ts": 100}), encoding="utf-8"
-    )
+    (snapdir / f"context-usage.{sid}.json").write_text(json.dumps({"pct": 73, "tokens": 730000, "window": 1000000, "ts": 100}), encoding="utf-8")
     pct, tokens, window, stale = mod._resolve_context(str(tmp_path), sid, "", 1_000_000, now=150)
     assert (pct, tokens, window) == (73, 730000, 1000000)
     assert stale is False
@@ -167,9 +184,7 @@ def test_resolve_context_snapshot_stale(tmp_path: Path) -> None:
     sid = "s"
     snapdir = tmp_path / ".claude" / "janitor"
     snapdir.mkdir(parents=True)
-    (snapdir / f"context-usage.{sid}.json").write_text(
-        json.dumps({"pct": 50, "ts": 0}), encoding="utf-8"
-    )
+    (snapdir / f"context-usage.{sid}.json").write_text(json.dumps({"pct": 50, "ts": 0}), encoding="utf-8")
     res = mod._resolve_context(str(tmp_path), sid, "", 1_000_000, now=10_000)
     assert res[0] == 50 and res[3] is True
 
@@ -190,11 +205,12 @@ def test_resolve_context_none_when_no_source(tmp_path: Path) -> None:
 
 # ---------- _format_line ----------------------------------------------------
 
+
 def test_format_line_below_suggest_no_nudge() -> None:
     """Below the advisory threshold -> info line only, no compact nudge."""
     mod = _import_hook()
     line = mod._format_line(40, 400000, 1_000_000, False, 60)
-    assert "40% (400k/1.0m) used" in line
+    assert "~40% (~400k/~1.0M) used" in line  # bucketed (TRDD-YRPUSIFY)
     assert "/janitor-compact-context" not in line
 
 
@@ -202,7 +218,7 @@ def test_format_line_at_suggest_has_nudge() -> None:
     """At/above the advisory threshold -> append the /janitor-compact-context nudge."""
     mod = _import_hook()
     line = mod._format_line(72, 720000, 1_000_000, False, 60)
-    assert "72%" in line and "/janitor-compact-context" in line
+    assert "~70%" in line and "/janitor-compact-context" in line  # 72 floored to the 5-pt band (TRDD-YRPUSIFY)
 
 
 def test_format_line_stale_suffix() -> None:
@@ -214,17 +230,19 @@ def test_format_line_stale_suffix() -> None:
 
 # ---------- _recently_compacted / _mark_compacted (real fs dedupe) ----------
 
+
 def test_dedupe_roundtrip(tmp_path: Path) -> None:
     """A mark suppresses a re-fire inside the window and expires past it."""
     mod = _import_hook()
     pd = str(tmp_path)
     assert mod._recently_compacted(pd, now=1000) is False
     mod._mark_compacted(pd, now=1000)
-    assert mod._recently_compacted(pd, now=1000 + 10) is True       # within 180s window
+    assert mod._recently_compacted(pd, now=1000 + 10) is True  # within 180s window
     assert mod._recently_compacted(pd, now=1000 + 10_000) is False  # past the window
 
 
 # ---------- _maybe_enforce (the decision matrix) ---------------------------
+
 
 def test_enforce_below_hardstop_is_none(tmp_path: Path) -> None:
     """Below the hard-stop -> no enforcement (falls through to advisory)."""
@@ -287,6 +305,7 @@ def test_enforce_trigger_exception_is_none(tmp_path: Path, monkeypatch) -> None:
 
 # ---------- _deny / _advisory shapes ---------------------------------------
 
+
 def test_deny_shape() -> None:
     """The deny dict carries the PreToolUse deny decision + the % in its reason."""
     mod = _import_hook()
@@ -308,6 +327,7 @@ def test_advisory_shape() -> None:
 
 
 # ---------- main() — the whole flow, in-process + hermetic ------------------
+
 
 def test_main_disabled_is_silent(monkeypatch, capsys) -> None:
     """Watchdog disabled -> exit 0, zero output."""
@@ -354,7 +374,7 @@ def test_main_advisory_when_enforcement_disabled(tmp_path: Path, monkeypatch, ca
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_payload(transcript=tp))))
     assert mod.main() == 0
     hs = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
-    assert "71%" in hs["additionalContext"]
+    assert "~70%" in hs["additionalContext"]  # 71 floored to the 5-pt band (TRDD-YRPUSIFY)
     assert "permissionDecision" not in hs
 
 
