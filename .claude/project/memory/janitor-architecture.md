@@ -2,7 +2,7 @@
 name: janitor-architecture
 description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub"
 ocd: 2026-06-13
-lmd: 2026-06-24
+lmd: 2026-07-02
 metadata:
   node_type: memory
   type: project
@@ -57,6 +57,26 @@ cron. `dispatch.py` then, in order:
 5. run each **due** detector `--one-shot`, emitting only NEW findings;
 6. reload — if a reload flag is set, emit `[janitor-reload]` (the model runs
    `/reload-plugins`).
+
+### Heartbeat modes — full / maintenance / stop (TRDD-FPL60EKV, v0.27.0)
+
+`dispatch._resolve_heartbeat_mode()` picks one of three modes per fire:
+**full** (the sequence above — due detectors + daemon spawn), **maintenance**
+(refreshes the prompt cache at the 0.1× cache-read rate and does NOTHING
+else — no detectors, no daemon spawn, no output — vs. letting the cache die
+and paying the 1.0× rewrite rate on the next real turn, a ~10× difference),
+or **stop** (self-disarm: emits `[janitor-self-disarm]`, the model runs
+`/janitor-disarm`, the cron deletes itself). Maintenance WINS over a global
+stop — one session can stay cache-warm while the rest of the fleet stays
+down, because `ensure_daemon_running()` still honors the machine-wide
+kill-switch (no fleet-recovery revival). Flags: local
+`.janitor/state/maintenance-mode` or global `maintenance-mode.flag`;
+controlled via `/janitor-maintenance-mode` (local `on`/`off`/`global`) or
+`global_control_cli.py maintenance|maintenance-off`. See the LOCAL-scope
+notes `reference_maintenance_mode_cache_warm_vs_disarm` (the cost model) and
+`feedback_arming_one_session_wakes_the_whole_fleet` (the incident that
+motivated it — clearing the global kill-switch to keep one session's
+heartbeat alive woke the whole fleet; maintenance-mode avoids that).
 
 ### Control flow — daemon
 
@@ -253,6 +273,9 @@ must report a crash.[^3]
   the OAuth rotator's account/keychain particulars, absolute home paths) lives
   in LOCAL-scope notes, NOT here. This page is git-tracked and host-global, so
   it stays generic by design.
+- LOCAL-scope notes `reference_maintenance_mode_cache_warm_vs_disarm` and
+  `feedback_arming_one_session_wakes_the_whole_fleet` — the maintenance-mode
+  cost model and the fleet-wake incident that motivated it.
 
 ## Notes and lessons learned
 
