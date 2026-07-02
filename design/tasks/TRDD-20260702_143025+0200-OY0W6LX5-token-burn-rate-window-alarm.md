@@ -1,9 +1,9 @@
 ---
 trdd-id: OY0W6LX5
-title: Window burn-rate alarm — warn when 5h/7d usage outpaces its linear budget (early-exhaustion)
+title: Fleet token attribution + window burn-rate alarm — which project over-consumes, and where the spike came from
 column: proposal
 created: 2026-07-02T14:30:25+0200
-updated: 2026-07-02T14:30:25+0200
+updated: 2026-07-02T14:33:40+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -49,6 +49,17 @@ approval-tier: 3
   → busiest 5h/7d windows = cap lower bounds; windows that exhausted early tighten the cap.
   Used to express absolute tokens and when the API util% is unavailable. History available:
   ~71 days / 247 MB → ample.
+- **THE CORE PROBLEM IS ATTRIBUTION (user, 2026-07-02):** the account util% is AGGREGATE
+  across all projects on a subscription — it can't say WHO. The user runs ~10 projects in
+  parallel on 2 Pro Max subs; when aggregate usage spikes, they need "which of the 10 is
+  consuming above its norm, and where did the spike come from" so the janitor can advise THAT
+  claude to cut back. So attribution is the PRIMARY deliverable; the burn-rate alarm is only
+  the TRIGGER to look. Enablers already exist: (a) each project's transcripts carry per-turn
+  usage → per-project rolling 5h/7d sums + each project's rate-vs-its-own-baseline;
+  (b) `fleet_scan.gather_fleet` already enumerates every running claude + its project root;
+  (c) `fleet_inject`/`terminal_trigger` already deliver a targeted message to a specific
+  session's pane. Attribution = a daemon-owned cross-project scan (the daemon is the machine-
+  wide singleton that already fleet-scans), NOT new plumbing.
 - **NEXT ACTION:** (1) confirm `/api/oauth/usage` fields (read-only probe). (2) Build the
   pure burn-rate math (`token_baseline`: `burn_ratio`, `projected_exhaustion`, `combine 5h+7d`)
   + tests — reproduce the user's example exactly. (3) `token_history.py` fallback miner. (4)
@@ -72,6 +83,25 @@ approval-tier: 3
   `…WINDOW_BURN_MIN_UTIL` (a floor so a barely-used window doesn't alarm), enable flag.
 - **Report:** `/janitor-token-report` gains a per-window burn-rate block (util%, elapsed%,
   ratio, projected exhaustion, lead-before-reset).
+
+### Attribution (the CORE — daemon-owned, cross-project)
+- **Per-project consumption scan:** for each ACTIVE project (from `fleet_scan.gather_fleet`),
+  walk its newest transcript(s) under `~/.claude/projects/<slug>/` → rolling 5h + 7d weighted
+  tokens, its share of the fleet total, and its recent rate vs its OWN trailing baseline
+  (median) = the per-project spike factor. Persist to `${CLAUDE_PLUGIN_DATA}` so ranking is
+  cross-project and survives updates.
+- **Culprit ID:** when the aggregate burn-rate trips, rank projects by absolute recent
+  consumption AND by spike-vs-own-baseline; the culprit = large AND above its own norm.
+- **Spike source (within the culprit):** break the culprit's recent turns into output vs
+  cache_creation (context bloat, re-read every turn) vs Task/subagent spawns vs tool_calls +
+  the timestamp the rate stepped up → "where the spike came from".
+- **Targeted advisory:** the daemon surfaces to the CULPRIT's own session via
+  `fleet_inject`/`terminal_trigger` — "you're the top consumer, N× your baseline; aggregate 7d
+  46%/1.6× pace — compact / stop idle subagents / throttle". Plus a fleet dashboard
+  `/janitor-token-attribution` (and fold into `/janitor-show-global-status`) ranking all
+  projects, runnable anywhere.
+- **Bounded/safe:** read-only scans; advisory only (never kills a session); opt-in +
+  min-floor so a quiet fleet never nags; honors the global kill-switch.
 
 ## Existing machinery to REUSE (don't rebuild)
 - `token_baseline.estimate_window_cap` (util%+spent → cap), `rolling_sum`, `bucketize`,
