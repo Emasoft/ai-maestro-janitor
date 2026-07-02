@@ -1060,6 +1060,31 @@ def _build_tasks() -> list[Task]:
     ]
 
 
+# The only task(s) allowed to run while the daemon is idling under global MAINTENANCE
+# (see the `main()` maintenance branch below). Keep this to genuine keepalive-critical
+# work only — everything else in `tasks` is exactly what maintenance means to skip.
+_MAINTENANCE_KEEPALIVE_TASK_NAMES = frozenset({"oauth-rotator-tick"})
+
+
+def _run_maintenance_keepalive(tasks: list[Task]) -> None:
+    """Run ONLY the keepalive-critical task(s) while otherwise idling under MAINTENANCE.
+
+    B3 bug fix: the maintenance branch in `main()` used to `continue` straight past the
+    ENTIRE task list, so "oauth-rotator-tick" (the 60 s beat that refreshes the LIVE
+    OAuth credential — see `task_oauth_rotator_tick`) never ran under maintenance.
+    Maintenance keeps every session firing CHEAP (the CLAUDE.md contract), so a lapsed
+    token would break the whole fleet while it looked idle. This runs ONLY the task(s)
+    named in `_MAINTENANCE_KEEPALIVE_TASK_NAMES` — the alert-only
+    "oauth-rotator-supervisor" and everything else stay skipped, matching maintenance's
+    "idle the expensive workloads" intent. Goes through the Task object (not a bare
+    `task_oauth_rotator_tick()` call) so the normal cadence stamp + failure-backoff
+    bookkeeping in `Task.run()` still applies.
+    """
+    for task in tasks:
+        if task.name in _MAINTENANCE_KEEPALIVE_TASK_NAMES and task.is_due():
+            task.run()
+
+
 def _setup_os_keepalive() -> None:
     """Best-effort L0 OS-keepalive setup at daemon startup (singleton only — runs after the
     flock is held). Refresh the DATA closure from the FRESHEST cache so a future OS respawn
@@ -1222,6 +1247,10 @@ def main() -> int:
             # dispatch's mode resolution (a session fires cheap, it is NOT disarmed).
             if gs.maintenance_mode_present():
                 gs.write_heartbeat()
+                # B3 fix: run the keepalive-critical task(s) (oauth-rotator-tick) even
+                # though every other task workload stays skipped under maintenance —
+                # see _run_maintenance_keepalive's docstring for the WHY.
+                _run_maintenance_keepalive(tasks)
                 for _ in range(_LOOP_CEILING_SEC):
                     # Break on _running=False, a kill-switch (the true STOP → the daemon must
                     # exit via the while-top branch), or maintenance lifting — but NOT on a
