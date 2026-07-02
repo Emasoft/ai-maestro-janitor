@@ -1,9 +1,9 @@
 ---
 trdd-id: TKNSTP82
 title: Fix post-compact token-runaway false alarm + never-stop maintenance continue-nudge
-column: dispatch
+column: complete
 created: 2026-07-02T11:16:08+0200
-updated: 2026-07-02T11:16:08+0200
+updated: 2026-07-02T11:55:47+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -18,7 +18,7 @@ target-branch: main
 test-requirements: [unit]
 impacts: []
 attempts: 0
-implementation-commits: []
+implementation-commits: [4a9749e, a1b8f5f]
 ---
 
 # Fix post-compact token-runaway false alarm + never-stop maintenance continue-nudge
@@ -45,6 +45,15 @@ Root cause CONFIRMED (fix-plan report): `token_meter.evaluate_turn_budget` (scri
 - **B2** — new `/janitor-keep-going` skill (on/off) → atomically writes/removes `.janitor/state/keep-going` (mirror the maintenance-mode skill). `/janitor-keep-going off` removes it.
 - **RUNAWAY GUARD:** the nudge fires ONLY under an explicit opt-in (the keep-going flag OR maintenance mode — both deliberate user choices). A plain full-mode session with neither → no nudge → idles normally. So no fleet-wide token runaway on default/interactive sessions.
 - Tests: dispatch phase test — keep-going flag → nudge in full AND maintenance; maintenance (no flag) → nudge; full + no flag + no maintenance → NO nudge; a prior compact/rate-limit resume still short-circuits first.
+
+## Part C — auto-compact-window-aware prediction + PREPARE alert (user, 2026-07-02)
+
+The context gauge must predict the AUTO-COMPACT point EXACTLY from `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (the auto-compact trigger token count; user sets 700000). The compact ROUTINE itself uses ~34000 tokens for the summary, so the real compact point = `CLAUDE_CODE_AUTO_COMPACT_WINDOW - 34000` (700000-34000 = 666000). `tokens_until_compact = (WINDOW - 34000) - used`. Verified: 559k used → ~107k remaining.
+
+- **C1** — `scripts/hooks/pre-tool-context-usage.py`: read `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; `effective_compact_point = WINDOW - _COMPACT_SUMMARY_OVERHEAD` (34000, overridable via `CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS`); `tokens_until_compact = effective_compact_point - used`. Emit a PREPARE alert (finish current step + write a handoff / `/janitor-write-handoff` so the summary captures the plan) when `tokens_until_compact <= CLAUDE_PLUGIN_OPTION_CONTEXT_PREPARE_TOKENS` (default 30000). Fall back to the existing advisory/enforce % when the env var is unset.
+- **C2** — surface exact numbers in `/janitor-token-report --live`: used, effective_compact_point, tokens_until_compact.
+- Tests: prepare alert fires at ≤30k-until-compact, silent above; env-var-unset fallback; the 34k overhead applied.
+- **SEQUENCING:** C edits pre-tool-context-usage.py, which Part A (A4) also touches → implement C AFTER Part A lands (sequential on that file), before publishing v0.28.2.
 
 ## Delivery
 Both parts touch DISJOINT files (A: token_meter.py, pre-tool-token-budget.py, token_report.py + tests; B: dispatch.py, new skill, dispatch tests) → implement in parallel. Verify ruff+mypy+pytest on touched files, then `publish.py --patch` → v0.28.2. Docs: CLAUDE.md hooks/skills list, README, the maintenance-mode skill (note it now nudges continue). Update this frontmatter (implementation-commits, column) on landing.
