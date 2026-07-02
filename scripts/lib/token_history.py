@@ -202,16 +202,18 @@ def scan_transcript(
                 if not isinstance(obj, dict) or obj.get("type") != "assistant":
                     continue
                 msg = obj.get("message")
-                mid = msg.get("id") if isinstance(msg, dict) else None
-                has_id = isinstance(mid, str) and bool(mid)
-                if seen_ids is not None and has_id and mid in seen_ids:
+                raw_id = msg.get("id") if isinstance(msg, dict) else None
+                # Normalize to `str | None` in one step: a separate `has_id` bool does
+                # NOT narrow the type at the `.add()` site for Pyright (CPV gate).
+                mid = raw_id if isinstance(raw_id, str) and raw_id else None
+                if seen_ids is not None and mid is not None and mid in seen_ids:
                     continue  # duplicate content-block line / replay copy — already counted
                 ev = _event_from_assistant(obj, since_epoch)
                 if ev is not None:
                     events.append(ev)
                     # Mark seen only when the event was ACCEPTED: an out-of-window
                     # first line must not shadow a (hypothetical) in-window duplicate.
-                    if seen_ids is not None and has_id:
+                    if seen_ids is not None and mid is not None:
                         seen_ids.add(mid)
     except OSError:
         return events
