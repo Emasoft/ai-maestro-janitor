@@ -1,7 +1,7 @@
 {
   "files": {
-    "CLAUDE.md": "1a9e2c3b0488c56e61488203aec1fd4268001c59f0ef2de83ec1a640e6a09204",
-    "README.md": "886436ae730ade5316c76368bd6abf63483c8892c07b779d3f537fee6c80e0c5",
+    "CLAUDE.md": "19fd86395e49c1c9c584733bdca67578ee24fe28f25ede404a9d65cd598771dd",
+    "README.md": "d92e679fb89d800033438f76e467d9553351f643ccc43207e240f3cb515a3e7e",
     "commands/janitor-identify-environment.md": "94c58281c3d42285c90ef3e9f72663782db286b8078374db9ee2b920487696a1",
     "commands/janitor-memory-conflict-frequency-get.md": "27bc20306e296614c4c4bd78b978a04717799b89f7c7054f2cf9b7b2f374f21b",
     "commands/janitor-memory-conflict-frequency-set.md": "cc5fd5b3e94b25f66d8b2f116a4504c069980a1f50924013b192079aa9467414",
@@ -44,6 +44,7 @@
     "skills/janitor-global-pause/SKILL.md": "0711e8242c03126348cf1d645ee65f66bc472ecbdd10ee10ee8b981cf7c2dc2e",
     "skills/janitor-global-reload-skills/SKILL.md": "767663e18d4f7089de1759637efd54f1937e2b2580d0ec3a32e7b3c74ffe4368",
     "skills/janitor-global-unpause/SKILL.md": "3b18d3f4ec0df561c7cb2cf8209c3aa4cd269aa34e0a6fd1b140900effa0c713",
+    "skills/janitor-maintenance-mode/SKILL.md": "2aecae934a7af2ce5c1c0f3fe0c5448b45f6128d681bb8a7df40caddc718c559",
     "skills/janitor-memory-atomize/SKILL.md": "8d534ef86dd4e0b919042d981157881ca92a4275ba59643043392897ac0ac8d2",
     "skills/janitor-memory-bootstrap/SKILL.md": "d77d412e24da2d1251c623cdd72df113aba12c67f57f638a0a3303573ff46b9f",
     "skills/janitor-memory-conflict/SKILL.md": "d3c86ed5af3d2a0cf2a478ec1cd18ba3786ae1f842260e7065237dc0606b0425",

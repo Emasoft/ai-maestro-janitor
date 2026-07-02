@@ -2,9 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.26.1] - 2026-07-01
+## [0.27.0] - 2026-07-02
 
-### Bug Fixes
+### Documentation
 
-- Hard interrupt sends TWO ESCs — one clears the tool, one ends the turn (TRDD-L87BQ2Y9)
+- Mark TRDD-L87BQ2Y9 published in v0.26.1 (double-ESC self-trigger fix)
+
+### Features
+
+- Maintenance-mode — cache-warm cheap fires between full and disarm (TRDD-FPL60EKV)
 
