@@ -356,7 +356,11 @@ def fleet_attribution(projects_root: Path, now: int, *, since_epoch: int | None 
     }
 
 
-def culprit(fleet: dict, *, min_share: float = 0.2, min_spike: float = 1.5) -> str | None:
+def culprit(fleet: dict, *, min_share: float = 0.1, min_spike: float = 1.5) -> str | None:
+    # min_share default 0.1 (was 0.2): validated on the first REAL fleet run (2026-07-02,
+    # 82 projects) — the true top consumer held 17% of the fleet with a 9.1x spike and the
+    # 0.2 floor wrongly reported "no culprit". On a many-project fleet no single session
+    # reaches 20%; 10% + a spike is already the one to advise.
     """The one project to advise: the highest-`roll_5h` slug whose `share_5h >= min_share`
     AND whose `spike_factor` is None OR `>= min_spike`. None when nobody clears the floors.
 
