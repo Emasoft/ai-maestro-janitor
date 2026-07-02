@@ -37,6 +37,12 @@ approval-tier: 0
   polluted"); (b) possibly REAL browser launches during tests if the launch path isn't stubbed —
   verify; (c) log noise drowns real rotation decisions.
 - **USER approval:** "yes, approved all 3" (2026-07-02) — item 2. Tier-0 execution (own scope).
+- **PRECEDENT (wikimem oauth-rotation-renew-reauth lesson [^7]):** this bug CLASS was fixed once
+  already — TRDD-14IY6MAD (v0.18.2): the cmd_auto tests leaked `live@x`/`alt@x` lines the same way
+  (`_setup_auto` patched state+keychain but not `_log`); fix = module autouse fixture redirecting
+  `rotator.ROOT` + `rotator.LOG_FILE` to tmp. Today = the SAME class from a DIFFERENT module (the
+  `_bootstrap_seeded_slots` tests). Durable fix: centralize the autouse fixture (conftest-level) so
+  EVERY rotator test module is covered and a future module can't re-introduce the leak.
 - **NEXT ACTION:** (1) grep tests/test_*rotator*/oauth* for fixture emails (`@x.com`) → find which
   test drives auto-bootstrap; (2) trace the rotator's log-writer path resolution — make it honor the
   SAME env override the state uses (one root resolution, not two — the TRDD-5EUYV08H lesson:
