@@ -173,11 +173,21 @@ def _event_from_assistant(obj: dict, since_epoch: int) -> Event | None:
     )
 
 
-def scan_transcript(path: str | os.PathLike[str], since_epoch: int) -> list[Event]:
+def scan_transcript(
+    path: str | os.PathLike[str], since_epoch: int, seen_ids: set[str] | None = None
+) -> list[Event]:
     """Stream one `*.jsonl` transcript and return every assistant `Event` at or after
     `since_epoch`. Line-by-line — a 100+ MB transcript is never loaded whole. Junk lines
     (JSON errors, blanks, non-assistant entries) are skipped; an unreadable file yields
-    whatever was collected before the error (best-effort, never raises)."""
+    whatever was collected before the error (best-effort, never raises).
+
+    `seen_ids` dedupes by `message.id`: ONE streamed API response is written as SEVERAL
+    `type:assistant` jsonl lines (one per content block), EACH repeating the same
+    `message.id` and the same full `usage` — summing every line over-counts 1.5-2.1×
+    (measured 2026-07-02 on three real projects; the user caught the inflated numbers).
+    The same id-dedupe also kills session-resume replay copies when the caller shares
+    one set across a project's files (see `scan_project`). Only the FIRST in-window
+    line of a message id contributes its usage; id-less (malformed) lines are kept."""
     events: list[Event] = []
     try:
         with Path(path).open("r", encoding="utf-8", errors="replace") as f:
@@ -191,9 +201,18 @@ def scan_transcript(path: str | os.PathLike[str], since_epoch: int) -> list[Even
                     continue  # partial / corrupt line — skip it, keep scanning
                 if not isinstance(obj, dict) or obj.get("type") != "assistant":
                     continue
+                msg = obj.get("message")
+                mid = msg.get("id") if isinstance(msg, dict) else None
+                has_id = isinstance(mid, str) and bool(mid)
+                if seen_ids is not None and has_id and mid in seen_ids:
+                    continue  # duplicate content-block line / replay copy — already counted
                 ev = _event_from_assistant(obj, since_epoch)
                 if ev is not None:
                     events.append(ev)
+                    # Mark seen only when the event was ACCEPTED: an out-of-window
+                    # first line must not shadow a (hypothetical) in-window duplicate.
+                    if seen_ids is not None and has_id:
+                        seen_ids.add(mid)
     except OSError:
         return events
     return events
@@ -210,6 +229,9 @@ def scan_project(project_dir: Path, since_epoch: int) -> list[Event]:
     if not d.is_dir():
         return []
     events: list[Event] = []
+    # ONE seen-set across ALL of the project's files: dedupes both the intra-file
+    # content-block repeats AND cross-file resume/replay copies of the same message.
+    seen_ids: set[str] = set()
     for jsonl in d.glob("*.jsonl"):
         if not jsonl.is_file():
             continue
@@ -219,7 +241,7 @@ def scan_project(project_dir: Path, since_epoch: int) -> list[Event]:
             continue
         if mtime < since_epoch:
             continue  # newest entry predates the window — prune the whole file
-        events.extend(scan_transcript(jsonl, since_epoch))
+        events.extend(scan_transcript(jsonl, since_epoch, seen_ids))
     events.sort(key=lambda e: e.ts)
     return events
 
