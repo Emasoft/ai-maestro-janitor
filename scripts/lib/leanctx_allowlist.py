@@ -81,7 +81,7 @@ def _autoallow_enabled() -> bool:
         try:
             from lib import state  # hook context: scripts/ on sys.path
         except ImportError:
-            import state  # detector / test context: scripts/lib on sys.path
+            import state  # type: ignore[no-redef]  # detector / test context: scripts/lib on sys.path
 
         return bool(state.is_truthy_env(_OPTION_ENV, True))
     except Exception:  # noqa: BLE001 -- a config-read failure must not decide anything but the default
