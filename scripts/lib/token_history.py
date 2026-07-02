@@ -289,14 +289,22 @@ def _step_up_ts(events: list[Event], now: int, rate_baseline_per_min: float) -> 
     return k * _HOUR
 
 
-def project_metrics(events: list[Event], now: int) -> dict:
+def project_metrics(
+    events: list[Event], now: int, *, w5_lo: int | None = None, w7_lo: int | None = None
+) -> dict:
     """Roll one project's `events` up into the attribution metrics for time `now`.
 
     Returns a dict with rolling weighted sums (`roll_5h`, `roll_7d`, `recent_1h`), the
     recent vs. baseline per-minute rates and their `spike_factor`, the last hour's `source`
-    breakdown, and `step_up_ts`. Safe on an empty list (all zeros / None). Pure."""
-    roll_5h = _window_sum(events, now - _5H, now)
-    roll_7d = _window_sum(events, now - _7D, now)
+    breakdown, and `step_up_ts`. Safe on an empty list (all zeros / None). Pure.
+
+    `w5_lo`/`w7_lo` (TRDD-0NRVNDSZ) are WINDOW-ALIGNED start epochs (`resets_at − window_s`
+    from the live usage probe, via `token_burn.window_starts`): when given they replace the
+    trailing `now − 5h`/`now − 7d` bounds for `roll_5h`/`roll_7d`, so the sums match the
+    subscription meter's FIXED billing windows. Baseline/spike stay trailing on purpose —
+    they measure the project's own norm, not a billing window."""
+    roll_5h = _window_sum(events, w5_lo if w5_lo is not None else now - _5H, now)
+    roll_7d = _window_sum(events, w7_lo if w7_lo is not None else now - _7D, now)
     recent_1h = _window_sum(events, now - _HOUR, now)
     rate_recent_per_min = recent_1h / 60.0
 
@@ -344,7 +352,14 @@ def project_metrics(events: list[Event], now: int) -> dict:
     }
 
 
-def fleet_attribution(projects_root: Path, now: int, *, since_epoch: int | None = None) -> dict:
+def fleet_attribution(
+    projects_root: Path,
+    now: int,
+    *,
+    since_epoch: int | None = None,
+    w5_lo: int | None = None,
+    w7_lo: int | None = None,
+) -> dict:
     """Attribute fleet-wide consumption across every project under `projects_root`.
 
     Walks each child dir that contains at least one `*.jsonl`, scans it (mtime-pruned by
@@ -362,7 +377,7 @@ def fleet_attribution(projects_root: Path, now: int, *, since_epoch: int | None 
                 continue
             if not any(child.glob("*.jsonl")):
                 continue  # not a project transcript dir — skip
-            projects[child.name] = project_metrics(scan_project(child, since_epoch), now)
+            projects[child.name] = project_metrics(scan_project(child, since_epoch), now, w5_lo=w5_lo, w7_lo=w7_lo)
 
     total_5h = sum(m["roll_5h"] for m in projects.values())
     total_7d = sum(m["roll_7d"] for m in projects.values())
@@ -374,6 +389,10 @@ def fleet_attribution(projects_root: Path, now: int, *, since_epoch: int | None 
     return {
         "now": now,
         "since_epoch": since_epoch,
+        # The aligned bounds actually used (None = trailing). Recorded so the cache can
+        # detect a bounds mismatch and reports can show WHICH window was summed.
+        "w5_lo": w5_lo,
+        "w7_lo": w7_lo,
         "projects": projects,
         "totals": {"roll_5h": total_5h, "roll_7d": total_7d},
         "ranking": ranking,

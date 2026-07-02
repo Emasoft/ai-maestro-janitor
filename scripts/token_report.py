@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 # A heartbeat whose output exceeds this is a "spike" worth the user's eye; also
 # flagged relative to the run's own p95. Env-overridable.
 import memory_scopes  # noqa: E402
+import rotator_usage  # noqa: E402
 import token_attribution_cache as tac  # noqa: E402
 import token_baseline as tb  # noqa: E402
 import token_burn  # noqa: E402
@@ -282,8 +283,15 @@ def _render_attribution(as_json: bool) -> int:
     the culprit (the one to advise). Reads the shared 30-min fleet cache (scans fresh only
     when stale). Read-only."""
     now = int(time.time())
+    # Window-ALIGNED bounds from the live usage probe (TRDD-0NRVNDSZ): the 5h/7d sums must
+    # cover the SAME fixed windows the subscription meter bills (start = resets_at −
+    # window_s), not trailing intervals. Probe failure → (None, None) → trailing fallback.
     try:
-        fleet = tac.get(_projects_root(), now)
+        w5_lo, w7_lo = token_burn.window_starts(rotator_usage.accounts_usage(), now)
+    except Exception:
+        w5_lo = w7_lo = None
+    try:
+        fleet = tac.get(_projects_root(), now, w5_lo=w5_lo, w7_lo=w7_lo)
     except Exception:
         fleet = {"now": now, "projects": {}, "totals": {"roll_5h": 0.0, "roll_7d": 0.0}, "ranking": []}
     culprit_slug = th.culprit(fleet)
@@ -295,7 +303,10 @@ def _render_attribution(as_json: bool) -> int:
     projects = fleet.get("projects", {})
     ranking = fleet.get("ranking", [])
     totals = fleet.get("totals", {})
-    print(f"[janitor-token-attribution] {len(projects)} project(s)  ·  fleet 5h {_fmt_k(totals.get('roll_5h', 0))}  ·  7d {_fmt_k(totals.get('roll_7d', 0))} weighted")
+    aligned = "window-aligned (resets_at)" if fleet.get("w5_lo") is not None else "trailing (no live probe)"
+    print(
+        f"[janitor-token-attribution] {len(projects)} project(s)  ·  fleet 5h {_fmt_k(totals.get('roll_5h', 0))}  ·  7d {_fmt_k(totals.get('roll_7d', 0))} weighted  ·  {aligned}"
+    )
     if not ranking:
         print("  no per-project transcript activity in the last 7d.")
         return 0

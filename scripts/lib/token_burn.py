@@ -78,6 +78,36 @@ def windows_from_usage(usage: dict, now: int) -> list[dict]:
     return out
 
 
+def window_starts(accounts_usage: list[dict], now: int) -> tuple[int | None, int | None]:
+    """The LIVE subscription windows' START epochs `(w5_lo, w7_lo)` — `resets_at − window_s`.
+
+    This is what makes attribution WINDOW-ALIGNED (TRDD-0NRVNDSZ): the user's meter bills a
+    FIXED window ending at `resets_at`, so its start is `resets_at − window_s` — NOT the
+    trailing `now − window_s`. Walks `accounts_usage` (the `rotator_usage.accounts_usage()`
+    shape) preferring the account labeled "live" (its windows are the ones the meter shows),
+    then the rest in order; the first parseable window per label wins. Either element is
+    None when no account exposes that window (callers then fall back to trailing). Pure."""
+    w5_lo: int | None = None
+    w7_lo: int | None = None
+    ordered = sorted(
+        (a for a in accounts_usage if isinstance(a, dict)),
+        key=lambda a: a.get("label") != "live",  # live first, stable otherwise
+    )
+    for acct in ordered:
+        usage = acct.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        for w in windows_from_usage(usage, now):
+            start = w["resets_at_epoch"] - w["window_s"]
+            if w["label"] == "5h" and w5_lo is None:
+                w5_lo = start
+            elif w["label"] == "7d" and w7_lo is None:
+                w7_lo = start
+        if w5_lo is not None and w7_lo is not None:
+            break
+    return (w5_lo, w7_lo)
+
+
 def format_burn_line(label: str, window: dict) -> str:
     """Render ONE tripped window as the base drift line (no top-consumer clause — the
     caller appends that only when fleet attribution is available)."""

@@ -75,14 +75,16 @@ def _short_slug(slug: str) -> str:
     return "-".join(parts[-2:]) if parts else slug
 
 
-def _top_consumer_clause() -> str:
+def _top_consumer_clause(w5_lo: int | None = None, w7_lo: int | None = None) -> str:
     """The ' Top consumer: …' suffix, computed ONLY when a burn tripped (never on quiet
     runs), from the shared 30-min fleet-attribution cache. Empty string on any failure — the
-    burn line is still worth emitting without attribution."""
+    burn line is still worth emitting without attribution. `w5_lo`/`w7_lo` are the LIVE
+    subscription windows' start epochs (TRDD-0NRVNDSZ) so the shares are summed over the
+    SAME windows the meter bills; None falls back to trailing."""
     try:
         now = int(time.time())
         projects_root = Path.home() / ".claude" / "projects"
-        fleet = tac.get(projects_root, now)
+        fleet = tac.get(projects_root, now, w5_lo=w5_lo, w7_lo=w7_lo)
         slug = th.culprit(fleet)
         if not slug:
             return ""
@@ -121,9 +123,14 @@ def main() -> int:
 
     # Gather + evaluate are wrapped together: even an unexpected rotator shape must not crash
     # the heartbeat. A gather failure yields no accounts → no trips → silent.
+    # The aligned window starts ride the same probe: resets_at − window_s per label. On any
+    # gather failure they stay None and attribution falls back to trailing windows.
+    w5_lo: int | None = None
+    w7_lo: int | None = None
     try:
         accounts = rotator_usage.accounts_usage()
         trips = token_burn.evaluate_trips(accounts, now, ratio, min_util)
+        w5_lo, w7_lo = token_burn.window_starts(accounts, now)
     except Exception:
         trips = []
 
@@ -138,7 +145,7 @@ def main() -> int:
         state.rotate_log_if_big("window-burn-rate")
         return 0
 
-    clause = _top_consumer_clause()  # one fleet scan (cached) shared by every tripped window
+    clause = _top_consumer_clause(w5_lo, w7_lo)  # one fleet scan (cached) shared by every tripped window
     seen = state.state_dir() / "window-burn-rate-seen.txt"
     day = now // 86400
     for trip in trips:
