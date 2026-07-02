@@ -1,9 +1,9 @@
 ---
 trdd-id: OY0W6LX5
 title: Fleet token attribution + window burn-rate alarm — which project over-consumes, and where the spike came from
-column: proposal
+column: dev
 created: 2026-07-02T14:30:25+0200
-updated: 2026-07-02T14:33:40+0200
+updated: 2026-07-02T14:41:58+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -110,12 +110,14 @@ approval-tier: 3
   rotation, no mutation).
 - `window-exhaustion.jsonl` (only 5 events) — keep as a corroborating cap-lower-bound source.
 
-## Open confirmations (build-time)
-- Exact `/api/oauth/usage` payload shape (does it return the reset/boundary + both windows?).
-- Are the 5h/7d windows rolling or fixed-reset? (User treats 7d as a fixed Jul 1→8 weekly.)
-
-## Approval
-Tier-3 (touches the OAuth read path + a new fleet-wide heartbeat alarm). Proposal — awaiting
-USER go-ahead before implementation.
+## CONFIRMED (probe 2026-07-02T14:41, read-only, http 200)
+- Payload: `five_hour.{utilization, resets_at}` + `seven_day.{utilization, resets_at}` (ISO
+  UTC) + a `limits[]` array (`kind: session|weekly_all|weekly_scoped`, `percent`, `severity:
+  normal|critical`, `resets_at`, `is_active`). `*_dollars` all None on this plan.
+- Both windows are FIXED-reset (resets_at given) → `elapsed_fraction = 1 − (resets_at − now)/window_s`.
+- Live validation: seven_day 48% with reset Jul 7 08:00Z → start Jun 30 08:00Z → elapsed
+  31.4% → **burn_ratio 1.53×** (matches the user's ~1.6× estimate). five_hour was 100%
+  (severity critical) at probe time — the alarm class is real.
 
 ## Approval log
+- 2026-07-02T14:41:58+0200 — APPROVED by USER (tier 3). Verbatim: "go". Build + publish authorized.
