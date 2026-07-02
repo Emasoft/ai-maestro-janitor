@@ -1,9 +1,9 @@
 ---
 trdd-id: FPL60EKV
 title: Maintenance-mode — keep the cache warm cheap instead of disarming (one session must not un-gate the fleet)
-column: dev
+column: published
 created: 2026-07-02T01:56:08+0200
-updated: 2026-07-02T02:40:00+0200
+updated: 2026-07-02T03:47:49+0200
 current-owner: autonomous-go-on-yourself
 assignee: autonomous-go-on-yourself
 priority: 2
@@ -30,11 +30,13 @@ audit-requirements: []
 review-requirements: []
 runtime-targets: [macos, linux]
 impacts: []
-attempts: 0
+attempts: 1
 test-failures: 0
-last-test-result: not-run
-implementation-commits: []
-external-refs: []
+last-test-result: pass
+implementation-commits: [11458b5]
+published-version: 0.27.0
+published-at: 2026-07-02T03:47:49+0200
+external-refs: [github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.27.0]
 ---
 
 # TRDD-FPL60EKV — Per-session keepalive override
