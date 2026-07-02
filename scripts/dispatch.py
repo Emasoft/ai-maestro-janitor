@@ -62,6 +62,11 @@ import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD
 # per-detector via last-run files, not by ordering).
 _DETECTORS: list[tuple[str, int, str]] = [
     ("pr-reconciler", 900, "CLAUDE_PLUGIN_OPTION_PR_RECONCILER_INTERVAL"),
+    # ci-status: after a push, watch the pushed commit's CI and emit a drift line (notify
+    # the main Claude) if it failed. Short cadence so a failure surfaces within ~1 heartbeat
+    # of CI completing; cheap no-op (one `git rev-parse`) when the pushed SHA is already
+    # resolved. FULL mode only. Opt-out CLAUDE_PLUGIN_OPTION_CI_STATUS_ENABLED (TRDD-AKH7JRAA).
+    ("ci-status", 60, "CLAUDE_PLUGIN_OPTION_CI_STATUS_INTERVAL"),
     ("worktree-janitor", 900, "CLAUDE_PLUGIN_OPTION_WORKTREE_JANITOR_INTERVAL"),
     ("trdd-drift", 3600, "CLAUDE_PLUGIN_OPTION_TRDD_DRIFT_INTERVAL"),
     ("trdd-reminder", 14400, "CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL"),

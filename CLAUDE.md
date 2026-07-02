@@ -108,11 +108,11 @@ All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
 
 ## Conventions (breadth — list, don't per-symbol-dump)
 
-**Detectors (`scripts/detectors/`, 38)** — each a standalone `--one-shot` script
+**Detectors (`scripts/detectors/`, 39)** — each a standalone `--one-shot` script
 run by `dispatch.py`; emits drift lines; slow ones use a PID-tracked detached-worker
 that skips if the prior worker is alive; per-detector cadence + seen-file dedupe.
 **Project-scoped — never touch user-scope.** Groups:
-- *git/workflow hygiene:* pr-reconciler, worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
+- *git/workflow hygiene:* pr-reconciler, ci-status (post-push: watch the pushed commit's CI, emit a drift line = notify main Claude on failure — TRDD-AKH7JRAA), worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
 - *TRDD/task:* trdd-drift, trdd-reminder.
 - *cleanup:* screenshot-purge, trashcan-purge.
 - *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; default-on, per-bucket-deduped, 5-min cadence).
