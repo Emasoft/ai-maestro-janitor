@@ -71,6 +71,38 @@ _DEFAULT_COMPACT_GRACE_S = 600
 _SPAWNER_TOOLS = frozenset({"Task", "Agent"})
 
 
+# TRDD-4MMXTJFB — repeat-nudge suppression window (seconds). While a turn stays in the
+# SAME (tier, signal-set) state, the full nudge paragraph is injected ONCE; repeats within
+# the window are silenced (advisory) or shrunk to one stable line (hard). Every injected
+# nudge rides the transcript and is re-read by all later turns, so re-injecting the same
+# ~120-token paragraph on EVERY tool call is exactly the context bloat this hook polices.
+_DEFAULT_REPEAT_S = 180
+_HARD_REPEAT_LINE = "⚠⚠ token-guard: hard budget still exceeded — see the prior nudge; wrap up now."
+
+
+def _repeat_suppressed(key: str, now: int, project_dir: str, window_s: int) -> bool:
+    """True iff the SAME nudge `key` was already emitted < `window_s` ago (and stamp the
+    emission otherwise). Fail-open: any I/O error → False (never suppress on doubt, and
+    never crash the hook). The stamp lives beside the other per-session state files."""
+    if window_s <= 0 or not project_dir:
+        return False
+    try:
+        stamp = Path(project_dir) / ".janitor" / "state" / "token-budget-last-nudge.txt"
+        try:
+            prev_key, prev_ts = stamp.read_text(encoding="utf-8").rsplit(" ", 1)
+            if prev_key == key and 0 <= now - int(prev_ts) < window_s:
+                return True
+        except (OSError, ValueError):
+            pass  # missing/corrupt stamp — treat as first emission
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        tmp = stamp.with_suffix(f".tmp.{os.getpid()}")
+        tmp.write_text(f"{key} {now}", encoding="utf-8")
+        os.replace(tmp, stamp)
+    except OSError:
+        return False
+    return False
+
+
 def _enabled(raw: str | None) -> bool:
     """DEFAULT-ON: unset/empty → True; explicit false/0/no/off → False."""
     if raw is None or raw.strip() == "":
@@ -289,6 +321,18 @@ def main() -> int:
         _optin(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE")),
     )
     if resp is not None:
+        # TRDD-4MMXTJFB — repeat-nudge suppression: only additionalContext nudges are
+        # deduped (a deny must ALWAYS fire — it gates a real spawn). Key = tier +
+        # signal-set (NOT the bucketed counts, which drift as the turn grows — the point
+        # is "same situation", not "same numbers").
+        hso = resp.get("hookSpecificOutput", {})
+        if isinstance(hso, dict) and "additionalContext" in hso:
+            key = f"{verdict.tier}:{int(_has_signal(verdict.reasons, 'output '))}{int(_has_signal(verdict.reasons, 'cache-miss write'))}"
+            window_s = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_REPEAT_S"), _DEFAULT_REPEAT_S)
+            if _repeat_suppressed(key, int(time.time()), project_dir, window_s):
+                if verdict.tier == "hard":
+                    _emit(_context(_HARD_REPEAT_LINE))  # tiny, byte-stable reminder
+                return 0  # advisory repeat: silence — the first nudge already rides the transcript
         _emit(resp)
     return 0
 
