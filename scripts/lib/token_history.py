@@ -122,10 +122,13 @@ def parse_ts(iso: str) -> int | None:
 class Event:
     """One assistant turn's contribution to attribution.
 
-    `weighted` is the token cost (see `weighted`); `output` and `cache_creation` are kept
-    raw so a spike can be attributed to full-price work vs. a cache-miss write;
-    `tool_calls` / `subagent_spawns` count the turn's `tool_use` blocks (spawns = the
-    `Task`/`Agent` subset) so a fan-out runaway is visible."""
+    `weighted` is the token cost (see `weighted`); ALL FOUR raw usage categories are kept
+    (TRDD-4MMXTJFB) so reports can distinguish full-price output, uncached input, the
+    ~1.25x cache-miss WRITE (`cache_creation`) and the ~0.1x context RE-READ (`cache_read`)
+    instead of blending them; `tool_calls` / `subagent_spawns` count the turn's `tool_use`
+    blocks (spawns = the `Task`/`Agent` subset) so a fan-out runaway is visible.
+
+    `input`/`cache_read` default 0 so pre-existing positional constructors stay valid."""
 
     ts: int
     weighted: float
@@ -133,6 +136,8 @@ class Event:
     cache_creation: int
     tool_calls: int
     subagent_spawns: int
+    input: int = 0
+    cache_read: int = 0
 
 
 def _count_tool_use(content: object) -> tuple[int, int]:
@@ -170,6 +175,8 @@ def _event_from_assistant(obj: dict, since_epoch: int) -> Event | None:
         cache_creation=_as_int(usage.get("cache_creation_input_tokens")),
         tool_calls=tool_calls,
         subagent_spawns=subagent_spawns,
+        input=_as_int(usage.get("input_tokens")),
+        cache_read=_as_int(usage.get("cache_read_input_tokens")),
     )
 
 
@@ -221,9 +228,10 @@ def scan_transcript(
 
 
 # Fleet-dict schema version. Bumped when the SCAN ITSELF changes meaning (v2 = recursive
-# subagent-transcript scan, TRDD-0NRVNDSZ) so a cached fleet computed by an older scanner
-# is treated as stale instead of served as truth.
-SCAN_VERSION = 2
+# subagent-transcript scan, TRDD-0NRVNDSZ; v3 = per-category Event fields + categories in
+# project_metrics, TRDD-4MMXTJFB) so a cached fleet computed by an older scanner is
+# treated as stale instead of served as truth.
+SCAN_VERSION = 3
 
 
 def scan_project(project_dir: Path, since_epoch: int) -> list[Event]:
@@ -262,6 +270,44 @@ def scan_project(project_dir: Path, since_epoch: int) -> list[Event]:
 def _window_sum(events: list[Event], lo_ts: int, hi_ts: int) -> float:
     """Weighted-token sum over the inclusive window [lo_ts, hi_ts]."""
     return sum(e.weighted for e in events if lo_ts <= e.ts <= hi_ts)
+
+
+#: Raw usage categories every Event carries (TRDD-4MMXTJFB) + the weighted blend.
+CATEGORY_FIELDS = ("output", "input", "cache_creation", "cache_read", "weighted")
+
+
+def _category_sums(events: list[Event], lo_ts: int, hi_ts: int) -> dict[str, float]:
+    """Per-category token sums over the inclusive window [lo_ts, hi_ts] — the four RAW
+    usage classes plus the weighted blend, so a report can say '92% of this window is
+    the cheap 0.1x cache re-read' instead of one conflated number."""
+    # Explicit str keys (not dict.fromkeys(CATEGORY_FIELDS)) — pyright infers Literal keys
+    # from the tuple, which is invariant-incompatible with the declared dict[str, float].
+    sums: dict[str, float] = {f: 0.0 for f in CATEGORY_FIELDS}
+    for e in events:
+        if lo_ts <= e.ts <= hi_ts:
+            sums["output"] += e.output
+            sums["input"] += e.input
+            sums["cache_creation"] += e.cache_creation
+            sums["cache_read"] += e.cache_read
+            sums["weighted"] += e.weighted
+    return sums
+
+
+def bucket_series(
+    events: list[Event], lo_ts: int, hi_ts: int, buckets: int, field: str = "weighted"
+) -> list[float]:
+    """`field` summed into `buckets` equal time bins over [lo_ts, hi_ts) — the graphable
+    PER-BUCKET rate series (the derivative view; its running sum is the cumulative view).
+    Empty bins are 0.0 so gaps show as gaps. Pure; junk bounds → []."""
+    if buckets <= 0 or hi_ts <= lo_ts or field not in CATEGORY_FIELDS:
+        return []
+    width = (hi_ts - lo_ts) / buckets
+    series = [0.0] * buckets
+    for e in events:
+        if lo_ts <= e.ts < hi_ts:
+            idx = min(int((e.ts - lo_ts) / width), buckets - 1)
+            series[idx] += float(getattr(e, field))
+    return series
 
 
 def _bucketize_hourly(events: list[Event], lo_ts: int, hi_ts: int) -> dict[int, float]:
@@ -328,24 +374,23 @@ def project_metrics(
 
     spike_factor = (rate_recent_per_min / rate_baseline_per_min) if rate_baseline_per_min > 0 else None
 
-    # Source breakdown of the last hour: which token class drove the weighted cost. The
-    # three shares PARTITION the weighted total (they sum to 1.0). Each `Event` carries only
-    # `output` and `cache_creation`, so the third share is the residual (weighted − output −
-    # cache_creation)/weighted — dominated by the cheap cache_read/10 term; the small
-    # uncached `input_tokens` is folded into it (negligible vs. cache_read in real
-    # transcripts). subagent_spawns is the last hour's total Task/Agent spawn count.
+    # Source breakdown of the last hour: which token class drove the weighted cost. Four
+    # shares PARTITION the weighted total (sum to 1.0), each computed from the Event's REAL
+    # per-category fields (TRDD-4MMXTJFB — previously input+cache_read were a residual
+    # approximation). subagent_spawns is the last hour's total Task/Agent spawn count.
     hour_events = [e for e in events if now - _HOUR <= e.ts <= now]
-    wsum = sum(e.weighted for e in hour_events)
-    osum = sum(e.output for e in hour_events)
-    csum = sum(e.cache_creation for e in hour_events)
+    hour_cats = _category_sums(hour_events, now - _HOUR, now)
+    wsum = hour_cats["weighted"]
     if wsum > 0:
-        output_share = osum / wsum
-        cache_creation_share = csum / wsum
-        cache_read_tenth_share = (wsum - osum - csum) / wsum
+        output_share = hour_cats["output"] / wsum
+        input_share = hour_cats["input"] / wsum
+        cache_creation_share = hour_cats["cache_creation"] / wsum
+        cache_read_tenth_share = (hour_cats["cache_read"] / 10.0) / wsum
     else:
-        output_share = cache_creation_share = cache_read_tenth_share = 0.0
+        output_share = input_share = cache_creation_share = cache_read_tenth_share = 0.0
     source = {
         "output_share": output_share,
+        "input_share": input_share,
         "cache_creation_share": cache_creation_share,
         "cache_read_tenth_share": cache_read_tenth_share,
         "subagent_spawns": sum(e.subagent_spawns for e in hour_events),
@@ -354,6 +399,11 @@ def project_metrics(
     return {
         "roll_5h": roll_5h,
         "roll_7d": roll_7d,
+        # Per-category raw sums over the SAME 5h/7d windows as roll_5h/roll_7d
+        # (TRDD-4MMXTJFB): output / input / cache_creation / cache_read / weighted,
+        # so reports separate the 0.1x re-read from full-price work.
+        "cat_5h": _category_sums(events, w5_lo if w5_lo is not None else now - _5H, now),
+        "cat_7d": _category_sums(events, w7_lo if w7_lo is not None else now - _7D, now),
         "recent_1h": recent_1h,
         "rate_recent_per_min": rate_recent_per_min,
         "rate_baseline_per_min": rate_baseline_per_min,
@@ -392,6 +442,9 @@ def fleet_attribution(
 
     total_5h = sum(m["roll_5h"] for m in projects.values())
     total_7d = sum(m["roll_7d"] for m in projects.values())
+    # Fleet-wide per-category totals (TRDD-4MMXTJFB) — same shape as each project's cat_*.
+    cat_5h = {f: sum(m["cat_5h"][f] for m in projects.values()) for f in CATEGORY_FIELDS}
+    cat_7d = {f: sum(m["cat_7d"][f] for m in projects.values()) for f in CATEGORY_FIELDS}
     for m in projects.values():
         m["share_5h"] = (m["roll_5h"] / total_5h) if total_5h > 0 else 0.0
         m["share_7d"] = (m["roll_7d"] / total_7d) if total_7d > 0 else 0.0
@@ -406,7 +459,7 @@ def fleet_attribution(
         "w5_lo": w5_lo,
         "w7_lo": w7_lo,
         "projects": projects,
-        "totals": {"roll_5h": total_5h, "roll_7d": total_7d},
+        "totals": {"roll_5h": total_5h, "roll_7d": total_7d, "cat_5h": cat_5h, "cat_7d": cat_7d},
         "ranking": ranking,
     }
 

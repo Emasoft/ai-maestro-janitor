@@ -33,6 +33,7 @@ import rotator_usage  # noqa: E402
 import token_attribution_cache as tac  # noqa: E402
 import token_baseline as tb  # noqa: E402
 import token_burn  # noqa: E402
+import token_graph  # noqa: E402
 import token_history as th  # noqa: E402
 import token_meter  # noqa: E402
 
@@ -294,42 +295,89 @@ def _parse_when(raw: str) -> int | None:
         return th.parse_ts(s)
 
 
-def _render_interval(since_raw: str, until_raw: str | None, as_json: bool) -> int:
-    """`--attribution --since X [--until Y]` — EXACT-interval attribution (TRDD-0NRVNDSZ).
+def _graph_bins(span_s: int) -> tuple[int, str]:
+    """(bucket_count, bucket_label) for a graph over a `span_s`-second window: 5-min bins
+    for a 5h-class window, 30-min up to 2 days, hourly beyond (capped at 168 = one 7d of
+    hours) — enough resolution to see shape without overflowing a terminal row."""
+    if span_s <= 6 * 3600:
+        return max(span_s // 300, 1), "5min"
+    if span_s <= 48 * 3600:
+        return max(span_s // 1800, 1), "30min"
+    return min(max(span_s // 3600, 1), 168), "1h"
 
-    A fresh, uncached, recursive scan of every project, summed over exactly [since, until]:
-    the user names the meter's own window bounds and gets per-project transcript-measured
-    weighted tokens for precisely that interval. No 30-min cache (an ad-hoc question must
-    never be answered with someone else's window)."""
-    now = int(time.time())
-    since = _parse_when(since_raw)
-    until = _parse_when(until_raw) if until_raw else now
-    if since is None or until is None or until <= since:
-        print(f"[janitor-token-attribution] invalid interval: since={since_raw!r} until={until_raw!r}")
-        return 2
-    rows: list[tuple[str, float, int]] = []
+
+def _render_interval(since: int, until: int, as_json: bool, *, graph: bool = False, label: str = "EXACT interval") -> int:
+    """Exact-interval attribution (TRDD-0NRVNDSZ) with per-category columns + optional
+    graphs (TRDD-4MMXTJFB).
+
+    A fresh, uncached, recursive scan of every project, summed over exactly [since, until]
+    — the four RAW usage categories (output / input / cache_creation / cache_read) shown
+    separately beside the weighted blend, so cheap 0.1x re-reads are never conflated with
+    full-price work. No 30-min cache (an ad-hoc question must never be answered with
+    someone else's window). `graph=True` appends cumulative + per-bucket-rate sparklines
+    for the CURRENT project's events over the same interval."""
+    rows: list[tuple[str, dict[str, float], int]] = []
     root = _projects_root()
+    cur_slug = memory_scopes.project_slug(_project_dir())
+    cur_events: list = []
     if root.is_dir():
         for child in sorted(root.iterdir()):
             if not child.is_dir() or not any(child.rglob("*.jsonl")):
                 continue
             events = th.scan_project(child, since)
-            w = th._window_sum(events, since, until)
-            if w > 0:
-                rows.append((child.name, w, sum(1 for e in events if since <= e.ts <= until)))
-    rows.sort(key=lambda r: r[1], reverse=True)
-    total = sum(r[1] for r in rows)
+            cats = th._category_sums(events, since, until)
+            if child.name == cur_slug:
+                cur_events = events
+            if cats["weighted"] > 0:
+                rows.append((child.name, cats, sum(1 for e in events if since <= e.ts <= until)))
+    rows.sort(key=lambda r: r[1]["weighted"], reverse=True)
+    total = {f: sum(r[1][f] for r in rows) for f in th.CATEGORY_FIELDS}
     if as_json:
-        print(json.dumps({"attribution": True, "since": since, "until": until, "total_weighted": total, "projects": [{"slug": s, "weighted": w, "events": n} for s, w, n in rows]}, separators=(",", ":")))
+        print(json.dumps({"attribution": True, "since": since, "until": until, "total_weighted": total["weighted"], "totals": total, "projects": [{"slug": s, "weighted": c["weighted"], "categories": c, "events": n} for s, c, n in rows]}, separators=(",", ":")))
         return 0
     span_h = (until - since) / 3600.0
-    print(f"[janitor-token-attribution] EXACT interval {datetime.fromtimestamp(since):%Y-%m-%d %H:%M} → {datetime.fromtimestamp(until):%H:%M} ({span_h:.1f}h)  ·  fleet {_fmt_k(total)} weighted (transcript-measured, subagents included)")
-    for slug, w, n in rows[:15]:
-        share = (w / total * 100.0) if total > 0 else 0.0
-        print(f"  {_short_slug(slug):<26} {_fmt_k(w):>8} {share:>5.0f}%  ({n} api-msgs)")
+    print(f"[janitor-token-attribution] {label} {datetime.fromtimestamp(since):%Y-%m-%d %H:%M} → {datetime.fromtimestamp(until):%m-%d %H:%M} ({span_h:.1f}h)  ·  fleet {_fmt_k(total['weighted'])} weighted (transcript-measured, subagents included)")
+    print(f"  fleet by category — output {_fmt_k(total['output'])} (full price)  ·  input {_fmt_k(total['input'])} (uncached, full price)  ·  cache_write {_fmt_k(total['cache_creation'])} (~1.25x, once per prefix change)  ·  cache_read {_fmt_k(total['cache_read'])} (~0.1x re-read)")
+    print()
+    print(f"  {'project':<26} {'weighted':>8} {'share':>6} {'output':>7} {'input':>7} {'cache_wr':>8} {'cache_rd':>8} {'msgs':>5}")
+    print(f"  {'-' * 26} {'-' * 8} {'-' * 6} {'-' * 7} {'-' * 7} {'-' * 8} {'-' * 8} {'-' * 5}")
+    for slug, c, n in rows[:15]:
+        share = (c["weighted"] / total["weighted"] * 100.0) if total["weighted"] > 0 else 0.0
+        print(f"  {_short_slug(slug):<26} {_fmt_k(c['weighted']):>8} {share:>5.0f}% {_fmt_k(c['output']):>7} {_fmt_k(c['input']):>7} {_fmt_k(c['cache_creation']):>8} {_fmt_k(c['cache_read']):>8} {n:>5}")
     if not rows:
         print("  no transcript activity in that interval.")
+    if graph:
+        bins, blabel = _graph_bins(until - since)
+        print()
+        print(f"  graphs — THIS project ({_short_slug(cur_slug)}), {bins} × {blabel} bins:")
+        lines = token_graph.render_window_graphs(cur_events, since, until, buckets=bins, bucket_label=blabel, fields=("weighted", "output", "input", "cache_creation", "cache_read"))
+        for ln in lines:
+            print(ln)
+        if not lines:
+            print("  (no activity from this project in the interval)")
     return 0
+
+
+def _render_selected_window(window: str, last: bool, as_json: bool, *, graph: bool) -> int:
+    """`--window 5h|7d [--last]` — exact-interval attribution over ONE subscription window
+    (TRDD-4MMXTJFB). Bounds come from the live probe (`token_burn.window_starts`: current
+    start = resets_at − W); CURRENT = [start, now], LAST = [start − W, start]. Probe
+    failure → trailing [now − W, now], labeled as such so the reader knows the bounds are
+    NOT meter-aligned."""
+    now = int(time.time())
+    wsec = _5H if window == "5h" else _7D
+    try:
+        w5_lo, w7_lo = token_burn.window_starts(rotator_usage.accounts_usage(), now)
+    except Exception:
+        w5_lo = w7_lo = None
+    lo = w5_lo if window == "5h" else w7_lo
+    if lo is None:
+        since, until, label = now - wsec, now, f"TRAILING {window} (no live probe)"
+    elif last:
+        since, until, label = lo - wsec, lo, f"LAST {window} window"
+    else:
+        since, until, label = lo, now, f"CURRENT {window} window"
+    return _render_interval(since, until, as_json, graph=graph, label=label)
 
 
 def _render_attribution(as_json: bool) -> int:
@@ -394,11 +442,22 @@ def main() -> int:
     ap.add_argument("--attribution", action="store_true", help="rank every project by cross-project token consumption and name the top consumer (fleet burn attribution; read-only)")
     ap.add_argument("--since", default=None, help="exact interval start (ISO 8601 or epoch) for --attribution: fresh uncached scan summed over [since, until]")
     ap.add_argument("--until", default=None, help="exact interval end (ISO 8601 or epoch), default now; only with --since")
+    ap.add_argument("--window", choices=("5h", "7d"), default=None, help="report exactly ONE subscription window (bounds from the live probe): the CURRENT window by default, the previous one with --last")
+    ap.add_argument("--last", action="store_true", help="with --window: the LAST completed window instead of the current one")
+    ap.add_argument("--graph", action="store_true", help="append cumulative + per-bucket-rate sparklines (this project's events) to the window/interval view")
     args = ap.parse_args()
 
+    if args.window is not None:
+        return _render_selected_window(args.window, args.last, args.json, graph=args.graph)
     if args.attribution:
         if args.since is not None:
-            return _render_interval(args.since, args.until, args.json)
+            now = int(time.time())
+            since = _parse_when(args.since)
+            until = _parse_when(args.until) if args.until else now
+            if since is None or until is None or until <= since:
+                print(f"[janitor-token-attribution] invalid interval: since={args.since!r} until={args.until!r}")
+                return 2
+            return _render_interval(since, until, args.json, graph=args.graph)
         return _render_attribution(args.json)
     if args.live:
         return _render_live(args.json)
