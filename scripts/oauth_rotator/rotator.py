@@ -38,6 +38,7 @@ Safety invariants
   (path under /share/claude/versions/) is running — matched precisely so the
   rotator's own path under ~/.claude/ never self-matches.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -72,14 +73,12 @@ KEYCHAIN_SERVICE = "Claude Code-credentials"
 # credential's keychain helpers. One-time move: migrate_slots_to_keychain().
 # Env-overridable ONLY so tests can target a throwaway keychain service and clean it
 # up — production always uses the default.
-SLOT_KEYCHAIN_SERVICE = os.environ.get(
-    "CLAUDE_ROTATOR_SLOT_KEYCHAIN_SERVICE", "Claude Code-rotator-slot")
+SLOT_KEYCHAIN_SERVICE = os.environ.get("CLAUDE_ROTATOR_SLOT_KEYCHAIN_SERVICE", "Claude Code-rotator-slot")
 # A second keychain service holding a REDUNDANT MIRROR of every slot token (TRDD-7100178d,
 # Pillar 2, Decision 2). write_slot writes both; read_slot falls back to this when the
 # primary keychain item is missing/corrupt (e.g. deleted via Keychain Access). Encrypted
 # at rest, same as the primary — no plaintext reintroduced. Env-overridable for tests only.
-SLOT_BACKUP_KEYCHAIN_SERVICE = os.environ.get(
-    "CLAUDE_ROTATOR_SLOT_BACKUP_KEYCHAIN_SERVICE", "Claude Code-rotator-slot-backup")
+SLOT_BACKUP_KEYCHAIN_SERVICE = os.environ.get("CLAUDE_ROTATOR_SLOT_BACKUP_KEYCHAIN_SERVICE", "Claude Code-rotator-slot-backup")
 # A third keychain service holding a REDUNDANT MIRROR of the LIVE credential blob
 # (TRDD-7100178d, Pillar 2). write_live_blob mirrors here on every switch, the tick's
 # integrity-repair pass refreshes it from the current live credential, read_live_blob falls
@@ -87,8 +86,7 @@ SLOT_BACKUP_KEYCHAIN_SERVICE = os.environ.get(
 # primary is missing/corrupt. Keychain-only — never writes ~/.claude/.credentials.json, so
 # the macOS live-re-read property (Claude clears its cache off that file's ABSENCE) is kept.
 # Env-overridable for tests only.
-LIVE_BACKUP_KEYCHAIN_SERVICE = os.environ.get(
-    "CLAUDE_ROTATOR_LIVE_BACKUP_KEYCHAIN_SERVICE", "Claude Code-credentials-livebak")
+LIVE_BACKUP_KEYCHAIN_SERVICE = os.environ.get("CLAUDE_ROTATOR_LIVE_BACKUP_KEYCHAIN_SERVICE", "Claude Code-credentials-livebak")
 
 
 class SlotKeychainWriteError(RuntimeError):
@@ -222,7 +220,7 @@ STATE_FILE = ROOT / "state.json"
 # overnight failure was undiagnosable; see TRDD-5539cd6e). `_decide()` mirrors
 # every decision both to stdout (manual runs + daemon stdout) AND to this file.
 LOG_FILE = ROOT / "rotator.log"
-_LOG_MAX_BYTES = 256 * 1024   # self-trim ceiling — bounds the unattended 60s-cadence log
+_LOG_MAX_BYTES = 256 * 1024  # self-trim ceiling — bounds the unattended 60s-cadence log
 _LOG_KEEP_BYTES = 128 * 1024  # on overflow, retain (roughly) the most-recent this-many bytes
 
 
@@ -246,7 +244,7 @@ def _log(msg: str) -> None:
             tail = LOG_FILE.read_bytes()[-_LOG_KEEP_BYTES:]
             nl = tail.find(b"\n")  # discard the partial first record so we start on a boundary
             if nl != -1:
-                tail = tail[nl + 1:]
+                tail = tail[nl + 1 :]
             tmp = ROOT / "rotator.log.trim.tmp"
             tmp.write_bytes(tail)
             os.replace(tmp, LOG_FILE)
@@ -261,6 +259,7 @@ def _decide(msg: str) -> None:
     leaves a durable, examinable trail of exactly-one decision per tick."""
     print(msg)
     _log(msg)
+
 
 # Auto-rotation thresholds (percent of a usage window consumed, 0-100). The
 # rotator switches the live credential to an alternate slot once the LIVE
@@ -346,7 +345,9 @@ def _security_add_password_via_stdin(service: str, account: str, data: str) -> N
     """
     subprocess.run(
         ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", data],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -365,9 +366,9 @@ def _read_live_primary() -> dict | None:
     acct = _keychain_account()
     try:
         proc = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE,
-             "-a", acct, "-w"],
-            capture_output=True, text=True,
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w"],
+            capture_output=True,
+            text=True,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             try:
@@ -387,7 +388,9 @@ def _read_live_primary() -> dict | None:
     try:
         r = subprocess.run(
             ["secret-tool", "lookup", "service", KEYCHAIN_SERVICE],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if r.returncode == 0 and r.stdout.strip():
             return json.loads(r.stdout.strip())
@@ -451,9 +454,12 @@ def write_live_blob(blob: dict) -> None:
         os.replace(tmp, cf)
         try:
             subprocess.run(
-                ["secret-tool", "store", "--label=Claude Code-credentials",
-                 "service", KEYCHAIN_SERVICE],
-                input=data, capture_output=True, text=True, timeout=5, check=False,
+                ["secret-tool", "store", "--label=Claude Code-credentials", "service", KEYCHAIN_SERVICE],
+                input=data,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
@@ -525,9 +531,9 @@ def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dic
     Linux `secret-tool`) under `service`. None if absent/unreadable."""
     try:
         proc = subprocess.run(
-            ["security", "find-generic-password", "-s", service,
-             "-a", email, "-w"],
-            capture_output=True, text=True,
+            ["security", "find-generic-password", "-s", service, "-a", email, "-w"],
+            capture_output=True,
+            text=True,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             try:
@@ -539,7 +545,9 @@ def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dic
     try:
         r = subprocess.run(
             ["secret-tool", "lookup", "service", service, "account", email],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if r.returncode == 0 and r.stdout.strip():
             return json.loads(r.stdout.strip())
@@ -574,9 +582,11 @@ def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SE
         return KEYCHAIN_WRITE_FAILED
     try:
         r = subprocess.run(
-            ["secret-tool", "store", "--label", "Claude Code rotator slot",
-             "service", service, "account", email],
-            input=data, capture_output=True, text=True, timeout=5,
+            ["secret-tool", "store", "--label", "Claude Code rotator slot", "service", service, "account", email],
+            input=data,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return r.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -589,14 +599,17 @@ def _slot_keychain_delete(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> N
     try:
         subprocess.run(
             ["security", "delete-generic-password", "-s", service, "-a", email],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
     except FileNotFoundError:
         pass
     try:
         subprocess.run(
             ["secret-tool", "clear", "service", service, "account", email],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
@@ -626,9 +639,7 @@ def write_slot(email: str, blob: dict) -> None:
     primary_ok = _slot_keychain_write(email, blob)
     if primary_ok is KEYCHAIN_WRITE_FAILED:
         # macOS keychain present but refused the write — do NOT write plaintext.
-        raise SlotKeychainWriteError(
-            "keychain write failed for slot %s — refusing to drop a plaintext token "
-            "(unlock the keychain / approve the access prompt, then retry)" % email)
+        raise SlotKeychainWriteError("keychain write failed for slot %s — refusing to drop a plaintext token (unlock the keychain / approve the access prompt, then retry)" % email)
     if primary_ok:
         _slot_keychain_write(email, blob, service=SLOT_BACKUP_KEYCHAIN_SERVICE)  # mirror
         return
@@ -677,8 +688,7 @@ def migrate_slots_to_keychain() -> list[tuple[str, bool]]:
             continue
         _slot_keychain_write(email, blob)
         back = _slot_keychain_read(email)
-        ok = (back is not None and bool(fingerprint(blob))
-              and fingerprint(back) == fingerprint(blob))
+        ok = back is not None and bool(fingerprint(blob)) and fingerprint(back) == fingerprint(blob)
         out.append((email, ok))
     return out
 
@@ -780,9 +790,8 @@ def usage_request(blob: dict) -> tuple[int, dict | None]:
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
-            return (getattr(r, "status", 200),
-                    json.loads(r.read().decode("utf-8", "replace")))
-    except urllib.error.HTTPError as e:        # MUST precede URLError (subclass)
+            return (getattr(r, "status", 200), json.loads(r.read().decode("utf-8", "replace")))
+    except urllib.error.HTTPError as e:  # MUST precede URLError (subclass)
         return (e.code, None)
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError):
         return (0, None)
@@ -808,17 +817,21 @@ def refresh_oauth_token(blob: dict) -> dict | None:
     rtok = inner.get("refreshToken") or inner.get("refresh_token")
     if not rtok:
         return None
-    body = json.dumps({
-        "grant_type": "refresh_token",
-        "client_id": CLIENT_ID,
-        "refresh_token": rtok,
-    }).encode()
+    body = json.dumps(
+        {
+            "grant_type": "refresh_token",
+            "client_id": CLIENT_ID,
+            "refresh_token": rtok,
+        }
+    ).encode()
     # MUST send a non-default User-Agent: urllib's default Python-urllib/<ver> is banned by
     # Cloudflare at the token endpoint (HTTP 403 / error code 1010 — "banned browser
     # signature"; empirically verified 2026-06-09). Reuse the same UA the /roles + /usage
     # calls already use (which pass CF) so keepalive-refresh isn't silently 1010-blocked.
     req = urllib.request.Request(
-        TOKEN_URL, data=body, method="POST",
+        TOKEN_URL,
+        data=body,
+        method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
     )
     try:
@@ -884,8 +897,7 @@ def cmd_capture(only_if_running: bool) -> int:
     # a corrupt slot as "captured" — the guardrail that would have caught the overnight failure.
     rb = read_slot(email)
     if rb is None or fingerprint(rb) != fp:
-        print("capture FAILED: slot for %s did not round-trip (stored value corrupt or "
-              "unreadable) — NOT recording it. See TRDD-5539cd6e." % email, file=sys.stderr)
+        print("capture FAILED: slot for %s did not round-trip (stored value corrupt or unreadable) — NOT recording it. See TRDD-5539cd6e." % email, file=sys.stderr)
         return 1
     eh = expires_in_h(blob)
     state["live_email"] = email
@@ -915,8 +927,7 @@ def cmd_list() -> int:
         eh = expires_in_h(blob) if blob else None
         eh_s = ("~%.1fh" % eh) if eh is not None else "?"
         flag = "  <- LIVE" if email == live else ""
-        print("  %-32s captured=%s  token-expiry=%s%s"
-              % (email, meta.get("captured_at", "?"), eh_s, flag))
+        print("  %-32s captured=%s  token-expiry=%s%s" % (email, meta.get("captured_at", "?"), eh_s, flag))
     return 0
 
 
@@ -927,16 +938,14 @@ def cmd_switch(email: str) -> int:
         return 1
     eh = expires_in_h(blob)
     if eh is not None and eh < 0:
-        print("WARNING: %s slot's access token is already expired (%.1fh ago);"
-              " a live process may need a refresh/restart." % (email, -eh))
+        print("WARNING: %s slot's access token is already expired (%.1fh ago); a live process may need a refresh/restart." % (email, -eh))
     _switch_blob(email, blob, reason="manual switch")
     print("switched live credential -> %s" % email)
     # VERIFIED (binary 2.1.153 + this macOS host): no ~/.claude/.credentials.json
     # exists, so Claude Code's mt1() cache-guard clears the in-memory OAuth cache
     # on every token check and re-reads the keychain. A running `claude` therefore
     # picks up this account on its NEXT turn — no restart required.
-    print("note: a running `claude` re-reads the keychain on its next turn "
-          "(macOS), so it adopts this account without a restart.")
+    print("note: a running `claude` re-reads the keychain on its next turn (macOS), so it adopts this account without a restart.")
     return 0
 
 
@@ -977,8 +986,7 @@ def _usage_row(blob: dict | None) -> tuple[str, str]:
         return ("err", "err")
     fh = _util(data, "five_hour")
     sd = _util(data, "seven_day")
-    return (("%.0f%%" % fh) if fh is not None else "?",
-            ("%.0f%%" % sd) if sd is not None else "?")
+    return (("%.0f%%" % fh) if fh is not None else "?", ("%.0f%%" % sd) if sd is not None else "?")
 
 
 def cmd_usage() -> int:
@@ -1080,8 +1088,7 @@ def _reconcile_live_email(state: dict, live_blob: dict) -> dict:
     state["live_429_streak"] = 0  # the debounce streak belonged to the stale account
     state["last_reconcile_at"] = time.time()
     save_state(state)
-    print("auto: reconciled live account — state said %r but the real live credential "
-          "is %r; state.json corrected" % (old_email, state["live_email"]))
+    print("auto: reconciled live account — state said %r but the real live credential is %r; state.json corrected" % (old_email, state["live_email"]))
     return state
 
 
@@ -1109,8 +1116,7 @@ def _refresh_and_heal_slot(email: str, blob: dict, state: dict) -> tuple[dict | 
     try:
         write_slot(email, refreshed)  # heal the lapsed slot in the keychain (as keepalive would)
     except SlotKeychainWriteError as exc:
-        _log("[auto] %s: keychain write refused after refresh (%s) — using fresh token in-memory"
-             % (email, exc))
+        _log("[auto] %s: keychain write refused after refresh (%s) — using fresh token in-memory" % (email, exc))
         return refreshed, False
     meta = state.get("slots", {}).get(email)
     if isinstance(meta, dict):
@@ -1154,7 +1160,7 @@ def cmd_auto() -> int:
     sd = _util(live_data, "seven_day")
     fh_s = ("%.0f%%" % fh) if fh is not None else "?"
     sd_s = ("%.0f%%" % sd) if sd is not None else "?"
-    live_expired = _blob_locally_expired(live_blob)   # API-independent death signal (F2)
+    live_expired = _blob_locally_expired(live_blob)  # API-independent death signal (F2)
     # `network_up` separates a token-specific failure (401/403/429 — the server answered, so
     # alternate tokens CAN still be usage-probed) from a transport failure (status 0 — no HTTP
     # response, so alternates are unreachable too and we fall back to LOCAL expiry signals).
@@ -1168,9 +1174,7 @@ def cmd_auto() -> int:
         state["live_429_streak"] = streak
         save_state(state)
         if streak < LIVE_429_DEBOUNCE:
-            _decide("auto: live %s returned 429 (streak %d/%d) — likely a transient "
-                    "usage-endpoint throttle, not a real limit; deferring rotation"
-                    % (live_email or "(live)", streak, LIVE_429_DEBOUNCE))
+            _decide("auto: live %s returned 429 (streak %d/%d) — likely a transient usage-endpoint throttle, not a real limit; deferring rotation" % (live_email or "(live)", streak, LIVE_429_DEBOUNCE))
             return 0
         near = True
         live_desc = "RATE-LIMITED (429 x%d)" % streak
@@ -1182,22 +1186,20 @@ def cmd_auto() -> int:
         near = is_near_limit(fh, sd) or live_expired
         live_desc = "5h=%s 7d=%s%s" % (fh_s, sd_s, " +LOCALLY-EXPIRING" if live_expired else "")
     elif live_status in (401, 403):
-        near = True   # server REJECTED the token (expired/invalid) — authoritative death signal
+        near = True  # server REJECTED the token (expired/invalid) — authoritative death signal
         live_desc = "token REJECTED (HTTP %d) — expired/invalid" % live_status
     elif live_expired:
-        near = True   # no HTTP response, but the local expiresAt says the token is already dead
+        near = True  # no HTTP response, but the local expiresAt says the token is already dead
         live_desc = "LOCALLY EXPIRED + API unreachable (status %s)" % live_status
     else:
-        _decide("auto: live %s usage unreachable (status %s) but token still valid locally; "
-                "staying put" % (live_email or "(live)", live_status))
+        _decide("auto: live %s usage unreachable (status %s) but token still valid locally; staying put" % (live_email or "(live)", live_status))
         return 0
     if not near:
         _decide("auto: live %s %s — within limits" % (live_email or "(live)", live_desc))
         return 0
     last = state.get("last_switch_at")
     if isinstance(last, (int, float)) and (time.time() - last) < MIN_DWELL_S:
-        _decide("auto: live %s exhausted (%s) but inside dwell window; deferring"
-                % (live_email or "(live)", live_desc))
+        _decide("auto: live %s exhausted (%s) but inside dwell window; deferring" % (live_email or "(live)", live_desc))
         return 0
     # Build the alternate-candidate list. A safe TARGET is NEVER itself locally expired. When the
     # network is up we also require a fresh /usage 200 below SAFE on both windows and apply the
@@ -1258,11 +1260,7 @@ def cmd_auto() -> int:
                     # the live account sat at 100%/401. Only a slot that truly
                     # cannot renew (no refresh token) is dropped.
                     _eh = expires_in_h(b)
-                    if (
-                        _oauth(b).get("refreshToken")
-                        and _eh is not None
-                        and not _blob_locally_expired(b)
-                    ):
+                    if _oauth(b).get("refreshToken") and _eh is not None and not _blob_locally_expired(b):
                         degraded.append((email, b, _eh))
                     continue
                 index_healed = index_healed or healed
@@ -1301,8 +1299,7 @@ def cmd_auto() -> int:
         target_email, target_blob, bfh, bsd = best
         reason = "live %s %s -> rotate" % (live_email or "(live)", live_desc)
         _switch_blob(target_email, target_blob, reason)
-        _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)"
-                % (live_email or "(live)", target_email, bfh, bsd, reason))
+        _decide("auto: switched %s -> %s (target 5h=%.0f%% 7d=%.0f%%; %s)" % (live_email or "(live)", target_email, bfh, bsd, reason))
         return 0
     # 2) DEGRADED fallback — no usage-confirmed target (or the network is down), but a
     # structurally-valid alternate exists (future expiry; its usage probe failed
@@ -1317,18 +1314,13 @@ def cmd_auto() -> int:
         why = "no usage-confirmed target" if network_up else "no usage; API unreachable"
         reason = "live %s %s -> degraded rotate (%s)" % (live_email or "(live)", live_desc, why)
         _switch_blob(target_email, target_blob, reason)
-        _decide("auto: switched %s -> %s (degraded; target token valid ~%.1fh; %s)"
-                % (live_email or "(live)", target_email, target_eh, reason))
+        _decide("auto: switched %s -> %s (degraded; target token valid ~%.1fh; %s)" % (live_email or "(live)", target_email, target_eh, reason))
         return 0
     # 3) Genuinely stuck — nothing rotatable in either path.
     if network_up:
-        _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe threshold "
-                "and none is structurally renewable — all paid accounts maxed; waiting for a "
-                "window to reset" % (live_email or "(live)", live_desc))
+        _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe threshold and none is structurally renewable — all paid accounts maxed; waiting for a window to reset" % (live_email or "(live)", live_desc))
     else:
-        _decide("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate "
-                "with a known future expiry exists — cannot rotate; manual re-auth needed"
-                % (live_email or "(live)"))
+        _decide("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate with a known future expiry exists — cannot rotate; manual re-auth needed" % (live_email or "(live)"))
     return 0
 
 
@@ -1379,10 +1371,8 @@ def _keepalive_refresh() -> list[str]:
             # FAIL CLOSED (P1): a locked/declined keychain refused the write. Do NOT drop a
             # plaintext token and do NOT crash the unattended tick — keep the old slot token
             # (F2a rotates away if it lapses) and skip the state update for this slot.
-            print("[keepalive] %s: keychain write refused (%s) — kept old token, skipped"
-                  % (email, exc), file=sys.stderr)
-            _log("[keepalive] %s: keychain write refused (%s) — kept old token, skipped"
-                 % (email, exc))  # failure deserves a durable record, not just ephemeral stderr
+            print("[keepalive] %s: keychain write refused (%s) — kept old token, skipped" % (email, exc), file=sys.stderr)
+            _log("[keepalive] %s: keychain write refused (%s) — kept old token, skipped" % (email, exc))  # failure deserves a durable record, not just ephemeral stderr
             continue
         meta = slots.get(email)
         if isinstance(meta, dict):
@@ -1418,14 +1408,20 @@ def _bootstrap_eligible(
     omitting it (default 0) reproduces the historical no-refresh-only truth table exactly.
     Token expiry is irrelevant to this leg (the cookie, not the token, is what gets minted
     from), so it is passed as None. test_cascade proves this equals classify exactly."""
-    return cascade.classify(
-        cascade.AccountState(
-            email="", is_live=False, has_refresh=has_refresh,
-            token_expires_h=None, has_session_cookie=has_session_key,
-            refresh_failures=refresh_failures,
-        ),
-        max_refresh_failures=max_refresh_failures,
-    ) is cascade.CascadeLeg.RENEW_COOKIE
+    return (
+        cascade.classify(
+            cascade.AccountState(
+                email="",
+                is_live=False,
+                has_refresh=has_refresh,
+                token_expires_h=None,
+                has_session_cookie=has_session_key,
+                refresh_failures=refresh_failures,
+            ),
+            max_refresh_failures=max_refresh_failures,
+        )
+        is cascade.CascadeLeg.RENEW_COOKIE
+    )
 
 
 def _profiles_root() -> Path:
@@ -1469,10 +1465,7 @@ def _profile_has_session_key(email: str, *, now: float | None = None) -> bool:
     chrome_now = int((now + 11644473600) * 1_000_000)  # Chrome epoch: us since 1601-01-01
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        rows = con.execute(
-            "SELECT expires_utc FROM cookies WHERE name = 'sessionKey' "
-            "AND host_key LIKE '%claude.ai'"
-        ).fetchall()
+        rows = con.execute("SELECT expires_utc FROM cookies WHERE name = 'sessionKey' AND host_key LIKE '%claude.ai'").fetchall()
         con.close()
     except sqlite3.Error:
         return False
@@ -1510,6 +1503,33 @@ def _bootstrap_pid_alive(pid: int) -> bool:
     return True
 
 
+# Auto-bootstrap browser-launch DENY-LIST (TRDD-56374Z36). The bootstrap path opens a VISIBLE
+# browser to mint a refresh token; it must NEVER do so for an implausible / fixture account.
+# These are the obvious test/placeholder email domains — a real Claude subscription is never
+# under one of them, so denying them is FAIL-OPEN for every real account. This is the runtime
+# belt behind the primary test-isolation fix (tests/conftest.py redirects ROOT + LOG_FILE per
+# test): even if a fixture account somehow reached the daemon's real state.json, the daemon
+# never launches a visible browser for it. Matched case-insensitively on the domain part only.
+_DENIED_BOOTSTRAP_DOMAINS = frozenset(
+    {
+        "x.com",
+        "example.com",
+        "example.org",
+        "test.local",
+        "invalid",
+    }
+)
+
+
+def _bootstrap_email_denied(email: str) -> bool:
+    """True iff `email`'s domain is a known fixture/placeholder domain that must NEVER trigger an
+    auto-bootstrap browser launch (see _DENIED_BOOTSTRAP_DOMAINS). FAIL-OPEN: an email with no
+    parseable domain is NOT denied — a malformed address is not this guard's concern (the launch
+    fails elsewhere), and a real account must never be blocked."""
+    _, _, domain = (email or "").rpartition("@")
+    return bool(domain) and domain.strip().lower() in _DENIED_BOOTSTRAP_DOMAINS
+
+
 def _invoke_slot_capture(email: str) -> bool:
     """LAUNCH (detached) a capture that mints a refresh-bearing slot for `email` from its
     SEEDED Chrome session. Returns True iff a capture was LAUNCHED this call, False if one
@@ -1537,6 +1557,14 @@ def _invoke_slot_capture(email: str) -> bool:
 
     This is the ONE external-process seam — tests monkeypatch it so no real browser / network /
     keychain is ever touched."""
+    if _bootstrap_email_denied(email):
+        # Runtime belt (TRDD-56374Z36): refuse to open a browser for an implausible/fixture
+        # account BEFORE any Popen. This is the tightest gate — the literal browser-launch
+        # site — so no denied domain ever spawns a capture, whatever the caller. Only ever
+        # reachable if a fixture account is in the real state.json (it should not be), so the
+        # one-line skip is self-diagnosing rather than routine noise; the log self-trims.
+        _log("auto-bootstrap: refusing browser launch for implausible/fixture account %s (denied domain) — skipped" % email)
+        return False
     script = Path(__file__).resolve().parent / "slot_capture_browser.py"
     pid_path = _bootstrap_pid_path(email)
     try:
@@ -1637,7 +1665,9 @@ def _bootstrap_seeded_slots() -> list[str]:
         attempts = int(meta.get("bootstrap_attempts", 0)) if isinstance(meta, dict) else 0
         action = _bootstrap_action(
             eligible=_bootstrap_eligible(has_refresh, has_session, refresh_failures=rf),
-            auto_on=auto_on, attempts=attempts, max_launches=MAX_BOOTSTRAP_LAUNCHES,
+            auto_on=auto_on,
+            attempts=attempts,
+            max_launches=MAX_BOOTSTRAP_LAUNCHES,
         )
         if action == "reset":  # self-renewing again -> clear the launch counter (fresh future cap)
             if isinstance(meta, dict):
@@ -1645,11 +1675,9 @@ def _bootstrap_seeded_slots() -> list[str]:
                 changed = True
             continue
         if action == "noop":  # not eligible (zero counter), OR eligible but auto-launch opted OFF
-            continue          # (the oauth-capture-stalled detector nudges the human in the OFF case)
+            continue  # (the oauth-capture-stalled detector nudges the human in the OFF case)
         if action == "cap-announce":  # just hit the cap: announce ONCE, then never auto-launch it again
-            _log("auto-bootstrap: %s capped at %d launches without a refresh-bearing mint - "
-                 "STOPPING auto-launch; run /janitor-refresh-claude-logins to capture it manually"
-                 % (email, MAX_BOOTSTRAP_LAUNCHES))
+            _log("auto-bootstrap: %s capped at %d launches without a refresh-bearing mint - STOPPING auto-launch; run /janitor-refresh-claude-logins to capture it manually" % (email, MAX_BOOTSTRAP_LAUNCHES))
             if isinstance(meta, dict):
                 meta["bootstrap_attempts"] = attempts + 1  # bump past the cap so the log fires once
                 changed = True
@@ -1659,8 +1687,7 @@ def _bootstrap_seeded_slots() -> list[str]:
         try:  # action == "launch"
             if _invoke_slot_capture(email):  # True = LAUNCHED, False = skipped (already running)
                 # Announce the visible window so it is never "without reason" (TRDD-5OJX3SCF).
-                _log("auto-bootstrap: opening a browser to mint a refresh token for %s "
-                     "(expected - post-login auto-bootstrap); live account untouched" % email)
+                _log("auto-bootstrap: opening a browser to mint a refresh token for %s (expected - post-login auto-bootstrap); live account untouched" % email)
                 if isinstance(meta, dict):
                     meta["bootstrap_attempts"] = attempts + 1
                     meta["last_bootstrap_at"] = int(now)
@@ -1672,8 +1699,7 @@ def _bootstrap_seeded_slots() -> list[str]:
             # runs inside. We deliberately swallow EVERY exception here (the one place
             # fail-fast is wrong — this is a last-line convenience, not a correctness gate)
             # and continue to the next eligible slot.
-            print("[bootstrap] %s: capture launch failed (%r) — skipped" % (email, exc),
-                  file=sys.stderr)
+            print("[bootstrap] %s: capture launch failed (%r) — skipped" % (email, exc), file=sys.stderr)
     if changed:
         save_state(state)  # persist bootstrap_attempts / last_bootstrap_at across ticks
     return launched
@@ -1737,14 +1763,16 @@ def _build_fleet_state(state: dict, now: float) -> list[cascade.AccountState]:
             blob = read_live_blob()  # the live token lives in the live store, not a slot
         inner = _oauth(blob) if blob else {}
         slot_meta = (state.get("slots") or {}).get(email)
-        out.append(cascade.AccountState(
-            email=email,
-            is_live=(email == live_email),
-            has_refresh=bool(inner.get("refreshToken") or inner.get("refresh_token")),
-            token_expires_h=(expires_in_h(blob) if blob else None),
-            has_session_cookie=_profile_has_session_key(email, now=now),
-            refresh_failures=(int(slot_meta.get("refresh_failures", 0)) if isinstance(slot_meta, dict) else 0),
-        ))
+        out.append(
+            cascade.AccountState(
+                email=email,
+                is_live=(email == live_email),
+                has_refresh=bool(inner.get("refreshToken") or inner.get("refresh_token")),
+                token_expires_h=(expires_in_h(blob) if blob else None),
+                has_session_cookie=_profile_has_session_key(email, now=now),
+                refresh_failures=(int(slot_meta.get("refresh_failures", 0)) if isinstance(slot_meta, dict) else 0),
+            )
+        )
     return out
 
 
@@ -1761,8 +1789,7 @@ def _log_cascade_plan() -> None:
     than in the nudge — the detector nudge is the source of truth."""
     try:
         fleet = _build_fleet_state(load_state(), time.time())
-        _log(cascade.cascade_plan(fleet, keepalive_ahead_h=KEEPALIVE_AHEAD_H,
-                                  max_refresh_failures=MAX_REFRESH_FAILURES).summary_line())
+        _log(cascade.cascade_plan(fleet, keepalive_ahead_h=KEEPALIVE_AHEAD_H, max_refresh_failures=MAX_REFRESH_FAILURES).summary_line())
     except Exception as exc:  # noqa: BLE001 — explicit-cascade visibility log is best-effort
         _log("cascade: plan unavailable (%r)" % exc)
 
@@ -1785,11 +1812,11 @@ def cmd_tick(only_if_running: bool) -> int:
     # whichever root holds the state, so this is just promotion — the NEXT tick process
     # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
     migrate_root_to_canonical()
-    _log_cascade_plan()       # explicit ROTATE→RENEW→REAUTH cascade visibility (best-effort, never a gate)
+    _log_cascade_plan()  # explicit ROTATE→RENEW→REAUTH cascade visibility (best-effort, never a gate)
     refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
     if refreshed:
         _log("keepalive: refreshed %s" % ", ".join(refreshed))  # durable record of token-prolonging action
-    _repair_integrity()       # Pillar 2: verify/restore state + slots + live BEFORE deciding
+    _repair_integrity()  # Pillar 2: verify/restore state + slots + live BEFORE deciding
     try:
         cmd_capture(False)
     except SlotKeychainWriteError as exc:
@@ -1797,10 +1824,9 @@ def cmd_tick(only_if_running: bool) -> int:
         # refused the slot write. The LIVE credential is untouched (Claude owns it); we simply
         # don't mirror it into a slot this beat (and never drop a plaintext token). The
         # standalone `rotator.py capture` still surfaces this error to the present human.
-        print("[capture] keychain write refused (%s) — slot not filed this tick" % exc,
-              file=sys.stderr)
+        print("[capture] keychain write refused (%s) — slot not filed this tick" % exc, file=sys.stderr)
         _log("[capture] keychain write refused (%s) — slot not filed this tick" % exc)
-    rc = cmd_auto()           # usage-based rotation FIRST — never starved by bootstrap
+    rc = cmd_auto()  # usage-based rotation FIRST — never starved by bootstrap
     _bootstrap_seeded_slots()  # P4d (LAST): launch detached captures from human-seeded sessions
     return rc
 
@@ -1889,18 +1915,13 @@ def cmd_oauth_health(as_json: bool) -> int:
     else:
         for e, h in health.items():
             days = ("%.1f" % h["expires_days"]) if h["expires_days"] is not None else "?"
-            print("%s\trefresh=%s\tdays=%s"
-                  % (e, "yes" if h["has_refresh"] else "no", days))
+            print("%s\trefresh=%s\tdays=%s" % (e, "yes" if h["has_refresh"] else "no", days))
     return 0
 
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("usage: rotator.py {capture [--only-if-claude-running] | "
-              "tick [--only-if-claude-running] | auto | usage | live-email | "
-              "known-emails | print-profiles-root | oauth-health [--json] | "
-              "list | switch <email> | migrate-slots | "
-              "delete-plaintext-slots | migrate-root}")
+        print("usage: rotator.py {capture [--only-if-claude-running] | tick [--only-if-claude-running] | auto | usage | live-email | known-emails | print-profiles-root | oauth-health [--json] | list | switch <email> | migrate-slots | delete-plaintext-slots | migrate-root}")
         return 2
     cmd = argv[0]
     # ── Read-only commands: no lock needed (they never write state.json / keychain). ──
@@ -1925,15 +1946,13 @@ def main(argv: list[str]) -> int:
     # every invocation runs — NOT in the daemon's task wrapper. A daemon-side lock would
     # only block the daemon's OWN rotator.py subprocess and would never see a manual run,
     # so it could not prevent the daemon-vs-manual race it was meant to. ──
-    _MUTATING = {"capture", "tick", "auto", "switch",
-                 "migrate-slots", "delete-plaintext-slots", "migrate-root"}
+    _MUTATING = {"capture", "tick", "auto", "switch", "migrate-slots", "delete-plaintext-slots", "migrate-root"}
     if cmd not in _MUTATING:
         print("unknown command: %s" % cmd)
         return 2
     with gs.oauth_rotator_lock() as got:
         if not got:
-            print("rotator: another rotator operation is in progress — skipped this run "
-                  "(safe to retry).", file=sys.stderr)
+            print("rotator: another rotator operation is in progress — skipped this run (safe to retry).", file=sys.stderr)
             return 0
         if cmd == "capture":
             return cmd_capture("--only-if-claude-running" in argv[1:])
@@ -1960,12 +1979,10 @@ def main(argv: list[str]) -> int:
             legacy = sorted(SLOTS.glob("*.json")) if SLOTS.is_dir() else []
             unsafe = [f.stem for f in legacy if _slot_keychain_read(f.stem) is None]
             if unsafe:
-                print("delete-plaintext-slots REFUSED — not yet in the keychain (run "
-                      "migrate-slots first): %s" % ", ".join(unsafe))
+                print("delete-plaintext-slots REFUSED — not yet in the keychain (run migrate-slots first): %s" % ", ".join(unsafe))
                 return 1
             removed = delete_plaintext_slot_files()
-            print("delete-plaintext-slots: removed %d plaintext file(s): %s"
-                  % (len(removed), ", ".join(removed) or "(none)"))
+            print("delete-plaintext-slots: removed %d plaintext file(s): %s" % (len(removed), ", ".join(removed) or "(none)"))
             return 0
         # cmd == "migrate-root"  (legacy_root is a Path here, not the list[Path] used in the
         # delete-plaintext-slots branch above — a distinct name avoids the type collision)
