@@ -79,6 +79,17 @@ forced compaction. The 34k summary overhead is overridable via
 configured — each account's live 5h/7d utilization% with its burn ratio (pace vs
 the even budget) and projected exhaustion, read-only.
 
+## `--window 5h|7d [--last] [--graph]` — exact subscription windows + charts
+
+`--window 5h` (or `7d`) reports EXACTLY the current subscription window — bounds
+derived from the live probe as `resets_at − W → now` — with per-project rows
+split into the four raw categories (output / input / cache_write ~1.25× /
+cache_read ~0.1×). `--last` selects the PREVIOUS completed window instead.
+`--graph` appends this project's unicode sparklines: per-bucket **rate** (the
+derivative) + **cumulative** curve per category, with a time axis (5-min bins
+for 5h, hourly for 7d). No live probe → labeled TRAILING fallback. Details +
+examples: `/janitor-token-attribution`.
+
 ## `--attribution` — which project is eating the token budget
 
 Pass `--attribution` for the fleet dashboard: every project on this machine

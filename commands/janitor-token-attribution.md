@@ -31,6 +31,32 @@ consults (via a shared 30-minute machine-wide cache) when a window trips, so the
 heartbeat's advisory can name the culprit instead of just "you're 46% at 1.6×
 pace".
 
+## Exact windows, per-category columns, graphs (TRDD-4MMXTJFB)
+
+Every row and the fleet header now separate the FOUR raw token categories —
+`output` (full price), `input` (uncached, full price), `cache_wr` (the ~1.25×
+cache-miss write) and `cache_rd` (the cheap ~0.1× context re-read) — beside the
+weighted blend, so the expensive work is never conflated with cache re-reads.
+
+Window / interval selectors (all take `--json` and `--graph`):
+
+```bash
+# EXACTLY the current subscription window (bounds = resets_at − W → now, from the live probe):
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/token_report.py" --window 5h
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/token_report.py" --window 7d
+# The LAST completed window instead:
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/token_report.py" --window 5h --last
+# An arbitrary exact interval (naive ISO = LOCAL time):
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/token_report.py" --attribution --since "2026-07-02T14:40" --until "2026-07-02T19:40"
+```
+
+`--graph` appends unicode sparkline charts for THIS project's events over the
+selected window, per category: the per-bucket **rate** (the derivative — how fast
+tokens were consumed) and the **cumulative** running sum, with a time axis.
+Bin width auto-scales: 5-min bins for a 5h window, hourly for 7d. When the live
+probe is unavailable the window degrades to a TRAILING interval and the header
+says so — bounds are never silently wrong.
+
 ## The burn-rate alarm (heartbeat) + knobs
 
 The `window-burn-rate` detector fires on the ~15-min heartbeat. A fixed-reset
