@@ -1,9 +1,9 @@
 ---
 trdd-id: 0NRVNDSZ
 title: Window-aligned attribution — bounds from resets_at, not trailing intervals
-column: dev
+column: published
 created: 2026-07-02T16:20:52+0200
-updated: 2026-07-02T17:05:00+0200
+updated: 2026-07-02T17:16:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 1
@@ -19,7 +19,9 @@ target-branch: main
 must-pass-tests-before-merge: true
 test-requirements: [unit, lint]
 review-requirements: []
-implementation-commits: []
+implementation-commits: [f5d6e2e, 173cabf]
+published-version: 0.29.1
+published-at: 2026-07-02T17:09:39+0200
 ---
 
 # TRDD-0NRVNDSZ — Window-aligned attribution — bounds from resets_at, not trailing intervals
