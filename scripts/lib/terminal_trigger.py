@@ -321,6 +321,12 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
     """Pure: the tmux session of the agent whose workingDirectory equals — or is a
     parent of — any cwd candidate. Returns None when nothing matches."""
     cands = [os.path.realpath(c) for c in cwd_candidates if c]
+    # MOST-SPECIFIC match wins (longest workingDirectory), not registry order: with the
+    # parent-prefix rule, an agent registered at a broad root (e.g. ~/Code) matches EVERY
+    # project under it, and list order would route this session's keystrokes (ESC,
+    # /compact, …) into that OTHER agent's pane. Keystroke injection must never guess.
+    best_ts: str | None = None
+    best_len = -1
     for agent in agents:
         if not isinstance(agent, dict):
             continue
@@ -330,9 +336,9 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
         wdr = os.path.realpath(wd)
         if any(c == wdr or c.startswith(wdr + os.sep) for c in cands):
             ts = _agent_tmux_session(agent)
-            if ts:
-                return ts
-    return None
+            if ts and len(wdr) > best_len:
+                best_ts, best_len = ts, len(wdr)
+    return best_ts
 
 
 def _try_ai_maestro_send(commands: Sequence[str], *, dry_run: bool, env: Mapping[str, str]) -> str | None:

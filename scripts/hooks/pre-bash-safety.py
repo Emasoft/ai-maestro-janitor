@@ -63,7 +63,11 @@ _SENSITIVE_SOURCE_PATTERNS = (
     re.compile(r"~/\.docker/config\.json"),
     re.compile(r"~/\.kube/config"),
     re.compile(r"/etc/(?:shadow|passwd)\b"),
-    re.compile(r"\$\{?(?:GITHUB_TOKEN|GH_TOKEN|NPM_TOKEN|AWS_(?:ACCESS|SECRET)_KEY[A-Z_]*"
+    # AWS_[A-Z_]*(?:KEY|TOKEN): the old AWS_(?:ACCESS|SECRET)_KEY prefix MISSED the two
+    # most critical real names — AWS_SECRET_ACCESS_KEY (SECRET_ACCESS, not SECRET_KEY)
+    # and AWS_SESSION_TOKEN — so `echo $AWS_SECRET_ACCESS_KEY | curl …` sailed past the
+    # exfil guard (whole-codebase review, TRDD-E9LMBNPE).
+    re.compile(r"\$\{?(?:GITHUB_TOKEN|GH_TOKEN|NPM_TOKEN|AWS_[A-Z_]*(?:KEY|TOKEN)[A-Z_]*"
                r"|ANTHROPIC_API_KEY|OPENAI_API_KEY|HF_TOKEN)\}?"),
     # Bare `env` token as a STANDALONE command — `env | curl ...` is the
     # exfil-whole-environment shape. The compositional check splits the

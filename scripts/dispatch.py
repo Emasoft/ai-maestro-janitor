@@ -296,6 +296,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # opt-out CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED; fail-open (silent on any rotator/
     # network failure); the detector self-cadences on the same interval too (TRDD-OY0W6LX5).
     ("window-burn-rate", 900, "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL"),
+    # token-usage-anomaly (TRDD-EDSFEQ5C): the SLOW per-5-min baseline complement of the
+    # fast pre-tool-token-budget guard. It shipped with its own gate/dedupe but was never
+    # added to this roster, so it NEVER RAN (found by the whole-codebase review,
+    # TRDD-E9LMBNPE). Reads token-meter.jsonl locally — cheap; self-gates on
+    # CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_ENABLED.
+    ("token-usage-anomaly", 300, "CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_INTERVAL"),
 ]
 
 

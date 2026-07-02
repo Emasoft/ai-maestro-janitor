@@ -267,12 +267,19 @@ def main() -> int:
     # needs an out-of-band reminder (documented follow-up).
     stop = _active_global_stop(gs)
     if stop is not None:
-        kind, reason, since = stop
-        state.log_line("session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
-        import time  # noqa: E402  -- stdlib
+        # MAINTENANCE WINS OVER A GLOBAL STOP (TRDD-FPL60EKV): maintenance-mode exists
+        # precisely so ONE session keeps its cache warm with cheap fires while the fleet
+        # is stopped. Suppressing the arm nudge here would strand that session unarmed
+        # at startup — the keep-warm never starts. Local sentinel OR machine-wide flag.
+        maintenance = (state.state_dir() / "maintenance-mode").is_file() or gs.maintenance_mode_present()
+        if not maintenance:
+            kind, reason, since = stop
+            state.log_line("session-start", f"global stop active ({kind}) -> not nudging /janitor-arm")
+            import time  # noqa: E402  -- stdlib
 
-        print(_format_stop_reminder(kind, reason, since, int(time.time())))
-        return 0
+            print(_format_stop_reminder(kind, reason, since, int(time.time())))
+            return 0
+        state.log_line("session-start", "global stop set but maintenance-mode active -> arm nudge proceeds")
 
     # /janitor-arm is idempotent, so even if the durable cron survived a previous
     # session, re-arming is safe.
