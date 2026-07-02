@@ -6,6 +6,11 @@ every spawn through an injected recorder, and the keystroke `fleet_inject.fire` 
 monkeypatched. What is proven here is the SAFETY CONTROL FLOW — default-off dry-run,
 the is_killable refusals, and that a kill happens only when both the opt-in and the
 guard agree.
+
+The channel-resolution tests (TRDD-ME8V2YJF follow-up) prove `_command_plan`'s
+fallback order for the two NEW channels (ai-maestro CLI, Linux GUI wtype/xdotool)
+without touching the unchanged tmux/iTerm behaviour — pure dict-in/plan-out, no
+subprocess, no network.
 """
 
 from __future__ import annotations
@@ -88,7 +93,10 @@ def test_fire_restart_dry_run_when_disabled_touches_nothing(monkeypatch) -> None
     keystroke — and reports DRY_RUN. This is the default production posture."""
     killed: list = []
     spawned: list = []
-    monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: spawned.append(p) or True)
+    def _fire(p):  # list.append() returns None; a def keeps the fire spy truthy cleanly
+        spawned.append(p)
+        return True
+    monkeypatch.setattr(fn.fleet_inject, "fire", _fire)
     plan = fn.build_force_restart(123, {"tmux_pane": "%1"})
     out = fn.fire_restart(plan, enabled=False, killable=True,
                           killer=lambda *a: killed.append(a), spawner=lambda a: spawned.append(a))
@@ -126,9 +134,12 @@ def test_fire_restart_resurrect_kills_then_spawns() -> None:
     killed: list = []
     spawned: list = []
     plan = fn.build_resurrect(888, "/proj")
+    def _spawn(argv):  # list.append() returns None; a def keeps the spawner spy truthy cleanly
+        spawned.append(argv)
+        return True
     out = fn.fire_restart(plan, enabled=True, killable=True,
                           killer=lambda pid, sig: killed.append(pid),
-                          spawner=lambda argv: bool(spawned.append(argv)) or True)
+                          spawner=_spawn)
     assert out == "FIRED:resurrect" and killed == [888] and len(spawned) == 1
     killed.clear()
     spawned.clear()
@@ -142,3 +153,59 @@ def test_fire_restart_safe_on_none_and_unknown() -> None:
     """A None plan or an unknown rung is a safe no-op string, never an exception."""
     assert fn.fire_restart(None, enabled=True, killable=True) == "NO_PLAN"
     assert fn.fire_restart({"rung": "bogus"}, enabled=True, killable=True) == "UNKNOWN_RUNG:bogus"
+
+
+def test_command_plan_prefers_tmux_then_iterm_then_aimaestro_then_linux_gui() -> None:
+    """Channel priority, most-direct first: tmux -> iterm -> aimaestro -> linux-gui.
+    Each lower-priority identity is present but never chosen while a higher one is."""
+    terminal_all = {
+        "tmux_pane": "%3", "iterm_session_id": "tty:4C4A-9B7",
+        "aimaestro_session": "agent-x", "aimaestro_cli": "/bin/aimaestro-agent.sh",
+        "linux_gui_channel": "wtype",
+    }
+    plan = fn.command_injection_plan(terminal_all, "/janitor-arm", esc_first=True)
+    assert plan["channel"] == "tmux"
+
+    no_tmux = dict(terminal_all)
+    del no_tmux["tmux_pane"]
+    plan = fn.command_injection_plan(no_tmux, "/janitor-arm", esc_first=True)
+    assert plan["channel"] == "iterm"
+
+    aimaestro_only = {
+        "aimaestro_session": "agent-x", "aimaestro_cli": "/bin/aimaestro-agent.sh",
+        "linux_gui_channel": "xdotool",
+    }
+    plan = fn.command_injection_plan(aimaestro_only, "/janitor-arm", esc_first=True)
+    assert plan["channel"] == "aimaestro"
+    assert plan["argv"] == [
+        "/bin/aimaestro-agent.sh", "session", "command", "agent-x",
+        "--newline", "--", "/janitor-arm",
+    ]
+
+    gui_only = {"linux_gui_channel": "xdotool"}
+    plan = fn.command_injection_plan(gui_only, "/janitor-arm", esc_first=True)
+    assert plan["channel"] == "xdotool"
+    assert ["RUN", "xdotool", "type", "--clearmodifiers", "--", "/janitor-arm"] in plan["steps"]
+
+
+def test_command_plan_aimaestro_requires_both_session_and_cli() -> None:
+    """A partial ai-maestro identity (session without a resolved CLI, or vice versa)
+    never builds a plan — fail-open, never guess a channel."""
+    assert fn.command_injection_plan({"aimaestro_session": "agent-x"}, "/x", esc_first=True) is None
+    assert fn.command_injection_plan(
+        {"aimaestro_cli": "/bin/aimaestro-agent.sh"}, "/x", esc_first=True
+    ) is None
+
+
+def test_command_plan_wtype_channel_builds_steps() -> None:
+    """The Linux GUI channel dispatches to the matching builder (wtype vs xdotool) by
+    the `linux_gui_channel` tag; falls open to None with an unrecognised value."""
+    plan = fn.command_injection_plan({"linux_gui_channel": "wtype"}, "/compact", esc_first=True)
+    assert plan["channel"] == "wtype"
+    assert ["RUN", "wtype", "/compact"] in plan["steps"]
+    assert fn.command_injection_plan({"linux_gui_channel": "bogus"}, "/x", esc_first=True) is None
+
+
+def test_command_plan_none_when_nothing_resolves() -> None:
+    """An empty terminal identity never guesses a channel."""
+    assert fn.command_injection_plan({}, "/janitor-arm", esc_first=True) is None

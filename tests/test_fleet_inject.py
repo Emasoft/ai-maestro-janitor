@@ -6,6 +6,10 @@ command-typing rungs produce a plan; tmux is preferred over iTerm when both are
 present (the ai-maestro-compatible, no-AppleScript path); an iTerm plan is built
 ONLY for a UUID that passes the injection-safety gate; and the osascript targets
 exactly the stored session, never a broadcast.
+
+The two NEW channels (TRDD-ME8V2YJF follow-up — ai-maestro CLI, Linux GUI
+wtype/xdotool) are tested the same way: pure argv building, and `fire()` dispatch
+proven via injected/monkeypatched spawn points — never a real subprocess.
 """
 
 from __future__ import annotations
@@ -121,3 +125,59 @@ def test_fire_declines_empty_plan() -> None:
     """fire(None) is a safe no-op (a declined plan never raises) and reports that
     nothing was launched."""
     assert fi.fire(None) is False
+
+
+def test_aimaestro_command_argv_shape() -> None:
+    """Pure argv builder: `<cli> session command <session> --newline -- <command>` —
+    the frozen ai-maestro CLI interface; no ESC primitive (documented: enqueues
+    regardless of hard/soft intent)."""
+    argv = fi.aimaestro_command_argv("/home/x/.local/bin/aimaestro-agent.sh", "agent-foo", "/janitor-arm")
+    assert argv == [
+        "/home/x/.local/bin/aimaestro-agent.sh", "session", "command", "agent-foo",
+        "--newline", "--", "/janitor-arm",
+    ]
+
+
+def test_fire_aimaestro_spawns_detached(monkeypatch) -> None:
+    """The aimaestro channel fires the resolved argv via a detached Popen, mirroring
+    the iTerm branch's fire-and-forget contract."""
+    calls: list = []
+    monkeypatch.setattr(fi.subprocess, "Popen", lambda *a, **k: calls.append((a, k)))
+    plan = {
+        "channel": "aimaestro", "command": "/janitor-arm",
+        "argv": ["cli", "session", "command", "agent-foo", "--newline", "--", "/janitor-arm"],
+    }
+    assert fi.fire(plan) is True
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[0] == plan["argv"]
+    assert kwargs["start_new_session"] is True
+
+
+def test_fire_aimaestro_spawn_failure_returns_false(monkeypatch) -> None:
+    """A spawn failure on the aimaestro channel degrades to False, same contract as
+    the iTerm branch — never lets the exception escape."""
+    def boom(*_a, **_k):
+        raise FileNotFoundError("cli not found")
+    monkeypatch.setattr(fi.subprocess, "Popen", boom)
+    plan = {
+        "channel": "aimaestro", "command": "/x",
+        "argv": ["cli", "session", "command", "s", "--newline", "--", "/x"],
+    }
+    assert fi.fire(plan) is False
+
+
+def test_fire_wtype_and_xdotool_use_detached_steps(monkeypatch) -> None:
+    """The Linux GUI channels (wtype/xdotool) reuse terminal_trigger's detached-step
+    runner, exactly like the tmux channel."""
+    seen: list = []
+    monkeypatch.setattr(
+        fi.terminal_trigger, "_fire_detached_steps",
+        lambda delay, steps: seen.append((delay, steps)),
+    )
+    for channel in ("wtype", "xdotool"):
+        plan = {"channel": channel, "command": "/x", "delay_s": 2.0, "steps": [["RUN", channel, "/x"]]}
+        assert fi.fire(plan) is True
+    assert len(seen) == 2
+    assert seen[0] == (2.0, [["RUN", "wtype", "/x"]])
+    assert seen[1] == (2.0, [["RUN", "xdotool", "/x"]])

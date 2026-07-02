@@ -6,7 +6,8 @@ the exact keystroke payload to inject a recovery command into ANOTHER instance's
 terminal, choosing the channel from the RESOLVED terminal identity (never this
 process's own env) — so the daemon can rescue a session it does not live in.
 
-Two channels, both already proven elsewhere in the plugin:
+Four channels, layered so the most-direct/reliable one wins (TRDD-ME8V2YJF follow-up
+adds the last two; iTerm/tmux are unchanged):
 
 - **iTerm** → an osascript that targets ONLY the session whose ``id`` equals the
   stored UUID, sends ESC (interrupt the dead/stuck turn), then types the command.
@@ -16,6 +17,15 @@ Two channels, both already proven elsewhere in the plugin:
   reusing ``terminal_trigger.build_tmux_steps``. tmux is preferred when present:
   an ai-maestro agent pane is automatable directly — no AppleScript, no focus
   steal — which is why this is the ai-maestro-compatible path.
+- **ai-maestro CLI** → ``aimaestro-agent.sh session command <tmux-session>
+  --newline -- <command>`` (``aimaestro_command_argv``), for an agent session the
+  raw TTY scan couldn't place (e.g. a nested/managed tmux fleet_scan can't see
+  directly). ``fleet_scan`` pre-resolves the CLI path and tmux session name once
+  per scan (never per-instance); no raw-ESC primitive on this channel.
+- **Linux GUI** (wtype/xdotool) → reuses ``terminal_trigger.build_wtype_steps`` /
+  ``build_xdotool_steps`` (the same builders self-trigger uses), typing into the
+  FOCUSED window — best-effort, last resort, tagged by ``fleet_scan`` only when
+  no tmux/iTerm channel resolved.
 
 Everything here is PURE / dry-run-able: build the payload, inspect it, THEN fire.
 This module covers only the gentle, command-TYPING rungs (rearm/reload/update).
@@ -96,6 +106,22 @@ def iterm_osascript(
     )
 
 
+def aimaestro_command_argv(cli: str, session: str, command: str) -> list[str]:
+    """argv for ``<cli> session command <session> --newline -- <command>`` — the
+    frozen ai-maestro CLI interface (issue #42) that types ``command`` into the
+    ai-maestro agent whose tmux session is ``session``. PURE — no resolution, no
+    I/O; the caller resolves ``cli`` (``terminal_trigger._resolve_aimaestro_cli``)
+    and ``session`` (fleet_scan's ``tag_aimaestro_identity``, via
+    ``terminal_trigger.match_agent_tmux``) beforehand — mirroring how
+    ``iterm_osascript`` takes an already-validated session id rather than
+    discovering it itself. Has no raw-ESC primitive (documented on
+    ``terminal_trigger._try_ai_maestro_send``): typing into a mid-turn agent
+    ENQUEUES the command regardless of hard/soft intent, so there is no
+    ``esc_first`` parameter here. (TRDD-ME8V2YJF follow-up)
+    """
+    return [cli, "session", "command", session, "--newline", "--", command]
+
+
 def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dict | None:
     """Build the keystroke-injection PLAN for a recovery `action` into a resolved
     `terminal` (``{'iterm_session_id'?, 'tmux_pane'?}``). PURE — returns a plan the
@@ -167,6 +193,26 @@ def fire(plan: dict | None) -> bool:
             # honored (NOT exec'd as `RUN`/`SLEEP` commands) and (b) the ESC the steps
             # send can't kill the daemon that launched them.
             terminal_trigger._fire_detached_steps(plan["delay_s"], plan["steps"])
+            return True
+        if plan["channel"] in ("wtype", "xdotool"):
+            # Same detached-child runner as tmux — it interprets the RUN/SLEEP step
+            # tags and runs them in a delayed, fully-detached child so the ESC they
+            # send can never kill the daemon that launched them (TRDD-ME8V2YJF
+            # follow-up: Linux GUI-terminal parity, best-effort focused-window send).
+            terminal_trigger._fire_detached_steps(plan["delay_s"], plan["steps"])
+            return True
+        if plan["channel"] == "aimaestro":
+            # Fire-and-forget (unlike self-trigger's _try_ai_maestro_send, which
+            # waits synchronously for CLI confirmation): the daemon's fleet-stop
+            # beat must never block on a subprocess, so we spawn detached exactly
+            # like the iTerm/osascript branch above (TRDD-ME8V2YJF follow-up).
+            subprocess.Popen(  # noqa: S603 - fixed argv (resolved CLI + validated session), no shell
+                plan["argv"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
             return True
     except (OSError, subprocess.SubprocessError):
         return False

@@ -19,11 +19,15 @@ env of its own) could never do this from inside a session.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import session_liveness
+import terminal_trigger
 
 # A session whose transcript has NOT advanced in this window is treated as stuck
 # (dead heartbeat / frozen). A live heartbeat fires a turn every ~5 min and every
@@ -240,13 +244,82 @@ def _cwd_of(pid: int) -> str | None:
     return None
 
 
+def _aimaestro_agents(env: Mapping[str, str] | None = None) -> tuple[str | None, list]:
+    """Resolve the ai-maestro CLI and fetch its agent list ONCE per ``gather_fleet()``
+    call — never per-instance, an N-instance scan must not shell out N times.
+    Best-effort: returns ``(None, [])`` on ANY failure (CLI absent, server down,
+    malformed JSON) so a host without ai-maestro installed/running never breaks the
+    fleet scan. Reuses ``terminal_trigger``'s resolver/runner — the SAME ones
+    self-trigger's ``_try_ai_maestro_send`` uses — instead of re-implementing CLI
+    discovery. (TRDD-ME8V2YJF follow-up)
+    """
+    e = env if env is not None else os.environ
+    cli = terminal_trigger._resolve_aimaestro_cli(e)
+    if not cli:
+        return None, []
+    proc = terminal_trigger._run_aimaestro_cli(cli, ["list", "--json"], env=e, timeout=5.0)
+    if proc is None or proc.returncode != 0 or not proc.stdout.strip():
+        return cli, []
+    try:
+        agents = json.loads(proc.stdout)
+    except ValueError:
+        return cli, []
+    if isinstance(agents, dict) and isinstance(agents.get("agents"), list):
+        agents = agents["agents"]
+    return cli, (agents if isinstance(agents, list) else [])
+
+
+def tag_aimaestro_identity(
+    terminal: dict[str, str], *, agents: list, cli: str | None, root: str | None
+) -> None:
+    """Extend a resolved ``terminal`` identity dict IN PLACE with the ai-maestro CLI
+    channel when this instance's ``root`` matches an ai-maestro agent's
+    ``workingDirectory``. Pure — ``agents``/``cli`` are the values ``_aimaestro_agents``
+    already fetched ONCE for the whole scan; this just does the per-instance match via
+    ``terminal_trigger.match_agent_tmux`` (the SAME pure matcher self-trigger uses,
+    keyed on this instance's project root instead of ``os.getcwd()``). Stores
+    ``aimaestro_session`` — an ai-maestro TMUX SESSION NAME (e.g. ``agent-foo``), NOT
+    a ``tmux_pane`` id — alongside the resolved CLI path, so ``fleet_restart._command_plan``
+    has both pieces it needs to build the CLI argv. No-op (leaves ``terminal``
+    untouched) when ``cli``/``agents``/``root`` are falsy or nothing matches, so a host
+    without ai-maestro running never grows a dangling identity key. (TRDD-ME8V2YJF follow-up)
+    """
+    if not cli or not agents or not root:
+        return
+    session = terminal_trigger.match_agent_tmux(agents, [root])
+    if session:
+        terminal["aimaestro_session"] = session
+        terminal["aimaestro_cli"] = cli
+
+
+def tag_linux_gui_identity(terminal: dict[str, str], *, channel: str | None) -> None:
+    """Extend a resolved ``terminal`` identity dict IN PLACE with the Linux
+    GUI-terminal channel (``wtype``/``xdotool``) — but ONLY when neither tmux nor
+    iTerm already resolved a channel for this instance. ``wtype``/``xdotool`` have no
+    per-window target (they type into whichever window has focus — see
+    ``terminal_trigger.build_wtype_steps``), so this is deliberately the LAST-RESORT
+    tag, mirroring ``fleet_restart._command_plan``'s fallback order
+    (tmux -> iterm -> aimaestro -> linux-gui): tagging it unconditionally would
+    misrepresent an already-reachable instance as needing the imprecise
+    focused-window channel. No-op when ``channel`` is falsy or a channel already
+    resolved. (TRDD-ME8V2YJF follow-up)
+    """
+    if channel and "tmux_pane" not in terminal and "iterm_session_id" not in terminal:
+        terminal["linux_gui_channel"] = channel
+
+
 def gather_fleet(*, now: int) -> list[Instance]:
     """Scan the whole host: every running claude instance whose cwd resolves to a
     ``.janitor`` project, with its terminal (by TTY) and diagnosed janitor health.
 
     Pure-ish I/O: one ``ps``, one ``tmux``, at most one ``osascript`` (only if
-    iTerm is actually running — so we NEVER relaunch a closed iTerm), and one
-    ``lsof`` per claude pid. Instances outside a janitor project are skipped.
+    iTerm is actually running — so we NEVER relaunch a closed iTerm), at most one
+    ai-maestro CLI ``list --json`` (only if the CLI resolves), and one ``lsof`` per
+    claude pid. Instances outside a janitor project are skipped. The ai-maestro
+    agent list and the Linux GUI channel are each resolved ONCE for the whole scan
+    (never per-instance) and then tagged onto every matching instance's terminal
+    identity — the same fan-out shape as ``iterm_by_tty``/``tmux_by_tty`` below.
+    (TRDD-ME8V2YJF follow-up)
     """
     ps_text = _run(["ps", "-eo", "pid=,tty=,command="])
     claude = parse_ps_claude(ps_text)
@@ -258,6 +331,12 @@ def gather_fleet(*, now: int) -> list[Instance]:
         iterm_by_tty = parse_iterm_sessions(
             _run(["osascript", "-e", _ITERM_TTY_OSASCRIPT], timeout=15)
         )
+    aimaestro_cli, aimaestro_agents = _aimaestro_agents()
+    linux_gui_channel = (
+        terminal_trigger._resolve_linux_gui_channel(os.environ)
+        if sys.platform.startswith("linux")
+        else None
+    )
 
     fleet: list[Instance] = []
     for pid, tty, cmd in claude:
@@ -272,6 +351,8 @@ def gather_fleet(*, now: int) -> list[Instance]:
         terminal = session_liveness.resolve_terminal_for_tty(
             tty, iterm_by_tty=iterm_by_tty, tmux_by_tty=tmux_by_tty
         )
+        tag_aimaestro_identity(terminal, agents=aimaestro_agents, cli=aimaestro_cli, root=root)
+        tag_linux_gui_identity(terminal, channel=linux_gui_channel)
         fleet.append(
             Instance(
                 pid=pid,

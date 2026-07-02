@@ -5,6 +5,10 @@ runs against real files in a tmp tree (still no mocks; just real ``.janitor``
 state). The load-bearing properties: a claude process is recognized from either
 install shape; a TTY round-trips ps→lsof→iTerm; and a ``disarmed.flag`` makes a
 project sacrosanct no matter how broken its other signals look.
+
+The ai-maestro / Linux-GUI identity tagging (TRDD-ME8V2YJF follow-up) is tested
+the same way: pure functions given pre-fetched inputs, and ``_aimaestro_agents``
+with its two subprocess-touching calls monkeypatched — no real CLI, no network.
 """
 
 from __future__ import annotations
@@ -102,3 +106,97 @@ def test_diagnose_root_unknown_transcript_is_not_flagged(tmp_path: Path) -> None
     root = tmp_path / "p"
     (root / ".janitor" / "state").mkdir(parents=True)
     assert fs.diagnose_root(str(root), now=1_000_000, transcript_age=None)[:2] == ("healthy", None)
+
+
+def test_tag_aimaestro_identity_matches_by_root() -> None:
+    """A matching ai-maestro agent (workingDirectory == the instance's project root)
+    tags aimaestro_session/aimaestro_cli; no match, no cli, or no agents => no-op
+    (never a dangling identity key on a host without ai-maestro running)."""
+    agents = [{"workingDirectory": "/proj/a", "session": {"tmuxSessionName": "agent-a"}}]
+
+    terminal: dict = {}
+    fs.tag_aimaestro_identity(terminal, agents=agents, cli="/bin/aimaestro-agent.sh", root="/proj/a")
+    assert terminal == {"aimaestro_session": "agent-a", "aimaestro_cli": "/bin/aimaestro-agent.sh"}
+
+    no_match: dict = {}
+    fs.tag_aimaestro_identity(no_match, agents=agents, cli="/bin/aimaestro-agent.sh", root="/proj/other")
+    assert no_match == {}
+
+    no_cli: dict = {}
+    fs.tag_aimaestro_identity(no_cli, agents=agents, cli=None, root="/proj/a")
+    assert no_cli == {}
+
+    no_agents: dict = {}
+    fs.tag_aimaestro_identity(no_agents, agents=[], cli="/bin/aimaestro-agent.sh", root="/proj/a")
+    assert no_agents == {}
+
+
+def test_tag_linux_gui_identity_only_when_no_tmux_or_iterm() -> None:
+    """The GUI tag is the LAST-RESORT identity: it never overrides an already-
+    resolved tmux/iTerm channel, and no-ops with no channel."""
+    reachable = {"tmux_pane": "%1"}
+    fs.tag_linux_gui_identity(reachable, channel="wtype")
+    assert "linux_gui_channel" not in reachable
+
+    unreachable: dict = {}
+    fs.tag_linux_gui_identity(unreachable, channel="xdotool")
+    assert unreachable == {"linux_gui_channel": "xdotool"}
+
+    no_channel: dict = {}
+    fs.tag_linux_gui_identity(no_channel, channel=None)
+    assert no_channel == {}
+
+
+def test_aimaestro_agents_best_effort_on_missing_cli(monkeypatch) -> None:
+    """No CLI resolvable => (None, []) — never raises, never shells out further."""
+    monkeypatch.setattr(fs.terminal_trigger, "_resolve_aimaestro_cli", lambda env: None)
+    assert fs._aimaestro_agents({}) == (None, [])
+
+
+def test_aimaestro_agents_parses_json_list(monkeypatch) -> None:
+    """A successful `list --json` call is parsed into the agents list; both the bare
+    list and the {"agents": [...]} wrapper shapes are accepted."""
+
+    class _Proc:
+        def __init__(self, out):
+            self.returncode = 0
+            self.stdout = out
+
+    monkeypatch.setattr(fs.terminal_trigger, "_resolve_aimaestro_cli", lambda env: "/bin/aimaestro-agent.sh")
+    monkeypatch.setattr(
+        fs.terminal_trigger, "_run_aimaestro_cli",
+        lambda cli, args, *, env, timeout: _Proc('[{"workingDirectory": "/a"}]'),
+    )
+    cli, agents = fs._aimaestro_agents({})
+    assert cli == "/bin/aimaestro-agent.sh"
+    assert agents == [{"workingDirectory": "/a"}]
+
+    monkeypatch.setattr(
+        fs.terminal_trigger, "_run_aimaestro_cli",
+        lambda cli, args, *, env, timeout: _Proc('{"agents": [{"workingDirectory": "/b"}]}'),
+    )
+    cli, agents = fs._aimaestro_agents({})
+    assert agents == [{"workingDirectory": "/b"}]
+
+
+def test_aimaestro_agents_best_effort_on_bad_json(monkeypatch) -> None:
+    """A non-JSON response or a failed CLI call degrades to an empty agents list,
+    never raises — a broken ai-maestro install must never break the fleet scan."""
+
+    class _Proc:
+        def __init__(self, out, rc=0):
+            self.returncode = rc
+            self.stdout = out
+
+    monkeypatch.setattr(fs.terminal_trigger, "_resolve_aimaestro_cli", lambda env: "/bin/aimaestro-agent.sh")
+    monkeypatch.setattr(
+        fs.terminal_trigger, "_run_aimaestro_cli",
+        lambda cli, args, *, env, timeout: _Proc("not json"),
+    )
+    assert fs._aimaestro_agents({}) == ("/bin/aimaestro-agent.sh", [])
+
+    monkeypatch.setattr(
+        fs.terminal_trigger, "_run_aimaestro_cli",
+        lambda cli, args, *, env, timeout: None,
+    )
+    assert fs._aimaestro_agents({}) == ("/bin/aimaestro-agent.sh", [])

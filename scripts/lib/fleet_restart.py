@@ -87,8 +87,15 @@ def is_killable(
 def _command_plan(terminal: dict, command: str, *, esc_first: bool) -> dict | None:
     """Build a keystroke plan that types ``command`` into a resolved terminal, reusing
     the SAME gated channel logic as fleet_inject (tmux pane validated, iTerm UUID
-    validated) so a tampered identity can never reach the argv/osascript. None when no
-    safe channel resolves."""
+    validated) so a tampered identity can never reach the argv/osascript. Falls
+    through, in order, to the ai-maestro CLI channel (an agent session the raw
+    tmux/iTerm TTY scan couldn't place, e.g. a nested/managed tmux) and finally the
+    Linux GUI-terminal channel (wtype/xdotool, focused-window best-effort) — both
+    identities are pre-resolved by ``fleet_scan`` (``aimaestro_session``+
+    ``aimaestro_cli`` / ``linux_gui_channel``), never looked up here, so this stays a
+    pure dict-driven build. None when no safe channel resolves. (TRDD-ME8V2YJF
+    follow-up adds the ai-maestro/Linux-GUI branches; tmux/iTerm are unchanged.)
+    """
     pane = terminal.get("tmux_pane", "").strip()
     if pane and terminal_trigger.valid_tmux_pane(pane):
         # build_tmux_steps always leads with ESC; harmless at a shell prompt (it just
@@ -101,16 +108,38 @@ def _command_plan(terminal: dict, command: str, *, esc_first: bool) -> dict | No
             "channel": "iterm", "command": command, "delay_s": 2.0,
             "osascript": fleet_inject.iterm_osascript(sid, command, esc_first=esc_first),
         }
+    session = terminal.get("aimaestro_session", "").strip()
+    cli = terminal.get("aimaestro_cli", "").strip()
+    if session and cli:
+        # No ESC primitive on this channel (documented on
+        # terminal_trigger._try_ai_maestro_send) — esc_first is intentionally unused.
+        return {
+            "channel": "aimaestro", "command": command,
+            "argv": fleet_inject.aimaestro_command_argv(cli, session, command),
+        }
+    gui_channel = terminal.get("linux_gui_channel", "").strip()
+    if gui_channel in ("wtype", "xdotool"):
+        # Same "always ESC-first, harmless at a shell prompt" rationale as tmux above.
+        builder = (
+            terminal_trigger.build_wtype_steps
+            if gui_channel == "wtype"
+            else terminal_trigger.build_xdotool_steps
+        )
+        return {
+            "channel": gui_channel, "command": command, "delay_s": 2.0,
+            "steps": builder(command),
+        }
     return None
 
 
 def command_injection_plan(terminal: dict, command: str, *, esc_first: bool) -> dict | None:
     """PUBLIC raw-command channel builder — the single source of truth for typing an
-    ARBITRARY command into another session's validated pane (tmux pane / iTerm UUID).
-    The daemon's fleet-stop beat (TRDD-ME8V2YJF) reuses THIS rather than duplicating
-    the channel logic, so both the recovery rungs and fleet-stop share one validated
-    path (a tampered identity can never reach the argv/osascript). Returns a plan for
-    ``fleet_inject.fire``, or None when no safe channel resolves."""
+    ARBITRARY command into another session's validated pane (tmux pane / iTerm UUID /
+    ai-maestro CLI session / Linux GUI channel). The daemon's fleet-stop beat
+    (TRDD-ME8V2YJF) reuses THIS rather than duplicating the channel logic, so both the
+    recovery rungs and fleet-stop share one validated path (a tampered identity can
+    never reach the argv/osascript). Returns a plan for ``fleet_inject.fire``, or None
+    when no safe channel resolves."""
     return _command_plan(terminal, command, esc_first=esc_first)
 
 
