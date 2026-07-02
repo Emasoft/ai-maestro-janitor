@@ -220,9 +220,20 @@ def scan_transcript(
     return events
 
 
+# Fleet-dict schema version. Bumped when the SCAN ITSELF changes meaning (v2 = recursive
+# subagent-transcript scan, TRDD-0NRVNDSZ) so a cached fleet computed by an older scanner
+# is treated as stale instead of served as truth.
+SCAN_VERSION = 2
+
+
 def scan_project(project_dir: Path, since_epoch: int) -> list[Event]:
     """Every assistant `Event` at or after `since_epoch` across all `*.jsonl` transcripts
     under `project_dir`, merged and sorted ascending by `ts`.
+
+    RECURSIVE (TRDD-0NRVNDSZ): subagent transcripts live in `<session>/subagents/agent-*.jsonl`
+    subdirectories, NOT at the top level — a top-level-only glob silently dropped ALL subagent
+    usage (publish pipelines, fleet scans, memory agents: the heaviest burners), which is why
+    attribution under-reported vs the subscription meter. `rglob` picks up every transcript.
 
     Cheap prune: a file whose mtime is older than `since_epoch` is SKIPPED without opening
     it — its last append (hence its newest entry) predates the window, so nothing inside
@@ -234,7 +245,7 @@ def scan_project(project_dir: Path, since_epoch: int) -> list[Event]:
     # ONE seen-set across ALL of the project's files: dedupes both the intra-file
     # content-block repeats AND cross-file resume/replay copies of the same message.
     seen_ids: set[str] = set()
-    for jsonl in d.glob("*.jsonl"):
+    for jsonl in d.rglob("*.jsonl"):
         if not jsonl.is_file():
             continue
         try:
@@ -375,7 +386,7 @@ def fleet_attribution(
         for child in sorted(root.iterdir()):
             if not child.is_dir():
                 continue
-            if not any(child.glob("*.jsonl")):
+            if not any(child.rglob("*.jsonl")):
                 continue  # not a project transcript dir — skip
             projects[child.name] = project_metrics(scan_project(child, since_epoch), now, w5_lo=w5_lo, w7_lo=w7_lo)
 
@@ -389,6 +400,7 @@ def fleet_attribution(
     return {
         "now": now,
         "since_epoch": since_epoch,
+        "scan": SCAN_VERSION,
         # The aligned bounds actually used (None = trailing). Recorded so the cache can
         # detect a bounds mismatch and reports can show WHICH window was summed.
         "w5_lo": w5_lo,

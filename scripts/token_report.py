@@ -278,6 +278,60 @@ def _account_burn_lines() -> list[str]:
     return lines
 
 
+def _parse_when(raw: str) -> int | None:
+    """Epoch seconds from a CLI timestamp: bare epoch int, or ISO 8601 (a naive ISO is
+    LOCAL time — the user quotes their meter's local window bounds, e.g. '2026-07-02T14:40')."""
+    s = raw.strip()
+    if s.isdigit():
+        return int(s)
+    # fromisoformat FIRST: a NAIVE string must resolve in LOCAL time (datetime.timestamp()
+    # does exactly that), while th.parse_ts would silently read it as UTC — a 2h shift here
+    # (observed: '14:40' summed as 16:40) is a wrong-window answer, the very bug this
+    # command exists to fix. Offset-aware strings resolve identically either way.
+    try:
+        return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        return th.parse_ts(s)
+
+
+def _render_interval(since_raw: str, until_raw: str | None, as_json: bool) -> int:
+    """`--attribution --since X [--until Y]` — EXACT-interval attribution (TRDD-0NRVNDSZ).
+
+    A fresh, uncached, recursive scan of every project, summed over exactly [since, until]:
+    the user names the meter's own window bounds and gets per-project transcript-measured
+    weighted tokens for precisely that interval. No 30-min cache (an ad-hoc question must
+    never be answered with someone else's window)."""
+    now = int(time.time())
+    since = _parse_when(since_raw)
+    until = _parse_when(until_raw) if until_raw else now
+    if since is None or until is None or until <= since:
+        print(f"[janitor-token-attribution] invalid interval: since={since_raw!r} until={until_raw!r}")
+        return 2
+    rows: list[tuple[str, float, int]] = []
+    root = _projects_root()
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or not any(child.rglob("*.jsonl")):
+                continue
+            events = th.scan_project(child, since)
+            w = th._window_sum(events, since, until)
+            if w > 0:
+                rows.append((child.name, w, sum(1 for e in events if since <= e.ts <= until)))
+    rows.sort(key=lambda r: r[1], reverse=True)
+    total = sum(r[1] for r in rows)
+    if as_json:
+        print(json.dumps({"attribution": True, "since": since, "until": until, "total_weighted": total, "projects": [{"slug": s, "weighted": w, "events": n} for s, w, n in rows]}, separators=(",", ":")))
+        return 0
+    span_h = (until - since) / 3600.0
+    print(f"[janitor-token-attribution] EXACT interval {datetime.fromtimestamp(since):%Y-%m-%d %H:%M} → {datetime.fromtimestamp(until):%H:%M} ({span_h:.1f}h)  ·  fleet {_fmt_k(total)} weighted (transcript-measured, subagents included)")
+    for slug, w, n in rows[:15]:
+        share = (w / total * 100.0) if total > 0 else 0.0
+        print(f"  {_short_slug(slug):<26} {_fmt_k(w):>8} {share:>5.0f}%  ({n} api-msgs)")
+    if not rows:
+        print("  no transcript activity in that interval.")
+    return 0
+
+
 def _render_attribution(as_json: bool) -> int:
     """`--attribution` — rank every project by its cross-project token consumption and name
     the culprit (the one to advise). Reads the shared 30-min fleet cache (scans fresh only
@@ -338,9 +392,13 @@ def main() -> int:
     ap.add_argument("--util7d", type=float, default=None, help="live 7d-window utilization%% → estimate the absolute cap + pace")
     ap.add_argument("--live", action="store_true", help="show the CURRENT session's exact context %% + last-turn token breakdown (no heartbeat log needed) instead of the historical report")
     ap.add_argument("--attribution", action="store_true", help="rank every project by cross-project token consumption and name the top consumer (fleet burn attribution; read-only)")
+    ap.add_argument("--since", default=None, help="exact interval start (ISO 8601 or epoch) for --attribution: fresh uncached scan summed over [since, until]")
+    ap.add_argument("--until", default=None, help="exact interval end (ISO 8601 or epoch), default now; only with --since")
     args = ap.parse_args()
 
     if args.attribution:
+        if args.since is not None:
+            return _render_interval(args.since, args.until, args.json)
         return _render_attribution(args.json)
     if args.live:
         return _render_live(args.json)

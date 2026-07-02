@@ -3,7 +3,7 @@ trdd-id: 0NRVNDSZ
 title: Window-aligned attribution — bounds from resets_at, not trailing intervals
 column: dev
 created: 2026-07-02T16:20:52+0200
-updated: 2026-07-02T16:20:52+0200
+updated: 2026-07-02T17:05:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 1
@@ -54,8 +54,23 @@ implementation-commits: []
   5. Consumers derive bounds from the live probe fail-soft (probe dead → None
      → trailing, previous behavior): `window-burn-rate.py` (it already gathers
      `accounts`) and `token_report.py --attribution` (adds a read-only probe).
-- **NEXT ACTION:** implement + tests (`tests/test_window_aligned_attribution.py`),
-  ruff/pytest green, commit. Rides the NEXT publish (no standalone release).
+- **WAVE 2 (user: "the commands report wrong values… fix them", 2026-07-02 ~17:00):**
+  three MORE correctness bugs found + fixed on top of wave 1:
+  1. `scan_project` globbed only TOP-LEVEL `*.jsonl` — every subagent transcript
+     (`<session>/subagents/agent-*.jsonl`) was silently dropped: publish
+     pipelines/fleet scans/memory agents (the heaviest burners) never counted.
+     Fix: `rglob`, shared seen-set. Real-data effect: fleet-since-14:40 40M → 65.6M;
+     janitor 10M/167msgs → 20.7M/400msgs. `SCAN_VERSION=2` stamped in the fleet
+     dict; the cache treats an older/absent stamp as stale.
+  2. `--attribution --since <ts> [--until <ts>]` — EXACT-interval mode: fresh
+     uncached recursive scan summed over precisely the requested bounds (the
+     user quotes the meter's own window start).
+  3. `_parse_when` naive-ISO bug caught in validation: `th.parse_ts` read
+     "14:40" as UTC (= 16:40 local, wrong window). fromisoformat-first so naive
+     strings resolve LOCAL.
+- **NEXT ACTION:** commit wave 2 + publish v0.29.1 (the user runs the CACHED
+  plugin's commands — only a release makes the fixed numbers reachable via
+  /janitor-token-report; until reload, run the repo script directly).
 
 ## Notes
 

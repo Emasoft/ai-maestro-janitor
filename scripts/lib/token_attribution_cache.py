@@ -57,6 +57,8 @@ def load_fresh(
     fleet = raw.get("fleet")
     if not isinstance(fleet, dict):
         return None
+    if fleet.get("scan") != th.SCAN_VERSION:
+        return None  # produced by an older scanner (e.g. pre-subagent-recursion) — stale
     if fleet.get("w5_lo") != w5_lo or fleet.get("w7_lo") != w7_lo:
         return None  # computed for different windows — recompute, don't reuse
     return fleet

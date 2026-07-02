@@ -19,7 +19,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib
 import token_burn as tb  # noqa: E402
 import token_history as th  # noqa: E402
 
-NOW = 1_800_000_000
+# One hour in the past (real clock): scan_project prunes files whose REAL mtime predates
+# `since_epoch`, so a fixture "now" in the future would prune every just-written file.
+NOW = int(time.time()) - 3600
 
 
 def _iso(epoch: int) -> str:
@@ -71,6 +73,38 @@ def test_project_metrics_aligned_bounds_override_trailing() -> None:
     aligned = th.project_metrics([ev_in, ev_out], NOW, w5_lo=w5_lo)
     assert trailing["roll_5h"] == 200.0
     assert aligned["roll_5h"] == 100.0
+
+
+def test_scan_project_recurses_into_subagent_transcripts(tmp_path: Path) -> None:
+    """Subagent usage in `<session>/subagents/agent-*.jsonl` MUST be counted (it was the
+    silently-dropped majority of heavy-window burn before the rglob fix)."""
+    import json as _json
+
+    line = _json.dumps(
+        {
+            "type": "assistant",
+            "timestamp": _iso(NOW),
+            "message": {"id": "msg_sub", "usage": {"input_tokens": 0, "output_tokens": 7}, "content": []},
+        }
+    )
+    sub = tmp_path / "sess-1" / "subagents"
+    sub.mkdir(parents=True)
+    (sub / "agent-abc.jsonl").write_text(line + "\n", encoding="utf-8")
+    events = th.scan_project(tmp_path, NOW - 60)
+    assert len(events) == 1 and events[0].output == 7
+
+
+def test_cache_scan_version_mismatch_is_stale(tmp_path: Path, monkeypatch) -> None:
+    """A cached fleet from an older scanner (no/old `scan` field) is never reused."""
+    import json as _json
+
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+    import token_attribution_cache as tac
+
+    (tmp_path / "gs").mkdir()
+    stale = {"ts": NOW, "fleet": {"w5_lo": None, "w7_lo": None, "projects": {}, "ranking": []}}
+    tac.cache_path().write_text(_json.dumps(stale), encoding="utf-8")
+    assert tac.load_fresh(NOW) is None
 
 
 def test_cache_bounds_mismatch_is_stale(tmp_path: Path, monkeypatch) -> None:
