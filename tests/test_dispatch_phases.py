@@ -686,15 +686,13 @@ def test_resolve_heartbeat_mode_maintenance_wins_over_kill_switch(env_isolation:
     assert dispatch._resolve_heartbeat_mode() == "maintenance"
 
 
-def test_main_maintenance_fires_cheap_no_chores_no_daemon(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """BEHAVIORAL PROOF: in maintenance-mode main() returns having done close to the MINIMUM —
-    it emits ONLY the never-stop keep-going nudge (TRDD-TKNSTP82; the fire itself already
-    refreshed the prompt cache at the 0.1x read rate), runs NO detector, and never tries to
-    spawn the daemon. This is the ~1/10-cost cache-refresh fire that keeps a session + its
-    project cache warm instead of letting it die, while still nudging an unattended agent to
-    keep working (TRDD-FPL60EKV, TRDD-TKNSTP82)."""
+def test_main_maintenance_fires_cheap_no_chores_but_ensures_daemon(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """BEHAVIORAL PROOF: in maintenance-mode main() does close to the MINIMUM — it emits ONLY
+    the never-stop keep-going nudge and runs NO detector — but it DOES call
+    ensure_daemon_running (TRDD-8PH8YOIJ): the daemon's existence is SURVIVAL (it beats the
+    60s oauth-rotator-tick that rotates accounts), not a chore. Before this, a daemon that
+    died during maintenance stayed dead — nobody rotated, the 5h window exhausted, and the
+    user had to /login by hand (incident 2026-07-02)."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -704,33 +702,31 @@ def test_main_maintenance_fires_cheap_no_chores_no_daemon(
     (state.state_dir() / "maintenance-mode").write_text("", encoding="utf-8")
 
     ran: list[str] = []
+    ensured: list[bool] = []
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
     monkeypatch.setattr(
         dispatch.gs,
         "ensure_daemon_running",
-        lambda *a, **k: pytest.fail("daemon spawn attempted in maintenance-mode"),
+        lambda *a, **k: ensured.append(True),
     )
 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-self-disarm]" not in out, "maintenance must NOT self-disarm (that kills the warm cache)"
-    expected = (
-        "[janitor-resume]\n"
-        "continue your pending task (keep-going mode) — if nothing remains, "
-        "say so briefly and run /janitor-keep-going off"
-    )
+    expected = "[janitor-resume]\ncontinue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off"
     assert out.strip() == expected, f"a maintenance fire must emit ONLY the keep-going nudge, got {out!r}"
     assert ran == [], f"a maintenance fire must run NO detector, ran {ran}"
     stamps = list(state.state_dir().glob("last-run-*.ts"))
     assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
+    assert ensured == [True], "maintenance MUST attempt ensure_daemon_running (TRDD-8PH8YOIJ survival)"
 
 
-def test_main_maintenance_under_kill_switch_keeps_beating(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_maintenance_under_kill_switch_keeps_beating(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """The keep-warm-while-fleet-down property end-to-end: with the kill-switch set AND the
-    maintenance flag set, main() does NOT self-disarm and does NOT spawn the daemon — the
-    session keeps a cheap cache-refresh beat while the fleet/daemon stay down (TRDD-FPL60EKV).
-    The daemon-stays-down half composes with test_ensure_daemon_running_respects_kill_switch."""
+    maintenance flag set, main() does NOT self-disarm and the daemon is NOT actually spawned —
+    the session keeps a cheap cache-refresh beat while the fleet/daemon stay down
+    (TRDD-FPL60EKV). Since TRDD-8PH8YOIJ, maintenance DOES call ensure_daemon_running (the
+    survival respawn), so this test lets the REAL gate run and asserts the deeper
+    spawn_daemon_detached is never reached — a deliberate global STOP still wins."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -744,8 +740,8 @@ def test_main_maintenance_under_kill_switch_keeps_beating(
     monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
     monkeypatch.setattr(
         dispatch.gs,
-        "ensure_daemon_running",
-        lambda *a, **k: pytest.fail("daemon spawn attempted while the fleet is kill-switched"),
+        "spawn_daemon_detached",
+        lambda *a, **k: pytest.fail("daemon spawned while the fleet is kill-switched"),
     )
 
     out = _capture_stdout(dispatch.main)
@@ -806,9 +802,7 @@ def test_phase_keep_going_nudge_no_dedupe_refires_every_call(env_isolation: dict
     assert first.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
 
 
-def test_main_full_mode_no_keep_going_flag_no_nudge(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_full_mode_no_keep_going_flag_no_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """BEHAVIORAL PROOF: plain full mode, no flag, not maintenance → no nudge text at all."""
     dispatch = _import_dispatch()
     import global_state as gs
@@ -826,9 +820,7 @@ def test_main_full_mode_no_keep_going_flag_no_nudge(
     assert "keep-going mode" not in out
 
 
-def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detectors(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detectors(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """BEHAVIORAL PROOF: the standalone opt-in nudges AND keeps full-mode chores running —
     unlike maintenance, keep-going in FULL mode does NOT skip detectors/daemon."""
     dispatch = _import_dispatch()
@@ -851,9 +843,7 @@ def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detector
     assert daemon_calls == ["called"], "keep-going in FULL mode must still lazy-spawn the daemon"
 
 
-def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """A prior rate-limit resume returns early — the keep-going nudge (even with the flag set)
     must NOT also appear; only the rate-limit resume cue does."""
     dispatch = _import_dispatch()
@@ -879,9 +869,7 @@ def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(
     assert "keep-going mode" not in out, "the keep-going nudge must not also fire this turn"
 
 
-def test_main_compact_resume_short_circuits_before_keep_going_nudge(
-    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_compact_resume_short_circuits_before_keep_going_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """Same short-circuit guarantee for a prior post-compact resume."""
     dispatch = _import_dispatch()
     import global_state as gs

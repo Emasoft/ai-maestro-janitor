@@ -961,6 +961,18 @@ def main() -> int:
     # long-idle purpose) and the resume nudges (an unattended maintenance session stalled after
     # a compact/rate-limit) — /code-review B1/B2/B4.
     if mode == "maintenance":
+        # TRDD-8PH8YOIJ: the daemon's EXISTENCE is survival, not a chore. A running daemon
+        # keeps the 60s oauth-rotator-tick beating under maintenance (v0.28.1 B3), but when
+        # the daemon DIED during maintenance nothing respawned it — sessions skipped the
+        # spawn here, so the 5h window exhausted with no rotation and the user had to
+        # /login by hand (incident 2026-07-02). ensure_daemon_running() is cheap+idempotent
+        # (pid/heartbeat check; spawn only when dead) and honors the kill-switch +
+        # crash-loop breaker by construction, so a deliberate global STOP still wins.
+        # Maintenance idles the EXPENSIVE chores, never survival.
+        try:
+            gs.ensure_daemon_running()
+        except Exception:  # noqa: BLE001 — survival is best-effort; never break the fire
+            pass
         state.log_line("dispatch", "maintenance-mode: cache-refresh fire, survival phases only")
         return 0
 
