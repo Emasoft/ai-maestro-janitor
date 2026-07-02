@@ -3,7 +3,7 @@ trdd-id: OY0W6LX5
 title: Fleet token attribution + window burn-rate alarm — which project over-consumes, and where the spike came from
 column: complete
 created: 2026-07-02T14:30:25+0200
-updated: 2026-07-02T15:36:00+0200
+updated: 2026-07-02T16:32:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -62,7 +62,7 @@ approval-tier: 3
   wide singleton that already fleet-scans), NOT new plumbing.
 - **NEXT ACTION:** (1) confirm `/api/oauth/usage` fields (read-only probe). (2) Build the
   pure burn-rate math (`token_baseline`: `burn_ratio`, `projected_exhaustion`, `combine 5h+7d`)
-  + tests — reproduce the user's example exactly. (3) `token_history.py` fallback miner. (4)
+  plus tests — reproduce the user's example exactly. (3) `token_history.py` fallback miner. (4)
   Wire an alarm: heartbeat `token-usage-anomaly` (or a new `window-burn-rate` detector) +
   surface in `/janitor-token-report`. (5) TDD throughout; ruff+mypy; publish.
 

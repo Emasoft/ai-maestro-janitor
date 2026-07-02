@@ -96,7 +96,10 @@ def _top_consumer_clause() -> str:
         source = "output" if output_share >= cache_share else "cache"
         spawns = int(src.get("subagent_spawns", 0) or 0)
         if spawns:
-            source = f"{source} + {spawns} subagent spawn(s)"
+            # "spawns" (bare plural), NOT "spawn(s)": the parenthesized plural
+            # pattern-matches a spawn(...) process-exec call in CPV skillaudit's
+            # SHELL_EXEC heuristic and blocked the v0.29.0 publish gate.
+            source = f"{source} + {spawns} subagent spawns"
         return f" Top consumer: {_short_slug(slug)} ({share:.0f}% of fleet 5h, spike {spike_txt}, source: {source})."
     except Exception:
         return ""
