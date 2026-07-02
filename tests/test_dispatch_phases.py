@@ -689,10 +689,12 @@ def test_resolve_heartbeat_mode_maintenance_wins_over_kill_switch(env_isolation:
 def test_main_maintenance_fires_cheap_no_chores_no_daemon(
     env_isolation: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """BEHAVIORAL PROOF: in maintenance-mode main() returns having done the MINIMUM — it emits
-    NO output (the fire itself already refreshed the prompt cache at the 0.1x read rate), runs
-    NO detector, and never tries to spawn the daemon. This is the ~1/10-cost cache-refresh fire
-    that keeps a session + its project cache warm instead of letting it die (TRDD-FPL60EKV)."""
+    """BEHAVIORAL PROOF: in maintenance-mode main() returns having done close to the MINIMUM —
+    it emits ONLY the never-stop keep-going nudge (TRDD-TKNSTP82; the fire itself already
+    refreshed the prompt cache at the 0.1x read rate), runs NO detector, and never tries to
+    spawn the daemon. This is the ~1/10-cost cache-refresh fire that keeps a session + its
+    project cache warm instead of letting it die, while still nudging an unattended agent to
+    keep working (TRDD-FPL60EKV, TRDD-TKNSTP82)."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -711,7 +713,12 @@ def test_main_maintenance_fires_cheap_no_chores_no_daemon(
 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-self-disarm]" not in out, "maintenance must NOT self-disarm (that kills the warm cache)"
-    assert out.strip() == "", f"a maintenance fire must emit nothing, got {out!r}"
+    expected = (
+        "[janitor-resume]\n"
+        "continue your pending task (keep-going mode) — if nothing remains, "
+        "say so briefly and run /janitor-keep-going off"
+    )
+    assert out.strip() == expected, f"a maintenance fire must emit ONLY the keep-going nudge, got {out!r}"
     assert ran == [], f"a maintenance fire must run NO detector, ran {ran}"
     stamps = list(state.state_dir().glob("last-run-*.ts"))
     assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
@@ -744,3 +751,154 @@ def test_main_maintenance_under_kill_switch_keeps_beating(
     out = _capture_stdout(dispatch.main)
     assert "[janitor-self-disarm]" not in out, "maintenance must override the kill-switch self-disarm"
     assert ran == [], "maintenance runs no detectors"
+
+
+# ---------- Phase 1.5a: keep-going never-stop nudge (TRDD-TKNSTP82 Part B) --
+
+_KEEP_GOING_LINE = "continue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off"
+
+
+def test_phase_keep_going_nudge_silent_full_mode_no_flag(env_isolation: dict) -> None:
+    """RUNAWAY GUARD: full mode with no keep-going flag and not maintenance → silent. This is
+    what keeps a plain interactive/default session from ever seeing the nudge."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert out == "", f"full mode with no opt-in must stay silent, got {out!r}"
+
+
+def test_phase_keep_going_nudge_emits_in_full_mode_with_flag(env_isolation: dict) -> None:
+    """The standalone /janitor-keep-going opt-in: full mode + flag present → nudge emitted."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"unexpected nudge output: {out!r}"
+
+
+def test_phase_keep_going_nudge_emits_in_maintenance_mode_no_flag(env_isolation: dict) -> None:
+    """Maintenance ALWAYS gets the nudge, even with no standalone flag set — mode alone opts in."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"unexpected nudge output: {out!r}"
+
+
+def test_phase_keep_going_nudge_no_dedupe_refires_every_call(env_isolation: dict) -> None:
+    """Unlike the day-bucketed renew nudge, this MUST re-fire on every due heartbeat while the
+    opt-in holds — a one-time nudge would miss a session idle across several heartbeats."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+
+    first = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    second = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert first == second, "the nudge must re-fire identically on every call, no dedupe"
+    assert first.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
+
+
+def test_main_full_mode_no_keep_going_flag_no_nudge(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BEHAVIORAL PROOF: plain full mode, no flag, not maintenance → no nudge text at all."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
+
+    out = _capture_stdout(dispatch.main)
+    assert "[janitor-resume]" not in out, f"a plain full-mode fire with no opt-in must not nudge, got {out!r}"
+    assert "keep-going mode" not in out
+
+
+def test_main_full_mode_with_keep_going_flag_emits_nudge_and_still_runs_detectors(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BEHAVIORAL PROOF: the standalone opt-in nudges AND keeps full-mode chores running —
+    unlike maintenance, keep-going in FULL mode does NOT skip detectors/daemon."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+
+    ran: list[str] = []
+    daemon_calls: list[str] = []
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: ran.append(name))
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: daemon_calls.append("called"))
+    monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
+
+    out = _capture_stdout(dispatch.main)
+    assert out.splitlines()[:2] == ["[janitor-resume]", _KEEP_GOING_LINE], f"nudge must lead the output, got {out!r}"
+    assert len(ran) > 0, "keep-going in FULL mode must still run the due detector roster"
+    assert daemon_calls == ["called"], "keep-going in FULL mode must still lazy-spawn the daemon"
+
+
+def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prior rate-limit resume returns early — the keep-going nudge (even with the flag set)
+    must NOT also appear; only the rate-limit resume cue does."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    sd = state.state_dir()
+    state.atomic_write(sd / "rate-limited.flag", "1")
+    state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 10))
+    (sd / "keep-going").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: pytest.fail("detectors must not run"))
+    monkeypatch.setattr(
+        dispatch.gs,
+        "ensure_daemon_running",
+        lambda *a, **k: pytest.fail("daemon spawn attempted during rate-limit resume"),
+    )
+
+    out = _capture_stdout(dispatch.main)
+    assert out.startswith("[janitor-resume] rate-limit cleared"), f"rate-limit resume must lead, got {out!r}"
+    assert "keep-going mode" not in out, "the keep-going nudge must not also fire this turn"
+
+
+def test_main_compact_resume_short_circuits_before_keep_going_nudge(
+    env_isolation: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same short-circuit guarantee for a prior post-compact resume."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    _arm_compact_flag(state, "continue TRDD-abcd1234")
+    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: pytest.fail("detectors must not run"))
+    monkeypatch.setattr(
+        dispatch.gs,
+        "ensure_daemon_running",
+        lambda *a, **k: pytest.fail("daemon spawn attempted during compact resume"),
+    )
+
+    out = _capture_stdout(dispatch.main)
+    assert out.startswith("[janitor-resume] Context was compacted"), f"compact resume must lead, got {out!r}"
+    assert "keep-going mode" not in out, "the keep-going nudge must not also fire this turn"

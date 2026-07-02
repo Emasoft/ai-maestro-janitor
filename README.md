@@ -519,14 +519,20 @@ daemon" control; re-arm each session to resume.
 **MAINTENANCE keeps firing — but cheap.** This is the middle ground between
 full and disarm. Each fire does the MINIMUM: the turn re-reads the session
 context at the 0.1× prompt-cache **read** rate (which resets the 5-minute cache
-TTL), then `dispatch.py` returns immediately — no detectors, no daemon spawn, no
-output. It exists because letting the cache **die** (disarm → no fires) forces
+TTL), then `dispatch.py` emits a never-stop "keep going" continue-nudge and
+returns — no detectors, no daemon spawn. It exists because letting the cache **die** (disarm → no fires) forces
 the next real turn to **rewrite** the whole context at the 1.0× rate — ~10× a
 cache read. So a maintenance fire costs ~1/10 of a cache-death rewrite: the
 cheapest way to keep a session (and thus its whole project's cache) warm.
 Maintenance **wins over** a global stop, so one session can stay warm while the
 fleet stays down (the daemon idles its tasks and is not respawned). Use it for
 idle-but-returning work; `/janitor-maintenance-mode off` restores full fires.
+
+**KEEP-GOING is the standalone never-stop nudge for FULL mode.** Maintenance already emits
+the continue-nudge unconditionally (above); `/janitor-keep-going` (local-only, no global
+variant) opts a session running in normal FULL mode into the SAME nudge — every due heartbeat
+prints `[janitor-resume]` + "continue your pending task" — while keeping detectors, the
+daemon, and drift reporting active. `/janitor-keep-going off` stops the nudge.
 
 **Rollout caveat.** The `[janitor-self-disarm]` marker is baked into the cron
 prompt at arm time, so crons armed BEFORE this shipped won't self-disarm on

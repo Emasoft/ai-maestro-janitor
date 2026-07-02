@@ -193,7 +193,8 @@ suspend, `.janitor/state/paused`), `janitor-global-disarm` ↔ `janitor-global-a
 kill-switch=disarm makes the daemon EXIT, global-pause=pause keeps the daemon ALIVE,
 maintenance-mode.flag=daemon idles but sessions keep firing CHEAP). THREE heartbeat modes
 (`dispatch._resolve_heartbeat_mode`): FULL (fire + due chores + daemon), MAINTENANCE (fire
-cache-refresh-ONLY — no chores/daemon/output; keeps the prompt cache warm at the 0.1× READ
+cache-refresh-ONLY — no chores/daemon, but DOES emit the never-stop keep-going nudge
+(TRDD-TKNSTP82); keeps the prompt cache warm at the 0.1× READ
 rate ≈ 1/10 the 1.0× REWRITE a dead cache costs on the next real turn; maintenance WINS over a
 global stop so ONE session stays warm while the fleet is down), STOP (self-disarm). Both global
 STOPS now TRULY STOP the heartbeat (free), not just silence it (TRDD-RQ9FIFX6): a set stop flag
@@ -201,7 +202,12 @@ makes `dispatch.py` emit a bare `[janitor-self-disarm]` marker → the session r
 → the cron DELETES ITSELF, because a cron FIRE is a full Claude turn that re-reads ~618k cached
 tokens (billed at the 0.1× cache-read rate, NOT free) whether or not detectors run — only NOT
 firing costs zero (MAINTENANCE is the middle option: keep the fire but at that 0.1× floor).
-The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays).
+The LOCAL `janitor-pause` is unchanged (silent in-place skip, cron stays). `janitor-keep-going`
+↔ `janitor-keep-going off` (TRDD-TKNSTP82, local-only, no global variant, `.janitor/state/keep-going`)
+is the STANDALONE opt-in for the same never-stop continue-nudge while running in FULL mode
+(detectors/daemon stay active) — `dispatch._phase_keep_going_nudge(mode)` fires it whenever that
+flag is set OR mode=="maintenance", called right before the maintenance early-return so both
+modes get it.
 Rollout caveat: crons armed BEFORE this shipped don't self-disarm (the cron prompt is baked at
 arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 (user-invoked Wikimem harvest of recent changes — active counterpart of memorize-nudge).

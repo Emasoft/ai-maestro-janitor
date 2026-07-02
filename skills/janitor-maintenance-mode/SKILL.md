@@ -7,10 +7,11 @@ description: Keep the janitor heartbeat ARMED but make every fire cache-refresh-
 
 ## Overview
 
-Maintenance-mode keeps the heartbeat firing every 5 min but does the ABSOLUTE MINIMUM each
-fire: the turn re-reads the session context at the 0.1x prompt-cache READ rate (which
-RESETS the 5-minute cache TTL), then `dispatch.py` returns immediately — no detectors, no
-daemon spawn, no agent work, no output.
+Maintenance-mode keeps the heartbeat firing every 5 min but does close to the ABSOLUTE MINIMUM
+each fire: the turn re-reads the session context at the 0.1x prompt-cache READ rate (which
+RESETS the 5-minute cache TTL), then `dispatch.py` emits the never-stop keep-going nudge
+(`[janitor-resume]` + a short "continue your pending task" line — TRDD-TKNSTP82) and returns —
+no detectors, no daemon spawn, no other agent work.
 
 **WHY it exists:** letting the cache DIE (disarm → no fires) forces the next real turn to
 REWRITE the whole context at the 1.0x rate — ~10x a cache read. So a maintenance fire costs
@@ -19,8 +20,11 @@ REWRITE the whole context at the 1.0x rate — ~10x a cache read. So a maintenan
 | mode | fires? | per-fire cost | when |
 |---|---|---|---|
 | FULL | yes | cache-read + due chores + daemon | active dev |
-| MAINTENANCE | yes | cache-read ONLY (~0.1x) | keep the cache warm, cheap |
+| MAINTENANCE | yes | cache-read + continue-nudge (~0.1x) | keep the cache warm, cheap, never stall |
 | DISARM | no | $0 (cache dies → 1.0x on return) | genuine long idle / shutdown |
+
+Maintenance always carries the never-stop continue-nudge (see `/janitor-keep-going` for the
+standalone opt-in to the same nudge while staying in FULL mode with detectors/daemon active).
 
 Two scopes:
 
@@ -95,8 +99,10 @@ use `/janitor-arm`; for a temporary silence, `/janitor-pause`.
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — `_resolve_heartbeat_mode()` returns
-  `"maintenance"` when this flag (local or global) is set; the fire then refreshes the cache
-  and returns before any detector/daemon phase.
+  `"maintenance"` when this flag (local or global) is set; the fire then refreshes the cache,
+  `_phase_keep_going_nudge(mode)` emits the continue-nudge, and the fire returns before any
+  detector/daemon phase.
+- `/janitor-keep-going` — the standalone opt-in for the same never-stop nudge in FULL mode.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/global_control_cli.py` — `maintenance` / `maintenance-off`
   set/clear the machine-wide flag (and the daemon idles its tasks while it is set).
 - `$CLAUDE_PROJECT_DIR/.janitor/state/maintenance-mode` — the per-session sentinel.

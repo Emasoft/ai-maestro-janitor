@@ -26,6 +26,7 @@ State:
   $PROJECT_ROOT/.janitor/state/last-run-<detector>.ts
   $PROJECT_ROOT/.janitor/state/heartbeat-armed-at.ts   # written by /janitor-arm
   $PROJECT_ROOT/.janitor/state/heartbeat-renew-seen.txt
+  $PROJECT_ROOT/.janitor/state/keep-going              # written by /janitor-keep-going (never-stop nudge opt-in)
 
 Exit code: 0 on normal completion (including no drift). Non-zero only on
 unrecoverable errors.
@@ -828,6 +829,35 @@ def _phase_heartbeat_renew() -> None:
         print(line)
 
 
+def _phase_keep_going_nudge(mode: str) -> None:
+    """Emit a never-stop continue-nudge when the session explicitly opted into it.
+
+    WHY (TRDD-TKNSTP82 Part B, user 2026-07-02): maintenance-mode was over-optimized
+    into full silence — an unattended agent that finishes a turn while maintenance is
+    active (or with the standalone `/janitor-keep-going` flag set) had nothing telling
+    it to keep working, so it silently stalled forever. This phase EMITS a
+    resume-shaped nudge but does NOT early-return — callers downstream (the
+    maintenance early-return that follows it in main(), or the full detector roster)
+    run exactly as they did before this phase existed.
+
+    RUNAWAY GUARD: fires ONLY under an explicit, deliberate opt-in — the per-session
+    `.janitor/state/keep-going` flag (see /janitor-keep-going) OR `mode ==
+    "maintenance"`. A plain full-mode session with neither set stays silent here and
+    idles normally, so this can never cause a fleet-wide token runaway on default /
+    interactive sessions.
+
+    No dedupe: unlike the day-bucketed renew nudge above, this is meant to re-fire on
+    EVERY due heartbeat while the opt-in holds — that repetition is the whole
+    "never stop" point (a one-time nudge would miss a session that stays idle across
+    several heartbeats in a row).
+    """
+    keep_going_flag = state.state_dir() / "keep-going"
+    if not keep_going_flag.is_file() and mode != "maintenance":
+        return
+    print("[janitor-resume]")
+    print("continue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off")
+
+
 def _phase_user_presence_breadcrumb() -> None:
     """Refresh the cross-plugin user-presence breadcrumb's liveness stamp.
 
@@ -903,16 +933,27 @@ def main() -> int:
     # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons).
     _phase_heartbeat_renew()
 
+    # Phase 1.5a: never-stop keep-going nudge (TRDD-TKNSTP82 Part B). Placed AFTER the
+    # renew phase and BEFORE the maintenance early-return below so BOTH modes get it:
+    # maintenance fires the nudge then takes its cheap return (no detectors/daemon);
+    # full fires the nudge then proceeds into the detector roster. It only emits under
+    # an explicit opt-in (mode == "maintenance" OR the .janitor/state/keep-going flag),
+    # so a plain full-mode session with neither set stays silent — see the phase's own
+    # docstring for the runaway guard. A prior rate-limit/compact resume already
+    # returned earlier in this function, so this phase is naturally skipped whenever
+    # one of those already fired this turn.
+    _phase_keep_going_nudge(mode)
+
     # Phase 1.5b: MAINTENANCE early-return (TRDD-FPL60EKV). The fire already refreshed the
     # prompt cache (the turn re-read the context at the 0.1x cache-READ rate, resetting the
     # 5-min TTL). Return HERE — after the cheap survival phases above (user-presence
-    # breadcrumb, rate-limit resume, post-compact resume, and the 7-day cron auto-renew) so a
-    # cache-warm fire still keeps the cron alive and surfaces a pending resume — but BEFORE the
-    # expensive phases below (guard, daemon spawn, detectors, reloads) that maintenance exists
-    # to skip. This return used to sit at Phase 0, which starved the renew (the cron silently
-    # expired after 7 days, defeating maintenance's long-idle purpose) and the resume nudges
-    # (an unattended maintenance session stalled after a compact/rate-limit) — /code-review
-    # B1/B2/B4.
+    # breadcrumb, rate-limit resume, post-compact resume, the 7-day cron auto-renew, and the
+    # never-stop keep-going nudge) so a cache-warm fire still keeps the cron alive and surfaces
+    # a pending resume — but BEFORE the expensive phases below (guard, daemon spawn, detectors,
+    # reloads) that maintenance exists to skip. This return used to sit at Phase 0, which
+    # starved the renew (the cron silently expired after 7 days, defeating maintenance's
+    # long-idle purpose) and the resume nudges (an unattended maintenance session stalled after
+    # a compact/rate-limit) — /code-review B1/B2/B4.
     if mode == "maintenance":
         state.log_line("dispatch", "maintenance-mode: cache-refresh fire, survival phases only")
         return 0
