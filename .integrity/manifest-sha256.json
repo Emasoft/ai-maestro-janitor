@@ -1,7 +1,7 @@
 {
   "files": {
-    "CLAUDE.md": "4f9570e9342f0a9b0d1a1e435e615584c178946b47d67ef505853814ee2fd69d",
-    "README.md": "42ee9bde83b94f09fd9815632865151ec13b8e442f18847f5cc21604d3fe67bc",
+    "CLAUDE.md": "d6d1eb00b9cde0f2e6aa87b18c883b0d97e354ea190e9ef776daf2d4858f878c",
+    "README.md": "b6927221fd8a0a95ec77bfd82ca0a1408606c4e00a728258dfef55d62a2755d5",
     "commands/janitor-identify-environment.md": "94c58281c3d42285c90ef3e9f72663782db286b8078374db9ee2b920487696a1",
     "commands/janitor-memory-conflict-frequency-get.md": "27bc20306e296614c4c4bd78b978a04717799b89f7c7054f2cf9b7b2f374f21b",
     "commands/janitor-memory-conflict-frequency-set.md": "cc5fd5b3e94b25f66d8b2f116a4504c069980a1f50924013b192079aa9467414",
@@ -16,7 +16,8 @@
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
     "commands/janitor-refresh-claude-logins.md": "92c99c2374be2238b699f5756a89e8ce7b53cf4b1e96f73fe857d8f92d624916",
     "commands/janitor-show-global-status.md": "a4bc6cd727f86ef86b8a81521ba91851cd7d133dbfeaa390c8afa87c10f76698",
-    "commands/janitor-token-report.md": "747cc476935fef3a50302353af09447ac904c8af72803114794bf78c6cc90d48",
+    "commands/janitor-token-attribution.md": "95ba34ad8afc532cac4ad9dcb2c27dec60773a2d73d553a314b24d52e3c5c329",
+    "commands/janitor-token-report.md": "0bd1a5cb2b3617ecaa567c8e96a5653903b92b2b578d76f1980392c6a6b95735",
     "rules/commit-discipline.md": "1e713f70c2966e5b3d71fe9a629ae2a570025d4c25bc5cdd4d7c1966a7f5eeee",
     "rules/janitor-footprint.md": "9b1761079fbbf8898abd4c874b565cedc5e2e01422e0d7956848dcfb93532e80",
     "rules/markdown-memory-recall.md": "c1c49e31379b966f86211e89b38f4106bd408c689fc17d191ea72f64aab1df0b",
