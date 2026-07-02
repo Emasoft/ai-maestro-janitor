@@ -50,12 +50,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import time
+
 import token_meter  # noqa: E402
 
 _DEFAULT_TURN_OUTPUT = 10_000
 _DEFAULT_TURN_OUTPUT_HARD = 40_000
 _DEFAULT_TURN_CACHE_CREATION = 25_000
 _DEFAULT_TURN_CACHE_CREATION_HARD = 75_000
+# TRDD-TKNSTP82 A2 — window (seconds) after a compaction during which cache_creation is
+# EXPECTED to spike (the one-time full-prefix re-cache) and is therefore ignored by the
+# classifier. A bit more generous than the ~5-min heartbeat cadence that clears the
+# resume-after-compact.ts flag, so a slow heartbeat tick never leaves a gap. 0 disables
+# (restores unconditional cache_creation classification).
+_DEFAULT_COMPACT_GRACE_S = 600
 
 # The tools that SPAWN a subagent — the biggest token multiplier. `Task` is Claude Code's
 # built-in; `Agent` is the same capability in the AI-Maestro harness. A hard-tier spawn of
@@ -88,6 +96,29 @@ def _coerce_int(raw: str | None, default: int) -> int:
     return val if val >= 0 else default
 
 
+def _resume_after_compact_ts_path(project_dir: str) -> Path:
+    return Path(project_dir) / ".janitor" / "state" / "resume-after-compact.ts"
+
+
+def _in_compact_grace(project_dir: str, now: int, grace_s: int) -> bool:
+    """True iff `post-compact-resume.py` wrote `resume-after-compact.ts` within the last
+    `grace_s` seconds — the window where a large `cache_creation` is EXPECTED (the
+    one-time full-prefix re-cache after a compaction), not a runaway signal.
+
+    `project_dir` empty (no `CLAUDE_PROJECT_DIR` and no payload `cwd`) or `grace_s <= 0`
+    → always False (never silently resolve a relative path from the process cwd — that
+    would be non-deterministic depending on where the hook happens to be invoked from).
+    Mirrors `pre-tool-context-usage.py`'s `_recently_compacted` dedupe pattern.
+    """
+    if not project_dir or grace_s <= 0:
+        return False
+    try:
+        ts = int(_resume_after_compact_ts_path(project_dir).read_text(encoding="utf-8").strip() or "0")
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+    return 0 <= (now - ts) < grace_s
+
+
 def _emit(obj: dict) -> None:
     sys.stdout.write(json.dumps(obj))
 
@@ -106,6 +137,19 @@ def _deny(reason: str) -> dict:
     }
 
 
+_CACHE_MISS_NOTE = (
+    "A cache-miss write happens once when the prompt prefix changes (an idle gap "
+    ">5 min, or a recent compaction) and is billed ~1.25x — a one-time WRITE cost, not "
+    "standing context size. That write already happened and cannot be undone; see "
+    "/janitor-token-report --live or the context-window % shown by the context watchdog "
+    "if you suspect the context itself is bloated."
+)
+
+
+def _has_signal(reasons: list[str], prefix: str) -> bool:
+    return any(r.startswith(prefix) for r in reasons)
+
+
 def _response(
     verdict: "token_meter.BudgetVerdict",
     usage: "token_meter.TurnUsage",
@@ -119,29 +163,39 @@ def _response(
       * hard + a `Task`/`Agent` spawn + ENFORCE → deny the spawn (stop the multiplier).
       * hard otherwise → a strong stop nudge (TaskStop background subagents, /compact).
       * advisory → a soft be-terse/wrap-up nudge.
+
+    TRDD-TKNSTP82 A3 — the two signals render DISTINCT text: a cache-miss-ONLY trip is a
+    one-time cache-WRITE billing artifact (see `_CACHE_MISS_NOTE`), never a context-size
+    problem, so it never recommends `/compact` (that would be circular — /compact is what
+    caused the prefix rewrite in the first place, or would trigger another one). An
+    output-driven trip keeps the `/compact` recommendation — it's legitimately correct
+    there, since a compaction shrinks a bloated turn's future cost.
     """
     if verdict.tier == "ok":
         return None
     signals = "; ".join(verdict.reasons)
     span = f"{usage.assistant_messages} msg / {usage.tool_calls} tool call(s)"
+    has_output = _has_signal(verdict.reasons, "output ")
+    has_cache_miss = _has_signal(verdict.reasons, "cache-miss write")
+
     if verdict.tier == "hard":
         if enforce and tool_name in _SPAWNER_TOOLS:
-            return _deny(
-                f"[token-guard] STOP — token runaway ({signals}; {span}). Do NOT spawn "
-                f"another subagent (the biggest token multiplier). End this step, TaskStop "
-                f"any background subagents, and /compact before continuing. (Disable: "
-                f"CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE=false.)"
-            )
-        return _context(
-            f"⚠⚠ TOKEN RUNAWAY: this turn {signals} ({span}). STOP NOW — finish the current "
-            f"step, stop background subagents with TaskStop, and consider /compact or "
-            f"/janitor-compact-context. Sustained output + cache-miss writes burn "
-            f"subscription usage fastest."
-        )
-    return _context(
-        f"⚠ Token spike: this turn {signals} ({span}). Be terse, wrap up the step, or compact "
-        f"— a cache-miss write is billed ~1.25x, and long output is full price."
-    )
+            return _deny(f"[token-guard] STOP — token runaway ({signals}; {span}). Do NOT spawn another subagent (the biggest token multiplier). End this step, TaskStop any background subagents, and /compact before continuing. (Disable: CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE=false.)")
+        if has_output:
+            msg = f"⚠⚠ TOKEN RUNAWAY: this turn {signals} ({span}). STOP NOW — finish the current step, stop background subagents with TaskStop, and consider /compact or /janitor-compact-context. Sustained output burns subscription usage fastest."
+            if has_cache_miss:
+                msg += f" {_CACHE_MISS_NOTE}"
+            return _context(msg)
+        # cache-miss-only hard trip: NOT an output/context problem — see _CACHE_MISS_NOTE.
+        return _context(f"⚠⚠ TOKEN RUNAWAY: this turn {signals} ({span}). {_CACHE_MISS_NOTE}")
+
+    # advisory tier
+    if has_output:
+        msg = f"⚠ Token spike: this turn {signals} ({span}). Be terse, wrap up the step, or compact — long output is billed at full price."
+        if has_cache_miss:
+            msg += f" {_CACHE_MISS_NOTE}"
+        return _context(msg)
+    return _context(f"⚠ Token spike: this turn {signals} ({span}). {_CACHE_MISS_NOTE}")
 
 
 def main() -> int:
@@ -169,11 +223,20 @@ def main() -> int:
         # rather than guess (correctness-by-omission, same as the meter + context guard).
         return 0
 
+    # TRDD-TKNSTP82 A2 — suppress the cache_creation signal for one grace window right
+    # after a compaction, where a big one-time full-prefix re-cache write is EXPECTED
+    # (not a runaway). project_dir mirrors pre-tool-context-usage.py's resolution order
+    # (CLAUDE_PROJECT_DIR env, else the payload's cwd).
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or str(payload.get("cwd", "") or "")
+    grace_s = _coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S"),
+        _DEFAULT_COMPACT_GRACE_S,
+    )
+    ignore_cache_creation = _in_compact_grace(project_dir, int(time.time()), grace_s)
+
     verdict = token_meter.evaluate_turn_budget(
         usage,
-        output_advisory=_coerce_int(
-            os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT"), _DEFAULT_TURN_OUTPUT
-        ),
+        output_advisory=_coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT"), _DEFAULT_TURN_OUTPUT),
         output_hard=_coerce_int(
             os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"),
             _DEFAULT_TURN_OUTPUT_HARD,
@@ -186,6 +249,7 @@ def main() -> int:
             os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION_HARD"),
             _DEFAULT_TURN_CACHE_CREATION_HARD,
         ),
+        ignore_cache_creation=ignore_cache_creation,
     )
     resp = _response(
         verdict,

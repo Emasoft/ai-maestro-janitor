@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -160,9 +161,7 @@ def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsa
                     assistant_msgs += 1
                 content = msg.get("content")
                 if isinstance(content, list):
-                    tool_calls += sum(
-                        1 for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
-                    )
+                    tool_calls += sum(1 for b in content if isinstance(b, dict) and b.get("type") == "tool_use")
     if trigger is None:
         return None  # turn boundary not in the tail window — omit rather than guess
 
@@ -216,14 +215,120 @@ def latest_context_size(transcript_path: str | os.PathLike[str]) -> Optional[int
         usage = msg.get("usage")
         if not isinstance(usage, dict):
             continue
-        total = (
-            int(usage.get("input_tokens") or 0)
-            + int(usage.get("cache_read_input_tokens") or 0)
-            + int(usage.get("cache_creation_input_tokens") or 0)
-        )
+        total = int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0)
         if total > 0:
             return total
     return None
+
+
+_CONTEXT_SNAPSHOT_STALE_AGE_S = 120  # statusline-write lag beyond which a snapshot is untrusted
+
+
+def read_context_snapshot(project_dir: str, session_id: str) -> Optional[dict]:
+    """The statusline-written context snapshot dict for (project_dir, session_id), or
+    None when absent/unreadable/not-a-dict.
+
+    Moved out of ``pre-tool-context-usage.py`` (TRDD-TKNSTP82 A4) so the context-watchdog
+    hook and ``/janitor-token-report --live`` share one implementation instead of two
+    independently-drifting copies.
+    """
+    if not project_dir or not session_id:
+        return None
+    p = Path(project_dir) / ".claude" / "janitor" / f"context-usage.{session_id}.json"
+    try:
+        snap = json.loads(p.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    return snap if isinstance(snap, dict) else None
+
+
+def resolve_context(project_dir: str, session_id: str, transcript: str, window_default: int, *, now: int) -> tuple[Optional[int], Optional[int], Optional[int], bool]:
+    """Return (pct, tokens, window, stale) — the live context-window occupancy.
+
+    Prefers the statusline snapshot (it carries the real window → an accurate %); falls
+    back to `latest_context_size` over `window_default` when no snapshot is readable.
+    (None, None, None, False) when neither source yields a usable %.
+
+    Moved out of ``pre-tool-context-usage.py`` (TRDD-TKNSTP82 A4) — that hook's own
+    behavior is UNCHANGED, it now just calls this shared implementation, and
+    ``/janitor-token-report --live`` reuses it for the same "exact context %" view so the
+    two surfaces can never silently drift apart.
+    """
+    snap = read_context_snapshot(project_dir, session_id)
+    if snap is not None and isinstance(snap.get("pct"), int):
+        tokens = snap.get("tokens") if isinstance(snap.get("tokens"), int) else None
+        window = snap.get("window") if isinstance(snap.get("window"), int) and snap["window"] > 0 else None
+        ts = snap.get("ts")
+        stale = isinstance(ts, int) and (now - ts) > _CONTEXT_SNAPSHOT_STALE_AGE_S
+        return snap["pct"], tokens, window, stale
+    if transcript and window_default > 0:
+        tokens = latest_context_size(transcript)
+        if tokens is not None:
+            pct = int(round(100 * tokens / window_default))
+            return pct, tokens, window_default, False
+    return None, None, None, False
+
+
+# The compact ROUTINE spends ~this many tokens writing its OWN summary, so the auto-compact
+# actually fires ~this far BEFORE CLAUDE_CODE_AUTO_COMPACT_WINDOW (user-measured, TRDD-TKNSTP82 C).
+_DEFAULT_COMPACT_SUMMARY_OVERHEAD = 34000
+
+
+def _coerce_env_int(raw: str | None, default: int) -> int:
+    """Best-effort non-negative int from an env value; junk/absent → default (a typo in an
+    env var must never crash a hook that reads it)."""
+    if not raw:
+        return default
+    try:
+        val = int(raw.strip())
+    except (ValueError, AttributeError):
+        return default
+    return val if val >= 0 else default
+
+
+@dataclass(frozen=True)
+class CompactPrediction:
+    """Predicted auto-compact geometry from CLAUDE_CODE_AUTO_COMPACT_WINDOW (TRDD-TKNSTP82 C).
+
+    `auto_window` is the env-var value — the token count at which Claude Code force-compacts;
+    `overhead` is the compact routine's own summary-write cost; `effective_compact_point =
+    auto_window - overhead` is where compaction ACTUALLY fires; `tokens_until_compact =
+    effective_compact_point - used` (goes negative once past the point).
+    """
+
+    auto_window: int
+    overhead: int
+    effective_compact_point: int
+    tokens_until_compact: int
+
+
+def predict_auto_compact(used_tokens: Optional[int], *, env: Mapping[str, str] | None = None) -> Optional[CompactPrediction]:
+    """Predict the EXACT auto-compact point from the CLAUDE_CODE_AUTO_COMPACT_WINDOW env var.
+
+    The user sets CLAUDE_CODE_AUTO_COMPACT_WINDOW to the token count at which Claude Code
+    force-compacts (e.g. 700000 = compact at 70% of a 1M window — NOT a fixed %, so we must
+    read the env var, not assume). The compact routine itself spends ~`overhead` tokens
+    writing the summary, so compaction fires at `auto_window - overhead` (700000 − 34000 =
+    666000). Returns the geometry, or None when the env var is unset/≤0 or `used_tokens` is
+    unknown — callers then fall back to the %-of-window gauge (TRDD-TKNSTP82 C1). `overhead`
+    is overridable via CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS.
+
+    Pure (reads only the passed `env`, defaulting to os.environ) so it is unit-testable AND
+    shared by the context-watchdog hook and `/janitor-token-report --live` — one predictor,
+    so the two surfaces can never disagree (the A4 single-source-of-truth pattern).
+    """
+    e: Mapping[str, str] = os.environ if env is None else env
+    auto_window = _coerce_env_int(e.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW"), 0)
+    if auto_window <= 0 or not isinstance(used_tokens, int):
+        return None
+    overhead = _coerce_env_int(e.get("CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS"), _DEFAULT_COMPACT_SUMMARY_OVERHEAD)
+    effective = auto_window - overhead
+    return CompactPrediction(
+        auto_window=auto_window,
+        overhead=overhead,
+        effective_compact_point=effective,
+        tokens_until_compact=effective - used_tokens,
+    )
 
 
 def append_log(log_path: str | os.PathLike[str], turn_usage: TurnUsage, now_epoch: int) -> None:
@@ -251,9 +356,7 @@ def trim_log(log_path: str | os.PathLike[str], *, keep_lines: int = 5000, max_by
         pass
 
 
-def append_exhaustion_event(
-    path: str | os.PathLike[str], event: dict, *, max_events: int = 500
-) -> None:
+def append_exhaustion_event(path: str | os.PathLike[str], event: dict, *, max_events: int = 500) -> None:
     """Append ONE window-exhaustion snapshot (a turn-ending API error / rate-limit) as a
     JSON line, then cap the file to the last `max_events`. Best-effort — NEVER raises, so a
     logging glitch can never break the StopFailure hook's critical resume-cue capture. The
@@ -320,6 +423,7 @@ def evaluate_turn_budget(
     output_hard: int,
     cache_creation_advisory: int,
     cache_creation_hard: int,
+    ignore_cache_creation: bool = False,
 ) -> BudgetVerdict:
     """Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
 
@@ -333,6 +437,15 @@ def evaluate_turn_budget(
     (so a user can watch only output, only cache-miss, or both). ``tier`` is the worst
     tripped tier; ``reasons`` lists every tripped signal, hard first. Pure — no I/O, so
     it is unit-tested with plain ``TurnUsage`` values.
+
+    ``ignore_cache_creation`` (TRDD-TKNSTP82 A1) — when True, the cache_creation signal
+    is EXCLUDED from classification entirely: it neither contributes a reason nor raises
+    the tier, even past its hard threshold. For the post-compact / cold-cache grace
+    window, where a large one-time full-prefix re-cache write is EXPECTED (a billing
+    artifact of the caching mechanism, not evidence of reckless behavior) — see
+    ``pre-tool-token-budget.py``'s ``_in_compact_grace``. The output signal is entirely
+    unaffected: sustained output still trips advisory/hard exactly as before, so a
+    genuine runaway during the grace window is still caught.
     """
     reasons_hard: list[str] = []
     reasons_advisory: list[str] = []
@@ -342,10 +455,11 @@ def evaluate_turn_budget(
         reasons_hard.append(f"output {o} ≥ hard {output_hard}")
     elif output_advisory > 0 and o >= output_advisory:
         reasons_advisory.append(f"output {o} ≥ {output_advisory}")
-    if cache_creation_hard > 0 and c >= cache_creation_hard:
-        reasons_hard.append(f"cache-miss write {c} ≥ hard {cache_creation_hard}")
-    elif cache_creation_advisory > 0 and c >= cache_creation_advisory:
-        reasons_advisory.append(f"cache-miss write {c} ≥ {cache_creation_advisory}")
+    if not ignore_cache_creation:
+        if cache_creation_hard > 0 and c >= cache_creation_hard:
+            reasons_hard.append(f"cache-miss write {c} ≥ hard {cache_creation_hard}")
+        elif cache_creation_advisory > 0 and c >= cache_creation_advisory:
+            reasons_advisory.append(f"cache-miss write {c} ≥ {cache_creation_advisory}")
     if reasons_hard:
         return BudgetVerdict(tier="hard", reasons=reasons_hard + reasons_advisory)
     if reasons_advisory:

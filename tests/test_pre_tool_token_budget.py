@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -40,9 +41,7 @@ def _assistant(out: int, *, tool: bool = False, text: str = "working", cache_cre
     content: list = [{"type": "text", "text": text}]
     if tool:
         content.append({"type": "tool_use", "name": "Bash", "input": {}})
-    return json.dumps({"type": "assistant", "message": {
-        "role": "assistant", "content": content,
-        "usage": {"input_tokens": 5, "output_tokens": out, "cache_creation_input_tokens": cache_creation}}})
+    return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": content, "usage": {"input_tokens": 5, "output_tokens": out, "cache_creation_input_tokens": cache_creation}}})
 
 
 def _write_transcript(tmp: Path, *lines: str) -> Path:
@@ -58,6 +57,7 @@ def _run(
     budget: str | None = "100",
     tool_name: str = "Bash",
     env_extra: dict[str, str] | None = None,
+    project_dir: str = "",
 ) -> subprocess.CompletedProcess[str]:
     payload: dict = {
         "session_id": "sess-1",
@@ -77,11 +77,20 @@ def _run(
     # enabled is None → leave the var UNSET, exercising the DEFAULT-ON behaviour.
     if budget is not None:
         env[_BUDGET] = budget
+    # ALWAYS set CLAUDE_PROJECT_DIR explicitly (default "") so the compact-grace check
+    # (TRDD-TKNSTP82 A2) is deterministic regardless of the ambient shell's env — an
+    # inherited CLAUDE_PROJECT_DIR pointing at a real project could otherwise pick up a
+    # real resume-after-compact.ts and make these tests flaky/non-reproducible.
+    env["CLAUDE_PROJECT_DIR"] = project_dir
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
-        [str(_HOOK)], input=json.dumps(payload), env=env,
-        capture_output=True, text=True, timeout=30,
+        [str(_HOOK)],
+        input=json.dumps(payload),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -117,7 +126,8 @@ def test_default_on_when_unset(tmp_path: Path) -> None:
 def test_cache_miss_spike_fires_independently_of_output(tmp_path: Path) -> None:
     """A CACHE-MISS write over its budget fires even when OUTPUT is tiny."""
     t = _write_transcript(
-        tmp_path, _user("do real work"),
+        tmp_path,
+        _user("do real work"),
         _assistant(20, tool=True, cache_creation=30_000),  # output under 100, cache-miss over 25000
     )
     ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}))
@@ -179,25 +189,29 @@ def test_budget_zero_disables_turn_check(tmp_path: Path) -> None:
 def test_multistep_turn_sums_output(tmp_path: Path) -> None:
     """Output is summed across the turn's assistant messages (with tool_results
     interleaved), so a turn that drips over the budget across steps still fires."""
-    tool_result = json.dumps({"type": "user", "message": {
-        "role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
+    tool_result = json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
     t = _write_transcript(
         tmp_path,
         _user("do real work"),
-        _assistant(60, tool=True), tool_result,
+        _assistant(60, tool=True),
+        tool_result,
         _assistant(60, tool=True),
     )
     ctx = _ctx(_run(str(t)))
     assert ctx is not None
-    assert "120" in ctx          # 60 + 60 summed across the turn
+    assert "120" in ctx  # 60 + 60 summed across the turn
 
 
 def test_malformed_input_silent() -> None:
     env = os.environ.copy()
     env[_ENABLED] = "true"
     r = subprocess.run(
-        [str(_HOOK)], input="not json", env=env,
-        capture_output=True, text=True, timeout=30,
+        [str(_HOOK)],
+        input="not json",
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert r.returncode == 0
     assert r.stdout.strip() == ""
@@ -208,3 +222,95 @@ def test_no_turn_boundary_silent(tmp_path: Path) -> None:
     → silent (don't guess)."""
     t = _write_transcript(tmp_path, _assistant(999, tool=True))
     assert _run(str(t)).stdout.strip() == ""
+
+
+def _write_resume_ts(project_dir: Path, ts: int) -> None:
+    sd = project_dir / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "resume-after-compact.ts").write_text(str(ts), encoding="utf-8")
+
+
+def test_fresh_compact_grace_suppresses_cache_miss(tmp_path: Path) -> None:
+    """TRDD-TKNSTP82 A2: a FRESH resume-after-compact.ts + high cache_creation + low
+    output → silent (the post-compact re-cache window)."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_resume_ts(proj, int(time.time()))
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
+    r = _run(str(t), env_extra={_CACHE: "25000"}, project_dir=str(proj))
+    assert r.stdout.strip() == ""
+
+
+def test_stale_compact_ts_does_not_suppress(tmp_path: Path) -> None:
+    """A STALE resume-after-compact.ts (older than the grace window) → unchanged
+    behavior — the cache-miss trip still fires (regression)."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_resume_ts(proj, int(time.time()) - 10_000)  # far older than the 600s default grace
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}, project_dir=str(proj)))
+    assert ctx is not None
+    assert "cache-miss" in ctx and "30000" in ctx
+
+
+def test_absent_compact_ts_does_not_suppress(tmp_path: Path) -> None:
+    """No resume-after-compact.ts at all (normal turn, no compaction) → unchanged
+    behavior — the cache-miss trip still fires."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE: "25000"}, project_dir=str(proj)))
+    assert ctx is not None and "cache-miss" in ctx
+
+
+def test_compact_grace_zero_disables_suppression(tmp_path: Path) -> None:
+    """CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S=0 disables the grace window even
+    with a fresh resume-after-compact.ts."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_resume_ts(proj, int(time.time()))
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=30_000))
+    ctx = _ctx(
+        _run(
+            str(t),
+            env_extra={_CACHE: "25000", "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_COMPACT_GRACE_S": "0"},
+            project_dir=str(proj),
+        )
+    )
+    assert ctx is not None and "cache-miss" in ctx
+
+
+def test_compact_grace_never_suppresses_output_signal(tmp_path: Path) -> None:
+    """The grace window is cache_creation-SCOPED only: an output-hard trip still fires
+    the STOP nudge even inside a fresh compact-grace window."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _write_resume_ts(proj, int(time.time()))
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(50_000, tool=True))
+    ctx = _ctx(_run(str(t), env_extra={_BUDGET_HARD: "40000"}, project_dir=str(proj)))
+    assert ctx is not None
+    assert "TOKEN RUNAWAY" in ctx and "TaskStop" in ctx
+
+
+def test_cache_miss_only_wording_omits_compact_recommendation(tmp_path: Path) -> None:
+    """TRDD-TKNSTP82 A3: a cache-miss-ONLY trip (no output signal) never recommends
+    /compact — it's a one-time WRITE cost, not fixed by compacting again."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(20, tool=True, cache_creation=80_000))
+    ctx = _ctx(_run(str(t), env_extra={_CACHE_HARD: "75000"}, project_dir=str(proj)))
+    assert ctx is not None
+    assert "cache-miss" in ctx
+    assert "/compact" not in ctx
+
+
+def test_output_only_wording_keeps_compact_recommendation(tmp_path: Path) -> None:
+    """An output-driven hard trip (no cache-miss signal) keeps the /compact
+    recommendation — it's legitimately correct there."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    t = _write_transcript(tmp_path, _user("do real work"), _assistant(50_000, tool=True))
+    ctx = _ctx(_run(str(t), env_extra={_BUDGET_HARD: "40000"}, project_dir=str(proj)))
+    assert ctx is not None
+    assert "/compact" in ctx
+

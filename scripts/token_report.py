@@ -26,11 +26,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+# A heartbeat whose output exceeds this is a "spike" worth the user's eye; also
+# flagged relative to the run's own p95. Env-overridable.
+import memory_scopes  # noqa: E402
 import token_baseline as tb  # noqa: E402
 import token_meter  # noqa: E402
 
-# A heartbeat whose output exceeds this is a "spike" worth the user's eye; also
-# flagged relative to the run's own p95. Env-overridable.
 _SPIKE_OUTPUT = int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_SPIKE_OUTPUT", "4000"))
 _HIGH_MEAN_OUTPUT = int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_HIGH_MEAN_OUTPUT", "2500"))
 
@@ -48,8 +49,7 @@ def _fmt_k(n: float) -> str:
     return f"{n:.0f}"
 
 
-def _window_metrics(records: list[dict], now: int, util5h: float | None, util7d: float | None,
-                    events: list[dict]) -> dict:
+def _window_metrics(records: list[dict], now: int, util5h: float | None, util7d: float | None, events: list[dict]) -> dict:
     """Rolling 5h/7d weighted sums + per-min rates, the busiest observed windows (cap
     lower bounds), the per-5-min robust baseline, the empirical cap from logged
     window-exhaustion events, and — when a live utilization% is supplied — the estimated
@@ -84,9 +84,116 @@ def _window_metrics(records: list[dict], now: int, util5h: float | None, util7d:
     return out
 
 
+def _project_dir() -> str:
+    return os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
+
+
 def _state_dir() -> Path:
-    proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
-    return Path(proj) / ".janitor" / "state"
+    return Path(_project_dir()) / ".janitor" / "state"
+
+
+def _coerce_int(raw: str | None, default: int) -> int:
+    """Best-effort positive int; junk/absent → default (a typo must never crash the report)."""
+    if not raw:
+        return default
+    try:
+        val = int(raw.strip())
+    except (ValueError, AttributeError):
+        return default
+    return val if val > 0 else default
+
+
+# TRDD-TKNSTP82 A4 — default context-window size for `--live`, shared with the
+# context-watchdog hook via the same env var so the two surfaces never disagree.
+_CONTEXT_WINDOW_DEFAULT = 1_000_000
+
+
+def _discover_transcript(project_dir: str) -> tuple[str, str] | None:
+    """(transcript_path, session_id) of the most-recently-modified transcript under this
+    project's ``~/.claude/projects/<slug>/`` dir, or None when none exist.
+
+    The harness names transcripts ``<session-uuid>.jsonl``, so the filename stem IS the
+    session id the statusline snapshot is keyed on. Uses
+    ``memory_scopes.project_slug`` — the single source of truth for the slug derivation,
+    shared with the memory subsystem, instead of re-deriving it here.
+    """
+    home = os.environ.get("HOME", "").strip() or os.path.expanduser("~")
+    projects_dir = Path(home) / ".claude" / "projects" / memory_scopes.project_slug(project_dir)
+    if not projects_dir.is_dir():
+        return None
+    candidates = [p for p in projects_dir.glob("*.jsonl") if p.is_file()]
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda p: p.stat().st_mtime)
+    return str(latest), latest.stem
+
+
+def _render_live(as_json: bool) -> int:
+    """`--live` — the CURRENT session's exact context percent + last-turn token breakdown,
+    no heartbeat log needed. Shares `token_meter.resolve_context`/`tail_turn_usage` with
+    the context-watchdog hook so the two views can never silently disagree (TRDD-TKNSTP82
+    A4)."""
+    project_dir = _project_dir()
+    discovered = _discover_transcript(project_dir)
+    if discovered is None:
+        note = "no transcript found under ~/.claude/projects/<slug>/ for this project"
+        if as_json:
+            print(json.dumps({"live": True, "session_id": None, "context": None, "last_turn": None, "note": note}, separators=(",", ":")))
+        else:
+            print(f"[janitor-token-report] --live: {note}.")
+        return 0
+
+    transcript, session_id = discovered
+    now = int(time.time())
+    window_default = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), _CONTEXT_WINDOW_DEFAULT)
+    pct, tokens, window, stale = token_meter.resolve_context(project_dir, session_id, transcript, window_default, now=now)
+    usage = token_meter.tail_turn_usage(transcript)
+    # TRDD-TKNSTP82 C2 — the exact predicted auto-compact point, shared with the
+    # context-watchdog hook via token_meter.predict_auto_compact (None when
+    # CLAUDE_CODE_AUTO_COMPACT_WINDOW is unset → the % gauge above stands alone).
+    pred = token_meter.predict_auto_compact(tokens)
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "live": True,
+                    "session_id": session_id,
+                    "transcript": transcript,
+                    "context": {"pct": pct, "tokens": tokens, "window": window, "stale": stale},
+                    "compact_prediction": (
+                        {
+                            "auto_window": pred.auto_window,
+                            "overhead": pred.overhead,
+                            "effective_compact_point": pred.effective_compact_point,
+                            "tokens_until_compact": pred.tokens_until_compact,
+                        }
+                        if pred is not None
+                        else None
+                    ),
+                    "last_turn": usage.as_record(now) if usage is not None else None,
+                },
+                separators=(",", ":"),
+            )
+        )
+        return 0
+
+    print(f"[janitor-token-report] --live  ·  session {session_id}")
+    if pct is not None:
+        size = f"{_fmt_k(tokens)}/{_fmt_k(window)}" if isinstance(tokens, int) and isinstance(window, int) else "?"
+        lag = "  (snapshot may lag)" if stale else ""
+        print(f"  Context window: {pct}% ({size}) used{lag}")
+    else:
+        print("  Context window: unknown (no statusline snapshot, no readable transcript occupancy)")
+    if pred is not None:
+        until = pred.tokens_until_compact
+        phrase = f"~{_fmt_k(until)} until auto-compact" if until > 0 else f"~{_fmt_k(-until)} PAST the auto-compact point"
+        print(f"  Auto-compact point: {_fmt_k(pred.effective_compact_point)} (window {_fmt_k(pred.auto_window)} − {_fmt_k(pred.overhead)} summary)  ·  {phrase}")
+    if usage is not None:
+        print(f"  Last turn — output: {usage.output_tokens} (full price)  ·  cache_creation: {usage.cache_creation_input_tokens} (one-time write, ~1.25x, billed once per prefix change)  ·  cache_read: {usage.cache_read_input_tokens} (cheap re-read, ~0.1x)")
+    else:
+        print("  Last turn: unavailable (turn boundary not found in the transcript tail)")
+    return 0
 
 
 def _fmt_ts(epoch: int) -> str:
@@ -99,12 +206,9 @@ def _fmt_ts(epoch: int) -> str:
 def _render_window(window: dict) -> None:
     """Print the rolling 5h/7d window view + baseline + (if available) the cap estimate."""
     print("  window usage (weighted = output + input + cache_creation + cache_read/10):")
-    print(f"    last 5h  {_fmt_k(window['roll_5h_weighted']):>7}  ({_fmt_k(window['roll_5h_per_min'])}/min)"
-          f"      busiest 5h seen  {_fmt_k(window['busiest_5h_weighted']):>7}  (→ cap ≥ this)")
-    print(f"    last 7d  {_fmt_k(window['roll_7d_weighted']):>7}  ({_fmt_k(window['roll_7d_per_min'])}/min)"
-          f"      busiest 7d seen  {_fmt_k(window['busiest_7d_weighted']):>7}  (→ cap ≥ this)")
-    print(f"    per-5-min baseline: median {_fmt_k(window['bucket_median'])}  ·  "
-          f"p95 {_fmt_k(window['bucket_p95'])}  ·  p99 {_fmt_k(window['bucket_p99'])}")
+    print(f"    last 5h  {_fmt_k(window['roll_5h_weighted']):>7}  ({_fmt_k(window['roll_5h_per_min'])}/min)      busiest 5h seen  {_fmt_k(window['busiest_5h_weighted']):>7}  (→ cap ≥ this)")
+    print(f"    last 7d  {_fmt_k(window['roll_7d_weighted']):>7}  ({_fmt_k(window['roll_7d_per_min'])}/min)      busiest 7d seen  {_fmt_k(window['busiest_7d_weighted']):>7}  (→ cap ≥ this)")
+    print(f"    per-5-min baseline: median {_fmt_k(window['bucket_median'])}  ·  p95 {_fmt_k(window['bucket_p95'])}  ·  p99 {_fmt_k(window['bucket_p99'])}")
     for lbl in ("5h", "7d"):
         cap = window.get(f"est_cap_{lbl}")
         if cap is not None:
@@ -112,24 +216,22 @@ def _render_window(window: dict) -> None:
             tail = f"; exhausts in ~{exhaust / 60:.1f}h at the recent rate" if exhaust else ""
             print(f"    est {lbl} cap ≈ {_fmt_k(cap)} weighted (from live utilization%){tail}")
     if window.get("est_cap_5h") is None and window.get("est_cap_7d") is None:
-        print("    (pass --util5h/--util7d from /api/oauth/usage — or /janitor-oauth-health — "
-              "to estimate the absolute cap + pace)")
+        print("    (pass --util5h/--util7d from /api/oauth/usage — or /janitor-oauth-health — to estimate the absolute cap + pace)")
     if window.get("exhaustion_events"):
-        print(f"    window-exhaustion events logged: {window['exhaustion_events']}  ·  "
-              f"empirical cap ≥ {_fmt_k(window['exhaustion_max_5h'])} (5h) / "
-              f"{_fmt_k(window['exhaustion_max_7d'])} (7d) — the max window sum seen at a "
-              f"turn-ending rate-limit")
+        print(f"    window-exhaustion events logged: {window['exhaustion_events']}  ·  empirical cap ≥ {_fmt_k(window['exhaustion_max_5h'])} (5h) / {_fmt_k(window['exhaustion_max_7d'])} (7d) — the max window sum seen at a turn-ending rate-limit")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Per-heartbeat token report")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--recent", type=int, default=15, help="how many recent fires to list")
-    ap.add_argument("--util5h", type=float, default=None,
-                    help="live 5h-window utilization%% (from /api/oauth/usage) → estimate the absolute cap + pace")
-    ap.add_argument("--util7d", type=float, default=None,
-                    help="live 7d-window utilization%% → estimate the absolute cap + pace")
+    ap.add_argument("--util5h", type=float, default=None, help="live 5h-window utilization%% (from /api/oauth/usage) → estimate the absolute cap + pace")
+    ap.add_argument("--util7d", type=float, default=None, help="live 7d-window utilization%% → estimate the absolute cap + pace")
+    ap.add_argument("--live", action="store_true", help="show the CURRENT session's exact context %% + last-turn token breakdown (no heartbeat log needed) instead of the historical report")
     args = ap.parse_args()
+
+    if args.live:
+        return _render_live(args.json)
 
     log_path = _state_dir() / "token-meter.jsonl"
     records = token_meter.load_log(log_path)
@@ -151,39 +253,39 @@ def main() -> int:
     window = _window_metrics(records, int(time.time()), args.util5h, args.util7d, events)
 
     if args.json:
-        print(json.dumps({
-            "count": out_stats["count"],
-            "output": out_stats,
-            "input": in_stats,
-            "spike_threshold": max(_SPIKE_OUTPUT, p95_out),
-            "spikes": len(spikes),
-            "window": window,
-            "log": str(log_path),
-        }, separators=(",", ":")))
+        print(
+            json.dumps(
+                {
+                    "count": out_stats["count"],
+                    "output": out_stats,
+                    "input": in_stats,
+                    "spike_threshold": max(_SPIKE_OUTPUT, p95_out),
+                    "spikes": len(spikes),
+                    "window": window,
+                    "log": str(log_path),
+                },
+                separators=(",", ":"),
+            )
+        )
         return 0
 
     print(f"[janitor-token-report] {out_stats['count']} heartbeat fires logged  ·  {log_path}")
     print()
-    print(f"  output tokens/fire   mean {out_stats['mean']:.0f}  ·  p50 {out_stats['p50']}  ·  "
-          f"p95 {out_stats['p95']}  ·  max {out_stats['max']}  ·  total {out_stats['total']}")
-    print(f"  input  tokens/fire   mean {in_stats['mean']:.0f}  ·  p95 {in_stats['p95']}  ·  "
-          f"max {in_stats['max']}")
+    print(f"  output tokens/fire   mean {out_stats['mean']:.0f}  ·  p50 {out_stats['p50']}  ·  p95 {out_stats['p95']}  ·  max {out_stats['max']}  ·  total {out_stats['total']}")
+    print(f"  input  tokens/fire   mean {in_stats['mean']:.0f}  ·  p95 {in_stats['p95']}  ·  max {in_stats['max']}")
     print()
     _render_window(window)
     print()
     print(f"  {'when':<12} {'output':>7} {'input':>7} {'cache_rd':>9} {'cache_cr':>8} {'tools':>5}")
-    print(f"  {'-'*12} {'-'*7} {'-'*7} {'-'*9} {'-'*8} {'-'*5}")
-    for r in records[-args.recent:]:
+    print(f"  {'-' * 12} {'-' * 7} {'-' * 7} {'-' * 9} {'-' * 8} {'-' * 5}")
+    for r in records[-args.recent :]:
         flag = "  ⚠ spike" if int(r.get("output", 0) or 0) >= max(_SPIKE_OUTPUT, p95_out) else ""
-        print(f"  {_fmt_ts(r.get('ts', 0)):<12} {r.get('output', 0):>7} {r.get('input', 0):>7} "
-              f"{r.get('cache_read', 0):>9} {r.get('cache_creation', 0):>8} {r.get('tool_calls', 0):>5}{flag}")
+        print(f"  {_fmt_ts(r.get('ts', 0)):<12} {r.get('output', 0):>7} {r.get('input', 0):>7} {r.get('cache_read', 0):>9} {r.get('cache_creation', 0):>8} {r.get('tool_calls', 0):>5}{flag}")
     print()
     if spikes:
-        print(f"  ⚠ {len(spikes)} fire(s) above the spike threshold "
-              f"({max(_SPIKE_OUTPUT, p95_out)} output tokens).")
+        print(f"  ⚠ {len(spikes)} fire(s) above the spike threshold ({max(_SPIKE_OUTPUT, p95_out)} output tokens).")
     if out_stats["mean"] >= _HIGH_MEAN_OUTPUT:
-        print(f"  ⚠ mean output/fire ({out_stats['mean']:.0f}) is above {_HIGH_MEAN_OUTPUT} — "
-              "consider lengthening the heartbeat interval or pushing more work into scripts.")
+        print(f"  ⚠ mean output/fire ({out_stats['mean']:.0f}) is above {_HIGH_MEAN_OUTPUT} — consider lengthening the heartbeat interval or pushing more work into scripts.")
     if not spikes and out_stats["mean"] < _HIGH_MEAN_OUTPUT:
         print("  ✓ no spikes; mean per-fire cost is within budget.")
     return 0

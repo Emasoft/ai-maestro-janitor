@@ -54,12 +54,14 @@ import token_meter  # noqa: E402  # latest_context_size — transcript-based occ
 _DEFAULT_SUGGEST_PCT = 60
 _DEFAULT_HARDSTOP_PCT = 85
 _DEFAULT_WINDOW = 1_000_000
-_STALE_AGE_S = 120
 # Trigger/deny at most once per compaction episode: after a compact fires, the next turn
 # (post-resume) is normally well below the cap; the window also stops a /compact spam loop
 # AND a deny-after-resume stuck loop (if compaction didn't drop us below the cap we fall
 # through to the advisory, never deny-forever).
 _AUTOCOMPACT_DEDUPE_S = 180
+# PREPARE tier (TRDD-TKNSTP82 C): once we are within this many tokens of the predicted
+# auto-compact point, warn the agent to finish + hand off BEFORE the forced compaction.
+_DEFAULT_PREPARE_TOKENS = 30_000
 
 
 def _truthy(raw: str | None, *, default: bool) -> bool:
@@ -88,37 +90,11 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
-def _read_snapshot(project_dir: str, session_id: str) -> dict | None:
-    """The statusline-written context snapshot dict, or None when absent/unreadable."""
-    if not project_dir or not session_id:
-        return None
-    p = Path(project_dir) / ".claude" / "janitor" / f"context-usage.{session_id}.json"
-    try:
-        snap = json.loads(p.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, ValueError):
-        return None
-    return snap if isinstance(snap, dict) else None
-
-
-def _resolve_context(
-    project_dir: str, session_id: str, transcript: str, window_default: int, *, now: int
-) -> tuple[int | None, int | None, int | None, bool]:
-    """Return (pct, tokens, window, stale). Prefer the statusline snapshot (it carries the
-    real window → accurate %); fall back to the transcript's live occupancy over the
-    configurable default window. (None, …) when neither source yields a usable %."""
-    snap = _read_snapshot(project_dir, session_id)
-    if snap is not None and isinstance(snap.get("pct"), int):
-        tokens = snap.get("tokens") if isinstance(snap.get("tokens"), int) else None
-        window = snap.get("window") if isinstance(snap.get("window"), int) and snap["window"] > 0 else None
-        ts = snap.get("ts")
-        stale = isinstance(ts, int) and (now - ts) > _STALE_AGE_S
-        return snap["pct"], tokens, window, stale
-    if transcript and window_default > 0:
-        tokens = token_meter.latest_context_size(transcript)
-        if tokens is not None:
-            pct = int(round(100 * tokens / window_default))
-            return pct, tokens, window_default, False
-    return None, None, None, False
+def _resolve_context(project_dir: str, session_id: str, transcript: str, window_default: int, *, now: int) -> tuple[int | None, int | None, int | None, bool]:
+    """Thin wrapper — the implementation lives in token_meter.resolve_context (TRDD-TKNSTP82
+    A4), shared with `/janitor-token-report --live`. This hook's OWN behavior is UNCHANGED;
+    only the implementation moved, so it can never silently drift from the report's view."""
+    return token_meter.resolve_context(project_dir, session_id, transcript, window_default, now=now)
 
 
 def _format_line(pct: int, tokens, window, stale: bool, suggest_pct: int) -> str:
@@ -131,13 +107,26 @@ def _format_line(pct: int, tokens, window, stale: bool, suggest_pct: int) -> str
     if stale:
         line += " (snapshot may lag)"
     if pct >= suggest_pct:
-        line += (
-            f" ⚠ At/above {suggest_pct}% — run /janitor-compact-context to compact now while "
-            "there's headroom: every turn re-reads the WHOLE context, so a bloated session "
-            "burns ~its size in tokens PER TURN (native auto-compact is unreliable on this "
-            "window; wait too long and /compact itself can fail)."
-        )
+        line += f" ⚠ At/above {suggest_pct}% — run /janitor-compact-context to compact now while there's headroom: every turn re-reads the WHOLE context, so a bloated session burns ~its size in tokens PER TURN (native auto-compact is unreliable on this window; wait too long and /compact itself can fail)."
     return line
+
+
+def _format_prepare_line(pct: int, pred: token_meter.CompactPrediction) -> str:
+    """The PREPARE-for-auto-compact alert (TRDD-TKNSTP82 C). Keyed on the EXACT predicted
+    auto-compact point (window − the routine's ~34k summary cost), not a %, so it warns just
+    before the forced compaction — while the agent can still finish its step and hand off."""
+    eff = _fmt_tokens(pred.effective_compact_point)
+    until = pred.tokens_until_compact
+    if until > 0:
+        head = f"⚠ PREPARE for auto-compact: ~{_fmt_tokens(until)} until the auto-compact point ({eff})."
+    else:
+        head = f"⚠ Auto-compact IMMINENT — {_fmt_tokens(-until)} PAST the auto-compact point ({eff})."
+    return (
+        f"Context window: {pct}% used. {head} "
+        f"(point = CLAUDE_CODE_AUTO_COMPACT_WINDOW {_fmt_tokens(pred.auto_window)} − {_fmt_tokens(pred.overhead)} summary cost.) "
+        "Finish the current step and run /janitor-write-handoff (or /janitor-compact-context to "
+        "compact NOW on your terms) so the compaction summary captures your plan."
+    )
 
 
 def _dedupe_path(project_dir: str) -> Path:
@@ -174,14 +163,13 @@ def _run_compact_trigger(pct: int) -> str:
     script = Path(plugin_root) / "scripts" / "compact_trigger.py"
     if not script.is_file():
         return "ERROR"
-    directive = (
-        f"resume your in-flight task — the context-size guard auto-compacted at {pct}% to "
-        "stop the per-turn token bleed; re-check the TRDD board / your handoff first."
-    )
+    directive = f"resume your in-flight task — the context-size guard auto-compacted at {pct}% to stop the per-turn token bleed; re-check the TRDD board / your handoff first."
     try:
         r = subprocess.run(
             ["uv", "run", "--script", "--quiet", str(script), "--directive", directive],
-            capture_output=True, text=True, timeout=8,
+            capture_output=True,
+            text=True,
+            timeout=8,
         )
     except (OSError, subprocess.SubprocessError):
         return "ERROR"
@@ -215,9 +203,7 @@ def _advisory(line: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": line}}
 
 
-def _maybe_enforce(
-    pct: int, tokens, project_dir: str, *, hardstop_pct: int, autocompact: bool, now: int
-) -> dict | None:
+def _maybe_enforce(pct: int, tokens, project_dir: str, *, hardstop_pct: int, autocompact: bool, now: int) -> dict | None:
     """Near the cap, FORCE a compaction and return the DENY dict; else None (→ advisory).
 
     Triggers + denies at most ONCE per compaction episode: if a compact was already queued
@@ -259,36 +245,37 @@ def main() -> int:
     transcript = str(payload.get("transcript_path", "") or "")
     now = int(time.time())
 
-    window_default = _coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), _DEFAULT_WINDOW
-    )
+    window_default = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"), _DEFAULT_WINDOW)
     try:
-        pct, tokens, window, stale = _resolve_context(
-            project_dir, session_id, transcript, window_default, now=now
-        )
+        pct, tokens, window, stale = _resolve_context(project_dir, session_id, transcript, window_default, now=now)
     except Exception:  # noqa: BLE001 — fail-open: a reading error must never block a tool
         return 0
     if pct is None:
         return 0
 
-    suggest_pct = _coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT"), _DEFAULT_SUGGEST_PCT
-    )
-    hardstop_pct = _coerce_int(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_HARDSTOP_PCT"), _DEFAULT_HARDSTOP_PCT
-    )
-    autocompact = _truthy(
-        os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_AUTOCOMPACT_ENABLED"), default=True
-    )
+    suggest_pct = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT"), _DEFAULT_SUGGEST_PCT)
+    hardstop_pct = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_HARDSTOP_PCT"), _DEFAULT_HARDSTOP_PCT)
+    autocompact = _truthy(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_AUTOCOMPACT_ENABLED"), default=True)
 
     # ENFORCEMENT tier — near the cap, force a compaction (returns the DENY when a compact
     # was actually queued, else None → advisory; never a stuck deny).
-    enforced = _maybe_enforce(
-        pct, tokens, project_dir, hardstop_pct=hardstop_pct, autocompact=autocompact, now=now
-    )
+    enforced = _maybe_enforce(pct, tokens, project_dir, hardstop_pct=hardstop_pct, autocompact=autocompact, now=now)
     if enforced is not None:
         sys.stdout.write(json.dumps(enforced))
         return 0
+
+    # PREPARE tier (TRDD-TKNSTP82 C) — when CLAUDE_CODE_AUTO_COMPACT_WINDOW is set we can
+    # predict the EXACT auto-compact point (window − the routine's ~34k summary cost) and warn
+    # just BEFORE it fires, so the agent finishes its step + hands off and the compaction
+    # summary captures the plan. More precise + more urgent than the %-band advisory, so it
+    # takes precedence when in the zone; with the env var unset, `pred` is None and we fall
+    # through to the existing %-of-window advisory (no behavior change).
+    prediction = token_meter.predict_auto_compact(tokens)
+    if prediction is not None:
+        prepare_tokens = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_PREPARE_TOKENS"), _DEFAULT_PREPARE_TOKENS)
+        if prediction.tokens_until_compact <= prepare_tokens:
+            sys.stdout.write(json.dumps(_advisory(_format_prepare_line(pct, prediction))))
+            return 0
 
     # ADVISORY tier — stay SILENT below the suggest threshold so the guard costs ZERO
     # context until you are actually approaching the cap. An additionalContext line rides

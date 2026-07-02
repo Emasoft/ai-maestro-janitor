@@ -34,8 +34,7 @@ def _assistant(*, text: str = "", usage: dict | None = None, tool: bool = False)
 def _tool_result() -> str:
     """A tool-result entry — delivered as a user-role message (NOT a real prompt),
     exactly as the real transcript records the reply to a tool call."""
-    return json.dumps({"type": "user", "message": {
-        "role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "out"}]}})
 
 
 _HB = "[janitor-heartbeat]\n/path/to/dispatcher-stub.py\nSurface stdout verbatim..."
@@ -57,12 +56,8 @@ class TestTokenMeter(unittest.TestCase):
                 _user("a previous human prompt"),
                 _assistant(text="prev", usage={"input_tokens": 9, "output_tokens": 9}),
                 _user(_HB),
-                _assistant(text="", tool=True, usage={
-                    "input_tokens": 100, "output_tokens": 40,
-                    "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 20}),
-                _assistant(text="silent", usage={
-                    "input_tokens": 30, "output_tokens": 12,
-                    "cache_read_input_tokens": 5100, "cache_creation_input_tokens": 0}),
+                _assistant(text="", tool=True, usage={"input_tokens": 100, "output_tokens": 40, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 20}),
+                _assistant(text="silent", usage={"input_tokens": 30, "output_tokens": 12, "cache_read_input_tokens": 5100, "cache_creation_input_tokens": 0}),
             )
             u = token_meter.tail_turn_usage(t)
             self.assertIsNotNone(u)
@@ -96,8 +91,8 @@ class TestTokenMeter(unittest.TestCase):
             u = token_meter.tail_turn_usage(t)
             self.assertIsNotNone(u)
             assert u is not None
-            self.assertTrue(u.is_heartbeat)              # found the real prompt, not a tool_result
-            self.assertEqual(u.input_tokens, 142)         # summed across all 3 assistant msgs
+            self.assertTrue(u.is_heartbeat)  # found the real prompt, not a tool_result
+            self.assertEqual(u.input_tokens, 142)  # summed across all 3 assistant msgs
             self.assertEqual(u.output_tokens, 60)
             self.assertEqual(u.assistant_messages, 3)
             self.assertEqual(u.tool_calls, 2)
@@ -149,8 +144,11 @@ class TestTokenMeter(unittest.TestCase):
             p = tmp / "t.jsonl"
             p.write_text(
                 '{"type":"assistant","message":{"content":[],"usage":{"output_to'  # truncated
-                + "\n" + _user(_HB) + "\n"
-                + _assistant(text="ok", usage={"input_tokens": 7, "output_tokens": 3}) + "\n",
+                + "\n"
+                + _user(_HB)
+                + "\n"
+                + _assistant(text="ok", usage={"input_tokens": 7, "output_tokens": 3})
+                + "\n",
                 encoding="utf-8",
             )
             u = token_meter.tail_turn_usage(p)
@@ -164,10 +162,7 @@ class TestTokenMeter(unittest.TestCase):
         with TemporaryDirectory() as d:
             log = Path(d) / "token-meter.jsonl"
             for i, out in enumerate((10, 20, 30, 40, 1000)):  # 1000 = spike
-                u = token_meter.TurnUsage(
-                    is_heartbeat=True, input_tokens=5, output_tokens=out,
-                    cache_read_input_tokens=100, cache_creation_input_tokens=0,
-                    assistant_messages=1, tool_calls=1)
+                u = token_meter.TurnUsage(is_heartbeat=True, input_tokens=5, output_tokens=out, cache_read_input_tokens=100, cache_creation_input_tokens=0, assistant_messages=1, tool_calls=1)
                 token_meter.append_log(log, u, now_epoch=1000 + i)
             recs = token_meter.load_log(log)
             self.assertEqual(len(recs), 5)
@@ -200,9 +195,13 @@ class TestTokenMeter(unittest.TestCase):
 
 def _usage(*, output: int = 0, cache_creation: int = 0) -> token_meter.TurnUsage:
     return token_meter.TurnUsage(
-        is_heartbeat=False, input_tokens=0, output_tokens=output,
-        cache_read_input_tokens=0, cache_creation_input_tokens=cache_creation,
-        assistant_messages=1, tool_calls=1,
+        is_heartbeat=False,
+        input_tokens=0,
+        output_tokens=output,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=cache_creation,
+        assistant_messages=1,
+        tool_calls=1,
     )
 
 
@@ -245,9 +244,39 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         """output budgets = 0 → output never trips, even at a huge value."""
         v = token_meter.evaluate_turn_budget(
             _usage(output=10_000_000),
-            output_advisory=0, output_hard=0, cache_creation_advisory=200, cache_creation_hard=2000,
+            output_advisory=0,
+            output_hard=0,
+            cache_creation_advisory=200,
+            cache_creation_hard=2000,
         )
         self.assertEqual(v.tier, "ok")
+
+    def test_ignore_cache_creation_suppresses_hard_trip(self):
+        """TRDD-TKNSTP82 A1: ignore_cache_creation=True + cache_creation past HARD threshold
+        + output below threshold -> tier 'ok' (the post-compact grace window)."""
+        v = token_meter.evaluate_turn_budget(_usage(output=0, cache_creation=5000), ignore_cache_creation=True, **self._TH)
+        self.assertEqual(v.tier, "ok")
+        self.assertEqual(v.reasons, [])
+
+    def test_ignore_cache_creation_suppresses_advisory_trip(self):
+        """Same suppression at the advisory tier, not just hard."""
+        v = token_meter.evaluate_turn_budget(_usage(output=0, cache_creation=300), ignore_cache_creation=True, **self._TH)
+        self.assertEqual(v.tier, "ok")
+
+    def test_ignore_cache_creation_does_not_suppress_output(self):
+        """The output signal is UNAFFECTED by ignore_cache_creation — a genuine runaway
+        during the grace window is still caught."""
+        v = token_meter.evaluate_turn_budget(_usage(output=1500, cache_creation=5000), ignore_cache_creation=True, **self._TH)
+        self.assertEqual(v.tier, "hard")
+        self.assertEqual(len(v.reasons), 1)
+        self.assertTrue(v.reasons[0].startswith("output"))
+
+    def test_ignore_cache_creation_default_false_unchanged(self):
+        """Default (no ignore_cache_creation arg) behavior is byte-identical to before A1:
+        a cache-miss-hard trip still fires."""
+        v = token_meter.evaluate_turn_budget(_usage(cache_creation=2500), **self._TH)
+        self.assertEqual(v.tier, "hard")
+        self.assertTrue(any("cache-miss write 2500" in r for r in v.reasons))
 
 
 class TestExhaustionLog(unittest.TestCase):
