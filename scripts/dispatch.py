@@ -871,14 +871,6 @@ def main() -> int:
         # prompt is baked at arm-time — re-arm rollout lag).
         print("[janitor-self-disarm]")
         return 0
-    if mode == "maintenance":
-        # The fire already refreshed the prompt cache (the turn re-read the context at the
-        # 0.1x cache-READ rate, resetting the 5-min TTL). Do NOTHING else — no detectors, no
-        # daemon spawn, no output — so the fire costs only the unavoidable cache read
-        # (~1/10 of a cache-death rewrite), keeping this session + its project cache warm.
-        state.log_line("dispatch", "maintenance-mode: cache-refresh fire, no chores")
-        return 0
-
     # Phase 0.05: per-project TEMPORARY pause (.janitor/state/paused) — auto-expires and resumes
     # the SAME cron in place, so it stays a silent skip and must NOT self-disarm (deleting the
     # cron would break its in-place auto-resume).
@@ -910,6 +902,20 @@ def main() -> int:
 
     # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons).
     _phase_heartbeat_renew()
+
+    # Phase 1.5b: MAINTENANCE early-return (TRDD-FPL60EKV). The fire already refreshed the
+    # prompt cache (the turn re-read the context at the 0.1x cache-READ rate, resetting the
+    # 5-min TTL). Return HERE — after the cheap survival phases above (user-presence
+    # breadcrumb, rate-limit resume, post-compact resume, and the 7-day cron auto-renew) so a
+    # cache-warm fire still keeps the cron alive and surfaces a pending resume — but BEFORE the
+    # expensive phases below (guard, daemon spawn, detectors, reloads) that maintenance exists
+    # to skip. This return used to sit at Phase 0, which starved the renew (the cron silently
+    # expired after 7 days, defeating maintenance's long-idle purpose) and the resume nudges
+    # (an unattended maintenance session stalled after a compact/rate-limit) — /code-review
+    # B1/B2/B4.
+    if mode == "maintenance":
+        state.log_line("dispatch", "maintenance-mode: cache-refresh fire, survival phases only")
+        return 0
 
     # Phase 1.55: autofix-OFF daily reminder. Free no-op when ON (default).
     _phase_autofix_mode_reminder()

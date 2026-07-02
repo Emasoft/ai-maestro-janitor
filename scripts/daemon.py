@@ -1223,10 +1223,15 @@ def main() -> int:
             if gs.maintenance_mode_present():
                 gs.write_heartbeat()
                 for _ in range(_LOOP_CEILING_SEC):
+                    # Break on _running=False, a kill-switch (the true STOP → the daemon must
+                    # exit via the while-top branch), or maintenance lifting — but NOT on a
+                    # global-pause. Maintenance is checked ABOVE the pause branch (it WINS when
+                    # both are set), so if pause also broke this sleep we would `continue`,
+                    # re-enter maintenance, break instantly again, and busy-spin write_heartbeat
+                    # at 100% CPU (/code-review B5). Maintenance keeps sleeping through a pause.
                     if (
                         not _running
                         or gs.kill_switch_present()
-                        or gs.global_pause_present()
                         or not gs.maintenance_mode_present()
                     ):
                         break

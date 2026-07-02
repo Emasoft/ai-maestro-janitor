@@ -98,6 +98,38 @@ def test_timed_out_cancelled_startup_failure_are_failures() -> None:
         assert len(failed) == 1
 
 
+def test_action_required_is_unsettled_waits() -> None:
+    """A completed run BLOCKED on manual approval (conclusion=action_required) is NOT a clean
+    pass — it is treated as unsettled → wait while inside the max-wait window (so a
+    deployment-approval gate is never silently stamped green)."""
+    runs = [_run(conclusion="action_required")]
+    action, failed = ci.classify_ci_runs(
+        runs, now=1000, first_seen_ts=1000, no_run_grace_s=1800, max_wait_s=21600
+    )
+    assert action == "wait" and failed == []
+
+
+def test_unsettled_past_max_wait_resolves() -> None:
+    """A run stuck non-terminal (queued) PAST the max-wait cap, with nothing failed → give up
+    waiting and resolve, so a wedged run is never polled forever."""
+    runs = [_run(status="queued", conclusion=None)]
+    action, failed = ci.classify_ci_runs(
+        runs, now=30000, first_seen_ts=1000, no_run_grace_s=1800, max_wait_s=21600
+    )
+    assert action == "resolved" and failed == []
+
+
+def test_unsettled_past_max_wait_with_failure_reports() -> None:
+    """Past the max-wait cap, if any run already FAILED while another is still stuck, report
+    the failure (judge on what HAS concluded) rather than wait on the stuck one forever."""
+    runs = [_run(status="queued", conclusion=None), _run(databaseId=2, conclusion="failure")]
+    action, failed = ci.classify_ci_runs(
+        runs, now=30000, first_seen_ts=1000, no_run_grace_s=1800, max_wait_s=21600
+    )
+    assert action == "failed"
+    assert [r["databaseId"] for r in failed] == [2]
+
+
 # ---------- build_ci_failure_line ----------
 
 

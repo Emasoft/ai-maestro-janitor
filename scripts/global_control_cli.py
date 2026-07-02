@@ -47,9 +47,16 @@ import global_state as gs  # noqa: E402  (bare sibling import; lib/ is on sys.pa
 
 
 def _status_line() -> str:
-    # Precedence mirrors dispatch's mode resolution: MAINTENANCE wins over a stop, because
-    # a maintenance fire is an explicit keep-warm intent (TRDD-FPL60EKV).
+    # Precedence mirrors dispatch's mode resolution: MAINTENANCE wins over a stop for SESSIONS
+    # (they keep firing cache-refresh-only) — a maintenance fire is an explicit keep-warm
+    # intent (TRDD-FPL60EKV). But the DAEMON checks the kill-switch FIRST and EXITS, so when
+    # BOTH maintenance and the kill-switch are set the daemon is stopped, not idle — report
+    # that honestly (/code-review B6) instead of claiming "daemon idle".
     if gs.maintenance_mode_present():
+        if gs.kill_switch_present():
+            return ("MAINTENANCE + DISARMED (sessions still fire cache-refresh-only, but the "
+                    "kill-switch stopped the daemon; run /janitor-global-arm, then "
+                    "/janitor-global-maintenance-off, to fully resume)")
         return ("MAINTENANCE (heartbeats stay armed but fire cache-refresh-only — no "
                 "detectors, daemon idle; run /janitor-global-maintenance-off to resume full mode)")
     if gs.kill_switch_present():
