@@ -1,9 +1,9 @@
 ---
 trdd-id: ME8V2YJF
 title: Daemon-driven fleet disarm/pause — janitor controls ALL sessions itself, no human
-column: dev
+column: complete
 created: 2026-06-30T19:15:28+0200
-updated: 2026-07-01T21:16:08+0200
+updated: 2026-07-02T05:52:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -19,12 +19,23 @@ target-branch: main
 test-requirements: [unit, integration]
 impacts: []
 attempts: 0
-implementation-commits: []
+implementation-commits: [eeb4aa8, 1d057f2]
 ---
 
 # Daemon-driven fleet disarm/pause — janitor controls ALL sessions itself, no human
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-30
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-02
+
+- **✅ COMPLETE (2026-07-02).** All three components DONE + tested + committed:
+  A (daemon-driven fleet disarm/pause core) + B (granular flag-file + immediate
+  chore-skip) + C (heartbeat self-disarm, RQ9FIFX6) landed in **eeb4aa8**; the
+  ai-maestro CLI + Linux GUI recovery channels (the #251 follow-up) landed in
+  **1d057f2** — fleet_scan tags aimaestro/linux identity, fleet_inject dispatches
+  aimaestro/wtype/xdotool, fleet_restart._command_plan priority tmux→iterm→
+  ai-maestro→linux-gui. Ships DORMANT/opt-in (fleet_stop_enabled +
+  hard_restart_enabled both default-OFF). 267-test fleet/daemon/terminal/liveness
+  regression + 13 new channel tests green; ruff+mypy clean. NOT pushed — July
+  budget freeze; rides a later publish. The historical plan below is SUPERSEDED.
 
 - **USER DIRECTIVE (verbatim intent):** "the janitor must be able to control all the other
   agents sessions by itself, no human present. Just use osa scripts in iterm, or the api in
