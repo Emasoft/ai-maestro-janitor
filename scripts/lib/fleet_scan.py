@@ -174,7 +174,12 @@ def transcript_age(root: str, now: int) -> int | None:
     lives outside ``.janitor`` (``~/.claude/projects/<dashed-cwd>/*.jsonl``), so
     this maps the project root to its harness slug the same way the memory scopes
     do (the absolute path with every separator replaced by a dash)."""
-    slug = os.path.realpath(root).replace("/", "-")
+    # SSOT slug (memory_scopes.project_slug): the harness dashes EVERY non-alphanumeric
+    # char, not just "/" — a separators-only replace returned None for any dotted or
+    # underscored project path, so the fleet guardian never saw those sessions' activity.
+    import memory_scopes
+
+    slug = memory_scopes.project_slug(os.path.realpath(root))
     tdir = os.path.join(os.path.expanduser("~"), ".claude", "projects", slug)
     youngest: int | None = None
     try:

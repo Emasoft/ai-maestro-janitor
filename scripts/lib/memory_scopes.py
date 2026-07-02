@@ -27,6 +27,7 @@ Stdlib only — importable from any detector that has ``scripts/lib`` on sys.pat
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -140,16 +141,18 @@ def iter_note_files(memdir: str | os.PathLike[str]) -> list[Path]:
 
 
 def project_slug(project_dir: str) -> str:
-    """Harness per-project slug: the absolute path with every separator dashed.
+    """Harness per-project slug: the absolute path with every NON-ALPHANUMERIC char dashed.
 
-    Mirrors ``user_mem_lib._project_slug`` and the directory the harness creates
-    under ``~/.claude/projects/``. Do NOT resolve symlinks — the harness keys on
-    the literal launch path, so resolving could diverge from the real dir name.
+    THE definition every janitor module must route through (user_mem_lib and fleet_scan
+    delegate here). The harness dashes more than separators — verified on disk:
+    ``…/perfect-skill-suggester/2.2.2`` → ``…-perfect-skill-suggester-2-2-2`` and
+    ``…/4vmcr_496…`` → ``…-4vmcr-496…`` — so a separators-only translation resolved a
+    NONEXISTENT dir for any dotted/underscored project path, silently emptying the whole
+    LOCAL memory subsystem (recall, librarian, harvest, user-mem) and blinding
+    fleet_scan.transcript_age for such projects. Do NOT resolve symlinks — the harness
+    keys on the literal launch path, so resolving could diverge from the real dir name.
     """
-    p = project_dir.replace(os.sep, "-")
-    if os.altsep:
-        p = p.replace(os.altsep, "-")
-    return p
+    return re.sub(r"[^A-Za-z0-9]", "-", project_dir)
 
 
 def _project_dir() -> str:

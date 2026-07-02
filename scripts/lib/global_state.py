@@ -1012,7 +1012,12 @@ def _kill_wedged_daemon(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bo
     if hb <= 0 or (int(time.time()) - hb) <= max_silence_s:
         return False  # not provably wedged
     cmdline = _read_process_cmdline(pid)
-    if "daemon.py" not in cmdline:
+    # BOTH daemon argv shapes are janitor daemons: a session-spawned one runs daemon.py,
+    # the launchd/systemd L0 keepalive runs daemon_keepalive_entry.py --keepalive (which
+    # does NOT contain the substring "daemon.py"). Matching only the former misclassified
+    # a wedged OS-spawned daemon as PID reuse and left it holding the flock forever —
+    # launchd respawns on exit, not on hang, so the whole machine lost the daemon.
+    if "daemon.py" not in cmdline and "daemon_keepalive_entry.py" not in cmdline:
         state.log_line(
             "daemon",
             f"wedge-kill: pid={pid} heartbeat stale but cmdline {cmdline!r} is not a "

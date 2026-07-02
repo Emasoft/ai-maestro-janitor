@@ -83,67 +83,78 @@ import version_update_lib as vu  # noqa: E402
 # launchd already passes --keepalive as argv[1] and the entry sets argv before main(), so this
 # is correct for the OS-spawned daemon and False for a session-spawned one.
 _KEEPALIVE_INSTANCE = "--keepalive" in sys.argv
-_INTERVAL_KEEPALIVE_SELF_HEAL = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_KEEPALIVE_SELF_HEAL_INTERVAL", "600")
+
+
+def _env_interval(var: str, default: int) -> int:
+    """Cadence knob from userConfig via env. MUST NOT be a bare int(): these run at import
+    time with stderr on /dev/null, so one human-shaped value (e.g. "20 min") would kill every
+    spawned daemon instantly, trip the crash-loop breaker, and silently stop ALL machine-global
+    services (marketplace refresh, plugin updates, OAuth keepalive). coerce_int falls back to
+    the default like every other janitor entry point."""
+    return state.coerce_int(os.environ.get(var), default)
+
+
+_INTERVAL_KEEPALIVE_SELF_HEAL = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_KEEPALIVE_SELF_HEAL_INTERVAL", 600
 )  # 10 min — how often the OS-spawned daemon checks the cache for a newer version to
 #  re-stage + exit-for-respawn. Cheap (one dir list + one filecmp); only acts on a real change.
 
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
-_INTERVAL_MARKETPLACE_REFRESH = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", "1200")
+_INTERVAL_MARKETPLACE_REFRESH = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", 1200
 )  # 20 min — daemon is the only writer of GLOBAL marketplace refresh
 #  (refreshes every configured marketplace in one CLI call). The per-session
 #  detector handles narrower local+project marketplaces at 5 min, so the
 #  daemon doesn't need to be aggressive here.
-_INTERVAL_USER_PLUGINS_UPDATE = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", "3600")
+_INTERVAL_USER_PLUGINS_UPDATE = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", 3600
 )  # 1 h — full sweep takes ~7 min; hourly cadence keeps everything fresh.
-_INTERVAL_VERSION_UPDATE = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", "21600")
+_INTERVAL_VERSION_UPDATE = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_VERSION_UPDATE_INTERVAL", 21600
 )  # 6 h — janitor self-update cadence. GitHub releases land at human-day
 #  granularity; checking every 6 h is plenty and keeps the load light.
-_INTERVAL_OAUTH_SUPERVISOR = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_SUPERVISOR_INTERVAL", "600")
+_INTERVAL_OAUTH_SUPERVISOR = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_SUPERVISOR_INTERVAL", 600
 )  # 10 min — the opt-in OAuth-rotator governance/auto-heal task (TRDD-32acd15f
 #  P2). A total no-op unless /janitor-auto-manage-oauth-on wrote the opt-in flag,
 #  so this cadence is free for every non-opted-in install. When opted-in the
 #  steady-state check is cheap (read the opt-in flag, stat the slots); the
 #  SessionStart fast-path surfaces alert-only findings the moment a session starts.
-_INTERVAL_OAUTH_TICK = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_TICK_INTERVAL", "60")
+_INTERVAL_OAUTH_TICK = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_OAUTH_TICK_INTERVAL", 60
 )  # 60 s — the opt-in OAuth-rotator beat (TRDD-32acd15f), folded into the daemon
 #  per TRDD-f892e109 decision 3: this REPLACES the deleted launchd agent, which ran
 #  the same `tick --only-if-claude-running` every 60 s via plist `StartInterval 60`.
 #  A total no-op unless the opt-in flag is set AND the real Claude binary is running
 #  (the guard lives inside cmd_tick). The daemon loop ceiling is already 60 s, so
 #  this is the finest cadence the loop can offer.
-_INTERVAL_MEMORY_GUARD = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_MEMORY_GUARD_INTERVAL", "120")
+_INTERVAL_MEMORY_GUARD = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_MEMORY_GUARD_INTERVAL", 120
 )  # 2 min — the Tier-1 OOM guard beat (TRDD-7100178d Pillar 4, Decision 1).
 #  Steady state is one cheap free-memory read; the ps snapshot + kill logic only
 #  runs under real memory pressure, so the cadence costs nothing when healthy.
-_INTERVAL_CACHE_PRUNE = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_CACHE_PRUNE_INTERVAL", "21600")
+_INTERVAL_CACHE_PRUNE = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_CACHE_PRUNE_INTERVAL", 21600
 )  # 6 h — plugin-cache prune (TRDD-a6d2fdaf, Fix A). The cache only bloats over
 #  hours/days (a plugin shipping several versions/day), so a 6 h cadence reclaims
 #  promptly without churn. The daemon owns it because the cache is machine-global.
-_INTERVAL_SESSION_LIVENESS = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_SESSION_LIVENESS_INTERVAL", "120")
+_INTERVAL_SESSION_LIVENESS = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_SESSION_LIVENESS_INTERVAL", 120
 )  # 2 min — the fleet-guardian beat (TRDD-324223a6, A2). A cheap ps + transcript-age
 #  scan; an actual recovery only fires for a genuinely frozen / cron-dead /
 #  version-mismatched instance and is bounded by a 15 min per-instance cooldown, so
 #  the cadence costs ~nothing while the fleet is healthy. This is the immortality the
 #  in-session cron cannot provide — it recovers the very heartbeat that died.
-_INTERVAL_FLEET_STOP = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_STOP_INTERVAL", "60")
+_INTERVAL_FLEET_STOP = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_FLEET_STOP_INTERVAL", 60
 )  # 1 min — the daemon-driven fleet disarm/pause beat (TRDD-ME8V2YJF). A cheap ps +
 #  transcript-age scan that no-ops unless a machine-wide disarm/pause flag is set AND
 #  the opt-in (CLAUDE_PLUGIN_OPTION_FLEET_STOP_ENABLED=1) is on. A responsive cadence so
 #  a global /janitor-global-disarm reaches every already-armed session within ~1 min,
 #  with no human — the reach-every-session half of the self-disarm story (RQ9FIFX6).
-_INTERVAL_RULES_CLEANUP = int(
-    os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", "3600")
+_INTERVAL_RULES_CLEANUP = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL", 3600
 )  # 1 h — post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W). Steady state is one
 #  cheap check (scopes + data-dir stat); it only removes files when the janitor is
 #  CONFIRMED fully uninstalled. Hourly is ample: after uninstall the daemon lingers on

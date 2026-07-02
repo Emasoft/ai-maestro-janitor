@@ -75,7 +75,10 @@ _INFLIGHT_COLUMNS = frozenset(
 )
 
 # Canonical TRDD filename shape: TRDD-<YYYYMMDD_HHMMSS±HHMM>-<uid8>-<slug>.md.
-_UID_RE = re.compile(r"TRDD-\d{8}_\d{6}[+-]\d{4}-([0-9a-fA-F]{8})-")
+# [0-9A-Za-z]: TRDD v2 ids are UPPERCASE base36, legacy v1 ids lowercase hex — hex-only
+# here dropped every modern in-flight TRDD from the pre-compaction handoff, so the
+# post-compact turn re-grounded without the current task's STATE block.
+_UID_RE = re.compile(r"TRDD-\d{8}_\d{6}[+-]\d{4}-([0-9A-Za-z]{8})-")
 
 # Matches the STATE head heading "## ⏵ STATE …" / "## STATE …" (⏵ = U+23F5).
 _STATE_HEADING = re.compile(r"^##\s+(?:⏵\s*)?STATE\b")

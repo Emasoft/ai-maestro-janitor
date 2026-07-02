@@ -23,19 +23,33 @@ from pathlib import Path
 from typing import Optional
 
 
-def _acquire_lock(lockdir: Path, retries: int = 50, sleep_s: float = 0.1) -> bool:
+def _acquire_lock(lockdir: Path, retries: int = 50, sleep_s: float = 0.1, stale_s: float = 60.0) -> bool:
     """Acquire a lockdir mutex. Fail open after `retries` to avoid blocking dispatch.
 
     Returns True on success, False if lock contention exceeded the budget.
     The bash original also "fails open" — under contention, the caller
     treats the key as already-seen so worst case is one dropped nudge that
     the next fire re-emits.
+
+    STALE-LOCK BREAK: a holder SIGKILLed mid-emit (e.g. a detector killed by dispatch's
+    timeout) leaves the lockdir forever; without expiry every later emit_once on that
+    seen-file spins the full retry budget and then drops its finding as "already seen" —
+    permanently suppressing real drift alerts. A legitimate hold lasts milliseconds, so a
+    lockdir older than `stale_s` is provably orphaned: break it and retry. rmdir on an
+    empty dir is race-safe — concurrent breakers get FileNotFoundError (ignored) and
+    exactly one subsequent mkdir wins.
     """
     for _ in range(retries):
         try:
             lockdir.mkdir()
             return True
         except FileExistsError:
+            try:
+                if time.time() - lockdir.stat().st_mtime > stale_s:
+                    lockdir.rmdir()
+                    continue  # broke a stale lock — retry mkdir immediately
+            except (FileNotFoundError, OSError):
+                continue  # holder released (or a peer broke it) — retry immediately
             time.sleep(sleep_s)
     return False
 

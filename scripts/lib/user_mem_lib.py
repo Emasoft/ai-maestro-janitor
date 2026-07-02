@@ -41,18 +41,13 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
 
 
 def _project_slug(project_dir: str) -> str:
-    """Harness per-project slug: the absolute path with every separator dashed.
+    """Delegate to the SSOT ``memory_scopes.project_slug`` — the harness dashes every
+    NON-alphanumeric char (dots/underscores too, not just separators); a local
+    separators-only copy silently pointed user-mem at a dir the harness never reads
+    for any dotted/underscored project path."""
+    import memory_scopes
 
-    Mirrors the directory the harness already creates under
-    ~/.claude/projects/. A leading separator yields a leading dash, exactly as
-    the harness does (so the slug matches the real on-disk directory name).
-    """
-    # Normalise but do NOT resolve symlinks — the harness keys on the literal
-    # path it was launched with, and resolving could diverge from that.
-    p = project_dir.replace(os.sep, "-")
-    if os.altsep:
-        p = p.replace(os.altsep, "-")
-    return p
+    return memory_scopes.project_slug(project_dir)
 
 
 def resolve_user_mem_dir(project_dir: Optional[str] = None) -> Path:

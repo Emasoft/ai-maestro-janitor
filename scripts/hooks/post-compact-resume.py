@@ -59,7 +59,10 @@ _INFLIGHT_COLUMNS = frozenset(
 # Canonical TRDD filename shape: TRDD-<YYYYMMDD_HHMMSS±HHMM>-<uid8>-<slug>.md.
 # The timestamp uses `_` and a `+HHMM`/`-HHMM` offset (no internal `-` other
 # than the field separators), so the 3rd dash-delimited field is the uid8.
-_UID_RE = re.compile(r"TRDD-\d{8}_\d{6}[+-]\d{4}-([0-9a-fA-F]{8})-")
+# [0-9A-Za-z]: TRDD v2 ids are UPPERCASE base36, legacy v1 ids lowercase hex — hex-only
+# here silently skipped every modern TRDD, so the auto-resume fallback named a stale
+# hex-era task (or nothing) after a compaction. Anchored on the TRDD-<ts>- prefix.
+_UID_RE = re.compile(r"TRDD-\d{8}_\d{6}[+-]\d{4}-([0-9A-Za-z]{8})-")
 
 _MAX_DIRECTIVE_LEN = 280
 

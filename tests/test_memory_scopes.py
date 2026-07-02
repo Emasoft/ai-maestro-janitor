@@ -48,8 +48,12 @@ def test_project_slug_dashes_separators():
 
 
 def test_project_slug_is_literal_not_normalized():
-    """The slug is built from the literal string, never a resolved/normalized path."""
-    assert msc.project_slug("/a/b/../c") == "-a-b-..-c"
+    """The slug is built from the literal string, never a resolved/normalized path.
+
+    The `..` segment is NOT collapsed — but its dots ARE dashed: the harness replaces
+    every non-alphanumeric char (verified on disk, TRDD-E9LMBNPE), so the old
+    separators-only expectation `-a-b-..-c` pinned the bug this fix removed."""
+    assert msc.project_slug("/a/b/../c") == "-a-b----c"
 
 
 # ---- resolve_local_dir -----------------------------------------------------
