@@ -290,6 +290,12 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # install). 6h cadence — install config changes rarely; dedupe keeps it to one
     # nag until the config changes.
     ("janitor-install-scope", 21600, "CLAUDE_PLUGIN_OPTION_JANITOR_INSTALL_SCOPE_INTERVAL"),
+    # window-burn-rate reads each account's live 5h/7d utilization% READ-ONLY via the OAuth
+    # rotator and alarms when a window burns >= RATIO× its even-pace budget (heading for an
+    # early rate-limit), naming the top-consuming project when it trips. 15-min cadence;
+    # opt-out CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED; fail-open (silent on any rotator/
+    # network failure); the detector self-cadences on the same interval too (TRDD-OY0W6LX5).
+    ("window-burn-rate", 900, "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL"),
 ]
 
 

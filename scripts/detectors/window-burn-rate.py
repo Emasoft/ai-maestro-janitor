@@ -1,0 +1,154 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""window-burn-rate — alarm when a subscription window outpaces its linear budget
+(TRDD-OY0W6LX5).
+
+Each fixed-reset usage window (5h rolling / 7d) should reach 100% exactly at its reset if
+spent evenly. This per-session detector reads every known account's live utilization% +
+reset boundary READ-ONLY through the OAuth rotator (`rotator.usage_request`) and, for any
+window burning ≥ RATIO× that even pace, emits ONE drift line so the main Claude learns it
+is heading for an early rate-limit — the model records per-turn usage but cannot know its
+own subscription baseline; only the janitor can.
+
+When a burn trips, it ALSO attributes the spend across the fleet (`token_history` via the
+shared 30-min cache) and names the top-consuming project + where its spike came from, so
+the advisory points at WHO to throttle — the account util% is aggregate across ~10 parallel
+projects and can't say that on its own.
+
+READ-ONLY + FAIL-OPEN: it never writes, rotates, or mutates any credential, and every step
+is wrapped so a rotator/network failure is a SILENT skip — a detector crash must never break
+the heartbeat. OPT-OUT via CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED=false.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "lib"))
+sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
+
+import dedupe  # noqa: E402
+import rotator_usage  # noqa: E402  # shared READ-ONLY account-usage gather (drives rotator)
+import state  # noqa: E402
+import token_attribution_cache as tac  # noqa: E402
+import token_burn  # noqa: E402
+import token_history as th  # noqa: E402
+
+# The pure decision helper the tests exercise (structure the detector so the verdict is a
+# pure function of usage dicts + env — no network in the tested path).
+_evaluate = token_burn.evaluate
+
+
+def _coerce_float(raw: str | None, default: float) -> float:
+    """Best-effort positive float; junk/absent/non-positive → default (a typo must never
+    crash the heartbeat or silently disable the floor)."""
+    if not raw:
+        return default
+    try:
+        val = float(raw.strip())
+    except (ValueError, AttributeError):
+        return default
+    return val if val > 0 else default
+
+
+def _stamp_path() -> Path:
+    return state.state_dir() / "window-burn-rate.selfrun.ts"
+
+
+def _due(now: int, interval: int) -> bool:
+    """True iff at least `interval` seconds have elapsed since the last self-run — a second,
+    detector-owned cadence gate on top of the dispatcher's, so a standalone invocation is
+    still rate-limited."""
+    return (now - state.read_int_state(_stamp_path(), 0)) >= interval
+
+
+def _short_slug(slug: str) -> str:
+    """Compact a harness project slug (the absolute path with every separator dashed) to its
+    trailing tokens so a drift line stays readable."""
+    parts = [p for p in slug.split("-") if p]
+    return "-".join(parts[-2:]) if parts else slug
+
+
+def _top_consumer_clause() -> str:
+    """The ' Top consumer: …' suffix, computed ONLY when a burn tripped (never on quiet
+    runs), from the shared 30-min fleet-attribution cache. Empty string on any failure — the
+    burn line is still worth emitting without attribution."""
+    try:
+        now = int(time.time())
+        projects_root = Path.home() / ".claude" / "projects"
+        fleet = tac.get(projects_root, now)
+        slug = th.culprit(fleet)
+        if not slug:
+            return ""
+        m = fleet.get("projects", {}).get(slug, {})
+        share = float(m.get("share_5h", 0.0)) * 100.0
+        spike = m.get("spike_factor")
+        spike_txt = f"{float(spike):.1f}x own baseline" if isinstance(spike, (int, float)) else "no baseline"
+        src = m.get("source", {}) or {}
+        output_share = float(src.get("output_share", 0.0))
+        cache_share = float(src.get("cache_creation_share", 0.0)) + float(src.get("cache_read_tenth_share", 0.0))
+        source = "output" if output_share >= cache_share else "cache"
+        spawns = int(src.get("subagent_spawns", 0) or 0)
+        if spawns:
+            source = f"{source} + {spawns} subagent spawn(s)"
+        return f" Top consumer: {_short_slug(slug)} ({share:.0f}% of fleet 5h, spike {spike_txt}, source: {source})."
+    except Exception:
+        return ""
+
+
+def main() -> int:
+    state.init_state()
+
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED", True):
+        return 0  # opt-out — silent no-op before any network / rotator work
+
+    interval = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL"), 900)
+    now = int(time.time())
+    if not _due(now, interval):
+        return 0
+
+    ratio = _coerce_float(os.environ.get("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_RATIO"), 1.5)
+    min_util = _coerce_float(os.environ.get("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_MIN_UTIL"), 10.0)
+
+    # Gather + evaluate are wrapped together: even an unexpected rotator shape must not crash
+    # the heartbeat. A gather failure yields no accounts → no trips → silent.
+    try:
+        accounts = rotator_usage.accounts_usage()
+        trips = token_burn.evaluate_trips(accounts, now, ratio, min_util)
+    except Exception:
+        trips = []
+
+    # Stamp the self-run cadence whether or not anything tripped (a probe DID run) so the
+    # detector backs off to its interval instead of re-probing every heartbeat.
+    try:
+        state.atomic_write(_stamp_path(), str(now))
+    except OSError:
+        pass
+
+    if not trips:
+        state.rotate_log_if_big("window-burn-rate")
+        return 0
+
+    clause = _top_consumer_clause()  # one fleet scan (cached) shared by every tripped window
+    seen = state.state_dir() / "window-burn-rate-seen.txt"
+    day = now // 86400
+    for trip in trips:
+        key = f"burn-{day}-{trip['key']}"
+        line = dedupe.emit_once(seen, key, trip["line"] + clause)
+        if line is not None:
+            # emit_once stored line+clause; if the clause changed but the key already fired
+            # today it stays deduped — the burn condition (account+window+day) is the signal.
+            print(line)
+
+    state.rotate_log_if_big("window-burn-rate")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

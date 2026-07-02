@@ -9,6 +9,7 @@ alarm (the bug the max(floor, z-band, median*ratio) threshold fixes).
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
@@ -17,8 +18,7 @@ import token_baseline as tb  # noqa: E402
 
 
 def _rec(ts: int, output: int = 0, inp: int = 0, cache_read: int = 0, cache_creation: int = 0) -> dict:
-    return {"ts": ts, "output": output, "input": inp,
-            "cache_read": cache_read, "cache_creation": cache_creation}
+    return {"ts": ts, "output": output, "input": inp, "cache_read": cache_read, "cache_creation": cache_creation}
 
 
 def _buckets_records(values: list[int], bucket_s: int = 300) -> list[dict]:
@@ -120,7 +120,7 @@ def test_classify_now_excludes_in_progress_bucket():
     excl = tb.classify_recent(recs, now=12 * 300 + 10)
     incl = tb.classify_recent(recs)
     assert excl is not None and not excl.is_anomaly  # in-progress spike excluded
-    assert incl is not None and incl.is_anomaly       # newest bucket tested → flagged
+    assert incl is not None and incl.is_anomaly  # newest bucket tested → flagged
 
 
 # ── rolling_sum / per_minute / max_window_sum ───────────────────────────────────
@@ -136,8 +136,7 @@ def test_per_minute():
 
 def test_max_window_sum_finds_busiest():
     # a quiet stretch then a burst clustered within one 300s window
-    recs = [_rec(0, output=10), _rec(10_000, output=100), _rec(10_100, output=100),
-            _rec(10_200, output=100)]
+    recs = [_rec(0, output=10), _rec(10_000, output=100), _rec(10_100, output=100), _rec(10_200, output=100)]
     assert tb.max_window_sum(recs, 300) == 300  # the 3 burst records land in one 300s window
 
 
@@ -163,3 +162,105 @@ def test_project_exhaustion_minutes():
 def test_project_exhaustion_none_when_idle():
     assert tb.project_exhaustion_minutes(1000, 0.0) is None
     assert tb.project_exhaustion_minutes(0, 10.0) is None
+
+
+# ── window burn-rate (TRDD-OY0W6LX5) ────────────────────────────────────────────
+_W5 = 18_000  # 5h rolling window (seconds)
+_W7 = 604_800  # 7d window (seconds)
+
+
+def _utc(y: int, mo: int, d: int, h: int = 0, mi: int = 0, s: int = 0) -> int:
+    """UTC calendar → epoch seconds (int) — the OAuth usage payload's resets_at is ISO UTC."""
+    return int(datetime(y, mo, d, h, mi, s, tzinfo=timezone.utc).timestamp())
+
+
+def test_burn_7d_verbatim_user_example():
+    """User's 7d example: 48% util at ~2/7 elapsed → ~1.53x pace, exhausts ~Jul 4-5."""
+    resets = _utc(2026, 7, 7, 8)  # Jul 7 08:00Z → window start Jun 30 08:00Z
+    now = _utc(2026, 7, 2, 12, 41)  # ~2/7 into the 7d window
+    frac = tb.elapsed_fraction_from_reset(resets, _W7, now)
+    assert frac is not None and 0.30 < frac < 0.32
+    ratio = tb.burn_ratio(48.0, frac)
+    assert ratio is not None and 1.5 < ratio < 1.56
+    exh = tb.projected_exhaustion_epoch(resets, _W7, 48.0, now)
+    assert exh is not None
+    early_by = resets - exh
+    assert early_by > 2 * 86_400  # exhausts > 2 days before the reset
+
+
+def test_burn_ratio_46pct_two_sevenths():
+    """46% at exactly 2/7 elapsed → 0.46/(2/7) ≈ 1.61x."""
+    ratio = tb.burn_ratio(46.0, 2 / 7)
+    assert ratio is not None and abs(ratio - 1.61) < 0.01
+
+
+def test_elapsed_fraction_clamps_and_bounds():
+    resets = _utc(2026, 7, 7, 8)
+    start = resets - _W7
+    assert tb.elapsed_fraction_from_reset(resets, _W7, start) == 0.0  # exactly at start
+    assert tb.elapsed_fraction_from_reset(resets, _W7, resets) == 1.0  # exactly at reset
+    assert tb.elapsed_fraction_from_reset(resets, _W7, start - 999) == 0.0  # before start → clamp 0
+    assert tb.elapsed_fraction_from_reset(resets, _W7, resets + 10) == 1.0  # just past reset → clamp 1
+
+
+def test_elapsed_fraction_none_on_nonsense():
+    resets = _utc(2026, 7, 7, 8)
+    assert tb.elapsed_fraction_from_reset(resets, 0, resets) is None  # window_s <= 0
+    assert tb.elapsed_fraction_from_reset(0, _W7, 100) is None  # resets_at <= 0
+    assert tb.elapsed_fraction_from_reset(resets, _W7, resets + _W7) is None  # a full window past reset
+
+
+def test_burn_ratio_edge_cases():
+    assert tb.burn_ratio(0.0, 0.3) == 0.0  # zero util → zero burn (not None)
+    assert tb.burn_ratio(None, 0.3) is None  # missing util
+    assert tb.burn_ratio(48.0, None) is None  # missing elapsed
+    assert tb.burn_ratio(48.0, 0.0) is None  # div guard: elapsed 0
+    assert tb.burn_ratio(-1.0, 0.3) is None  # negative util
+
+
+def test_projected_exhaustion_none_cases():
+    resets = _utc(2026, 7, 7, 8)
+    now = _utc(2026, 7, 2, 12, 41)
+    assert tb.projected_exhaustion_epoch(resets, _W7, 0.0, now) is None  # util 0
+    assert tb.projected_exhaustion_epoch(resets, _W7, None, now) is None  # util None
+    assert tb.projected_exhaustion_epoch(resets, 0, 48.0, now) is None  # invalid elapsed
+
+
+def test_projected_exhaustion_after_reset_when_coasting():
+    """A window well under linear pace projects exhaustion AFTER its reset (won't rate-limit)."""
+    resets = _utc(2026, 7, 7, 8)
+    now = resets - _W7 // 2  # exactly halfway
+    exh = tb.projected_exhaustion_epoch(resets, _W7, 20.0, now)  # 20% at 50% elapsed = coasting
+    assert exh is not None and exh > resets
+
+
+def test_worst_window_picks_critical_5h():
+    """A 5h window at 100% (exhausted NOW) beats a 7d window ahead of pace — soonest wins."""
+    now = _utc(2026, 7, 2, 12, 41)
+    windows = [
+        {"label": "seven_day", "util_pct": 48.0, "resets_at_epoch": _utc(2026, 7, 7, 8), "window_s": _W7},
+        {"label": "five_hour", "util_pct": 100.0, "resets_at_epoch": now + 3600, "window_s": _W5},
+    ]
+    worst = tb.worst_window_burn(windows, now=now)
+    assert worst is not None and worst["label"] == "five_hour"
+    assert worst["early_by_s"] is not None and worst["early_by_s"] > 0
+    assert worst["exhaustion_epoch"] <= now  # already at / over the limit
+
+
+def test_worst_window_highest_ratio_when_none_early():
+    """When no window exhausts early, the HIGHEST burn ratio wins."""
+    now = _utc(2026, 7, 2, 12, 41)
+    windows = [
+        {"label": "a", "util_pct": 10.0, "resets_at_epoch": now + _W7 // 2, "window_s": _W7},
+        {"label": "b", "util_pct": 25.0, "resets_at_epoch": now + _W7 // 2, "window_s": _W7},
+    ]
+    worst = tb.worst_window_burn(windows, now=now)
+    assert worst is not None and worst["label"] == "b"
+    assert worst["early_by_s"] is not None and worst["early_by_s"] < 0  # both coast past reset
+
+
+def test_worst_window_none_when_uncomputable():
+    now = _utc(2026, 7, 2, 12, 41)
+    assert tb.worst_window_burn([], now=now) is None  # empty
+    bad = [{"label": "x", "util_pct": None, "resets_at_epoch": now + 3600, "window_s": _W5}]
+    assert tb.worst_window_burn(bad, now=now) is None  # no computable ratio

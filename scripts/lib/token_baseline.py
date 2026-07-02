@@ -24,12 +24,7 @@ from dataclasses import dataclass
 # RELATIVE anomaly detection AND, paired with the OAuth utilization%, for absolute cap
 # estimation (the calibration absorbs the proxy's constant factor).
 def weighted_tokens(rec: dict) -> int:
-    return (
-        int(rec.get("output", 0) or 0)
-        + int(rec.get("input", 0) or 0)
-        + int(rec.get("cache_creation", 0) or 0)
-        + int(rec.get("cache_read", 0) or 0) // 10
-    )
+    return int(rec.get("output", 0) or 0) + int(rec.get("input", 0) or 0) + int(rec.get("cache_creation", 0) or 0) + int(rec.get("cache_read", 0) or 0) // 10
 
 
 def bucketize(records: list[dict], bucket_s: int) -> dict[int, int]:
@@ -148,11 +143,7 @@ def classify_recent(
 def rolling_sum(records: list[dict], window_s: int, now: int) -> int:
     """Summed weighted tokens whose `ts` is within the last `window_s` up to `now`."""
     lo = now - window_s
-    return sum(
-        weighted_tokens(r)
-        for r in records
-        if isinstance(r.get("ts"), (int, float)) and lo <= int(r["ts"]) <= now
-    )
+    return sum(weighted_tokens(r) for r in records if isinstance(r.get("ts"), (int, float)) and lo <= int(r["ts"]) <= now)
 
 
 def max_window_sum(records: list[dict], window_s: int) -> int:
@@ -162,11 +153,7 @@ def max_window_sum(records: list[dict], window_s: int) -> int:
     at least this much). Stdlib O(n log n) sort + O(n) sweep; {} → 0."""
     if window_s <= 0:
         return 0
-    pts = sorted(
-        (int(r["ts"]), weighted_tokens(r))
-        for r in records
-        if isinstance(r.get("ts"), (int, float))
-    )
+    pts = sorted((int(r["ts"]), weighted_tokens(r)) for r in records if isinstance(r.get("ts"), (int, float)))
     best = 0
     cur = 0
     lo = 0
@@ -193,11 +180,111 @@ def estimate_window_cap(util_pct: float | None, window_weighted: int) -> int | N
     return int(window_weighted / (util_pct / 100.0))
 
 
-def project_exhaustion_minutes(
-    remaining_weighted: int, recent_rate_per_min: float
-) -> float | None:
+def project_exhaustion_minutes(remaining_weighted: int, recent_rate_per_min: float) -> float | None:
     """Minutes until the remaining budget is exhausted at `recent_rate_per_min`. None when
     the rate is ~0 (never exhausts) or the remaining budget is non-positive."""
     if recent_rate_per_min <= 0 or remaining_weighted <= 0:
         return None
     return remaining_weighted / recent_rate_per_min
+
+
+# ── Window burn-rate (TRDD-OY0W6LX5) ─────────────────────────────────────────
+# A subscription window (5h rolling / 7d) has a HARD reset boundary, and the OAuth
+# usage payload reports `resets_at` + a `utilization`% — enough to know whether the
+# account is burning FASTER than the even pace that would land it at 100% exactly at
+# the reset. These are pure ratio/projection primitives; the caller owns the alarm
+# thresholds (RATIO bar, min-util / min-elapsed floors so a barely-used window never
+# false-alarms). No I/O; the util%/reset come from the read-only rotator usage probe.
+def elapsed_fraction_from_reset(resets_at_epoch: int, window_s: int, now: int) -> float | None:
+    """Fraction [0.0, 1.0] of a FIXED-reset usage window that has elapsed at `now`.
+
+    The window STARTED at `resets_at − window_s` (the payload gives `resets_at`), so
+    elapsed fraction = `(now − start) / window_s`, clamped to [0, 1]. This is the
+    linear "budget" a perfectly-even pace would have burned by now — the denominator
+    the burn-rate compares against. Fail-safe None (never raises) on nonsense inputs:
+    a non-positive `window_s` or `resets_at_epoch`, or a `now` a full window PAST the
+    reset (`now >= resets_at + window_s` — the window should already have rolled over,
+    so the sample is stale/wrong)."""
+    if window_s <= 0 or resets_at_epoch <= 0:
+        return None
+    if now >= resets_at_epoch + window_s:
+        return None
+    start = resets_at_epoch - window_s
+    frac = (now - start) / window_s
+    if frac < 0.0:
+        return 0.0
+    if frac > 1.0:
+        return 1.0
+    return frac
+
+
+def burn_ratio(util_pct: float | None, elapsed_fraction: float | None) -> float | None:
+    """How fast a window is burning vs its even-pace budget: `(util%/100) / elapsed`.
+
+    1.0 = exactly on the linear pace to hit 100% right at the reset; >1.0 = AHEAD of
+    pace (will exhaust EARLY — the alarm case); <1.0 = coasting. None when either
+    input is None, `util_pct` is negative, or `elapsed_fraction` is <= 0 (the div
+    guard). A brand-new window has a tiny elapsed that inflates the ratio toward
+    infinity — that is the CALLER's min-elapsed / min-util floor concern, deliberately
+    NOT clamped here so this stays a pure ratio."""
+    if util_pct is None or elapsed_fraction is None:
+        return None
+    if util_pct < 0 or elapsed_fraction <= 0:
+        return None
+    return (util_pct / 100.0) / elapsed_fraction
+
+
+def projected_exhaustion_epoch(resets_at_epoch: int, window_s: int, util_pct: float | None, now: int) -> int | None:
+    """Epoch when this window reaches 100% util at its current AVERAGE pace.
+
+    At `elapsed_s` seconds into the window we have spent `util_pct`%; holding that
+    average, reaching 100% takes `elapsed_s × (100 / util_pct)` from the window
+    START, so exhaustion = `start + elapsed_s × (100 / util_pct)`. MAY land AFTER
+    `resets_at` — that means the window will NOT exhaust early (the caller compares
+    the two to decide the lead time). None when `util_pct` is not a usable positive
+    percent, or the elapsed fraction is invalid (inherits
+    `elapsed_fraction_from_reset`'s fail-safes)."""
+    if util_pct is None or util_pct <= 0:
+        return None
+    frac = elapsed_fraction_from_reset(resets_at_epoch, window_s, now)
+    if frac is None:
+        return None
+    start = resets_at_epoch - window_s
+    elapsed_s = frac * window_s
+    return int(start + elapsed_s * (100.0 / util_pct))
+
+
+def worst_window_burn(windows: list[dict], *, now: int) -> dict | None:
+    """The single most-alarming usage window across a fleet of windows.
+
+    Each input dict carries `{label, util_pct, resets_at_epoch, window_s}`. For every
+    COMPUTABLE window (one that yields a real `burn_ratio`) a COPY is augmented with
+    `burn_ratio`, `exhaustion_epoch`, and `early_by_s` (= `resets_at_epoch −
+    exhaustion`; POSITIVE means it exhausts BEFORE its reset — the bad case). The
+    winner is the window that exhausts EARLIEST in wall-clock time among those
+    exhausting early (the nearest rate-limit is what to warn about); if NONE exhaust
+    early, the one with the HIGHEST burn ratio. None when no window is computable at
+    all (empty input, or every window has an invalid util/elapsed)."""
+    augmented: list[dict] = []
+    for w in windows:
+        resets_at = w.get("resets_at_epoch")
+        window_s = w.get("window_s")
+        if not isinstance(resets_at, int) or not isinstance(window_s, int):
+            continue
+        util = w.get("util_pct")
+        ratio = burn_ratio(util, elapsed_fraction_from_reset(resets_at, window_s, now))
+        if ratio is None:
+            continue
+        exhaustion = projected_exhaustion_epoch(resets_at, window_s, util, now)
+        early_by = (resets_at - exhaustion) if exhaustion is not None else None
+        aug = dict(w)
+        aug["burn_ratio"] = ratio
+        aug["exhaustion_epoch"] = exhaustion
+        aug["early_by_s"] = early_by
+        augmented.append(aug)
+    if not augmented:
+        return None
+    early = [a for a in augmented if a["early_by_s"] is not None and a["early_by_s"] > 0]
+    if early:
+        return min(early, key=lambda a: a["exhaustion_epoch"])
+    return max(augmented, key=lambda a: a["burn_ratio"])

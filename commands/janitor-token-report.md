@@ -75,4 +75,26 @@ auto-compact point it warns you to finish the current step and run
 forced compaction. The 34k summary overhead is overridable via
 `CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS`.
 
+`--live` also appends a per-account **window burn** line when the OAuth rotator is
+configured — each account's live 5h/7d utilization% with its burn ratio (pace vs
+the even budget) and projected exhaustion, read-only.
+
+## `--attribution` — which project is eating the token budget
+
+Pass `--attribution` for the fleet dashboard: every project on this machine
+ranked by its cross-project 5h/7d token consumption, its share of the fleet, its
+spike-vs-own-baseline, and the **top consumer** to advise:
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/token_report.py" --attribution
+```
+
+The account `/api/oauth/usage` utilization% is aggregate across all your parallel
+projects; this scans each project's transcripts to name WHICH one is
+over-consuming. It is the companion to the `window-burn-rate` heartbeat alarm,
+which emits a drift line when a 5h/7d window burns **≥ 1.5×** its even-pace budget
+(heading for an early rate-limit) and names that culprit. See
+`/janitor-token-attribution` for the full dashboard + the burn-alarm env knobs
+(`CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED` / `…_RATIO` / `…_MIN_UTIL`).
+
 Read-only — it never writes or changes anything; the hook does the logging.

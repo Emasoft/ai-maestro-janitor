@@ -29,7 +29,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 # A heartbeat whose output exceeds this is a "spike" worth the user's eye; also
 # flagged relative to the run's own p95. Env-overridable.
 import memory_scopes  # noqa: E402
+import token_attribution_cache as tac  # noqa: E402
 import token_baseline as tb  # noqa: E402
+import token_burn  # noqa: E402
+import token_history as th  # noqa: E402
 import token_meter  # noqa: E402
 
 _SPIKE_OUTPUT = int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_SPIKE_OUTPUT", "4000"))
@@ -193,6 +196,11 @@ def _render_live(as_json: bool) -> int:
         print(f"  Last turn — output: {usage.output_tokens} (full price)  ·  cache_creation: {usage.cache_creation_input_tokens} (one-time write, ~1.25x, billed once per prefix change)  ·  cache_read: {usage.cache_read_input_tokens} (cheap re-read, ~0.1x)")
     else:
         print("  Last turn: unavailable (turn boundary not found in the transcript tail)")
+    burn = _account_burn_lines()
+    if burn:
+        print("  window burn (live utilization%, read-only via the account rotator):")
+        for ln in burn:
+            print(ln)
     return 0
 
 
@@ -221,6 +229,96 @@ def _render_window(window: dict) -> None:
         print(f"    window-exhaustion events logged: {window['exhaustion_events']}  ·  empirical cap ≥ {_fmt_k(window['exhaustion_max_5h'])} (5h) / {_fmt_k(window['exhaustion_max_7d'])} (7d) — the max window sum seen at a turn-ending rate-limit")
 
 
+def _projects_root() -> Path:
+    home = os.environ.get("HOME", "").strip() or os.path.expanduser("~")
+    return Path(home) / ".claude" / "projects"
+
+
+def _short_slug(slug: str) -> str:
+    """Compact a harness project slug (abs path with separators dashed) to its trailing
+    two tokens so the attribution table stays readable."""
+    parts = [p for p in slug.split("-") if p]
+    return "-".join(parts[-2:]) if parts else slug
+
+
+def _account_burn_line(acct: dict, now: int) -> str | None:
+    """One account's `<prefix>  5h NN% (ratio X.Xx)  ·  7d NN% (ratio X.Xx, exhausts …)`
+    line for `--live`, or None when it has no computable window. Pure over the gathered
+    payload."""
+    usage = acct.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    parts: list[str] = []
+    for w in token_burn.windows_from_usage(usage, now):
+        r = w["burn_ratio"]
+        rt = f"{r:.1f}x" if r is not None else "n/a"
+        seg = f"{w['label']} {w['util_pct']:.0f}% (ratio {rt}"
+        ex = w["exhaustion_epoch"]
+        if isinstance(ex, int) and ex < w["resets_at_epoch"]:
+            seg += f", exhausts {_fmt_ts(ex)}"
+        parts.append(seg + ")")
+    if not parts:
+        return None
+    return f"  {acct.get('label', 'live')}  " + "  ·  ".join(parts)
+
+
+def _account_burn_lines() -> list[str]:
+    """READ-ONLY per-account 5h/7d burn summary for `--live`. Returns [] when no rotator is
+    configured or on ANY failure — the `--live` view degrades silently. Uses the shared
+    rotator_usage gather + token_burn math so this and the detector never disagree."""
+    try:
+        import rotator_usage  # noqa: PLC0415  # lazy — only --live needs the rotator drive
+
+        accounts = rotator_usage.accounts_usage()
+    except Exception:
+        return []
+    now = int(time.time())
+    lines = [ln for acct in accounts if (ln := _account_burn_line(acct, now)) is not None]
+    return lines
+
+
+def _render_attribution(as_json: bool) -> int:
+    """`--attribution` — rank every project by its cross-project token consumption and name
+    the culprit (the one to advise). Reads the shared 30-min fleet cache (scans fresh only
+    when stale). Read-only."""
+    now = int(time.time())
+    try:
+        fleet = tac.get(_projects_root(), now)
+    except Exception:
+        fleet = {"now": now, "projects": {}, "totals": {"roll_5h": 0.0, "roll_7d": 0.0}, "ranking": []}
+    culprit_slug = th.culprit(fleet)
+
+    if as_json:
+        print(json.dumps({"attribution": True, "now": now, "fleet": fleet, "culprit": culprit_slug}, separators=(",", ":")))
+        return 0
+
+    projects = fleet.get("projects", {})
+    ranking = fleet.get("ranking", [])
+    totals = fleet.get("totals", {})
+    print(f"[janitor-token-attribution] {len(projects)} project(s)  ·  fleet 5h {_fmt_k(totals.get('roll_5h', 0))}  ·  7d {_fmt_k(totals.get('roll_7d', 0))} weighted")
+    if not ranking:
+        print("  no per-project transcript activity in the last 7d.")
+        return 0
+    print()
+    print(f"  {'project':<26} {'5h':>7} {'7d':>7} {'share5h':>8} {'spike':>7} {'subagents':>9}")
+    print(f"  {'-' * 26} {'-' * 7} {'-' * 7} {'-' * 8} {'-' * 7} {'-' * 9}")
+    for slug in ranking:
+        m = projects.get(slug, {})
+        spike = m.get("spike_factor")
+        spike_txt = f"{spike:.1f}x" if isinstance(spike, (int, float)) else "—"
+        spawns = int((m.get("source", {}) or {}).get("subagent_spawns", 0) or 0)
+        print(f"  {_short_slug(slug):<26} {_fmt_k(m.get('roll_5h', 0)):>7} {_fmt_k(m.get('roll_7d', 0)):>7} {m.get('share_5h', 0.0) * 100:>7.0f}% {spike_txt:>7} {spawns:>9}")
+    print()
+    if culprit_slug:
+        m = projects.get(culprit_slug, {})
+        spike = m.get("spike_factor")
+        spike_txt = f"{spike:.1f}x own baseline" if isinstance(spike, (int, float)) else "no trailing baseline"
+        print(f"  ⚠ top consumer: {_short_slug(culprit_slug)} — {m.get('share_5h', 0.0) * 100:.0f}% of fleet 5h, {spike_txt}. Advise it to compact / throttle / stop idle subagents.")
+    else:
+        print("  ✓ no single project stands out above the fleet floors.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Per-heartbeat token report")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
@@ -228,8 +326,11 @@ def main() -> int:
     ap.add_argument("--util5h", type=float, default=None, help="live 5h-window utilization%% (from /api/oauth/usage) → estimate the absolute cap + pace")
     ap.add_argument("--util7d", type=float, default=None, help="live 7d-window utilization%% → estimate the absolute cap + pace")
     ap.add_argument("--live", action="store_true", help="show the CURRENT session's exact context %% + last-turn token breakdown (no heartbeat log needed) instead of the historical report")
+    ap.add_argument("--attribution", action="store_true", help="rank every project by cross-project token consumption and name the top consumer (fleet burn attribution; read-only)")
     args = ap.parse_args()
 
+    if args.attribution:
+        return _render_attribution(args.json)
     if args.live:
         return _render_live(args.json)
 

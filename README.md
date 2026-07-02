@@ -978,6 +978,20 @@ any plugin-side change — staying on a recent CC build is recommended:
   **estimated absolute cap** (`spent ÷ util%`) + minutes-to-exhaustion at the
   recent rate — the answer to "what is the max Opus tokens allowed in a 5h/7d
   window, and am I about to blow through it early".
+- **Burn-rate alarm + fleet attribution** (`window-burn-rate` detector +
+  `/janitor-token-attribution`): a window should reach 100% exactly at its reset
+  if spent evenly, so `burn_ratio = util% ÷ (100 × elapsed-fraction)`. The
+  heartbeat reads each account's live 5h/7d utilization% + reset boundary
+  **READ-ONLY** through the OAuth rotator and, when a window burns **≥ 1.5×** its
+  even pace (default; heading for an early rate-limit), emits one drift line —
+  per account, min-util floored so a fresh window never nags. Because the account
+  util% is aggregate across ~10 parallel projects, a trip also names the
+  **top-consuming project** (its 5h share, its spike vs its own baseline, and
+  where the spike came from) so the advice points at *who* to throttle.
+  `/janitor-token-attribution` prints that fleet ranking on demand; `--live`
+  gains a per-account burn line. Read-only, fail-open (a rotator/network hiccup
+  is silent), opt-out `CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED=false` (also
+  `…_RATIO`, `…_MIN_UTIL`).
 
 ## License
 
