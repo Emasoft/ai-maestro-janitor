@@ -1,9 +1,9 @@
 ---
 trdd-id: OY0W6LX5
 title: Fleet token attribution + window burn-rate alarm — which project over-consumes, and where the spike came from
-column: dev
+column: complete
 created: 2026-07-02T14:30:25+0200
-updated: 2026-07-02T14:41:58+0200
+updated: 2026-07-02T15:36:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -18,7 +18,7 @@ target-branch: main
 test-requirements: [unit]
 impacts: []
 attempts: 0
-implementation-commits: []
+implementation-commits: [a4d2ff7, 391f1aa]
 approval-tier: 3
 ---
 

@@ -1,9 +1,9 @@
 ---
 trdd-id: 56374Z36
 title: Rotator test-isolation leak — tests write the PRODUCTION rotator.log + bootstrap browser-launch guard
-column: planned
+column: complete
 created: 2026-07-02T15:02:17+0200
-updated: 2026-07-02T15:02:17+0200
+updated: 2026-07-02T15:36:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -18,7 +18,7 @@ target-branch: main
 test-requirements: [unit]
 impacts: []
 attempts: 0
-implementation-commits: []
+implementation-commits: [028409f]
 approval-tier: 0
 ---
 

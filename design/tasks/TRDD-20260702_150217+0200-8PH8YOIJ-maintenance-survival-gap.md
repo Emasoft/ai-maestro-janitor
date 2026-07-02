@@ -1,9 +1,9 @@
 ---
 trdd-id: 8PH8YOIJ
 title: Maintenance survival gap — rotation + daemon respawn must survive maintenance mode
-column: planned
+column: complete
 created: 2026-07-02T15:02:17+0200
-updated: 2026-07-02T15:02:17+0200
+updated: 2026-07-02T15:36:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -18,7 +18,7 @@ target-branch: main
 test-requirements: [unit]
 impacts: []
 attempts: 0
-implementation-commits: []
+implementation-commits: [bffd533]
 approval-tier: 0
 ---
 
