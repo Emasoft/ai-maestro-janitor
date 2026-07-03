@@ -1,9 +1,9 @@
 ---
 trdd-id: ZNN0UK5K
 title: fseventsd runaway (39GB/97%) — L0 keepalive restage churn + test-state pollution
-column: dev
+column: complete
 created: 2026-07-03T06:04:36+0200
-updated: 2026-07-03T06:44:06+0200
+updated: 2026-07-03T06:46:53+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 0
@@ -12,6 +12,7 @@ effort: L
 labels: [keepalive, fsevents, oom, test-isolation, immortality]
 task-type: bugfix
 parent-trdd: null
+eht: [TRDD-HK7IZ21Z]
 relevant-rules: []
 release-via: publish
 delivery: direct-push
@@ -142,13 +143,20 @@ implementation-commits: [33ef7eb]
     not the janitor; always scope janitor test runs to `tests/`.
   - Wikimem: new PROJECT page `janitor-keepalive-test-isolation-fsevents.md`
     (symptom-indexed) + reciprocal link from `janitor-architecture.md`.
-- **NEXT ACTION:** FIX C — launchd/systemd restart THROTTLE (`ThrottleInterval` ≥30 s
-  / `RestartSec`+`StartLimitIntervalSec`) so a crash-on-start daemon can't hammer
-  respawn→restage (the amplifier). Then FIX D — failure-class detector (warn on
-  fseventsd/mds/any proc >4 GB + disk >95 %; catches the "or some other process"
-  case) as a child TRDD. Then ship via `publish.py` (rides the next release with the
-  earlier v0.30.0 / TRDD-2KQQAEPP work). FIX E (log cleanup) unneeded — rotation +
-  backoff self-heal the existing corrupt stage in one bounded restage.
+- **✓ FIX C already present** (verified in `scripts/keepalive_install.sh`): launchd
+  `ThrottleInterval=30` (line 187) + `RunAtLoad`/`KeepAlive`; systemd
+  `Restart=always`/`RestartSec=30` (line 229). The respawn path is bounded to ≥30 s.
+  Combined with FIX B (restage copy capped once/cooldown REGARDLESS of respawn rate)
+  and FIX A (no test pollution ⇒ no corrupt-stage trigger), the runaway is solved by
+  THREE independent layers. No FIX C work needed.
+- **FIX D deferred → child TRDD-HK7IZ21Z** (backburner): a failure-class detector
+  warning on fseventsd/mds/any process >4 GB + disk >95 % — the USER's "or some other
+  process is leaking" safety net; additive, NOT required to fix this bug.
+- **✓ PERMANENT SOLUTION COMPLETE (A + B; pre-existing C).** Committed to `main`
+  (fix 33ef7eb, memory+trdd d284970), rechecked 4×, wikimem'd. FIX E (log cleanup)
+  unneeded — rotation + backoff self-heal the existing corrupt stage in ONE bounded
+  restage on next boot. Ships via `publish.py` on the next USER-authorized release
+  (rides with the pending v0.30.0 / TRDD-2KQQAEPP).
 
 ## Durable artifacts to read before acting
 - scratchpad/forensics-1.txt, scratchpad/forensics-2.txt — the raw snapshots.
