@@ -2,7 +2,7 @@
 name: janitor-architecture
 description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub"
 ocd: 2026-06-13
-lmd: 2026-07-02
+lmd: 2026-07-03
 metadata:
   node_type: memory
   type: project
@@ -276,6 +276,10 @@ must report a crash.[^3]
 - LOCAL-scope notes `reference_maintenance_mode_cache_warm_vs_disarm` and
   `feedback_arming_one_session_wakes_the_whole_fleet` — the maintenance-mode
   cost model and the fleet-wake incident that motivated it.
+- [[janitor-keepalive-test-isolation-fsevents]] — the L0 keepalive's call-time
+  state resolution, the test-isolation levers (`JANITOR_GLOBAL_STATE_DIR` /
+  `JANITOR_DATA_DIR`, not `CLAUDE_PLUGIN_DATA`), and the bounded restage — the
+  fseventsd-runaway class (TRDD-ZNN0UK5K).
 
 ## Notes and lessons learned
 

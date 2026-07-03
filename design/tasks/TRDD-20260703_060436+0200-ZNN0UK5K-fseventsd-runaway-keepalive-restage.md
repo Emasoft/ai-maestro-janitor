@@ -3,7 +3,7 @@ trdd-id: ZNN0UK5K
 title: fseventsd runaway (39GB/97%) — L0 keepalive restage churn + test-state pollution
 column: dev
 created: 2026-07-03T06:04:36+0200
-updated: 2026-07-03T06:04:36+0200
+updated: 2026-07-03T06:44:06+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 0
@@ -19,7 +19,7 @@ target-branch: main
 must-pass-tests-before-merge: true
 test-requirements: [unit, lint]
 review-requirements: []
-implementation-commits: []
+implementation-commits: [33ef7eb]
 ---
 
 # TRDD-ZNN0UK5K — fseventsd runaway: L0 keepalive restage churn + test-state pollution
@@ -123,13 +123,32 @@ implementation-commits: []
     `HOME` + `CLAUDE_PLUGIN_DATA` (per CLAUDE.md test conventions).
   - Ship via `publish.py` (CPV `--strict` gate — no NIT/MINOR/MAJOR/CRITICAL).
 
-- **NEXT ACTION:** implement FIX A + FIX B in `keepalive_boot.py` + isolate the 5
-  keepalive test files (delegate one agent per file cluster, serial, opus, TDD);
-  run the keepalive tests; then FIX C (throttle audit), FIX E (cleanup), FIX D
-  (detector). Verify ruff/pyright + `pytest tests/test_keepalive*.py
-  tests/test_daemon_keepalive_entry.py tests/test_daemon_maintenance_keepalive.py`.
-  Commit WHY-rich per fix. This does NOT block on the earlier v0.30.0 publish /
-  TRDD-2KQQAEPP — but ships in the same next release.
+- **✓ DONE — FIX A + FIX B (commit 33ef7eb), rechecked 4× per USER order:**
+  `keepalive_boot._state_dir()` + `launchd_keepalive.data_dir()`/`data_scripts_dir()`
+  resolve the global-state/DATA dir at CALL time (honor `JANITOR_GLOBAL_STATE_DIR`
+  / `JANITOR_DATA_DIR`, NOT `${CLAUDE_PLUGIN_DATA}` = running-plugin); restage
+  backoff (identical still-mismatched signature within a 300 s cooldown skips the
+  copy; env `…KEEPALIVE_RESTAGE_COOLDOWN_S`, 0 disables; converges); 256 KB boot-log
+  rotation; autouse isolation fixture (HOME + the two dir envs + CLAUDE_PLUGIN_DATA)
+  across all 5 keepalive test files + 5 new regressions.
+  - RECHECK (4 passes, all green): (1) keepalive 54 + regression 215 + ruff clean +
+    pyright 0/0/0; (2) `keepalive_boot.py` logic trace — fail-open/loud intact,
+    backoff converges; (3) diffs — prod behavior identical (env unset), tests REAL
+    (spy only on the `restage` I/O boundary); (4) real `~/.claude/janitor-global-state`
+    UNTOUCHED by the test run (`find -newermt` empty; boot log mtime unchanged) +
+    **TRUE janitor suite `pytest tests/` = 12028 passed**. NOTE: bare
+    `python -m pytest` from root INTERNAL-ERRORs collecting a FOREIGN project under
+    `downloads_dev/CLAUDE-BROWSER-PROJECTS/…` (missing deps) — orthogonal, gitignored,
+    not the janitor; always scope janitor test runs to `tests/`.
+  - Wikimem: new PROJECT page `janitor-keepalive-test-isolation-fsevents.md`
+    (symptom-indexed) + reciprocal link from `janitor-architecture.md`.
+- **NEXT ACTION:** FIX C — launchd/systemd restart THROTTLE (`ThrottleInterval` ≥30 s
+  / `RestartSec`+`StartLimitIntervalSec`) so a crash-on-start daemon can't hammer
+  respawn→restage (the amplifier). Then FIX D — failure-class detector (warn on
+  fseventsd/mds/any proc >4 GB + disk >95 %; catches the "or some other process"
+  case) as a child TRDD. Then ship via `publish.py` (rides the next release with the
+  earlier v0.30.0 / TRDD-2KQQAEPP work). FIX E (log cleanup) unneeded — rotation +
+  backoff self-heal the existing corrupt stage in one bounded restage.
 
 ## Durable artifacts to read before acting
 - scratchpad/forensics-1.txt, scratchpad/forensics-2.txt — the raw snapshots.
