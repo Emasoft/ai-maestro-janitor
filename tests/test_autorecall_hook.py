@@ -264,8 +264,10 @@ def test_on_privacy_user_mem_note_never_surfaced(tmp_path):
     # If anything was injected, it must be the agent note — never the private one.
     if out.strip():
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-        assert "SECRETMEMO" not in ctx
-        assert "user-mem" not in ctx
+        assert "SECRETMEMO" not in ctx  # the private note's unique content never leaks
+        assert "private.md" not in ctx  # nor its file (NOT a "user-mem" substring check —
+        # pytest derives tmp_path from the test name, so "user-mem" is in the fixture path
+        # itself and would collide with the surfaced public note's legitimate path)
         assert "agentnote.md" in ctx
 
 
