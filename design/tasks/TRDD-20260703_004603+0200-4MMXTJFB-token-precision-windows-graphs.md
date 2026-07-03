@@ -93,4 +93,4 @@ implementation-commits: [b795aaf, f2b729a, bb8a4b2, 0aaedf4]
   `message.usage.{input,output,cache_creation_input,cache_read_input}_tokens`;
   weighted = output + input + cache_creation + cache_read/10; window-aligned
   bounds ship since v0.29.1 (TRDD-0NRVNDSZ); fleet cache checks `scan` version
-  + bounds match (token_attribution_cache).
+  and bounds match (token_attribution_cache).
