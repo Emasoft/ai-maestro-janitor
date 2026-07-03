@@ -64,6 +64,16 @@ def _status(text_head: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _column(text_head: str) -> str | None:
+    m = re.search(r"^column:\s*(\S+)\s*$", text_head, re.MULTILINE)
+    return m.group(1) if m else None
+
+
+# TRDD v2 columns that mean "actively being worked" — the WORK group of the kanban
+# (~/.claude/rules/trdd-design-tasks.md). v1's `status: in-progress` maps onto these.
+_ACTIVE_COLUMNS = frozenset({"dev", "testing", "ai_review", "human_review"})
+
+
 def _title(text_head: str, fallback: str) -> str:
     m = re.search(r"^title:\s*(.+)$", text_head, re.MULTILINE)
     return m.group(1).strip() if m else fallback
@@ -89,7 +99,10 @@ def _in_progress(tasks_dir: Path) -> list[Path]:
             head = p.read_text(encoding="utf-8", errors="replace")[:_FRONT]
         except OSError:
             continue
-        if _status(head) == "in-progress":
+        # v2 first (`column:` WORK group), v1 fallback (`status: in-progress`) — the
+        # v1-only gate matched ZERO modern TRDDs, leaving the post-compaction turn
+        # without the STATE block this hook exists to inject (review wf_6aee2965).
+        if _column(head) in _ACTIVE_COLUMNS or _status(head) == "in-progress":
             out.append(p)
     return out
 

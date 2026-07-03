@@ -43,7 +43,8 @@ from repomap.markers import read_fence_header  # noqa: E402
 # Reuse the generator's digest so detector and generator can never disagree
 # about freshness semantics (scripts/ is not a package → runtime sys.path).
 sys.path.insert(0, str(_LIB.parent))
-from repomap_generate import repo_digest  # type: ignore[import-not-found]  # noqa: E402
+from repomap.renderer import structure_hash  # noqa: E402
+from repomap_generate import extract_all, load_excludes, repo_digest  # type: ignore[import-not-found]  # noqa: E402
 
 
 def main() -> int:
@@ -66,7 +67,27 @@ def main() -> int:
     current = repo_digest(root)
     recorded = header.get("digest", "")
     if current == recorded:
-        return 0  # fresh — silent
+        return 0  # fresh — silent (no commit/edit since the last generation)
+
+    # The digest moves on EVERY commit/edit and can never catch up (the generator
+    # skips the write when the structure hash matches), so a digest mismatch alone
+    # would re-fire a false STALE nudge forever on structure-preserving changes
+    # (review wf_6aee2965). Confirm with the AUTHORITATIVE structure probe — the
+    # same extract+hash the generator uses — and cache the verdict per digest so
+    # the extraction runs once per commit, not once per heartbeat.
+    fresh_stamp = Path(state.state_dir()) / "project-map-fresh-at.digest"
+    try:
+        if fresh_stamp.read_text(encoding="utf-8").strip() == current:
+            return 0  # this exact digest already verified structure-fresh
+    except OSError:
+        pass
+    try:
+        maps = extract_all(root, load_excludes(root))
+    except Exception:
+        maps = []
+    if maps and header.get("sha") == structure_hash(maps):
+        state.atomic_write(fresh_stamp, current)
+        return 0  # structure unchanged — the map is NOT stale; stay silent
 
     seen = Path(state.state_dir()) / "project-map-drift.seen"
     line = dedupe.emit_once(

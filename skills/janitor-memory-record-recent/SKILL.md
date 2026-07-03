@@ -64,8 +64,14 @@ done
 SINCE_ISO=$( [ "$LAST_MEM_TS" -gt 0 ] && date -r "$LAST_MEM_TS" +%Y-%m-%dT%H:%M:%S || echo "24 hours ago" )
 git log --since="$SINCE_ISO" --pretty='%h %s' --no-merges      # recent landed work
 git diff --stat                                                # uncommitted changes
-git diff                                                       # the actual edits (read selectively)
 ```
+
+Do NOT run a bare `git diff` — an unbounded working-tree diff floods and
+permanently inflates the session context. From the `--stat` list, inspect only
+the files that look substantive, one at a time and token-lean: `git diff --
+<file>` piped through `distill` when available (e.g. `git diff -- <file> |
+distill "What changed? One line per change."`), or `ctx_git_read` /
+`ctx_read(path, mode=diff)` when lean-ctx is active.
 
 Also recall this session's OWN edited files (the files you touched in this
 conversation) — they are the highest-signal candidates even if not yet committed.

@@ -117,6 +117,8 @@ def classify_recent(
     Returns None when there is too little history to judge (need the tested bucket + >= 8
     prior buckets).
     """
+    if bucket_s <= 0:
+        return None  # a 0/negative knob must disable, not ZeroDivisionError every heartbeat
     buckets = bucketize(records, bucket_s)
     all_b = sorted(buckets)
     if now is not None:

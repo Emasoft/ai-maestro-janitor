@@ -36,7 +36,10 @@ Detail for every numbered step (signal table, full bash blocks, generation invar
 
    ```bash
    uv tool install --quiet zizmor 2>/dev/null
-   zizmor .github/workflows 2>&1 | tee "$REPORT_DIR/<TS>-final-scan.txt"
+   # Capture the FULL report to the file only — never stream the multi-line scan
+   # into the conversation (context flood); surface just the verdict tail.
+   zizmor .github/workflows > "$REPORT_DIR/<TS>-final-scan.txt" 2>&1
+   tail -3 "$REPORT_DIR/<TS>-final-scan.txt"   # the findings-count summary line(s)
    ```
 
    Any finding → run `/janitor-github-workflow-doctor`. Doctor can't fix → abort BEFORE commit.

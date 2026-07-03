@@ -171,7 +171,9 @@ def main() -> int:
     # decision report produces a fresh key (fresh reminder); an unchanged set
     # reminds at most once per interval. Sort so directory order is irrelevant.
     sig = hashlib.sha1(",".join(sorted(unconverted)).encode("utf-8")).hexdigest()[:8]
-    tick_key = f"tick-{now // interval}-{sig}"
+    # max(1, …): interval=0 is a legal knob value (coerce_int only clamps negatives) and
+    # must mean "every fire", never ZeroDivisionError — same guard as memorize-nudge.
+    tick_key = f"tick-{now // max(1, interval)}-{sig}"
 
     seen = state.state_dir() / f"report-to-trdd-session-{_session_key()}.txt"
     msg = (

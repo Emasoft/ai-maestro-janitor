@@ -127,7 +127,10 @@ def _inflight_trdd_directive(project_root: Path) -> str:
         m = _UID_RE.search(path.name)
         if not m:
             continue
-        uid8 = m.group(1).lower()
+        # Keep the id's original case: v2 ids are UPPERCASE base36 — lowercasing
+        # corrupted the id shown in the resume directive (and breaks any
+        # case-sensitive lookup); ids are matched case-insensitively anyway.
+        uid8 = m.group(1)
         column = updated = title = ""
         try:
             with path.open("r", encoding="utf-8") as fh:
