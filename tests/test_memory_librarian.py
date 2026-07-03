@@ -37,11 +37,11 @@ _HAVE_MEMGREP = bool(_MEMGREP) and Path(_MEMGREP).exists()
 
 
 def _slug(project_dir: str) -> str:
-    """Mirror user_mem_lib._project_slug: absolute path, separators dashed."""
-    p = project_dir.replace(os.sep, "-")
-    if os.altsep:
-        p = p.replace(os.altsep, "-")
-    return p
+    """Mirror memory_scopes.project_slug (the SSOT): dash EVERY non-alphanumeric
+    char, not just separators. macOS TemporaryDirectory paths contain `_`
+    (/var/folders/…), so a separators-only slug diverges from the detector's and
+    it reads an empty dir (regression caught by publish, TRDD-4MMXTJFB wave 1)."""
+    return re.sub(r"[^A-Za-z0-9]", "-", project_dir)
 
 
 def _note(name: str, description: str, tags: list[str], body: str = "body.") -> str:

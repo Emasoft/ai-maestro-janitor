@@ -29,6 +29,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -51,11 +52,10 @@ _MARKERS = {
 
 
 def _slug(project_dir: str) -> str:
-    """Mirror the detector's _project_slug: absolute path, separators dashed."""
-    p = project_dir.replace(os.sep, "-")
-    if os.altsep:
-        p = p.replace(os.altsep, "-")
-    return p
+    """Mirror memory_scopes.project_slug (the SSOT): dash EVERY non-alphanumeric
+    char, not just separators — else a macOS temp path with `_` diverges from the
+    detector's slug and it reads an empty dir (TRDD-4MMXTJFB wave 1)."""
+    return re.sub(r"[^A-Za-z0-9]", "-", project_dir)
 
 
 def _local_scope_dir(home: Path, project: Path) -> Path:
