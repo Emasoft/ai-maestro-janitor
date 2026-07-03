@@ -3,7 +3,7 @@ trdd-id: ZNN0UK5K
 title: fseventsd runaway (39GB/97%) — L0 keepalive restage churn + test-state pollution
 column: complete
 created: 2026-07-03T06:04:36+0200
-updated: 2026-07-03T19:00:04+0200
+updated: 2026-07-03T19:17:15+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 0
@@ -55,9 +55,17 @@ FS-churn root, so bounding that churn (S8) is the real prevention.
 - **S7** disk checks report BOTH writable + purgeable (accurate, not alarmist). *PENDING.*
 - **S8** bound the janitor's own FS-churn (age-retention for `reports/` + `.janitor/state`).
   *PENDING.*
-- **S9** ✅ **DONE + SHIPPED v0.30.0** — opt-in PostToolUse hook capping Bash output at
-  500 chars (head+tail) + tldr/distill/lean-ctx allowlist (commits 96bf8a4 + 21661b4).
-  *Open: doc-check whether CC has a native bash-output cap / save-to-file that supersedes it.*
+- **S9** ⛔ **SUPERSEDED + RETIRED v0.31.0** — shipped as an opt-in PostToolUse hook in
+  v0.30.0 (500-char head+tail cap + tldr/distill/lean-ctx allowlist; commits 96bf8a4 +
+  21661b4), then RETIRED once a fork-agent doc-check CONFIRMED Claude Code has a NATIVE
+  `BASH_MAX_OUTPUT_LENGTH` env var that caps Bash output AND saves the FULL output to a
+  file, handing the model path+preview for lossless Read-slicing. WHY retire: native is
+  strictly better — the S9 hook's head+tail DROPPED the middle of long output (data loss),
+  and running both would clobber native's file-pointer preview (S9's `updatedToolOutput`
+  overwrites it). User decision 2026-07-03: adopt native at `BASH_MAX_OUTPUT_LENGTH=500`
+  (set in `~/.claude/settings.json` env — needs a session restart to take effect) and
+  retire S9. Removed in v0.31.0: the hook + test (`git rm`), the hooks.json Bash
+  PostToolUse entry, and the `.janitor/state/bash-output-cap` sentinel.
 
 **Sequencing:** S1+S2 → S7 → S5(+HK7IZ21Z)/S6 → S3/S4; each its own commit. Core fix
 (Part 1) shipped: **33ef7eb**.
