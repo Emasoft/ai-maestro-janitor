@@ -19,7 +19,7 @@ target-branch: main
 must-pass-tests-before-merge: true
 test-requirements: [unit, lint]
 review-requirements: []
-implementation-commits: [b795aaf, f2b729a]
+implementation-commits: [b795aaf, f2b729a, bb8a4b2, 0aaedf4]
 ---
 
 # TRDD-4MMXTJFB — Precise token accounting + window selectors + graphs + cache audit
@@ -78,6 +78,16 @@ implementation-commits: [b795aaf, f2b729a]
      bucket-stable (YRPUSIFY); hooks append-only (never mutate the prefix).
   4. Detector emit-once dedupe + maintenance/keep-going cache-warm modes
      confirmed in place and correct.
+- **Wave 3 (commit 0aaedf4, 2026-07-03):** the USER's follow-up
+  `/code-review xhigh --fix` token-waste scan (run wf_6aee2965, serial-opus per
+  `~/.claude/rules/workflows-rules.md`) confirmed 9 more defects, all fixed:
+  dead v1-only gate in on-session-start-trdd-state.py (STATE injection never
+  fired on v2 TRDDs), 3 zero-division knob crashes (classify_recent bucket=0;
+  trdd-reminder + report-to-trdd-drift interval=0), post-compact-resume id
+  lowercasing, project-map-drift perpetual false nudge (now structure-hash
+  confirmed, verdict cached per digest), and 2 context-flooding skill bash
+  blocks (record-recent bare `git diff`; workflow-create zizmor `| tee`).
+  Tests in `tests/test_review_fixes_wave3.py`.
 - **NEXT ACTION:** ship in the next USER-authorized release, then → published.
 - **Load-bearing facts:** transcript usage keys are
   `message.usage.{input,output,cache_creation_input,cache_read_input}_tokens`;
