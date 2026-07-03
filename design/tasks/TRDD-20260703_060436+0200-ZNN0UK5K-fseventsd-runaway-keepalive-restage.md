@@ -3,7 +3,7 @@ trdd-id: ZNN0UK5K
 title: fseventsd runaway (39GB/97%) — L0 keepalive restage churn + test-state pollution
 column: complete
 created: 2026-07-03T06:04:36+0200
-updated: 2026-07-03T06:46:53+0200
+updated: 2026-07-03T19:00:04+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 0
@@ -20,12 +20,47 @@ target-branch: main
 must-pass-tests-before-merge: true
 test-requirements: [unit, lint]
 review-requirements: []
-implementation-commits: [33ef7eb]
+implementation-commits: [33ef7eb, 96bf8a4, 21661b4, d557d6b]
 ---
 
 # TRDD-ZNN0UK5K — fseventsd runaway: L0 keepalive restage churn + test-state pollution
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-03
+
+## ✅ SAFEGUARDS PLAN — COMPLETE + PARTIALLY SHIPPED (2026-07-03, v0.30.0)
+
+Approved plan mirrored here for durability (source: `~/.claude/plans/glittery-hatching-shell.md`).
+
+**Part 0 — disk finding (forensics CONFIRMED):** disk genuinely IS ~99% full —
+**28 GB writable** of 1.9 TB (identical on `/` + `/System/Volumes/Data`, one APFS
+container). OS-UI "194 GB free" = 28 GB writable + **~166 GB purgeable** (reclaimable
+local snapshots/caches macOS frees on demand; `df` excludes them — both numbers are
+right, they measure different things). **No overnight leak** (df moved 31→28 GB in
+hours; no >2 GB file touched in 48 h) — chronic accumulation. Top consumers: `~/Code`
+452 GB, `~/Library/Containers` 163 GB, OrbStack 89 GB. **Janitor is NOT the filler**
+(`plugins/data` 176 MB, `janitor-global-state` 2.1 MB). Host-hygiene issue, but the
+fsevents storm + snapshot-purge-under-pressure share the janitor's high-volume
+FS-churn root, so bounding that churn (S8) is the real prevention.
+
+**Part 2 — prevention roster (actionable, sequenced):**
+- **S1** session-DEFAULT test isolation in `tests/conftest.py` + session-end real-state
+  write-guard (would have caught this on CI run #1). *PENDING.*
+- **S2** guard-test banning module-level `Path.home()` writers (allow-list
+  `launchd_keepalive._DATA_DIR`, the only one). *PENDING.*
+- **S3** audit every self-heal/retry loop for backoff/convergence. *PENDING.*
+- **S4** append-log rotation audit (unbounded-log gaps). *PENDING.*
+- **S5** failure-class runaway detector `system-daemon-runaway.py` (alert at 4 GB, not
+  39 GB) — child **TRDD-HK7IZ21Z**. *PENDING.*
+- **S6** memory-guard ALERT path for a non-janitor runaway it can't kill. *PENDING.*
+- **S7** disk checks report BOTH writable + purgeable (accurate, not alarmist). *PENDING.*
+- **S8** bound the janitor's own FS-churn (age-retention for `reports/` + `.janitor/state`).
+  *PENDING.*
+- **S9** ✅ **DONE + SHIPPED v0.30.0** — opt-in PostToolUse hook capping Bash output at
+  500 chars (head+tail) + tldr/distill/lean-ctx allowlist (commits 96bf8a4 + 21661b4).
+  *Open: doc-check whether CC has a native bash-output cap / save-to-file that supersedes it.*
+
+**Sequencing:** S1+S2 → S7 → S5(+HK7IZ21Z)/S6 → S3/S4; each its own commit. Core fix
+(Part 1) shipped: **33ef7eb**.
 
 - **USER order (2026-07-03, verbatim):** "we got a problem. i had to kill a
   runaway fseventsd process that was at 39 Gb of ram usage and 97% of cpu usage.
