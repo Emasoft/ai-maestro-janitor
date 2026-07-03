@@ -23,6 +23,7 @@ import errno
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -798,8 +799,79 @@ def _read_process_cmdline(pid: int) -> str:
     return (proc.stdout or "").strip()
 
 
+# The plugin cache lays a daemon out at
+# `.../ai-maestro-plugins/ai-maestro-janitor/<semver>/scripts/daemon.py`, so the
+# version segment is the `<semver>` that immediately follows the plugin-name path
+# component. Anchoring on the leading slash + the plugin name avoids matching the
+# `ai-maestro-plugins` marketplace dir that precedes it.
+_CACHE_VERSION_RE = re.compile(r"/ai-maestro-janitor/(\d+\.\d+\.\d+)/")
+
+
+def _cache_version_from_path(text: str) -> Optional[str]:
+    """Extract the plugin cache `<version>` segment from a daemon script path.
+
+    Returns the `<semver>` string embedded in `.../ai-maestro-janitor/<semver>/`,
+    or None when `text` has no such segment (e.g. a non-cache install, the repo
+    checkout, or the L0 keepalive entry from the FIXED DATA dir) — i.e. "not
+    version-comparable by cache layout".
+    """
+    m = _CACHE_VERSION_RE.search(text)
+    return m.group(1) if m else None
+
+
+def _restart_decision(cmdline: str, expected: str, quarantined: set[str]) -> bool:
+    """PURE core of daemon_needs_restart's version-RECENCY gate (B-2 / CC 2.1.200).
+
+    Given the running daemon's argv `cmdline`, the `expected` current-cache
+    `daemon.py` path (from the version driving THIS heartbeat), and the set of
+    `quarantined` version strings, decide whether to SIGTERM-and-respawn. Split
+    out as a pure function so the directionality logic is unit-testable without a
+    live process. The WHY of each branch:
+
+      * exact path match          → False: the daemon already runs the current
+                                    cache's daemon.py; nothing to roll.
+      * current cache is NEWER     → True:  normal roll-forward — a plugin update
+                                    landed while the old daemon still ran old code.
+      * current cache is OLDER     → restart ONLY iff the running (newer) daemon's
+                                    version is QUARANTINED. This is the one CC
+                                    2.1.200 fix: a mere path DIFFERENCE must not let
+                                    an OLDER reinstalled/downgraded cache SIGTERM a
+                                    NEWER running daemon and respawn itself from the
+                                    older cache ("older build seizes the daemon").
+                                    The single legitimate downgrade is C3
+                                    auto-rollback DOWN to a known-good older version
+                                    after the newer one was proven bad (quarantined).
+      * same version, other path   → False: same code, don't thrash the daemon.
+      * either version unparseable → True:  fail-safe to the pre-B-2 "roll on any
+                                    diff" so a genuinely-relocated/reinstalled path
+                                    still rolls. A non-cache path is almost always a
+                                    real reinstall, not a downgrade, so restarting is
+                                    the safe default when recency can't be proven.
+    """
+    if expected in cmdline:
+        return False
+    import version_update_lib as _vul  # lazy: keeps global_state's top-level import
+                                       # graph thin for the many hooks/detectors that
+                                       # import it but never call daemon_needs_restart.
+    running_ver = _cache_version_from_path(cmdline)
+    current_ver = _cache_version_from_path(expected)
+    if running_ver is None or current_ver is None:
+        return True  # can't locate a cache version in one path → fail-safe restart
+    running_t = _vul.parse_semver(running_ver)
+    current_t = _vul.parse_semver(current_ver)
+    if running_t == (-1,) or current_t == (-1,):
+        return True  # non-semver segment → fail-safe restart (same as above)
+    if current_t > running_t:
+        return True  # roll-forward — this heartbeat's cache is newer than the daemon
+    if current_t < running_t:
+        # Older heartbeat vs a newer running daemon: never downgrade UNLESS the newer
+        # running version is quarantined (proven-bad → legitimate C3 rollback DOWN).
+        return running_ver in quarantined
+    return False  # same version, path differs only in location → no code change
+
+
 def daemon_needs_restart() -> bool:
-    """True iff the running daemon's script path doesn't match the current cache.
+    """True iff the running daemon should be restarted from the current cache.
 
     Detects the autonomy gap that survives plugin updates without it: when
     the janitor plugin itself is auto-updated to a new cache version, the
@@ -808,16 +880,20 @@ def daemon_needs_restart() -> bool:
     Python interpreter still holds the old code — bugs fixed in the new
     version remain unfixed in the running daemon.
 
-    Comparison rule: the running process's argv contains a path to
+    Comparison rule (RECENCY-gated — CC 2.1.200 parity / audit B-2): the
+    running process's argv carries a path to
     `.../<plugin-cache-version>/scripts/daemon.py`. Our `daemon_script_path()`
-    (called from dispatch — same `scripts/` directory as the version of the
-    plugin currently driving the heartbeat) gives the EXPECTED path. If they
-    differ, the daemon is from a stale cache version and needs to be
-    restarted.
+    (called from dispatch — same `scripts/` dir as the version driving the
+    heartbeat) gives the EXPECTED path. A restart is requested only when the
+    current heartbeat's cache is NEWER than the running daemon's (roll-forward),
+    or when the running daemon's version is now QUARANTINED (roll DOWN to a
+    known-good older version). A mere path DIFFERENCE is NOT enough — an OLDER
+    reinstalled cache must not SIGTERM a NEWER running daemon and reseat itself
+    from the older cache. See `_restart_decision` for the full truth table.
 
     Returns False when the daemon isn't running, when we can't read its
-    argv (foreign uid, race, ps unavailable), or when the paths match.
-    A False return is always safe — the daemon will be restarted next
+    argv (foreign uid, race, ps unavailable), or when the recency gate says
+    stay. A False return is always safe — the daemon will be restarted next
     time it actually crashes or stalls.
     """
     pid = daemon_pid()
@@ -837,11 +913,16 @@ def daemon_needs_restart() -> bool:
     if "daemon_keepalive_entry.py" in cmdline:
         return False
     expected = str(daemon_script_path().resolve())
-    # The argv may have `uv run --script --quiet /path/to/daemon.py` OR
-    # `python /path/to/daemon.py` — we just check that the EXPECTED path is
-    # a substring. If not, the running daemon is from a different cache
-    # version (or a different install entirely → also stale by definition).
-    return expected not in cmdline
+    try:
+        import version_update_lib as _vul
+        quarantined = _vul.read_quarantine()
+    except Exception:  # noqa: BLE001 — a recency-gate fault must never crash the heartbeat.
+        # version_update_lib unavailable / quarantine read faulted → fall back to the
+        # pre-B-2 contract (restart on any path diff) so a genuinely-changed path still
+        # rolls. WHY safe: this only re-opens the older-vs-newer edge the gate would
+        # otherwise block; a stale daemon that never rolls is the worse failure.
+        return expected not in cmdline
+    return _restart_decision(cmdline, expected, quarantined)
 
 
 def request_daemon_restart() -> bool:

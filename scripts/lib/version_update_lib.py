@@ -74,6 +74,16 @@ def _semver_tuple(s: str) -> tuple[int, ...]:
     return tuple(int(p) for p in s.split("."))
 
 
+def parse_semver(s: str) -> tuple[int, ...]:
+    """Public semver-ordering helper: '0.31.0' → (0, 31, 0), or (-1,) on
+    non-semver input (which sorts lowest). A thin public alias of the
+    module-internal ``_semver_tuple`` so other lib modules (e.g. the
+    daemon-recency gate in global_state) reuse ONE semver parser instead of
+    hand-rolling their own — keeping a single source of truth for version
+    ordering across the janitor."""
+    return _semver_tuple(s)
+
+
 def detect_install_scopes() -> list[str]:
     """Return every scope where the plugin is referenced.
 

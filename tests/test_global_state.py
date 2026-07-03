@@ -685,3 +685,90 @@ def test_maintenance_mode_orthogonal_to_kill_switch_and_pause(state_dir: Path) -
     gs.clear_maintenance_mode()
     gs.set_kill_switch("k")
     assert gs.maintenance_mode_present() is False, "kill-switch must not imply maintenance"
+
+
+# ---------- daemon-restart RECENCY gate (audit B-2 / CC 2.1.200) ----------
+#
+# _restart_decision is the PURE core of daemon_needs_restart: given the running
+# daemon's argv, the current-cache daemon.py path, and the quarantined-version
+# set, it decides whether to SIGTERM-and-respawn. Tested with REAL cache-shaped
+# path strings (no process, no mock) so the version DIRECTIONALITY is pinned
+# exactly — an OLDER reinstalled cache must NOT seize a NEWER running daemon.
+
+
+def _daemon_path(version: str, *, home: str = "/u") -> str:
+    """A realistic cache `daemon.py` argv (uv-run form) for a plugin version."""
+    return (
+        f"uv run --script --quiet {home}/.claude/plugins/cache/ai-maestro-plugins/"
+        f"ai-maestro-janitor/{version}/scripts/daemon.py"
+    )
+
+
+def _daemon_bare(version: str, *, home: str = "/u") -> str:
+    """The bare resolved `daemon.py` path (the shape `daemon_script_path()` yields)."""
+    return _daemon_path(version, home=home).split()[-1]
+
+
+def test_daemon_needs_restart_newer_current_restarts_older(state_dir: Path) -> None:
+    """Roll-forward: the heartbeat's cache is NEWER than the running daemon → restart (True)."""
+    gs = _gs()
+    assert gs._restart_decision(_daemon_path("0.30.0"), _daemon_bare("0.31.0"), set()) is True
+
+
+def test_daemon_needs_restart_older_current_does_not_restart_newer(state_dir: Path) -> None:
+    """B-2 guard: an OLDER heartbeat must NOT SIGTERM a NEWER running daemon (False)."""
+    gs = _gs()
+    assert gs._restart_decision(_daemon_path("0.31.0"), _daemon_bare("0.30.0"), set()) is False
+
+
+def test_daemon_needs_restart_same_version_does_not_restart(state_dir: Path) -> None:
+    """Same version, path differs only in install location → no code change, no restart (False)."""
+    gs = _gs()
+    running = _daemon_path("0.31.0", home="/opt/other")
+    expected = _daemon_bare("0.31.0", home="/u")
+    assert expected not in running, "precondition: not an exact-substring match"
+    assert gs._restart_decision(running, expected, set()) is False
+
+
+def test_daemon_needs_restart_quarantined_newer_may_roll_down(state_dir: Path) -> None:
+    """C3 rollback DOWN: an older heartbeat MAY restart a newer daemon iff it is quarantined (True)."""
+    gs = _gs()
+    assert gs._restart_decision(_daemon_path("0.31.0"), _daemon_bare("0.30.0"), {"0.31.0"}) is True
+
+
+def test_daemon_needs_restart_exact_path_match_no_restart(state_dir: Path) -> None:
+    """The running argv already carries the current daemon.py path → nothing to roll (False)."""
+    gs = _gs()
+    expected = _daemon_bare("0.31.0")
+    running = _daemon_path("0.31.0")
+    assert expected in running
+    assert gs._restart_decision(running, expected, set()) is False
+
+
+def test_daemon_needs_restart_unparseable_path_fails_safe_true(state_dir: Path) -> None:
+    """No cache-version segment in one path → fail-safe to the pre-B-2 'roll on any diff' (True)."""
+    gs = _gs()
+    assert gs._restart_decision("python /opt/custom/install/daemon.py", _daemon_bare("0.31.0"), set()) is True
+
+
+def test_daemon_needs_restart_no_daemon_returns_false(state_dir: Path) -> None:
+    """No daemon pid on disk → daemon_needs_restart is False (nothing to restart)."""
+    gs = _gs()
+    gs.init_global_state()
+    assert gs.daemon_needs_restart() is False
+
+
+def test_daemon_needs_restart_non_cache_path_fails_safe_true(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end (real child + real ps + real read_quarantine): a live daemon whose argv
+    carries NO cache version segment hits the fail-safe → daemon_needs_restart True."""
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))  # hermetic quarantine read
+    gs = _gs()
+    gs.init_global_state()
+    proc = _spawn_fake_daemon(tmp_path)  # argv ends in <tmp>/daemon.py (no cache version)
+    try:
+        gs.write_daemon_pid(proc.pid)
+        assert gs.daemon_needs_restart() is True
+    finally:
+        _reap(proc)
