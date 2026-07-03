@@ -203,13 +203,17 @@ def test_project_metrics_spike_none_without_baseline() -> None:
 
 
 def test_project_metrics_source_breakdown() -> None:
-    """The last hour's source shares partition the weighted total (sum to 1.0) and count spawns."""
-    events = [th.Event(ts=NOW - 600, weighted=200.0, output=100, cache_creation=50, tool_calls=1, subagent_spawns=1)]
+    """The last hour's FOUR source shares partition the weighted total (sum to 1.0) from the
+    REAL per-category fields (TRDD-4MMXTJFB — no longer a residual approximation), and count
+    spawns. Fixture is self-consistent: weighted = output + input + cache_creation + cache_read/10."""
+    events = [th.Event(ts=NOW - 600, weighted=200.0, output=100, cache_creation=50, tool_calls=1, subagent_spawns=1, input=20, cache_read=300)]
     src = th.project_metrics(events, NOW)["source"]
     assert src["output_share"] == pytest.approx(0.5)  # 100/200
+    assert src["input_share"] == pytest.approx(0.1)  # 20/200
     assert src["cache_creation_share"] == pytest.approx(0.25)  # 50/200
-    assert src["cache_read_tenth_share"] == pytest.approx(0.25)  # residual (200-100-50)/200
-    assert src["output_share"] + src["cache_creation_share"] + src["cache_read_tenth_share"] == pytest.approx(1.0)
+    assert src["cache_read_tenth_share"] == pytest.approx(0.15)  # (300/10)/200
+    total = src["output_share"] + src["input_share"] + src["cache_creation_share"] + src["cache_read_tenth_share"]
+    assert total == pytest.approx(1.0)
     assert src["subagent_spawns"] == 1
 
 
