@@ -23,11 +23,32 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 _LIB = Path(__file__).resolve().parent.parent / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 daemon = importlib.import_module("daemon")
 gs = importlib.import_module("global_state")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_janitor_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect every janitor global-state / DATA / HOME path to a per-test tmp tree so no
+    keepalive test can read or write the real ~/.claude/janitor-global-state/ or the real
+    plugin DATA dir (TRDD-ZNN0UK5K). Sets sane isolated DEFAULTS; each test's own _wire()
+    re-points JANITOR_GLOBAL_STATE_DIR to its tmp_path (last-wins) for the Task cadence
+    stamps, so this fixture and _wire() compose cleanly."""
+    home = tmp_path / "_home"
+    data = home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+    gsd = tmp_path / "_global-state"
+    for d in (home, data, gsd):
+        d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gsd))
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
 
 def _wire(monkeypatch, tmp_path) -> None:

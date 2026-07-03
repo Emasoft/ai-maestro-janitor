@@ -13,9 +13,30 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 ENTRY_PATH = Path(__file__).resolve().parents[1] / "scripts" / "daemon_keepalive_entry.py"
 SRC = ENTRY_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SRC)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_janitor_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect every janitor global-state / DATA / HOME path to a per-test tmp tree so no
+    keepalive test can read or write the real ~/.claude/janitor-global-state/ or the real
+    plugin DATA dir. These AST-only tests touch no state, but the isolation is applied
+    uniformly across the keepalive suite so a future runtime assertion here can never
+    pollute production state (TRDD-ZNN0UK5K)."""
+    home = tmp_path / "_home"
+    data = home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+    gsd = tmp_path / "_global-state"
+    for d in (home, data, gsd):
+        d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gsd))
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
 # Only these modules may be imported — this alone bars subprocess / socket /
 # importlib / ctypes etc. from ever being used in the launched file. ``daemon`` and

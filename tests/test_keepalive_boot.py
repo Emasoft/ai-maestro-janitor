@@ -27,6 +27,27 @@ import keepalive_stage  # type: ignore[import-not-found]  # noqa: E402
 import launchd_keepalive  # type: ignore[import-not-found]  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_janitor_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect every janitor global-state / DATA / HOME path to a per-test tmp tree so no
+    keepalive test can read or write the real ~/.claude/janitor-global-state/ or the real
+    plugin DATA dir. A frozen module constant (keepalive_boot's old _LOG_DIR,
+    launchd_keepalive._DATA_DIR) let these tests pollute production state and corrupt the
+    real staged closure, driving a 39 GB fseventsd runaway (TRDD-ZNN0UK5K). Env-based so a
+    subprocess that re-imports the libs inherits the SAME isolated tree."""
+    home = tmp_path / "_home"
+    # Keep the FIXED DATA suffix so data_dir()'s shape assertion still holds on a tmp tree.
+    data = home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+    gsd = tmp_path / "_global-state"
+    for d in (home, data, gsd):
+        d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gsd))
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+
 def _make_cache(tmp: Path) -> Path:
     """Build a REAL cache scripts dir holding the full staged closure (verbatim from the repo
     ``scripts/``). Returns the cache scripts dir."""
@@ -158,8 +179,8 @@ def test_broken_stage_unrepairable_returns_false_and_logs_loud(
         raise OSError("disk full")
 
     monkeypatch.setattr(keepalive_boot, "_repair", _boom)
-    # Also keep the log file off the host: point the boot-log dir at tmp.
-    monkeypatch.setattr(keepalive_boot, "_LOG_DIR", tmp_path / "logdir")
+    # The boot log is kept off the host by the autouse fixture (JANITOR_GLOBAL_STATE_DIR →
+    # tmp); _state_dir() re-resolves it at call time, so no _LOG_DIR patch is needed.
 
     result = keepalive_boot.verify_or_restage(str(staged))
     assert result is False, "an unrepairable broken stage must return False (fail-loud, not crash)"
@@ -180,13 +201,130 @@ def test_gate_never_raises_on_bad_input(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_loud_helper_writes_stderr_and_logfile(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """_loud emits to BOTH stderr and the keepalive boot-log file (the operator-visible
-    surfaces), and tolerates an unwritable log dir without raising."""
-    logdir = tmp_path / "logdir"
-    monkeypatch.setattr(keepalive_boot, "_LOG_DIR", logdir)
+    surfaces). The log lands in the CALL-TIME _state_dir() (JANITOR_GLOBAL_STATE_DIR,
+    isolated to tmp by the autouse fixture) — never a home-frozen dir (TRDD-ZNN0UK5K)."""
     keepalive_boot._loud("hello operator")
     assert "keepalive-boot: hello operator" in capsys.readouterr().err
-    logged = (logdir / keepalive_boot._LOG_NAME).read_text(encoding="utf-8")
+    logged = (keepalive_boot._state_dir() / keepalive_boot._LOG_NAME).read_text(
+        encoding="utf-8"
+    )
     assert "hello operator" in logged
+
+
+# ── TRDD-ZNN0UK5K regressions: test-state isolation + bounded restage churn ───
+
+
+def test_state_dir_honors_env_at_call_time_not_frozen_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REGRESSION (TRDD-ZNN0UK5K root cause): _state_dir() re-resolves
+    JANITOR_GLOBAL_STATE_DIR at CALL time, so a _loud write lands in whatever the env
+    currently points at — never the home-frozen ~/.claude/janitor-global-state constant
+    that made these tests pollute the real boot log and corrupt the real staged closure.
+    Proven by re-pointing the env mid-test and watching the write follow it."""
+    a = tmp_path / "gsd-a"
+    b = tmp_path / "gsd-b"
+    log = keepalive_boot._LOG_NAME
+
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(a))
+    assert keepalive_boot._state_dir() == a.resolve(), "state dir must honor the env NOW"
+    keepalive_boot._loud("into A")
+    assert "into A" in (a / log).read_text(encoding="utf-8")
+
+    # Re-point AFTER the first write: a frozen constant would keep writing to A.
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(b))
+    assert keepalive_boot._state_dir() == b.resolve()
+    keepalive_boot._loud("into B")
+    assert "into B" in (b / log).read_text(encoding="utf-8")
+    assert "into B" not in (a / log).read_text(encoding="utf-8"), "A must not receive B's line"
+
+
+def _wire_persistent_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, list[Path]]:
+    """Build a real cache + staged tree with a corrupt staged file, repoint resolution at
+    them, and replace launchd_keepalive.restage with a NO-OP SPY (records its calls but
+    does NOT fix the stage — so the mismatch persists and the cooldown logic is what we
+    observe). Returns (cache, staged, restage_calls)."""
+    cache = _make_cache(tmp_path)
+    staged = _make_stage_from(cache, tmp_path)
+    monkeypatch.setattr(launchd_keepalive, "latest_cache_scripts_dir", lambda: cache)
+    monkeypatch.setattr(launchd_keepalive, "data_scripts_dir", lambda: staged)
+    (staged / "daemon.py").write_text("torn\n", encoding="utf-8")  # persistent mismatch
+    restage_calls: list[Path] = []
+    # Spy only — NOT a mock of the code under test; verify_or_restage + the cooldown are real.
+    monkeypatch.setattr(launchd_keepalive, "restage", lambda src: restage_calls.append(src))
+    return cache, staged, restage_calls
+
+
+def test_identical_restage_within_cooldown_is_suppressed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 2nd verify_or_restage with the SAME unconverged mismatch, inside the cooldown,
+    SKIPS the copy — the fsevents-churn half of the runaway (TRDD-ZNN0UK5K). The restage
+    spy is called exactly ONCE across two calls."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEPALIVE_RESTAGE_COOLDOWN_S", "300")
+    _cache, staged, restage_calls = _wire_persistent_mismatch(tmp_path, monkeypatch)
+
+    r1 = keepalive_boot.verify_or_restage(str(staged))
+    r2 = keepalive_boot.verify_or_restage(str(staged))
+
+    assert r1 is False and r2 is False, "an unconverged mismatch returns False both times"
+    assert len(restage_calls) == 1, "the 2nd identical restage within cooldown must be skipped"
+
+
+def test_cooldown_zero_disables_suppression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_PLUGIN_OPTION_KEEPALIVE_RESTAGE_COOLDOWN_S=0 turns the suppression OFF — a 2nd
+    identical call DOES restage (restage spy called twice)."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEPALIVE_RESTAGE_COOLDOWN_S", "0")
+    _cache, staged, restage_calls = _wire_persistent_mismatch(tmp_path, monkeypatch)
+
+    keepalive_boot.verify_or_restage(str(staged))
+    keepalive_boot.verify_or_restage(str(staged))
+
+    assert len(restage_calls) == 2, "cooldown=0 must restage on every call (no suppression)"
+
+
+def test_different_mismatch_signature_restages_within_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Suppression is keyed on the mismatch SIGNATURE (sorted rel-paths): a DIFFERENT set
+    of corrupt files restages even inside the cooldown, so a genuinely new torn stage is
+    never starved of a repair (TRDD-ZNN0UK5K)."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEPALIVE_RESTAGE_COOLDOWN_S", "300")
+    cache, staged, restage_calls = _wire_persistent_mismatch(tmp_path, monkeypatch)
+
+    keepalive_boot.verify_or_restage(str(staged))  # signature: {daemon.py}
+    assert len(restage_calls) == 1
+
+    # New torn set: restore daemon.py, corrupt a different closure file → new signature.
+    (staged / "daemon.py").write_bytes((cache / "daemon.py").read_bytes())
+    (staged / "lib" / "global_state.py").write_text("torn2\n", encoding="utf-8")
+    keepalive_boot.verify_or_restage(str(staged))  # signature: {lib/global_state.py}
+
+    assert len(restage_calls) == 2, "a different mismatch signature must not be suppressed"
+
+
+def test_boot_log_rotates_past_max_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The boot log is size-rotated (<name> → <name>.1) once it exceeds _LOG_MAX_BYTES, so a
+    persistent boot fault can never grow it without bound (TRDD-ZNN0UK5K, FIX B2)."""
+    state = keepalive_boot._state_dir()  # isolated tmp dir (autouse fixture)
+    state.mkdir(parents=True, exist_ok=True)
+    log = state / keepalive_boot._LOG_NAME
+    log.write_text("x" * (keepalive_boot._LOG_MAX_BYTES + 1), encoding="utf-8")  # over cap
+
+    keepalive_boot._loud("post-rotation line")
+
+    rotated = state / (keepalive_boot._LOG_NAME + ".1")
+    assert rotated.is_file(), "the oversized log must rotate to <name>.1"
+    assert rotated.stat().st_size > keepalive_boot._LOG_MAX_BYTES, "the .1 holds the old bulk"
+    fresh = log.read_text(encoding="utf-8")
+    assert "post-rotation line" in fresh, "the new line lands in the fresh log"
+    assert len(fresh) < keepalive_boot._LOG_MAX_BYTES, "the new log starts fresh after rotation"

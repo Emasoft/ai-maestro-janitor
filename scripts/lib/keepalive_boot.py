@@ -39,11 +39,23 @@ Two hard invariants for the DEEPEST immortality layer:
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from pathlib import Path
 
 import keepalive_stage  # sibling: computes the daemon's verbatim import closure
 import launchd_keepalive  # sibling: latest_cache_scripts_dir() + restage()
+
+try:
+    # Sibling in the daemon closure. Its global_state_dir() honors
+    # JANITOR_GLOBAL_STATE_DIR, resolved at CALL time — so the keepalive's log + restage
+    # stamp land in the SAME test-overridable dir every other janitor global-state writer
+    # uses, instead of a frozen real Path.home() that made the keepalive tests pollute
+    # production state (TRDD-ZNN0UK5K).
+    import global_state  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - defensive; the lib is part of the closure
+    global_state = None  # type: ignore[assignment]
 
 try:
     # _file_sha256 is the same streaming hasher the self-integrity manifest uses; reuse
@@ -52,26 +64,91 @@ try:
 except Exception:  # pragma: no cover - defensive; the lib is part of the closure
     _file_sha256 = None  # type: ignore[assignment]
 
-# The keepalive's own log dir (same place launchd/systemd capture stdout/stderr to, and
-# where the daemon pins its logs). A loud line here is visible next to the crash output.
-_LOG_DIR = Path.home() / ".claude" / "janitor-global-state"
+# The keepalive's log lives in the janitor global-state dir (same place launchd/systemd
+# capture stdout/stderr to, and where the daemon pins its logs). A loud line here is
+# visible next to the crash output.
 _LOG_NAME = "daemon-keepalive.boot.log"
+_LOG_MAX_BYTES = 256 * 1024  # rotate at 256 KB so the boot log can never grow unbounded
+_RESTAGE_STAMP = "daemon-keepalive.restage-stamp"
+
+
+def _state_dir() -> Path:
+    """The keepalive log/stamp dir, resolved AT CALL TIME so JANITOR_GLOBAL_STATE_DIR (the
+    isolation override every janitor global-state writer honors) is respected. A frozen
+    module-level ``Path.home()`` constant made the keepalive tests write into production
+    state and corrupt the real staged closure → the fseventsd runaway (TRDD-ZNN0UK5K)."""
+    if global_state is not None:
+        try:
+            return global_state.global_state_dir()
+        except Exception:
+            pass
+    return Path.home() / ".claude" / "janitor-global-state"
 
 
 def _loud(msg: str) -> None:
     """Emit ``msg`` to BOTH stderr (launchd/systemd capture it) and a keepalive log file,
-    each best-effort so a logging failure never propagates into the launch path."""
+    each best-effort so a logging failure never propagates into the launch path. The log is
+    size-rotated (``<name>`` → ``<name>.1``) so a persistent boot fault can't grow it
+    without bound."""
     line = f"keepalive-boot: {msg}"
     try:
         print(line, file=sys.stderr, flush=True)
     except Exception:
         pass
     try:
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
-        with (_LOG_DIR / _LOG_NAME).open("a", encoding="utf-8") as fh:
+        d = _state_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        log = d / _LOG_NAME
+        try:
+            if log.stat().st_size > _LOG_MAX_BYTES:
+                os.replace(log, log.with_name(_LOG_NAME + ".1"))
+        except OSError:
+            pass  # no log yet, or a concurrent rotate raced — the append below still works
+        with log.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except Exception:
         # A log we cannot write must not block the daemon — stderr already carried it.
+        pass
+
+
+def _restage_cooldown_s() -> int:
+    """Seconds an identical repeated restage is suppressed. A closure that never converges
+    (an un-stageable file, or a cache version that keeps flipping) otherwise re-copies the
+    whole ~16-file closure on EVERY keepalive boot — the fsevents-churn half of the
+    fseventsd runaway (TRDD-ZNN0UK5K). Env-tunable; 0 disables the suppression."""
+    try:
+        return max(0, int(os.environ.get("CLAUDE_PLUGIN_OPTION_KEEPALIVE_RESTAGE_COOLDOWN_S", "300")))
+    except (TypeError, ValueError):
+        return 300
+
+
+def _restage_recently_tried(signature: str, now: int) -> bool:
+    """True iff the SAME mismatch ``signature`` was restaged within the cooldown and is
+    STILL mismatched now — i.e. the prior restage did NOT make it converge, so copying the
+    closure again is futile churn. Reads ``<state>/daemon-keepalive.restage-stamp``
+    (``<ts>\\t<sig>``). Never raises. A cooldown of 0 always returns False (feature off)."""
+    cooldown = _restage_cooldown_s()
+    if cooldown <= 0:
+        return False
+    try:
+        raw = (_state_dir() / _RESTAGE_STAMP).read_text(encoding="utf-8").strip()
+        last_ts_s, _, last_sig = raw.partition("\t")
+        return last_sig == signature and (now - int(last_ts_s)) < cooldown
+    except (OSError, ValueError):
+        return False
+
+
+def _record_restage(signature: str, now: int) -> None:
+    """Stamp ``(now, signature)`` atomically so an identical mismatch on the next boot is
+    suppressed for the cooldown. Never raises."""
+    try:
+        d = _state_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        stamp = d / _RESTAGE_STAMP
+        tmp = stamp.with_name(f"{_RESTAGE_STAMP}.tmp.{os.getpid()}")
+        tmp.write_text(f"{now}\t{signature}", encoding="utf-8")
+        os.replace(tmp, stamp)
+    except OSError:
         pass
 
 
@@ -157,11 +234,21 @@ def verify_or_restage(staged_scripts_dir: object) -> bool:
         if not missing:
             return True  # stage is complete + byte-faithful to the cache
 
+        signature = ",".join(sorted(missing))
+        now = int(time.time())
+        if _restage_recently_tried(signature, now):
+            # The SAME closure files were restaged within the cooldown and are STILL
+            # mismatched → the restage does not converge, so re-copying the whole closure is
+            # pure fsevents churn (TRDD-ZNN0UK5K). Skip the copy; the first attempt already
+            # logged the cause, and the import below still fails VISIBLY.
+            return False
+
         _loud(
             f"staged closure is corrupt/incomplete ({len(missing)} file(s): "
             f"{', '.join(missing[:8])}{'…' if len(missing) > 8 else ''}); "
             f"restaging from {cache}"
         )
+        _record_restage(signature, now)
         try:
             _repair(staged, cache)
         except Exception as exc:

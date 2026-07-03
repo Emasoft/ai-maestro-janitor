@@ -36,6 +36,29 @@ sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import launchd_keepalive  # type: ignore[import-not-found]  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _isolate_janitor_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect every janitor global-state / DATA / HOME path to a per-test tmp tree so no
+    keepalive test can read or write the real ~/.claude/janitor-global-state/ or the real
+    plugin DATA dir. A frozen module constant (launchd_keepalive._DATA_DIR, computed from
+    Path.home() at import) let these tests resolve the REAL DATA dir and restage the real
+    closure, driving a 39 GB fseventsd runaway (TRDD-ZNN0UK5K). JANITOR_DATA_DIR is the
+    lever data_dir()/version_update_lib._data_dir() both honor; the DATA path keeps the
+    FIXED suffix so data_dir()'s shape assertion still holds on a tmp tree. Per-test
+    overrides (setenv JANITOR_DATA_DIR) win over this default."""
+    home = tmp_path / "_home"
+    data = home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+    gsd = tmp_path / "_global-state"
+    for d in (home, data, gsd):
+        d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gsd))
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+
 _EXPECTED_ENTRY_LITERAL = (
     "$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/scripts/daemon_keepalive_entry.py"
 )
@@ -183,7 +206,7 @@ def test_install_stages_closure_and_runs_staged_installer(
     """install() verbatim-stages the entry+daemon+installer into DATA and runs the STAGED
     installer (the real launchctl/systemctl call is stubbed — no OS side effect)."""
     data = tmp_path / "data"
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     calls: list[list[str]] = []
     monkeypatch.setattr(launchd_keepalive, "_run", lambda cmd: (calls.append(cmd) or (True, "")))
     ok, _ = launchd_keepalive.install(SCRIPTS)
@@ -204,7 +227,7 @@ def test_install_on_unsupported_platform_stages_nothing(
 ) -> None:
     """On a platform with no OS keepalive, install() fails fast and stages nothing."""
     data = tmp_path / "data"
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     monkeypatch.setattr(launchd_keepalive, "current_platform", lambda: "other")
     calls: list[list[str]] = []
     monkeypatch.setattr(launchd_keepalive, "_run", lambda cmd: (calls.append(cmd) or (True, "")))
@@ -218,7 +241,7 @@ def test_uninstall_without_staged_installer_is_noop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Uninstalling when nothing was ever installed is a success no-op (never raises)."""
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", tmp_path / "data")
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
     calls: list[list[str]] = []
     monkeypatch.setattr(launchd_keepalive, "_run", lambda cmd: (calls.append(cmd) or (True, "")))
     ok, msg = launchd_keepalive.uninstall()
@@ -234,7 +257,7 @@ def test_uninstall_runs_staged_installer(
     scripts = data / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "keepalive_install.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     calls: list[list[str]] = []
     monkeypatch.setattr(launchd_keepalive, "_run", lambda cmd: (calls.append(cmd) or (True, "")))
     ok, _ = launchd_keepalive.uninstall()
@@ -250,7 +273,7 @@ def test_is_installed_delegates_to_installer_status(
     scripts = data / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "keepalive_install.sh").write_text("x", encoding="utf-8")
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     seen: dict[str, list[str]] = {}
     monkeypatch.setattr(
         launchd_keepalive, "_run", lambda cmd: (seen.__setitem__("cmd", cmd) or (True, "installed"))
@@ -263,7 +286,7 @@ def test_is_installed_false_without_staged_installer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With no staged installer, is_installed() is False without shelling out."""
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", tmp_path / "data")
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
     assert launchd_keepalive.is_installed() is False
 
 
@@ -426,7 +449,7 @@ def test_staged_is_current_true_when_identical(
     src.mkdir()
     (data / "scripts" / "daemon.py").write_text("SAME", encoding="utf-8")
     (src / "daemon.py").write_text("SAME", encoding="utf-8")
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     assert launchd_keepalive.staged_is_current(src) is True
 
 
@@ -439,7 +462,7 @@ def test_staged_is_current_false_when_differs_or_missing(
     src = tmp_path / "src"
     src.mkdir()
     (src / "daemon.py").write_text("NEW", encoding="utf-8")
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     assert launchd_keepalive.staged_is_current(src) is False  # staged daemon.py missing
     (data / "scripts" / "daemon.py").write_text("OLD", encoding="utf-8")
     assert launchd_keepalive.staged_is_current(src) is False  # content differs
@@ -451,7 +474,7 @@ def test_restage_stages_without_ever_activating(
     """restage() refreshes the DATA closure + installer but NEVER runs the installer — the
     property that lets the launchd daemon refresh itself on startup without self-bootout."""
     data = tmp_path / "data"
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     calls: list[list[str]] = []
     monkeypatch.setattr(launchd_keepalive, "_run", lambda cmd: (calls.append(cmd) or (True, "")))
     launchd_keepalive.restage(SCRIPTS)
@@ -465,7 +488,7 @@ def test_activate_runs_staged_installer_or_reports_missing(
 ) -> None:
     """activate() runs the staged installer's `install`; with none staged it fails cleanly."""
     data = tmp_path / "data"
-    monkeypatch.setattr(launchd_keepalive, "_DATA_DIR", data)
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
     ok, msg = launchd_keepalive.activate()
     assert ok is False and "no staged installer" in msg
     (data / "scripts").mkdir(parents=True)

@@ -12,10 +12,34 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 
 import keepalive_stage  # type: ignore[import-not-found]  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_janitor_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect every janitor global-state / DATA / HOME path to a per-test tmp tree so no
+    keepalive test can read or write the real ~/.claude/janitor-global-state/ or the real
+    plugin DATA dir. A frozen module constant (keepalive_boot's old _LOG_DIR,
+    launchd_keepalive._DATA_DIR) let these tests pollute production state and corrupt the
+    real staged closure, driving a 39 GB fseventsd runaway (TRDD-ZNN0UK5K). Env-based so the
+    subprocess that re-imports the entry (→ verify_or_restage) inherits the SAME isolated
+    tree instead of writing the real boot log."""
+    home = tmp_path / "_home"
+    # Keep the FIXED DATA suffix so data_dir()'s shape assertion still holds on a tmp tree.
+    data = home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+    gsd = tmp_path / "_global-state"
+    for d in (home, data, gsd):
+        d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(gsd))
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
 
 def test_closure_is_bounded_and_excludes_pattern_libs() -> None:

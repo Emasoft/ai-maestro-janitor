@@ -36,7 +36,10 @@ import version_update_lib  # sibling in scripts/lib/; the C3 quarantine reader (
 
 # The janitor's FIXED persistent DATA dir — hard-coded (NOT ${CLAUDE_PLUGIN_DATA}, which
 # resolves to whichever plugin owns the current turn, wrong in a detached/session-less
-# daemon). The same hard-coded location the arm skill + the memory subsystem use.
+# daemon). The same hard-coded location the arm skill + the memory subsystem use. This is
+# the FALLBACK value; data_dir() re-resolves it at CALL time and honors JANITOR_DATA_DIR —
+# the same test-only override version_update_lib._data_dir() uses — so no test touches the
+# real ~/.claude tree (TRDD-ZNN0UK5K).
 _DATA_DIR = Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
 _INSTALLER_NAME = "keepalive_install.sh"
 # The FIXED plugin-cache location (the marketplace install path). The OS-spawned daemon
@@ -49,13 +52,30 @@ _CACHE_PARENT = (
 
 
 def data_dir() -> Path:
+    """The janitor's FIXED persistent DATA dir, resolved AT CALL TIME.
+
+    Honors ``JANITOR_DATA_DIR`` when set — the SAME test-only override
+    ``version_update_lib._data_dir()`` reads (the janitor's canonical DATA-dir isolation
+    lever). A frozen module constant (``_DATA_DIR``, computed from ``Path.home()`` at
+    import) made the keepalive TESTS resolve to the REAL DATA dir and restage the real
+    closure, driving a 39 GB fseventsd runaway (TRDD-ZNN0UK5K); reading the override here at
+    call time is the sibling fix to ``keepalive_boot._state_dir()``. It deliberately does
+    NOT read ``${CLAUDE_PLUGIN_DATA}`` — per this module's design that env points at
+    whichever plugin owns the current turn, wrong both in the detached daemon and in a
+    session where another plugin owns the turn (e.g. ``fleet_status``'s keepalive probe). In
+    production the override is unset, so this falls back to the hard-coded FIXED path
+    (identical behavior to before)."""
+    override = os.environ.get("JANITOR_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
     return _DATA_DIR
 
 
 def data_scripts_dir() -> Path:
     """Where the verbatim daemon closure + the installer are staged (beside the entry the
-    OS service launches at the fixed DATA path)."""
-    return _DATA_DIR / "scripts"
+    OS service launches at the fixed DATA path). Resolved via ``data_dir()`` so the
+    ``JANITOR_DATA_DIR`` test override reaches it too (TRDD-ZNN0UK5K)."""
+    return data_dir() / "scripts"
 
 
 def current_platform() -> str:
