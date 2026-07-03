@@ -133,3 +133,83 @@ def test_malformed_stdin_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod.sys, "stdout", buf)
     assert mod.main() == 0
     assert buf.getvalue() == ""
+
+
+def _bash(command: str, stdout: str) -> dict:
+    """A Bash PostToolUse payload with a command line and an oversized stdout."""
+    return {"tool_name": "Bash", "tool_input": {"command": command}, "tool_response": {"stdout": stdout}}
+
+
+def test_command_bypasses_cap_helper() -> None:
+    """The pure allowlist matcher recognizes command-position and piped-into token-savers."""
+    allow = frozenset({"tldr", "distill", "lean-ctx"})
+    assert mod._command_bypasses_cap("tldr definition foo bar.py", allow)  # command position
+    assert mod._command_bypasses_cap("git diff | distill 'summarize'", allow)  # piped into
+    assert mod._command_bypasses_cap("/usr/local/bin/tldr search x .", allow)  # leading path stripped
+    assert mod._command_bypasses_cap("env DEBUG=1 tldr search x .", allow)  # wrapper + assign skipped
+    assert not mod._command_bypasses_cap("cat huge.txt", allow)  # not a token-saver
+    assert not mod._command_bypasses_cap("echo distilled the results", allow)  # 'distill' not in cmd pos
+    assert not mod._command_bypasses_cap("", allow)  # no command → no bypass
+
+
+def test_bypass_piped_distill(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A command piping into distill is NOT capped — its output is already summarized."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    out = _run(
+        _bash("git diff | distill 'summarize the changes'", "z" * 5000),
+        monkeypatch,
+        {"CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ENABLED": "1", "CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_CHARS": "500"},
+    )
+    assert out is None  # bypassed → no rewrite
+
+
+def test_bypass_tldr_at_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A tldr invocation is NOT capped — tldr already extracts only the relevant lines."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    out = _run(
+        _bash("tldr structure scripts/", "z" * 5000),
+        monkeypatch,
+        {"CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ENABLED": "1"},
+    )
+    assert out is None
+
+
+def test_bypass_lean_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A lean-ctx invocation is NOT capped — lean-ctx already compresses shell output."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    out = _run(
+        _bash('lean-ctx -c "git status"', "z" * 5000),
+        monkeypatch,
+        {"CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ENABLED": "1"},
+    )
+    assert out is None
+
+
+def test_non_allowlisted_still_capped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A plain command NOT in the allowlist is still capped when it exceeds the cap."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    out = _run(
+        _bash("cat huge.txt", "z" * 5000),
+        monkeypatch,
+        {
+            "CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ENABLED": "1",
+            "CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_CHARS": "500",
+            "CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ALLOWLIST": None,
+        },
+    )
+    assert out is not None  # capped
+    assert len(json.loads(out)["hookSpecificOutput"]["updatedToolOutput"]) <= 500
+
+
+def test_bypass_allowlist_env_extension(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The allowlist is extensible: an extra name via the env var also bypasses the cap."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    out = _run(
+        _bash("mytool run --verbose", "z" * 5000),
+        monkeypatch,
+        {
+            "CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ENABLED": "1",
+            "CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ALLOWLIST": "mytool,othertool",
+        },
+    )
+    assert out is None

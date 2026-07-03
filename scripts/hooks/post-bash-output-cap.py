@@ -19,6 +19,10 @@ Design invariants:
     truthy OR the per-project sentinel ``<project>/.janitor/state/bash-output-cap`` exists — the
     sentinel is read at hook RUNTIME, so a session enables the cap WITHOUT a restart.
   * Cap is ``CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_CHARS`` (default 500); ``cap <= 0`` disables.
+  * ALLOWLIST — a command that RUNS or PIPES INTO a token-saving tool (``tldr`` / ``distill`` /
+    ``lean-ctx``, extensible via ``CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ALLOWLIST``) is NEVER
+    capped: its output is already compressed, so capping it would truncate the very thing the
+    agent ran to save context.
   * FAIL-OPEN — ANY error → emit nothing → the original output is shown unchanged. A truncation
     hook must never be able to break a Bash call.
   * Rewrites ONLY when the output actually EXCEEDS the cap; short output passes through with zero
@@ -29,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -94,6 +99,50 @@ def _cap_chars() -> int:
         return _DEFAULT_CAP
 
 
+# Token-saving tools already emit COMPRESSED output — tldr extracts only the relevant lines,
+# distill summarizes a stream, lean-ctx compresses shell output — so capping THEM would truncate
+# legitimately-minimal output and defeat the very tool the agent reached for to save context. A
+# Bash command that RUNS or PIPES INTO one of these bypasses the cap entirely. The set is
+# extensible via CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ALLOWLIST (comma-separated extra names).
+_DEFAULT_ALLOWLIST = ("tldr", "distill", "lean-ctx")
+# Split a command line into pipeline segments so we can inspect the command in EACH position
+# (a distill after a `|`, a tldr at the start): `||`/`&&` before the single-char `| ; newline`.
+_SEGMENT_SEP = re.compile(r"\|\||&&|[|;\n]")
+_ENV_ASSIGN = re.compile(r"^\w+=")  # a leading VAR=value shell assignment to skip over
+# Command wrappers to look THROUGH to the real command they run (`sudo tldr …`, `env X=1 distill`).
+_WRAPPER_CMDS = frozenset({"sudo", "env", "command", "time", "nice", "builtin", "exec", "stdbuf"})
+
+
+def _allowlist() -> frozenset[str]:
+    names = set(_DEFAULT_ALLOWLIST)
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_BASH_OUTPUT_CAP_ALLOWLIST")
+    if raw and raw.strip():
+        names |= {n.strip() for n in raw.split(",") if n.strip()}
+    return frozenset(names)
+
+
+def _first_command_token(segment: str) -> str | None:
+    """The command name of one pipeline segment, skipping ``VAR=val`` assignments and wrapper
+    prefixes (``sudo``/``env``/…) and stripping any leading path (``/usr/bin/tldr`` → ``tldr``)."""
+    for tok in segment.strip().split():
+        if _ENV_ASSIGN.match(tok) or tok in _WRAPPER_CMDS:
+            continue
+        return tok.rsplit("/", 1)[-1]
+    return None
+
+
+def _command_bypasses_cap(command: str, allowlist: frozenset[str]) -> bool:
+    """True iff ANY pipeline segment's command is an allowlisted token-saving tool — in which
+    case the output is already compressed and must pass through the cap untouched."""
+    if not command:
+        return False
+    for segment in _SEGMENT_SEP.split(command):
+        token = _first_command_token(segment)
+        if token is not None and token in allowlist:
+            return True
+    return False
+
+
 def _extract_output(tool_response: object) -> str:
     """Best-effort visible text of a Bash ``tool_response`` — a dict with stdout/stderr, a plain
     string, or a list of content blocks."""
@@ -130,6 +179,15 @@ def main() -> int:
         return 0
     cap = _cap_chars()
     if cap <= 0:
+        return 0
+    # Never cap a token-saving tool's already-compressed output (tldr / distill / lean-ctx).
+    tool_input = data.get("tool_input")
+    command = ""
+    if isinstance(tool_input, dict):
+        cmd = tool_input.get("command")
+        if isinstance(cmd, str):
+            command = cmd
+    if _command_bypasses_cap(command, _allowlist()):
         return 0
     text = _extract_output(data.get("tool_response"))
     if not text or len(text) <= cap:
