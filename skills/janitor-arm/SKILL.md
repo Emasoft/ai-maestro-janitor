@@ -122,7 +122,10 @@ they can no longer auto-approve a pending action or set the session title. The
 heartbeat was verified UNAFFECTED on CC 2.1.191 — a heartbeat fire starts a fresh
 turn whose tools are policy-approved; it never relied on the scheduled delivery
 auto-approving a *pending* prompt. Recorded so the next CC-version compatibility
-audit has a baseline (TRDD-6F7F7D60).
+audit has a baseline (TRDD-6F7F7D60). CC 2.1.198 made subagents run in the
+background by DEFAULT, so the `run_in_background: true` on the
+`[janitor-memory-*]` marker's agent spawn is now REDUNDANT but harmless — kept
+for clarity/explicitness.
 
 ## Error Handling
 

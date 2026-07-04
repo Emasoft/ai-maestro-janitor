@@ -16,6 +16,15 @@ recovery injection in separate layers. Keeping the decision pure is what makes
 "never poke a healthy session" a TESTED property rather than a hope — injecting
 keystrokes into a working session would corrupt real work, so the false-positive
 cost is high and the gate must be conservative.
+
+CC-watchdog interaction (TRDD-FVO2KSSO): CC 2.1.196 ships a default-on stream
+idle-watchdog (~5 min; disable via CLAUDE_ENABLE_STREAM_WATCHDOG=0) that
+aborts+retries a stalled turn, and CC 2.1.199's CLAUDE_CODE_RETRY_WATCHDOG raises
+the default retry count to 300 and lifts the 15 cap on CLAUDE_CODE_MAX_RETRIES
+(the sanctioned unattended-session knob). The janitor's freeze-detection is thus
+a COMPLEMENT / second line of defense — it recovers a HARD freeze (dead process,
+corrupted config) that CC's own turn-level watchdog cannot — not the sole
+recovery path.
 """
 
 from __future__ import annotations

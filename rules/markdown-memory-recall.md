@@ -314,7 +314,10 @@ is an **unorganized memory BUFFER that grows on its own** — a first-class, coe
 NOT a stub to retire:
 
 - The janitor **never stubs it, never trims it, never maintains it as an index.** The harness
-  owns its content; the janitor only READS it as a harvest source.
+  owns its content; the janitor only READS it as a harvest source. (CC 2.1.186's native
+  reminder to "compact `MEMORY.md` when nearing the size limit" targets this harness-owned
+  buffer — expected harness behavior, ORTHOGONAL to the janitor's memgrep-indexed wiki; the
+  janitor neither triggers nor suppresses it.)
 - A **harvest cron** (`/janitor-memory-harvest`; the `[janitor-memory-harvest]` heartbeat
   marker) continuously finds **newly-created** buffer memories and **MIRRORS** them into the
   curated WIKI in metadata-rich form (the editorial model below) — additively, **incrementally**
