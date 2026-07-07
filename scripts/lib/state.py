@@ -675,6 +675,13 @@ def log_line(name: str, message: str) -> None:
         line = f"[{ts}] [s:{sid[:8]}] {message}\n"
     else:
         line = f"[{ts}] {message}\n"
+    # S4 (TRDD-7IUTRX29): rotation is STRUCTURAL, not conventional. 10 of the 40
+    # log_line writers (hooks especially — stop-failure.log had grown unbounded)
+    # never called rotate_log_if_big; folding the amortised check into the append
+    # itself bounds every present AND future writer by construction. One stat()
+    # per line, a rename only past the cap — the explicit end-of-run rotate calls
+    # remain harmless (idempotent under the cap).
+    rotate_log_if_big(name)
     log_path = log_dir() / f"{name}.log"
     with log_path.open("a", encoding="utf-8") as f:
         f.write(line)

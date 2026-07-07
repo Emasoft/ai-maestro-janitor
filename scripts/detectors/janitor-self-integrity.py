@@ -242,6 +242,10 @@ def _record_fire(verdict: str) -> None:
             "rule_id": _NAME,
             "verdict": verdict,
         })
+        # S4 (TRDD-7IUTRX29): an append-per-fire chain grows unbounded AND makes each
+        # full verify() walk longer every heartbeat. trim() is amortised (no-op under
+        # the byte cap) and keeps verify() green via the key-signed trim-anchor.
+        chain.trim()
     except OSError:
         # Append failure is non-fatal; the next fire will still chain
         # from the last successful entry. Logged via state.log_line so

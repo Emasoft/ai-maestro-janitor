@@ -65,3 +65,23 @@ def test_log_line_writes_to_override_not_project(tmp_path, monkeypatch):
         assert not (proj / ".janitor" / "logs" / "daemon.log").exists()
     finally:
         _clear()
+
+
+def test_log_line_rotates_structurally_when_oversized(tmp_path, monkeypatch):
+    """S4 (TRDD-7IUTRX29): rotation is folded into the APPEND itself — a writer that
+    never calls rotate_log_if_big (10 of 40 did not; stop-failure.log grew unbounded)
+    is still bounded: an oversized log rolls to .log.1 before the new line lands."""
+    logs = tmp_path / "logs"
+    monkeypatch.setenv("JANITOR_LOG_DIR", str(logs))
+    _clear()
+    try:
+        logs.mkdir(parents=True)
+        big = logs / "some-hook.log"
+        big.write_text("x" * 1_100_000, encoding="utf-8")  # already past the 1 MiB cap
+        state.log_line("some-hook", "first line after rotation")
+        rolled = logs / "some-hook.log.1"
+        assert rolled.is_file() and rolled.stat().st_size >= 1_100_000
+        fresh = big.read_text(encoding="utf-8")
+        assert "first line after rotation" in fresh and len(fresh) < 1000
+    finally:
+        _clear()

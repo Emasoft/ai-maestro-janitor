@@ -120,6 +120,16 @@ that skips if the prior worker is alive; per-detector cadence + seen-file dedupe
 - *supply-chain/security:* mcp-rugpull, remote-credentials, supply-chain-fingerprints, typosquat-watcher, provenance-audit, repo-trust-score, package-manager-policy, workflow-security, historical-cache-scan, binary-magic-scanner, ai-context-poisoning, subagent-report, janitor-self-integrity.
 - *updates (some daemon-delegating shims):* marketplace-refresh, plugin-updates, local-plugins-update, project-plugins-update, **user-plugins-update (shim → daemon)**, version-update (shim → daemon).
 
+**Boundedness invariants (S3+S4, TRDD-7IUTRX29):** a self-heal that can run every
+tick MUST dedupe/back-off on an unchanged input (content-hash convergence like
+`verify_or_restage`, cadence stamps, cooldown gates like `fleet_recovery.gate` — all
+audited bounded 2026-07-07); every append site MUST rotate or trim — `state.log_line`
+rotates STRUCTURALLY (amortized inside the append, so hooks/detectors that never call
+`rotate_log_if_big` are still bounded), `AuditChain.trim()` caps the self-integrity
+chain via a key-signed trim-anchor that keeps genesis-anchored `verify()` green,
+`trim_recovery_audit` (documented rollup trade-off) + `token_meter.trim_log` +
+reports-purge's seen-file caps cover the rest.
+
 **Pattern libraries (`scripts/lib/*_patterns.py`, ~200)** — the security knowledge
 base. One module per attack class, uniform shape: exposes regex/rule definitions +
 metadata consumed by the scanner detectors. Naming: `<domain>_patterns.py` (e.g.

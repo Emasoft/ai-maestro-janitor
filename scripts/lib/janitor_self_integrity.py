@@ -306,6 +306,9 @@ def verify_drift_line(
 # knows the salt (it's right here in the source) still can't compute
 # the first prev_hmac without the key.
 _CHAIN_GENESIS_LABEL = b"JANITOR_CHAIN_GENESIS"
+# The reserved `type` of the key-signed head entry a `trim()` writes (S4, TRDD-7IUTRX29).
+# verify() honors it ONLY at index 0; see AuditChain.trim for the full design note.
+_TRIM_ANCHOR_TYPE = "trim-anchor"
 
 
 def _canonical_payload(entry: dict) -> str:
@@ -426,6 +429,57 @@ class AuditChain:
                                 ensure_ascii=False) + "\n")
         return entry
 
+    def trim(self, *, keep_lines: int = 2000, max_bytes: int = 2 * 1024 * 1024) -> bool:
+        """Cap the chain WITHOUT sacrificing genesis-anchored verification (S4,
+        TRDD-7IUTRX29).
+
+        Naive tail-keep (what a plain log rotation does) breaks `verify()` at the new
+        first line — its `prev_hmac` points at a dropped entry. This trim instead writes
+        a KEY-SIGNED **trim-anchor** as the new head: `prev_hmac` = genesis (so the chain
+        still starts at genesis), and `resumes_from` = the kept tail's expected
+        predecessor hmac. `verify()` honors an anchor ONLY at index 0 — anywhere else its
+        genesis `prev_hmac` fails the ordinary chain check, so an attacker cannot use one
+        to splice out arbitrary middle entries; forging one at the head still requires
+        the key. Prior anchors are dropped on re-trim (superseded by the new head).
+
+        Amortised-cheap: no-op below `max_bytes`. Fail-open on I/O errors (an oversized
+        chain is better than a crashed heartbeat). Returns True iff a rewrite happened."""
+        try:
+            if keep_lines <= 0 or not self._log.is_file() or self._log.stat().st_size <= max_bytes:
+                return False
+            lines = [ln for ln in self._log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        except OSError:
+            return False
+        real: list[tuple[str, dict]] = []
+        for raw in lines:
+            try:
+                obj = json.loads(raw)
+            except (ValueError, TypeError):
+                continue  # a malformed line can't anchor anything — drop it with the head
+            if isinstance(obj, dict) and obj.get("type") != _TRIM_ANCHOR_TYPE:
+                real.append((raw, obj))
+        kept = real[-keep_lines:]
+        if len(kept) == len(real) or not kept:
+            return False  # nothing would actually be dropped — leave the file alone
+        resumes_from = kept[0][1].get("prev_hmac")
+        if not isinstance(resumes_from, str) or not resumes_from:
+            return False  # can't anchor safely — better oversized than broken
+        anchor: dict = {
+            "type": _TRIM_ANCHOR_TYPE,
+            "dropped": len(real) - len(kept),
+            "resumes_from": resumes_from,
+            "prev_hmac": self._genesis_prev(),
+        }
+        anchor["hmac"] = self._entry_hmac(_canonical_payload(anchor))
+        try:
+            tmp = self._log.with_name(self._log.name + ".tmp")
+            body = json.dumps(anchor, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            tmp.write_text(body + "\n" + "\n".join(raw for raw, _ in kept) + "\n", encoding="utf-8")
+            os.replace(tmp, self._log)
+        except OSError:
+            return False
+        return True
+
     def verify(self) -> tuple[bool, int, str]:
         """Verify every entry in the chain, top to bottom.
 
@@ -433,6 +487,11 @@ class AuditChain:
         chain: (True, N, ""). On the first break: (False, broken_idx,
         reason). The break point is the *index* of the entry that
         failed, so the caller can surface "first break at entry N".
+
+        A key-signed trim-anchor is honored ONLY as entry 0 (see `trim`): after
+        verifying its hmac, the expected predecessor jumps to `resumes_from`. An
+        anchor anywhere else fails the ordinary `prev_hmac` check (its prev is
+        genesis) — mid-chain splicing stays detectable.
         """
         if not self._log.is_file():
             return (True, 0, "")
@@ -461,7 +520,13 @@ class AuditChain:
             recomputed = self._entry_hmac(canonical)
             if not hmac.compare_digest(actual_hmac, recomputed):
                 return (False, idx, "hmac mismatch")
-            expected_prev = actual_hmac
+            if idx == 0 and entry.get("type") == _TRIM_ANCHOR_TYPE:
+                resumes = entry.get("resumes_from")
+                if not isinstance(resumes, str) or not resumes:
+                    return (False, idx, "trim-anchor missing resumes_from")
+                expected_prev = resumes
+            else:
+                expected_prev = actual_hmac
             idx += 1
         return (True, idx, "")
 

@@ -262,6 +262,74 @@ def test_audit_chain_requires_key() -> None:
         AuditChain(Path("/tmp/x"), b"")
 
 
+# ---- trim with a key-signed anchor (S4, TRDD-7IUTRX29) -------------------------------
+
+
+def _grown_chain(tmp_path: Path, n: int = 40) -> "AuditChain":
+    k = load_or_create_key(data_dir=tmp_path)
+    chain = AuditChain(tmp_path / "chain.ndjson", k)
+    for i in range(n):
+        chain.append({"event": "detector.fire", "seq": i})
+    return chain
+
+
+def test_audit_chain_trim_keeps_verify_green(tmp_path: Path) -> None:
+    """THE S4 design requirement: after a trim, a genesis-anchored verify() still
+    passes — the key-signed trim-anchor bridges genesis to the kept tail."""
+    chain = _grown_chain(tmp_path, 40)
+    assert chain.trim(keep_lines=10, max_bytes=1) is True
+    ok, n, reason = chain.verify()
+    assert ok is True, reason
+    assert n == 11  # the anchor + the 10 kept entries
+
+
+def test_audit_chain_trim_is_noop_under_cap(tmp_path: Path) -> None:
+    """Amortised: below max_bytes nothing is rewritten (bounded cost per beat)."""
+    chain = _grown_chain(tmp_path, 5)
+    assert chain.trim(keep_lines=2, max_bytes=10 * 1024 * 1024) is False
+    ok, n, _ = chain.verify()
+    assert ok is True and n == 5
+
+
+def test_audit_chain_append_after_trim_continues_chain(tmp_path: Path) -> None:
+    """New entries after a trim chain onto the kept tail — the log stays live."""
+    chain = _grown_chain(tmp_path, 40)
+    assert chain.trim(keep_lines=10, max_bytes=1)
+    chain.append({"event": "detector.fire", "post": "trim"})
+    ok, n, reason = chain.verify()
+    assert ok is True, reason
+    assert n == 12
+
+
+def test_audit_chain_anchor_mid_chain_is_rejected(tmp_path: Path) -> None:
+    """An anchor is honored ONLY at index 0 — moved anywhere else, its genesis
+    prev_hmac breaks the ordinary chain check (no mid-chain splicing)."""
+    chain = _grown_chain(tmp_path, 40)
+    assert chain.trim(keep_lines=10, max_bytes=1)
+    log = tmp_path / "chain.ndjson"
+    lines = [ln for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    # Swap the anchor (line 0) one position down — a splice attempt.
+    lines[0], lines[1] = lines[1], lines[0]
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    ok, idx, reason = chain.verify()
+    assert ok is False and idx == 0 and "prev_hmac" in reason
+
+
+def test_audit_chain_retrim_drops_previous_anchor(tmp_path: Path) -> None:
+    """A second trim supersedes the first anchor — exactly ONE anchor at the head."""
+    chain = _grown_chain(tmp_path, 40)
+    assert chain.trim(keep_lines=20, max_bytes=1)
+    for i in range(10):
+        chain.append({"event": "detector.fire", "seq": 100 + i})
+    assert chain.trim(keep_lines=5, max_bytes=1)
+    log = tmp_path / "chain.ndjson"
+    anchors = [ln for ln in log.read_text(encoding="utf-8").splitlines() if "trim-anchor" in ln]
+    assert len(anchors) == 1
+    ok, n, reason = chain.verify()
+    assert ok is True, reason
+    assert n == 6  # new anchor + 5 kept
+
+
 # ---------- Section 4: manifest verifier ---------------------------------
 
 
