@@ -73,9 +73,21 @@ _GUARDED: dict[str, tuple[Path, dict[str, str]]] = {}
 
 # Files the live daemon legitimately churns while a suite runs — excluded from the S1b
 # guard so it detects TEST pollution, not daemon liveness. Everything else under the real
-# dirs (staged *.py closure, state.json, *.flag, quarantine/last-good json, memory pages)
-# stays guarded: a test mutating any of those fails the whole suite.
-_GUARD_EXCLUDE_SUFFIXES = (".ts", ".log", ".log.1", ".jsonl", ".ndjson", ".pid", ".lock", ".flock")
+# dirs (staged *.py closure, *.flag, quarantine/last-good json, memory pages) stays
+# guarded: a test mutating any of those fails the whole suite.
+_GUARD_EXCLUDE_SUFFIXES = (
+    ".ts", ".log", ".log.1", ".jsonl", ".ndjson", ".pid", ".lock", ".flock",
+    # code-review 2026-07-07: integrity .bak mirrors are rewritten beside every primary
+    # write; sqlite sidecars (.memgrep index, Chrome profile DBs) churn on any live
+    # daemon memory/rotator activity — all daemon-legit, none test-pollution-specific.
+    ".bak", ".pyc", ".db", ".db-wal", ".db-shm", ".sqlite", ".sqlite3",
+)
+# Whole subtrees owned by the LIVE daemon's runtime (rewritten on its 60s oauth tick /
+# harvest passes) — guarding them would fail the suite whenever the daemon breathes
+# mid-run, and the rotator's Chrome profiles subtree alone holds ~4k churning files.
+# Rotator test pollution is separately fenced by _isolate_rotator_paths + the
+# real_state-marked keychain tests, so excluding these keeps the guard's signal pure.
+_GUARD_EXCLUDE_PARTS = ("oauth-rotator", ".memgrep")
 
 
 def _manifest(root: Path) -> dict[str, str]:
@@ -85,6 +97,8 @@ def _manifest(root: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for p in sorted(root.rglob("*")):
         if not p.is_file() or "__pycache__" in p.parts:
+            continue
+        if any(part in _GUARD_EXCLUDE_PARTS for part in p.parts):
             continue
         if p.name.endswith(_GUARD_EXCLUDE_SUFFIXES):
             continue

@@ -108,17 +108,22 @@ def test_s1b_manifest_detects_added_changed_and_removed_files(tmp_path: Path) ->
     (root / "state.json").write_text("{}", encoding="utf-8")
     (root / "gone.flag").write_text("x", encoding="utf-8")
     (root / "daemon.heartbeat.ts").write_text("1", encoding="utf-8")  # excluded churn
+    rotator = root / "oauth-rotator"
+    rotator.mkdir()
+    (rotator / "state.json").write_text("{}", encoding="utf-8")  # excluded subtree
     before = _manifest(root)
 
     (root / "state.json").write_text('{"mutated": true}', encoding="utf-8")  # changed
     (root / "gone.flag").unlink()  # removed
     (root / "new-file.json").write_text("{}", encoding="utf-8")  # added
     (root / "daemon.heartbeat.ts").write_text("2", encoding="utf-8")  # churn — ignored
+    (rotator / "state.json").write_text('{"tick": 1}', encoding="utf-8")  # daemon-owned — ignored
     after = _manifest(root)
 
     changed = {rel for rel in set(before) | set(after) if before.get(rel) != after.get(rel)}
     assert changed == {"state.json", "gone.flag", "new-file.json"}
     assert "daemon.heartbeat.ts" not in before and "daemon.heartbeat.ts" not in after
+    assert not any("oauth-rotator" in rel for rel in set(before) | set(after))
 
 
 def test_no_new_module_level_frozen_home_paths() -> None:
