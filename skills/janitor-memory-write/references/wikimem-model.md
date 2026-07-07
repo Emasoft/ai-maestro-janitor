@@ -189,6 +189,22 @@ a governing rule, link up to it instead.>
 [^N]: [ocd:… lmd:…] <a superseded memory, demoted here with its WHY>
 ```
 
+### Canonical key placement (issue #68 P4 — where ocd/lmd/tier live)
+
+- **`ocd` / `lmd` are TOP-LEVEL keys** (the issue #56 decision) — exactly as the
+  template above shows. The repair serializer normalizes nested variants up to
+  top level (`ced38b4`).
+- **`node_type` / `type` / `tier` live under `metadata:`** in the write-skill
+  shape; top-level spellings are EQUALLY accepted — `parse_frontmatter()` hoists
+  every `metadata:` sub-key to top level and memgrep reads both.
+- Because both placements are legal in the wild, **never test key presence with a
+  bare `grep '^ocd:'`** — that produced a real false positive ("pages missing
+  ocd/lmd" that actually had them nested, issue #68 P4). Use
+  `memory_edit_verify.parse_frontmatter()` or `memgrep --where 'fm.<key> …'`
+  (`fm.KEY` matches the key anywhere in the frontmatter).
+- `tier` may be ABSENT entirely — readers treat absence as `component`
+  (the verify gate agrees since issue #68 P3).
+
 A `component` uses `## Governed by` (+ optional `## See also`); a `hub`/`aspect`
 uses `## Applies to` (+ optional `## See also`). The point is the same: a page is
 its (lean) memories PLUS its typed context edges. A page with memories but no
