@@ -204,6 +204,50 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             self.assertEqual(out.strip(), "")
             self.assertFalse((memdir / PROPOSAL_NAME).exists())
 
+    def test_wiki_only_scope_is_analyzed_and_shape_checked(self):
+        """F20 (wikimem audit 2026-07-07): a scope whose notes ALL live under
+        `wiki/` (exactly what the coexistence harvest produces) must be analyzed
+        — the old top-level-only gate skipped it entirely, and the shape pass
+        never saw curated wiki pages. The finding is labeled by the rel path."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            wiki = memdir / "wiki"
+            wiki.mkdir()
+            # Malformed curated page: NO mandatory `## Notes and lessons learned`.
+            (wiki / "badpage.md").write_text(
+                "---\nname: badpage\ndescription: \"a curated page\"\n"
+                "ocd: 2026-06-09\nlmd: 2026-06-09\n"
+                "metadata:\n  node_type: memory\n  tier: component\n---\nA fact.\n"
+            )
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            self.assertIn("wiki/badpage.md", proposal)
+
+    def test_wiki_conflict_pair_reads_real_bodies(self):
+        """F20: the contradiction scan must read a NESTED note's real body — the
+        old basename keying made `_read_note_texts` read `memdir/<basename>`
+        (nonexistent for `wiki/` pages) and silently compared empty bodies, so
+        a wiki-page contradiction was invisible."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            wiki = memdir / "wiki"
+            wiki.mkdir()
+            (wiki / "retry-cap-a.md").write_text(
+                _note("retry-cap-a", "widget retry cap value", ["retry"],
+                      body="The widget retries 3 times then fails."))
+            (wiki / "retry-cap-b.md").write_text(
+                _note("retry-cap-b", "widget retry cap value", ["retry"],
+                      body="The widget retries 5 times then fails."))
+            out = _run(home, project)
+            self.assertIn("[memory-librarian]", out)
+            self.assertIn("conflict", out)
+            proposal = (memdir / PROPOSAL_NAME).read_text()
+            self.assertIn("wiki/retry-cap-a.md", proposal)
+            self.assertIn("wiki/retry-cap-b.md", proposal)
+
     def test_proposal_file_not_treated_as_a_note(self):
         """A pre-existing proposal file is never itself clustered/flagged."""
         with TemporaryDirectory() as h, TemporaryDirectory() as p:

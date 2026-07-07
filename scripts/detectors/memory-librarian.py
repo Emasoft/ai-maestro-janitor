@@ -64,8 +64,8 @@ import state  # noqa: E402
 # The librarian's own output file — written into the memory dir but it is NOT a
 # memory note. Never scanned, never clustered, never mutated-as-a-note. (The
 # non-note exclusion itself — this name, the index files, the whole `-proposed.md`
-# detector-output family, and the PRIVATE user-mem store — now lives in the
-# shared SSOT `memory_scopes.is_note_file`; see `_is_note_basename` below.)
+# detector-output family, and the PRIVATE user-mem store — lives in the shared
+# SSOT `memory_scopes.is_note_file`, which every scan/parse site calls directly.)
 PROPOSAL_NAME = "memory-reorg-proposed.md"
 
 # Bounds so a huge corpus can never blow up the heartbeat. We cap the number of
@@ -403,16 +403,22 @@ def _basename(path_token: str) -> str:
     return Path(path_token.strip()).name
 
 
-def _is_note_basename(name: str) -> bool:
-    """True iff a basename is a real memory note — via the shared SSOT.
+def _rel_token(path_token: str, memdir: Path) -> str:
+    """Normalise a memgrep-emitted path token to a memdir-RELATIVE posix path.
 
-    Delegates to `memory_scopes.is_note_file`, which excludes the index files
-    (MEMORY.md / memory-index.md), the whole `*-proposed.md` detector-output
-    family (issue #54), and the PRIVATE user-mem store. Callers pass a bare
-    basename here (the user-mem path-component check is a no-op on a basename and
-    is enforced separately where full paths are available — see `_parse_index`).
-    """
-    return memory_scopes.is_note_file(name)
+    F20 (wikimem audit 2026-07-07): keying notes/links on BASENAMES collided the
+    moment pages lived in subdirectories — and the coexistence harvest mirrors a
+    buffer note into `wiki/<same-name>.md`, so a basename key made the mirror and
+    its buffer twin the SAME entry (the contradiction scan then read the wrong —
+    or an empty — body via `memdir / basename`). The rel path is unique per note
+    and `memdir / rel` reads the right file. Handles both relative (`./wiki/x.md`)
+    and absolute tokens (memgrep echoes the root it was handed, which the
+    librarian passes absolute)."""
+    p = Path(path_token.strip())
+    try:
+        return p.relative_to(memdir).as_posix()
+    except ValueError:
+        return p.as_posix()
 
 
 def _slug_words(note_basename: str) -> str:
@@ -428,8 +434,8 @@ def _slug_words(note_basename: str) -> str:
     return stem.replace("_", " ").replace("-", " ")
 
 
-def _parse_index(stdout: str) -> dict[str, NoteMeta]:
-    """Parse `memgrep index --markdown` → {note-basename: NoteMeta(tags, tokens)}.
+def _parse_index(stdout: str, memdir: Path) -> dict[str, NoteMeta]:
+    """Parse `memgrep index --markdown` → {memdir-relative path: NoteMeta(tags, tokens)}.
 
     Skips non-note files (proposal / loaded index / generated index) and any
     note whose path lands inside the user-mem subdir (defence-in-depth — we also
@@ -437,6 +443,11 @@ def _parse_index(stdout: str) -> dict[str, NoteMeta]:
     otherwise leak it). `tokens` are the significant words of the note's
     filename stem + `summary:` (description), so a tagless note still clusters
     by topic-word overlap — the common real-world case.
+
+    F20: keyed on the memdir-RELATIVE path (`_rel_token`), never the basename —
+    a nested `wiki/foo.md` used to flatten to `foo.md`, so `_read_note_texts`
+    read the WRONG path (empty body for every wiki note in the contradiction
+    scan) and a harvest mirror collided with its same-named buffer twin.
     """
     notes: dict[str, NoteMeta] = {}
     current: str | None = None
@@ -450,11 +461,10 @@ def _parse_index(stdout: str) -> dict[str, NoteMeta]:
             if not memory_scopes.is_note_file(token.strip()):
                 current = None
                 continue
-            name = _basename(token)
-            current = name
+            current = _rel_token(token, memdir)
             # Seed tokens from the filename stem immediately (always available);
             # the summary: line (if any) augments them below.
-            notes.setdefault(current, NoteMeta(tokens=_significant_tokens(_slug_words(name))))
+            notes.setdefault(current, NoteMeta(tokens=_significant_tokens(_slug_words(_basename(token)))))
             if len(notes) >= _MAX_NOTES:
                 break
             continue
@@ -476,28 +486,30 @@ def _parse_index(stdout: str) -> dict[str, NoteMeta]:
     return notes
 
 
-def _parse_links(stdout: str) -> set[frozenset[str]]:
-    """Parse `memgrep links` → set of undirected linked basename-pairs.
+def _parse_links(stdout: str, memdir: Path) -> set[frozenset[str]]:
+    """Parse `memgrep links` → set of undirected linked rel-path pairs (F20).
 
     Each `A -> B` line yields the unordered pair {A, B}. A pair is considered
     "already cross-linked" if EITHER direction appears (a single tangential
     link to the canonical page is enough to satisfy the wiki invariant).
+    Keyed on memdir-relative paths so the pairs match `_parse_index`'s keys
+    for nested (`wiki/`) notes too.
     """
     pairs: set[frozenset[str]] = set()
     for raw in stdout.splitlines():
         m = _LINK_RE.match(raw)
         if not m:
             continue
-        a = _basename(m.group("from"))
-        b = _basename(m.group("to"))
+        a = _rel_token(m.group("from"), memdir)
+        b = _rel_token(m.group("to"), memdir)
         if a == b:
             continue
         pairs.add(frozenset((a, b)))
     return pairs
 
 
-def _parse_links_directed(stdout: str) -> set[tuple[str, str]]:
-    """Parse `memgrep links` → DIRECTED (from, to) basename pairs, notes only.
+def _parse_links_directed(stdout: str, memdir: Path) -> set[tuple[str, str]]:
+    """Parse `memgrep links` → DIRECTED (from, to) rel-path pairs, notes only.
 
     The undirected `_parse_links` deliberately collapses direction (a single
     tangential link satisfies the cross-link invariant for clustering). The LINK
@@ -511,9 +523,9 @@ def _parse_links_directed(stdout: str) -> set[tuple[str, str]]:
         m = _LINK_RE.match(raw)
         if not m:
             continue
-        a = _basename(m.group("from"))
-        b = _basename(m.group("to"))
-        if a == b or not _is_note_basename(a) or not _is_note_basename(b):
+        a = _rel_token(m.group("from"), memdir)
+        b = _rel_token(m.group("to"), memdir)
+        if a == b or not memory_scopes.is_note_file(a) or not memory_scopes.is_note_file(b):
             continue
         pairs.add((a, b))
     return pairs
@@ -872,29 +884,31 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
 def _collect_shape_findings(memdir: Path) -> list[str]:
     """Run `_scan_page_shape` over every NOTE in one scope root → issue lines.
 
-    Notes only (the non-note files — MEMORY.md, the proposal, the generated
-    index — are excluded by `_is_note_basename`, and `user-mem/` is never
-    entered because we iterate the top level only, matching the rest of the
-    librarian). Sorted by note name for a stable proposal/fingerprint. Capped at
+    Notes only, RECURSIVELY (F20): the scan routes through the SSOT
+    `memory_scopes.iter_note_files`, which excludes the non-note files
+    (MEMORY.md, the proposals, the generated index) and never enters
+    `user-mem/` / `.memgrep/` / `.maint-staging/`. Findings are labeled by the
+    memdir-relative path so nested `wiki/` pages are unambiguous. Sorted scan
+    order keeps the proposal/fingerprint stable. Capped at
     `_MAX_SHAPE_FINDINGS`. A note we cannot read is skipped (never crashes).
     """
     findings: list[str] = []
-    try:
-        entries = sorted(p for p in memdir.iterdir() if p.is_file() and _is_note_basename(p.name))
-    except OSError:
-        return []
-    for path in entries:
+    # F20 (wikimem audit 2026-07-07): recurse via the SSOT scan — the top-level
+    # iterdir left every curated `wiki/` page (exactly what the coexistence
+    # harvest produces) shape-unchecked forever. iter_note_files already excludes
+    # user-mem/.memgrep/.maint-staging and the non-note files.
+    for path in memory_scopes.iter_note_files(memdir):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        findings.extend(_scan_page_shape(path.name, text))
+        findings.extend(_scan_page_shape(path.relative_to(memdir).as_posix(), text))
         if len(findings) >= _MAX_SHAPE_FINDINGS:
             return findings[:_MAX_SHAPE_FINDINGS]
     return findings
 
 
-def _parse_broken_links(stdout: str) -> list[str]:
+def _parse_broken_links(stdout: str, memdir: Path) -> list[str]:
     """Parse `memgrep links --broken` → sorted findings of which page dangles.
 
     Each line is `<from>:LINE -> <slug>  [BROKEN]` (verified live — the target
@@ -908,14 +922,14 @@ def _parse_broken_links(stdout: str) -> list[str]:
         m = _BROKEN_LINK_RE.match(raw)
         if not m:
             continue
-        src = _basename(m.group("from"))
-        if not _is_note_basename(src):
+        src = _rel_token(m.group("from"), memdir)  # F20: rel path, not basename
+        if not memory_scopes.is_note_file(src):
             continue
         out.add(f"{src}: broken [[{m.group('slug')}]] link (target file missing)")
     return sorted(out)[:_MAX_LINK_FINDINGS]
 
 
-def _parse_orphans(stdout: str) -> list[str]:
+def _parse_orphans(stdout: str, memdir: Path) -> list[str]:
     """Parse `memgrep links --orphans` → sorted findings of notes with no inbound links.
 
     Each line is a bare `.md` path. An orphan page is one nothing else links to —
@@ -935,8 +949,8 @@ def _parse_orphans(stdout: str) -> list[str]:
         m = _ORPHAN_RE.match(raw)
         if not m:
             continue
-        name = _basename(m.group("path"))
-        if not _is_note_basename(name):
+        name = _rel_token(m.group("path"), memdir)  # F20: rel path, not basename
+        if not memory_scopes.is_note_file(name):
             continue
         out.add(f"{name}: orphan page (no inbound [[links]]) (advisory)")
     return sorted(out)[:_MAX_LINK_FINDINGS]
@@ -976,12 +990,12 @@ def _collect_link_findings(
     detector never crashes the heartbeat just because one query failed).
     """
     broken_out = _run_memgrep(binary, ["links", "--broken"], memdir)
-    broken = _parse_broken_links(broken_out) if broken_out else []
+    broken = _parse_broken_links(broken_out, memdir) if broken_out else []
 
     orphans: list[str] = []
     if linked:
         orphans_out = _run_memgrep(binary, ["links", "--orphans"], memdir)
-        orphans = _parse_orphans(orphans_out) if orphans_out else []
+        orphans = _parse_orphans(orphans_out, memdir) if orphans_out else []
 
     index_sync = _collect_memory_sync_findings(memdir)
     return broken, orphans, index_sync
@@ -1015,15 +1029,10 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     returns no longer short-circuit the shape pass).
     """
     report = ScopeReport(scope="")  # scope label is set by the caller
-    has_note = False
-    try:
-        for entry in memdir.iterdir():
-            if entry.is_file() and _is_note_basename(entry.name):
-                has_note = True
-                break
-    except OSError:
-        return report
-    if not has_note:
+    # F20 (wikimem audit 2026-07-07): the has-note gate must RECURSE (SSOT scan)
+    # — a scope whose notes all live under `wiki/` (exactly what the coexistence
+    # harvest produces) was skipped entirely by the old top-level iterdir.
+    if not memory_scopes.iter_note_files(memdir):
         return report
 
     # Refresh the persistent SQLite index FIRST (rank 8) so the corpus index
@@ -1043,7 +1052,7 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     # and the conflict-candidate exclusion (a cross-linked pair is not a
     # conflict). Computed once here so we don't run `links` twice.
     links_out = _run_memgrep(binary, ["links"], memdir)
-    linked = _parse_links(links_out) if links_out else set()
+    linked = _parse_links(links_out, memdir) if links_out else set()
 
     # Link-graph integrity + MEMORY.md sync run per-root, independent of
     # clustering (rank 4) — a broken link or a stale index line must surface even
@@ -1055,10 +1064,10 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     # The LINK LAW audit (rank 4, TRDD-bc16d602): every note→note link must have
     # its reciprocal. Reuses the SAME `links` stdout — no extra memgrep call.
     if links_out:
-        report.one_sided = _collect_one_sided_findings(_parse_links_directed(links_out))
+        report.one_sided = _collect_one_sided_findings(_parse_links_directed(links_out, memdir))
 
     index_out = _run_memgrep(binary, ["index", "--markdown"], memdir)
-    notes = _parse_index(index_out) if index_out else {}
+    notes = _parse_index(index_out, memdir) if index_out else {}
 
     if len(notes) >= 2:
         clusters = _build_clusters(notes)
