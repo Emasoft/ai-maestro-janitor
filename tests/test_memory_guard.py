@@ -222,3 +222,60 @@ def test_memory_guard_kills_selected_runaway_under_pressure(
     monkeypatch.setattr(daemon.mg, "kill_process", lambda pid: killed.append(pid) or True)
     daemon.task_memory_guard()
     assert killed == [4242], "exactly the janitor-owned runaway, never the claude session"
+
+
+# ---- S6 refused-runaway alert (TRDD-1T53EKTN) --------------------------------------
+
+_4GIB_KB = 4 * 1024 * 1024
+
+
+def test_select_refused_alert_picks_top_unkillable_hog() -> None:
+    """The largest-RSS process the guard REFUSES to kill (system daemon) is the alert —
+    the exact 39-GB-fseventsd shape the guard used to stay silent about."""
+    fseventsd = _row(101, "/System/Library/.../fseventsd", rss=6 * 1024 * 1024)
+    session = _row(102, "claude --resume", rss=5 * 1024 * 1024)
+    small = _row(103, "/usr/sbin/somethingd", rss=100_000)
+    hog = mg.select_refused_alert(
+        [fseventsd, session, small], protected_pids=frozenset(), min_rss_kb=_4GIB_KB
+    )
+    assert hog is not None and hog.pid == 101
+
+
+def test_select_refused_alert_silent_under_threshold() -> None:
+    """A refused process below the RSS bar is normal life, not an alert."""
+    modest = _row(104, "/usr/libexec/somed", rss=3 * 1024 * 1024)  # 3 GiB < 4 GiB bar
+    assert mg.select_refused_alert([modest], protected_pids=frozenset(),
+                                   min_rss_kb=_4GIB_KB) is None
+
+
+def test_select_refused_alert_ignores_killable_janitor_runaway() -> None:
+    """A janitor-owned runaway is the KILL path's business — never the alert path's."""
+    killable = _row(105, "claude plugin marketplace update", rss=8 * 1024 * 1024)
+    assert mg.select_refused_alert([killable], protected_pids=frozenset(),
+                                   min_rss_kb=_4GIB_KB) is None
+
+
+def test_daemon_alerts_refused_hog_once_with_disk_metric(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under pressure with only an UNKILLABLE hog: no kill, ONE emit_once-deduped alert
+    carrying the S7 dual disk label; a second beat does not re-alert the same program."""
+    daemon = _import_daemon(tmp_path, monkeypatch)
+    monkeypatch.setattr(daemon.mg, "free_memory_mb", lambda: 100)  # pressure
+    hog = mg.ProcRow(pid=901, ppid=1, rss_kb=39 * 1024 * 1024, etime_s=999_999,
+                     command="/System/Library/.../fseventsd")
+    monkeypatch.setattr(daemon.mg, "snapshot_processes", lambda p: [hog])
+    killed: list[int] = []
+    monkeypatch.setattr(daemon.mg, "kill_process", lambda pid: killed.append(pid) or True)
+    # No live diskutil subprocess in tests — pin the S7 label.
+    monkeypatch.setattr(
+        daemon.dp, "disk_pressure",
+        lambda path="/": daemon.dp.DiskPressure(writable_gb=13.9, purgeable_gb=None),
+    )
+    daemon.task_memory_guard()
+    assert killed == [], "the never-kill invariant must hold for the hog"
+    seen = tmp_path / "gs" / "memory-guard-alert-seen.txt"
+    assert seen.is_file(), "the alert must have fired (emit_once seen-file created)"
+    first = seen.read_text(encoding="utf-8")
+    daemon.task_memory_guard()  # same hog next beat → deduped, no new seen entry
+    assert seen.read_text(encoding="utf-8") == first

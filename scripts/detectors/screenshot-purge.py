@@ -55,6 +55,7 @@ from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import disk_pressure as dp  # noqa: E402  # S7 dual disk metric (TRDD-1T53EKTN)
 import state  # noqa: E402
 
 # Image extensions written by browser-UI test runners. Lowercase comparison.
@@ -233,10 +234,13 @@ def main() -> int:
             )
         else:
             disk_note = "free-space probe failed"
+        # S7 (TRDD-1T53EKTN): also report the DUAL metric — writable-only numbers
+        # contradict the OS UI (writable+purgeable) and mislead the human reading this.
         print(
             f"[screenshot-purge] LOW DISK: removed {lowdisk_removed_count} "
             f"oldest screenshot(s) to relieve pressure "
-            f"(freed {_fmt_size(lowdisk_removed_bytes)}, {disk_note})."
+            f"(freed {_fmt_size(lowdisk_removed_bytes)}, {disk_note}; "
+            f"{dp.disk_pressure(screenshots_dir).label})."
         )
 
     state.rotate_log_if_big("screenshot-purge")

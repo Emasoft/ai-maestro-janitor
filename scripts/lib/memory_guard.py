@@ -176,6 +176,30 @@ def is_tier1_killable(row: ProcRow, *, protected_pids: frozenset[int],
     return True
 
 
+# S6 (TRDD-1T53EKTN): a process this large that the guard REFUSES to kill is exactly the
+# fseventsd-incident shape — a system runaway growing silently while the never-kill
+# invariant (rightly) holds. 4 GiB RSS is far above any healthy daemon on this fleet.
+DEFAULT_ALERT_RSS_KB = 4 * 1024 * 1024
+
+
+def select_refused_alert(rows: list[ProcRow], *, protected_pids: frozenset[int],
+                         min_etime_s: int = DEFAULT_RUNAWAY_ETIME_S,
+                         min_rss_kb: int = DEFAULT_ALERT_RSS_KB) -> Optional[ProcRow]:
+    """S6 alert selector: the single largest-RSS process AT/ABOVE `min_rss_kb` that
+    `is_tier1_killable` REFUSES (system daemon, user session, too-young, protected).
+
+    Alert-only — the never-kill invariant is untouched; the caller LOGS the hog so a
+    human learns about the 39-GB-fseventsd class instead of silence. Returns None when
+    no refused process crosses the threshold (the healthy case)."""
+    hogs = [r for r in rows
+            if r.rss_kb >= min_rss_kb
+            and not is_tier1_killable(r, protected_pids=protected_pids,
+                                      min_etime_s=min_etime_s)]
+    if not hogs:
+        return None
+    return max(hogs, key=lambda r: r.rss_kb)
+
+
 def select_victim(rows: list[ProcRow], *, protected_pids: frozenset[int],
                   min_etime_s: int = DEFAULT_RUNAWAY_ETIME_S) -> Optional[ProcRow]:
     """Pick the single largest-RSS Tier-1-killable row, or None.

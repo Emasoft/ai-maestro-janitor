@@ -63,6 +63,8 @@ sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix A)
 import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
+import dedupe  # noqa: E402  # emit_once — S6 refused-runaway alert dedupe (TRDD-1T53EKTN)
+import disk_pressure as dp  # noqa: E402  # S7 dual disk metric (TRDD-1T53EKTN)
 import fleet_inject  # noqa: E402  # A3 terminal-env recovery injector (TRDD-324223a6)
 import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_restart  # noqa: E402  # raw-command channel builder reused by fleet-stop (TRDD-ME8V2YJF)
@@ -613,6 +615,34 @@ def task_memory_guard() -> None:
             "runaways are killable) — standing down; snapshot kept at "
             f"{snapshot}",
         )
+        # S6 (TRDD-1T53EKTN): standing down must not mean SILENCE about a giant we
+        # rightly won't kill — the 39 GB fseventsd grew unnoticed exactly here. Alert
+        # (once per distinct hog, emit_once-deduped) with the S7 dual disk metric so a
+        # human can judge whether "low disk" is real or purgeable-covered.
+        alert_rss_kb = state.coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_MEMORY_GUARD_ALERT_RSS_KB"),
+            mg.DEFAULT_ALERT_RSS_KB,
+        )
+        if alert_rss_kb > 0:
+            hog = mg.select_refused_alert(
+                rows, protected_pids=protected, min_etime_s=min_age, min_rss_kb=alert_rss_kb
+            )
+            if hog is not None:
+                seen = gs.global_state_dir() / "memory-guard-alert-seen.txt"
+                # Key on the program, not the pid: the same runaway respawning under a
+                # new pid is the SAME problem and must not re-alert every beat.
+                key = f"{hog.command.split()[0] if hog.command else '?'}:{alert_rss_kb}"
+                msg = dedupe.emit_once(
+                    seen,
+                    key,
+                    "memory-guard ALERT: unkillable runaway "
+                    f"pid={hog.pid} rss={hog.rss_kb // 1024}MB age={hog.etime_s}s "
+                    f"cmd={hog.command!r} — the never-kill invariant holds (not "
+                    f"janitor-owned); a HUMAN must decide. Disk: {dp.disk_pressure().label}. "
+                    f"Free memory was {free_mb}MB; snapshot: {snapshot}",
+                )
+                if msg:
+                    state.log_line("daemon", msg)
         return
     killed = mg.kill_process(victim.pid)
     state.log_line(
