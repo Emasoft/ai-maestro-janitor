@@ -1,9 +1,11 @@
 ---
 trdd-id: 2U8AH82F
 title: Migrate daemon global state from unofficial ~/.claude/janitor-global-state to CLAUDE_PLUGIN_DATA
-column: todo
+column: complete
 created: 2026-07-04T04:46:15+0200
-updated: 2026-07-04T04:46:15+0200
+updated: 2026-07-07T18:23:04+0200
+implementation-commits: [ba58ebb, efaed0f]
+eht: [TRDD-ULEGRT01]
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
