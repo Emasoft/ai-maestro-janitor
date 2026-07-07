@@ -6,7 +6,8 @@ description: CONSOLIDATE (MERGE) executor — fuses two duplicate memory notes a
 # Janitor memory — CONSOLIDATE (MERGE executor)
 
 > **Execution context (TRDD-aebedbff):** the janitor dispatches this pass as a DEDICATED
-> background **opus** agent — you ARE that agent. Run the whole pass here in your own
+> background **Sonnet** agent (`janitor-memory-subconscious-agent` — Sonnet, not Opus, per
+> the USER cost decision 2026-06-30) — you ARE that agent. Run the whole pass here in your own
 > context and return only a one-line result + the report path. A wikimem editorial pass is
 > never run inline in a main session (it must not burden CPV or any other session's context).
 
