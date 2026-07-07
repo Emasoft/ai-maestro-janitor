@@ -35,7 +35,7 @@ split / consolidate / conflict / repair / harvest.
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Editor enabled + roll forward.** Run `uv run scripts/memory_txn_cli.py resume "<scope_root>"`
+1. **Editor enabled + roll forward.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward any interrupted txn). If the editor is kill-switched or
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
 2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** The
@@ -95,11 +95,11 @@ body):
 ## EXECUTE through the transaction core
 
 ```bash
-uv run scripts/memory_txn_cli.py begin "<scope_root>" atomize "<page.md>"
+uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" begin "<scope_root>" atomize "<page.md>"
 #   → txn_id=<id>  staging=<abs dir>
 # Edit ONLY the staged copy of <page.md>: insert LEADING `^id [desc:…, keywords:…]` markers (own
 # lines) ABOVE each fact; bump lmd; change NOTHING else (no reword, no new prose, no deletes).
-uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op atomize
+uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" commit "<scope_root>" <txn_id> --op atomize
 #   → committed <id> (atomize): 1 write(s), 0 delete(s)
 #   verify_atomize proves: lessons preserved, every body FACT byte-identical, no frontmatter key
 #   dropped, ocd unchanged, lmd not regressed, ≥1 marker added, and the ONLY new lines are markers.

@@ -58,7 +58,7 @@ spelled out in the iron rules below.
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Editor enabled.** Run `uv run scripts/memory_txn_cli.py resume "<scope_root>"`
+1. **Editor enabled.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward an interrupted txn). If kill-switched /
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — stop.
 2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** A bare

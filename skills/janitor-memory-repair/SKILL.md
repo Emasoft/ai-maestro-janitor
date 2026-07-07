@@ -49,7 +49,7 @@ the job of the other three passes; REPAIR only makes a page well-formed.
 
 ## Preconditions — verify BEFORE any work (any fail → one-line finding, stop)
 
-1. **Editor enabled.** Run `uv run scripts/memory_txn_cli.py resume "<scope_root>"`
+1. **Editor enabled.** Run `uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" resume "<scope_root>"`
    first (rolls forward any interrupted txn). If the editor is kill-switched or
    `CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED=off`, the CLI refuses — honor it.
 2. **Scope (the scheduler already gated the cadence — do NOT re-check `is_due`).** A bare
@@ -99,7 +99,7 @@ For each candidate page, diagnose and fix ONLY what is wrong:
 
 ```bash
 # sources = the ONE malformed page
-uv run scripts/memory_txn_cli.py begin "<scope_root>" repair "<page.md>"
+uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" begin "<scope_root>" repair "<page.md>"
 #   → txn_id=<id>  staging=<abs dir>
 # Edit ONLY the staged copy of <page.md> in place:
 #   - add/complete the frontmatter (name, description, ocd, lmd, node_type, type, tier)
@@ -107,7 +107,7 @@ uv run scripts/memory_txn_cli.py begin "<scope_root>" repair "<page.md>"
 #   - add the '## Notes and lessons learned' section if missing
 #   - fix an inverted tier shape; correct an answer-shaped description
 #   - DO NOT add/remove other pages, DO NOT delete the source (1 write, 0 deletes)
-uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op repair
+uv run "$CLAUDE_PLUGIN_ROOT/scripts/memory_txn_cli.py" commit "<scope_root>" <txn_id> --op repair
 #   → committed <id> (repair): 1 write(s), 0 delete(s)
 #   verify_repair proves: lessons preserved, every required key present + valid
 #   tier, NO metadata key dropped, ocd unchanged, lmd not regressed, Notes present.
