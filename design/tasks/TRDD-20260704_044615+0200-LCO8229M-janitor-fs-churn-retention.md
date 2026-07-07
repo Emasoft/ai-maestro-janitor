@@ -1,9 +1,10 @@
 ---
 trdd-id: LCO8229M
 title: S8 — bound the janitor's own FS churn with age-based retention for reports and stale seen-files
-column: todo
+column: complete
 created: 2026-07-04T04:46:15+0200
-updated: 2026-07-04T04:46:15+0200
+updated: 2026-07-07T17:54:11+0200
+implementation-commits: [79957c7]
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 4
