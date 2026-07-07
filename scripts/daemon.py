@@ -775,6 +775,87 @@ def _write_recovery_state(path: Path, st: dict) -> None:
         raise
 
 
+def _hard_restart_plan(inst) -> dict | None:
+    """Build the hard-restart plan for a `dead`/`frozen`-exhausted instance
+    (TRDD-56d24c02 increment 2). PURE dict building — nothing fires here.
+
+    - `dead` (pid gone) → rung 5 `relaunch`: type ``claude --continue`` into the
+      surviving pane. No kill, so no resurrect fallback — resurrect KILLS, and
+      ``is_killable`` is frozen-only by design (a dead instance has no live pid
+      worth killing); an unreachable dead pane is logged, never force-handled.
+    - `frozen` (ladder exhausted) → rung 6 `force_restart` (kill the wedged pid +
+      relaunch in its pane); when NO pane channel resolves, fall back to rung 7
+      `resurrect` (detached background claude that kills + relaunches) — the
+      documented no-channel escalation on ``build_force_restart``.
+    """
+    if inst.diagnosis == "dead":
+        return fleet_restart.build_relaunch(inst.terminal)
+    plan = fleet_restart.build_force_restart(inst.pid, inst.terminal)
+    if plan is None:
+        plan = fleet_restart.build_resurrect(inst.pid, inst.project_root)
+    return plan
+
+
+def _hard_restart_channel(plan: dict) -> str:
+    """The audit-facing channel of a hard-restart plan: relaunch carries it at the
+    top level, force_restart nests it under its relaunch sub-plan, resurrect has no
+    keystroke channel (it spawns a detached process)."""
+    ch = plan.get("channel") or plan.get("relaunch", {}).get("channel")
+    return str(ch) if ch else "spawn"
+
+
+def _run_hard_restart(inst, *, tag, fire, attempts, identity, sf, now, audit) -> None:
+    """ONE hard-restart attempt (rungs 5-7) for a dead/frozen-exhausted instance
+    (TRDD-56d24c02 increment 2). All kill-path gates live HERE, in order — each
+    independently sufficient to stop a kill:
+
+    1. plan build — relaunch/force_restart need a validated pane channel
+       (tampered identities never reach argv/osascript); no channel on `dead`
+       → log + audit, touch nothing.
+    2. ``enabled`` — the beat's fire flag AND the DEFAULT-OFF opt-in
+       ``fleet_restart.hard_restart_enabled()``. Off → ``fire_restart`` returns
+       ``DRY_RUN:<rung>`` and executes NOTHING (the plan was still built, so the
+       log shows exactly what WOULD happen).
+    3. ``killable`` — ``fleet_restart.is_killable`` recomputed HERE from the live
+       Instance facts (real claude cmdline, NOT ``active``, not this daemon,
+       frozen-only): the second independent gate under ``diagnose_instance``'s
+       guarantee that a transcript-advancing session is never frozen/dead.
+
+    The attempt is consumed on DRY_RUN and FIRED alike — WHY: a permanently
+    disabled or failing hard rung must still walk the 4-attempt budget to the
+    crash-loop human alert (with the cooldown throttling its log line) instead of
+    dry-run-logging every beat forever. A SUCCESSFUL restart gives the session a
+    NEW pid → the identity stamp resets the budget for the new occupant, so
+    consuming attempts here can never starve a recovered instance.
+    """
+    plan = _hard_restart_plan(inst)
+    if plan is None:
+        state.log_line(
+            "daemon",
+            f"session-liveness: {tag} UNREACHABLE ({inst.terminal}) — would "
+            "hard-restart; skipped (no injection channel)",
+        )
+        audit(inst, "unreachable", "relaunch", None)  # plan is None only on `dead`
+        return
+    enabled = fire and fleet_restart.hard_restart_enabled()
+    killable = fleet_restart.is_killable(
+        pid=inst.pid,
+        command=inst.command,
+        active=inst.active,
+        diagnosis=inst.diagnosis,
+        self_pid=os.getpid(),
+        daemon_pid=gs.daemon_pid(),
+    )
+    outcome = fleet_restart.fire_restart(plan, enabled=enabled, killable=killable)
+    _write_recovery_state(sf, {"attempts": attempts + 1, "last_ts": now, "identity": identity})
+    rung = str(plan.get("rung", "?"))
+    channel = _hard_restart_channel(plan)
+    state.log_line("daemon", f"session-liveness: {outcome} → {channel} for {tag}")
+    # Audit outcome = the fire_restart status class, greppable lowercase
+    # (dry_run / fired / fire_failed / refused / unknown_rung).
+    audit(inst, outcome.split(":", 1)[0].lower(), rung, channel)
+
+
 def task_rules_cleanup() -> None:
     """Post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W).
 
@@ -799,7 +880,7 @@ def task_rules_cleanup() -> None:
         )
 
 
-def task_session_liveness() -> None:
+def task_session_liveness(fleet: list | None = None) -> None:
     """Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
     version-mismatched claude instances across the WHOLE host and recover them from
     OUTSIDE by injecting ESC + /janitor-arm (or /reload-plugins) into each one's OWN
@@ -812,22 +893,39 @@ def task_session_liveness() -> None:
     (rearm/reload/update) are idempotent — harmless even if fired on a merely-idle
     session (ESC is a no-op with no in-flight turn; the slash-commands just
     re-establish the heartbeat). Per-instance cooldown + a crash-loop guard bound
-    it; on the guard trip a human is alerted ONCE. The hard-restart rungs (kill+respawn)
-    are A5 — not wired; the ladder caps at `update`.
+    it; on the guard trip a human is alerted ONCE.
+
+    HARD-RESTART rungs (A5, TRDD-56d24c02 increment 2 — USER-approved 2026-07-08):
+    a `dead` instance gets rung 5 `relaunch`; a `frozen` instance whose gentle
+    ladder is exhausted escalates to rung 6 `force_restart` (→ rung 7 `resurrect`
+    when no pane resolves). These EXECUTE only when BOTH the beat's fire flag AND
+    the separate DEFAULT-OFF opt-in CLAUDE_PLUGIN_OPTION_FLEET_HARD_RESTART_ENABLED=1
+    hold; otherwise the built plan is dry-run-logged. Every kill path re-checks
+    ``fleet_restart.is_killable`` (real claude cmdline, not `active`, not
+    self/daemon, frozen-only) — the second gate under ``diagnose_instance``'s
+    guarantee that a transcript-advancing session is never frozen/dead. A dry-run
+    or fired hard attempt still consumes an attempt from the same 4-attempt budget,
+    so a disabled or failing hard rung walks to the crash-loop human alert instead
+    of logging forever.
 
     DETECTION always runs and logs. FIRING is on by default for the gentle rungs;
     set CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED=0 for dry-run-log-only, or turn
     the whole beat off via CLAUDE_PLUGIN_OPTION_SESSION_LIVENESS_ENABLED=0.
+
+    `fleet` is a test seam: pass pre-built ``fleet_scan.Instance`` rows to exercise
+    the REAL decision/audit/state wiring without scanning the host process table
+    (execution stays opt-in-gated, so tests never touch a live process).
     """
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_SESSION_LIVENESS_ENABLED", True):
         return
     fire = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED", True)
     now = int(time.time())
-    try:
-        fleet = fleet_scan.gather_fleet(now=now)
-    except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
-        state.log_line("daemon", f"session-liveness: fleet scan failed: {exc}")
-        return
+    if fleet is None:
+        try:
+            fleet = fleet_scan.gather_fleet(now=now)
+        except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
+            state.log_line("daemon", f"session-liveness: fleet scan failed: {exc}")
+            return
     rec_dir = gs.global_state_dir() / "recovery"
     rec_dir.mkdir(parents=True, exist_ok=True)
 
@@ -894,13 +992,21 @@ def task_session_liveness() -> None:
             continue
         if decision == "cooldown":
             continue
-        action = fr.action_for(inst.diagnosis, attempts)
+        action = fr.action_for(inst.diagnosis, attempts, include_hard=True)
         if action is None:
-            # Reachable as a concept but not via a typed command (e.g. `dead` maps to
-            # the not-yet-wired hard-restart `relaunch`): recovery_for_diagnosis (the gate
-            # above) and action_for DELIBERATELY diverge on `dead`. This re-check is
-            # what keeps the divergence safe — we never fire an unwired action.
+            # Unknown / unrecoverable diagnosis — we never invent an action for a
+            # state we don't recognize. (Since increment 2 wired A5, `dead` maps to
+            # the hard rung `relaunch` and no longer lands here.)
             _audit(inst, "declined_unwired", action, None)
+            continue
+        if sl.is_hard_rung(action):
+            # A5 hard-restart rungs (TRDD-56d24c02 increment 2). Extracted so the
+            # kill-path gates live in ONE reviewed place; executes only behind the
+            # DEFAULT-OFF opt-in — else dry-run-logs the built plan.
+            _run_hard_restart(
+                inst, tag=tag, fire=fire, attempts=attempts,
+                identity=identity, sf=sf, now=now, audit=_audit,
+            )
             continue
         plan = fleet_inject.build_injection(inst.terminal, action)
         if plan is None:

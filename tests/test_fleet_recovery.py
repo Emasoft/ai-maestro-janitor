@@ -55,3 +55,26 @@ def test_crash_loop_wins_over_cooldown() -> None:
     a looping recovery must stop and alert, never silently retry forever."""
     now = 1_000_000
     assert fr.gate(last_ts=now - fr.COOLDOWN_S - 100, attempts=fr.MAX_ATTEMPTS + 3, now=now) == "crash_loop"
+
+
+def test_include_hard_extends_the_ladders_but_never_the_untouchables() -> None:
+    """include_hard (TRDD-56d24c02 increment 2): frozen escalates past `update` into
+    force_restart and clamps there; dead maps to relaunch; healthy/unarmed stay None
+    at ANY attempt count — the hard rungs only extend ladders that already existed
+    for a genuinely-stuck diagnosis, never create one for a session we must not touch."""
+    assert fr.action_for("frozen", 2, include_hard=True) == "update"        # gentle part unchanged
+    assert fr.action_for("frozen", 3, include_hard=True) == "force_restart"
+    assert fr.action_for("frozen", 99, include_hard=True) == "force_restart"  # clamps, no wrap
+    assert fr.action_for("dead", 0, include_hard=True) == "relaunch"
+    assert fr.action_for("dead", 0) is None                    # unwired view preserved
+    assert fr.action_for("healthy", 99, include_hard=True) is None
+    assert fr.action_for("unarmed", 99, include_hard=True) is None
+    assert fr.action_for("nonsense", 0, include_hard=True) is None
+
+
+def test_hard_budget_allows_exactly_one_hard_attempt() -> None:
+    """Documentation-test of the bounded-storm math: the single hard attempt is
+    attempts=3 (force_restart); attempts=4 == MAX_ATTEMPTS trips the crash-loop
+    guard, so the guardian can never enter a kill/respawn storm."""
+    assert fr.action_for("frozen", fr.MAX_ATTEMPTS - 1, include_hard=True) == "force_restart"
+    assert fr.gate(last_ts=None, attempts=fr.MAX_ATTEMPTS, now=1_000_000) == "crash_loop"

@@ -6,9 +6,12 @@ now (cooldown + crash-loop bounds). No I/O, no firing, no process control.
 The daemon walks a COMMAND-TYPING ladder for a stuck session — each action's
 injection (``fleet_inject``) sends ESC first, then types the slash-command, so a
 bare ESC-nudge is subsumed by ``rearm``. The genuinely-dangerous hard-restart rungs
-(relaunch / force_restart / resurrect — killing and respawning a process) are A5:
-deliberately NOT wired here. When the gentle ladder is exhausted the guard alerts
-a human instead of escalating to a process kill the daemon can't yet do safely.
+(relaunch / force_restart / resurrect — killing and respawning a process) are A5
+(TRDD-56d24c02): this POLICY names them only when the caller passes
+``include_hard=True`` (increment 2, USER-approved 2026-07-08); EXECUTION stays in
+the daemon behind ``fleet_restart.hard_restart_enabled()`` + ``is_killable`` — this
+module still never fires anything. Without ``include_hard`` the gentle ladder is
+the whole ladder and exhaustion alerts a human, exactly as before.
 
 All three gentle rungs are IDEMPOTENT and harmless even if mis-fired on a merely
 idle (non-working) session: ESC on a session with no in-flight turn is a no-op, and
@@ -37,22 +40,38 @@ MAX_ATTEMPTS = 4
 _FROZEN_LADDER = ("rearm", "reload", "update")
 
 
-def action_for(diagnosis: str, attempts: int) -> str | None:
+def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> str | None:
     """The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
     or None when the diagnosis is not recoverable by a typed command:
 
     - ``cron_dead``        → ``rearm``  (the in-session cron died → re-arm it)
     - ``version_mismatch`` → ``reload`` (running stale code → reload the new plugin)
-    - ``frozen``           → walk ``_FROZEN_LADDER`` by attempt (rearm→reload→update)
-    - ``healthy`` / ``unarmed`` → None  (never poke a working or opted-out session)
-    - ``dead``             → None       (no pane to type into → hard-restart A5, not here)
+    - ``frozen``           → walk ``_FROZEN_LADDER`` by attempt (rearm→reload→update);
+      with ``include_hard`` the ladder extends one rung to ``force_restart`` (kill the
+      wedged pid + ``claude --continue``) once the gentle rungs are exhausted
+    - ``healthy`` / ``unarmed`` → None  (never poke a working or opted-out session —
+      ``include_hard`` NEVER changes this: the hard rungs only extend ladders that
+      already existed for a genuinely-stuck diagnosis)
+    - ``dead``             → ``relaunch`` with ``include_hard`` (no kill — type
+      ``claude --continue`` into the surviving pane), else None (A5 unwired view)
+
+    ``include_hard`` (TRDD-56d24c02 increment 2) only names the rung — the DAEMON
+    gates execution on ``fleet_restart.hard_restart_enabled()`` (DEFAULT-OFF dry-run)
+    + ``is_killable``, so this stays pure policy with no process control. resurrect
+    is deliberately NOT attempt-indexed: it is force_restart's no-channel FALLBACK
+    (``build_force_restart`` → None → ``build_resurrect``), not a ladder step —
+    with MAX_ATTEMPTS=4 the budget allows exactly ONE hard attempt (attempts=3)
+    before the crash-loop guard pages a human.
     """
     if diagnosis == "cron_dead":
         return "rearm"
     if diagnosis == "version_mismatch":
         return "reload"
     if diagnosis == "frozen":
-        return _FROZEN_LADDER[min(max(attempts, 0), len(_FROZEN_LADDER) - 1)]
+        ladder = _FROZEN_LADDER + (("force_restart",) if include_hard else ())
+        return ladder[min(max(attempts, 0), len(ladder) - 1)]
+    if diagnosis == "dead" and include_hard:
+        return "relaunch"
     return None
 
 
