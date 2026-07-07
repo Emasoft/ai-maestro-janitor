@@ -19,7 +19,9 @@ def _user(text: str) -> str:
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
 
 
-def _assistant(*, text: str = "", usage: dict | None = None, tool: bool = False) -> str:
+def _assistant(
+    *, text: str = "", usage: dict | None = None, tool: bool = False, msg_id: str | None = None
+) -> str:
     content: list = []
     if text:
         content.append({"type": "text", "text": text})
@@ -28,6 +30,8 @@ def _assistant(*, text: str = "", usage: dict | None = None, tool: bool = False)
     msg: dict = {"role": "assistant", "content": content}
     if usage is not None:
         msg["usage"] = usage
+    if msg_id is not None:
+        msg["id"] = msg_id
     return json.dumps({"type": "assistant", "message": msg})
 
 
@@ -96,6 +100,52 @@ class TestTokenMeter(unittest.TestCase):
             self.assertEqual(u.output_tokens, 60)
             self.assertEqual(u.assistant_messages, 3)
             self.assertEqual(u.tool_calls, 2)
+
+    def test_duplicated_usage_entries_counted_once_per_message(self):
+        """REGRESSION (the 'janitor meter is FLAWED' bug, 2026-07-07): Claude Code writes
+        one assistant transcript ENTRY per streamed content block, each repeating the SAME
+        message.usage — verified live at 2.1-3.7x inflation when summed per entry. Usage
+        must be counted ONCE per unique message id, while tool_use blocks (distinct per
+        entry) keep per-entry counting."""
+        dup_usage = {
+            "input_tokens": 10,
+            "output_tokens": 50,
+            "cache_read_input_tokens": 9_000_000,
+            "cache_creation_input_tokens": 300_000,
+        }
+        with TemporaryDirectory() as d:
+            tmp = Path(d)
+            t = _write(
+                tmp,
+                _user("do the thing"),
+                # ONE API response streamed as 3 entries (text + 2 tool_use blocks),
+                # all carrying identical usage under the same message id.
+                _assistant(text="thinking...", usage=dup_usage, msg_id="msg_A"),
+                _assistant(tool=True, usage=dup_usage, msg_id="msg_A"),
+                _assistant(tool=True, usage=dup_usage, msg_id="msg_A"),
+                _tool_result(),
+                # A second, distinct API response.
+                _assistant(
+                    text="done",
+                    usage={
+                        "input_tokens": 5,
+                        "output_tokens": 20,
+                        "cache_read_input_tokens": 1_000_000,
+                        "cache_creation_input_tokens": 7_000,
+                    },
+                    msg_id="msg_B",
+                ),
+            )
+            u = token_meter.tail_turn_usage(t)
+            self.assertIsNotNone(u)
+            assert u is not None
+            # Once per message — NOT 3x msg_A.
+            self.assertEqual(u.input_tokens, 15)
+            self.assertEqual(u.output_tokens, 70)
+            self.assertEqual(u.cache_read_input_tokens, 10_000_000)
+            self.assertEqual(u.cache_creation_input_tokens, 307_000)
+            self.assertEqual(u.assistant_messages, 2)  # unique messages, not entries
+            self.assertEqual(u.tool_calls, 2)  # per-entry blocks are genuinely distinct
 
     def test_non_heartbeat_turn_flagged_false(self):
         """A normal (typed) user turn → is_heartbeat=False (so the hook logs nothing)."""

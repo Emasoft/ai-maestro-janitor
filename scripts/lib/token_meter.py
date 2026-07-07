@@ -139,8 +139,15 @@ def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsa
     if not entries:
         return None
 
-    inp = out = cache_read = cache_create = 0
-    assistant_msgs = tool_calls = 0
+    # Claude Code writes one `assistant` transcript ENTRY per streamed CONTENT BLOCK, and
+    # every entry of the same API response repeats the SAME `message.usage` object. Summing
+    # per ENTRY therefore multiplies one response's usage by its block count — measured live
+    # at 2.1-3.7x inflation (the "janitor meter is FLAWED" bug, 2026-07-07). Usage must be
+    # counted ONCE per unique message id; last entry wins (values are identical today, and
+    # last-wins stays correct if CC ever streams cumulative usage). Entries with no message
+    # id fall back to their per-entry uuid so they are never silently dropped or merged.
+    usage_by_msg: dict[str, dict] = {}
+    tool_calls = 0
     trigger: Optional[dict] = None
     for entry in reversed(entries):
         etype = entry.get("type")
@@ -154,16 +161,22 @@ def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsa
             if isinstance(msg, dict):
                 usage = msg.get("usage")
                 if isinstance(usage, dict):
-                    inp += int(usage.get("input_tokens") or 0)
-                    out += int(usage.get("output_tokens") or 0)
-                    cache_read += int(usage.get("cache_read_input_tokens") or 0)
-                    cache_create += int(usage.get("cache_creation_input_tokens") or 0)
-                    assistant_msgs += 1
+                    key = str(msg.get("id") or entry.get("uuid") or id(entry))
+                    # reversed() walk: the FIRST time we see an id here is the file-order
+                    # LAST entry for it — setdefault keeps that one, i.e. last-wins.
+                    usage_by_msg.setdefault(key, usage)
                 content = msg.get("content")
                 if isinstance(content, list):
+                    # tool_use blocks are NOT duplicated across a message's entries (each
+                    # entry carries its own distinct block) — per-entry counting is right.
                     tool_calls += sum(1 for b in content if isinstance(b, dict) and b.get("type") == "tool_use")
     if trigger is None:
         return None  # turn boundary not in the tail window — omit rather than guess
+
+    inp = sum(int(u.get("input_tokens") or 0) for u in usage_by_msg.values())
+    out = sum(int(u.get("output_tokens") or 0) for u in usage_by_msg.values())
+    cache_read = sum(int(u.get("cache_read_input_tokens") or 0) for u in usage_by_msg.values())
+    cache_create = sum(int(u.get("cache_creation_input_tokens") or 0) for u in usage_by_msg.values())
 
     is_heartbeat = _message_text(trigger).lstrip().startswith(_HEARTBEAT_MARKER)
     return TurnUsage(
@@ -172,7 +185,7 @@ def tail_turn_usage(transcript_path: str | os.PathLike[str]) -> Optional[TurnUsa
         output_tokens=out,
         cache_read_input_tokens=cache_read,
         cache_creation_input_tokens=cache_create,
-        assistant_messages=assistant_msgs,
+        assistant_messages=len(usage_by_msg),
         tool_calls=tool_calls,
     )
 
