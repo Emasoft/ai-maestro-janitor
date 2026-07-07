@@ -2,7 +2,7 @@
 name: janitor-architecture
 description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub"
 ocd: 2026-06-13
-lmd: 2026-07-03
+lmd: 2026-07-07
 metadata:
   node_type: memory
   type: project
@@ -229,13 +229,15 @@ in the heartbeat's own exec path bricks the very lifeline it guards.
 | `<repo-root>/.janitor/state/` | per-project | per-project | per-session detector state (last-run stamps, seen-files, resume/rate-limit flags) |
 
 The **auto-rolling dispatcher stub** lives in `${CLAUDE_PLUGIN_DATA}` (correct —
-survives version bumps). **Known migration debt:** the daemon's global state
-currently lives in an UNOFFICIAL `$HOME/.claude/janitor-global-state/` folder
-(daemon PID/flock/heartbeat, the marketplace lock, per-task last-run stamps,
-kill-switch and reload flags). That folder is not backed up and is orphaned by
-purge — the standing TODO is to migrate it to `${CLAUDE_PLUGIN_DATA}`, but
-because it holds the *running* daemon's flock path, it is a careful move-state +
-dual-read migration, not a flip-the-switch change.
+survives version bumps). The daemon's global state (PID/flock/heartbeat, the
+marketplace lock, per-task last-run stamps, kill-switch and reload flags) is
+CANONICALLY at `${CLAUDE_PLUGIN_DATA}/global-state/` since TRDD-2U8AH82F.[^4]
+Existing installs are migrated automatically by the daemon under its singleton
+flock (flock-moves-LAST: the NEW dir's flock is acquired before the
+`migrated-from-legacy.ts` marker flips resolution); control-flag readers
+dual-read the legacy `$HOME/.claude/janitor-global-state/` for version skew,
+and that legacy dir survives only as a tombstoned read-fallback until an EHT
+retires it (~2 releases out).
 
 **Principle (per the project owner):** prefer `${CLAUDE_PLUGIN_DATA}` over any
 new `$HOME/.claude/<custom>/` folder — the data dir is the only location
@@ -317,3 +319,12 @@ must report a crash.[^3]
   reviews because C4 (heartbeat) and the keepalive (OS path) each looked correct
   in isolation; only the whole-immortality-surface review caught the cross-group
   seam.
+[^4]: [ocd:2026-07-07 lmd:2026-07-07] This section previously said the daemon
+  state lived in an UNOFFICIAL `$HOME/.claude/janitor-global-state/` folder with
+  a standing migrate-to-DATA TODO. Superseded 2026-07-07 by TRDD-2U8AH82F
+  (commit ba58ebb): the DATA dir is now canonical via a staged handover. The WHY
+  of the staging: the flock path IS the singleton guarantee, so a naive path
+  flip would let a new-code daemon lock the NEW dir while an old daemon still
+  held the LEGACY lock — two live daemons. Hence resolver-marker + copy under
+  the legacy flock + NEW flock acquired BEFORE the marker (both held for the
+  daemon's lifetime) + dual-read of control flags for old-code sessions.

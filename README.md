@@ -103,7 +103,7 @@ update <id> --scope user` over every user-scope plugin, every 1 h), and the
 janitor self-update (every 6 h, gated by `auto_update_on_new_release`). It is
 **lazy-spawned** by any per-session heartbeat via
 `lib.global_state.ensure_daemon_running()` and **singleton-protected** by an
-exclusive flock on `~/.claude/janitor-global-state/daemon.flock`, so N
+exclusive flock on `<global-state>/daemon.flock`, so N
 concurrent Claude Code sessions across N projects produce exactly **one**
 daemon — not N. This closes [issue #7](https://github.com/Emasoft/ai-maestro-janitor/issues/7):
 pre-daemon, per-project PID dedup could not coordinate across sessions, so
@@ -116,25 +116,37 @@ the per-session detector (`marketplace-refresh`, 5 min cadence). The daemon
 and the per-session refresh have disjoint scopes: the daemon does the global
 bulk, the session does the project-narrow set.
 
+`<global-state>` below is the daemon-state dir. Since TRDD-2U8AH82F its
+CANONICAL home is the plugin DATA dir
+`~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/`
+(backed up, preserved across updates, purged only on uninstall). An existing
+install is migrated automatically: the daemon copies the legacy
+`~/.claude/janitor-global-state/` there one time under its singleton flock and
+stamps a `migrated-from-legacy.ts` marker; until that happens everything keeps
+using the legacy dir, and afterwards the legacy dir remains only as a
+tombstoned read-fallback for not-yet-updated sessions.
+
 | State file | Purpose |
 | --- | --- |
-| `~/.claude/janitor-global-state/daemon.flock` | exclusive flock held for the daemon's lifetime; the kernel releases it on death |
-| `~/.claude/janitor-global-state/daemon.pid` | the live daemon's PID (diagnostic) |
-| `~/.claude/janitor-global-state/daemon.heartbeat.ts` | tick written every loop iteration + during long workloads; sessions treat the daemon as stuck when this is older than `DEFAULT_DAEMON_STALE_SECONDS` (1800 s) |
-| `~/.claude/janitor-global-state/marketplace-refresh.last-run.ts` | last successful bulk-refresh completion stamp |
-| `~/.claude/janitor-global-state/user-plugins-update.last-run.ts` | same, for the user-scope plugin sweep |
-| `~/.claude/janitor-global-state/version-update.last-run.ts` | same, for the janitor self-update task |
-| `~/.claude/janitor-global-state/reload-needed.flag` | written by the daemon when a real plugin update lands; the next heartbeat emits `[janitor-reload]` and clears the flag |
-| `~/.claude/janitor-global-state/daemon.log` | daemon's own log (rotated by `state.rotate_log_if_big`) |
-| `~/.claude/janitor-global-state/kill-switch.flag` | touch to make the running daemon exit on its next loop tick |
+| `<global-state>/daemon.flock` | exclusive flock held for the daemon's lifetime; the kernel releases it on death |
+| `<global-state>/daemon.pid` | the live daemon's PID (diagnostic) |
+| `<global-state>/daemon.heartbeat.ts` | tick written every loop iteration + during long workloads; sessions treat the daemon as stuck when this is older than `DEFAULT_DAEMON_STALE_SECONDS` (1800 s) |
+| `<global-state>/marketplace-refresh.last-run.ts` | last successful bulk-refresh completion stamp |
+| `<global-state>/user-plugins-update.last-run.ts` | same, for the user-scope plugin sweep |
+| `<global-state>/version-update.last-run.ts` | same, for the janitor self-update task |
+| `<global-state>/reload-needed.flag` | written by the daemon when a real plugin update lands; the next heartbeat emits `[janitor-reload]` and clears the flag |
+| `<global-state>/daemon.log` | daemon's own log (rotated by `state.rotate_log_if_big`) |
+| `<global-state>/kill-switch.flag` | touch to make the running daemon exit on its next loop tick |
+| `<global-state>/migrated-from-legacy.ts` | the migration marker — its presence is what flips path resolution to the DATA dir |
 
-**Manual control:**
-- Inspect: `cat ~/.claude/janitor-global-state/daemon.log | tail -30`
-- Disable temporarily: `touch ~/.claude/janitor-global-state/kill-switch.flag`
-- Re-enable: `rm ~/.claude/janitor-global-state/kill-switch.flag` (the next
+**Manual control** (substitute `<global-state>` with the DATA-dir path above —
+or the legacy path on a not-yet-migrated install):
+- Inspect: `tail -30 <global-state>/daemon.log`
+- Disable temporarily: `touch <global-state>/kill-switch.flag`
+- Re-enable: `rm <global-state>/kill-switch.flag` (the next
   heartbeat lazy-spawns a fresh daemon)
 - Disable permanently: set `daemon_enabled: false` in userConfig
-- Kill (graceful): `kill $(cat ~/.claude/janitor-global-state/daemon.pid)`
+- Kill (graceful): `kill $(cat <global-state>/daemon.pid)`
 
 The daemon NEVER touches per-project plugin state (`local-plugins-update`,
 `project-plugins-update`, `plugin-updates` remain per-session) and NEVER
@@ -235,7 +247,8 @@ read directly by the daemon — set them in your project's
   bypass and the userConfig knob to relax it; set
   `pkg_manager_hook_allow_user_override: true` to downgrade to per-call
   `ask` instead. Every block lands in
-  `~/.claude/janitor-global-state/pkg-manager-guard.log`.
+  `<global-state>/pkg-manager-guard.log` (the daemon-state dir — see the
+  Global daemon section for its canonical DATA-dir path).
 
   Sample deny reason: `[pkg-manager-guard] pnpm --no-frozen-lockfile
   permits lockfile drift (use a real lockfile update + commit). Set
@@ -790,7 +803,7 @@ via the `/plugin configure` interface or edit the project's
 | `heartbeat_renewal_threshold_days` | 6 | Days after arming before dispatch.py emits a bare `[janitor-renew]` marker. Since v0.5.2 the cron prompt installed by `/janitor-arm` teaches Claude to silently run `/janitor-arm` on that marker — renewal is automatic + invisible. Existing crons armed with the pre-v0.5.2 prompt will surface the marker once before the first silent-prompt re-arm. |
 | `version_check_interval` | 300 | Min seconds between checks against `api.github.com` for a newer plugin release. 5 min by default — runs every heartbeat. ~12 cheap GitHub requests/hour, well under both API limits (60/h unauth, 5000/h `gh`-auth). |
 | `auto_update_on_new_release` | **true** (since v0.5.3) | When true, the global janitor daemon auto-runs `claude plugin marketplace update ai-maestro-plugins` + `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto>` whenever a newer release is on GitHub, then sets the reload-needed flag so the next heartbeat emits `[janitor-reload]` and Claude silently runs `/reload-plugins`. The daemon's flock guarantees single-writer semantics (closes [issue #7](https://github.com/Emasoft/ai-maestro-janitor/issues/7)). When false, the version-update detector instead emits a manual-update nudge. |
-| `daemon_enabled` | true | When true, per-session heartbeats lazy-spawn the global janitor daemon (`scripts/daemon.py`) on `~/.claude/janitor-global-state/`, which owns every machine-global auto-update task (bulk marketplace refresh, user-scope plugin updates, janitor self-update). Singleton via exclusive flock — N sessions = ONE daemon. Manual kill switch: `touch ~/.claude/janitor-global-state/kill-switch.flag` (running daemon exits on next loop tick). |
+| `daemon_enabled` | true | When true, per-session heartbeats lazy-spawn the global janitor daemon (`scripts/daemon.py`) on the `<global-state>` dir (canonically `${CLAUDE_PLUGIN_DATA}/global-state/` since TRDD-2U8AH82F), which owns every machine-global auto-update task (bulk marketplace refresh, user-scope plugin updates, janitor self-update). Singleton via exclusive flock — N sessions = ONE daemon. Manual kill switch: `touch <global-state>/kill-switch.flag` (running daemon exits on next loop tick). |
 | `daemon_marketplace_refresh_interval` | 1200 | Min seconds the daemon waits between bulk `claude plugin marketplace update` runs (no args = every configured marketplace). 20 min by default. The daemon is the only writer of the GLOBAL refresh, so a moderate cadence is enough; narrower per-session refreshes of just the local+project plugins' marketplaces still run every 5 min via `marketplace_refresh_interval`. |
 | `daemon_user_plugins_update_interval` | 3600 | Min seconds between full user-scope plugin sweeps. 1 h by default — a full sweep over ~80 plugins × ~5 s each takes ~7 min, so hourly keeps everything fresh without burning CPU. |
 | `daemon_version_update_interval` | 21600 | Min seconds the daemon waits between janitor self-update checks. 6 h by default — GitHub releases land at human-day granularity so this is plenty. Each cycle reads the local cache's highest version, queries `gh api releases/latest`, and — when behind — runs `claude plugin update ai-maestro-janitor@ai-maestro-plugins --scope <auto>`. Gated additionally by `auto_update_on_new_release` (no-op when false). |
@@ -821,7 +834,7 @@ via the `/plugin configure` interface or edit the project's
 | `branch_protection_enabled` | true | When true, the `branch-protection` detector asks the GitHub API (read-only) whether the default branch has classic protection OR an active ruleset, and surfaces an URGENT drift line only when it can DEFINITIVELY confirm neither. NEVER configures protection itself. Skips silently when `gh` is absent/unauthenticated, the viewer is not a repo admin, or any probe is indeterminate. Set false to disable. |
 | `branch_protection_interval` | 21600 | Min seconds between `branch-protection` checks. 6 h by default — branch rulesets change rarely and each pass makes a few `gh` API calls. Nags once until fixed and re-arms automatically if protection is later removed. |
 | `pkg_manager_min_release_age_minutes` | 7200 | Minimum age (minutes) the `pre-tool-pkg-guard` hook will accept for `pnpm config set minimumReleaseAge`, `minimum-release-age` in `.npmrc`, and `pnpm.minimumReleaseAge` in `package.json` / `pnpm-workspace.yaml`. 7200 ≈ 5 days, matches safedep's recommendation after the art-template compromise. |
-| `pkg_manager_hook_allow_user_override` | false | When false (default), the `pre-tool-pkg-guard` hook hard-denies every detected bypass. When true, it downgrades to `ask` — per-call user confirmation instead of a block. Every block is logged regardless to `~/.claude/janitor-global-state/pkg-manager-guard.log`. |
+| `pkg_manager_hook_allow_user_override` | false | When false (default), the `pre-tool-pkg-guard` hook hard-denies every detected bypass. When true, it downgrades to `ask` — per-call user confirmation instead of a block. Every block is logged regardless to `<global-state>/pkg-manager-guard.log`. |
 | `pkg_manager_policy_enabled` | true | When true (default), the `package-manager-policy` detector scans the project's package-manager config for missing or weak safety knobs and flags when no install-time malware firewall is on PATH. |
 | `pkg_manager_policy_interval` | 21600 | Min seconds between `package-manager-policy` scans. 6 h by default — package-manager config rarely changes, and the detector content-hashes the files anyway so an unchanged-config fire costs only file stats. |
 | `context_watchdog_enabled` | true | When true (DEFAULT), the `pre-tool-context-usage` `PreToolUse` hook fires on EVERY tool call and guards the per-turn context-size token bleed (every turn re-reads the WHOLE context, so a session near the 1M cap burns ~its size per turn). It reads the live occupancy from the statusline snapshot, or falls back to the transcript's latest assistant input+cache occupancy over `context_window_tokens`. Two-tiered. ADVISORY (at/above `context_compact_suggest_pct`, default 60): a `/janitor-compact-context` nudge via `additionalContext` with no `permissionDecision`, so the tool flow is untouched. ENFORCEMENT (at/above `context_hardstop_pct`, default 85, gated by `context_autocompact_enabled`): queues the compaction itself and DENIES the tool call so the turn ends cleanly for `/compact`, then `post-compact-resume` continues at a reduced context. Fail-open everywhere (no terminal or any error degrades to the advisory, never a stuck deny). DEFAULT-ON because the bleed it prevents cost a month of tokens; set false to disable both tiers, or `context_autocompact_enabled=false` to keep only the advisory. |

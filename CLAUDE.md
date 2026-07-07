@@ -34,10 +34,10 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 | `${CLAUDE_PLUGIN_DATA}` | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | **Persistent** — survives updates, backed up, purged only on uninstall | ALL persistent state, caches, venvs. **Prefer this.** |
 | `$CLAUDE_PROJECT_DIR/.janitor/state/` | per-project | per-project | per-session detector state |
 
-**Current state locations (and the migration TODO):**
+**Current state locations:**
 - ✅ `dispatcher-stub.py` → `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (correct).
 - ✅ per-session → `$PROJECT/.janitor/state/` (correct — project-scoped).
-- ⚠️ **daemon global state → `~/.claude/janitor-global-state/`** (`global_state.py::global_state_dir`) — this is an UNOFFICIAL folder: not backed up, orphaned by purge, not version-preserved. **TODO: migrate to `${CLAUDE_PLUGIN_DATA}`.** Risk: the flock path changes → must migrate the *running* daemon carefully (move state + one-time dual-read) or two daemons race. Not a flip-the-switch change.
+- ✅ **daemon global state → `${CLAUDE_PLUGIN_DATA}/global-state/`** (TRDD-2U8AH82F). `global_state.py::global_state_dir` ladder: env override → XDG → DATA dir (once the `migrated-from-legacy.ts` marker exists, or fresh install) → legacy `~/.claude/janitor-global-state/` while a pre-migration install awaits its daemon. The DAEMON performs the one-time copy under the legacy singleton flock and takes the NEW flock BEFORE stamping the marker (flock-moves-LAST — no two-daemon window); control-flag readers dual-read legacy for version skew. Legacy dir = tombstoned read-fallback; retirement is an EHT 2 releases out.
 
 > **Principle (per user):** prefer `${CLAUDE_PLUGIN_DATA}` over any new
 > `~/.claude/<custom>/` folder. The data dir is the only one guaranteed
@@ -49,9 +49,9 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 
 ```
 ~/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/<ver>/  ephemeral plugin (scripts/skills/hooks)
-~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/         DATA: dispatcher-stub.py + CANONICAL USER memory/  (← daemon state SHOULD move here)
+~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/         DATA: dispatcher-stub.py + CANONICAL USER memory/ + global-state/ (canonical daemon state since TRDD-2U8AH82F)
 ~/.claude/ai-maestro-janitor-memory/                                  USER-memory backup MIRROR (TRDD-GFT33HT9): SessionStart syncs primary→mirror + restores mirror→primary; survives a plain uninstall (data dir deleted). memory_scopes.{resolve_user_mirror_dir,sync_user_memory_mirror}
-~/.claude/janitor-global-state/                                       UNOFFICIAL daemon state (migrate → DATA):
+~/.claude/janitor-global-state/                                       LEGACY daemon state (auto-migrated → DATA/global-state by the daemon; read-fallback only):
     daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
     marketplace-op.lock (NEW) · {marketplace-refresh,user-plugins-update,version-update}.last-run.ts
     kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)

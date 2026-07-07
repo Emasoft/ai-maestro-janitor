@@ -10,7 +10,8 @@
 >   Code does not clean a plugin's `~/.claude/rules/` or a project's `.claude/rules/` on
 >   uninstall). Treat this rule as INERT, and tell the user it is an orphaned janitor rule they
 >   may delete. NEVER delete any MEMORY store — only this rule file, and only with the user's ok.
-> - **DISARMED** — else if `~/.claude/janitor-global-state/kill-switch.flag` EXISTS (set by
+> - **DISARMED** — else if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/kill-switch.flag`
+>   OR the legacy `~/.claude/janitor-global-state/kill-switch.flag` EXISTS (set by
 >   `/janitor-global-disarm`), the janitor is intentionally stopped → treat this rule as INERT
 >   this session.
 > - **ACTIVE** — otherwise the janitor is running; apply the rule as written below.
@@ -52,7 +53,8 @@ are safe to remove.
 | `~/.claude/projects/<slug>/memory/` | **LOCAL**-scope wiki memory — machine-private notes (paths, hostnames, hints) | **NO** — real knowledge |
 | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | the janitor's **DATA** dir — dispatcher stub, **USER**-scope memory (canonical), OAuth-rotator + daemon state | **NO** — persistent state |
 | `~/.claude/ai-maestro-janitor-memory/` | the **USER-scope memory MIRROR** — a synced backup of the canonical USER corpus, kept OUTSIDE the data dir so it survives a plain `plugin uninstall` (TRDD-GFT33HT9). SessionStart syncs it and restores from it after a data-dir loss | **NO** — real knowledge (a memory store) |
-| `~/.claude/janitor-global-state/` | the machine-wide daemon singleton (pid / flock / locks / timestamps) | no — the daemon recreates what it needs |
+| `~/.claude/plugins/data/…/global-state/` | the machine-wide daemon singleton (pid / flock / locks / timestamps) — CANONICAL since TRDD-2U8AH82F | no — the daemon recreates what it needs |
+| `~/.claude/janitor-global-state/` | the LEGACY daemon-state dir — auto-migrated into the DATA dir by the daemon; kept only as a read-fallback for not-yet-updated sessions (see its README-MOVED.txt) | after every session runs a post-migration janitor, yes |
 
 **Rule of thumb:** any `…/memory/…` directory and the plugin **DATA** dir hold
 real state — never delete them. `.janitor/state`, `.janitor/logs`, `reports*`,

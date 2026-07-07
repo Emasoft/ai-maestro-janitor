@@ -10,7 +10,8 @@
 >   Code does not clean a plugin's `~/.claude/rules/` or a project's `.claude/rules/` on
 >   uninstall). Treat this rule as INERT, and tell the user it is an orphaned janitor rule they
 >   may delete. NEVER delete any MEMORY store — only this rule file, and only with the user's ok.
-> - **DISARMED** — else if `~/.claude/janitor-global-state/kill-switch.flag` EXISTS (set by
+> - **DISARMED** — else if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/kill-switch.flag`
+>   OR the legacy `~/.claude/janitor-global-state/kill-switch.flag` EXISTS (set by
 >   `/janitor-global-disarm`), the janitor is intentionally stopped → treat this rule as INERT
 >   this session.
 > - **ACTIVE** — otherwise the janitor is running; apply the rule as written below.
