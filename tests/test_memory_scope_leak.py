@@ -246,6 +246,74 @@ class TestMemoryScopeLeak(unittest.TestCase):
             self.assertIn("gitignored", prop)
             self.assertIn("!.claude/project/memory/**", prop)
 
+    def test_local_shaped_tracked_store_flagged(self) -> None:
+        """F18: a TRACKED `projects/<x>/memory/` tree inside the repo (the
+        harness LOCAL corpus committed by mistake) is a guard finding."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(root, "arch.md", "clean fact.\n")
+            leaked = root / "projects" / "some-slug" / "memory"
+            leaked.mkdir(parents=True)
+            (leaked / "note.md").write_text("a local note\n", encoding="utf-8")
+            _git(["add", ".claude/project/memory/arch.md",
+                  "projects/some-slug/memory/note.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            out = _run(Path(td) / "home", root)
+            self.assertIn("[memory-scope-leak]", out)
+            prop = _proposal(root)
+            self.assertIn("LOCAL-shaped memory store", prop)
+            self.assertIn("projects/some-slug/memory", prop)
+
+    def test_local_shaped_untracked_store_not_flagged(self) -> None:
+        """F18: an UNTRACKED `projects/<x>/memory/` tree (a vendored monorepo
+        shape) cannot leak via push — no guard, no false positive. Pre-fix the
+        unbounded rglob flagged it (and walked the whole tree every fire)."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            _write_project_memory(root, "arch.md", "clean fact.\n")
+            _git(["add", ".claude/project/memory/arch.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            vendored = root / "vendor" / "projects" / "x" / "memory"
+            vendored.mkdir(parents=True)
+            (vendored / "note.md").write_text("vendored note\n", encoding="utf-8")
+            out = _run(Path(td) / "home", root)
+            self.assertNotIn("[memory-scope-leak]", out)
+
+    def test_stale_proposal_cleared_on_clean_scan(self) -> None:
+        """F19: once the leak is fixed, the next run REMOVES the stale proposal
+        (its own footer promises 'Re-run clears this') and resets the dedupe
+        horizon so an identical leak recurring later re-emits."""
+        with TemporaryDirectory() as td:
+            root = Path(td) / "proj"
+            root.mkdir()
+            _init_repo(root)
+            page = _write_project_memory(
+                root, "paths.md", "see /Users/emanuele/x.sh on disk.\n",
+            )
+            _git(["add", ".claude/project/memory/paths.md"], root)
+            _git(["commit", "-qm", "x"], root)
+            home = Path(td) / "home"
+            first = _run(home, root)
+            self.assertIn("[memory-scope-leak]", first)
+            self.assertTrue(_proposal(root))
+            # The leak is fixed: the page becomes portable.
+            page.write_text("the script lives in the repo's tools/ dir.\n", encoding="utf-8")
+            _git(["add", ".claude/project/memory/paths.md"], root)
+            _git(["commit", "-qm", "fix"], root)
+            clean = _run(home, root, extra_env={"CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL": "0"})
+            self.assertEqual(clean.strip(), "")
+            self.assertEqual(_proposal(root), "", "stale proposal must be removed on a clean scan")
+            # The SAME leak recurring later must re-emit (dedupe horizon reset).
+            page.write_text("see /Users/emanuele/x.sh on disk.\n", encoding="utf-8")
+            _git(["add", ".claude/project/memory/paths.md"], root)
+            _git(["commit", "-qm", "regress"], root)
+            again = _run(home, root, extra_env={"CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL": "0"})
+            self.assertIn("[memory-scope-leak]", again)
+
     # ----- dedupe ---------------------------------------------------------
 
     def test_unchanged_findings_are_silent_on_rerun(self) -> None:

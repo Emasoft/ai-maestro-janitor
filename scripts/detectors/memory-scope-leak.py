@@ -97,6 +97,10 @@ _ENTROPY_MIN_BITS = 4.5
 # Candidate token: a run of base64-alphabet chars (std + url-safe). Bounded.
 _TOKEN_RE = re.compile(r"[A-Za-z0-9+/_\-=]{%d,512}" % _ENTROPY_MIN_LEN)
 
+# A TRACKED repo path that reproduces the harness LOCAL-corpus shape
+# (`…/projects/<x>/memory/…`) — committing one leaks the per-machine store.
+_LOCAL_SHAPED_RE = re.compile(r"(?P<dir>(?:^|.+/)projects/[^/]+/memory)/")
+
 
 def _git_toplevel(cwd: Path) -> Path | None:
     """Resolve the repo's top-level dir, or None when `cwd` is not a git repo.
@@ -239,23 +243,32 @@ def _gitignore_guards(root: Path, memdir: Path) -> list[str]:
             "exception: `!.claude/project/`, `!.claude/project/memory/`, then "
             "`!.claude/project/memory/**`"
         )
-    # (b) LOCAL-shaped dirs inside the repo: any `.../projects/<x>/memory` path.
-    # The harness LOCAL corpus lives at ~/.claude/projects/<slug>/memory; if such
-    # a tree was copied into the repo it leaks per-machine private notes.
-    try:
-        for cand in root.rglob("projects"):
-            if not cand.is_dir():
-                continue
-            for sub in cand.iterdir():
-                if (sub / "memory").is_dir():
-                    rel = (sub / "memory").relative_to(root).as_posix()
-                    guards.append(
-                        f"LOCAL-shaped memory store inside the repo ({rel}) — "
-                        "the per-machine LOCAL corpus must never be committed"
-                    )
-                    break
-    except OSError:
-        pass
+    # (b) LOCAL-shaped dirs inside the repo: any TRACKED `.../projects/<x>/memory/…`
+    # path. The harness LOCAL corpus lives at ~/.claude/projects/<slug>/memory; if
+    # such a tree was committed it leaks per-machine private notes.
+    #
+    # F18 (wikimem audit 2026-07-07): the old `root.rglob("projects")` walked the
+    # ENTIRE tree — node_modules, .git, build dirs — unbounded, every fire. On a
+    # large repo that alone could exceed dispatch's 120 s detector timeout; the
+    # SIGKILL landed AFTER the cadence stamp, silently disabling the whole
+    # PROJECT-scope leak scan for that repo forever. `git ls-files` is ONE bounded
+    # subprocess, and considering only TRACKED paths matches the threat model
+    # exactly (an untracked vendored `projects/<x>/memory/` can't leak via push —
+    # which also kills that monorepo false positive).
+    proc = state.run_subprocess(
+        ["git", "ls-files", "-z"], cwd=root, detector_name="memory-scope-leak",
+    )
+    if proc is not None and proc.returncode == 0:
+        local_shaped: set[str] = set()
+        for rel in proc.stdout.split("\0"):
+            m = _LOCAL_SHAPED_RE.match(rel)
+            if m:
+                local_shaped.add(m.group("dir"))
+        for rel in sorted(local_shaped)[:5]:
+            guards.append(
+                f"LOCAL-shaped memory store inside the repo ({rel}) — "
+                "the per-machine LOCAL corpus must never be committed"
+            )
     return guards
 
 
@@ -352,6 +365,22 @@ def main() -> int:
 
     if not page_findings and not guards:
         # Clean (or absent) PROJECT scope → nothing to surface.
+        # F19 (wikimem audit 2026-07-07): the proposal's own footer promises
+        # "Re-run clears this once the leak is gone" — honor it. A stale proposal
+        # lives IN-REPO in the pushed memory dir, telling every contributor there
+        # is a leak forever. It is a regeneratable detector artifact (never a
+        # note), so remove it; also drop the dedupe seen-file so an IDENTICAL
+        # leak set recurring later re-emits instead of being silently suppressed
+        # by the stale fingerprint key.
+        if has_memdir:
+            stale = memdir / PROPOSAL_NAME
+            if stale.is_file():
+                try:
+                    stale.unlink()
+                    (state.state_dir() / "memory-scope-leak-seen.txt").unlink(missing_ok=True)
+                    state.log_line("memory-scope-leak", "leak set clean — removed stale proposal")
+                except OSError:
+                    pass  # best-effort; the next clean run retries
         state.rotate_log_if_big("memory-scope-leak")
         return 0
 
