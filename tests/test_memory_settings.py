@@ -60,6 +60,33 @@ def test_set_none_reverts_to_default():
     assert ms.get("split_per_day") == 0
 
 
+def test_per_day_rate_above_86400_never_crashes_is_due():
+    """M-5 (wikimem audit 2026-07-07): a per-day rate > 86400 (interval < 1 s)
+    is accepted by validation, so is_due must not die on `% int(interval)` —
+    pre-fix int(0.5) == 0 raised `integer modulo by zero` on EVERY is_due."""
+    ms.set_value("harvest_per_day", "100000")
+    assert isinstance(ms.is_due("harvest", "LOCAL", "/tmp/root", _NOW), bool)
+    assert ms.interval_s("harvest_per_day") < 1
+
+
+def test_wrong_typed_stored_value_degrades_to_default():
+    """M-6 (wikimem audit 2026-07-07): a hand-edited store with a wrong-TYPED
+    value must degrade to the default like a corrupt FILE does — pre-fix
+    interval_s raised ValueError, crashing the scheduler's is_due and the txn
+    CLI's _split_max_bytes."""
+    ms.settings_dir().mkdir(parents=True, exist_ok=True)
+    ms._settings_path().write_text(
+        json.dumps({"harvest_per_day": "banana", "split_max_bytes": "not-an-int",
+                    "split_per_day": 2}),
+        encoding="utf-8",
+    )
+    assert ms.get("harvest_per_day") == 0          # corrupt → default
+    assert ms.get("split_max_bytes") == 36000      # corrupt → default
+    assert ms.get("split_per_day") == 2.0          # the valid key still applies
+    assert ms.interval_s("harvest_per_day") == math.inf  # and nothing raises
+    assert ms.is_due("harvest", "LOCAL", "/tmp/root", _NOW) is False
+
+
 def test_set_zero_is_allowed_and_disables():
     """A 0 rate is valid (it disables the pass) — not rejected."""
     assert ms.set_value("conflict_per_day", "0") == 0.0

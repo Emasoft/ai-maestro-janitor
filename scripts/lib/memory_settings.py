@@ -84,7 +84,13 @@ def _settings_path() -> Path:
 
 def load() -> dict:
     """Return the full settings dict (DEFAULTS overlaid by any persisted values).
-    A missing or unreadable store yields the defaults — never crashes."""
+    A missing or unreadable store yields the defaults — never crashes.
+
+    M-6 (wikimem audit 2026-07-07): each stored VALUE is re-validated through
+    `_coerce`; a wrong-typed value (a hand-edited `"banana"` rate) degrades to
+    the default exactly like a corrupt FILE does. Pre-fix the resilience was
+    inconsistent — bad file → defaults, bad value → a ValueError crashing the
+    scheduler's is_due and the txn CLI's _split_max_bytes."""
     merged = dict(DEFAULTS)
     path = _settings_path()
     try:
@@ -93,8 +99,12 @@ def load() -> dict:
         return merged
     if isinstance(stored, dict):
         for k, val in stored.items():
-            if k in DEFAULTS:
-                merged[k] = val
+            if k not in DEFAULTS:
+                continue
+            try:
+                merged[k] = _coerce(k, val)
+            except (ValueError, TypeError):
+                continue  # corrupt value → keep the default (never crash)
     return merged
 
 
@@ -206,7 +216,11 @@ def _phase_offset(intervention: str, scope: str, root, interval: float) -> float
     if not math.isfinite(interval) or interval <= 0:
         return 0.0
     h = hashlib.sha256(f"{intervention}:{scope}:{root}".encode("utf-8")).hexdigest()
-    return float(int(h[:16], 16) % int(interval))
+    # M-5 (wikimem audit 2026-07-07): FLOAT modulo, not `% int(interval)` — a
+    # per-day rate > 86400 gives an interval < 1 s, and int(0.5) == 0 made this
+    # raise `integer modulo by zero` in every is_due (validation accepts any
+    # finite rate >= 0, so the crash was reachable from a plain frequency-set).
+    return math.fmod(float(int(h[:16], 16)), interval)
 
 
 def is_due(intervention: str, scope: str, root, now: int) -> bool:
