@@ -1224,6 +1224,28 @@ def main() -> int:
     if flock_fd is None:
         return 0
 
+    # TRDD-2U8AH82F: one-time staged handover legacy → plugin DATA dir. Runs ONLY
+    # here — holding the (legacy-path) singleton flock proves we are the machine's
+    # single writer. On success we hold BOTH flocks for this daemon's lifetime
+    # (flock-moves-LAST: the NEW lock is taken before the marker flips resolution),
+    # and every gs.* call below — including write_daemon_pid — resolves the NEW dir.
+    # `new_flock_fd` must stay referenced: closing it would release the NEW lock.
+    new_flock_fd = None
+    try:
+        new_flock_fd = gs.migrate_global_state_to_data_dir()
+    except Exception as exc:  # noqa: BLE001 — migration must never brick startup
+        state.log_line("daemon", f"global-state migration skipped: {exc}")
+    if new_flock_fd is not None:
+        # Re-pin the daemon log to the post-migration dir (log_dir() is lru_cached
+        # and was resolved against the legacy dir at the top of main()).
+        os.environ["JANITOR_LOG_DIR"] = str(gs.global_state_dir())
+        state.log_dir.cache_clear()
+        state.log_line(
+            "daemon",
+            f"global state migrated to the plugin DATA dir: {gs.global_state_dir()} "
+            "(TRDD-2U8AH82F; legacy dir kept as read-fallback)",
+        )
+
     pid = os.getpid()
     # Install the graceful-shutdown handlers BEFORE publishing the pid file.
     # The pid file is the public "I'm alive" signal a supervisor waits on before

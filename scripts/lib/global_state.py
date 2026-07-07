@@ -24,6 +24,7 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -75,16 +76,41 @@ _WEDGE_TERM_GRACE_S = 2.0
 _WEDGE_KILL_GRACE_S = 1.0
 
 
+# TRDD-2U8AH82F: the daemon state's CANONICAL home is the plugin DATA dir (backed up,
+# preserved across plugin updates, purged only on uninstall). The old
+# ~/.claude/janitor-global-state/ was an UNOFFICIAL folder — not backed up, orphaned by
+# plugin purge. The move is a STAGED HANDOVER, not a flip: while an existing install has
+# not migrated yet, everything keeps resolving the LEGACY dir; the daemon (the single
+# writer, under its flock) performs the one-time copy and stamps this marker in the NEW
+# dir — only then does resolution flip machine-wide.
+_MIGRATION_MARKER = "migrated-from-legacy.ts"
+
+
+def _legacy_global_state_dir() -> Path:
+    return Path.home() / ".claude" / "janitor-global-state"
+
+
+def _data_global_state_dir() -> Path:
+    return (
+        Path.home() / ".claude" / "plugins" / "data"
+        / "ai-maestro-janitor-ai-maestro-plugins" / "global-state"
+    )
+
+
 def global_state_dir() -> Path:
     """Return the system-wide janitor state directory.
 
-    Resolution order:
-      1. $JANITOR_GLOBAL_STATE_DIR if set (escape hatch for tests / weird hosts).
-      2. $XDG_STATE_HOME/janitor/ when XDG_STATE_HOME is set (Linux default).
-      3. ~/.claude/janitor-global-state/ everywhere else (the canonical home —
-         it sits inside Claude Code's own state tree so the user already
-         expects janitor data to live there, and it's not in any per-project
-         tree so no per-worktree split).
+    Resolution order (TRDD-2U8AH82F):
+      1. $JANITOR_GLOBAL_STATE_DIR if set (escape hatch for tests / weird hosts —
+         ABSOLUTE priority, the whole test suite relies on it).
+      2. $XDG_STATE_HOME/janitor/ when XDG_STATE_HOME is set (Linux default —
+         already an official location, not part of the migration).
+      3. The plugin DATA dir `.../plugins/data/<janitor>/global-state/` once the
+         daemon has stamped the migration marker there, OR on a FRESH install
+         (no legacy dir to migrate).
+      4. The legacy ~/.claude/janitor-global-state/ while a not-yet-migrated
+         install still has one — reads AND writes stay consistent with a
+         possibly-older daemon until the single-writer migration flips the marker.
     """
     override = os.environ.get("JANITOR_GLOBAL_STATE_DIR")
     if override:
@@ -92,7 +118,26 @@ def global_state_dir() -> Path:
     xdg = os.environ.get("XDG_STATE_HOME")
     if xdg:
         return Path(xdg).expanduser().resolve() / "janitor"
-    return Path.home() / ".claude" / "janitor-global-state"
+    new = _data_global_state_dir()
+    legacy = _legacy_global_state_dir()
+    if (new / _MIGRATION_MARKER).is_file() or not legacy.is_dir():
+        return new
+    return legacy
+
+
+def _legacy_read_path(name: str) -> Optional[Path]:
+    """Dual-read window (TRDD-2U8AH82F): after the migration flips resolution to the
+    DATA dir, a not-yet-updated session's OLD code may still write control flags at
+    the LEGACY path. Flag READERS therefore also probe legacy while it exists — a
+    fleet stop must never be missed because of version skew. Never active under the
+    env override (test isolation), and gone entirely once the legacy dir is retired
+    (fallback removal is the EHT follow-up, 2 releases out)."""
+    if os.environ.get("JANITOR_GLOBAL_STATE_DIR"):
+        return None
+    legacy = _legacy_global_state_dir()
+    if legacy.is_dir() and global_state_dir() != legacy:
+        return legacy / name
+    return None
 
 
 def init_global_state() -> Path:
@@ -100,6 +145,82 @@ def init_global_state() -> Path:
     d = global_state_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+# Files that must NOT be copied by the migration: the kernel locks are dir-bound
+# (copying a flock file copies nothing kernel-side, and a stray copy invites a
+# split-brain read), and the pid is re-published by the migrating daemon itself.
+_MIGRATION_SKIP = frozenset({
+    "daemon.flock", "daemon.pid", "marketplace-op.lock", "oauth-rotator-tick.lock",
+})
+
+
+def migrate_global_state_to_data_dir() -> Optional[int]:
+    """One-time staged migration legacy → plugin DATA dir (TRDD-2U8AH82F).
+
+    MUST be called ONLY by the daemon, immediately after it acquired the singleton
+    flock — pre-migration that flock lives at the LEGACY path, so the caller is
+    provably the machine's single writer. Sequence (the FLOCK-MOVES-LAST invariant):
+
+      1. copy every state file/dir (minus kernel locks + pid) legacy → NEW;
+      2. acquire the NEW dir's daemon.flock BEFORE stamping the marker — from that
+         instant the caller holds BOTH flocks, so no window exists where a second
+         daemon could take the NEW lock while we still guard only the legacy one;
+      3. stamp the migration marker (the atomic switch every `global_state_dir()`
+         call resolves on) and drop a tombstone README in the legacy dir.
+
+    The legacy dir is NEVER deleted here — old-code sessions keep reading it, the
+    dual-read window covers their flag writes, and retirement is the EHT follow-up
+    two releases out. Returns the NEW flock fd (caller must keep it open for the
+    daemon's lifetime) when a migration happened; None when there was nothing to
+    do (env override, XDG host, fresh install, already migrated) or on any
+    failure (fail-open: staying on legacy is always safe)."""
+    if os.environ.get("JANITOR_GLOBAL_STATE_DIR") or os.environ.get("XDG_STATE_HOME"):
+        return None
+    legacy = _legacy_global_state_dir()
+    if global_state_dir() != legacy:
+        return None  # fresh install or already migrated — nothing to hand over
+    new = _data_global_state_dir()
+    try:
+        new.mkdir(parents=True, exist_ok=True)
+        for src in legacy.iterdir():
+            if src.name in _MIGRATION_SKIP or src.name.endswith(".tmp"):
+                continue
+            dst = new / src.name
+            if src.is_dir():
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            elif not dst.exists():  # idempotent: a prior partial copy wins
+                shutil.copy2(src, dst)
+    except OSError:
+        return None
+    # FLOCK MOVES LAST: take the NEW lock while still holding the legacy one.
+    fd = None
+    try:
+        fd = os.open(new / "daemon.flock", os.O_CREAT | os.O_RDWR, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        return None  # someone else holds the NEW lock — do NOT flip the marker
+    try:
+        marker = new / _MIGRATION_MARKER
+        tmp = marker.with_name(marker.name + f".tmp.{os.getpid()}")
+        tmp.write_text(f"{int(time.time())}\n", encoding="utf-8")
+        os.replace(tmp, marker)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        return None
+    with contextlib.suppress(OSError):
+        (legacy / "README-MOVED.txt").write_text(
+            "This janitor state dir was MIGRATED to the plugin DATA dir:\n"
+            f"  {new}\n"
+            "Kept only as a read-fallback for not-yet-updated sessions; safe to\n"
+            "remove after every session runs a janitor >= the migration release.\n",
+            encoding="utf-8",
+        )
+    return fd
 
 
 # ---------- file paths (private; callers use the named helpers below) -------
@@ -153,7 +274,12 @@ def read_heartbeat() -> int:
 
 
 def kill_switch_present() -> bool:
-    return _killswitch_path().is_file()
+    # Dual-read (TRDD-2U8AH82F): a fleet STOP set by an old-code session at the
+    # legacy path must still be honored after the migration flipped resolution.
+    if _killswitch_path().is_file():
+        return True
+    legacy = _legacy_read_path("kill-switch.flag")
+    return legacy is not None and legacy.is_file()
 
 
 def set_kill_switch(reason: str = "") -> None:
@@ -187,7 +313,10 @@ def maintenance_mode_present() -> bool:
     project's cache warm at the 0.1x cache-READ rate instead of letting it die and paying
     the 1.0x rewrite" control — ~1/10 the cost. The daemon idles its task workloads while it
     is set (like a pause); `/janitor-global-maintenance` sets it, `-off` clears it."""
-    return _maintenance_path().is_file()
+    if _maintenance_path().is_file():
+        return True
+    legacy = _legacy_read_path("maintenance-mode.flag")  # dual-read, TRDD-2U8AH82F
+    return legacy is not None and legacy.is_file()
 
 
 def set_maintenance_mode(reason: str = "") -> None:
@@ -217,7 +346,10 @@ def global_pause_present() -> bool:
     while this is present), and every session's heartbeat no-ops — a temporary,
     teardown-free silence. `/janitor-global-pause` sets it; `/janitor-global-unpause`
     clears it. Contrast the kill-switch, which makes the daemon EXIT (the true stop)."""
-    return _global_pause_path().is_file()
+    if _global_pause_path().is_file():
+        return True
+    legacy = _legacy_read_path("global-pause.flag")  # dual-read, TRDD-2U8AH82F
+    return legacy is not None and legacy.is_file()
 
 
 def set_global_pause(reason: str = "") -> None:
@@ -674,27 +806,36 @@ def spawn_daemon_detached() -> Optional[int]:
 # unchanged, so a still-running OLD-code session is surfaced once via its legacy
 # is-present check during the one transition update that ships this code.
 
-def reload_generation() -> int:
-    """Return the reload generation (epoch the daemon last stamped after a
-    plugin changed on disk), or 0 if none. NEVER mutated by a reader."""
-    p = _reload_flag_path()
+def _generation_from_file(p: Path) -> int:
+    """Parse one generation-flag file: `<epoch>\\t<reason>` on the first line.
+    Shared by the reload + skills-reload readers (and their legacy dual-reads)."""
     if not p.is_file():
         return 0
     try:
         raw = p.read_text(encoding="utf-8")
     except OSError:
         return 0
-    # The body is `<epoch>\t<reason>` on a single line — take the token before
-    # the tab, NOT the whole line (which would never be all-digits).
+    # Take the token before the tab, NOT the whole line (never all-digits).
     first_line = raw.splitlines()[0] if raw else ""
     gen_tok = first_line.partition("\t")[0].strip()
     if gen_tok.isdigit():
         return int(gen_tok)
-    # Legacy content (a boolean "1" or a bare reason string) written by a daemon
-    # that predates the generation format → treat as "an update happened at an
-    # unknown time" so a never-acked session still reloads once (return 1, the
-    # smallest positive generation; any real epoch stamp dwarfs it).
+    # Pre-generation content (a boolean "1" or a bare reason string) → treat as
+    # "an update happened at an unknown time" so a never-acked session still
+    # reloads once (1 is the smallest positive gen; any real epoch dwarfs it).
     return 1 if raw.strip() else 0
+
+
+def reload_generation() -> int:
+    """Return the reload generation (epoch the daemon last stamped after a
+    plugin changed on disk), or 0 if none. NEVER mutated by a reader.
+    Dual-reads the legacy dir during the migration window (TRDD-2U8AH82F) —
+    max() wins, so a stamp from either era still triggers exactly one reload."""
+    gen = _generation_from_file(_reload_flag_path())
+    legacy = _legacy_read_path("reload-needed.flag")
+    if legacy is not None:
+        gen = max(gen, _generation_from_file(legacy))
+    return gen
 
 
 def reload_flag_present() -> bool:
@@ -736,21 +877,14 @@ def clear_reload_flag() -> None:
 
 def skills_reload_generation() -> int:
     """Return the standalone-skills reload generation (epoch of the last
-    `/janitor-global-reload-skills`), or 0 if none. NEVER mutated by a reader."""
-    p = _skills_reload_flag_path()
-    if not p.is_file():
-        return 0
-    try:
-        raw = p.read_text(encoding="utf-8")
-    except OSError:
-        return 0
-    first_line = raw.splitlines()[0] if raw else ""
-    gen_tok = first_line.partition("\t")[0].strip()
-    if gen_tok.isdigit():
-        return int(gen_tok)
-    # Legacy/garbled content → treat as "a reload was requested at an unknown time"
-    # so a never-acked session still reloads once (1 is the smallest positive gen).
-    return 1 if raw.strip() else 0
+    `/janitor-global-reload-skills`), or 0 if none. NEVER mutated by a reader.
+    Dual-reads the legacy dir during the migration window (TRDD-2U8AH82F) — an
+    old-code session's global_control_cli may still stamp the legacy path."""
+    gen = _generation_from_file(_skills_reload_flag_path())
+    legacy = _legacy_read_path("skills-reload-needed.flag")
+    if legacy is not None:
+        gen = max(gen, _generation_from_file(legacy))
+    return gen
 
 
 def skills_reload_flag_present() -> bool:
