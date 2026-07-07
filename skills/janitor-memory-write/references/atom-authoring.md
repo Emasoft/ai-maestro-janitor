@@ -28,8 +28,10 @@ metadata:
 <the memories — LEAN. A hub: overview + parts map. An aspect: the shared rule.
 A component: only what is specific to this element (never re-copy a governing
 rule — link up to it). For feedback/project add **Why:** and **How to apply:**.>
-<each durable fact ends with its atom marker, e.g.:>
+<each durable fact OPENS with its atom marker on the line ABOVE it (LEADING —
+the marker line opens the atom; the prose below is its body), e.g.:>
 ^<id> [keywords: <the search words for THIS fact>, type: <type>, ocd: <today>, lmd: <today>]
+<the fact's prose goes HERE, below its marker>
 
 ## Applies to          # GENERAL pages (hub/aspect) ONLY — the radiating ray-list
 - [[governed-element-1]] · [[governed-element-2]]   # EVERY element this rule governs

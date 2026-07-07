@@ -93,6 +93,10 @@ else
 fi
 ```
 
+> Privacy: `user-mem/` under the LOCAL root is the user's PRIVATE store —
+> memgrep excludes it at the engine level; the grep FALLBACK does not, so pipe
+> fallback results through `grep -v '/user-mem/'` and never open such a path.
+
 Read the top 1-3 pages it returns **whole** (facts + their `[^N]` lessons —
 memgrep appends them). The result decides the editorial move for this change.
 

@@ -235,12 +235,16 @@ second of the **two metadata levels** — do NOT conflate them:
    in the body. This is what delimits one atom from the next.
 
 **The syntax is the Obsidian Block-Properties plugin** (`^<block-id> [key: value,
-…]`), placed at the **END** of the block(s) it identifies:
+…]`), placed **LEADING — on its own line ABOVE the block(s) it identifies** (the
+marker line OPENS its atom; the prose below it, up to the next marker/heading, is
+that atom's body). This matches the shipped memgrep parser and the atomize skill —
+a trailing marker would silently attach every fact to the WRONG atom (H1, wikimem
+audit 2026-07-07: this doc used to show the trailing form):
 
 ```markdown
+^rotate-drain [desc: rotator_drains_busy_account_first, keywords: rotator drain rate-limit oauth alternate, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
 The rotator drains the live (near-limit) account first, then rotates to a safe
 alternate that is below SAFE on BOTH the 5h and 7d windows.
-^rotate-drain [desc: rotator_drains_busy_account_first, keywords: rotator drain rate-limit oauth alternate, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
 ```
 
 Parsing grammar (memgrep implements exactly this):

@@ -59,12 +59,17 @@ JANITOR_ROOT="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse --show-toplevel 2>/dev/nu
 CLI="$JANITOR_ROOT/scripts/memory_txn_cli.py"        # the transaction CLI you drive
 # Kill-gate: respect the editor master switch + janitor kill-switch. If disabled,
 # STOP (the CLI's `begin` also refuses, but check up front to avoid wasted work).
-uv run --quiet - <<'PY' || { echo "wikimem editor disabled — abstain"; exit 0; }
+uv run --quiet - <<PY || { echo "wikimem editor disabled — abstain"; exit 0; }
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_txn
 sys.exit(0 if memory_txn.editor_enabled() else 1)
 PY
 ```
+
+> The heredoc delimiter is UNQUOTED (`<<PY`) on purpose — `$JANITOR_ROOT` must
+> expand. A quoted `<<'PY'` passes the literal string to Python, the import
+> fails, and this gate false-abstains EVEN WHEN THE EDITOR IS ENABLED (H5,
+> wikimem audit 2026-07-07). Same for the two blocks below.
 
 If a `[janitor-consolidate]` marker drove this turn, the scheduler already chose
 ONE scope for this heartbeat and holds nothing you need — you pick the scope from
@@ -88,7 +93,7 @@ rides the *next* `publish.py`, never a standalone push. Confirm the gate before
 touching PROJECT:
 
 ```bash
-uv run --quiet - <<'PY'
+uv run --quiet - <<PY
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_settings
 print("project-edit:", "ON" if memory_settings.get("edit_project_scope") else "OFF (skip PROJECT)")
@@ -139,7 +144,7 @@ does NOT re-check legality. Run it on A's and B's frontmatter and refuse on a
 `False`:
 
 ```bash
-uv run --quiet - <<'PY'
+uv run --quiet - <<PY
 import sys; sys.path.insert(0, "$JANITOR_ROOT/scripts/lib")
 import memory_edit_verify as v
 A = v.parse_frontmatter(open("$A_PATH").read())

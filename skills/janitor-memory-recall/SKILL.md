@@ -106,6 +106,13 @@ Read the top 1-3 pages; the fact is in the body, and from there you can follow
 See-also into related pages exactly as in Entry A. If recall returns nothing, the
 memory doesn't exist yet — solve it, then `/janitor-memory-write` (MEMORIZE).
 
+**Privacy boundary:** the LOCAL root's `user-mem/` subdir is the user's PRIVATE
+store — agent-invisible by design (TRDD-4334aad0; only `/janitor-memory-user-share`
+may surface one of its memories). memgrep's memory subcommands exclude it at the
+ENGINE level (dir-rooted walks skip descendant `user-mem/` components), so it never
+ranks — if a result path ever names `user-mem/`, treat it as a bug: do not open or
+quote it, and report the finding.
+
 **Results now include body ATOMS, not just pages.** A page body is a sequence of
 first-class facts, each OPENED by a leading block-property marker (the marker line
 sits above the fact; the content below it is the atom's body), and `recall`

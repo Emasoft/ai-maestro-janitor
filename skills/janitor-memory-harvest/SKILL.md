@@ -109,6 +109,10 @@ UPDATE-or-CREATE a curated copy in `<scope>/wiki/`:
 memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
 ```
 
+> Privacy: `user-mem/` under the LOCAL root is the user's PRIVATE store —
+> memgrep excludes it at the engine level; if a result path ever names it,
+> treat that as a bug (never open, quote, or mirror it).
+
 - **A wiki page on the same subject already exists** → UPDATE it (the
   `/janitor-memory-update` correction protocol — clean the fact in place, demote a
   superseded statement to a dated `[^N]` lesson). Do NOT create a duplicate.
@@ -124,8 +128,16 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
   - **Scope routing** — machine-private (local paths / hostnames / secrets) → LOCAL;
     project-shared (no secrets) → PROJECT; cross-project → USER; **UNSURE → LOCAL**.
 
-  Write through the transaction core (`memory_txn_cli.py` — the crash-safe, flock-guarded
-  path the other passes use) so the wiki edit is atomic; then `memgrep reindex "$MEMDIR"`.
+  How to land the edit (H3, wikimem audit 2026-07-07 — the txn CLI has NO
+  harvest/create op, so the two cases route differently):
+  - **CREATE a brand-new `wiki/<name>.md`** → a direct `Write` of the new file
+    (one atomic file creation; there is no pre-existing content to protect — the
+    step-3 `mirror_preservation_ok` gate below is the loss oracle for this case).
+  - **UPDATE an existing wiki page** → through the transaction core:
+    `memory_txn_cli.py begin <scope> --op repair <rel>` → edit the staged copy →
+    `commit --op repair` (one source, the write at the same path — the shape the
+    repair gate accepts).
+  Then `memgrep reindex "$MEMDIR"`.
   **The buffer note is left exactly as it was** — you mirror its content into `wiki/`, you
   do not move, edit, or delete it.
 

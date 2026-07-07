@@ -102,6 +102,11 @@ else
 fi
 ```
 
+Privacy: the LOCAL root's `user-mem/` subdir is the user's PRIVATE store —
+agent-invisible by design. memgrep's memory subcommands exclude it at the ENGINE
+level; the plain-`grep` FALLBACK does not, so pipe fallback results through
+`grep -v '/user-mem/'` and never open a path that names it.
+
 Read the top 1-3 notes the recall returns; the answer is in their bodies. The
 note's SCOPE is its path (under `~/.claude/projects/…` = LOCAL, under the repo
 = PROJECT, under the janitor PLUGIN_DATA dir `…/plugins/data/<janitor>/memory` = USER); when two scopes state conflicting
