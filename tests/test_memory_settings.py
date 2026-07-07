@@ -389,3 +389,64 @@ def test_harvest_watermark_survives_corrupt_file(tmp_path, monkeypatch):
     p.write_text("{ this is not json", encoding="utf-8")
     assert ms.harvest_watermark_read("LOCAL", "/proj/corrupt") == {}
     assert ms.harvest_note_is_mirrored("LOCAL", "/proj/corrupt", "n.md", "x") is False
+
+
+# ── is-due / mark-ran CLI verbs (issue #68 P1, TRDD-UENXDA8P) ────────────────────────────
+
+
+def test_cli_is_due_then_mark_ran_roundtrip(capsys, monkeypatch, tmp_path):
+    """The agent-shell cadence gate: `is-due` exits 0 (due) for an enabled fresh pass;
+    `mark-ran` stamps it; `is-due` then exits 1 with `not-due` — no lib import needed."""
+    ms.set_value("harvest_per_day", "4")
+    root = tmp_path / "memroot"
+    root.mkdir()
+    due_argv = ["x", "is-due", "harvest", "LOCAL", "--root", str(root), "--now", str(_NOW)]
+    monkeypatch.setattr(sys, "argv", due_argv)
+    assert cli.main() == 0
+    assert capsys.readouterr().out.strip() == "due"
+
+    monkeypatch.setattr(
+        sys, "argv", ["x", "mark-ran", "harvest", "LOCAL", "--root", str(root), "--now", str(_NOW)]
+    )
+    assert cli.main() == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr(sys, "argv", due_argv)
+    assert cli.main() == 1
+    assert capsys.readouterr().out.strip() == "not-due"
+
+
+def test_cli_is_due_disabled_pass_not_due(capsys, monkeypatch, tmp_path):
+    """A pass whose per-day rate is 0 (the default) is never due — exit 1."""
+    monkeypatch.setattr(
+        sys, "argv", ["x", "is-due", "conflict", "LOCAL", "--root", str(tmp_path), "--now", str(_NOW)]
+    )
+    assert cli.main() == 1
+    assert capsys.readouterr().out.strip() == "not-due"
+
+
+def test_cli_is_due_unknown_intervention_errors(capsys, monkeypatch, tmp_path):
+    """An unknown intervention fails fast with exit 2 — never a silent not-due."""
+    monkeypatch.setattr(
+        sys, "argv", ["x", "is-due", "nonsense", "LOCAL", "--root", str(tmp_path), "--now", str(_NOW)]
+    )
+    assert cli.main() == 2
+    assert "unknown intervention" in capsys.readouterr().err
+
+
+def test_cli_scope_label_is_case_insensitive(capsys, monkeypatch, tmp_path):
+    """`local` and `LOCAL` hit the SAME stamp — the CLI normalizes to the scheduler's
+    UPPERCASE labels, else agent-typed lowercase would fork the cadence."""
+    ms.set_value("repair_per_day", "2")
+    root = tmp_path / "m"
+    root.mkdir()
+    monkeypatch.setattr(
+        sys, "argv", ["x", "mark-ran", "repair", "local", "--root", str(root), "--now", str(_NOW)]
+    )
+    assert cli.main() == 0
+    capsys.readouterr()
+    monkeypatch.setattr(
+        sys, "argv", ["x", "is-due", "repair", "LOCAL", "--root", str(root), "--now", str(_NOW)]
+    )
+    assert cli.main() == 1  # the lowercase mark-ran satisfied the UPPERCASE is-due
+    assert capsys.readouterr().out.strip() == "not-due"
