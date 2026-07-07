@@ -65,6 +65,26 @@ def test_resolve_local_dir_uses_slug(monkeypatch, _isolate):
     assert got == _isolate / ".claude" / "projects" / "-Users-me-proj" / "memory"
 
 
+def test_resolve_local_dir_for_matches_resolve_local_dir(monkeypatch, _isolate):
+    """M-11 (wikimem audit 2026-07-07): the explicit-project export resolves the
+    SAME dir the implicit resolver does, using the harness slug rules (dash every
+    non-alphanumeric, never realpath) — the SSOT for callers like fleet_status
+    that resolve LOCAL roots for OTHER projects."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/Users/me/my_proj.v2")
+    assert msc.resolve_local_dir_for("/Users/me/my_proj.v2") == msc.resolve_local_dir()
+    assert msc.resolve_local_dir_for("/Users/me/my_proj.v2").parent.name == "-Users-me-my-proj-v2"
+
+
+def test_settings_dir_shares_the_data_dir_constant(monkeypatch, _isolate):
+    """M-11: memory_settings.settings_dir builds its default path from the
+    memory_scopes SSOT constant — the two literals can never drift again."""
+    monkeypatch.delenv("JANITOR_MEMORY_SETTINGS_DIR", raising=False)
+    import memory_settings as ms
+    d = ms.settings_dir()
+    assert d.name == msc.JANITOR_DATA_DIR_NAME
+    assert msc.resolve_user_dir().parent == d
+
+
 # ---- resolve_user_dir (the hard-coded-path gotcha) -------------------------
 
 def test_resolve_user_dir_ignores_claude_plugin_data(_isolate):

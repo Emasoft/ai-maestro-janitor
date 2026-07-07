@@ -191,15 +191,19 @@ def _user_memdir() -> Path:
     untouchable, survives plugin updates + `--keep-data` uninstall (NOT a
     `~/.claude/<custom>/` folder a cleanup pass could wipe). Not created.
 
-    Resolved by this EXPLICIT hard-coded path, NEVER via ``${CLAUDE_PLUGIN_DATA}``:
-    that env var holds the *currently-running* plugin's data dir, which is the
-    janitor ONLY inside the janitor's own plugin hooks. This is a UserPromptSubmit
-    hook fired in the host session where ``CLAUDE_PLUGIN_DATA`` is unset or points
-    at whatever plugin owns the turn — not necessarily the janitor — so reading it
-    would route USER recall to the wrong plugin's dir.
+    Resolved through the `memory_scopes` SSOT (M-11, wikimem audit 2026-07-07 —
+    never a re-derived literal), which hard-codes the path EXPLICITLY and NEVER
+    reads ``${CLAUDE_PLUGIN_DATA}``: that env var holds the *currently-running*
+    plugin's data dir, which is the janitor ONLY inside the janitor's own plugin
+    hooks. This is a UserPromptSubmit hook fired in the host session where
+    ``CLAUDE_PLUGIN_DATA`` is unset or points at whatever plugin owns the turn —
+    not necessarily the janitor — so reading it would route USER recall to the
+    wrong plugin's dir. Only called AFTER `_load_libs` put scripts/lib on
+    sys.path (user_mem_lib itself imports memory_scopes, so it is importable).
     """
-    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
+    import memory_scopes  # noqa: PLC0415 — importable only after _load_libs
+
+    return memory_scopes.resolve_user_dir()
 
 
 def _recall(memgrep: str, query: str, note_paths: list[str]) -> str:

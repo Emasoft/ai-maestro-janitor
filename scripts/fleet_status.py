@@ -370,14 +370,15 @@ def main() -> int:
     home = Path.home()
     now = int(time.time())
 
+    # M-11 (wikimem audit 2026-07-07): memory roots come from the memory_scopes
+    # SSOT, never a re-derived literal — the old inline path (and the old
+    # realpath-based LOCAL slug below) could silently drift from the real roots.
     sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
     import fleet_scan  # noqa: E402  -- local lib module
+    import memory_scopes  # noqa: E402  -- local lib module
 
     gstate = home / ".claude" / "janitor-global-state"
-    global_mem = (
-        home / ".claude" / "plugins" / "data"
-        / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
-    )
+    global_mem = memory_scopes.resolve_user_dir()
     global_wikimem = _count_md(global_mem)
     daemon_hb = _read_epoch(str(gstate / "daemon.heartbeat.ts"))
     daemon_alive = daemon_hb is not None and (now - daemon_hb) < 600
@@ -417,8 +418,10 @@ def main() -> int:
         g = _git(root)
         t = _newest_transcript(home, root)
         armed = "yes" if os.path.isfile(os.path.join(root, ".janitor", "state", "heartbeat-armed-at.ts")) else "no"
-        slug = os.path.realpath(root).replace("/", "-")
-        local_mem = _count_md(home / ".claude" / "projects" / slug / "memory")
+        # M-11: the SSOT slug (dash EVERY non-alphanumeric, never realpath) —
+        # the old realpath+"/"→"-" translation resolved a NONEXISTENT dir for
+        # any dotted/underscored/symlinked project path (count silently 0).
+        local_mem = _count_md(memory_scopes.resolve_local_dir_for(root))
         proj_mem = _count_md(Path(_git_top(root)) / ".claude" / "project" / "memory")
         started, etime = times.get(i.pid, ("—", "—"))
         ci = "—"

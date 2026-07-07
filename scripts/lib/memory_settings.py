@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 
 import global_state
+import memory_scopes
 import state
 
 # Default global settings. The six per-day editorial-pass rates default to 0 = OFF:
@@ -75,7 +76,9 @@ def settings_dir() -> Path:
     override = os.environ.get("JANITOR_MEMORY_SETTINGS_DIR")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"
+    # M-11: the data-dir NAME is the memory_scopes SSOT constant — two literals
+    # that must never drift, maintained in ONE place.
+    return Path.home() / ".claude" / "plugins" / "data" / memory_scopes.JANITOR_DATA_DIR_NAME
 
 
 def _settings_path() -> Path:

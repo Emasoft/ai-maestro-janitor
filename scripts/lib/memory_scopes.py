@@ -35,7 +35,10 @@ from pathlib import Path
 # The janitor's FIXED plugin-DATA directory name (NOT a marketplace id). The CANONICAL
 # USER memory scope lives under it; see resolve_user_dir for why it is hard-coded rather
 # than read from ${CLAUDE_PLUGIN_DATA}. A ``--keep-data`` uninstall preserves it directly.
-_JANITOR_DATA_DIR_NAME = "ai-maestro-janitor-ai-maestro-plugins"
+# PUBLIC (M-11, wikimem audit 2026-07-07): every module that needs the data-dir name
+# (memory_settings.settings_dir, fleet_status, …) imports THIS constant — two literals
+# that must never drift cannot be maintained independently.
+JANITOR_DATA_DIR_NAME = "ai-maestro-janitor-ai-maestro-plugins"
 
 # The USER-memory MIRROR dir name under ``~/.claude/`` (TRDD-GFT33HT9). The canonical USER
 # corpus lives in the plugin DATA dir (above), which ``claude plugin uninstall`` DELETES
@@ -160,13 +163,21 @@ def _project_dir() -> str:
     return (os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).strip()
 
 
+def resolve_local_dir_for(project_dir: str) -> Path:
+    """The LOCAL agent-memory dir of an EXPLICIT project path (M-11 — the SSOT
+    export for callers like fleet_status that resolve LOCAL roots for OTHER
+    projects, not the current one). Uses the harness slug rules (`project_slug`:
+    dash every non-alphanumeric char, never resolve symlinks). Not created."""
+    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
+    return home / ".claude" / "projects" / project_slug(project_dir) / "memory"
+
+
 def resolve_local_dir() -> Path:
     """The per-project LOCAL agent-memory dir (parent of ``user-mem``). Not created.
 
     LOCAL scope of the three-scope wiki: per-project, per-machine, never pushed.
     """
-    home = Path(os.environ.get("HOME") or os.path.expanduser("~"))
-    return home / ".claude" / "projects" / project_slug(_project_dir()) / "memory"
+    return resolve_local_dir_for(_project_dir())
 
 
 def resolve_project_dir() -> Path | None:
@@ -206,7 +217,7 @@ def resolve_user_dir() -> Path:
     synced backup MIRROR (``resolve_user_mirror_dir``) OUTSIDE the data dir guarantees the
     memory is never lost (TRDD-GFT33HT9). Not created.
     """
-    return _home() / ".claude" / "plugins" / "data" / _JANITOR_DATA_DIR_NAME / "memory"
+    return _home() / ".claude" / "plugins" / "data" / JANITOR_DATA_DIR_NAME / "memory"
 
 
 def resolve_user_mirror_dir() -> Path:
