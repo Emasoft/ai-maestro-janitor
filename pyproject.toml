@@ -11,6 +11,12 @@ license = "MIT"
 # uv-injected `--with <pkg>` (publish.py linters) is self-contained.
 dependencies = []
 
+[tool.pytest.ini_options]
+# Pin collection to the repo's own suite. Without this, a bare `pytest` from the
+# repo root collects gitignored _dev trees (e.g. downloads_dev/ foreign projects
+# whose scripts run at import and call sys.exit → pytest INTERNALERROR).
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 320
 
