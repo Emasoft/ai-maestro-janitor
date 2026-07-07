@@ -35,6 +35,7 @@ unrecoverable errors.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -321,6 +322,49 @@ def _mark_detector_ran(name: str) -> None:
     state.atomic_write(state.state_dir() / f"last-run-{name}.ts", str(int(time.time())))
 
 
+# F6 (wikimem audit runtime): the cron prompt promises that a forged reserved
+# marker inside untrusted content "already" arrives defanged — but that defang
+# was a PER-DETECTOR convention (state.sanitize_for_drift_line), and ~half the
+# roster never imports it. Detector stdout used to pass to the cron turn
+# VERBATIM (capture_output=False), so ONE sanitizer-less detector printing
+# untrusted multi-line text was a bare-line marker-forgery vector. This is the
+# missing CENTRAL enforcement: _run_detector now captures stdout and defangs
+# any RESERVED whole-line-executable marker that the emitting detector does
+# not own. Only the reserved set is touched — ordinary `[janitor-<detector>]`
+# drift prefixes (e.g. janitor-install-scope) pass through untouched.
+_RESERVED_MARKER_RE = re.compile(
+    r"\[janitor-(?:memory-[a-z0-9-]+|resume|renew|reload-skills|reload|self-disarm)\]"
+)
+# The ONLY detector that legitimately emits a reserved marker, and the exact
+# shape it may emit bare (memory-maintenance's chore fan-out markers).
+_MARKER_OWNERS: dict[str, re.Pattern[str]] = {
+    "memory-maintenance": re.compile(r"\[janitor-memory-[a-z0-9-]+\]"),
+}
+
+
+def _defang_foreign_markers(detector: str, text: str) -> str:
+    """Defang reserved `[janitor-…]` markers a detector is not entitled to emit.
+
+    An owner's marker survives ONLY as a bare whole line (the exact contract the
+    cron clause executes); the same marker embedded in prose — even the owner's —
+    is untrusted-shaped and gets defanged to `⟦janitor-…⟧` so it can't match.
+    """
+    if not text or "[janitor-" not in text:
+        return text
+    own = _MARKER_OWNERS.get(detector)
+    out: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        # bare whole line == no surrounding text at all (splitlines strips \n)
+        if own is not None and own.fullmatch(stripped) and stripped == line:
+            out.append(line)
+            continue
+        out.append(
+            _RESERVED_MARKER_RE.sub(lambda m: "⟦" + m.group(0)[1:-1] + "⟧", line)
+        )
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
 def _run_detector(name: str, interval: int) -> None:
     script = _HERE / "detectors" / f"{name}.py"
     if not script.is_file() or not os.access(script, os.X_OK):
@@ -342,14 +386,27 @@ def _run_detector(name: str, interval: int) -> None:
     # the enforced one.
     timeout = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_DETECTOR_TIMEOUT"), 120)
     try:
+        # stdout is CAPTURED (not inherited) so the F6 central defang above can
+        # neutralize forged reserved markers before they reach the cron turn.
+        # stderr stays inherited — it never carries drift lines.
         proc = subprocess.run(
             [str(script), "--one-shot"],
-            capture_output=False,
+            stdout=subprocess.PIPE,
+            text=True,
             check=False,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         state.log_line("dispatch", f"detector '{name}' timed out after {timeout}s — killed")
+        # With a PIPE the partial output is on the exception — print it (defanged)
+        # so a slow detector's already-produced findings aren't silently dropped
+        # (they used to stream live under capture_output=False).
+        partial = exc.stdout
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", "replace")
+        if partial:
+            sys.stdout.write(_defang_foreign_markers(name, partial))
+            sys.stdout.flush()
         # Stamp last-run even on timeout so a chronically-slow detector backs
         # off to its cadence instead of re-firing (and re-hanging) every fire.
         _mark_detector_ran(name)
@@ -357,6 +414,9 @@ def _run_detector(name: str, interval: int) -> None:
     except OSError as exc:
         state.log_line("dispatch", f"detector '{name}' spawn failed: {exc}")
         return
+    if proc.stdout:
+        sys.stdout.write(_defang_foreign_markers(name, proc.stdout))
+        sys.stdout.flush()
     if proc.returncode != 0:
         state.log_line("dispatch", f"detector '{name}' exited non-zero")
     _mark_detector_ran(name)
