@@ -10,8 +10,11 @@ size gate); everything else returns True (unchanged cadence-only behavior).
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
@@ -105,10 +108,11 @@ def test_content_has_work_split_fail_open_on_nonpositive_cap(tmp_path):
 
 def test_content_has_work_unprechecked_chores_fail_open(tmp_path):
     """Every chore WITHOUT a cheap exact precheck returns True (fail-open) so the
-    scheduler keeps its existing cadence-only behavior — harvest/repair/atomize are
-    documented follow-ups; conflict is semantic + agent-discovered. (consolidate is
-    NO LONGER in this set — it now has a STRUCTURAL precheck, TRDD-8UD3Q7K5.)"""
-    for chore in ("harvest", "repair", "atomize", "conflict"):
+    scheduler keeps its existing cadence-only behavior — harvest stays a follow-up
+    (BLOCKED on the coexistence-model flux, TRDD-ab232dbd #231/#232); conflict is
+    semantic + agent-discovered. (consolidate/repair/atomize are NO LONGER in this
+    set — they now have structural prechecks: TRDD-8UD3Q7K5 + TRDD-3XS3PDCF.)"""
+    for chore in ("harvest", "conflict"):
         assert mcp.content_has_work(chore, tmp_path, split_max_bytes=_CAP) is True
         # ...and still True with content present (they are never suppressed here).
         _page(tmp_path, f"{chore}.md", 100)
@@ -215,3 +219,184 @@ def test_content_has_work_consolidate_delegates_to_structural_gate(tmp_path):
     _curated(tmp_path, "a.md", tier="component", type_="project")
     _curated(tmp_path, "b.md", tier="component", type_="project")
     assert mcp.content_has_work("consolidate", tmp_path, split_max_bytes=_CAP) is True
+
+
+def _shaped(
+    d: Path,
+    name: str,
+    *,
+    tier: str = "component",
+    notes: bool = True,
+    dates_top_level: bool = True,
+    body: str = "A durable fact line about the subject.",
+    marker: bool = False,
+    drop: tuple[str, ...] = (),
+) -> Path:
+    """Write a fully-SHAPED curated wikimem page (every verify_repair required key,
+    top-level ocd/lmd, the standing Notes section, no tier inversion) and let each
+    test break exactly ONE aspect of the shape via the knobs."""
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / name
+    top: list[str] = ["---", f"name: {name[:-3]}"]
+    if "description" not in drop:
+        top.append("description: what breaks when X happens — symptom words")
+    if dates_top_level:
+        top.append("ocd: 2026-07-01")
+        top.append("lmd: 2026-07-08")
+    top.append("metadata:")
+    top.append("  node_type: memory")
+    top.append("  type: project")
+    if "tier" not in drop:
+        top.append(f"  tier: {tier}")
+    if not dates_top_level:
+        # the historical NESTED placement repair normalizes (issue #56)
+        top.append("  ocd: 2026-07-01")
+        top.append("  lmd: 2026-07-08")
+    top.append("---")
+    parts = ["\n".join(top), ""]
+    if marker:
+        parts.append("^fact-1 [desc: the_fact, keywords: symptom words]")
+    parts.append(body)
+    if notes:
+        parts += ["", "## Notes and lessons learned", ""]
+    p.write_text("\n".join(parts) + "\n", encoding="utf-8")
+    return p
+
+
+# --------------------------------------------------------------------------- #
+# repair_has_work — the STRUCTURAL page-shape gate (TRDD-3XS3PDCF follow-up)
+# --------------------------------------------------------------------------- #
+
+def test_repair_has_work_false_on_well_formed_corpus(tmp_path):
+    """Every page fully shaped (all required keys, valid tier, top-level dates,
+    Notes section, no tier inversion) -> repair is provably idle."""
+    _shaped(tmp_path, "a.md")
+    _shaped(tmp_path / "wiki", "b.md", tier="aspect")
+    assert mcp.repair_has_work(tmp_path) is False
+
+
+def test_repair_has_work_true_on_missing_notes_section(tmp_path):
+    """A page without the standing '## Notes and lessons learned' section is
+    repair work (verify_repair requires the section on the result)."""
+    _shaped(tmp_path, "a.md", notes=False)
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_missing_required_key(tmp_path):
+    """A page lacking any verify_repair required key (tier here) is repair work —
+    this also covers RAW harness buffer notes (partial schema by construction),
+    which the repair skill explicitly upgrades."""
+    _shaped(tmp_path, "a.md", drop=("tier",))
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_nested_dates(tmp_path):
+    """ocd/lmd nested under metadata: (the historical shape, issue #56) is
+    placement-normalization work even though the FLATTENED keys are present."""
+    _shaped(tmp_path, "a.md", dates_top_level=False)
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_invalid_tier(tmp_path):
+    """A tier outside {hub, aspect, component} must be re-tagged -> work."""
+    _shaped(tmp_path, "a.md", tier="banana")
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_inverted_aspect_shape(tmp_path):
+    """An aspect that only RECEIVES (## Governed by, no ## Applies to) is built
+    backwards — the skill re-shapes or re-tags it."""
+    _shaped(tmp_path, "a.md", tier="aspect", body="A rule.\n\n## Governed by\n- [[x]]")
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_component_with_applies_to(tmp_path):
+    """A component that RADIATES (## Applies to) is the mirror inversion."""
+    _shaped(tmp_path, "a.md", body="A fact.\n\n## Applies to\n- [[x]]")
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_true_on_frontmatterless_page(tmp_path):
+    """No leading --- fence at all -> invisible to ranked recall -> repair work."""
+    (tmp_path / "bare.md").write_text("just prose, no frontmatter\n", encoding="utf-8")
+    assert mcp.repair_has_work(tmp_path) is True
+
+
+def test_repair_has_work_false_on_empty_and_missing_dir(tmp_path):
+    """An empty or non-existent corpus has no repair work (not an error)."""
+    assert mcp.repair_has_work(tmp_path) is False
+    assert mcp.repair_has_work(tmp_path / "nope") is False
+
+
+def test_content_has_work_repair_delegates(tmp_path):
+    """repair routes through repair_has_work (False then True round-trip)."""
+    assert mcp.content_has_work("repair", tmp_path, split_max_bytes=_CAP) is False
+    _shaped(tmp_path, "a.md", notes=False)
+    assert mcp.content_has_work("repair", tmp_path, split_max_bytes=_CAP) is True
+
+
+# --------------------------------------------------------------------------- #
+# atomize_has_work — free-prose curated pages without atom markers
+# --------------------------------------------------------------------------- #
+
+def test_atomize_has_work_true_for_unmarked_curated_page(tmp_path):
+    """A curated page with a substantive body and ZERO atom markers is the
+    atomize skill's exact candidate -> work."""
+    _shaped(tmp_path, "a.md")
+    assert mcp.atomize_has_work(tmp_path) is True
+
+
+def test_atomize_has_work_false_when_every_curated_page_carries_a_marker(tmp_path):
+    """The atomize skill skips any page with >=1 marker ('already atomized'), so
+    an all-marked corpus is provably idle."""
+    _shaped(tmp_path, "a.md", marker=True)
+    _shaped(tmp_path / "wiki", "b.md", marker=True)
+    assert mcp.atomize_has_work(tmp_path) is False
+
+
+def test_atomize_has_work_false_for_raw_buffer_notes_only(tmp_path):
+    """RAW harness buffer notes are not curated wiki pages -> never atomize
+    candidates (is_curated_wiki_page is the coexistence discriminator)."""
+    _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    assert mcp.atomize_has_work(tmp_path) is False
+
+
+def test_atomize_has_work_false_for_page_without_substantive_body(tmp_path):
+    """Headings + the empty Notes pool only -> nothing an atom could mark -> the
+    skill's 'free-prose-leaf-no-distinct-facts' abstain case -> no work."""
+    _shaped(tmp_path, "a.md", body="## Some heading")
+    assert mcp.atomize_has_work(tmp_path) is False
+
+
+def test_atomize_has_work_false_on_empty_and_missing_dir(tmp_path):
+    """An empty or non-existent corpus has no atomize work (not an error)."""
+    assert mcp.atomize_has_work(tmp_path) is False
+    assert mcp.atomize_has_work(tmp_path / "nope") is False
+
+
+def test_content_has_work_atomize_delegates(tmp_path):
+    """atomize routes through atomize_has_work (False then True round-trip)."""
+    assert mcp.content_has_work("atomize", tmp_path, split_max_bytes=_CAP) is False
+    _shaped(tmp_path, "a.md")
+    assert mcp.content_has_work("atomize", tmp_path, split_max_bytes=_CAP) is True
+
+
+# --------------------------------------------------------------------------- #
+# FAIL-OPEN on unreadable pages (libs audit L-11)
+# --------------------------------------------------------------------------- #
+
+def test_unreadable_page_fails_open_for_read_based_prechecks(tmp_path):
+    """A page the precheck cannot READ is NOT provably idle -> True (fail-open),
+    never skip-and-suppress (libs audit L-11). The corpus is arranged so every
+    readable page has NO work — the flip to True comes solely from the locked one."""
+    if os.geteuid() == 0:
+        pytest.skip("permission bits do not bind root")
+    _shaped(tmp_path, "good.md", marker=True)  # readable: no repair/atomize/merge work
+    locked = _shaped(tmp_path, "locked.md", marker=True)
+    locked.chmod(0)
+    try:
+        assert mcp.consolidate_has_work(tmp_path) is True
+        assert mcp.repair_has_work(tmp_path) is True
+        assert mcp.atomize_has_work(tmp_path) is True
+    finally:
+        locked.chmod(0o644)  # let pytest's tmp_path cleanup delete it

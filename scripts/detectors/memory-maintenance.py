@@ -222,9 +222,11 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
     zero-LLM filesystem check that suppresses a cadence-due chore with NOTHING to do
     so it never spawns a ~226-240k no-op subconscious agent (TRDD-3XS3PDCF, TRDD-8UD3Q7K5).
     It is FAIL-OPEN: only a chore whose idleness is cheaply proven (today: SPLIT's
-    size gate, and CONSOLIDATE's structural "no legal-merge pair" gate — issue #64)
-    is suppressed; every other chore returns work=True and keeps its cadence-only
-    behavior. Because a suppressed chore is simply NOT returned here, it is never
+    size gate, CONSOLIDATE's structural "no legal-merge pair" gate — issue #64 —
+    and REPAIR/ATOMIZE's structural page-shape / free-prose gates, the
+    TRDD-3XS3PDCF follow-up) is suppressed; every other chore returns work=True
+    and keeps its cadence-only behavior. Because a suppressed chore is simply NOT
+    returned here, it is never
     picked and never stamped (`mark_ran`) — so it re-checks every heartbeat and
     emits the instant work appears (Option A), with NO second cadence gate (the
     scheduler stays the sole cadence authority; the agent still trusts the marker).

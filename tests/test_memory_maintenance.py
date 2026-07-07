@@ -97,6 +97,40 @@ def _write_mergeable_pair(scope_dir: Path, *, tier: str = "component", type_: st
         )
 
 
+def _write_curated_page(scope_dir: Path, *, name: str = "page.md", marker: bool) -> Path:
+    """A fully-SHAPED curated page (every verify_repair required key, top-level
+    ocd/lmd, the Notes section) — repair-idle by construction. marker=True also
+    makes it atomize-idle (>=1 atom marker); marker=False leaves it FREE-PROSE
+    (atomize's exact candidate, TRDD-3XS3PDCF follow-up)."""
+    scope_dir.mkdir(parents=True, exist_ok=True)
+    p = scope_dir / name
+    mark = "^fact-1 [desc: the_fact, keywords: symptom words]\n" if marker else ""
+    p.write_text(
+        f"---\nname: {name[:-3]}\ndescription: what breaks when X — symptoms\n"
+        "ocd: 2026-07-01\nlmd: 2026-07-08\nmetadata:\n  node_type: memory\n"
+        "  type: project\n  tier: component\n---\n\n"
+        f"{mark}A durable fact line about the subject.\n\n"
+        "## Notes and lessons learned\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def _write_malformed_page(scope_dir: Path, *, name: str = "broken.md") -> Path:
+    """A structurally-MALFORMED page (missing the standing Notes section) so REPAIR
+    has real work — the precheck suppresses a cadence-due repair when every page is
+    fully shaped (TRDD-3XS3PDCF follow-up)."""
+    scope_dir.mkdir(parents=True, exist_ok=True)
+    p = scope_dir / name
+    p.write_text(
+        f"---\nname: {name[:-3]}\ndescription: what breaks when X — symptoms\n"
+        "ocd: 2026-07-01\nlmd: 2026-07-08\nmetadata:\n  node_type: memory\n"
+        "  type: project\n  tier: component\n---\n\nA fact line.\n",
+        encoding="utf-8",
+    )
+    return p
+
+
 def _write_settings(settings_dir: Path, **values: object) -> None:
     """Write the wikimem settings store the detector reads via
     JANITOR_MEMORY_SETTINGS_DIR. Only the given keys are set; the rest take the
@@ -179,6 +213,14 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
         # consolidate now also requires real work — a structural merge pair
         # (TRDD-8UD3Q7K5).
         _write_mergeable_pair(fixture["local"])
+    elif intervention == "repair":
+        # repair now also requires real work — a structurally-malformed page
+        # (TRDD-3XS3PDCF follow-up).
+        _write_malformed_page(fixture["local"])
+    elif intervention == "atomize":
+        # atomize now also requires real work — a free-prose curated page
+        # (TRDD-3XS3PDCF follow-up).
+        _write_curated_page(fixture["local"], marker=False)
 
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     # Exactly one non-empty line, and it is the bare marker (no trailing text).
@@ -526,3 +568,105 @@ def test_no_emit_no_sidecar(fixture):
     assert not [ln for ln in out.splitlines() if ln.strip()], out
     sidecar = fixture["project"] / ".janitor" / "state" / "memory-maint-pending.json"
     assert not sidecar.exists()
+
+
+# --------------------------------------------------------------------------- #
+# the content-precheck (TRDD-3XS3PDCF follow-up) — repair/atomize suppressed
+# when the corpus is structurally clean / already atomized
+# --------------------------------------------------------------------------- #
+
+def _repair_only(settings_dir: Path) -> None:
+    """Enable ONLY repair (high rate, always due) so its structural page-shape
+    precheck is what's under test."""
+    _write_settings(
+        settings_dir,
+        repair_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
+        consolidation_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
+    )
+
+
+def _atomize_only(settings_dir: Path) -> None:
+    """Enable ONLY atomize (high rate, always due) so its free-prose precheck is
+    what's under test."""
+    _write_settings(
+        settings_dir,
+        atomize_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
+        consolidation_per_day=0.0, repair_per_day=0.0, harvest_per_day=0.0,
+    )
+
+
+def test_repair_suppressed_when_corpus_is_well_formed(fixture):
+    """repair is cadence-due but every page is fully shaped -> the structural
+    precheck suppresses the marker (no no-op agent spawn)."""
+    _repair_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out
+
+
+def test_repair_not_stamped_when_suppressed_then_fires_when_defect_appears(fixture):
+    """Option A for repair: a suppressed fire leaves the cadence slot unused, so a
+    malformed page appearing later emits immediately (no second cadence gate)."""
+    _repair_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    first = _run(env)
+    assert first.strip() == "", first
+    _write_malformed_page(fixture["local"])
+    second = _run(env)
+    lines = [ln for ln in second.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-repair]"], second
+
+
+def test_atomize_suppressed_when_every_curated_page_is_marked(fixture):
+    """atomize is cadence-due but every curated page already carries an atom
+    marker -> suppressed (the skill would only re-abstain)."""
+    _atomize_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out
+
+
+def test_atomize_not_stamped_when_suppressed_then_fires_when_free_prose_appears(fixture):
+    """Option A for atomize: the suppressed fire did not consume the cadence slot —
+    a free-prose curated page appearing later emits immediately."""
+    _atomize_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    first = _run(env)
+    assert first.strip() == "", first
+    _write_curated_page(fixture["local"], name="fresh.md", marker=False)
+    second = _run(env)
+    lines = [ln for ln in second.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-atomize]"], second
+
+
+# --------------------------------------------------------------------------- #
+# F2 / F3 (wikimem audit runtime LOWs): per-project cursor + fail-open catch-all
+# --------------------------------------------------------------------------- #
+
+def test_cursor_is_per_project_not_global(fixture):
+    """F2: the round-robin cursor lives in the PROJECT's .janitor/state — the dir
+    whose scope list the index is interpreted against — never in the machine-wide
+    global-state dir (a global index advanced under another project's list length
+    scrambles rotation fairness)."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert "[janitor-memory-split]" in out
+    project_cursor = fixture["project"] / ".janitor" / "state" / "memory-maint-rr-cursor.ts"
+    assert project_cursor.is_file(), "cursor must land in the project state dir (F2)"
+    assert not (fixture["gstate"] / "memory-maint-rr-cursor.ts").exists()
+
+
+def test_unexpected_error_is_fail_open_silent(fixture, tmp_path):
+    """F3: any unexpected internal error -> exit 0 with NO output (the documented
+    graceful-no-op contract, now enforced by main()'s catch-all). Forced by making
+    the global-state dir path a FILE, so init_global_state's mkdir raises once the
+    detector tries to take the dispatch lock for an emit-worthy pick."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    bogus_gstate = tmp_path / "gstate-is-a-file"
+    bogus_gstate.write_text("not a dir", encoding="utf-8")
+    out = _run(_env(fixture["home"], fixture["project"], bogus_gstate, fixture["settings"]))
+    assert out.strip() == "", out
