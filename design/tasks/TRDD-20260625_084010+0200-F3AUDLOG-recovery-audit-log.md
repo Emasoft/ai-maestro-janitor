@@ -1,9 +1,9 @@
 ---
 trdd-id: F3AUDLOG
 title: Immortality F3 — recovery audit log (append-only NDJSON) + F2 dashboard augments
-column: dev
+column: published
 created: 2026-06-25T08:40:10+0200
-updated: 2026-06-25T08:40:10+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 4
@@ -20,6 +20,7 @@ test-requirements: [unit]
 runtime-targets: [macos, linux]
 impacts: []
 external-refs: []
+implementation-commits: [d5accac]
 ---
 
 # TRDD-F3AUDLOG — immortality F3: recovery audit log + F2 dashboard augments

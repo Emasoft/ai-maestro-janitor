@@ -3,7 +3,7 @@ trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
 column: dev
 created: 2026-06-08T16:53:09+0200
-updated: 2026-06-08T18:40:27+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -24,6 +24,8 @@ external-refs: []
 # TRDD-dfc0959a — Rotator 3-layer cascade + keychain-encrypted cookies + consistency fixes
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-08
+
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dev:** Phases 0/1/2/2c are shipped AND live (cookie_vault.py + cascade.py in-tree; the "daemon still runs cached 0.6.1 — none of this is live yet" fact below is SUPERSEDED — current release v0.31.0). Phase 3 remains OPEN: live capture validation behind `CLAUDE_ROTATOR_KEYCHAIN_COOKIES` (still opt-in, slot_capture_browser.py:361), the verify-before-SCRUB decision, and the deferred A-F* follow-ups.
 
 **USER design directives (2026-06-08), the authoritative spec:**
 1. **Every rotator script must follow ONE paradigm in 3 parts, each FALLING BACK to the

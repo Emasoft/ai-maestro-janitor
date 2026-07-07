@@ -1,9 +1,9 @@
 ---
 trdd-id: fe45babc-6567-4622-862b-de19db908ad5
 title: Autonomous overnight session — OAuth survival + memory-system + immortality GROUP C + issue coordination
-column: dev
+column: complete
 created: 2026-06-22T02:20:07+0200
-updated: 2026-06-25T10:56:39+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: infra
@@ -12,6 +12,7 @@ relevant-rules: []
 test-requirements: [unit]
 impacts: []
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues"]
+implementation-commits: [4775e56, 1ef191c, 9a56bc5, f7fe470, 0e90331, 0422d0a]
 ---
 
 # Autonomous overnight session — the night brain (read on every wake)

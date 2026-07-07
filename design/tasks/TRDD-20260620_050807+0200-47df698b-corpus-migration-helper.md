@@ -3,7 +3,7 @@ trdd-id: 47df698b-d946-4c53-9ce4-d40d1b76a1d4
 title: Memory scope-migration helper — re-scope LOCAL to PROJECT (ai-maestro corpus, option b)
 column: dispatch
 created: 2026-06-20T05:08:07+0200
-updated: 2026-06-20T05:08:07+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -21,6 +21,8 @@ external-refs: []
 # TRDD-47df698b — Memory scope-migration helper (LOCAL→PROJECT)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-20
+
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dispatch:** Phase 1 (read-only classifier + reviewable plan) is shipped — `scripts/migrate_memory_scope.py` + `scripts/lib/memory_migrate.py` in-tree; `--apply` still FAILS FAST by design (migrate_memory_scope.py:15-19) because Phase 2 (owning-Claude apply) is unbuilt and cross-project/USER-gated (fe45babc journal: "#209 needs the target corpus").
 
 - **Origin:** the USER chose **option (b)** for the mis-scoped ai-maestro fleet
   corpus (2026-06-20): *write a migration helper the ai-maestro Claude runs* — NOT

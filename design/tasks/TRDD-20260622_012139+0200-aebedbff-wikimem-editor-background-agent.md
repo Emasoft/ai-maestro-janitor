@@ -1,9 +1,9 @@
 ---
 trdd-id: aebedbff-8f3e-41f2-945b-8b181964e8af
 title: Wikimem editorial work runs in the janitor-memory-subconscious-agent (opus, async) — never a main session
-column: dev
+column: published
 created: 2026-06-22T01:21:39+0200
-updated: 2026-06-22T02:05:00+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: claude-janitor-dev
 parent-trdd: null
 task-type: refactor
@@ -11,6 +11,7 @@ release-via: publish
 relevant-rules: []
 test-requirements: [unit]
 impacts: []
+implementation-commits: [619cedd]
 ---
 
 # Wikimem editorial passes → background opus agent (not main context)

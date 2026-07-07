@@ -1,9 +1,9 @@
 ---
 trdd-id: AKH7JRAA
 title: ci-status detector — after a push, watch the commit's CI and notify the main Claude on failure
-column: dev
+column: published
 created: 2026-07-02T03:52:52+0200
-updated: 2026-07-02T03:52:52+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: autonomous-go-on-yourself
 assignee: autonomous-go-on-yourself
 priority: 2
@@ -24,7 +24,7 @@ runtime-targets: [macos, linux]
 impacts: []
 attempts: 0
 last-test-result: not-run
-implementation-commits: []
+implementation-commits: [25a1dee, 690b7f4]
 external-refs: []
 ---
 

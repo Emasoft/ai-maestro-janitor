@@ -1,9 +1,9 @@
 ---
 trdd-id: GB3Z9U9J
 title: Board reconciliation sweep — close shipped-but-open TRDDs, merge duplicates, triage stale issues
-column: todo
+column: dev
 created: 2026-07-04T04:46:15+0200
-updated: 2026-07-04T04:46:15+0200
+updated: 2026-07-07T14:46:35+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -18,6 +18,19 @@ external-refs: ["https://github.com/Emasoft/ai-maestro-janitor/issues/67", "http
 ---
 
 # TRDD-GB3Z9U9J — Board reconciliation sweep
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-07
+
+- **Steps 1+2 DONE** (executed 2026-07-04, committed 2026-07-07): 17 TRDDs reconciled —
+  11 closed (`published`/`complete`: 87935f21, 3f7b6807, aebedbff, fe45babc, T198DT1W,
+  7DVNHLOP, DKEYCHN7, DGROUPAB, F3AUDLOG, KEEPQRTN, AKH7JRAA), 1 superseded (3ab0397e →
+  superseded-by 6f226399), 5+ annotated "PARTIALLY SHIPPED, stays dev/dispatch" (32acd15f,
+  dfc0959a, 47df698b, 56d24c02, 3XS3PDCF, YRPUSIFY). Evidence SHAs spot-verified
+  (d14510a/aa4c593/10ee8d1/441d467/5687848 all exist and match their TRDDs).
+- **NEXT ACTION — step 3:** triage GitHub issues #67 (weekly audit drift) and #70
+  ([janitor-reload] marker UX) against current code; close with evidence or spawn a TRDD.
+- **Then step 4:** investigate why the reconciliation detector (TRDD-15ECPBSA) never
+  flagged the drift; fix + regression-test, or record why out-of-scope.
 
 ## The task
 

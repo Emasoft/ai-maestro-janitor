@@ -1,9 +1,9 @@
 ---
 trdd-id: DGROUPAB
 title: Immortality GROUP D — keepalive interpreter fallback + staged-closure restage guard
-column: dev
+column: published
 created: 2026-06-25T08:08:27+0200
-updated: 2026-06-25T08:08:27+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -20,6 +20,7 @@ test-requirements: [unit]
 runtime-targets: [macos, linux]
 impacts: []
 external-refs: []
+implementation-commits: [2b2a996]
 ---
 
 # TRDD-DGROUPAB — immortality GROUP D (config self-heal): ship only D-α + D-β

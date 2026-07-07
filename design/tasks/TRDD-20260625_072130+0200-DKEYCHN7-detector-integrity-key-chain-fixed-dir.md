@@ -1,9 +1,9 @@
 ---
 trdd-id: DKEYCHN7
 title: Self-integrity detector key + audit-chain use $CLAUDE_PLUGIN_DATA not the FIXED janitor dir — scatter + cross-session mismatch
-column: todo
+column: published
 created: 2026-06-25T07:21:30+0200
-updated: 2026-06-25T07:21:30+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 4
@@ -21,6 +21,7 @@ runtime-targets: [macos, linux]
 impacts: [migration]
 migration-direction: forward
 external-refs: []
+implementation-commits: [a0f6777]
 ---
 
 # TRDD-DKEYCHN7 — detector integrity key + audit-chain must live in the FIXED janitor DATA dir

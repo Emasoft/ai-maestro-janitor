@@ -1,9 +1,9 @@
 ---
 trdd-id: 3f7b6807-c2be-4726-a098-4bcfee13d5d5
 title: Daily memory-system migration — staggered harvest + PROJECT gitignore-exception enforcer
-column: dev
+column: published
 created: 2026-06-20T16:02:27+0200
-updated: 2026-06-20T16:27:00+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -17,6 +17,7 @@ release-via: publish
 delivery: direct-push
 test-requirements: [unit]
 external-refs: []
+implementation-commits: [848f1c6, 8ea5265]
 ---
 
 # TRDD-3f7b6807 — Daily memory-system migration (staggered)

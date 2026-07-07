@@ -1,9 +1,9 @@
 ---
 trdd-id: T198DT1W
 title: Immortal janitor GROUP C — C2 verify-before-exec gate + C3 pin-good/quarantine-bad + C4 bad-self-update auto-rollback
-column: dev
+column: published
 created: 2026-06-24T17:55:04+0200
-updated: 2026-06-24T18:20:09+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 2
@@ -18,6 +18,7 @@ test-requirements: [unit]
 runtime-targets: [macos, linux]
 impacts: []
 external-refs: []
+implementation-commits: [9773ff3, e6a6d93, 63ae1c5]
 ---
 
 # TRDD-T198DT1W — GROUP C exec-path: verify-before-exec (C2) + pin-good/quarantine (C3) + auto-rollback (C4)

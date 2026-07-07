@@ -3,7 +3,7 @@ trdd-id: YRPUSIFY
 title: Cache-optimize the hooks, spark agent, skills, commands, and rules — stop prefix invalidation + shrink the per-agent floor
 column: dev
 created: 2026-07-02T15:18:48+0200
-updated: 2026-07-02T15:18:48+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -25,6 +25,8 @@ approval-tier: 0
 # Cache-optimize hooks + spark agent + skills/commands/rules (USER command, 2026-07-02: "immediately")
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-02
+
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dev:** P1 shipped in v0.29.0 (5687848, already in implementation-commits). P2 (user-scope standalone assets) has no in-repo evidence; P3 (plugin-tree CPV cache pass, was gated on OY0W6LX5 which is now published) and P4 (7.6x rewrite-factor root-cause investigation) remain open.
 
 - **WHY (measured, reports/token-attribution + scratchpad/spark_cost_breakdown.py):** two spark
   agents: peak context ~246k/312k but cache_creation 1.86M/1.84M — a **~7.6× rewrite factor**

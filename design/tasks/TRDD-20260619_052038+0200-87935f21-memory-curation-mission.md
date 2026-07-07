@@ -1,9 +1,9 @@
 ---
 trdd-id: 87935f21-392a-4022-8161-64f493663c44
 title: Memory curation at all scopes — the janitor's core self-maintaining mission
-column: dev
+column: published
 created: 2026-06-19T05:20:38+0200
-updated: 2026-06-25T15:27:28+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -16,6 +16,7 @@ relevant-rules: []
 release-via: publish
 test-requirements: [unit]
 external-refs: []
+implementation-commits: [d14510a, aa4c593, 10ee8d1]
 ---
 
 # TRDD-87935f21 — Memory curation is the janitor's core mission

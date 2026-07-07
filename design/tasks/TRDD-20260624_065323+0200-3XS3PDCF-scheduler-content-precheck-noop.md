@@ -3,7 +3,7 @@ trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
 column: dev
 created: 2026-06-24T06:53:23+0200
-updated: 2026-06-24T12:12:00+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -23,6 +23,8 @@ external-refs: []
 # TRDD-3XS3PDCF — scheduler-side cheap content-precheck to eliminate no-op memory-agent spawns
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
+
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dev:** the split-MVP is PUBLISHED (441d467, in v0.18.1 — the "committed locally, NOT yet published" note below is SUPERSEDED); consolidate gained its own structural precheck via TRDD-8UD3Q7K5/issue #64 (636e7df, v0.24.15). Remaining in-scope follow-ups: harvest precheck (still BLOCKED on TRDD-ab232dbd), repair/atomize prechecks, split refinement (memory_content_precheck.py:142 documents them as follow-ups).
 
 ### ✅ SPLIT-MVP IMPLEMENTED + TESTED (2026-06-24 ~08:42, committed locally, NOT yet published)
 The highest-value slice — the **SPLIT** content-precheck — is done, TDD'd, ruff-clean,

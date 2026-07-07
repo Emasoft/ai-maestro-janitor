@@ -1,9 +1,9 @@
 ---
 trdd-id: KEEPQRTN
 title: Immortality C4-at-L0 — keepalive quarantine-aware version selection + OS-respawn crash signal
-column: dev
+column: published
 created: 2026-06-25T09:06:05+0200
-updated: 2026-06-25T09:06:05+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -20,6 +20,7 @@ test-requirements: [unit]
 runtime-targets: [macos, linux]
 impacts: []
 external-refs: []
+implementation-commits: [e67244b]
 ---
 
 # TRDD-KEEPQRTN — extend C4 auto-rollback to the daemon/L0 (keepalive) path

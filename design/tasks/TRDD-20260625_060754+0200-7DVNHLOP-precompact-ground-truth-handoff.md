@@ -1,9 +1,9 @@
 ---
 trdd-id: 7DVNHLOP
 title: PreCompact hook — write a filesystem-grounded handoff so post-compaction re-grounds in VERIFIED state
-column: dev
+column: published
 created: 2026-06-25T06:07:54+0200
-updated: 2026-06-25T06:07:54+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: spark
 assignee: spark
 priority: 2
@@ -27,7 +27,7 @@ impacts: [ci-pipeline]
 attempts: 1
 test-failures: 0
 last-test-result: not-run
-implementation-commits: []
+implementation-commits: [6a060c4]
 ---
 
 # TRDD-7DVNHLOP — PreCompact ground-truth handoff hook

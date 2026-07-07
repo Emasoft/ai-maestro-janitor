@@ -3,7 +3,7 @@ trdd-id: 6f226399-1e6f-4d25-8132-f6ab8c332548
 title: Heartbeat survival on Claude Code 2.1.x — durable downgrade + PLUGIN_DATA load-source instability
 column: backburner
 created: 2026-06-14T18:05:26+0200
-updated: 2026-06-14T18:05:26+0200
+updated: 2026-07-04T05:14:00+0200
 current-owner: ai-maestro-janitor
 task-type: infra
 priority: 4
@@ -41,6 +41,8 @@ two parts remain OPEN and need a decision, not autonomous code.
   `${CLAUDE_PLUGIN_DATA}`** (the suffixed dir is the only one the harness backs
   up, preserves across updates, and purges on uninstall). This is a deliberate
   trade-off for the USER, NOT an autonomous change to the survival path.
+
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — absorbed TRDD-3ab0397e (now superseded by this TRDD):** both covered the same issue-#23 pair of findings; this file is the more current (knows the v0.8.7 state, verified on CC 2.1.177). Unique fact folded in from the absorbed TRDD: its 2026-06-11 issue-#23 triage had already RECORDED a maintainer direction for Finding 2 — REJECT the fixed unofficial data-dir path; implement (2a) stub-path drift-detect (record the armed cron's stub path at arm time, e.g. `<state>/heartbeat-stub-path.txt`; on mismatch with the live `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` emit the renew marker to silently re-arm) + (2b) orphan data-dir retirement on re-arm (byte-identical sibling stubs → safe-delete/tombstone). That direction matches option 1 below; the USER call on making it final remains open.
 
 ## The decision the USER must make (Finding 2)
 
