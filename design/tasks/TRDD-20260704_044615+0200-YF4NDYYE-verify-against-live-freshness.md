@@ -1,9 +1,10 @@
 ---
 trdd-id: YF4NDYYE
 title: Plugin-freshness helper — verify cached plugin matches live before any cache-based audit (issue 69)
-column: todo
+column: complete
 created: 2026-07-04T04:46:15+0200
-updated: 2026-07-04T04:46:15+0200
+updated: 2026-07-07T17:51:03+0200
+implementation-commits: [0146d9d]
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 3
@@ -19,6 +20,19 @@ external-refs: ["https://github.com/Emasoft/ai-maestro-janitor/issues/69"]
 ---
 
 # TRDD-YF4NDYYE — Verify-against-live plugin freshness helper (issue #69)
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-07
+
+SHIPPED in `0146d9d`; TRDD terminal.
+- `scripts/lib/plugin_freshness.py`: `freshness()` / `header()` + a `__main__` CLI
+  (`python3 …/plugin_freshness.py <plugin_root>`); fail-open; release probe TTL-cached
+  in global state (6h, `CLAUDE_PLUGIN_OPTION_FRESHNESS_TTL_S`, 0 disables).
+- Wired into `/janitor-audit` (step 1b, mandatory report-top header + STALE callout).
+- DELIBERATE deviation from plan step 2: `janitor-self-integrity` / `provenance-audit`
+  drift lines NOT suffixed — self-integrity's line is HMAC-wrapped
+  (`wrap_drift_line`), a freshness suffix would break `verify_drift_line`; the audit
+  SKILL surface is where the issue's staleness trap actually bit.
+- Verified live: janitor cache 0.31.0 → clean header; the 0.30.0 dir → STALE banner.
 
 ## The task
 
