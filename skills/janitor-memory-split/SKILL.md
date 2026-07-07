@@ -152,7 +152,10 @@ When detail moves into a sub-page, any OTHER page that linked `[[source-slug]]`
 for a fact that now lives in a sub-page should repoint to it. Find every inbound link:
 
 ```bash
-memgrep links --from "$REL" "$SCOPE_ROOT"   # backlinks: pages that link to the source
+# memgrep matches the note NEEDLE against the BASENAME/stem only (never a path
+# substring), so pass the SLUG — a rel-path with a "/" (e.g. wiki/page.md) can
+# NEVER match and backlinks would silently come back empty.
+memgrep links --from "$(basename "$REL" .md)" "$SCOPE_ROOT"   # backlinks: pages that link to the source
 ```
 
 For each backlink really about a sub-topic, plan to rewrite `[[source-slug]]` →
