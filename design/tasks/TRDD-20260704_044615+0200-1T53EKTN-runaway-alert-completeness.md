@@ -1,9 +1,10 @@
 ---
 trdd-id: 1T53EKTN
 title: S6+S7 — memory-guard alert on unkillable system runaways + APFS-aware dual disk metric
-column: todo
+column: complete
 created: 2026-07-04T04:46:15+0200
-updated: 2026-07-04T04:46:15+0200
+updated: 2026-07-07T18:00:33+0200
+implementation-commits: [3e1f107]
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 4
