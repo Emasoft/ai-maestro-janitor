@@ -265,22 +265,42 @@ class MemoryTxn:
             self._persist()
         self._cleanup()
 
-    def _apply(self) -> None:
+    def _apply(self) -> list[str]:
         """Idempotent end-state application (used by commit AND resume roll-forward).
         Writes first (survivors before deletions so content is never momentarily
         absent), deletes last. `os.replace` is atomic, so a staged file still
-        present ⟺ that write has NOT applied — the resume completion oracle."""
+        present ⟺ that write has NOT applied — the resume completion oracle.
+
+        M-1 (wikimem audit 2026-07-07): a roll-forward can run MINUTES TO HOURS
+        after the crash (next heartbeat), and a user `janitor-memory-write` may
+        have landed on a source page in that window. The commit-time re-hash only
+        guards the live commit; here each write/delete whose target rel is a
+        recorded SOURCE re-checks the live sha against the journal's begin-time
+        hash and SKIPS on mismatch — the NEWER user content is preserved (the
+        never-lose-a-memory charter beats completing the stale swap; a preserved
+        duplicate re-surfaces on the next consolidate pass). Returns one line per
+        skipped target so resume can surface the decision."""
+        skipped: list[str] = []
         for rel in self.writes:
             staged = self.staging_dir / rel
             live = self.scope_root / rel
             if staged.exists():
+                want = self.sources.get(rel)
+                if want is not None and live.exists() and _sha256_file(live) != want:
+                    skipped.append(f"skipped write {rel}: live content newer than the journal snapshot")
+                    continue
                 live.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(staged, live)
             # staged gone ⇒ a prior (crashed) commit already applied this write → skip
         for rel in self.deletes:
             live = self.scope_root / rel
             if live.exists():
+                want = self.sources.get(rel)
+                if want is not None and _sha256_file(live) != want:
+                    skipped.append(f"skipped delete {rel}: live content newer than the journal snapshot")
+                    continue
                 live.unlink()
+        return skipped
 
     def abort(self) -> None:
         """Discard a not-yet-committed transaction. Safe to call any time before
@@ -336,11 +356,15 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
             with commit_lock(txn.scope_root) as got:
                 if not got:
                     continue  # another process owns the swap right now
-                txn._apply()
+                skipped = txn._apply()
                 txn.phase = _PHASE_DONE
                 txn._persist()
             txn._cleanup()
             acted.append(f"rolled-forward {txn.txn_id}")
+            # Surface every target the M-1 guard preserved (a concurrent edit
+            # landed in the crash window) — silent data-preservation is still a
+            # divergence from the txn's intended end-state; a human/agent should see it.
+            acted.extend(f"{line} ({txn.txn_id})" for line in skipped)
         elif txn.phase == _PHASE_STAGING:
             if now - txn.started_at > stale_seconds:
                 txn._cleanup()

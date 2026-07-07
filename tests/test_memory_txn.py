@@ -204,6 +204,52 @@ def test_resume_is_noop_without_a_staging_dir(tmp_path):
     assert memory_txn.resume_pending(scope) == []
 
 
+# M-1 regression (wikimem audit 2026-07-07): a roll-forward runs minutes-to-hours
+# after the crash; a user edit that landed on a SOURCE page in that window must
+# be PRESERVED (skip the stale write/delete), never silently clobbered.
+
+def test_roll_forward_preserves_concurrent_edit_over_stale_delete(tmp_path):
+    """A merge crashed in phase=committing; the user then edits a to-be-deleted
+    source page. Resume must apply the rest, SKIP that delete (the live content
+    is newer than the journal snapshot), and surface the skip."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "merge", ["a.md", "b.md"])
+    txn.stage_write("c.md", "MERGED")
+    txn.stage_delete("a.md")
+    txn.stage_delete("b.md")
+    txn.phase = "committing"
+    txn._persist()
+    # The crash window: a user janitor-memory-write lands on source b.md.
+    user_edit = "---\nname: b\n---\n\nFact B — user just edited.\n"
+    (scope / "b.md").write_text(user_edit, encoding="utf-8")
+
+    acted = memory_txn.resume_pending(scope)
+    assert any("rolled-forward" in a for a in acted)
+    assert any("skipped delete b.md" in a for a in acted), acted
+    assert (scope / "c.md").read_text(encoding="utf-8") == "MERGED"   # rest applied
+    assert not (scope / "a.md").exists()                              # unchanged source deleted
+    assert (scope / "b.md").read_text(encoding="utf-8") == user_edit  # newer content preserved
+    assert not txn.staging_dir.exists()
+
+
+def test_roll_forward_preserves_concurrent_edit_over_stale_write(tmp_path):
+    """An in-place repair crashed in phase=committing; the user then edits the
+    page. Resume must NOT overwrite the newer user content with the stale staged
+    result — skip the write and surface it."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"])
+    txn.stage_write("a.md", "---\nname: a\n---\n\nREPAIRED (stale).\n")
+    txn.phase = "committing"
+    txn._persist()
+    user_edit = "---\nname: a\n---\n\nFact A — user just edited.\n"
+    (scope / "a.md").write_text(user_edit, encoding="utf-8")
+
+    acted = memory_txn.resume_pending(scope)
+    assert any("skipped write a.md" in a for a in acted), acted
+    assert (scope / "a.md").read_text(encoding="utf-8") == user_edit
+    assert not txn.staging_dir.exists()  # txn still completes + cleans
+
+
 # H-2 regression (wikimem audit 2026-07-07): a failure DURING the committing
 # swap must NOT destroy the journal — abort() refuses past staging, so
 # resume_pending can roll the half-applied txn forward.
