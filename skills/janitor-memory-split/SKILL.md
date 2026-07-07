@@ -76,8 +76,14 @@ PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory
   change rides the next `publish.py` — you never push it yourself. Unless PROJECT
   editing is on, restrict the candidate scan to LOCAL + USER.
 
-Process exactly **ONE scope this run** (the marker / the user names it; default to
-the scope with the largest over-cap page). `$SCOPE_ROOT` below is that one root.
+Process exactly **ONE scope this run**: first read
+`.janitor/state/memory-maint-pending.json` — the scheduler records there the exact
+`(intervention, scope, root)` it stamped when it emitted the marker (F1: the stamp
+already advanced, so "due" is NOT re-derivable here; acting on a different scope
+skips the stamped one for a full cadence). Use that root when the file exists and
+its `intervention` is `split`; otherwise (user-named scope, or the file is
+missing/names another chore) default to the scope with the largest over-cap page.
+`$SCOPE_ROOT` below is that one root.
 
 ## The algorithm
 

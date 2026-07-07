@@ -490,3 +490,39 @@ def test_project_scope_fires_when_opted_in():
         out = _run(_env(home, repo, gstate, settings))
         lines = [ln for ln in out.splitlines() if ln.strip()]
         assert lines == ["[janitor-memory-split]"], out
+
+
+# --------------------------------------------------------------------------- #
+# F1 (wikimem audit runtime): the emit writes a pending-pick sidecar so the
+# fanned-out agent processes the EXACT (scope, root) the scheduler stamped.
+
+
+def test_emit_writes_pending_sidecar(fixture):
+    """A fire that emits a marker also records its pick in memory-maint-pending.json
+    (marker/intervention/scope/root/stamped_at), so the agent can't act on the
+    wrong scope while the stamped one skips a full cadence."""
+    _write_settings(fixture["settings"], split_per_day=1000.0)
+    _write_oversized_page(fixture["local"])
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert "[janitor-memory-split]" in out
+    sidecar = fixture["project"] / ".janitor" / "state" / "memory-maint-pending.json"
+    assert sidecar.is_file(), "emit must write the pending-pick sidecar"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert data["marker"] == "[janitor-memory-split]"
+    assert data["intervention"] == "split"
+    assert data["scope"] == "LOCAL"  # memory_scopes labels are uppercase
+    assert data["root"] == str(fixture["local"])
+    assert isinstance(data["stamped_at"], int) and data["stamped_at"] > 0
+
+
+def test_no_emit_no_sidecar(fixture):
+    """A silent fire (nothing due) never writes the pending-pick sidecar."""
+    _write_settings(
+        fixture["settings"],
+        split_per_day=0.0, consolidation_per_day=0.0, conflict_per_day=0.0,
+        repair_per_day=0.0, atomize_per_day=0.0, harvest_per_day=0.0,
+    )
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert not [ln for ln in out.splitlines() if ln.strip()], out
+    sidecar = fixture["project"] / ".janitor" / "state" / "memory-maint-pending.json"
+    assert not sidecar.exists()

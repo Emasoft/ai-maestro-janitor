@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import json
 import os
 import sys
 import time
@@ -315,6 +316,25 @@ def main() -> int:
         state.log_line(
             "memory-maintenance",
             f"due: {intervention} @ {scope_label} ({root}) — emitting {marker}",
+        )
+        # F1 (wikimem audit runtime): the marker is bare/constant by contract, so
+        # by itself the fanned-out agent cannot know WHICH (scope, root) this
+        # scheduler just stamped — mark_ran already advanced the stamp, so "due"
+        # is underivable downstream, and the agent could act on scope B while
+        # scope A was stamped (A then skips a full cadence). This sidecar pins
+        # the pick; the chore skills read it and process exactly this scope.
+        # Written BEFORE the marker prints so the agent can never race it.
+        state.atomic_write(
+            state.state_dir() / "memory-maint-pending.json",
+            json.dumps(
+                {
+                    "marker": marker,
+                    "intervention": intervention,
+                    "scope": scope_label,
+                    "root": str(root),
+                    "stamped_at": now,
+                }
+            ),
         )
         # The marker MUST be bare/exact on its own line (the cron clause keys on
         # that). NEVER routed through sanitize_for_drift_line — that is for UNTRUSTED
