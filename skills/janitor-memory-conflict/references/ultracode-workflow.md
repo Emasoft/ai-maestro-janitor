@@ -1,7 +1,11 @@
 # CONFLICT executor — the ultracode Workflow (pool, backoff, barrier, prompts)
 
-This is the concrete shape the `janitor-memory-conflict` skill runs as a
-`Workflow` script. It implements the three rules the user requires of every
+This is the concrete shape of the conflict skill's fan-out. **It is a TEMPLATE**:
+the executing `janitor-memory-subconscious-agent` has the `Agent` tool but NO
+`Workflow` tool, so adapt this pool to ramped parallel `Agent` calls (same cap,
+same ramp, same rate-limit-as-returned-string classification); run it verbatim as
+a `Workflow` script only when the harness provides that tool. It implements the
+three rules the user requires of every
 fan-out: (1) a **capped** concurrent pool, (2) **kept AT capacity** in real time
 (finisher pulls the next queued job), (3) **progressive ramped spawn** (a few
 seconds between launches). Plus the decisive correctness rule: **a rate limit

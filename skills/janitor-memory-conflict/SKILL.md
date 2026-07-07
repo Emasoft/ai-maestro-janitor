@@ -27,8 +27,10 @@ git history, and either:
   agents** (told to *disprove*) + a git-history verify — structurally the same
   pair-consolidation, so even a DELETE loses no knowledge.
 
-It runs as an **ultracode `Workflow`** (a ramped agent pool) so the skeptic votes
-parallelize within the rate limit. ALL mutation goes through `scripts/memory_txn_cli.py`
+The skeptic votes fan out as **parallel `Agent` calls** shaped like the ultracode
+`Workflow` pool — the executing subconscious agent's toolset has `Agent`, not
+`Workflow`, so spawn ramped parallel Agent calls (re-enqueue on rate-limit text)
+and use a real `Workflow` tool only if the harness provides one. ALL mutation goes through `scripts/memory_txn_cli.py`
 (crash-safe, hash-guarded, flock-serialized); the agent NEVER edits a live page — only
 staged COPIES, committed atomically. The full pool/backoff code + agent prompts are
 in the references doc (Resources); the provenance/WHY chain this skill enforces is
@@ -78,9 +80,11 @@ spelled out in the iron rules below.
    `### Conflict candidates` (`- topic \`<tag>\`: <a> vs <b>`); bound to the **top-K
    oldest/most-conflicted** (K≈5). Empty/absent → stop.
 
-## The pipeline (per conflict pair) — ULTRACODE Workflow
+## The pipeline (per conflict pair) — the ramped agent pool
 
-This is a `Workflow` script. The shape (full code + prompts in the references doc):
+Run this pool with parallel `Agent` calls (the references doc's `Workflow` code is
+the TEMPLATE — adapt it to ramped Agent spawns when no Workflow tool exists). The
+shape (full code + prompts in the references doc):
 
 - **Constant-capacity ramped pool** (cap `clamp(WIKIMEM_CONFLICT_POOL, 6, 15)`, ~8;
   2–4 s jittered between spawns, kept at capacity). **A rate-limit arrives as a
@@ -122,8 +126,9 @@ references doc.
 ### Stage 4 — EXECUTE the verdict THROUGH the transaction core
 Never edit a live page: `begin` copies the sources into staging, you edit only the
 STAGED COPIES, then `commit` re-hashes under the per-scope flock and applies
-atomically. The gate exposes only `--op merge` / `--op split`, so **BOTH conflict
-verdicts ride `--op merge`** — expressed as a REAL merge of the pair: one page is
+atomically. The CLI exposes `--op merge|split|repair|atomize`, but repair/atomize
+are in-place single-page ops — structurally wrong for a pair-retirement — so
+**BOTH conflict verdicts ride `--op merge`** — expressed as a REAL merge of the pair: one page is
 RETIRED (a delete) and its fact + EVERY `[^N]` lesson is FOLDED into the survivor (a
 write), so even a DELETE loses no knowledge. (A same-slug in-place edit is rejected:
 `commit` diffs staging vs the recorded sources, so a `rm`-then-rewrite at one path is
