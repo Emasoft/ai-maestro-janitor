@@ -65,18 +65,6 @@ _MAX_CHARS = 1200
 # noise to every trivial confirmation. Prompts shorter than this are skipped.
 _MIN_PROMPT_CHARS = 12
 
-# Non-page files inside a PROJECT/USER memory root that must NOT be recalled
-# (loaded index, generated query index, the memory detectors' proposal files).
-# The LOCAL corpus uses `_agent_notes` (top-level *.md), which never reaches
-# these by depth; the PROJECT/USER walk is recursive, so it excludes them by name.
-_NON_PAGE_NAMES = frozenset({
-    "MEMORY.md",
-    "memory-index.md",
-    "memory-reorg-proposed.md",
-    "memory-scope-leak-proposed.md",
-})
-
-
 def _load_libs():
     """Import `user_mem_lib` (for find_memgrep + the agent-memdir resolution) and
     `state` (for is_truthy_env), whether running via the plugin (CLAUDE_PLUGIN_ROOT
@@ -113,51 +101,47 @@ def _agent_memdir(um, project_dir: str | None) -> Path:
 
 
 def _agent_notes(memdir: Path) -> list[str]:
-    """The top-level `*.md` files of the agent corpus — the search set.
+    """The top-level real NOTE files of the agent corpus — the search set.
 
     ONLY the direct children of `memdir`; never the `user-mem/` subdirectory.
     Returns absolute paths sorted for determinism. An unreadable dir yields []
     (the caller then no-ops). This is the structural privacy boundary: by handing
     recall explicit FILE paths we guarantee the recursive walk never reaches the
     private user-mem subtree (recall walks directories, not files).
+
+    F15 (wikimem audit 2026-07-07): each file is ALSO filtered through the
+    memory_scopes SSOT `is_note_file` — the LOCAL root's TOP-LEVEL files include
+    `MEMORY.md`, `memory-index.md`, and the detectors' `*-proposed.md` reports,
+    none of which are notes; a proposal report's gloss lines used to be
+    rankable and injectable into agent context as if they were memory.
     """
+    import memory_scopes  # importable only after _load_libs put lib on sys.path
+
     try:
-        return sorted(str(p) for p in memdir.glob("*.md") if p.is_file())
+        return sorted(
+            str(p) for p in memdir.glob("*.md")
+            if p.is_file() and memory_scopes.is_note_file(p)
+        )
     except OSError:  # pragma: no cover - defensive
         return []
 
 
 def _scope_pages(root: Path) -> list[str]:
-    """The recallable `*.md` pages of a PROJECT or USER memory root.
+    """The recallable real NOTE pages of a PROJECT or USER memory root.
 
     The memory system has THREE scopes (TRDD-c77dae09): LOCAL (the agent corpus,
     handled by `_agent_notes` with its user-mem exclusion), PROJECT
     (`<git-root>/.claude/project/memory/`, git-tracked + pushed), and USER (the
-    janitor's FIXED data dir
-    `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/`,
-    global — see `_user_memdir`). PROJECT/USER
-    pages may live in subdirectories, so we walk
-    recursively — but EXCLUDE the tool's generated `.memgrep/` index sidecar and
-    the detector proposal/index files (not pages). Returns absolute file paths
-    sorted for determinism; an unreadable/absent root yields [].
-
-    Note: PROJECT/USER scopes never contain a private `user-mem/` subtree (that
-    is LOCAL-only by construction), so there is no privacy subtree to exclude
-    here — but skipping `.memgrep/` keeps generated cache out of the recall set.
+    janitor's FIXED data dir — see `_user_memdir`). PROJECT/USER pages may live
+    in subdirectories, so the scan recurses — via the memory_scopes SSOT
+    `iter_note_files` (F15), which excludes the generated/index files, the
+    `*-proposed.md` detector-report family, `.memgrep/`, `.maint-staging/`, and
+    the private `user-mem/` subtree. Absolute paths, sorted; an absent or
+    unreadable root yields [].
     """
-    if not root.is_dir():
-        return []
-    try:
-        pages = [
-            str(p)
-            for p in root.rglob("*.md")
-            if p.is_file()
-            and ".memgrep" not in p.parts
-            and p.name not in _NON_PAGE_NAMES
-        ]
-    except OSError:  # pragma: no cover - defensive
-        return []
-    return sorted(pages)
+    import memory_scopes  # importable only after _load_libs put lib on sys.path
+
+    return [str(p) for p in memory_scopes.iter_note_files(root)]
 
 
 def _project_memdir(project_dir: str | None) -> Path | None:
@@ -244,8 +228,27 @@ def _format_context(recall_out: str) -> str | None:
     """Turn recall's `path — description` lines into a compact additionalContext
     block, or None when there are no usable lines. Caps total length so a few
     very long descriptions cannot bloat the agent context.
+
+    F14 (wikimem audit 2026-07-07): every recall line is UNTRUSTED corpus data —
+    note descriptions, atom bodies, lesson text; a poisoned PROJECT-scope page
+    arrives via git from any contributor. Each line is stripped of invisible/
+    bidi unicode and bracket-defanged (`[` `]` → `⟦` `⟧`) BEFORE injection, so a
+    note cannot smuggle a marker-shaped or authority-shaped line (a fake
+    `[janitor-…]` marker, a forged `[user-mem #N — shared by the user]` header)
+    into the agent context on every matching prompt. The one legitimate `[…]`
+    header below is OURS and is added AFTER sanitization.
     """
-    lines = [ln.rstrip() for ln in recall_out.splitlines() if ln.strip()]
+    import security_helpers  # importable only after _load_libs put lib on sys.path
+    import state as state_mod
+
+    lines = [
+        state_mod.sanitize_for_drift_line(
+            security_helpers.strip_invisible_unicode(ln.rstrip())
+        )
+        for ln in recall_out.splitlines()
+        if ln.strip()
+    ]
+    lines = [ln for ln in lines if ln.strip()]
     if not lines:
         return None
     body = "\n".join(lines)[:_MAX_CHARS]
