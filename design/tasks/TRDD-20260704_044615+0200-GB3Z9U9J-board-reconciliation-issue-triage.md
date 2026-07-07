@@ -1,9 +1,10 @@
 ---
 trdd-id: GB3Z9U9J
 title: Board reconciliation sweep — close shipped-but-open TRDDs, merge duplicates, triage stale issues
-column: dev
+column: complete
 created: 2026-07-04T04:46:15+0200
-updated: 2026-07-07T14:46:35+0200
+updated: 2026-07-07T14:51:17+0200
+implementation-commits: [26d02a9, ddfc4f6]
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -27,10 +28,21 @@ external-refs: ["https://github.com/Emasoft/ai-maestro-janitor/issues/67", "http
   superseded-by 6f226399), 5+ annotated "PARTIALLY SHIPPED, stays dev/dispatch" (32acd15f,
   dfc0959a, 47df698b, 56d24c02, 3XS3PDCF, YRPUSIFY). Evidence SHAs spot-verified
   (d14510a/aa4c593/10ee8d1/441d467/5687848 all exist and match their TRDDs).
-- **NEXT ACTION — step 3:** triage GitHub issues #67 (weekly audit drift) and #70
-  ([janitor-reload] marker UX) against current code; close with evidence or spawn a TRDD.
-- **Then step 4:** investigate why the reconciliation detector (TRDD-15ECPBSA) never
-  flagged the drift; fix + regression-test, or record why out-of-scope.
+- **Step 3 DONE (2026-07-07):** #67 closed with evidence (every drift item resolved by
+  the sweep or legitimately parked in backburner). #70 was STILL VALID — the wrapper
+  skill /janitor-reload-plugins existed but the cron prompt still mapped
+  `[janitor-reload]` → the agent-unrunnable built-in `/reload-plugins`; fixed in
+  `ddfc4f6` (skills/janitor-arm/SKILL.md:63 now uses the wrapper, mirroring the
+  `[janitor-reload-skills]` pattern; old crons roll forward via the 7-day renew cycle),
+  then closed with evidence.
+- **Step 4 DONE — premise FALSE, no detector bug:** issue #67's own body carries the
+  detector's correct 2026-06-29 `[trdd-state-reconciliation]` finding (18 candidates,
+  incl. all 3 closeables). The detector flagged everything; it is SURFACE-ONLY by
+  design, so the drift persisted only because no session acted on the weekly issue for
+  5 days. Actionation lag is the agent/human loop, not a detection gap — no code change.
+- **ALL 4 plan steps complete; verification passed** (`column: dev` count now only
+  genuinely in-progress work; no duplicate open subjects; both issues closed with
+  evidence comments). TRDD terminal.
 
 ## The task
 
