@@ -57,6 +57,45 @@ def test_parse_frontmatter_reads_flow_style_metadata_map():
     assert fm["globs"] == ["src/a/**", "src/b/**"]
 
 
+def test_parse_frontmatter_reads_block_style_glob_list():
+    """M-4 (wikimem audit 2026-07-07): a BLOCK-style list (`globs:` followed by
+    indented `- item` lines — what a generic YAML-writing agent naturally emits)
+    parses into the same Python list flow style does. Pre-fix the no-colon item
+    lines were skipped and `globs` read as an empty value."""
+    text = (
+        "---\nname: h\nmetadata:\n  tier: hub\n  globs:\n"
+        "    - \"src/a/**\"\n    - 'src/b/**'\n---\n\nbody\n"
+    )
+    fm = v.parse_frontmatter(text)
+    assert fm["globs"] == ["src/a/**", "src/b/**"]
+    assert fm["tier"] == "hub"
+
+
+def test_parse_frontmatter_reads_top_level_block_list():
+    """A top-level block list (`tags:` + items) parses as a list too."""
+    text = "---\nname: n\ntags:\n  - alpha\n  - beta\nocd: 2026-06-01\n---\nbody\n"
+    fm = v.parse_frontmatter(text)
+    assert fm["tags"] == ["alpha", "beta"]
+    assert fm["ocd"] == "2026-06-01"  # a later scalar key closes the pending list
+
+
+def test_block_style_hub_split_dropping_a_glob_fails():
+    """M-4 regression: a hub whose globs are BLOCK-style must still trip the
+    globs-partition gate when a split drops one of its patterns. Pre-fix the
+    parent parsed as '' and split_globs_partition_ok('' vs ['']) was vacuous."""
+    hub = (
+        "---\nname: plat\nocd: 2026-06-01\nlmd: 2026-06-01\nmetadata:\n"
+        "  tier: hub\n  type: project\n  globs:\n    - \"src/a/**\"\n    - \"src/b/**\"\n"
+        "---\n\n## A\nx\n## B\ny\n\n## Notes and lessons learned\n"
+    )
+    meta = v.parse_frontmatter(hub)
+    sub = v.parse_frontmatter(
+        "---\nname: plat-a\nmetadata:\n  tier: hub\n  globs:\n    - \"src/a/**\"\n---\nx"
+    )
+    ok, why = v.split_globs_partition_ok(meta.get("globs"), [sub.get("globs")])
+    assert ok is False and "src/b/**" in why
+
+
 def test_flow_and_block_metadata_agree_for_legality():
     """A flow-style component pair merges legally exactly like block style, and a
     flow-style component is correctly REFUSED for splitting (reads tier=component,

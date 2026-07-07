@@ -68,6 +68,13 @@ def parse_frontmatter(text: str) -> dict:
         return {}
     fm: dict = {}
     in_meta = False
+    # M-4 (wikimem audit 2026-07-07): a key whose BLOCK-style list is being
+    # collected (`globs:` followed by indented `- item` lines). Block style is
+    # what a generic YAML-writing agent naturally emits; skipping the no-colon
+    # item lines made a hub's block-style `globs:` read as empty and the split
+    # globs-partition check vacuous — the same bug class as the flow-style hole
+    # (audit Finding 1) in a third spelling.
+    pending_list_key: str | None = None
     for raw in lines[1:]:
         if raw.strip() == "---":
             break
@@ -77,7 +84,14 @@ def parse_frontmatter(text: str) -> dict:
         s = raw.strip()
         if s == "metadata:":
             in_meta = True
+            pending_list_key = None
             continue
+        if pending_list_key is not None and indented and (s == "-" or s.startswith("- ")):
+            item = s[1:].strip().strip('"').strip("'")
+            if item:
+                fm[pending_list_key].append(item)
+            continue
+        pending_list_key = None
         if ":" not in s:
             continue
         key, _, val = s.partition(":")
@@ -96,10 +110,18 @@ def parse_frontmatter(text: str) -> dict:
                     fm[k2.strip()] = _parse_scalar_or_list(v2)
             continue
         if indented and in_meta:
-            fm[key] = _parse_scalar_or_list(val)
+            if not val.strip():
+                fm[key] = []          # a block list opens here; items follow
+                pending_list_key = key
+            else:
+                fm[key] = _parse_scalar_or_list(val)
         elif not indented:
             in_meta = False
-            fm[key] = _parse_scalar_or_list(val)
+            if not val.strip():
+                fm[key] = []
+                pending_list_key = key
+            else:
+                fm[key] = _parse_scalar_or_list(val)
     return fm
 
 
