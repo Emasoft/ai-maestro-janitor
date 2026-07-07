@@ -249,7 +249,7 @@ split/conflict/repair/atomize/harvest; auto-dispatched by `memory-maintenance` v
 skills, DETECT + FIX fail-safe; the security detectors SUGGEST it via
 `security_helpers.security_agent_hint()` — a visible hint, NOT a silent marker, since
 security fixes have real blast radius; opt out `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`).
-Both `model: opus, effort: high`.
+Memory agent `model: sonnet` (USER cost decision 2026-06-30), security agent `model: opus`; both `effort: high`.
 
 **Tests (`tests/`)** — pytest; one `test_*_patterns.py` per pattern lib + core tests
 (`test_marketplace_lock`, `test_rules_installer`, `test_marketplace_refresh_daemon_stale`, …).

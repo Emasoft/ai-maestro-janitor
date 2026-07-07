@@ -11,18 +11,19 @@ deduplicates it MACHINE-WIDE, and emits a single forge-proof marker the cron tur
 acts on. It NEVER reads the corpus, never runs memgrep, never mutates a page — it
 only EMITS one of six bare markers:
 
-    [janitor-memory-split]       → dispatch a background opus agent: /janitor-memory-split
-    [janitor-memory-repair]      → dispatch a background opus agent: /janitor-memory-repair
-    [janitor-memory-atomize]     → dispatch a background opus agent: /janitor-memory-atomize
-    [janitor-memory-harvest]     → dispatch a background opus agent: /janitor-memory-harvest
-    [janitor-memory-consolidate] → dispatch a background opus agent: /janitor-memory-consolidate
-    [janitor-memory-conflict]    → dispatch a background opus agent: /janitor-memory-conflict
+    [janitor-memory-split]       → dispatch a background Sonnet agent: /janitor-memory-split
+    [janitor-memory-repair]      → dispatch a background Sonnet agent: /janitor-memory-repair
+    [janitor-memory-atomize]     → dispatch a background Sonnet agent: /janitor-memory-atomize
+    [janitor-memory-harvest]     → dispatch a background Sonnet agent: /janitor-memory-harvest
+    [janitor-memory-consolidate] → dispatch a background Sonnet agent: /janitor-memory-consolidate
+    [janitor-memory-conflict]    → dispatch a background Sonnet agent: /janitor-memory-conflict
 
 The cron turn (the EXECUTE layer) interprets the marker; this detector cannot
 spawn agents — the "a python detector cannot spawn agents, only the main loop can"
 contract holds through CC 2.1.181. (TRDD-b4b9e27c STATE block.) Per TRDD-aebedbff the
 cron turn does NOT run the editorial pass in its own context: it spawns exactly ONE
-background opus agent (Agent tool, run_in_background) that reads & executes the matching
+background Sonnet agent (Agent tool, run_in_background — pinned to Sonnet per the
+USER cost decision 2026-06-30) that reads & executes the matching
 `janitor-memory-<name>` skill on the due scope and returns, fire-and-forget — so the
 complex, verify-gated pass never burdens whatever main session fired the heartbeat.
 
@@ -219,7 +220,7 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
     Cadence-due (`is_due`) is NEAR-FREE (a stat + int-compare on the global stamp).
     The content precheck (`memory_content_precheck.content_has_work`) is a cheap,
     zero-LLM filesystem check that suppresses a cadence-due chore with NOTHING to do
-    so it never spawns a ~226-240k no-op opus agent (TRDD-3XS3PDCF, TRDD-8UD3Q7K5).
+    so it never spawns a ~226-240k no-op subconscious agent (TRDD-3XS3PDCF, TRDD-8UD3Q7K5).
     It is FAIL-OPEN: only a chore whose idleness is cheaply proven (today: SPLIT's
     size gate, and CONSOLIDATE's structural "no legal-merge pair" gate — issue #64)
     is suppressed; every other chore returns work=True and keeps its cadence-only
