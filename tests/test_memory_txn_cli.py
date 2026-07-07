@@ -354,6 +354,99 @@ def test_merge_into_survivor_dropping_survivors_lesson_fails(tmp_path):
     assert (scope / "b.md").exists()
 
 
+# M-2 regression (wikimem audit 2026-07-07): structural legality is enforced AT
+# COMMIT TIME for merge and split — the agent-side pre-flight is convention, not
+# enforcement. A txn begun with op "conflict" is the ONE sanctioned exemption
+# (the conflict pass's loss-preserving pair-retirement is legal across tiers).
+
+def _pair_merge_txn(tmp_path, *, begin_op: str, a_extra: dict, b_extra: dict):
+    """Build a delete-both-write-merged merge shape with per-page tier/type
+    overrides. The merged result preserves BOTH pages' facts + lessons and keeps
+    ocd=min, so ONLY the legality gate can refuse it."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    a = _note("a", ocd="2026-05-01", lmd="2026-05-10", body="Auth uses JWT.",
+              lessons="[^1]: cap is 3, verified against source.\n", **a_extra)
+    b = _note("b", ocd="2026-06-01", lmd="2026-06-09", body="Tokens expire in 30s.",
+              lessons="[^1]: 30s timeout per config.\n", **b_extra)
+    (scope / "a.md").write_text(a, encoding="utf-8")
+    (scope / "b.md").write_text(b, encoding="utf-8")
+    txn_id = _txn_id_from_begin(scope, begin_op, "a.md", "b.md")
+    staging = _staging(scope, txn_id)
+    (staging / "a.md").unlink()
+    (staging / "b.md").unlink()
+    merged = _note("merged", ocd="2026-05-01", lmd="2026-06-18",
+                   tier=a_extra.get("tier", "component"), typ=a_extra.get("typ", "project"),
+                   body="Auth uses JWT.\n\nTokens expire in 30s.", lessons=(
+                       "[^1]: cap is 3, verified against source.\n"
+                       "[^2]: 30s timeout per config.\n"))
+    (staging / "merged.md").write_text(merged, encoding="utf-8")
+    return scope, txn_id
+
+
+def test_cross_type_merge_refused_at_commit(tmp_path):
+    """A merge of a `project` page with a `reference` page must be refused by the
+    commit gate even when it loses nothing — cross-type is structurally illegal."""
+    scope, txn_id = _pair_merge_txn(
+        tmp_path, begin_op="merge",
+        a_extra={"typ": "project"}, b_extra={"typ": "reference"})
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc == 1, "cross-type merge must fail commit-time legality"
+    assert (scope / "a.md").exists() and (scope / "b.md").exists()  # live intact
+    assert not (scope / "merged.md").exists()
+
+
+def test_cross_tier_merge_refused_at_commit(tmp_path):
+    """A merge of an `aspect` page with a `component` page must be refused by the
+    commit gate — cross-tier is structurally illegal (never mix a radiating rule
+    with a terminal element)."""
+    scope, txn_id = _pair_merge_txn(
+        tmp_path, begin_op="merge",
+        a_extra={"tier": "aspect"}, b_extra={"tier": "component"})
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc == 1
+    assert (scope / "a.md").exists() and (scope / "b.md").exists()
+    assert not (scope / "merged.md").exists()
+
+
+def test_conflict_op_txn_exempt_from_merge_legality(tmp_path):
+    """A txn begun with op `conflict` (the conflict pass's pair-retirement) rides
+    `commit --op merge` across tiers WITHOUT the legality screen — the sanctioned
+    exemption (conflict-protocol.md): the demoted fact survives as a lesson."""
+    scope, txn_id = _pair_merge_txn(
+        tmp_path, begin_op="conflict",
+        a_extra={"tier": "aspect"}, b_extra={"tier": "component"})
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc == 0, "the conflict pass's cross-tier pair-retirement must stay legal"
+    assert (scope / "merged.md").exists()
+    assert not (scope / "a.md").exists() and not (scope / "b.md").exists()
+
+
+def test_component_split_refused_at_commit(tmp_path):
+    """Splitting a `component` page is refused at commit — one element = one page;
+    a component is never fragmented, no matter how well the sub-pages preserve it."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    comp = _note("comp", body="## First\nFact one.\n## Second\nFact two.",
+                 lessons="[^1]: the cap is 3.\n")
+    (scope / "comp.md").write_text(comp, encoding="utf-8")
+    txn_id = _txn_id_from_begin(scope, "split", "comp.md")
+    staging = _staging(scope, txn_id)
+    (staging / "comp.md").write_text(
+        _note("comp", lmd="2026-06-18", body="Overview: see [[comp-first]] and [[comp-second]]."),
+        encoding="utf-8")
+    (staging / "comp-first.md").write_text(
+        _note("comp-first", body="## First\nFact one.", lessons="[^1]: the cap is 3.\n"),
+        encoding="utf-8")
+    (staging / "comp-second.md").write_text(
+        _note("comp-second", body="## Second\nFact two."), encoding="utf-8")
+
+    rc = _run("commit", scope, txn_id, "--op", "split")
+    assert rc == 1, "a component split must fail commit-time legality"
+    assert (scope / "comp.md").read_text(encoding="utf-8") == comp  # live intact
+    assert not (scope / "comp-first.md").exists()
+
+
 def test_merge_into_survivor_preserving_everything_commits(tmp_path):
     """The correct merge-into-survivor: both pages' lessons + facts survive and
     the survivor keeps its own OLDER ocd — must pass (the pre-fix gate perversely

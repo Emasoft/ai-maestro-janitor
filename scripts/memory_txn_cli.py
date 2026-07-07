@@ -141,6 +141,23 @@ def _verify_merge(txn, writes, deletes):
         if rel in delete_set:
             retired.append(_slug_of(rel, text))
 
+    # M-2 (wikimem audit 2026-07-07): structural legality is machine-checkable
+    # from the metas already in hand, so enforce it AT COMMIT TIME — the
+    # consolidate skill's pre-flight is convention, not enforcement, and a
+    # confused agent could otherwise commit a cross-tier/cross-type merge.
+    # EXEMPT the CONFLICT pass (journal op == "conflict", recorded at begin):
+    # its loss-preserving pair-retirement is sanctioned "regardless of the
+    # pair's tiers" (conflict-protocol.md) — a conflict pair contradicts about
+    # ONE subject and the demoted fact survives as a lesson on the survivor,
+    # so is_legal_merge's tier/type screen deliberately does not apply there.
+    # Pairwise against the first meta suffices: legality is equality-based
+    # (same mergeable tier, same type), hence transitive.
+    if txn.op != "conflict":
+        for i, meta in enumerate(source_metas[1:], start=2):
+            legal, why = verify.is_legal_merge(source_metas[0], meta)
+            if not legal:
+                return False, [f"illegal merge (source #{i} vs #1): {why}"]
+
     if len(writes) != 1:
         raise MemoryTxnError(
             f"merge expects exactly ONE surviving page, found {len(writes)} write(s)"
@@ -170,6 +187,17 @@ def _verify_split(txn, writes, deletes):
     source_text = (txn.scope_root / source_rel).read_text(encoding="utf-8")
     source_meta = verify.parse_frontmatter(source_text)
 
+    max_bytes = _split_max_bytes()
+    # M-2 (wikimem audit 2026-07-07): enforce split legality at commit time,
+    # mirroring the merge-side gate — a component is ONE element ("one element =
+    # one page") and is never fragmented, and a seamless (<2-section) hub/aspect
+    # splits only when oversized (seam synthesis). The split skill's own check is
+    # convention; this is the enforcement.
+    oversized = len(source_text.encode("utf-8")) > max_bytes
+    legal, why = verify.is_legal_split(source_meta, source_text, oversized=oversized)
+    if not legal:
+        return False, [f"illegal split: {why}"]
+
     if not writes:
         raise MemoryTxnError("split produced no output pages")
     overview_rel = source_rel if source_rel in writes else sorted(writes)[0]
@@ -179,7 +207,6 @@ def _verify_split(txn, writes, deletes):
     subpage_metas = [verify.parse_frontmatter(t) for t in subpage_texts]
 
     page_sizes = {rel: len(txt.encode("utf-8")) for rel, txt in writes.items()}
-    max_bytes = _split_max_bytes()
 
     retired = [
         _slug_of(rel, (txn.scope_root / rel).read_text(encoding="utf-8"))

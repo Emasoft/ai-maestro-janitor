@@ -139,9 +139,11 @@ abstain.
 
 ### 3. Legality gate — `is_legal_merge` (BEFORE you open a transaction)
 
-`is_legal_merge` is **your** pre-flight check; the CLI's commit-time `verify_merge`
-does NOT re-check legality. Run it on A's and B's frontmatter and refuse on a
-`False`:
+`is_legal_merge` is **your** pre-flight check. The CLI's commit gate NOW re-checks
+legality too (wikimem audit M-2) and will refuse an illegal merge at `commit --op
+merge` — but running the pre-flight keeps the refusal EARLY and cheap (before you
+open a transaction and do the editorial work). Run it on A's and B's frontmatter
+and refuse on a `False`:
 
 ```bash
 uv run --quiet - <<PY

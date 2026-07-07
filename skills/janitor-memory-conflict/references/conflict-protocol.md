@@ -217,12 +217,14 @@ uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op merge
 > then a verdict ALWAYS retires one page of the pair; it can never keep both pages
 > nor edit a single page in place.
 >
-> Note: the `--op merge` commit gate does NOT call `is_legal_merge` — structural
-> legality (same-tier/same-type/no-two-hubs) is the CONSOLIDATE skill's concern, not
-> CONFLICT's. A conflict pair contradicts about ONE subject, so folding the
-> obsolete/false fact into the survivor as a loss-preserving `[^N]` is legitimate
+> Note: the `--op merge` commit gate calls `is_legal_merge` for consolidate-shaped
+> merges but EXEMPTS a txn whose journal `op` is `conflict` (recorded at `begin` —
+> which is why the recipes above begin with the op word `conflict`, never `merge`).
+> Structural legality (same-tier/same-type/no-two-hubs) is the CONSOLIDATE skill's
+> concern, not CONFLICT's: a conflict pair contradicts about ONE subject, so folding
+> the obsolete/false fact into the survivor as a loss-preserving `[^N]` is legitimate
 > regardless of the pair's tiers — do NOT pre-screen a conflict consolidation with
-> `is_legal_merge`. The only gate is `verify_merge` (lessons preserved + ocd==min +
+> `is_legal_merge`. Your gate is `verify_merge` (lessons preserved + ocd==min +
 > no new duplicate + no dangling ref).
 
 **On verify FAIL or any error:** `commit` exits non-zero with the reasons and the
