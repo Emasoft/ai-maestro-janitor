@@ -44,10 +44,16 @@ _PHASE_STAGING = "staging"        # building the txn; nothing applied yet
 _PHASE_COMMITTING = "committing"  # source re-hash passed → swap in progress (roll FORWARD on resume)
 _PHASE_DONE = "done"              # fully applied → only cleanup remains
 
-# A staging-phase journal older than this is a CRASHED pass (no real pass takes
-# this long), safe to discard on resume. Kept generous so resume never clobbers a
-# legitimately in-flight pass that is between begin() and commit().
-_STALE_SECONDS_DEFAULT = 1800
+# A staging-phase journal whose JOURNAL FILE has been untouched for this long is
+# a CRASHED pass, safe to discard on resume. M-9 (wikimem audit 2026-07-07): the
+# CLI contract is begin → agent semantic work → commit ACROSS PROCESSES, and a
+# rate-limited / slow agent pass routinely exceeds 30 minutes — the old 1800 s
+# window let any OTHER pass's resume discard a legitimately in-flight txn and
+# throw away hours of editorial work. Staleness is measured on the journal file's
+# MTIME (freshest liveness signal — every _persist bumps it, and a long-thinking
+# agent may simply `touch` the journal as an explicit keepalive), with started_at
+# as the floor for filesystems with unreliable mtimes. 6 h default.
+_STALE_SECONDS_DEFAULT = 21600
 
 
 class MemoryTxnError(Exception):
@@ -332,12 +338,17 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
       after the source re-hash passed MUST complete; the staged content is the
       verified end-state.
     - `done` → just clean (the crash was after apply, before cleanup).
-    - `staging` → discard ONLY if older than `stale_seconds` (a fresh staging
-      journal may belong to a legitimately in-flight pass between begin and
-      commit; never clobber it). A stale one is a crashed pass that never began
-      applying → safe to drop.
+    - `staging` → discard ONLY if the JOURNAL FILE is older than `stale_seconds`
+      (mtime-based, M-9: every `_persist` bumps it and an in-flight agent may
+      `touch` the journal as a keepalive — a fresh journal belongs to a
+      legitimately in-flight pass between begin and commit; never clobber it).
+      A stale one is a crashed pass that never began applying → safe to drop.
 
-    Returns one human-readable line per transaction acted on. Honors the same
+    Returns one human-readable line per transaction acted on — including (M-7)
+    a `FAILED <id>` line when one txn's handling raised (a poisoned journal must
+    never wedge the rest of the resume) and an `unreadable journal` line for a
+    journal that cannot even be parsed (left in place for a human, but SURFACED —
+    the old silent `continue` meant nobody was ever told). Honors the same
     commit flock so a concurrent live commit and a resume never race a swap."""
     staging_root = MemoryTxn._staging_root(Path(scope_root))
     if not staging_root.is_dir():
@@ -348,27 +359,62 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
         try:
             txn = MemoryTxn._load(jp)
         except (json.JSONDecodeError, KeyError, OSError):
-            continue  # an unreadable journal is left for a human; never crash resume
-        if txn.phase == _PHASE_DONE:
-            txn._cleanup()
-            acted.append(f"cleaned {txn.txn_id} (was done)")
-        elif txn.phase == _PHASE_COMMITTING:
-            with commit_lock(txn.scope_root) as got:
-                if not got:
-                    continue  # another process owns the swap right now
-                skipped = txn._apply()
-                txn.phase = _PHASE_DONE
-                txn._persist()
-            txn._cleanup()
-            acted.append(f"rolled-forward {txn.txn_id}")
-            # Surface every target the M-1 guard preserved (a concurrent edit
-            # landed in the crash window) — silent data-preservation is still a
-            # divergence from the txn's intended end-state; a human/agent should see it.
-            acted.extend(f"{line} ({txn.txn_id})" for line in skipped)
-        elif txn.phase == _PHASE_STAGING:
-            if now - txn.started_at > stale_seconds:
+            # M-7: left in place for a human — but surfaced, never silently skipped.
+            acted.append(f"unreadable journal {jp.name}: left in place for a human")
+            continue
+        try:
+            if txn.phase == _PHASE_DONE:
                 txn._cleanup()
-                acted.append(f"discarded stale {txn.txn_id}")
+                acted.append(f"cleaned {txn.txn_id} (was done)")
+            elif txn.phase == _PHASE_COMMITTING:
+                with commit_lock(txn.scope_root) as got:
+                    if not got:
+                        continue  # another process owns the swap right now
+                    skipped = txn._apply()
+                    txn.phase = _PHASE_DONE
+                    txn._persist()
+                txn._cleanup()
+                acted.append(f"rolled-forward {txn.txn_id}")
+                # Surface every target the M-1 guard preserved (a concurrent edit
+                # landed in the crash window) — silent data-preservation is still a
+                # divergence from the txn's intended end-state; a human/agent should see it.
+                acted.extend(f"{line} ({txn.txn_id})" for line in skipped)
+            elif txn.phase == _PHASE_STAGING:
+                try:
+                    fresh_ts = int(jp.stat().st_mtime)
+                except OSError:
+                    fresh_ts = txn.started_at
+                if now - max(fresh_ts, txn.started_at) > stale_seconds:
+                    txn._cleanup()
+                    acted.append(f"discarded stale {txn.txn_id}")
+        except Exception as exc:  # noqa: BLE001 — M-7: isolate per-journal failures
+            # One poisoned txn (e.g. a permanent I/O error inside its _apply) must
+            # not wedge every later journal — and the skills invoke resume at the
+            # start of EVERY editorial pass, so an uncaught exception here would
+            # silently no-op all future passes on this scope. The journal is left
+            # in place: a committing txn keeps its roll-forward path for a later,
+            # healthier resume.
+            acted.append(f"FAILED {txn.txn_id}: {exc}")
+    # M-8: a crash between staging-dir creation and the first journal persist
+    # leaves a journal-LESS staging dir no journal-loop entry will ever clean —
+    # unbounded growth, and its staged page copies are memgrep-recall-visible
+    # (memgrep has no .maint-staging exclusion; only iter_note_files does).
+    # Sweep any staging subdir with no matching journal once it is older than
+    # the stale window (a FRESH one may belong to a begin() racing this resume).
+    try:
+        subdirs = sorted(p for p in staging_root.iterdir() if p.is_dir())
+    except OSError:
+        subdirs = []
+    for sub in subdirs:
+        if (staging_root / f"{sub.name}.json").exists():
+            continue
+        try:
+            age = now - int(sub.stat().st_mtime)
+        except OSError:
+            continue
+        if age > stale_seconds:
+            shutil.rmtree(sub, ignore_errors=True)
+            acted.append(f"removed orphan staging dir {sub.name} (no journal)")
     return acted
 
 

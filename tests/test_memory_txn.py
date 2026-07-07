@@ -172,18 +172,108 @@ def test_resume_cleans_a_done_txn(tmp_path):
 
 
 def test_resume_discards_a_stale_staging_txn(tmp_path):
-    """A staging-phase journal older than the stale window is a crashed pass — drop
-    it WITHOUT touching the live tree (the merge never began applying)."""
+    """A staging-phase journal untouched past the stale window (journal MTIME —
+    M-9) is a crashed pass — drop it WITHOUT touching the live tree (the merge
+    never began applying)."""
+    import os
     scope = _scope(tmp_path)
     txn = MemoryTxn.begin(scope, "merge", ["a.md"])
     txn.stage_write("c.md", "never applied")
     txn.started_at = 0  # ancient
     txn._persist()
+    os.utime(txn.journal_path, (0, 0))  # journal untouched since the epoch
     acted = memory_txn.resume_pending(scope, stale_seconds=10)
     assert any("discarded stale" in a for a in acted)
     assert not txn.staging_dir.exists()
     assert (scope / "a.md").exists()  # live untouched
     assert not (scope / "c.md").exists()
+
+
+def test_resume_keepalive_journal_touch_prevents_discard(tmp_path):
+    """M-9 regression: an OLD txn whose journal was recently touched (the agent
+    keepalive — or simply a recent stage_write's _persist) is a LIVE in-flight
+    pass and must NOT be discarded, no matter how old started_at is. Pre-fix the
+    check used started_at alone, so a >30-min agent pass was thrown away."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "merge", ["a.md"])
+    txn.stage_write("c.md", "in flight for hours")
+    txn.started_at = 0  # the pass began ages ago…
+    txn._persist()      # …but the journal was JUST touched (the keepalive)
+    acted = memory_txn.resume_pending(scope, stale_seconds=10)
+    assert not any("discarded" in a for a in acted), acted
+    assert txn.staging_dir.exists()
+    txn.abort()
+
+
+# M-7 regression (wikimem audit 2026-07-07): resume must isolate per-journal
+# failures (one poisoned txn cannot wedge the rest) and SURFACE unreadable
+# journals instead of silently skipping them.
+
+def test_resume_surfaces_unreadable_journal(tmp_path):
+    """A corrupt journal is left in place for a human — but resume now SAYS so
+    (the silent continue meant nobody was ever told, and its staging leaked)."""
+    scope = _scope(tmp_path)
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir()
+    (staging_root / "deadbeef.json").write_text("{not json", encoding="utf-8")
+    acted = memory_txn.resume_pending(scope)
+    assert any("unreadable journal deadbeef.json" in a for a in acted), acted
+    assert (staging_root / "deadbeef.json").exists()  # left for a human
+
+
+def test_resume_one_failing_txn_does_not_wedge_the_next(tmp_path):
+    """Two committing txns; one fails its _apply with a REAL I/O error (its write
+    target's parent is a regular file, so mkdir raises). Resume surfaces a FAILED
+    line for it, keeps its journal (the roll-forward path survives), and still
+    rolls the healthy txn forward."""
+    scope = _scope(tmp_path)
+    (scope / "sub").write_text("a FILE where the bad txn needs a directory", encoding="utf-8")
+
+    bad = MemoryTxn.begin(scope, "repair", ["a.md"])
+    bad.stage_write("sub/c.md", "cannot land: parent is a file")
+    bad.phase = "committing"
+    bad._persist()
+
+    good = MemoryTxn.begin(scope, "repair", ["b.md"])
+    good.stage_write("b.md", "---\nname: b\n---\n\nFact B (rolled forward).\n")
+    good.phase = "committing"
+    good._persist()
+
+    acted = memory_txn.resume_pending(scope)
+    assert any(a.startswith(f"FAILED {bad.txn_id}") for a in acted), acted
+    assert any(f"rolled-forward {good.txn_id}" in a for a in acted), acted
+    assert "rolled forward" in (scope / "b.md").read_text(encoding="utf-8")
+    assert bad.journal_path.exists(), "the failing txn keeps its roll-forward journal"
+
+
+# M-8 regression (wikimem audit 2026-07-07): a journal-less staging dir (crash
+# between mkdir and the first _persist) must be swept once stale — it grew
+# unbounded and its staged copies were memgrep-recall-visible.
+
+def test_resume_sweeps_stale_orphan_staging_dir(tmp_path):
+    """An old staging subdir with no matching journal is removed and surfaced."""
+    import os
+    scope = _scope(tmp_path)
+    staging_root = MemoryTxn._staging_root(scope)
+    orphan = staging_root / "0123456789abcdef0123456789abcdef"
+    orphan.mkdir(parents=True)
+    (orphan / "a.md").write_text("leaked staged copy", encoding="utf-8")
+    os.utime(orphan, (0, 0))  # ancient
+    acted = memory_txn.resume_pending(scope, stale_seconds=10)
+    assert any("removed orphan staging dir" in a for a in acted), acted
+    assert not orphan.exists()
+
+
+def test_resume_leaves_fresh_orphan_staging_dir_alone(tmp_path):
+    """A FRESH journal-less staging dir may belong to a begin() racing this very
+    resume (journal not persisted yet) — never sweep it early."""
+    scope = _scope(tmp_path)
+    staging_root = MemoryTxn._staging_root(scope)
+    orphan = staging_root / "fedcba9876543210fedcba9876543210"
+    orphan.mkdir(parents=True)
+    acted = memory_txn.resume_pending(scope, stale_seconds=1800)
+    assert not any("orphan" in a for a in acted)
+    assert orphan.exists()
 
 
 def test_resume_leaves_a_fresh_staging_txn_alone(tmp_path):

@@ -28,6 +28,12 @@ The contract is two-phase so the agent can do its semantic work between them:
   abort <scope_root> <txn_id>       Discard a not-yet-committed transaction.
   resume <scope_root>               Roll forward / clean interrupted transactions.
 
+Staleness / keepalive (M-9): a staging-phase txn whose JOURNAL file goes
+untouched for 6 h is discarded by any later `resume` as a crashed pass. The
+window is journal-MTIME-based, so a long pass (rate-limit stall, slow model)
+keeps its txn alive simply by touching the journal —
+`touch <scope_root>/.maint-staging/<txn_id>.json` — between begin and commit.
+
 Fail-fast: every error exits non-zero with a one-line `error:` message; a clean
 commit / abort / resume exits 0.
 """
