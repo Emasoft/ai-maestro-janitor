@@ -108,8 +108,35 @@ def test_verify_repair_fails_on_dropped_lesson():
     assert not ok and any("lesson" in r for r in reasons)
 
 
+def test_verify_repair_passes_on_valid_tierless_page():
+    """RECONCILE (issue #68 P3): the model says absent tier ⇒ component, so a minimal
+    repair of a valid tier-less page must PASS — the gate used to demand tier and
+    reject 22/28 legitimately tier-less LOCAL pages."""
+    source = ("---\nname: x\ndescription: \"d\"\nmetadata:\n  type: project\n---\n\n"
+              "A fact.\n\n## Notes and lessons learned\n[^1]: the cap is 3.\n")
+    result = ("---\nname: x\ndescription: \"d\"\nocd: 2026-06-01\nlmd: 2026-06-19\n"
+              "metadata:\n  node_type: memory\n  type: project\n---\n\n"
+              "A fact.\n\n## Notes and lessons learned\n[^1]: the cap is 3.\n")
+    ok, reasons = v.verify_repair(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert ok, reasons
+
+
+def test_verify_repair_still_rejects_explicit_invalid_tier():
+    """An EXPLICIT tier outside {hub, aspect, component} is still refused — only
+    ABSENCE became valid, not junk values."""
+    source = _note(tier="component")
+    result = _note(tier="banana")
+    ok, reasons = v.verify_repair(
+        source, v.parse_frontmatter(source), result, v.parse_frontmatter(result)
+    )
+    assert not ok and any("invalid tier" in r for r in reasons)
+
+
 def test_verify_repair_fails_when_required_key_still_missing():
-    """A 'repair' that did not actually backfill tier/ocd/lmd/node_type is refused."""
+    """A 'repair' that did not actually backfill ocd/lmd/node_type is refused
+    (tier is NOT required — absent means component per the model)."""
     txt = "---\nname: x\ndescription: \"d\"\nmetadata:\n  type: project\n---\n\nf\n\n## Notes and lessons learned\n"
     ok, reasons = v.verify_repair(txt, v.parse_frontmatter(txt), txt, v.parse_frontmatter(txt))
     assert not ok and any("missing required key" in r for r in reasons)

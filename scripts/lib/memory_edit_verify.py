@@ -653,7 +653,11 @@ def verify_split(
 
 # Every wikimem page MUST carry these. The repair pass backfills them; verify_repair
 # refuses a "repair" that still lacks any (it didn't finish) or that DROPPED one.
-_REQUIRED_FM_KEYS = ("name", "description", "ocd", "lmd", "node_type", "type", "tier")
+# `tier` is deliberately NOT here (issue #68 P3, TRDD-UENXDA8P): the model says
+# "absent ⇒ treat as component" (wikimem-model.md), so a tier-less page is VALID and a
+# minimal repair of one must pass. An EXPLICIT tier is still validated against
+# _VALID_TIERS below; the repair skill still INFERS a tier when it completes a page.
+_REQUIRED_FM_KEYS = ("name", "description", "ocd", "lmd", "node_type", "type")
 _VALID_TIERS = ("hub", "aspect", "component")
 
 
@@ -673,7 +677,8 @@ def verify_repair(
     - LESSON PRESERVATION — every `[^N]` lesson of the source survives (sacred, the
       same parser-independent check merge/split use).
     - COMPLETENESS — the result carries every REQUIRED frontmatter key with a
-      non-empty value, and a `tier` from the legal set.
+      non-empty value; a `tier`, WHEN PRESENT, must be from the legal set (absent
+      is valid — the model reads it as `component`).
     - NO METADATA LOSS — repair never DROPS a frontmatter key the source had.
     - ORIGIN PRESERVED — `ocd` is unchanged when the source already had one (a
       repair must never rewrite a page's birth date); `lmd` is not regressed.
