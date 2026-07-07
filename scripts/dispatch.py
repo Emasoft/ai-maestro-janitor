@@ -86,6 +86,10 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("subagent-report", 3600, "CLAUDE_PLUGIN_OPTION_SUBAGENT_REPORT_INTERVAL"),
     ("version-update", 300, "CLAUDE_PLUGIN_OPTION_VERSION_CHECK_INTERVAL"),
     ("trashcan-purge", 86400, "CLAUDE_PLUGIN_OPTION_TRASHCAN_PURGE_INTERVAL"),
+    # reports-purge runs daily (S8, TRDD-LCO8229M): a 30d retention window
+    # doesn't need a tighter cadence, and the seen-file caps only matter at
+    # hundreds of lines. Silent no-op when reports/ is absent.
+    ("reports-purge", 86400, "CLAUDE_PLUGIN_OPTION_REPORTS_PURGE_INTERVAL"),
     # screenshot-purge runs hourly: 72h is the default age threshold so a
     # 1h cadence catches expiries promptly AND re-probes free disk while
     # the user is mid-task. Skipped silently when reports/screenshots/ is
