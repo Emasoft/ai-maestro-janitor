@@ -329,6 +329,7 @@ def test_keychain_write_passes_data_as_argv_value(monkeypatch: pytest.MonkeyPatc
     assert seen["input"] is None                          # NOT the truncating stdin-prompt mode
 
 
+@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
 def test_keychain_write_roundtrips_real_keychain_over_128_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The keychain write stores the EXACT bytes in the real macOS keychain — including
     payloads well over 128 bytes (TRDD-5539cd6e REGRESSION LOCK). The old stdin-prompt mode
@@ -352,6 +353,7 @@ def test_keychain_write_roundtrips_real_keychain_over_128_bytes(monkeypatch: pyt
     assert rotator._slot_keychain_read(account, service=service) is None  # cleaned up
 
 
+@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
 def test_write_slot_uses_keychain_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """On a keychain host, write_slot stores the token ENCRYPTED in the keychain (NO plaintext file) and read_slot round-trips it. 🐌"""
     if sys.platform != "darwin":
@@ -371,6 +373,7 @@ def test_write_slot_uses_keychain_when_available(tmp_path: Path, monkeypatch: py
     assert rotator.read_slot(email) is None              # gone after cleanup
 
 
+@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
 def test_read_slot_recovers_from_backup_when_primary_deleted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If the PRIMARY slot keychain item is deleted/corrupt, read_slot recovers the token from the redundant backup keychain and re-heals the primary (Pillar 2, Decision 2). 🐌"""
     if sys.platform != "darwin":
@@ -394,6 +397,7 @@ def test_read_slot_recovers_from_backup_when_primary_deleted(tmp_path: Path, mon
         _purge_slot_keychain(email)
 
 
+@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
 def test_migrate_slots_to_keychain_verifies_and_keeps_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """migrate_slots_to_keychain copies each legacy plaintext slot into the keychain, verifies by fingerprint, and keeps the files. 🐌"""
     if sys.platform != "darwin":
@@ -562,6 +566,7 @@ def _purge_live_keychain() -> None:
     rotator._slot_keychain_delete(acct, service=rotator.LIVE_BACKUP_KEYCHAIN_SERVICE)
 
 
+@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
 def test_live_backup_mirror_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
     """The -livebak live-credential mirror round-trips through the real OS keychain. 🐌"""
     if sys.platform != "darwin":
@@ -576,6 +581,7 @@ def test_live_backup_mirror_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rotator._live_backup_read() is None  # gone after cleanup
 
 
+@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
 def test_write_live_blob_mirrors_to_livebak(monkeypatch: pytest.MonkeyPatch) -> None:
     """write_live_blob writes the primary AND the redundant -livebak mirror (Pillar 2). 🐌"""
     if sys.platform != "darwin":
