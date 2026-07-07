@@ -294,6 +294,63 @@ def test_resume_is_noop_without_a_staging_dir(tmp_path):
     assert memory_txn.resume_pending(scope) == []
 
 
+# M-10 regression (wikimem audit 2026-07-07): rel-paths must never escape the
+# scope root — `Path / <absolute>` replaces the base entirely and `..` walks
+# out, so an unvalidated rel was an arbitrary write/unlink primitive.
+
+def test_begin_rejects_absolute_source_path(tmp_path):
+    """An absolute source path is refused at begin (and staging is cleaned)."""
+    scope = _scope(tmp_path)
+    victim = tmp_path / "outside.md"
+    victim.write_text("outside the scope", encoding="utf-8")
+    with pytest.raises(MemoryTxnError, match="escapes the scope root"):
+        MemoryTxn.begin(scope, "merge", [str(victim)])
+    assert not list((scope / memory_txn._STAGING_DIRNAME).glob("*"))
+
+
+def test_stage_write_rejects_dotdot_escape(tmp_path):
+    """A `../` rel in stage_write is refused — nothing may land outside scope."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"])
+    with pytest.raises(MemoryTxnError, match="escapes the scope root"):
+        txn.stage_write("../escape.md", "poison")
+    txn.abort()
+    assert not (tmp_path / "escape.md").exists()
+
+
+def test_stage_delete_rejects_absolute_path(tmp_path):
+    """An absolute rel in stage_delete is refused — no out-of-scope unlink."""
+    scope = _scope(tmp_path)
+    victim = tmp_path / "victim.md"
+    victim.write_text("must survive", encoding="utf-8")
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"])
+    with pytest.raises(MemoryTxnError, match="escapes the scope root"):
+        txn.stage_delete(str(victim))
+    txn.abort()
+    assert victim.exists()
+
+
+def test_resume_refuses_hostile_journal_with_escaping_delete(tmp_path):
+    """A hand-crafted committing journal whose deletes target an ABSOLUTE path
+    is refused at _load (surfaced as unreadable) — resume never unlinks it."""
+    import json as _json
+    scope = _scope(tmp_path)
+    victim = tmp_path / "victim.md"
+    victim.write_text("must survive", encoding="utf-8")
+    staging_root = MemoryTxn._staging_root(scope)
+    staging_root.mkdir()
+    hostile_id = "aa" * 16
+    (staging_root / hostile_id).mkdir()
+    (staging_root / f"{hostile_id}.json").write_text(_json.dumps({
+        "txn_id": hostile_id, "op": "merge", "scope_root": str(scope),
+        "phase": "committing", "started_at": 0,
+        "sources": {}, "writes": [], "deletes": [str(victim)],
+    }), encoding="utf-8")
+    acted = memory_txn.resume_pending(scope)
+    assert any("unreadable journal" in a for a in acted), acted
+    assert victim.exists(), "resume must never roll a scope-escaping txn forward"
+
+
 # M-1 regression (wikimem audit 2026-07-07): a roll-forward runs minutes-to-hours
 # after the crash; a user edit that landed on a SOURCE page in that window must
 # be PRESERVED (skip the stale write/delete), never silently clobbered.

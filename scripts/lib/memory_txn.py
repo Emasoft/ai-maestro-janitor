@@ -136,6 +136,25 @@ def _sha256_file(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def _ensure_rel_inside(scope_root: Path, rel: str) -> None:
+    """M-10 (wikimem audit 2026-07-07), defense-in-depth: reject any rel-path
+    that escapes the scope root. ``Path / <absolute>`` REPLACES the base entirely
+    and ``..`` segments walk out, so an absolute or dot-dot rel arriving via the
+    API (`apply_atomic`, `stage_*`) or a hand-crafted journal (`_load` trusts
+    `scope_root`+rel verbatim) could make commit/resume write or unlink arbitrary
+    user-writable paths — in the one module allowed to delete memory files. The
+    CLI's own reconstructed paths are already safe (derived via `relative_to`);
+    this guards every other entry point. Raises MemoryTxnError on escape."""
+    p = Path(rel)
+    if p.is_absolute():
+        raise MemoryTxnError(f"rel path escapes the scope root: {rel!r}")
+    root = Path(scope_root).resolve()
+    # resolve() also collapses symlink hops, so a rel that tunnels OUT of the
+    # scope through an in-scope symlink is rejected too.
+    if not (root / p).resolve().is_relative_to(root):
+        raise MemoryTxnError(f"rel path escapes the scope root: {rel!r}")
+
+
 # --------------------------------------------------------------------------- #
 # the transaction
 # --------------------------------------------------------------------------- #
@@ -179,6 +198,11 @@ class MemoryTxn:
         staging_dir.mkdir(parents=True, exist_ok=False)
         sources: dict = {}
         for rel in source_rel_paths:
+            try:
+                _ensure_rel_inside(scope_root, rel)  # M-10: no scope escape
+            except MemoryTxnError:
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                raise
             live = scope_root / rel
             if not live.exists():
                 shutil.rmtree(staging_dir, ignore_errors=True)
@@ -207,6 +231,12 @@ class MemoryTxn:
     def _load(cls, journal_path: Path) -> "MemoryTxn":
         data = json.loads(Path(journal_path).read_text(encoding="utf-8"))
         scope_root = Path(data["scope_root"])
+        # M-10: a hand-crafted/corrupted journal must not become an arbitrary
+        # file write/unlink primitive — validate every recorded rel BEFORE any
+        # caller can _apply it. resume_pending treats the raise as an unreadable
+        # journal (surfaced, left in place), never rolling a hostile txn forward.
+        for rel in (*data["sources"], *data["writes"], *data["deletes"]):
+            _ensure_rel_inside(scope_root, rel)
         return cls(
             scope_root=scope_root, txn_id=data["txn_id"], op=data["op"],
             staging_dir=cls._staging_root(scope_root) / data["txn_id"],
@@ -220,6 +250,7 @@ class MemoryTxn:
     def stage_write(self, rel_path: str, content: str) -> None:
         """Stage the FULL new content of `rel_path` (created or overwritten on
         commit). Supersedes a pending delete of the same path."""
+        _ensure_rel_inside(self.scope_root, rel_path)  # M-10: no scope escape
         dst = self.staging_dir / rel_path
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(content, encoding="utf-8")
@@ -232,6 +263,7 @@ class MemoryTxn:
     def stage_delete(self, rel_path: str) -> None:
         """Stage the removal of `rel_path` from the live tree on commit.
         Supersedes a pending write of the same path."""
+        _ensure_rel_inside(self.scope_root, rel_path)  # M-10: no scope escape
         if rel_path not in self.deletes:
             self.deletes.append(rel_path)
         if rel_path in self.writes:
@@ -358,8 +390,10 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
     for jp in sorted(staging_root.glob("*.json")):
         try:
             txn = MemoryTxn._load(jp)
-        except (json.JSONDecodeError, KeyError, OSError):
-            # M-7: left in place for a human — but surfaced, never silently skipped.
+        except (json.JSONDecodeError, KeyError, OSError, MemoryTxnError):
+            # M-7: left in place for a human — but surfaced, never silently
+            # skipped. MemoryTxnError covers M-10's scope-escape validation: a
+            # hostile journal is refused here and NEVER rolled forward.
             acted.append(f"unreadable journal {jp.name}: left in place for a human")
             continue
         try:
