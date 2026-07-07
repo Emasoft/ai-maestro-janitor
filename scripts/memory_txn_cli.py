@@ -41,6 +41,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import memory_edit_verify as verify  # noqa: E402
+import memory_scopes  # noqa: E402
 import memory_txn  # noqa: E402
 from memory_txn import MemoryTxn, MemoryTxnError  # noqa: E402
 
@@ -96,13 +97,13 @@ def _live_pages_excluding(scope_root: Path, exclude: set[str]) -> dict[str, str]
     pages the txn writes or deletes). Used as the OTHER-pages set for the
     dangling-link (LINK-LAW) check so a missed backlink redirect anywhere in the
     corpus is caught, not just inside the edited pages."""
-    staging_root = MemoryTxn._staging_root(scope_root)
+    # M-3 (wikimem audit 2026-07-07): route through the SSOT note scan, never a
+    # private rglob. The local walk read the PRIVATE user-mem/ store into the
+    # verifier (its rel paths could leak into agent-visible failure reasons) and
+    # let non-notes (MEMORY.md stub, index docs, detector reports) false-fail
+    # the LINK-LAW check via their stale [[links]].
     out: dict[str, str] = {}
-    for p in scope_root.rglob("*.md"):
-        if not p.is_file():
-            continue
-        if staging_root in p.parents:                     # never the staging copies
-            continue
+    for p in memory_scopes.iter_note_files(scope_root):
         rel = str(p.relative_to(scope_root))
         if rel in exclude:
             continue
@@ -120,16 +121,25 @@ def _load_txn(scope_root: Path, txn_id: str) -> MemoryTxn:
 
 
 def _verify_merge(txn, writes, deletes):
-    """Build verify_merge inputs from the reconstructed change set. Sources are the
-    DELETED pages (read at their begin-time content from the live tree); the result
-    is the single new/overwritten page the merge produced."""
+    """Build verify_merge inputs from the reconstructed change set. Sources are
+    ALL of the txn's declared source pages — including a SURVIVOR the merge
+    overwrites in place — read at begin-time content from the live tree (pre-
+    commit the live tree IS begin-time content; commit's re-hash enforces it).
+    H-1 (wikimem audit 2026-07-07): building sources from `deletes` alone let the
+    merge-into-survivor shape (write a.md + delete b.md) drop the survivor's own
+    lessons/facts unseen, and made ocd_lmd_ok_merge reward adopting the deleted
+    page's YOUNGER ocd. `retired` stays deletes-only (only removed slugs retire).
+    The union guards the degenerate case of a delete the agent forgot to declare
+    as a source."""
     source_texts, source_metas, retired = [], [], []
-    for rel in deletes:
+    delete_set = set(deletes)
+    for rel in sorted(set(txn.sources) | delete_set):
         live = txn.scope_root / rel
         text = live.read_text(encoding="utf-8")
         source_texts.append(text)
         source_metas.append(verify.parse_frontmatter(text))
-        retired.append(_slug_of(rel, text))
+        if rel in delete_set:
+            retired.append(_slug_of(rel, text))
 
     if len(writes) != 1:
         raise MemoryTxnError(

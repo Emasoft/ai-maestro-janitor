@@ -202,3 +202,59 @@ def test_resume_is_noop_without_a_staging_dir(tmp_path):
     """resume_pending on a scope that never ran a txn returns nothing, no crash."""
     scope = _scope(tmp_path)
     assert memory_txn.resume_pending(scope) == []
+
+
+# H-2 regression (wikimem audit 2026-07-07): a failure DURING the committing
+# swap must NOT destroy the journal — abort() refuses past staging, so
+# resume_pending can roll the half-applied txn forward.
+
+def test_abort_refuses_once_committing(tmp_path):
+    """abort() in the committing phase is a no-op: journal + staging survive."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "merge", ["a.md", "b.md"])
+    txn.stage_write("c.md", "---\nname: c\n---\n\nFact A. Fact B.\n")
+    txn.phase = memory_txn._PHASE_COMMITTING
+    txn._persist()
+    txn.abort()
+    assert txn.journal_path.exists(), "committing journal must survive abort()"
+    assert txn.staging_dir.exists()
+
+
+def test_apply_atomic_failure_mid_swap_leaves_journal_and_resume_completes(
+    tmp_path, monkeypatch
+):
+    """apply_atomic with an OSError on the SECOND os.replace (write #1 already
+    landed): the exception propagates, but the journal survives — and the next
+    resume_pending rolls the txn forward to a fully-consistent corpus. Pre-fix,
+    abort() destroyed the journal here and the corpus stayed half-mutated forever."""
+    scope = _scope(tmp_path)
+    real_replace = memory_txn.os.replace
+
+    # Patch fires ONLY on the second LIVE content swap (d.md landing outside the
+    # staging tree) — a plain call counter would trip on the journal/staging
+    # atomic_writes first (same global os module) and abort while still staging.
+    def flaky_replace(src, dst):
+        d = str(dst)
+        if d.endswith("d.md") and ".maint-staging" not in d:
+            raise OSError("disk full (injected)")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(memory_txn.os, "replace", flaky_replace)
+    with pytest.raises(OSError, match="injected"):
+        memory_txn.apply_atomic(
+            scope, "merge", ["a.md", "b.md"],
+            writes={
+                "c.md": "---\nname: c\n---\n\nFact A. Fact B.\n",
+                "d.md": "---\nname: d\n---\n\nSecond page.\n",
+            },
+            deletes=["a.md", "b.md"],
+        )
+    monkeypatch.setattr(memory_txn.os, "replace", real_replace)
+    staging_root = MemoryTxn._staging_root(scope)
+    journals = list(staging_root.glob("*.json"))
+    assert journals, "the committing journal must survive the mid-swap failure"
+    acted = memory_txn.resume_pending(scope)
+    assert any("rolled-forward" in line or "forward" in line for line in acted) or acted
+    assert (scope / "c.md").exists() and (scope / "d.md").exists()
+    assert not (scope / "a.md").exists() and not (scope / "b.md").exists()
+    assert not list(staging_root.glob("*.json")), "journal cleaned after roll-forward"

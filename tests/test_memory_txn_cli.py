@@ -317,3 +317,54 @@ def test_commit_with_no_staged_changes_errors(tmp_path):
     assert rc == 2
     assert not _staging(scope, txn_id).exists()  # aborted
     assert "A fact." in (scope / "a.md").read_text(encoding="utf-8")
+
+
+# H-1 regression (wikimem audit 2026-07-07): the merge-INTO-SURVIVOR shape
+# (overwrite a.md, delete b.md) must feed the SURVIVOR's begin-time content to
+# the verifier too — dropping the survivor's own lesson used to commit clean.
+
+def _survivor_merge_txn(tmp_path, survivor_text: str):
+    """Build the merge-into-survivor shape: a.md is overwritten with
+    `survivor_text`, b.md is deleted. Returns (scope, txn_id)."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    a = _note("a", ocd="2026-05-01", lmd="2026-05-10",
+              body="Auth uses JWT.", lessons="[^1]: cap is 3, verified against source.\n")
+    b = _note("b", ocd="2026-06-01", lmd="2026-06-09",
+              body="Tokens expire in 30s.", lessons="[^1]: 30s timeout per config.\n")
+    (scope / "a.md").write_text(a, encoding="utf-8")
+    (scope / "b.md").write_text(b, encoding="utf-8")
+    txn_id = _txn_id_from_begin(scope, "merge", "a.md", "b.md")
+    staging = _staging(scope, txn_id)
+    (staging / "b.md").unlink()
+    (staging / "a.md").write_text(survivor_text, encoding="utf-8")
+    return scope, txn_id
+
+
+def test_merge_into_survivor_dropping_survivors_lesson_fails(tmp_path):
+    """The exact H-1 hole: the survivor keeps B's content but LOSES its own
+    lesson + fact — the verifier must now refuse (it used to pass)."""
+    bad = _note("a", ocd="2026-05-01", lmd="2026-06-18",
+                body="Tokens expire in 30s.",
+                lessons="[^1]: 30s timeout per config.\n")  # A's lesson + fact GONE
+    scope, txn_id = _survivor_merge_txn(tmp_path, bad)
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc != 0, "a merge that loses the survivor's own lesson must not commit"
+    assert "cap is 3" in (scope / "a.md").read_text(encoding="utf-8")  # live tree intact
+    assert (scope / "b.md").exists()
+
+
+def test_merge_into_survivor_preserving_everything_commits(tmp_path):
+    """The correct merge-into-survivor: both pages' lessons + facts survive and
+    the survivor keeps its own OLDER ocd — must pass (the pre-fix gate perversely
+    REJECTED the older ocd because it only saw the deleted page's sources)."""
+    good = _note("a", ocd="2026-05-01", lmd="2026-06-18",
+                 body="Auth uses JWT. Tokens expire in 30s.", lessons=(
+                     "[^1]: cap is 3, verified against source.\n"
+                     "[^2]: 30s timeout per config.\n"))
+    scope, txn_id = _survivor_merge_txn(tmp_path, good)
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc == 0
+    merged = (scope / "a.md").read_text(encoding="utf-8")
+    assert "cap is 3" in merged and "30s timeout" in merged
+    assert not (scope / "b.md").exists()

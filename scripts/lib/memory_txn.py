@@ -284,7 +284,16 @@ class MemoryTxn:
 
     def abort(self) -> None:
         """Discard a not-yet-committed transaction. Safe to call any time before
-        the `committing` phase; a no-op on a vanished staging tree."""
+        the `committing` phase; a no-op on a vanished staging tree.
+
+        REFUSES (no-op) once the phase is past `staging` (H-2, wikimem audit
+        2026-07-07): after commit() persists phase=committing, a partial _apply
+        may already have mutated the live tree — the journal is then the ONLY
+        roll-forward path for resume_pending, and destroying it would strand the
+        corpus permanently half-mutated. Roll-forward, never roll-back, is the
+        committing-phase contract; abort must not be able to break it."""
+        if self.phase != _PHASE_STAGING:
+            return
         self._cleanup()
 
     def _cleanup(self) -> None:
@@ -353,9 +362,12 @@ def apply_atomic(
 ) -> str:
     """begin → stage `writes`/`deletes` → optional `verify(txn)` → commit, all in
     one process. `writes` is {rel_path: content}; `deletes` is an iterable of
-    rel_paths; `verify` raises to abort. Returns the txn_id on success; on ANY
-    failure the staging tree is discarded and the exception re-raised — the live
-    tree is never left partially mutated."""
+    rel_paths; `verify` raises to abort. Returns the txn_id on success. On a
+    failure BEFORE commit reaches the committing phase, the staging tree is
+    discarded and the exception re-raised (live tree untouched); a failure
+    DURING the committing swap leaves the journal in place — abort() refuses
+    past staging — so the next resume_pending rolls the txn forward instead of
+    stranding a half-applied live tree (H-2)."""
     txn = MemoryTxn.begin(scope_root, op, source_rel_paths)
     try:
         for rel, content in writes.items():
