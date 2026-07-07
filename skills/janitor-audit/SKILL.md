@@ -19,6 +19,18 @@ Invokes each ai-maestro-janitor detector synchronously, aggregates output into a
 
 1. Resolve `JANITOR_ROOT` = `${CLAUDE_PROJECT_DIR}/.janitor` (fall back to `$(pwd)/.janitor` if the env var is unset).
 
+1b. **Freshness first (issue #69):** this audit reads the plugin CACHE, which can lag the
+   installed pin / latest release — findings against a stale cache describe code that is
+   no longer live. Print the freshness header and put it at the TOP of the report:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/plugin_freshness.py" "${CLAUDE_PLUGIN_ROOT}"
+   ```
+
+   If the line carries `⚠ STALE`, say so prominently and recommend updating/reloading the
+   plugin BEFORE acting on any finding below (the check is fail-open: `unknown` fields
+   mean "could not verify", not "fresh").
+
 2. Run every detector under `${CLAUDE_PLUGIN_ROOT}/scripts/detectors/` once, capturing stdout and stderr separately. Iterate the directory rather than hard-coding a list — that way the skill stays in sync with the dispatcher as detectors are added.
 
    ```bash
