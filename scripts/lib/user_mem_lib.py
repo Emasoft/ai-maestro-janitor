@@ -284,7 +284,11 @@ class UserMemStore:
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=20,
+                # F10 (wikimem audit 2026-07-07): must be SHORTER than the hook's
+                # own hooks.json timeout — if the harness SIGKILLs the whole hook
+                # first, the timed-out UserPromptSubmit is NON-blocking and the
+                # private query proceeds to the model. 5s inner < 30s outer.
+                timeout=5,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             return []
@@ -415,7 +419,19 @@ def previous_user_message(transcript_path: Path | str) -> Optional[str]:
     """
     path = Path(transcript_path)
     try:
-        raw = path.read_text(encoding="utf-8")
+        # F10 (wikimem audit 2026-07-07): read only the TAIL, never the whole
+        # file — long-session transcripts reach hundreds of MB, and blowing the
+        # hook's time budget makes the harness kill it NON-blocking, leaking the
+        # private prompt to the model. The wanted message is the one immediately
+        # before the save command, so the last 512 KB always contains it; a
+        # mid-line start is harmless (that partial line fails json.loads and is
+        # skipped).
+        tail_bytes = 512 * 1024
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > tail_bytes:
+                fh.seek(size - tail_bytes)
+            raw = fh.read().decode("utf-8", errors="replace")
     except (FileNotFoundError, OSError):
         return None
     last_text: Optional[str] = None

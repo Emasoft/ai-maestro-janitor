@@ -35,7 +35,7 @@
           {
             "type": "command",
             "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit-user-mem.py",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       },

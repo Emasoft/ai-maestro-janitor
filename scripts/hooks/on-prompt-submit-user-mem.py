@@ -230,33 +230,46 @@ def main() -> int:
     if not any(head.startswith(name) for name in _COMMAND_NAMES):
         return 0
 
-    um = _load_user_mem_lib()
-    if um is None:
-        # Lib unavailable → cannot safely handle the command; stay a no-op so the
-        # prompt flows normally rather than silently disappearing.
-        return 0
+    # From here on the prompt plausibly IS a user-mem command carrying PRIVATE
+    # text. Privacy demands FAIL-CLOSED (F9 + F11, wikimem audit 2026-07-07):
+    # every failure below must BLOCK the prompt (erase it from the turn) rather
+    # than fall through and hand the private text/query to the model. The ONLY
+    # deliberate fall-through is parse_command rejecting a LOOKALIKE (e.g.
+    # `/to-user-memory`) — that is a normal prompt, not ours.
+    try:
+        um = _load_user_mem_lib()
+        if um is None:
+            _emit(_block(
+                "[user-mem] library unavailable — prompt withheld to protect the "
+                "private text. Retry after /reload-plugins (or check the janitor install)."
+            ))
+            return 0
 
-    # parse_command anchors the match (requires end-of-string or a following
-    # space) and maps every recognised slash form — new and legacy — to the
-    # canonical id "add"/"search"/"share", so a lookalike like `/to-user-memory`
-    # that passed the cheap prefix guard above is correctly rejected here.
-    command, argstring = um.parse_command(prompt)
-    if command is None:
-        return 0
+        # parse_command anchors the match (requires end-of-string or a following
+        # space) and maps every recognised slash form — new and legacy — to the
+        # canonical id "add"/"search"/"share", so a lookalike like `/to-user-memory`
+        # that passed the cheap prefix guard above is correctly rejected here.
+        command, argstring = um.parse_command(prompt)
+        if command is None:
+            return 0
 
-    # Resolve the per-project store. The harness memory dir is keyed on the
-    # project directory ($CLAUDE_PROJECT_DIR), which resolve_user_mem_dir prefers;
-    # the payload `cwd` is only a fallback for the (rare) case the env var is unset.
-    project_dir = (os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "").strip() or None
-    store_dir = um.resolve_user_mem_dir(project_dir=project_dir)
-    store = um.UserMemStore(store_dir)
+        # Resolve the per-project store. The harness memory dir is keyed on the
+        # project directory ($CLAUDE_PROJECT_DIR), which resolve_user_mem_dir prefers;
+        # the payload `cwd` is only a fallback for the (rare) case the env var is unset.
+        project_dir = (os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or "").strip() or None
+        store_dir = um.resolve_user_mem_dir(project_dir=project_dir)
+        store = um.UserMemStore(store_dir)
 
-    if command == "add":
-        _emit(_handle_to_user_mem(um, argstring, payload, store))
-    elif command == "search":
-        _emit(_handle_search_user_mem(um, argstring, store))
-    elif command == "share":
-        _emit(_handle_share_user_mem(argstring, store))
+        if command == "add":
+            _emit(_handle_to_user_mem(um, argstring, payload, store))
+        elif command == "search":
+            _emit(_handle_search_user_mem(um, argstring, store))
+        elif command == "share":
+            _emit(_handle_share_user_mem(argstring, store))
+    except Exception:
+        # A traceback + non-zero exit would be a NON-blocking hook error — the
+        # private prompt would proceed to the model. Withhold it instead.
+        _emit(_block("[user-mem] internal error — prompt withheld to protect the private text."))
     return 0
 
 

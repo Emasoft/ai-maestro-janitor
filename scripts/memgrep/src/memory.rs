@@ -28,6 +28,25 @@ fn is_md(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Sub-dirs a memory-scope walk must NEVER descend into (wikimem audit 2026-07-07
+/// F8, mirroring the Python SSOT `memory_scopes.EXCLUDED_DIRNAMES`):
+/// `user-mem/` is the PRIVATE user-authored store — agent-invisible BY DESIGN
+/// (only /janitor-memory-user-share may surface one of its memories), yet every
+/// dir-rooted recall/find/reindex used to walk it and could print private bodies
+/// straight into agent context. `.maint-staging/` holds transaction copies that
+/// would surface as duplicate recall results (relevant under --hidden; without it
+/// the dot-dir is skipped anyway). The check is on components RELATIVE to the
+/// walked root, so `memgrep find q <…>/user-mem` (the user-mem search command
+/// passing the private store AS the root) still works — only descendants are
+/// filtered, never the root the caller explicitly named.
+const EXCLUDED_SUBDIRS: [&str; 2] = ["user-mem", ".maint-staging"];
+
+fn under_excluded_subdir(path: &std::path::Path, root: &std::path::Path) -> bool {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    rel.components()
+        .any(|c| EXCLUDED_SUBDIRS.iter().any(|x| c.as_os_str() == *x))
+}
+
 fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let paths = if paths.is_empty() {
@@ -40,7 +59,10 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
             out.push(p.clone());
         } else {
             for e in WalkBuilder::new(p).hidden(!hidden).build().flatten() {
-                if e.file_type().map(|t| t.is_file()).unwrap_or(false) && is_md(e.path()) {
+                if e.file_type().map(|t| t.is_file()).unwrap_or(false)
+                    && is_md(e.path())
+                    && !under_excluded_subdir(e.path(), p)
+                {
                     out.push(e.path().to_path_buf());
                 }
             }

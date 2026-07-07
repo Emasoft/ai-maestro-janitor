@@ -1767,3 +1767,63 @@ fn find_claude_mem_ref_index_matches_live_scan() {
         "indexed and live-scan find-cmref must match byte-for-byte:\nlive:\n{live}\nindexed:\n{indexed}"
     );
 }
+
+#[test]
+fn dir_rooted_recall_never_walks_the_private_user_mem_store() {
+    // F8 (wikimem audit 2026-07-07): `user-mem/` is the PRIVATE user-authored store —
+    // agent-invisible BY DESIGN. A dir-rooted recall/find/reindex on the memory SCOPE must
+    // never rank, print, or index its notes (the shipped recall protocol passes the scope
+    // DIR as the root, so the engine is the one place the boundary can hold). Non-vacuous:
+    // the private note's description matches the query exactly.
+    // NB: the tag must not contain "user-mem" — it lands in the temp PATH, and the
+    // assertions below check the OUTPUT for the private note's markers.
+    let d = TempDir::new("umprivacy");
+    seed_corpus(&d);
+    std::fs::create_dir_all(d.join("user-mem")).expect("mk user-mem");
+    d.write(
+        "user-mem/00001-private.md",
+        "---\ndescription: oauth rotator keychain credentials PRIVATE\n---\n\nMy private secret memory.\n",
+    );
+    let o = run(&["recall", "oauth rotator keychain credentials", d.as_str()]);
+    assert!(
+        !o.contains("00001-private") && !o.contains("user-mem"),
+        "recall on the scope dir must not surface user-mem content:\n{o}"
+    );
+    let f = run(&["find", "+PRIVATE", d.as_str()]);
+    assert!(
+        !f.contains("00001-private") && !f.contains("user-mem"),
+        "find on the scope dir must not surface user-mem content:\n{f}"
+    );
+    // Reindex on the scope must not pull private bodies into the sidecar either: an
+    // indexed recall right after must stay clean.
+    let _ = run(&["reindex", d.as_str()]);
+    let oi = run(&[
+        "recall",
+        "oauth rotator keychain credentials",
+        d.as_str(),
+        "--use-index",
+    ]);
+    assert!(
+        !oi.contains("00001-private") && !oi.contains("user-mem"),
+        "indexed recall must not surface user-mem content:\n{oi}"
+    );
+}
+
+#[test]
+fn user_mem_named_as_the_root_is_still_searchable() {
+    // The exclusion is on DESCENDANT components relative to the walked root, never the root
+    // itself — /janitor-memory-user-search passes the private store AS the root and must
+    // keep working.
+    let d = TempDir::new("user-mem-root");
+    std::fs::create_dir_all(d.join("user-mem")).expect("mk user-mem");
+    d.write(
+        "user-mem/00001-private.md",
+        "---\ndescription: my private note about the espresso machine\n---\n\nEspresso fact.\n",
+    );
+    let root = d.join("user-mem");
+    let o = run(&["find", "+espresso", root.to_str().expect("utf-8")]);
+    assert!(
+        o.contains("00001-private.md"),
+        "user-mem named as the ROOT must remain searchable:\n{o}"
+    );
+}
