@@ -56,12 +56,18 @@ fn collect_md(paths: &[PathBuf], hidden: bool) -> Vec<PathBuf> {
     };
     for p in &paths {
         if p.is_file() {
+            // An EXPLICITLY named file always passes — the caller asked for it.
             out.push(p.clone());
         } else {
             for e in WalkBuilder::new(p).hidden(!hidden).build().flatten() {
                 if e.file_type().map(|t| t.is_file()).unwrap_or(false)
                     && is_md(e.path())
                     && !under_excluded_subdir(e.path(), p)
+                    // F16 (wikimem audit 2026-07-07): filter the NON-NOTE family
+                    // (MEMORY.md / memory-index.md / *-proposed.md reports) at the
+                    // WALK, so reindex/links/lint agree with recall/find — the
+                    // reports were being INDEXED and link-graphed as if notes.
+                    && !is_index_file(e.path())
                 {
                     out.push(e.path().to_path_buf());
                 }
@@ -1706,12 +1712,19 @@ type RecallRanked = (
     Option<String>,
 );
 
-/// Is `path` one of the index FILES (`MEMORY.md` / `memory-index.md`)? Those are MAPS of the notes,
-/// not notes — ranking them lets a symptom query match the index's gloss lines and return the index
-/// itself as noise above the real note (observed dogfooding recall on the live KB).
+/// Is `path` a NON-NOTE file — one of the index MAPS (`MEMORY.md` / `memory-index.md`) or a
+/// `*-proposed.md` detector report? The maps are MAPS of the notes, not notes — ranking them lets a
+/// symptom query match the index's gloss lines and return the index itself as noise above the real
+/// note (observed dogfooding recall on the live KB). The `-proposed.md` family (wikimem audit
+/// 2026-07-07 F16, mirroring the Python SSOT `memory_scopes.NON_NOTE_BASENAMES` +
+/// `DETECTOR_OUTPUT_SUFFIX`): the memory detectors drop plain-markdown reports named
+/// `<detector>-proposed.md` into the scanned dir; ranking/indexing them let the librarian's own
+/// report outrank a real note for reorganization-symptom queries.
 fn is_index_file(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()).is_some_and(|n| {
-        n.eq_ignore_ascii_case("MEMORY.md") || n.eq_ignore_ascii_case("memory-index.md")
+        n.eq_ignore_ascii_case("MEMORY.md")
+            || n.eq_ignore_ascii_case("memory-index.md")
+            || n.to_ascii_lowercase().ends_with("-proposed.md")
     })
 }
 

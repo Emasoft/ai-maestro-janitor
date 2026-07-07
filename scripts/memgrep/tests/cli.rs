@@ -1810,6 +1810,68 @@ fn dir_rooted_recall_never_walks_the_private_user_mem_store() {
 }
 
 #[test]
+fn proposed_reports_never_ranked_indexed_or_linked() {
+    // F16 (wikimem audit 2026-07-07): the memory detectors drop `<detector>-proposed.md`
+    // reports into the scanned dir. They are NOT notes (Python SSOT: DETECTOR_OUTPUT_SUFFIX)
+    // — recall/find must not rank them, reindex must not index them, links must not
+    // link-graph them. Non-vacuous: the report's gloss matches the query exactly.
+    let d = TempDir::new("proposedskip");
+    seed_corpus(&d);
+    d.write(
+        "memory-reorg-proposed.md",
+        "# Proposed reorganization\noauth rotator keychain credentials PROPOSALGLOSS [[oauth-rotator]]\n",
+    );
+    let o = run(&["recall", "oauth rotator keychain credentials", d.as_str()]);
+    assert!(
+        !o.contains("memory-reorg-proposed"),
+        "recall must not rank a -proposed.md detector report:\n{o}"
+    );
+    let f = run(&["find", "+PROPOSALGLOSS", d.as_str()]);
+    assert!(
+        !f.contains("memory-reorg-proposed"),
+        "find must not rank a -proposed.md detector report:\n{f}"
+    );
+    let _ = run(&["reindex", d.as_str()]);
+    let oi = run(&[
+        "recall",
+        "oauth rotator keychain credentials",
+        d.as_str(),
+        "--use-index",
+    ]);
+    assert!(
+        !oi.contains("memory-reorg-proposed"),
+        "indexed recall must not serve a -proposed.md detector report:\n{oi}"
+    );
+    let l = run(&["links", d.as_str()]);
+    assert!(
+        !l.contains("memory-reorg-proposed"),
+        "links must not graph a -proposed.md detector report:\n{l}"
+    );
+    // The MEMORY subcommands treat the report as a non-note even when EXPLICITLY
+    // named (same long-standing semantic as an explicit MEMORY.md arg — the
+    // consumer-side is_index_file check predates this fix). Reading a report is
+    // the plain grep mode's job, which is unaffected.
+    let explicit = run(&[
+        "find",
+        "+PROPOSALGLOSS",
+        d.join("memory-reorg-proposed.md").to_str().expect("utf-8"),
+    ]);
+    assert!(
+        !explicit.contains("memory-reorg-proposed"),
+        "the memory subcommands never rank a report, even explicitly named:\n{explicit}"
+    );
+    let grep_mode = run(&[
+        "-e",
+        "PROPOSALGLOSS",
+        d.join("memory-reorg-proposed.md").to_str().expect("utf-8"),
+    ]);
+    assert!(
+        grep_mode.contains("PROPOSALGLOSS"),
+        "the plain grep mode must still read an explicitly named report:\n{grep_mode}"
+    );
+}
+
+#[test]
 fn user_mem_named_as_the_root_is_still_searchable() {
     // The exclusion is on DESCENDANT components relative to the walked root, never the root
     // itself — /janitor-memory-user-search passes the private store AS the root and must
