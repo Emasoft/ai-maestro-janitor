@@ -1,9 +1,10 @@
 ---
 trdd-id: A8DRPZFM
 title: S1+S2 — session-default test isolation, real-state write guard, frozen-path-constant guard test
-column: todo
+column: complete
+implementation-commits: [97e1ed2]
 created: 2026-07-04T04:46:15+0200
-updated: 2026-07-04T04:46:15+0200
+updated: 2026-07-07T15:21:31+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
