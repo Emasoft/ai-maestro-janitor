@@ -3,7 +3,7 @@ trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
 column: dev
 created: 2026-06-24T06:53:23+0200
-updated: 2026-07-04T05:14:00+0200
+updated: 2026-07-08T00:20:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -50,6 +50,31 @@ What landed:
   `tests/test_memory_maintenance.py` (4 NEW precheck tests incl. the Option-A
   not-stamped-then-fires invariant + the `.maint-staging` exclusion; 3 existing split-fires
   tests seeded an over-cap page). **29/29 pass, ruff clean.**
+
+### ✅ REPAIR + ATOMIZE PRECHECKS IMPLEMENTED (2026-07-08, this session)
+The two remaining unblocked follow-ups landed, TDD'd (65/65 green across
+test_memory_content_precheck.py + test_memory_maintenance.py, ruff clean):
+- **`repair_has_work`** — STRUCTURAL page-shape gate mirroring `verify_repair`'s own
+  bars via the SSOT constants (`_REQUIRED_FM_KEYS`, `_VALID_TIERS`,
+  `_LESSONS_HEADING`): missing/partial frontmatter (incl. RAW buffer notes — the
+  skill explicitly upgrades them), invalid tier, NESTED ocd/lmd placement (issue
+  #56 — raw-line check, since parse_frontmatter flattens), missing Notes section,
+  inverted tier shape. DOCUMENTED RESIDUAL: the two SEMANTIC-only defects
+  (answer-shaped description, own one-sided link) are not cheaply detectable — a
+  corpus whose ONLY defects are semantic stays suppressed until the librarian
+  surfaces them or a structural defect appears (same documented-approximation trade
+  as split's size-only gate).
+- **`atomize_has_work`** — free-prose gate mirroring the skill's exact candidate
+  scan: CURATED pages only (`is_curated_wiki_page` — raw buffer notes never
+  candidates), zero `_ATOM_MARKER_RE` markers, ≥1 substantive body line (else the
+  skill's "free-prose-leaf" abstain case).
+- **L-11 (libs audit) fixed in passing**: every precheck's unreadable-page path now
+  FAILS OPEN (`return True`) instead of skip-and-continue — an unreadable page is
+  not provably idle.
+- Scheduler unchanged except docstring (the generic `content_has_work` dispatch just
+  gained the two branches); Option-A never-stamped-when-suppressed invariant covered
+  by new gating tests for both chores.
+- HARVEST precheck stays BLOCKED (below) on TRDD-ab232dbd #231/#232.
 
 ### 🔻 FOLLOW-UPS (deliberately NOT in this MVP — the dispatch is built to extend)
 - **HARVEST precheck — BLOCKED (not merely deferred): the harvest WORK-predicate is in
