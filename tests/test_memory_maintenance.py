@@ -221,6 +221,10 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
         # atomize now also requires real work — a free-prose curated page
         # (TRDD-3XS3PDCF follow-up).
         _write_curated_page(fixture["local"], marker=False)
+    elif intervention == "harvest":
+        # harvest now also requires real work — an un-mirrored raw buffer note
+        # (TRDD-3XS3PDCF follow-up, unblocked 2026-07-08).
+        _write_raw_note(fixture["local"])
 
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     # Exactly one non-empty line, and it is the bare marker (no trailing text).
@@ -639,6 +643,51 @@ def test_atomize_not_stamped_when_suppressed_then_fires_when_free_prose_appears(
     second = _run(env)
     lines = [ln for ln in second.splitlines() if ln.strip()]
     assert lines == ["[janitor-memory-atomize]"], second
+
+
+def _harvest_only(settings_dir: Path) -> None:
+    """Enable ONLY harvest (high rate, always due) so its un-mirrored-buffer-note
+    precheck is what's under test (TRDD-3XS3PDCF follow-up, unblocked 2026-07-08)."""
+    _write_settings(
+        settings_dir,
+        harvest_per_day=1000.0, split_per_day=0.0, conflict_per_day=0.0,
+        consolidation_per_day=0.0, repair_per_day=0.0, atomize_per_day=0.0,
+    )
+
+
+def _write_raw_note(memdir: Path, name: str = "raw-note.md") -> Path:
+    """A RAW harness buffer note: harness-minimal frontmatter (no wikimem-only key),
+    so is_curated_wiki_page is False — exactly what harvest mirrors."""
+    memdir.mkdir(parents=True, exist_ok=True)
+    p = memdir / name
+    p.write_text(
+        f"---\nname: {name[:-3]}\ndescription: raw buffer note\nmetadata:\n  type: reference\n---\n\na raw fact.\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def test_harvest_suppressed_when_no_raw_buffer_notes(fixture):
+    """harvest is cadence-due but every top-level page is curated -> the buffer-scan
+    precheck suppresses the marker (the exact ~258k live no-op of 2026-07-08)."""
+    _harvest_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out
+
+
+def test_harvest_not_stamped_when_suppressed_then_fires_when_raw_note_appears(fixture):
+    """Option A for harvest: the suppressed fire left the cadence slot unused, so a
+    raw buffer note appearing later emits immediately (no second cadence gate)."""
+    _harvest_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    first = _run(env)
+    assert first.strip() == "", first
+    _write_raw_note(fixture["local"])
+    second = _run(env)
+    lines = [ln for ln in second.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-harvest]"], second
 
 
 # --------------------------------------------------------------------------- #

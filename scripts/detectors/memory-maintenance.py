@@ -246,7 +246,7 @@ def _first_due_intervention(scope: str, root: Path, now: int) -> str | None:
     for intervention, _marker in _MARKERS:
         if memory_settings.is_due(intervention, scope, root, now) and \
            memory_content_precheck.content_has_work(
-               intervention, root, split_max_bytes=split_cap
+               intervention, root, split_max_bytes=split_cap, scope=scope
            ):
             return intervention
     return None

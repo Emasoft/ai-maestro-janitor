@@ -23,12 +23,12 @@
 # cheap precheck (and any precheck that can't determine its inputs) returns True =
 # unchanged cadence-only behavior. Today SPLIT has a precheck (the size gate),
 # CONSOLIDATE has a STRUCTURAL-only precheck (TRDD-8UD3Q7K5, issue #64 — see below),
-# and REPAIR/ATOMIZE have STRUCTURAL prechecks (TRDD-3XS3PDCF follow-up — see each
-# function for the exact predicate + its documented residual). HARVEST stays a
-# follow-up — BLOCKED until the coexistence-harvest model stabilizes (TRDD-ab232dbd
-# #231/#232): a predicate written against either in-flux model would wrong-suppress
-# against the other. CONFLICT is genuinely SEMANTIC (contradictory-fact discovery)
-# and stays agent-discovered.
+# REPAIR/ATOMIZE have STRUCTURAL prechecks (TRDD-3XS3PDCF follow-up — see each
+# function for the exact predicate + its documented residual), and HARVEST has the
+# skill's own step-1 buffer scan (un-mirrored raw notes via the watermark ledger —
+# unblocked 2026-07-08 once the coexistence-mirror model shipped in v0.33.0 and its
+# predicate stabilized). CONFLICT is genuinely SEMANTIC (contradictory-fact
+# discovery) and stays agent-discovered.
 #
 # CONSOLIDATE's precheck is STRUCTURAL-ONLY, not a full content gate. A merge is
 # governed by `memory_edit_verify.is_legal_merge`, whose THREE refusal grounds are
@@ -52,6 +52,7 @@ from pathlib import Path
 
 import memory_edit_verify  # sibling in scripts/lib/ — the SSOT for merge legality
 import memory_scopes  # sibling in scripts/lib/ (the caller puts lib on sys.path)
+import memory_settings  # sibling in scripts/lib/ — the harvest watermark SSOT
 
 
 def _candidate_pages(root: Path) -> list[Path]:
@@ -245,13 +246,59 @@ def atomize_has_work(root: Path) -> bool:
     return False
 
 
-def content_has_work(intervention: str, root: Path, *, split_max_bytes: int) -> bool:
+# The generated top-level basenames the harvest skill's own buffer scan excludes.
+# Kept as a module constant so the precheck and any future caller share one list.
+_HARVEST_EXCLUDED_NAMES = frozenset({"MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"})
+
+
+def harvest_has_work(scope: str, root: Path) -> bool:
+    """True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
+    into the curated wiki (TRDD-3XS3PDCF follow-up — UNBLOCKED 2026-07-08 once the
+    coexistence-mirror harvest model shipped in v0.33.0 and ran live).
+
+    Mirrors the janitor-memory-harvest skill's candidate scan EXACTLY (step 1 of
+    the skill): TOP-LEVEL `<root>/*.md` only (NOT recursive — the skill uses
+    `root.glob("*.md")`, so a nested note is never a harvest candidate and must not
+    make the precheck claim work the skill won't do), minus the generated
+    basenames; a CURATED page (`is_curated_wiki_page` True — the coexistence
+    discriminator) is never buffer material; a raw note already watermarked with
+    unchanged content (`harvest_note_is_mirrored`) is already mirrored. Anything
+    else is exactly one un-mirrored buffer note = real work. Unreadable notes and
+    watermark-read failures fail OPEN (harvest re-mirroring is additive and safe,
+    so a wrong dispatch is a no-op; a wrong suppress silently breaks the chore).
+
+    Live evidence for the gate: two heartbeat harvest passes on 2026-07-08
+    abstained "nothing due" at 257,826 + 266,125 tokens — the exact no-op class
+    this module exists to kill."""
+    try:
+        candidates = sorted(root.glob("*.md"))
+    except OSError:
+        return True  # can't even list → not provably idle (FAIL-OPEN)
+    for p in candidates:
+        if p.name in _HARVEST_EXCLUDED_NAMES:
+            continue  # harness/index files the skill never mirrors
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            return True  # FAIL-OPEN (libs audit L-11): unreadable → not provably idle
+        if memory_scopes.is_curated_wiki_page(text):
+            continue  # already curated → not a buffer note
+        if not memory_settings.harvest_note_is_mirrored(scope, str(root), p.name, text):
+            return True  # an un-mirrored (or edited-since-mirror) raw buffer note
+    return False
+
+
+def content_has_work(
+    intervention: str, root: Path, *, split_max_bytes: int, scope: str | None = None
+) -> bool:
     """True iff `intervention` has actual work on the `root` corpus.
 
-    FAIL-OPEN: returns True for every chore WITHOUT a cheap, exact precheck, and for
-    SPLIT when the cap is non-positive (can't determine → never suppress). A chore is
-    suppressed ONLY when its idleness is cheaply PROVEN; otherwise the scheduler
-    keeps its existing cadence-only behavior."""
+    FAIL-OPEN: returns True for every chore WITHOUT a cheap, exact precheck, for
+    SPLIT when the cap is non-positive, and for HARVEST when the caller supplied no
+    `scope` (the watermark ledger is keyed per (scope, root) — without the scope we
+    can't read it, so we never suppress). A chore is suppressed ONLY when its
+    idleness is cheaply PROVEN; otherwise the scheduler keeps its existing
+    cadence-only behavior."""
     if intervention == "split":
         if split_max_bytes <= 0:
             return True  # cap unreadable/disabled → fail-open (do not suppress)
@@ -265,8 +312,12 @@ def content_has_work(intervention: str, root: Path, *, split_max_bytes: int) -> 
     if intervention == "atomize":
         # Free-prose curated pages without atom markers (the skill's own candidate scan).
         return atomize_has_work(root)
-    # harvest: still a follow-up — BLOCKED until the coexistence-harvest model
-    # stabilizes (TRDD-ab232dbd #231/#232); a predicate written now would
-    # wrong-suppress against whichever model ships. conflict: semantic,
-    # agent-discovered. Unknown chores: fail-open by default.
+    if intervention == "harvest":
+        # Un-mirrored raw buffer notes (the skill's own step-1 scan). Needs the
+        # scope to key the watermark ledger; scope unknown → fail-open.
+        if scope is None:
+            return True
+        return harvest_has_work(scope, root)
+    # conflict: semantic (contradictory-fact discovery), agent-discovered.
+    # Unknown chores: fail-open by default.
     return True

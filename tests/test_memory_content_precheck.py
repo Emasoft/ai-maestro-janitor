@@ -400,3 +400,98 @@ def test_unreadable_page_fails_open_for_read_based_prechecks(tmp_path):
         assert mcp.atomize_has_work(tmp_path) is True
     finally:
         locked.chmod(0o644)  # let pytest's tmp_path cleanup delete it
+
+
+# --------------------------------------------------------------------------- #
+# harvest_has_work — un-mirrored raw buffer notes (the skill's step-1 scan;
+# TRDD-3XS3PDCF follow-up, unblocked 2026-07-08)
+# --------------------------------------------------------------------------- #
+
+def _isolate_gstate(monkeypatch, tmp_path: Path) -> None:
+    """Point the harvest watermark ledger (global_state_dir) at a scratch dir so
+    a test never reads/writes the machine's real watermark files."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
+
+
+def test_harvest_has_work_true_for_unmirrored_raw_note(tmp_path, monkeypatch):
+    """One raw buffer note, no watermark -> real harvest work."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    assert mcp.harvest_has_work("LOCAL", tmp_path) is True
+
+
+def test_harvest_has_work_false_when_all_pages_curated(tmp_path, monkeypatch):
+    """Every top-level page already curated -> nothing to mirror (the exact
+    corpus shape of the two live 2026-07-08 no-op passes this gate kills)."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "a.md", tier="component", type_="reference")
+    _curated(tmp_path, "b.md", tier="aspect", type_="project")
+    assert mcp.harvest_has_work("LOCAL", tmp_path) is False
+
+
+def test_harvest_has_work_false_when_raw_note_already_mirrored(tmp_path, monkeypatch):
+    """A raw note whose exact content is watermarked as mirrored is done work."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    import memory_settings
+    p = _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    memory_settings.harvest_mark_mirrored("LOCAL", str(tmp_path), p.name, p.read_text(encoding="utf-8"))
+    assert mcp.harvest_has_work("LOCAL", tmp_path) is False
+
+
+def test_harvest_has_work_true_when_mirrored_note_edited(tmp_path, monkeypatch):
+    """Editing a mirrored buffer note invalidates its watermark hash -> re-mirror."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    import memory_settings
+    p = _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    memory_settings.harvest_mark_mirrored("LOCAL", str(tmp_path), p.name, p.read_text(encoding="utf-8"))
+    p.write_text(p.read_text(encoding="utf-8") + "\nnew fact.\n", encoding="utf-8")
+    assert mcp.harvest_has_work("LOCAL", tmp_path) is True
+
+
+def test_harvest_has_work_ignores_generated_names_and_subdirs(tmp_path, monkeypatch):
+    """MEMORY.md / the generated index files are never mirrored, and the scan is
+    TOP-LEVEL ONLY (skill parity: `root.glob('*.md')`) — a raw-shaped note inside a
+    subdir must not claim work the skill's own scan would never see."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    (tmp_path / "MEMORY.md").write_text("# MEMORY — stub\n", encoding="utf-8")
+    (tmp_path / "memory-index.md").write_text("index\n", encoding="utf-8")
+    (tmp_path / "memory-reorg-proposed.md").write_text("proposals\n", encoding="utf-8")
+    _curated(tmp_path / "wikimem", "nested-raw.md", tier=None, type_="reference")
+    assert mcp.harvest_has_work("LOCAL", tmp_path) is False
+
+
+def test_harvest_has_work_false_on_empty_and_missing_dir(tmp_path, monkeypatch):
+    """No candidates at all -> provably idle (empty dir and missing dir alike)."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    assert mcp.harvest_has_work("LOCAL", tmp_path) is False
+    assert mcp.harvest_has_work("LOCAL", tmp_path / "absent") is False
+
+
+def test_harvest_unreadable_note_fails_open(tmp_path, monkeypatch):
+    """An unreadable top-level note is NOT provably idle -> True (libs audit L-11)."""
+    if os.geteuid() == 0:
+        pytest.skip("permission bits do not bind root")
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "ok.md", tier="component", type_="reference")
+    locked = _curated(tmp_path, "locked.md", tier="component", type_="reference")
+    locked.chmod(0)
+    try:
+        assert mcp.harvest_has_work("LOCAL", tmp_path) is True
+    finally:
+        locked.chmod(0o644)
+
+
+def test_content_has_work_harvest_fail_open_without_scope(tmp_path, monkeypatch):
+    """Without the scope the watermark ledger is unkeyable -> never suppress."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "a.md", tier="component", type_="reference")  # provably idle corpus
+    assert mcp.content_has_work("harvest", tmp_path, split_max_bytes=_CAP) is True
+
+
+def test_content_has_work_harvest_delegates_with_scope(tmp_path, monkeypatch):
+    """harvest routes through harvest_has_work (False then True round-trip)."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _curated(tmp_path, "a.md", tier="component", type_="reference")
+    assert mcp.content_has_work("harvest", tmp_path, split_max_bytes=_CAP, scope="LOCAL") is False
+    _curated(tmp_path, "raw.md", tier=None, type_="reference")
+    assert mcp.content_has_work("harvest", tmp_path, split_max_bytes=_CAP, scope="LOCAL") is True
