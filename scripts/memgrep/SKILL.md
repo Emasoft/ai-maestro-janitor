@@ -94,4 +94,5 @@ memgrep find-claude-mem-ref feedback_oauth.md <memdir>           # atoms harvest
 memgrep reindex <memdir>                                         # refresh the SQLite query index (pages+lessons+atoms)
 memgrep index --markdown --write <memdir>                        # regenerate memory-index.md
 memgrep lint <memdir>                                            # structural integrity gate (exit≠0 on any violation)
+memgrep overview <memdir>                                        # print the <project>-overview.md navigation entry page
 ```

@@ -251,12 +251,29 @@ These are the actual flags on the shipped binary (verify with `memgrep recall
   matches verbatim WITH spaces and may be `+`/`-` prefixed; a `+`/`-` INSIDE a
   token is literal (`pro*-debug*` is ONE term). `--only-notes` searches the
   resolved `[^N]` lessons instead of pages. Composes with every recall flag
-  above.
+  above. A literal `-` query reads the query from STDIN (privacy: keeps a
+  private query off the process table — the user-mem search uses this).
 
   ```bash
   memgrep find "+rotator +keychain -widget" <memdir>          # must have rotator AND keychain, not widget
   memgrep find '+"old approach" retry' <memdir>               # mandatory phrase + optional ranker
   memgrep find "+max_retries" <memdir> --only-notes           # search ONLY the lessons-learned
+  ```
+
+- **overview** — the navigation entry point: print the corpus's
+  `<project>-overview.md` wiki page (the reader's way INTO the wiki — the command
+  the MEMORY.md deprecation stub advertises).
+
+  ```bash
+  memgrep overview <memdir>            # print the overview page that links into the deeper pages
+  ```
+
+- **lint** — the structural integrity gate: page-shape / frontmatter / footnote /
+  link violations, exit≠0 on any violation (what the librarian's shape pass and
+  the repair chore check against).
+
+  ```bash
+  memgrep lint <memdir>                # structural integrity gate (exit != 0 on any violation)
   ```
 
 - **find-claude-mem-ref** — the harvest provenance query: list every wiki ATOM
