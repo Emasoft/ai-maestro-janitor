@@ -42,8 +42,17 @@ step-1 scan exactly (top-level glob only — skill parity documented, a nested n
 claims work the skill won't do); `content_has_work` gained a keyword-only `scope`
 (fail-open when absent — the watermark ledger is scope-keyed); scheduler passes
 `scope=scope`. 9 predicate tests + 2 gating tests + the due-emits-marker[harvest] seed
-fix — 80/80 green, ruff clean. The in-scope precheck set is now COMPLETE
-(split/consolidate/repair/atomize/harvest; conflict stays agent-discovered by design).
+fix — 80/80 green, ruff clean.
+
+**2026-07-09 — CONFLICT PRECHECK TOO (commit f2056ca): ALL SIX CHORES NOW GATED.** A
+live conflict pass (2026-07-08 23:01) abstained on an empty `### Conflict candidates`
+section at 260,931 tokens — and the pass is NOT self-discovering: the skill's own
+precondition reads the librarian's `memory-reorg-proposed.md` and mandates
+"Empty/absent → stop", so due-ness is mechanically checkable (discovery stays the
+librarian's semantic job). `conflict_has_work` pins writer/reader parity to the
+librarian's literal heading + `- (none)` sentinel; absent file = the skill's own idle
+case; unreadable = fail-open. 7 unit + 2 gating tests; the two
+"unconditional fail-open" collateral tests updated; 88/88 green, ruff clean.
 Remaining in this TRDD: only the split "over-cap AND splittable" refinement. Banked
 locally; rides the next publish.
 
