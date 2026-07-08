@@ -36,9 +36,16 @@ at `harvest_per_day=1` × 3 scopes ≈ 750k/day of avoidable no-op. The now-stab
 for `harvest_has_work(root)`: any top-level note that is NOT a curated wikimem page
 (`is_curated_wiki_page` False) AND not yet watermarked mirrored
 (`memory_settings.harvest_note_is_mirrored` False) — both already-shipped helpers; pure
-filesystem read, same fail-open discipline as the split gate. NEXT: implement
-`harvest_has_work` in memory_content_precheck.py + gating tests (mirror the split ones);
-that completes this TRDD's in-scope precheck set (split/consolidate/repair/atomize/harvest).
+filesystem read, same fail-open discipline as the split gate. **IMPLEMENTED same
+night (commit 10f899b, 23:0x):** `harvest_has_work(scope, root)` mirrors the skill's
+step-1 scan exactly (top-level glob only — skill parity documented, a nested note never
+claims work the skill won't do); `content_has_work` gained a keyword-only `scope`
+(fail-open when absent — the watermark ledger is scope-keyed); scheduler passes
+`scope=scope`. 9 predicate tests + 2 gating tests + the due-emits-marker[harvest] seed
+fix — 80/80 green, ruff clean. The in-scope precheck set is now COMPLETE
+(split/consolidate/repair/atomize/harvest; conflict stays agent-discovered by design).
+Remaining in this TRDD: only the split "over-cap AND splittable" refinement. Banked
+locally; rides the next publish.
 
 ### ✅ SPLIT-MVP IMPLEMENTED + TESTED (2026-06-24 ~08:42, committed locally, NOT yet published)
 The highest-value slice — the **SPLIT** content-precheck — is done, TDD'd, ruff-clean,
