@@ -344,11 +344,32 @@ def _security_add_password_via_stdin(service: str, account: str, data: str) -> N
     `security` is absent (not macOS).
     """
     subprocess.run(
-        ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", data],
+        _add_password_argv(service, account, data),
         check=True,
         capture_output=True,
         text=True,
     )
+
+
+def _add_password_argv(service: str, account: str, data: str) -> list[str]:
+    """The `security add-generic-password` argv, as a PURE builder so tests can assert
+    its shape without touching a keychain.
+
+    F3 (TRDD-7PYTX4E9): every rotator-written item carries `-T` ACL partners for
+    /usr/bin/security (the binary ALL our reads go through — authorizing it makes the
+    item readable prompt-free from a headless daemon context) and the real python
+    binary. CAVEAT (documented, by design): `-T` sets the ACL only when the item is
+    CREATED — `-U` updating an EXISTING item keeps that item's old ACL. And a user
+    `/login` always REPLACES the live item with a Claude-only-ACL one the daemon
+    cannot read; no write-side flag can prevent that, which is exactly why the
+    beacon (F2) + mirror-source distrust (F1) exist."""
+    return [
+        "security", "add-generic-password", "-U",
+        "-s", service, "-a", account,
+        "-T", "/usr/bin/security",
+        "-T", os.path.realpath(sys.executable),
+        "-w", data,
+    ]
 
 
 def _read_live_primary() -> dict | None:
@@ -362,13 +383,18 @@ def _read_live_primary() -> dict | None:
       3. GNOME Keyring via `secret-tool` — the Linux desktop keyring.
     On macOS the keychain path wins and the others are never reached.
     """
-    # 1. macOS keychain
+    # 1. macOS keychain. TIMEOUT is load-bearing (TRDD-7PYTX4E9): reading the SECRET
+    # (-w) of an item whose ACL excludes us raises a GUI prompt — headless, the call
+    # HANGS (the 2026-07-08 daemon tick froze ~30 min on exactly this until the
+    # workload cap killed it). Bound it so an ACL-denied read degrades in seconds to
+    # the mirror fallback, where cmd_auto's F1 source-distrust takes over.
     acct = _keychain_account()
     try:
         proc = subprocess.run(
             ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w"],
             capture_output=True,
             text=True,
+            timeout=10,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             try:
@@ -377,6 +403,8 @@ def _read_live_primary() -> dict | None:
                 pass
     except FileNotFoundError:
         pass  # `security` only exists on macOS
+    except subprocess.TimeoutExpired:
+        return None  # ACL prompt hang — unreadable from this context (item EXISTS)
     # 2. Linux/Windows credentials file
     cf = Path.home() / ".claude" / ".credentials.json"
     if cf.exists():
@@ -413,13 +441,162 @@ def _live_backup_write(blob: dict) -> None:
     _slot_keychain_write(_keychain_account(), blob, service=LIVE_BACKUP_KEYCHAIN_SERVICE)
 
 
+def _primary_live_item_absent() -> bool:
+    """True ONLY when the primary live credential is PROVABLY absent (TRDD-7PYTX4E9).
+
+    The distinction that matters: an ACL-DENIED primary (unreadable from this
+    context) still EXISTS and holds the user's current login — it must never be
+    treated as "gone". The probe lists the item WITHOUT `-w`: attribute reads do
+    not touch the ACL-protected secret, so this never raises the GUI prompt that
+    hangs a headless `-w` read. Anything ambiguous (timeout, odd rc, no `security`
+    with a credentials file present) counts as PRESENT — the restore stays refused."""
+    acct = _keychain_account()
+    try:
+        proc = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        # Not macOS — the primary is the credentials file; absent means absent.
+        return not (Path.home() / ".claude" / ".credentials.json").exists()
+    except subprocess.TimeoutExpired:
+        return False  # ambiguous — never prove absence from a hang
+    if proc.returncode == 0:
+        return False  # the item exists (whether or not its secret is readable by us)
+    # errSecItemNotFound is rc 44 / "could not be found" — the only proven-absent case.
+    return proc.returncode == 44 or "could not be found" in (proc.stderr or "")
+
+
+def read_live_blob_with_source() -> tuple[dict | None, str]:
+    """The live credential PLUS where it came from: ("primary" | "mirror" | "none").
+
+    TRDD-7PYTX4E9 F1: the 2026-07-08 incident proved a DECISION path must never
+    consume the -livebak mirror as if it were the primary — a user `/login` writes a
+    Claude-only-ACL keychain item the headless daemon cannot read, the silent mirror
+    fallback then substitutes a STALE credential, and every identity/usage decision
+    downstream operates on the WRONG account (the daemon watched fmuaddib while
+    emanuele burned to 100%). Durability fallbacks (cmd_live_email, display paths)
+    may keep using read_live_blob(); rotation decisions (cmd_auto) MUST branch on
+    the source and treat "mirror" as an UNTRUSTED identity."""
+    prim = _read_live_primary()
+    if prim is not None:
+        return prim, "primary"
+    mirror = _live_backup_read()
+    if mirror is not None:
+        return mirror, "mirror"
+    return None, "none"
+
+
 def read_live_blob() -> dict | None:
     """The live credential, robust against a corrupt/missing primary: the PRIMARY store ladder
     (_read_live_primary) first, then the redundant -livebak mirror (Pillar 2). A read never
     RESTORES the primary — that is _repair_integrity's job at tick start (a deliberate,
     once-per-tick action, not a side effect of every read) — it just always returns a usable
-    blob while one survives anywhere."""
-    return _read_live_primary() or _live_backup_read()
+    blob while one survives anywhere. Decision paths that must distinguish a mirror-sourced
+    blob use read_live_blob_with_source() instead (TRDD-7PYTX4E9 F1)."""
+    return read_live_blob_with_source()[0]
+
+
+# --------------------------------------------------------------------------
+# Live-identity BEACON (TRDD-7PYTX4E9 F2) — the session-context ground truth
+# --------------------------------------------------------------------------
+# A session-context process (hooks, a manual `rotator.py tick`) CAN read the
+# primary keychain item even when the headless daemon cannot (a user /login
+# writes a Claude-only-ACL item). The beacon is that context's stamp of WHO is
+# live — {fp, email, ts} — so the daemon's mirror-source path (F1) has an
+# independent identity source instead of trusting a stale mirror.
+BEACON_MAX_AGE_S = float(os.environ.get("ROTATOR_BEACON_MAX_AGE_S", str(24 * 3600)))
+
+
+def _live_identity_path() -> Path:
+    # Resolved at call time off the module-global ROOT so test isolation
+    # (monkeypatched ROOT) and the canonical/legacy root split both hold.
+    return ROOT / "live-identity.json"
+
+
+def write_live_identity_beacon(*, now: float | None = None) -> bool:
+    """Stamp the live credential's identity from a context that can READ the primary.
+
+    Reads the PRIMARY only — NEVER the mirror (a beacon derived from the mirror would
+    launder the very staleness F1 distrusts). Email resolution ladder, cheapest first:
+    a slot whose fp matches (free, offline), then /roles (network, ~1s — callers run
+    this detached), then state's own record when state.live_fp already matches this
+    exact credential. An unresolvable email still yields a useful beacon (the fp lets
+    the daemon at least confirm mirror==live). Returns True iff a beacon was written."""
+    prim = _read_live_primary()
+    if prim is None:
+        return False
+    fp = fingerprint(prim)
+    if not fp:
+        return False
+    email: str | None = None
+    state = load_state()
+    for em in state.get("slots", {}):
+        sb = read_slot(em)
+        if sb is not None and fingerprint(sb) == fp:
+            email = em
+            break
+    if email is None:
+        email = account_email(prim)
+    if email is None and state.get("live_fp") == fp:
+        le = state.get("live_email")
+        email = le if isinstance(le, str) else None
+    payload = json.dumps(
+        {"fp": fp, "email": email, "ts": (now if now is not None else time.time())},
+        separators=(",", ":"),
+    )
+    try:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        target = _live_identity_path()
+        tmp = target.with_suffix(".json.tmp.%d" % os.getpid())
+        tmp.write_text(payload)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, target)
+    except OSError as exc:
+        # Best-effort observability side-channel: never crash a hook/tick over it.
+        print("rotator: beacon write failed (non-fatal): %r" % (exc,), file=sys.stderr)
+        return False
+    return True
+
+
+def read_live_identity_beacon(*, max_age_s: float | None = None, now: float | None = None) -> dict | None:
+    """The last session-stamped live identity, or None when absent/garbage/STALE.
+
+    Staleness matters: an old beacon may predate a /login, and trusting it would
+    recreate the wrong-identity failure with extra steps. Default freshness window
+    24h (ROTATOR_BEACON_MAX_AGE_S) — SessionStart + every session-context tick
+    re-stamp it, so any actively-used machine keeps it fresh."""
+    try:
+        data = json.loads(_live_identity_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or not data.get("fp"):
+        return None
+    ts = data.get("ts")
+    if not isinstance(ts, (int, float)):
+        return None
+    limit = max_age_s if max_age_s is not None else BEACON_MAX_AGE_S
+    if ((now if now is not None else time.time()) - ts) > limit:
+        return None
+    return data
+
+
+def _stamp_tick_completed(*, now: float | None = None) -> None:
+    """Record that a tick ran to COMPLETION (TRDD-7PYTX4E9 F4). The supervisor alerts
+    when this stamp goes stale while the daemon is alive — the 2026-07-08 tick hung on
+    a keychain ACL prompt and stopped silently for 30+ min with zero alarms. A hang
+    never reaches this stamp (that is the point); a crash does (a crashed tick FINISHED,
+    the failure is visible elsewhere). Best-effort: never crashes the beat."""
+    try:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        target = ROOT / "tick-completed.ts"
+        tmp = target.with_suffix(".ts.tmp.%d" % os.getpid())
+        tmp.write_text("%d" % int(now if now is not None else time.time()))
+        os.replace(tmp, target)
+    except OSError as exc:
+        print("rotator: tick-completed stamp failed (non-fatal): %r" % (exc,), file=sys.stderr)
 
 
 def write_live_blob(blob: dict) -> None:
@@ -872,8 +1049,17 @@ def _util(usage: dict | None, window: str) -> float | None:
 def cmd_capture(only_if_running: bool) -> int:
     if only_if_running and not claude_running():
         return 0  # silent no-op
-    blob = read_live_blob()
+    blob, src = read_live_blob_with_source()
     if blob is None:
+        return 0
+    if src != "primary":
+        # F1 (TRDD-7PYTX4E9): NEVER capture the mirror as "the live account". In the
+        # daemon context (primary ACL-unreadable) the mirror can be a STALE credential;
+        # filing it here would rewrite state.live_email/live_fp from that stale blob on
+        # EVERY tick — silently re-poisoning the identity right after any heal (observed
+        # live 2026-07-09 00:57: state reverted to the mirror's account overnight).
+        # A session-context capture (primary readable) is unaffected.
+        _log("capture: primary live credential unreadable — skipping capture (a mirror-sourced blob is never 'the live account'; TRDD-7PYTX4E9 F1)")
         return 0
     fp = fingerprint(blob)
     if not fp:
@@ -973,6 +1159,21 @@ def _switch_blob(email: str, blob: dict, reason: str) -> None:
     state["last_switch_reason"] = reason
     state["live_429_streak"] = 0  # new live account starts with a clean debounce slate
     save_state(state)
+    # F2 (TRDD-7PYTX4E9): the rotator AUTHORED this live write, so it knows the identity
+    # with certainty even in a context that cannot read the primary back — stamp the
+    # beacon directly instead of via write_live_identity_beacon()'s primary read.
+    try:
+        ROOT.mkdir(parents=True, exist_ok=True)
+        target = _live_identity_path()
+        tmp = target.with_suffix(".json.tmp.%d" % os.getpid())
+        tmp.write_text(json.dumps(
+            {"fp": fingerprint(blob), "email": email, "ts": time.time()},
+            separators=(",", ":"),
+        ))
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, target)
+    except OSError:
+        pass  # best-effort observability side-channel — never fail a switch over it
 
 
 def _usage_row(blob: dict | None) -> tuple[str, str]:
@@ -1075,7 +1276,7 @@ def _reconcile_live_email(state: dict, live_blob: dict) -> dict:
         return state  # already in sync — steady state, no network, no write
     old_email = state.get("live_email")
     # Resolve the real account's email: Anthropic /roles is ground truth; fall back to a
-    # local fingerprint match against known slots, then to the stale value as last resort.
+    # local fingerprint match against known slots.
     real_email = account_email(live_blob)
     if not real_email:
         for em in state.get("slots", {}):
@@ -1083,13 +1284,99 @@ def _reconcile_live_email(state: dict, live_blob: dict) -> dict:
             if sb and fingerprint(sb) == real_fp:
                 real_email = em
                 break
-    state["live_email"] = real_email or old_email
+    if not real_email:
+        # F5 (TRDD-7PYTX4E9): the credential CHANGED but its account is unresolvable
+        # (roles unreachable AND no slot fp match). The old code pinned the NEW fp
+        # onto the OLD email — after which the fp-equality early-return above saw
+        # "no drift" forever and the mislabel became permanent. Leave state UNTOUCHED
+        # so the drift stays detectable and the next tick retries the resolution.
+        _decide(
+            "auto: live credential CHANGED (fp %s -> %s) but its account is UNRESOLVABLE "
+            "(roles unreachable, no slot fp match) — leaving state unreconciled so the "
+            "drift stays detectable; will retry next tick (TRDD-7PYTX4E9 F5)"
+            % (state.get("live_fp") or "?", real_fp)
+        )
+        return state
+    state["live_email"] = real_email
     state["live_fp"] = real_fp
     state["live_429_streak"] = 0  # the debounce streak belonged to the stale account
     state["last_reconcile_at"] = time.time()
     save_state(state)
-    print("auto: reconciled live account — state said %r but the real live credential is %r; state.json corrected" % (old_email, state["live_email"]))
+    # _decide (not bare print): a reconcile is a real identity decision — it must land
+    # in the durable rotator.log, not just a vanishing subprocess stdout (F4 spirit).
+    _decide("auto: reconciled live account — state said %r but the real live credential is %r; state.json corrected" % (old_email, state["live_email"]))
     return state
+
+
+def _resolve_untrusted_live(mirror_blob: dict, state: dict) -> tuple[dict | None, dict]:
+    """The MIRROR-SOURCE decision path (TRDD-7PYTX4E9 F1+F2) — the primary live
+    credential was unreadable from this context, so `mirror_blob` is of UNKNOWN
+    relation to the account actually in use. Establish the live identity from an
+    independent source and return (probe_blob, state):
+
+      - probe_blob is a token OF THE TRUE LIVE ACCOUNT usable for the usage probe
+        (the mirror itself when the beacon proves mirror == live; else the live
+        account's slot twin, keepalive-refreshed if needed), or
+      - None → the identity is unknowable / no usable twin: the caller MUST stay
+        put this tick (fail-safe — a wrong stay-put costs one tick; a wrong
+        rotation decision on a phantom identity is the 2026-07-08 incident).
+
+    Never trusts the fp=="no drift" shortcut: the stale mirror is EXACTLY the blob
+    whose fp matches stale state (the trap that blinded the reconciler)."""
+    _decide(
+        "auto: ⚠ primary live credential UNREADABLE from this context — using the "
+        "-livebak MIRROR; identity untrusted until independently resolved (TRDD-7PYTX4E9 F1)"
+    )
+    beacon = read_live_identity_beacon()
+    mirror_fp = fingerprint(mirror_blob)
+    if beacon is not None:
+        b_fp = beacon.get("fp")
+        b_email = beacon.get("email")
+        if b_fp == mirror_fp:
+            # The session last saw THIS exact credential live → the mirror IS live.
+            if isinstance(b_email, str) and b_email and state.get("live_email") != b_email:
+                state["live_email"] = b_email
+                state["live_fp"] = b_fp
+                state["live_429_streak"] = 0
+                save_state(state)
+                _decide("auto: live identity confirmed via session beacon: %s (mirror == live credential)" % b_email)
+            return mirror_blob, state
+        if isinstance(b_email, str) and b_email:
+            # The mirror holds a DIFFERENT credential than the true live. Correct the
+            # identity from the beacon and probe the live account via its slot twin
+            # (same account ⇒ same usage windows).
+            if state.get("live_email") != b_email or state.get("live_fp") != b_fp:
+                state["live_email"] = b_email
+                state["live_fp"] = b_fp
+                state["live_429_streak"] = 0
+                save_state(state)
+            _decide(
+                "auto: live identity from session beacon: %s — the mirror holds a DIFFERENT "
+                "credential; probing the live account via its slot token (TRDD-7PYTX4E9 F2)" % b_email
+            )
+            twin = read_slot(b_email)
+            if twin is not None and not _blob_locally_expired(twin):
+                return twin, state
+            if twin is not None and _oauth(twin).get("refreshToken"):
+                refreshed, healed = _refresh_and_heal_slot(b_email, twin, state)
+                if refreshed is not None and not _blob_locally_expired(refreshed):
+                    if healed:
+                        save_state(state)
+                    return refreshed, state
+            _decide(
+                "auto: live account %s has no usable slot twin to probe — staying put "
+                "this tick (fail-safe; TRDD-7PYTX4E9)" % b_email
+            )
+            return None, state
+        # beacon carries a fp but no email, and the fp differs from the mirror → the
+        # true live account is a credential we cannot name or probe. Fall through.
+    m_email = account_email(mirror_blob)
+    _decide(
+        "auto: live identity UNKNOWABLE (no fresh session beacon; the mirror resolves to %s "
+        "but its relation to the account in use is unknown) — staying put rather than "
+        "deciding on an untrusted identity (TRDD-7PYTX4E9 F1)" % (m_email or "unresolvable")
+    )
+    return None, state
 
 
 def _refresh_and_heal_slot(email: str, blob: dict, state: dict) -> tuple[dict | None, bool]:
@@ -1146,14 +1433,24 @@ def cmd_auto() -> int:
     never triggers a switch.
     """
     state = load_state()
-    live_blob = read_live_blob()
+    live_blob, live_src = read_live_blob_with_source()
     if live_blob is None:
         _decide("auto: no live credential")
         return 0
-    # GROUND-TRUTH RECONCILE (TRDD-7100178d#6 stale-index / live-account drift): the actual
-    # live keychain credential is authoritative. Correct state.json to match it BEFORE the
-    # decision below, or the candidate list would treat the real live account as a target.
-    state = _reconcile_live_email(state, live_blob)
+    if live_src == "mirror":
+        # F1 (TRDD-7PYTX4E9): a mirror-sourced blob is NOT the live identity — resolve
+        # it independently (session beacon → slot twin) or stay put. Skips the fp-based
+        # reconcile below: the stale mirror's fp matching stale state is exactly the
+        # blind spot that let the 2026-07-08 exhaustion go unobserved.
+        live_blob, state = _resolve_untrusted_live(live_blob, state)
+        if live_blob is None:
+            return 0  # fail-safe: identity unknowable this tick — already logged
+    else:
+        # GROUND-TRUTH RECONCILE (TRDD-7100178d#6 stale-index / live-account drift): the
+        # actual live keychain credential is authoritative. Correct state.json to match it
+        # BEFORE the decision below, or the candidate list would treat the real live
+        # account as a target.
+        state = _reconcile_live_email(state, live_blob)
     live_email = state.get("live_email")
     live_status, live_data = usage_request(live_blob)
     fh = _util(live_data, "five_hour")
@@ -1738,8 +2035,19 @@ def _repair_integrity() -> list[str]:
         else:
             mirror = _live_backup_read()
             if mirror is not None:
-                write_live_blob(mirror)  # primary gone/corrupt -> restore it from the mirror
-                actions.append("live credential: restored primary from -livebak mirror")
+                # F1 write-path gate (TRDD-7PYTX4E9): restore ONLY when the primary item
+                # is PROVABLY ABSENT. "Unreadable" ≠ "absent" — an ACL-denied primary
+                # (the state after every user /login, from the headless daemon) still
+                # holds the USER'S CURRENT credential; "restoring" the (possibly stale)
+                # mirror over it would OVERWRITE the user's login with an old token —
+                # the mutating twin of the read-path blind spot.
+                if _primary_live_item_absent():
+                    write_live_blob(mirror)  # primary truly gone/corrupt -> restore
+                    actions.append("live credential: restored primary from -livebak mirror")
+                    _log("repair: primary live item ABSENT — restored it from the -livebak mirror")
+                else:
+                    actions.append("live credential: primary unreadable but PRESENT — restore refused (TRDD-7PYTX4E9)")
+                    _log("repair: primary live item present but unreadable from this context — refusing the mirror restore (it would overwrite the user's current login; TRDD-7PYTX4E9 F1)")
     except OSError as exc:
         actions.append("repair pass I/O error (non-fatal): %r" % (exc,))
     return actions
@@ -1805,30 +2113,40 @@ def cmd_tick(only_if_running: bool) -> int:
     bootstrap launch, and the detached capture (fire-and-forget) can't delay the beat. (The
     launch itself returns immediately; this ordering is belt-and-braces.)
     """
-    if only_if_running and not claude_running():
-        return 0
-    # One-time, non-destructive: move state.json/opt-in from the legacy standalone root
-    # into the canonical DATA-dir root. The smart _rotator_root() already reads from
-    # whichever root holds the state, so this is just promotion — the NEXT tick process
-    # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
-    migrate_root_to_canonical()
-    _log_cascade_plan()  # explicit ROTATE→RENEW→REAUTH cascade visibility (best-effort, never a gate)
-    refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
-    if refreshed:
-        _log("keepalive: refreshed %s" % ", ".join(refreshed))  # durable record of token-prolonging action
-    _repair_integrity()  # Pillar 2: verify/restore state + slots + live BEFORE deciding
     try:
-        cmd_capture(False)
-    except SlotKeychainWriteError as exc:
-        # FAIL CLOSED (P1) without crashing the unattended tick: a locked/declined keychain
-        # refused the slot write. The LIVE credential is untouched (Claude owns it); we simply
-        # don't mirror it into a slot this beat (and never drop a plaintext token). The
-        # standalone `rotator.py capture` still surfaces this error to the present human.
-        print("[capture] keychain write refused (%s) — slot not filed this tick" % exc, file=sys.stderr)
-        _log("[capture] keychain write refused (%s) — slot not filed this tick" % exc)
-    rc = cmd_auto()  # usage-based rotation FIRST — never starved by bootstrap
-    _bootstrap_seeded_slots()  # P4d (LAST): launch detached captures from human-seeded sessions
-    return rc
+        if only_if_running and not claude_running():
+            return 0
+        # One-time, non-destructive: move state.json/opt-in from the legacy standalone root
+        # into the canonical DATA-dir root. The smart _rotator_root() already reads from
+        # whichever root holds the state, so this is just promotion — the NEXT tick process
+        # then resolves to the canonical root. Safe to call every tick (no-op once migrated).
+        migrate_root_to_canonical()
+        # F2 (TRDD-7PYTX4E9): a tick running in a context that CAN read the primary (a
+        # manual/session-context run) refreshes the live-identity beacon for free — the
+        # daemon's own ticks can't (their primary read fails), which is the point.
+        write_live_identity_beacon()
+        _log_cascade_plan()  # explicit ROTATE→RENEW→REAUTH cascade visibility (best-effort, never a gate)
+        refreshed = _keepalive_refresh()  # F2b: refresh slot tokens nearing expiry (prevent an overnight lapse)
+        if refreshed:
+            _log("keepalive: refreshed %s" % ", ".join(refreshed))  # durable record of token-prolonging action
+        _repair_integrity()  # Pillar 2: verify/restore state + slots + live BEFORE deciding
+        try:
+            cmd_capture(False)
+        except SlotKeychainWriteError as exc:
+            # FAIL CLOSED (P1) without crashing the unattended tick: a locked/declined keychain
+            # refused the slot write. The LIVE credential is untouched (Claude owns it); we simply
+            # don't mirror it into a slot this beat (and never drop a plaintext token). The
+            # standalone `rotator.py capture` still surfaces this error to the present human.
+            print("[capture] keychain write refused (%s) — slot not filed this tick" % exc, file=sys.stderr)
+            _log("[capture] keychain write refused (%s) — slot not filed this tick" % exc)
+        rc = cmd_auto()  # usage-based rotation FIRST — never starved by bootstrap
+        _bootstrap_seeded_slots()  # P4d (LAST): launch detached captures from human-seeded sessions
+        return rc
+    finally:
+        # F4 (TRDD-7PYTX4E9): a completed tick — including the only-if-running no-op and a
+        # crashed-but-finished one — stamps its liveness; only a HANG leaves the stamp stale,
+        # which is exactly what the supervisor's tick-stalled alert watches for.
+        _stamp_tick_completed()
 
 
 def cmd_live_email() -> int:
@@ -1921,10 +2239,16 @@ def cmd_oauth_health(as_json: bool) -> int:
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("usage: rotator.py {capture [--only-if-claude-running] | tick [--only-if-claude-running] | auto | usage | live-email | known-emails | print-profiles-root | oauth-health [--json] | list | switch <email> | migrate-slots | delete-plaintext-slots | migrate-root}")
+        print("usage: rotator.py {capture [--only-if-claude-running] | tick [--only-if-claude-running] | auto | usage | live-email | known-emails | print-profiles-root | oauth-health [--json] | list | beacon | switch <email> | migrate-slots | delete-plaintext-slots | migrate-root}")
         return 2
     cmd = argv[0]
     # ── Read-only commands: no lock needed (they never write state.json / keychain). ──
+    if cmd == "beacon":
+        # F2 (TRDD-7PYTX4E9): session-context live-identity stamp. Writes only the
+        # atomic live-identity.json (never state.json / keychain), so it is safe
+        # lock-free — the SessionStart hook spawns it detached and must never block
+        # behind the daemon's tick lock.
+        return 0 if write_live_identity_beacon() else 1
     if cmd == "usage":
         return cmd_usage()
     if cmd == "live-email":

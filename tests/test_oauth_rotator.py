@@ -687,7 +687,9 @@ def _setup_auto(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, live_email: 
     monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
     rotator.save_state({"live_email": live_email, "live_fp": rotator.fingerprint(live_blob),
                         "slots": {e: {} for e in slot_blobs}})
-    monkeypatch.setattr(rotator, "read_live_blob", lambda: live_blob)
+    # cmd_auto is source-aware since TRDD-7PYTX4E9 F1 — the default harness serves the
+    # blob as PRIMARY-sourced (the trusted path); mirror-source tests override this.
+    monkeypatch.setattr(rotator, "read_live_blob_with_source", lambda: (live_blob, "primary"))
     monkeypatch.setattr(rotator, "read_slot", lambda e: slot_blobs.get(e))
     monkeypatch.setattr(rotator, "usage_request",
                         lambda b: usage.get(b.get("claudeAiOauth", {}).get("accessToken", ""), (0, None)))
@@ -1103,7 +1105,10 @@ def test_cmd_capture_fails_loud_on_corrupt_roundtrip(tmp_path: Path, monkeypatch
     monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
     monkeypatch.setattr(rotator, "SLOTS", tmp_path / "slots")
     monkeypatch.setattr(rotator, "claude_running", lambda: True)
-    monkeypatch.setattr(rotator, "read_live_blob", lambda: _blob("LIVE-TOKEN", expires_ms=_ms_in(8)))
+    # cmd_capture is source-aware since TRDD-7PYTX4E9 F1 (a mirror-sourced blob is
+    # never captured as "the live account") — serve the blob as PRIMARY-sourced.
+    monkeypatch.setattr(rotator, "read_live_blob_with_source",
+                        lambda: (_blob("LIVE-TOKEN", expires_ms=_ms_in(8)), "primary"))
     monkeypatch.setattr(rotator, "account_email", lambda *_a, **_k: "e@x")
     monkeypatch.setattr(rotator, "write_slot", lambda *_a, **_k: None)   # pretend the write happened
     monkeypatch.setattr(rotator, "read_slot", lambda *_a, **_k: None)    # …but it round-trips to garbage
@@ -1229,3 +1234,254 @@ def test_configured_rotator_home_none_when_absent(
     monkeypatch.delenv("CLAUDE_ROTATOR_HOME", raising=False)
     monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
     assert rotator.configured_rotator_home() is None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TRDD-7PYTX4E9 — daemon blind-spot fixes (F1 source-aware identity, F2 beacon,
+# F3 ACL partners, F4 tick-completion stamp, F5 reconcile pin bug)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_read_live_blob_with_source_tags_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """(blob, source): primary wins as 'primary'; mirror fallback is TAGGED 'mirror'
+    so decision paths can distrust it; nothing anywhere → (None, 'none') (F1)."""
+    primary, mirror = _blob("P"), _blob("M")
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: primary)
+    monkeypatch.setattr(rotator, "_live_backup_read", lambda: mirror)
+    assert rotator.read_live_blob_with_source() == (primary, "primary")
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: None)
+    assert rotator.read_live_blob_with_source() == (mirror, "mirror")
+    monkeypatch.setattr(rotator, "_live_backup_read", lambda: None)
+    assert rotator.read_live_blob_with_source() == (None, "none")
+
+
+def test_add_password_argv_carries_acl_partners() -> None:
+    """F3: every rotator keychain write authorizes /usr/bin/security + the real python
+    binary via -T, so rotator-written items stay readable from a headless daemon."""
+    argv = rotator._add_password_argv("svc", "acct", "DATA")
+    assert argv[:3] == ["security", "add-generic-password", "-U"]
+    assert ("-s", "svc") == (argv[3], argv[4]) and ("-a", "acct") == (argv[5], argv[6])
+    t_vals = [argv[i + 1] for i, a in enumerate(argv) if a == "-T"]
+    assert "/usr/bin/security" in t_vals
+    assert os.path.realpath(sys.executable) in t_vals
+    assert argv[-2:] == ["-w", "DATA"]  # the secret stays LAST (stdin-prompt shape preserved)
+
+
+def test_beacon_round_trip_email_from_slot_fp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F2: write_live_identity_beacon stamps {fp, email, ts} from a PRIMARY read, resolving
+    the email offline via a slot fp match; read_live_identity_beacon returns it while fresh."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live = _blob("LIVE-XYZ")
+    rotator.save_state({"live_email": None, "live_fp": None, "slots": {"me@x": {}}})
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live)
+    monkeypatch.setattr(rotator, "read_slot", lambda e: live if e == "me@x" else None)
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: pytest.fail("network resolve must not run when a slot fp matches"))
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+    beacon = rotator.read_live_identity_beacon(now=1000.0 + 60)
+    assert beacon is not None
+    assert beacon["email"] == "me@x"
+    assert beacon["fp"] == rotator.fingerprint(live)
+    # 0600: the beacon names an account email — same trust boundary as state.json.
+    assert stat.S_IMODE(os.stat(rotator._live_identity_path()).st_mode) == 0o600
+
+
+def test_beacon_never_written_from_mirror_and_stale_is_ignored(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F2 safety: no primary → NO beacon (a mirror-derived beacon would launder the very
+    staleness F1 distrusts); a beacon older than the freshness window reads as None."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: None)
+    assert rotator.write_live_identity_beacon(now=1000.0) is False
+    assert rotator.read_live_identity_beacon(now=1000.0) is None
+    # now a real one, read past its freshness window
+    live = _blob("LIVE-OLD")
+    rotator.save_state({"live_email": "me@x", "live_fp": rotator.fingerprint(live), "slots": {}})
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live)
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+    assert rotator.read_live_identity_beacon(now=1000.0 + 30) is not None          # fresh
+    assert rotator.read_live_identity_beacon(now=1000.0 + rotator.BEACON_MAX_AGE_S + 1) is None  # stale
+
+
+def test_reconcile_leaves_state_untouched_when_identity_unresolvable(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F5: fp drift + unresolvable account (no roles, no slot match) must NOT pin the new
+    fp onto the old email — the old behavior silenced every future reconcile. State stays
+    unchanged so the drift remains detectable and the next tick retries."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    old = {"live_email": "old@x", "live_fp": "0" * 16, "slots": {"other@x": {}}}
+    rotator.save_state(dict(old))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)          # roles unreachable
+    monkeypatch.setattr(rotator, "read_slot", lambda e: _blob("OTHER"))      # fp won't match
+    state = rotator._reconcile_live_email(dict(old), _blob("NEW-CRED"))
+    assert state["live_email"] == "old@x"
+    assert state["live_fp"] == "0" * 16                                       # NOT pinned to the new fp
+    on_disk = rotator.load_state()
+    assert on_disk["live_fp"] == "0" * 16                                     # nothing persisted either
+
+
+def test_resolve_untrusted_live_trusts_beacon_confirmed_mirror(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F1+F2: beacon fp == mirror fp proves the mirror IS the live credential — usable,
+    and the state identity is corrected from the beacon."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    mirror = _blob("SAME-CRED")
+    fp = rotator.fingerprint(mirror)
+    rotator.save_state({"live_email": "stale@x", "live_fp": fp, "slots": {}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": fp, "email": "real@x", "ts": 1.0})
+    blob, state = rotator._resolve_untrusted_live(mirror, rotator.load_state())
+    assert blob is mirror
+    assert state["live_email"] == "real@x"
+
+
+def test_resolve_untrusted_live_probes_slot_twin_when_mirror_differs(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F1+F2: beacon names a DIFFERENT account than the mirror → identity comes from the
+    beacon and the usage-probe blob is the live account's slot twin, never the mirror."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    mirror = _blob("STALE-OTHER-ACCT")
+    twin = _blob("REAL-LIVE-TWIN", expires_ms=_ms_in(8))
+    rotator.save_state({"live_email": "stale@x", "live_fp": rotator.fingerprint(mirror),
+                        "slots": {"real@x": {}}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": "f" * 16, "email": "real@x", "ts": 1.0})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: twin if e == "real@x" else None)
+    blob, state = rotator._resolve_untrusted_live(mirror, rotator.load_state())
+    assert blob is twin
+    assert state["live_email"] == "real@x"
+    assert state["live_fp"] == "f" * 16                                       # the TRUE live credential's fp
+
+
+def test_resolve_untrusted_live_stays_put_without_beacon(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F1 fail-safe: no fresh beacon → the identity is unknowable → None (stay put).
+    A wrong stay-put costs one tick; a wrong rotation is the 2026-07-08 incident."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "x@x", "live_fp": "a" * 16, "slots": {}})
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: None)
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: "whoever@x")
+    blob, _state = rotator._resolve_untrusted_live(_blob("M"), rotator.load_state())
+    assert blob is None
+
+
+def test_cmd_auto_incident_regression_mirror_blind_spot(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE 2026-07-08 INCIDENT, replayed: primary unreadable (mirror-sourced blob = the
+    STALE fmuaddib-like credential), beacon names the REAL live account whose slot twin
+    shows exhaustion, while the mirror's account sits free. Pre-fix: the daemon probed the
+    mirror's healthy account as 'live' and never rotated. Post-fix: identity comes from
+    the beacon, the twin's exhaustion is seen, and the rotator switches onto the account
+    that actually has a free window."""
+    live_twin = _blob("REAL-LIVE", expires_ms=_ms_in(8))     # the burning account's slot twin
+    stale_mirror = _blob("STALE-FREE", expires_ms=_ms_in(8))  # the OTHER account's stale credential
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="stale@x", live_blob=stale_mirror,
+                           slot_blobs={"real@x": live_twin, "stale@x": stale_mirror},
+                           usage={"REAL-LIVE": (200, {"five_hour": {"utilization": 99.0},
+                                                      "seven_day": {"utilization": 50.0}}),
+                                  "STALE-FREE": (200, _usage_ok(0.0))})
+    # Override the harness default: the blob arrives MIRROR-sourced (primary unreadable).
+    monkeypatch.setattr(rotator, "read_live_blob_with_source", lambda: (stale_mirror, "mirror"))
+    monkeypatch.setattr(rotator, "read_live_identity_beacon",
+                        lambda **_k: {"fp": rotator.fingerprint(live_twin), "email": "real@x", "ts": 1.0})
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["stale@x"]           # rotated ONTO the free account
+    # _switch_blob is stubbed (records, never persists), so the on-disk identity reflects the
+    # pre-decision correction: the mirror-blind daemon now KNOWS the true live is real@x (not the
+    # mirror's stale@x) before it decides — the exact blind spot the 2026-07-08 incident exposed.
+    assert rotator.load_state()["live_email"] == "real@x"
+
+
+def test_cmd_auto_mirror_source_without_beacon_never_rotates(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F1 fail-safe at the cmd_auto level: mirror-sourced + no beacon → stay put even when
+    the mirror's own probe would scream 'exhausted' (deciding on a phantom identity is
+    exactly the failure being fixed)."""
+    mirror = _blob("MIRROR", expires_ms=_ms_in(8))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="stale@x", live_blob=mirror,
+                           slot_blobs={"alt@x": _blob("ALT", expires_ms=_ms_in(8))},
+                           usage={"MIRROR": (401, None), "ALT": (200, _usage_ok())})
+    monkeypatch.setattr(rotator, "read_live_blob_with_source", lambda: (mirror, "mirror"))
+    monkeypatch.setattr(rotator, "read_live_identity_beacon", lambda **_k: None)
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    rotator.cmd_auto()
+    assert switches == []
+
+
+def test_cmd_capture_skips_mirror_sourced_blob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F1: a mirror-sourced blob is NEVER captured as 'the live account' — capturing it
+    rewrote state.live_email from a stale credential on every daemon tick (the overnight
+    re-poisoning observed 2026-07-09 00:57)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": "healed@x", "live_fp": "h" * 16, "slots": {}})
+    monkeypatch.setattr(rotator, "claude_running", lambda: True)
+    monkeypatch.setattr(rotator, "read_live_blob_with_source", lambda: (_blob("STALE"), "mirror"))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: pytest.fail("must not resolve a mirror blob"))
+    rc = rotator.cmd_capture(only_if_running=False)
+    assert rc == 0
+    assert rotator.load_state()["live_email"] == "healed@x"   # identity NOT re-poisoned
+
+
+def test_repair_refuses_mirror_restore_when_primary_merely_unreadable(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F1 write-path gate: primary unreadable but PRESENT (the ACL-denied post-/login
+    state) → the mirror restore is REFUSED — 'restoring' would overwrite the user's
+    current login with a stale token. Only a PROVABLY-absent primary is restored."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    rotator.save_state({"live_email": None, "live_fp": None, "slots": {}})
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: None)
+    monkeypatch.setattr(rotator, "_live_backup_read", lambda: _blob("MIRROR"))
+    monkeypatch.setattr(rotator, "read_slot", lambda e: None)
+    writes: list = []
+    monkeypatch.setattr(rotator, "write_live_blob", lambda b: writes.append(b))
+    monkeypatch.setattr(rotator, "_primary_live_item_absent", lambda: False)   # present, ACL-denied
+    actions = rotator._repair_integrity()
+    assert writes == []                                                        # restore refused
+    assert any("restore refused" in a for a in actions)
+    monkeypatch.setattr(rotator, "_primary_live_item_absent", lambda: True)    # truly gone
+    actions = rotator._repair_integrity()
+    assert len(writes) == 1                                                    # now it restores
+    assert any("restored primary" in a for a in actions)
+
+
+def test_primary_live_item_absent_only_on_proven_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The absence probe proves absence ONLY on errSecItemNotFound (rc 44 / 'could not be
+    found'); an existing item (rc 0) and an ambiguous hang (timeout) both count PRESENT."""
+    import subprocess as sp
+    import types
+
+    def fake_run(rc: int, stderr: str = ""):
+        return lambda *_a, **_k: types.SimpleNamespace(returncode=rc, stderr=stderr, stdout="")
+
+    monkeypatch.setattr(rotator.subprocess, "run", fake_run(0))
+    assert rotator._primary_live_item_absent() is False                        # item exists
+    monkeypatch.setattr(rotator.subprocess, "run", fake_run(44, "could not be found"))
+    assert rotator._primary_live_item_absent() is True                         # proven absent
+    def raise_timeout(*_a, **_k):
+        raise sp.TimeoutExpired(cmd="security", timeout=10)
+    monkeypatch.setattr(rotator.subprocess, "run", raise_timeout)
+    assert rotator._primary_live_item_absent() is False                        # ambiguous → present
+
+
+def test_switch_blob_stamps_the_beacon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F2: a rotator-authored switch KNOWS the identity it just wrote — it stamps the
+    beacon directly, keeping it current even from the daemon context."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(rotator, "read_live_blob", lambda: {})
+    monkeypatch.setattr(rotator, "write_live_blob", lambda b: None)
+    target = _blob("NEW-LIVE")
+    rotator._switch_blob("new@x", target, reason="test")
+    beacon = rotator.read_live_identity_beacon()
+    assert beacon is not None
+    assert beacon["email"] == "new@x"
+    assert beacon["fp"] == rotator.fingerprint(target)
+
+
+def test_cmd_tick_stamps_completion_even_on_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F4: EVERY finished tick — including the only-if-running no-op — stamps
+    tick-completed.ts; only a HANG leaves it stale (what the supervisor alerts on)."""
+    monkeypatch.setattr(rotator, "claude_running", lambda: False)
+    rc = rotator.cmd_tick(only_if_running=True)
+    assert rc == 0
+    stamp = rotator.ROOT / "tick-completed.ts"
+    assert stamp.is_file()
+    assert abs(int(stamp.read_text()) - time.time()) < 5
