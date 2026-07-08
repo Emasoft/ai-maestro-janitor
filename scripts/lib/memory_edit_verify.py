@@ -147,9 +147,14 @@ def _normalize_lesson(body: str) -> str:
 def extract_lessons(text: str) -> list[str]:
     """Return the normalized body of every `[^N]: …` footnote definition in `text`
     (multi-line continuations folded in). Order-preserving; numbers ignored."""
-    # Footnote def = `[^id]:` at line start, body runs until the next def or EOF.
+    # Footnote def = `[^id]:` at line start, body runs until the next def, the
+    # next full-line heading, or EOF. The heading stop is L-2 (wikimem audit
+    # 2026-07-07): without it a trailing section after the lessons pool (e.g.
+    # `## See also`) is swallowed into the LAST lesson's body, contaminating
+    # lessons_preserved's comparison and false-failing edits that legitimately
+    # move that section.
     out: list[str] = []
-    for m in re.finditer(r"(?ms)^\[\^[^\]]+\]:.*?(?=^\[\^[^\]]+\]:|\Z)", text):
+    for m in re.finditer(r"(?ms)^\[\^[^\]]+\]:.*?(?=^\[\^[^\]]+\]:|^#{1,6}\s|\Z)", text):
         norm = _normalize_lesson(m.group(0))
         if norm:
             out.append(norm)
@@ -191,9 +196,14 @@ def _body_minus_lessons(text: str) -> str:
     """The note's BODY: frontmatter stripped, and the `## Notes and lessons learned`
     section stripped (lessons are guarded separately by lessons_preserved)."""
     body = _strip_frontmatter(text)
-    idx = body.find(_LESSONS_HEADING)
-    if idx != -1:
-        body = body[:idx]
+    # L-3 (wikimem audit 2026-07-07): match the heading as a FULL LINE, never a
+    # substring — meta-pages about the memory system mention `## Notes and
+    # lessons learned` inline, and a find() on the raw string truncated the body
+    # at that mention, leaving later facts unchecked in sources and false-failing
+    # results.
+    m = re.search(rf"(?m)^{re.escape(_LESSONS_HEADING)}\s*$", body)
+    if m:
+        body = body[: m.start()]
     return body
 
 
@@ -324,9 +334,16 @@ def no_new_duplicate_lines(result: str, min_len: int = 24) -> tuple[bool, list[s
     appears more than once in `result`. Catches a naive union that re-introduced
     the very duplication the merge was meant to remove."""
     seen: dict[str, int] = {}
+    in_fence = False
     for raw in result.splitlines():
         s = raw.strip()
-        if len(s) < min_len or s.startswith("#") or s.startswith("```"):
+        # L-6 (wikimem audit 2026-07-07): track fence STATE, don't just skip the
+        # ``` line itself — the same ≥min_len command legitimately appears in two
+        # code examples, and counting fence contents false-failed those merges.
+        if s.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence or len(s) < min_len or s.startswith("#"):
             continue
         norm = re.sub(r"\s+", " ", s)
         seen[norm] = seen.get(norm, 0) + 1
@@ -376,6 +393,22 @@ _FN_DEF_RE = re.compile(r"(?m)^\[\^([^\]]+)\]:")   # a footnote DEFINITION: line
 _FN_ANY_RE = re.compile(r"\[\^([^\]]+)\]")          # ANY `[^id]` occurrence (refs + def markers)
 
 
+def _mask_code_fences(text: str) -> str:
+    """`text` with every fenced-code line blanked (line structure preserved).
+    L-4 (wikimem audit 2026-07-07): a page DOCUMENTING footnote syntax inside a
+    ``` fence read as having a dangling `[^id]` ref, permanently failing every
+    merge/split/repair that touched it — fence contents are examples, not refs."""
+    out: list[str] = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            out.append("\n" if line.endswith("\n") else "")
+            continue
+        out.append(("\n" if line.endswith("\n") else "") if in_fence else line)
+    return "".join(out)
+
+
 def footnote_refs_resolve(text: str) -> tuple[bool, list[str]]:
     """Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
     the SAME page. Returns (no unresolved refs, sorted unresolved ids).
@@ -385,29 +418,32 @@ def footnote_refs_resolve(text: str) -> tuple[bool, list[str]]:
     dangling footnote. Computed by id: the def line `[^id]:` itself contains the
     marker `[^id]`, so `all_ids - def_ids` is exactly the set of referenced-but-
     undefined ids (an orphan def cancels itself out and is never flagged)."""
-    defs = set(_FN_DEF_RE.findall(text))
-    unresolved = sorted(set(_FN_ANY_RE.findall(text)) - defs)
+    # L-4: scan with fences masked — `[^id]` tokens inside code examples are
+    # documentation, not references (and a def shown only in a fence is not a def).
+    masked = _mask_code_fences(text)
+    defs = set(_FN_DEF_RE.findall(masked))
+    unresolved = sorted(set(_FN_ANY_RE.findall(masked)) - defs)
     return (not unresolved, unresolved)
 
 
 def no_new_dangling_footnote_refs(
     source_texts: list[str], result_texts: list[str]
 ) -> tuple[bool, list[str]]:
-    """A split/merge must not INTRODUCE a dangling footnote ref. Footnote ids may
-    be renumbered across the op (lesson preservation matches by BODY, not number),
-    so compare COUNTS not ids: the total number of unresolved `[^id]` refs across
-    all RESULT pages must not exceed the total across all SOURCE pages. This
-    enforces the shared-footnote move-rule (a def is never dropped while an atom
-    still cites it, and a moved ref carries its def) WITHOUT punishing a
-    pre-existing dangling ref the op merely carried forward. Returns (ok, sorted
-    result-side offenders) — the offenders make the failure actionable."""
-    src = sum(len(footnote_refs_resolve(t)[1]) for t in source_texts)
-    offenders: list[str] = []
+    """A split/merge must not INTRODUCE a dangling footnote ref. Compare per-ID
+    sets, not counts (L-5, wikimem audit 2026-07-07): the count form let "fixed
+    one dangling ref" buy a licence to orphan a DIFFERENT id in the same op. A
+    result-side unresolved id is tolerated ONLY if that same id was already
+    unresolved in a source (carried forward, not introduced); a renumbered lesson
+    stays guarded by the body-text lessons_preserved check. This enforces the
+    shared-footnote move-rule (a def is never dropped while an atom still cites
+    it, and a moved ref carries its def). Returns (ok, sorted NEW offenders)."""
+    src_unresolved: set[str] = set()
+    for t in source_texts:
+        src_unresolved.update(footnote_refs_resolve(t)[1])
+    new_ids: set[str] = set()
     for t in result_texts:
-        offenders.extend(f"[^{m}]" for m in footnote_refs_resolve(t)[1])
-    if len(offenders) > src:
-        return (False, sorted(set(offenders)))
-    return (True, [])
+        new_ids.update(i for i in footnote_refs_resolve(t)[1] if i not in src_unresolved)
+    return (not new_ids, sorted(f"[^{i}]" for i in new_ids))
 
 
 # --------------------------------------------------------------------------- #
