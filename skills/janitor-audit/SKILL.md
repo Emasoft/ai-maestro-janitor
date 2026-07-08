@@ -19,7 +19,7 @@ Invokes each ai-maestro-janitor detector synchronously, aggregates output into a
 
 1. Resolve `JANITOR_ROOT` = `${CLAUDE_PROJECT_DIR}/.janitor` (fall back to `$(pwd)/.janitor` if the env var is unset).
 
-1b. **Freshness first (issue #69):** this audit reads the plugin CACHE, which can lag the
+   1b. **Freshness first (issue #69):** this audit reads the plugin CACHE, which can lag the
    installed pin / latest release — findings against a stale cache describe code that is
    no longer live. Print the freshness header and put it at the TOP of the report:
 
