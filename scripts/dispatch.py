@@ -563,11 +563,17 @@ def _phase_rate_limit_recovery() -> bool:
     since = state.read_int_state(since_file, now)
     age = now - since
 
+    # F7 (wikimem audit): the marker is emitted BARE on its own line — same
+    # whole-line-only contract as renew/reload/memory markers — with the prose
+    # on line 2 (the keep-going two-line idiom). A prose-carrying marker line
+    # would legitimize prefix-mimicry: any detector line starting with
+    # "[janitor-resume] …" would be honored by the cron prompt.
+    print("[janitor-resume]")
     if age > 0:
-        print(f"[janitor-resume] rate-limit cleared after {age}s — API is reachable again. Resume the previous pending task.")
+        print(f"rate-limit cleared after {age}s — API is reachable again. Resume the previous pending task.")
     else:
         # since-file was missing or in the future (clock skew); still cue resume.
-        print("[janitor-resume] rate-limit cleared (duration unknown) — API is reachable again. Resume the previous pending task.")
+        print("rate-limit cleared (duration unknown) — API is reachable again. Resume the previous pending task.")
 
     # Also clear any pending post-compact resume flag: a rate-limit resume cue
     # already says "resume the pending task", which subsumes it. Clearing both
@@ -624,12 +630,15 @@ def _phase_compact_resume() -> bool:
     now = int(time.time())
     age = max(0, now - state.read_int_state(since_file, now))
 
+    # F7 (wikimem audit): bare marker line + prose on line 2 — see
+    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract).
+    print("[janitor-resume]")
     if directive:
-        print(f"[janitor-resume] Context was compacted {age}s ago — auto-resume. {directive}")
+        print(f"Context was compacted {age}s ago — auto-resume. {directive}")
     else:
         # Flag present but empty/unreadable: still cue a generic resume so the
         # session doesn't stall idle after a compaction.
-        print(f"[janitor-resume] Context was compacted {age}s ago — auto-resume. Resume your previous in-flight task (check the TRDD board / your handoff).")
+        print(f"Context was compacted {age}s ago — auto-resume. Resume your previous in-flight task (check the TRDD board / your handoff).")
 
     for p in (flag, since_file):
         try:

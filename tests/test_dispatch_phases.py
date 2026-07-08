@@ -424,7 +424,7 @@ def test_phase_compact_resume_silent_when_flag_absent(env_isolation: dict) -> No
 
 
 def test_phase_compact_resume_emits_directive_and_clears(env_isolation: dict) -> None:
-    """flag present → one [janitor-resume] line carrying the directive; flag cleared."""
+    """flag present → bare [janitor-resume] marker + directive on line 2 (F7); flag cleared."""
     dispatch = _import_dispatch()
     import state
 
@@ -440,6 +440,31 @@ def test_phase_compact_resume_emits_directive_and_clears(env_isolation: dict) ->
     sd = state.state_dir()
     assert not (sd / "resume-after-compact.flag").exists(), "flag must be cleared after emission"
     assert not (sd / "resume-after-compact.ts").exists(), "ts sidecar must be cleared too"
+
+
+def test_resume_marker_line_is_bare_whole_line(env_isolation: dict) -> None:
+    """F7 (wikimem audit): BOTH resume phases emit the [janitor-resume] marker as a
+    BARE whole line with the prose/directive on line 2 — the cron prompt honors
+    whole-line markers only, so a prose-carrying marker line would legitimize
+    prefix-mimicry (`[janitor-resume] …` inside any detector line being honored)."""
+    dispatch = _import_dispatch()
+    import state
+
+    # Post-compact resume: marker bare, directive on line 2.
+    _arm_compact_flag(state, "continue TRDD-31095269", age_s=42)
+    out = _capture_stdout(dispatch._phase_compact_resume)
+    lines = out.splitlines()
+    assert lines[0] == "[janitor-resume]", f"marker line must be bare, got {lines[0]!r}"
+    assert "continue TRDD-31095269" in lines[1]
+
+    # Rate-limit resume: same two-line shape.
+    sd = state.state_dir()
+    (sd / "rate-limited.flag").write_text("", encoding="utf-8")
+    state.atomic_write(sd / "rate-limited-since.ts", str(int(__import__("time").time()) - 30))
+    out2 = _capture_stdout(dispatch._phase_rate_limit_recovery)
+    lines2 = out2.splitlines()
+    assert lines2[0] == "[janitor-resume]", f"marker line must be bare, got {lines2[0]!r}"
+    assert "rate-limit cleared" in lines2[1]
 
 
 def test_phase_compact_resume_returns_true_when_emitted(env_isolation: dict) -> None:
@@ -865,7 +890,8 @@ def test_main_rate_limit_resume_short_circuits_before_keep_going_nudge(env_isola
     )
 
     out = _capture_stdout(dispatch.main)
-    assert out.startswith("[janitor-resume] rate-limit cleared"), f"rate-limit resume must lead, got {out!r}"
+    # F7: bare marker line, prose on line 2 (whole-line-only marker contract).
+    assert out.startswith("[janitor-resume]\nrate-limit cleared"), f"rate-limit resume must lead, got {out!r}"
     assert "keep-going mode" not in out, "the keep-going nudge must not also fire this turn"
 
 
@@ -888,5 +914,6 @@ def test_main_compact_resume_short_circuits_before_keep_going_nudge(env_isolatio
     )
 
     out = _capture_stdout(dispatch.main)
-    assert out.startswith("[janitor-resume] Context was compacted"), f"compact resume must lead, got {out!r}"
+    # F7: bare marker line, directive on line 2 (whole-line-only marker contract).
+    assert out.startswith("[janitor-resume]\nContext was compacted"), f"compact resume must lead, got {out!r}"
     assert "keep-going mode" not in out, "the keep-going nudge must not also fire this turn"
