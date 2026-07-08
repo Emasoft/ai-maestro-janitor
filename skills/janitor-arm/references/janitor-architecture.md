@@ -45,6 +45,8 @@ cron prompt (baked at /janitor-arm)
 
 **Survival contract.** The stub is fire-and-forget — zero arguments, no state, no logging. Its interface is `dispatcher-stub.py` (no args) → `os.execv` → `dispatch.py` (no args). As long as future versions of `dispatch.py` stay zero-argument fire-and-forget (which they have been since v0.1.0), the stub never needs updating. If we ever break this contract in a future janitor release, that release becomes a "users must re-arm" version — the same UX as pre-stub, applied once.
 
+**Where the marker protocol lives (TRDD-82OP4EN9, W3).** The cron prompt itself is a ~340-char stub: the `[janitor-heartbeat]` marker, the stub path, and one pointer line. The full marker-handling protocol (renew / reload / reload-skills / self-disarm / the six memory markers / resume / security + the zero-output contract) lives in the installed rule `janitor-heartbeat-protocol.md` (shipped in `rules/`, refreshed into `~/.claude/rules/` by rules_installer at every SessionStart). Two wins: the protocol rides the session's CACHED prefix at the 0.1× read rate instead of ~945 fresh input tokens on every fire, and protocol changes roll out per-session with NO re-arm — the same auto-roll property the stub gives the code path. The prompt's baked fallback (rule missing → surface verbatim + honor only `[janitor-resume]`) is deliberately non-lossy, so a session that somehow lacks the rule degrades instead of going dark.
+
 ## Operational rules
 
 **When re-arming is still needed.** Three cases, only three:
