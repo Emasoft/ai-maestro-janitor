@@ -179,9 +179,11 @@ def _verify_merge(txn, writes, deletes):
     return ok, reasons
 
 
-def _verify_split(txn, writes, deletes):
+def _verify_split(txn, writes, deletes, unsplittable=None):
     """Build verify_split inputs. The split has ONE source page; outputs are an
-    overview (the write at the source's path, else the first write) + sub-pages."""
+    overview (the write at the source's path, else the one carrying the source's
+    slug as `<stem>-overview`) + sub-pages. `unsplittable` (L-8) = rel-paths the
+    caller flags as over-cap atomic leaves (the CLI's --unsplittable)."""
     if len(txn.sources) != 1:
         raise MemoryTxnError(
             f"split expects exactly ONE source page, found {len(txn.sources)}"
@@ -206,7 +208,22 @@ def _verify_split(txn, writes, deletes):
 
     if not writes:
         raise MemoryTxnError("split produced no output pages")
-    overview_rel = source_rel if source_rel in writes else sorted(writes)[0]
+    if source_rel in writes:
+        overview_rel = source_rel
+    else:
+        # L-9 (wikimem audit 2026-07-07): when the split RETIRES the source slug,
+        # sorted(writes)[0] could crown an alphabetically-first SUB-PAGE as the
+        # overview — for a hub that guarantees a bogus "globs overlap" rejection
+        # with a misleading reason. The overview is the write that carries the
+        # source's slug forward; anything else is ambiguous and must be refused.
+        src_stem = Path(source_rel).stem
+        cands = [r for r in writes if Path(r).stem in (f"{src_stem}-overview", src_stem)]
+        if len(cands) != 1:
+            raise MemoryTxnError(
+                "cannot identify the overview page: keep the source's path, or write "
+                f"exactly one '{src_stem}-overview.md'; got {sorted(writes)}"
+            )
+        overview_rel = cands[0]
     overview_text = writes[overview_rel]
     subpages = {rel: txt for rel, txt in writes.items() if rel != overview_rel}
     subpage_texts = [subpages[r] for r in sorted(subpages)]
@@ -222,7 +239,7 @@ def _verify_split(txn, writes, deletes):
     others = _live_pages_excluding(txn.scope_root, touched)
     ok, reasons = verify.verify_split(
         source_text, source_meta, subpage_texts, subpage_metas, overview_text,
-        page_sizes, max_bytes, unsplittable=None, retired_slugs=retired,
+        page_sizes, max_bytes, unsplittable=set(unsplittable or ()), retired_slugs=retired,
         other_live_pages=others,
     )
     return ok, reasons
@@ -301,20 +318,47 @@ def cmd_begin(args) -> int:
 def cmd_commit(args) -> int:
     scope = Path(args.scope_root).expanduser().resolve()
     txn = _load_txn(scope, args.txn_id)
+    # L-7 (wikimem audit 2026-07-07): the journal's op — declared at begin — is the
+    # txn's shape contract; verifying a merge-shaped txn with the repair oracle
+    # proves nothing. A mismatched --op is a CALLER error: refuse WITHOUT aborting,
+    # so a typo'd flag cannot destroy a valid staged edit. ONE sanctioned pairing:
+    # a `conflict` journal commits via `--op merge` — conflict IS merge-shaped
+    # (pair-retirement), and _verify_merge reads txn.op=="conflict" to apply its
+    # legality exemption (conflict-protocol.md).
+    if args.op != txn.op and not (txn.op == "conflict" and args.op == "merge"):
+        print(
+            f"error: --op {args.op!r} does not match the journal's recorded op "
+            f"{txn.op!r} (declared at begin); re-run with that op or abort the txn",
+            file=sys.stderr,
+        )
+        return 2
     writes, deletes = _reconstruct_changes(txn)
     if not writes and not deletes:
         txn.abort()
         print("error: no changes staged (nothing written, added, or removed)", file=sys.stderr)
         return 2
 
-    if args.op == "merge":
-        ok, reasons = _verify_merge(txn, writes, deletes)
-    elif args.op == "split":
-        ok, reasons = _verify_split(txn, writes, deletes)
-    elif args.op == "atomize":
-        ok, reasons = _verify_atomize(txn, writes, deletes)
-    else:
-        ok, reasons = _verify_repair(txn, writes, deletes)
+    try:
+        if args.op == "merge":
+            ok, reasons = _verify_merge(txn, writes, deletes)
+        elif args.op == "split":
+            ok, reasons = _verify_split(txn, writes, deletes, unsplittable=args.unsplittable)
+        elif args.op == "atomize":
+            ok, reasons = _verify_atomize(txn, writes, deletes)
+        else:
+            ok, reasons = _verify_repair(txn, writes, deletes)
+    except MemoryTxnError:
+        # L-10 (wikimem audit 2026-07-07): a shape error is as final as a verify
+        # FAIL — abort, or staging+journal silently age out over 30 min. abort()
+        # is H-2-guarded (no-op past the staging phase), so this can never
+        # destroy a committing journal.
+        txn.abort()
+        raise
+    except OSError as exc:
+        # A source vanishing mid-verify printed a raw traceback; map it to the
+        # CLI's `error:` contract and clean up the txn.
+        txn.abort()
+        raise MemoryTxnError(f"live-tree read failed during verify: {exc}") from exc
 
     if not ok:
         txn.abort()
@@ -326,11 +370,17 @@ def cmd_commit(args) -> int:
     # Verify passed → register the reconstructed change set into the journal and
     # commit atomically (the txn re-hashes sources for the stale-snapshot guard,
     # takes the per-scope flock, and applies writes-before-deletes via os.replace).
-    for rel, content in writes.items():
-        txn.stage_write(rel, content)
-    for rel in deletes:
-        txn.stage_delete(rel)
-    txn.commit()
+    try:
+        for rel, content in writes.items():
+            txn.stage_write(rel, content)
+        for rel in deletes:
+            txn.stage_delete(rel)
+        txn.commit()
+    except MemoryTxnError:
+        # L-10: same clean-up contract for the apply half; abort() is H-2-guarded,
+        # so a failure AFTER phase=committing keeps its roll-forward journal.
+        txn.abort()
+        raise
     print(f"committed {txn.txn_id} ({args.op}): "
           f"{len(writes)} write(s), {len(deletes)} delete(s)")
     return 0
@@ -367,6 +417,12 @@ def main() -> int:
     c.add_argument("scope_root")
     c.add_argument("txn_id")
     c.add_argument("--op", required=True, choices=("merge", "split", "repair", "atomize"))
+    c.add_argument(
+        "--unsplittable", action="append", default=None, metavar="REL",
+        help="rel-path of a split output allowed to stay over the size cap (an "
+             "atomic leaf that cannot be split further); repeatable. L-8: without "
+             "this the library's escape hatch was unreachable from the CLI.",
+    )
 
     a = sub.add_parser("abort", help="discard a not-yet-committed transaction")
     a.add_argument("scope_root")
