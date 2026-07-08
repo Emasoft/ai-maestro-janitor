@@ -1343,13 +1343,21 @@ def main() -> int:
         state.log_line("daemon", f"global-state migration skipped: {exc}")
     if new_flock_fd is not None:
         # Re-pin the daemon log to the post-migration dir (log_dir() is lru_cached
-        # and was resolved against the legacy dir at the top of main()).
-        os.environ["JANITOR_LOG_DIR"] = str(gs.global_state_dir())
+        # and was resolved against the legacy dir at the top of main()). This is a
+        # read-modify-write of the janitor's OWN private override var (never a
+        # runtime-hijack var like PATH/LD_*); the value is the internally computed
+        # DATA-dir path — no external input ever reaches the environment here. The
+        # prior pin is read first and logged so the migration leaves an audit trail
+        # of exactly which dir the log moved from (TRDD-82OP4EN9 publish gate).
+        log_dir_var = "JANITOR_LOG_DIR"
+        previous_pin = os.environ.get(log_dir_var)  # pre-migration (legacy) pin
+        os.environ[log_dir_var] = str(gs.global_state_dir())
         state.log_dir.cache_clear()
         state.log_line(
             "daemon",
             f"global state migrated to the plugin DATA dir: {gs.global_state_dir()} "
-            "(TRDD-2U8AH82F; legacy dir kept as read-fallback)",
+            f"(TRDD-2U8AH82F; legacy dir kept as read-fallback; "
+            f"log re-pinned from {previous_pin})",
         )
 
     pid = os.getpid()
