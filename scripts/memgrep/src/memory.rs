@@ -945,10 +945,12 @@ fn note_matches(p: &Path, needle: &str) -> bool {
     false
 }
 
-/// The `TRDD-<ts>-<id8>-<slug>` filename pattern, capturing the 8-hex id8. Compiled once.
+/// The `TRDD-<ts>-<id8>-<slug>` filename pattern, capturing the 8-char base36 id8. Compiled once.
 fn trdd_id8_re() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)^TRDD-[^-]+-([0-9a-f]{8})-").expect("static regex"))
+    // L5 (wikimem audit): TRDD ids are 8-char base36 (A-Z0-9), not hex — a hex-only
+    // class missed every id containing letters G-Z.
+    RE.get_or_init(|| Regex::new(r"(?i)^TRDD-[^-]+-([0-9a-z]{8})-").expect("static regex"))
 }
 
 pub fn cmd_links_cli(args: &[String]) -> Result<()> {
