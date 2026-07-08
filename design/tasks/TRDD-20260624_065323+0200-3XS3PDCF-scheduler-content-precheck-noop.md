@@ -3,7 +3,7 @@ trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
 column: dev
 created: 2026-06-24T06:53:23+0200
-updated: 2026-07-08T00:20:00+0200
+updated: 2026-07-08T22:50:00+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -24,7 +24,21 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-24
 
-**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dev:** the split-MVP is PUBLISHED (441d467, in v0.18.1 — the "committed locally, NOT yet published" note below is SUPERSEDED); consolidate gained its own structural precheck via TRDD-8UD3Q7K5/issue #64 (636e7df, v0.24.15). Remaining in-scope follow-ups: harvest precheck (still BLOCKED on TRDD-ab232dbd), repair/atomize prechecks, split refinement (memory_content_precheck.py:142 documents them as follow-ups).
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dev:** the split-MVP is PUBLISHED (441d467, in v0.18.1 — the "committed locally, NOT yet published" note below is SUPERSEDED); consolidate gained its own structural precheck via TRDD-8UD3Q7K5/issue #64 (636e7df, v0.24.15). Remaining in-scope follow-ups: harvest precheck (UNBLOCKED 2026-07-08 — see the entry below), split refinement (memory_content_precheck.py:142 documents them as follow-ups).
+
+**2026-07-08 22:50 — HARVEST PRECHECK UNBLOCKED (the last missing gate).** The blocker
+(TRDD-ab232dbd's model-in-flux) is RESOLVED: the coexistence-mirror harvest shipped in
+v0.33.0 (mirror raw buffer notes into `wikimem/`, never touch the buffer) and ran LIVE
+tonight. Live evidence of the remaining drain: the 22:45 heartbeat-dispatched harvest on
+LOCAL abstained "nothing due — all 38 notes curated, 0 raw to mirror" at a cost of
+**257,826 tokens** (report `reports/memory-subconscious-agent/20260708_224524+0200-harvest-local-nothing-due.md`);
+at `harvest_per_day=1` × 3 scopes ≈ 750k/day of avoidable no-op. The now-stable predicate
+for `harvest_has_work(root)`: any top-level note that is NOT a curated wikimem page
+(`is_curated_wiki_page` False) AND not yet watermarked mirrored
+(`memory_settings.harvest_note_is_mirrored` False) — both already-shipped helpers; pure
+filesystem read, same fail-open discipline as the split gate. NEXT: implement
+`harvest_has_work` in memory_content_precheck.py + gating tests (mirror the split ones);
+that completes this TRDD's in-scope precheck set (split/consolidate/repair/atomize/harvest).
 
 ### ✅ SPLIT-MVP IMPLEMENTED + TESTED (2026-06-24 ~08:42, committed locally, NOT yet published)
 The highest-value slice — the **SPLIT** content-precheck — is done, TDD'd, ruff-clean,
