@@ -3,9 +3,10 @@ trdd-id: 7PYTX4E9
 title: Rotator daemon blind-spot — silent mirror fallback masquerades as live identity
 column: planned
 created: 2026-07-08T22:32:31+0200
-updated: 2026-07-08T22:32:31+0200
+updated: 2026-07-09T01:55:49+0200
 current-owner: main
 assignee: main
+implementation-commits: [af68a6e, c740a5a]
 priority: 1
 severity: HIGH
 effort: M
@@ -28,7 +29,45 @@ external-refs: []
 
 # Rotator daemon blind-spot — silent mirror fallback masquerades as live identity
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-08
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-09
+
+**IMPLEMENTED (2026-07-09, commits af68a6e + c740a5a) — NOT yet published, daemon
+NOT restarted.** All of F1–F5 landed, TDD, in
+`scripts/oauth_rotator/{rotator.py,supervisor.py}` +
+`scripts/hooks/on-session-start.py`:
+- **F1** — `read_live_blob_with_source()` tags provenance; `cmd_auto`/`cmd_capture`
+  branch on it; mirror-sourced blobs resolved via `_resolve_untrusted_live`
+  (beacon → slot twin) or STAY PUT (fail-safe). `_repair_integrity` restores the
+  primary from the mirror ONLY when it is PROVABLY absent (`_primary_live_item_absent`,
+  rc 44), never when merely ACL-unreadable. 10s timeout on the secret read kills
+  the ACL-prompt hang.
+- **F2** — `write/read_live_identity_beacon` + `rotator.py beacon` CLI; stamped by
+  the session-start hook (detached), by `cmd_tick` (session-context), and directly
+  by `_switch_blob`. Daemon's mirror path consumes it as independent identity truth.
+- **F3** — `_add_password_argv` adds `-T /usr/bin/security -T <python>` to every
+  rotator keychain write (live + slots) so items the rotator created stay
+  daemon-readable prompt-free. (CAVEAT documented in code: `-T` is create-time only;
+  a `/login` re-creates a Claude-ACL item — that is why F1+F2 exist.)
+- **F4** — `_stamp_tick_completed` (finally-stamped `tick-completed.ts`) + supervisor
+  `tick-stalled` alert (stale > 600s OR never, while daemon alive). NB: the "no
+  timestamps" half of the original F4 was already satisfied — `_log()` timestamps
+  every decision line (local time + `%z`); the archaeology guesswork came from the
+  abandoned legacy log. The real gap fixed here is the tick-liveness alert.
+- **F5** — `_reconcile_live_email` leaves state UNTOUCHED when the changed
+  credential's account is unresolvable (was pinning the new fp onto the old email →
+  permanent silent mislabel).
+
+**TESTS:** 13 new in `test_oauth_rotator.py` (incl. the incident replay) + 6 new in
+`test_oauth_supervisor.py`. Full oauth suite **331/331 green**, ruff clean on all
+five touched files. No mocks; keychain untouched (seam-monkeypatched isolation).
+
+**NEXT ACTION (owner: orchestrator/MANAGER — the worker was forbidden to do these):**
+publish the janitor (`scripts/publish.py`), then restart the global daemon so the
+running tick picks up the new rotator.py. Until the daemon restarts, the live
+daemon still runs the pre-fix code (the 2026-07-08 band-aid holds it correct for
+now, but the blind spot returns on the next user `/login`).
+
+---
 
 **INCIDENT (2026-07-08 ~21:20, USER-reported):** the rotator failed to rotate at
 window exhaustion; the user was locked out until the 22:10 window reset and had to
