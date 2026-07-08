@@ -27,8 +27,11 @@
 # function for the exact predicate + its documented residual), and HARVEST has the
 # skill's own step-1 buffer scan (un-mirrored raw notes via the watermark ledger —
 # unblocked 2026-07-08 once the coexistence-mirror model shipped in v0.33.0 and its
-# predicate stabilized). CONFLICT is genuinely SEMANTIC (contradictory-fact
-# discovery) and stays agent-discovered.
+# predicate stabilized). CONFLICT's *discovery* is genuinely SEMANTIC — but that is
+# the librarian detector's job; the conflict PASS itself consumes the librarian's
+# `### Conflict candidates` section ("Empty/absent → stop" is the skill's own
+# precondition), so its due-ness IS mechanically precheckable (see
+# conflict_has_work). With that, every one of the six chores is gated.
 #
 # CONSOLIDATE's precheck is STRUCTURAL-ONLY, not a full content gate. A merge is
 # governed by `memory_edit_verify.is_legal_merge`, whose THREE refusal grounds are
@@ -250,6 +253,50 @@ def atomize_has_work(root: Path) -> bool:
 # Kept as a module constant so the precheck and any future caller share one list.
 _HARVEST_EXCLUDED_NAMES = frozenset({"MEMORY.md", "memory-index.md", "memory-reorg-proposed.md"})
 
+# The librarian-written section heading + empty-sentinel the conflict skill reads
+# (memory-librarian.py `_render_scope_section` writes both — writer/reader parity).
+_CONFLICT_SECTION_HEADING = "### Conflict candidates"
+_NO_CANDIDATES_SENTINEL = "- (none)"
+
+
+def conflict_has_work(root: Path) -> bool:
+    """True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
+    conflict candidate (TRDD-3XS3PDCF follow-up — the last precheckable chore).
+
+    The conflict PASS is not self-discovering: its sole candidate source is the
+    librarian's proposal file — the skill's own precondition 3 reads the
+    `### Conflict candidates` section and mandates "Empty/absent → stop". So the
+    pass's due-ness is mechanically checkable even though conflict DISCOVERY is
+    semantic (the librarian detector does that for free on the heartbeat):
+
+    - file ABSENT → the skill would stop → provably idle → False.
+    - only `- (none)` sentinel bullets (the librarian's empty marker) → False.
+    - ANY other `- ` bullet inside a Conflict-candidates section → True (dispatch;
+      the agent still applies its own scope/legality judgment per pair).
+    - file present but UNREADABLE → True (fail-open — not provably idle).
+
+    Live evidence: a heartbeat conflict pass on 2026-07-08 abstained on the empty
+    section at 260,931 tokens — the same no-op class as the other gates."""
+    proposal = root / "memory-reorg-proposed.md"
+    if not proposal.is_file():
+        return False  # "Empty/absent → stop" — absence is the skill's own idle case
+    try:
+        text = proposal.read_text(encoding="utf-8")
+    except OSError:
+        return True  # present but unreadable → FAIL-OPEN (libs audit L-11)
+    in_section = False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s == _CONFLICT_SECTION_HEADING:
+            in_section = True
+            continue
+        if in_section and s.startswith("#"):
+            in_section = False  # next heading ends the section (any level)
+            continue
+        if in_section and s.startswith("- ") and s != _NO_CANDIDATES_SENTINEL:
+            return True  # a real surfaced candidate pair
+    return False
+
 
 def harvest_has_work(scope: str, root: Path) -> bool:
     """True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
@@ -318,6 +365,10 @@ def content_has_work(
         if scope is None:
             return True
         return harvest_has_work(scope, root)
-    # conflict: semantic (contradictory-fact discovery), agent-discovered.
+    if intervention == "conflict":
+        # The pass consumes the librarian's surfaced candidates ("Empty/absent →
+        # stop" is the skill's own precondition); discovery stays semantic and
+        # stays the librarian's job.
+        return conflict_has_work(root)
     # Unknown chores: fail-open by default.
     return True

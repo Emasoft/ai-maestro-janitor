@@ -225,6 +225,10 @@ def test_due_emits_the_right_bare_marker(fixture, intervention):
         # harvest now also requires real work — an un-mirrored raw buffer note
         # (TRDD-3XS3PDCF follow-up, unblocked 2026-07-08).
         _write_raw_note(fixture["local"])
+    elif intervention == "conflict":
+        # conflict now also requires real work — a surfaced candidate in the
+        # librarian's proposal file (TRDD-3XS3PDCF follow-up).
+        _write_conflict_proposal(fixture["local"])
 
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     # Exactly one non-empty line, and it is the bare marker (no trailing text).
@@ -242,6 +246,13 @@ def test_only_one_marker_per_fire_when_several_due(fixture):
         split_per_day=1000.0, consolidation_per_day=1000.0, conflict_per_day=1000.0,
         repair_per_day=1000.0, atomize_per_day=1000.0, harvest_per_day=1000.0,
     )
+    # Every chore is content-precheck-gated now, so seed REAL work for several
+    # chores at once (an over-cap page = split work; a raw note = harvest work;
+    # a surfaced candidate = conflict work) — the one-marker rule must hold even
+    # with multiple chores both due AND having work.
+    _write_oversized_page(fixture["local"])
+    _write_raw_note(fixture["local"])
+    _write_conflict_proposal(fixture["local"])
     out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
     lines = [ln for ln in out.splitlines() if ln.strip()]
     assert len(lines) == 1, out
@@ -688,6 +699,53 @@ def test_harvest_not_stamped_when_suppressed_then_fires_when_raw_note_appears(fi
     second = _run(env)
     lines = [ln for ln in second.splitlines() if ln.strip()]
     assert lines == ["[janitor-memory-harvest]"], second
+
+
+def _conflict_only(settings_dir: Path) -> None:
+    """Enable ONLY conflict (high rate, always due) so its surfaced-candidates
+    precheck is what's under test (TRDD-3XS3PDCF follow-up)."""
+    _write_settings(
+        settings_dir,
+        conflict_per_day=1000.0, split_per_day=0.0, harvest_per_day=0.0,
+        consolidation_per_day=0.0, repair_per_day=0.0, atomize_per_day=0.0,
+    )
+
+
+def _write_conflict_proposal(memdir: Path) -> Path:
+    """A librarian-shaped proposal file with ONE real conflict candidate."""
+    memdir.mkdir(parents=True, exist_ok=True)
+    p = memdir / "memory-reorg-proposed.md"
+    p.write_text(
+        "## LOCAL scope\n\n### Aggregation candidates\n\n- (none)\n\n"
+        "### Conflict candidates\n\n- topic `timeout`: old-page vs new-page\n\n"
+        "### Page shape\n\n- (none)\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def test_conflict_suppressed_when_no_surfaced_candidates(fixture):
+    """conflict is cadence-due but the librarian surfaced nothing (no proposal
+    file) -> the candidates precheck suppresses the marker (the live 260,931-token
+    no-op of 2026-07-08)."""
+    _conflict_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    out = _run(_env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"]))
+    assert out.strip() == "", out
+
+
+def test_conflict_not_stamped_when_suppressed_then_fires_when_candidate_appears(fixture):
+    """Option A for conflict: the suppressed fire left the cadence slot unused, so
+    a surfaced candidate appearing later emits immediately."""
+    _conflict_only(fixture["settings"])
+    _write_curated_page(fixture["local"], marker=True)
+    env = _env(fixture["home"], fixture["project"], fixture["gstate"], fixture["settings"])
+    first = _run(env)
+    assert first.strip() == "", first
+    _write_conflict_proposal(fixture["local"])
+    second = _run(env)
+    lines = [ln for ln in second.splitlines() if ln.strip()]
+    assert lines == ["[janitor-memory-conflict]"], second
 
 
 # --------------------------------------------------------------------------- #

@@ -107,16 +107,14 @@ def test_content_has_work_split_fail_open_on_nonpositive_cap(tmp_path):
 
 
 def test_content_has_work_unprechecked_chores_fail_open(tmp_path):
-    """Every chore WITHOUT a cheap exact precheck returns True (fail-open) so the
-    scheduler keeps its existing cadence-only behavior — harvest stays a follow-up
-    (BLOCKED on the coexistence-model flux, TRDD-ab232dbd #231/#232); conflict is
-    semantic + agent-discovered. (consolidate/repair/atomize are NO LONGER in this
-    set — they now have structural prechecks: TRDD-8UD3Q7K5 + TRDD-3XS3PDCF.)"""
-    for chore in ("harvest", "conflict"):
-        assert mcp.content_has_work(chore, tmp_path, split_max_bytes=_CAP) is True
-        # ...and still True with content present (they are never suppressed here).
-        _page(tmp_path, f"{chore}.md", 100)
-        assert mcp.content_has_work(chore, tmp_path, split_max_bytes=_CAP) is True
+    """A chore whose precheck cannot determine its inputs returns True (fail-open)
+    so the scheduler keeps its cadence-only behavior. Since 2026-07-08 EVERY chore
+    has a gate (harvest + conflict were the last), so the residual fail-open cases
+    are: harvest WITHOUT its scope kwarg (the watermark ledger is scope-keyed) and
+    any unknown chore name (the test below)."""
+    _page(tmp_path, "raw-shaped.md", 100)  # a note that is provably idle for neither
+    assert mcp.content_has_work("harvest", tmp_path, split_max_bytes=_CAP) is True
+    assert mcp.content_has_work("harvest", tmp_path, split_max_bytes=_CAP, scope=None) is True
 
 
 def test_content_has_work_unknown_intervention_fails_open(tmp_path):
@@ -495,3 +493,69 @@ def test_content_has_work_harvest_delegates_with_scope(tmp_path, monkeypatch):
     assert mcp.content_has_work("harvest", tmp_path, split_max_bytes=_CAP, scope="LOCAL") is False
     _curated(tmp_path, "raw.md", tier=None, type_="reference")
     assert mcp.content_has_work("harvest", tmp_path, split_max_bytes=_CAP, scope="LOCAL") is True
+
+
+# --------------------------------------------------------------------------- #
+# conflict_has_work — the librarian's surfaced candidates ("Empty/absent → stop"
+# is the skill's own precondition; TRDD-3XS3PDCF follow-up)
+# --------------------------------------------------------------------------- #
+
+def _proposal(d: Path, conflict_lines: list[str]) -> Path:
+    """Write a librarian-shaped memory-reorg-proposed.md whose Conflict-candidates
+    section holds exactly `conflict_lines` (the librarian's own render shape)."""
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "memory-reorg-proposed.md"
+    body = [
+        "## LOCAL scope", "",
+        "### Aggregation candidates", "",
+        "- topic `x` (2 notes): a.md, b.md",  # a bullet OUTSIDE the conflict section
+        "", "### Conflict candidates", "",
+        *conflict_lines,
+        "", "### Page shape", "", "- (none)", "",
+    ]
+    p.write_text("\n".join(body) + "\n", encoding="utf-8")
+    return p
+
+
+def test_conflict_has_work_true_for_real_candidate(tmp_path):
+    """A surfaced `- topic ...: a vs b` pair -> the pass has work."""
+    _proposal(tmp_path, ["- topic `timeout`: widget-timeout-old vs widget-timeout-new"])
+    assert mcp.conflict_has_work(tmp_path) is True
+
+
+def test_conflict_has_work_false_for_none_sentinel(tmp_path):
+    """The librarian's `- (none)` empty marker is NOT a candidate (the exact
+    corpus shape of the live 260,931-token no-op of 2026-07-08)."""
+    _proposal(tmp_path, ["- (none)"])
+    assert mcp.conflict_has_work(tmp_path) is False
+
+
+def test_conflict_has_work_false_when_proposal_absent(tmp_path):
+    """No memory-reorg-proposed.md -> the skill's own 'absent → stop' idle case."""
+    assert mcp.conflict_has_work(tmp_path) is False
+
+
+def test_conflict_has_work_ignores_bullets_outside_the_section(tmp_path):
+    """An aggregation/page-shape bullet must never count as a conflict candidate —
+    only bullets INSIDE a Conflict-candidates section (any heading ends it)."""
+    _proposal(tmp_path, ["- (none)"])  # helper already writes a non-conflict bullet
+    assert mcp.conflict_has_work(tmp_path) is False
+
+
+def test_conflict_has_work_unreadable_proposal_fails_open(tmp_path):
+    """A PRESENT but unreadable proposal is not provably idle -> True (L-11)."""
+    if os.geteuid() == 0:
+        pytest.skip("permission bits do not bind root")
+    p = _proposal(tmp_path, ["- (none)"])
+    p.chmod(0)
+    try:
+        assert mcp.conflict_has_work(tmp_path) is True
+    finally:
+        p.chmod(0o644)
+
+
+def test_content_has_work_conflict_delegates(tmp_path):
+    """conflict routes through conflict_has_work (False then True round-trip)."""
+    assert mcp.content_has_work("conflict", tmp_path, split_max_bytes=_CAP) is False
+    _proposal(tmp_path, ["- topic `t`: a vs b"])
+    assert mcp.content_has_work("conflict", tmp_path, split_max_bytes=_CAP) is True
