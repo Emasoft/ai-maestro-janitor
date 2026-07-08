@@ -18,13 +18,60 @@ dir is never read or written.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import user_mem_lib  # noqa: E402
+
+# The in-tree memgrep crate. The e2e search tests MUST run the binary built from
+# THIS tree — F13 changed the find CLI contract (query on stdin via the `-`
+# sentinel), so a stale PATH/cargo-bin install would fail them; crate build
+# FIRST, PATH only as a last resort (the inverse of the recall-only resolver in
+# test_autorecall_hook.py, where the CLI surface is stable).
+_MEMGREP_CRATE = _PROJECT_ROOT / "scripts" / "memgrep"
+
+
+def _find_or_build_memgrep() -> str | None:
+    """A `memgrep` matching THIS tree's sources: prebuilt target/ → cargo build → PATH."""
+    for rel in ("target/release/memgrep", "target/debug/memgrep"):
+        cand = _MEMGREP_CRATE / rel
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    cargo = shutil.which("cargo")
+    if cargo:
+        try:
+            subprocess.run(
+                [cargo, "build", "--release", "--manifest-path", str(_MEMGREP_CRATE / "Cargo.toml")],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            pass
+        built = _MEMGREP_CRATE / "target" / "release" / "memgrep"
+        if built.is_file():
+            return str(built)
+    return shutil.which("memgrep")
+
+
+_MEMGREP = _find_or_build_memgrep()
+_needs_memgrep = pytest.mark.skipif(_MEMGREP is None, reason="memgrep binary unavailable and cargo build failed")
+
+
+@pytest.fixture
+def memgrep_env(monkeypatch):
+    """Point find_memgrep's env override at the tree-matching binary for e2e tests."""
+    monkeypatch.setenv("MEMGREP_BIN", _MEMGREP or "")
+    return _MEMGREP
 
 # --------------------------------------------------------------------------
 # numbering: immutable, monotonic, never-reused
@@ -276,11 +323,22 @@ def test_parse_command_newline_separator_is_accepted():
 
 
 def test_parse_command_rejects_lookalikes():
-    """A longer lookalike is NOT misclassified (anchored: exact token or token+space/newline only)."""
+    """A longer lookalike is NOT misclassified (exact first-token equality)."""
     assert user_mem_lib.parse_command("/to-user-memory please") == (None, "")
     assert user_mem_lib.parse_command("/janitor-memory-user-adder x") == (None, "")
     assert user_mem_lib.parse_command("not a command at all") == (None, "")
     assert user_mem_lib.parse_command("") == (None, "")
+
+
+def test_parse_command_accepts_any_whitespace_separator():
+    """F12 (wikimem audit): tab / exotic whitespace after the command must STILL be
+    recognised — the old space/newline-only separator check let `/to-user-mem\\tsecret`
+    fall through as a normal prompt, leaking the private text to the model."""
+    assert user_mem_lib.parse_command("/to-user-mem\tmy secret") == ("add", "my secret")
+    assert user_mem_lib.parse_command("/janitor-memory-user-add\t remember") == ("add", "remember")
+    assert user_mem_lib.parse_command("/janitor-memory-user-search\v+q") == ("search", "+q")  # \v (vertical tab) is exotic whitespace too — split() handles it
+    assert user_mem_lib.parse_command("/janitor-memory-user-search" + "+q") == (None, "")  # truly GLUED (no whitespace) = different token, a lookalike, not ours
+    assert user_mem_lib.parse_command("/share-user-mem\r\n7") == ("share", "7")
 
 
 def test_command_prefixes_cover_all_six_forms():
@@ -309,34 +367,37 @@ def test_previous_user_message_skips_new_command_name(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# search: routes to `memgrep find <query> <dir> --use-index`
+# search: routes to `memgrep find - <dir> --use-index` (query on STDIN — F13)
 # --------------------------------------------------------------------------
 
 
 def test_build_search_argv_routes_to_memgrep_find(tmp_path):
-    """build_search_argv produces `memgrep find <query> <user-mem-dir> --use-index` (only the user-mem dir)."""
+    """build_search_argv produces `memgrep find - <user-mem-dir> --use-index` (query NEVER on argv — F13)."""
     d = tmp_path / "user-mem"
-    argv = user_mem_lib.build_search_argv("+keep -drop optional", d, memgrep="memgrep")
+    argv = user_mem_lib.build_search_argv(d, memgrep="memgrep")
     assert argv[0] == "memgrep"
     assert argv[1] == "find"
-    assert argv[2] == "+keep -drop optional"  # the whole query is ONE argv element (phrases/operators preserved)
+    assert argv[2] == "-"  # the stdin sentinel — the query itself travels on stdin
     assert str(d) in argv
     assert "--use-index" in argv
 
 
-def test_build_search_argv_preserves_quoted_phrase(tmp_path):
-    """A quoted-phrase query is passed through verbatim as a single argv element for memgrep's DSL."""
+def test_build_search_argv_never_carries_query_text(tmp_path):
+    """F13 (wikimem audit): no query material may appear anywhere on the argv —
+    argv is visible to `ps`, and this is the PRIVATE user-mem store."""
     d = tmp_path / "user-mem"
-    q = '+"logistic regression failure" -old'
-    argv = user_mem_lib.build_search_argv(q, d, memgrep="memgrep")
-    assert q in argv
+    argv = user_mem_lib.build_search_argv(d, memgrep="memgrep")
+    joined = " ".join(argv)
+    # The argv is fully static apart from the store path and --top value.
+    assert "keychain" not in joined and "secret" not in joined
+    assert argv.count("-") == 1
 
 
 def test_search_is_scoped_to_user_mem_dir_only(tmp_path):
     """The search argv references ONLY the user-mem dir — never the agent corpus (no leakage across stores)."""
     user_dir = tmp_path / "memory" / "user-mem"
     agent_dir = tmp_path / "memory"
-    argv = user_mem_lib.build_search_argv("anything", user_dir, memgrep="memgrep")
+    argv = user_mem_lib.build_search_argv(user_dir, memgrep="memgrep")
     assert str(user_dir) in argv
     # The agent corpus path must not appear as a search root.
     assert str(agent_dir) not in [a for a in argv if a != str(user_dir)]
@@ -347,8 +408,9 @@ def test_search_is_scoped_to_user_mem_dir_only(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_search_results_are_prefixed_with_immutable_number(tmp_path):
-    """Live search via memgrep returns hits annotated with each memory's immutable number."""
+@_needs_memgrep
+def test_search_results_are_prefixed_with_immutable_number(tmp_path, memgrep_env):
+    """Live search via memgrep (query on STDIN — F13) returns hits annotated with each memory's immutable number."""
     store = user_mem_lib.UserMemStore(tmp_path / "user-mem")
     store.save("the deployment script needs a keychain check")  # 1
     store.save("unrelated note about coffee")  # 2
@@ -364,7 +426,8 @@ def test_search_results_are_prefixed_with_immutable_number(tmp_path):
         assert r.number >= 1
 
 
-def test_search_no_match_returns_empty(tmp_path):
+@_needs_memgrep
+def test_search_no_match_returns_empty(tmp_path, memgrep_env):
     """A query matching nothing returns an empty result list (not an error)."""
     store = user_mem_lib.UserMemStore(tmp_path / "user-mem")
     store.save("alpha beta gamma")

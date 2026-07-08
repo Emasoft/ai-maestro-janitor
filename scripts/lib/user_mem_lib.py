@@ -278,12 +278,15 @@ class UserMemStore:
         """
         if not self.dir.is_dir():
             return []
-        argv = build_search_argv(query, self.dir, memgrep=memgrep, top=top)
+        argv = build_search_argv(self.dir, memgrep=memgrep, top=top)
         try:
             proc = subprocess.run(
                 argv,
                 capture_output=True,
                 text=True,
+                # F13 (wikimem audit): the private query travels on STDIN (the
+                # argv carries the `-` sentinel) so it never shows up in `ps`.
+                input=query,
                 # F10 (wikimem audit 2026-07-07): must be SHORTER than the hook's
                 # own hooks.json timeout — if the harness SIGKILLs the whole hook
                 # first, the timed-out UserPromptSubmit is NON-blocking and the
@@ -349,16 +352,19 @@ def _split_hit_line(line: str) -> tuple[Optional[str], str]:
 # --- argv builder (kept module-level so a hook/test can assert routing) -----
 
 
-def build_search_argv(query: str, store_dir: Path, *, memgrep: Optional[str] = None, top: int = 50) -> list[str]:
-    """Build the `memgrep find <query> <store_dir> --use-index --top <top>` argv.
+def build_search_argv(store_dir: Path, *, memgrep: Optional[str] = None, top: int = 50) -> list[str]:
+    """Build the `memgrep find - <store_dir> --use-index --top <top>` argv.
 
-    The whole `query` is passed as ONE argv element so memgrep's own parser
-    handles the +/- operators, wildcards and quoted phrases (we do NOT split or
-    pre-interpret it — the DSL lives entirely in the Rust crate). `store_dir` is
-    the SOLE search root, which is what scopes the search to user-mem only.
+    F13 (wikimem audit): the query is NEVER placed on argv — argv is visible to
+    `ps` for the search's duration, and this is the PRIVATE user-mem store. The
+    literal `-` tells memgrep to read the query from STDIN (the caller pipes it
+    via `subprocess.run(..., input=query)`); memgrep's own parser then handles
+    the +/- operators, wildcards and quoted phrases (the DSL lives entirely in
+    the Rust crate). `store_dir` is the SOLE search root, which is what scopes
+    the search to user-mem only.
     """
     binary = memgrep or os.environ.get("MEMGREP_BIN") or "memgrep"
-    return [binary, "find", query, str(store_dir), "--use-index", "--top", str(top)]
+    return [binary, "find", "-", str(store_dir), "--use-index", "--top", str(top)]
 
 
 # --- transcript: recover the previous user message (bare /to-user-mem) ------
@@ -473,24 +479,27 @@ def parse_command(prompt: str) -> tuple[Optional[str], str]:
     names AND the three legacy `/…-user-mem` aliases map to (so the hook
     dispatch keys on the canonical id regardless of which slash form was typed),
     or None if the prompt is not one of ours. `argstring` is the trimmed
-    remainder after the command word. The match is anchored at the start and
-    requires either end-of-string or a following space/newline, so a longer
+    remainder after the command word. The command word is the FIRST
+    whitespace-delimited token, compared by EXACT equality — so a longer
     lookalike (e.g. `/to-user-memory`, `/janitor-memory-user-adder`) is NOT
-    misclassified as one of ours.
+    misclassified as one of ours, while ANY whitespace separator is accepted.
     """
     if not prompt:
         return None, ""
     stripped = prompt.strip()
-    # Longest token first so a name that is a prefix of another can never shadow
-    # the longer one (defensive — the current set has no such overlap, but this
-    # keeps the anchoring correct if names are ever added).
-    for token in sorted(_COMMAND_ALIASES, key=len, reverse=True):
-        canonical = _COMMAND_ALIASES[token]
-        if stripped == token:
-            return canonical, ""
-        if stripped.startswith(token + " ") or stripped.startswith(token + "\n"):
-            return canonical, stripped[len(token):].strip()
-    return None, ""
+    # F12 (wikimem audit): token EQUALITY on the first whitespace-delimited
+    # word, not prefix+space/newline checks. The old separator check accepted
+    # only " " / "\n" after the command, so `/to-user-mem\tsecret` (tab — or
+    # any exotic whitespace) fell through as "not ours" and the PRIVATE text
+    # reached the model. str.split() delimits on ALL whitespace, and an exact
+    # dict lookup on the whole token cannot be shadowed by a lookalike.
+    parts = stripped.split(maxsplit=1)
+    if not parts:
+        return None, ""
+    canonical = _COMMAND_ALIASES.get(parts[0])
+    if canonical is None:
+        return None, ""
+    return canonical, parts[1].strip() if len(parts) > 1 else ""
 
 
 def find_memgrep() -> Optional[str]:

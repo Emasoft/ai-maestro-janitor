@@ -2131,6 +2131,7 @@ struct FindArgs {
     /// spaces and may itself be `+`/`-` prefixed. A `+`/`-` INSIDE a token is literal (so `pro*-debug*`
     /// is ONE wildcard term). QUOTE the whole query in the shell. `allow_hyphen_values` so a query that
     /// STARTS with a `-exclude` term (e.g. `-tables`) is taken as the query value, not a CLI flag.
+    /// A literal `-` reads the query from STDIN (keeps a private query off the process table — F13).
     #[arg(allow_hyphen_values = true)]
     query: String,
     /// Memory dir(s) to search (default: current dir).
@@ -2329,7 +2330,19 @@ fn find_only_notes(
 /// results equal the walk) and composes with `--sort`/`--since`/`--until`/`--with-notes` like recall.
 pub fn cmd_find_cli(args: &[String]) -> Result<()> {
     let a = FindArgs::parse_from(std::iter::once("find".to_string()).chain(args.iter().cloned()));
-    let q = query_dsl::parse(&a.query)?;
+    // F13 (wikimem audit): a literal `-` query means "read the query from STDIN".
+    // A PRIVATE query (the user-mem store search) on argv is visible to `ps` for
+    // the search's duration; stdin keeps it off the process table. `-` is safe as
+    // the sentinel: bare `-` is not a meaningful DSL query (an empty exclude).
+    let query_text = if a.query == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        buf.trim().to_string()
+    } else {
+        a.query.clone()
+    };
+    let q = query_dsl::parse(&query_text)?;
     if q.is_empty() {
         anyhow::bail!(
             "find needs at least one query term (a word, a wildcard like `pro*`, or a \"quoted phrase\")"
