@@ -14,6 +14,7 @@ has the runnable steps.
 - Worked walkthrough
 - Failure-path walkthrough
 - Bounds & safety recap
+- Steps 6-9 — the executable sequence (moved from the SKILL body)
 
 ## The two-phase transaction contract (`scripts/memory_txn_cli.py`)
 
@@ -193,3 +194,76 @@ verify failures: dropped/reworded lesson(s)` for a human.
   stale-hash guard (abort) — you never overwrite a just-written fact.
 - Crash-resumable: `resume <scope_root>` (next heartbeat) heals a half-applied
   swap; the completed `txn_id` is the idempotency key.
+
+## Steps 6-9 — the executable sequence (moved from the SKILL body)
+
+The exact command sequence for the transaction half of the merge. Moved here
+verbatim from the SKILL body (TRDD-82OP4EN9 token-budget move); the body keeps
+only the invariants.
+
+### 6. Open the transaction (copies only — never the live tree)
+
+The survivor keeps A's slug by convention (fewest inbound redirects). Pass **both
+sources** to `begin`; you'll overwrite A's staged copy with the merged page and
+delete B's staged copy:
+
+```bash
+out=$(uv run "$CLI" begin "$MEMDIR" merge "<A-rel-path>" "<B-rel-path>")
+TXN=$(echo "$out" | sed -n 's/^txn_id=//p')
+STAGING=$(echo "$out" | sed -n 's/^staging=//p')
+# Plus the backlink-holder pages from step 5 — copy each into staging so you can
+# repoint its [[A]]/[[B]] to [[C]] as part of THIS txn:
+for holder in <holder-rel-paths...>; do mkdir -p "$STAGING/$(dirname "$holder")"; cp "$MEMDIR/$holder" "$STAGING/$holder"; done  # mkdir -p: a nested wikimem/ holder needs its staging parent created first (L6 — begin only creates parents for SOURCES)
+```
+
+Now edit **only files under `$STAGING`**:
+
+- **Overwrite `$STAGING/<A-rel-path>`** with the merged page `C` (rules below).
+- **Delete `$STAGING/<B-rel-path>`** (`rm` — this becomes the source-removal).
+- **In each holder copy under `$STAGING`,** replace every `[[B]]` (and any
+  `[[A]]` that should now read `[[C]]`) with the survivor's slug. (If the survivor
+  keeps A's slug, only `[[B]]`→`[[A]]` redirects are needed; holders already
+  linking `[[A]]` are correct.)
+
+### 7. Build the merged page `C`
+
+`verify_merge` (at `commit --op merge`) machine-checks lesson preservation, dedup,
+and ocd/lmd — FAILS on any breach. Body-fact preservation and the opening lead are
+YOUR responsibility; the verifier does not enforce them. Key constraints: every
+`[^N]` lesson from both sources survives byte-identical; `ocd = min(A.ocd, B.ocd)`,
+`lmd = today`; no duplicate content lines; open with a one-sentence lead; no
+`[[link]]` to a retired slug; merge all `## See also` / `## Governed by` /
+`## Applies to` edges (deduped); keep the survivor's slug in `name:`.
+
+See [merge-page-rules](merge-page-rules.md) for the full rule breakdown
+(what verify_merge enforces vs. what you must ensure, frontmatter shape).
+
+### 8. Commit — the CLI verifies and applies atomically
+
+```bash
+uv run "$CLI" commit "$MEMDIR" "$TXN" --op merge
+```
+
+`commit` reconstructs the write/delete set by diffing staging vs the recorded
+sources, runs `verify_merge` (lesson preservation, ocd/lmd, no-new-duplicates,
+no-dangling-refs across the WHOLE scope), and on PASS re-hashes the sources
+(stale-snapshot guard), takes the per-scope flock, and applies
+writes-before-deletes via `os.replace`. On PASS it prints
+`committed <txn> (merge): N write(s), M delete(s)` and exits 0 — **done**.
+
+### 9. EXIT / retry / rollback
+
+- **SUCCESS** = `commit` exited 0 (verify passed; LOCAL/USER applied on disk;
+  PROJECT, if enabled, staged-not-pushed). `memgrep reindex` if present (the index
+  is memgrep's — do NOT touch `MEMORY.md`). Report the one-line result.
+- **verify FAILED** (exit 1) — the CLI already **aborted** the txn and left the
+  live tree untouched. Read the printed reasons, fix C in a **fresh** transaction
+  (begin again), and retry. **Bounded retry ≤ 3.** After 3 failures, `uv run
+  "$CLI" abort "$MEMDIR" "$TXN"` (if a txn is still open), mutate NOTHING, and
+  surface a finding: `[janitor-memory] merge <A>+<B> abandoned after 3 verify
+  failures: <reasons>`.
+- **Lock contention / stale source** (the CLI prints `error:` / exits 2) — another
+  pass or a concurrent `/janitor-memory-write` is touching this scope. **Abstain**
+  this cycle (the next heartbeat retries); do not force it.
+- A half-applied crash is **self-healing**: the next heartbeat's
+  `uv run "$CLI" resume "$MEMDIR"` rolls forward or discards the interrupted txn.
