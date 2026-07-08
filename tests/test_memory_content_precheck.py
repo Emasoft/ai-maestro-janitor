@@ -209,7 +209,7 @@ def test_consolidate_has_work_finds_pair_across_subdirs(tmp_path):
     """The scan is recursive (iter_note_files rglob) — a pair split across the root
     and the curated wiki/ subdir still counts (both are real notes)."""
     _curated(tmp_path, "a.md", tier="component", type_="project")
-    _curated(tmp_path / "wiki", "b.md", tier="component", type_="project")
+    _curated(tmp_path / "wikimem", "b.md", tier="component", type_="project")
     assert mcp.consolidate_has_work(tmp_path) is True
 
 
@@ -271,7 +271,7 @@ def test_repair_has_work_false_on_well_formed_corpus(tmp_path):
     """Every page fully shaped (all required keys, valid tier, top-level dates,
     Notes section, no tier inversion) -> repair is provably idle."""
     _shaped(tmp_path, "a.md")
-    _shaped(tmp_path / "wiki", "b.md", tier="aspect")
+    _shaped(tmp_path / "wikimem", "b.md", tier="aspect")
     assert mcp.repair_has_work(tmp_path) is False
 
 
@@ -350,7 +350,7 @@ def test_atomize_has_work_false_when_every_curated_page_carries_a_marker(tmp_pat
     """The atomize skill skips any page with >=1 marker ('already atomized'), so
     an all-marked corpus is provably idle."""
     _shaped(tmp_path, "a.md", marker=True)
-    _shaped(tmp_path / "wiki", "b.md", marker=True)
+    _shaped(tmp_path / "wikimem", "b.md", marker=True)
     assert mcp.atomize_has_work(tmp_path) is False
 
 

@@ -282,7 +282,7 @@ def is_due(intervention: str, scope: str, root, now: int) -> bool:
 # harvest watermark store (TRDD-ab232dbd — the coexistence mirror's idempotency)
 #
 # The coexistence harvest MIRRORS each raw buffer note into a separate curated
-# `memory/wiki/` page and leaves the buffer 100% intact. Re-running it must NOT
+# `memory/wikimem/` page and leaves the buffer 100% intact. Re-running it must NOT
 # re-mirror an already-mirrored note (else duplicate wiki pages). The watermark is a
 # per-(scope, root) JSON map ``{note_name: content_sha256}`` of what has been
 # mirrored. Keyed by content hash, not just name, so an EDITED buffer note (new hash)

@@ -50,11 +50,11 @@ _USER_MEMORY_MIRROR_DIR_NAME = "ai-maestro-janitor-memory"
 
 # The CURATED-wiki sub-namespace within every scope. The coexistence model
 # (TRDD-ab232dbd, USER decision 2026-06-23): a scope's root ``memory/`` holds the
-# harness BUFFER (MEMORY.md + raw notes, harness-owned); ``memory/wiki/`` holds the
-# janitor's CURATED wiki pages. Harvest mirrors raw buffer notes into ``wiki/`` as
+# harness BUFFER (MEMORY.md + raw notes, harness-owned); ``memory/wikimem/`` holds the
+# janitor's CURATED wiki pages. Harvest mirrors raw buffer notes into ``wikimem/`` as
 # SEPARATE curated copies — it never modifies the buffer. memgrep recall recurses
 # the scope root, so it covers both halves with no change.
-WIKI_SUBDIR = "wiki"
+WIKI_SUBDIR = "wikimem"  # USER decision 2026-07-08: curated pages live in <scope_root>/wikimem/ (renamed from "wiki"; no legacy fallback)
 
 # Frontmatter keys the wikimem skills write but the harness ``# Memory`` directive
 # never does (it writes only ``name`` / ``description`` / ``metadata.type``).
@@ -317,6 +317,11 @@ def is_curated_wiki_page(text: str) -> bool:
     for ln in fm_lines:
         # key = text before the first ':' (after stripping indent + any '-' list
         # marker), so nested ``  node_type: memory`` and top-level ``tier:`` match.
+        # L-1 (wikimem audit): require a ':' — a bare list item ("  - tier") has NO
+        # key; without this a raw buffer note tagged `- tier` classified CURATED and
+        # harvest silently skipped mirroring it.
+        if ":" not in ln:
+            continue
         key = ln.split(":", 1)[0].strip().lstrip("-").strip()
         if key in _WIKIMEM_ONLY_FM_KEYS:
             return True

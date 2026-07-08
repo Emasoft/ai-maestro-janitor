@@ -212,7 +212,7 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
         with TemporaryDirectory() as h, TemporaryDirectory() as p:
             home, project = Path(h), Path(p)
             memdir = _build(home, project)
-            wiki = memdir / "wiki"
+            wiki = memdir / "wikimem"
             wiki.mkdir()
             # Malformed curated page: NO mandatory `## Notes and lessons learned`.
             (wiki / "badpage.md").write_text(
@@ -223,7 +223,7 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             out = _run(home, project)
             self.assertIn("[memory-librarian]", out)
             proposal = (memdir / PROPOSAL_NAME).read_text()
-            self.assertIn("wiki/badpage.md", proposal)
+            self.assertIn("wikimem/badpage.md", proposal)
 
     def test_wiki_conflict_pair_reads_real_bodies(self):
         """F20: the contradiction scan must read a NESTED note's real body — the
@@ -233,7 +233,7 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
         with TemporaryDirectory() as h, TemporaryDirectory() as p:
             home, project = Path(h), Path(p)
             memdir = _build(home, project)
-            wiki = memdir / "wiki"
+            wiki = memdir / "wikimem"
             wiki.mkdir()
             (wiki / "retry-cap-a.md").write_text(
                 _note("retry-cap-a", "widget retry cap value", ["retry"],
@@ -245,8 +245,8 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             self.assertIn("[memory-librarian]", out)
             self.assertIn("conflict", out)
             proposal = (memdir / PROPOSAL_NAME).read_text()
-            self.assertIn("wiki/retry-cap-a.md", proposal)
-            self.assertIn("wiki/retry-cap-b.md", proposal)
+            self.assertIn("wikimem/retry-cap-a.md", proposal)
+            self.assertIn("wikimem/retry-cap-b.md", proposal)
 
     def test_proposal_file_not_treated_as_a_note(self):
         """A pre-existing proposal file is never itself clustered/flagged."""

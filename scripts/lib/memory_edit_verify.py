@@ -290,7 +290,7 @@ def harvest_preservation_ok(
 #
 # The coexistence model REVERSES the stub-reduction: harvest no longer touches the
 # harness BUFFER (MEMORY.md + raw notes at the scope root). It MIRRORS each raw
-# buffer note into a SEPARATE curated wiki page under `memory/wiki/`. The invariant
+# buffer note into a SEPARATE curated wiki page under `memory/wikimem/`. The invariant
 # this proves is the OPPOSITE direction of harvest_preservation_ok: not "is every
 # MEMORY.md memory in the wiki before we stub MEMORY.md", but "is every RAW BUFFER
 # NOTE's content now present in the wiki" — with the buffer left 100% intact, so a

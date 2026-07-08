@@ -408,10 +408,10 @@ def _rel_token(path_token: str, memdir: Path) -> str:
 
     F20 (wikimem audit 2026-07-07): keying notes/links on BASENAMES collided the
     moment pages lived in subdirectories — and the coexistence harvest mirrors a
-    buffer note into `wiki/<same-name>.md`, so a basename key made the mirror and
+    buffer note into `wikimem/<same-name>.md`, so a basename key made the mirror and
     its buffer twin the SAME entry (the contradiction scan then read the wrong —
     or an empty — body via `memdir / basename`). The rel path is unique per note
-    and `memdir / rel` reads the right file. Handles both relative (`./wiki/x.md`)
+    and `memdir / rel` reads the right file. Handles both relative (`./wikimem/x.md`)
     and absolute tokens (memgrep echoes the root it was handed, which the
     librarian passes absolute)."""
     p = Path(path_token.strip())
@@ -445,7 +445,7 @@ def _parse_index(stdout: str, memdir: Path) -> dict[str, NoteMeta]:
     by topic-word overlap — the common real-world case.
 
     F20: keyed on the memdir-RELATIVE path (`_rel_token`), never the basename —
-    a nested `wiki/foo.md` used to flatten to `foo.md`, so `_read_note_texts`
+    a nested `wikimem/foo.md` used to flatten to `foo.md`, so `_read_note_texts`
     read the WRONG path (empty body for every wiki note in the contradiction
     scan) and a harvest mirror collided with its same-named buffer twin.
     """
@@ -493,7 +493,7 @@ def _parse_links(stdout: str, memdir: Path) -> set[frozenset[str]]:
     "already cross-linked" if EITHER direction appears (a single tangential
     link to the canonical page is enough to satisfy the wiki invariant).
     Keyed on memdir-relative paths so the pairs match `_parse_index`'s keys
-    for nested (`wiki/`) notes too.
+    for nested (`wikimem/`) notes too.
     """
     pairs: set[frozenset[str]] = set()
     for raw in stdout.splitlines():
@@ -888,13 +888,13 @@ def _collect_shape_findings(memdir: Path) -> list[str]:
     `memory_scopes.iter_note_files`, which excludes the non-note files
     (MEMORY.md, the proposals, the generated index) and never enters
     `user-mem/` / `.memgrep/` / `.maint-staging/`. Findings are labeled by the
-    memdir-relative path so nested `wiki/` pages are unambiguous. Sorted scan
+    memdir-relative path so nested `wikimem/` pages are unambiguous. Sorted scan
     order keeps the proposal/fingerprint stable. Capped at
     `_MAX_SHAPE_FINDINGS`. A note we cannot read is skipped (never crashes).
     """
     findings: list[str] = []
     # F20 (wikimem audit 2026-07-07): recurse via the SSOT scan — the top-level
-    # iterdir left every curated `wiki/` page (exactly what the coexistence
+    # iterdir left every curated `wikimem/` page (exactly what the coexistence
     # harvest produces) shape-unchecked forever. iter_note_files already excludes
     # user-mem/.memgrep/.maint-staging and the non-note files.
     for path in memory_scopes.iter_note_files(memdir):
@@ -1030,7 +1030,7 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     """
     report = ScopeReport(scope="")  # scope label is set by the caller
     # F20 (wikimem audit 2026-07-07): the has-note gate must RECURSE (SSOT scan)
-    # — a scope whose notes all live under `wiki/` (exactly what the coexistence
+    # — a scope whose notes all live under `wikimem/` (exactly what the coexistence
     # harvest produces) was skipped entirely by the old top-level iterdir.
     if not memory_scopes.iter_note_files(memdir):
         return report

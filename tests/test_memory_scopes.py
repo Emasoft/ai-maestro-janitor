@@ -166,7 +166,7 @@ def test_resolve_scope_dirs_includes_project_in_git_repo(tmp_path, monkeypatch):
 def test_resolve_wiki_dir_is_the_wiki_subnamespace(tmp_path):
     """The curated wiki lives at ``<scope_root>/wiki`` — the buffer at the root, the
     wiki one level down, so memgrep recall (which recurses the root) covers both."""
-    assert msc.resolve_wiki_dir(tmp_path / "memory") == tmp_path / "memory" / "wiki"
+    assert msc.resolve_wiki_dir(tmp_path / "memory") == tmp_path / "memory" / "wikimem"
     assert msc.resolve_wiki_dir(tmp_path / "memory").name == msc.WIKI_SUBDIR
 
 
@@ -263,9 +263,9 @@ def test_iter_note_files_is_recursive(tmp_path):
     """Notes in sub-dirs (e.g. the curated wiki/ sub-namespace) are included —
     iter_note_files recurses, matching every editor/librarian scan it replaces."""
     mem = tmp_path / "memory"
-    (mem / "wiki").mkdir(parents=True)
+    (mem / "wikimem").mkdir(parents=True)
     (mem / "root_note.md").write_text("root\n", encoding="utf-8")
-    (mem / "wiki" / "hub_frontend.md").write_text("curated\n", encoding="utf-8")
+    (mem / "wikimem" / "hub_frontend.md").write_text("curated\n", encoding="utf-8")
 
     got = {p.name for p in msc.iter_note_files(mem)}
     assert got == {"root_note.md", "hub_frontend.md"}
