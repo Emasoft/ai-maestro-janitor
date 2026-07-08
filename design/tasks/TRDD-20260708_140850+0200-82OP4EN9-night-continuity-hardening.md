@@ -1,7 +1,7 @@
 ---
 trdd-id: 82OP4EN9
 title: Night-continuity hardening — maintenance mode must guarantee unattended all-night work at minimum token cost
-column: dev
+column: published
 created: 2026-07-08T14:08:50+0200
 updated: 2026-07-08T14:52:00+0200
 current-owner: ai-maestro-janitor
@@ -41,8 +41,13 @@ no re-arm needed for protocol changes). SubagentStop has no agent_id in its
 documented payload → manifest removal is best-effort, the 7-day sweep + harmless
 over-listing is the guaranteed cleanup.
 
-**NEXT ACTION:** publish (publish.py) → plugin update → `/janitor-maintenance-mode`
-then `/janitor-arm` in the night-work project (USER-confirmed step). Minor hygiene
+**DONE 2026-07-08 15:20: published v0.33.0 (USER-approved), plugin updated
+0.31.0→0.33.0, maintenance flag set, heartbeat armed (356-char prompt, job in
+the janitor repo session). Caveat: CronCreate is session-only on this CC build
+("durable has no effect") — a session restart drops the cron; W2's SessionStart
+nudge (active after restart, heartbeat-armed-at.ts stamped) closes exactly that.
+This session still runs 0.31.0 HOOKS until restart, so the W1 manifest starts
+populating post-restart.** Minor hygiene
 follow-up: tests/test_session_start_rearm_guard.py lacks its own sys.path inserts
 (fails solo, passes in suite — pre-existing).
 
