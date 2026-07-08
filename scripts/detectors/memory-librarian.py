@@ -1217,6 +1217,20 @@ def _candidate_fingerprint(per_scope: list[ScopeReport]) -> str:
 
 
 def main() -> int:
+    # F3 (wikimem audit runtime): line 33 promises graceful no-op / never crashes
+    # the heartbeat, but nothing enforced it — same contract gap as
+    # memory-maintenance. The catch-all IS the contract: log, no stdout, exit 0.
+    try:
+        return _run()
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-open catch-all
+        try:
+            state.log_line("memory-librarian", f"unexpected error (fail-open no-op): {exc}")
+        except Exception:
+            pass
+        return 0
+
+
+def _run() -> int:
     state.init_state()
 
     # The three-scope roots that exist (LOCAL → PROJECT → USER, most-specific

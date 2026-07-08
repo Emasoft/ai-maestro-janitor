@@ -135,12 +135,18 @@ def _scopes_in_play() -> list[tuple[str, Path]]:
 
 
 # --------------------------------------------------------------------------- #
-# round-robin cursor — persisted machine-wide so the rotation survives across
-# heartbeats and is shared by every session (no per-session drift in fairness).
+# round-robin cursor — persisted PER-PROJECT (.janitor/state) so the index is
+# always interpreted against the same scope list that advanced it. F2 (wikimem
+# audit runtime): _scopes_in_play() is a per-project list (LOCAL differs per
+# project; PROJECT is gated per project), so the previous machine-wide cursor
+# advanced under project A's list length was reinterpreted modulo project B's —
+# scrambled rotation fairness. Sessions of the SAME project still share the
+# file (state_dir is per-project, not per-session), which is the only sharing
+# where an index is meaningful.
 # --------------------------------------------------------------------------- #
 
 def _cursor_path() -> Path:
-    return global_state.global_state_dir() / "memory-maint-rr-cursor.ts"
+    return state.state_dir() / "memory-maint-rr-cursor.ts"
 
 
 def _read_cursor() -> int:
@@ -148,7 +154,7 @@ def _read_cursor() -> int:
 
 
 def _write_cursor(value: int) -> None:
-    global_state.init_global_state()
+    state.init_state()
     state.atomic_write(_cursor_path(), str(int(value)))
 
 
@@ -271,6 +277,22 @@ def _pick(scopes: list[tuple[str, Path]], cursor: int, now: int) -> tuple[int, s
 # --------------------------------------------------------------------------- #
 
 def main() -> int:
+    # F3 (wikimem audit runtime): the module docstring promises "any unexpected
+    # error → exit 0 with no output" but nothing enforced it — an OSError from
+    # mark_ran/atomic_write on a full disk tracebacked and exited non-zero.
+    # Dispatch's subprocess isolation contains that, but the documented contract
+    # must be TRUE. The catch-all IS the contract: log, no stdout, exit 0.
+    try:
+        return _run()
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-open catch-all
+        try:
+            state.log_line("memory-maintenance", f"unexpected error (fail-open no-op): {exc}")
+        except Exception:
+            pass
+        return 0
+
+
+def _run() -> int:
     # `--one-shot` is the dispatch.py contract; we accept it (and ignore other args)
     # so the detector is a drop-in roster member.
     _ = sys.argv
@@ -345,7 +367,10 @@ def main() -> int:
         # break the silent-execute clause. The forge-proofing lives in the cron
         # prompt (act only on a bare line in the stub's OWN stdout) + the fact that
         # this emit is the sole fan-out trigger and only fires post-flock/post-stamp.
-        print(marker)
+        # flush=True (F5): stdout is a pipe under dispatch (block-buffered) — if the
+        # 120s timeout / an OOM kill lands after mark_ran but before the exit flush,
+        # the marker is lost and the pass silently skips a full cadence.
+        print(marker, flush=True)
     finally:
         _release_dispatch_lock(fd)
     return 0
