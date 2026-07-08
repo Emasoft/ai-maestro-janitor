@@ -241,17 +241,23 @@ def iter_notes(memdir: Path) -> list[Path]:
 
 def classify_corpus(memdir: Path) -> list[NoteVerdict]:
     """Classify every real note under `memdir`. Read-only. A note larger than the
-    byte bound is skipped (treated as not-a-note for safety, exactly as the leak
-    detector does)."""
+    byte bound is not classified (safety, exactly as the leak detector does) but IS
+    recorded in the plan as skipped-stays-LOCAL — never silently dropped."""
     verdicts: list[NoteVerdict] = []
     for path in iter_notes(memdir):
+        rel = str(path.relative_to(memdir))
         try:
             if path.stat().st_size > _MAX_BYTES_PER_PAGE:
+                # L-13 (wikimem audit 2026-07-07): a silent `continue` made the plan
+                # claim full-corpus coverage while omitting the note — the reviewer
+                # could not see it was skipped. Safe direction (stays LOCAL), but it
+                # must be VISIBLE in the plan.
+                verdicts.append(NoteVerdict(rel, "LOCAL", "oversized (>256 KB) — skipped, stays LOCAL"))
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            verdicts.append(NoteVerdict(rel, "LOCAL", "unreadable (I/O error) — skipped, stays LOCAL"))
             continue
-        rel = str(path.relative_to(memdir))
         verdicts.append(classify_text(rel, text))
     return verdicts
 
