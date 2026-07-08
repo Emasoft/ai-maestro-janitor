@@ -516,8 +516,23 @@ def _phase_paused() -> bool:
     return False
 
 
+def _sweep_old_files(root, suffixes: tuple[str, ...], cutoff: float) -> None:
+    """Unlink files directly under `root` whose name ends with one of `suffixes`
+    and whose mtime predates `cutoff`. Never recurses, never raises."""
+    if not root.is_dir():
+        return
+    for f in root.iterdir():
+        if not f.is_file() or not f.name.endswith(suffixes):
+            continue
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except (FileNotFoundError, OSError):
+            pass
+
+
 def _phase_log_retention() -> None:
-    """Bound .janitor/logs/ growth. Fires at most once per LOCAL day.
+    """Bound .janitor/logs/ + .janitor/state/ growth. Fires at most once per LOCAL day.
 
     Successive heartbeats inside the same day re-read the stamp and skip
     the cleanup; the cost per fire is one stat() + one string compare.
@@ -535,20 +550,28 @@ def _phase_log_retention() -> None:
     if prev == today:
         return
 
-    cutoff = time.time() - (days * 86400)
-    log_root = state.log_dir()
-    if log_root.is_dir():
-        for f in log_root.iterdir():
-            if not f.is_file():
-                continue
-            name = f.name
-            if not (name.endswith(".log") or name.endswith(".log.1")):
-                continue
-            try:
-                if f.stat().st_mtime < cutoff:
-                    f.unlink()
-            except (FileNotFoundError, OSError):
-                pass
+    _sweep_old_files(state.log_dir(), (".log", ".log.1"), time.time() - (days * 86400))
+
+    # F21 (wikimem audit): sweep dead per-session STATE files on the same daily
+    # gate. .janitor/state/ accumulates per-session seen-files (e.g. the
+    # memorize-nudge `memorize-nudge-session-<key>.txt` dedupe files),
+    # fingerprint keys, and cadence stamps for sessions/detectors that no longer
+    # exist — nothing ever pruned them (this phase cleaned only logs/). An
+    # mtime-age sweep is safe BECAUSE every in-use file is rewritten on use
+    # (fresh mtime): only files nothing touched for the whole window are dead.
+    # Deliberately limited to *.txt / *.ts — control FLAGS (*.flag, paused,
+    # keep-going, maintenance-mode) are NEVER swept: deleting a flag changes
+    # behavior, while deleting a stale stamp/seen-file only makes a detector due
+    # again or re-emits an old finding once (fail-toward-run).
+    state_days = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_STATE_RETENTION_DAYS"), 45)
+    if state_days > 0:
+        _sweep_old_files(state.state_dir(), (".txt", ".ts"), time.time() - (state_days * 86400))
+        # F2 residue: the pre-fix MACHINE-WIDE round-robin cursor is dead state
+        # now that the cursor is per-project — remove the orphan, best-effort.
+        try:
+            (gs.global_state_dir() / "memory-maint-rr-cursor.ts").unlink(missing_ok=True)
+        except OSError:
+            pass
     state.atomic_write(stamp, today)
 
 

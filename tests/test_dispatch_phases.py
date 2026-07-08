@@ -917,3 +917,65 @@ def test_main_compact_resume_short_circuits_before_keep_going_nudge(env_isolatio
     # F7: bare marker line, directive on line 2 (whole-line-only marker contract).
     assert out.startswith("[janitor-resume]\nContext was compacted"), f"compact resume must lead, got {out!r}"
     assert "keep-going mode" not in out, "the keep-going nudge must not also fire this turn"
+
+
+class TestStateRetentionSweep:
+    """F21 (wikimem audit): the daily retention phase also sweeps dead state files."""
+
+    def test_stale_txt_and_ts_files_are_swept_fresh_survive(self, env_isolation: dict) -> None:
+        """*.txt / *.ts older than the window are removed; recently-touched ones survive."""
+        dispatch = _import_dispatch()
+        import os as _os
+
+        import state
+
+        state.init_state()
+        sd = state.state_dir()
+        old = time.time() - 60 * 86400  # well past the 45-day default
+        stale_txt = sd / "memorize-nudge-session-deadbeef.txt"
+        stale_ts = sd / "last-run-some-retired-detector.ts"
+        fresh_txt = sd / "heartbeat-renew-seen.txt"
+        for f in (stale_txt, stale_ts, fresh_txt):
+            f.write_text("x", encoding="utf-8")
+        _os.utime(stale_txt, (old, old))
+        _os.utime(stale_ts, (old, old))
+
+        dispatch._phase_log_retention()
+
+        assert not stale_txt.exists(), "a 60-day-old per-session seen file must be swept"
+        assert not stale_ts.exists(), "a 60-day-old orphan cadence stamp must be swept"
+        assert fresh_txt.exists(), "a freshly-touched file must survive the sweep"
+
+    def test_control_flags_are_never_swept(self, env_isolation: dict) -> None:
+        """Flags change behavior — even ancient ones are NEVER deleted by the sweep."""
+        dispatch = _import_dispatch()
+        import os as _os
+
+        import state
+
+        state.init_state()
+        sd = state.state_dir()
+        old = time.time() - 365 * 86400
+        flag = sd / "rate-limited.flag"
+        paused = sd / "paused"
+        for f in (flag, paused):
+            f.write_text("", encoding="utf-8")
+            _os.utime(f, (old, old))
+
+        dispatch._phase_log_retention()
+
+        assert flag.exists(), "*.flag files must never be swept"
+        assert paused.exists(), "extensionless control files must never be swept"
+
+    def test_dead_global_rr_cursor_is_removed(self, env_isolation: dict) -> None:
+        """The pre-F2 machine-wide round-robin cursor orphan is GC'd from the global dir."""
+        dispatch = _import_dispatch()
+        import global_state as gs
+
+        gs.init_global_state()
+        orphan = gs.global_state_dir() / "memory-maint-rr-cursor.ts"
+        orphan.write_text("3", encoding="utf-8")
+
+        dispatch._phase_log_retention()
+
+        assert not orphan.exists(), "the dead machine-wide cursor must be GC'd"
