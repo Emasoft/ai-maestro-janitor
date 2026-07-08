@@ -18,9 +18,6 @@ dir is never read or written.
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -31,39 +28,11 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import user_mem_lib  # noqa: E402
 
-# The in-tree memgrep crate. The e2e search tests MUST run the binary built from
-# THIS tree — F13 changed the find CLI contract (query on stdin via the `-`
-# sentinel), so a stale PATH/cargo-bin install would fail them; crate build
-# FIRST, PATH only as a last resort (the inverse of the recall-only resolver in
-# test_autorecall_hook.py, where the CLI surface is stable).
-_MEMGREP_CRATE = _PROJECT_ROOT / "scripts" / "memgrep"
+# The e2e search tests MUST run the memgrep built from THIS tree — F13 changed
+# the find CLI contract (query on stdin via the `-` sentinel), so a stale
+# PATH/cargo-bin install would fail them. Shared resolver lives in conftest.
+from conftest import MEMGREP_BIN_PATH as _MEMGREP  # noqa: E402
 
-
-def _find_or_build_memgrep() -> str | None:
-    """A `memgrep` matching THIS tree's sources: prebuilt target/ → cargo build → PATH."""
-    for rel in ("target/release/memgrep", "target/debug/memgrep"):
-        cand = _MEMGREP_CRATE / rel
-        if cand.is_file() and os.access(cand, os.X_OK):
-            return str(cand)
-    cargo = shutil.which("cargo")
-    if cargo:
-        try:
-            subprocess.run(
-                [cargo, "build", "--release", "--manifest-path", str(_MEMGREP_CRATE / "Cargo.toml")],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-            pass
-        built = _MEMGREP_CRATE / "target" / "release" / "memgrep"
-        if built.is_file():
-            return str(built)
-    return shutil.which("memgrep")
-
-
-_MEMGREP = _find_or_build_memgrep()
 _needs_memgrep = pytest.mark.skipif(_MEMGREP is None, reason="memgrep binary unavailable and cargo build failed")
 
 

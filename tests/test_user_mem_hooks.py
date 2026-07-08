@@ -49,6 +49,13 @@ def _run_hook(payload: dict, env_extra: dict, project: Path, home: Path) -> tupl
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["CLAUDE_PROJECT_DIR"] = str(project)
+    # F13: the hook's search execs memgrep with the query on STDIN — point it at
+    # the TREE-BUILT binary (a stale installed one predates the '-' sentinel).
+    # Set BEFORE env_extra so "no memgrep" tests can still override it away.
+    from conftest import MEMGREP_BIN_PATH
+
+    if MEMGREP_BIN_PATH:
+        env["MEMGREP_BIN"] = MEMGREP_BIN_PATH
     env.update(env_extra)
     proc = subprocess.run(
         [sys.executable, str(_HOOK)],

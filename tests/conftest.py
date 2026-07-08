@@ -208,3 +208,43 @@ def _isolate_rotator_paths(request: pytest.FixtureRequest, monkeypatch: pytest.M
     root: Path = request.getfixturevalue("tmp_path")
     monkeypatch.setattr(rotator, "ROOT", root, raising=False)
     monkeypatch.setattr(rotator, "LOG_FILE", root / "rotator.log", raising=False)
+
+
+# ── Shared tree-built memgrep resolver (F13, wikimem audit) ─────────────────────────────
+#
+# The user-mem search e2e tests (lib AND hook) exec the real memgrep. F13 changed the
+# `find` CLI contract (a literal `-` query reads the query from STDIN), so a STALE
+# installed binary on PATH would fail them — the tests MUST run the binary built from
+# THIS tree: prebuilt target/ first, cargo build next, PATH only as a last resort.
+
+_MEMGREP_CRATE_DIR = Path(__file__).resolve().parent.parent / "scripts" / "memgrep"
+
+
+def find_or_build_memgrep() -> str | None:
+    """A `memgrep` matching THIS tree's sources, or None (callers then skip)."""
+    import subprocess as _subprocess
+
+    for rel in ("target/release/memgrep", "target/debug/memgrep"):
+        cand = _MEMGREP_CRATE_DIR / rel
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    cargo = shutil.which("cargo")
+    if cargo:
+        try:
+            _subprocess.run(
+                [cargo, "build", "--release", "--manifest-path", str(_MEMGREP_CRATE_DIR / "Cargo.toml")],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        except (_subprocess.CalledProcessError, _subprocess.TimeoutExpired, OSError):
+            pass
+        built = _MEMGREP_CRATE_DIR / "target" / "release" / "memgrep"
+        if built.is_file():
+            return str(built)
+    return shutil.which("memgrep")
+
+
+# Resolved once per session — importable by test modules (`from conftest import ...`).
+MEMGREP_BIN_PATH = find_or_build_memgrep()
