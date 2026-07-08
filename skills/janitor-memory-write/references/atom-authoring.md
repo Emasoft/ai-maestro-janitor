@@ -69,6 +69,11 @@ The widget retries 3× then fails.[^1][^2]
 [^2]: [[backoff-policy]]
 ```
 
+> The pooled `## Lessons Learned` / `## See also` headings above are the ATOM-pool
+> convention; the page must STILL carry the standing `## Notes and lessons learned`
+> section (mandatory even when empty — the write checklist, REPAIR, and the wikimem
+> model all enforce it). The pools coexist with it; they never replace it. (L8)
+
 `keywords:` is the only REQUIRED prop — it is the atom's recall surface (the
 question words, NOT the answer's jargon); `ocd`/`lmd`/`type` are optional (an atom
 without them inherits the page's). Author an optional **`desc:`** too — a one-line

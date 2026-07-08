@@ -49,19 +49,20 @@ across all three scopes' roots:
 ```bash
 # Compose the three scope roots (LOCAL / PROJECT / USER) — same as the recall protocol.
 LOCAL_MEM="$HOME/.claude/projects/$(pwd | sed 's#/#-#g')/memory"
-PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory"
+PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # || pwd: L4 — a non-git cwd otherwise expands to the filesystem-root path
 USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"
 ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS+=("$d"); done
 
 # (a) The floor — newest memory mtime tells you "changes since when". 0 = no memory yet.
 LAST_MEM_TS=0
 for d in "${ROOTS[@]}"; do
-  t=$(find "$d" -name '*.md' -not -name 'MEMORY.md' -exec stat -f %m {} + 2>/dev/null | sort -rn | head -1)
+  # L3: BSD stat first, GNU fallback per-file — the BSD-only form broke on Linux.
+  t=$(find "$d" -name '*.md' -not -name 'MEMORY.md' \( -exec stat -f %m {} \; -o -exec stat -c %Y {} \; \) 2>/dev/null | sort -rn | head -1)
   [ -n "$t" ] && [ "$t" -gt "$LAST_MEM_TS" ] && LAST_MEM_TS=$t
 done
 
 # (b) The surface — substantive commits since that floor + the working-tree diff.
-SINCE_ISO=$( [ "$LAST_MEM_TS" -gt 0 ] && date -r "$LAST_MEM_TS" +%Y-%m-%dT%H:%M:%S || echo "24 hours ago" )
+SINCE_ISO=$( [ "$LAST_MEM_TS" -gt 0 ] && { date -r "$LAST_MEM_TS" +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -d "@$LAST_MEM_TS" +%Y-%m-%dT%H:%M:%S; } || echo "24 hours ago" )  # L3: BSD date -r, GNU date -d fallback
 git log --since="$SINCE_ISO" --pretty='%h %s' --no-merges      # recent landed work
 git diff --stat                                                # uncommitted changes
 ```
@@ -149,7 +150,7 @@ For a code-change memory, attach its provenance so the superseded-memory WHY sta
 sourceable, not inferred: `commits:` (the SHA[s] the fact came from) and, when one
 exists, `trdd:` (the TRDD that designed it). Then commit the **code AND the
 memory together** (per `~/.claude/rules/commit-discipline.md` — commit often, WHY
-in the message + code comments, `TRDD-<8hex>` in the subject), so the
+in the message + code comments, `TRDD-<id8>` (8-char base36, A-Z0-9 — not hex) in the subject), so the
 `blame → commit → memory` chain is intact.
 
 ### 6. Sanity-check the harvest

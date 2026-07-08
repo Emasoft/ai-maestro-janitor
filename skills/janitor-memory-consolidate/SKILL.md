@@ -113,7 +113,7 @@ MEMDIR="$LOCAL_MEM"   # or $USER_MEM — the ONE scope for this pass
 # Most-recently-touched pages (the likely fresh dup), newest first. NOTE: memgrep
 # REJECTS an empty query ("recall needs at least one content term"), so a bare
 # `memgrep recall "" … --sort lmd` can never serve as the recency listing (and a
-# flat `ls -t "$MEMDIR"/*.md` misses wiki/ sub-pages). Use a recursive find +
+# flat `ls -t "$MEMDIR"/*.md` misses wikimem/ sub-pages). Use a recursive find +
 # `ls -t` mtime sort, EXCLUDING the PRIVATE user-mem/ store (TRDD-4334aad0 —
 # agent-invisible by design), memgrep's index dir, txn staging, and the
 # generated index/stub files.
@@ -211,7 +211,7 @@ TXN=$(echo "$out" | sed -n 's/^txn_id=//p')
 STAGING=$(echo "$out" | sed -n 's/^staging=//p')
 # Plus the backlink-holder pages from step 5 — copy each into staging so you can
 # repoint its [[A]]/[[B]] to [[C]] as part of THIS txn:
-for holder in <holder-rel-paths...>; do cp "$MEMDIR/$holder" "$STAGING/$holder"; done
+for holder in <holder-rel-paths...>; do mkdir -p "$STAGING/$(dirname "$holder")"; cp "$MEMDIR/$holder" "$STAGING/$holder"; done  # mkdir -p: a nested wikimem/ holder needs its staging parent created first (L6 — begin only creates parents for SOURCES)
 ```
 
 Now edit **only files under `$STAGING`**:

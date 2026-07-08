@@ -50,9 +50,9 @@ it. Three cases; handle them in order, using the Edit tool (never sed) on
    trackable.
 2. **A bare `.claude/` (or `.claude`) ignore line exists** → it prunes the whole
    tree so git never descends to honor a re-include. Change that line to the deep
-   form `.claude/**`, THEN add the four exception lines below. (The bare form must
+   form `.claude/**`, THEN add the three exception lines below. (The bare form must
    become `.claude/**` first — exceptions under a bare-pruned dir are inert.)
-3. **`.claude/**` already present** → just add the four exception lines below if
+3. **`.claude/**` already present** → just add the three exception lines below if
    they're missing.
 
 Detect which case applies:
@@ -91,7 +91,7 @@ git -C "$REPO" check-ignore -v ".claude/project/memory/MEMORY.md"; echo "exit=$?
 Don't overwrite an existing wikimem. Only seed when the dir is empty of pages:
 
 ```bash
-ls "$PROJECT_MEM"/*.md >/dev/null 2>&1 && echo "wikimem already exists — skip seeding"
+ls "$PROJECT_MEM"/wikimem/*.md >/dev/null 2>&1 && echo "wikimem already exists — skip seeding"  # gate on CURATED pages only (L7) — buffer notes / MEMORY.md at the root must not suppress seeding
 ```
 
 If empty, create the overview page with the **Write tool** (real content, not echo).
@@ -100,7 +100,7 @@ is Anthropic's native, harness-owned memory BUFFER (the `# Memory` directive wri
 loads it). The janitor never stubs/seeds/trims it; the harvest chore READS it and mirrors new
 buffer memories into the curated wiki. Bootstrap seeds only the wiki entry page.
 
-The project's **overview ENTRY POINT** page — file `<project-name>-overview.md` in
+The project's **overview ENTRY POINT** page — file `wikimem/<project-name>-overview.md` in
 `$PROJECT_MEM/`, its `name:` is `<project-name>-overview` (Step 4 stages the exact
 path). This is the Wikipedia-style overview the reader enters through (`memgrep
 overview <memdir>` prints it): a concise story of the whole project with links OUT to
@@ -153,7 +153,7 @@ Stage the new PROJECT-scope files **by name** (never `git add -A`) when the user
 wants them committed — this scope is meant to be pushed so every dev shares it:
 
 ```bash
-git -C "$REPO" add .gitignore "$PROJECT_MEM"/*-overview.md
+git -C "$REPO" add .gitignore "$PROJECT_MEM"/wikimem/*-overview.md
 # then commit when the user asks — do NOT auto-commit. (MEMORY.md is the harness-owned
 # buffer — bootstrap never creates it, so it is not staged here.)
 ```

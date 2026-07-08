@@ -137,7 +137,7 @@ verdict ALWAYS retires one page of the pair.)
 
 - **DEMOTE** (the DEFAULT, non-destructive) — keep the page holding the CURRENT truth
   as survivor; retire the obsolete page; fold its still-true-of-the-past fact in as a
-  compounding `[^N]` with the SOURCED WHY (cite the `<sha>`/`TRDD-<8hex>`). `ocd =
+  compounding `[^N]` with the SOURCED WHY (cite the `<sha>`/`TRDD-<id8>` (8-char base36)). `ocd =
   min(both)`, `lmd = today`; copy every pre-existing `[^N]` verbatim; redirect any
   `[[<retired_slug>]]` backlink to the survivor.
 - **DELETE** (RARE — post-vote, provenance + traceless) — structurally identical, only

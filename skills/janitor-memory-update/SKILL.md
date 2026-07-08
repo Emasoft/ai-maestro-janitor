@@ -94,7 +94,7 @@ in a new page):
    `## Applies to` AND the element's `## Governed by`; a new lateral relation →
    `## See also` on BOTH pages. Remove dead edges on both ends too.
 3. Bump `lmd:`. If the title or `description` changed, refresh the search index
-   (`memgrep reindex` — optional, recall auto-reindexes); do NOT touch `MEMORY.md`
+   (`memgrep reindex` — optional, recall falls back to a live walk when the index is stale); do NOT touch `MEMORY.md`
    (the index is memgrep's, agent-invisible).
 
 ## 2. CORRECT a memory — the 2-step NON-DESTRUCTIVE protocol

@@ -66,7 +66,7 @@ is present, `memory_txn_cli.py begin` exits non-zero — that is your hard stop.
 SLUG="$(pwd | sed 's#/#-#g')"
 LOCAL_MEM="$HOME/.claude/projects/$SLUG/memory"
 USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # janitor's FIXED data dir — hard-coded, NOT ${CLAUDE_PLUGIN_DATA}
-PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory"
+PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project/memory"  # || pwd: L4 — a non-git cwd otherwise expands to the filesystem-root path
 ```
 
 - **LOCAL and USER** roots are mutated and applied (atomic-write through the txn).
@@ -153,7 +153,7 @@ for a fact that now lives in a sub-page should repoint to it. Find every inbound
 
 ```bash
 # memgrep matches the note NEEDLE against the BASENAME/stem only (never a path
-# substring), so pass the SLUG — a rel-path with a "/" (e.g. wiki/page.md) can
+# substring), so pass the SLUG — a rel-path with a "/" (e.g. wikimem/page.md) can
 # NEVER match and backlinks would silently come back empty.
 memgrep links --from "$(basename "$REL" .md)" "$SCOPE_ROOT"   # backlinks: pages that link to the source
 ```

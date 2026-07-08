@@ -104,6 +104,11 @@ Pick exactly one (see the model for the full definition + the WHY):
   `checkout-endpoint`). It is a terminal: it only links UP to the general pages
   that govern it.
 
+**Where the page lives:** create it at `$MEMDIR/wikimem/<name>.md` — curated pages
+live in the `wikimem/` sub-dir (`memory_scopes.WIKI_SUBDIR`, USER decision
+2026-07-08); the scope ROOT is the harness-owned buffer (MEMORY.md + raw notes) and
+is never the home of a curated page.
+
 Keep the new page LEAN — never re-copy a governing rule into a component; link up
 to it. This is what keeps the pyramid from exploding (the model's core WHY).
 Honor the **one-component-one-page** invariant: if a component page for this
@@ -158,7 +163,7 @@ The wiki index is 100% memgrep's — the agent-invisible, unlimited SQLite
 memory BUFFER, not a wiki index — the harvest mirrors FROM it INTO the wiki; the wiki
 skills never write the buffer, and hand-maintaining a human index is what grew unbounded
 and corrupted memories). Just refresh the search index: `memgrep reindex "$MEMDIR"`
-if memgrep is present (optional — recall auto-reindexes). Recall finds the new
+if memgrep is present (optional — recall falls back to a live walk when the index is stale; it never writes the index itself). Recall finds the new
 page by its `description`/body, never by a human index.
 
 ### 7. Sanity-check

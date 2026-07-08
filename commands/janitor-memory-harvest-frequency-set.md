@@ -6,7 +6,7 @@ argument-hint: "[times-per-day]"
 # /janitor-memory-harvest-frequency-set
 
 Set the global cadence of the wikimem **HARVEST** pass (it mirrors new raw buffer
-memories into curated `wiki/` pages, never touching the buffer). The value is
+memories into curated `wikimem/` pages, never touching the buffer). The value is
 **times per day** (a float: `0.5` = once every 48h; `0` disables the pass). With
 **no argument** it reverts to the default (`0` — HARVEST is opt-in, off by default
 per the USER cost decision 2026-06-30). All wikimem-editor settings are **global**
