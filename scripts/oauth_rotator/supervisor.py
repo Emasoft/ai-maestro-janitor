@@ -44,6 +44,13 @@ PINNING_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_T
 # reminder's CLAUDE_ROTATOR_SETUP_REMIND_DAYS default).
 SETUP_REMIND_DAYS = 30
 
+# F4 (TRDD-7PYTX4E9): alert when the 60s tick hasn't COMPLETED in this long while
+# the daemon is alive. The 2026-07-08 tick hung on a keychain ACL prompt and
+# stopped silently for 30+ minutes with zero alarms — rotation was dead exactly
+# when it was needed. 600s = ten missed beats: far past any transient slowness,
+# early enough to matter within a 5h window.
+TICK_STALL_ALERT_S = float(os.environ.get("ROTATOR_TICK_STALL_ALERT_S", "600"))
+
 
 _JANITOR_DATA_DIRNAME = "ai-maestro-janitor-ai-maestro-plugins"
 
@@ -98,6 +105,12 @@ class Facts:
     on_macos: bool
     pinning_env: tuple[str, ...] = ()
     slots: tuple[SlotFact, ...] = ()
+    # F4 (TRDD-7PYTX4E9): tick liveness. `tick_completed_age_s` is seconds since the
+    # rotator last stamped tick-completed.ts (None = never stamped / unreadable);
+    # `daemon_alive` gates the alert — a stale stamp with the daemon DOWN is the
+    # daemon's own problem, not a tick stall.
+    tick_completed_age_s: float | None = None
+    daemon_alive: bool = False
 
 
 @dataclass(frozen=True)
@@ -139,6 +152,23 @@ def diagnose(facts: Facts) -> list[Finding]:
             "rotation cannot run on this platform.",
         ))
         return out
+
+    # F4 (TRDD-7PYTX4E9): the tick machinery itself must be observed. A stamp that
+    # goes stale while the daemon is ALIVE means the tick is hanging (the 2026-07-08
+    # keychain-ACL-prompt freeze) or silently failing — rotation is OFF exactly when
+    # the user relies on it. None (never stamped) counts as stalled too: once this
+    # version ships, every completed tick stamps, so a persistent None is a real
+    # signal, not noise.
+    if facts.daemon_alive and (
+        facts.tick_completed_age_s is None or facts.tick_completed_age_s > TICK_STALL_ALERT_S
+    ):
+        age = ("%.0fs" % facts.tick_completed_age_s) if facts.tick_completed_age_s is not None else "never"
+        out.append(Finding(
+            "tick-stalled",
+            f"the 60s rotator tick has not COMPLETED for {age} (> {TICK_STALL_ALERT_S:.0f}s) "
+            f"while the daemon is alive — the tick is hanging or failing; rotation is "
+            f"effectively OFF. Check rotator.log and the daemon log.",
+        ))
 
     # Per-slot credential alerts (a human must re-capture / re-auth).
     for s in facts.slots:
@@ -225,6 +255,37 @@ def _slot_facts(root: Path, now: float) -> tuple[SlotFact, ...]:
     return tuple(out)
 
 
+def _tick_completed_age_s(root: Path, now: float) -> float | None:
+    """Seconds since the rotator's tick-completed.ts stamp (TRDD-7PYTX4E9 F4), or
+    None when the stamp is absent/garbage — which diagnose treats as stalled."""
+    try:
+        return max(0.0, now - float((root / "tick-completed.ts").read_text().strip()))
+    except (OSError, ValueError):
+        return None
+
+
+def _daemon_alive() -> bool:
+    """Best-effort: is the global janitor daemon alive? Robust import of
+    scripts/lib/global_state (the daemon context already has scripts/ on the path;
+    the test harness may not — fail to False, which silences the tick-stalled
+    alert rather than false-alarming in unknown contexts)."""
+    import sys
+    try:
+        from lib import global_state  # type: ignore[import-not-found]
+    except ImportError:
+        lib_dir = str(Path(__file__).resolve().parent.parent / "lib")
+        if lib_dir not in sys.path:
+            sys.path.insert(0, lib_dir)
+        try:
+            import global_state  # type: ignore[import-not-found]
+        except ImportError:
+            return False
+    try:
+        return bool(global_state.daemon_is_alive())
+    except Exception:  # noqa: BLE001 -- observability probe; never crash the supervisor
+        return False
+
+
 def gather_facts(root: Path | None = None, *, now: float | None = None) -> Facts:
     """Collect every observable fact `diagnose` needs. The ONLY I/O entry point."""
     root = root or _rotator_root()
@@ -237,6 +298,8 @@ def gather_facts(root: Path | None = None, *, now: float | None = None) -> Facts
         on_macos=on_macos,
         pinning_env=pinning,
         slots=_slot_facts(root, now) if opt_in else (),
+        tick_completed_age_s=_tick_completed_age_s(root, now) if opt_in else None,
+        daemon_alive=_daemon_alive() if opt_in else False,
     )
 
 

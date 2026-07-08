@@ -132,3 +132,68 @@ def test_apply_records_alerts_and_logs() -> None:
     res = sup.apply(findings, log=logs.append)
     assert res.alerts == ["pinning-env", "setup-token-expiring"]
     assert any("pinning-env" in m for m in logs)
+
+
+# ── F4 (TRDD-7PYTX4E9): tick-liveness alert — the tick machinery must be observed.
+# The 2026-07-08 tick hung on a keychain ACL prompt and stopped silently for 30+ min
+# with zero alarms; a stale tick-completion stamp while the daemon is alive is that
+# silence made loud.
+
+def test_tick_stalled_alerts_when_daemon_alive_and_stamp_stale() -> None:
+    """daemon alive + last tick completion older than the stall window → 'tick-stalled'."""
+    f = _facts(daemon_alive=True, tick_completed_age_s=sup.TICK_STALL_ALERT_S + 1)
+    findings = sup.diagnose(f)
+    stalled = [x for x in findings if x.code == "tick-stalled"]
+    assert len(stalled) == 1
+    assert "effectively OFF" in stalled[0].message
+    assert "has not COMPLETED" in stalled[0].message
+
+
+def test_tick_stalled_alerts_when_stamp_never_written() -> None:
+    """A None age (stamp absent/garbage) counts as stalled once this version ships —
+    every completed tick stamps, so a persistent None is a real signal, not noise."""
+    f = _facts(daemon_alive=True, tick_completed_age_s=None)
+    stalled = [x for x in sup.diagnose(f) if x.code == "tick-stalled"]
+    assert len(stalled) == 1
+    assert "never" in stalled[0].message
+
+
+def test_tick_fresh_stamp_no_alert() -> None:
+    """A recent tick completion (well within the window) → no tick-stalled alert."""
+    f = _facts(daemon_alive=True, tick_completed_age_s=30.0)
+    assert not [x for x in sup.diagnose(f) if x.code == "tick-stalled"]
+
+
+def test_tick_stall_suppressed_when_daemon_down() -> None:
+    """daemon NOT alive → no tick-stalled alert even with a stale/None stamp: a dead
+    daemon is the daemon's own problem (its liveness watchdog owns it), not a tick stall."""
+    assert not [x for x in sup.diagnose(_facts(daemon_alive=False, tick_completed_age_s=99_999.0))
+                if x.code == "tick-stalled"]
+    assert not [x for x in sup.diagnose(_facts(daemon_alive=False, tick_completed_age_s=None))
+                if x.code == "tick-stalled"]
+
+
+def test_tick_completed_age_reads_real_stamp(tmp_path: Path) -> None:
+    """_tick_completed_age_s reads tick-completed.ts as an epoch and returns the age;
+    an absent OR garbage stamp yields None (which diagnose treats as stalled)."""
+    now = 2_000_000.0
+    assert sup._tick_completed_age_s(tmp_path, now) is None            # absent
+    (tmp_path / "tick-completed.ts").write_text(str(int(now - 42)))
+    assert abs(sup._tick_completed_age_s(tmp_path, now) - 42.0) < 0.01  # real age
+    (tmp_path / "tick-completed.ts").write_text("not-a-number")
+    assert sup._tick_completed_age_s(tmp_path, now) is None            # garbage
+
+
+def test_gather_facts_populates_tick_liveness(tmp_path: Path, monkeypatch) -> None:
+    """gather_facts (opted-in) reads the tick-completion stamp and the daemon-alive
+    probe into Facts, so diagnose can fire the stall alert. _daemon_alive is stubbed
+    (the real probe imports the global daemon state, absent in the test harness)."""
+    (tmp_path / "opt-in.flag").write_text("on")
+    now = 3_000_000.0
+    (tmp_path / "tick-completed.ts").write_text(str(int(now - (sup.TICK_STALL_ALERT_S + 5))))
+    monkeypatch.setattr(sup, "_daemon_alive", lambda: True)
+    facts = sup.gather_facts(root=tmp_path, now=now)
+    assert facts.daemon_alive is True
+    assert facts.tick_completed_age_s is not None
+    assert facts.tick_completed_age_s > sup.TICK_STALL_ALERT_S
+    assert "tick-stalled" in {x.code for x in sup.diagnose(facts)}

@@ -198,6 +198,36 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
         state.log_line("session-start", f"terminal-identity capture skipped: {exc}")
 
+    # Live-identity BEACON (TRDD-7PYTX4E9 F2): this hook runs in the SESSION context,
+    # which can read the primary live keychain item even when the headless daemon
+    # cannot (a user /login writes a Claude-only-ACL item — the 2026-07-08 incident).
+    # Stamp {fp, email, ts} into the rotator home so the daemon's mirror-source path
+    # has independent ground truth for WHO is live. Detached (the email resolution may
+    # hit /roles, ~1s — a hook must not block on it), lock-free (beacon writes only its
+    # own atomic file), and gated on a configured rotator so machines without one pay
+    # nothing. Best-effort: any failure must never break session start.
+    try:
+        import subprocess  # noqa: E402  -- stdlib
+
+        _data_env = os.environ.get("CLAUDE_PLUGIN_DATA", "").strip()
+        _candidates = [
+            Path(_data_env) / "oauth-rotator" if _data_env and "ai-maestro-janitor" in _data_env else None,
+            Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "oauth-rotator",
+            Path.home() / ".claude" / "account-rotator",
+        ]
+        if any(c is not None and (c / "state.json").is_file() for c in _candidates):
+            _rotator_py = Path(plugin_root) / "scripts" / "oauth_rotator" / "rotator.py"
+            if _rotator_py.is_file():
+                subprocess.Popen(  # noqa: S603 -- fixed argv, no shell
+                    [sys.executable, str(_rotator_py), "beacon"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        state.log_line("session-start", f"live-identity beacon spawn skipped: {exc}")
+
     _cron_liveness_nudge(state, session_id)
 
     # Propagate the plugin's shipped rules (rules/*.md) into the active
