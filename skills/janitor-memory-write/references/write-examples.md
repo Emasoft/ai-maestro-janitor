@@ -3,6 +3,10 @@
 Three worked routing/shape examples for `/janitor-memory-write`. Moved here
 verbatim from the SKILL body (TRDD-82OP4EN9 token-budget move).
 
+## Table of contents
+
+- [Worked examples (aspect / component / user-feedback)](#worked-examples-aspect--component--user-feedback)
+
 ## Worked examples (aspect / component / user-feedback)
 
 <example>

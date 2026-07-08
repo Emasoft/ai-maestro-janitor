@@ -1,5 +1,11 @@
 # Merge page construction rules
 
+## Table of contents
+
+- [What verify_merge enforces at commit](#what-verify_merge-enforces-at-commit)
+- [What you must ensure (not verifier-checked)](#what-you-must-ensure-not-verifier-checked)
+- [Frontmatter and link web](#frontmatter-and-link-web)
+
 Rules for building the merged survivor page `C` in step 7 of the consolidation procedure. These constraints are enforced by `verify_merge` at commit time (lessons, ocd/lmd, no-new-duplicates, no-dangling-refs) or are your responsibility (lead sentence, body-fact preservation).
 
 ## What verify_merge enforces at commit

@@ -42,7 +42,7 @@ documented payload → manifest removal is best-effort, the 7-day sweep + harmle
 over-listing is the guaranteed cleanup.
 
 **NEXT ACTION:** publish (publish.py) → plugin update → `/janitor-maintenance-mode`
-+ `/janitor-arm` in the night-work project (USER-confirmed step). Minor hygiene
+then `/janitor-arm` in the night-work project (USER-confirmed step). Minor hygiene
 follow-up: tests/test_session_start_rearm_guard.py lacks its own sys.path inserts
 (fails solo, passes in suite — pre-existing).
 
