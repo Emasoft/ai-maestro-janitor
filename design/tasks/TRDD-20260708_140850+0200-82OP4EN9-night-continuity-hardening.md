@@ -3,7 +3,7 @@ trdd-id: 82OP4EN9
 title: Night-continuity hardening — maintenance mode must guarantee unattended all-night work at minimum token cost
 column: dev
 created: 2026-07-08T14:08:50+0200
-updated: 2026-07-08T14:08:50+0200
+updated: 2026-07-08T14:52:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 0
@@ -20,7 +20,7 @@ test-requirements: [unit, integration, lint]
 review-requirements: []
 runtime-targets: [macos]
 impacts: [install-script]
-implementation-commits: []
+implementation-commits: [a89dacc, cfdb5f1, 014bd5b]
 ---
 
 # Night-continuity hardening (TRDD-82OP4EN9)
@@ -34,10 +34,17 @@ tokens." Maintenance mode = the night posture: minimum tokens, only the
 strictly-necessary survival chores; full chores return only when maintenance
 is switched off.
 
-**Current state:** design approved, implementation fanning out (2 worktree forks).
+**Current state (2026-07-08 14:52):** W1-W4 ALL LANDED + merged (a89dacc W3,
+cfdb5f1 W1+W4, 014bd5b W2); full suite 12213/12213 green, ruff clean. Prompt
+3,779→356 chars; protocol rides rules/janitor-heartbeat-protocol.md (per-session,
+no re-arm needed for protocol changes). SubagentStop has no agent_id in its
+documented payload → manifest removal is best-effort, the 7-day sweep + harmless
+over-listing is the guaranteed cleanup.
 
-**NEXT ACTION:** land W1-W4 below, merge, full gate, then publish + arm
-maintenance (publish/arm = USER-confirmed step).
+**NEXT ACTION:** publish (publish.py) → plugin update → `/janitor-maintenance-mode`
++ `/janitor-arm` in the night-work project (USER-confirmed step). Minor hygiene
+follow-up: tests/test_session_start_rearm_guard.py lacks its own sys.path inserts
+(fails solo, passes in suite — pre-existing).
 
 ## Verified baseline (dispatch.py main(), read 2026-07-08)
 
