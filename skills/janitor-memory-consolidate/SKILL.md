@@ -264,5 +264,10 @@ defaults to LOCAL+USER (PROJECT opt-in, staged-not-pushed).
   - Failure-path walkthrough
   - Bounds & safety recap
   - Steps 6-9 — the executable sequence (moved from the SKILL body)
+- [merge-page-rules](references/merge-page-rules.md) — the survivor-page
+  construction constraints. Its sections:
+  - What verify_merge enforces at commit
+  - What you must ensure (not verifier-checked)
+  - Frontmatter and link web
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons
   conventions + the LOCAL/PROJECT/USER scope table.
