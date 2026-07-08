@@ -4,7 +4,7 @@
 # ///
 """PostToolUse hook — memory correction-protocol advisory (TRDD-c77dae09, rank 5).
 
-Fires AFTER an Edit / Write to a MEMORY PAGE and, when the edit looks like a
+Fires AFTER an Edit / MultiEdit / Write to a MEMORY PAGE and, when the edit looks like a
 fact was REWRITTEN in place without demoting the old fact to a lesson, surfaces
 a one-line advisory `additionalContext` reminding the agent of the 2-step
 non-destructive correction protocol (clean the fact in place + record the WHY as
@@ -124,17 +124,33 @@ def _is_replacement(old: str, new: str) -> bool:
 def _correction_nudge_needed(tool: str, tool_input: dict) -> bool:
     """Decide whether to surface the correction-protocol advisory.
 
-    Edit-only by design: a Write carries no prior content in the PostToolUse
-    payload, so append-vs-replace is undeterminable and we stay silent on it.
+    Edit + MultiEdit carry old/new pairs, so append-vs-replace is decidable for
+    both; a Write carries no prior content in the PostToolUse payload, so it
+    stays silent by design.
     """
-    if tool != "Edit":
+    if tool == "Edit":
+        pairs = [(str(tool_input.get("old_string") or ""), str(tool_input.get("new_string") or ""))]
+    elif tool == "MultiEdit":
+        # F22 (wikimem audit): MultiEdit batches per-edit old/new pairs in
+        # `edits[]` — the same replace-vs-append signal as Edit. A lesson added
+        # by ANY edit in the batch counts for the WHOLE batch (fact rewritten in
+        # edit 1 + lesson recorded in edit 2 = the protocol followed in one call).
+        raw = tool_input.get("edits")
+        if not isinstance(raw, list):
+            return False
+        pairs = [
+            (str(e.get("old_string") or ""), str(e.get("new_string") or ""))
+            for e in raw
+            if isinstance(e, dict)
+        ]
+    else:
         return False
-    old = str(tool_input.get("old_string") or "")
-    new = str(tool_input.get("new_string") or "")
-    if not _is_replacement(old, new):
-        return False           # pure append/insert — not a fact rewrite
-    if _adds_lesson(old, new):
-        return False           # the rewrite DID add a lesson — protocol followed
+    if not pairs:
+        return False
+    if not any(_is_replacement(old, new) for old, new in pairs):
+        return False           # pure appends/inserts — not a fact rewrite
+    if any(_adds_lesson(old, new) for old, new in pairs):
+        return False           # the batch DID add a lesson — protocol followed
     return True
 
 
@@ -155,7 +171,7 @@ def main() -> int:
         return 0  # garbage stdin → silent no-op
 
     tool = data.get("tool_name", "")
-    if tool not in ("Edit", "Write"):
+    if tool not in ("Edit", "Write", "MultiEdit"):
         return 0
     tool_input = data.get("tool_input") or {}
 

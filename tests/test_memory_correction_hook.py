@@ -68,6 +68,16 @@ def _edit(file_path: str, old: str, new: str) -> dict:
     }
 
 
+def _multiedit(file_path: str, pairs: list[tuple[str, str]]) -> dict:
+    return {
+        "tool_name": "MultiEdit",
+        "tool_input": {
+            "file_path": file_path,
+            "edits": [{"old_string": o, "new_string": n} for o, n in pairs],
+        },
+    }
+
+
 class TestFiresOnReplaceWithoutLesson:
     def test_replace_body_fact_without_lesson_fires(self):
         """A fact rewritten in place on a memory page, no lesson added → advisory fires."""
@@ -79,6 +89,45 @@ class TestFiresOnReplaceWithoutLesson:
         assert _fired(res)
         assert "2-step" in res.stdout
         assert "[memory-correction]" in res.stderr  # user-visible line too
+
+
+class TestMultiEdit:
+    """F22 (wikimem audit): MultiEdit batches per-edit old/new pairs — the same
+    correction-shaped signal as Edit; it previously bypassed the advisory entirely."""
+
+    def test_multiedit_replacement_without_lesson_fires(self):
+        """A MultiEdit batch that rewrites a fact with no lesson anywhere → advisory fires."""
+        res = _run(_multiedit(_MEM_PAGE, [
+            ("The cap is 5 retries.", "The cap is 3 retries."),
+            ("", "An unrelated inserted sentence."),
+        ]))
+        assert _fired(res)
+
+    def test_multiedit_lesson_in_any_edit_silences_the_batch(self):
+        """Fact rewritten in edit 1 + lesson recorded in edit 2 of the SAME call = protocol followed → silent."""
+        res = _run(_multiedit(_MEM_PAGE, [
+            ("The cap is 5 retries.", "The cap is 3 retries.[^4]"),
+            ("", "[^4]: earlier this said 5; the config key was misread."),
+        ]))
+        assert not _fired(res)
+
+    def test_multiedit_pure_appends_are_silent(self):
+        """A batch of pure appends/insertions is not a rewrite → silent."""
+        old = "The cap is 3 retries."
+        res = _run(_multiedit(_MEM_PAGE, [
+            (old, old + " It logs each attempt."),
+            ("", "Another added line."),
+        ]))
+        assert not _fired(res)
+
+    def test_multiedit_malformed_edits_is_silent(self):
+        """A non-list / junk `edits` payload never crashes and never fires."""
+        res = _run({
+            "tool_name": "MultiEdit",
+            "tool_input": {"file_path": _MEM_PAGE, "edits": "junk"},
+        })
+        assert not _fired(res)
+        assert res.returncode == 0
 
 
 class TestSilentCases:
