@@ -575,6 +575,31 @@ def _phase_log_retention() -> None:
     state.atomic_write(stamp, today)
 
 
+def _pending_agent_directive_lines() -> list[str]:
+    """W1 (TRDD-82OP4EN9): SendMessage-resume lines for in-flight background agents.
+
+    Lazy import + blanket except: the resume phases are the load-bearing
+    night-survival path — a manifest bug must degrade to "no agent lines",
+    never kill the [janitor-resume] emission itself.
+    """
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        return pending_agents.directive_lines()
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _pending_agent_count() -> int:
+    """W4 (TRDD-82OP4EN9): how many background agents the manifest lists. Fail-open 0."""
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        return len(pending_agents.pending())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _phase_rate_limit_recovery() -> bool:
     """Return True if a [janitor-resume] line was emitted (caller should exit)."""
     flag = state.state_dir() / "rate-limited.flag"
@@ -597,6 +622,12 @@ def _phase_rate_limit_recovery() -> bool:
     else:
         # since-file was missing or in the future (clock skew); still cue resume.
         print("rate-limit cleared (duration unknown) — API is reachable again. Resume the previous pending task.")
+    # W1 (TRDD-82OP4EN9): a rate-limit window kills BACKGROUND agents too, and
+    # nothing else resumes them — list each one for a deterministic SendMessage
+    # resume instead of hoping the model re-reads its transcript (2026-07-08:
+    # four forks died at the 5h cap and needed a manual "resume").
+    for line in _pending_agent_directive_lines():
+        print(line)
 
     # Also clear any pending post-compact resume flag: a rate-limit resume cue
     # already says "resume the pending task", which subsumes it. Clearing both
@@ -662,6 +693,11 @@ def _phase_compact_resume() -> bool:
         # Flag present but empty/unreadable: still cue a generic resume so the
         # session doesn't stall idle after a compaction.
         print(f"Context was compacted {age}s ago — auto-resume. Resume your previous in-flight task (check the TRDD board / your handoff).")
+    # W1 (TRDD-82OP4EN9): a compaction wipes the working memory of in-flight
+    # background agents from the fresh context — list them explicitly so the
+    # resumed turn re-attaches to each via SendMessage.
+    for line in _pending_agent_directive_lines():
+        print(line)
 
     for p in (flag, since_file):
         try:
@@ -963,7 +999,28 @@ def _phase_keep_going_nudge(mode: str) -> None:
     if not keep_going_flag.is_file() and mode != "maintenance":
         return
     print("[janitor-resume]")
-    print("continue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off")
+    # W4 (TRDD-82OP4EN9): point the nudge at the ACTUAL pending work when we can
+    # name it — a generic "continue" lets an idle session answer "nothing to do"
+    # and stall; a pointer to the directive file / the pending-agents manifest
+    # re-anchors it every fire. Both probes are fail-open (a broken pointer must
+    # never silence the nudge — the nudge IS the night-survival pulse).
+    bits: list[str] = []
+    try:
+        directive_file = state.state_dir() / "resume-directive.txt"
+        if directive_file.is_file() and directive_file.stat().st_size > 0:
+            bits.append("read .janitor/state/resume-directive.txt for the current target")
+    except OSError:
+        pass
+    n = _pending_agent_count()
+    if n:
+        bits.append(
+            f"{n} background agent(s) pending — resume each via SendMessage"
+            " (ids in .janitor/state/pending-agents.json)"
+        )
+    if bits:
+        print("continue your pending task (keep-going mode) — " + "; ".join(bits))
+    else:
+        print("continue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off")
 
 
 def _phase_user_presence_breadcrumb() -> None:
