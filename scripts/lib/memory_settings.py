@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import math
@@ -144,6 +146,27 @@ def get(key: str):
     return load()[key]
 
 
+@contextlib.contextmanager
+def _rmw_lock(lock_path: Path):
+    """F4 (wikimem audit runtime): serialize the module's two read-modify-write
+    sites. Both did load->mutate->atomic_write with no lock, so two concurrent
+    writers lost one update (a lost settings deviation / a lost watermark entry).
+    Blocking flock is correct here — holders write a few hundred bytes, so the
+    wait is microseconds and skip-if-held (the dispatch idiom) would instead
+    LOSE the caller's update, the exact defect being fixed."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
 def set_value(key: str, raw=None):
     """Persist `key` = coerced(`raw`); `raw is None` reverts to the default.
     Returns the stored value. Atomic write (tmp + os.replace).
@@ -159,11 +182,14 @@ def set_value(key: str, raw=None):
     pure defaults for untouched keys. [TRDD-378c85da]
     """
     value = _coerce(key, raw)
-    current = load()
-    current[key] = value
-    deviations = {k: v for k, v in current.items() if k in DEFAULTS and DEFAULTS[k] != v}
     settings_dir().mkdir(parents=True, exist_ok=True)
-    state.atomic_write(_settings_path(), json.dumps(deviations, indent=2, sort_keys=True))
+    # F4: the load→write below is a read-modify-write — hold the lock across it
+    # so a concurrent set_value can't overwrite this one's deviation.
+    with _rmw_lock(settings_dir() / "memory-settings.rmw.lock"):
+        current = load()
+        current[key] = value
+        deviations = {k: v for k, v in current.items() if k in DEFAULTS and DEFAULTS[k] != v}
+        state.atomic_write(_settings_path(), json.dumps(deviations, indent=2, sort_keys=True))
     return value
 
 
@@ -299,9 +325,13 @@ def harvest_mark_mirrored(scope: str, root, note_name: str, note_text: str) -> N
     wiki. Read-modify-write the per-scope map atomically (tmp + os.replace via
     `state.atomic_write`), accumulating across notes within and across passes."""
     global_state.init_global_state()
-    wm = harvest_watermark_read(scope, root)
-    wm[note_name] = _content_hash(note_text)
-    state.atomic_write(harvest_watermark_path(scope, root), json.dumps(wm, sort_keys=True))
+    # F4: read→mutate→write of the shared per-(scope, root) map — locked so two
+    # concurrent harvest passes can't drop each other's mirrored-note entries
+    # (a lost entry = a safe but wasteful duplicate re-mirror next pass).
+    with _rmw_lock(global_state.global_state_dir() / "memory-harvest-watermark.rmw.lock"):
+        wm = harvest_watermark_read(scope, root)
+        wm[note_name] = _content_hash(note_text)
+        state.atomic_write(harvest_watermark_path(scope, root), json.dumps(wm, sort_keys=True))
 
 
 def _content_hash(text: str) -> str:
