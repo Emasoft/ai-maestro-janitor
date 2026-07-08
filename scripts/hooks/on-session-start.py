@@ -66,6 +66,42 @@ def _format_stop_reminder(kind: str, reason: str, since: int, now: int) -> str:
     )
 
 
+def _cron_liveness_nudge(state, session_id: str) -> None:  # noqa: ANN001 - local module type
+    """W2 (TRDD-82OP4EN9): one context line asking the fresh session to verify
+    the heartbeat cron still exists.
+
+    Some Claude Code builds downgrade `durable: true` crons to session-only,
+    and the 7-day expiry can eat one — either way the heartbeat silently stops
+    firing and an unattended night loses its resume pulse. A hook cannot call
+    CronList/CronCreate (session tools), so the strongest thing a SessionStart
+    hook CAN do is put ONE verification line into the fresh session's context.
+    Gated on heartbeat-armed-at.ts (this project actually uses the heartbeat)
+    and deduped per session id (a single stamp file — bounded state; an absent
+    session_id skips the dedupe rather than the nudge, because losing the nudge
+    is the failure mode this exists to prevent).
+    """
+    try:
+        if not (state.state_dir() / "heartbeat-armed-at.ts").is_file():
+            return
+        seen = state.state_dir() / "cron-liveness-nudged.session"
+        prev = ""
+        try:
+            prev = seen.read_text(encoding="utf-8").strip()
+        except OSError:
+            prev = ""
+        if session_id and session_id == prev:
+            return
+        if session_id:
+            state.atomic_write(seen, session_id)
+        print(
+            "janitor: this project's heartbeat should be armed — verify the cron exists "
+            "(CronList: a job whose prompt starts with [janitor-heartbeat]); if it is missing, "
+            "silently run /janitor-arm (some Claude Code builds drop durable crons on restart)."
+        )
+    except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
+        state.log_line("session-start", f"cron-liveness nudge skipped: {exc}")
+
+
 def main() -> int:
     # All side-effecting code lives inside main() so the hook script is
     # safely importable (no module-scope sys.exit, no module-scope
@@ -105,11 +141,17 @@ def main() -> int:
     import json  # noqa: E402  -- stdlib
 
     source = "startup"
+    session_id = ""
     try:
         if not sys.stdin.isatty():
             raw = sys.stdin.read()
             if raw.strip():
-                source = str(json.loads(raw).get("source", "startup"))
+                payload = json.loads(raw)
+                source = str(payload.get("source", "startup"))
+                # W2 (TRDD-82OP4EN9): the cron-liveness nudge below dedupes on
+                # the session id so a clear/compact restart of the SAME session
+                # doesn't repeat it.
+                session_id = str(payload.get("session_id", "") or "")
     except Exception:  # noqa: BLE001 -- best-effort; never break session start
         source = "startup"
     if source in ("startup", "resume"):
@@ -155,6 +197,8 @@ def main() -> int:
             )
     except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
         state.log_line("session-start", f"terminal-identity capture skipped: {exc}")
+
+    _cron_liveness_nudge(state, session_id)
 
     # Propagate the plugin's shipped rules (rules/*.md) into the active
     # scope's .claude/rules/ directory so Claude Code's rule loader picks
