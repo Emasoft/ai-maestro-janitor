@@ -3,7 +3,7 @@ trdd-id: EFTQB9RR
 title: The disarm opt-out invariant had no writer, and disarm deleted a machine-wide file
 column: dev
 created: 2026-07-09T20:36:10+0200
-updated: 2026-07-09T20:58:42+0200
+updated: 2026-07-09T21:12:00+0200
 current-owner: janitor
 assignee: janitor
 priority: 2
@@ -32,7 +32,9 @@ attempts: 0
 test-failures: 0
 last-test-result: pass
 last-test-at: 2026-07-09T20:34:00+0200
-implementation-commits: [57bfe31, b2be32b]
+implementation-commits: [57bfe31, b2be32b, 9e6fa2b]
+published-version: 0.36.0
+published-at: 2026-07-09T21:05:00+0200
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/77"]
 ---
 
@@ -45,7 +47,18 @@ wants the SessionStart arm-nudge gated on the POSITIVE opt-out `disarmed.flag` r
 the presence of `heartbeat-armed-at.ts`. That gate cannot be built until the flag has a
 writer. It did not have one.
 
-**Current state** — all three landed locally, NOT yet published.
+**PUBLISHED as v0.36.0.** All CI green (Release, CI, zizmor, memgrep binaries, Notify
+Marketplace). Deployed to this machine: plugin cache updated 0.35.9 → 0.36.0, the L0
+keepalive closure re-staged and byte-verified (`daemon.py`, `lib/fleet_scan.py` sha-match),
+daemon restarted (pid 27817). Its first `session-liveness` beat on the new code ran clean —
+no `fleet scan failed`, and both stale instances diagnosed `cron_dead` → gentle `rearm`,
+which is the honest diagnosis the sweep exists to preserve. Live census: only ONE reachable
+project holds a `rate-limited.flag` and it is FRESH, so the sweep correctly deleted nothing.
+
+`column:` stays `dev` deliberately. `complete → publish → published` is a NON-EXEMPT
+transition (`~/.claude/rules/manager-approval-defaults.md` §Y), and the same decision is
+already pending for TRDD-K3WQ7XM9 (shipped in v0.35.1, still `column: dev`). Both should be
+advanced together once the owner rules on it.
 
 - **Bug 1 — `disarmed.flag` had four readers and zero writers.** FIXED (`57bfe31`).
   `/janitor-disarm` now writes it; `/janitor-arm` now removes it, FIRST, before `CronCreate`.
@@ -62,11 +75,14 @@ writer. It did not have one.
 - **Tests**: `test_disarm_optout_invariant.py` (5) + `test_stale_rate_limit_sweep.py` (18).
   Full suite 12322 passed, 1 skipped.
 
-**NEXT ACTION:** publish (`uv run scripts/publish.py`), then comment the outcome on
-janitor#77. `/janitor-arm` this project once afterward so the fleet sees the new skills.
+**NEXT ACTION:** nothing required. janitor#77 is commented
+(`issues/77#issuecomment-4928621347`) with items A and C closed and the two new bugs written
+up. Items B and D stay open and are the owner's call.
 
 **Do NOT** bump the CPV pin: `v2.153.1` is the last good ref (`v2.153.2` raises 8 CRITICALs on
-our own `rules/*.md` — upstream CPV#160).
+our own `rules/*.md` — upstream CPV#160). **Do NOT** re-run `ruff format` on a pre-existing
+file: this repo is not format-clean (275 of 308 files would reformat), so it injects ~150
+lines of unrelated churn into an otherwise surgical diff. `ruff check` only.
 
 **Load-bearing facts**
 
