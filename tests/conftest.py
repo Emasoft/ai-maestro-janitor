@@ -276,20 +276,33 @@ def _teardown_session_keychain() -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_keychain_latch_between_tests() -> "Iterator[None]":
-    """Clear the Safe-Keychain-Protocol denied-latch before AND after every test
-    (TRDD-K3WQ7XM9 P2), so a test that deliberately trips the latch can never poison the
-    next test's `security` ops. The latch lives at
-    ``$JANITOR_GLOBAL_STATE_DIR/keychain-denied.latch`` (the session tmp dir)."""
-    def _clear() -> None:
+    """Reset ALL leakable Safe-Keychain-Protocol state before AND after every test
+    (TRDD-K3WQ7XM9 P2) — two distinct cross-test leaks, both fixed here:
+
+    1. The denied-latch file (``$JANITOR_GLOBAL_STATE_DIR/keychain-denied.latch``): a test
+       that trips the latch would otherwise short-circuit a later test's `security` ops.
+    2. ``JANITOR_ROTATOR_HEADLESS``: the daemon's ``task_oauth_rotator_tick`` sets it via
+       ``os.environ[...] = "1"`` DIRECTLY (not monkeypatch), so a full-suite test that
+       exercises the daemon tick leaks headless=1 to EVERY later test →
+       ``_read_live_primary`` skips its read and returns None (observed: the publish G4
+       gate failed only on ``test_write_live_blob_mirrors_to_livebak``, which passed in
+       isolation). ``os.environ.pop`` is the direct inverse of that direct set; tests that
+       need it set it themselves (via monkeypatch, auto-restored).
+
+    Clearing at SETUP (before the body) is the load-bearing half — it resolves the SAME
+    latch path ``run_security`` uses and strips a leaked env, so the test starts clean
+    regardless of what an earlier test left behind."""
+    def _reset() -> None:
         gsd = os.environ.get("JANITOR_GLOBAL_STATE_DIR", "")
         if gsd:
             try:
                 os.remove(os.path.join(gsd, "keychain-denied.latch"))
             except OSError:
                 pass
-    _clear()
+        os.environ.pop("JANITOR_ROTATOR_HEADLESS", None)
+    _reset()
     yield
-    _clear()
+    _reset()
 
 
 def pytest_configure(config: pytest.Config) -> None:
