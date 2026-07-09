@@ -68,15 +68,38 @@ jobs:
         # rules/*.md (upstream claude-plugins-validation#160), so v2.153.1 is the
         # last good ref. Issue #71's fix (A2A false positive) is already IN
         # v2.153.1 — we pinned the fixed version by coincidence.
+        #
+        # HANG MITIGATION (ported from ci.yml, which has had it for releases):
+        # `cpv-remote-validate` intermittently hangs with no progress while the
+        # identical local gate in publish.py has already passed on the same commit.
+        # Unwrapped, this step simply ran until `timeout-minutes` killed the job —
+        # v0.35.3 died at the old 15m bound, v0.35.6 and v0.35.8 at the 30m one.
+        # Raising the bound was never a fix; it doubled the stall. Successes take
+        # ~3.5 min, so a 300 s per-attempt cap is generous, and three attempts
+        # self-heal the hang (v0.24.4 hit it on the first attempt AND the retry, so
+        # retry-once was empirically insufficient).
+        #
+        # `timeout` exits 124 on a hang — retry that. Any other non-zero is CPV's
+        # real 1..4 severity exit: fail fast, no pointless retry.
         run: |
-          set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1 --with pyyaml cpv-remote-validate plugin . --strict
-          exit_code=$?
-          set -e
-          if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then
-            echo "::error::Validation failed (exit code $exit_code)"
-            exit $exit_code
-          fi
+          run_cpv() {
+            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1 \
+              --with pyyaml cpv-remote-validate plugin . --strict
+          }
+          # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
+          # `&&` form leaves $? = run_cpv's real exit code on failure, whereas an
+          # if-with-no-else swallows it (returns 0), which would make a real
+          # failure look like a pass. This is the proven set-e-safe pattern —
+          # copied verbatim from ci.yml, which has run it for months.
+          rc=0
+          for attempt in 1 2 3; do
+            run_cpv && { echo "Validation passed (attempt $attempt)"; exit 0; }
+            rc=$?
+            if [ "$rc" -ne 124 ]; then break; fi   # real validation failure → fail fast, no retry
+            echo "::warning::CPV validation hung (timed out at 300s) — attempt $attempt/3"
+          done
+          echo "::error::Validation failed (exit code $rc)"
+          exit "$rc"
 
       - name: Check if release already exists
         id: release_exists
