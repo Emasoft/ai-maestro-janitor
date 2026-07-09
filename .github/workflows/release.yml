@@ -11,9 +11,20 @@ jobs:
     # Bound the job so a transit-degraded `uvx` clone in "Validate plugin
     # (strict)" fails fast instead of zombie-hanging to GitHub's 6h max
     # (task #243; see memory: stuck-release-ci-not-publish-blocked). The
-    # release itself is created locally by publish.py — this job is a
-    # redundant post-hoc check, so a tight bound is safe.
-    timeout-minutes: 15
+    # release itself is created locally by publish.py, so a bound is safe.
+    #
+    # 15 was too tight and killed the gate on v0.35.2 AND v0.35.3. Measured
+    # on run 29021326527: `uvx` install finished 4s in; the step then spent
+    # 13m21s inside CPV's REPO LINT and was cancelled mid-lint. Cause: this
+    # repo vendors a full Rust crate (scripts/memgrep/), REPO LINT detects
+    # `rust` and lints its 9 files, and a CI runner compiles it from COLD
+    # (locally `target/` is warm — the whole validate takes ~1m07s).
+    #
+    # A killed gate is WORSE than a slow one: it never reaches a verdict, so
+    # it asserts nothing while showing a red badge nobody reads. Raising the
+    # bound RESTORES the check rather than skipping it. 30 still bounds the
+    # zombie case an order of magnitude below GitHub's 6h.
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -38,9 +49,21 @@ jobs:
         run: uv python install 3.12
 
       - name: Validate plugin (strict)
+        # PINNED to a released CPV tag. Unpinned, this resolved the upstream
+        # DEFAULT BRANCH and executed whatever was on it inside a job holding
+        # `contents: write` on this repo — a supply-chain hole (one bad commit
+        # upstream = write access here) and non-reproducible releases. The pin
+        # must match publish.py's local gate exactly, or a release can pass
+        # locally and fail here (or worse, the reverse).
+        #
+        # BUMP PROTOCOL: raise both this tag and the one in publish.py in the
+        # same commit, after checking `gh api repos/Emasoft/claude-plugins-\
+        # validation/releases/latest`. Note issue #71's fix (CPV PR #157,
+        # A2A false positive) only arrives here once it is RELEASED and the
+        # pin is bumped — that is the intended, greppable behaviour.
         run: |
           set +e
-          uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1 --with pyyaml cpv-remote-validate plugin . --strict
           exit_code=$?
           set -e
           if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]; then

@@ -1616,10 +1616,18 @@ Examples:
     # duplicate CPV pass loses nothing. Step numbers below are kept on
     # their original sequence (Step 6 follows Step 4 — there is no Step 5)
     # so log greps for any existing release-history line still hit.
+    #
+    # CPV is PINNED to a released tag, and the pin MUST equal the one in
+    # .github/workflows/release.yml. Unpinned, both resolved CPV's default
+    # branch, so (a) the local gate and the CI gate could validate different
+    # code — a release passing here and failing there, or the reverse — and
+    # (b) CI executed whatever was on that branch inside a job holding
+    # `contents: write`. Bump both in the same commit; see the BUMP PROTOCOL
+    # comment in release.yml.
     if info.has_kind(ProjectKind.CLAUDE_PLUGIN):
         print(f"\n{BLUE}=== Step 4: CPV strict validate plugin (mandatory) ==={NC}")
         run([
-            "uvx", "--from", "git+https://github.com/Emasoft/claude-plugins-validation",
+            "uvx", "--from", "git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1",
             "--with", "pyyaml", "cpv-remote-validate", "plugin", str(plugin_root), "--strict",
         ], cwd=git_root)
         print(f"{GREEN}ok CPV strict validation passed{NC}")
