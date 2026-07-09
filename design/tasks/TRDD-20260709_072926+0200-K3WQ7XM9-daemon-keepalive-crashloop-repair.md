@@ -3,7 +3,7 @@ trdd-id: K3WQ7XM9
 title: Daemon crash-loop repair — init_state, staged_is_current, keepalive test-isolation, keychain re-prompt
 column: dev
 created: 2026-07-09T07:29:26+0200
-updated: 2026-07-09T07:29:26+0200
+updated: 2026-07-09T07:48:00+0200
 current-owner: janitor
 assignee: janitor
 priority: 1
@@ -38,17 +38,27 @@ keychain hang. This TRDD collects the full repair.
    `JANITOR_LOG_DIR`) and `state_dir()` best-effort (catch OSError). Verified traceback:
    `daemon.main → state.log_line → init_state → state_dir().mkdir → /.janitor read-only`.
 
-2. **`launchd_keepalive.staged_is_current()` FALSE-POSITIVE — TODO.**
-   During repair, `staged_is_current(0.34.0)` returned **True** while the DATA-staged
-   `daemon.py` was an OLD version (staged `def main` at 1155 vs 0.34.0's 1291). So
-   `install()` skipped restaging and the keepalive kept booting the OLD (buggy) daemon.
-   Because of this, fix #1 will NOT reach the launchd path until staged_is_current is
-   corrected AND a new version is published+restaged. Read
-   `scripts/lib/launchd_keepalive.py::staged_is_current` + `keepalive_stage.py` — find why a
-   stale closure compares equal (likely comparing the wrong file set / a frozen dir / mtime
-   vs content). Fix so a stale closure reliably reports NOT current → restage runs.
+2. **`launchd_keepalive.staged_is_current()` FALSE-POSITIVE — FIXED (`a39cf84`).**
+   Root-caused to TWO defects: (a) it compared ONLY `daemon.py`, so a stale `lib/` closure
+   file with a current `daemon.py` read as "current" (wrong file set); (b) `filecmp.cmp(...,
+   shallow=False)` keeps a MODULE-LEVEL cache keyed on `(path, path, sig, sig)` with
+   `sig=(mode,size,mtime)` — after a same-size/same-mtime overwrite with different content it
+   returns a STALE `True` (reproduced empirically). Fix: `staged_is_current` now byte-compares
+   the WHOLE closure (`keepalive_stage.daemon_closure`) via direct reads (no filecmp cache).
+   Regression test added; ruff+mypy clean.
 
-3. **Keepalive test-isolation escape (RECURRENCE of a host-crash bug) — VERIFY/FIX.**
+3. **Keepalive test-isolation escape — VERIFIED, fix HOLDS (no code change needed).**
+   The 2026-07-03 call-time-dir fix is intact and defended by S1a (conftest session-default
+   env isolation), S1b (real-state write-guard), and S2 (`test_no_frozen_home_paths`). Full
+   `pytest tests/` (12246 passed) produced ZERO real-state pollution: (a) S1b write-guard did
+   NOT fire (no guarded `.py`/state/flags/memory mutation), and (b) the REAL
+   `daemon-keepalive.boot.log` size was UNCHANGED (91655→91655) across the whole run — the
+   sharpest probe, since `.log` is excluded from S1b, proving no keepalive test escaped into
+   it. The 296 pre-existing `pytest`/`kaboom` lines in that log are HISTORICAL (pre-isolation);
+   the suite added zero. Left the old log in place (daemon's own regeneratable `.log`,
+   auto-rotates at 256KB; not worth touching live daemon state).
+
+   [ORIGINAL DIAGNOSIS, retained for the record:]
    The production `daemon-keepalive.boot.log` contains `pytest-of-emanuelesabetta/pytest-1572/
    test_corrupt_stage_is_restaged0/...` paths — keepalive tests wrote to REAL DATA state.
    This is the class in project-memory note **`janitor-keepalive-test-isolation-fsevents`**
@@ -64,7 +74,20 @@ keychain hang. This TRDD collects the full repair.
    `JANITOR_GLOBAL_STATE_DIR` + `JANITOR_DATA_DIR` (NOT `CLAUDE_PLUGIN_DATA`). Also clear the
    old pollution from the real boot log if safe.
 
-4. **Keychain re-prompts ~100× with no "Always Allow" — INVESTIGATE, attempt mitigation.**
+4. **Keychain re-prompts ~100× — DOCUMENTED (no code change; needs a follow-up TRDD).**
+   Root cause confirmed: `rotator._read_live_primary()` (rotator.py:379) unconditionally
+   `security find-generic-password -s "Claude Code-credentials" -a $USER -w` — a `-w` secret
+   read of the ACL-restricted primary Claude's `/login` writes with a Claude-only ACL. From
+   the daemon's headless context (+ version-changing uv-python path) macOS re-prompts with no
+   durable "Always Allow". Already non-fatal (timeout=10 at rotator.py:401, 0.34.0). KEY
+   INSIGHT: the "~100×" is largely a SYMPTOM of the crash-loop — each respawn = one first-tick
+   prompt — so fixing #2/#3 collapses it to ~1 prompt per daemon lifetime. The `-livebak`
+   mirror is prompt-free (created via `/usr/bin/security`, ACL trusts that stable binary).
+   Mitigation options A/B/C + the "no USER keychain action needed / an Always-Allow won't
+   stick" analysis are in the report (see below). NOT implemented here: out of scope + the
+   constraint "Do NOT touch the live keychain credential" + risk to the F1 identity logic.
+
+   [ORIGINAL NOTE, retained:]
    USER reported the keychain dialog opened ~100× with NO "Always Allow" button; they
    started cancelling. Cause: the daemon's `security` reads come from a **uv-cached python
    whose path changes every version** (`~/.cache/uv/.../python`) AND/OR it reads the
@@ -104,5 +127,20 @@ entries, stable pid, no crash-loop), and un-quarantine as needed.
   compounded by #2/#3. Also I called the write-guard `.py`-closure exit-3 a pure false
   positive; it was partly REAL test pollution (#3).
 
+## Fix-agent session result (2026-07-09T07:48+0200)
+
+- Bug #2 FIXED (`a39cf84`); bug #3 VERIFIED (fix holds, 0 pollution); bug #4 DOCUMENTED.
+- Full suite: **12246 passed, 8 failed**. The 8 are ALL `@real_state` real-macOS-keychain
+  roundtrips (`test_oauth_rotator.py`×6, `test_safe_storage.py`×2) failing environmentally —
+  the machine's live keychain is in the denied/prompting state the USER is cancelling (bug #4's
+  own condition: `_live_backup_read()==None`, `StoreResult.FAILED`). NOT a regression (diff is
+  100% keepalive; the failing files import no keepalive module; tree clean). Not re-run (would
+  spam more keychain prompts). **ORCHESTRATOR publish-gate note:** these 8 may block publish.py's
+  test gate until the keychain is unlocked or conftest's `_skip_real_state_when_keychain_prompting`
+  probe is hardened (it returned "usable" via a fresh `/usr/bin/security` item yet the real-service
+  writes fail — a plugin-test-hygiene gap).
+- Full report: `reports/daemon-keepalive-repair/20260709_074731+0200-repair.md`.
+
 ## Implementation commits
 - `d939110` — fix #1 (init_state resilient to read-only `/`).
+- `a39cf84` — fix #2 (staged_is_current whole-closure compare + drop filecmp) + regression test.
