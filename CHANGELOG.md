@@ -2,16 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.35.5] - 2026-07-09
+## [0.35.6] - 2026-07-09
 
 ### Bug Fixes
 
-- Gentle rungs must reach ai-maestro agents and Linux GUI terminals
-- Repair the tool PATH so the launchd guardian can reach the fleet
+- The PATH repair fixes tmux only — drop the false ai-maestro claim
 
 ### Documentation
 
-- Correct the release-timeout rationale — 30m is headroom, not the fix
-- Record why the janitor carries no role plugin, and what survives takeover
-- Instance.terminal documents all four identity keys
+- TRDD-VQ4LX7ND — launchd guardian channel blindness
+- Spell the observed PATH without leading separators
 
