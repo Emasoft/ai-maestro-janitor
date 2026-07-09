@@ -2,32 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.34.0] - 2026-07-09
+## [0.35.0] - 2026-07-09
 
 ### Bug Fixes
 
-- Never consume the -livebak mirror as live identity (TRDD-7PYTX4E9 F1/F3/F5)
-- Tick-liveness alert + session-context live-identity beacon (TRDD-7PYTX4E9 F2/F4)
-- Bound the 3 unbounded macOS `security`slot calls (headless hang)
+- Init_state must not crash the OS-keepalive daemon on read-only "/"
+- Staged_is_current compares whole closure, drops filecmp (TRDD-K3WQ7XM9)
+- Isolate keychain tests to a real temp keychain via JANITOR_ROTATOR_KEYCHAIN (TRDD-K3WQ7XM9 FIX B)
+- Mark the rotator tick HEADLESS so it never prompts on the primary read (TRDD-K3WQ7XM9 FIX B2)
+- Safe Keychain Protocol — a denied-latch choke-point makes a prompt-flood impossible (TRDD-K3WQ7XM9 P1/P2)
 
 ### Documentation
 
-- 82OP4EN9 published in v0.33.0 + activation record
-- Add TRDD-7PYTX4E9 — rotator daemon blind-spot (silent mirror fallback masquerades as live identity)
-- 3XS3PDCF — harvest precheck UNBLOCKED (coexistence model live in v0.33.0)
-- 3XS3PDCF — harvest precheck implemented (10f899b); precheck set complete
-- 3XS3PDCF — conflict precheck implemented (f2056ca); all six chores gated
-- 7PYTX4E9 — F1-F5 implemented (af68a6e + c740a5a), tests 331/331 green, not yet published
-
-### Features
-
-- Harvest content-precheck — suppress no-op harvest spawns (TRDD-3XS3PDCF)
-- Conflict content-precheck — suppress no-op conflict spawns (TRDD-3XS3PDCF)
+- Add K3WQ7XM9 — daemon crash-loop repair (init_state/staged_is_current/test-isolation/keychain)
+- K3WQ7XM9 bug #3 verified, bug #4 documented, keychain-test note
+- Macos-keychain wikimem — safe keychain protocol + ACL-prompt-flood gotcha
 
 ### Tests
 
-- Exclude daemon fleet-recovery dir from the S1b write-guard
-- Skip real_state keychain tests when the macOS keychain is prompting (unblock publish)
-- Mock _primary_live_item_absent in the stale F1-era restore test
-- Exclude daemon spawn-history + keepalive restage-stamp from the S1b write-guard
+- Gate real-tmux E2E behind JANITOR_TEST_REAL_TMUX, skip by default (TRDD-K3WQ7XM9 FIX A)
+- Strip leaked JANITOR_ROTATOR_HEADLESS + latch before every test
 
