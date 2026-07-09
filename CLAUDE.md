@@ -257,7 +257,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e4427a7a740c digest=36da1f4e95bc generated=2026-07-09T15:29:40+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=1a37546f2078 digest=2197f8c0eb04 generated=2026-07-09T21:29:34+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -490,6 +490,11 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · PrunePlan — The prune decision for one plugin dir.
   · plan_cache_prune(cache_root, installed_plugins, *, keep_recent, cutoff_epoch, now) -> list[PrunePlan] — Build a prune plan for every `<marketplace>/<plugin>/` under `cache_root`.
   · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
+`scripts/lib/daemon_path.py` — Restore a usable tool PATH for the OS-keepalive daemon (TRDD-VQ4LX7ND).
+  · default_prefixes(platform) -> tuple[str, ...] — The candidate dirs for a platform. Unknown platforms get none (no guessing).
+  · augmented_path(current, *, candidates, exists) -> tuple[str, list[str]] — Return ``(new_path, added_dirs)`` — ``current`` with every candidate that
+  · ensure_tool_path(env) -> list[str] — Augment ``env['PATH']`` in place with the platform's standard tool prefixes.
+  · resolve_injection_tools(env) -> dict[str, str | None] — ``{tool: absolute path or None}`` for each PATH-resolved injection tool.
 `scripts/lib/daemon_throttle.py` — Low-priority subprocess throttling for the global janitor daemon (TRDD-TY2EZ8ZH,
   · low_priority_prefix(platform, *, has_taskpolicy, has_nice, has_ionice) -> list[str] — Return the command-prefix that launches a subprocess at LOW CPU+IO priority.
   · nice_preexec() -> Optional[Callable[[], None]] — Return a ``preexec_fn`` that lowers the child's CPU priority, or ``None``.
@@ -508,7 +513,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · valid_session_id(session_id) -> bool — True iff `session_id` is a bare iTerm UUID safe to interpolate into an
   · iterm_osascript(session_id, command, *, delay_s, esc_first) -> str — AppleScript that targets ONLY the iTerm session whose id == `session_id`,
   · aimaestro_command_argv(cli, session, command) -> list[str] — argv for ``<cli> session command <session> --newline -- <command>`` — the
-  · build_injection(terminal, action, *, delay_s) -> dict | None — Build the keystroke-injection PLAN for a recovery `action` into a resolved
+  · build_command_plan(terminal, command, *, esc_first, delay_s) -> dict | None — THE single channel-selection builder: turn a resolved `terminal` identity plus
+  · build_injection(terminal, action, *, delay_s) -> dict | None — Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
   · fire(plan) -> bool — Fire a built injection plan fully DETACHED — so the daemon never blocks and
 `scripts/lib/fleet_recovery.py` — Fleet recovery POLICY (TRDD-324223a6, GROUP A / A2) — the PURE decisions the
   · action_for(diagnosis, attempts, *, include_hard) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
@@ -522,16 +528,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · build_resurrect(pid, project_root) -> dict — rung 7 — the pane is unreachable: spawn a DETACHED background ``claude`` (a new
   · fire_restart(plan, *, enabled, killable, killer, spawner) -> str — Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
 `scripts/lib/fleet_scan.py` — Daemon-side fleet scanner (TRDD-324223a6) — find EVERY running claude instance
-  · Instance — One running claude instance + its diagnosed janitor health. ``terminal`` is
+  · Instance — One running claude instance + its diagnosed janitor health. ``terminal`` is the
   · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude process in
   · parse_iterm_sessions(text) -> dict[str, str] — ``{normalized_tty: iterm_session_id}`` from the osascript dump of
   · parse_tmux_panes(text) -> dict[str, str] — ``{normalized_tty: pane_id}`` from
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · transcript_age(root, now) -> int | None — Seconds since this project's NEWEST session transcript was written, or
+  · sweep_stale_rate_limit(root, *, now, max_age_s) -> bool — Delete `<root>/.janitor/state/rate-limited.flag` if it is stale. Returns True if swept.
   · diagnose_root(root, *, now, transcript_age, stale_s) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
   · tag_aimaestro_identity(terminal, *, agents, cli, root) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the ai-maestro CLI
   · tag_linux_gui_identity(terminal, *, channel) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the Linux
-  · gather_fleet(*, now) -> list[Instance] — Scan the whole host: every running claude instance whose cwd resolves to a
+  · gather_fleet(*, now, sweep_stale_rate_limit_s) -> list[Instance] — Scan the whole host: every running claude instance whose cwd resolves to a
 `scripts/lib/fleet_stop.py` — Daemon-driven fleet disarm/pause POLICY (TRDD-ME8V2YJF, component A) — the PURE
   · fleet_stop_enabled() -> bool — Master opt-in for daemon-driven fleet-stop injection. DEFAULT-OFF — mirrors
   · stop_command_for(flag_state) -> str | None — The local slash-command to inject for a fleet flag state, or None when the flag
@@ -890,6 +897,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/lib/session_liveness.py` — Session-liveness detection primitives (TRDD-dccb0b8a, Phase 1).
   · capture_terminal_identity(env) -> dict[str, str] — Extract the stable terminal-pane identifiers the daemon needs to inject
   · is_session_frozen(*, transcript_mtime, rate_limited_since, flag_present, now, heartbeat_interval_s, freeze_factor, grace_s) -> bool — True iff a session is FROZEN-AND-STUCK and needs an external wake.
+  · rate_limit_flag_is_stale(flag_mtime, now, max_age_s) -> bool — True iff a `rate-limited.flag` is old enough to be litter rather than a rate limit.
   · recovery_cooldown_ok(last_attempt, now, cooldown_s) -> bool — True iff enough time has elapsed since the last wake attempt on this
   · escalation_tier(attempts) -> int — Map prior FAILED wake attempts to a recovery TIER (1..3):
   · recovery_action_for(attempt) -> str — The recovery action for the Nth (0-based) consecutive failed wake. Walks
