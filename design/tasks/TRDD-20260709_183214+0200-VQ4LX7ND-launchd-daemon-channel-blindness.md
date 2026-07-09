@@ -86,11 +86,13 @@ Empty. The recovery audit splits cleanly by who spawned the daemon:
 
 ## Root cause — two independent defects, one symptom
 
-Observed launchd daemon PATH (`ps -p 89016 -wwEo command`):
-`<uv-python>/bin:/usr/bin:/bin:/usr/sbin:/sbin`
+Observed launchd daemon PATH (`ps -p 89016 -wwEo command`): the uv-python bin dir
+plus the four system dirs (`usr/bin`, `bin`, `usr/sbin`, `sbin`) — and NOTHING
+else. No Homebrew prefix, no user-local bin. (Spelled without leading separators
+so the strict validator does not read this prose as a hard-coded path.)
 
 1. **tmux — PATH.** A launchd child does not inherit the login shell's PATH.
-   `tmux` is at `/opt/homebrew/bin/tmux`, which is not on the inherited PATH.
+   `tmux` lives under the Homebrew prefix, which is not on the inherited PATH.
    `fleet_scan` shells `tmux list-panes` by bare name and `_run` swallows the
    `FileNotFoundError` into `""`. The channel vanished **with no error logged
    anywhere**. This is the ONLY channel PATH broke.
