@@ -2,18 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.36.0] - 2026-07-09
-
-### Bug Fixes
-
-- Give disarmed.flag a writer, and stop disarm deleting a shared file
-- Re-arm on every wake; the armed stamp was never trustworthy
+## [0.37.0] - 2026-07-09
 
 ### Documentation
 
-- Capture today's WHYs — fleet reachability + the CPV gate
+- The opt-out flag with no writer, and the shared file disarm deleted
+- TRDD-EFTQB9RR published as v0.36.0 and verified live
 
 ### Features
 
-- Sweep stale rate-limited flags so a quiet session is not read as frozen
+- Opt-in per-fire cost series via a user-configured CLI
+
+### Miscellaneous
+
+- Refresh the CLAUDE.md project map after v0.36.0
 

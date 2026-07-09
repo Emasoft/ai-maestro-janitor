@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.36.0",
+  "version": "0.37.0",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -145,7 +145,7 @@
     },
     "heartbeat_cost_command": {
       "title": "Heartbeat Cost Command (opt-in)",
-      "description": "Full shell command of a CLI that prints ONE line with the exact token+dollar cost of the PREVIOUS heartbeat fire (e.g. AgentLens: 'node ~/Code/agentlens/scripts/agentlens-heartbeat-cost.js --oneline'). Default: empty (disabled). When set, dispatch.py runs it on every fire — full AND maintenance mode — and appends its first stdout line to .janitor/logs/heartbeat-cost.log, building a greppable per-fire cost series. It never prints to the fire's stdout (a per-fire stdout line would cost output tokens on every fire, taxing the thing it measures). Fail-open: a non-zero exit, timeout (20s), or missing binary means no line this fire; the fire is never blocked. The command is config (not a hard-coded path) because such CLIs are typically machine-local.",
+      "description": "Full shell command of a CLI that prints ONE line with the exact token+dollar cost of the PREVIOUS heartbeat fire (e.g. AgentLens: 'node ~/Code/agentlens/scripts/agentlens-heartbeat-cost.js --oneline'). Default: empty (disabled). When set, dispatch.py runs it on every fire \u2014 full AND maintenance mode \u2014 and appends its first stdout line to .janitor/logs/heartbeat-cost.log, building a greppable per-fire cost series. It never prints to the fire's stdout (a per-fire stdout line would cost output tokens on every fire, taxing the thing it measures). Fail-open: a non-zero exit, timeout (20s), or missing binary means no line this fire; the fire is never blocked. The command is config (not a hard-coded path) because such CLIs are typically machine-local.",
       "type": "string",
       "default": "",
       "sensitive": false

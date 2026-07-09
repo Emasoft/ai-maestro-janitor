@@ -1,6 +1,6 @@
 {
   "files": {
-    "CLAUDE.md": "9cfbe30caa9133308a79ba6fead9576be55c324882e2b85ed6592026192dacf9",
+    "CLAUDE.md": "4e1fdcfa75bf2d29d9a90ef541786ae240dc198d0faaaab9e11ea1770d4a7cea",
     "README.md": "4c6201c9ec70ae20c175879e2c2679da1315c0cecf5cb34a41a85152ed4fdd06",
     "commands/janitor-identify-environment.md": "94c58281c3d42285c90ef3e9f72663782db286b8078374db9ee2b920487696a1",
     "commands/janitor-memory-atomize-frequency-get.md": "5322aff383051ea07cc717f781f795f1279d5c3a0f624817bbf934681b8591c7",
