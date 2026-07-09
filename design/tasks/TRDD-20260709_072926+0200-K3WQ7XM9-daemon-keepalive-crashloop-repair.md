@@ -3,7 +3,7 @@ trdd-id: K3WQ7XM9
 title: Daemon crash-loop repair — init_state, staged_is_current, keepalive test-isolation, keychain re-prompt
 column: dev
 created: 2026-07-09T07:29:26+0200
-updated: 2026-07-09T11:20:53+0200
+updated: 2026-07-09T12:33:33+0200
 current-owner: janitor
 assignee: janitor
 priority: 1
@@ -21,7 +21,35 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-09
 
-**⏵ UPDATE 2026-07-09 (LATEST — keychain flood RESOLVED + guardian RE-ARMED; supersedes item #4 below):**
+**⏵ UPDATE 2026-07-09 #2 (LATEST — SECOND flood root-caused + FIXED in v0.35.1):**
+- **A SECOND flood hit even with the rotator opt-in PAUSED.** Root cause: THREE heartbeat
+  DETECTORS read the OS keychain independent of the opt-in flag — `window-burn-rate`
+  (`rotator_usage.accounts_usage`) and `oauth-login-needed` + `oauth-cookie-reminder`
+  (`supervisor._slot_facts`). They gated on rotator-home PRESENCE / their own ENABLED flag, NOT
+  the opt-in flag — so "paused rotator" did NOT mean "zero keychain access." My earlier claim
+  that pausing the opt-in gave zero keychain access was WRONG for these detectors.
+- **Compounded by a LOCKED login keychain (macOS auto-lock).** A locked keychain makes EVERY
+  reader prompt to unlock — the janitor detectors AND macOS itself (the user saw
+  `iCloudNotificationAgent` prompting too, the tell that the whole keychain was locked). The
+  `run_security` denied-latch capped each burst at ONE, but every re-lock started a fresh one.
+- **FIX v0.35.1 (`1140208`):** gate at the TWO shared keychain-read entry points —
+  `supervisor._slot_facts` returns `()` unless `opt_in_present(root)` (fixes both oauth
+  detectors), and `window-burn-rate._keychain_opt_in_ok()` gates before its `accounts_usage`
+  gather. The user-invoked `/janitor-token-report --live` (the OTHER `accounts_usage` caller) is
+  deliberately NOT gated. +2 regression tests prove "no opt-in → no keychain read"; full suite
+  12261 passed, ruff+mypy clean. Published: https://github.com/Emasoft/ai-maestro-janitor/releases/tag/v0.35.1
+- **DEPLOYED:** cache updated 0.35.0→0.35.1; OS-keepalive closure force-restaged + byte-verified
+  0.35.1 (`daemon.py`+`supervisor.py` MATCH); stub→0.35.1; heartbeat cron `ee43873d` at `*/4`
+  (4 min — cron can't express 4m30s); kill-switch/latch CLEARED. Rotator opt-in stays PAUSED
+  (its own slot-ACL prompt, TRDD-dfc0959a, is unfixed; the detector gate makes detectors safe
+  regardless — opt-in OFF now truly = zero keychain access).
+- **USER-SIDE permanent fix (the thing that actually stopped it):** the login keychain was
+  auto-locking. `security unlock-keychain` + `security set-keychain-settings
+  ~/Library/Keychains/login.keychain-db` (no flags → `no-timeout`, no lock-on-sleep) — run in a
+  REAL terminal / Keychain Access GUI, because this Claude terminal's lean-ctx wrapper BLOCKS the
+  `security` binary. Verified `show-keychain-info` → `no-timeout`. wikimem: [[macos-keychain]] `[^3]`.
+
+**⏵ UPDATE 2026-07-09 #1 (keychain flood RESOLVED + guardian RE-ARMED; supersedes item #4 below):**
 - **v0.35.0 SHIPPED + DEPLOYED** the structural flood fix: `safe_storage.run_security` choke-point
   (denied-latch short-circuits BEFORE spawn; hard timeout → latch; ACL/cancel → latch) = at most
   ONE keychain prompt machine-wide, EVER, until a human clears the latch (`3e5c36a`); FIX B2 marks

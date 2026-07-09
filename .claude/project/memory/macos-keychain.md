@@ -1,6 +1,6 @@
 ---
 name: macos-keychain
-description: "macOS keychain dialog opened hundreds of times / 'Security wants to use the login keychain' with no Always Allow button / cannot type — a keychain prompt FLOOD, often right after rotating/re-logging a Claude account. The safe `security` protocol every keychain interaction MUST follow so this is structurally impossible: single choke-point, hard timeout, headless fail-fast, one-shot denied-latch, temp-keychain test isolation."
+description: "macOS keychain dialog opened hundreds of times / 'Security wants to use the login keychain' with no Always Allow button / cannot type — a keychain prompt FLOOD, often right after rotating/re-logging a Claude account. Prompts KEEP coming even after I paused the rotator / iCloudNotificationAgent is ALSO asking for the login keychain / I typed my password (or ran `security unlock-keychain`) and it is NOT sticking / how do I stop the keychain popups and keep them from coming back. The safe `security` protocol every keychain interaction MUST follow so this is structurally impossible: single choke-point, hard timeout, headless fail-fast, one-shot denied-latch, opt-in gate on EVERY keychain-reading path (detectors included), temp-keychain test isolation; plus the user-side fix for a LOCKED login keychain: `security unlock-keychain` + `set-keychain-settings` no-auto-lock (in a real terminal — the Claude lean-ctx wrapper blocks `security`)."
 ocd: 2026-07-09
 lmd: 2026-07-09
 metadata:
@@ -56,6 +56,16 @@ user rotates / re-logs a Claude account**.
    and kept relaunching it. Publishing + caching + clearing the kill-switch does NOT help — a
    cleared kill-switch **revives whatever is STAGED**. The fix is not "deployed" until the STAGED
    closure is force-restaged and byte-verified against the new version.[^2]
+6. **Detectors read the keychain INDEPENDENT of the rotator opt-in** — why the flood came back
+   even with the rotator "paused". THREE heartbeat detectors read account tokens from the
+   keychain but gated on rotator-home PRESENCE / their own ENABLED flag, NOT the `opt-in.flag`:
+   `window-burn-rate` (`rotator_usage.accounts_usage`) and `oauth-login-needed` +
+   `oauth-cookie-reminder` (`supervisor._slot_facts`). So pausing the rotator opt-in did NOT stop
+   keychain access. Fix (v0.35.1): gate at the two shared read entry points on
+   `supervisor.opt_in_present(root)` — `_slot_facts` returns `()` and `window-burn-rate`'s
+   `_keychain_opt_in_ok()` short-circuits — so "opt-in OFF" now truly means zero keychain access
+   for automatic detectors (the user-invoked `/janitor-token-report --live` is deliberately
+   exempt).[^3]
 
 **How it was stopped (2026-07-09):** kill the hung reader daemons **by PID** (they never
 honor the kill-switch mid-hang), set the machine-wide **kill-switch** (both canonical +
@@ -150,3 +160,26 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   supervisor no-op → zero keychain access, independent of whether the launchd context can prompt;
   the `run_security` denied-latch is the belt, the opt-in-pause is the suspenders. See
   `[[janitor-keepalive-test-isolation-fsevents]]` for the staging internals.
+
+[^3]: [ocd:2026-07-09 lmd:2026-07-09] 2026-07-09, the THIRD flood — the one that finally
+  taught the real lesson. Symptoms-to-remember: "I PAUSED the rotator and the keychain prompts
+  STILL come back"; "this time it's `security` AND `iCloudNotificationAgent` prompting"; "I typed
+  my password / ran `security unlock-keychain` and it's NOT STICKING, it keeps asking." Two
+  distinct causes, both true at once: (a) THREE janitor DETECTORS read the keychain independent
+  of the rotator opt-in flag (root-cause #6 above) — pausing the rotator never stopped them;
+  fixed in v0.35.1 by gating `supervisor._slot_facts` + `window-burn-rate` on `opt_in_present`.
+  (b) The macOS **login keychain was LOCKED** (auto-lock on sleep/idle) — and a locked keychain
+  makes EVERYTHING that needs it prompt, the janitor AND macOS's own agents. The tell that the
+  keychain (not one app's ACL) is the problem: a SYSTEM agent like `iCloudNotificationAgent`
+  prompting, and an unlock-style dialog with NO "Always Allow" button (an ACL prompt has one; a
+  keychain-UNLOCK prompt does not). Lessons: (a) "pause the feature" only helps if EVERY code
+  path that touches the resource is gated on the same flag — audit ALL callers, not just the
+  obvious one (here the rotator tick was gated but three detectors were not). (b) When prompts
+  persist AFTER halting the janitor and there is NO live `security`/janitor process in a `ps`
+  snapshot, suspect a LOCKED keychain hit by macOS/iCloud, not the janitor — the durable fix is
+  the USER unlocking it + disabling auto-lock: `security unlock-keychain` then
+  `security set-keychain-settings ~/Library/Keychains/login.keychain-db` (no flags →
+  `no-timeout`, no lock-on-sleep; verify with `show-keychain-info`). (c) GOTCHA: this Claude
+  terminal's lean-ctx shell wrapper BLOCKS the `security` binary, so `! security unlock-keychain`
+  in the Claude prompt silently never runs — the user must unlock in a REAL terminal or via the
+  Keychain Access GUI. That is why an unlock "didn't stick": it never executed.
