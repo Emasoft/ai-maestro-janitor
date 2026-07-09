@@ -341,13 +341,17 @@ def _security_add_password_via_stdin(service: str, account: str, data: str) -> N
     hardening, NOT done here — getting ctypes argtypes wrong risks worse than this.)
 
     Raises subprocess.CalledProcessError on failure (fail-fast); FileNotFoundError if
-    `security` is absent (not macOS).
+    `security` is absent (not macOS); subprocess.TimeoutExpired if the write HANGS on a
+    locked/prompting keychain (2026-07-09: an unbounded write froze the daemon tick + the
+    test suite) — the caller (`_slot_keychain_write`) treats that as KEYCHAIN_WRITE_FAILED
+    and fails CLOSED, never dropping a plaintext token.
     """
     subprocess.run(
         _add_password_argv(service, account, data),
         check=True,
         capture_output=True,
         text=True,
+        timeout=5,
     )
 
 
@@ -711,14 +715,22 @@ def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dic
             ["security", "find-generic-password", "-s", service, "-a", email, "-w"],
             capture_output=True,
             text=True,
+            # TIMEOUT is load-bearing (TRDD-7PYTX4E9 / 2026-07-09): reading the SECRET
+            # (-w) of a slot whose ACL excludes us — or ANY read while the login keychain
+            # is LOCKED — raises a GUI prompt; headless, the call HANGS FOREVER (froze the
+            # daemon oauth-tick AND the whole test suite on a locked keychain, 2026-07-09).
+            # The Linux `secret-tool` branch below was already bounded (timeout=5); this
+            # macOS branch — the one that actually prompts — was not. Bound it so an
+            # ACL-denied / locked-keychain read degrades in seconds to the mirror / None.
+            timeout=5,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             try:
                 return json.loads(proc.stdout.strip())
             except json.JSONDecodeError:
                 pass
-    except FileNotFoundError:
-        pass  # not macOS
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass  # not macOS, or a locked/prompting keychain — fall through to secret-tool/None
     try:
         r = subprocess.run(
             ["secret-tool", "lookup", "service", service, "account", email],
@@ -752,10 +764,11 @@ def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SE
         return True
     except FileNotFoundError:
         pass  # `security` ABSENT → not macOS — try the Linux keyring below
-    except subprocess.CalledProcessError:
-        # `security` PRESENT but the write FAILED. Do NOT fall through to the Linux
-        # keyring (we ARE on macOS) and do NOT let write_slot drop a plaintext file —
-        # surface a distinct sentinel so the caller fails closed.
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # `security` PRESENT but the write FAILED (non-zero exit) or HUNG on a
+        # locked/prompting keychain then timed out (2026-07-09). Either way we ARE on
+        # macOS: do NOT fall through to the Linux keyring and do NOT let write_slot drop a
+        # plaintext file — surface the fail-closed sentinel.
         return KEYCHAIN_WRITE_FAILED
     try:
         r = subprocess.run(
@@ -778,8 +791,11 @@ def _slot_keychain_delete(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> N
             ["security", "delete-generic-password", "-s", service, "-a", email],
             capture_output=True,
             text=True,
+            # Bound it: a locked/prompting keychain hangs an unbounded delete too
+            # (best-effort cleanup — a timeout is a no-op, same as any other failure).
+            timeout=5,
         )
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
     try:
         subprocess.run(
