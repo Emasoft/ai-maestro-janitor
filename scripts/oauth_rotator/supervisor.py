@@ -211,6 +211,16 @@ def _slot_facts(root: Path, now: float) -> tuple[SlotFact, ...]:
     comes from the state.json INDEX (root-scoped) — the same source the rotator's own
     cmd_list/cmd_auto enumerate — and each blob is read keychain-first, with a legacy
     plaintext-file fallback for any slot not migrated yet."""
+    # KEYCHAIN-SAFETY GATE (TRDD-K3WQ7XM9): refuse to touch the OS keychain unless the user
+    # has OPTED IN to rotator auto-management. This is the choke-point BOTH oauth-login-needed
+    # and oauth-cookie-reminder reach DIRECTLY (bypassing gather_facts, which already gates on
+    # opt_in), so without this gate a "paused" rotator still read the keychain from the
+    # heartbeat — and when the login keychain is LOCKED, every such read raises a GUI unlock
+    # prompt (the 2026-07-09 flood). gather_facts already checks opt_in before calling here, so
+    # this is redundant-safe for it. Reading the keychain is only ever OK once the user has
+    # explicitly enabled auto-management; until then "paused" MUST mean zero keychain access.
+    if not opt_in_present(root):
+        return ()
     emails: list[str] = []
     idx: dict = {}  # the state-index slots map, kept so the per-slot loop can read refresh_failures
     sf = root / "state.json"

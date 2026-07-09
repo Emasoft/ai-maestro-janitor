@@ -112,7 +112,13 @@ def test_windows_from_usage_parses_both_windows() -> None:
 
 def _run_detector(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     full_env = os.environ.copy()
-    for k in ("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED", "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL"):
+    # Also drop any inherited rotator-home pointers so a REAL rotator home can never leak into a
+    # subprocess test (the keychain-safety gate below must be exercised against ONLY what the
+    # test sets up — never the developer's live keychain).
+    for k in (
+        "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED", "CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL",
+        "CLAUDE_PLUGIN_DATA", "CLAUDE_ROTATOR_HOME",
+    ):
         full_env.pop(k, None)
     full_env.update(env)
     return subprocess.run([sys.executable, str(_DETECTOR)], env=full_env, capture_output=True, text=True, timeout=30)
@@ -136,5 +142,24 @@ def test_detector_silent_when_not_due(tmp_path: Path) -> None:
     state_dir.mkdir(parents=True)
     (state_dir / "window-burn-rate.selfrun.ts").write_text("9999999999", encoding="utf-8")
     r = _run_detector({"CLAUDE_PROJECT_DIR": str(proj)})  # enabled by default
+    assert r.returncode == 0
+    assert r.stdout.strip() == ""
+
+
+def test_detector_silent_when_not_opted_in(tmp_path: Path) -> None:
+    """KEYCHAIN-SAFETY GATE (TRDD-K3WQ7XM9): enabled + DUE, and a rotator home EXISTS, but it is
+    NOT opted in (no opt-in.flag) — the 'paused rotator' state. The detector must no-op BEFORE
+    the usage gather, so it never calls accounts_usage → never reads the OS keychain (which, on a
+    LOCKED login keychain, raises a GUI unlock prompt — the 2026-07-09 flood). Exit 0, no output.
+
+    Regression guard: before the gate, an automatic heartbeat detector read the keychain here
+    whenever a rotator home merely existed, regardless of the opt-in flag."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    home = tmp_path / "rotator"
+    home.mkdir()
+    # A CONFIGURED rotator home (state.json present) but deliberately NO opt-in.flag → paused.
+    (home / "state.json").write_text('{"slots": {}}', encoding="utf-8")
+    r = _run_detector({"CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_ROTATOR_HOME": str(home)})
     assert r.returncode == 0
     assert r.stdout.strip() == ""

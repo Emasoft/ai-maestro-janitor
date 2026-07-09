@@ -98,11 +98,36 @@ def test_slot_facts_reads_refresh_and_expiry(tmp_path: Path) -> None:
     (slots / "setup@x.com.json").write_text(json.dumps({"claudeAiOauth": {
         "accessToken": "a", "refreshToken": None,
         "expiresAt": int((now + 5 * 86400) * 1000)}}))
+    # _slot_facts now gates its keychain read on the rotator opt-in (TRDD-K3WQ7XM9); mark the
+    # root opted-in so this test exercises the actual slot-parsing behaviour it asserts.
+    (tmp_path / "opt-in.flag").touch()
     facts = {s.email: s for s in sup._slot_facts(tmp_path, now)}
     assert facts["full@x.com"].has_refresh is True
     assert abs(facts["full@x.com"].expires_days - 2.0) < 0.01
     assert facts["setup@x.com"].has_refresh is False
     assert abs(facts["setup@x.com"].expires_days - 5.0) < 0.01
+
+
+def test_slot_facts_gated_on_opt_in_never_reads_keychain(tmp_path: Path) -> None:
+    """KEYCHAIN-SAFETY GATE (TRDD-K3WQ7XM9): with NO opt-in.flag, _slot_facts returns () and
+    NEVER reads a slot — even though real slot files (and a state.json index) exist. This is
+    the choke-point both oauth-login-needed and oauth-cookie-reminder reach directly; without
+    the gate a "paused" rotator kept reading the OS keychain from the heartbeat, and a LOCKED
+    login keychain turned every read into a GUI unlock-prompt flood (the 2026-07-09 incident)."""
+    slots = tmp_path / "slots"
+    slots.mkdir()
+    now = 1_780_000_000.0
+    (tmp_path / "state.json").write_text(json.dumps({"slots": {"a@x.com": {}}}))
+    (slots / "a@x.com.json").write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": "a", "refreshToken": "r", "expiresAt": int((now + 2 * 86400) * 1000)}}))
+    # No opt-in.flag → the gate must short-circuit BEFORE any keychain / slot read.
+    assert sup.opt_in_present(root=tmp_path) is False
+    assert sup._slot_facts(tmp_path, now) == ()
+    # And once opted in, the very same fixture DOES read the slot (proves () was the gate, not
+    # a parse failure).
+    (tmp_path / "opt-in.flag").touch()
+    facts = sup._slot_facts(tmp_path, now)
+    assert [f.email for f in facts] == ["a@x.com"]
 
 
 def test_opt_in_present_tracks_the_flag(tmp_path: Path) -> None:

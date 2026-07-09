@@ -107,6 +107,25 @@ def _top_consumer_clause(w5_lo: int | None = None, w7_lo: int | None = None) -> 
         return ""
 
 
+def _keychain_opt_in_ok() -> bool:
+    """True iff the rotator is OPTED IN, so this detector may read account tokens from the OS
+    keychain (TRDD-K3WQ7XM9). The SAME gate the daemon's rotator tick uses — it makes "rotator
+    paused" mean "zero keychain access" for this AUTOMATIC detector, so a locked login keychain
+    can never turn its usage gather into a GUI unlock-prompt flood. (The user-invoked
+    `/janitor-token-report --live`, the OTHER `accounts_usage` caller, is deliberately NOT gated:
+    the user explicitly asked, and the safe_storage denied-latch still caps any prompt at one.)
+    Lazy-imports so a disabled/not-due heartbeat never loads the rotator, and FAILS CLOSED — any
+    resolution error returns False, i.e. do NOT touch the keychain."""
+    try:
+        import rotator  # noqa: PLC0415  # configured_rotator_home SSOT (scripts/oauth_rotator)
+        import supervisor  # noqa: PLC0415  # opt_in_present gate (scripts/oauth_rotator)
+
+        home = rotator.configured_rotator_home()
+        return home is not None and supervisor.opt_in_present(home)
+    except Exception:
+        return False
+
+
 def main() -> int:
     state.init_state()
 
@@ -116,6 +135,12 @@ def main() -> int:
     interval = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_INTERVAL"), 900)
     now = int(time.time())
     if not _due(now, interval):
+        return 0
+
+    # KEYCHAIN-SAFETY GATE (TRDD-K3WQ7XM9): the usage gather below reads each account's token
+    # from the OS keychain; an AUTOMATIC heartbeat detector must never let that raise a GUI
+    # unlock prompt on a locked keychain, so it only runs when the user has OPTED IN.
+    if not _keychain_opt_in_ok():
         return 0
 
     ratio = _coerce_float(os.environ.get("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_RATIO"), 1.5)

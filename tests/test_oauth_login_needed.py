@@ -155,6 +155,10 @@ def _run(
     home = tmp_path / "rotator"
     (home / "slots").mkdir(parents=True, exist_ok=True)
     (home / "state.json").write_text(json.dumps({"slots": {e: {} for e in slots}}))
+    # The detector now gates its keychain reads on the rotator opt-in (TRDD-K3WQ7XM9): a
+    # "paused" rotator must never touch the keychain from the heartbeat. These integration
+    # tests exercise the opted-in path, so mark the home opted-in.
+    (home / "opt-in.flag").touch()
     for email, refreshable in slots.items():
         oauth: dict[str, object] = {"accessToken": "x"}
         if refreshable:
