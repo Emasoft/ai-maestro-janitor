@@ -49,7 +49,7 @@ are safe to remove.
 
 | Path | What it is | Safe to delete? |
 |---|---|---|
-| `~/.claude/rules/*.md` | the janitor's shipped GLOBAL rules (this one, `markdown-memory-recall`, `use-safe-delete`) | no — canonical. A **project-local copy** of any of these is a redundant mirror: gitignore or delete it, **never commit** it (it would impose a personal global rule on every contributor) |
+| `~/.claude/rules/*.md` | the janitor's shipped GLOBAL rules — hygiene (this one, `markdown-memory-recall`, `use-safe-delete`, `commit-discipline`, `janitor-heartbeat-protocol`) + the 3 ai-maestro-INDEPENDENT governance rules (`trdd-design-tasks`, `prrd-design-rules`, `universal-kanban` — the janitor half of ai-maestro TRDD-DE9757LJ, issue #73) | no — canonical. A **project-local copy** of any of these is a redundant mirror: gitignore or delete it, **never commit** it (it would impose a personal global rule on every contributor) |
 | `~/.claude/projects/<slug>/memory/` | **LOCAL**-scope wiki memory — machine-private notes (paths, hostnames, hints) | **NO** — real knowledge |
 | `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` | the janitor's **DATA** dir — dispatcher stub, **USER**-scope memory (canonical), OAuth-rotator + daemon state | **NO** — persistent state |
 | `~/.claude/ai-maestro-janitor-memory/` | the **USER-scope memory MIRROR** — a synced backup of the canonical USER corpus, kept OUTSIDE the data dir so it survives a plain `plugin uninstall` (TRDD-GFT33HT9). SessionStart syncs it and restores from it after a data-dir loss | **NO** — real knowledge (a memory store) |
