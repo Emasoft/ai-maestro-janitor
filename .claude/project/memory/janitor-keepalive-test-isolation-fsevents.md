@@ -2,7 +2,7 @@
 name: janitor-keepalive-test-isolation-fsevents
 description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / how to root-cause an fseventsd or mds RAM/CPU runaway"
 ocd: 2026-07-03
-lmd: 2026-07-03
+lmd: 2026-07-09
 metadata:
   node_type: memory
   type: project
@@ -68,6 +68,10 @@ literally appear in the production boot log.
 ## See also
 
 - [[janitor-architecture]] — the L0–L3 immortality layers this component lives in.
+- [[macos-keychain]] — the 2026-07-09 keychain-flood RECURRENCE: this keepalive had STAGED the
+  pre-fix 0.31.0 flooder into DATA and kept relaunching it, so a published+cached fix never
+  reached the running daemon until the staged closure was force-restaged + byte-verified (that
+  page's root-cause #5 / lesson `[^2]`).
 - Same keepalive subsystem, related seam: the hub's TRDD-KEEPQRTN lesson (`[^3]`) —
   "a self-healing gate must be consulted by EVERY respawn path." Both are keepalive
   restage/respawn bugs that looked correct per-path but broke at the whole-surface

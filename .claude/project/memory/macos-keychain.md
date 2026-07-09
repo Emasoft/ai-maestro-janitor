@@ -50,6 +50,12 @@ user rotates / re-logs a Claude account**.
    version crash-loops (see the daemon-crashloop TRDD) the heartbeat runs a **stale cached
    version** that lacks the timeout/headless fixes, so even a "fixed" tree keeps flooding from
    the fallback.
+5. **The OS-keepalive STAGES a stale daemon** — the deepest variant, why the flood RECURRED for
+   days after the fix was published: the L0 launchd keepalive copies a daemon closure into
+   `${DATA}/scripts/` and runs THAT, not the cache. It had staged the pre-fix **0.31.0** flooder
+   and kept relaunching it. Publishing + caching + clearing the kill-switch does NOT help — a
+   cleared kill-switch **revives whatever is STAGED**. The fix is not "deployed" until the STAGED
+   closure is force-restaged and byte-verified against the new version.[^2]
 
 **How it was stopped (2026-07-09):** kill the hung reader daemons **by PID** (they never
 honor the kill-switch mid-hang), set the machine-wide **kill-switch** (both canonical +
@@ -108,6 +114,8 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
 - `[[reference_oauth_rotator_keychain_architecture]]` — the rotator's slot/mirror keychain layout.
 - `[[oauth-rotation-renew-reauth]]` — the ROTATE→RENEW→REAUTH component that reads these items.
 - `[[reference_macos_security_keychain_gotchas]]` — the storage-corruption sibling (gotchas 1 & 2).
+- `[[janitor-keepalive-test-isolation-fsevents]]` — the OS-keepalive staging mechanism whose STALE
+  staged closure kept the pre-fix flooder alive (root-cause #5 above / lesson `[^2]`).
 
 ## Notes and lessons learned
 
@@ -124,3 +132,21 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   (e) Fixing the daemon crash-loop UNMASKS the rotator prompt — a healthy daemon reaches the
   tick that a crashing one never did; so the headless read-path fix must ship together with the
   crash-loop fix, never after.
+
+[^2]: [ocd:2026-07-09 lmd:2026-07-09] 2026-07-09, the RECURRENCE. Symptom-to-remember: "I
+  PUBLISHED the fix, updated the cache, cleared the kill-switch — and the flood STILL kept
+  coming back over the next days." Root cause: the L0 OS-keepalive (launchd) runs a daemon
+  closure it STAGES into `${DATA}/scripts/`, independent of the heartbeat and the cache. It had
+  staged the pre-fix **0.31.0** flooder (`staged_is_current` was False vs the current version —
+  the closure was staged before the fix existed) and relaunched it every time. Lessons: (a) A
+  cached/published fix is NOT deployed to the keepalive until the STAGED closure is force-restaged
+  AND byte-verified (`launchd_keepalive.restage(latest_cache_scripts_dir())`, then sha-compare
+  staged `daemon.py`/`rotator.py`/`safe_storage.py` == the new version). (b) Clearing the
+  kill-switch REVIVES whatever is STAGED — so verify the staged closure BEFORE clearing it, or you
+  revive the flooder. (c) The subprocess the daemon spawns (`_HERE/oauth_rotator/rotator.py`,
+  `_HERE` = the daemon's own dir) is the STAGED rotator, so the whole closure — not just daemon.py
+  — must be current. (d) The durable, uncertainty-proof stop for a keychain-touching sub-feature
+  is to PAUSE its opt-in flag (`opt-in.flag` → `opt-in.flag.PAUSED-…`), which makes the tick +
+  supervisor no-op → zero keychain access, independent of whether the launchd context can prompt;
+  the `run_security` denied-latch is the belt, the opt-in-pause is the suspenders. See
+  `[[janitor-keepalive-test-isolation-fsevents]]` for the staging internals.
