@@ -563,6 +563,13 @@ def task_oauth_rotator_tick() -> None:
     if not oauth_supervisor.opt_in_present():
         return  # rotator not activated on this machine -> silent no-op
     rotator_py = _HERE / "oauth_rotator" / "rotator.py"
+    # FIX B2 (TRDD-K3WQ7XM9): mark the rotator subprocess HEADLESS so it NEVER does the
+    # prompting `-w` secret read of the ACL-restricted primary live item — a read the daemon
+    # can only ever hang/prompt on (the ~100× keychain prompt storm). It resolves the live
+    # credential from the -T-accessible -livebak mirror instead (the same resolution it
+    # reached after the read failed). The daemon is definitionally headless, so this is always
+    # correct here; a manual/session-context `rotator.py tick` never sets it → unchanged.
+    os.environ["JANITOR_ROTATOR_HEADLESS"] = "1"
     _run_workload(
         [sys.executable, str(rotator_py), "tick", "--only-if-claude-running"],
         timeout=120,
