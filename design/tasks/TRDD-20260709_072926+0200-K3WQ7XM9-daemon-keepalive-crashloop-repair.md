@@ -3,7 +3,7 @@ trdd-id: K3WQ7XM9
 title: Daemon crash-loop repair — init_state, staged_is_current, keepalive test-isolation, keychain re-prompt
 column: dev
 created: 2026-07-09T07:29:26+0200
-updated: 2026-07-09T07:48:00+0200
+updated: 2026-07-09T11:20:53+0200
 current-owner: janitor
 assignee: janitor
 priority: 1
@@ -20,6 +20,32 @@ external-refs: []
 # Daemon crash-loop repair (post-0.34.0)
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-09
+
+**⏵ UPDATE 2026-07-09 (LATEST — keychain flood RESOLVED + guardian RE-ARMED; supersedes item #4 below):**
+- **v0.35.0 SHIPPED + DEPLOYED** the structural flood fix: `safe_storage.run_security` choke-point
+  (denied-latch short-circuits BEFORE spawn; hard timeout → latch; ACL/cancel → latch) = at most
+  ONE keychain prompt machine-wide, EVER, until a human clears the latch (`3e5c36a`); FIX B2 marks
+  the rotator tick HEADLESS so it skips the prompting `-w` primary read (`1cf0b6c`); conftest
+  headless-leak fix (`85e6d17`). Full 7395-test suite passed with ZERO keychain prompts. Release
+  `87618eb`.
+- **ROOT CAUSE of the RECURRING flood found this session:** the L0 OS-keepalive (launchd) had
+  STAGED **0.31.0** (the pre-fix flooder) into `${DATA}/scripts/` and kept relaunching it —
+  `staged_is_current` was False vs the correct 0.35.0 target (staged before 0.35.0 existed).
+  FORCE-RESTAGED the whole closure to 0.35.0 and byte-verified daemon.py + rotator.py +
+  safe_storage.py all == 0.35.0. The keepalive now runs the flood-safe daemon.
+- **GUARDIAN RE-ARMED:** kill-switch + denied-latch + stale daemon.pid CLEARED in both global-state
+  dirs; stub refreshed to 0.35.0; heartbeat cron re-created (`060459c4`, session-only per the CC
+  durable-downgrade — the OS-keepalive is the durable layer). `kill_switch_present()`=False → daemon runs.
+- **ROTATOR OPT-IN RE-PAUSED** (`opt-in.flag` → `opt-in.flag.PAUSED-keychain-incident-20260709`).
+  Reason: B2 headless only skips the PRIMARY read; the tick still reads the ACL'd SLOTS
+  (`Claude Code-rotator-slot`) via `-w`, which have no stable trusted reader (the flood's real ACL
+  root cause — TRDD-dfc0959a) → would prompt ONCE then the latch disables the rotator anyway.
+  Pausing the opt-in makes `task_oauth_rotator_tick` + the supervisor no-op → the daemon touches
+  the keychain ZERO times → zero prompts, guaranteed, independent of the launchd-context question.
+  `supervisor.opt_in_present()`=False verified. RE-ENABLE with `/janitor-auto-manage-oauth-on` once
+  the slot-ACL/stable-reader fix (TRDD-dfc0959a) lands. wikimem: [[macos-keychain]].
+- **NET:** janitor guardian ARMED + running verified-safe 0.35.0; flood STRUCTURALLY impossible
+  (latch) AND the flood-source feature dormant (opt-in paused). No keychain reader in `ps`.
 
 **Context:** v0.34.0 shipped the rotator keychain-timeout fix (`c717743`) — real, done.
 But the janitor **daemon crash-loops** on every version (0.34.0→0.33.0→0.31.0 all
