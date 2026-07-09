@@ -122,47 +122,94 @@ def aimaestro_command_argv(cli: str, session: str, command: str) -> list[str]:
     return [cli, "session", "command", session, "--newline", "--", command]
 
 
-def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dict | None:
-    """Build the keystroke-injection PLAN for a recovery `action` into a resolved
-    `terminal` (``{'iterm_session_id'?, 'tmux_pane'?}``). PURE — returns a plan the
-    caller fires (or inspects in a dry-run); None when the action types no command
-    OR the terminal cannot be safely targeted.
+def build_command_plan(
+    terminal: dict, command: str, *, esc_first: bool = True, delay_s: float = 2.0
+) -> dict | None:
+    """THE single channel-selection builder: turn a resolved `terminal` identity plus
+    an already-chosen `command` into a fire-able plan, or None when no safe channel
+    resolves. PURE — no resolution, no I/O; `fleet_scan` populated every key.
 
-    Plan shapes::
+    Fallback order — tmux -> iterm -> aimaestro -> linux-gui — is the order
+    `fleet_scan.tag_linux_gui_identity` documents, most-direct first. Plan shapes::
 
-        {'channel': 'tmux',  'command': '<cmd>', 'steps': [[argv], ...]}
-        {'channel': 'iterm', 'command': '<cmd>', 'osascript': '<script>'}
+        {'channel': 'tmux',     'command': ..., 'delay_s': ..., 'steps': [[argv], ...]}
+        {'channel': 'iterm',    'command': ..., 'delay_s': ..., 'osascript': '<script>'}
+        {'channel': 'aimaestro','command': ..., 'argv': [cli, 'session', ...]}
+        {'channel': 'wtype'|'xdotool', 'command': ..., 'delay_s': ..., 'steps': [...]}
 
-    tmux is preferred when a pane is present — it is the ai-maestro-compatible,
-    no-AppleScript, no-focus-steal path. iTerm is the fallback, gated on a valid
-    UUID so a tampered identity can never reach the osascript sink.
+    WHY this lives here and not in `fleet_restart`: both the GENTLE command-typing
+    rungs (`build_injection`, below) and the HARD restart rungs
+    (`fleet_restart._command_plan`) must reach exactly the same set of instances. They
+    did not: this builder used to stop after iterm, while the hard path already walked
+    all four. An ai-maestro agent reachable ONLY via the CLI channel — or a Linux GUI
+    terminal — was therefore reported UNREACHABLE for a harmless `/janitor-arm`, kept
+    escalating, and eventually met a rung that KILLS it. A severity inversion: the
+    gentle fix was skipped precisely where the violent one landed. One builder, one
+    reachability set, so the two can never drift again.
+
+    Every identity that reaches a sink is validated first (bare `%<n>` tmux pane, hex
+    iTerm UUID) — a malformed one declines that channel and falls through rather than
+    smuggling a flag into `tmux send-keys` or AppleScript into `osascript`.
     """
-    command = action_to_command(action)
-    if command is None:
-        return None  # esc_nudge / hard-restart — not a command-typing injection
     pane = terminal.get("tmux_pane", "").strip()
-    # Gate the tmux pane exactly as the iTerm UUID is gated below: only a bare `%<n>`
-    # may reach the `tmux send-keys -t <pane>` argv. A malformed pane (e.g. a
-    # leading `-`, which tmux would read as a FLAG) is rejected, and we fall through
-    # to the iTerm channel — mirroring the UUID decline path, so neither sink ever
-    # receives an unvalidated identity.
     if pane and terminal_trigger.valid_tmux_pane(pane):
+        # build_tmux_steps always leads with ESC; harmless at a shell prompt (it just
+        # clears the line), so the esc_first distinction only matters for iTerm.
         return {
             "channel": "tmux",
             "command": command,
             "delay_s": delay_s,
             "steps": terminal_trigger.build_tmux_steps(pane, command),
         }
-    sid_full = terminal.get("iterm_session_id", "").strip()
-    sid = sid_full.split(":")[-1].strip()  # accept '<tty>:<uuid>' or a bare uuid
-    if sid and valid_session_id(sid):
+    sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
+    if sid and valid_session_id(sid):  # accept '<tty>:<uuid>' or a bare uuid
         return {
             "channel": "iterm",
             "command": command,
             "delay_s": delay_s,
-            "osascript": iterm_osascript(sid, command, delay_s=delay_s),
+            "osascript": iterm_osascript(sid, command, delay_s=delay_s, esc_first=esc_first),
         }
-    return None  # unreachable: no tmux pane and no valid iTerm UUID
+    session = terminal.get("aimaestro_session", "").strip()
+    cli = terminal.get("aimaestro_cli", "").strip()
+    if session and cli:
+        # No ESC primitive on this channel (see terminal_trigger._try_ai_maestro_send):
+        # typing into a mid-turn agent ENQUEUES regardless, so esc_first is unused. No
+        # delay_s either — the CLI is fired directly, not through the delayed step runner.
+        return {
+            "channel": "aimaestro",
+            "command": command,
+            "argv": aimaestro_command_argv(cli, session, command),
+        }
+    gui_channel = terminal.get("linux_gui_channel", "").strip()
+    if gui_channel in ("wtype", "xdotool"):
+        # Same "always ESC-first, harmless at a shell prompt" rationale as tmux.
+        builder = (
+            terminal_trigger.build_wtype_steps
+            if gui_channel == "wtype"
+            else terminal_trigger.build_xdotool_steps
+        )
+        return {
+            "channel": gui_channel,
+            "command": command,
+            "delay_s": delay_s,
+            "steps": builder(command),
+        }
+    return None  # genuinely unreachable: no channel resolved
+
+
+def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dict | None:
+    """Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
+    resolved `terminal`. PURE. None when the action types no command (esc_nudge /
+    hard-restart rungs) OR no channel resolves.
+
+    Channel selection is delegated to `build_command_plan`, so the gentle rungs reach
+    exactly the instances the hard rungs do — including ai-maestro agents (CLI channel)
+    and Linux GUI terminals, which this function used to declare UNREACHABLE.
+    """
+    command = action_to_command(action)
+    if command is None:
+        return None  # esc_nudge / hard-restart — not a command-typing injection
+    return build_command_plan(terminal, command, delay_s=delay_s)
 
 
 def fire(plan: dict | None) -> bool:

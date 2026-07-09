@@ -181,3 +181,98 @@ def test_fire_wtype_and_xdotool_use_detached_steps(monkeypatch) -> None:
     assert len(seen) == 2
     assert seen[0] == (2.0, [["RUN", "wtype", "/x"]])
     assert seen[1] == (2.0, [["RUN", "xdotool", "/x"]])
+
+
+# ---------------------------------------------------------------------------
+# Gentle/hard rung reachability parity — the severity inversion.
+#
+# `build_injection` (gentle rungs: rearm/reload/update) used to stop after the
+# iterm channel, while `fleet_restart._command_plan` (hard rungs: relaunch /
+# force_restart) already walked tmux -> iterm -> aimaestro -> linux-gui. So an
+# ai-maestro agent reachable ONLY via the CLI channel, and any Linux GUI
+# terminal, was reported UNREACHABLE for a harmless `/janitor-arm`, kept
+# escalating, and eventually met a rung that KILLS it. The gentle fix was
+# skipped exactly where the violent one landed. These lock the two sets together.
+# ---------------------------------------------------------------------------
+
+_AIMAESTRO_TERMINAL = {
+    "aimaestro_session": "agent-foo",
+    "aimaestro_cli": "/usr/bin/aimaestro-agent.sh",
+}
+_GUI_TERMINAL = {"linux_gui_channel": "wtype"}
+
+
+def test_build_injection_reaches_aimaestro_agent() -> None:
+    """A gentle rung MUST reach an ai-maestro agent that only the CLI channel can place
+    (a nested/managed tmux the raw TTY scan cannot see)."""
+    plan = fi.build_injection(_AIMAESTRO_TERMINAL, "rearm")
+    assert plan is not None, "gentle rung must not declare an ai-maestro agent unreachable"
+    assert plan["channel"] == "aimaestro"
+    assert plan["command"] == "/janitor-arm"
+    assert plan["argv"] == [
+        "/usr/bin/aimaestro-agent.sh", "session", "command", "agent-foo",
+        "--newline", "--", "/janitor-arm",
+    ]
+
+
+def test_build_injection_reaches_linux_gui_terminal() -> None:
+    """A gentle rung MUST reach a Linux GUI terminal (focused-window, best effort)."""
+    plan = fi.build_injection(_GUI_TERMINAL, "reload")
+    assert plan is not None
+    assert plan["channel"] == "wtype"
+    assert plan["command"] == "/reload-plugins"
+    assert plan["steps"]
+
+
+def test_build_injection_channel_precedence_unchanged() -> None:
+    """Adding the fallbacks must not demote an already-direct channel: tmux still wins
+    over iterm, and both still win over aimaestro / linux-gui."""
+    both = {
+        "tmux_pane": "%3", "iterm_session_id": "DEADBEEF-0000",
+        **_AIMAESTRO_TERMINAL, **_GUI_TERMINAL,
+    }
+    tmux_plan = fi.build_injection(both, "rearm")
+    assert tmux_plan is not None and tmux_plan["channel"] == "tmux"
+    no_tmux = {k: v for k, v in both.items() if k != "tmux_pane"}
+    iterm_plan = fi.build_injection(no_tmux, "rearm")
+    assert iterm_plan is not None and iterm_plan["channel"] == "iterm"
+    cli_only = {**_AIMAESTRO_TERMINAL, **_GUI_TERMINAL}
+    cli_plan = fi.build_injection(cli_only, "rearm")
+    assert cli_plan is not None and cli_plan["channel"] == "aimaestro"
+
+
+def test_build_injection_still_none_when_no_channel() -> None:
+    """A genuinely unreachable terminal still declines — the fallbacks must not invent
+    a channel out of an empty or bogus identity."""
+    assert fi.build_injection({}, "rearm") is None
+    assert fi.build_injection({"linux_gui_channel": "bogus"}, "rearm") is None
+
+
+def test_build_injection_declines_non_typing_actions() -> None:
+    """esc_nudge and the hard rungs type no command -> still None, even with a live
+    channel resolved."""
+    assert fi.build_injection({"tmux_pane": "%3"}, "esc_nudge") is None
+    assert fi.build_injection(_AIMAESTRO_TERMINAL, "force_restart") is None
+
+
+def test_gentle_and_hard_paths_agree_on_every_terminal_shape() -> None:
+    """The invariant the inversion violated: for the SAME terminal, the gentle builder
+    and the hard builder resolve the SAME channel — including agreeing on None."""
+    import fleet_restart as fr  # type: ignore[import-not-found]
+
+    shapes = [
+        {"tmux_pane": "%7"},
+        {"iterm_session_id": "tty1:DEADBEEF-1234"},
+        dict(_AIMAESTRO_TERMINAL),
+        dict(_GUI_TERMINAL),
+        {"linux_gui_channel": "xdotool"},
+        {},
+        {"tmux_pane": "-bad"},              # malformed pane -> decline that channel
+        {"iterm_session_id": "no;script"},  # malformed uuid -> decline that channel
+    ]
+    for term in shapes:
+        gentle = fi.build_injection(term, "rearm")
+        hard = fr._command_plan(term, "/janitor-arm", esc_first=True)
+        gentle_ch = gentle["channel"] if gentle else None
+        hard_ch = hard["channel"] if hard else None
+        assert gentle_ch == hard_ch, f"reachability drift on {term}: {gentle_ch} vs {hard_ch}"
