@@ -329,6 +329,69 @@ def test_keychain_write_passes_data_as_argv_value(monkeypatch: pytest.MonkeyPatc
     assert seen["input"] is None                          # NOT the truncating stdin-prompt mode
 
 
+_KEYCHAIN_USABLE_CACHE: bool | None = None
+
+
+def _keychain_usable() -> bool:
+    """Fast probe: can `security` touch the login keychain WITHOUT blocking on an
+    interactive unlock / ACL prompt? A fresh `claude /login` can leave the keychain
+    PROMPTING for access, which makes the real-keychain roundtrip tests below HANG the
+    `security` subprocess indefinitely — observed 2026-07-09, timing out publish.py's
+    test gate at 600s while every other test passed. A throwaway add→delete under a
+    SHORT timeout answers the question: a TimeoutExpired (the prompt) or any error →
+    keychain unusable → the caller SKIPS instead of hanging an unattended publish.
+    Cached so the (potentially 8s-blocking) probe runs at most once per session, not
+    once per test."""
+    global _KEYCHAIN_USABLE_CACHE
+    if _KEYCHAIN_USABLE_CACHE is not None:
+        return _KEYCHAIN_USABLE_CACHE
+    import subprocess
+
+    svc = "Claude Code-rotator-probe-%d" % os.getpid()
+    acct = "probe-%d@example.test" % os.getpid()
+    ok = False
+    try:
+        # WRITE then — critically — READ BACK. Creating a keychain item never prompts,
+        # but READING one under a restrictive ACL (what a fresh `/login` leaves) DOES.
+        # The read is the exact operation the roundtrip tests hang on, so the probe
+        # must exercise it (a write-only probe returns a false "usable").
+        add = subprocess.run(
+            ["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe"],
+            capture_output=True, text=True, timeout=8,
+        )
+        read = subprocess.run(
+            ["security", "find-generic-password", "-s", svc, "-a", acct, "-w"],
+            capture_output=True, text=True, timeout=8,
+        )
+        ok = add.returncode == 0 and read.returncode == 0 and read.stdout.strip() == "probe"
+    except (subprocess.TimeoutExpired, OSError):
+        ok = False  # a prompt is up (or `security` is absent) → unusable
+    finally:
+        try:
+            subprocess.run(
+                ["security", "delete-generic-password", "-s", svc, "-a", acct],
+                capture_output=True, text=True, timeout=8,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+    _KEYCHAIN_USABLE_CACHE = ok
+    return ok
+
+
+@pytest.fixture(autouse=True)
+def _skip_real_keychain_when_prompting(request: pytest.FixtureRequest) -> None:
+    """Every `real_state` test in this module touches the REAL macOS keychain (see each
+    test's decorator comment). When a fresh `claude /login` leaves the keychain PROMPTING
+    for access, `security` READS block indefinitely and hang the whole suite — they timed
+    out publish.py's test gate at 600s on 2026-07-09 while every other test passed. Probe
+    once (cached); if the keychain is unusable, SKIP every real_state test rather than
+    hang an unattended publish. Non-real_state tests are a fast no-op (the probe never
+    runs for them). The keychain becomes usable again once the user unlocks it / grants
+    `security` access (Always-Allow on the prompt)."""
+    if request.node.get_closest_marker("real_state") and not _keychain_usable():
+        pytest.skip("real macOS keychain locked/prompting for access — skipping real_state keychain test (would hang `security`)")
+
+
 @pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
 def test_keychain_write_roundtrips_real_keychain_over_128_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The keychain write stores the EXACT bytes in the real macOS keychain — including

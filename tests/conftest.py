@@ -98,6 +98,66 @@ _GUARD_EXCLUDE_SUFFIXES = (
 _GUARD_EXCLUDE_PARTS = ("oauth-rotator", ".memgrep", "recovery")
 
 
+_KEYCHAIN_USABLE_CACHE: bool | None = None
+
+
+def _keychain_usable() -> bool:
+    """Fast probe: can `security` touch the login keychain WITHOUT blocking on an
+    interactive unlock / ACL prompt? A fresh `claude /login` can leave the keychain
+    PROMPTING for access, which makes every ``real_state`` real-keychain test HANG its
+    `security` READ subprocess indefinitely — observed 2026-07-09, timing out publish.py's
+    test gate at 600s while all other tests passed. A throwaway add→READ→delete under a
+    SHORT timeout answers it: a TimeoutExpired (the prompt) or any error → keychain
+    unusable → the ``_skip_real_state_when_keychain_prompting`` fixture skips instead of
+    hanging an unattended publish. The READ is load-bearing: creating an item never
+    prompts, but reading one under a restrictive ACL does. Cached so the (up to 8s)
+    probe runs at most once per session."""
+    global _KEYCHAIN_USABLE_CACHE
+    if _KEYCHAIN_USABLE_CACHE is not None:
+        return _KEYCHAIN_USABLE_CACHE
+    import subprocess
+    import sys
+
+    ok = False
+    if sys.platform == "darwin":
+        svc = "Claude Code-conftest-probe-%d" % os.getpid()
+        acct = "probe-%d@example.test" % os.getpid()
+        try:
+            add = subprocess.run(
+                ["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe"],
+                capture_output=True, text=True, timeout=8,
+            )
+            read = subprocess.run(
+                ["security", "find-generic-password", "-s", svc, "-a", acct, "-w"],
+                capture_output=True, text=True, timeout=8,
+            )
+            ok = add.returncode == 0 and read.returncode == 0 and read.stdout.strip() == "probe"
+        except (subprocess.TimeoutExpired, OSError):
+            ok = False
+        finally:
+            try:
+                subprocess.run(
+                    ["security", "delete-generic-password", "-s", svc, "-a", acct],
+                    capture_output=True, text=True, timeout=8,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+    _KEYCHAIN_USABLE_CACHE = ok
+    return ok
+
+
+@pytest.fixture(autouse=True)
+def _skip_real_state_when_keychain_prompting(request: "pytest.FixtureRequest") -> None:
+    """GLOBAL guard: a `real_state` test that reads the real macOS keychain HANGS when a
+    fresh `/login` leaves the keychain prompting. Skip every such test when the keychain
+    is unusable, so an unattended publish never hangs (was tripping test_oauth_rotator,
+    test_safe_storage, test_cookie_vault on 2026-07-09). Non-real_state tests are a fast
+    no-op — the probe only runs for a real_state-marked test, and it is cached. The
+    keychain becomes usable again once the user unlocks it / grants `security` access."""
+    if request.node.get_closest_marker("real_state") and not _keychain_usable():
+        pytest.skip("real macOS keychain locked/prompting for access — skipping real_state test (would hang `security`)")
+
+
 def _manifest(root: Path) -> dict[str, str]:
     """Content manifest {relpath: sha256} of every guarded file under ``root``."""
     if not root.is_dir():
