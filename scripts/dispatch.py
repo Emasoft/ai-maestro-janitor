@@ -996,7 +996,8 @@ def _phase_keep_going_nudge(mode: str) -> None:
     several heartbeats in a row).
     """
     keep_going_flag = state.state_dir() / "keep-going"
-    if not keep_going_flag.is_file() and mode != "maintenance":
+    maintenance = mode == "maintenance"
+    if not keep_going_flag.is_file() and not maintenance:
         return
     print("[janitor-resume]")
     # W4 (TRDD-82OP4EN9): point the nudge at the ACTUAL pending work when we can
@@ -1019,8 +1020,24 @@ def _phase_keep_going_nudge(mode: str) -> None:
         )
     if bits:
         print("continue your pending task (keep-going mode) — " + "; ".join(bits))
+    elif maintenance:
+        # WHY (issue #74): the generic fallback below names `/janitor-keep-going
+        # off`, but in maintenance mode the keep-going flag is ABSENT so that
+        # command only rm's a non-existent flag — a NO-OP — while the agent
+        # falsely reports "keep-going OFF" and the nudge re-fires forever.
+        # Maintenance is a deliberately-set mode with its own lifecycle
+        # (/janitor-maintenance-mode off); a per-fire nudge must NOT let a worker
+        # unilaterally exit it. This branch also covers "flag present AND
+        # maintenance active" — the flag's off-lever cannot silence a
+        # maintenance-driven nudge, so we never name it here.
+        print("continue your pending task (maintenance mode) — if you are blocked on a human decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone keep-going off-switch does not apply to it; maintenance is exited deliberately with /janitor-maintenance-mode off)")
     else:
-        print("continue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off")
+        # Flag is the SOLE driver here, so /janitor-keep-going off IS the correct
+        # lever. WHY (issue #74): reworded from "if nothing remains" so a session
+        # merely BLOCKED ON A HUMAN DECISION (a RULE-1 autonomy boundary) does not
+        # disable the never-stop guardian exactly when a human is expected to
+        # re-engage — only genuinely-finished work should turn it off.
+        print("continue your pending task (keep-going mode) — if the work is genuinely finished (not merely blocked on a human decision), say so briefly and run /janitor-keep-going off")
 
 
 def _phase_user_presence_breadcrumb() -> None:

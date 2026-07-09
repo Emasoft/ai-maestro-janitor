@@ -285,11 +285,17 @@ def test_keep_going_nudge_points_at_pending_agents_and_directive(iso, capsys) ->
 
 
 def test_keep_going_nudge_generic_when_nothing_pending(iso, capsys) -> None:
-    """No directive + empty manifest → the pre-W4 generic off-ramp line, unchanged."""
+    """No directive + empty manifest, maintenance-driven → the maintenance fallback line.
+
+    issue #74: this fallback used to name `/janitor-keep-going off`, but in maintenance that
+    command is a NO-OP (the keep-going flag is absent) — so the line must NOT name it, and must
+    instead tell the agent to WAIT rather than self-disable a deliberately-set mode."""
     dispatch = _import_dispatch()
     dispatch._phase_keep_going_nudge("maintenance")
     out = capsys.readouterr().out
-    assert "if nothing remains, say so briefly and run /janitor-keep-going off" in out
+    assert "/janitor-keep-going off" not in out
+    assert "do NOT disable maintenance mode" in out
+    assert "/janitor-maintenance-mode off" in out
 
 
 def test_keep_going_nudge_silent_in_plain_full_mode(iso, capsys) -> None:

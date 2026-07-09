@@ -737,8 +737,8 @@ def test_main_maintenance_fires_cheap_no_chores_but_ensures_daemon(env_isolation
 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-self-disarm]" not in out, "maintenance must NOT self-disarm (that kills the warm cache)"
-    expected = "[janitor-resume]\ncontinue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off"
-    assert out.strip() == expected, f"a maintenance fire must emit ONLY the keep-going nudge, got {out!r}"
+    expected = "[janitor-resume]\n" + _MAINTENANCE_LINE
+    assert out.strip() == expected, f"a maintenance fire must emit ONLY the maintenance nudge, got {out!r}"
     assert ran == [], f"a maintenance fire must run NO detector, ran {ran}"
     stamps = list(state.state_dir().glob("last-run-*.ts"))
     assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
@@ -776,7 +776,13 @@ def test_main_maintenance_under_kill_switch_keeps_beating(env_isolation: dict, m
 
 # ---------- Phase 1.5a: keep-going never-stop nudge (TRDD-TKNSTP82 Part B) --
 
-_KEEP_GOING_LINE = "continue your pending task (keep-going mode) — if nothing remains, say so briefly and run /janitor-keep-going off"
+# issue #74: the flag-driven line (keep-going flag is the SOLE driver → the off-lever
+# IS correct here; reworded so a session blocked on a human decision does not disable it).
+_KEEP_GOING_LINE = "continue your pending task (keep-going mode) — if the work is genuinely finished (not merely blocked on a human decision), say so briefly and run /janitor-keep-going off"
+# issue #74: the maintenance-driven line. MUST NOT name `/janitor-keep-going off` — in
+# maintenance the flag is absent so that command is a NO-OP; maintenance is its own mode
+# exited via /janitor-maintenance-mode off, never from a per-fire nudge.
+_MAINTENANCE_LINE = "continue your pending task (maintenance mode) — if you are blocked on a human decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone keep-going off-switch does not apply to it; maintenance is exited deliberately with /janitor-maintenance-mode off)"
 
 
 def test_phase_keep_going_nudge_silent_full_mode_no_flag(env_isolation: dict) -> None:
@@ -809,7 +815,7 @@ def test_phase_keep_going_nudge_emits_in_maintenance_mode_no_flag(env_isolation:
 
     state.init_state()
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"unexpected nudge output: {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE], f"unexpected nudge output: {out!r}"
 
 
 def test_phase_keep_going_nudge_no_dedupe_refires_every_call(env_isolation: dict) -> None:
@@ -825,6 +831,62 @@ def test_phase_keep_going_nudge_no_dedupe_refires_every_call(env_isolation: dict
     second = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
     assert first == second, "the nudge must re-fire identically on every call, no dedupe"
     assert first.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
+
+
+# ---------- issue #74: driver-aware fallback line (no false "keep-going OFF") --
+
+
+def test_phase_keep_going_nudge_maintenance_never_names_off_lever(env_isolation: dict) -> None:
+    """issue #74 core: maintenance + NO keep-going flag must NOT name `/janitor-keep-going off`
+    (in maintenance that command is a NO-OP, so the old line re-fired forever while the agent
+    falsely reported "keep-going OFF") and must warn against disabling maintenance mode."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert "/janitor-keep-going off" not in out, f"maintenance nudge must not name the no-op off-lever: {out!r}"
+    assert "do NOT disable maintenance mode" in out, f"maintenance nudge must warn against self-disable: {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE]
+
+
+def test_phase_keep_going_nudge_full_with_flag_names_off_lever(env_isolation: dict) -> None:
+    """issue #74: when the standalone keep-going flag is the SOLE driver (full mode), the off-lever
+    IS the correct action, so the line MUST name `/janitor-keep-going off`."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert "/janitor-keep-going off" in out, f"flag-driven nudge must name the off-lever: {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE]
+
+
+def test_phase_keep_going_nudge_flag_and_maintenance_uses_maintenance_line(env_isolation: dict) -> None:
+    """issue #74: flag present AND maintenance active → the maintenance line wins (the flag's
+    off-lever cannot silence a maintenance-driven nudge, so it must NOT be named)."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert "/janitor-keep-going off" not in out, f"maintenance-driven nudge must not name the off-lever: {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE]
+
+
+def test_phase_keep_going_nudge_full_no_flag_still_silent_issue74(env_isolation: dict) -> None:
+    """issue #74: the driver-aware fix preserves the RUNAWAY GUARD — full mode, no flag, not
+    maintenance stays completely silent (no runaway on default / interactive sessions)."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert out == "", f"the guard must keep a plain full-mode session silent, got {out!r}"
 
 
 def test_main_full_mode_no_keep_going_flag_no_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
