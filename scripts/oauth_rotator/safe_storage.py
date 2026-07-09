@@ -52,11 +52,151 @@ import binascii
 import os
 import platform
 import subprocess
+import sys
+import time
 from enum import Enum
+from typing import NamedTuple
 
 # How long to wait on a secret-store CLI before giving up (a hung keyring prompt must
 # never wedge the unattended daemon tick).
 _CLI_TIMEOUT_S = 10.0
+
+
+# ==========================================================================
+# THE SAFE KEYCHAIN PROTOCOL (TRDD-K3WQ7XM9 P1) — one choke-point every `security`
+# call routes through, making a prompt-flood STRUCTURALLY IMPOSSIBLE.
+#
+# The 2026 flood was 0.31.0 rotator daemons doing UNBOUNDED `-w` reads of a slot whose
+# ACL broke after the user rotated accounts → each read raised a keychain prompt → the
+# daemon respawned → ~100 prompts. Three ordered defenses close it for good:
+#   (b) DENIED-LATCH FIRST: once ANY `security` op is denied/hangs, a persistent flag is
+#       set and EVERY later op short-circuits to "denied" WITHOUT spawning `security` —
+#       so at most ONE prompt can EVER occur machine-wide until a human clears the latch.
+#   (a) HARD TIMEOUT on every subprocess (a hung prompt can never wedge the caller).
+#   (d) On a timeout / ACL-denied / user-canceled result: SET the latch + log ONE line.
+# The headless primitive (skip the `-w` primary read entirely in daemon/detector/tick
+# context) lives in rotator._primary_secret_read_permitted; the latch is the backstop that
+# also covers SLOT reads and any path that isn't headless-gated.
+# ==========================================================================
+
+_KEYCHAIN_LATCH_NAME = "keychain-denied.latch"
+# Substrings that mark a `security` result as a DENIAL worth latching on (case-insensitive).
+# Deliberately NARROW: an ACL/unlock/interaction denial or a user-canceled prompt — NEVER
+# "item could not be found" (a normal not-found must not latch and deny everything).
+_DENIAL_MARKERS = (
+    "user interaction is not allowed",
+    "the user name or passphrase you entered is not correct",
+    "user canceled",
+    "user cancelled",
+    "errsecauthfailed",
+    "-25293",  # errSecAuthFailed
+    "errsecinteractionnotallowed",
+    "-25308",  # errSecInteractionNotAllowed
+    "errsecusercanceled",
+    "-128",    # errSecUserCanceled
+)
+
+
+class SecurityRun(NamedTuple):
+    """Outcome of ONE gated `security` invocation via ``run_security``."""
+
+    ok: bool               # `security` ran AND returned 0
+    stdout: str            # its stdout (empty unless it ran)
+    stderr: str            # its stderr (empty unless it ran)
+    spawned: bool          # True IFF the `security` subprocess was actually launched
+    denied: bool           # blocked by the pre-set latch (no spawn) OR this call tripped it
+    returncode: int | None
+
+
+def _keychain_latch_path() -> str:
+    """Absolute path of the machine-wide denied-latch flag, resolved AT CALL TIME.
+
+    Honors ``JANITOR_GLOBAL_STATE_DIR`` (the isolation lever every janitor global-state
+    writer + the test suite uses) → else the janitor's global-state dir under HOME. Kept a
+    plain env read (no ``global_state`` import) so safe_storage stays dependency-light and
+    the latch is fully test-isolatable."""
+    d = os.environ.get("JANITOR_GLOBAL_STATE_DIR", "").strip() or os.path.join(
+        os.path.expanduser("~"), ".claude", "janitor-global-state"
+    )
+    return os.path.join(d, _KEYCHAIN_LATCH_NAME)
+
+
+def keychain_denied_latched() -> bool:
+    """True iff the denied-latch is set — a prior `security` op was denied/hung, so NO
+    further op should even spawn `security` (it would just prompt again)."""
+    return os.path.isfile(_keychain_latch_path())
+
+
+def set_keychain_denied(reason: str) -> None:
+    """Set the persistent denied-latch (atomic tmp+replace) and log ONE actionable line.
+    Idempotent — never raises (a latch we can't write must not crash the caller)."""
+    path = _keychain_latch_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        tmp = f"{path}.tmp.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(f"{stamp}\t{reason}\n")
+        os.replace(tmp, path)
+    except OSError:
+        pass  # best-effort — the in-call denial still returned; the latch is an optimization
+    try:
+        print(
+            "[safe-storage] KEYCHAIN DENIED-LATCH SET: %s. All further `security` ops are "
+            "suppressed (no prompt) until you re-grant access and clear the latch — run "
+            "`rotator.py clear-keychain-latch` (or call safe_storage.clear_keychain_denied())."
+            % reason,
+            file=sys.stderr, flush=True,
+        )
+    except Exception:
+        pass
+
+
+def clear_keychain_denied() -> bool:
+    """Clear the denied-latch so `security` ops resume. Call this from the arm / ACL-re-grant
+    flow (the user has re-granted access). Returns True iff a latch was present + removed.
+    Never raises."""
+    path = _keychain_latch_path()
+    try:
+        os.remove(path)
+        return True
+    except OSError:
+        return False
+
+
+def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S) -> SecurityRun:
+    """THE single gate EVERY `security` invocation (safe_storage AND rotator) routes through.
+
+    Enforces the protocol in order: (b) denied-latch short-circuit BEFORE spawning →
+    (a) hard timeout → (d) latch-on-denial. Never raises. When the latch is unset and no
+    denial occurs, this is byte-identical to a plain ``subprocess.run(argv, timeout=...)``."""
+    if keychain_denied_latched():
+        # Short-circuit: the latch is set, so we must NOT spawn `security` (it would prompt).
+        return SecurityRun(ok=False, stdout="", stderr="", spawned=False, denied=True, returncode=None)
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        # `security` absent → not really macOS. NOT a denial; caller may try another backend.
+        return SecurityRun(ok=False, stdout="", stderr="", spawned=False, denied=False, returncode=None)
+    except subprocess.TimeoutExpired:
+        set_keychain_denied(f"a `security` op hung past {timeout:g}s (a keychain unlock/ACL prompt)")
+        return SecurityRun(ok=False, stdout="", stderr="", spawned=True, denied=True, returncode=None)
+    stderr = proc.stderr or ""
+    if proc.returncode != 0 and _is_denial(stderr):
+        set_keychain_denied("`security` returned an ACL/auth/user-canceled denial")
+        return SecurityRun(ok=False, stdout=proc.stdout or "", stderr=stderr, spawned=True, denied=True, returncode=proc.returncode)
+    return SecurityRun(ok=(proc.returncode == 0), stdout=proc.stdout or "", stderr=stderr,
+                       spawned=True, denied=False, returncode=proc.returncode)
+
+
+def _is_denial(stderr: str) -> bool:
+    """True iff a NON-ZERO `security` result is an ACL/auth/user-canceled DENIAL (latch it),
+    as opposed to a benign not-found. Matches only the narrow denial markers; a
+    'could not be found' is explicitly NOT a denial."""
+    low = stderr.lower()
+    if "could not be found" in low or "the specified item could not be found" in low:
+        return False
+    return any(m in low for m in _DENIAL_MARKERS)
 
 
 class StoreResult(str, Enum):
@@ -221,42 +361,28 @@ def secret_tool_delete_argv(service: str, account: str) -> list[str]:
 # macOS backend (`security`) — mirrors the proven rotator._slot_keychain_* path.
 # --------------------------------------------------------------------------
 def _macos_store(service: str, account: str, secret: str) -> StoreResult:
-    try:
-        # Value on argv (NOT stdin) — the stdin form truncates at 128 bytes via
-        # getpass() (TRDD-5539cd6e); see macos_store_argv / the module docstring.
-        proc = subprocess.run(
-            macos_store_argv(service, account, secret),
-            capture_output=True, text=True, timeout=_CLI_TIMEOUT_S,
-        )
-    except FileNotFoundError:
+    # Value on argv (NOT stdin) — the stdin form truncates at 128 bytes via getpass()
+    # (TRDD-5539cd6e). Routed through the protocol choke-point (latch/timeout/latch-on-deny).
+    run = run_security(macos_store_argv(service, account, secret))
+    if not run.spawned and not run.denied:
         return StoreResult.NO_BACKEND   # `security` absent → not really macOS
-    except subprocess.TimeoutExpired:
-        return StoreResult.FAILED       # a hung keychain prompt — fail closed
-    return StoreResult.OK if proc.returncode == 0 else StoreResult.FAILED
+    if not run.ok:
+        return StoreResult.FAILED       # latched, hung, denied, or non-zero — fail closed
+    return StoreResult.OK
 
 
 def _macos_retrieve(service: str, account: str) -> str | None:
-    try:
-        proc = subprocess.run(
-            macos_retrieve_argv(service, account),
-            capture_output=True, text=True, timeout=_CLI_TIMEOUT_S,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
+    run = run_security(macos_retrieve_argv(service, account))
+    if not run.ok:
+        return None                     # absent / latched / hung / denied / not-found
     # `security -w` prints the secret + a trailing newline; strip ONLY the trailing
     # newline `security` adds, not interior whitespace the secret may legitimately hold.
-    if proc.returncode == 0:
-        out = proc.stdout
-        return out[:-1] if out.endswith("\n") else out
-    return None
+    out = run.stdout
+    return out[:-1] if out.endswith("\n") else out
 
 
 def _macos_delete(service: str, account: str) -> None:
-    try:
-        subprocess.run(macos_delete_argv(service, account),
-                       capture_output=True, text=True, timeout=_CLI_TIMEOUT_S)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    run_security(macos_delete_argv(service, account))  # best-effort; latch/timeout enforced
 
 
 # --------------------------------------------------------------------------

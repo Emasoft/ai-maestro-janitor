@@ -347,13 +347,17 @@ def _security_add_password_via_stdin(service: str, account: str, data: str) -> N
     test suite) — the caller (`_slot_keychain_write`) treats that as KEYCHAIN_WRITE_FAILED
     and fails CLOSED, never dropping a plaintext token.
     """
-    subprocess.run(
-        _add_password_argv(service, account, data),
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
+    # Routed through the Safe Keychain Protocol choke-point (TRDD-K3WQ7XM9 P1): latch
+    # short-circuit → hard timeout → latch-on-denial. Preserve this fn's historical
+    # exception contract so `_slot_keychain_write` still fails CLOSED on any failure.
+    run = safe_storage.run_security(_add_password_argv(service, account, data), timeout=5)
+    if not run.spawned and not run.denied:
+        raise FileNotFoundError("`security` not found")  # not macOS → caller tries secret-tool
+    if not run.ok:
+        raise subprocess.CalledProcessError(  # latched / hung / denied / non-zero → fail closed
+            run.returncode if run.returncode is not None else 1,
+            ["security", "add-generic-password"],
+        )
 
 
 def _add_password_argv(service: str, account: str, data: str) -> list[str]:
@@ -410,20 +414,14 @@ def _read_primary_macos_keychain(acct: str) -> dict | None:
     falls to the -livebak mirror (the same resolution, no prompt)."""
     if not _primary_secret_read_permitted():
         return None
-    try:
-        proc = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w", *safe_storage.keychain_scope_args()],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except FileNotFoundError:
-        return None  # `security` only exists on macOS
-    except subprocess.TimeoutExpired:
-        return None  # ACL prompt hang — unreadable from this context (item EXISTS)
-    if proc.returncode == 0 and proc.stdout.strip():
+    # Choke-point (TRDD-K3WQ7XM9 P1): latch short-circuit → hard timeout → latch-on-denial.
+    run = safe_storage.run_security(
+        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w", *safe_storage.keychain_scope_args()],
+        timeout=10,
+    )
+    if run.ok and run.stdout.strip():
         try:
-            return json.loads(proc.stdout.strip())
+            return json.loads(run.stdout.strip())
         except json.JSONDecodeError:
             pass
     return None
@@ -491,22 +489,21 @@ def _primary_live_item_absent() -> bool:
     hangs a headless `-w` read. Anything ambiguous (timeout, odd rc, no `security`
     with a credentials file present) counts as PRESENT — the restore stays refused."""
     acct = _keychain_account()
-    try:
-        proc = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, *safe_storage.keychain_scope_args()],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except FileNotFoundError:
-        # Not macOS — the primary is the credentials file; absent means absent.
+    # No `-w` → an attribute-only presence probe (never touches the secret, never prompts);
+    # still routed through the choke-point so a latched state short-circuits it too.
+    run = safe_storage.run_security(
+        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, *safe_storage.keychain_scope_args()],
+        timeout=10,
+    )
+    if not run.spawned and not run.denied:
+        # Not macOS (no `security`) — the primary is the credentials file; absent means absent.
         return not (Path.home() / ".claude" / ".credentials.json").exists()
-    except subprocess.TimeoutExpired:
-        return False  # ambiguous — never prove absence from a hang
-    if proc.returncode == 0:
+    if run.denied or run.returncode is None:
+        return False  # latched / hung — ambiguous; never prove absence
+    if run.ok:
         return False  # the item exists (whether or not its secret is readable by us)
     # errSecItemNotFound is rc 44 / "could not be found" — the only proven-absent case.
-    return proc.returncode == 44 or "could not be found" in (proc.stderr or "")
+    return run.returncode == 44 or "could not be found" in run.stderr
 
 
 def read_live_blob_with_source() -> tuple[dict | None, str]:
@@ -746,27 +743,20 @@ def slot_path(email: str) -> Path:
 def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dict | None:
     """Read an account's slot token from the OS keychain (macOS `security`, then
     Linux `secret-tool`) under `service`. None if absent/unreadable."""
-    try:
-        proc = subprocess.run(
-            ["security", "find-generic-password", "-s", service, "-a", email, "-w", *safe_storage.keychain_scope_args()],
-            capture_output=True,
-            text=True,
-            # TIMEOUT is load-bearing (TRDD-7PYTX4E9 / 2026-07-09): reading the SECRET
-            # (-w) of a slot whose ACL excludes us — or ANY read while the login keychain
-            # is LOCKED — raises a GUI prompt; headless, the call HANGS FOREVER (froze the
-            # daemon oauth-tick AND the whole test suite on a locked keychain, 2026-07-09).
-            # The Linux `secret-tool` branch below was already bounded (timeout=5); this
-            # macOS branch — the one that actually prompts — was not. Bound it so an
-            # ACL-denied / locked-keychain read degrades in seconds to the mirror / None.
-            timeout=5,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            try:
-                return json.loads(proc.stdout.strip())
-            except json.JSONDecodeError:
-                pass
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass  # not macOS, or a locked/prompting keychain — fall through to secret-tool/None
+    # Choke-point (TRDD-K3WQ7XM9 P1): the SLOT `-w` read was the 2026 flood source (a slot
+    # whose ACL broke after account rotation → unbounded hanging reads). The gate makes it
+    # impossible: a latched state short-circuits WITHOUT spawning; the FIRST hang sets the
+    # latch (hard timeout still bounds that one). On any non-success we fall through to the
+    # Linux `secret-tool` branch (a no-op on macOS → None).
+    run = safe_storage.run_security(
+        ["security", "find-generic-password", "-s", service, "-a", email, "-w", *safe_storage.keychain_scope_args()],
+        timeout=5,
+    )
+    if run.ok and run.stdout.strip():
+        try:
+            return json.loads(run.stdout.strip())
+        except json.JSONDecodeError:
+            pass
     try:
         r = subprocess.run(
             ["secret-tool", "lookup", "service", service, "account", email],
@@ -822,17 +812,12 @@ def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SE
 def _slot_keychain_delete(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> None:
     """Remove an account's slot token from the keychain `service` (best-effort, both
     stores). Used to forget a retired account and by the keychain tests' cleanup."""
-    try:
-        subprocess.run(
-            ["security", "delete-generic-password", "-s", service, "-a", email, *safe_storage.keychain_scope_args()],
-            capture_output=True,
-            text=True,
-            # Bound it: a locked/prompting keychain hangs an unbounded delete too
-            # (best-effort cleanup — a timeout is a no-op, same as any other failure).
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    # Choke-point (TRDD-K3WQ7XM9 P1): best-effort, but still gated so a latched state never
+    # spawns `security` and a hung delete bounds+latches like every other op.
+    safe_storage.run_security(
+        ["security", "delete-generic-password", "-s", service, "-a", email, *safe_storage.keychain_scope_args()],
+        timeout=5,
+    )
     try:
         subprocess.run(
             ["secret-tool", "clear", "service", service, "account", email],
@@ -2295,6 +2280,16 @@ def main(argv: list[str]) -> int:
         return 2
     cmd = argv[0]
     # ── Read-only commands: no lock needed (they never write state.json / keychain). ──
+    if cmd == "clear-keychain-latch":
+        # Safe Keychain Protocol (TRDD-K3WQ7XM9 P1): the human's re-grant / re-arm path.
+        # After re-granting keychain ACL (e.g. re-login / "Always Allow"), clear the latch so
+        # `security` ops resume. Until then EVERY op is suppressed (no prompt can recur).
+        cleared = safe_storage.clear_keychain_denied()
+        print("keychain denied-latch cleared" if cleared else "no keychain denied-latch was set")
+        return 0
+    if cmd == "keychain-latch-status":
+        print("LATCHED" if safe_storage.keychain_denied_latched() else "clear")
+        return 0
     if cmd == "beacon":
         # F2 (TRDD-7PYTX4E9): session-context live-identity stamp. Writes only the
         # atomic live-identity.json (never state.json / keychain), so it is safe

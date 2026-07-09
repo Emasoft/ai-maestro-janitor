@@ -187,6 +187,8 @@ def test_snapshot_failed_propagates_failclosed(monkeypatch: pytest.MonkeyPatch,
 
     class _R:
         returncode = 1  # security write refused (locked/declined)
+        stdout = ""
+        stderr = ""  # run_security reads proc.stdout + proc.stderr (Safe Keychain Protocol, TRDD-K3WQ7XM9)
     monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _R())
     assert cv.snapshot_to_keychain("a@x.com", db) is ss.StoreResult.FAILED
 

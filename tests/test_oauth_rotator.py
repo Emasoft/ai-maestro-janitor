@@ -310,6 +310,9 @@ def test_keychain_write_passes_data_as_argv_value(monkeypatch: pytest.MonkeyPatc
     # Fragmented so no contiguous credential literal sits in tracked source
     # (tests/README.md §"fragment-only"); reconstructs byte-identical for the assertion below.
     SECRET = '{"accessToken":"tok-' + '0123456789abcdef' + '","refreshToken":"R-' + 'secret"}'
+    # No keychain-scope arg on the argv so the -w VALUE stays LAST for the assertion below
+    # (the session-default JANITOR_ROTATOR_KEYCHAIN would otherwise append a trailing keychain).
+    monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
     seen: dict = {}
 
     def _spy(argv, **kwargs):  # type: ignore[no-untyped-def]
@@ -318,9 +321,13 @@ def test_keychain_write_passes_data_as_argv_value(monkeypatch: pytest.MonkeyPatc
 
         class _R:
             returncode = 0
+            stdout = ""
+            stderr = ""  # run_security reads proc.stdout + proc.stderr (Safe Keychain Protocol, TRDD-K3WQ7XM9)
         return _R()
 
-    monkeypatch.setattr(rotator.subprocess, "run", _spy)
+    # The write now routes through safe_storage.run_security → safe_storage.subprocess.run,
+    # so spy THAT module's subprocess (not rotator's) — TRDD-K3WQ7XM9 P1 choke-point.
+    monkeypatch.setattr(rotator.safe_storage.subprocess, "run", _spy)
     rotator._security_add_password_via_stdin("svc-test", "acct-test", SECRET)
     argv = seen["argv"]
     assert argv[:2] == ["security", "add-generic-password"]
@@ -1298,9 +1305,12 @@ def test_read_live_blob_with_source_tags_provenance(monkeypatch: pytest.MonkeyPa
     assert rotator.read_live_blob_with_source() == (None, "none")
 
 
-def test_add_password_argv_carries_acl_partners() -> None:
+def test_add_password_argv_carries_acl_partners(monkeypatch: pytest.MonkeyPatch) -> None:
     """F3: every rotator keychain write authorizes /usr/bin/security + the real python
     binary via -T, so rotator-written items stay readable from a headless daemon."""
+    # Assert the BASE argv shape (the -w VALUE stays last) — unset the session-default keychain
+    # scope that would otherwise append a trailing keychain positional (TRDD-K3WQ7XM9).
+    monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
     argv = rotator._add_password_argv("svc", "acct", "DATA")
     assert argv[:3] == ["security", "add-generic-password", "-U"]
     assert ("-s", "svc") == (argv[3], argv[4]) and ("-a", "acct") == (argv[5], argv[6])

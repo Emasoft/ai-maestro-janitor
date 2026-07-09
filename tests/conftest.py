@@ -59,6 +59,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,10 @@ import pytest
 _ISOLATION_ENVS = ("HOME", "JANITOR_GLOBAL_STATE_DIR", "JANITOR_DATA_DIR", "CLAUDE_PLUGIN_DATA")
 _REAL_ENV: dict[str, str | None] = {}
 _SESSION_TMP: Path | None = None
+# Session-default temp keychain (TRDD-K3WQ7XM9 P2): every test's `security` calls are scoped
+# to THIS isolated keychain via JANITOR_ROTATOR_KEYCHAIN, so NO test can touch the login
+# keychain. Round-trip tests override it per-test with the fresh `isolated_keychain` fixture.
+_SESSION_KEYCHAIN: str | None = None
 # label -> (real dir, before-manifest)
 _GUARDED: dict[str, tuple[Path, dict[str, str]]] = {}
 
@@ -161,7 +166,7 @@ def _security_temp_keychain_roundtrip_ok() -> bool:
 
 
 @pytest.fixture
-def isolated_keychain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> "Path":
+def isolated_keychain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> "Iterator[Path]":
     """A REAL but ISOLATED macOS keychain for keychain round-trip tests (TRDD-K3WQ7XM9 FIX B).
 
     Creates a temp keychain via ``security create-keychain``, points
@@ -230,6 +235,63 @@ def _manifest(root: Path) -> dict[str, str]:
     return out
 
 
+def _setup_session_keychain() -> None:
+    """Create a session-wide REAL temp keychain and point JANITOR_ROTATOR_KEYCHAIN at it, so
+    EVERY test's `security` call is confined to it — the login keychain is never touched
+    (TRDD-K3WQ7XM9 P2). macOS-only + best-effort: if `security`/create-keychain is
+    unavailable it is a no-op (there is then no `security` to run either). `create-keychain`
+    with a known password never prompts, and no-autolock keeps it unlocked all session."""
+    global _SESSION_KEYCHAIN
+    import subprocess as _sp
+    import sys as _sys
+
+    if _sys.platform != "darwin" or shutil.which("security") is None or _SESSION_TMP is None:
+        return
+    kc = str(_SESSION_TMP / "session.keychain-db")
+    pw = "janitor-session-pw"  # throwaway temp-keychain password, not a secret
+    try:
+        if _sp.run(["security", "create-keychain", "-p", pw, kc],
+                   capture_output=True, text=True, timeout=15).returncode != 0:
+            return
+        _sp.run(["security", "unlock-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=15)
+        _sp.run(["security", "set-keychain-settings", kc], capture_output=True, text=True, timeout=15)  # no autolock
+    except (_sp.SubprocessError, OSError):
+        return
+    _SESSION_KEYCHAIN = kc
+    os.environ["JANITOR_ROTATOR_KEYCHAIN"] = kc
+
+
+def _teardown_session_keychain() -> None:
+    global _SESSION_KEYCHAIN
+    if _SESSION_KEYCHAIN is None:
+        return
+    import subprocess as _sp
+
+    try:
+        _sp.run(["security", "delete-keychain", _SESSION_KEYCHAIN], capture_output=True, text=True, timeout=15)
+    except (_sp.SubprocessError, OSError):
+        pass
+    _SESSION_KEYCHAIN = None
+
+
+@pytest.fixture(autouse=True)
+def _clear_keychain_latch_between_tests() -> "Iterator[None]":
+    """Clear the Safe-Keychain-Protocol denied-latch before AND after every test
+    (TRDD-K3WQ7XM9 P2), so a test that deliberately trips the latch can never poison the
+    next test's `security` ops. The latch lives at
+    ``$JANITOR_GLOBAL_STATE_DIR/keychain-denied.latch`` (the session tmp dir)."""
+    def _clear() -> None:
+        gsd = os.environ.get("JANITOR_GLOBAL_STATE_DIR", "")
+        if gsd:
+            try:
+                os.remove(os.path.join(gsd, "keychain-denied.latch"))
+            except OSError:
+                pass
+    _clear()
+    yield
+    _clear()
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
@@ -271,6 +333,7 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ["JANITOR_DATA_DIR"] = str(data)
     os.environ["CLAUDE_PLUGIN_DATA"] = str(data)
     os.environ.pop("XDG_STATE_HOME", None)
+    _setup_session_keychain()  # session-default temp keychain — no test touches the login keychain
 
 
 @pytest.fixture(autouse=True)
@@ -310,6 +373,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     global _SESSION_TMP
+    _teardown_session_keychain()  # delete the session-default temp keychain
     if _SESSION_TMP is not None:
         shutil.rmtree(_SESSION_TMP, ignore_errors=True)
         _SESSION_TMP = None
