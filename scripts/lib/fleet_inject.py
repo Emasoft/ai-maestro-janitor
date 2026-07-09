@@ -55,7 +55,10 @@ _UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
 # command, so action_to_command() returns None and build_injection() declines.
 _ACTION_COMMAND = {
     "rearm": "/janitor-arm",
-    "reload": "/reload-plugins",
+    # --force: a plugin whose code is mid-use can refuse a plain reload and stay
+    # on the old cached version (user directive 2026-07-10) — every janitor
+    # sender of /reload-plugins forces.
+    "reload": "/reload-plugins --force",
     "update": "/janitor-arm",
 }
 

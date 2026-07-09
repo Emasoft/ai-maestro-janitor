@@ -1,6 +1,6 @@
 ---
 name: janitor-maintenance-mode
-description: Keep the janitor heartbeat ARMED but make every fire cache-refresh-only (no detectors, no daemon, no agents), so the prompt cache stays warm at ~1/10 the cost of letting it die and rewriting — the cheap middle ground between a full heartbeat and disarm. Trigger with /janitor-maintenance-mode, "maintenance mode", "keep the cache warm cheaply", "cheap heartbeat"; add "off" to disable, or "global" to apply fleet-wide.
+description: Keep the janitor heartbeat ARMED but make every fire cache-refresh-only (no chores, no daemon spawn, no agents — only the token-burn monitors stay on), so the prompt cache stays warm at ~1/10 the cost of letting it die and rewriting — the cheap middle ground between a full heartbeat and disarm. Trigger with /janitor-maintenance-mode, "maintenance mode", "keep the cache warm cheaply", "cheap heartbeat"; add "off" to disable, or "global" to apply fleet-wide.
 ---
 
 # Janitor maintenance-mode
@@ -10,8 +10,10 @@ description: Keep the janitor heartbeat ARMED but make every fire cache-refresh-
 Maintenance-mode keeps the heartbeat firing every 5 min but does close to the ABSOLUTE MINIMUM
 each fire: the turn re-reads the session context at the 0.1x prompt-cache READ rate (which
 RESETS the 5-minute cache TTL), then `dispatch.py` emits the never-stop keep-going nudge
-(`[janitor-resume]` + a short "continue your pending task" line — TRDD-TKNSTP82) and returns —
-no detectors, no daemon spawn, no other agent work.
+(`[janitor-resume]` + a short "continue your pending task" line — TRDD-TKNSTP82), runs ONLY
+the token-monitoring detectors (`token-usage-anomaly` + `window-burn-rate` — a long unattended
+maintenance session is exactly the one whose burn most needs watching, and both are cheap
+local reads), and returns — no other detectors, no daemon spawn, no other agent work.
 
 **WHY it exists:** letting the cache DIE (disarm → no fires) forces the next real turn to
 REWRITE the whole context at the 1.0x rate — ~10x a cache read. So a maintenance fire costs
@@ -20,7 +22,7 @@ REWRITE the whole context at the 1.0x rate — ~10x a cache read. So a maintenan
 | mode | fires? | per-fire cost | when |
 |---|---|---|---|
 | FULL | yes | cache-read + due chores + daemon | active dev |
-| MAINTENANCE | yes | cache-read + continue-nudge (~0.1x) | keep the cache warm, cheap, never stall |
+| MAINTENANCE | yes | cache-read + continue-nudge + token monitors (~0.1x) | keep the cache warm, cheap, never stall |
 | DISARM | no | $0 (cache dies → 1.0x on return) | genuine long idle / shutdown |
 
 Maintenance always carries the never-stop continue-nudge (see `/janitor-keep-going` for the

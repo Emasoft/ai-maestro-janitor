@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-plugins
-description: Run /reload-plugins for the current Claude Code session so freshly auto-updated plugin hooks and skills take effect, without the human typing the command. Invoke in response to a [janitor-reload] heartbeat marker (emitted after the daemon auto-updates the janitor plugin), or whenever plugin code changed on disk and the session must pick it up. Fires ESC then /reload-plugins at this session's own terminal pane (iTerm or tmux). Supports --soft (enqueue /reload-plugins WITHOUT pressing ESC, so the current turn finishes first and no in-flight work is interrupted). Trigger with /janitor-reload-plugins, /janitor-reload-plugins --soft, or by asking to reload plugins now.
+description: Run /reload-plugins --force for the current Claude Code session so freshly auto-updated plugin hooks and skills take effect, without the human typing the command. Invoke in response to a [janitor-reload] heartbeat marker (emitted after the daemon auto-updates the janitor plugin), or whenever plugin code changed on disk and the session must pick it up. Fires ESC then /reload-plugins --force at this session's own terminal pane (iTerm or tmux). Supports --soft (enqueue the reload WITHOUT pressing ESC, so the current turn finishes first and no in-flight work is interrupted). Trigger with /janitor-reload-plugins, /janitor-reload-plugins --soft, or by asking to reload plugins now.
 ---
 
 # Janitor reload-plugins
@@ -13,9 +13,11 @@ still using the OLD cached hooks and skills until `/reload-plugins` runs. The
 heartbeat surfaces a bare `[janitor-reload]` marker for exactly this — but the
 agent cannot run a built-in slash command via the Skill tool (it refuses
 `/reload-plugins`, `/compact`, `/clear`). This skill is the working path: it
-types `/reload-plugins` into this session's own terminal pane (iTerm via
+types `/reload-plugins --force` into this session's own terminal pane (iTerm via
 osascript, or tmux via `send-keys`), the same mechanism `/janitor-compact-context`
-uses for `/compact`.
+uses for `/compact`. `--force` is ALWAYS sent (user directive 2026-07-10): without
+it, a plugin whose code is mid-use can refuse the reload and silently stay on the
+old cached version.
 
 Unlike compaction, **reloading plugins does NOT discard the conversation** — it
 swaps plugin code in place — so there is no resume directive and nothing is lost.
@@ -34,12 +36,12 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
    interrupting the current turn:
 
    ```bash
-   # HARD (default): ESC → /reload-plugins (interrupts the current turn)
+   # HARD (default): ESC → /reload-plugins --force (interrupts the current turn)
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/reload_trigger.py"
 
-   # SOFT: enqueue /reload-plugins (no ESC — runs after the current turn ends,
-   # so no in-flight work is cut short). Prefer this when you're mid-task and the
-   # reload can wait for a safe boundary.
+   # SOFT: enqueue /reload-plugins --force (no ESC — runs after the current turn
+   # ends, so no in-flight work is cut short). Prefer this when you're mid-task
+   # and the reload can wait for a safe boundary.
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/reload_trigger.py" --soft
    ```
 
@@ -48,11 +50,11 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
      step 2.
    - `NO_ITERM` → this session is not in an automatable terminal (iTerm or tmux),
      so self-trigger isn't available. Tell the user: *"Plugins were auto-updated —
-     please run `/reload-plugins` now (auto-trigger works in iTerm and tmux)."*
+     please run `/reload-plugins --force` now (auto-trigger works in iTerm and tmux)."*
      Then stop.
 
 2. **END YOUR TURN IMMEDIATELY.** The script fired a *detached* keystroke sender
-   that, after ~2 s, sends ESC then `/reload-plugins` to your pane. For the
+   that, after ~2 s, sends ESC then `/reload-plugins --force` to your pane. For the
    command to run cleanly you must stop now — do not call more tools. Emit one
    short line like *"Reloading plugins to pick up the update."* and stop. (If you
    keep working, the ESC interrupts your in-flight turn anyway, but a clean stop
@@ -62,28 +64,29 @@ swaps plugin code in place — so there is no resume directive and nothing is lo
 
 One short line to the user, then the turn ends. Side effect: launches a detached
 keystroke sender (osascript in iTerm, `tmux send-keys` in tmux) that types
-`/reload-plugins` into this session's own pane — HARD mode (default) prepends a raw
-ESC (interrupt), `--soft` omits it (enqueue, runs after the current turn ends).
+`/reload-plugins --force` into this session's own pane — HARD mode (default) prepends
+a raw ESC (interrupt), `--soft` omits it (enqueue, runs after the current turn ends).
 
 ## Done when (terminating conditions)
 
 This skill fires once and ends the turn — it never loops or polls. It is complete
 when ONE of these holds:
 
-- [ ] **RELOAD_FIRED** — `reload_trigger.py` queued the detached ESC→`/reload-plugins`
-  at this pane: emit one short line (e.g. "Reloading plugins to pick up the update.")
-  and END THE TURN IMMEDIATELY (call no more tools). STOP.
+- [ ] **RELOAD_FIRED** — `reload_trigger.py` queued the detached
+  ESC→`/reload-plugins --force` at this pane: emit one short line (e.g. "Reloading
+  plugins to pick up the update.") and END THE TURN IMMEDIATELY (call no more
+  tools). STOP.
 - [ ] **NO_ITERM** — not in an automatable terminal (iTerm/tmux), or `osascript`
-  unavailable: tell the user to run `/reload-plugins` manually, then STOP.
+  unavailable: tell the user to run `/reload-plugins --force` manually, then STOP.
 
 ## Error handling
 
 - `NO_ITERM` → not in an automatable terminal (iTerm/tmux); ask the user to run
-  `/reload-plugins` manually.
+  `/reload-plugins --force` manually.
 - The script never blocks: it returns immediately and the keystrokes fire detached.
 - If no automatable terminal is detected (e.g. plain Apple Terminal / VS Code, or
   `osascript` unavailable on non-macOS), the keystroke send degrades — ask the
-  user to `/reload-plugins` manually.
+  user to `/reload-plugins --force` manually.
 
 ## Scope
 

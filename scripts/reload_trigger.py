@@ -69,7 +69,10 @@ def _build_osascript(uuid: str, delay_s: float, *, esc_first: bool = True) -> st
         # TWO ESCs (terminal_trigger.HARD_INTERRUPT_ESC_COUNT): one clears a running tool,
         # one ends the turn — else /reload-plugins enqueues behind the still-alive turn.
         lines += terminal_trigger.iterm_esc_lines()
-    lines.append('            write text "/reload-plugins"')
+    # --force: without it a plugin whose code is mid-use can refuse the reload and
+    # stay on the old cached version (user directive 2026-07-10) — every janitor
+    # sender of /reload-plugins forces for this reason.
+    lines.append('            write text "/reload-plugins --force"')
     lines += [
         "          end tell",
         "        end if",
@@ -118,7 +121,7 @@ def main() -> int:
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).
     sent = terminal_trigger.send_self_command(
-        "/reload-plugins", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
+        "/reload-plugins --force", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
     )
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
@@ -141,7 +144,7 @@ def main() -> int:
         print("NO_ITERM")
         return 0
     if args.dry_run:
-        plan = ("ESC->" if esc_first else "") + "/reload-plugins"
+        plan = ("ESC->" if esc_first else "") + "/reload-plugins --force"
         print(f"DRY_RUN would fire {plan} at iTerm session {uuid} after {args.delay}s")
         return 0
     _fire(_build_osascript(uuid, args.delay, esc_first=esc_first))

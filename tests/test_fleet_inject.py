@@ -27,7 +27,9 @@ def test_action_to_command_only_typing_rungs() -> None:
     """The gentle command-typing rungs map to a slash-command; esc_nudge (ESC only)
     and the hard-restart rungs (handled by the daemon) map to None."""
     assert fi.action_to_command("rearm") == "/janitor-arm"
-    assert fi.action_to_command("reload") == "/reload-plugins"
+    # --force always (user directive 2026-07-10): a mid-use plugin can refuse a
+    # plain reload and silently stay on the old cached version.
+    assert fi.action_to_command("reload") == "/reload-plugins --force"
     assert fi.action_to_command("update") == "/janitor-arm"
     assert fi.action_to_command("esc_nudge") is None
     assert fi.action_to_command("relaunch") is None
@@ -79,7 +81,7 @@ def test_build_injection_iterm_fallback_strips_tty_prefix() -> None:
     assert plan is not None
     assert plan["channel"] == "iterm"
     assert 'if (id of s) is "4C4A-9B7" then' in plan["osascript"]
-    assert 'write text "/reload-plugins"' in plan["osascript"]
+    assert 'write text "/reload-plugins --force"' in plan["osascript"]
 
 
 def test_build_injection_declines_unreachable_and_noncommand() -> None:
@@ -220,7 +222,7 @@ def test_build_injection_reaches_linux_gui_terminal() -> None:
     plan = fi.build_injection(_GUI_TERMINAL, "reload")
     assert plan is not None
     assert plan["channel"] == "wtype"
-    assert plan["command"] == "/reload-plugins"
+    assert plan["command"] == "/reload-plugins --force"
     assert plan["steps"]
 
 

@@ -53,7 +53,9 @@ def test_build_osascript_targets_uuid_and_sends_esc_then_reload() -> None:
     osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0)
     assert '"789D8299-5AA2-48CF-9325-3BC972B9BEAE"' in osa, "must match the specific session id"
     assert osa.count("character id 27") == 2, "a HARD interrupt sends TWO ESCs (tool + turn)"
-    assert '"/reload-plugins"' in osa, "must send /reload-plugins"
+    # --force always (user directive 2026-07-10): a mid-use plugin can refuse a
+    # plain reload and silently stay on the old cached version.
+    assert '"/reload-plugins --force"' in osa, "must send /reload-plugins --force"
     assert '"/compact"' not in osa, "must NOT send /compact (this is the reload trigger)"
     assert "delay 2.0" in osa, "must delay before firing so the parent returns first"
 
@@ -63,7 +65,7 @@ def test_build_osascript_soft_omits_esc() -> None:
     mod = _import()
     osa = mod._build_osascript("789D8299-5AA2-48CF-9325-3BC972B9BEAE", 2.0, esc_first=False)
     assert "character id 27" not in osa, "soft mode must NOT send an ESC byte"
-    assert '"/reload-plugins"' in osa, "must still type /reload-plugins"
+    assert '"/reload-plugins --force"' in osa, "must still type /reload-plugins --force"
 
 
 def test_uuid_regex_accepts_real_rejects_injection() -> None:
@@ -86,7 +88,7 @@ def test_dry_run_reports_plan_and_does_not_fire() -> None:
     proc = _run(["--dry-run"], iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE")
     assert proc.returncode == 0
     assert "DRY_RUN" in proc.stdout and "789D8299-5AA2-48CF-9325-3BC972B9BEAE" in proc.stdout
-    assert "reload-plugins" in proc.stdout
+    assert "reload-plugins --force" in proc.stdout
     assert "RELOAD_FIRED" not in proc.stdout, "dry-run must not fire"
 
 

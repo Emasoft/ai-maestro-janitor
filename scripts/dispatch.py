@@ -309,6 +309,27 @@ _DETECTORS: list[tuple[str, int, str]] = [
     ("token-usage-anomaly", 300, "CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_INTERVAL"),
 ]
 
+# The detector subset that SURVIVES maintenance mode (user directive 2026-07-10,
+# TRDD-8Q0OYVWM): a maintenance session is exactly the long-running unattended one
+# whose token burn most needs watching, so the token-monitoring detectors keep
+# running while every other chore idles. Both are cheap local reads (the
+# token-meter log; the rotator's cached usage snapshot), self-gated and
+# self-cadenced, and their drift lines are precisely the alarms that must still
+# reach the model during a keep-warm idle.
+_MAINTENANCE_DETECTORS = frozenset({"token-usage-anomaly", "window-burn-rate"})
+
+
+def _run_maintenance_detectors() -> None:
+    """Run ONLY the token-monitoring detector subset (maintenance-mode fires).
+
+    Same roster entries, same env-var cadence overrides, same `_run_detector`
+    due-gate as the full Phase 2 loop — so a detector never runs twice in one
+    fire (maintenance returns before Phase 2) and never at a different cadence.
+    """
+    for name, default_interval, env_var in _DETECTORS:
+        if name in _MAINTENANCE_DETECTORS:
+            _run_detector(name, state.coerce_int(os.environ.get(env_var), default_interval))
+
 
 def _detector_is_due(name: str, interval: int) -> bool:
     last_file = state.state_dir() / f"last-run-{name}.ts"
@@ -1123,9 +1144,10 @@ def main() -> int:
     #                   delete this cron so a fire costs zero (TRDD-RQ9FIFX6). Best for LONG
     #                   idle. dispatch can't call CronDelete (a session tool), so it signals
     #                   the session to run /janitor-disarm; self-limiting once the cron is gone.
-    #   * maintenance — keep firing but do ONLY the cache refresh (no detectors, no daemon, no
-    #                   output). Best for keeping a session/project cache warm at 1/10 the cost
-    #                   of letting it die and rewriting.
+    #   * maintenance — keep firing but do ONLY the cache refresh + survival phases + the
+    #                   token-monitoring detector subset (_MAINTENANCE_DETECTORS — burn alarms
+    #                   must outlive the chores). Best for keeping a session/project cache
+    #                   warm at 1/10 the cost of letting it die and rewriting.
     #   * full        — the normal heartbeat (cache refresh + due detectors + daemon).
     mode = _resolve_heartbeat_mode()
     if mode == "stop":
@@ -1207,7 +1229,14 @@ def main() -> int:
             gs.ensure_daemon_running()
         except Exception:  # noqa: BLE001 — survival is best-effort; never break the fire
             pass
-        state.log_line("dispatch", "maintenance-mode: cache-refresh fire, survival phases only")
+        # Token monitoring survives maintenance (user directive 2026-07-10,
+        # TRDD-8Q0OYVWM): run ONLY the _MAINTENANCE_DETECTORS subset at its
+        # normal cadence. Everything else stays idle — this keeps the burn
+        # alarms alive without reviving the chores maintenance exists to skip.
+        _run_maintenance_detectors()
+        state.log_line(
+            "dispatch", "maintenance-mode: cache-refresh fire, survival + token monitoring only"
+        )
         return 0
 
     # Phase 1.55: autofix-OFF daily reminder. Free no-op when ON (default).

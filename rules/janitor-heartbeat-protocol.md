@@ -25,7 +25,7 @@ consumed marker line. All other stdout is surfaced verbatim.
 | Bare line | Silent action |
 |---|---|
 | `[janitor-renew]` | run `/janitor-arm` — renew the cron before its 7-day expiry |
-| `[janitor-reload]` | run `/janitor-reload-plugins` (the wrapper types /reload-plugins into this pane itself — the Skill tool refuses built-ins, issue #70) |
+| `[janitor-reload]` | run `/janitor-reload-plugins` (the wrapper types /reload-plugins --force into this pane itself — the Skill tool refuses built-ins, issue #70; --force so a mid-use plugin cannot refuse the reload) |
 | `[janitor-reload-skills]` | run `/janitor-reload-skills` — standalone non-plugin skills; DISTINCT from /reload-plugins |
 | `[janitor-self-disarm]` | run `/janitor-disarm` — a machine-wide stop is active; DELETE this heartbeat cron (a fire is never free, even cached) |
 | `[janitor-resume]` | resume the prior/pending task — the line(s) immediately AFTER the marker carry the directive (which task; any background agents to resume via SendMessage) |

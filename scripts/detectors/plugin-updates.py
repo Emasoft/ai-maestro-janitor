@@ -330,7 +330,7 @@ def main() -> int:
                 seen,
                 f"updated@{plugin_id}@{scope}@{current_version}->{real_new}",
                 f"[plugin-updates] auto-updated {plugin_id} [scope {scope}]: "
-                f"{current_version} → {real_new}. Run /reload-plugins to apply in this session.",
+                f"{current_version} → {real_new}. Run /reload-plugins --force to apply in this session.",
             )
             if line is not None:
                 print(line)

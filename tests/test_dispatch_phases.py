@@ -713,7 +713,8 @@ def test_resolve_heartbeat_mode_maintenance_wins_over_kill_switch(env_isolation:
 
 def test_main_maintenance_fires_cheap_no_chores_but_ensures_daemon(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """BEHAVIORAL PROOF: in maintenance-mode main() does close to the MINIMUM — it emits ONLY
-    the never-stop keep-going nudge and runs NO detector — but it DOES call
+    the never-stop keep-going nudge and runs ONLY the token-monitoring detector subset
+    (TRDD-8Q0OYVWM: the burn alarms outlive the chores) — but it DOES call
     ensure_daemon_running (TRDD-8PH8YOIJ): the daemon's existence is SURVIVAL (it beats the
     60s oauth-rotator-tick that rotates accounts), not a chore. Before this, a daemon that
     died during maintenance stayed dead — nobody rotated, the 5h window exhausted, and the
@@ -739,9 +740,12 @@ def test_main_maintenance_fires_cheap_no_chores_but_ensures_daemon(env_isolation
     assert "[janitor-self-disarm]" not in out, "maintenance must NOT self-disarm (that kills the warm cache)"
     expected = "[janitor-resume]\n" + _MAINTENANCE_LINE
     assert out.strip() == expected, f"a maintenance fire must emit ONLY the maintenance nudge, got {out!r}"
-    assert ran == [], f"a maintenance fire must run NO detector, ran {ran}"
+    # TRDD-8Q0OYVWM: the token-burn monitors are the ONE detector subset that
+    # survives maintenance (user directive 2026-07-10) — nothing else runs.
+    assert set(ran) == dispatch._MAINTENANCE_DETECTORS, f"maintenance runs ONLY the token monitors, ran {ran}"
+    assert len(ran) == len(dispatch._MAINTENANCE_DETECTORS), f"no detector may run twice, ran {ran}"
     stamps = list(state.state_dir().glob("last-run-*.ts"))
-    assert stamps == [], f"no detector should have stamped last-run, found {stamps}"
+    assert stamps == [], f"the recording fake never stamps last-run, found {stamps}"
     assert ensured == [True], "maintenance MUST attempt ensure_daemon_running (TRDD-8PH8YOIJ survival)"
 
 
@@ -771,7 +775,8 @@ def test_main_maintenance_under_kill_switch_keeps_beating(env_isolation: dict, m
 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-self-disarm]" not in out, "maintenance must override the kill-switch self-disarm"
-    assert ran == [], "maintenance runs no detectors"
+    # TRDD-8Q0OYVWM: only the token-monitoring subset runs under maintenance.
+    assert set(ran) == dispatch._MAINTENANCE_DETECTORS, "maintenance runs only the token monitors"
 
 
 # ---------- Phase 1.5a: keep-going never-stop nudge (TRDD-TKNSTP82 Part B) --

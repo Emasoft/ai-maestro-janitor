@@ -241,7 +241,7 @@ def main() -> int:
         if um is None:
             _emit(_block(
                 "[user-mem] library unavailable — prompt withheld to protect the "
-                "private text. Retry after /reload-plugins (or check the janitor install)."
+                "private text. Retry after /reload-plugins --force (or check the janitor install)."
             ))
             return 0
 
