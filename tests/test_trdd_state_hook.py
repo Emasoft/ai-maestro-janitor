@@ -9,8 +9,10 @@ with a controlled stdin JSON.
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -57,8 +59,19 @@ class TestTrddStateHook(unittest.TestCase):
         d.mkdir(parents=True)
         return Path(tmp)
 
+    def _write_handoff(self, root: Path, *, age_s: int = 0) -> Path:
+        """Create a precompact-handoff.md under the temp project, optionally aged."""
+        sd = root / ".janitor" / "state"
+        sd.mkdir(parents=True, exist_ok=True)
+        p = sd / "precompact-handoff.md"
+        p.write_text("# PreCompact ground-truth handoff\n(test fixture)\n")
+        if age_s:
+            past = time.time() - age_s
+            os.utime(p, (past, past))
+        return p
+
     def test_compact_injects_state_block(self):
-        """On source=compact, the in-progress TRDD's full STATE block is injected."""
+        """On source=compact WITHOUT a fresh handoff, the full STATE block is injected."""
         with TemporaryDirectory() as tmp:
             root = self._project(tmp)
             (root / "design/tasks/TRDD-20260530_100000+0200-aaaaaaaa-x.md").write_text(
@@ -68,6 +81,47 @@ class TestTrddStateHook(unittest.TestCase):
             self.assertIn("### NEXT ACTION", out)
             self.assertIn("### POST-MORTEM", out)
             self.assertIn("SUPERSEDE", out)
+
+    def test_compact_with_fresh_handoff_injects_digest_only(self):
+        """On source=compact WITH a fresh handoff, only a pointer + digest is injected.
+
+        The handoff already carries the STATE blocks verbatim — injecting them again
+        doubled the post-compact context (TRDD-498LEWZ4)."""
+        with TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            (root / "design/tasks/TRDD-20260530_100000+0200-aaaaaaaa-x.md").write_text(
+                _trdd("in-progress", "Active thing", with_state=True))
+            self._write_handoff(root)
+            out = _run(root, "compact")
+            self.assertIn("COMPACTION just occurred", out)          # the warning survives
+            self.assertIn("precompact-handoff.md", out)             # the pointer
+            self.assertIn("TRDD-20260530_100000+0200-aaaaaaaa-x.md", out)  # the digest line
+            self.assertNotIn("### POST-MORTEM", out)                # STATE body NOT duplicated
+            self.assertNotIn("### NEXT ACTION", out)
+
+    def test_compact_with_stale_handoff_falls_back_to_full_injection(self):
+        """A handoff older than the freshness window is a PREVIOUS compaction's — the
+        hook must not point at outdated truth, so it falls back to full injection."""
+        with TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            (root / "design/tasks/TRDD-20260530_100000+0200-aaaaaaaa-x.md").write_text(
+                _trdd("in-progress", "Active thing", with_state=True))
+            self._write_handoff(root, age_s=2 * 3600)
+            out = _run(root, "compact")
+            self.assertIn("### POST-MORTEM", out)                   # full STATE injected
+            self.assertIn("SUPERSEDE", out)
+
+    def test_fresh_handoff_does_not_change_startup_listing(self):
+        """A fresh handoff must not alter the non-compact sources — startup still lists."""
+        with TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            (root / "design/tasks/TRDD-20260530_100000+0200-aaaaaaaa-x.md").write_text(
+                _trdd("in-progress", "Active thing", with_state=True))
+            self._write_handoff(root)
+            out = _run(root, "startup")
+            self.assertIn("in-progress TRDD(s)", out)
+            self.assertNotIn("precompact-handoff.md", out)          # pointer is compact-only
+            self.assertNotIn("### POST-MORTEM", out)
 
     def test_completed_trdd_is_ignored(self):
         """A completed TRDD is never surfaced — only in-progress ones."""

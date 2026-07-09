@@ -12,10 +12,16 @@ the TRDD's authoritative `## STATE` head block. This HOOK is ACTIVE enforcement.
 On every SessionStart it scans `<project>/design/tasks/` for `status: in-progress`
 TRDDs and injects a reminder into the first turn's context:
 
-- `source == "compact"` (the dangerous moment — a lossy summary just replaced the
-  real plan): inject each in-progress TRDD's FULL `## STATE` block (capped),
-  prefixed as AUTHORITATIVE and SUPERSEDING any conflicting compaction-summary
-  claim. The truth is back in context before the first post-compact turn.
+- `source == "compact"` + a FRESH `precompact-handoff.md` (the common case — the
+  PreCompact hook wrote it seconds earlier): inject a one-line warning + a pointer
+  to the handoff + a one-line-per-TRDD digest. The handoff ALREADY carries these
+  TRDDs' STATE blocks verbatim (plus git truth + verbatim recent turns) and the
+  resume loop steers the next turn to read it — injecting the same blocks here
+  DOUBLED the post-compact context (35.3 KB measured, TRDD-498LEWZ4).
+- `source == "compact"` with NO fresh handoff (the janitor PreCompact hook is
+  disabled, failed, or a foreign compaction path): inject each in-progress TRDD's
+  FULL `## STATE` block (capped), prefixed as AUTHORITATIVE and SUPERSEDING any
+  conflicting compaction-summary claim — failures fall toward MORE grounding.
 - any other source (startup / resume / clear): list the in-progress TRDDs + paths
   and direct the model to read their STATE blocks before touching that work.
 
@@ -30,11 +36,21 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 MAX_TRDDS = 4              # cap how many in-progress TRDDs we surface
 MAX_STATE_LINES = 140      # cap injected STATE lines per TRDD so context stays lean
 _FRONT = 4000              # bytes of head to scan for frontmatter fields
+
+# The PreCompact hook (pre-compact-handoff.py) writes this file seconds before a
+# SessionStart:compact fires. When it is FRESH, it is THIS compaction's handoff and
+# already carries the in-flight TRDDs' STATE blocks verbatim — so this hook injects a
+# pointer + digest instead of a duplicate copy (TRDD-498LEWZ4). A file older than the
+# window belongs to a PREVIOUS compaction: pointing the model at it would re-ground on
+# outdated truth, so staleness falls back to the full STATE injection.
+_HANDOFF_RELPATH = Path(".janitor") / "state" / "precompact-handoff.md"
+_HANDOFF_FRESH_S = 900
 
 # Matches the STATE head heading: "## ⏵ STATE …" or "## STATE …" (⏵ = U+23F5).
 _STATE_HEADING = re.compile(r"^##\s+(?:⏵\s*)?STATE\b")
@@ -92,6 +108,47 @@ def _state_block(text: str) -> str | None:
     return "\n".join(block).strip()
 
 
+def _preamble(*, after_compact: bool, inject_full: bool, n_trdds: int) -> str:
+    """The injection's leading paragraph for the three modes (full / digest / list)."""
+    if inject_full:
+        return (
+            "⚠️ [janitor-trdd] A context COMPACTION just occurred — the summary is "
+            "lossy and may carry WRONG technical conclusions. The AUTHORITATIVE `## STATE` "
+            "block(s) of this project's in-progress TRDD(s) are injected below; they SUPERSEDE "
+            "any conflicting claim in the compaction summary. Read them before acting."
+        )
+    if after_compact:
+        return (
+            "⚠️ [janitor-trdd] A context COMPACTION just occurred — the summary is "
+            "lossy and may carry WRONG technical conclusions. The authoritative "
+            "re-grounding (git truth, the in-progress TRDD `## STATE` blocks VERBATIM, "
+            "the verbatim recent turns) is `.janitor/state/precompact-handoff.md` — "
+            "READ IT FIRST, before acting on any summary claim. In-progress TRDDs:"
+        )
+    return (
+        f"[janitor-trdd] {n_trdds} in-progress TRDD(s) in this project. Before touching "
+        "their work, read the `## STATE` block of each (a compaction summary is not a "
+        "substitute). Files:"
+    )
+
+
+def _fresh_handoff(project_dir: Path) -> Path | None:
+    """The precompact handoff written by THIS compaction, or None.
+
+    Freshness (mtime within `_HANDOFF_FRESH_S`) is what ties the file to the
+    compaction that just ended — the PreCompact hook writes it moments before this
+    hook fires. Any doubt (missing, stale, unreadable) returns None so the caller
+    falls back to full injection: failures fall toward MORE grounding, not less.
+    """
+    p = project_dir / _HANDOFF_RELPATH
+    try:
+        if p.is_file() and (time.time() - p.stat().st_mtime) <= _HANDOFF_FRESH_S:
+            return p
+    except OSError:
+        pass
+    return None
+
+
 def _in_progress(tasks_dir: Path) -> list[Path]:
     out: list[Path] = []
     for p in sorted(tasks_dir.glob("TRDD-*.md")):
@@ -118,20 +175,13 @@ def main() -> int:
         return 0
 
     after_compact = source == "compact"
-    parts: list[str] = []
-    if after_compact:
-        parts.append(
-            "⚠️ [janitor-trdd] A context COMPACTION just occurred — the summary is "
-            "lossy and may carry WRONG technical conclusions. The AUTHORITATIVE `## STATE` "
-            "block(s) of this project's in-progress TRDD(s) are injected below; they SUPERSEDE "
-            "any conflicting claim in the compaction summary. Read them before acting."
-        )
-    else:
-        parts.append(
-            f"[janitor-trdd] {len(trdds)} in-progress TRDD(s) in this project. Before touching "
-            "their work, read the `## STATE` block of each (a compaction summary is not a "
-            "substitute). Files:"
-        )
+    # Inject full STATE blocks ONLY when there is no fresh handoff to point at —
+    # the handoff already carries them verbatim, and one copy in context is enough.
+    inject_full = after_compact and _fresh_handoff(project_dir) is None
+
+    parts: list[str] = [
+        _preamble(after_compact=after_compact, inject_full=inject_full, n_trdds=len(trdds))
+    ]
 
     for p in trdds:
         try:
@@ -139,7 +189,7 @@ def main() -> int:
         except OSError:
             continue
         title = _title(text[:_FRONT], p.name)
-        if after_compact:
+        if inject_full:
             block = _state_block(text)
             if block:
                 parts.append(f"\n--- design/tasks/{p.name} — {title} ---\n{block}")
@@ -149,6 +199,8 @@ def main() -> int:
                     "(no ## STATE block — read the file top-to-bottom) ---"
                 )
         else:
+            # Digest line — shared by the post-compact pointer mode AND the
+            # startup/resume list: path + title + whether a STATE block exists.
             tag = "has ## STATE block" if _state_block(text) else "NO ## STATE block — read top-to-bottom"
             parts.append(f"  • design/tasks/{p.name} — {title} ({tag})")
 

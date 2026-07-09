@@ -15,8 +15,9 @@ it captures *what the filesystem says*, not *what you were thinking*.
 
 This skill writes the **semantic** layer on top: a rich, agent-authored handoff to
 `.janitor/state/agent-handoff.md` capturing the reasoning a snapshot can't — the plan,
-the next concrete action, the load-bearing facts, the trap you already wasted time on,
-the alternative you rejected and why. It is **opt-in** because authoring it costs tokens
+the next concrete action, the OPEN issues and why each is still unsolved, the
+load-bearing facts, the trap you already wasted time on, the alternative you rejected
+and why. It is **opt-in** because authoring it costs tokens
 (that is exactly why `/janitor-compact-context --handoff` is a separate, deliberate mode
 — see [When to use](#when-to-use)). Reserve it for **delicate junctures**.
 
@@ -48,13 +49,24 @@ write a bloated handoff: it costs tokens to author now AND to read on resume. Be
    - **NEXT ACTION** — the ONE concrete next step, runnable as written (a command, an
      edit, a file to open). Point at durable state, never a volatile in-memory step.
    - **Plan** — the remaining steps in order, terse.
+   - **Open issues — what is NOT yet solved, and WHY** — the intelligent summary a
+     lossy compaction destroys first. For EACH unresolved issue, bug, or pending
+     decision: one line naming it, one line on WHY it is still open (root cause
+     unknown? blocked on whom/what? deliberately deferred? awaiting the user's
+     call?), and a POINTER to where the full context durably lives — the governing
+     `TRDD-<id8>`, a wikimem page name (recallable later via
+     `memgrep recall "<symptom>" <memdir>`), a Claude Code native memory note, or a
+     GitHub issue `#N`. A pointer costs one line; the content is read on demand —
+     NEVER paste what a reference can carry.
    - **Load-bearing facts / gotchas** — exact constants, the one command that works,
      the trap already hit, the rejected alternative + WHY. This is the part the
      mechanical handoff cannot produce — spend your words here.
    - **Verify** — how to confirm the work is correct (the test/lint command, the pass
      criteria).
    Keep it to what matters. Do NOT restate what `precompact-handoff.md` already has
-   (git log, working tree, verbatim turns) — this handoff COMPLEMENTS that file.
+   (git log, working tree, verbatim turns) — this handoff COMPLEMENTS that file. The
+   same economy applies to memories: when a wikimem page or memory note already holds
+   the detail, reference it by name instead of restating it.
 
 3. **Record the resume pointer** so the post-compaction turn is steered to your handoff.
    Write ONE line to `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-directive.txt`:
