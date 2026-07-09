@@ -113,9 +113,26 @@ def log_dir() -> Path:
 # --- public API ------------------------------------------------------------
 
 def init_state() -> None:
-    """Create state/ and logs/ directories if missing. Idempotent."""
-    state_dir().mkdir(parents=True, exist_ok=True)
+    """Create state/ and logs/ directories if missing. Idempotent.
+
+    log_dir() is created FIRST because it is what log_line() actually writes to, and the
+    global daemon overrides it to the writable global-state dir via JANITOR_LOG_DIR.
+
+    state_dir() is then best-effort. The OS-keepalive daemon (TRDD-71ABD7V7) runs under
+    launchd with NO CLAUDE_PROJECT_DIR and cwd="/", so project_root() resolves to "/" and
+    state_dir() becomes "/.janitor/state" — an unwritable read-only-root path whose mkdir
+    raised OSError(Errno 30) and CRASH-LOOPED the keepalive daemon on every boot
+    (2026-07-09: `state.log_line` -> `init_state` -> `state_dir().mkdir` -> read-only "/").
+    The daemon logs via JANITOR_LOG_DIR and never uses state_dir, so a missing project
+    state dir must not crash it. Per-session detectors always have a writable project (their
+    log_dir is under it and is created just above), so this tolerance never masks a real
+    error for them.
+    """
     log_dir().mkdir(parents=True, exist_ok=True)
+    try:
+        state_dir().mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
 
 def atomic_write(target: Path, value: str) -> None:
