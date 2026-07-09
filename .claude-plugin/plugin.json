@@ -143,6 +143,13 @@
       "default": 6,
       "sensitive": false
     },
+    "heartbeat_cost_command": {
+      "title": "Heartbeat Cost Command (opt-in)",
+      "description": "Full shell command of a CLI that prints ONE line with the exact token+dollar cost of the PREVIOUS heartbeat fire (e.g. AgentLens: 'node ~/Code/agentlens/scripts/agentlens-heartbeat-cost.js --oneline'). Default: empty (disabled). When set, dispatch.py runs it on every fire — full AND maintenance mode — and appends its first stdout line to .janitor/logs/heartbeat-cost.log, building a greppable per-fire cost series. It never prints to the fire's stdout (a per-fire stdout line would cost output tokens on every fire, taxing the thing it measures). Fail-open: a non-zero exit, timeout (20s), or missing binary means no line this fire; the fire is never blocked. The command is config (not a hard-coded path) because such CLIs are typically machine-local.",
+      "type": "string",
+      "default": "",
+      "sensitive": false
+    },
     "version_check_interval": {
       "title": "Version Update Check Cadence (seconds)",
       "description": "Minimum seconds between checks against api.github.com for a newer plugin release. Default: 300 (5 min \u2014 runs every heartbeat by default). The detector queries the repo declared in plugin.json's `repository` field, so forks check against their own releases. Silent on network/auth failures. The GitHub query short-circuits when nothing changed; a 5-min cadence costs ~12 cheap requests/hour, well inside both the unauthenticated (60/h) and `gh`-authenticated (5000/h) API limits.",

@@ -1040,6 +1040,58 @@ def _phase_keep_going_nudge(mode: str) -> None:
         print("continue your pending task (keep-going mode) — if the work is genuinely finished (not merely blocked on a human decision), say so briefly and run /janitor-keep-going off")
 
 
+def _phase_heartbeat_cost() -> None:
+    """Record the PREVIOUS fire's exact token+dollar cost via a user-configured CLI
+    (janitor#78, opt-in via ``CLAUDE_PLUGIN_OPTION_HEARTBEAT_COST_COMMAND``).
+
+    The command (e.g. the AgentLens ``agentlens-heartbeat-cost.js --oneline`` client)
+    reports the last fully-SETTLED fire — an OTEL body carries no request_id, so a
+    call's tokens become knowable only once the NEXT call is written; the in-flight
+    fire can never see its own final response. At a 5-minute cadence, fire N records
+    exactly what fire N-1 cost. That also means WHERE in this fire the phase runs is
+    immaterial to correctness, so it sits with the cheap survival phases and runs in
+    BOTH full and maintenance modes — maintenance fires are precisely the ones whose
+    cost decides whether the cadence is worth keeping.
+
+    The line goes to the ``heartbeat-cost`` LOG, never to stdout. This is the
+    load-bearing choice: the heartbeat's zero-output contract means every byte a fire
+    prints forces the model to spend output tokens surfacing it on EVERY fire —
+    a per-fire stdout cost line would tax the exact thing it exists to measure. The
+    user is studying the SERIES, and a greppable log file is the series. (log_line's
+    structural rotation bounds it — the S3/S4 append invariant.)
+
+    The command string is config, not code: the CLI lives in a machine-local checkout
+    (not yet published), so hard-coding a path here would break every other machine.
+    Fail-open per the issue's own contract: a non-zero exit, timeout, missing binary,
+    or unparseable command string means "no cost line this fire" — never block, never
+    print. Skipped-fire gaps (pause / rate-limit / compact early-returns) self-heal:
+    the next invocation reports whatever fire settled last, so the series has holes,
+    never wrong values.
+    """
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_COST_COMMAND", "").strip()
+    if not raw:
+        return  # DEFAULT-OFF — the dependency is opt-in, machine-local tooling
+    try:
+        import shlex  # stdlib -- local import keeps module scope lean
+
+        argv = shlex.split(raw)
+    except ValueError as exc:  # unbalanced quotes in the configured string
+        state.log_line("dispatch", f"heartbeat-cost command unparseable: {exc}")
+        return
+    if not argv:
+        return
+    # detector_name="dispatch" ON PURPOSE: run_subprocess logs its failure line to
+    # <detector_name>.log, and pointing that at "heartbeat-cost" would salt the cost
+    # SERIES with error lines every fire the CLI is down. Diagnostics belong in
+    # dispatch.log; heartbeat-cost.log stays a pure, greppable series.
+    proc = state.run_subprocess(argv, timeout=20.0, detector_name="dispatch")
+    if proc is None or proc.returncode != 0:
+        return  # fail-fast CLI contract: non-zero == "no cost line this fire"
+    line = (proc.stdout or "").strip().splitlines()
+    if line and line[0].strip():
+        state.log_line("heartbeat-cost", line[0].strip())
+
+
 def _phase_user_presence_breadcrumb() -> None:
     """Refresh the cross-plugin user-presence breadcrumb's liveness stamp.
 
@@ -1125,6 +1177,12 @@ def main() -> int:
     # returned earlier in this function, so this phase is naturally skipped whenever
     # one of those already fired this turn.
     _phase_keep_going_nudge(mode)
+
+    # Phase 1.5a2: previous-fire cost record (janitor#78, opt-in). Before the
+    # maintenance early-return ON PURPOSE — maintenance fires are the ones whose
+    # measured cost justifies (or indicts) the cadence. Logs, never prints; the
+    # phase's docstring carries the why.
+    _phase_heartbeat_cost()
 
     # Phase 1.5b: MAINTENANCE early-return (TRDD-FPL60EKV). The fire already refreshed the
     # prompt cache (the turn re-read the context at the 0.1x cache-READ rate, resetting the
