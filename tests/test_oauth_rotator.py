@@ -680,8 +680,12 @@ def test_repair_integrity_restores_live_primary_from_mirror(
     rotator.save_state({"live_email": None, "live_fp": None, "slots": {}})
     mirror = _blob("RESTORED")
     restored: list = []
-    monkeypatch.setattr(rotator, "_read_live_primary", lambda: None)     # primary gone
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: None)     # primary unreadable
     monkeypatch.setattr(rotator, "_live_backup_read", lambda: mirror)    # mirror survived
+    # F1 write-path gate (TRDD-7PYTX4E9): restore fires ONLY when the primary is PROVABLY
+    # ABSENT (unreadable != absent — an ACL-denied primary still holds the user's login).
+    # This test's intent is "primary truly gone", so it must assert absence here.
+    monkeypatch.setattr(rotator, "_primary_live_item_absent", lambda: True)
     monkeypatch.setattr(rotator, "write_live_blob", lambda b: restored.append(b))
     actions = rotator._repair_integrity()
     assert restored == [mirror]                                          # primary restored from mirror
