@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.35.7] - 2026-07-09
+## [0.35.8] - 2026-07-09
 
-### Bug Fixes
+### Ci
 
-- Bound the resume nudges so a dead fork is not pinged for a week
+- Pin the THIRD CPV call site — ci.yml was left resolving the default branch
 
