@@ -81,6 +81,13 @@ _GUARD_EXCLUDE_SUFFIXES = (
     # write; sqlite sidecars (.memgrep index, Chrome profile DBs) churn on any live
     # daemon memory/rotator activity — all daemon-legit, none test-pollution-specific.
     ".bak", ".pyc", ".db", ".db-wal", ".db-shm", ".sqlite", ".sqlite3",
+    # 2026-07-09: daemon-liveness files the LIVE daemon rewrites on any (re)spawn /
+    # keepalive restage — pure daemon runtime, never test-written (tests use the
+    # isolated JANITOR_GLOBAL_STATE_DIR). `daemon.spawn-history` churns on every daemon
+    # spawn; `daemon-keepalive.restage-stamp` on every closure restage. A daemon
+    # rollback/respawn mid-suite false-failed the whole publish gate (exit 3) while all
+    # tests passed — same class as the already-excluded .ts/.pid stamps + `recovery`.
+    ".spawn-history", ".restage-stamp",
 )
 # Whole subtrees owned by the LIVE daemon's runtime (rewritten on its 60s oauth tick /
 # harvest passes) — guarding them would fail the suite whenever the daemon breathes
