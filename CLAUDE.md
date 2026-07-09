@@ -257,11 +257,12 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=813b406e8329 digest=5d54fc8c8b4c generated=2026-06-25T09:16:14+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e4427a7a740c digest=36da1f4e95bc generated=2026-07-09T15:29:40+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
 `scripts/compact_trigger.py` — Backing script for /janitor-compact-context (TRDD-31095269).
+  · plan_compact(*, soft, handoff) -> tuple[list[str], bool] — Map the (--soft, --handoff) flags to the (commands, esc_first) send plan.
   · main() -> int
 `scripts/daemon.py` — Global janitor daemon — single-instance owner of machine-global auto-update tasks.
   · task_marketplace_refresh() -> None — Run `claude plugin marketplace update` (bulk → all marketplaces).
@@ -271,7 +272,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · task_oauth_rotator_tick() -> None — 60 s OAuth-rotator beat (TRDD-32acd15f), folded into the daemon per
   · task_memory_guard() -> None — Tier-1 OOM guard (TRDD-7100178d Pillar 4, Decision 1 — user-signed 2026-05-31).
   · task_cache_prune() -> None — Prune stale plugin-cache version dirs (TRDD-a6d2fdaf, Fix A).
-  · task_session_liveness() -> None — Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
+  · task_rules_cleanup() -> None — Post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W).
+  · task_session_liveness(fleet) -> None — Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
+  · task_fleet_stop() -> None — Daemon-driven fleet disarm/pause beat (TRDD-ME8V2YJF): when the machine-wide
   · Task — One periodic unit of work owned by the daemon.
   · Task.time_until_due(self) -> int
   · Task.is_due(self) -> bool
@@ -283,6 +286,10 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/binary-magic-scanner.py` — binary-magic-scanner — magic-byte sniff for binaries in unexpected paths.
   · main() -> int
 `scripts/detectors/branch-protection.py` — Branch-protection detector — flags an unprotected default branch.
+  · main() -> int
+`scripts/detectors/ci-status.py` — ci-status — after a push, watch the pushed commit's GitHub CI/CD runs; notify on failure.
+  · classify_ci_runs(runs, *, now, first_seen_ts, no_run_grace_s, max_wait_s) -> tuple[str, list[dict[str, Any]]] — Decide what to do about the CI runs for one pushed SHA. PURE (no I/O).
+  · build_ci_failure_line(pushed_sha, branch, failed_runs) -> str — Build the one-line drift notification for a failed CI run set. Every gh-derived
   · main() -> int
 `scripts/detectors/claude-md-scope-drift.py` — CLAUDE.md scope drift — Python port of claude-md-scope-drift.sh.
   · main() -> int
@@ -343,6 +350,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/detectors/report-to-trdd-drift.py` — report-to-trdd-drift — nudge when a DECISION report has no TRDD.
   · main() -> int
+`scripts/detectors/reports-purge.py` — reports-purge — S8 of the fseventsd plan (TRDD-LCO8229M): bound the janitor's own
+  · main() -> int
 `scripts/detectors/screenshot-purge.py` — screenshot-purge — Age- and disk-pressure-based purge of UI test screenshots.
   · main() -> int
 `scripts/detectors/settings-scope-drift.py` — Settings-scope drift — Python port of settings-scope-drift.sh.
@@ -359,6 +368,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/detectors/task-pr-mismatch.py` — Task/PR mismatch detector — Python port of task-pr-mismatch.sh.
   · main() -> int
+`scripts/detectors/token-usage-anomaly.py` — token-usage-anomaly — flag a SUDDEN token-usage spike vs the session's learned normal.
+  · main() -> int
 `scripts/detectors/tracked-ignored.py` — Tracked-ignored detector — Python port of tracked-ignored.sh.
   · main() -> int
 `scripts/detectors/trashcan-purge.py` — trashcan-purge — Python port of trashcan-purge.sh.
@@ -367,6 +378,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/detectors/trdd-reminder.py` — TRDD reminder — Python port of trdd-reminder.sh.
   · main() -> int
+`scripts/detectors/trdd-state-reconciliation.py` — trdd-state-reconciliation — SURFACE shipped-but-open kanban board drift.
+  · main() -> int
 `scripts/detectors/typosquat-watcher.py` — Typosquat-watcher — heartbeat detector for typo-squat dependency names.
   · main() -> int
 `scripts/detectors/user-plugins-update.py` — Per-session shim — user-scope plugin updates are owned by the global daemon.
@@ -374,6 +387,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/version-update.py` — Version-update detector — read-only after TRDD-be2efa56 §9 follow-up.
   · main() -> int
 `scripts/detectors/why-in-commits.py` — why-in-commits — nudge when recent substantive commits carry no WHY.
+  · main() -> int
+`scripts/detectors/window-burn-rate.py` — window-burn-rate — alarm when a subscription window outpaces its linear budget
   · main() -> int
 `scripts/detectors/workflow-security.py` — Workflow-security detector — heartbeat-cadenced GitHub Actions audit.
   · main() -> int
@@ -409,6 +424,10 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/hooks/on-stop.py` — Stop hook — Python port of on-stop.sh.
   · main() -> int
+`scripts/hooks/on-subagent-start.py` — SubagentStart hook — record a spawned background agent (TRDD-82OP4EN9 W1).
+  · main() -> int
+`scripts/hooks/on-subagent-stop.py` — SubagentStop hook — clear a finished background agent (TRDD-82OP4EN9 W1).
+  · main() -> int
 `scripts/hooks/post-compact-resume.py` — PostCompact hook — record what the next heartbeat should auto-resume.
   · main() -> int
 `scripts/hooks/post-edit-memory-correction.py` — PostToolUse hook — memory correction-protocol advisory (TRDD-c77dae09, rank 5).
@@ -423,13 +442,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/hooks/pre-compact-handoff.py` — PreCompact hook — write a FILESYSTEM-GROUNDED handoff before each compaction.
   · main() -> int
-`scripts/hooks/pre-tool-context-usage.py` — PreToolUse hook — surface the live context-window % to the agent on every tool call.
+`scripts/hooks/pre-tool-context-usage.py` — PreToolUse hook — context-size runaway guard (TRDD-31095269, TRDD-SMZFJVZ3).
   · main() -> int
 `scripts/hooks/pre-tool-pkg-guard.py` — PreToolUse guard against package-manager safety-knob bypasses.
   · check_bash(command) -> str | None
   · check_edit(tool, tool_input, cwd) -> str | None
   · main() -> int
-`scripts/hooks/pre-tool-token-budget.py` — PreToolUse hook — warn the agent when ITS OWN token consumption is high.
+`scripts/hooks/pre-tool-token-budget.py` — PreToolUse hook — real-time token-spike + cache-miss guard (TRDD-KI24GR5Z).
   · main() -> int
 `scripts/identify_environment.py` — Backing script for /janitor-identify-environment (TRDD-db169d9e follow-up).
   · detect_terminal() -> dict
@@ -471,23 +490,33 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · PrunePlan — The prune decision for one plugin dir.
   · plan_cache_prune(cache_root, installed_plugins, *, keep_recent, cutoff_epoch, now) -> list[PrunePlan] — Build a prune plan for every `<marketplace>/<plugin>/` under `cache_root`.
   · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
+`scripts/lib/daemon_throttle.py` — Low-priority subprocess throttling for the global janitor daemon (TRDD-TY2EZ8ZH,
+  · low_priority_prefix(platform, *, has_taskpolicy, has_nice, has_ionice) -> list[str] — Return the command-prefix that launches a subprocess at LOW CPU+IO priority.
+  · nice_preexec() -> Optional[Callable[[], None]] — Return a ``preexec_fn`` that lowers the child's CPU priority, or ``None``.
 `scripts/lib/daemon_watchdog.py` — Shared daemon-task staleness watchdog for the per-session detector shims.
   · emit_if_daemon_stale(*, task_name, last_run_filename, cadence_env, default_cadence_s, subject) -> None — Print a once/hour drift line iff `task_name`'s completion stamp is stale
 `scripts/lib/dedupe.py` — Dedupe helper — Python port of scripts/lib/dedupe.sh.
   · emit_once(seen_file, key, message) -> Optional[str] — Return `message` the FIRST time `key` is seen, None on repeats.
   · emit_forget(seen_file, key) -> None — Forget a key so the next occurrence re-emits.
+`scripts/lib/disk_pressure.py` — disk_pressure — the S7 shared dual disk metric (TRDD-1T53EKTN, fseventsd plan).
+  · DiskPressure — Both numbers a human needs to judge disk pressure. `purgeable_gb` None = unknown.
+  · DiskPressure.label(self) -> str — The canonical report string: 'NN.N GB writable / +NN.N GB purgeable'.
+  · parse_diskutil_purgeable_gb(plist_bytes) -> float | None — Purgeable GB from a `diskutil info -plist` payload, or None when the running
+  · disk_pressure(path) -> DiskPressure — The dual metric for the filesystem holding `path`. Never raises.
 `scripts/lib/fleet_inject.py` — Fleet recovery injector (TRDD-324223a6, GROUP A / A3) — the ACTUATION layer.
   · action_to_command(action) -> str | None — The slash-command a command-typing recovery `action` injects, or None when
   · valid_session_id(session_id) -> bool — True iff `session_id` is a bare iTerm UUID safe to interpolate into an
   · iterm_osascript(session_id, command, *, delay_s, esc_first) -> str — AppleScript that targets ONLY the iTerm session whose id == `session_id`,
+  · aimaestro_command_argv(cli, session, command) -> list[str] — argv for ``<cli> session command <session> --newline -- <command>`` — the
   · build_injection(terminal, action, *, delay_s) -> dict | None — Build the keystroke-injection PLAN for a recovery `action` into a resolved
   · fire(plan) -> bool — Fire a built injection plan fully DETACHED — so the daemon never blocks and
 `scripts/lib/fleet_recovery.py` — Fleet recovery POLICY (TRDD-324223a6, GROUP A / A2) — the PURE decisions the
-  · action_for(diagnosis, attempts) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
+  · action_for(diagnosis, attempts, *, include_hard) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
   · gate(*, last_ts, attempts, now) -> str — Decide whether to attempt recovery on an instance NOW. Returns:
 `scripts/lib/fleet_restart.py` — Hard-restart recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
   · hard_restart_enabled() -> bool — Master opt-in for the process-killing rungs. DEFAULT-OFF — these rungs kill and
   · is_killable(*, pid, command, active, diagnosis, self_pid, daemon_pid) -> bool — The hard gate before any ``os.kill``. True ONLY when killing this pid is safe:
+  · command_injection_plan(terminal, command, *, esc_first) -> dict | None — PUBLIC raw-command channel builder — the single source of truth for typing an
   · build_relaunch(terminal) -> dict | None — rung 5 — resume a `dead` (pid-gone) session by typing ``claude --continue`` into
   · build_force_restart(pid, terminal) -> dict | None — rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
   · build_resurrect(pid, project_root) -> dict — rung 7 — the pane is unreachable: spawn a DETACHED background ``claude`` (a new
@@ -500,13 +529,22 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · transcript_age(root, now) -> int | None — Seconds since this project's NEWEST session transcript was written, or
   · diagnose_root(root, *, now, transcript_age, stale_s) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
+  · tag_aimaestro_identity(terminal, *, agents, cli, root) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the ai-maestro CLI
+  · tag_linux_gui_identity(terminal, *, channel) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the Linux
   · gather_fleet(*, now) -> list[Instance] — Scan the whole host: every running claude instance whose cwd resolves to a
+`scripts/lib/fleet_stop.py` — Daemon-driven fleet disarm/pause POLICY (TRDD-ME8V2YJF, component A) — the PURE
+  · fleet_stop_enabled() -> bool — Master opt-in for daemon-driven fleet-stop injection. DEFAULT-OFF — mirrors
+  · stop_command_for(flag_state) -> str | None — The local slash-command to inject for a fleet flag state, or None when the flag
+  · injection_stamp_key(pid, flag_state) -> str — The stable dedupe key for one ``(session pid, flag-state)`` injection. The
+  · is_injectable(*, pid, command, self_pid, daemon_pid, is_user_active) -> bool — True ONLY when it is safe to type a stop command into this session's pane:
+  · select_stop_targets(sessions, *, flag_state, self_pid, daemon_pid, already_injected, user_active_pids) -> list[dict] — PURE. Given the scanned fleet + the current flag state, return one injection
 `scripts/lib/git_utils.py` — Shared git helpers — Python port of scripts/lib/git-utils.sh.
   · is_squash_merged(branch_ref, base_ref, cwd) -> bool — Detect whether <branch_ref> was squash-merged into <base_ref>.
   · scope_tracking_status(rel) -> str — Probe git tracking status of `rel` (relative to project root).
 `scripts/lib/global_state.py` — Shared contract for the GLOBAL janitor daemon — system-wide singleton that
   · global_state_dir() -> Path — Return the system-wide janitor state directory.
   · init_global_state() -> Path — Create the global state dir if missing. Idempotent. Return its path.
+  · migrate_global_state_to_data_dir() -> Optional[int] — One-time staged migration legacy → plugin DATA dir (TRDD-2U8AH82F).
   · daemon_pid() -> Optional[int] — Read daemon.pid → int, or None if missing / malformed.
   · write_daemon_pid(pid) -> None
   · remove_daemon_pid() -> None
@@ -515,9 +553,16 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · kill_switch_present() -> bool
   · set_kill_switch(reason) -> None — Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
   · clear_kill_switch() -> None — Remove the kill-switch flag so the daemon can be lazy-spawned again — the revive
+  · maintenance_mode_present() -> bool — True iff the machine-wide MAINTENANCE flag is set (/janitor-global-maintenance,
+  · set_maintenance_mode(reason) -> None — Set the machine-wide MAINTENANCE flag — every session's heartbeat drops to
+  · clear_maintenance_mode() -> None — Clear the machine-wide MAINTENANCE flag so heartbeats resume FULL fires (chores) and
   · global_pause_present() -> bool — True iff the machine-wide PAUSE flag is set (TRDD-a3fa4d5d). Distinct from the
   · set_global_pause(reason) -> None — Set the machine-wide PAUSE flag — the daemon idles (stays alive, keeps ticking
   · clear_global_pause() -> None — Clear the machine-wide PAUSE flag — the daemon resumes running due tasks on its
+  · fleet_stop_flag_state() -> str | None — The current machine-wide fleet-stop flag, or None when neither is set. ``disarm``
+  · record_fleet_injection(pid, flag_state, now) -> None — Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
+  · fleet_injections_seen() -> set[str] — The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
+  · clear_fleet_injections(flag_state) -> None — Forget injection stamps so a re-set flag re-injects. ``flag_state=None`` clears
   · daemon_is_alive(max_silence_s) -> bool — True iff the daemon's PID is alive AND its heartbeat is recent.
   · acquire_singleton_flock(*, blocking) -> Optional[int] — Acquire the exclusive flock on daemon.flock.
   · release_singleton_flock(fd) -> None — Close the fd; the kernel releases the flock as a side effect.
@@ -533,7 +578,11 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · reload_flag_present() -> bool
   · set_reload_flag(reason) -> None — Stamp the reload generation (current epoch) after a plugin changed on
   · clear_reload_flag() -> None — Reset the reload generation. Used only by the disarm / manual-reset path;
-  · daemon_needs_restart() -> bool — True iff the running daemon's script path doesn't match the current cache.
+  · skills_reload_generation() -> int — Return the standalone-skills reload generation (epoch of the last
+  · skills_reload_flag_present() -> bool
+  · set_skills_reload_flag(reason) -> None — Stamp the standalone-skills reload generation (current epoch). Format
+  · clear_skills_reload_flag() -> None — Reset the standalone-skills reload generation. Used only by a manual-reset
+  · daemon_needs_restart() -> bool — True iff the running daemon should be restarted from the current cache.
   · request_daemon_restart() -> bool — Send SIGTERM to a stale daemon so the next heartbeat lazy-spawns a new one.
   · crash_loop_active(now) -> bool — PUBLIC read-only: True iff the daemon spawn breaker is tripped (the
   · recent_spawn_count(window_s, now) -> int — PUBLIC read-only: how many daemon spawn attempts landed within the last
@@ -558,6 +607,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · verify_drift_line(line, *, rule_id, severity, path, line_number, corpus_hash, key) -> bool — Verify a drift line previously wrapped by `wrap_drift_line`.
   · AuditChain — Append-only HMAC-SHA256 chained NDJSON log.
   · AuditChain.append(self, event) -> dict — Append `event` (a dict of caller-supplied fields).
+  · AuditChain.trim(self, *, keep_lines, max_bytes) -> bool — Cap the chain WITHOUT sacrificing genesis-anchored verification (S4,
   · AuditChain.verify(self) -> tuple[bool, int, str] — Verify every entry in the chain, top to bottom.
   · compute_manifest(plugin_root, globs) -> dict[str, str] — Compute `{ relative_path: sha256-hex }` over the matched files.
   · write_manifest(manifest, path) -> None — Write the manifest atomically.
@@ -570,20 +620,28 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · daemon_closure(scripts_dir) -> list[Path] — Every in-tree .py the L0 daemon needs (the verbatim DATA stage list), absolute
   · stage_closure(scripts_dir, dest_scripts_dir) -> list[Path] — Verbatim-copy the closure into `dest_scripts_dir`, preserving the relative layout
 `scripts/lib/launchd_keepalive.py` — OS keepalive orchestrator for the global daemon (TRDD-71ABD7V7, GROUP B / L0).
-  · data_dir() -> Path
+  · data_dir() -> Path — The janitor's FIXED persistent DATA dir, resolved AT CALL TIME.
   · data_scripts_dir() -> Path — Where the verbatim daemon closure + the installer are staged (beside the entry the
   · current_platform() -> str — 'macos' | 'linux' | 'other' — whether an OS keepalive is available here.
   · opted_in() -> bool — Master opt-in for the OS keepalive. Default ON (the user mandated OS-level
   · latest_cache_scripts_dir() -> Path | None — The ``scripts/`` dir of the newest cached plugin version that is NOT C3-quarantined
   · restage(source_scripts_dir) -> None — Verbatim-refresh the DATA closure + installer from ``source_scripts_dir`` WITHOUT
   · activate() -> tuple[bool, str] — Run the STAGED installer's ``install`` to register the OS service (idempotent).
-  · staged_is_current(source_scripts_dir) -> bool — True iff the staged DATA ``daemon.py`` is byte-identical to ``source_scripts_dir``'s
+  · staged_is_current(source_scripts_dir) -> bool — True iff EVERY file of the daemon's staged import closure is byte-identical to
   · install(source_scripts_dir) -> tuple[bool, str] — Stage the daemon closure + installer into DATA, then register the OS service —
   · uninstall() -> tuple[bool, str] — Run the STAGED installer's uninstall (idempotent, best-effort, never raises). Uses
   · is_installed() -> bool — True iff the OS-keepalive artifact for this platform is on disk, as reported by the
+`scripts/lib/leanctx_allowlist.py` — Self-heal the lean-ctx shell allowlist for the janitor heartbeat
+  · required_tokens() -> list[str] — Return the janitor's required lean-ctx allowlist tokens.
+  · ensure_janitor_allowed() -> list[str] — Additively allow every janitor-required token on the lean-ctx allowlist.
 `scripts/lib/memory_content_precheck.py` — Cheap, zero-LLM filesystem prechecks for the memory-maintenance SCHEDULER
   · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
-  · content_has_work(intervention, root, *, split_max_bytes) -> bool — True iff `intervention` has actual work on the `root` corpus.
+  · consolidate_has_work(root) -> bool — True iff some pair of candidate pages in `root` COULD be a legal merge —
+  · repair_has_work(root) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
+  · atomize_has_work(root) -> bool — True iff some CURATED wiki page in `root` is still FREE-PROSE — no
+  · conflict_has_work(root) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
+  · harvest_has_work(scope, root) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
+  · content_has_work(intervention, root, *, split_max_bytes, scope) -> bool — True iff `intervention` has actual work on the `root` corpus.
 `scripts/lib/memory_edit_verify.py` — Wikimem edit verifier (TRDD-b92a9dd0) — the oracle that proves an editorial
   · parse_frontmatter(text) -> dict — Flatten a wikimem note's YAML frontmatter into one dict (top-level keys +
   · extract_lessons(text) -> list[str] — Return the normalized body of every `[^N]: …` footnote definition in `text`
@@ -594,7 +652,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · no_new_duplicate_lines(result, min_len) -> tuple[bool, list[str]] — No substantive content line (length ≥ `min_len`, not a heading/list marker)
   · no_dangling_refs(live_pages, retired_slugs) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
   · footnote_refs_resolve(text) -> tuple[bool, list[str]] — Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
-  · no_new_dangling_footnote_refs(source_texts, result_texts) -> tuple[bool, list[str]] — A split/merge must not INTRODUCE a dangling footnote ref. Footnote ids may
+  · no_new_dangling_footnote_refs(source_texts, result_texts) -> tuple[bool, list[str]] — A split/merge must not INTRODUCE a dangling footnote ref. Compare per-ID
   · ocd_lmd_ok_merge(source_metas, result_meta) -> tuple[bool, str] — The survivor of a merge keeps the OLDEST origin date and a fresh modify
   · is_legal_merge(meta_a, meta_b) -> tuple[bool, str] — Refuse a structurally-illegal merge (the agent still decides SUBJECT
   · is_legal_split(meta, body, min_sections, oversized) -> tuple[bool, str] — Decide whether a page may be split. Per the wikimem model "one element =
@@ -611,6 +669,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · parse_vm_stat(text, page_size) -> Optional[int] — Free MB from macOS `vm_stat` output: (free + speculative) pages.
   · parse_meminfo(text) -> Optional[int] — Free MB from Linux /proc/meminfo's MemAvailable (kB). None if absent.
   · is_tier1_killable(row, *, protected_pids, min_etime_s) -> bool — The Tier-1 truth: may this row EVER be killed by the guard?
+  · select_refused_alert(rows, *, protected_pids, min_etime_s, min_rss_kb) -> Optional[ProcRow] — S6 alert selector: the single largest-RSS process AT/ABOVE `min_rss_kb` that
   · select_victim(rows, *, protected_pids, min_etime_s) -> Optional[ProcRow] — Pick the single largest-RSS Tier-1-killable row, or None.
   · free_memory_mb() -> Optional[int] — System free memory in MB (macOS vm_stat / Linux meminfo). None = unknown.
   · snapshot_processes(snapshot_path) -> list[ProcRow] — `ps -axo pid,ppid,rss,etime,command` -> FILE -> parsed rows.
@@ -619,14 +678,19 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · privacy_scan(text) -> list[str] — Return the sorted, deduped leak-CLASS labels found in `text`.
   · NoteVerdict — The classification of ONE note. `leak_classes` is empty iff privacy-clean;
   · classify_text(rel_path, text) -> NoteVerdict — Classify ONE note from its relative path + full text. Pure (no I/O).
-  · iter_notes(memdir) -> list[Path] — Every real note `*.md` under `memdir`, excluding non-note files and the
+  · iter_notes(memdir) -> list[Path] — Every real note `*.md` under `memdir`, via the shared SSOT.
   · classify_corpus(memdir) -> list[NoteVerdict] — Classify every real note under `memdir`. Read-only. A note larger than the
   · render_plan(memdir, verdicts, *, project_repo) -> str — Render the migration PLAN: every note with its verdict, the deciding
 `scripts/lib/memory_scopes.py` — Shared three-scope memory-root resolution — the SINGLE SOURCE OF TRUTH.
-  · project_slug(project_dir) -> str — Harness per-project slug: the absolute path with every separator dashed.
+  · is_note_file(path) -> bool — True iff ``path`` is a real memory NOTE — the SSOT discriminator.
+  · iter_note_files(memdir) -> list[Path] — Every real memory NOTE under ``memdir`` (recursive), filtered by ``is_note_file``.
+  · project_slug(project_dir) -> str — Harness per-project slug: the absolute path with every NON-ALPHANUMERIC char dashed.
+  · resolve_local_dir_for(project_dir) -> Path — The LOCAL agent-memory dir of an EXPLICIT project path (M-11 — the SSOT
   · resolve_local_dir() -> Path — The per-project LOCAL agent-memory dir (parent of ``user-mem``). Not created.
   · resolve_project_dir() -> Path | None — The PROJECT scope memory root ``<git-root>/.claude/project/memory/``, or
   · resolve_user_dir() -> Path — The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
+  · resolve_user_mirror_dir() -> Path — The USER-memory BACKUP MIRROR ``~/.claude/ai-maestro-janitor-memory/`` (TRDD-GFT33HT9).
+  · sync_user_memory_mirror() -> str | None — Keep the uninstall-surviving USER-memory MIRROR in step with the canonical store
   · resolve_wiki_dir(scope_root) -> Path — The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wiki``.
   · is_curated_wiki_page(text) -> bool — True iff ``text`` is a CURATED wikimem page; False iff a RAW harness buffer note.
   · resolve_scope_dirs() -> list[tuple[str, Path]] — The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT → USER.
@@ -663,6 +727,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · format_security_triggered(action, normalized_diff) -> str — Build the canonical SECURITY-TRIGGERED gate block.
   · parse_approval_response(reply) -> bool — Return True iff the reply is EXACTLY ``APPROVED`` after .strip().
   · apply_fp_filters(text, filters) -> bool — Return True iff ``text`` contains ANY substring from ``filters``.
+`scripts/lib/pending_agents.py` — Pending background-agent manifest (TRDD-82OP4EN9 W1) — deterministic fork
+  · add(agent_id, description, now) -> None — Record a spawned subagent. Fail-open: swallows everything.
+  · remove(agent_id, now) -> None — Clear a finished subagent. No-op on empty/unknown id (fail-open).
+  · pending(now) -> list[dict] — Live (unswept) entries, oldest-first. Fail-open [].
+  · directive_lines(now) -> list[str] — Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
+`scripts/lib/plugin_freshness.py` — Plugin-freshness helper (issue #69, TRDD-YF4NDYYE) — verify cached-vs-live BEFORE
+  · cached_version(plugin_root) -> str | None — The version of the plugin tree being audited (its own plugin.json).
+  · installed_pin(plugin_name, marketplace) -> str | None — The version Claude Code currently pins for this plugin, or None.
+  · latest_published(plugin_root, *, now) -> str | None — Latest published release version, through the TTL cache. None when unknown
+  · freshness(plugin_root, *, now) -> dict — The audit-header facts: what is being audited vs what is installed/published.
+  · header(plugin_root, *, now) -> str — The one-line report header every cache-based audit prints first.
 `scripts/lib/posture.py` — Posture-grade computation for the janitor heartbeat.
   · PostureGrade — A single grade snapshot for the heartbeat.
   · compute(critical, high, major, minor, mal_advisories) -> PostureGrade — Compute a posture grade from per-severity counts + OSV MAL-* count.
@@ -700,7 +775,12 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · render_body(filemaps) -> str — Deterministic map body (no fences, no timestamp). Individual files first
   · structure_hash(filemaps) -> str — 12-hex sha256 over the rendered body. Identical structure → identical
   · render_block(filemaps, *, generated_iso, digest) -> str — The full fenced block ready to splice into CLAUDE.md. `digest` is the
+`scripts/lib/rotator_usage.py` — Shared READ-ONLY account-usage gather (TRDD-OY0W6LX5).
+  · accounts_usage() -> list[dict] — `[{"label", "usage"}]` for every unique known account (live + slots, deduped by
 `scripts/lib/rules_installer.py` — Install plugin-shipped rule files into the active scope's .claude/rules/.
+  · remove_orphaned_rules() -> list[str] — Partial-uninstall self-heal: remove janitor-installed rules from every KNOWN rules
+  · janitor_uninstalled() -> bool — True iff the janitor appears FULLY uninstalled: referenced in NO settings.json
+  · cleanup_user_orphans_if_uninstalled() -> list[str] — Daemon entry point (TRDD-H9IBY95W): when the janitor is FULLY uninstalled, remove
   · install_rules(plugin_root) -> list[str] — Copy <plugin_root>/rules/*.md to every active scope's rules dir.
 `scripts/lib/security_helpers.py` — Shared security primitives — distilled from 10-agent study of 141
   · shannon_entropy(s) -> float — Shannon entropy in bits per character.
@@ -858,18 +938,92 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · load(project_root) -> SuppressionTable — Load the project's suppression table.
 `scripts/lib/terminal_trigger.py` — Terminal-aware self-trigger send-abstraction (TRDD-db169d9e R3).
   · valid_tmux_pane(pane) -> bool — True iff `pane` is a bare tmux pane id (`%<n>`) safe to place on a
-  · build_tmux_steps(pane, command) -> list[list[str]] — The ordered send sequence for a tmux pane: ESC, settle, the command (literal),
+  · iterm_esc_lines(indent) -> list[str] — AppleScript lines for a HARD interrupt inside an iTerm ``tell s`` block:
+  · build_tmux_steps(pane, commands, *, esc_first) -> list[list[str]] — The ordered send sequence for a tmux pane: an OPTIONAL leading ESC, then each
+  · build_wtype_steps(commands, *, esc_first) -> list[list[str]] — The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
+  · build_xdotool_steps(commands, *, esc_first) -> list[list[str]] — The X11 (`xdotool`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
   · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
-  · send_self_command(command, *, delay_s, dry_run, env) -> str — Send `command` (a fixed literal like `/compact`) to this session's own pane,
+  · send_self_command(commands, *, delay_s, esc_first, dry_run, env) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
   · main() -> int
+`scripts/lib/token_attribution_cache.py` — Shared 30-minute fleet-attribution cache (TRDD-OY0W6LX5).
+  · cache_path() -> Path — The single machine-wide cache file, in the daemon's global-state dir.
+  · load_fresh(now, *, max_age_s, w5_lo, w7_lo) -> dict | None — The cached fleet dict iff it exists, is younger than `max_age_s`, AND was computed
+  · compute(projects_root, now, *, since_epoch, w5_lo, w7_lo) -> dict — Scan the fleet fresh and persist the result to the cache. Returns the fleet dict.
+  · get(projects_root, now, *, max_age_s, w5_lo, w7_lo) -> dict — A fleet attribution dict, reusing a cache entry younger than `max_age_s` (with
+`scripts/lib/token_baseline.py` — Adaptive token-usage baseline + anomaly primitives (TRDD-EDSFEQ5C).
+  · weighted_tokens(rec) -> int
+  · bucketize(records, bucket_s) -> dict[int, int] — `{bucket_index: summed weighted tokens}` over `records` (each needs a numeric `ts`).
+  · robust_baseline(values) -> tuple[float, float] — (median, MAD) — MAD = median(|v - median|), the robust scale. Empty → (0, 0).
+  · anomaly_score(value, median, mad) -> float — Robust z-score `(value - median) / (1.4826 * MAD)`. The 1.4826 makes MAD a
+  · percentile(values, pct) -> int
+  · AnomalyVerdict — The classification of the most-recent complete bucket vs the trailing baseline.
+  · classify_recent(records, *, bucket_s, z, floor_pct, ratio, now) -> AnomalyVerdict | None — Classify the most-recent COMPLETE bucket as anomalous vs the trailing history.
+  · rolling_sum(records, window_s, now) -> int — Summed weighted tokens whose `ts` is within the last `window_s` up to `now`.
+  · max_window_sum(records, window_s) -> int — The largest weighted-token sum over ANY `window_s`-wide time window in `records`
+  · per_minute(total, window_s) -> float — Average weighted tokens per minute over a window of `window_s` seconds.
+  · estimate_window_cap(util_pct, window_weighted) -> int | None — Estimate a window's ABSOLUTE weighted-token cap from a utilization% sample paired
+  · project_exhaustion_minutes(remaining_weighted, recent_rate_per_min) -> float | None — Minutes until the remaining budget is exhausted at `recent_rate_per_min`. None when
+  · elapsed_fraction_from_reset(resets_at_epoch, window_s, now) -> float | None — Fraction [0.0, 1.0] of a FIXED-reset usage window that has elapsed at `now`.
+  · burn_ratio(util_pct, elapsed_fraction) -> float | None — How fast a window is burning vs its even-pace budget: `(util%/100) / elapsed`.
+  · projected_exhaustion_epoch(resets_at_epoch, window_s, util_pct, now) -> int | None — Epoch when this window reaches 100% util at its current AVERAGE pace.
+  · worst_window_burn(windows, *, now) -> dict | None — The single most-alarming usage window across a fleet of windows.
+`scripts/lib/token_burn.py` — Pure window burn-rate decision layer (TRDD-OY0W6LX5).
+  · account_prefix(email) -> str — The privacy-safe account label for a drift line: the local part of the email only
+  · windows_from_usage(usage, now) -> list[dict] — Parse a raw `/api/oauth/usage` payload into per-window burn inputs for `now`.
+  · window_starts(accounts_usage, now) -> tuple[int | None, int | None] — The LIVE subscription windows' START epochs `(w5_lo, w7_lo)` — `resets_at − window_s`.
+  · format_burn_line(label, window) -> str — Render ONE tripped window as the base drift line (no top-consumer clause — the
+  · evaluate_trips(accounts_usage, now, ratio, min_util) -> list[dict] — The pure burn verdict: one trip per (account, window) whose burn ratio ≥ `ratio`.
+  · evaluate(accounts_usage, now, ratio, min_util) -> list[str] — The detector's pure decision helper: the rendered burn drift lines (no top-consumer
+`scripts/lib/token_graph.py` — Terminal token-usage graphs (TRDD-4MMXTJFB).
+  · sparkline(values) -> str — One-row sparkline of `values`, scaled to the series' own max. Zeros render as
+  · render_series(series, lo_ts, hi_ts, *, label, bucket_label) -> list[str] — Render one bucketed series as TWO annotated sparkline rows — the per-bucket RATE
+  · render_window_graphs(events, lo_ts, hi_ts, *, buckets, bucket_label, fields) -> list[str] — Full graph block for one window: per `fields` category, the rate + cumulative
+`scripts/lib/token_history.py` — Cross-project per-ACCOUNT token attribution miner (TRDD-OY0W6LX5).
+  · weighted(usage) -> float — Weighted token cost of one turn's usage dict, mirroring token_report.py:
+  · parse_ts(iso) -> int | None — ISO-8601 timestamp (with a trailing `Z` OR a numeric offset, optional fractional
+  · Event — One assistant turn's contribution to attribution.
+  · scan_transcript(path, since_epoch, seen_ids) -> list[Event] — Stream one `*.jsonl` transcript and return every assistant `Event` at or after
+  · scan_project(project_dir, since_epoch) -> list[Event] — Every assistant `Event` at or after `since_epoch` across all `*.jsonl` transcripts
+  · bucket_series(events, lo_ts, hi_ts, buckets, field) -> list[float] — `field` summed into `buckets` equal time bins over [lo_ts, hi_ts) — the graphable
+  · project_metrics(events, now, *, w5_lo, w7_lo) -> dict — Roll one project's `events` up into the attribution metrics for time `now`.
+  · fleet_attribution(projects_root, now, *, since_epoch, w5_lo, w7_lo) -> dict — Attribute fleet-wide consumption across every project under `projects_root`.
+  · culprit(fleet, *, min_share, min_spike) -> str | None — The one project to advise: the highest-`roll_5h` slug whose `share_5h >= min_share`
 `scripts/lib/token_meter.py` — Per-heartbeat token accounting (TRDD-a4e41e89, Phase 1).
   · TurnUsage — Summed token usage of the most-recent turn, plus whether it was a heartbeat.
   · TurnUsage.as_record(self, now_epoch) -> dict
   · tail_turn_usage(transcript_path) -> Optional[TurnUsage] — Sum the most-recent turn's token usage and flag whether it's a heartbeat.
+  · latest_context_size(transcript_path) -> Optional[int] — Total INPUT context (input + cache_read + cache_creation tokens) the model
+  · read_context_snapshot(project_dir, session_id) -> Optional[dict] — The statusline-written context snapshot dict for (project_dir, session_id), or
+  · resolve_context(project_dir, session_id, transcript, window_default, *, now) -> tuple[Optional[int], Optional[int], Optional[int], bool] — Return (pct, tokens, window, stale) — the live context-window occupancy.
+  · CompactPrediction — Predicted auto-compact geometry from CLAUDE_CODE_AUTO_COMPACT_WINDOW (TRDD-TKNSTP82 C).
+  · predict_auto_compact(used_tokens, *, env) -> Optional[CompactPrediction] — Predict the EXACT auto-compact point from the CLAUDE_CODE_AUTO_COMPACT_WINDOW env var.
   · append_log(log_path, turn_usage, now_epoch) -> None — Append one JSON line for a heartbeat turn's usage (append is atomic enough
   · trim_log(log_path, *, keep_lines, max_bytes) -> None — Cap the append-only log: when it exceeds `max_bytes`, atomically rewrite
+  · append_exhaustion_event(path, event, *, max_events) -> None — Append ONE window-exhaustion snapshot (a turn-ending API error / rate-limit) as a
   · load_log(log_path) -> list[dict]
+  · BudgetVerdict — The budget-tier decision for the IN-PROGRESS turn (TRDD-KI24GR5Z).
+  · evaluate_turn_budget(usage, *, output_advisory, output_hard, cache_creation_advisory, cache_creation_hard, ignore_cache_creation) -> BudgetVerdict — Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
   · summarize(records, *, field) -> Optional[dict] — Distribution stats for `field` over the per-heartbeat records.
+`scripts/lib/trdd_common.py` — Shared TRDD-parsing helpers + the state-reconciliation checks (stdlib-only).
+  · extract_uid(filename) -> str | None — Return a TRDD filename's id (UPPERCASE base36 OR legacy UUID), or None.
+  · norm_state(value) -> str — Normalise a status/column token to lowercase kebab-case.
+  · parse_trdd_state(path) -> tuple[str, str] — Return (status, column) for a TRDD, both normalised kebab-case or ''.
+  · parse_state_text(head) -> tuple[str, str] — Pure variant of parse_trdd_state over already-read text (the file head).
+  · extract_trdd_refs(text) -> list[str] — Return every `TRDD-<id8>` id referenced in `text` (order-preserving, deduped).
+  · parse_flow_list(raw) -> list[str] — Parse a YAML flow-style list value into its raw element strings.
+  · blocked_by_ids(raw) -> list[str] — Extract the blocker TRDD ids from a `blocked-by:` flow-list value.
+  · impl_commit_shas(raw) -> list[str] — Extract commit SHAs from an `implementation-commits:` flow-list value.
+  · TrddRecord — Everything the four reconciliation checks need, parsed from ONE TRDD.
+  · parse_record_text(text, *, uid) -> TrddRecord — Build a TrddRecord from a TRDD's text (frontmatter + body head).
+  · parse_trdd_record(path) -> TrddRecord — Read a TRDD file and build its TrddRecord (uses RECONCILE_BYTES head).
+  · is_terminal_column(column) -> bool — True iff `column` is one of the DONE/closed terminal columns.
+  · check1_shipped_but_open(record, commit_in_released_tag) -> bool — Check 1 — the keystone. Non-terminal TRDD whose commits are in a released tag.
+  · check2_has_remaining_work(record) -> bool — Check 2 — the remaining-work gate that suppresses Check-1 over-claims.
+  · check3_prose_frontmatter_mismatch(record) -> bool — Check 3 — STATE prose claims a block the machine fields do not encode.
+  · check4_stale_blockers(record, column_of) -> list[str] — Check 4 — blockers (frontmatter OR prose-named) that are now terminal.
+  · ReconcileVerdict — The reconciliation outcome for ONE TRDD — which checks fired + the label.
+  · ReconcileVerdict.fires(self) -> bool
+  · reconcile(record, commit_in_released_tag, column_of) -> ReconcileVerdict — Run all four checks on one record; return the consolidated verdict.
 `scripts/lib/user_mem_lib.py` — USER-MEMORY subsystem core (TRDD-4334aad0) — a PRIVATE, agent-invisible
   · resolve_user_mem_dir(project_dir) -> Path — Return the user-mem store dir for a project (does not create it).
   · SearchResult — One memgrep hit, annotated with the memory's immutable number.
@@ -879,11 +1033,12 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · UserMemStore.read(self, number) -> Optional[str] — Return memory #number's body text, or None if it was never assigned /
   · UserMemStore.delete(self, number) -> bool — Remove memory #number's file. Returns True if a file was removed.
   · UserMemStore.search(self, query, *, memgrep, top) -> list[SearchResult] — Run `memgrep find <query> <this-dir> --use-index` and return numbered hits.
-  · build_search_argv(query, store_dir, *, memgrep, top) -> list[str] — Build the `memgrep find <query> <store_dir> --use-index --top <top>` argv.
+  · build_search_argv(store_dir, *, memgrep, top) -> list[str] — Build the `memgrep find - <store_dir> --use-index --top <top>` argv.
   · previous_user_message(transcript_path) -> Optional[str] — Return the text of the user message immediately BEFORE the save-command line.
   · parse_command(prompt) -> tuple[Optional[str], str] — Classify a submitted prompt as one of our commands.
   · find_memgrep() -> Optional[str] — Resolve the memgrep binary path (env override → PATH → cargo bin).
 `scripts/lib/version_update_lib.py` — Shared janitor self-update helpers — used by the daemon's
+  · parse_semver(s) -> tuple[int, ...] — Public semver-ordering helper: '0.31.0' → (0, 31, 0), or (-1,) on
   · detect_install_scopes() -> list[str] — Return every scope where the plugin is referenced.
   · list_installed_versions(parent) -> list[str] — Semver-shaped subdir names of `parent`, sorted ascending.
   · resolve_latest_published(plugin_root) -> str | None — GitHub releases/latest tag for the repo declared in plugin.json.
@@ -944,7 +1099,10 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · SlotKeychainWriteError — A keychain/keyring was PRESENT but refused a slot write — fail CLOSED.
   · configured_rotator_home() -> Path | None — The rotator home the daemon ACTUALLY uses, or None when none is configured (opt-in by
   · migrate_root_to_canonical() -> tuple[Path, Path, bool] — One-time: copy ``state.json`` + ``opt-in.flag`` from the legacy standalone root
+  · read_live_blob_with_source() -> tuple[dict | None, str] — The live credential PLUS where it came from: ("primary" | "mirror" | "none").
   · read_live_blob() -> dict | None — The live credential, robust against a corrupt/missing primary: the PRIMARY store ladder
+  · write_live_identity_beacon(*, now) -> bool — Stamp the live credential's identity from a context that can READ the primary.
+  · read_live_identity_beacon(*, max_age_s, now) -> dict | None — The last session-stamped live identity, or None when absent/garbage/STALE.
   · write_live_blob(blob) -> None — Overwrite the live credential with `blob`, cross-platform.
   · fingerprint(blob) -> str
   · expires_in_h(blob) -> float | None
@@ -975,11 +1133,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · cmd_oauth_health(as_json) -> int — Print per-account OAuth health (has_refresh + expiry) read from the KEYCHAIN.
   · main(argv) -> int
 `scripts/oauth_rotator/safe_storage.py` — Cross-platform OS secret storage — the single abstraction for keeping rotator
+  · SecurityRun — Outcome of ONE gated `security` invocation via ``run_security``.
+  · keychain_denied_latched() -> bool — True iff the denied-latch is set — a prior `security` op was denied/hung, so NO
+  · set_keychain_denied(reason) -> None — Set the persistent denied-latch (atomic tmp+replace) and log ONE actionable line.
+  · clear_keychain_denied() -> bool — Clear the denied-latch so `security` ops resume. Call this from the arm / ACL-re-grant
+  · run_security(argv, *, timeout) -> SecurityRun — THE single gate EVERY `security` invocation (safe_storage AND rotator) routes through.
   · StoreResult — Outcome of a ``store`` call — three-valued so callers can fail closed.
   · detect_backend() -> str — Return the active backend id: ``macos`` | ``secret_tool`` | ``dpapi`` | ``none``.
   · store(service, account, secret) -> StoreResult — Store ``secret`` (an opaque string — the caller serialises) ENCRYPTED under
   · retrieve(service, account) -> str | None — Return the stored secret string for (``service``, ``account``), or ``None`` if
   · delete(service, account) -> None — Best-effort removal of (``service``, ``account``) from the active backend.
+  · keychain_scope_args() -> list[str] — Trailing `security` positional args that SCOPE every generic-password op to a
   · macos_store_argv(service, account, secret) -> list[str] — `security add-generic-password` argv with the value ON ARGV (`-w <secret>`).
   · macos_retrieve_argv(service, account) -> list[str]
   · macos_delete_argv(service, account) -> list[str]
@@ -1030,6 +1194,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · update_python_versions(plugin_root, new_version) -> list[tuple[bool, str]] — Update __version__ = 'X.Y.Z' in all Python files.
   · check_version_consistency(plugin_root) -> tuple[bool, str] — Check all version sources match. Returns (ok, message).
   · do_bump(plugin_root, new_version, dry_run) -> bool — Bump version across all files. Returns True on success.
+  · main() -> int
+`scripts/reload_skills_trigger.py` — Backing script for /janitor-reload-skills (analogue of reload_trigger.py).
   · main() -> int
 `scripts/reload_trigger.py` — Backing script for /janitor-reload-plugins (analogue of compact_trigger.py).
   · main() -> int
