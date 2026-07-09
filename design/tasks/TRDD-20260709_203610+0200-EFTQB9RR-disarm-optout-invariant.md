@@ -3,7 +3,7 @@ trdd-id: EFTQB9RR
 title: The disarm opt-out invariant had no writer, and disarm deleted a machine-wide file
 column: dev
 created: 2026-07-09T20:36:10+0200
-updated: 2026-07-09T20:36:10+0200
+updated: 2026-07-09T20:58:42+0200
 current-owner: janitor
 assignee: janitor
 priority: 2
@@ -32,7 +32,7 @@ attempts: 0
 test-failures: 0
 last-test-result: pass
 last-test-at: 2026-07-09T20:34:00+0200
-implementation-commits: []
+implementation-commits: [57bfe31, b2be32b]
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/77"]
 ---
 
@@ -45,19 +45,28 @@ wants the SessionStart arm-nudge gated on the POSITIVE opt-out `disarmed.flag` r
 the presence of `heartbeat-armed-at.ts`. That gate cannot be built until the flag has a
 writer. It did not have one.
 
-**Current state**
+**Current state** — all three landed locally, NOT yet published.
 
-- **Bug 1 — `disarmed.flag` had four readers and zero writers.** FIXED (not yet published).
+- **Bug 1 — `disarmed.flag` had four readers and zero writers.** FIXED (`57bfe31`).
   `/janitor-disarm` now writes it; `/janitor-arm` now removes it, FIRST, before `CronCreate`.
-- **Bug 2 — `/janitor-disarm` deleted the machine-wide dispatcher stub.** FIXED (not yet
-  published). The `rm -f "${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py"` step is gone, replaced by
-  an explicit "do NOT delete this" paragraph naming the blast radius.
-- **Guard test** `tests/test_disarm_optout_invariant.py` — 5 tests, all 4 substantive ones
-  proven to fail against the pre-fix skills. Full suite: 12303 passed, 1 skipped.
+- **Bug 2 — `/janitor-disarm` deleted the machine-wide dispatcher stub.** FIXED (`57bfe31`).
+  The `rm -f "${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py"` step is gone, replaced by an explicit
+  "do NOT delete this" paragraph naming the blast radius.
+- **janitor#77 item A — re-arm on every wake.** FIXED (`b2be32b`). The SessionStart nudge is
+  gated on the POSITIVE opt-out instead of the arm stamp. `DISARMED_FLAG` / `RATE_LIMITED_FLAG`
+  now live in `state.py` as the single definition.
+- **janitor#77 item C — daemon sweep of stale `rate-limited.flag`.** DONE. Pure predicate
+  `session_liveness.rate_limit_flag_is_stale`, I/O `fleet_scan.sweep_stale_rate_limit`, wired
+  through an opt-in `gather_fleet(sweep_stale_rate_limit_s=…)` so `fleet_status` stays
+  read-only; the daemon passes a 24 h window (`rate_limit_flag_max_age_hours`, 0 disables).
+- **Tests**: `test_disarm_optout_invariant.py` (5) + `test_stale_rate_limit_sweep.py` (18).
+  Full suite 12322 passed, 1 skipped.
 
-**NEXT ACTION:** janitor#77 item A — in `scripts/hooks/on-session-start.py`, change the
-arm-nudge gate at line 84 from `if not (state_dir / "heartbeat-armed-at.ts").is_file(): return`
-to a `disarmed.flag`-absent gate. Then item C (task 23).
+**NEXT ACTION:** publish (`uv run scripts/publish.py`), then comment the outcome on
+janitor#77. `/janitor-arm` this project once afterward so the fleet sees the new skills.
+
+**Do NOT** bump the CPV pin: `v2.153.1` is the last good ref (`v2.153.2` raises 8 CRITICALs on
+our own `rules/*.md` — upstream CPV#160).
 
 **Load-bearing facts**
 
@@ -156,6 +165,22 @@ zsh-unsafe snippet that lived in markdown and no Python test could see).
 `test_fleet_scan_reads_the_flag_the_skills_write` binds the two halves together: it is the one
 assertion that would have caught the original gap, because it fails if either side drifts.
 
+**D5 — the sweep is opt-in at the `gather_fleet` seam, not unconditional.** `gather_fleet` has
+two callers: the daemon, and `fleet_status.py`, which renders the read-only `/janitor-show-global-status`
+table. A status view that mutates the thing it reports on is a status view nobody can trust, so
+`sweep_stale_rate_limit_s` defaults to `None` and only the daemon passes a window. The sweep runs
+BEFORE `diagnose_root` for each root, so one beat both clears the litter and acts on the corrected
+diagnosis, rather than sweeping now and helping five minutes later. A `disarmed.flag` project is
+skipped entirely — sacrosanct means we do not write into its tree, not merely that we do not inject
+into its pane.
+
+**D6 — the flag's own mtime is the age.** The StopFailure hook `touch()`es it on EVERY
+turn-ending API error, so a session that is genuinely rate-limited right now keeps its flag fresh
+for the whole limit and is never swept; a session that has not hit an API error in 24 h is not
+rate-limited by any definition. No parsing of `rate-limited-since.ts` is needed (and that file is
+misnamed — it is overwritten on every failing turn, so it records the LAST rate limit, not the
+first).
+
 ## Consequences and follow-ups
 
 - **No migration is possible for already-disarmed projects.** A project disarmed before this
@@ -167,6 +192,18 @@ assertion that would have caught the original gap, because it fails if either si
 - `fleet_status.py`'s `armed` column keeps meaning "did `/janitor-arm` reach step 6". After
   item A it stops being load-bearing for behavior, but it remains a lying column
   (janitor#77 items 2-3) until #77 item D decides what the table should show.
+- **The sweep only reaches projects with a running claude.** `gather_fleet` enumerates the
+  process table, so the 17 flagged projects get cleaned when their session next runs. That is
+  the complete set of *harmful* cases — `diagnose_instance` is only ever called for a running
+  instance, so a flag in a dormant project is inert litter. It is not the complete set of
+  *littered* ones.
+- **Three fleet options are undeclared in `plugin.json`'s `userConfig`**:
+  `session_liveness_enabled`, `fleet_recovery_enabled`, `fleet_hard_restart_enabled`. They are
+  read from the environment and work, but no UI surfaces them. Pre-existing gap, noticed while
+  declaring `rate_limit_flag_max_age_hours` (which IS declared, matching
+  `trashcan_max_age_days`). Worth a separate PR; deliberately not widened into this one.
+- **janitor#77 items B and D remain open.** B (fleet-wide arm) needs the ai-maestro server and
+  TRDD-VQ4LX7ND's TCC half. D (rename `/janitor-global-arm`) is a naming call for the owner.
 
 ## Notes and lessons learned
 

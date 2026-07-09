@@ -227,6 +227,13 @@
       "default": 72,
       "sensitive": false
     },
+    "rate_limit_flag_max_age_hours": {
+      "title": "Stale Rate-Limit Flag Max Age (hours)",
+      "description": "Hours a project's .janitor/state/rate-limited.flag may sit untouched before the global daemon sweeps it. Default: 24. Only dispatch.py clears the flag and dispatch needs a live heartbeat cron, so a project whose cron died can never clear its own \u2014 and a stale flag makes the fleet guardian read a merely-quiet session as 'frozen' (which escalates toward a force-restart) instead of 'cron_dead' (a gentle re-arm). The StopFailure hook touches the flag on every turn-ending API error, so a genuinely rate-limited session keeps its flag fresh and is never swept. Set to 0 to disable the sweep.",
+      "type": "number",
+      "default": 24,
+      "sensitive": false
+    },
     "screenshot_lowdisk_min_free_gb": {
       "title": "Screenshot Low-Disk Trigger (GiB)",
       "description": "When free space on the disk holding reports/screenshots/ drops below this many GiB, screenshot-purge enters low-disk mode and deletes oldest screenshots first (regardless of age) until free space recovers above screenshot_lowdisk_target_free_gb. Default: 5. Set to 0 to disable low-disk override (age-only mode).",

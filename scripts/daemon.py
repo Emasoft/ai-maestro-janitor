@@ -928,9 +928,14 @@ def task_session_liveness(fleet: list | None = None) -> None:
         return
     fire = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_FLEET_RECOVERY_ENABLED", True)
     now = int(time.time())
+    # janitor#77 item C: only dispatch.py clears a rate-limited.flag, and dispatch needs a
+    # live cron — so a cron-dead project can never clear its own. The daemon is alive when
+    # the cron is not. Sweeping here (0 disables) restores the honest `cron_dead` diagnosis,
+    # and with it the gentle `rearm` rung instead of `frozen`'s walk toward a force_restart.
+    sweep_s = 3600 * _env_interval("CLAUDE_PLUGIN_OPTION_RATE_LIMIT_FLAG_MAX_AGE_HOURS", 24)
     if fleet is None:
         try:
-            fleet = fleet_scan.gather_fleet(now=now)
+            fleet = fleet_scan.gather_fleet(now=now, sweep_stale_rate_limit_s=sweep_s)
         except Exception as exc:  # noqa: BLE001 - a scan error must never kill the beat
             state.log_line("daemon", f"session-liveness: fleet scan failed: {exc}")
             return

@@ -50,7 +50,13 @@ def _setup(monkeypatch, tmp_path: Path, fleet: list, *, fire: str = "1") -> list
         fn.cache_clear()
     recorded: list = []
     monkeypatch.setattr(daemon.fleet_inject, "fire", lambda plan: bool(recorded.append(plan)) or True)
-    monkeypatch.setattr(daemon.fleet_scan, "gather_fleet", lambda *, now: fleet)
+    # `sweep_stale_rate_limit_s` is the daemon's opt-in stale-flag sweep (janitor#77 item C);
+    # the seam accepts and ignores it — these tests inject a fleet, so there are no real roots.
+    monkeypatch.setattr(
+        daemon.fleet_scan,
+        "gather_fleet",
+        lambda *, now, sweep_stale_rate_limit_s=None: fleet,
+    )
     return recorded
 
 

@@ -197,6 +197,37 @@ def transcript_age(root: str, now: int) -> int | None:
     return youngest
 
 
+def sweep_stale_rate_limit(root: str, *, now: int, max_age_s: int) -> bool:
+    """Delete `<root>/.janitor/state/rate-limited.flag` if it is stale. Returns True if swept.
+
+    The daemon is the ONLY actor that can do this (janitor#77 item C). The flag is cleared
+    by `dispatch.py`, which runs only from a live heartbeat cron — so the project that most
+    needs its flag cleared (the one whose cron died) is precisely the one that can never
+    clear it. The daemon is alive when the cron is not, which is what breaks the circle.
+
+    A `disarmed.flag` project is sacrosanct and is skipped: the user opted out, its diagnosis
+    is `unarmed` regardless of the rate-limit flag, and we do not touch its files.
+
+    Never raises. A missing flag, an unreadable mtime, or a losing unlink race are all
+    "nothing to do" — the sweep is idempotent and bounded (one stat, at most one unlink).
+    """
+    sdir = os.path.join(root, ".janitor", "state")
+    if os.path.isfile(os.path.join(sdir, state.DISARMED_FLAG)):
+        return False
+    flag = os.path.join(sdir, state.RATE_LIMITED_FLAG)
+    try:
+        mtime: int | None = int(os.stat(flag).st_mtime)
+    except OSError:
+        return False  # absent or unreadable — never delete what we cannot assess
+    if not session_liveness.rate_limit_flag_is_stale(mtime, now, max_age_s):
+        return False
+    try:
+        os.unlink(flag)
+    except OSError:
+        return False  # lost a race with dispatch.py clearing it — the same outcome
+    return True
+
+
 def diagnose_root(
     root: str,
     *,
@@ -317,7 +348,7 @@ def tag_linux_gui_identity(terminal: dict[str, str], *, channel: str | None) -> 
         terminal["linux_gui_channel"] = channel
 
 
-def gather_fleet(*, now: int) -> list[Instance]:
+def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> list[Instance]:
     """Scan the whole host: every running claude instance whose cwd resolves to a
     ``.janitor`` project, with its terminal (by TTY) and diagnosed janitor health.
 
@@ -329,6 +360,13 @@ def gather_fleet(*, now: int) -> list[Instance]:
     (never per-instance) and then tagged onto every matching instance's terminal
     identity — the same fan-out shape as ``iterm_by_tty``/``tmux_by_tty`` below.
     (TRDD-ME8V2YJF follow-up)
+
+    ``sweep_stale_rate_limit_s`` is the ONLY way this function writes to disk, and it
+    defaults to None (read-only). Pass a window and each root's stale ``rate-limited.flag``
+    is deleted BEFORE it is diagnosed, so the same beat sees the corrected `cron_dead`
+    instead of a false `frozen` (janitor#77 item C). The daemon passes it; ``fleet_status``
+    must not — a status table that mutates the thing it reports on is a status table nobody
+    can trust.
     """
     ps_text = _run(["ps", "-eo", "pid=,tty=,command="])
     claude = parse_ps_claude(ps_text)
@@ -354,6 +392,15 @@ def gather_fleet(*, now: int) -> list[Instance]:
             continue
         tr_age = transcript_age(root, now)
         active = tr_age is not None and tr_age < ACTIVE_FRESH_S
+        if sweep_stale_rate_limit_s is not None and sweep_stale_rate_limit(
+            root, now=now, max_age_s=sweep_stale_rate_limit_s
+        ):
+            # BEFORE diagnose_root, so this beat already sees the honest diagnosis.
+            state.log_line(
+                "daemon",
+                f"session-liveness: swept stale rate-limited.flag in {root} "
+                f"(older than {sweep_stale_rate_limit_s}s) — restores cron_dead over frozen",
+            )
         diagnosis, recovery, dispatch_age = diagnose_root(
             root, now=now, transcript_age=tr_age
         )

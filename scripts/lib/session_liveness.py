@@ -93,6 +93,29 @@ def is_session_frozen(
     return True
 
 
+def rate_limit_flag_is_stale(flag_mtime: int | None, now: int, max_age_s: int) -> bool:
+    """True iff a `rate-limited.flag` is old enough to be litter rather than a rate limit.
+
+    Only `dispatch.py` clears the flag, and dispatch runs only from a live heartbeat cron.
+    A project whose cron died therefore can NEVER clear its own flag — the loop is closed
+    by construction, and 17 of 35 projects on this machine held one, up to 50 days old
+    (janitor#77 item 4). A stale flag makes `diagnose_instance` read a merely-quiet session
+    as `frozen`, which walks the ladder toward rung 6 `force_restart` (a kill) instead of
+    the gentle `rearm` that `cron_dead` earns.
+
+    Age is the flag's own mtime because the StopFailure hook `touch()`es it on EVERY
+    turn-ending API error. So a session that is genuinely rate-limited right now keeps its
+    flag fresh for as long as the limit lasts, and is never swept — while a session that
+    has not hit an API error in `max_age_s` is not rate-limited by any definition.
+
+    `max_age_s <= 0` disables the sweep (never stale). An unreadable mtime is not stale:
+    we never delete what we cannot assess.
+    """
+    if flag_mtime is None or max_age_s <= 0:
+        return False
+    return (now - flag_mtime) >= max_age_s
+
+
 def recovery_cooldown_ok(last_attempt: int | None, now: int, cooldown_s: int) -> bool:
     """True iff enough time has elapsed since the last wake attempt on this
     session. Prevents injection storms: wake once, then wait a full cooldown for
