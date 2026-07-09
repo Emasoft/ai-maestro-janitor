@@ -18,6 +18,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+# --- per-project state filenames (cross-module contract) -------------------
+
+# The POSITIVE opt-out. Written by /janitor-disarm, removed by /janitor-arm, and
+# read by fleet_scan.diagnose_root (-> session_liveness `unarmed`, sacrosanct) and
+# by the SessionStart arm nudge. It is a contract spanning Python AND two shipped
+# SKILL.md files, so the name lives here rather than as a literal at each site — it
+# once had four readers and no writer at all, and every one of those readers spelled
+# it independently (TRDD-EFTQB9RR).
+DISARMED_FLAG = "disarmed.flag"
+
+# Written by the StopFailure hook on any turn-ending API error, cleared by
+# dispatch.py on the next fire. Read by fleet_scan to diagnose `frozen`.
+RATE_LIMITED_FLAG = "rate-limited.flag"
+
 # --- path resolution -------------------------------------------------------
 
 # CPV-skillaudit: avoid reserved-env mutation. A caller (e.g. the PostCompact

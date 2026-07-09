@@ -67,22 +67,33 @@ def _format_stop_reminder(kind: str, reason: str, since: int, now: int) -> str:
 
 
 def _cron_liveness_nudge(state, session_id: str) -> None:  # noqa: ANN001 - local module type
-    """W2 (TRDD-82OP4EN9): one context line asking the fresh session to verify
-    the heartbeat cron still exists.
+    """W2 (TRDD-82OP4EN9): one context line asking the fresh session to arm/verify
+    the heartbeat cron. Re-arm on every wake (janitor#77 item A, TRDD-EFTQB9RR).
 
     Some Claude Code builds downgrade `durable: true` crons to session-only,
     and the 7-day expiry can eat one — either way the heartbeat silently stops
     firing and an unattended night loses its resume pulse. A hook cannot call
     CronList/CronCreate (session tools), so the strongest thing a SessionStart
     hook CAN do is put ONE verification line into the fresh session's context.
-    Gated on heartbeat-armed-at.ts (this project actually uses the heartbeat)
-    and deduped per session id (a single stamp file — bounded state; an absent
+
+    The gate is the POSITIVE opt-out — only `disarmed.flag` suppresses the nudge.
+    It used to be the PRESENCE of `heartbeat-armed-at.ts`, and that stamp cannot
+    bear the weight: `/janitor-arm` writes it at step 6, one step AFTER CronCreate,
+    so a turn that rate-limits in between leaves a firing cron with no stamp and
+    this project is never nudged again, while a Claude restart leaves a stamp with
+    no cron. Both lying directions were observed live on this machine (janitor#77
+    item 2). `/janitor-arm` is idempotent — it deletes existing `[janitor-heartbeat]`
+    crons before creating one — so an unconditional re-arm is correct whether or not
+    a stamp claims it already happened. That sidesteps the stamp rather than trying
+    to make it trustworthy.
+
+    Deduped per session id (a single stamp file — bounded state; an absent
     session_id skips the dedupe rather than the nudge, because losing the nudge
     is the failure mode this exists to prevent).
     """
     try:
-        if not (state.state_dir() / "heartbeat-armed-at.ts").is_file():
-            return
+        if (state.state_dir() / state.DISARMED_FLAG).is_file():
+            return  # the user opted out of THIS project — sacrosanct, never nudge
         seen = state.state_dir() / "cron-liveness-nudged.session"
         prev = ""
         try:
@@ -94,9 +105,10 @@ def _cron_liveness_nudge(state, session_id: str) -> None:  # noqa: ANN001 - loca
         if session_id:
             state.atomic_write(seen, session_id)
         print(
-            "janitor: this project's heartbeat should be armed — verify the cron exists "
+            "janitor: verify the cron exists for this project "
             "(CronList: a job whose prompt starts with [janitor-heartbeat]); if it is missing, "
-            "silently run /janitor-arm (some Claude Code builds drop durable crons on restart)."
+            "silently run /janitor-arm — it is idempotent, and some Claude Code builds drop "
+            "durable crons on restart. To opt this project out permanently: /janitor-disarm."
         )
     except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
         state.log_line("session-start", f"cron-liveness nudge skipped: {exc}")

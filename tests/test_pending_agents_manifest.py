@@ -396,10 +396,9 @@ def test_keep_going_nudge_silent_in_plain_full_mode(iso, capsys) -> None:
 
 
 def test_cron_liveness_nudge_emits_once_per_session(iso, capsys) -> None:
-    """Armed project + fresh session id → ONE verification line; the same session
-    id again → silent (dedupe); a NEW session id → nudges again."""
+    """Fresh session id → ONE verification line; the same session id again → silent
+    (dedupe); a NEW session id → nudges again."""
     state = iso["state"]
-    (state.state_dir() / "heartbeat-armed-at.ts").write_text("123", encoding="utf-8")
     hook = _import_session_start_hook()
     hook._cron_liveness_nudge(state, "sess-1")
     first = capsys.readouterr().out
@@ -411,10 +410,31 @@ def test_cron_liveness_nudge_emits_once_per_session(iso, capsys) -> None:
     assert "verify the cron exists" in capsys.readouterr().out
 
 
-def test_cron_liveness_nudge_silent_when_not_armed(iso, capsys) -> None:
-    """No heartbeat-armed-at.ts → this project never armed a heartbeat → no nudge
-    (a project that doesn't use the janitor cron must not be told to create one)."""
+def test_cron_liveness_nudge_fires_when_never_armed(iso, capsys) -> None:
+    """No heartbeat-armed-at.ts → STILL nudge (janitor#77 item A, TRDD-EFTQB9RR).
+
+    This is the exact inverse of the test it replaces. The old gate suppressed the nudge
+    unless the stamp was present, which made the stamp load-bearing — and the stamp is
+    written at /janitor-arm step 6, one step AFTER CronCreate, so a turn that dies in
+    between leaves a firing cron with no stamp and the project is never nudged again.
+    Both lying directions were observed live (janitor#77 item 2). /janitor-arm is
+    idempotent, so nudging an already-armed project is free; NOT nudging an unstamped
+    one is a silent, permanent hole.
+    """
     state = iso["state"]
+    assert not (state.state_dir() / "heartbeat-armed-at.ts").exists()
+    hook = _import_session_start_hook()
+    hook._cron_liveness_nudge(state, "sess-1")
+    assert "verify the cron exists" in capsys.readouterr().out
+
+
+def test_cron_liveness_nudge_silent_when_disarmed(iso, capsys) -> None:
+    """A `disarmed.flag` is the POSITIVE opt-out — the one thing that suppresses the nudge.
+
+    The user ran /janitor-disarm on this project; the janitor must never nag it back on.
+    """
+    state = iso["state"]
+    (state.state_dir() / state.DISARMED_FLAG).write_text("123", encoding="utf-8")
     hook = _import_session_start_hook()
     hook._cron_liveness_nudge(state, "sess-1")
     assert capsys.readouterr().out == ""
@@ -424,7 +444,6 @@ def test_cron_liveness_nudge_missing_session_id_still_nudges(iso, capsys) -> Non
     """An absent session_id skips the DEDUPE, not the nudge — losing the nudge is
     the failure mode W2 exists to prevent."""
     state = iso["state"]
-    (state.state_dir() / "heartbeat-armed-at.ts").write_text("123", encoding="utf-8")
     hook = _import_session_start_hook()
     hook._cron_liveness_nudge(state, "")
     assert "verify the cron exists" in capsys.readouterr().out

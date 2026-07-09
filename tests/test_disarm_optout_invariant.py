@@ -29,9 +29,13 @@ guarded. Same technique as `test_memory_recall_shell_snippets.py`.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts" / "lib"))
+
+import state  # type: ignore[import-not-found]  # noqa: E402
 
 DISARM = REPO / "skills" / "janitor-disarm" / "SKILL.md"
 ARM = REPO / "skills" / "janitor-arm" / "SKILL.md"
@@ -105,8 +109,14 @@ def test_fleet_scan_reads_the_flag_the_skills_write() -> None:
 
     This is the assertion that would have caught the original gap: it binds the shipped
     skill text to the Python that consumes it, which no unit test of either half could do
-    on its own.
+    on its own. It routes through `state.DISARMED_FLAG` so the name has exactly one
+    definition — the four readers used to spell it independently, and nobody wrote it.
     """
     scan = (REPO / "scripts" / "lib" / "fleet_scan.py").read_text(encoding="utf-8")
-    assert '"disarmed.flag"' in scan, "fleet_scan no longer reads disarmed.flag"
-    assert FLAG_WRITE.search("\n".join(_shell_lines(DISARM))), "…but janitor-disarm stopped writing it"
+    assert "state.DISARMED_FLAG" in scan, "fleet_scan no longer reads the opt-out flag"
+
+    # The constant is what the skills must write/remove — not some other filename that
+    # merely happens to look like it.
+    name = re.escape(state.DISARMED_FLAG)
+    assert re.search(rf"(touch|>|printf|echo)[^\n]*{name}", "\n".join(_shell_lines(DISARM))), f"janitor-disarm does not write state.DISARMED_FLAG ({state.DISARMED_FLAG})"
+    assert re.search(rf"^\s*rm\b[^\n]*{name}", "\n".join(_shell_lines(ARM)), re.MULTILINE), f"janitor-arm does not remove state.DISARMED_FLAG ({state.DISARMED_FLAG})"

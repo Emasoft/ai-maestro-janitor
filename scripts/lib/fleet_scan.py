@@ -27,6 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 import session_liveness
+import state
 import terminal_trigger
 
 # A session whose transcript has NOT advanced in this window is treated as stuck
@@ -218,8 +219,8 @@ def diagnose_root(
     """
     sdir = os.path.join(root, ".janitor", "state")
     ldir = os.path.join(root, ".janitor", "logs")
-    deliberately_unarmed = os.path.isfile(os.path.join(sdir, "disarmed.flag"))
-    rate_limited = os.path.isfile(os.path.join(sdir, "rate-limited.flag"))
+    deliberately_unarmed = os.path.isfile(os.path.join(sdir, state.DISARMED_FLAG))
+    rate_limited = os.path.isfile(os.path.join(sdir, state.RATE_LIMITED_FLAG))
     transcript_stale = transcript_age is not None and transcript_age >= stale_s
     diagnosis = session_liveness.diagnose_instance(
         deliberately_unarmed=deliberately_unarmed,
