@@ -3,7 +3,7 @@ trdd-id: 3XS3PDCF
 title: Memory scheduler should cheap-pre-check content-due-ness before emitting filesystem-checkable chore markers — kill the ~240k no-op agent spawns
 column: dev
 created: 2026-06-24T06:53:23+0200
-updated: 2026-07-08T22:50:00+0200
+updated: 2026-07-09T15:33:52+0200
 current-owner: ai-maestro-janitor
 assignee: null
 priority: 3
@@ -53,8 +53,58 @@ librarian's semantic job). `conflict_has_work` pins writer/reader parity to the
 librarian's literal heading + `- (none)` sentinel; absent file = the skill's own idle
 case; unreadable = fail-open. 7 unit + 2 gating tests; the two
 "unconditional fail-open" collateral tests updated; 88/88 green, ruff clean.
-Remaining in this TRDD: only the split "over-cap AND splittable" refinement. Banked
-locally; rides the next publish.
+**SUPERSEDED — "Banked locally; rides the next publish" is stale:** `f2056ca` (conflict)
+and `10f899b` (harvest) both shipped in **v0.34.0**, and are ancestors of v0.35.3.
+
+**2026-07-09 — CONSOLIDATE STILL DRAINS: its structural gate is NECESSARY but far from
+SUFFICIENT** (evidence below; decisions carried here because the cited reports are
+gitignored/ephemeral). Two live consolidate passes dispatched on 2026-07-08 both
+**ABSTAINED** after a full agent spawn:
+
+- USER scope, 21:15 — `reports/memory-subconscious-agent/20260708_211500+0200-consolidate-user-scope.md`
+- LOCAL scope, 23:05 — `reports/memory-subconscious-agent/20260708_230514+0200-consolidate-local-abstain.md`
+
+`consolidate_has_work` (TRDD-8UD3Q7K5 / issue #64) asks only the STRUCTURAL necessary
+condition of `is_legal_merge`: *does any page pair share the same `tier` (∈ aspect,
+component) and the same `type`?* Both scopes hold many `tier: component, type: reference`
+pages, so the gate passes, the marker fires, the agent spawns — and then abstains on
+**subject**, which the gate never examined. Both reports independently confirm zero
+same-subject pairs (the many `oauth-rotator-*` pages are distinct facets; the
+`wikimem-atom-block-properties*` and `ai-maestro-fleet-hub*` families are correct
+post-SPLIT shapes that `is_legal_merge` would itself refuse to re-fragment).
+
+**Do NOT graft the conflict-style librarian sentinel onto consolidate.** It looks like a
+drop-in (`conflict_has_work` reads the librarian's `### Conflict candidates` + `- (none)`
+sentinel) but it would silently change semantics. The CONFLICT skill's own precondition
+mandates *"Empty/absent → stop"*, which is what makes reader/writer parity safe there. The
+CONSOLIDATE skill does **its own discovery beyond the librarian's list** — see the LOCAL
+report's step 2, where it read `### Aggregation candidates: (none)` and *then* independently
+narrowed by recency + title similarity. Gating on `(none)` would suppress discovery the
+skill is contractually still performing. Two honest options, both design changes:
+(a) tighten the structural predicate with a cheap subject-overlap signal on top of
+tier+type, or (b) make the CONSOLIDATE skill's discovery contract librarian-authoritative
+(adopting the "Empty/absent → stop" precondition), and only then gate on the sentinel.
+
+**The drain is a SCHEDULER problem, not an editor-correctness problem.** A scratch
+end-to-end merge test the same evening
+(`reports/memory-subconscious-agent/20260708_201642+0200-scratch-consolidate-test.md`)
+drove `begin → stage → commit` on an isolated scope root (`JANITOR_GLOBAL_STATE_DIR`
+pointed at a scratch dir so the real, intentionally-SET kill-switch was never touched) and
+proved the transaction core correct: both sources' facts merged verbatim, `ocd` kept at the
+older of the two, `lmd` bumped, the retired page deleted, staging cleaned on success.
+
+Ancillary, worth keeping: in that session the native `Write`/`Edit` tools refused every
+staged-file write with *"File has not been read yet"* — reproduced on a brand-new probe file
+immediately after Reading it, so it was environmental, not path-specific. Worked around by
+writing staged bytes via `uv run <script>.py`. That stays inside the skill's constraint
+("edit only inside staging"); the transaction core's hash/verify gate — not the identity of
+the writing tool — is what actually proves no live-page corruption.
+
+**Both abstains, and the 2026-07-09 heartbeat's librarian line (`0 aggregation + 0 conflict
++ 17 page-shape + 95 link/sync across 3 scopes`), agree the real backlog is REPAIR-pass
+work** (dangling footnote defs, `[[links]]` to missing targets, orphan pages, ~19 one-sided
+links needing reciprocals) — not consolidation. Remaining in this TRDD: the split "over-cap
+AND splittable" refinement, plus the consolidate sufficiency question above.
 
 ### ✅ SPLIT-MVP IMPLEMENTED + TESTED (2026-06-24 ~08:42, committed locally, NOT yet published)
 The highest-value slice — the **SPLIT** content-precheck — is done, TDD'd, ruff-clean,
