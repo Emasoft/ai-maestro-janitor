@@ -30,6 +30,12 @@ store/retrieve boundary so the keychain only ever holds printable ASCII (decode 
 This also sidesteps trailing-newline ambiguity and is uniform across Linux `secret-tool` /
 Windows DPAPI backends.
 
+**See also `[[macos-keychain]]`** — the aspect page holding the SAFE KEYCHAIN PROTOCOL
+(single choke-point + timeout + headless fail-fast + one-shot denied-latch) and **gotcha 3,
+the ACL-prompt FLOOD** (the 2026-07-09 incident: hundreds of "Security wants to use the login
+keychain" dialogs after an account rotation). These two storage gotchas are gotchas 1 & 2 of
+that page.
+
 **How to apply:** any code that puts a non-trivial / non-ASCII secret into the macOS keychain
 via `security` MUST (a) put the value on argv, not stdin, and (b) base64-wrap it. The
 canonical impl is `scripts/oauth_rotator/safe_storage.py` (store/retrieve, three-valued
