@@ -14,6 +14,7 @@ skipped when tmux isn't installed, and always tears its session down.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -199,8 +200,18 @@ def test_payload_malformed_returns_nonzero():
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
 def test_tmux_real_send_delivers_keystrokes(monkeypatch):
     """Drive send_self_command against a live tmux pane running `cat`; the typed
-    command must show up in the pane. Proves the detached-child send path works."""
-    session = f"janitor-tt-pytest-{__import__('os').getpid()}"
+    command must show up in the pane. Proves the detached-child send path works.
+
+    OPT-IN ONLY (TRDD-K3WQ7XM9 FIX A): this spawns a REAL tmux server. Production's
+    `build_tmux_steps` targets the DEFAULT socket (`tmux send-keys -t <pane>`, no `-L`),
+    so an isolated private-socket E2E can't exercise the real send path — and a
+    default-socket server would attach to / flood the user's own tmux (it became a
+    keystroke flood-host on 2026-07-08). So it is SKIPPED unless JANITOR_TEST_REAL_TMUX=1,
+    guaranteeing the publish gate never spawns a tmux server."""
+    if os.environ.get("JANITOR_TEST_REAL_TMUX") != "1":
+        pytest.skip("real-tmux E2E disabled by default (spawns a server on the DEFAULT socket); "
+                    "opt in with JANITOR_TEST_REAL_TMUX=1")
+    session = f"janitor-tt-pytest-{os.getpid()}"
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", session, "-x", "80", "-y", "24", "cat"],
         check=True, timeout=10,
