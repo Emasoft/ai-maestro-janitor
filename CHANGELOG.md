@@ -2,18 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.35.4] - 2026-07-09
+## [0.35.5] - 2026-07-09
+
+### Bug Fixes
+
+- Gentle rungs must reach ai-maestro agents and Linux GUI terminals
+- Repair the tool PATH so the launchd guardian can reach the fleet
 
 ### Documentation
 
-- Carry 3 memory-pass decisions into TRDD-3XS3PDCF STATE
-- Reflow a line that poisoned markdownlint MD004
-
-### Miscellaneous
-
-- Refresh the fenced CLAUDE.md project map
-
-### Security
-
-- Pin CPV to v2.153.1 and raise the release bound to 30m
+- Correct the release-timeout rationale — 30m is headroom, not the fix
+- Record why the janitor carries no role plugin, and what survives takeover
+- Instance.terminal documents all four identity keys
 
