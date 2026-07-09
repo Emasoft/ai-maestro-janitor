@@ -2,14 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.35.1] - 2026-07-09
+## [0.35.2] - 2026-07-09
 
 ### Bug Fixes
 
-- Gate keychain-reading detectors on the rotator opt-in (TRDD-K3WQ7XM9)
+- MD031 blanks-around-fences in the shipped trdd-design-tasks IND rule (issue #73)
+- Escape literal pipes in trdd-design-tasks transition table (issue #73)
 
 ### Documentation
 
-- Keychain flood RESOLVED + guardian re-armed (TRDD-K3WQ7XM9)
-- Keepalive-staging trap — a published fix isn't deployed while the OS-keepalive runs a STALE staged daemon (TRDD-K3WQ7XM9)
+- SECOND flood root cause + v0.35.1 fix + user-side unlock (TRDD-K3WQ7XM9)
+- List the 3 IND governance rules in the shipped-rules footprint (issue #73)
+
+### Features
+
+- Ship the 3 IND governance rules via rules_installer (issue #73)
 

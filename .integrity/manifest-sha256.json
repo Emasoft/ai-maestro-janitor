@@ -1,7 +1,7 @@
 {
   "files": {
-    "CLAUDE.md": "fd981146d620d94f9f99d01b7bfd8328e3b9f217eb977994efb9aad4d66123ba",
-    "README.md": "8ed3be8e84434323c1b05b5c03938224251700d55ee1ae2db1487d2558fcbf3d",
+    "CLAUDE.md": "ca4d915ff6c0c193684aae1c0a42d90f66fb526ec93fae3a64c39a667da9bb52",
+    "README.md": "4c6201c9ec70ae20c175879e2c2679da1315c0cecf5cb34a41a85152ed4fdd06",
     "commands/janitor-identify-environment.md": "94c58281c3d42285c90ef3e9f72663782db286b8078374db9ee2b920487696a1",
     "commands/janitor-memory-atomize-frequency-get.md": "5322aff383051ea07cc717f781f795f1279d5c3a0f624817bbf934681b8591c7",
     "commands/janitor-memory-atomize-frequency-set.md": "e5ae33537f864649dae0ca24aea777e36c1e61d21878389597bf144d86f45175",
@@ -25,9 +25,12 @@
     "commands/janitor-token-attribution.md": "3d93f96635cf8243fe328b65722abed15cff83912ed9c9fd7d9b937061634df5",
     "commands/janitor-token-report.md": "eeb45b33079b88747a2ed4bc0689c645151de32d54d5a11399a93bfc74578637",
     "rules/commit-discipline.md": "eb342dfab3a5385f413b028bc4e1bed61dbc45fae3895852422a19157d303672",
-    "rules/janitor-footprint.md": "2d562d4f40b60128806989940e4b5568b4b9d9d03c71597b994f87e4abdc6808",
+    "rules/janitor-footprint.md": "730d56f9afde95642b7ac423f363e5d8c7f88957c716baa5e3192af7fc7ea709",
     "rules/janitor-heartbeat-protocol.md": "cfc9bcb0510d20c3319894089ef1451f459493d851ed00fdccb725e14b5ebf06",
     "rules/markdown-memory-recall.md": "2b0448bd13f8648728291e7c13764326a984f95f26bf6a67750e3f921a9a4368",
+    "rules/prrd-design-rules.md": "123be2d635c3bb024fb922845824f70d66343ccc1baa3b4a5aec4684b1a52aad",
+    "rules/trdd-design-tasks.md": "e512589cf074f86920d401c3b7429412b6ea0768647d0a0781cc643e8cfbe6b9",
+    "rules/universal-kanban.md": "0fd4d7775b34cf1cf03b3422785759a23621d24d7fc6857aba724b00fd140794",
     "rules/use-safe-delete.md": "604579ef9b3c14b6ae5232aaece521b266b9394d7fa38ff3901142fea754f862",
     "skills/janitor-actions-up/SKILL.md": "5e5eee79c5832c3c2b109ae4fa7b21c26a587502c954cc322e76719d3522c565",
     "skills/janitor-arm/SKILL.md": "ca07120a4ecfde4442ce8b013e7da091e0ec88e1240a5785c92757b5c808f1ce",
