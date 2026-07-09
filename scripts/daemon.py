@@ -62,6 +62,7 @@ sys.path.insert(0, str(_HERE / "lib"))
 sys.path.insert(0, str(_HERE / "oauth_rotator"))
 
 import cache_prune as cp  # noqa: E402  # plugin-cache prune (TRDD-a6d2fdaf, Fix A)
+import daemon_path  # noqa: E402  # restore a usable tool PATH under launchd (TRDD-VQ4LX7ND)
 import daemon_throttle as dt  # noqa: E402  # low-priority marketplace-refresh (TRDD-TY2EZ8ZH, #244)
 import dedupe  # noqa: E402  # emit_once — S6 refused-runaway alert dedupe (TRDD-1T53EKTN)
 import disk_pressure as dp  # noqa: E402  # S7 dual disk metric (TRDD-1T53EKTN)
@@ -1295,6 +1296,35 @@ def _uninstall_os_keepalive() -> None:
         state.log_line("daemon", f"os-keepalive uninstall skipped: {exc}")
 
 
+def _repair_tool_path() -> None:
+    """Give this daemon a PATH that can actually find its tools (TRDD-VQ4LX7ND).
+
+    A launchd/systemd child inherits a bare PATH with no `/opt/homebrew/bin`, so
+    `tmux` was unresolvable and `fleet_scan._run` swallowed the FileNotFoundError
+    into "" — the guardian saw zero panes and skipped every rearm IN SILENCE (254
+    consecutive `UNREACHABLE ({})` beats, while the same code fired 93 injections
+    from a session-spawned daemon that had a login PATH). Must run before ANY
+    subprocess, so both the scan probes and the keystroke sends can resolve.
+
+    The missing-tool line is the other half of the fix: a dead recovery channel is
+    now VISIBLE at startup instead of degrading into a mute skip loop.
+    FAIL-OPEN — a PATH fault must never brick the daemon.
+    """
+    try:
+        added = daemon_path.ensure_tool_path()
+        if added:
+            state.log_line("daemon", f"PATH augmented with: {os.pathsep.join(added)}")
+        missing = [t for t, p in daemon_path.resolve_injection_tools().items() if p is None]
+        if missing:
+            state.log_line(
+                "daemon",
+                f"injection tools MISSING from this daemon's PATH: {', '.join(missing)} "
+                "— the matching recovery channels cannot fire",
+            )
+    except Exception as exc:  # noqa: BLE001 — PATH repair is best-effort, never fatal
+        state.log_line("daemon", f"PATH augmentation skipped: {exc}")
+
+
 def main() -> int:
     # The daemon is a machine-wide singleton, but state.log_line() defaults to
     # a PROJECT-scoped logs/ dir keyed on whatever tree spawned us — so the
@@ -1307,6 +1337,7 @@ def main() -> int:
     os.environ.setdefault("JANITOR_LOG_DIR", str(gs.global_state_dir()))
 
     gs.init_global_state()
+    _repair_tool_path()
 
     # KEEPQRTN HIGH-2 — feed the crash-loop signal on the OS-respawn path. The crash-loop
     # breaker only counts spawn attempts written by the SESSION path (spawn_daemon_detached).

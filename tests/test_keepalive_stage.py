@@ -43,9 +43,16 @@ def _isolate_janitor_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_closure_is_bounded_and_excludes_pattern_libs() -> None:
-    """The daemon closure is small (~16 files) and contains none of the ~200 *_patterns.py libs."""
+    """The daemon closure stays small (a few dozen files) and contains none of the
+    ~200 *_patterns.py libs.
+
+    The bound guards against an import accidentally dragging in a large subtree; it
+    is deliberately loose (headroom for legitimate new daemon modules) because the
+    sharp assertion is the pattern-lib leak check below. Raised 30 -> 40 when
+    `daemon_path.py` legitimately joined the closure (TRDD-VQ4LX7ND).
+    """
     closure = keepalive_stage.daemon_closure(SCRIPTS)
-    assert 0 < len(closure) <= 30, f"closure unexpectedly large: {len(closure)}"
+    assert 0 < len(closure) <= 40, f"closure unexpectedly large: {len(closure)}"
     leaked = [p.name for p in closure if p.name.endswith("_patterns.py")]
     assert not leaked, f"pattern libs leaked into the closure: {leaked}"
 
@@ -55,6 +62,17 @@ def test_closure_includes_entry_and_daemon() -> None:
     names = {p.name for p in keepalive_stage.daemon_closure(SCRIPTS)}
     assert "daemon_keepalive_entry.py" in names
     assert "daemon.py" in names
+
+
+def test_closure_includes_daemon_path_module() -> None:
+    """`daemon_path` MUST be staged: the launchd daemon imports it at startup, so a
+    closure that omitted it would raise ImportError on every boot -> OS relaunch ->
+    crash-loop -> the C4 breaker quarantines a perfectly good version. The closure is
+    computed by BFS over imports, so this holds automatically; the test pins it so a
+    future refactor of the seed list cannot silently drop it. (TRDD-VQ4LX7ND)
+    """
+    names = {p.name for p in keepalive_stage.daemon_closure(SCRIPTS)}
+    assert "daemon_path.py" in names
 
 
 def test_staged_closure_really_imports_via_the_entry(tmp_path: Path) -> None:
