@@ -100,11 +100,17 @@ writing staged bytes via `uv run <script>.py`. That stays inside the skill's con
 ("edit only inside staging"); the transaction core's hash/verify gate — not the identity of
 the writing tool — is what actually proves no live-page corruption.
 
-**Both abstains, and the 2026-07-09 heartbeat's librarian line (`0 aggregation + 0 conflict
-+ 17 page-shape + 95 link/sync across 3 scopes`), agree the real backlog is REPAIR-pass
-work** (dangling footnote defs, `[[links]]` to missing targets, orphan pages, ~19 one-sided
-links needing reciprocals) — not consolidation. Remaining in this TRDD: the split "over-cap
-AND splittable" refinement, plus the consolidate sufficiency question above.
+**Both abstains, and the 2026-07-09 heartbeat's librarian line
+(`0 aggregation + 0 conflict + 17 page-shape + 95 link/sync across 3 scopes`), agree the
+real backlog is REPAIR-pass work** (dangling footnote defs, `[[links]]` to missing targets,
+orphan pages, ~19 one-sided links needing reciprocals) — not consolidation. Remaining in
+this TRDD: the split "over-cap AND splittable" refinement, plus the consolidate sufficiency
+question above.
+
+(Reflowed deliberately: the previous hard wrap put `+ 17 page-shape …` at the start of a
+line, which markdownlint MD004 reads as a `+` unordered-list marker and reports as a
+mixed-marker NIT — publish-blocking under `cpv-remote-validate --strict`. Never let a
+hard-wrapped prose line begin with `+ ` or `* `; CPV issue #113 documents the same trap.)
 
 ### ✅ SPLIT-MVP IMPLEMENTED + TESTED (2026-06-24 ~08:42, committed locally, NOT yet published)
 The highest-value slice — the **SPLIT** content-precheck — is done, TDD'd, ruff-clean,
