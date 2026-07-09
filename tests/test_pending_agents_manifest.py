@@ -79,11 +79,14 @@ def _import_session_start_hook():
 
 
 def test_add_then_pending_roundtrip(iso) -> None:
-    """add() records {agentId, description, ts}; pending() returns it live."""
+    """add() records {agentId, description, ts, nudges}; pending() returns it live.
+    `nudges` seeds at 0 — the per-entry resume budget introduced for #75."""
     pa = iso["pa"]
     pa.add("agent-abc123", "fix runtime LOWs", now=1000)
     got = pa.pending(now=1000)
-    assert got == [{"agentId": "agent-abc123", "description": "fix runtime LOWs", "ts": 1000}]
+    assert got == [
+        {"agentId": "agent-abc123", "description": "fix runtime LOWs", "ts": 1000, "nudges": 0}
+    ]
 
 
 def test_remove_clears_entry(iso) -> None:
@@ -138,7 +141,7 @@ def test_corrupt_manifest_fails_open_and_recovers(iso) -> None:
 
 def test_directive_lines_format_cap_and_note(iso) -> None:
     """Lines carry the SendMessage instruction per agent (newest 10) + ONE
-    trailing harmless-ping note; an empty manifest yields no lines at all."""
+    trailing advisory note; an empty manifest yields no lines at all."""
     pa = iso["pa"]
     assert pa.directive_lines(now=1000) == []
     for i in range(12):
@@ -148,7 +151,86 @@ def test_directive_lines_format_cap_and_note(iso) -> None:
     assert len(agent_lines) == pa.MAX_DIRECTIVE_AGENTS
     assert "a2 — task 2" in agent_lines[0]  # newest 10 of 12 → starts at a2
     assert "a11 — task 11" in agent_lines[-1]
-    assert lines[-1].startswith("(a resume ping to an already-finished agent is harmless")
+    assert lines[-1].startswith("(check each agent's status before resuming")
+
+
+def test_note_does_not_claim_a_resume_ping_is_harmless(iso) -> None:
+    """REGRESSION (#75). The note used to read 'a resume ping to an already-finished
+    agent is harmless — it just restates its result'. True for an agent that
+    COMPLETED; false for one that DIED, which re-runs the request that killed it.
+    An agent trusting the old note burned tokens on every heartbeat for a week."""
+    pa = iso["pa"]
+    pa.add("a1", "some fork", now=1000)
+    note = pa.directive_lines(now=1000)[-1]
+    assert "harmless" not in note
+    assert "DIED" in note and "re-runs" in note
+
+
+def test_an_entry_is_listed_at_most_max_nudges_times(iso) -> None:
+    """The #75 bound: an agent that never gets removed (SubagentStop carries no
+    agent_id) is nudged MAX_NUDGES times and then retired — not for MAX_AGE_S."""
+    pa = iso["pa"]
+    pa.add("ghost", "died on a too-long prompt", now=1000)
+    seen = 0
+    for _ in range(pa.MAX_NUDGES + 4):
+        lines = [ln for ln in pa.directive_lines(now=1000)
+                 if ln.startswith("resume background agent via SendMessage:")]
+        seen += len(lines)
+    assert seen == pa.MAX_NUDGES
+    assert pa.pending(now=1000) == []  # retired, well inside MAX_AGE_S
+
+
+def test_each_directive_call_spends_exactly_one_nudge(iso) -> None:
+    """A consuming read decrements the budget by one, not by the number of agents."""
+    pa = iso["pa"]
+    pa.add("a1", "one", now=1000)
+    pa.add("a2", "two", now=1000)
+    pa.directive_lines(now=1000)
+    assert [e["nudges"] for e in pa.pending(now=1000)] == [1, 1]
+    pa.directive_lines(now=1000)
+    assert [e["nudges"] for e in pa.pending(now=1000)] == [2, 2]
+
+
+def test_respawned_agent_id_gets_a_fresh_nudge_budget(iso) -> None:
+    """Re-spawning the same id is a NEW agent for nudge purposes — otherwise a
+    genuinely re-launched fork would inherit an exhausted budget and never be listed."""
+    pa = iso["pa"]
+    pa.add("a1", "first life", now=1000)
+    for _ in range(pa.MAX_NUDGES):
+        pa.directive_lines(now=1000)
+    assert pa.pending(now=1000) == []
+    pa.add("a1", "second life", now=2000)
+    lines = [ln for ln in pa.directive_lines(now=2000) if "SendMessage" in ln]
+    assert len(lines) == 1
+
+
+def test_pre_issue75_manifest_without_nudges_key_is_readable(iso) -> None:
+    """Backward compatibility: an entry written before #75 has no `nudges` key and
+    must load with a fresh budget rather than being swept or crashing."""
+    import json
+
+    pa = iso["pa"]
+    path = pa._manifest_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([{"agentId": "old", "description": "legacy", "ts": 1000}]))
+    entries = pa.pending(now=1000)
+    assert len(entries) == 1
+    assert entries[0]["nudges"] == 0
+
+
+def test_corrupt_nudges_value_restarts_the_budget(iso) -> None:
+    """A non-int / negative count must not sweep a live agent (under-listing is the
+    worse failure) — it restarts the budget instead."""
+    import json
+
+    pa = iso["pa"]
+    path = pa._manifest_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([
+        {"agentId": "a", "description": "", "ts": 1000, "nudges": "lots"},
+        {"agentId": "b", "description": "", "ts": 1000, "nudges": -5},
+    ]))
+    assert [e["nudges"] for e in pa.pending(now=1000)] == [0, 0]
 
 
 def test_directive_lines_defang_marker_mimicry(iso) -> None:

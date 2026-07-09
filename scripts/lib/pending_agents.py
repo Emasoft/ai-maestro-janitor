@@ -7,9 +7,24 @@ turn, the MAIN session auto-resumes via ``rate-limited.flag`` →
 human notices (empirically 2026-07-08: four forks died at the 5h cap and needed
 a manual "resume"). This manifest records every live subagent so the resume
 directive can LIST them for a deterministic SendMessage-resume instead of
-hoping the model remembers its transcript. A resume ping to an agent that
-actually finished is HARMLESS (verified 2026-07-08: a completed fork restated
-its result and stopped) — so over-listing is safe, under-listing is not.
+hoping the model remembers its transcript.
+
+OVER-LISTING IS CHEAP, NOT FREE (issue #75, 2026-07-09). The original design said
+a resume ping to a finished agent is "harmless — it just restates its result",
+and made the 7-day age sweep the only cleanup. That reasoning holds for an agent
+that COMPLETED. It fails for one that DIED: a `claude-code-guide` fork terminated
+deterministically ("Prompt is too long · ~290003 tokens > 200000 limit" — its own
+system prompt overflows before any work), and because SubagentStop carries no
+``agent_id`` to remove it, the manifest re-nudged a resume of that corpse on EVERY
+heartbeat until a human zeroed the file by hand. Resuming it re-ran the identical
+over-limit request, forever.
+
+We cannot observe "this agent died" — the hook payload does not carry it (see
+below). So we bound the blast radius instead: each entry is listed at most
+``MAX_NUDGES`` times and is then dropped. Three unheeded nudges mean the agent
+either resumed (and its Stop never cleared it) or cannot be resumed; in both
+cases nudging again is waste. Under-listing is still the worse failure, so the
+budget is spent before the entry is retired, never withheld.
 
 Writers: ``scripts/hooks/on-subagent-start.py`` (add) and
 ``scripts/hooks/on-subagent-stop.py`` (remove). Reader: ``dispatch.py``'s
@@ -53,6 +68,12 @@ MAX_ENTRIES = 50
 # rides a model turn; 10 covers any sane parallel fan-out).
 MAX_DIRECTIVE_AGENTS = 10
 
+# How many times ONE entry may appear in a resume directive before it is retired.
+# The bound that turns the 7-day ghost of issue #75 into three pings. Chosen as
+# the smallest number that still tolerates a heartbeat firing while the model is
+# mid-turn and cannot act on the directive yet.
+MAX_NUDGES = 3
+
 # Bound persisted description length (hook payloads are model-adjacent data).
 _MAX_DESC_LEN = 120
 
@@ -79,6 +100,38 @@ def _locked() -> Iterator[None]:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
+def _normalize(entry: object, now: int) -> dict | None:
+    """One raw manifest record → a clean entry, or None if it must be swept.
+
+    Swept when: not a mapping, no agentId, older than MAX_AGE_S (the guaranteed
+    cleanup for a Stop that never fired), or its nudge budget is spent (#75).
+    An absent/corrupt `nudges` restarts the budget — pre-#75 manifests have no
+    such key, and a fresh budget over-nudges by at most MAX_NUDGES, which is the
+    safe direction (under-listing loses a real agent).
+    """
+    if not isinstance(entry, dict):
+        return None
+    agent_id = str(entry.get("agentId", "") or "").strip()
+    if not agent_id:
+        return None
+    ts = entry.get("ts", 0)
+    if not isinstance(ts, int):
+        ts = 0
+    if now - ts > MAX_AGE_S:
+        return None
+    nudges = entry.get("nudges", 0)
+    if not isinstance(nudges, int) or nudges < 0:
+        nudges = 0
+    if nudges >= MAX_NUDGES:
+        return None
+    return {
+        "agentId": agent_id,
+        "description": str(entry.get("description", "") or "")[:_MAX_DESC_LEN],
+        "ts": ts,
+        "nudges": nudges,
+    }
+
+
 def _load_unlocked(now: int) -> list[dict]:
     """Read + sweep the manifest. Corrupt/missing → [] (fail-open, never raises)."""
     try:
@@ -87,26 +140,7 @@ def _load_unlocked(now: int) -> list[dict]:
         return []
     if not isinstance(entries, list):
         return []
-    out: list[dict] = []
-    for e in entries:
-        if not isinstance(e, dict):
-            continue
-        agent_id = str(e.get("agentId", "") or "").strip()
-        ts = e.get("ts", 0)
-        if not isinstance(ts, int):
-            ts = 0
-        if not agent_id:
-            continue
-        if now - ts > MAX_AGE_S:
-            continue  # the guaranteed cleanup for a Stop that never fired
-        out.append(
-            {
-                "agentId": agent_id,
-                "description": str(e.get("description", "") or "")[:_MAX_DESC_LEN],
-                "ts": ts,
-            }
-        )
-    return out
+    return [e for e in (_normalize(raw, now) for raw in entries) if e is not None]
 
 
 def _save_unlocked(entries: list[dict]) -> None:
@@ -129,6 +163,7 @@ def add(agent_id: str, description: str = "", now: int | None = None) -> None:
                     "agentId": agent_id,
                     "description": str(description or "")[:_MAX_DESC_LEN],
                     "ts": t,
+                    "nudges": 0,  # a re-spawned id gets a fresh nudge budget
                 }
             )
             _save_unlocked(entries[-MAX_ENTRIES:])
@@ -164,23 +199,48 @@ def pending(now: int | None = None) -> list[dict]:
 def directive_lines(now: int | None = None) -> list[str]:
     """Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
 
+    CONSUMING read (#75): each listed entry spends one nudge from its budget, and
+    an entry whose budget is exhausted is dropped on the next load. This is what
+    stops a dead agent from being re-nudged on every heartbeat for MAX_AGE_S. The
+    write is best-effort — if it fails, the lines are still returned (a lost nudge
+    count over-nudges, which is the safe direction).
+
     Ids/descriptions come from hook payloads (model-adjacent, untrusted), so
     both are defanged via ``sanitize_for_drift_line`` — a crafted description
     cannot inject a fake ``[janitor-…]`` marker line into the resume turn.
     """
-    entries = pending(now)
-    if not entries:
+    try:
+        t = int(now if now is not None else time.time())
+        with _locked():
+            entries = _load_unlocked(t)
+            listed = entries[-MAX_DIRECTIVE_AGENTS:]
+            if not listed:
+                return []
+            lines = [_directive_line(e) for e in listed]
+            shown = {e["agentId"] for e in listed}
+            for e in entries:
+                if e["agentId"] in shown:
+                    e["nudges"] += 1
+            _save_unlocked(entries)
+    except Exception:  # noqa: BLE001 - the resume phases must never die on a manifest bug
         return []
-    lines: list[str] = []
-    for e in entries[-MAX_DIRECTIVE_AGENTS:]:
-        # sanitize_for_drift_line defangs [ ] and strips control chars but keeps
-        # newlines — collapse whitespace too, or a multi-line description would
-        # smuggle a raw extra line into the resume turn (one line per agent is
-        # the contract the whole-line-only marker security model relies on).
-        aid = " ".join(state.sanitize_for_drift_line(e["agentId"]).split())[:64]
-        desc = " ".join(state.sanitize_for_drift_line(e["description"]).split())[:_MAX_DESC_LEN]
-        suffix = f" — {desc}" if desc else ""
-        lines.append(f"resume background agent via SendMessage: {aid}{suffix}")
-    # One shared note (not per-line — token economy): over-pinging is safe.
-    lines.append("(a resume ping to an already-finished agent is harmless — it just restates its result)")
+    # One shared note (not per-line — token economy). It must NOT claim the ping is
+    # free: an agent that DIED (terminal API error) re-runs its failing request on
+    # every resume, which is exactly how issue #75 burned tokens for a week.
+    lines.append(
+        "(check each agent's status before resuming: a finished agent just restates its "
+        f"result, but a DIED agent re-runs the request that killed it; each is listed at "
+        f"most {MAX_NUDGES} times, then dropped)"
+    )
     return lines
+
+
+def _directive_line(entry: dict) -> str:
+    """One sanitized resume line. `sanitize_for_drift_line` defangs [ ] and strips
+    control chars but keeps newlines — collapse whitespace too, or a multi-line
+    description would smuggle a raw extra line into the resume turn (one line per
+    agent is the contract the whole-line-only marker security model relies on)."""
+    aid = " ".join(state.sanitize_for_drift_line(entry["agentId"]).split())[:64]
+    desc = " ".join(state.sanitize_for_drift_line(entry["description"]).split())[:_MAX_DESC_LEN]
+    suffix = f" — {desc}" if desc else ""
+    return f"resume background agent via SendMessage: {aid}{suffix}"
