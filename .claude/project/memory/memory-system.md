@@ -315,6 +315,9 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
   skills · hooks}, not just the memgrep binary.
 - `[[reference_memgrep_links_to_from_semantics]]` — the `links --to`/`--from`
   directional-flag gotcha (intuition inverts them).
+- `[[janitor-is-not-a-role-agent]]` — why PROJECT scope is the ONLY memory that
+  survives a maintainer-agent takeover (it clones the repo; everything uncommitted
+  is lost), and why the janitor carries no role plugin.
 
 ## Notes and lessons learned
 
