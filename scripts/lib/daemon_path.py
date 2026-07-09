@@ -11,6 +11,13 @@ panes, logged ``UNREACHABLE ({})``, and skipped the rearm — silently, 254 time
 in a row, while the identical code fired 93 injections from a session-spawned
 daemon that had a normal PATH.
 
+SCOPE — this repairs the **tmux** channel and nothing else. The iTerm channel is
+not PATH-broken (``osascript`` is at ``/usr/bin``); it lacks a TCC Automation
+grant. The ai-maestro channel is not PATH-broken either (its resolver probes
+``$AIMAESTRO_CLI`` and ``~/.local/bin`` before touching PATH). Claiming otherwise
+was an inference from one ``shutil.which`` call rather than a reading of the
+resolver — see the lesson in TRDD-VQ4LX7ND.
+
 The repair belongs in the PROCESS, not in each argv: augmenting ``os.environ``
 once at daemon start fixes the scan probes, the send steps, and every future
 tool, and it is inherited by children for free. It also survives a plugin update
@@ -48,17 +55,18 @@ _LINUX_PREFIXES: tuple[str, ...] = (
     "~/.cargo/bin",
 )
 
-# Tools whose absence silently disables a whole recovery channel. Logged once at
-# daemon start so a future PATH regression is VISIBLE instead of degrading into a
-# mute `UNREACHABLE ({})` loop — the exact failure this module was written to end.
+# Tools that this module's PATH repair is responsible for, reported once at daemon
+# start so a future PATH regression is VISIBLE instead of degrading into a mute
+# `UNREACHABLE ({})` loop — the exact failure this module was written to end.
 #
-# `aimaestro-agent.sh` matters most of the three: unlike tmux/osascript keystrokes,
-# the ai-maestro channel ENQUEUES a command that a hibernated agent executes on
-# wake, and it needs no GUI session and no TCC Automation grant. It is therefore
-# the only channel that reaches a wedged agent from a headless launchd daemon — and
-# `terminal_trigger._resolve_aimaestro_cli` finds it with a bare `shutil.which`, so
-# launchd's stripped PATH disabled it exactly as it disabled tmux.
-INJECTION_TOOLS: tuple[str, ...] = ("tmux", "osascript", "aimaestro-agent.sh")
+# ONLY tools resolved by a bare PATH lookup belong here, because that is the only
+# question `shutil.which` can answer. `aimaestro-agent.sh` is deliberately ABSENT:
+# `terminal_trigger._resolve_aimaestro_cli` tries `$AIMAESTRO_CLI`, then an explicit
+# `$HOME/.local/bin/aimaestro-agent.sh`, and only THEN falls back to `shutil.which`
+# — so it resolves fine under launchd's stripped PATH, and a `which`-based check
+# would report a working channel as MISSING. A false "channel cannot fire" alarm is
+# the same disease as a silent skip, wearing the opposite mask.
+INJECTION_TOOLS: tuple[str, ...] = ("tmux", "osascript")
 
 
 def default_prefixes(platform: str) -> tuple[str, ...]:
@@ -116,11 +124,15 @@ def ensure_tool_path(env: Mapping[str, str] | None = None) -> list[str]:
 
 
 def resolve_injection_tools(env: Mapping[str, str] | None = None) -> dict[str, str | None]:
-    """``{tool: absolute path or None}`` for each tool the fleet injector needs.
+    """``{tool: absolute path or None}`` for each PATH-resolved injection tool.
 
     Call AFTER ``ensure_tool_path``. A ``None`` here is the early-warning signal
     that a recovery channel is dead: it is a fact about this daemon's environment,
     not about the host (the tool may well exist for the user's login shell).
+
+    Only answers the question ``shutil.which`` can answer. A channel whose resolver
+    consults env vars or explicit paths (ai-maestro) MUST NOT be checked here — it
+    would report a working channel as MISSING. See ``INJECTION_TOOLS``.
     """
     import shutil
 

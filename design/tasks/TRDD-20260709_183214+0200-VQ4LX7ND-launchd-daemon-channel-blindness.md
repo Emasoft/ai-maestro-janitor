@@ -3,7 +3,7 @@ trdd-id: VQ4LX7ND
 title: Launchd guardian resolves no injection channel — PATH stripped, TCC absent
 column: dev
 created: 2026-07-09T18:32:14+0200
-updated: 2026-07-09T18:32:14+0200
+updated: 2026-07-09T18:48:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -49,6 +49,13 @@ Live proof after restart (daemon pid 79652, 18:30):
 FIRST injection a launchd-spawned daemon has ever landed (prior record: 0 fires
 in 254 consecutive beats).
 
+**SUPERSEDED — do NOT carry forward:** v0.35.5's claim that the stripped PATH also
+disabled the **ai-maestro** channel. It did not; that resolver is not PATH-gated.
+The PATH repair fixed **tmux only**. v0.35.6 removes `aimaestro-agent.sh` from
+`INJECTION_TOOLS` (a `which`-based check there was a latent FALSE "channel cannot
+fire" alarm). The ai-maestro server is **not running on this machine**; build no
+plumbing for it here. See `[^1]`.
+
 **PART 2 (TCC / iTerm) — STILL OPEN. This is the remaining work.**
 Same beat, same daemon: `agentlens [frozen] … UNREACHABLE ({})` and
 `ANIME2SVG [frozen] … UNREACHABLE ({})`. Both are iTerm-only instances.
@@ -83,11 +90,10 @@ Observed launchd daemon PATH (`ps -p 89016 -wwEo command`):
 `<uv-python>/bin:/usr/bin:/bin:/usr/sbin:/sbin`
 
 1. **tmux — PATH.** A launchd child does not inherit the login shell's PATH.
-   `tmux` is at `/opt/homebrew/bin/tmux`; `aimaestro-agent.sh` at
-   `~/.local/bin/`. Neither dir is on the inherited PATH. `fleet_scan` shells
-   `tmux list-panes` by bare name and `_run` swallows the `FileNotFoundError`
-   into `""`; `terminal_trigger._resolve_aimaestro_cli` uses a bare
-   `shutil.which`. Both channels vanished, **with no error logged anywhere**.
+   `tmux` is at `/opt/homebrew/bin/tmux`, which is not on the inherited PATH.
+   `fleet_scan` shells `tmux list-panes` by bare name and `_run` swallows the
+   `FileNotFoundError` into `""`. The channel vanished **with no error logged
+   anywhere**. This is the ONLY channel PATH broke.
 
 2. **iTerm — TCC Automation.** `osascript` IS found (`/usr/bin/osascript`, on
    the bare PATH). But the daemon runs as
@@ -125,13 +131,16 @@ channels are tried, not the case where *none resolve*.
   **not** resolve. This is the other half of the fix: a dead channel is now
   visible at boot instead of silent.
 
-`aimaestro-agent.sh` is tracked as an injection tool because — per the USER,
-2026-07-09 — the ai-maestro channel **enqueues** a command that a hibernated
-agent executes on wake, and needs neither a GUI session nor a TCC grant. It is
-therefore the only channel that can reach a wedged agent from a headless daemon.
-(It resolves now, but is inert on this host while the ai-maestro server is down,
-so `_aimaestro_agents()` returns no agents and no instance carries an
-`aimaestro_session`.)
+**The ai-maestro channel is NOT part of this fix.** v0.35.5 shipped a comment, a
+commit message and a test claiming the stripped PATH also disabled
+`aimaestro-agent.sh`. That claim is FALSE — corrected in v0.35.6; see the
+lesson `[^1]`. The channel is real and valuable (per the USER, 2026-07-09 it
+**enqueues** a command a hibernated agent executes on wake, needing neither a GUI
+session nor a TCC grant — the only channel that reaches a wedged agent from a
+headless daemon), but the ai-maestro server is **not running on this machine yet**
+and no plumbing for it belongs in this TRDD. `_aimaestro_agents()` returns no
+agents; no instance carries an `aimaestro_session`. Revisit when the server is up
+(LOCAL memory: `[[aimaestro-server-down-use-github-issues]]`).
 
 `daemon_path.py` joins the L0 staged import closure automatically (BFS over
 imports); `test_closure_includes_daemon_path_module` pins it, because a closure
@@ -167,6 +176,11 @@ Open questions:
 - Injection ≠ immediate execution. Keystrokes typed into a wedged pane sit in the
   pty buffer until the session unwedges; the ai-maestro CLI enqueues explicitly.
   Neither is lost, but neither is instant.
+- `_resolve_aimaestro_cli` probes `$AIMAESTRO_CLI` → `$HOME/.local/bin/…` →
+  `shutil.which`. It is NOT PATH-gated. `_aimaestro_agents()` therefore already
+  shelled the CLI on every `gather_fleet`, launchd or not; with the server down it
+  exits rc=2 in ~10 ms (a bash-3.2 `declare -g` error, unrelated), so the probe is
+  harmless — but it predates this TRDD and was not introduced by the PATH repair.
 - The `armed` column in `/janitor-show-global-status` reads
   `<project>/.janitor/state/heartbeat-armed-at.ts` — written ONLY by
   `/janitor-arm` step 6, deleted ONLY by `/janitor-disarm`. It reports "did the
@@ -181,4 +195,25 @@ exists so the guardian survives every session dying — but a launchd child is
 exactly the context that has no login PATH, no Aqua session, and no TCC grants.
 Moving the daemon out of a session bought it immortality and cost it its hands,
 and nothing in the system noticed, because the loss of a capability was encoded
-as an empty string.
+as an empty string.[^1]
+
+[^1]: [ocd:2026-07-09 lmd:2026-07-09] v0.35.5 shipped the claim — in a code
+  comment, the commit message, the TRDD, and a passing test — that launchd's
+  stripped PATH ALSO disabled the ai-maestro channel "exactly as it disabled
+  tmux". FALSE. I saw `shutil.which("aimaestro-agent.sh")` at
+  `terminal_trigger.py:282` and inferred the resolver from that one line. The
+  actual `_resolve_aimaestro_cli` probes `$AIMAESTRO_CLI`, then the explicit
+  `$HOME/.local/bin/aimaestro-agent.sh`, and only THEN falls back to `which` — it
+  resolves fine on a bare PATH. Two harms: (a) a false narrative in a shipped
+  release; (b) a real latent defect — `resolve_injection_tools` used `which`, so
+  the daemon would log "aimaestro-agent.sh MISSING — the matching recovery
+  channels cannot fire" about a channel that works. A false alarm is the same
+  disease as the silent skip, wearing the opposite mask. LESSON: this is the
+  SECOND time in one session I asserted a mechanism I had not read to the bottom
+  (the first: "the 13m CI stall was the Rust cold compile"). The live evidence
+  said `FIRED rearm → tmux` and nothing about ai-maestro; I decorated the
+  evidence instead of letting it discipline the claim. Read the whole resolver,
+  not the first call site — and when the evidence names ONE channel, claim ONE
+  channel. (Third instance the same hour: I wrote a commit SHA into this very
+  footnote before the commit existed.) Corrected in v0.35.6;
+  `test_aimaestro_cli_is_deliberately_not_a_tracked_injection_tool` pins it.

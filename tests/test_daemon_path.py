@@ -183,8 +183,25 @@ def test_resolve_injection_tools_reports_missing_as_none() -> None:
     assert all(v is None for v in tools.values())
 
 
-def test_aimaestro_cli_is_a_tracked_injection_tool() -> None:
-    """The ai-maestro CLI ENQUEUES a command a hibernated agent runs on wake — the
-    only channel that reaches a wedged agent from a headless daemon. Its absence
-    must be surfaced, not silently skipped."""
-    assert "aimaestro-agent.sh" in dpth.INJECTION_TOOLS
+def test_aimaestro_cli_is_deliberately_not_a_tracked_injection_tool() -> None:
+    """REGRESSION (v0.35.5 shipped this wrong). `aimaestro-agent.sh` must NOT be in
+    INJECTION_TOOLS.
+
+    `terminal_trigger._resolve_aimaestro_cli` tries `$AIMAESTRO_CLI`, then an
+    explicit `$HOME/.local/bin/aimaestro-agent.sh`, and only THEN `shutil.which`.
+    So it resolves fine under launchd's stripped PATH — and a `which`-based check
+    (which is all `resolve_injection_tools` can do) would report a WORKING channel
+    as MISSING. A false "channel cannot fire" alarm is as bad as the silent skip
+    this module exists to end.
+    """
+    assert "aimaestro-agent.sh" not in dpth.INJECTION_TOOLS
+
+
+def test_which_disagrees_with_the_aimaestro_resolver_under_a_bare_path() -> None:
+    """Pins the exact fact that made the v0.35.5 claim wrong: on the real launchd
+    PATH, `shutil.which("aimaestro-agent.sh")` is None even when the CLI exists at
+    the explicit `~/.local/bin` location its own resolver probes first. That gap is
+    why the tool must not be checked by `which`."""
+    import shutil
+
+    assert shutil.which("aimaestro-agent.sh", path=LAUNCHD_PATH) is None
