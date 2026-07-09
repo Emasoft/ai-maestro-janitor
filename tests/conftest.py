@@ -87,7 +87,15 @@ _GUARD_EXCLUDE_SUFFIXES = (
 # mid-run, and the rotator's Chrome profiles subtree alone holds ~4k churning files.
 # Rotator test pollution is separately fenced by _isolate_rotator_paths + the
 # real_state-marked keychain tests, so excluding these keeps the guard's signal pure.
-_GUARD_EXCLUDE_PARTS = ("oauth-rotator", ".memgrep")
+# `recovery`: the daemon's fleet-recovery per-instance state dir
+# (`global-state/recovery/<project>.json`, written by task_session_liveness on every
+# ~60s fleet beat — TRDD-324223a6/F3AUDLOG). These are `.json` (so not caught by the
+# append-log suffix rules) and are pure daemon runtime, so a live daemon monitoring
+# the fleet mid-run would otherwise false-fail the whole publish suite (observed
+# 2026-07-09: three <project>.json recovery records tripped the guard during publish.py
+# while all 12253 tests passed). Test-owned recovery writes go through the isolated
+# JANITOR_GLOBAL_STATE_DIR, never the REAL dir this guard snapshots.
+_GUARD_EXCLUDE_PARTS = ("oauth-rotator", ".memgrep", "recovery")
 
 
 def _manifest(root: Path) -> dict[str, str]:
