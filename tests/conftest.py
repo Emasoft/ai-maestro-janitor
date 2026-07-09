@@ -109,48 +109,94 @@ _KEYCHAIN_USABLE_CACHE: bool | None = None
 
 
 def _keychain_usable() -> bool:
-    """Fast probe: can `security` touch the login keychain WITHOUT blocking on an
-    interactive unlock / ACL prompt? A fresh `claude /login` can leave the keychain
-    PROMPTING for access, which makes every ``real_state`` real-keychain test HANG its
-    `security` READ subprocess indefinitely — observed 2026-07-09, timing out publish.py's
-    test gate at 600s while all other tests passed. A throwaway add→READ→delete under a
-    SHORT timeout answers it: a TimeoutExpired (the prompt) or any error → keychain
-    unusable → the ``_skip_real_state_when_keychain_prompting`` fixture skips instead of
-    hanging an unattended publish. The READ is load-bearing: creating an item never
-    prompts, but reading one under a restrictive ACL does. Cached so the (up to 8s)
-    probe runs at most once per session."""
+    """Fast probe: is `security` functional for a REAL round-trip — checked against a
+    THROWAWAY TEMP keychain, NEVER the user's login keychain (TRDD-K3WQ7XM9 FIX B).
+
+    Previously this add→read→delete'd against the LOGIN keychain; even though its fresh
+    item (created by /usr/bin/security) never PROMPTED, it still TOUCHED the real login
+    keychain — which the no-real-keychain-in-tests rule forbids, and a fresh `/login` that
+    left the keychain locked/prompting made the READ HANG (timed out publish.py's gate at
+    600s, 2026-07-09). Now it creates its OWN temp keychain, round-trips one item confined
+    to it via the trailing-keychain positional, and deletes it — so a locked/prompting
+    login keychain can neither hang nor prompt this probe, and the login keychain is never
+    touched. Cached so the (<8s) probe runs at most once per session."""
     global _KEYCHAIN_USABLE_CACHE
     if _KEYCHAIN_USABLE_CACHE is not None:
         return _KEYCHAIN_USABLE_CACHE
-    import subprocess
     import sys
 
-    ok = False
-    if sys.platform == "darwin":
-        svc = "Claude Code-conftest-probe-%d" % os.getpid()
-        acct = "probe-%d@example.test" % os.getpid()
+    _KEYCHAIN_USABLE_CACHE = _security_temp_keychain_roundtrip_ok() if sys.platform == "darwin" else False
+    return _KEYCHAIN_USABLE_CACHE
+
+
+def _security_temp_keychain_roundtrip_ok() -> bool:
+    """add→read one item in a THROWAWAY temp keychain (never the login keychain), then
+    delete the keychain. True iff the round-trip succeeded. Timeouts/errors → False."""
+    import subprocess
+    import tempfile
+
+    probe_dir = tempfile.mkdtemp(prefix="janitor-probe-kc-")
+    kc = os.path.join(probe_dir, "probe.keychain-db")
+    pw, svc, acct = "janitor-probe-pw", "janitor-conftest-probe", "probe@example.test"
+    try:
+        create = subprocess.run(["security", "create-keychain", "-p", pw, kc],
+                                capture_output=True, text=True, timeout=8)
+        if create.returncode != 0:
+            return False
+        subprocess.run(["security", "unlock-keychain", "-p", pw, kc],
+                       capture_output=True, text=True, timeout=8)
+        add = subprocess.run(["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe", kc],
+                             capture_output=True, text=True, timeout=8)
+        read = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", acct, "-w", kc],
+                              capture_output=True, text=True, timeout=8)
+        return add.returncode == 0 and read.returncode == 0 and read.stdout.strip() == "probe"
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    finally:
         try:
-            add = subprocess.run(
-                ["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe"],
-                capture_output=True, text=True, timeout=8,
-            )
-            read = subprocess.run(
-                ["security", "find-generic-password", "-s", svc, "-a", acct, "-w"],
-                capture_output=True, text=True, timeout=8,
-            )
-            ok = add.returncode == 0 and read.returncode == 0 and read.stdout.strip() == "probe"
+            subprocess.run(["security", "delete-keychain", kc], capture_output=True, text=True, timeout=8)
         except (subprocess.TimeoutExpired, OSError):
-            ok = False
-        finally:
-            try:
-                subprocess.run(
-                    ["security", "delete-generic-password", "-s", svc, "-a", acct],
-                    capture_output=True, text=True, timeout=8,
-                )
-            except (subprocess.TimeoutExpired, OSError):
-                pass
-    _KEYCHAIN_USABLE_CACHE = ok
-    return ok
+            pass
+        shutil.rmtree(probe_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def isolated_keychain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> "Path":
+    """A REAL but ISOLATED macOS keychain for keychain round-trip tests (TRDD-K3WQ7XM9 FIX B).
+
+    Creates a temp keychain via ``security create-keychain``, points
+    ``JANITOR_ROTATOR_KEYCHAIN`` at it (so every rotator/safe_storage ``security`` op is
+    confined to it by ``safe_storage.keychain_scope_args()``), and deletes it on teardown.
+    A genuine ``security`` round-trip that honors the no-mocks rule while NEVER touching /
+    prompting / unlocking the user's real LOGIN keychain — the fix for the ~100× password
+    prompt storm the OAuth ``real_state`` tests caused (2026-07-09). Skips off-macOS, when
+    ``security`` is absent, or if the temp keychain cannot be created. ``set-keychain-settings``
+    with no ``-t`` disables auto-lock so the keychain stays unlocked (no re-prompt) for the
+    test's duration."""
+    import subprocess as _sp
+    import sys as _sys
+
+    if _sys.platform != "darwin" or shutil.which("security") is None:
+        pytest.skip("macOS `security` keychain not available")
+    kc = tmp_path / "janitor-test.keychain-db"
+    pw = "janitor-test-pw"  # noqa: S105 - a throwaway temp-keychain password, not a secret
+    try:
+        _sp.run(["security", "create-keychain", "-p", pw, str(kc)],
+                check=True, capture_output=True, text=True, timeout=15)
+        _sp.run(["security", "unlock-keychain", "-p", pw, str(kc)],
+                check=True, capture_output=True, text=True, timeout=15)
+        # No `-t <timeout>` → auto-lock disabled → the keychain never re-locks (and so never
+        # re-prompts) mid-test.
+        _sp.run(["security", "set-keychain-settings", str(kc)],
+                check=False, capture_output=True, text=True, timeout=15)
+    except (_sp.CalledProcessError, _sp.TimeoutExpired, OSError) as exc:
+        pytest.skip(f"could not create isolated temp keychain: {exc}")
+    monkeypatch.setenv("JANITOR_ROTATOR_KEYCHAIN", str(kc))
+    try:
+        yield kc
+    finally:
+        _sp.run(["security", "delete-keychain", str(kc)],
+                check=False, capture_output=True, text=True, timeout=15)
 
 
 @pytest.fixture(autouse=True)

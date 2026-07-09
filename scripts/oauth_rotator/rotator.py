@@ -65,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # this dir — so `imp
 import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW→REAUTH SSOT, TRDD-dfc0959a)
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
+import safe_storage  # noqa: E402  # scripts/oauth_rotator/safe_storage.py — keychain_scope_args() lever (TRDD-K3WQ7XM9 FIX B)
 
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 # Per-account slot tokens are stored in the OS keychain too — ENCRYPTED at rest,
@@ -373,7 +374,59 @@ def _add_password_argv(service: str, account: str, data: str) -> list[str]:
         "-T", "/usr/bin/security",
         "-T", os.path.realpath(sys.executable),
         "-w", data,
+        # Trailing keychain scope (empty in production → argv unchanged; a test's temp
+        # keychain when JANITOR_ROTATOR_KEYCHAIN is set — TRDD-K3WQ7XM9 FIX B).
+        *safe_storage.keychain_scope_args(),
     ]
+
+
+def _primary_secret_read_permitted() -> bool:
+    """False when this process must NOT do a PROMPTING `-w` secret read of the ACL-restricted
+    primary live item (`Claude Code-credentials`) — TRDD-K3WQ7XM9 FIX B2.
+
+    The daemon sets ``JANITOR_ROTATOR_HEADLESS=1`` for its rotator-tick subprocess. Headless,
+    that `-w` read can ONLY ever raise a GUI keychain prompt the daemon cannot answer (it
+    hangs, then times out — the ~100× prompt storm the user hit once bug #1 lets the tick
+    run). It is pure cost: a headless context can NEVER read Claude's Claude-only-ACL primary
+    anyway, so the read was already guaranteed to fail. Skipping it makes read_live_blob()
+    fall to the `-T`-accessible `-livebak` mirror (read_live_blob_with_source → source
+    "mirror", which cmd_auto's F1 distrust already treats as an untrusted identity) — the
+    SAME account resolution the daemon reached AFTER the read failed, now WITHOUT the prompt.
+    Unset (a manual / session-context run, hooks, the statusline) → True → byte-identical
+    `-w` behavior. Only the READ changes; the credential is never written or modified."""
+    raw = os.environ.get("JANITOR_ROTATOR_HEADLESS", "").strip().lower()
+    return raw in ("", "0", "false", "no", "off")
+
+
+def _read_primary_macos_keychain(acct: str) -> dict | None:
+    """The macOS `security -w` read of the primary live item, or None if absent / unreadable /
+    SKIPPED because headless (FIX B2).
+
+    TIMEOUT is load-bearing (TRDD-7PYTX4E9): reading the SECRET (`-w`) of an item whose ACL
+    excludes us raises a GUI prompt — headless, the call HANGS (the 2026-07-08 daemon tick
+    froze ~30 min on exactly this). When headless (`_primary_secret_read_permitted()` is
+    False), we don't even attempt it — the daemon can never read Claude's Claude-only-ACL
+    primary, so the `-w` read is pure prompt-cost; skipping it returns None and read_live_blob
+    falls to the -livebak mirror (the same resolution, no prompt)."""
+    if not _primary_secret_read_permitted():
+        return None
+    try:
+        proc = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w", *safe_storage.keychain_scope_args()],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return None  # `security` only exists on macOS
+    except subprocess.TimeoutExpired:
+        return None  # ACL prompt hang — unreadable from this context (item EXISTS)
+    if proc.returncode == 0 and proc.stdout.strip():
+        try:
+            return json.loads(proc.stdout.strip())
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
 def _read_live_primary() -> dict | None:
@@ -385,30 +438,13 @@ def _read_live_primary() -> dict | None:
          capture flow relies on keys off this account attribute).
       2. ~/.claude/.credentials.json — the native store on Linux/Windows.
       3. GNOME Keyring via `secret-tool` — the Linux desktop keyring.
-    On macOS the keychain path wins and the others are never reached.
+    On macOS the keychain path wins and the others are never reached (unless headless, where
+    it is skipped so the daemon never prompts — FIX B2 — and the ladder falls through).
     """
-    # 1. macOS keychain. TIMEOUT is load-bearing (TRDD-7PYTX4E9): reading the SECRET
-    # (-w) of an item whose ACL excludes us raises a GUI prompt — headless, the call
-    # HANGS (the 2026-07-08 daemon tick froze ~30 min on exactly this until the
-    # workload cap killed it). Bound it so an ACL-denied read degrades in seconds to
-    # the mirror fallback, where cmd_auto's F1 source-distrust takes over.
     acct = _keychain_account()
-    try:
-        proc = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, "-w"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            try:
-                return json.loads(proc.stdout.strip())
-            except json.JSONDecodeError:
-                pass
-    except FileNotFoundError:
-        pass  # `security` only exists on macOS
-    except subprocess.TimeoutExpired:
-        return None  # ACL prompt hang — unreadable from this context (item EXISTS)
+    macos = _read_primary_macos_keychain(acct)
+    if macos is not None:
+        return macos
     # 2. Linux/Windows credentials file
     cf = Path.home() / ".claude" / ".credentials.json"
     if cf.exists():
@@ -457,7 +493,7 @@ def _primary_live_item_absent() -> bool:
     acct = _keychain_account()
     try:
         proc = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct],
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, *safe_storage.keychain_scope_args()],
             capture_output=True,
             text=True,
             timeout=10,
@@ -712,7 +748,7 @@ def _slot_keychain_read(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> dic
     Linux `secret-tool`) under `service`. None if absent/unreadable."""
     try:
         proc = subprocess.run(
-            ["security", "find-generic-password", "-s", service, "-a", email, "-w"],
+            ["security", "find-generic-password", "-s", service, "-a", email, "-w", *safe_storage.keychain_scope_args()],
             capture_output=True,
             text=True,
             # TIMEOUT is load-bearing (TRDD-7PYTX4E9 / 2026-07-09): reading the SECRET
@@ -788,7 +824,7 @@ def _slot_keychain_delete(email: str, service: str = SLOT_KEYCHAIN_SERVICE) -> N
     stores). Used to forget a retired account and by the keychain tests' cleanup."""
     try:
         subprocess.run(
-            ["security", "delete-generic-password", "-s", service, "-a", email],
+            ["security", "delete-generic-password", "-s", service, "-a", email, *safe_storage.keychain_scope_args()],
             capture_output=True,
             text=True,
             # Bound it: a locked/prompting keychain hangs an unbounded delete too

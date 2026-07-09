@@ -192,8 +192,8 @@ def test_snapshot_failed_propagates_failclosed(monkeypatch: pytest.MonkeyPatch,
 
 
 @pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
-@pytest.mark.real_state  # `security` resolves the login keychain via HOME — fake HOME → FAILED
-def test_snapshot_then_materialize_switches_profile(monkeypatch: pytest.MonkeyPatch,
+def test_snapshot_then_materialize_switches_profile(isolated_keychain,  # isolated temp keychain — NEVER login (TRDD-K3WQ7XM9 FIX B)
+                                                     monkeypatch: pytest.MonkeyPatch,
                                                      tmp_path: Path) -> None:
     """THE Phase-2 profile switch, end-to-end through the REAL keychain: snapshot account
     A's cookies from its profile → store encrypted in the keychain → materialize into a

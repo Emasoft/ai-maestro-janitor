@@ -329,71 +329,14 @@ def test_keychain_write_passes_data_as_argv_value(monkeypatch: pytest.MonkeyPatc
     assert seen["input"] is None                          # NOT the truncating stdin-prompt mode
 
 
-_KEYCHAIN_USABLE_CACHE: bool | None = None
+# NOTE (TRDD-K3WQ7XM9 FIX B): the former module-level login-keychain probe
+# (`_keychain_usable`) + `_skip_real_keychain_when_prompting` autouse fixture were REMOVED.
+# The keychain round-trip tests below no longer touch the LOGIN keychain at all — each uses
+# the `isolated_keychain` fixture (a REAL but ISOLATED temp keychain via the
+# JANITOR_ROTATOR_KEYCHAIN lever), so there is nothing to probe/skip and no prompt to avoid.
 
 
-def _keychain_usable() -> bool:
-    """Fast probe: can `security` touch the login keychain WITHOUT blocking on an
-    interactive unlock / ACL prompt? A fresh `claude /login` can leave the keychain
-    PROMPTING for access, which makes the real-keychain roundtrip tests below HANG the
-    `security` subprocess indefinitely — observed 2026-07-09, timing out publish.py's
-    test gate at 600s while every other test passed. A throwaway add→delete under a
-    SHORT timeout answers the question: a TimeoutExpired (the prompt) or any error →
-    keychain unusable → the caller SKIPS instead of hanging an unattended publish.
-    Cached so the (potentially 8s-blocking) probe runs at most once per session, not
-    once per test."""
-    global _KEYCHAIN_USABLE_CACHE
-    if _KEYCHAIN_USABLE_CACHE is not None:
-        return _KEYCHAIN_USABLE_CACHE
-    import subprocess
-
-    svc = "Claude Code-rotator-probe-%d" % os.getpid()
-    acct = "probe-%d@example.test" % os.getpid()
-    ok = False
-    try:
-        # WRITE then — critically — READ BACK. Creating a keychain item never prompts,
-        # but READING one under a restrictive ACL (what a fresh `/login` leaves) DOES.
-        # The read is the exact operation the roundtrip tests hang on, so the probe
-        # must exercise it (a write-only probe returns a false "usable").
-        add = subprocess.run(
-            ["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe"],
-            capture_output=True, text=True, timeout=8,
-        )
-        read = subprocess.run(
-            ["security", "find-generic-password", "-s", svc, "-a", acct, "-w"],
-            capture_output=True, text=True, timeout=8,
-        )
-        ok = add.returncode == 0 and read.returncode == 0 and read.stdout.strip() == "probe"
-    except (subprocess.TimeoutExpired, OSError):
-        ok = False  # a prompt is up (or `security` is absent) → unusable
-    finally:
-        try:
-            subprocess.run(
-                ["security", "delete-generic-password", "-s", svc, "-a", acct],
-                capture_output=True, text=True, timeout=8,
-            )
-        except (subprocess.TimeoutExpired, OSError):
-            pass
-    _KEYCHAIN_USABLE_CACHE = ok
-    return ok
-
-
-@pytest.fixture(autouse=True)
-def _skip_real_keychain_when_prompting(request: pytest.FixtureRequest) -> None:
-    """Every `real_state` test in this module touches the REAL macOS keychain (see each
-    test's decorator comment). When a fresh `claude /login` leaves the keychain PROMPTING
-    for access, `security` READS block indefinitely and hang the whole suite — they timed
-    out publish.py's test gate at 600s on 2026-07-09 while every other test passed. Probe
-    once (cached); if the keychain is unusable, SKIP every real_state test rather than
-    hang an unattended publish. Non-real_state tests are a fast no-op (the probe never
-    runs for them). The keychain becomes usable again once the user unlocks it / grants
-    `security` access (Always-Allow on the prompt)."""
-    if request.node.get_closest_marker("real_state") and not _keychain_usable():
-        pytest.skip("real macOS keychain locked/prompting for access — skipping real_state keychain test (would hang `security`)")
-
-
-@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
-def test_keychain_write_roundtrips_real_keychain_over_128_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_keychain_write_roundtrips_real_keychain_over_128_bytes(isolated_keychain, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain — NEVER login (TRDD-K3WQ7XM9 FIX B)
     """The keychain write stores the EXACT bytes in the real macOS keychain — including
     payloads well over 128 bytes (TRDD-5539cd6e REGRESSION LOCK). The old stdin-prompt mode
     truncated everything >128B to 128B of corrupt JSON; this asserts a realistic ~600B and a
@@ -403,21 +346,26 @@ def test_keychain_write_roundtrips_real_keychain_over_128_bytes(monkeypatch: pyt
         pytest.skip("real macOS keychain test")
     service = "Claude Code-rotator-wtest-%d" % os.getpid()
     account = "wtest-%d@example.test" % os.getpid()
-    try:
-        for tok_len in (40, 400, 8000):                  # blobs ~ 130B, ~600B, ~9000B
-            blob = _blob("T" * tok_len, refresh="R" * tok_len, expires_ms=123456789000)
-            data = json.dumps(blob, separators=(",", ":"))
-            assert len(data) > 128                        # the sizes that the old path corrupted
+    for tok_len in (40, 400, 8000):                       # blobs ~ 130B, ~600B, ~9000B
+        blob = _blob("T" * tok_len, refresh="R" * tok_len, expires_ms=123456789000)
+        data = json.dumps(blob, separators=(",", ":"))
+        assert len(data) > 128                            # the sizes that the old path corrupted
+        # Delete-then-write so EACH size is a fresh CREATE, never a `-U` UPDATE of the
+        # existing item: re-asserting an item's `-T` ACL on update makes macOS gate the
+        # write behind an authorization PROMPT that HANGS a headless test (TRDD-K3WQ7XM9).
+        # This guard checks WRITE byte-fidelity per size (the 128B getpass-truncation
+        # regression), which a pure create exercises exactly.
+        rotator._slot_keychain_delete(account, service=service)
+        try:
             rotator._security_add_password_via_stdin(service, account, data)
             got = rotator._slot_keychain_read(account, service=service)
             assert got == blob, f"round-trip failed at data len={len(data)} (truncation?)"
-    finally:
-        rotator._slot_keychain_delete(account, service=service)
+        finally:
+            rotator._slot_keychain_delete(account, service=service)
     assert rotator._slot_keychain_read(account, service=service) is None  # cleaned up
 
 
-@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
-def test_write_slot_uses_keychain_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_slot_uses_keychain_when_available(isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """On a keychain host, write_slot stores the token ENCRYPTED in the keychain (NO plaintext file) and read_slot round-trips it. 🐌"""
     if sys.platform != "darwin":
         pytest.skip("real macOS keychain test")
@@ -436,8 +384,7 @@ def test_write_slot_uses_keychain_when_available(tmp_path: Path, monkeypatch: py
     assert rotator.read_slot(email) is None              # gone after cleanup
 
 
-@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
-def test_read_slot_recovers_from_backup_when_primary_deleted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_read_slot_recovers_from_backup_when_primary_deleted(isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """If the PRIMARY slot keychain item is deleted/corrupt, read_slot recovers the token from the redundant backup keychain and re-heals the primary (Pillar 2, Decision 2). 🐌"""
     if sys.platform != "darwin":
         pytest.skip("real macOS keychain test")
@@ -460,8 +407,7 @@ def test_read_slot_recovers_from_backup_when_primary_deleted(tmp_path: Path, mon
         _purge_slot_keychain(email)
 
 
-@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
-def test_migrate_slots_to_keychain_verifies_and_keeps_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migrate_slots_to_keychain_verifies_and_keeps_files(isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """migrate_slots_to_keychain copies each legacy plaintext slot into the keychain, verifies by fingerprint, and keeps the files. 🐌"""
     if sys.platform != "darwin":
         pytest.skip("real macOS keychain test")
@@ -629,8 +575,7 @@ def _purge_live_keychain() -> None:
     rotator._slot_keychain_delete(acct, service=rotator.LIVE_BACKUP_KEYCHAIN_SERVICE)
 
 
-@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
-def test_live_backup_mirror_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_backup_mirror_roundtrip(isolated_keychain, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """The -livebak live-credential mirror round-trips through the real OS keychain. 🐌"""
     if sys.platform != "darwin":
         pytest.skip("keychain round-trip is macOS-only")
@@ -644,8 +589,7 @@ def test_live_backup_mirror_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rotator._live_backup_read() is None  # gone after cleanup
 
 
-@pytest.mark.real_state  # real `security` keychain resolves via HOME — fake HOME → exit 154
-def test_write_live_blob_mirrors_to_livebak(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_live_blob_mirrors_to_livebak(isolated_keychain, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """write_live_blob writes the primary AND the redundant -livebak mirror (Pillar 2). 🐌"""
     if sys.platform != "darwin":
         pytest.skip("keychain round-trip is macOS-only")
@@ -657,6 +601,39 @@ def test_write_live_blob_mirrors_to_livebak(monkeypatch: pytest.MonkeyPatch) -> 
         assert rotator._live_backup_read() == blob     # redundant mirror written
     finally:
         _purge_live_keychain()
+
+
+def test_primary_secret_read_permitted_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FIX B2 (TRDD-K3WQ7XM9) headless gate: JANITOR_ROTATOR_HEADLESS truthy FORBIDS the
+    prompting `-w` primary read; unset/falsey PERMITS it (byte-identical production)."""
+    monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+    assert rotator._primary_secret_read_permitted() is True
+    for off in ("0", "false", "no", "off", ""):
+        monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", off)
+        assert rotator._primary_secret_read_permitted() is True, off
+    for on in ("1", "true", "YES", "on"):
+        monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", on)
+        assert rotator._primary_secret_read_permitted() is False, on
+
+
+def test_read_live_primary_skips_prompting_read_when_headless(isolated_keychain, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B2)
+    """FIX B2 end-to-end in an ISOLATED keychain: a primary item is PRESENT, yet under
+    JANITOR_ROTATOR_HEADLESS=1 `_read_live_primary` returns None WITHOUT the `-w` secret read
+    (the daemon never prompts); with the flag unset it reads the value normally. 🐌"""
+    if sys.platform != "darwin":
+        pytest.skip("real macOS keychain test")
+    monkeypatch.setattr(rotator, "KEYCHAIN_SERVICE", "Claude Code-credentials-TEST-%d" % os.getpid())
+    blob = _blob("primary-live-token")
+    acct = rotator._keychain_account()
+    try:
+        rotator._security_add_password_via_stdin(
+            rotator.KEYCHAIN_SERVICE, acct, json.dumps(blob, separators=(",", ":")))
+        monkeypatch.delenv("JANITOR_ROTATOR_HEADLESS", raising=False)
+        assert rotator._read_live_primary() == blob            # session context: reads the value
+        monkeypatch.setenv("JANITOR_ROTATOR_HEADLESS", "1")
+        assert rotator._read_live_primary() is None            # headless: skipped → no prompt
+    finally:
+        rotator._slot_keychain_delete(acct, service=rotator.KEYCHAIN_SERVICE)
 
 
 def test_read_live_blob_prefers_primary_then_livebak(monkeypatch: pytest.MonkeyPatch) -> None:

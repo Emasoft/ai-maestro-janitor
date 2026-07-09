@@ -176,8 +176,7 @@ def test_retrieve_unwraps_base64(monkeypatch: pytest.MonkeyPatch) -> None:
 # REAL macOS keychain round-trip — the 128-byte truncation regression guard.
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
-@pytest.mark.real_state  # `security` resolves the login keychain via HOME — fake HOME → FAILED
-def test_macos_roundtrip_multi_kilobyte_secret() -> None:
+def test_macos_roundtrip_multi_kilobyte_secret(isolated_keychain) -> None:  # isolated temp keychain — NEVER the login keychain (TRDD-K3WQ7XM9 FIX B)
     """REGRESSION GUARD (TRDD-5539cd6e): a multi-KB secret (a realistic cookie jar) must
     round-trip through the real keychain BYTE-FOR-BYTE — proving the 128-byte getpass
     truncation is gone. Uses a throwaway PID-scoped TEST service; deletes it after."""
@@ -202,8 +201,7 @@ def test_macos_roundtrip_multi_kilobyte_secret() -> None:
 
 
 @pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
-@pytest.mark.real_state  # same HOME-dependent keychain resolution as the multi-KB round-trip
-def test_macos_roundtrip_preserves_special_chars() -> None:
+def test_macos_roundtrip_preserves_special_chars(isolated_keychain) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """A secret with newlines / quotes / unicode round-trips intact (interior whitespace
     is preserved; only the trailing newline `security -w` adds is stripped)."""
     secret = 'line1\nline2 "quoted" \t café 🦝 end'
@@ -215,8 +213,7 @@ def test_macos_roundtrip_preserves_special_chars() -> None:
 
 
 @pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
-@pytest.mark.real_state  # same HOME-dependent keychain resolution as the multi-KB round-trip
-def test_macos_delete_is_idempotent() -> None:
+def test_macos_delete_is_idempotent(isolated_keychain) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """delete on an absent item is a no-op (never raises); retrieve then returns None."""
     ss.delete(_TEST_SERVICE, "ghost@x.com")  # never stored
     ss.delete(_TEST_SERVICE, "ghost@x.com")  # again — still fine

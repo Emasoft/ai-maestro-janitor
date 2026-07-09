@@ -161,6 +161,27 @@ def delete(service: str, account: str) -> None:
 
 
 # --------------------------------------------------------------------------
+# Keychain-scope lever — the SINGLE source of truth for confining every rotator
+# `security` op to a named keychain (TRDD-K3WQ7XM9 FIX B).
+# --------------------------------------------------------------------------
+def keychain_scope_args() -> list[str]:
+    """Trailing `security` positional args that SCOPE every generic-password op to a
+    specific keychain when ``JANITOR_ROTATOR_KEYCHAIN`` is set, else ``[]``.
+
+    macOS ``security {add,find,delete}-generic-password`` all accept a trailing keychain
+    path positional; naming it confines the op to THAT keychain instead of the default
+    login-keychain search list. UNSET (production, the default) → ``[]`` → every argv is
+    BYTE-IDENTICAL to before → the login keychain exactly as today. The lever exists so
+    the keychain TESTS can point at a REAL but ISOLATED temp keychain (created via
+    ``security create-keychain``): a genuine `security` round-trip that NEVER prompts /
+    unlocks the user's real login keychain (the ~100× password/allow-prompt storm the
+    OAuth real_state tests caused, 2026-07-09). Resolved AT CALL TIME so a test's
+    ``monkeypatch.setenv`` is honored."""
+    kc = os.environ.get("JANITOR_ROTATOR_KEYCHAIN", "").strip()
+    return [kc] if kc else []
+
+
+# --------------------------------------------------------------------------
 # Argv builders — pure, so tests assert command construction without executing.
 # --------------------------------------------------------------------------
 def macos_store_argv(service: str, account: str, secret: str) -> list[str]:
@@ -169,16 +190,18 @@ def macos_store_argv(service: str, account: str, secret: str) -> list[str]:
     Argv — NOT stdin — because the stdin form (`-w` with no value) reads via macOS
     ``getpass()`` (hard 128-byte buffer → silent truncation of any larger secret;
     TRDD-5539cd6e). `-U` updates an existing item. See the module docstring for the
-    full rationale and why the brief `ps` exposure is acceptable for these items."""
-    return ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", secret]
+    full rationale and why the brief `ps` exposure is acceptable for these items. A
+    trailing ``keychain_scope_args()`` confines the write to the test keychain when set
+    (empty in production → argv unchanged)."""
+    return ["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", secret, *keychain_scope_args()]
 
 
 def macos_retrieve_argv(service: str, account: str) -> list[str]:
-    return ["security", "find-generic-password", "-s", service, "-a", account, "-w"]
+    return ["security", "find-generic-password", "-s", service, "-a", account, "-w", *keychain_scope_args()]
 
 
 def macos_delete_argv(service: str, account: str) -> list[str]:
-    return ["security", "delete-generic-password", "-s", service, "-a", account]
+    return ["security", "delete-generic-password", "-s", service, "-a", account, *keychain_scope_args()]
 
 
 def secret_tool_store_argv(service: str, account: str) -> list[str]:
