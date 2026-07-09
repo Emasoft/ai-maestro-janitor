@@ -70,10 +70,13 @@ _ITERM_TTY_OSASCRIPT = (
 
 @dataclass(frozen=True)
 class Instance:
-    """One running claude instance + its diagnosed janitor health. ``terminal`` is
-    the injection identity resolved from the live TTY (``{tmux_pane?,
-    iterm_session_id?}``); empty means the daemon cannot reach this pane by
-    keystroke (resolution failed — e.g. a terminal we don't drive)."""
+    """One running claude instance + its diagnosed janitor health. ``terminal`` is the
+    injection identity, resolved from the live TTY and then extended by the taggers:
+    ``{tmux_pane?, iterm_session_id?, aimaestro_session?+aimaestro_cli?,
+    linux_gui_channel?}``. ``fleet_inject.build_command_plan`` consumes it in that
+    fallback order (tmux -> iterm -> aimaestro -> linux-gui). EMPTY means the daemon
+    cannot reach this pane by keystroke at all — an armed instance with an empty
+    identity is genuinely unreachable, not merely on an unusual terminal."""
 
     pid: int
     command: str
