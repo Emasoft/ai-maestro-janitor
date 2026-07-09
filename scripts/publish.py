@@ -1617,13 +1617,15 @@ Examples:
     # their original sequence (Step 6 follows Step 4 — there is no Step 5)
     # so log greps for any existing release-history line still hit.
     #
-    # CPV is PINNED to a released tag, and the pin MUST equal the one in
-    # .github/workflows/release.yml. Unpinned, both resolved CPV's default
-    # branch, so (a) the local gate and the CI gate could validate different
-    # code — a release passing here and failing there, or the reverse — and
-    # (b) CI executed whatever was on that branch inside a job holding
-    # `contents: write`. Bump both in the same commit; see the BUMP PROTOCOL
-    # comment in release.yml.
+    # CPV is PINNED to a released tag, and the pin MUST equal the ones in
+    # .github/workflows/release.yml AND .github/workflows/ci.yml — THREE sites,
+    # bumped in one commit. Unpinned, a site resolves CPV's default branch, so
+    # (a) the local gate and a CI gate validate different code — exactly what
+    # happened on v0.35.7, where this pinned gate passed and the then-unpinned
+    # ci.yml failed on v2.153.2's 8 CRITICALs against our own rules/*.md — and
+    # (b) CI executes whatever is on that branch inside a job holding
+    # `contents: write`. See the BUMP PROTOCOL comment in release.yml; never
+    # bump without running the candidate ref against the tree locally first.
     if info.has_kind(ProjectKind.CLAUDE_PLUGIN):
         print(f"\n{BLUE}=== Step 4: CPV strict validate plugin (mandatory) ==={NC}")
         run([

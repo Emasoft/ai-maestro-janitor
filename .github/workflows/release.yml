@@ -59,11 +59,15 @@ jobs:
         # must match publish.py's local gate exactly, or a release can pass
         # locally and fail here (or worse, the reverse).
         #
-        # BUMP PROTOCOL: raise both this tag and the one in publish.py in the
-        # same commit, after checking `gh api repos/Emasoft/claude-plugins-\
-        # validation/releases/latest`. Note issue #71's fix (CPV PR #157,
-        # A2A false positive) only arrives here once it is RELEASED and the
-        # pin is bumped — that is the intended, greppable behaviour.
+        # BUMP PROTOCOL: the ref is pinned in THREE places and they must move
+        # together, in one commit — this file, .github/workflows/ci.yml, and
+        # scripts/publish.py. (ci.yml was missed the first time and cost a red
+        # CI on v0.35.7: unpinned, it resolved CPV's default branch onto the
+        # v2.153.2 regression.) Never bump without running the candidate ref
+        # against the tree locally first: v2.153.2 raises 8 CRITICALs on our own
+        # rules/*.md (upstream claude-plugins-validation#160), so v2.153.1 is the
+        # last good ref. Issue #71's fix (A2A false positive) is already IN
+        # v2.153.1 — we pinned the fixed version by coincidence.
         run: |
           set +e
           uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1 --with pyyaml cpv-remote-validate plugin . --strict

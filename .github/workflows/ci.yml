@@ -72,8 +72,20 @@ jobs:
           # attempts self-heal that case. A real validation failure (any other
           # non-zero — CPV's 1-4 severity exits) fails fast WITHOUT a pointless
           # retry. The job-level timeout-minutes is the hard backstop.
+          # BUMP PROTOCOL: the CPV ref is pinned in THREE places and they must move
+          # together, in one commit — this file, .github/workflows/release.yml, and
+          # scripts/publish.py. Never bump without first running the new ref against
+          # the tree locally; v2.153.2 raises 8 CRITICALs on our own rules/*.md
+          # (upstream claude-plugins-validation#160), so v2.153.1 is the last good ref.
+          #
+          # This call site was left UNPINNED when the other two were pinned, and it
+          # cost a red CI on the v0.35.7 release: it resolved CPV's default branch,
+          # picked up v2.153.2, and failed on a CRITICAL we did not cause and could
+          # not fix — while publish.py's pinned local gate passed on the same commit.
+          # An unpinned resolve in a job is also a supply-chain hole: CI executes
+          # whatever is on that branch.
           run_cpv() {
-            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation \
+            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1 \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
