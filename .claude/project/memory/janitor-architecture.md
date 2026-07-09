@@ -282,6 +282,12 @@ must report a crash.[^3]
   state resolution, the test-isolation levers (`JANITOR_GLOBAL_STATE_DIR` /
   `JANITOR_DATA_DIR`, not `CLAUDE_PLUGIN_DATA`), and the bounded restage — the
   fseventsd-runaway class (TRDD-ZNN0UK5K).
+- [[janitor-fleet-guardian-reachability]] — why the status table's `armed` column
+  is not "the heartbeat is running", why `/janitor-global-arm` arms nothing, and
+  why the launchd daemon logged `UNREACHABLE ({})` for 254 beats (stripped PATH
+  for tmux; no TCC Automation grant for iTerm). The counterpart to the
+  Immortality section above: the OS-keepalive bought the guardian durability and
+  cost it its injection channels.
 
 ## Notes and lessons learned
 

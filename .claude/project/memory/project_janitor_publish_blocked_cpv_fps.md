@@ -1,8 +1,8 @@
 ---
 name: project_janitor_publish_blocked_cpv_fps
-description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked"
+description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it"
 ocd: 2026-06-11
-lmd: 2026-06-23
+lmd: 2026-07-09
 metadata:
   node_type: memory
   type: project
@@ -37,11 +37,39 @@ manifest, not at the repo root). Guard now in place: staging logic lives in
 runs the SAME script on every push. Binaries live on v0.7.1+ (4 platforms +
 SHA256SUMS).
 
-**How to apply:** when a publish fails the gate, run
-`uvx --from git+https://github.com/Emasoft/claude-plugins-validation --with pyyaml cpv-remote-validate plugin . --strict`,
-triage each finding: real → devitalize/remove (never suppress); FP/gap → file a
-NEW CPV issue (see #112/#113/#115/#116 as templates). publish.py Step 4 is the
-ONLY validation (CPV plugin via uvx) — never add local validator copies. See also
+**CPV IS PINNED, IN THREE PLACES.** `scripts/publish.py`,
+`.github/workflows/release.yml`, and `.github/workflows/ci.yml` each invoke
+`uvx --from git+https://github.com/Emasoft/claude-plugins-validation@<tag>`. All
+three must carry the SAME tag and be bumped in ONE commit. Unpinned, a site
+resolves CPV's default branch, which means (a) the local gate and a CI gate can
+validate different code, and (b) CI executes whatever is on that branch inside a
+job holding `contents: write` — a supply-chain hole. Grep the INVOCATION, never
+the files you remember; two of three sites is a pin plus a hole.[^4]
+
+**Never bump the pin without first running the candidate ref against the tree.**
+`v2.153.1` is the last good ref. `v2.153.2` raises 8 CRITICAL
+`skillaudit:prompt_injection INDIRECT_PROMPT_INJECT` on the janitor's own
+`rules/*.md` — it classifies `rules/` as untrusted ingested content instead of
+authored plugin instruction surface, so under it NO plugin can ship a `rules/`
+directory (upstream CPV#160). The pin is what turned that into a caught
+regression instead of a blocked release.
+
+**The CPV gate HANGS intermittently.** `cpv-remote-validate` sometimes makes no
+progress while the identical local gate has already passed on the same commit. A
+healthy validate takes ~3.5 min. Every call site therefore wraps it in
+`timeout 300` with 3 attempts, retrying ONLY on exit 124 and failing fast on
+CPV's real 1..4 severity exits. A **`Release` job that is CANCELLED at exactly
+`timeout-minutes` is this hang**, not slowness — raising the bound is never the
+fix.[^3]
+
+**How to apply:** when a publish fails the gate, run the PINNED command
+(`uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1 --with pyyaml cpv-remote-validate plugin . --strict`),
+then triage each finding: real → devitalize/remove (never suppress); FP/gap →
+file a NEW CPV issue (see #112/#113/#115/#116/#158/#160 as templates). publish.py
+Step 4 is the ONLY validation (CPV plugin via uvx) — never add local validator
+copies. Note the recurring FP shape: CPV rules keep firing on plugin-AUTHORED
+markdown (`design/**` prose, `rules/**`), never on the code — the fix belongs in
+CPV's path-classification layer, not per-detector. See also
 `[[janitor-publish-pipeline]]` (the full gate-order page) and
 `[[project_rotator_let_429_happen_version_skew]]` (the rotator deadlock that this
 publish-block kept alive — a fix doesn't run until it's published).
@@ -82,3 +110,32 @@ STATE §1.[^2]
   un-devitalizable load-bearing feature (e.g. launchd persistence) that trips the
   gate must be SEPARATED into its own release, not exempted and not "waited out"
   via a CPV exempt mechanism (#40).
+[^3]: [ocd:2026-07-09 lmd:2026-07-09] SUPERSEDED: "the release CI stall is the Rust
+  cold compile" and, after that, "raise the release bound 15m→30m". Both wrong.
+  Roughly half of one day's releases were CANCELLED — v0.35.3 at 15m18s, v0.35.6 at
+  30m21s, v0.35.8 at 30m17s — each dying at exactly `timeout-minutes`, all in step 5
+  `Validate plugin (strict)`, while the successes took ~3.5 min. The job was HUNG,
+  and the timeout was the only thing ending it. `ci.yml` had carried a
+  `timeout 300` + 3-attempt wrapper for this exact CPV hang all along; `release.yml`
+  called `uvx` bare and never got it. WHY I got it wrong TWICE: I inferred a
+  mechanism from a DURATION (a long step "must be" a slow compile), then treated the
+  symptom by widening the bound — which merely doubled the stall. The commit that
+  corrected the rationale ("30m is headroom, not the fix") still did not go look for
+  the remedy, which existed one file away. Lesson: a job that dies at exactly its
+  timeout is hung, not slow; find the hang, and before writing a mitigation, grep
+  whether a sibling workflow already solved it. Ported verbatim in v0.35.9. The port
+  also closed a hole nobody was looking for: the old gate read
+  `if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]`, so ANY exit outside 1..4 — a
+  crash, exit 127, a missing binary — silently PASSED release validation.
+[^4]: [ocd:2026-07-09 lmd:2026-07-09] SUPERSEDED: "both `release.yml` and
+  `publish.py` are now pinned" — asserted in the commit message of `c7c4613` and
+  publicly in ai-maestro-janitor#71. There were THREE call sites; `ci.yml:76` was
+  still unpinned. It resolved CPV's default branch onto the `v2.153.2` regression and
+  turned the v0.35.7 release CI red on 8 CRITICALs the janitor did not cause and
+  could not fix locally, while the pinned local gate passed 0/0/0/0 on the same
+  commit. WHY: I grepped the two FILES I already had in mind instead of grepping for
+  the INVOCATION, then repeated the "both" claim without re-checking it. Lesson: to
+  prove a thing is pinned everywhere, search for the thing (`grep -rn
+  'claude-plugins-validation'`), not for the places you expect it. Fixed in v0.35.8;
+  all three sites now carry a BUMP PROTOCOL comment naming the other two, so a future
+  bump cannot pin a subset.
