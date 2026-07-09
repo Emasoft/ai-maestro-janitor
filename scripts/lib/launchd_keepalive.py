@@ -24,7 +24,6 @@ install must not kill the very daemon it was meant to protect.
 
 from __future__ import annotations
 
-import filecmp
 import os
 import shutil
 import subprocess
@@ -218,15 +217,42 @@ def activate() -> tuple[bool, str]:
 
 
 def staged_is_current(source_scripts_dir: Path) -> bool:
-    """True iff the staged DATA ``daemon.py`` is byte-identical to ``source_scripts_dir``'s
-    ``daemon.py``. When False, a newer/different version is available and the OS-spawned
-    daemon should ``restage`` + exit so launchd respawns it on the fresh code. False if
-    either file is missing (the caller only acts when a real source dir was resolved)."""
-    staged = data_scripts_dir() / "daemon.py"
-    src = source_scripts_dir / "daemon.py"
-    if not staged.is_file() or not src.is_file():
+    """True iff EVERY file of the daemon's staged import closure is byte-identical to
+    ``source_scripts_dir``'s copy. When False, a newer/different/incomplete stage exists and
+    the OS-spawned daemon should ``restage`` + exit so launchd respawns on the fresh code.
+    False if the source dir carries no ``daemon.py`` (nothing to compare), the closure can't
+    be computed, or any closure file is missing/unreadable/mismatched.
+
+    Two bugs this shape fixes (TRDD-K3WQ7XM9 bug #2), both proven to report a STALE stage as
+    "current" — starving the OS-respawn self-heal so the launchd daemon kept booting old code:
+
+    * WRONG FILE SET — the old check compared ONLY ``daemon.py``. A stale ``lib/`` closure
+      file (e.g. an old ``global_state.py``) with a current ``daemon.py`` read as "current",
+      so the OS daemon ran fresh ``daemon.py`` against stale libs. We now compare the WHOLE
+      closure (``keepalive_stage.daemon_closure`` — the exact set ``restage`` copies).
+    * FILECMP CACHE FALSE-POSITIVE — ``filecmp.cmp(shallow=False)`` keeps a MODULE-LEVEL
+      cache keyed on ``(path, path, sig, sig)`` where ``sig`` is ``(mode, size, mtime)``.
+      After a file is overwritten with same-size/same-mtime BUT DIFFERENT content, the cache
+      returns its stale ``True`` (empirically confirmed). We read bytes directly instead —
+      no cross-call cache — so a changed-but-same-signature file is always detected."""
+    if not (source_scripts_dir / "daemon.py").is_file():
         return False
-    return filecmp.cmp(staged, src, shallow=False)
+    dest_scripts = data_scripts_dir()
+    try:
+        closure = keepalive_stage.daemon_closure(source_scripts_dir)
+    except (OSError, SyntaxError, ValueError):
+        # An unreadable / unparseable source daemon.py can't be proven current → restage.
+        return False
+    if not closure:
+        return False
+    for src in closure:
+        staged = dest_scripts / src.relative_to(source_scripts_dir)
+        try:
+            if not staged.is_file() or staged.read_bytes() != src.read_bytes():
+                return False
+        except OSError:
+            return False
+    return True
 
 
 def install(source_scripts_dir: Path) -> tuple[bool, str]:

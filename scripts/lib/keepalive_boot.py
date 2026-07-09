@@ -3,9 +3,11 @@
 The OS keepalive launches ``daemon_keepalive_entry.py`` from the persistent DATA
 dir, and that entry does a static ``import daemon`` — so the daemon AND its whole
 ~16-file import closure must be present and uncorrupted BESIDE the entry at the DATA
-path. ``launchd_keepalive.staged_is_current`` only byte-compares ``daemon.py`` vs the
-cache (a CURRENCY check), and nothing detects a *corrupt/truncated/incomplete* stage
-(interrupted copy, disk-full, bit-rot, partial relocation). A torn stage makes
+path. ``launchd_keepalive.staged_is_current`` byte-compares the whole closure vs the
+cache (a CURRENCY check the daemon self-heal loop runs), but that runs only when a live
+daemon is executing — nothing detects a *corrupt/truncated/incomplete* stage
+(interrupted copy, disk-full, bit-rot, partial relocation) at LAUNCH, before any daemon
+runs. A torn stage makes
 ``import daemon`` raise → the OS service crash-loops with NO re-stage trigger, because
 the only thing that re-stages is a live session firing ``_setup_os_keepalive()`` — and
 an all-sessions-down host (the exact scenario the OS keepalive exists for) cannot

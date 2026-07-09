@@ -468,6 +468,27 @@ def test_staged_is_current_false_when_differs_or_missing(
     assert launchd_keepalive.staged_is_current(src) is False  # content differs
 
 
+def test_staged_is_current_false_when_closure_lib_stale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stale CLOSURE lib file (with a byte-current daemon.py) → NOT current, so the OS
+    daemon restages rather than running a fresh daemon.py against stale libs. The old
+    daemon.py-only check reported this as "current" (TRDD-K3WQ7XM9 bug #2, wrong file set)."""
+    data = tmp_path / "data"
+    (data / "scripts" / "lib").mkdir(parents=True)
+    src = tmp_path / "src"
+    (src / "lib").mkdir(parents=True)
+    # daemon.py imports a sibling lib module → the closure includes lib/foo.py.
+    (src / "daemon.py").write_text("import foo\n", encoding="utf-8")
+    (src / "lib" / "foo.py").write_text("VERSION = 2\n", encoding="utf-8")
+    (data / "scripts" / "daemon.py").write_text("import foo\n", encoding="utf-8")  # daemon.py matches
+    (data / "scripts" / "lib" / "foo.py").write_text("VERSION = 1\n", encoding="utf-8")  # but foo.py is STALE
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(data))
+    assert launchd_keepalive.staged_is_current(src) is False
+    (data / "scripts" / "lib" / "foo.py").write_text("VERSION = 2\n", encoding="utf-8")  # now fresh
+    assert launchd_keepalive.staged_is_current(src) is True
+
+
 def test_restage_stages_without_ever_activating(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
