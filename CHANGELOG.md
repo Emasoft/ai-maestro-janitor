@@ -2,13 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.35.3] - 2026-07-09
-
-### Bug Fixes
-
-- Driver-aware keep-going nudge fallback (issue #74)
+## [0.35.4] - 2026-07-09
 
 ### Documentation
 
-- TRDD-98ISATJZ — own the memory-discoverability design (janitor#62)
+- Carry 3 memory-pass decisions into TRDD-3XS3PDCF STATE
+- Reflow a line that poisoned markdownlint MD004
+
+### Miscellaneous
+
+- Refresh the fenced CLAUDE.md project map
+
+### Security
+
+- Pin CPV to v2.153.1 and raise the release bound to 30m
 
