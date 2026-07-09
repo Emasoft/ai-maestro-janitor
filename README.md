@@ -708,8 +708,16 @@ new ones added in future releases).
 The SessionStart hook copies the plugin's shipped rules (`rules/*.md`) into the
 active scope's rules dir — `~/.claude/rules/` (user install) or
 `<project>/.claude/rules/` (project/local install) — because Claude Code's rule
-loader only reads those, not a plugin's bundled `rules/`. Each installed rule
-carries a **conditional inert-guard** at its top plus an
+loader only reads those, not a plugin's bundled `rules/`. The shipped set is
+`commit-discipline`, `markdown-memory-recall`, `use-safe-delete`,
+`janitor-heartbeat-protocol`, `janitor-footprint`, plus the three universal
+governance rules `trdd-design-tasks`, `prrd-design-rules`, and
+`universal-kanban` — the IND (ai-maestro-independent) half of ai-maestro's
+3-pillars split, usable in any project with no server or plugin beyond the
+janitor (their DEP overlays are installed separately by the ai-maestro server,
+never by the janitor). The set is auto-discovered by globbing `rules/*.md`, so
+dropping a new `.md` there ships it — there is no hardcoded list. Each installed
+rule carries a **conditional inert-guard** at its top plus an
 `ai-maestro-janitor:installed-rule` provenance marker:
 
 - **Disarmed** (`/janitor-global-disarm` set the kill-switch) → the rule tells

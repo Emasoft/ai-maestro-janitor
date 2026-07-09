@@ -248,3 +248,75 @@ def test_atomic_write_leaves_no_temp_residue(tmp_path, monkeypatch):
     rules_installer.install_rules(plugin)
     leftovers = [p.name for p in dst.parent.iterdir() if p.name != _DST_NAME]
     assert leftovers == [], f"unexpected temp residue: {leftovers}"
+
+
+# ---- issue #73: the 3 IND governance rules shipped via rules_installer -----
+
+# The universal (ai-maestro-INDEPENDENT) governance rules shipped by the janitor.
+_IND_RULES = ("trdd-design-tasks.md", "prrd-design-rules.md", "universal-kanban.md")
+# DEP-only overlays the janitor must NEVER ship — the ai-maestro server installs
+# them into agent workdirs as aimaestro-*.md; the janitor's cleanup keeps ignoring
+# their old (unmarked) hand-placed globals too.
+_DEP_ONLY_RULES = ("trdd-approval-tiers.md", "manager-approval-defaults.md")
+
+
+def test_ind_governance_rules_shipped_with_guard_block():
+    """The 3 IND governance rules ship under rules/, each wrapped with the provenance
+    marker AND the conditional inert-guard, and each keeps its body H1 + Layering note."""
+    rules_dir = _PROJECT_ROOT / "rules"
+    for name in _IND_RULES:
+        p = rules_dir / name
+        assert p.is_file(), f"expected shipped IND rule {name}"
+        text = p.read_text(encoding="utf-8")
+        assert _MARKER in text, f"{name} missing the provenance marker"
+        assert "> [!IMPORTANT]" in text, f"{name} missing the conditional inert-guard"
+        assert text.startswith("<!-- " + _MARKER), f"{name} guard must lead the file"
+        assert "\n# " in text, f"{name} lost its body H1 heading under the wrap"
+        # The IND "Layering note" naming the DEP overlay is kept verbatim (issue #73).
+        assert "Layering note" in text, f"{name} lost its Layering note"
+
+
+def test_dep_only_rules_are_not_shipped():
+    """The two DEP-only overlays must NOT be shipped by the janitor (issue #73)."""
+    rules_dir = _PROJECT_ROOT / "rules"
+    for name in _DEP_ONLY_RULES:
+        assert not (rules_dir / name).exists(), f"{name} must NOT ship with the janitor"
+
+
+def test_ind_rules_install_and_are_content_idempotent(tmp_path, monkeypatch):
+    """Installing the REAL shipped rules lands the 3 IND rules byte-identical to source,
+    and a second install re-copies nothing — the acceptance criterion "byte-stable across
+    sessions (content-idempotent)"."""
+    rules_dst_dir = _isolate_project_scope(
+        monkeypatch, tmp_path / "home", tmp_path / "proj"
+    ).parent
+    src_dir = _PROJECT_ROOT / "rules"
+    copied = rules_installer.install_rules(_PROJECT_ROOT)
+    for name in _IND_RULES:
+        dst = rules_dst_dir / name
+        assert dst.is_file(), f"{name} was not installed"
+        assert dst.read_bytes() == (src_dir / name).read_bytes(), f"{name} not byte-identical to source"
+        assert str(dst) in copied
+    # Re-install is a no-op: the on-disk copies are already byte-exact.
+    assert rules_installer.install_rules(_PROJECT_ROOT) == []
+
+
+def test_ind_rule_takes_over_unmarked_same_named_file(tmp_path, monkeypatch):
+    """Takeover semantics (issue #73): install_rules compares BYTES, not markers, so a
+    user's pre-existing UNMARKED trdd-design-tasks.md is OVERWRITTEN by the janitor's
+    wrapped IND copy — the content-based overwrite IS the one-shot migration. This pins
+    that behavior so a future marker-gating of the install path can't silently break the
+    takeover (marker-gating guards only the REMOVAL path, never the install)."""
+    rules_dst_dir = _isolate_project_scope(
+        monkeypatch, tmp_path / "home", tmp_path / "proj"
+    ).parent
+    rules_dst_dir.mkdir(parents=True, exist_ok=True)
+    victim = rules_dst_dir / "trdd-design-tasks.md"
+    victim.write_text("# OLD hand-placed global, no janitor marker\n", encoding="utf-8")
+    assert _MARKER not in victim.read_text(encoding="utf-8")
+
+    copied = rules_installer.install_rules(_PROJECT_ROOT)
+    text = victim.read_text(encoding="utf-8")
+    assert _MARKER in text, "the unmarked same-named file must be overwritten by the marked IND copy"
+    assert text == (_PROJECT_ROOT / "rules" / "trdd-design-tasks.md").read_text(encoding="utf-8")
+    assert str(victim) in copied
