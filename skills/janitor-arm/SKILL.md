@@ -36,12 +36,15 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    uninstall … / install … --scope user` commands are in the warning). Only
    proceed to step 1 when it prints `OK user-scope`.
 
-1. Install (or refresh) the stub atomically. `/janitor-arm` arms only THIS project's
-   heartbeat; it deliberately does NOT touch the machine-wide global kill-switch — a
-   project arm must not silently undo a deliberate `/janitor-global-disarm`. To revive
-   a globally-disarmed daemon, use `/janitor-global-arm`.
+1. Revoke this project's opt-out, then install (or refresh) the stub atomically.
+   `/janitor-arm` arms only THIS project's heartbeat; it deliberately does NOT touch the
+   machine-wide global kill-switch — a project arm must not silently undo a deliberate
+   `/janitor-global-disarm`. To revive a globally-disarmed daemon, use `/janitor-global-arm`.
 
    ```bash
+   STATE_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state"
+   mkdir -p "$STATE_DIR"
+   rm -f "$STATE_DIR/disarmed.flag"
    mkdir -p "${CLAUDE_PLUGIN_DATA}"
    STUB_SOURCE="${CLAUDE_PLUGIN_ROOT}/scripts/dispatcher-stub.py"
    STUB_DEST="${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py"
@@ -50,6 +53,13 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    chmod +x "$TMP_DEST"
    mv -f "$TMP_DEST" "$STUB_DEST"
    ```
+
+   The `disarmed.flag` removal is FIRST, before `CronCreate`, on purpose. Every step of this
+   skill can be cut short by a rate limit or an ended turn, so the ordering decides which way
+   a half-finished arm fails. Clearing the flag first means a turn that dies before step 5
+   leaves *no cron and no opt-out* — the fleet guardian reads `cron_dead` and re-arms, and the
+   arm self-heals. Clearing it last would leave *a cron and a stale opt-out*, and the guardian
+   would file this project under "the user opted out" and never touch it again.
 
 2. Read cron from `${CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON}`, default `"*/5 * * * *"`.
 
@@ -95,7 +105,7 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
 
 ## Output
 
-One line: cron expression, heartbeat ID, current stub target version (durable vs session-only per step 7). The stub file is written atomically to `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`; no other files written.
+One line: cron expression, heartbeat ID, current stub target version (durable vs session-only per step 7). The stub file is written atomically to `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`; in this project's `.janitor/state/` it writes `heartbeat-armed-at.ts` and removes `disarmed.flag` + `heartbeat-renew-seen.txt`. No other files written.
 
 ## Known limitations (Claude Code platform)
 

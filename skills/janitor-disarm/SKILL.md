@@ -24,32 +24,30 @@ Use this when you want to pause janitor activity without uninstalling the plugin
 
 2. For each matched job, call `CronDelete` with its ID. If any `CronDelete` returns an error, continue with the rest — surface the error in the final report.
 
-3. Remove the arm-timestamp and the renewal-dedupe file so a future `/janitor-arm` starts cleanly:
+3. Remove the arm-timestamp and the renewal-dedupe file so a future `/janitor-arm` starts cleanly, and write `disarmed.flag` — the positive opt-out record. The flag is what `fleet_scan` reads to classify this project `unarmed` (sacrosanct); without it the fleet guardian sees a cron-less project as `cron_dead` and types `/janitor-arm` back into this pane, undoing the disarm:
 
    ```bash
    STATE_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state"
+   mkdir -p "$STATE_DIR"
    rm -f "$STATE_DIR/heartbeat-armed-at.ts" \
          "$STATE_DIR/heartbeat-renew-seen.txt"
+   date +%s > "$STATE_DIR/disarmed.flag"
    ```
 
-4. Remove the auto-rolling stub from the plugin data dir (installed by `/janitor-arm` in v0.4.11+). The data directory itself is preserved — CC's `/plugin uninstall` flow handles full data-dir cleanup; we just remove the stub so disarm is a clean inverse of arm:
+4. Report one line: `Janitor disarmed: <N> heartbeat(s) deleted.` If any `CronDelete` failed, append `; <M> deletion(s) failed — check CronList and retry`.
 
-   ```bash
-   rm -f "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins}/dispatcher-stub.py"
-   ```
-
-5. Report one line: `Janitor disarmed: <N> heartbeat(s) deleted, stub removed.` If any `CronDelete` failed, append `; <M> deletion(s) failed — check CronList and retry`.
+**Do NOT delete `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`.** Removing it reads like the inverse of `/janitor-arm` step 1, but it is not: the data dir is per-PLUGIN, so that stub is a single machine-wide file every project's cron execs. This skill is also what a session runs on the bare `[janitor-self-disarm]` marker, so a `/janitor-global-disarm` has every armed session reach this skill at once — the first one to delete the stub strands all the others firing at a missing file, burning a full billed turn per fire, which is the exact cost TRDD-RQ9FIFX6 exists to eliminate. The stub is inert without a cron, and `/plugin uninstall` owns the data dir.
 
 ## Output
 
-One line describing how many heartbeats were deleted. No files written beyond the two removed state files. No side effects other than CronDelete + filesystem cleanup.
+One line describing how many heartbeats were deleted. Writes exactly one file (`disarmed.flag`) and removes two (`heartbeat-armed-at.ts`, `heartbeat-renew-seen.txt`), all inside this project's `.janitor/state/`. Nothing outside the project is touched.
 
 ## Error Handling
 
 - `CronList` fails → abort with the error verbatim. Cannot disarm without a list.
 - Some `CronDelete` calls fail → continue processing the rest, report failures in the final line.
-- `STATE_DIR` doesn't exist → fine; the `rm -f` is a no-op in that case.
-- Zero `[janitor-heartbeat]` jobs found → still remove the state files and report `Janitor disarmed: 0 heartbeat(s) deleted (nothing was armed).`
+- `STATE_DIR` doesn't exist → the `mkdir -p` creates it; the `rm -f` is then a no-op. The `disarmed.flag` write must still happen: a never-armed project that the user explicitly disarms is opting out, and the guardian must honor that.
+- Zero `[janitor-heartbeat]` jobs found → still run step 3 and report `Janitor disarmed: 0 heartbeat(s) deleted (nothing was armed).`
 
 ## Examples
 
@@ -62,13 +60,14 @@ User: kill the janitor cron
 
 ## Scope
 
-This skill ONLY withdraws heartbeat crons and clears the arm-timestamp. It does NOT uninstall the plugin, touch `.janitor/state/` data, prune logs, or affect drift-detector seen-files. To re-arm, run `/janitor-arm`.
+PROJECT-SCOPED. This skill ONLY withdraws this project's heartbeat crons, clears its arm-timestamp, and records its opt-out. It does NOT uninstall the plugin, prune logs, affect drift-detector seen-files, or touch anything shared between projects — in particular it never removes the machine-wide dispatcher stub. To re-arm, run `/janitor-arm` (which clears `disarmed.flag`).
 
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/dispatch.py` — the cron-fire entry point; will no longer be invoked by any `[janitor-heartbeat]` cron once this skill completes.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/heartbeat-armed-at.ts` — arm timestamp, removed by this skill.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/heartbeat-renew-seen.txt` — renewal-nudge dedupe file, removed by this skill.
+- `$CLAUDE_PROJECT_DIR/.janitor/state/disarmed.flag` — the opt-out record, written by this skill and read by `scripts/lib/fleet_scan.py` (`deliberately_unarmed`) so the fleet guardian leaves this project alone.
 
 ## Checklist
 
@@ -77,5 +76,6 @@ Copy this checklist and track your progress:
 - [ ] `CronList` and filter prompts starting with `[janitor-heartbeat]`
 - [ ] `CronDelete` each matched job, continue past per-job errors
 - [ ] Remove `.janitor/state/heartbeat-armed-at.ts` and `heartbeat-renew-seen.txt`
-- [ ] Remove `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (best-effort)
+- [ ] Write `.janitor/state/disarmed.flag` (the opt-out the fleet guardian honors)
+- [ ] Leave `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` alone — it is machine-wide
 - [ ] Report the deletion count (plus failure count if any) in one line
