@@ -29,8 +29,9 @@ runtime-targets: [macos, linux]
 impacts: []
 attempts: 0
 test-failures: 0
-last-test-result: not-run
-implementation-commits: []
+last-test-result: pass
+last-test-at: 2026-07-10T04:52:00+0200
+implementation-commits: [84c4564]
 ---
 
 # Soft-by-default command injection — wait for the turn to finish unless the target is wedged
