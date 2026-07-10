@@ -1021,7 +1021,11 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 identity=identity, sf=sf, now=now, audit=_audit,
             )
             continue
-        plan = fleet_inject.build_injection(inst.terminal, action)
+        # Hard (ESC) only for a frozen target — a live cron_dead/version_mismatch
+        # session gets a soft enqueue so its in-flight turn survives (TRDD-0GPQROC1).
+        plan = fleet_inject.build_injection(
+            inst.terminal, action, esc_first=fr.injection_is_hard(inst.diagnosis)
+        )
         if plan is None:
             state.log_line(
                 "daemon",
@@ -1054,7 +1058,12 @@ def _fire_fleet_stop(inst, plan: dict, flag_state: str, now: int) -> None:
     a successful fire (so a held flag hits each session once), and F3-audit (fail-open).
     Extracted from task_fleet_stop so the beat stays under the complexity cap; `inst`
     is the fleet Instance (for audit fields) or None."""
-    cmd_plan = fleet_restart.command_injection_plan(plan["terminal"], plan["command"], esc_first=True)
+    # SOFT (no ESC, TRDD-0GPQROC1): a machine-wide pause/disarm should land at each
+    # session's turn boundary — the enqueued command runs when the turn ends, so the
+    # stop never destroys in-flight work (user directive 2026-07-10).
+    cmd_plan = fleet_restart.command_injection_plan(
+        plan["terminal"], plan["command"], esc_first=False
+    )
     if cmd_plan is None:
         state.log_line(
             "daemon",

@@ -48,6 +48,9 @@ def _wire(monkeypatch, tmp_path, *, fleet, enabled=True, fire_ok=True, plan: str
     monkeypatch.setattr(daemon.os, "getpid", lambda: 1)
 
     def _plan(terminal, command, *, esc_first):
+        # SOFT contract (TRDD-0GPQROC1): a fleet stop lands at each session's turn
+        # boundary — the daemon must never request an ESC-interrupt here.
+        assert esc_first is False, "fleet-stop injection must be soft (no ESC)"
         return None if plan is None else {"channel": "tmux", "command": command}
 
     monkeypatch.setattr(daemon.fleet_restart, "command_injection_plan", _plan)

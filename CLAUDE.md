@@ -225,21 +225,28 @@ arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 `janitor-credential-window-audit`, `janitor-github-workflow-doctor`,
 `janitor-github-workflow-create`, `janitor-fork-pr-cache-audit`,
 `janitor-compact-context` (agent-invocable self-compact + auto-resume; backed by
-`scripts/compact_trigger.py`; `--soft` = enqueue `/compact` WITHOUT ESC so the turn
-finishes first, `--handoff` = run `/janitor-write-handoff` first — combinable —
+`scripts/compact_trigger.py`; SOFT/enqueue by default since TRDD-0GPQROC1 — `/compact`
+runs when the turn ends; `--hard` = ESC-interrupt for emergencies (the ≥85% enforcement
+hook passes it), `--handoff` = run `/janitor-write-handoff` first — combinable —
 TRDD-LQU7OXXV), `janitor-write-handoff` (rich agent-authored handoff to
 `.janitor/state/agent-handoff.md`, the OPT-IN semantic complement to the always-on
 zero-cost `pre-compact-handoff.py`; `--then-compact` chains to `/compact`),
-`janitor-reload-plugins` (→ `/reload-plugins`; `--soft`), `janitor-reload-skills`
+`janitor-reload-plugins` (→ `/reload-plugins --force`; soft default, `--hard`),
+`janitor-reload-skills`
 (→ CC's `/reload-skills` for STANDALONE non-plugin skills/commands at local/project/user
 scope — `/reload-plugins` only reloads plugin-bundled ones; backed by
-`scripts/reload_skills_trigger.py`; `--soft`) ↔ `janitor-global-reload-skills` (machine-wide:
+`scripts/reload_skills_trigger.py`; soft default, `--hard`) ↔ `janitor-global-reload-skills`
+(machine-wide:
 `global_control_cli.py reload-skills` stamps a `skills-reload-needed.flag` generation that
 `dispatch.py _phase_skills_reload` emits `[janitor-reload-skills]` for once-per-session,
 mirroring the `[janitor-reload]` path — TRDD-LQU7OXXV). The self-trigger commands share
-`scripts/lib/terminal_trigger.py`, which now parameterizes `esc_first` (hard=ESC-interrupt /
+`scripts/lib/terminal_trigger.py`, which parameterizes `esc_first` (hard=ESC-interrupt /
 soft=enqueue) + multi-command sends — the substrate TRDD-ME8V2YJF reuses for daemon-driven
-fleet injection.
+fleet injection. **Injection is SOFT by default fleet-wide (TRDD-0GPQROC1):** the three
+self-triggers enqueue, `_fire_fleet_stop` types stop commands without ESC, gentle recovery
+rungs ESC only a `frozen` target (`fleet_recovery.injection_is_hard`), and
+`fleet_inject.build_command_plan` honors `esc_first` on EVERY channel (tmux/wtype/xdotool
+included — they used to always ESC).
 
 **Agents (`agents/`, 2)** — the TWO single-curator agents, each ONE agent that loads
 many per-task SKILLS (never one-agent-per-task), runs in its OWN context, returns one
@@ -257,12 +264,12 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=1a37546f2078 digest=2197f8c0eb04 generated=2026-07-09T21:29:34+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=3e218eb522bf digest=b2e7128d41f5 generated=2026-07-10T04:29:50+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
 `scripts/compact_trigger.py` — Backing script for /janitor-compact-context (TRDD-31095269).
-  · plan_compact(*, soft, handoff) -> tuple[list[str], bool] — Map the (--soft, --handoff) flags to the (commands, esc_first) send plan.
+  · plan_compact(*, soft, handoff) -> tuple[list[str], bool] — Map the resolved (soft, handoff) mode to the (commands, esc_first) send plan.
   · main() -> int
 `scripts/daemon.py` — Global janitor daemon — single-instance owner of machine-global auto-update tasks.
   · task_marketplace_refresh() -> None — Run `claude plugin marketplace update` (bulk → all marketplaces).
@@ -514,10 +521,11 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · iterm_osascript(session_id, command, *, delay_s, esc_first) -> str — AppleScript that targets ONLY the iTerm session whose id == `session_id`,
   · aimaestro_command_argv(cli, session, command) -> list[str] — argv for ``<cli> session command <session> --newline -- <command>`` — the
   · build_command_plan(terminal, command, *, esc_first, delay_s) -> dict | None — THE single channel-selection builder: turn a resolved `terminal` identity plus
-  · build_injection(terminal, action, *, delay_s) -> dict | None — Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
+  · build_injection(terminal, action, *, esc_first, delay_s) -> dict | None — Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
   · fire(plan) -> bool — Fire a built injection plan fully DETACHED — so the daemon never blocks and
 `scripts/lib/fleet_recovery.py` — Fleet recovery POLICY (TRDD-324223a6, GROUP A / A2) — the PURE decisions the
   · action_for(diagnosis, attempts, *, include_hard) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
+  · injection_is_hard(diagnosis) -> bool — Hard/soft policy for a gentle command-typing injection (TRDD-0GPQROC1). PURE.
   · gate(*, last_ts, attempts, now) -> str — Decide whether to attempt recovery on an instance NOW. Returns:
 `scripts/lib/fleet_restart.py` — Hard-restart recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
   · hard_restart_enabled() -> bool — Master opt-in for the process-killing rungs. DEFAULT-OFF — these rungs kill and

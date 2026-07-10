@@ -4,7 +4,7 @@
 # ///
 """Backing script for /janitor-compact-context (TRDD-31095269).
 
-Records the resume directive, then fires a DETACHED, delayed ESC -> /compact at
+Records the resume directive, then fires a DETACHED, delayed /compact at
 THIS session's own iTerm pane so the agent can compact its own context mid-session
 (native auto-compact is unreliable on the 1M window).
 
@@ -15,12 +15,14 @@ Two steps:
      "[janitor-resume] <directive>", so the session auto-resumes exactly where it
      left off. (No directive -> the PostCompact hook falls back to the newest
      in-flight TRDD on the board.)
-  2. Launch a detached osascript that, after a short delay, sends ESC (to
-     interrupt an in-flight turn) then "/compact" to the iTerm session whose id
-     matches the UUID in $ITERM_SESSION_ID.
+  2. Launch a detached osascript that, after a short delay, types "/compact" to
+     the iTerm session whose id matches the UUID in $ITERM_SESSION_ID. SOFT is
+     the default (TRDD-0GPQROC1): no ESC, so the command enqueues and runs when
+     the current turn ends — no in-flight work lost. `--hard` sends ESC first
+     (interrupt NOW) for emergencies like the >=85% enforcement hook.
 
-The delay + detach are load-bearing: the script must NOT be killed by the very
-ESC it sends, so it returns immediately and the keystrokes fire ~delay seconds
+The delay + detach are load-bearing: the script must NOT be killed by the ESC it
+may send, so it returns immediately and the keystrokes fire ~delay seconds
 later (after the agent ends its turn). It targets ONLY the session whose UUID
 matches $ITERM_SESSION_ID — never other panes — so concurrent Claude instances
 are untouched.
@@ -62,13 +64,14 @@ HANDOFF_THEN_COMPACT_CMD = "/janitor-write-handoff --then-compact"
 
 
 def plan_compact(*, soft: bool, handoff: bool) -> tuple[list[str], bool]:
-    """Map the (--soft, --handoff) flags to the (commands, esc_first) send plan.
+    """Map the resolved (soft, handoff) mode to the (commands, esc_first) send plan.
 
-    Four modes, each a keystroke sequence typed into this session's own pane:
-      - default (hard):    ESC → /compact                     (interrupt now, compact)
-      - --soft:            /compact                            (no ESC → runs at turn end)
-      - --handoff (hard):  ESC → /janitor-write-handoff …      (skill then chains /compact)
-      - --handoff --soft:  /janitor-write-handoff, /compact    (no ESC → both enqueued)
+    Four modes, each a keystroke sequence typed into this session's own pane
+    (since TRDD-0GPQROC1 soft is the CLI default and --hard is the opt-in):
+      - soft (default):    /compact                            (no ESC → runs at turn end)
+      - --hard:            ESC → /compact                      (interrupt now, compact)
+      - --handoff (soft):  /janitor-write-handoff, /compact    (no ESC → both enqueued)
+      - --handoff --hard:  ESC → /janitor-write-handoff …      (skill then chains /compact)
 
     Returns (commands, esc_first). `esc_first=False` is the SOFT contract: omit the ESC
     so the agent's in-flight turn is NOT interrupted — the command(s) enqueue and run
@@ -179,17 +182,24 @@ def main() -> int:
         default=2.0,
         help="seconds to wait before sending ESC -> /compact (lets the turn settle)",
     )
-    ap.add_argument(
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
         "--soft",
         action="store_true",
-        help="do NOT press ESC — enqueue the command(s) so they run AFTER the current "
-        "turn ends (no in-flight work lost); default is a hard ESC-interrupt compact",
+        help="deprecated no-op alias — SOFT (enqueue, no ESC) is now the default "
+        "(TRDD-0GPQROC1, user directive 2026-07-10)",
+    )
+    mode.add_argument(
+        "--hard",
+        action="store_true",
+        help="press ESC first — interrupt the in-flight turn so /compact runs NOW; "
+        "for emergencies (context near the wall), e.g. the >=85%% enforcement hook",
     )
     ap.add_argument(
         "--handoff",
         action="store_true",
         help="run /janitor-write-handoff (a rich agent-authored handoff) BEFORE /compact "
-        "— for delicate junctures; combinable with --soft",
+        "— for delicate junctures; combinable with --hard",
     )
     ap.add_argument(
         "--dry-run",
@@ -203,7 +213,11 @@ def main() -> int:
         path = _write_directive(directive)
         print(f"DIRECTIVE_WRITTEN {path}")
 
-    commands, esc_first = plan_compact(soft=args.soft, handoff=args.handoff)
+    # SOFT is the default (TRDD-0GPQROC1): the skill ends its turn right after firing,
+    # so the enqueued /compact runs seconds later anyway — without risking an ESC that
+    # cuts in-flight work. --hard restores the ESC for the emergency path (the >=85%
+    # context-enforcement hook passes it explicitly).
+    commands, esc_first = plan_compact(soft=not args.hard, handoff=args.handoff)
 
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH

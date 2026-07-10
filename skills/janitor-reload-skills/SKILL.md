@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-skills
-description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect without the human typing it. /reload-plugins reloads ONLY plugin-bundled skills, so standalone ones (added at any scope) need /reload-skills. Invoke on a [janitor-reload-skills] heartbeat marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. Fires ESC+/reload-skills at this session's own pane (iTerm/tmux); --soft enqueues without ESC. Trigger with /janitor-reload-skills [--soft], or by asking to reload skills now.
+description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect without the human typing it. /reload-plugins reloads ONLY plugin-bundled skills, so standalone ones (added at any scope) need /reload-skills. Invoke on a [janitor-reload-skills] heartbeat marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. Types /reload-skills at this session's own pane (iTerm/tmux); SOFT by default (no ESC — enqueues, runs after the current turn ends); --hard presses ESC first. Trigger with /janitor-reload-skills [--hard], or by asking to reload skills now.
 ---
 
 # Janitor reload-skills
@@ -38,17 +38,18 @@ Use `/janitor-reload-plugins` instead when the skill/command lives inside a plug
 
 ## Instructions
 
-1. **Run the backing script** (fires the detached ESC→/reload-skills at this pane
-   after a short delay). Add `--soft` to enqueue the reload instead of interrupting
-   the current turn:
+1. **Run the backing script** (fires the detached /reload-skills at this pane
+   after a short delay). The default is SOFT (TRDD-0GPQROC1): the command enqueues
+   and runs after the current turn ends — no in-flight work interrupted. Add
+   `--hard` only when the reload must happen NOW:
 
    ```bash
-   # HARD (default): ESC → /reload-skills (interrupts the current turn)
+   # SOFT (default): enqueue /reload-skills (no ESC — runs after the current turn
+   # ends, so no in-flight work is cut short)
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/reload_skills_trigger.py"
 
-   # SOFT: enqueue /reload-skills (no ESC — runs after the current turn ends, so no
-   # in-flight work is cut short). Prefer this when you're mid-task.
-   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/reload_skills_trigger.py" --soft
+   # HARD (opt-in): ESC → /reload-skills (interrupts the current turn)
+   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/reload_skills_trigger.py" --hard
    ```
 
    Read the one-word result:
@@ -60,9 +61,9 @@ Use `/janitor-reload-plugins` instead when the skill/command lives inside a plug
      tmux)."* Then stop.
 
 2. **END YOUR TURN IMMEDIATELY.** The script fired a *detached* keystroke sender
-   that, after ~2 s, sends the reload to your pane (ESC first in HARD mode; no ESC
-   in `--soft`, so it merely enqueues). For the command to run cleanly you must
-   stop now — do not call more tools. Emit one short line like *"Reloading skills to
+   that, after ~2 s, sends the reload to your pane (no ESC in the SOFT default, so
+   it enqueues and runs the moment your turn ends; ESC first in `--hard`). Stop
+   now — do not call more tools. Emit one short line like *"Reloading skills to
    pick up the change."* and stop. After the reload the conversation continues
    normally.
 
@@ -70,8 +71,8 @@ Use `/janitor-reload-plugins` instead when the skill/command lives inside a plug
 
 One short line to the user, then the turn ends. Side effect: launches a detached
 keystroke sender (osascript in iTerm, `tmux send-keys` in tmux) that types
-`/reload-skills` into this session's own pane — HARD mode (default) prepends a raw
-ESC (interrupt), `--soft` omits it (enqueue, runs after the current turn ends).
+`/reload-skills` into this session's own pane — SOFT mode (default) sends no ESC
+(enqueue, runs after the current turn ends), `--hard` prepends a raw ESC (interrupt).
 
 ## Done when (terminating conditions)
 
@@ -104,7 +105,7 @@ sessions. For the machine-wide (all-sessions) variant use
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/reload_skills_trigger.py` — backing script (fires
-  the detached ESC→/reload-skills; `--soft` omits the ESC).
+  the detached /reload-skills send; soft/enqueue by default, `--hard` for ESC-now).
 - `/janitor-reload-plugins` — the sibling for PLUGIN-bundled skills/commands
   (`/reload-plugins`).
 - `/janitor-global-reload-skills` — the machine-wide variant: stamps a generation

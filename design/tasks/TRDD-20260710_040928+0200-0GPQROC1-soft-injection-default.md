@@ -1,9 +1,9 @@
 ---
 trdd-id: 0GPQROC1
 title: Soft-by-default command injection — wait for the turn to finish unless the target is wedged
-column: dev
+column: testing
 created: 2026-07-10T04:09:28+0200
-updated: 2026-07-10T04:09:28+0200
+updated: 2026-07-10T04:52:00+0200
 current-owner: janitor-claude
 assignee: janitor-claude
 priority: 2
@@ -37,12 +37,29 @@ implementation-commits: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-10
 
-**IN PROGRESS.** User directive (2026-07-10, verbatim): "have you updated the commands
-to use the --soft option (waiting for the agent to go idle or the turn to finish before
-injecting the command)?" — i.e. injected commands must ENQUEUE (run at the turn
-boundary), not ESC-interrupt in-flight work, wherever the target may be a WORKING agent.
+**IMPLEMENTED + VERIFIED locally.** User directive (2026-07-10, verbatim): "have you
+updated the commands to use the --soft option (waiting for the agent to go idle or
+the turn to finish before injecting the command)?" — injected commands must ENQUEUE
+(run at the turn boundary), not ESC-interrupt in-flight work, wherever the target
+may be a WORKING agent.
 
-**NEXT ACTION:** implement per the decision table below, run suite + lint, commit.
+Shipped per the decision table (D1):
+- `reload_trigger.py`, `reload_skills_trigger.py`, `compact_trigger.py`, and the
+  `terminal_trigger.py` CLI — soft default; `--hard` opt-in; `--soft` kept as a
+  deprecated no-op alias (mutually exclusive with `--hard`).
+- `hooks/pre-tool-context-usage.py` — the >=85% enforcement auto-compact passes
+  `--hard` explicitly (emergency semantics preserved).
+- `lib/fleet_inject.py` — `build_command_plan` honors `esc_first` on tmux/wtype/
+  xdotool (was silently always-ESC); `build_injection` gained `esc_first`.
+- `lib/fleet_recovery.py` — new pure policy `injection_is_hard(diagnosis)`: True
+  only for `frozen` (a wedged turn never ends, so soft would never run).
+- `daemon.py` — session-liveness passes `esc_first=fr.injection_is_hard(...)`;
+  `_fire_fleet_stop` is soft (`esc_first=False`).
+- Docs: the 5 affected SKILL.md files, README.md, CLAUDE.md prose + repomap.
+- Tests: 10 updated/new across the trigger/fleet/hook test files; **full suite
+  12,350 passed, 1 skipped; ruff clean.**
+
+**NEXT ACTION:** rides the next release (publish is NON-EXEMPT — user approval).
 
 ## Problem (verified against the code, 2026-07-10)
 

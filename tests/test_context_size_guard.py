@@ -262,6 +262,30 @@ def test_enforce_hardstop_zero_disables(tmp_path: Path) -> None:
     assert mod._maybe_enforce(95, 950000, str(tmp_path), hardstop_pct=0, autocompact=True, now=0) is None
 
 
+def test_run_compact_trigger_argv_requests_hard(tmp_path: Path, monkeypatch) -> None:
+    """The >=85% enforcement tier must pass --hard explicitly (TRDD-0GPQROC1): the
+    trigger's CLI default became soft/enqueue, but this is the emergency wall — the
+    ESC-now semantics have to be requested. Captures the REAL argv by intercepting
+    subprocess.run inside the hook module; no keystroke is ever sent."""
+    mod = _import_hook()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "compact_trigger.py").write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(tmp_path))
+    captured: list[list[str]] = []
+
+    class _Done:
+        stdout = "COMPACT_FIRED"
+
+    def _fake_run(argv, **_kw):
+        captured.append(list(argv))
+        return _Done()
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+    assert mod._run_compact_trigger(90) == "COMPACT_FIRED"
+    assert len(captured) == 1
+    assert "--hard" in captured[0], "enforcement auto-compact must request the ESC path"
+
+
 def test_enforce_fires_deny_on_compact_fired(tmp_path: Path, monkeypatch) -> None:
     """Above the cap with a fired compaction -> deny, and the mark suppresses re-deny."""
     mod = _import_hook()

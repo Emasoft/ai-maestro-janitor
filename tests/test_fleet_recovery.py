@@ -78,3 +78,15 @@ def test_hard_budget_allows_exactly_one_hard_attempt() -> None:
     guard, so the guardian can never enter a kill/respawn storm."""
     assert fr.action_for("frozen", fr.MAX_ATTEMPTS - 1, include_hard=True) == "force_restart"
     assert fr.gate(last_ts=None, attempts=fr.MAX_ATTEMPTS, now=1_000_000) == "crash_loop"
+
+
+def test_injection_is_hard_only_for_frozen() -> None:
+    """Hard/soft injection policy (TRDD-0GPQROC1): ESC-interrupt ONLY a frozen target
+    (its wedged turn never ends, so an enqueued command would never run). Every LIVE
+    injectable diagnosis gets a soft enqueue that preserves in-flight work — as does
+    anything unknown (fail toward not destroying work)."""
+    assert fr.injection_is_hard("frozen") is True
+    assert fr.injection_is_hard("cron_dead") is False
+    assert fr.injection_is_hard("version_mismatch") is False
+    assert fr.injection_is_hard("healthy") is False
+    assert fr.injection_is_hard("nonsense") is False

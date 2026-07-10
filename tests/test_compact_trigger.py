@@ -107,7 +107,8 @@ def test_build_osascript_handoff_soft_types_both_no_esc() -> None:
 # ---------- main() via subprocess, ALWAYS --dry-run -----------------------
 
 def test_dry_run_writes_directive_and_reports_plan(tmp_path: Path) -> None:
-    """--dry-run + iTerm set: directive written, plan printed, NO osascript fired."""
+    """--dry-run + iTerm set: directive written, plan printed, NO osascript fired.
+    Bare invocation is SOFT (TRDD-0GPQROC1): no ESC — /compact enqueues at turn end."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run(
@@ -118,13 +119,14 @@ def test_dry_run_writes_directive_and_reports_plan(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert "DIRECTIVE_WRITTEN" in proc.stdout
     assert "DRY_RUN" in proc.stdout and "789D8299-5AA2-48CF-9325-3BC972B9BEAE" in proc.stdout
+    assert "ESC->" not in proc.stdout, "SOFT default must not interrupt the in-flight turn"
     assert "COMPACT_FIRED" not in proc.stdout, "dry-run must not fire"
     written = (p / ".janitor" / "state" / "resume-directive.txt").read_text(encoding="utf-8")
     assert written.strip() == "continue TRDD-31095269 at P3 — read STATE block"
 
 
 def test_soft_dry_run_omits_esc_from_plan(tmp_path: Path) -> None:
-    """--soft: the printed iTerm plan has NO `ESC->` prefix (enqueue, don't interrupt)."""
+    """--soft (deprecated no-op alias of the default): NO `ESC->` prefix in the plan."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run(
@@ -136,16 +138,57 @@ def test_soft_dry_run_omits_esc_from_plan(tmp_path: Path) -> None:
     assert "COMPACT_FIRED" not in proc.stdout
 
 
-def test_handoff_dry_run_runs_handoff_skill_first(tmp_path: Path) -> None:
-    """--handoff (hard): the plan is ESC -> /janitor-write-handoff (which then chains /compact)."""
+def test_hard_dry_run_has_esc_prefix(tmp_path: Path) -> None:
+    """--hard (opt-in since TRDD-0GPQROC1): the plan leads with `ESC->` — the emergency
+    semantics the >=85% context-enforcement hook requests explicitly."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run(
+        ["--dry-run", "--hard"], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE"
+    )
+    assert proc.returncode == 0
+    assert "ESC->" in proc.stdout, "--hard must restore the ESC-interrupt"
+    assert "COMPACT_FIRED" not in proc.stdout
+
+
+def test_soft_and_hard_are_mutually_exclusive(tmp_path: Path) -> None:
+    """--soft --hard together is a usage error (argparse mutually-exclusive group)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run(
+        ["--dry-run", "--soft", "--hard"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+    )
+    assert proc.returncode != 0, "contradictory modes must be rejected"
+
+
+def test_handoff_hard_dry_run_runs_handoff_skill_first(tmp_path: Path) -> None:
+    """--handoff --hard: the plan is ESC -> /janitor-write-handoff (which then chains
+    /compact). Since TRDD-0GPQROC1 the hard variant must be requested explicitly."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run(
+        ["--dry-run", "--handoff", "--hard"],
+        project=p,
+        iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+    )
+    assert proc.returncode == 0
+    assert "ESC->" in proc.stdout, "hard --handoff interrupts first"
+    assert "/janitor-write-handoff --then-compact" in proc.stdout
+
+
+def test_handoff_default_is_soft_enqueues_both(tmp_path: Path) -> None:
+    """--handoff alone is SOFT now (TRDD-0GPQROC1): no ESC; both commands enqueued."""
     p = tmp_path / "proj"
     p.mkdir()
     proc = _run(
         ["--dry-run", "--handoff"], project=p, iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE"
     )
     assert proc.returncode == 0
-    assert "ESC->" in proc.stdout, "hard --handoff interrupts first"
-    assert "/janitor-write-handoff --then-compact" in proc.stdout
+    assert "ESC->" not in proc.stdout, "--handoff default must be soft"
+    out = proc.stdout
+    assert out.index("/janitor-write-handoff") < out.index("/compact"), "handoff before compact"
 
 
 def test_handoff_soft_dry_run_enqueues_both(tmp_path: Path) -> None:

@@ -156,13 +156,15 @@ def build_command_plan(
     """
     pane = terminal.get("tmux_pane", "").strip()
     if pane and terminal_trigger.valid_tmux_pane(pane):
-        # build_tmux_steps always leads with ESC; harmless at a shell prompt (it just
-        # clears the line), so the esc_first distinction only matters for iTerm.
+        # esc_first MUST be honored here too (TRDD-0GPQROC1): a mid-turn Claude in a
+        # tmux pane is interrupted by ESC exactly like in iTerm, so the old
+        # always-ESC shortcut ("harmless at a shell prompt") silently turned every
+        # SOFT intent hard on this channel and killed in-flight work.
         return {
             "channel": "tmux",
             "command": command,
             "delay_s": delay_s,
-            "steps": terminal_trigger.build_tmux_steps(pane, command),
+            "steps": terminal_trigger.build_tmux_steps(pane, command, esc_first=esc_first),
         }
     sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
     if sid and valid_session_id(sid):  # accept '<tty>:<uuid>' or a bare uuid
@@ -185,7 +187,9 @@ def build_command_plan(
         }
     gui_channel = terminal.get("linux_gui_channel", "").strip()
     if gui_channel in ("wtype", "xdotool"):
-        # Same "always ESC-first, harmless at a shell prompt" rationale as tmux.
+        # esc_first honored here too (TRDD-0GPQROC1) — same reasoning as the tmux
+        # channel above: ESC into a mid-turn Claude interrupts it, so soft must
+        # genuinely mean soft on every keystroke channel.
         builder = (
             terminal_trigger.build_wtype_steps
             if gui_channel == "wtype"
@@ -195,12 +199,14 @@ def build_command_plan(
             "channel": gui_channel,
             "command": command,
             "delay_s": delay_s,
-            "steps": builder(command),
+            "steps": builder(command, esc_first=esc_first),
         }
     return None  # genuinely unreachable: no channel resolved
 
 
-def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dict | None:
+def build_injection(
+    terminal: dict, action: str, *, esc_first: bool = True, delay_s: float = 2.0
+) -> dict | None:
     """Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
     resolved `terminal`. PURE. None when the action types no command (esc_nudge /
     hard-restart rungs) OR no channel resolves.
@@ -208,11 +214,17 @@ def build_injection(terminal: dict, action: str, *, delay_s: float = 2.0) -> dic
     Channel selection is delegated to `build_command_plan`, so the gentle rungs reach
     exactly the instances the hard rungs do — including ai-maestro agents (CLI channel)
     and Linux GUI terminals, which this function used to declare UNREACHABLE.
+
+    `esc_first` is the hard/soft switch (TRDD-0GPQROC1): the caller passes
+    `fleet_recovery.injection_is_hard(diagnosis)` so a LIVE session (cron_dead /
+    version_mismatch) gets a SOFT enqueue that preserves its in-flight turn, while a
+    FROZEN one keeps the ESC — its wedged turn never ends, so an enqueued command
+    would never run.
     """
     command = action_to_command(action)
     if command is None:
         return None  # esc_nudge / hard-restart — not a command-typing injection
-    return build_command_plan(terminal, command, delay_s=delay_s)
+    return build_command_plan(terminal, command, esc_first=esc_first, delay_s=delay_s)
 
 
 def fire(plan: dict | None) -> bool:

@@ -75,6 +75,19 @@ def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> 
     return None
 
 
+def injection_is_hard(diagnosis: str) -> bool:
+    """Hard/soft policy for a gentle command-typing injection (TRDD-0GPQROC1). PURE.
+
+    True (ESC-interrupt first) ONLY for ``frozen``: a wedged turn never ends, so a
+    softly-enqueued command would sit behind it forever — the ESC IS the unwedge.
+    Every other injectable diagnosis (``cron_dead``, ``version_mismatch``) targets a
+    LIVE, possibly mid-work session where only the heartbeat or the plugin code is
+    stale; typing without ESC enqueues the command to run at the turn boundary, so
+    no in-flight work is lost (user directive 2026-07-10).
+    """
+    return diagnosis == "frozen"
+
+
 def gate(*, last_ts: int | None, attempts: int, now: int) -> str:
     """Decide whether to attempt recovery on an instance NOW. Returns:
 

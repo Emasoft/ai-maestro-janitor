@@ -508,14 +508,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Type a slash-command into this session's own pane.")
     ap.add_argument("command", help="the slash-command to send, e.g. /compact")
     ap.add_argument("--delay", type=float, default=2.0, help="seconds before sending (lets the turn settle)")
-    ap.add_argument(
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
         "--soft",
         action="store_true",
-        help="do NOT press ESC — enqueue the command so it runs after the current turn ends",
+        help="deprecated no-op alias — SOFT (enqueue, no ESC) is now the default (TRDD-0GPQROC1)",
+    )
+    mode.add_argument(
+        "--hard",
+        action="store_true",
+        help="press ESC first — interrupt the in-flight turn so the command runs NOW",
     )
     ap.add_argument("--dry-run", action="store_true", help="print the plan, do not fire")
     args = ap.parse_args()
-    print(send_self_command(args.command, delay_s=args.delay, esc_first=not args.soft, dry_run=args.dry_run))
+    # SOFT is the default (TRDD-0GPQROC1): the command enqueues at the turn boundary
+    # so no in-flight work is lost; --hard restores the ESC-interrupt.
+    print(send_self_command(args.command, delay_s=args.delay, esc_first=args.hard, dry_run=args.dry_run))
     return 0
 
 

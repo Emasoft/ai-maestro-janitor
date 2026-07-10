@@ -1,6 +1,6 @@
 ---
 name: janitor-compact-context
-description: Self-compact the current Claude Code session's context, then auto-resume. Invoke when context usage is high (e.g. the watchdog warned at or above threshold) and you want to compact before the wall where /compact itself fails. Records a resume directive, then fires ESC+/compact at this session's own pane (iTerm/tmux). --soft enqueues /compact WITHOUT ESC (the current turn finishes; no in-flight work lost); --handoff writes a rich handoff via /janitor-write-handoff first (delicate junctures); the two combine. Trigger with /janitor-compact-context [--soft] [--handoff], or by asking to compact now.
+description: Self-compact the current Claude Code session's context, then auto-resume. Invoke when context usage is high (e.g. the watchdog warned at or above threshold) and you want to compact before the wall where /compact itself fails. Records a resume directive, then types /compact at this session's own pane (iTerm/tmux). SOFT by default (no ESC — /compact enqueues and runs when the current turn finishes; no in-flight work lost); --hard presses ESC first for emergencies (context near the wall); --handoff writes a rich handoff via /janitor-write-handoff first (delicate junctures); the flags combine. Trigger with /janitor-compact-context [--hard] [--handoff], or by asking to compact now.
 ---
 
 # Janitor compact-context
@@ -32,17 +32,18 @@ emits `[janitor-resume] …` → you continue exactly where you left off.
 
 Do NOT use it for trivial turns or when context is low — compaction is lossy.
 
-## Modes — hard (default), `--soft`, `--handoff`
+## Modes — soft (default), `--hard`, `--handoff`
 
-Pick the mode by how the compaction should interact with the CURRENT turn and how
-rich the handoff must be:
+Since TRDD-0GPQROC1 (user directive 2026-07-10) SOFT is the default: the command
+enqueues and runs when the current turn ends, so no in-flight work is ever lost.
+Pick `--hard` only for emergencies:
 
 | Invocation | ESC? | What happens | Use when |
 |---|---|---|---|
-| `--directive "…"` (default, HARD) | yes | ESC interrupts the turn NOW, then `/compact` runs | context is critically high and you must compact immediately |
-| `--soft --directive "…"` | no | `/compact` is TYPED and ENQUEUED; it runs only after the current turn ends — no in-flight work is discarded | you want to compact at a safe boundary, not lose the turn's work |
-| `--handoff --directive "…"` (HARD) | yes | ESC, then `/janitor-write-handoff` runs (writes a RICH agent handoff), which then chains to `/compact` | a delicate juncture where the mechanical PreCompact handoff isn't enough and a semantic, agent-authored handoff is worth the token cost |
-| `--handoff --soft --directive "…"` | no | `/janitor-write-handoff` then `/compact` are both ENQUEUED (turn finishes first, handoff runs, then compact) | delicate juncture AND you don't want to interrupt the current turn |
+| `--directive "…"` (default, SOFT) | no | `/compact` is TYPED and ENQUEUED; it runs when the current turn ends — and you end your turn right after firing, so it runs seconds later with no work discarded | the normal case — compact at a safe boundary |
+| `--hard --directive "…"` | yes | ESC interrupts the turn NOW, then `/compact` runs | context is critically high (near the wall) and you must compact immediately; the >=85% enforcement hook uses this |
+| `--handoff --directive "…"` (SOFT) | no | `/janitor-write-handoff` then `/compact` are both ENQUEUED (turn finishes first, handoff runs, then compact) | a delicate juncture where the mechanical PreCompact handoff isn't enough and a semantic, agent-authored handoff is worth the token cost |
+| `--handoff --hard --directive "…"` | yes | ESC, then `/janitor-write-handoff` runs (writes a RICH agent handoff), which then chains to `/compact` | delicate juncture AND the compact cannot wait for the turn to finish |
 
 `--handoff` is OPT-IN because a rich agent-authored handoff costs tokens. The
 always-on, zero-cost `pre-compact-handoff.py` PreCompact hook already writes a
@@ -64,20 +65,20 @@ the plan / the trap to avoid" layer on top, for the rare junctures that warrant 
    the rich handoff it writes — so `--directive` here is optional.)
 
 2. **Run the backing script** (records the directive, then fires the detached
-   send at this pane after a short delay). Add `--soft` and/or `--handoff` per the
+   send at this pane after a short delay). Add `--hard` and/or `--handoff` per the
    Modes table:
 
    ```bash
-   # HARD (default): ESC → /compact
+   # SOFT (default): enqueue /compact (no ESC — the current turn finishes first)
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py" \
      --directive "continue TRDD-<uid8> at <step> — read its STATE block first"
 
-   # SOFT: enqueue /compact (no ESC — the current turn finishes first)
+   # HARD (emergency): ESC → /compact (interrupts the in-flight turn NOW)
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py" \
-     --soft --directive "continue TRDD-<uid8> at <step> — read its STATE block first"
+     --hard --directive "continue TRDD-<uid8> at <step> — read its STATE block first"
 
-   # HANDOFF (delicate juncture): /janitor-write-handoff first, then /compact.
-   # Combine with --soft to also avoid interrupting the current turn.
+   # HANDOFF (delicate juncture): /janitor-write-handoff first, then /compact —
+   # both enqueued. Combine with --hard only if the compact cannot wait.
    uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py" --handoff
    ```
 
@@ -91,11 +92,11 @@ the plan / the trap to avoid" layer on top, for the rare junctures that warrant 
      user compacts.
 
 3. **END YOUR TURN IMMEDIATELY.** This is critical: the script fired a *detached*
-   keystroke sender that, after ~2 s, sends the command(s) to your pane. In HARD
-   mode it sends ESC first — so for `/compact` to run cleanly you must stop now: do
-   not call any more tools, do not keep working. In SOFT mode the command is merely
-   enqueued and runs after this turn ends, so stopping is still the clean thing to
-   do. Emit one short line like *"Context at NN% — compacting now; I'll auto-resume."*
+   keystroke sender that, after ~2 s, sends the command(s) to your pane. In the
+   SOFT default the command is enqueued and runs the moment this turn ends — so
+   stopping now is what makes the compact happen promptly. In `--hard` mode it
+   sends ESC first, so stopping cleanly avoids losing the tail of the turn. Emit
+   one short line like *"Context at NN% — compacting now; I'll auto-resume."*
    and stop.
 
 ## Output
@@ -103,10 +104,10 @@ the plan / the trap to avoid" layer on top, for the rare junctures that warrant 
 One short line to the user, then the turn ends. Side effects: writes
 `<project>/.janitor/state/resume-directive.txt` (consumed once by the PostCompact
 hook) and launches a detached keystroke sender (osascript in iTerm, `tmux
-send-keys` in tmux) that types the mode's command(s) into this pane — HARD modes
-prepend a raw ESC (interrupt), SOFT modes do not (enqueue). In `--handoff` mode the
-sequence starts with `/janitor-write-handoff`, which authors a rich handoff and then
-compacts.
+send-keys` in tmux) that types the mode's command(s) into this pane — the SOFT
+default sends no ESC (enqueue), `--hard` prepends a raw ESC (interrupt). In
+`--handoff` mode the sequence starts with `/janitor-write-handoff`, which authors
+a rich handoff and then compacts.
 
 ## Error handling
 
@@ -127,8 +128,8 @@ any plugin config, does NOT disarm the heartbeat, does NOT compact other session
 ## Resources
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py` — backing script (records the
-  directive, fires the detached send; `--soft` omits the ESC, `--handoff` prepends
-  the handoff skill).
+  directive, fires the detached send; soft/enqueue by default, `--hard` restores
+  the ESC, `--handoff` prepends the handoff skill).
 - `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-directive.txt` — the one-shot resume
   pointer this skill writes and the PostCompact hook consumes.
 - `/janitor-write-handoff` — the skill `--handoff` runs first; it authors a rich,

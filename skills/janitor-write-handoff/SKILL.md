@@ -81,18 +81,19 @@ write a bloated handoff: it costs tokens to author now AND to read on resume. Be
 
 4. **Chain to `/compact` — ONLY if invoked with `--then-compact`.** Inspect your
    invocation arguments:
-   - **Arguments contain `--then-compact`** (the hard `/janitor-compact-context --handoff`
-     path): enqueue `/compact` so it runs when THIS turn ends, then stop. Run:
+   - **Arguments contain `--then-compact`** (the `/janitor-compact-context --handoff
+     --hard` path): enqueue `/compact` so it runs when THIS turn ends, then stop. Run:
 
      ```bash
-     uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py" --soft
+     uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py"
      ```
 
-     `--soft` (no ESC) enqueues `/compact`; no `--directive` here (step 3 already set
-     the authoritative directive). Then **END YOUR TURN IMMEDIATELY** — emit one short
-     line (e.g. *"Handoff written; compacting now, I'll auto-resume."*) and stop.
+     The trigger's default is soft/enqueue (no ESC, TRDD-0GPQROC1); no `--directive`
+     here (step 3 already set the authoritative directive). Then **END YOUR TURN
+     IMMEDIATELY** — emit one short line (e.g. *"Handoff written; compacting now,
+     I'll auto-resume."*) and stop.
    - **No `--then-compact`** (a bare `/janitor-write-handoff`, or the combined
-     `/janitor-compact-context --handoff --soft` where `/compact` is ALREADY enqueued
+     `/janitor-compact-context --handoff` where `/compact` is ALREADY enqueued
      right after this command): do NOT trigger a compact yourself. Report that the
      handoff was written and stop — if a `/compact` was enqueued behind you, it runs
      when this turn ends and reads your directive.
@@ -127,7 +128,7 @@ is written independently by the PreCompact hook and the two coexist).
 - `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-directive.txt` — the one-shot resume
   pointer the PostCompact hook consumes.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py` — the `/compact` trigger this skill
-  chains to (`--soft`) when invoked with `--then-compact`.
+  chains to (soft/enqueue default) when invoked with `--then-compact`.
 - `/janitor-compact-context` — the compaction skill; its `--handoff` mode runs this skill
   first. Its `pre-compact-handoff.py` PreCompact hook writes the complementary
   mechanical handoff for free on every compaction.

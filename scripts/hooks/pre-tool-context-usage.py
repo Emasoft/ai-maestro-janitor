@@ -203,8 +203,12 @@ def _run_compact_trigger(pct: int) -> str:
     # [janitor-resume] injection, so keep it on the same cache-stable surface.
     directive = f"resume your in-flight task — the context-size guard auto-compacted at {_bucket_pct(pct)} to stop the per-turn token bleed; re-check the TRDD board / your handoff first."
     try:
+        # --hard: this is the >=85% EMERGENCY tier — the deny below is already cutting
+        # the turn, and the ESC is the point (compact NOW, before the context wall).
+        # The trigger's CLI default is soft/enqueue since TRDD-0GPQROC1, so the
+        # emergency semantics must be requested explicitly.
         r = subprocess.run(
-            ["uv", "run", "--script", "--quiet", str(script), "--directive", directive],
+            ["uv", "run", "--script", "--quiet", str(script), "--hard", "--directive", directive],
             capture_output=True,
             text=True,
             timeout=8,

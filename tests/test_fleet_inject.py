@@ -74,6 +74,27 @@ def test_build_injection_prefers_tmux() -> None:
     assert ["RUN", "tmux", "send-keys", "-t", "%5", "-l", "/janitor-arm"] in plan["steps"]
 
 
+def test_build_command_plan_tmux_honors_soft() -> None:
+    """esc_first=False must reach the tmux steps too (TRDD-0GPQROC1): the old
+    always-ESC shortcut silently turned every SOFT intent hard on this channel —
+    a mid-turn Claude in tmux is interrupted by ESC exactly like in iTerm."""
+    soft = fi.build_command_plan({"tmux_pane": "%5"}, "/janitor-arm", esc_first=False)
+    assert soft is not None and soft["channel"] == "tmux"
+    assert not any("Escape" in step for step in soft["steps"]), "soft tmux plan must not send ESC"
+    hard = fi.build_command_plan({"tmux_pane": "%5"}, "/janitor-arm", esc_first=True)
+    assert hard is not None
+    assert any("Escape" in step for step in hard["steps"]), "hard tmux plan leads with ESC"
+
+
+def test_build_injection_soft_reaches_the_plan() -> None:
+    """build_injection forwards esc_first (TRDD-0GPQROC1): the daemon passes
+    injection_is_hard(diagnosis), so a live cron_dead target gets a soft enqueue
+    that preserves its in-flight turn."""
+    plan = fi.build_injection({"tmux_pane": "%5"}, "rearm", esc_first=False)
+    assert plan is not None
+    assert not any("Escape" in step for step in plan["steps"])
+
+
 def test_build_injection_iterm_fallback_strips_tty_prefix() -> None:
     """With no tmux pane, an iTerm plan is built from the '<tty>:<uuid>' identity —
     the tty prefix is stripped and only the UUID is interpolated."""

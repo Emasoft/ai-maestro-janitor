@@ -4,7 +4,7 @@
 # ///
 """Backing script for /janitor-reload-skills (analogue of reload_trigger.py).
 
-Fires a DETACHED, delayed ESC -> /reload-skills at THIS session's own iTerm pane so
+Fires a DETACHED, delayed /reload-skills at THIS session's own iTerm pane so
 the agent can pick up freshly installed STANDALONE (non-plugin) skills and commands
 WITHOUT the human typing the command. Claude Code's `/reload-plugins` only reloads
 skills/commands bundled INSIDE a plugin; a standalone skill or command dropped into
@@ -18,13 +18,14 @@ Like the reload trigger there is NO resume directive: /reload-skills reloads sta
 skills/commands in place and does NOT discard the conversation, so nothing needs to be
 recorded for an auto-resume — the turn simply continues after the reload.
 
-The delay + detach are load-bearing: the script must NOT be killed by the very ESC it
-sends, so it returns immediately and the keystrokes fire ~delay seconds later (after the
+The delay + detach are load-bearing: the script must NOT be killed by the ESC it may
+send, so it returns immediately and the keystrokes fire ~delay seconds later (after the
 agent ends its turn). It targets ONLY the session whose UUID matches $ITERM_SESSION_ID —
 never other panes — so concurrent Claude instances are untouched.
 
-`--soft` omits the ESC: /reload-skills is TYPED and ENQUEUED so it runs after the current
-turn ends, never interrupting in-flight work.
+SOFT is the default (TRDD-0GPQROC1): /reload-skills is TYPED and ENQUEUED so it runs
+after the current turn ends, never interrupting in-flight work. `--hard` presses ESC
+first when the reload must happen immediately.
 
 Outside iTerm ($ITERM_SESSION_ID unset) self-trigger isn't available: the script prints
 NO_ITERM and the skill asks the user to run /reload-skills manually.
@@ -105,11 +106,18 @@ def main() -> int:
         default=2.0,
         help="seconds to wait before sending ESC -> /reload-skills (lets the turn settle)",
     )
-    ap.add_argument(
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
         "--soft",
         action="store_true",
-        help="do NOT press ESC — enqueue /reload-skills so it runs AFTER the current "
-        "turn ends (no in-flight work interrupted); default is a hard ESC-interrupt reload",
+        help="deprecated no-op alias — SOFT (enqueue, no ESC) is now the default "
+        "(TRDD-0GPQROC1, user directive 2026-07-10)",
+    )
+    mode.add_argument(
+        "--hard",
+        action="store_true",
+        help="press ESC first — interrupt the in-flight turn so the reload runs NOW; "
+        "a skills reload is rarely that urgent, so this is opt-in",
     )
     ap.add_argument(
         "--dry-run",
@@ -117,7 +125,9 @@ def main() -> int:
         help="print the plan, but do NOT fire osascript (for tests)",
     )
     args = ap.parse_args()
-    esc_first = not args.soft
+    # SOFT is the default (TRDD-0GPQROC1): typed while the agent is mid-turn, the
+    # command ENQUEUES and runs at the turn boundary — no in-flight work is lost.
+    esc_first = args.hard
 
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH

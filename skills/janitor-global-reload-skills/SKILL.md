@@ -31,8 +31,8 @@ plugin auto-update path (which emits `[janitor-reload]` → `/reload-plugins`).
 
 ## When NOT to use
 
-- Reload standalone skills in only THIS session → `/janitor-reload-skills` (local,
-  immediate; supports `--soft`).
+- Reload standalone skills in only THIS session → `/janitor-reload-skills` (local;
+  soft/enqueue by default, `--hard` for immediate).
 - Reload PLUGIN-bundled skills/commands → `/reload-plugins` (or wait for the janitor
   auto-update, which triggers it fleet-wide via `[janitor-reload]`).
 
@@ -87,5 +87,6 @@ disarm any cron. Each session self-applies `/reload-skills` on its own heartbeat
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/global_control_cli.py` — backing CLI (`reload-skills`
   stamps the generation; also `disarm`/`arm`/`pause`/`unpause`/`status`).
-- `/janitor-reload-skills` — the per-session variant (immediate; supports `--soft`).
+- `/janitor-reload-skills` — the per-session variant (soft/enqueue by default;
+  `--hard` for immediate).
 - `/janitor-reload-plugins` — the sibling for PLUGIN-bundled skills/commands.
