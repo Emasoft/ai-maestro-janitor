@@ -34,6 +34,7 @@ unrecoverable errors.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -55,6 +56,7 @@ _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.
 
 import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
+import heartbeat_cadence as hc  # noqa: E402  # TTL-aware cadence tiers (TRDD-0QQX9H0G, #83)
 import state  # noqa: E402
 import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD-T198DT1W)
 
@@ -1132,6 +1134,145 @@ def _phase_user_presence_breadcrumb() -> None:
         state.log_line("dispatch", f"user-presence refresh failed: {exc}")
 
 
+_CADENCE_STATE_FILE = "cadence-state.json"
+_DESIRED_CADENCE_FILE = "desired-cadence.cron"
+_ARMED_CADENCE_FILE = "armed-cadence.cron"
+_TTL_REGIME_FILE = "ttl-regime.json"
+# A genuine user prompt within this window holds the cadence at MID (timely
+# chore/drift pickup); past it, an idle session is free to demote to SLOW.
+_RECENT_ACTIVITY_WINDOW_S = 7200  # 2h
+
+
+def _read_json_file(path: Path) -> dict | None:
+    """Read a small JSON state file. None on absent/unreadable/malformed (fail-open)."""
+    try:
+        if not path.is_file():
+            return None
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _cadence_active_waiting(sd: Path) -> bool:
+    """True iff this session is waiting on something time-sensitive (→ FAST tier):
+    a rate-limit, a pending post-compact / directive resume, an explicit keep-going
+    opt-in, or in-flight background agents. Fail-open (any read error → the pending
+    agents probe, itself fail-open)."""
+    try:
+        if (sd / "rate-limited.flag").is_file():
+            return True
+        if (sd / "resume-after-compact.flag").is_file():
+            return True
+        if (sd / "keep-going").is_file():
+            return True
+        directive = sd / "resume-directive.txt"
+        if directive.is_file() and directive.stat().st_size > 0:
+            return True
+    except OSError:
+        pass
+    return _pending_agent_count() > 0
+
+
+def _cadence_recent_activity(now: int) -> bool:
+    """True iff a genuine user prompt landed within the MID window. Reads the
+    user-presence breadcrumb's `last_user_input_epoch` (owned by the
+    UserPromptSubmit hook, NOT bumped by cron ticks), so an unattended idle
+    session reads False and is free to demote to SLOW."""
+    data = _read_json_file(state.user_presence_path())
+    if data is None:
+        return False
+    last = data.get("last_user_input_epoch", 0)
+    if not isinstance(last, (int, float)) or isinstance(last, bool):
+        return False
+    return int(last) > 0 and (now - int(last)) < _RECENT_ACTIVITY_WINDOW_S
+
+
+def _phase_cadence_tier() -> None:
+    """Dynamic TTL-aware heartbeat cadence (TRDD-0QQX9H0G, issue #83).
+
+    Picks a cadence tier from live state each fire — FAST when actively waiting,
+    MID on recent user activity, SLOW when idle — and applies a tier change by
+    RE-USING the [janitor-renew] marker (dispatch cannot call CronCreate itself).
+    The SLOW ceiling is bounded by the REAL cache-TTL, resolved authoritatively
+    via the agentlensPro get_account_status probe (fail-open, cached ~30 min).
+
+    Called BEFORE the rate-limit / compact early-returns so a waiting session can
+    still promote to FAST, and it runs in BOTH full and maintenance modes (a
+    maintenance session is idle → SLOW → even cheaper). A TOTAL no-op when
+    heartbeat_cadence_dynamic is off. Fail-open throughout: a cadence bug must
+    never break the fire.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", True):
+        return
+    try:
+        now = int(time.time())
+        sd = state.state_dir()
+
+        # 1. live signals → the un-smoothed tier this fire asks for.
+        signals = hc.Signals(
+            active_waiting=_cadence_active_waiting(sd),
+            recent_activity=_cadence_recent_activity(now),
+        )
+        raw = hc.raw_tier(signals)
+
+        # 2. authoritative cache-TTL (probe + cache + env fallback, all fail-open).
+        regime_config = (
+            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "auto").strip().lower() or "auto"
+        )
+        probe_cmd = os.environ.get(
+            "CLAUDE_PLUGIN_OPTION_HEARTBEAT_ACCOUNT_STATUS_COMMAND", "agentlenspro get_account_status"
+        )
+        probe_interval = state.coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_REGIME_PROBE_INTERVAL"), 1800
+        )
+        ttl_minutes, cache_write = hc.resolve_ttl_minutes(
+            now=now,
+            regime_config=regime_config,
+            cached=_read_json_file(sd / _TTL_REGIME_FILE),
+            probe_interval=probe_interval,
+            probe=lambda: hc.probe_account_status(probe_cmd),
+            env=os.environ,
+        )
+        if cache_write is not None:
+            state.atomic_write(sd / _TTL_REGIME_FILE, json.dumps(cache_write))
+
+        # 3. hysteresis → the tier actually in force (promote now / demote after N).
+        demote_fires = state.coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES"), 2
+        )
+        prev = hc.state_from_dict(_read_json_file(sd / _CADENCE_STATE_FILE))
+        committed = hc.commit_tier(raw, prev, demote_fires)
+        state.atomic_write(sd / _CADENCE_STATE_FILE, json.dumps(hc.state_to_dict(committed)))
+
+        # 4. tier → desired cron; re-arm (via [janitor-renew]) only if the live cron differs.
+        overrides = {
+            hc.FAST: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_FAST", ""),
+            hc.MID: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_MID", ""),
+            hc.SLOW: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_SLOW", ""),
+        }
+        desired = hc.tier_to_cron(committed.committed_tier, ttl_minutes, overrides)
+        state.atomic_write(sd / _DESIRED_CADENCE_FILE, desired)
+
+        armed = ""
+        armed_path = sd / _ARMED_CADENCE_FILE
+        try:
+            if armed_path.is_file():
+                armed = armed_path.read_text().strip()
+        except OSError:
+            armed = ""
+        if desired.strip() != armed:
+            # Re-cadence == re-arm: the protocol rule maps [janitor-renew] to
+            # /janitor-arm, which reads desired-cadence.cron, bakes it, and writes
+            # armed-cadence.cron — so this marker stops firing once reconciled.
+            # The call site (main) places this phase AFTER the rate-limit / compact
+            # resume early-returns, so a recovery fire never reaches here and stays
+            # clean — no resume-vs-renew gate is needed.
+            print("[janitor-renew]")
+    except Exception as exc:  # noqa: BLE001 - cadence must never break the fire
+        state.log_line("dispatch", f"cadence-tier phase failed: {exc}")
+
+
 def main() -> int:
     state.init_state()
 
@@ -1205,6 +1346,15 @@ def main() -> int:
     # measured cost justifies (or indicts) the cadence. Logs, never prints; the
     # phase's docstring carries the why.
     _phase_heartbeat_cost()
+
+    # Phase 1.5a3: dynamic TTL-aware cadence tier (TRDD-0QQX9H0G, #83). Placed
+    # AFTER the rate-limit / compact resume early-returns (so a recovery fire
+    # never emits a re-arm marker and stays clean) and AFTER the keep-going nudge
+    # (so the nudge still leads that fire's output), but BEFORE the maintenance
+    # early-return so a maintenance (idle) session demotes to SLOW and gets even
+    # cheaper. It re-uses [janitor-renew] to re-arm the cron at the chosen tier; a
+    # total no-op when heartbeat_cadence_dynamic is off.
+    _phase_cadence_tier()
 
     # Phase 1.5b: MAINTENANCE early-return (TRDD-FPL60EKV). The fire already refreshed the
     # prompt cache (the turn re-read the context at the 0.1x cache-READ rate, resetting the

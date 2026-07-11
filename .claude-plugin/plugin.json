@@ -33,9 +33,65 @@
     },
     "heartbeat_cron": {
       "title": "Heartbeat Cron Expression",
-      "description": "Standard 5-field cron for the janitor heartbeat. Default: \"*/5 * * * *\" (every 5 min \u2014 aligned with the prompt-cache TTL, low token cost per fire). Raise to e.g. \"*/20 * * * *\" if you are using the 1-hour cache and accept longer idle gaps.",
+      "description": "Standard 5-field cron for the janitor heartbeat \u2014 the INITIAL cadence baked at /janitor-arm. Default: \"*/5 * * * *\". When heartbeat_cadence_dynamic is on (default), the dispatcher AUTO-TIERS from here: it writes the desired cron to .janitor/state/desired-cadence.cron and re-arms (via the [janitor-renew] marker) to a FAST/MID/SLOW cadence chosen from live state, so the fixed value here converges within 1-2 fires. Set heartbeat_cadence_dynamic=false to pin this fixed cadence and disable tiering.",
       "type": "string",
       "default": "*/5 * * * *",
+      "sensitive": false
+    },
+    "heartbeat_cadence_dynamic": {
+      "title": "Dynamic TTL-aware heartbeat cadence",
+      "description": "When true (DEFAULT), the dispatcher self-selects the heartbeat cadence each fire (TRDD-0QQX9H0G, issue #83): FAST=*/5 when the session is actively waiting (rate-limited, a pending resume, in-flight background agents, keep-going) \u2014 the same cadence as today, so recovery latency is unchanged; MID=*/15 on recent user activity; SLOW=*/30 (bounded by the real cache-TTL) when idle \u2014 cutting idle heartbeat cost ~6x (a measured quiet fire on a large session \u2248 $0.76; */5 = 12 fires/h vs */30 = 2/h) with NO recovery regression. A tier change is applied by re-arming through the existing [janitor-renew] marker (dispatch cannot call CronCreate itself). When false, the phase is a total no-op and the fixed heartbeat_cron is used unchanged.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "heartbeat_ttl_regime": {
+      "title": "Cache-TTL regime for cadence",
+      "description": "Which prompt-cache-TTL regime the SLOW keep-warm ceiling assumes: \"auto\" (DEFAULT) resolves it authoritatively via the agentlensPro get_account_status probe (see heartbeat_account_status_command), falling back to an env heuristic (ANTHROPIC_API_KEY set \u2192 5-min tier, else 60-min) when the probe is unavailable. \"subscription\" forces the 60-min regime (SLOW */30), \"api-key\" forces the 5-min regime (all tiers */5, no slowdown). Only \"auto\" runs the probe.",
+      "type": "string",
+      "default": "auto",
+      "sensitive": false
+    },
+    "heartbeat_account_status_command": {
+      "title": "Account-status probe command (cadence TTL regime)",
+      "description": "Shell command that prints JSON with a cacheTtl.minutes field naming the current prompt-cache TTL (e.g. AgentLens: 'agentlenspro get_account_status'). Consulted ONLY when heartbeat_ttl_regime=auto. Default: 'agentlenspro get_account_status' (a bare PATH binary). Empty string disables the probe \u2192 pure env fallback. Result is cached in .janitor/state/ttl-regime.json and re-probed only every heartbeat_regime_probe_interval seconds. Fail-open: a missing binary, non-zero exit, 5s timeout, or unparseable output falls back to the env heuristic and never blocks the fire (same contract as heartbeat_cost_command). Config, not a hard-coded path, because such CLIs are machine-local.",
+      "type": "string",
+      "default": "agentlenspro get_account_status",
+      "sensitive": false
+    },
+    "heartbeat_regime_probe_interval": {
+      "title": "Cache-TTL regime probe interval (seconds)",
+      "description": "Minimum seconds between account-status probes for the cadence TTL regime. Default: 1800 (30 min). The regime changes rarely (a plan/billing-mode switch), so a fresh cache is reused between probes \u2014 at most one short subprocess per interval per project.",
+      "type": "number",
+      "default": 1800,
+      "sensitive": false
+    },
+    "heartbeat_cadence_demote_fires": {
+      "title": "Cadence demote hysteresis (fires)",
+      "description": "Consecutive idle fires required before the cadence demotes to a SLOWER tier. Default: 2. Promotion to a FASTER tier is always immediate (a rate-limited session must speed up at once); only demotion waits this many fires, so a single idle fire between active ones does not flap the cron (which would trigger a needless re-arm).",
+      "type": "number",
+      "default": 2,
+      "sensitive": false
+    },
+    "heartbeat_cron_fast": {
+      "title": "FAST-tier cron override",
+      "description": "Override the FAST-tier heartbeat cron (active-waiting sessions: rate-limited / resume-pending). Default empty = built-in \"*/5 * * * *\" — the same cadence as the fixed pre-#83 default, so an actively-waiting session has NO recovery-latency regression. Ignored in the fast-TTL regime, where every tier is forced to */5.",
+      "type": "string",
+      "default": "",
+      "sensitive": false
+    },
+    "heartbeat_cron_mid": {
+      "title": "MID-tier cron override",
+      "description": "Override the MID-tier heartbeat cron (recent-activity sessions). Default empty = built-in \"*/15 * * * *\" in the slow-TTL regime (3x cheaper than */5). Ignored in the fast-TTL regime.",
+      "type": "string",
+      "default": "",
+      "sensitive": false
+    },
+    "heartbeat_cron_slow": {
+      "title": "SLOW-tier cron override",
+      "description": "Override the SLOW-tier heartbeat cron (idle keep-warm). Default empty = built-in \"*/30 * * * *\" in the slow-TTL regime (2 fires/h, 30-min gaps under the 1h cache TTL with margin; 6x cheaper than */5). */30 is the safe floor for a uniform cadence — any */N with 30<=N<60 fires exactly twice an hour, so a slower uniform cron is not possible without a 60-min (at-TTL) gap. Ignored in the fast-TTL regime, where every tier is */5.",
+      "type": "string",
+      "default": "",
       "sensitive": false
     },
     "pr_reconciler_interval": {

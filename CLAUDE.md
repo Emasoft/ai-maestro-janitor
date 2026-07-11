@@ -57,7 +57,8 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
     kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)
 $PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·
     rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
-    resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files
+    resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files ·
+    desired-cadence.cron · armed-cadence.cron · cadence-state.json · ttl-regime.json (TTL-aware cadence, TRDD-0QQX9H0G)
 cron: one durable CronCreate per project → fires the stub
 ```
 
@@ -69,6 +70,7 @@ plugin updates auto-roll with NO re-arm) → `dispatch.py`:
 1. `rate-limited.flag` present → emit `[janitor-resume]`, clear flag (also clears the compact-resume flag).
 2. `resume-after-compact.flag` present → emit `[janitor-resume] …continue TRDD-xxxx…`, clear flag (post-compact auto-resume; the PostCompact hook wrote it — TRDD-31095269).
 3. cron near 7-day expiry → emit `[janitor-renew]` (Claude re-runs /janitor-arm).
+3a. **dynamic TTL-aware cadence** (TRDD-0QQX9H0G, #83): pick a tier from live state — FAST `*/5` (actively waiting: rate-limit / resume-pending / pending agents / keep-going — SAME as pre-#83, so recovery latency is unchanged), MID `*/15` (recent user activity), SLOW `*/30` (idle) — bounded by the REAL cache-TTL (authoritative via the `agentlenspro get_account_status` probe → `cacheTtl.minutes`, fail-open + cached; fast-TTL regime <30min ⇒ all tiers `*/5`). Writes `desired-cadence.cron`; RE-USES `[janitor-renew]` to re-arm when the armed tier differs (dispatch can't call CronCreate). Runs after the resume/keep-going phases + in maintenance mode, before the maintenance return; hysteresis (`heartbeat_cadence_demote_fires`, default 2) demotes slowly, promotes now. No-op when `heartbeat_cadence_dynamic` is off. Cuts idle heartbeat cost ~6x (measured: a quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76; `*/5`=12 fires/h → ~$9/h idle vs `*/30`=2/h). `*/30` is the safe floor — any `*/N` with 30≤N<60 fires exactly 2×/h, so a slower uniform cron needs a 60-min (at-TTL) gap.
 4. `ensure_daemon_running()` (lazy-spawn the singleton if dead).
 5. daemon stale/old-version → request restart (auto-roll the daemon too).
 6. run each **due** detector `--one-shot`; emit only NEW findings (seen-file dedupe).
@@ -264,7 +266,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=3e218eb522bf digest=b2e7128d41f5 generated=2026-07-10T04:29:50+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=999e54cc65a4 digest=81cf8c030793 generated=2026-07-11T11:55:01+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -603,6 +605,16 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · recent_spawn_count(window_s, now) -> int — PUBLIC read-only: how many daemon spawn attempts landed within the last
   · record_spawn_attempt(now) -> None — PUBLIC: record one daemon spawn attempt into the crash-loop ring.
   · ensure_daemon_running(max_silence_s) -> bool — If the daemon is dead AND not kill-switched AND enabled, spawn it.
+`scripts/lib/heartbeat_cadence.py` — TTL-aware heartbeat cadence tiers (TRDD-0QQX9H0G, issue #83).
+  · Signals — The two booleans the dispatcher resolves from state files each fire.
+  · CadenceState — Persisted (``.janitor/state/cadence-state.json``) hysteresis state.
+  · raw_tier(signals) -> str — The un-smoothed tier this fire's signals ask for. Pure.
+  · commit_tier(raw, prev, demote_fires) -> CadenceState — Apply hysteresis: promote to a faster tier IMMEDIATELY, demote to a slower
+  · tier_to_cron(tier, ttl_minutes, overrides) -> str — Map (tier, real cache-TTL) -> a 5-field cron. Pure.
+  · probe_account_status(command, *, timeout) -> int | None — Run the configured account-status command and return ``cacheTtl.minutes``.
+  · resolve_ttl_minutes(*, now, regime_config, cached, probe_interval, probe, env) -> tuple[int, dict | None] — Resolve the authoritative cache-TTL (minutes) for the SLOW ceiling.
+  · state_to_dict(state) -> dict — Serialize CadenceState for ``cadence-state.json``.
+  · state_from_dict(data) -> CadenceState | None — Parse CadenceState from disk. None on absent/malformed input (treated as
 `scripts/lib/ioc_taxonomy.py` — IOC taxonomy primitives — distilled from the deep-forensics-ioc audit
   · IOCTaxonomyError — Raised when an IOC bundle cannot be parsed.
   · IOCRecord — Per-threat IOC bundle — the four-quadrant breakdown distilled from

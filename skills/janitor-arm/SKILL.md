@@ -61,7 +61,20 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    arm self-heals. Clearing it last would leave *a cron and a stale opt-out*, and the guardian
    would file this project under "the user opted out" and never touch it again.
 
-2. Read cron from `${CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON}`, default `"*/5 * * * *"`.
+2. Resolve the cron cadence. The dynamic TTL-aware cadence tier (TRDD-0QQX9H0G, #83)
+   writes the desired cron to `.janitor/state/desired-cadence.cron` on each fire; read
+   THAT first so a dispatcher-driven re-arm (the `[janitor-renew]` marker) bakes the
+   chosen tier — then fall back to config, then the `*/5` default:
+
+   ```bash
+   STATE_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state"
+   CRON=""
+   [ -s "$STATE_DIR/desired-cadence.cron" ] && CRON="$(tr -d '\n' < "$STATE_DIR/desired-cadence.cron")"
+   [ -z "$CRON" ] && CRON="${CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON:-*/5 * * * *}"
+   printf 'cron=%s\n' "$CRON"
+   ```
+
+   Use the resolved `$CRON` for `CronCreate` in step 5.
 
 3. `CronList` → for each job whose prompt starts with `[janitor-heartbeat]`, `CronDelete`. Guarantees one heartbeat after arming.
 
@@ -84,7 +97,7 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    > ALREADY-armed pre-self-disarm cron still won't self-disarm on a global stop until
    > re-armed; stop such a cron with a one-time `/janitor-disarm`.
 
-5. `CronCreate` with `cron` from step 2, `prompt` from step 4, `durable: true`, `recurring: true`. **Observe the response's durability** — some Claude Code builds (verified 2.1.173–2.1.177) silently downgrade `durable: true` to **session-only**; the response then says "Session-only (not written to disk…)". See [Known limitations](#known-limitations-claude-code-platform).
+5. `CronCreate` with the resolved `$CRON` from step 2, `prompt` from step 4, `durable: true`, `recurring: true`. **Observe the response's durability** — some Claude Code builds (verified 2.1.173–2.1.177) silently downgrade `durable: true` to **session-only**; the response then says "Session-only (not written to disk…)". See [Known limitations](#known-limitations-claude-code-platform).
 
 6. Record arm timestamp + clear stale renew-dedupe:
 
@@ -95,6 +108,14 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    printf '%s' "$NOW" > "$STATE_DIR/heartbeat-armed-at.ts.tmp.$$" && \
      mv -f "$STATE_DIR/heartbeat-armed-at.ts.tmp.$$" "$STATE_DIR/heartbeat-armed-at.ts"
    rm -f "$STATE_DIR/heartbeat-renew-seen.txt"
+   # Record the cadence actually armed (TRDD-0QQX9H0G, #83) so the dispatcher's
+   # cadence phase knows the live tier and stops re-emitting [janitor-renew] once
+   # reconciled. Re-resolve the SAME way step 2 did (deterministic within an arm).
+   CRON=""
+   [ -s "$STATE_DIR/desired-cadence.cron" ] && CRON="$(tr -d '\n' < "$STATE_DIR/desired-cadence.cron")"
+   [ -z "$CRON" ] && CRON="${CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON:-*/5 * * * *}"
+   printf '%s' "$CRON" > "$STATE_DIR/armed-cadence.cron.tmp.$$" && \
+     mv -f "$STATE_DIR/armed-cadence.cron.tmp.$$" "$STATE_DIR/armed-cadence.cron"
    ```
 
 7. **Verify durability, then report honestly.** A durable job persists to `~/.claude/scheduled_tasks.json`; a session-only job does not (and `CronList` shows `[session-only]`). Check the CronCreate response (or `CronList`):
@@ -105,7 +126,7 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
 
 ## Output
 
-One line: cron expression, heartbeat ID, current stub target version (durable vs session-only per step 7). The stub file is written atomically to `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`; in this project's `.janitor/state/` it writes `heartbeat-armed-at.ts` and removes `disarmed.flag` + `heartbeat-renew-seen.txt`. No other files written.
+One line: cron expression, heartbeat ID, current stub target version (durable vs session-only per step 7). The stub file is written atomically to `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`; in this project's `.janitor/state/` it reads `desired-cadence.cron` (the dynamic cadence tier, #83), writes `heartbeat-armed-at.ts` + `armed-cadence.cron`, and removes `disarmed.flag` + `heartbeat-renew-seen.txt`. No other files written.
 
 ## Known limitations (Claude Code platform)
 

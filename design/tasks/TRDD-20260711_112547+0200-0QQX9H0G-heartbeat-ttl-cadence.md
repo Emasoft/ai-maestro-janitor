@@ -3,7 +3,7 @@ trdd-id: 0QQX9H0G
 title: TTL-aware dynamically-tiered heartbeat cadence — stop firing 12x more often than the 1h cache TTL needs
 column: dev
 created: 2026-07-11T11:25:47+0200
-updated: 2026-07-11T11:25:47+0200
+updated: 2026-07-11T12:06:10+0200
 current-owner: janitor-claude
 assignee: janitor-claude
 priority: 1
@@ -29,8 +29,8 @@ runtime-targets: [macos, linux]
 impacts: [config-schema]
 attempts: 0
 test-failures: 0
-last-test-result: not-run
-last-test-at: null
+last-test-result: pass
+last-test-at: 2026-07-11T12:06:10+0200
 implementation-commits: []
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/83", "github.com/Emasoft/ai-maestro-janitor/issues/78"]
 ---
@@ -69,8 +69,13 @@ confirms this works.
   The env heuristic (`ANTHROPIC_API_KEY`⇒5 else 60) is only the fallback — it is WRONG for
   the over-plan-usage-credits case (auto-drops to 5-min TTL with no API key), which the
   probe gets right.
-- Tier→cron: `ttl_minutes < 30` ⇒ all tiers `*/5` (fast-TTL, no safe slowdown, correct
-  no-op). Else FAST=`*/15`, MID=`*/30`, SLOW=`*/45` (all overridable).
+- Tier→cron (REVISED from MEASURED per-fire cost — janitor token-meter, 318 fires: a
+  quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76): `ttl_minutes < 30`
+  ⇒ all tiers `*/5` (fast-TTL, no safe slowdown, correct no-op). Else FAST=`*/5` (KEEP
+  the pre-#83 cadence for active-waiting — zero recovery-latency regression), MID=`*/15`
+  (3× cheaper), SLOW=`*/30` (idle, 6× cheaper). `*/30` is the safe floor: any `*/N` with
+  30≤N<60 fires EXACTLY 2×/h, so the originally-planned `*/45` was no cheaper than `*/30`,
+  and `*/15` for FAST would have slowed rate-limit recovery for no benefit. All overridable.
 - Hysteresis: promote-to-faster immediately; demote-to-slower only after
   `heartbeat_cadence_demote_fires` (default 2) idle fires. Prevents re-arm churn.
 - `heartbeat_cadence_dynamic=false` ⇒ `_phase_cadence_tier` is a total no-op; behavior is

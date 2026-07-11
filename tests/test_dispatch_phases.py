@@ -33,6 +33,11 @@ def env_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(global_dir))
+    # These tests exercise OTHER phases via dispatch.main(); the dynamic cadence
+    # phase (TRDD-0QQX9H0G) is orthogonal noise for them (it would emit a one-time
+    # [janitor-renew] and, in "auto" regime, shell out to agentlenspro). Turn it
+    # off so their exact-output assertions stay focused — cadence has its own file.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
 
     # Force-reload so module-level path resolution picks up the env.
     for mod in ("dispatch", "global_state", "state"):
