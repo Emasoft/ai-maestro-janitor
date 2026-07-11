@@ -1051,3 +1051,64 @@ class TestStateRetentionSweep:
         dispatch._phase_log_retention()
 
         assert not orphan.exists(), "the dead machine-wide cursor must be GC'd"
+
+
+# ---------------------------------------------------------------------------
+# The iTerm Automation (TCC) alarm — TRDD-VQ4LX7ND part 2.
+#
+# The daemon resolved an injection channel 0 times in 254 launchd-spawned beats: macOS
+# denies a background daemon the Automation grant, so it cannot enumerate iTerm sessions
+# and skips every frozen iTerm instance. The janitor cannot grant that permission — only
+# the human can. What it CAN stop is the silence, which is the failure the TRDD indicts.
+# ---------------------------------------------------------------------------
+def test_iterm_alarm_is_silent_when_the_flag_is_absent(env_isolation: dict,
+                                                        capsys: pytest.CaptureFixture) -> None:
+    """No denial, no noise. Every heartbeat on a healthy machine must stay silent."""
+    dispatch = _import_dispatch()
+    dispatch._phase_iterm_automation_alarm()
+    assert capsys.readouterr().out == ""
+
+
+def test_iterm_alarm_fires_once_with_the_remedy(env_isolation: dict,
+                                                 capsys: pytest.CaptureFixture) -> None:
+    """The alarm names the CONSEQUENCE and the FIX, and repeats at most once per session —
+    a line that reprints every 5 minutes is one the user learns to scroll past."""
+    env_isolation["global_dir"].mkdir(parents=True, exist_ok=True)
+    (env_isolation["global_dir"] / "iterm-automation-blocked.flag").write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+
+    dispatch._phase_iterm_automation_alarm()
+    first = capsys.readouterr().out
+    dispatch._phase_iterm_automation_alarm()
+    second = capsys.readouterr().out
+
+    assert "cannot enumerate its sessions" in first
+    assert "Automation" in first
+    assert "CANNOT rescue" in first          # the consequence
+    assert "System Settings" in first        # the remedy
+    assert second == ""                      # acked — not repeated
+
+
+def test_iterm_alarm_refires_when_the_condition_recurs(env_isolation: dict,
+                                                        capsys: pytest.CaptureFixture) -> None:
+    """A NEW occurrence (a fresher flag) speaks again — the ack is per-occurrence, not
+    forever, or a denial that reappeared after being fixed would stay silent."""
+    gdir = env_isolation["global_dir"]
+    gdir.mkdir(parents=True, exist_ok=True)
+    flag = gdir / "iterm-automation-blocked.flag"
+    flag.write_text("x", encoding="utf-8")
+    dispatch = _import_dispatch()
+    dispatch._phase_iterm_automation_alarm()
+    capsys.readouterr()
+
+    # The grant was given, the flag cleared… and later denied again.
+    flag.unlink()
+    dispatch._phase_iterm_automation_alarm()
+    assert capsys.readouterr().out == ""     # cleared → silent
+    flag.write_text("x", encoding="utf-8")
+    import os as _os
+    _os.utime(flag, (time.time() + 10, time.time() + 10))  # a NEWER occurrence
+
+    dispatch._phase_iterm_automation_alarm()
+
+    assert "cannot enumerate its sessions" in capsys.readouterr().out

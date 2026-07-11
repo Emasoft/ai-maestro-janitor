@@ -21,6 +21,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import fleet_scan as fs  # type: ignore[import-not-found]  # noqa: E402
+import pytest  # noqa: E402
 
 
 def test_parse_ps_claude_recognizes_both_shapes() -> None:
@@ -200,3 +201,49 @@ def test_aimaestro_agents_best_effort_on_bad_json(monkeypatch) -> None:
         lambda cli, args, *, env, timeout: None,
     )
     assert fs._aimaestro_agents({}) == ("/bin/aimaestro-agent.sh", [])
+
+
+# ---------------------------------------------------------------------------
+# TCC-denial detection (TRDD-VQ4LX7ND part 2). A running iTerm ALWAYS has at least one
+# session, so "iTerm is up but osascript enumerated zero sessions" cannot mean "no
+# sessions" — it means the Apple Event was blocked. That distinction is the whole
+# detector: it separates a real, actionable denial from the boring case (iTerm closed).
+# ---------------------------------------------------------------------------
+def test_blocked_when_iterm_is_up_but_no_sessions_come_back() -> None:
+    assert fs.iterm_automation_blocked(iterm_running=True, sessions={}) is True
+
+
+def test_not_blocked_when_sessions_are_readable() -> None:
+    """The channel works — this is the state a session-spawned daemon is in."""
+    assert fs.iterm_automation_blocked(
+        iterm_running=True, sessions={"ttys001": "w0t0p0"}) is False
+
+
+def test_not_blocked_when_iterm_is_not_running() -> None:
+    """No iTerm, no grant needed. Alarming here would be a false positive on every
+    tmux-only or headless machine."""
+    assert fs.iterm_automation_blocked(iterm_running=False, sessions={}) is False
+
+
+def test_flag_is_written_and_then_self_clears(tmp_path: Path,
+                                              monkeypatch: "pytest.MonkeyPatch") -> None:
+    """The flag must clear itself the moment sessions become readable. An alarm the human
+    has to remember to silence is one they learn to ignore."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    for mod in ("global_state",):
+        sys.modules.pop(mod, None)
+    flag = tmp_path / fs.ITERM_TCC_FLAG
+
+    fs.record_iterm_automation_state(True)
+    assert flag.is_file()
+
+    fs.record_iterm_automation_state(False)   # the human granted it; sessions came back
+    assert not flag.exists()
+
+
+def test_recording_never_raises_on_an_unusable_state_dir(monkeypatch: "pytest.MonkeyPatch") -> None:
+    """It runs inside a fleet scan — a stamp failure must never break the guardian."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", "/proc/nonexistent/cannot-write")
+    for mod in ("global_state",):
+        sys.modules.pop(mod, None)
+    fs.record_iterm_automation_state(True)  # must not raise

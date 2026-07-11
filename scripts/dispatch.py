@@ -785,6 +785,40 @@ def _phase_plugin_reload() -> None:
     )
 
 
+def _phase_iterm_automation_alarm() -> None:
+    """Surface the daemon's TCC-denial finding ONCE per session (TRDD-VQ4LX7ND part 2).
+
+    The fleet guardian resolved an injection channel 0 times in 254 launchd-spawned beats
+    while a session-spawned daemon resolved 56. The cause is a denied macOS Automation
+    grant, and the symptom the TRDD indicts is not the denial itself — it is that the dead
+    channel degraded into a MUTE skip loop for hours. The daemon cannot fix the grant (only
+    the human can, in System Settings) and nobody reads the daemon log, so the ONLY useful
+    thing it can do is say so where a human will see it: here.
+
+    Emitted once per session (the flag persists until the grant lands and the next fleet
+    scan clears it, so without the ack this would repeat every fire). Fail-open.
+    """
+    try:
+        flag = gs.global_state_dir() / "iterm-automation-blocked.flag"
+        if not flag.is_file():
+            return
+        acked = state.state_dir() / "iterm-automation-alarm-acked.ts"
+        if acked.is_file() and state.file_mtime(acked) >= state.file_mtime(flag):
+            return  # already told this session about THIS occurrence
+        state.atomic_write(acked, str(int(time.time())))
+        print(
+            "[janitor] The global daemon can see iTerm running but cannot enumerate its "
+            "sessions — macOS is denying it Automation (Apple Events) access. Consequence: "
+            "the fleet guardian CANNOT rescue a frozen/rate-limited Claude in any iTerm "
+            "pane (tmux panes are unaffected); it has been skipping them silently. Fix: "
+            "System Settings → Privacy & Security → Automation → allow the janitor daemon "
+            "(its uv/python entry) to control iTerm. This alarm clears itself on the next "
+            "fleet scan once the grant lands. See TRDD-VQ4LX7ND."
+        )
+    except Exception as exc:  # noqa: BLE001 -- advisory; a heartbeat must never die here
+        state.log_line("dispatch", f"iterm-automation alarm skipped: {exc}")
+
+
 def _phase_skills_reload() -> None:
     """Emit a bare `[janitor-reload-skills]` marker once-per-session when the
     STANDALONE-skills reload generation advances past what THIS project's heartbeat
@@ -1448,6 +1482,12 @@ def main() -> int:
     # The cron prompt's silent-execute clause runs /janitor-reload-skills, which
     # types /reload-skills into this pane (reloads NON-plugin skills/commands).
     _phase_skills_reload()
+
+    # Phase 1.63: the iTerm Automation (TCC) alarm. The daemon stamped a flag because
+    # it can see iTerm running but cannot enumerate its sessions — so it has been
+    # skipping every frozen iTerm instance in silence. Say it ONCE, out loud, with the
+    # exact remedy; the daemon's own log reaches nobody.
+    _phase_iterm_automation_alarm()
 
     # Phase 1.64: C4 bad-self-update auto-rollback. When the global-state spawn
     # breaker shows the daemon is crash-looping (a bad new version that won't stay

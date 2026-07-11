@@ -131,6 +131,54 @@ def parse_iterm_sessions(text: str) -> dict[str, str]:
     return out
 
 
+ITERM_TCC_FLAG = "iterm-automation-blocked.flag"
+
+
+def iterm_automation_blocked(*, iterm_running: bool, sessions: dict[str, str]) -> bool:
+    """True iff iTerm is UP but the osascript enumerated ZERO sessions — the signature of
+    a denied macOS Automation (Apple Events) grant. PURE.
+
+    A running iTerm always has at least one session, so an empty result cannot mean "no
+    sessions"; it means the Apple Event never reached iTerm. That is the whole reason the
+    launchd-spawned daemon resolved a channel 0 times in 254 beats while a session-spawned
+    daemon resolved 56 (TRDD-VQ4LX7ND): the grant is attributed to a binary identity, and a
+    background daemon's request is denied silently.
+
+    This is a DETECTION, not a fix. The grant itself can only be given by the human, in
+    System Settings. What this kills is the failure the TRDD actually indicts: a dead
+    channel degrading into a MUTE skip loop for hours. Silence is not success.
+    """
+    return iterm_running and not sessions
+
+
+def record_iterm_automation_state(blocked: bool) -> None:
+    """Persist (or clear) the TCC-denial condition for the heartbeat to surface.
+
+    The daemon is a detached process nobody reads the logs of; the heartbeat is the only
+    surface that reaches a human. So the daemon stamps a flag and `dispatch` turns it into
+    ONE actionable drift line. Clearing on success matters as much as setting: the moment
+    the human grants the permission, the next beat reads sessions again and the alarm must
+    stop by itself — an alarm you have to remember to silence is one you learn to ignore.
+
+    Best-effort: this must never break a fleet scan.
+    """
+    try:
+        import global_state as gs  # local import — fleet_scan is imported by non-daemon paths
+
+        flag = gs.global_state_dir() / ITERM_TCC_FLAG
+        if blocked:
+            if not flag.exists():
+                flag.write_text(
+                    "iTerm is running but the daemon's osascript enumerated 0 sessions "
+                    "— macOS Automation grant denied (TRDD-VQ4LX7ND)\n",
+                    encoding="utf-8",
+                )
+        else:
+            flag.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001 -- advisory only; never break the scan
+        pass
+
+
 def parse_tmux_panes(text: str) -> dict[str, str]:
     """``{normalized_tty: pane_id}`` from
     ``tmux list-panes -a -F '#{pane_tty} #{pane_id}'``."""
@@ -374,10 +422,18 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
         _run(["tmux", "list-panes", "-a", "-F", "#{pane_tty} #{pane_id}"])
     )
     iterm_by_tty: dict[str, str] = {}
-    if "iTerm" in ps_text:  # only drive osascript when iTerm is already up
+    iterm_running = "iTerm" in ps_text
+    if iterm_running:  # only drive osascript when iTerm is already up
         iterm_by_tty = parse_iterm_sessions(
             _run(["osascript", "-e", _ITERM_TTY_OSASCRIPT], timeout=15)
         )
+    # iTerm up + zero sessions enumerated = the Apple Event was blocked (TRDD-VQ4LX7ND).
+    # Record it so the heartbeat can tell the human ONCE, instead of the daemon skipping
+    # every frozen iTerm instance in silence forever. Self-clears the moment the grant
+    # lands and sessions come back.
+    record_iterm_automation_state(
+        iterm_automation_blocked(iterm_running=iterm_running, sessions=iterm_by_tty)
+    )
     aimaestro_cli, aimaestro_agents = _aimaestro_agents()
     linux_gui_channel = (
         terminal_trigger._resolve_linux_gui_channel(os.environ)
