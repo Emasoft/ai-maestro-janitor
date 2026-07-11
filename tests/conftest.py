@@ -216,6 +216,31 @@ def _skip_real_state_when_keychain_prompting(request: "pytest.FixtureRequest") -
         pytest.skip("real macOS keychain locked/prompting for access — skipping real_state test (would hang `security`)")
 
 
+def _source_manifest(root: Path) -> dict[str, str]:
+    """Content manifest of the SOURCE files under ``root`` — only what a clobber would
+    damage: ``*.py`` and ``*.sh``.
+
+    Deliberately NOT `_manifest`: that walks every file, and `scripts/memgrep/target/` is
+    1.4 GB of gitignored Rust build artifacts (15,285 files — 97% of the tree). Hashing
+    them would make session start slow AND make the guard false-positive the moment anyone
+    runs `cargo build` mid-suite. The thing the clobber destroyed was source, so source is
+    what we guard.
+    """
+    out: dict[str, str] = {}
+    if not root.is_dir():
+        return out
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or p.suffix not in (".py", ".sh"):
+            continue
+        if "__pycache__" in p.parts or "target" in p.parts:
+            continue
+        try:
+            out[p.relative_to(root).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
+        except OSError:
+            continue
+    return out
+
+
 def _manifest(root: Path) -> dict[str, str]:
     """Content manifest {relpath: sha256} of every guarded file under ``root``."""
     if not root.is_dir():
@@ -329,6 +354,20 @@ def pytest_configure(config: pytest.Config) -> None:
         )
         _GUARDED["global-state"] = (real_gsd, _manifest(real_gsd))
         _GUARDED["plugin-data"] = (real_data, _manifest(real_data))
+        # S1c — the SOURCE TREE guard (TRDD-RYZCVVKA). On 2026-07-11 this repo's whole
+        # daemon closure was silently overwritten with the INSTALLED plugin's v0.39.0
+        # copies: committed work reverted in the working tree, exec bits cleared. It was
+        # noticed only because a lost +x bit happened to break 22 tests — a clobber of a
+        # file WITHOUT an exec bit would have been invisible, and could have been committed
+        # as a regression of already-published code.
+        #
+        # The write path is now refused at the source (`keepalive_stage.stage_closure`),
+        # and instrumenting the suite proved nothing in it stages into the repo. This guard
+        # is the backstop for that proof: if any test ever writes `scripts/**` again, the
+        # suite FAILS and names the file, instead of the damage being found by accident
+        # weeks later. Same shape as the two dir guards above, so it costs one manifest.
+        _scripts = Path(__file__).resolve().parent.parent / "scripts"
+        _GUARDED["source-tree"] = (_scripts, _source_manifest(_scripts))
 
     _SESSION_TMP = Path(tempfile.mkdtemp(prefix="janitor-test-session-"))
     home = _SESSION_TMP / "_home"
