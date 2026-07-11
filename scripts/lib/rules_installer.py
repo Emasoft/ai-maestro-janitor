@@ -210,8 +210,71 @@ def _target_rules_dir(scope: str) -> Path | None:
     return None
 
 
+def references_dir() -> Path:
+    """Where the shipped rules' FULL reference docs live: `<DATA>/rules-reference/`.
+
+    Deliberately NOT under any `.claude/rules/` dir. Claude Code loads every
+    `~/.claude/rules/*.md` into the context PREFIX of every session AND every subagent,
+    machine-wide — so a 35 KB reference doc there is re-written into cache by every cold
+    agent that ever starts. The rules themselves must carry only the normative core; the
+    bulky reference material (full schemas, transition matrices, grep cheat-sheets,
+    migration guides) lives here and is READ ON DEMAND, costing zero tokens until an
+    agent actually needs it. The DATA dir is the right home: it is the only path
+    guaranteed stable across plugin version updates (TRDD-YRPUSIFY axis B)."""
+    return _data_dir() / "rules-reference"
+
+
+def install_references(plugin_root: Path) -> list[str]:
+    """Copy <plugin_root>/rules/references/*.md into `<DATA>/rules-reference/`.
+
+    Same content-exact idempotency as install_rules (byte compare, atomic tmp+replace),
+    but the destination is the persistent DATA dir rather than a rules dir, so these
+    files are never loaded into any context. Silent no-op when the source dir is absent.
+    Returns the paths actually written."""
+    src_dir = plugin_root / "rules" / "references"
+    if not src_dir.is_dir():
+        return []
+    src_files = sorted(p for p in src_dir.iterdir() if p.is_file() and p.suffix == ".md")
+    if not src_files:
+        return []
+
+    dst_dir = references_dir()
+    try:
+        dst_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return []
+
+    written: list[str] = []
+    for src in src_files:
+        dst = dst_dir / src.name
+        if dst.exists():
+            try:
+                if dst.read_bytes() == src.read_bytes():
+                    continue
+            except OSError:
+                continue
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(dir=str(dst_dir), prefix=f".{src.name}.", suffix=".tmp")
+            os.close(fd)
+            shutil.copyfile(src, tmp)
+            os.replace(tmp, dst)
+            written.append(str(dst))
+        except OSError:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            continue
+    return written
+
+
 def install_rules(plugin_root: Path) -> list[str]:
     """Copy <plugin_root>/rules/*.md to every active scope's rules dir.
+
+    NOTE: `iterdir()` is deliberately NON-recursive — `rules/references/` holds the
+    on-demand full docs and must NEVER be installed as a rule (see install_references).
 
     Returns a list of `<dst-path>` strings for files that were
     actually copied on this call (so the caller can log them).

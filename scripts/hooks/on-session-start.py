@@ -256,6 +256,19 @@ def main() -> int:
             f"installed plugin rule(s): {', '.join(copied)}",
         )
 
+    # Ship the rules' FULL reference docs to <DATA>/rules-reference/ (TRDD-YRPUSIFY axis
+    # B). They live OUTSIDE any .claude/rules/ dir on purpose: everything in a rules dir
+    # is loaded into the context prefix of every session AND every cold subagent
+    # machine-wide, so parking 87 KB of schemas/cheat-sheets/migration guides there made
+    # every fan-out re-write them into cache. Here they cost ZERO tokens until an agent
+    # actually reads one.
+    refs = rules_installer.install_references(Path(plugin_root))
+    if refs:
+        state.log_line(
+            "session-start",
+            f"installed rule reference doc(s): {', '.join(refs)}",
+        )
+
     # Partial-uninstall self-heal (TRDD-H9IBY95W): remove provenance-marked janitor
     # rules from any KNOWN .claude/rules/ dir the janitor is NO LONGER installed into
     # (e.g. the project scope after a project-scope uninstall while still user-installed,

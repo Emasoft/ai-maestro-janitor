@@ -320,3 +320,99 @@ def test_ind_rule_takes_over_unmarked_same_named_file(tmp_path, monkeypatch):
     assert _MARKER in text, "the unmarked same-named file must be overwritten by the marked IND copy"
     assert text == (_PROJECT_ROOT / "rules" / "trdd-design-tasks.md").read_text(encoding="utf-8")
     assert str(victim) in copied
+
+
+# ---- the context floor (TRDD-YRPUSIFY axis B) -----------------------------
+#
+# Everything in a `.claude/rules/` dir is loaded into the context PREFIX of every
+# session AND every cold subagent, machine-wide. A byte shipped here is a byte
+# re-written into cache by every fan-out agent that ever starts — which is why the
+# bulky reference material moved to `<DATA>/rules-reference/` (read on demand, zero
+# tokens until needed). These tests are the ratchet that stops the floor growing back.
+
+# A RATCHET, not a budget: it may go DOWN, never up. Set after the 2026-07-11 burn
+# investigation, when the 8 shipped rules totalled 112,889 B (~28k tokens) — 48% of the
+# machine's whole rules floor — because three of them carried full schemas, transition
+# matrices, grep cheat-sheets and migration guides. Moving those to rules/references/
+# (read on demand) brought the corpus to 49,894 B, a 56% cut. The cap sits just above
+# that with room for one small new rule. Raising it needs a measured justification:
+# every byte here is re-written into cache by every cold subagent on the machine.
+_RULES_FLOOR_CAP_BYTES = 52_000
+_SINGLE_RULE_CAP_BYTES = 12_000
+
+
+def test_shipped_rules_stay_under_the_context_floor_cap():
+    """The whole shipped-rules corpus must stay under the floor cap — it is re-written
+    into cache by every cold subagent, machine-wide."""
+    md = sorted((_PROJECT_ROOT / "rules").glob("*.md"))
+    total = sum(p.stat().st_size for p in md)
+    assert total <= _RULES_FLOOR_CAP_BYTES, (
+        f"shipped rules total {total} B > cap {_RULES_FLOOR_CAP_BYTES} B. "
+        "Move reference material to rules/references/ (on-demand), do not grow the floor."
+    )
+
+
+def test_no_single_shipped_rule_is_a_reference_document():
+    """No individual rule may balloon into a reference doc — that is what
+    rules/references/ is for."""
+    md = sorted((_PROJECT_ROOT / "rules").glob("*.md"))
+    fat = [(p.name, p.stat().st_size) for p in md if p.stat().st_size > _SINGLE_RULE_CAP_BYTES]
+    assert not fat, f"rules over the per-file cap (move detail to rules/references/): {fat}"
+
+
+def test_references_are_never_installed_as_rules(tmp_path, monkeypatch):
+    """rules/references/*.md must NOT land in a .claude/rules/ dir — putting them there
+    would re-inflate the very context floor they exist to avoid."""
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "# demo\n")
+    refs = plugin / "rules" / "references"
+    refs.mkdir(parents=True, exist_ok=True)
+    (refs / "big-full.md").write_text("x" * 5000, encoding="utf-8")
+
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    dst = _isolate_project_scope(monkeypatch, home, project)
+    rules_installer.install_rules(plugin)
+
+    assert dst.exists(), "the real rule is installed"
+    assert not (dst.parent / "big-full.md").exists(), "a reference doc must NEVER be installed as a rule"
+    assert not (dst.parent / "references").exists()
+
+
+def test_install_references_writes_to_the_data_dir(tmp_path, monkeypatch):
+    """The full docs land in <DATA>/rules-reference/ — persistent, and outside every
+    context-loaded rules dir."""
+    plugin = tmp_path / "plugin"
+    refs = plugin / "rules" / "references"
+    refs.mkdir(parents=True, exist_ok=True)
+    (refs / "trdd-design-tasks-full.md").write_text("FULL DOC BODY", encoding="utf-8")
+    _mk_home(monkeypatch, tmp_path, user_installed=True, data_dir=True)
+
+    written = rules_installer.install_references(plugin)
+    dst = rules_installer.references_dir() / "trdd-design-tasks-full.md"
+    assert dst.is_file()
+    assert dst.read_text(encoding="utf-8") == "FULL DOC BODY"
+    assert str(dst) in written
+    # Byte-identical second call is a no-op (same idempotency contract as install_rules).
+    assert rules_installer.install_references(plugin) == []
+
+
+def test_install_references_is_a_noop_without_a_references_dir(tmp_path, monkeypatch):
+    """A plugin with no rules/references/ installs nothing and never raises."""
+    plugin = tmp_path / "plugin"
+    _make_plugin(plugin, "# demo\n")
+    _mk_home(monkeypatch, tmp_path, user_installed=True, data_dir=True)
+    assert rules_installer.install_references(plugin) == []
+
+
+def test_every_slimmed_rule_points_at_its_full_reference():
+    """A rule whose detail moved out MUST tell the reader where the full doc is, or the
+    knowledge is simply lost. Each shipped reference doc must be named by its rule."""
+    refs = sorted((_PROJECT_ROOT / "rules" / "references").glob("*-full.md"))
+    assert refs, "expected the on-demand reference docs"
+    for ref in refs:
+        rule = _PROJECT_ROOT / "rules" / ref.name.replace("-full.md", ".md")
+        assert rule.is_file(), f"reference {ref.name} has no owning rule"
+        body = rule.read_text(encoding="utf-8")
+        assert ref.name in body, f"{rule.name} does not point at its full reference {ref.name}"
+        assert "rules-reference" in body, f"{rule.name} does not give the reference dir path"
