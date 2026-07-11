@@ -56,13 +56,42 @@ The PATH repair fixed **tmux only**. v0.35.6 removes `aimaestro-agent.sh` from
 fire" alarm). The ai-maestro server is **not running on this machine**; build no
 plumbing for it here. See `[^1]`.
 
-**PART 2 (TCC / iTerm) — STILL OPEN. This is the remaining work.**
-Same beat, same daemon: `agentlens [frozen] … UNREACHABLE ({})` and
-`ANIME2SVG [frozen] … UNREACHABLE ({})`. Both are iTerm-only instances.
+**PART 2 (TCC / iTerm) — the SILENCE is fixed (2026-07-11, `43f3f2a`); the GRANT is
+the user's to give.**
 
-**NEXT ACTION:** give the LaunchAgent a STABLE binary identity that macOS TCC can
-attribute an Automation grant to, so `parse_iterm_sessions`' osascript returns
-sessions instead of "".
+The TRDD's own indictment is that the bug "was not that a channel died — it was that a
+dead channel degraded into a **mute skip loop** for hours." That half is now closed:
+
+- `fleet_scan.iterm_automation_blocked()` detects the exact signature — iTerm is running
+  yet osascript enumerated ZERO sessions. A running iTerm always has ≥1 session, so an
+  empty result cannot mean "no sessions"; the Apple Event was blocked.
+- `record_iterm_automation_state()` stamps it; `dispatch._phase_iterm_automation_alarm()`
+  emits ONE line naming the CONSEQUENCE (the guardian cannot rescue a frozen Claude in any
+  iTerm pane; tmux is unaffected) and the REMEDY (System Settings → Privacy & Security →
+  Automation). Once per occurrence, and it SELF-CLEARS the moment sessions come back.
+
+**The launch-path rewrite is NOT done, deliberately.** "Give the LaunchAgent a stable
+binary identity" is still the right fix, but both obvious routes are blocked, and the
+blast radius of getting it wrong is *the machine-wide guardian never starts*:
+
+- **Point the plist at a stable system interpreter — DEAD.** `/usr/bin/python3` on this
+  machine is **3.9.6** (Xcode's); the janitor requires ≥3.11. Verified, not assumed.
+- **A stable wrapper/bundle as `ProgramArguments[0]` — BLOCKED by CPV.** The persistence
+  discriminator (CPV issue #152) can only resolve a plist whose program folds to the
+  in-tree scanned entry, which is why `keepalive_install.sh` bakes the interpreter into
+  the RUNTIME plist only. A new binary identity at a DATA path would trip it at publish.
+- The live plist's `ProgramArguments[0]` is already the STABLE `/opt/homebrew/bin/uv`; the
+  per-version python only appears because uv re-execs into its managed toolchain.
+- And the TCC root cause is still **INFERRED, not verified** — the TRDD says so itself
+  (reading the TCC db needs Full Disk Access).
+
+Shipping a speculative rewrite of how the guardian launches, on an unverified hypothesis,
+is a worse trade than making its failure loud. The alarm now tells the user exactly what
+to do; only they can grant the permission.
+
+**NEXT ACTION (user):** when the alarm fires, grant the janitor daemon Automation access
+to iTerm in System Settings. If it still cannot enumerate sessions afterwards, the
+inferred cause is wrong and the launch-path work should be re-opened with that evidence.
 
 ## Problem
 
