@@ -131,12 +131,27 @@ def main() -> int:
         )
         return 0
 
-    # Put scripts/ on sys.path (NOT scripts/lib/) and import via the
-    # `lib` package so the CPV hook validator recognises this as a
-    # local-sibling import. The validator's local_sibling detector
-    # scans scripts/ for direct .py children and subdirs that contain
-    # __init__.py — `lib` is now a package thanks to scripts/lib/__init__.py.
+    # Put scripts/ on sys.path so `from lib import …` resolves — the CPV hook
+    # validator's local_sibling detector recognises that package form (scripts/lib/ has
+    # an __init__.py), which is why the package import is used here rather than a bare
+    # `import global_state`.
+    #
+    # scripts/lib/ MUST ALSO be on the path, and that is NOT cosmetic. A `lib` module may
+    # bare-import a sibling (`global_state.py` does `import state`) — an ABSOLUTE import
+    # that resolves only if scripts/lib/ is itself on sys.path. Every detector gets that
+    # for free by putting scripts/lib/ on the path directly; a hook importing the same
+    # module as `lib.global_state` does not. Omitting this line is not a lint nit: it
+    # raises ModuleNotFoundError at IMPORT time, so the hook dies before its first
+    # statement — which is exactly what happened. From 4df60fc (2026-06-20, when this hook
+    # first imported global_state) until 2026-07-11 this hook crashed on EVERY session and
+    # nobody noticed: Claude Code does not surface a SessionStart hook crash, so the only
+    # symptom was the absence of things nobody watches — rules stopped updating (a rule
+    # added after that date, universal-kanban.md, never reached ~/.claude/rules at all),
+    # the reference docs stopped shipping, the memory breadcrumb stopped printing, and the
+    # USER-memory backup mirror stopped syncing. tests/test_hooks_execute.py now EXECUTES
+    # every hook, so an import-time death can never again pass as silence.
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
+    sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
     from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
     from lib import memory_scopes, rules_installer, state  # noqa: E402  -- local package, not PyPI
 
