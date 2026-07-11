@@ -667,6 +667,10 @@ def _phase_rate_limit_recovery() -> bool:
             p.unlink()
         except FileNotFoundError:
             pass
+    # The flags are gone, but the cadence phase (which runs only on a LATER fire, since
+    # this one returns early) still needs to know a resume just happened — otherwise a
+    # rate-limited session would keep retrying at its idle SLOW cadence. TRDD-0QQX9H0G.
+    _stamp_resume(sd, now)
     state.log_line("dispatch", f"rate-limit cleared after {age}s, resume cue emitted")
     return True
 
@@ -727,6 +731,9 @@ def _phase_compact_resume() -> bool:
             p.unlink()
         except FileNotFoundError:
             pass
+    # Same reason as in _phase_rate_limit_recovery: this fire returns early, so the
+    # cadence phase can only learn about the resume from this stamp. TRDD-0QQX9H0G.
+    _stamp_resume(state.state_dir(), now)
     state.log_line("dispatch", f"post-compact resume cue emitted (age {age}s)")
     return True
 
@@ -1138,9 +1145,18 @@ _CADENCE_STATE_FILE = "cadence-state.json"
 _DESIRED_CADENCE_FILE = "desired-cadence.cron"
 _ARMED_CADENCE_FILE = "armed-cadence.cron"
 _TTL_REGIME_FILE = "ttl-regime.json"
+_LAST_RESUME_FILE = "last-resume.ts"
 # A genuine user prompt within this window holds the cadence at MID (timely
 # chore/drift pickup); past it, an idle session is free to demote to SLOW.
 _RECENT_ACTIVITY_WINDOW_S = 7200  # 2h
+# A session that emitted a [janitor-resume] cue within this window counts as
+# ACTIVELY WAITING (→ FAST). This is the ONLY way the cadence can see a rate-limit
+# or post-compact resume at all: both resume phases UNLINK their flag and early-return
+# from main() before the cadence phase runs, so reading the flags there is dead code.
+# Without this stamp a rate-limited unattended session would sit at SLOW and retry the
+# resume every 30 min instead of every 5 — and a post-resume session doing unattended
+# work writes no user-presence breadcrumb, so it would read as idle while it works.
+_RESUME_RECENCY_WINDOW_S = 1800  # 30 min
 
 
 def _read_json_file(path: Path) -> dict | None:
@@ -1154,15 +1170,21 @@ def _read_json_file(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _cadence_active_waiting(sd: Path) -> bool:
+def _cadence_active_waiting(sd: Path, now: int) -> bool:
     """True iff this session is waiting on something time-sensitive (→ FAST tier):
-    a rate-limit, a pending post-compact / directive resume, an explicit keep-going
-    opt-in, or in-flight background agents. Fail-open (any read error → the pending
-    agents probe, itself fail-open)."""
+    a RECENT resume cue (rate-limit or post-compact), a pending directive resume, an
+    explicit keep-going opt-in, or in-flight background agents. Fail-open (any read
+    error → the pending agents probe, itself fail-open).
+
+    The resume signal is the `last-resume.ts` STAMP, not the `rate-limited.flag` /
+    `resume-after-compact.flag` files: those are unlinked by their own phase, which
+    then early-returns from main() BEFORE this phase runs, so testing them here would
+    always read False. The stamp survives the flag, so the fire AFTER a resume cue
+    promotes to FAST and the recovery retry loop runs at the fast cadence.
+    """
     try:
-        if (sd / "rate-limited.flag").is_file():
-            return True
-        if (sd / "resume-after-compact.flag").is_file():
+        last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
+        if last_resume > 0 and 0 <= now - last_resume < _RESUME_RECENCY_WINDOW_S:
             return True
         if (sd / "keep-going").is_file():
             return True
@@ -1172,6 +1194,16 @@ def _cadence_active_waiting(sd: Path) -> bool:
     except OSError:
         pass
     return _pending_agent_count() > 0
+
+
+def _stamp_resume(sd: Path, now: int) -> None:
+    """Record that a [janitor-resume] cue was emitted now — the cadence phase's only
+    view of a resume (see _cadence_active_waiting). Best-effort: a stamp failure must
+    never break the resume cue itself, which is the survival-critical part."""
+    try:
+        state.atomic_write(sd / _LAST_RESUME_FILE, str(now))
+    except OSError as exc:
+        state.log_line("dispatch", f"last-resume stamp failed: {exc}")
 
 
 def _cadence_recent_activity(now: int) -> bool:
@@ -1197,11 +1229,14 @@ def _phase_cadence_tier() -> None:
     The SLOW ceiling is bounded by the REAL cache-TTL, resolved authoritatively
     via the agentlensPro get_account_status probe (fail-open, cached ~30 min).
 
-    Called BEFORE the rate-limit / compact early-returns so a waiting session can
-    still promote to FAST, and it runs in BOTH full and maintenance modes (a
-    maintenance session is idle → SLOW → even cheaper). A TOTAL no-op when
-    heartbeat_cadence_dynamic is off. Fail-open throughout: a cadence bug must
-    never break the fire.
+    Called AFTER the rate-limit / compact resume early-returns (so a recovery fire's
+    output stays clean — a [janitor-renew] must never precede its [janitor-resume])
+    and after the keep-going nudge, but BEFORE the maintenance early-return, so a
+    maintenance session still demotes to SLOW and gets even cheaper. Because those
+    resume phases return early, a resume is visible here only via the `last-resume.ts`
+    stamp they leave behind — see _cadence_active_waiting. A TOTAL no-op when
+    heartbeat_cadence_dynamic is off. Fail-open throughout: a cadence bug must never
+    break the fire.
     """
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", True):
         return
@@ -1211,7 +1246,7 @@ def _phase_cadence_tier() -> None:
 
         # 1. live signals → the un-smoothed tier this fire asks for.
         signals = hc.Signals(
-            active_waiting=_cadence_active_waiting(sd),
+            active_waiting=_cadence_active_waiting(sd, now),
             recent_activity=_cadence_recent_activity(now),
         )
         raw = hc.raw_tier(signals)

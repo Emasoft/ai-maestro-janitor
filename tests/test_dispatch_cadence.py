@@ -54,6 +54,18 @@ def _run_phase(dispatch) -> str:
     return buf.getvalue()
 
 
+def _run_main(dispatch) -> str:
+    """Run a WHOLE fire (dispatch.main()) and return its stdout."""
+    buf = StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        dispatch.main()
+    finally:
+        sys.stdout = old
+    return buf.getvalue()
+
+
 def _state(proj: Path) -> Path:
     return proj / ".janitor" / "state"
 
@@ -87,13 +99,69 @@ def test_silent_when_armed_matches_desired(proj: Path, monkeypatch: pytest.Monke
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
 
 
-def test_rate_limited_promotes_to_fast(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A rate-limited.flag is an active-waiting signal → FAST cron."""
+def test_recent_resume_promotes_to_fast(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A FRESH last-resume.ts stamp is an active-waiting signal → FAST cron.
+
+    The stamp — not rate-limited.flag — is the cadence's view of a resume: the resume
+    phases unlink their flag and early-return from main() before this phase ever runs.
+    """
+    import time
+
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
-    (_state(proj) / "rate-limited.flag").write_text("")
+    (_state(proj) / "last-resume.ts").write_text(str(int(time.time())))
     dispatch = _import_dispatch()
     _run_phase(dispatch)
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+
+
+def test_stale_resume_stamp_does_not_hold_fast(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An OLD resume stamp expires → the session is free to demote back to SLOW."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
+    (_state(proj) / "last-resume.ts").write_text(str(int(time.time()) - 7200))
+    dispatch = _import_dispatch()
+    _run_phase(dispatch)
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
+
+
+def test_rate_limit_fire_stamps_resume_then_next_fire_goes_fast(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """END-TO-END regression guard for the dead-signal bug (TRDD-0QQX9H0G).
+
+    Fire 1: rate-limited.flag → main() emits [janitor-resume] and returns EARLY, having
+    unlinked the flag — so the cadence phase never sees it and the fire's output must
+    stay clean (no [janitor-renew]). It leaves a last-resume.ts stamp.
+    Fire 2: the flag is gone, but the stamp makes the session ACTIVE-WAITING → FAST, so
+    the recovery retry loop runs at */5 instead of the idle */30 it would otherwise sit
+    at. Before the fix, fire 2 read no signal at all and demoted the session to SLOW.
+    """
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state as st
+
+    gs.init_global_state()
+    st.init_state()
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    (_state(proj) / "maintenance-mode").write_text("")  # skip chores; cadence still runs
+    monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
+    (_state(proj) / "rate-limited.flag").write_text("")
+
+    out1 = _run_main(dispatch)
+    assert "[janitor-resume]" in out1
+    assert "rate-limit cleared" in out1
+    assert "[janitor-renew]" not in out1  # a recovery fire stays clean
+    assert not (_state(proj) / "rate-limited.flag").exists()
+    assert (_state(proj) / "last-resume.ts").is_file()
+    assert not (_state(proj) / "desired-cadence.cron").exists()  # phase did not run
+
+    out2 = _run_main(dispatch)
+    assert "rate-limit cleared" not in out2  # the flag is consumed; no second cue
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+    assert "[janitor-renew]" in out2  # re-arm to FAST
 
 
 def test_api_key_regime_all_tiers_5min(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,13 +213,6 @@ def test_maintenance_fire_runs_cadence_before_return(proj: Path, monkeypatch: py
     monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
     monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
 
-    buf = StringIO()
-    old = sys.stdout
-    sys.stdout = buf
-    try:
-        dispatch.main()
-    finally:
-        sys.stdout = old
-    out = buf.getvalue()
+    out = _run_main(dispatch)
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
     assert "[janitor-renew]" in out  # first fire, armed absent → re-arm to SLOW

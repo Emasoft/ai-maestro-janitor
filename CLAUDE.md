@@ -58,7 +58,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 $PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·
     rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
     resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files ·
-    desired-cadence.cron · armed-cadence.cron · cadence-state.json · ttl-regime.json (TTL-aware cadence, TRDD-0QQX9H0G)
+    desired-cadence.cron · armed-cadence.cron · cadence-state.json · ttl-regime.json · last-resume.ts (TTL-aware cadence, TRDD-0QQX9H0G)
 cron: one durable CronCreate per project → fires the stub
 ```
 
@@ -69,8 +69,9 @@ cron: one durable CronCreate per project → fires the stub
 plugin updates auto-roll with NO re-arm) → `dispatch.py`:
 1. `rate-limited.flag` present → emit `[janitor-resume]`, clear flag (also clears the compact-resume flag).
 2. `resume-after-compact.flag` present → emit `[janitor-resume] …continue TRDD-xxxx…`, clear flag (post-compact auto-resume; the PostCompact hook wrote it — TRDD-31095269).
+   Both resume phases also stamp `last-resume.ts` and RETURN EARLY. The stamp is the cadence phase's ONLY view of a resume — it runs later in the same `main()`, by which point the flag is already unlinked, so reading the flags there is dead code (fixed 2026-07-11).
 3. cron near 7-day expiry → emit `[janitor-renew]` (Claude re-runs /janitor-arm).
-3a. **dynamic TTL-aware cadence** (TRDD-0QQX9H0G, #83): pick a tier from live state — FAST `*/5` (actively waiting: rate-limit / resume-pending / pending agents / keep-going — SAME as pre-#83, so recovery latency is unchanged), MID `*/15` (recent user activity), SLOW `*/30` (idle) — bounded by the REAL cache-TTL (authoritative via the `agentlenspro get_account_status` probe → `cacheTtl.minutes`, fail-open + cached; fast-TTL regime <30min ⇒ all tiers `*/5`). Writes `desired-cadence.cron`; RE-USES `[janitor-renew]` to re-arm when the armed tier differs (dispatch can't call CronCreate). Runs after the resume/keep-going phases + in maintenance mode, before the maintenance return; hysteresis (`heartbeat_cadence_demote_fires`, default 2) demotes slowly, promotes now. No-op when `heartbeat_cadence_dynamic` is off. Cuts idle heartbeat cost ~6x (measured: a quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76; `*/5`=12 fires/h → ~$9/h idle vs `*/30`=2/h). `*/30` is the safe floor — any `*/N` with 30≤N<60 fires exactly 2×/h, so a slower uniform cron needs a 60-min (at-TTL) gap.
+3a. **dynamic TTL-aware cadence** (TRDD-0QQX9H0G, #83): pick a tier from live state — FAST `*/5` (actively waiting: a `last-resume.ts` stamp <30min old / pending directive / pending agents / keep-going — SAME as pre-#83, so recovery latency is unchanged), MID `*/15` (recent user activity), SLOW `*/30` (idle) — bounded by the REAL cache-TTL (authoritative via the `agentlenspro get_account_status` probe → `cacheTtl.minutes`, fail-open + cached; fast-TTL regime <30min ⇒ all tiers `*/5`). Writes `desired-cadence.cron`; RE-USES `[janitor-renew]` to re-arm when the armed tier differs (dispatch can't call CronCreate). Runs after the resume/keep-going phases + in maintenance mode, before the maintenance return; hysteresis (`heartbeat_cadence_demote_fires`, default 2) demotes slowly, promotes now. No-op when `heartbeat_cadence_dynamic` is off. Cuts idle heartbeat cost ~6x (measured: a quiet fire on a ~510k-context session ≈ 507k cache_read ≈ $0.76; `*/5`=12 fires/h → ~$9/h idle vs `*/30`=2/h). `*/30` is the safe floor — any `*/N` with 30≤N<60 fires exactly 2×/h, so a slower uniform cron needs a 60-min (at-TTL) gap.
 4. `ensure_daemon_running()` (lazy-spawn the singleton if dead).
 5. daemon stale/old-version → request restart (auto-roll the daemon too).
 6. run each **due** detector `--one-shot`; emit only NEW findings (seen-file dedupe).
