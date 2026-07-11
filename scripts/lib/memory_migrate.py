@@ -318,3 +318,164 @@ def render_plan(memdir: Path, verdicts: list[NoteVerdict], *, project_repo: str)
     lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------- #
+# PHASE 2 — the apply (run by the OWNING project's Claude, in its own session)
+#
+# Moving a note LOCAL → PROJECT publishes it: PROJECT scope is git-tracked and PUSHED
+# to every contributor. That makes apply irreversible in the way that matters (you
+# cannot un-push a leaked path), and it deletes from the only place the note currently
+# exists. So apply is built like the cookie scrub: prove first, mutate second, and
+# never destroy an original you have not verified is safely copied.
+#
+# Four guards, all fail-CLOSED:
+#   1. OWNERSHIP — apply runs only from inside the owning repo (the cross-project
+#      contract). There is deliberately NO bypass flag: a switch that lets one
+#      project's session mutate another project's store is exactly the rule this
+#      guard exists to enforce.
+#   2. THE REVIEWED PLAN — apply consumes the plan file, and re-classifies to confirm
+#      the corpus still classifies the way the reviewer saw. Any drift (a note edited,
+#      added, or removed since the dry-run) aborts: what was reviewed is no longer what
+#      would be applied.
+#   3. PRIVACY RE-GATE — every note about to be published is re-scanned at apply time.
+#      One leak aborts the WHOLE apply. The plan's verdict is not trusted as a cache.
+#   4. VERIFY-THEN-RETIRE — copy every note and byte-verify it at the destination
+#      BEFORE any source is touched; the source is then MOVED to a recoverable trashcan,
+#      never `rm`-ed (RULE 0: it is human-authored, untracked work).
+# --------------------------------------------------------------------------- #
+
+_PLAN_PROJECT_HEADING = "## → PROJECT"
+_PLAN_ENTRY_RE = re.compile(r"^- `([^`]+)`")
+
+
+class MigrationRefused(Exception):
+    """A guard refused the apply. Nothing was mutated."""
+
+
+def parse_plan_project_set(plan_text: str) -> list[str]:
+    """The relative note paths the plan marked PROJECT-bound, in plan order.
+
+    Apply is driven by the REVIEWED artifact, not by a fresh classification — that is
+    what makes "the owning Claude reviews the plan, then applies" mean anything.
+    """
+    out: list[str] = []
+    in_section = False
+    for line in plan_text.splitlines():
+        if line.startswith("## "):
+            in_section = line.strip().startswith(_PLAN_PROJECT_HEADING)
+            continue
+        if not in_section:
+            continue
+        m = _PLAN_ENTRY_RE.match(line.strip())
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def project_memory_root(project_repo: Path) -> Path:
+    """The PROJECT-scope memory root inside the owning repo."""
+    return project_repo / ".claude" / "project" / "memory"
+
+
+def check_ownership(project_repo: Path, cwd_repo_root: Path | None) -> None:
+    """Guard 1. Raise unless we are running inside the repo we are about to write to."""
+    if cwd_repo_root is None:
+        raise MigrationRefused(
+            "--apply must run from inside the owning project's git repo "
+            "(cwd is not in a git repo). The janitor session never applies to another "
+            "project's store — the owning project's Claude runs this in its own session."
+        )
+    if cwd_repo_root.resolve() != project_repo.resolve():
+        raise MigrationRefused(
+            f"--apply refused: cwd's repo is {cwd_repo_root}, but --project-repo is "
+            f"{project_repo}. Run this from inside the owning repo (cross-project contract)."
+        )
+
+
+def check_plan_matches_corpus(memdir: Path, planned: list[str]) -> list[NoteVerdict]:
+    """Guard 2 + 3. Re-classify NOW and prove the reviewed plan still describes reality.
+
+    Returns the verdicts for the planned notes. Raises MigrationRefused when the corpus
+    drifted (a planned note vanished, or a note's verdict is no longer PROJECT), or when
+    any planned note now scans dirty — a note edited between the dry-run and the apply
+    must never be published on the strength of a stale verdict.
+    """
+    if not planned:
+        raise MigrationRefused("the plan marks no note PROJECT-bound — nothing to apply")
+
+    current = {v.rel_path: v for v in classify_corpus(memdir)}
+    verdicts: list[NoteVerdict] = []
+    drift: list[str] = []
+    for rel in planned:
+        now = current.get(rel)
+        if now is None:
+            drift.append(f"{rel}: in the plan but no longer in the corpus")
+            continue
+        if now.leak_classes:
+            drift.append(f"{rel}: now scans PRIVATE ({', '.join(now.leak_classes)})")
+            continue
+        if now.verdict != PROJECT:
+            drift.append(f"{rel}: no longer classifies PROJECT ({now.reason})")
+            continue
+        verdicts.append(now)
+
+    if drift:
+        raise MigrationRefused(
+            "the corpus changed since the plan was written — re-run the dry-run and "
+            "review the fresh plan:\n  " + "\n  ".join(drift)
+        )
+    return verdicts
+
+
+def _trashcan_dir(project_repo: Path, stamp: str) -> Path:
+    """Where a retired source note goes. Inside the owning repo's gitignored
+    `.trashcan/` (recoverable by a single `mv`, auto-purged after ~90 days by the
+    trashcan-purge detector) — never an `rm`, because the source is human-authored
+    work that lives outside any git repo (RULE 0)."""
+    return project_repo / ".trashcan" / "migrate-memory-scope" / stamp
+
+
+def apply_plan(memdir: Path, project_repo: Path, planned: list[str], *, stamp: str,
+               keep_source: bool = False) -> list[tuple[str, str]]:
+    """Publish the planned notes to PROJECT scope. Returns [(rel_path, outcome)].
+
+    Guard 4 in three phases so a failure can never leave a half-migrated corpus:
+      COPY every note to the destination, VERIFY each is byte-identical, and only then
+      RETIRE the sources. A collision at the destination refuses outright — apply never
+      overwrites an existing PROJECT note.
+    """
+    dest_root = project_memory_root(project_repo)
+
+    # Refuse before writing anything if any destination is occupied.
+    collisions = [rel for rel in planned if (dest_root / rel).exists()]
+    if collisions:
+        raise MigrationRefused(
+            "destination already holds: " + ", ".join(collisions) +
+            " — apply never overwrites an existing PROJECT note"
+        )
+
+    # PHASE A — copy + byte-verify. Nothing is destroyed yet, so an abort here is free.
+    copied: list[tuple[Path, Path, str]] = []
+    for rel in planned:
+        src = memdir / rel
+        dst = dest_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        payload = src.read_bytes()
+        dst.write_bytes(payload)
+        if dst.read_bytes() != payload:
+            raise MigrationRefused(f"copy of {rel} did not verify at {dst} — nothing retired")
+        copied.append((src, dst, rel))
+
+    if keep_source:
+        return [(rel, f"copied → {dst}") for _, dst, rel in copied]
+
+    # PHASE B — retire the sources, now that every destination is proven good.
+    trash = _trashcan_dir(project_repo, stamp)
+    out: list[tuple[str, str]] = []
+    for src, dst, rel in copied:
+        retired = trash / rel
+        retired.parent.mkdir(parents=True, exist_ok=True)
+        src.replace(retired)
+        out.append((rel, f"moved → {dst} (source retired to {retired})"))
+    return out

@@ -273,7 +273,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=f7c319aee3cd digest=c7078110df20 generated=2026-07-11T14:23:30+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=ae57f4d7d65a digest=e00d709ca001 generated=2026-07-11T14:31:31+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -729,6 +729,12 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · iter_notes(memdir) -> list[Path] — Every real note `*.md` under `memdir`, via the shared SSOT.
   · classify_corpus(memdir) -> list[NoteVerdict] — Classify every real note under `memdir`. Read-only. A note larger than the
   · render_plan(memdir, verdicts, *, project_repo) -> str — Render the migration PLAN: every note with its verdict, the deciding
+  · MigrationRefused — A guard refused the apply. Nothing was mutated.
+  · parse_plan_project_set(plan_text) -> list[str] — The relative note paths the plan marked PROJECT-bound, in plan order.
+  · project_memory_root(project_repo) -> Path — The PROJECT-scope memory root inside the owning repo.
+  · check_ownership(project_repo, cwd_repo_root) -> None — Guard 1. Raise unless we are running inside the repo we are about to write to.
+  · check_plan_matches_corpus(memdir, planned) -> list[NoteVerdict] — Guard 2 + 3. Re-classify NOW and prove the reviewed plan still describes reality.
+  · apply_plan(memdir, project_repo, planned, *, stamp, keep_source) -> list[tuple[str, str]] — Publish the planned notes to PROJECT scope. Returns [(rel_path, outcome)].
 `scripts/lib/memory_scopes.py` — Shared three-scope memory-root resolution — the SINGLE SOURCE OF TRUTH.
   · is_note_file(path) -> bool — True iff ``path`` is a real memory NOTE — the SSOT discriminator.
   · iter_note_files(memdir) -> list[Path] — Every real memory NOTE under ``memdir`` (recursive), filtered by ``is_note_file``.

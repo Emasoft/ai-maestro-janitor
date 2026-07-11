@@ -1,9 +1,9 @@
 ---
 trdd-id: 47df698b-d946-4c53-9ce4-d40d1b76a1d4
 title: Memory scope-migration helper — re-scope LOCAL to PROJECT (ai-maestro corpus, option b)
-column: dispatch
+column: dev
 created: 2026-06-20T05:08:07+0200
-updated: 2026-07-04T05:14:00+0200
+updated: 2026-07-11T15:05:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -20,9 +20,68 @@ external-refs: []
 
 # TRDD-47df698b — Memory scope-migration helper (LOCAL→PROJECT)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-20
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-11
 
-**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dispatch:** Phase 1 (read-only classifier + reviewable plan) is shipped — `scripts/migrate_memory_scope.py` + `scripts/lib/memory_migrate.py` in-tree; `--apply` still FAILS FAST by design (migrate_memory_scope.py:15-19) because Phase 2 (owning-Claude apply) is unbuilt and cross-project/USER-gated (fe45babc journal: "#209 needs the target corpus").
+**2026-07-11 — PHASE 2 (`--apply`) IS BUILT.** The tool is now complete; what remains
+is not janitor work.
+
+`--apply --plan <plan.md>` publishes the plan's PROJECT-bound notes into
+`<repo>/.claude/project/memory/`. Apply is publish-AND-retire — PROJECT scope is
+git-tracked and PUSHED (a leak cannot be un-pushed), and the LOCAL original is the only
+copy that exists — so it is guarded like the cookie scrub: prove first, mutate second.
+Four guards, all fail-CLOSED, all refusing BEFORE anything is written:
+
+1. **OWNERSHIP** — `--apply` refuses unless the cwd's git repo IS `--project-repo`.
+   **There is deliberately NO bypass flag.** The TRDD's original sketch allowed "an
+   explicit opt-in flag"; I rejected that. A switch that lets one project's session
+   mutate another project's store is precisely the thing the cross-project rule exists
+   to prevent, and an escape hatch on the only guard enforcing it is worth less than the
+   guard. The owning Claude runs the tool from its own repo — which IS the contract.
+2. **THE REVIEWED PLAN** — apply consumes the plan file and re-classifies to prove the
+   corpus still classifies as the reviewer saw it. Any drift (a note edited, added, or
+   gone since the dry-run) aborts: what was reviewed must be what is applied.
+3. **PRIVACY RE-GATE** — every note about to be published is re-scanned AT APPLY TIME.
+   One leak aborts the whole run. The plan's verdict is never trusted as a cache.
+4. **VERIFY-THEN-RETIRE** — copy + byte-verify every destination BEFORE any source is
+   touched, so a failure can never leave a half-migrated corpus. The source is then
+   MOVED to the repo's gitignored `.trashcan/migrate-memory-scope/<ts>/` — never `rm`-ed
+   (RULE 0: it is human-authored work outside any git repo). Recovery is one `mv`.
+   `--keep-source` copies without retiring. A name collision in PROJECT scope refuses
+   outright; apply never overwrites someone else's note.
+
+Also wires `project_memory_tracked.ensure_tracked()` so the published scope is actually
+git-TRACKED (a corpus published into a gitignored dir would be shared with nobody), and
+writes an `…-applied.md` report next to the plan.
+
+**Verified end-to-end through the real CLI** (throwaway repos): dry-run classified a
+clean note → PROJECT and a `/Users/…`-bearing note → LOCAL (privacy gate held); apply
+from the WRONG repo was REFUSED; apply from the OWNING repo published the clean note,
+left the private one in LOCAL, and retired the source recoverably. 27 tests in
+`test_memory_migrate.py` (10 new, all guards proven to refuse without mutating); ruff
+clean.
+
+**NEXT ACTION — NOT janitor work.** The ai-maestro corpus migration is the OWNING
+project's Claude's job: it runs the dry-run, reviews the plan, then runs `--apply` in
+its OWN session. This janitor session must NOT run `--apply` against
+`~/.claude/projects/-Users-emanuelesabetta-ai-maestro/memory` — that is exactly the
+cross-project mutation the guards refuse.
+
+**SUPERSEDED — do NOT carry forward** (the `### The tool` sketch further down predates
+the shipped build):
+
+- *"update BOTH `MEMORY.md` indexes"* — OBSOLETE. `MEMORY.md` is now a deprecation STUB;
+  the index is 100% memgrep's (`markdown-memory-recall.md`: "do NOT add pointers here").
+  Writing index entries would re-create the hand-maintained index that rule retired.
+- *"redirect cross-scope `[[backlinks]]`"* — UNNECESSARY. A wiki link is `[[slug]]`, the
+  slug does not change on a move, and recall composes all three scopes in one query — so
+  a link into a migrated note still resolves. There is nothing to rewrite.
+- *"idempotent (re-run = no-op once migrated)"* — CHANGED, deliberately. A re-run of the
+  same plan now REFUSES ("in the plan but no longer in the corpus"), because the notes
+  were retired from LOCAL. A silent no-op is indistinguishable from a successful apply;
+  a loud refusal tells the operator the truth.
+- *"(or an explicit opt-in flag)"* on the ownership guard — REJECTED (see guard 1 above).
+
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J):** Phase 1 (read-only classifier + reviewable plan) shipped — `scripts/migrate_memory_scope.py` + `scripts/lib/memory_migrate.py` in-tree.
 
 - **Origin:** the USER chose **option (b)** for the mis-scoped ai-maestro fleet
   corpus (2026-06-20): *write a migration helper the ai-maestro Claude runs* — NOT

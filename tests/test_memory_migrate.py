@@ -24,6 +24,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 _LIB = Path(__file__).resolve().parent.parent / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 
@@ -203,7 +205,11 @@ class CliTests(unittest.TestCase):
             after = {p: p.read_bytes() for p in memdir.iterdir()}
             self.assertEqual(before, after)
 
-    def test_apply_refuses_loudly(self) -> None:
+    def test_apply_without_a_plan_refuses_loudly(self) -> None:
+        """`--apply` used to refuse because it was unbuilt; now it refuses because it is
+        driven by a REVIEWED plan. Either way it must never silently no-op — apply is
+        publish-and-retire, so a bare invocation with no reviewed artifact is a bug, not
+        a default."""
         with TemporaryDirectory() as d:
             root = Path(d)
             memdir = root / "memory"
@@ -211,7 +217,36 @@ class CliTests(unittest.TestCase):
             (memdir / "x.md").write_text(CLEAN_PLAIN, encoding="utf-8")
             proc = self._run([str(memdir), "--project-repo", str(root), "--apply"], cwd=root)
             self.assertEqual(2, proc.returncode)
-            self.assertIn("--apply is not implemented", proc.stderr)
+            self.assertIn("--plan", proc.stderr)
+            # And nothing was published.
+            self.assertFalse((root / ".claude" / "project" / "memory").exists())
+
+    def test_apply_refuses_against_another_projects_store(self) -> None:
+        """End-to-end through the CLI: the cross-project contract holds even when the
+        caller passes a real corpus and a real plan — the cwd's repo is not the target."""
+        with TemporaryDirectory() as d:
+            root = Path(d)
+            memdir = root / "memory"
+            memdir.mkdir()
+            (memdir / "x.md").write_text(CLEAN_PLAIN, encoding="utf-8")
+            target = root / "someone-elses-repo"
+            target.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=target, check=True)
+            here = root / "my-repo"
+            here.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=here, check=True)
+            plan = root / "plan.md"
+            plan.write_text("## → PROJECT\n\n- `x.md` — topic\n", encoding="utf-8")
+
+            proc = self._run(
+                [str(memdir), "--project-repo", str(target), "--apply", "--plan", str(plan)],
+                cwd=here,
+            )
+
+            self.assertEqual(2, proc.returncode)
+            self.assertIn("REFUSED", proc.stderr)
+            self.assertFalse((target / ".claude" / "project" / "memory").exists())
+            self.assertTrue((memdir / "x.md").is_file())  # source untouched
 
     def test_missing_dir_fails_fast(self) -> None:
         with TemporaryDirectory() as d:
@@ -223,3 +258,143 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# PHASE 2 — the apply. Every test here is about a guard REFUSING and leaving the
+# corpus untouched, because apply both PUBLISHES (git-tracked + pushed — you cannot
+# un-push a leak) and RETIRES the only existing copy of a human-authored note.
+# Real files, real git repos, no mocks.
+# ---------------------------------------------------------------------------
+def _note(text: str = "a project note about the codebase architecture") -> str:
+    return f"---\nname: n\ndescription: d\nmetadata:\n  type: project\n---\n\n{text}\n"
+
+
+def _corpus(tmp_path: Path, notes: dict[str, str]) -> Path:
+    memdir = tmp_path / "local-mem"
+    memdir.mkdir(parents=True, exist_ok=True)
+    for name, body in notes.items():
+        (memdir / name).write_text(body, encoding="utf-8")
+    return memdir
+
+
+def _repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "owning-repo"
+    repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    return repo
+
+
+def test_parse_plan_reads_only_the_project_section() -> None:
+    """Apply is driven by the plan's PROJECT list — a LOCAL-stay entry must never be
+    picked up (that would publish a note the reviewer chose to keep private)."""
+    plan = (
+        "# plan\n\n## → PROJECT\n\n- `arch.md` — topic\n- `build.md` — topic\n\n"
+        "## → LOCAL-stay\n\n- `secrets.md` — privacy: local-path\n"
+    )
+    assert mm.parse_plan_project_set(plan) == ["arch.md", "build.md"]
+
+
+def test_apply_refuses_outside_the_owning_repo(tmp_path: Path) -> None:
+    """The cross-project contract, enforced in code: a session whose repo is not the
+    target repo may not mutate the target's store. There is no bypass flag."""
+    repo = _repo(tmp_path)
+    other = tmp_path / "some-other-repo"
+    other.mkdir()
+
+    with pytest.raises(mm.MigrationRefused, match="cross-project contract"):
+        mm.check_ownership(repo, other)
+
+
+def test_apply_refuses_when_cwd_is_not_in_a_repo(tmp_path: Path) -> None:
+    with pytest.raises(mm.MigrationRefused, match="owning project"):
+        mm.check_ownership(_repo(tmp_path), None)
+
+
+def test_apply_refuses_when_a_planned_note_vanished(tmp_path: Path) -> None:
+    """The plan is a promise about a corpus. If the corpus moved on, what a human
+    reviewed is not what would be applied."""
+    memdir = _corpus(tmp_path, {"arch.md": _note()})
+
+    with pytest.raises(mm.MigrationRefused, match="no longer in the corpus"):
+        mm.check_plan_matches_corpus(memdir, ["arch.md", "gone.md"])
+
+
+def test_apply_refuses_when_a_planned_note_now_leaks(tmp_path: Path) -> None:
+    """THE guard that matters. A note edited between review and apply must never be
+    published on the strength of its stale verdict — PROJECT scope is PUSHED, and a
+    leaked local path cannot be un-pushed."""
+    memdir = _corpus(tmp_path, {
+        "arch.md": _note("the architecture lives at /Users/someone/secret/path/app.py"),
+    })
+
+    with pytest.raises(mm.MigrationRefused, match="now scans PRIVATE"):
+        mm.check_plan_matches_corpus(memdir, ["arch.md"])
+
+
+def test_apply_refuses_on_an_empty_plan(tmp_path: Path) -> None:
+    memdir = _corpus(tmp_path, {"arch.md": _note()})
+    with pytest.raises(mm.MigrationRefused, match="nothing to apply"):
+        mm.check_plan_matches_corpus(memdir, [])
+
+
+def test_apply_refuses_to_overwrite_an_existing_project_note(tmp_path: Path) -> None:
+    """A name collision in PROJECT scope is someone else's note. Refuse, don't clobber."""
+    memdir = _corpus(tmp_path, {"arch.md": _note()})
+    repo = _repo(tmp_path)
+    dest = mm.project_memory_root(repo) / "arch.md"
+    dest.parent.mkdir(parents=True)
+    dest.write_text("SOMEONE ELSE'S NOTE", encoding="utf-8")
+
+    with pytest.raises(mm.MigrationRefused, match="never overwrites"):
+        mm.apply_plan(memdir, repo, ["arch.md"], stamp="20260711_000000+0200")
+
+    assert dest.read_text(encoding="utf-8") == "SOMEONE ELSE'S NOTE"
+    assert (memdir / "arch.md").is_file()  # source untouched too
+
+
+def test_apply_publishes_and_retires_the_source_recoverably(tmp_path: Path) -> None:
+    """The happy path. The note lands in PROJECT scope byte-identical, and the LOCAL
+    original is MOVED to the repo's gitignored .trashcan/ — never deleted, because it is
+    human-authored work outside any git repo (RULE 0). Recovery is a single `mv`."""
+    body = _note("architecture of the build pipeline")
+    memdir = _corpus(tmp_path, {"arch.md": body})
+    repo = _repo(tmp_path)
+
+    results = mm.apply_plan(memdir, repo, ["arch.md"], stamp="20260711_000000+0200")
+
+    published = mm.project_memory_root(repo) / "arch.md"
+    assert published.read_text(encoding="utf-8") == body     # byte-identical
+    assert not (memdir / "arch.md").exists()                  # retired from LOCAL
+    retired = repo / ".trashcan" / "migrate-memory-scope" / "20260711_000000+0200" / "arch.md"
+    assert retired.read_text(encoding="utf-8") == body        # …but recoverable
+    assert results[0][0] == "arch.md"
+
+
+def test_apply_keep_source_copies_without_retiring(tmp_path: Path) -> None:
+    """--keep-source: publish a copy, leave the original in place."""
+    body = _note()
+    memdir = _corpus(tmp_path, {"arch.md": body})
+    repo = _repo(tmp_path)
+
+    mm.apply_plan(memdir, repo, ["arch.md"], stamp="20260711_000000+0200", keep_source=True)
+
+    assert (mm.project_memory_root(repo) / "arch.md").read_text(encoding="utf-8") == body
+    assert (memdir / "arch.md").read_text(encoding="utf-8") == body  # still there
+
+
+def test_a_failed_copy_retires_nothing(tmp_path: Path) -> None:
+    """Copy-then-verify-then-retire, in that order: if ANY destination fails, every
+    source must still be on disk. A half-migrated corpus is the one outcome that cannot
+    be recovered from by hand."""
+    memdir = _corpus(tmp_path, {"a.md": _note(), "b.md": _note()})
+    repo = _repo(tmp_path)
+    # Make the destination un-writable for the SECOND note by planting a directory where
+    # its file must go — a real filesystem refusal, not a simulated one.
+    (mm.project_memory_root(repo) / "b.md").mkdir(parents=True)
+
+    with pytest.raises((mm.MigrationRefused, OSError)):
+        mm.apply_plan(memdir, repo, ["a.md", "b.md"], stamp="20260711_000000+0200")
+
+    assert (memdir / "a.md").is_file()   # nothing was retired
+    assert (memdir / "b.md").is_file()
