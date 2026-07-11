@@ -27,7 +27,7 @@
 > `.claude/rules/`) that EXPANDS this base with multi-agent transition
 > authority, approval tiers, and title-based routing — the overlay never
 > restates this base.
-
+>
 > **SCOPE (amended 2026-07-11).** A TRDD is **PROJECT-scoped** (`<project-root>/design/`,
 > git-tracked and pushed) or **LOCAL-scoped** (`~/.claude/projects/<slug>/design/`, outside
 > the repo and machine-private). Its **scope IS its path**. The local root mirrors the

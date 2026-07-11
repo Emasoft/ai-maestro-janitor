@@ -64,6 +64,10 @@ from pathlib import Path
 
 import pytest
 
+# The write sandbox lives in a MODULE (not in conftest) so a CHILD process can import it too —
+# see sandbox_guard's docstring. pytest puts this dir on sys.path, so a plain import works.
+import sandbox_guard
+
 # ─── S1a/S1b module state (filled by pytest_configure) ──────────────────────────────────
 
 _ISOLATION_ENVS = ("HOME", "JANITOR_GLOBAL_STATE_DIR", "JANITOR_DATA_DIR", "CLAUDE_PLUGIN_DATA")
@@ -194,134 +198,40 @@ _SANDBOX_DENY: tuple[Path, ...] = (
     _REAL_HOME_AT_IMPORT / ".claude",  # live plugin DATA, global-state, rules, memory
     *(_REPO_ROOT / d for d in ("scripts", "rules", "skills", "agents", "commands", "hooks", "design", ".claude-plugin")),
 )
-# Python writes import bytecode into the source tree on every run; that is the interpreter,
-# not a test escaping its boundary.
-_SANDBOX_ALLOW_PARTS = ("__pycache__", ".pytest_cache")
-_SANDBOX_PATCHED: list[tuple[object, str, object]] = []
 
-
-class SandboxViolation(RuntimeError):
-    """A test tried to write OUTSIDE its boundaries — into real machine state or the repo source."""
-
-
-def _fd_relative(kwargs: dict) -> bool:
-    """True when a syscall's path is relative to a `dir_fd`, not to the cwd.
-
-    `shutil.rmtree` (hence `TemporaryDirectory` cleanup) walks with
-    `os.rmdir("design", dir_fd=<fd of the tmp dir>)` — a BARE relative name plus an open
-    directory fd. Resolving that name against the cwd is simply wrong: it made a tmp-dir
-    cleanup look like an attack on the REAL repo's design/ and failed 68 innocent tests.
-    We cannot portably resolve an fd-relative name, so we skip it here — `shutil.rmtree` is
-    guarded at its entry point instead, which is what actually bounds the recursive delete.
-    """
-    return kwargs.get("dir_fd") is not None
-
-
-def _sandbox_check(path: object, op: str) -> None:
-    """Raise unless `path` is outside every protected root. Reads are never routed here."""
-    if not isinstance(path, (str, bytes, os.PathLike)):
-        return  # an int fd — no path to police
-    try:
-        raw = os.fsdecode(path) if isinstance(path, bytes) else str(path)
-        target = Path(os.path.abspath(raw))
-    except (ValueError, TypeError):
-        return
-    if any(part in _SANDBOX_ALLOW_PARTS for part in target.parts):
-        return
-    for root in _SANDBOX_DENY:
-        if target == root or root in target.parents:
-            raise SandboxViolation(
-                f"BLOCKED {op}() -> {target}\n"
-                f"A test may not write outside its own tmp boundary. This path is inside the "
-                f"protected root {root}.\n"
-                f"Real machine state and this repo's source are OFF LIMITS to the suite: on "
-                f"2026-07-11 an unsandboxed keepalive restage overwrote scripts/** with the "
-                f"released v0.39.0, reverting committed work (TRDD-RYZCVVKA).\n"
-                f"Fix the TEST: write to `tmp_path`, and route janitor paths through the "
-                f"isolated HOME / JANITOR_DATA_DIR / JANITOR_GLOBAL_STATE_DIR env."
-            )
+# The guard itself lives in `sandbox_guard` (a MODULE, not conftest code) for one reason: a
+# child process cannot import conftest. Patching syscalls here protects only THIS interpreter,
+# and a test that spawns `subprocess.run([sys.executable, …])` hands the child a completely
+# unpatched Python, free to write anywhere — which is precisely the shape of the incident this
+# sandbox exists to prevent, and was demonstrated live on 2026-07-11 when the running daemon
+# wrote the real plugin-data dir mid-suite and this sandbox never saw it. `_export_sandbox`
+# below installs it in every descendant too, so there is ONE rule enforced in ONE place.
+SandboxViolation = sandbox_guard.SandboxViolation
+_SANDBOX_BOOT_DIR = _REPO_ROOT / "tests" / "_sandbox_boot"
 
 
 def _install_write_sandbox() -> None:
-    """Wrap every write-capable syscall so a protected path raises instead of being written.
-
-    These are choke points, not a blocklist of callers: shutil, json.dump, tempfile and
-    `stage_closure`'s tmp+os.replace all bottom out here. Two traps this code fell into once
-    and must not fall into again — both were caught by tests/test_write_sandbox.py, which is
-    why those positive controls exist:
-
-    * `io.open` is a SEPARATE binding from `builtins.open`. `pathlib.Path.open` (hence
-      `write_text`/`write_bytes`) calls `io.open`, so patching only `builtins.open` lets every
-      pathlib write straight through. Both names are wrapped.
-    * For `os.replace(src, dst)` the file that gets DESTROYED is `dst`, not `src`. Guarding
-      the source argument polices the harmless tmp file and waves the clobber through — which
-      is precisely how `stage_closure` overwrote this repo (TRDD-RYZCVVKA). For rename/replace
-      BOTH ends are checked: moving protected source away destroys it just as surely.
-
-    `os.chmod` is included because the clobber's most damaging side effect was a CLEARED EXEC
-    BIT (100755 -> 100644) — damage no content manifest would ever flag.
-    """
-    import builtins
-    import io
-
-    def _patch(module: object, name: str, factory) -> None:
-        original = getattr(module, name)
-        _SANDBOX_PATCHED.append((module, name, original))
-        setattr(module, name, factory(original, name))
-
-    def _open_guard(original, name):
-        def guarded(file, mode="r", *args, **kwargs):
-            if isinstance(mode, str) and any(c in mode for c in "wax+"):
-                _sandbox_check(file, name)
-            return original(file, mode, *args, **kwargs)
-
-        return guarded
-
-    def _os_open_guard(original, name):
-        writes = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
-
-        def guarded(path, flags, *args, **kwargs):
-            if isinstance(flags, int) and flags & writes:
-                _sandbox_check(path, name)
-            return original(path, flags, *args, **kwargs)
-
-        return guarded
-
-    def _path_guard(original, name):
-        def guarded(path, *args, **kwargs):
-            if not _fd_relative(kwargs):
-                _sandbox_check(path, name)
-            return original(path, *args, **kwargs)
-
-        return guarded
-
-    def _two_ended_guard(original, name):
-        def guarded(src, dst, *args, **kwargs):
-            if not _fd_relative(kwargs):
-                _sandbox_check(dst, name)  # the file being overwritten — THE clobber vector
-                if name in ("replace", "rename"):
-                    _sandbox_check(src, name)  # a move out of a protected root destroys it too
-            return original(src, dst, *args, **kwargs)
-
-        return guarded
-
-    _patch(builtins, "open", _open_guard)
-    _patch(io, "open", _open_guard)  # pathlib's write path — NOT covered by builtins
-    _patch(os, "open", _os_open_guard)
-    for fn in ("remove", "unlink", "rmdir", "mkdir", "makedirs", "chmod", "truncate"):
-        _patch(os, fn, _path_guard)
-    for fn in ("replace", "rename", "symlink", "link"):
-        _patch(os, fn, _two_ended_guard)
-    # shutil.rmtree walks with fd-relative unlink/rmdir (see _fd_relative), so its children are
-    # invisible to the os.* guards above. Guard its ENTRY POINT instead — one check on the root
-    # it was handed covers the whole recursive delete.
-    _patch(shutil, "rmtree", _path_guard)
+    sandbox_guard.install(_SANDBOX_DENY)
 
 
 def _remove_write_sandbox() -> None:
-    for module, name, original in reversed(_SANDBOX_PATCHED):
-        setattr(module, name, original)
-    _SANDBOX_PATCHED.clear()
+    sandbox_guard.remove()
+
+
+def _export_write_sandbox_to_children() -> None:
+    """Make every CHILD Python process boot with the same sandbox.
+
+    Two env vars do it: the protected roots (a child cannot recompute them — by the time it
+    runs, HOME points into a tmp tree), and a PYTHONPATH carrying `_sandbox_boot/`, whose
+    `sitecustomize.py` CPython auto-imports at interpreter startup. Prepended, never replacing
+    an existing PYTHONPATH.
+    """
+    sandbox_guard.publish_roots(_SANDBOX_DENY)
+    entries = [str(_SANDBOX_BOOT_DIR), str(_REPO_ROOT / "tests")]
+    existing = os.environ.get("PYTHONPATH", "")
+    if existing:
+        entries.extend(e for e in existing.split(os.pathsep) if e and e not in entries)
+    os.environ["PYTHONPATH"] = os.pathsep.join(entries)
 
 
 _KEYCHAIN_USABLE_CACHE: bool | None = None
@@ -606,6 +516,11 @@ def pytest_configure(config: pytest.Config) -> None:
     # S1e LAST: the env above is now fake, so anything still resolving a REAL protected path is
     # by definition escaping its boundary — and from here on the write itself is refused.
     _install_write_sandbox()
+    # S1g: and every CHILD process the suite spawns inherits the same refusal. Patching syscalls
+    # above protects only THIS interpreter; a subprocess gets a clean one and can write anywhere.
+    # That is not theoretical — it is how the source tree was clobbered, and it is why the live
+    # daemon's writes were invisible to the guard above.
+    _export_write_sandbox_to_children()
 
 
 @pytest.fixture(autouse=True)

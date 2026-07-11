@@ -81,6 +81,7 @@ machine-private) — see step 1.
    offset (`%Y-%m-%dT%H:%M:%S%z`). No trailing whitespace or comments on data lines.
 5. **Minimal frontmatter** (a trivial TRDD needs only these; the schema is OPEN — add any
    field from the full reference when it applies):
+
    ```yaml
    ---
    trdd-id: M7BZ4X1Q
@@ -92,6 +93,7 @@ machine-private) — see step 1.
    task-type: feature        # feature|bugfix|refactor|docs|infra|security|artifact|spike|audit
    ---
    ```
+
 6. **`column:` is the state machine** (v2 replaced v1's `status:`). Lifecycle order:
    `backburner → todo → design → dispatch → dev → testing → ai_review → (human_review) →
    complete`, then `publish → published` (tools) or `deploy → live → (live_auditing)`
@@ -109,9 +111,11 @@ machine-private) — see step 1.
 10. **STATE head block — MANDATORY once a TRDD spans more than one session.** A TRDD grows
     append-only, so a reader (or a compaction summary) hits the OLDEST, often SUPERSEDED
     facts first. Immediately after the title, before the first body section:
+
     ```markdown
     ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — <date>
     ```
+
     It is the single source of truth and is kept current on every edit. It carries: the
     current state of each component; the **NEXT ACTION** (one concrete step, runnable as
     written); the load-bearing facts/gotchas; an explicit **SUPERSEDED — do NOT carry
