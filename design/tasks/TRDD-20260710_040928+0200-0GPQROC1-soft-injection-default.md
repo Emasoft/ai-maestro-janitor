@@ -1,9 +1,9 @@
 ---
 trdd-id: 0GPQROC1
 title: Soft-by-default command injection — wait for the turn to finish unless the target is wedged
-column: testing
+column: complete
 created: 2026-07-10T04:09:28+0200
-updated: 2026-07-10T04:52:00+0200
+updated: 2026-07-11T12:19:01+0200
 current-owner: janitor-claude
 assignee: janitor-claude
 priority: 2
@@ -30,13 +30,13 @@ impacts: []
 attempts: 0
 test-failures: 0
 last-test-result: pass
-last-test-at: 2026-07-10T04:52:00+0200
-implementation-commits: [84c4564]
+last-test-at: 2026-07-11T12:17:00+0200
+implementation-commits: [84c4564, 109c7d2]
 ---
 
 # Soft-by-default command injection — wait for the turn to finish unless the target is wedged
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-10
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-11
 
 **IMPLEMENTED + VERIFIED locally.** User directive (2026-07-10, verbatim): "have you
 updated the commands to use the --soft option (waiting for the agent to go idle or
@@ -54,11 +54,24 @@ Shipped per the decision table (D1):
   xdotool (was silently always-ESC); `build_injection` gained `esc_first`.
 - `lib/fleet_recovery.py` — new pure policy `injection_is_hard(diagnosis)`: True
   only for `frozen` (a wedged turn never ends, so soft would never run).
-- `daemon.py` — session-liveness passes `esc_first=fr.injection_is_hard(...)`;
-  `_fire_fleet_stop` is soft (`esc_first=False`).
+- `daemon.py` — session-liveness AND `_fire_fleet_stop` both pass
+  `esc_first=fr.injection_is_hard(inst.diagnosis)` — soft for every live diagnosis,
+  hard ONLY for `frozen` (see the correction below).
 - Docs: the 5 affected SKILL.md files, README.md, CLAUDE.md prose + repomap.
-- Tests: 10 updated/new across the trigger/fleet/hook test files; **full suite
-  12,350 passed, 1 skipped; ruff clean.**
+- Tests: 10 updated/new across the trigger/fleet/hook test files, +3 for the
+  fleet-stop ESC policy; **full suite 12,392 passed, 1 skipped; ruff clean.**
+
+**CORRECTION (109c7d2, 2026-07-11).** The original ship made `_fire_fleet_stop`
+UNCONDITIONALLY soft (`esc_first=False`). That is wrong for a FROZEN target: a wedged
+turn never ends, so the enqueued `/janitor-disarm` sits in its input queue forever —
+yet `fire()` returns True and `record_fleet_injection` stamps `(pid, flag)` as
+delivered, so the stop is never retried while the flag is held and the frozen
+session's cron keeps firing billable turns straight through a machine-wide stop. The
+fleet-stop path now uses the SAME `injection_is_hard` policy as the gentle-recovery
+path (the ESC IS the unwedge). Caught by the xhigh code-review pass, verified against
+the code before fixing. Lesson: "soft everywhere" is not the invariant — "soft for a
+session that can still reach a turn boundary" is; anything that can't must be
+interrupted or the delivery is a silent no-op that looks like success.
 
 **NEXT ACTION:** rides the next release (publish is NON-EXEMPT — user approval).
 
@@ -85,7 +98,7 @@ Four injection surfaces still ESC-interrupt (hard) by default:
 | `reload_trigger.py` / `reload_skills_trigger.py` | hard default | **soft default**, `--hard` opt-in (`--soft` stays as a no-op alias) | a reload is never worth killing the caller's own in-flight turn |
 | `compact_trigger.py` | hard default | **soft default**, `--hard` opt-in | the skill ends its turn right after firing, so soft runs seconds later anyway; hard stays for emergencies |
 | `pre-tool-context-usage.py` enforcement auto-compact | inherits hard default | passes **`--hard` explicitly** | ≥85% is the emergency wall: the deny is already cutting the turn; ESC-now is the point |
-| `_fire_fleet_stop` | `esc_first=True` | **`esc_first=False`** | a fleet pause/disarm should land at each session's turn boundary — that IS the directive |
+| `_fire_fleet_stop` | `esc_first=True` | **`injection_is_hard(diagnosis)`** — soft for a live session, hard for `frozen` (corrected in 109c7d2; the first cut hard-coded `False`) | a fleet pause/disarm should land at each session's turn boundary — but a frozen session HAS no turn boundary, so soft there is a stamped-as-delivered no-op |
 | `build_injection` gentle rungs | always hard | **soft for `cron_dead` / `version_mismatch`, hard only for `frozen`** (policy helper `fleet_recovery.injection_is_hard`) | live sessions keep their in-flight work; a frozen turn never ends, so an enqueued command would never run — ESC is the unwedge |
 | `build_command_plan` tmux/wtype/xdotool | ESC always | **honor `esc_first`** | soft intent was silently hard on every non-iTerm channel |
 

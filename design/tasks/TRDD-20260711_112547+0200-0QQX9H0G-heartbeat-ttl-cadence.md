@@ -1,9 +1,9 @@
 ---
 trdd-id: 0QQX9H0G
 title: TTL-aware dynamically-tiered heartbeat cadence — stop firing 12x more often than the 1h cache TTL needs
-column: dev
+column: complete
 created: 2026-07-11T11:25:47+0200
-updated: 2026-07-11T12:06:10+0200
+updated: 2026-07-11T12:19:01+0200
 current-owner: janitor-claude
 assignee: janitor-claude
 priority: 1
@@ -30,8 +30,8 @@ impacts: [config-schema]
 attempts: 0
 test-failures: 0
 last-test-result: pass
-last-test-at: 2026-07-11T12:06:10+0200
-implementation-commits: []
+last-test-at: 2026-07-11T12:17:00+0200
+implementation-commits: [431982f, 39feb86]
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/83", "github.com/Emasoft/ai-maestro-janitor/issues/78"]
 ---
 
@@ -39,21 +39,21 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/83", "github.com/E
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-11
 
-**Status: IN IMPLEMENTATION.** User-approved plan (plan file
-`~/.claude/plans/staged-kindling-lynx.md`). Implements issue #83 (open); issue #78
-(heartbeat-cost CLI) is already shipped (`36aeca4`) and is the measurement tool that
-confirms this works.
+**Status: COMPLETE (implemented, tested, committed `431982f`) — awaiting publish.**
+User-approved plan (plan file `~/.claude/plans/staged-kindling-lynx.md`). Implements
+issue #83 (open); issue #78 (heartbeat-cost CLI) is already shipped (`36aeca4`) and is
+the measurement tool that confirms this works.
 
-**NEXT ACTION:** implement in this order —
-1. `scripts/lib/heartbeat_cadence.py` (pure lib + one probe helper).
-2. `scripts/dispatch.py` — `_phase_cadence_tier()`, called Phase 0.6 (before rate-limit
-   recovery, so a rate-limited fire can still promote to FAST; runs in full+maintenance).
-3. `skills/janitor-arm/SKILL.md` — step 2 reads `desired-cadence.cron` first; step 6
-   writes `armed-cadence.cron`.
-4. `.claude-plugin/plugin.json` — reword `heartbeat_cron`; add the 5 new options.
-5. `tests/test_heartbeat_cadence.py` + dispatch integration tests; full suite + ruff green.
-6. CLAUDE.md prose + repomap regen + README; commit by name. **Do NOT push** (publish
-   is NON-EXEMPT — user approval).
+Shipped: `scripts/lib/heartbeat_cadence.py` (pure tiers + hysteresis + cron map + the
+one TTL probe helper); `dispatch._phase_cadence_tier()` at **Phase 1.5a3** (see the
+placement note below); `skills/janitor-arm/SKILL.md` steps 2+6 (read `desired-cadence.cron`
+/ write `armed-cadence.cron`); 8 new `plugin.json` options; 40 new tests
+(`tests/test_heartbeat_cadence.py` + `tests/test_dispatch_cadence.py`). Full suite
+**12,392 passed, 1 skipped; ruff clean**.
+
+**NEXT ACTION:** rides the next release — `complete → publish` is NON-EXEMPT and needs
+an explicit USER go-ahead. After it ships, verify with `agentlenspro heartbeat-cost`
+that the idle per-fire series falls as sessions demote to SLOW.
 
 **Load-bearing facts / gotchas:**
 - `dispatch.py` CANNOT change its own cron (CronCreate/CronDelete are model tools). A
@@ -80,6 +80,26 @@ confirms this works.
   `heartbeat_cadence_demote_fires` (default 2) idle fires. Prevents re-arm churn.
 - `heartbeat_cadence_dynamic=false` ⇒ `_phase_cadence_tier` is a total no-op; behavior is
   today's fixed cadence. Pre-existing crons re-arm to a tier on their first `[janitor-renew]`.
+- **PHASE PLACEMENT (supersedes the plan's "Phase 0.6") + the DEAD-SIGNAL fix.** The
+  phase runs at **Phase 1.5a3** — AFTER the rate-limit / post-compact resume
+  early-returns and AFTER the keep-going nudge, but BEFORE the maintenance
+  early-return. Putting it at 0.6 (as the plan said) made a recovery fire print
+  `[janitor-renew]` ahead of `[janitor-resume]`, breaking the exact-output contract
+  those fires have. **But moving it there silently killed two of the five FAST
+  signals:** `_phase_rate_limit_recovery` and `_phase_compact_resume` each UNLINK their
+  flag and `return` from `main()`, so by the time the cadence phase runs the flags are
+  always gone — `rate-limited.flag` / `resume-after-compact.flag` could never read True
+  in production. The unit test passed only because it calls the phase directly. A
+  rate-limited unattended session would therefore have retried its resume at the idle
+  SLOW cadence (every 30 min) instead of every 5 — the exact recovery regression this
+  TRDD promised not to cause. FIX: both resume phases now stamp `last-resume.ts`, and
+  `_cadence_active_waiting` treats a stamp younger than 30 min as ACTIVE-WAITING. That
+  also closes a second hole: a session doing UNATTENDED work after a resume writes no
+  user-presence breadcrumb, so it would otherwise read as idle while it works.
+  Regression-guarded end-to-end by `test_rate_limit_fire_stamps_resume_then_next_fire_goes_fast`.
+  Lesson: when a phase moves behind an early-return, re-verify every signal it reads is
+  still *reachable* there — a signal consumed by an earlier phase is dead code that
+  unit tests calling the phase in isolation will happily pass.
 
 **Durable artifacts to read before acting:**
 - `~/.claude/plans/staged-kindling-lynx.md` — the full approved plan.
@@ -119,12 +139,16 @@ design; the tier table, signals, hysteresis, and config surface are specified th
 - Cost proof post-ship: `.janitor/logs/heartbeat-cost.log` idle series falls as the
   cadence demotes to SLOW.
 
-## Follow-up (separate TRDDs)
+## Follow-up (separate TRDDs — AUTHORED 2026-07-11)
 
-Broader "prefer agentlensPro over the janitor's own estimations" (user steer 2026-07-11):
-`window-burn-rate` → `get_window_budget`/`get_account_status.usageWindows`;
-`token-usage-anomaly` → `get_burn_status`/`investigate_burn`. Same fail-open
-"prefer-when-present, fall back to native" pattern as this task's regime probe.
+Broader "prefer agentlensPro over the janitor's own estimations" (user steer 2026-07-11)
+is now tracked as **TRDD-WUUR2DFX** (the umbrella + the non-negotiable integration
+contract), with two children: **TRDD-90B47EM9** (`window-burn-rate` →
+`get_window_budget`/`get_account_status.usageWindows`) and **TRDD-HL8H3XCV**
+(`token-usage-anomaly` → `get_burn_status`/`investigate_burn`). All three cite THIS
+task's TTL-regime probe as the reference implementation of the fail-open
+"prefer-when-present, fall back to native" pattern. Each is `backburner` and blocked on
+one user decision (switch vs cross-check).
 
 ## Approval log
 
