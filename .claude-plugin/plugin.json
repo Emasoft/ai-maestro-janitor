@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.39.0",
+  "version": "0.40.0",
   "description": "Session-scoped janitor: reconciles PRs, worktrees, TRDDs, tasks; nudges to commit often, act on subagent reports, and never leave work stale; handles rate-limit auto-resume and prompt-cache keep-alive via a single durable CronCreate heartbeat. No external daemons.",
   "author": {
     "name": "Emasoft",
@@ -75,7 +75,7 @@
     },
     "heartbeat_cron_fast": {
       "title": "FAST-tier cron override",
-      "description": "Override the FAST-tier heartbeat cron (active-waiting sessions: rate-limited / resume-pending). Default empty = built-in \"*/5 * * * *\" — the same cadence as the fixed pre-#83 default, so an actively-waiting session has NO recovery-latency regression. Ignored in the fast-TTL regime, where every tier is forced to */5.",
+      "description": "Override the FAST-tier heartbeat cron (active-waiting sessions: rate-limited / resume-pending). Default empty = built-in \"*/5 * * * *\" \u2014 the same cadence as the fixed pre-#83 default, so an actively-waiting session has NO recovery-latency regression. Ignored in the fast-TTL regime, where every tier is forced to */5.",
       "type": "string",
       "default": "",
       "sensitive": false
@@ -89,14 +89,14 @@
     },
     "heartbeat_cron_slow": {
       "title": "SLOW-tier cron override",
-      "description": "Override the SLOW-tier heartbeat cron (idle keep-warm). Default empty = built-in \"*/30 * * * *\" in the slow-TTL regime (2 fires/h, 30-min gaps under the 1h cache TTL with margin; 6x cheaper than */5). */30 is the safe floor for a uniform cadence — any */N with 30<=N<60 fires exactly twice an hour, so a slower uniform cron is not possible without a 60-min (at-TTL) gap. Ignored in the fast-TTL regime, where every tier is */5.",
+      "description": "Override the SLOW-tier heartbeat cron (idle keep-warm). Default empty = built-in \"*/30 * * * *\" in the slow-TTL regime (2 fires/h, 30-min gaps under the 1h cache TTL with margin; 6x cheaper than */5). */30 is the safe floor for a uniform cadence \u2014 any */N with 30<=N<60 fires exactly twice an hour, so a slower uniform cron is not possible without a 60-min (at-TTL) gap. Ignored in the fast-TTL regime, where every tier is */5.",
       "type": "string",
       "default": "",
       "sensitive": false
     },
     "issues_watch_interval": {
       "title": "GitHub issues-watch cadence (seconds)",
-      "description": "Minimum seconds between GitHub issue-tracker checks, when the watcher is enabled for a project via /janitor-issues-watch-on. The watcher is OFF by default and costs nothing until enabled. Default: 1800 (30 min) — issues do not churn every 5 minutes and each due fire costs one `gh` call.",
+      "description": "Minimum seconds between GitHub issue-tracker checks, when the watcher is enabled for a project via /janitor-issues-watch-on. The watcher is OFF by default and costs nothing until enabled. Default: 1800 (30 min) \u2014 issues do not churn every 5 minutes and each due fire costs one `gh` call.",
       "type": "string",
       "default": "1800",
       "sensitive": false
@@ -698,7 +698,7 @@
     },
     "post_mcp_sanitizer_enabled": {
       "title": "Post-MCP-Response Sanitiser Hook Enabled",
-      "description": "ON by default. The `post-mcp-response-sanitizer` PostToolUse hook fires AFTER every mcp__* tool call and, on a strong injection signal, STRIPS covert invisible/bidi unicode and replaces the payload via updatedToolOutput (a homoglyph-only weak signal warns instead of replacing). It detects prompt-injection shapes: invisible unicode (zero-width / bidi override), NFKC homoglyph diffs (a Cyrillic look-alike substituted for a Latin letter, etc.), and jailbreak phrasing (instruction-override openers, role-reassignment openers, fake system-tag and frame-break markers). It defaults ON because third-party MCP servers can return attacker-controlled web content (scraped pages, issue bodies) that lands directly in the model's context — protection must not depend on a user remembering to enable it. Set to false to opt out; set post_mcp_sanitizer_strip=false for warn-only. From the narthex sweep-A.",
+      "description": "ON by default. The `post-mcp-response-sanitizer` PostToolUse hook fires AFTER every mcp__* tool call and, on a strong injection signal, STRIPS covert invisible/bidi unicode and replaces the payload via updatedToolOutput (a homoglyph-only weak signal warns instead of replacing). It detects prompt-injection shapes: invisible unicode (zero-width / bidi override), NFKC homoglyph diffs (a Cyrillic look-alike substituted for a Latin letter, etc.), and jailbreak phrasing (instruction-override openers, role-reassignment openers, fake system-tag and frame-break markers). It defaults ON because third-party MCP servers can return attacker-controlled web content (scraped pages, issue bodies) that lands directly in the model's context \u2014 protection must not depend on a user remembering to enable it. Set to false to opt out; set post_mcp_sanitizer_strip=false for warn-only. From the narthex sweep-A.",
       "type": "boolean",
       "default": true,
       "sensitive": false
