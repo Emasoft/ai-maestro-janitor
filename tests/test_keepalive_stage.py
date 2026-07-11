@@ -98,3 +98,63 @@ def test_staged_files_are_verbatim_copies(tmp_path: Path) -> None:
     for src in keepalive_stage.daemon_closure(SCRIPTS):
         dst = tmp_path / src.relative_to(SCRIPTS)
         assert dst.read_bytes() == src.read_bytes(), f"staged copy differs from source: {src.name}"
+
+
+# ---------------------------------------------------------------------------
+# The source-tree write guard (TRDD-RYZCVVKA).
+#
+# On 2026-07-11 this repo's entire daemon closure was overwritten with the INSTALLED
+# plugin's v0.39.0 copies — silently reverting committed work and clearing exec bits. The
+# mechanism is a stage whose destination resolved to the repo instead of the DATA dir. The
+# closure is only EVER staged into the DATA dir, so a source-repo destination is always a
+# bug; refusing the write makes the whole class impossible instead of merely detectable.
+# ---------------------------------------------------------------------------
+def _fake_plugin_repo(root: Path) -> Path:
+    """A directory that looks like a plugin SOURCE checkout: a git work tree whose root
+    carries a plugin manifest."""
+    (root / ".git").mkdir(parents=True)
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    return root
+
+
+def test_stage_refuses_a_plugin_source_checkout(tmp_path: Path) -> None:
+    """The incident, as a test: staging into a plugin source tree must RAISE, and must not
+    write a single file."""
+    repo = _fake_plugin_repo(tmp_path / "repo")
+    dest = repo / "scripts"
+
+    with pytest.raises(keepalive_stage.UnsafeStageDestination, match="SOURCE checkout"):
+        keepalive_stage.stage_closure(SCRIPTS, dest)
+
+    assert not (dest / "daemon.py").exists()  # nothing was written
+
+
+def test_stage_allows_a_git_repo_that_is_not_a_plugin(tmp_path: Path) -> None:
+    """THE false-positive that would matter more than the bug. Plenty of people keep `~` or
+    `~/.claude` in a dotfiles repo, and the REAL data dir lives under `~/.claude/plugins/
+    data/…`. A naive "inside any git repo" guard would refuse the legitimate production
+    stage and silently kill the L0 keepalive. Only a PLUGIN checkout (git + a manifest at
+    the root) may be refused."""
+    dotfiles = tmp_path / "dotfiles"
+    (dotfiles / ".git").mkdir(parents=True)          # a git repo, but NOT a plugin
+    dest = dotfiles / ".claude" / "plugins" / "data" / "janitor" / "scripts"
+
+    staged = keepalive_stage.stage_closure(SCRIPTS, dest)
+
+    assert (dest / "daemon.py").is_file()
+    assert staged
+
+
+def test_stage_allows_an_ordinary_destination(tmp_path: Path) -> None:
+    """No git anywhere above it — the plain case must keep working."""
+    dest = tmp_path / "data" / "scripts"
+    keepalive_stage.stage_closure(SCRIPTS, dest)
+    assert (dest / "daemon.py").is_file()
+
+
+def test_this_repo_is_recognised_as_a_plugin_source_checkout() -> None:
+    """The guard must actually fire on the real thing it failed to prevent: THIS repo's
+    scripts dir. A predicate that refuses a synthetic fixture but not the actual victim
+    would be theatre."""
+    assert keepalive_stage.is_plugin_source_checkout(SCRIPTS) is True

@@ -80,11 +80,55 @@ def daemon_closure(scripts_dir: Path) -> list[Path]:
     return sorted(closure)
 
 
+class UnsafeStageDestination(Exception):
+    """The stage destination is a plugin SOURCE checkout, not the DATA dir."""
+
+
+def is_plugin_source_checkout(path: Path) -> bool:
+    """True iff `path` sits inside a plugin SOURCE repo — a git work tree whose ROOT also
+    carries `.claude-plugin/plugin.json`.
+
+    Both conditions are required, and the second is what makes this safe. "Inside any git
+    repo" would be wrong: plenty of people keep `~` or `~/.claude` in a dotfiles repo, and
+    the real DATA dir lives under `~/.claude/plugins/data/…` — so a bare git test would
+    refuse the LEGITIMATE production stage and silently kill the L0 keepalive. A plugin
+    manifest at the repo root, by contrast, is present in a plugin checkout and never in
+    the DATA dir.
+
+    A plain filesystem walk, not `git rev-parse`: no subprocess, no PATH dependency, and it
+    works for a destination that does not exist yet (we walk its ancestors). A `.git` FILE
+    (a worktree/submodule pointer) counts exactly like a `.git` dir.
+    """
+    p = path if path.is_absolute() else path.resolve()
+    for candidate in (p, *p.parents):
+        if (candidate / ".git").exists():
+            return (candidate / ".claude-plugin" / "plugin.json").is_file()
+    return False
+
+
 def stage_closure(scripts_dir: Path, dest_scripts_dir: Path) -> list[Path]:
     """Verbatim-copy the closure into `dest_scripts_dir`, preserving the relative layout
     (so the staged daemon's `_HERE/"lib"` + `_HERE/"oauth_rotator"` resolve). Each copy is
     byte-identical (`shutil.copyfile` — never edited/templated) and lands atomically
-    (tmp + `os.replace`). The launched entry is made executable. Returns the staged paths."""
+    (tmp + `os.replace`). The launched entry is made executable. Returns the staged paths.
+
+    REFUSES a destination inside a plugin SOURCE checkout (TRDD-RYZCVVKA). The closure is
+    only ever staged into the plugin DATA dir, so a source-repo destination is ALWAYS a bug
+    — and a DESTRUCTIVE one: it overwrites a developer's files with the installed plugin's
+    older, published copies, silently reverting committed work and clearing exec bits. That
+    happened on 2026-07-11: this repo's entire closure was reverted to the v0.39.0 release,
+    and it surfaced only because the lost +x bit broke 22 tests. The same class caused
+    TRDD-ZNN0UK5K (tests restaging the REAL closure → a 39 GB fseventsd runaway). Guarding
+    the WRITE makes the class impossible rather than merely detectable, which is worth more
+    than knowing which caller got the path wrong.
+    """
+    if is_plugin_source_checkout(dest_scripts_dir):
+        raise UnsafeStageDestination(
+            f"refusing to stage the daemon closure into {dest_scripts_dir}: it is inside a "
+            "plugin SOURCE checkout. The closure belongs in the plugin DATA dir; staging it "
+            "over a source tree overwrites a developer's files with the installed plugin's "
+            "older copies. See TRDD-RYZCVVKA."
+        )
     staged: list[Path] = []
     for src in daemon_closure(scripts_dir):
         dst = dest_scripts_dir / src.relative_to(scripts_dir)
