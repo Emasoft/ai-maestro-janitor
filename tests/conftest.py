@@ -59,7 +59,7 @@ import hashlib
 import os
 import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -73,26 +73,41 @@ _SESSION_TMP: Path | None = None
 # to THIS isolated keychain via JANITOR_ROTATOR_KEYCHAIN, so NO test can touch the login
 # keychain. Round-trip tests override it per-test with the fresh `isolated_keychain` fixture.
 _SESSION_KEYCHAIN: str | None = None
-# label -> (real dir, before-manifest)
-_GUARDED: dict[str, tuple[Path, dict[str, str]]] = {}
+# label -> (real dir, before-manifest, the snapshot fn that BUILT it — sessionfinish must
+# re-snapshot with the SAME function or the diff is pure noise)
+_GUARDED: dict[str, tuple[Path, dict[str, str], "Callable[[Path], dict[str, str]]"]] = {}
 
 # Files the live daemon legitimately churns while a suite runs — excluded from the S1b
 # guard so it detects TEST pollution, not daemon liveness. Everything else under the real
 # dirs (staged *.py closure, *.flag, quarantine/last-good json, memory pages) stays
 # guarded: a test mutating any of those fails the whole suite.
 _GUARD_EXCLUDE_SUFFIXES = (
-    ".ts", ".log", ".log.1", ".jsonl", ".ndjson", ".pid", ".lock", ".flock",
+    ".ts",
+    ".log",
+    ".log.1",
+    ".jsonl",
+    ".ndjson",
+    ".pid",
+    ".lock",
+    ".flock",
     # code-review 2026-07-07: integrity .bak mirrors are rewritten beside every primary
     # write; sqlite sidecars (.memgrep index, Chrome profile DBs) churn on any live
     # daemon memory/rotator activity — all daemon-legit, none test-pollution-specific.
-    ".bak", ".pyc", ".db", ".db-wal", ".db-shm", ".sqlite", ".sqlite3",
+    ".bak",
+    ".pyc",
+    ".db",
+    ".db-wal",
+    ".db-shm",
+    ".sqlite",
+    ".sqlite3",
     # 2026-07-09: daemon-liveness files the LIVE daemon rewrites on any (re)spawn /
     # keepalive restage — pure daemon runtime, never test-written (tests use the
     # isolated JANITOR_GLOBAL_STATE_DIR). `daemon.spawn-history` churns on every daemon
     # spawn; `daemon-keepalive.restage-stamp` on every closure restage. A daemon
     # rollback/respawn mid-suite false-failed the whole publish gate (exit 3) while all
     # tests passed — same class as the already-excluded .ts/.pid stamps + `recovery`.
-    ".spawn-history", ".restage-stamp",
+    ".spawn-history",
+    ".restage-stamp",
 )
 # Whole subtrees owned by the LIVE daemon's runtime (rewritten on its 60s oauth tick /
 # harvest passes) — guarding them would fail the suite whenever the daemon breathes
@@ -108,6 +123,160 @@ _GUARD_EXCLUDE_SUFFIXES = (
 # while all 12253 tests passed). Test-owned recovery writes go through the isolated
 # JANITOR_GLOBAL_STATE_DIR, never the REAL dir this guard snapshots.
 _GUARD_EXCLUDE_PARTS = ("oauth-rotator", ".memgrep", "recovery")
+
+
+# ─── S1e — the HARD WRITE SANDBOX (TRDD-RYZCVVKA) ───────────────────────────────────────
+#
+# WHY a sandbox and not another fixture: every layer before this one was OPT-IN, and every
+# one of them was escaped.
+#   * Per-module `_isolate_janitor_state` fixtures (test_keepalive_*.py) redirect the env —
+#     yet the REAL keepalive boot log holds 296 lines whose restage SOURCE is a pytest tmp
+#     dir. Tests wrote production state straight through their own isolation.
+#   * The S1a session-default env redirect still leaves `@pytest.mark.real_state` and any
+#     process that resolves a path WITHOUT reading the env.
+#   * The S1b/S1c manifest guards only DETECT, after the fact — and S1b explicitly excludes
+#     `.log` and `.restage-stamp` as "daemon liveness", which are precisely the two files the
+#     2026-07-11 clobber wrote. The guard was blind to its own incident.
+#
+# So this layer does not ask a test to isolate itself. It makes the write FAIL. The two roots
+# below are the ones the suite actually damaged: the user's live `~/.claude` tree, and this
+# repo's own source, which was overwritten with the installed v0.39.0 — silently reverting
+# committed work and clearing exec bits.
+_REAL_HOME_AT_IMPORT = Path(os.path.expanduser("~")).resolve()
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+_SANDBOX_DENY: tuple[Path, ...] = (
+    _REAL_HOME_AT_IMPORT / ".claude",  # live plugin DATA, global-state, rules, memory
+    *(_REPO_ROOT / d for d in ("scripts", "rules", "skills", "agents", "commands", "hooks", "design", ".claude-plugin")),
+)
+# Python writes import bytecode into the source tree on every run; that is the interpreter,
+# not a test escaping its boundary.
+_SANDBOX_ALLOW_PARTS = ("__pycache__", ".pytest_cache")
+_SANDBOX_PATCHED: list[tuple[object, str, object]] = []
+
+
+class SandboxViolation(RuntimeError):
+    """A test tried to write OUTSIDE its boundaries — into real machine state or the repo source."""
+
+
+def _fd_relative(kwargs: dict) -> bool:
+    """True when a syscall's path is relative to a `dir_fd`, not to the cwd.
+
+    `shutil.rmtree` (hence `TemporaryDirectory` cleanup) walks with
+    `os.rmdir("design", dir_fd=<fd of the tmp dir>)` — a BARE relative name plus an open
+    directory fd. Resolving that name against the cwd is simply wrong: it made a tmp-dir
+    cleanup look like an attack on the REAL repo's design/ and failed 68 innocent tests.
+    We cannot portably resolve an fd-relative name, so we skip it here — `shutil.rmtree` is
+    guarded at its entry point instead, which is what actually bounds the recursive delete.
+    """
+    return kwargs.get("dir_fd") is not None
+
+
+def _sandbox_check(path: object, op: str) -> None:
+    """Raise unless `path` is outside every protected root. Reads are never routed here."""
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        return  # an int fd — no path to police
+    try:
+        raw = os.fsdecode(path) if isinstance(path, bytes) else str(path)
+        target = Path(os.path.abspath(raw))
+    except (ValueError, TypeError):
+        return
+    if any(part in _SANDBOX_ALLOW_PARTS for part in target.parts):
+        return
+    for root in _SANDBOX_DENY:
+        if target == root or root in target.parents:
+            raise SandboxViolation(
+                f"BLOCKED {op}() -> {target}\n"
+                f"A test may not write outside its own tmp boundary. This path is inside the "
+                f"protected root {root}.\n"
+                f"Real machine state and this repo's source are OFF LIMITS to the suite: on "
+                f"2026-07-11 an unsandboxed keepalive restage overwrote scripts/** with the "
+                f"released v0.39.0, reverting committed work (TRDD-RYZCVVKA).\n"
+                f"Fix the TEST: write to `tmp_path`, and route janitor paths through the "
+                f"isolated HOME / JANITOR_DATA_DIR / JANITOR_GLOBAL_STATE_DIR env."
+            )
+
+
+def _install_write_sandbox() -> None:
+    """Wrap every write-capable syscall so a protected path raises instead of being written.
+
+    These are choke points, not a blocklist of callers: shutil, json.dump, tempfile and
+    `stage_closure`'s tmp+os.replace all bottom out here. Two traps this code fell into once
+    and must not fall into again — both were caught by tests/test_write_sandbox.py, which is
+    why those positive controls exist:
+
+    * `io.open` is a SEPARATE binding from `builtins.open`. `pathlib.Path.open` (hence
+      `write_text`/`write_bytes`) calls `io.open`, so patching only `builtins.open` lets every
+      pathlib write straight through. Both names are wrapped.
+    * For `os.replace(src, dst)` the file that gets DESTROYED is `dst`, not `src`. Guarding
+      the source argument polices the harmless tmp file and waves the clobber through — which
+      is precisely how `stage_closure` overwrote this repo (TRDD-RYZCVVKA). For rename/replace
+      BOTH ends are checked: moving protected source away destroys it just as surely.
+
+    `os.chmod` is included because the clobber's most damaging side effect was a CLEARED EXEC
+    BIT (100755 -> 100644) — damage no content manifest would ever flag.
+    """
+    import builtins
+    import io
+
+    def _patch(module: object, name: str, factory) -> None:
+        original = getattr(module, name)
+        _SANDBOX_PATCHED.append((module, name, original))
+        setattr(module, name, factory(original, name))
+
+    def _open_guard(original, name):
+        def guarded(file, mode="r", *args, **kwargs):
+            if isinstance(mode, str) and any(c in mode for c in "wax+"):
+                _sandbox_check(file, name)
+            return original(file, mode, *args, **kwargs)
+
+        return guarded
+
+    def _os_open_guard(original, name):
+        writes = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
+
+        def guarded(path, flags, *args, **kwargs):
+            if isinstance(flags, int) and flags & writes:
+                _sandbox_check(path, name)
+            return original(path, flags, *args, **kwargs)
+
+        return guarded
+
+    def _path_guard(original, name):
+        def guarded(path, *args, **kwargs):
+            if not _fd_relative(kwargs):
+                _sandbox_check(path, name)
+            return original(path, *args, **kwargs)
+
+        return guarded
+
+    def _two_ended_guard(original, name):
+        def guarded(src, dst, *args, **kwargs):
+            if not _fd_relative(kwargs):
+                _sandbox_check(dst, name)  # the file being overwritten — THE clobber vector
+                if name in ("replace", "rename"):
+                    _sandbox_check(src, name)  # a move out of a protected root destroys it too
+            return original(src, dst, *args, **kwargs)
+
+        return guarded
+
+    _patch(builtins, "open", _open_guard)
+    _patch(io, "open", _open_guard)  # pathlib's write path — NOT covered by builtins
+    _patch(os, "open", _os_open_guard)
+    for fn in ("remove", "unlink", "rmdir", "mkdir", "makedirs", "chmod", "truncate"):
+        _patch(os, fn, _path_guard)
+    for fn in ("replace", "rename", "symlink", "link"):
+        _patch(os, fn, _two_ended_guard)
+    # shutil.rmtree walks with fd-relative unlink/rmdir (see _fd_relative), so its children are
+    # invisible to the os.* guards above. Guard its ENTRY POINT instead — one check on the root
+    # it was handed covers the whole recursive delete.
+    _patch(shutil, "rmtree", _path_guard)
+
+
+def _remove_write_sandbox() -> None:
+    for module, name, original in reversed(_SANDBOX_PATCHED):
+        setattr(module, name, original)
+    _SANDBOX_PATCHED.clear()
 
 
 _KEYCHAIN_USABLE_CACHE: bool | None = None
@@ -144,16 +313,12 @@ def _security_temp_keychain_roundtrip_ok() -> bool:
     kc = os.path.join(probe_dir, "probe.keychain-db")
     pw, svc, acct = "janitor-probe-pw", "janitor-conftest-probe", "probe@example.test"
     try:
-        create = subprocess.run(["security", "create-keychain", "-p", pw, kc],
-                                capture_output=True, text=True, timeout=8)
+        create = subprocess.run(["security", "create-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=8)
         if create.returncode != 0:
             return False
-        subprocess.run(["security", "unlock-keychain", "-p", pw, kc],
-                       capture_output=True, text=True, timeout=8)
-        add = subprocess.run(["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe", kc],
-                             capture_output=True, text=True, timeout=8)
-        read = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", acct, "-w", kc],
-                              capture_output=True, text=True, timeout=8)
+        subprocess.run(["security", "unlock-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=8)
+        add = subprocess.run(["security", "add-generic-password", "-U", "-s", svc, "-a", acct, "-w", "probe", kc], capture_output=True, text=True, timeout=8)
+        read = subprocess.run(["security", "find-generic-password", "-s", svc, "-a", acct, "-w", kc], capture_output=True, text=True, timeout=8)
         return add.returncode == 0 and read.returncode == 0 and read.stdout.strip() == "probe"
     except (subprocess.TimeoutExpired, OSError):
         return False
@@ -186,22 +351,18 @@ def isolated_keychain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> "Itera
     kc = tmp_path / "janitor-test.keychain-db"
     pw = "janitor-test-pw"  # noqa: S105 - a throwaway temp-keychain password, not a secret
     try:
-        _sp.run(["security", "create-keychain", "-p", pw, str(kc)],
-                check=True, capture_output=True, text=True, timeout=15)
-        _sp.run(["security", "unlock-keychain", "-p", pw, str(kc)],
-                check=True, capture_output=True, text=True, timeout=15)
+        _sp.run(["security", "create-keychain", "-p", pw, str(kc)], check=True, capture_output=True, text=True, timeout=15)
+        _sp.run(["security", "unlock-keychain", "-p", pw, str(kc)], check=True, capture_output=True, text=True, timeout=15)
         # No `-t <timeout>` → auto-lock disabled → the keychain never re-locks (and so never
         # re-prompts) mid-test.
-        _sp.run(["security", "set-keychain-settings", str(kc)],
-                check=False, capture_output=True, text=True, timeout=15)
+        _sp.run(["security", "set-keychain-settings", str(kc)], check=False, capture_output=True, text=True, timeout=15)
     except (_sp.CalledProcessError, _sp.TimeoutExpired, OSError) as exc:
         pytest.skip(f"could not create isolated temp keychain: {exc}")
     monkeypatch.setenv("JANITOR_ROTATOR_KEYCHAIN", str(kc))
     try:
         yield kc
     finally:
-        _sp.run(["security", "delete-keychain", str(kc)],
-                check=False, capture_output=True, text=True, timeout=15)
+        _sp.run(["security", "delete-keychain", str(kc)], check=False, capture_output=True, text=True, timeout=15)
 
 
 @pytest.fixture(autouse=True)
@@ -275,8 +436,7 @@ def _setup_session_keychain() -> None:
     kc = str(_SESSION_TMP / "session.keychain-db")
     pw = "janitor-session-pw"  # throwaway temp-keychain password, not a secret
     try:
-        if _sp.run(["security", "create-keychain", "-p", pw, kc],
-                   capture_output=True, text=True, timeout=15).returncode != 0:
+        if _sp.run(["security", "create-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=15).returncode != 0:
             return
         _sp.run(["security", "unlock-keychain", "-p", pw, kc], capture_output=True, text=True, timeout=15)
         _sp.run(["security", "set-keychain-settings", kc], capture_output=True, text=True, timeout=15)  # no autolock
@@ -317,6 +477,7 @@ def _clear_keychain_latch_between_tests() -> "Iterator[None]":
     Clearing at SETUP (before the body) is the load-bearing half — it resolves the SAME
     latch path ``run_security`` uses and strips a leaked env, so the test starts clean
     regardless of what an earlier test left behind."""
+
     def _reset() -> None:
         gsd = os.environ.get("JANITOR_GLOBAL_STATE_DIR", "")
         if gsd:
@@ -325,6 +486,7 @@ def _clear_keychain_latch_between_tests() -> "Iterator[None]":
             except OSError:
                 pass
         os.environ.pop("JANITOR_ROTATOR_HEADLESS", None)
+
     _reset()
     yield
     _reset()
@@ -333,9 +495,7 @@ def _clear_keychain_latch_between_tests() -> "Iterator[None]":
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        "real_state: opt out of the session-default janitor state isolation for this test "
-        "(restores the REAL HOME / JANITOR_GLOBAL_STATE_DIR / JANITOR_DATA_DIR / "
-        "CLAUDE_PLUGIN_DATA env). Use ONLY for tests that must observe real machine state.",
+        "real_state: opt out of the session-default janitor state isolation for this test (restores the REAL HOME / JANITOR_GLOBAL_STATE_DIR / JANITOR_DATA_DIR / CLAUDE_PLUGIN_DATA env). Use ONLY for tests that must observe real machine state.",
     )
     global _SESSION_TMP
     for name in _ISOLATION_ENVS:
@@ -345,15 +505,10 @@ def pytest_configure(config: pytest.Config) -> None:
     # Only the xdist controller (or a plain run) owns the guard.
     if not hasattr(config, "workerinput"):
         real_home = Path(_REAL_ENV["HOME"] or str(Path.home()))
-        real_gsd = Path(
-            _REAL_ENV["JANITOR_GLOBAL_STATE_DIR"] or str(real_home / ".claude" / "janitor-global-state")
-        )
-        real_data = Path(
-            _REAL_ENV["JANITOR_DATA_DIR"]
-            or str(real_home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins")
-        )
-        _GUARDED["global-state"] = (real_gsd, _manifest(real_gsd))
-        _GUARDED["plugin-data"] = (real_data, _manifest(real_data))
+        real_gsd = Path(_REAL_ENV["JANITOR_GLOBAL_STATE_DIR"] or str(real_home / ".claude" / "janitor-global-state"))
+        real_data = Path(_REAL_ENV["JANITOR_DATA_DIR"] or str(real_home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"))
+        _GUARDED["global-state"] = (real_gsd, _manifest(real_gsd), _manifest)
+        _GUARDED["plugin-data"] = (real_data, _manifest(real_data), _manifest)
         # S1c — the SOURCE TREE guard (TRDD-RYZCVVKA). On 2026-07-11 this repo's whole
         # daemon closure was silently overwritten with the INSTALLED plugin's v0.39.0
         # copies: committed work reverted in the working tree, exec bits cleared. It was
@@ -367,7 +522,7 @@ def pytest_configure(config: pytest.Config) -> None:
         # suite FAILS and names the file, instead of the damage being found by accident
         # weeks later. Same shape as the two dir guards above, so it costs one manifest.
         _scripts = Path(__file__).resolve().parent.parent / "scripts"
-        _GUARDED["source-tree"] = (_scripts, _source_manifest(_scripts))
+        _GUARDED["source-tree"] = (_scripts, _source_manifest(_scripts), _source_manifest)
 
     _SESSION_TMP = Path(tempfile.mkdtemp(prefix="janitor-test-session-"))
     home = _SESSION_TMP / "_home"
@@ -386,6 +541,9 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ["CLAUDE_PLUGIN_DATA"] = str(data)
     os.environ.pop("XDG_STATE_HOME", None)
     _setup_session_keychain()  # session-default temp keychain — no test touches the login keychain
+    # S1e LAST: the env above is now fake, so anything still resolving a REAL protected path is
+    # by definition escaping its boundary — and from here on the write itself is refused.
+    _install_write_sandbox()
 
 
 @pytest.fixture(autouse=True)
@@ -405,8 +563,12 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not _GUARDED:
         return
     diffs: list[str] = []
-    for label, (root, before) in _GUARDED.items():
-        after = _manifest(root)
+    for label, (root, before, snapshot) in _GUARDED.items():
+        # Re-snapshot with the SAME function that built `before`. The source-tree guard uses
+        # a *.py/*.sh-scoped manifest (the vendored Rust tree under scripts/memgrep/target is
+        # 15k gitignored build artifacts); re-snapshotting it with the unscoped _manifest made
+        # every .rs/.toml/.DS_Store read as "ADDED" and drowned real failures in noise.
+        after = snapshot(root)
         for rel in sorted(set(before) | set(after)):
             if before.get(rel) == after.get(rel):
                 continue
@@ -425,6 +587,9 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     global _SESSION_TMP
+    # S1e FIRST: restore the real syscalls before any teardown below needs them — the session
+    # tmp tree is outside every protected root, but the sandbox must never outlive the session.
+    _remove_write_sandbox()
     _teardown_session_keychain()  # delete the session-default temp keychain
     if _SESSION_TMP is not None:
         shutil.rmtree(_SESSION_TMP, ignore_errors=True)
