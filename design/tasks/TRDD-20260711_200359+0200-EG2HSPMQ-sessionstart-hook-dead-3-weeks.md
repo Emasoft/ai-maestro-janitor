@@ -1,9 +1,9 @@
 ---
 trdd-id: EG2HSPMQ
 title: SessionStart hook died on import for three weeks — rules stopped installing
-column: complete
+column: published
 created: 2026-07-11T20:03:59+0200
-updated: 2026-07-11T20:03:59+0200
+updated: 2026-07-11T21:30:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 0
@@ -32,6 +32,8 @@ test-failures: 0
 last-test-result: pass
 last-test-at: 2026-07-11T20:00:00+0200
 implementation-commits: [b28c53a]
+published-version: 0.40.0
+published-at: 2026-07-11T21:30:00+0200
 external-refs: ["https://github.com/Emasoft/ai-maestro-janitor/issues/84"]
 ---
 
@@ -39,17 +41,14 @@ external-refs: ["https://github.com/Emasoft/ai-maestro-janitor/issues/84"]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-11
 
-**FIXED and tested (`b28c53a`). Not yet published — the fix reaches no machine until a
-release ships.**
+**DONE — FIXED, tested, and SHIPPED in v0.40.0 (release commit `136c20f`; fix `b28c53a`).**
 
-- Root cause, fix, and the guardrail are all landed. Full suite green (12,535 passed).
-- **The one thing still outstanding is the PUBLISH**, which is user-gated. Until then this
-  machine's `~/.claude/rules/` stays frozen at its 2026-06-22 state and the USER-memory
-  backup mirror stays unsynced.
-- Do NOT "fix" this by hand-running the hook against the cached v0.39.0 plugin: that would
-  install the OLD (pre-slimming) rules and make the context floor *larger*. The correct
-  sequence is publish → the new version is cached → the next SessionStart installs the
-  canonical rules.
+- Root cause, fix, and the guardrail all landed and published. The next daemon auto-update
+  rolls v0.40.0 into the cache; the next SessionStart then runs the (now-alive) hook and
+  reinstalls the canonical rules — including `universal-kanban.md`, which had reached zero
+  sessions on this machine — and resyncs the USER-memory backup mirror.
+- Nothing further to do here. This TRDD is a historical record of a bug that produced only
+  absences for three weeks; its lessons `[^1][^2][^3]` are the durable takeaways.
 
 ## What happened
 
