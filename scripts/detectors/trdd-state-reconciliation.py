@@ -30,7 +30,6 @@ candidate is not re-nagged every heartbeat.
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 from datetime import datetime
@@ -125,16 +124,20 @@ def _load_git_log(root: Path) -> list[tuple[str, str]]:
     return out
 
 
-def _commit_touches_impl(sha: str, root: Path) -> bool:
-    """True iff `sha` changes at least one file OUTSIDE `design/tasks/`.
+def _commit_touches_impl(sha: str, root: Path, trdd_prefix: str) -> bool:
+    """True iff `sha` changes at least one file OUTSIDE the TRDD board (`trdd_prefix`).
 
     A TRDD's OWN authoring commits (`docs: add TRDD-<id8> …`, `docs(trdd): …`)
-    touch only the spec under `design/tasks/` — that is authoring, not
+    touch only the spec under the board dir — that is authoring, not
     implementation. Once a release tags such a commit, the bare subject-grep
     would otherwise make a never-implemented `backburner` design doc read as
     "shipped" (TRDD-7C787DUS: TRDD-cf15d412 was flagged closeable purely because
     its `docs: add` commit landed in a tag). A commit that also touches code/docs
     elsewhere IS implementation and is kept.
+
+    `trdd_prefix` is the board's repo-relative dir (e.g. `design/tasks/`), resolved by
+    the caller from the SAME `trdd_common` resolver the board scan uses — so the
+    exclusion follows a project that relocated its TRDDs via TRDD_PATH.
 
     Fail OPEN on any git error (return True): the detector is surface-only, so a
     stray false-"shipped" candidate is caught by the human verifier, whereas
@@ -151,7 +154,7 @@ def _commit_touches_impl(sha: str, root: Path) -> bool:
     files = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
     if not files:
         return True
-    return any(not f.startswith("design/tasks/") for f in files)
+    return any(not f.startswith(trdd_prefix) for f in files)
 
 
 def _main_root(root: Path) -> Path:
@@ -198,8 +201,8 @@ def _write_report(main_root: Path, rows: list[dict]) -> Path | None:
         "this detector mutated ZERO TRDD files. Verify each TRDD's full STATE + "
         "git before acting (a shipped-but-blocked TRDD is review, NOT closeable).",
         "",
-        "| TRDD | column | verdict | checks fired | evidence |",
-        "| --- | --- | --- | --- | --- |",
+        "| TRDD | scope | column | verdict | checks fired | evidence |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for r in rows:
         uid = r["uid"] or "?"
@@ -216,8 +219,8 @@ def _write_report(main_root: Path, rows: list[dict]) -> Path | None:
             evidence_bits.append("stale blocker(s): " + ", ".join(r["stale_blockers"]))
         evidence = "; ".join(evidence_bits) or "—"
         lines.append(
-            f"| TRDD-{uid} | {r['column'] or '?'} | {r['label']} | "
-            f"{', '.join(r['fired'])} | {evidence} |"
+            f"| TRDD-{uid} | {r.get('scope', trdd_common.PROJECT)} | {r['column'] or '?'} | "
+            f"{r['label']} | {', '.join(r['fired'])} | {evidence} |"
         )
     lines.append("")
 
@@ -242,35 +245,42 @@ def main() -> int:
     seen = state.state_dir() / "trdd-state-reconciliation-seen.txt"
 
     root = state.project_root()
-    trdd_subpath = os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
-    trdd_dir = root / trdd_subpath
 
-    # Containment check — see trdd-drift.py for the rationale. A misconfigured
-    # TRDD path must NOT cause the detector to scan outside the project.
-    try:
-        resolved_trdd = trdd_dir.resolve()
-        resolved_root = root.resolve()
-        resolved_trdd.relative_to(resolved_root)
-    except (ValueError, OSError):
-        state.log_line(
-            "trdd-state-reconciliation",
-            f"TRDD path {trdd_subpath!r} resolves outside project root — refusing to scan",
-        )
+    # BOTH design scopes — PROJECT and LOCAL. `trdd_common` owns the resolution and the
+    # containment check that used to be copied here (see its module docstring).
+    trdds = trdd_common.trdd_files("tasks", str(root))
+    if not trdds:
+        state.log_line("trdd-state-reconciliation", "no TRDDs in any design scope — skipping")
         return 0
 
-    if not trdd_dir.is_dir():
-        state.log_line("trdd-state-reconciliation", f"TRDD dir {trdd_dir} not present — skipping")
-        return 0
+    # The authoring-commit prefix for `_commit_touches_impl` — derived from the SAME
+    # resolver the board uses, so a project that relocated its TRDDs via TRDD_PATH still
+    # gets its authoring commits excluded. Hardcoding `design/tasks/` here (as this
+    # detector used to) meant a relocated board's `docs: add TRDD-…` commits looked like
+    # implementation, resurrecting the very false-"shipped" bug TRDD-7C787DUS fixed.
+    # LOCAL TRDDs need no such exclusion: they live outside the repo and have NO authoring
+    # commits at all, so only a real code commit can ever cite them.
+    impl_prefix = "design/tasks/"
+    project_tasks = trdd_common.project_tasks_dir(str(root))
+    if project_tasks is not None:
+        try:
+            impl_prefix = f"{project_tasks.relative_to(root).as_posix()}/"
+        except ValueError:
+            pass
 
     # Pass 1 — parse every TRDD into a record + build the uid->column board so
-    # Check 4 can resolve a blocker's CURRENT column without re-reading files.
+    # Check 4 can resolve a blocker's CURRENT column without re-reading files. The board
+    # spans BOTH scopes on purpose: a LOCAL TRDD can be blocked by a PROJECT one (and vice
+    # versa), so a per-scope board would report a resolved blocker as still-blocking.
     records: list[trdd_common.TrddRecord] = []
+    scope_by_uid: dict[str, str] = {}
     column_by_uid: dict[str, str] = {}
-    for f in sorted(trdd_dir.glob("TRDD-*.md")):
+    for scope, f in trdds:
         rec = trdd_common.parse_trdd_record(f)
         records.append(rec)
         if rec.uid is not None:
             column_by_uid[rec.uid] = rec.column
+            scope_by_uid[rec.uid] = scope
 
     def column_of(uid: str) -> str:
         return column_by_uid.get(uid, "")
@@ -303,12 +313,12 @@ def main() -> int:
             if log_lines is None:
                 log_lines = _load_git_log(root)
             # Exclude the TRDD's OWN authoring commits (which touch only its spec
-            # under design/tasks/) so a never-implemented backburner design doc
+            # under the board dir) so a never-implemented backburner design doc
             # does not read as "shipped" once a release tags it (TRDD-7C787DUS).
             subj_commits = [
                 s
                 for s in _subject_commits_for_uid(rec.uid, log_lines)
-                if _commit_touches_impl(s, root)
+                if _commit_touches_impl(s, root, impl_prefix)
             ]
             merged = list(dict.fromkeys([*rec.impl_commits, *subj_commits]))
             rec = trdd_common.TrddRecord(
@@ -330,6 +340,7 @@ def main() -> int:
         rows.append(
             {
                 "uid": verdict.uid,
+                "scope": scope_by_uid.get(verdict.uid or "", trdd_common.PROJECT),
                 "column": verdict.column,
                 "label": verdict.label,
                 "fired": verdict.fired,
@@ -367,7 +378,11 @@ def main() -> int:
     # under a user-controlled project dir.
     by_label: dict[str, list[str]] = {}
     for r in new_rows:
-        by_label.setdefault(r["label"], []).append(f"TRDD-{r['uid']}")
+        # Name the scope only when it is LOCAL — PROJECT is the default board and tagging
+        # every id with it would be noise. TRDD ids are globally unique, so the dedupe key
+        # (above) needs no scope qualifier.
+        tag = " (local)" if r.get("scope") == trdd_common.LOCAL else ""
+        by_label.setdefault(r["label"], []).append(f"TRDD-{r['uid']}{tag}")
     parts: list[str] = []
     for label in sorted(by_label):
         ids = by_label[label]
