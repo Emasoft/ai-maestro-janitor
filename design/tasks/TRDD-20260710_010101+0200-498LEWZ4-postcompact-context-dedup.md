@@ -1,9 +1,9 @@
 ---
 trdd-id: 498LEWZ4
 title: Dedupe the post-compact context injection and add open-issues to the rich handoff
-column: dev
+column: complete
 created: 2026-07-10T01:01:01+0200
-updated: 2026-07-10T01:01:01+0200
+updated: 2026-07-11T13:25:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 2

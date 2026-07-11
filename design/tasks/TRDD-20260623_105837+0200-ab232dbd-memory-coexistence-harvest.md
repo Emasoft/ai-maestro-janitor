@@ -1,9 +1,9 @@
 ---
 trdd-id: ab232dbd-59eb-4bff-8770-4dd7c65ac00e
 title: MEMORY.md buffer ⇄ Wikimem wiki coexistence — harvest-mirror, never stub
-column: blocked
+column: complete
 created: 2026-06-23T10:58:37+0200
-updated: 2026-06-23T13:26:34+0200
+updated: 2026-07-11T13:25:00+0200
 current-owner: claude-janitor-dev
 assignee: claude-janitor-dev
 task-type: refactor

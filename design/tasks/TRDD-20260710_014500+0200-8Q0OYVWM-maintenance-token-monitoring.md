@@ -1,9 +1,9 @@
 ---
 trdd-id: 8Q0OYVWM
 title: Token monitoring survives maintenance mode, and every reload sends --force
-column: dev
+column: complete
 created: 2026-07-10T01:45:00+0200
-updated: 2026-07-10T01:45:00+0200
+updated: 2026-07-11T13:25:00+0200
 current-owner: janitor-session
 assignee: janitor-session
 priority: 2

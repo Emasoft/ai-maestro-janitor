@@ -1,9 +1,9 @@
 ---
 trdd-id: dccb0b8a-242f-4e6a-a93f-f266ed3c8d08
 title: Daemon session-liveness watchdog — out-of-session freeze recovery
-column: design
+column: complete
 created: 2026-06-21T19:22:05+0200
-updated: 2026-06-21T19:22:05+0200
+updated: 2026-07-11T13:25:00+0200
 current-owner: janitor-dev
 assignee: janitor-dev
 priority: 0

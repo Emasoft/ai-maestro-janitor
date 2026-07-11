@@ -1,9 +1,9 @@
 ---
 trdd-id: ZTC068KI
 title: Opt-in per-fire cost series — record the previous fire's exact cost to a log
-column: dev
+column: complete
 created: 2026-07-09T23:51:39+0200
-updated: 2026-07-09T23:51:39+0200
+updated: 2026-07-11T13:25:00+0200
 current-owner: janitor
 assignee: janitor
 priority: 3
