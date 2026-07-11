@@ -50,18 +50,62 @@ that is NOT a rules dir and is therefore never context-loaded. **Corpus 112,889 
 they were restored). Ratchet tests cap the corpus at 52,000 B and any single rule at
 12,000 B — the cap may go DOWN, never up.
 
+**2026-07-11 — P2 SHIPPED (user-authorized, backup-first). Floor -70,337 B (-26%).**
+
+**Scope was WRONG and got corrected by measurement.** P2 was scoped as "rules + CLAUDE.md +
+agents/ + skills/ + commands/" (~2.9 MB). Verified against a LIVE system prompt: agent /
+command / skill **bodies are NOT in the always-loaded prefix** — only their one-line
+descriptions are (`agents/spark.md` is 4,413 B; it appears as ONE line). So the real floor is
+only `~/.claude/rules/*.md` (233,301 B, all 30 injected IN FULL) + `~/.claude/CLAUDE.md`
+(37,295 B) = **270,596 B**. Editing agents/skills/commands would have been ~2.6 MB of wasted
+work for zero floor reduction.
+
+**Technique — a lossless SPLIT, not a trim** (the 460aad0 pattern, now with a mechanical
+gate). Each oversized rule became a small loaded RULE + a `~/.claude/rules-reference/
+<name>-full.md` that no session loads. A verifier
+(`scratchpad/verify_rule_split.py`) asserts every substantive line of the ORIGINAL survives
+VERBATIM in (rule + reference) — so content is provably MOVED, never dropped. It was
+self-tested against a deliberately-lossy split first. Every split below reports LOSSLESS.
+
+| file | prefix before | prefix after | cut |
+|---|---|---|---|
+| trdd-approval-tiers.md | 32,816 | 11,767 | -64% |
+| corpus-to-plugin-distillation.md | 19,597 | 2,493 | -87% |
+| browser-ui-test-techniques.md | 17,053 | 2,917 | -82% |
+| manager-approval-defaults.md | 15,382 | 5,321 | -65% |
+| agent-reports-location.md | 8,512 | 4,485 | -47% |
+| CLAUDE.md | 37,295 | 33,335 | -10% |
+
+`CLAUDE.md` yielded only 10% because it is dense NORMATIVE content (RULE 0, RULE 1, the
+Production directives) plus two tool-managed fenced blocks (CodeGraph, distill) left
+untouched — pushing further would mean deleting guardrails, which the approval did not cover.
+Two clean wins there: the `## lean-ctx — Context Runtime` section (which line 330 of the SAME
+file already declared STALE — the prefix carried both the dead section and the note saying to
+ignore it), and the `### agents reports` subsection, a near-verbatim DUPLICATE of the loaded
+`rules/agent-reports-location.md` (the prefix carried that rule TWICE).
+
+**Result: floor 270,596 -> 200,259 B (-70,337, -26%).** Once the janitor's own already-slimmed
+rules publish (installed 87,568 -> repo 49,894), the floor reaches **162,585 B (-40% total)**.
+That is ~-18k tokens re-written by EVERY cold subagent, machine-wide. Measured corroboration
+the same session: each of the 3 subagents used for this work cost ~285k tokens, most of it
+loading this floor before doing any work.
+
+**RULE 0 audit trail.** Authorizing user text (AskUserQuestion, 2026-07-11): **"Approved —
+backup first"**. Backup taken FIRST at 2026-07-11 15:44:56+0200 via
+`cp -a {CLAUDE.md,rules,agents,commands,skills} ~/.claude/backups-cache-opt-20260711_154456+0200/`
+(119 MB), verified byte-identical for every file in the edit scope (`diff -r`). NOTHING was
+deleted — every edit is an in-place rewrite whose full original text is preserved in both the
+backup AND the reference files. The 5 skills entries that `diff -r` flagged are pre-existing
+symlinks into `~/.agents/` (all 5 preserved as symlinks; targets outside the edit scope).
+
 **Remaining:**
-- **P2 (user-scope standalone assets) — NEEDS USER PERMISSION.** `~/.claude/rules/*.md`
-  (the ~120 KB that is NOT janitor-shipped), `~/.claude/CLAUDE.md` (37 KB),
-  `~/.claude/agents/*.md`, `~/.claude/skills/**`, `~/.claude/commands/**`. These are the
-  USER's own files, outside any git repo -> RULE 0: no destructive/significant edit without
-  explicit written approval, and BACKUP-first to `~/.claude/backups-cache-opt-<ts>/`.
-  This is now the single largest remaining floor item.
 - **P3 (plugin-tree CPV cache pass)** — lower value than believed: plugin skills/commands
   load on demand, so they are not in the always-on floor. Do it, but it is not the lever.
-- **P1** shipped in v0.29.0 (5687848).
+- **P1** shipped in v0.29.0 (5687848). **P2** shipped 2026-07-11 (this entry, outside git —
+  backup is the recovery).
 
-**NEXT ACTION:** ask the USER to authorize P2 (their own `~/.claude/` assets, backup-first).
+**NEXT ACTION:** none for P2. P3 is optional/low-value. The janitor-shipped half of the floor
+lands automatically on the next publish.
 
 - **WHY (measured, reports/token-attribution + scratchpad/spark_cost_breakdown.py):** two spark
   agents: peak context ~246k/312k but cache_creation 1.86M/1.84M — a **~7.6× rewrite factor**
