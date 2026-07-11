@@ -94,6 +94,13 @@
       "default": "",
       "sensitive": false
     },
+    "issues_watch_interval": {
+      "title": "GitHub issues-watch cadence (seconds)",
+      "description": "Minimum seconds between GitHub issue-tracker checks, when the watcher is enabled for a project via /janitor-issues-watch-on. The watcher is OFF by default and costs nothing until enabled. Default: 1800 (30 min) — issues do not churn every 5 minutes and each due fire costs one `gh` call.",
+      "type": "string",
+      "default": "1800",
+      "sensitive": false
+    },
     "pr_reconciler_interval": {
       "title": "PR Reconciler Internal Cadence (seconds)",
       "description": "Minimum seconds between PR reconciliation passes. The heartbeat may fire more often; this just throttles the detector's work. Default: 900 (15 min).",
