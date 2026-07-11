@@ -29,6 +29,10 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import trdd_common  # noqa: E402  -- needs the sys.path line above
+
 # Security detectors whose last-run stamp marks "the janitor last looked at this
 # project's supply-chain / secrets / workflow surface" (continuous, per-heartbeat
 # — there is no discrete 'scan', so we report the most-recent run datetime; the
@@ -328,18 +332,19 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
     Each card is rich — full uuid, title, severity, frontmatter rows, rendered body
     HTML, raw body (for copy), and the file path. The source FOLDER pins the
     super-column; design/tasks/ uses each TRDD's own column (v1 ``status:`` mapped)."""
-    top = Path(_git_top(project_root))
+    top = _git_top(project_root)
     v1map = {"not-started": "backburner", "in-progress": "dev", "completed": "complete"}
     board: dict[str, list[dict]] = {}
+    # ONE board spanning BOTH design scopes, with `scope` as a per-card badge — not a second
+    # board (the 3-pillars spec is explicit: columns and transitions are identical, scope is
+    # a filter). `trdd_common` resolves each lifecycle folder in PROJECT (honoring
+    # TRDD_PATH) and LOCAL (`~/.claude/projects/<slug>/design/`).
     folders = {
-        "design/tasks": None, "design/proposals": "proposal",
-        "design/archived": "archived", "design/refused": "refused",
+        "tasks": None, "proposals": "proposal",
+        "archived": "archived", "refused": "refused",
     }
-    for rel, forced in folders.items():
-        d = top / rel
-        if not d.is_dir():
-            continue
-        for f in sorted(d.glob("TRDD-*.md")):
+    for folder, forced in folders.items():
+        for scope, f in trdd_common.trdd_files(folder, top):
             try:
                 raw = f.read_text(encoding="utf-8", errors="replace")[:_BODY_CAP]
             except OSError:
@@ -354,11 +359,14 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
                 uuid = parts[2] if len(parts) > 2 else f.stem
             board.setdefault(col, []).append({
                 "id": uuid,
+                "scope": scope,
                 "title": (fm.get("title") or f.stem)[:120],
                 "sev": fm.get("severity", ""),
                 "fm": pairs,
                 "html": _render_markdown(body),
                 "text": body,
+                # The REAL path — a LOCAL TRDD is outside the repo, so a repo-relative
+                # path would name a file that does not exist.
                 "path": str(f),
             })
     return board

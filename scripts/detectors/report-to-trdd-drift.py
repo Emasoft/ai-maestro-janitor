@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
 import state  # noqa: E402
+import trdd_common  # noqa: E402
 
 # Filenames that signal a DECISION / synthesis worth a TRDD (vs raw data dumps,
 # lint captures, screenshots — those legitimately stay as evidence-only reports).
@@ -103,11 +104,18 @@ def _is_memory_noop_report(rep: Path, reports_dir: Path) -> bool:
     return _MEMORY_NOOP_RE.search(head) is not None
 
 
-def _trdd_corpus(tasks_dir: Path) -> str:
+def _trdd_corpus(trdd_paths: list[Path]) -> str:
     """Concatenate all TRDD bodies so a one-shot substring test answers
-    'is this report referenced by any TRDD?' (TRDDs cite the report path)."""
+    'is this report referenced by any TRDD?' (TRDDs cite the report path).
+
+    Takes the already-resolved paths rather than a directory: the board spans BOTH design
+    scopes, and a report converted into a LOCAL TRDD is just as converted as one converted
+    into a PROJECT TRDD. Reading only the project dir would leave this detector nagging
+    forever about a decision the user already captured locally — the exact false positive
+    that teaches people to ignore the nag.
+    """
     parts: list[str] = []
-    for p in sorted(tasks_dir.glob("TRDD-*.md")):
+    for p in trdd_paths:
         try:
             parts.append(p.read_text(encoding="utf-8", errors="replace"))
         except OSError:
@@ -129,17 +137,18 @@ def main() -> int:
     )
 
     root = state.project_root()
-    tasks_dir = root / os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
     reports_dir = root / "reports"
 
-    # Gate: only projects that USE TRDDs and HAVE a reports/ tree. Both must be
-    # contained in the project root (no symlink escape).
-    if not (tasks_dir.is_dir() and _contained(tasks_dir, root)):
+    # Gate: only projects that USE TRDDs (in EITHER design scope) and HAVE a reports/ tree.
+    # `trdd_common` owns the board resolution and the containment check that used to be a
+    # private copy here; `_contained` still guards reports/, which is ours alone.
+    trdds = trdd_common.trdd_files("tasks", str(root))
+    if not trdds:
         return 0
     if not (reports_dir.is_dir() and _contained(reports_dir, root)):
         return 0
 
-    corpus = _trdd_corpus(tasks_dir)
+    corpus = _trdd_corpus([p for _scope, p in trdds])
     now = int(time.time())
 
     unconverted: list[str] = []

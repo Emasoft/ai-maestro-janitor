@@ -48,7 +48,10 @@ def test_trdd_state_hook_matches_v2_columns(tmp_path: Path) -> None:
     (tasks / "TRDD-20260518_000000+0200-cccc3333-done.md").write_text(
         "---\ntrdd-id: c\ntitle: z\ncolumn: complete\n---\n", encoding="utf-8"
     )
-    picked = {p.name for p in ns["_in_progress"](tasks)}
+    # `_in_progress` now takes the already-resolved board (the caller composes it from BOTH
+    # design scopes via _trdd_paths). This test is about the COLUMN-MATCHING filter, not the
+    # discovery, so hand it the files directly and keep the assertions unchanged.
+    picked = {p.name for p in ns["_in_progress"](sorted(tasks.glob("TRDD-*.md")))}
     assert "TRDD-20260703_000000+0200-AAAA1111-v2.md" in picked  # v2 WORK column
     assert "TRDD-20260518_000000+0200-bbbb2222-v1.md" in picked  # v1 fallback kept
     assert "TRDD-20260518_000000+0200-cccc3333-done.md" not in picked  # terminal skipped

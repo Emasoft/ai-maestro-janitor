@@ -111,19 +111,54 @@ def _consume_directive_file(state_dir: Path) -> None:
         pass
 
 
+def _trdd_paths(project_root: Path) -> list[Path]:
+    """Every TRDD on the board, across BOTH design scopes (PROJECT + LOCAL).
+
+    FAIL-OPEN by design. This hook drives post-compaction auto-resume, so it must degrade,
+    never die: if `trdd_common` cannot be imported for any reason, fall back to the plain
+    PROJECT board rather than raising. A hook that crashes on import runs nothing at all
+    and Claude Code does not surface it — that failure mode cost this plugin three weeks of
+    silently-dead SessionStart (see tests/test_hooks_execute.py), and a resume hook is a
+    worse place to relearn it.
+    """
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    if plugin_root:
+        try:
+            scripts = Path(plugin_root) / "scripts"
+            # BOTH entries: `from lib import …` needs scripts/ on the path, and a lib module's
+            # bare sibling import needs scripts/lib/ on it. Omitting the second is the exact
+            # ModuleNotFoundError that killed on-session-start.py.
+            for entry in (str(scripts), str(scripts / "lib")):
+                if entry not in sys.path:
+                    sys.path.insert(0, entry)
+            from lib import trdd_common  # noqa: E402 - local package, not PyPI
+
+            return [p for _scope, p in trdd_common.trdd_files("tasks", str(project_root))]
+        except Exception:  # noqa: BLE001 -- degrade to the project board; never break resume
+            pass
+    tasks_dir = project_root / "design" / "tasks"
+    if not tasks_dir.is_dir():
+        return []
+    return sorted(tasks_dir.glob("TRDD-*.md"))
+
+
 def _inflight_trdd_directive(project_root: Path) -> str:
     """Build a 'continue TRDD-xxxx' directive from the newest in-flight TRDD.
 
-    Reads only the frontmatter (top ~60 lines) of each design/tasks/TRDD-*.md.
+    Reads only the frontmatter (top ~60 lines) of each TRDD on the board — BOTH design
+    scopes, PROJECT and LOCAL. Scanning only the repo would strand exactly the work most
+    likely to be interrupted: a LOCAL TRDD is a chore about THIS machine, and after a
+    compaction it is the one thing a fresh context cannot reconstruct from the repo.
+
     `updated:` is an ISO-8601 string that sorts lexicographically within a
     shared local TZ offset, so a plain string-max picks the most recently
     touched in-flight task — a good "what was I just doing" heuristic.
     """
-    tasks_dir = project_root / "design" / "tasks"
-    if not tasks_dir.is_dir():
+    trdds = _trdd_paths(project_root)
+    if not trdds:
         return ""
     best: tuple[str, str, str] | None = None  # (updated, uid8, title)
-    for path in tasks_dir.glob("TRDD-*.md"):
+    for path in trdds:
         m = _UID_RE.search(path.name)
         if not m:
             continue

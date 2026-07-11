@@ -149,9 +149,39 @@ def _fresh_handoff(project_dir: Path) -> Path | None:
     return None
 
 
-def _in_progress(tasks_dir: Path) -> list[Path]:
+def _trdd_paths(project_dir: Path) -> list[Path]:
+    """Every TRDD on the board, across BOTH design scopes (PROJECT + LOCAL).
+
+    FAIL-OPEN by design: on ANY import failure, fall back to the plain PROJECT board rather
+    than raising. This is a SessionStart hook, and a SessionStart hook that dies on import
+    runs nothing while Claude Code stays silent about it — the failure that left this
+    plugin's OTHER SessionStart hook dead for three weeks. The board is a nicety; not
+    crashing the session start is not.
+    """
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    if plugin_root:
+        try:
+            scripts = Path(plugin_root) / "scripts"
+            # BOTH entries: `from lib import …` needs scripts/ on the path, and a lib module's
+            # bare sibling import needs scripts/lib/ on it. Omitting the second is the exact
+            # ModuleNotFoundError that killed on-session-start.py.
+            for entry in (str(scripts), str(scripts / "lib")):
+                if entry not in sys.path:
+                    sys.path.insert(0, entry)
+            from lib import trdd_common  # noqa: E402 - local package, not PyPI
+
+            return [p for _scope, p in trdd_common.trdd_files("tasks", str(project_dir))]
+        except Exception:  # noqa: BLE001 -- degrade to the project board; never break session start
+            pass
+    tasks_dir = project_dir / "design" / "tasks"
+    if not tasks_dir.is_dir():
+        return []
+    return sorted(tasks_dir.glob("TRDD-*.md"))
+
+
+def _in_progress(trdds: list[Path]) -> list[Path]:
     out: list[Path] = []
-    for p in sorted(tasks_dir.glob("TRDD-*.md")):
+    for p in trdds:
         try:
             head = p.read_text(encoding="utf-8", errors="replace")[:_FRONT]
         except OSError:
@@ -164,13 +194,27 @@ def _in_progress(tasks_dir: Path) -> list[Path]:
     return out
 
 
+def _display(p: Path, project_dir: Path) -> str:
+    """How to NAME a TRDD to the agent so it can actually open it.
+
+    A PROJECT TRDD shows repo-relative (`design/tasks/X.md`). A LOCAL TRDD lives OUTSIDE
+    the repo, so printing it repo-relative would name a file that does not exist — the
+    agent would Read it, get nothing, and conclude the TRDD was lost. Print its real path
+    (HOME collapsed to `~` for readability; still openable verbatim).
+    """
+    try:
+        return str(p.relative_to(project_dir))
+    except ValueError:
+        try:
+            return f"~/{p.relative_to(Path.home())}"
+        except ValueError:
+            return str(p)
+
+
 def main() -> int:
     project_dir, source = _read_input()
-    tasks_dir = project_dir / "design" / "tasks"
-    if not tasks_dir.is_dir():
-        return 0
 
-    trdds = _in_progress(tasks_dir)[:MAX_TRDDS]
+    trdds = _in_progress(_trdd_paths(project_dir))[:MAX_TRDDS]
     if not trdds:
         return 0
 
@@ -189,20 +233,21 @@ def main() -> int:
         except OSError:
             continue
         title = _title(text[:_FRONT], p.name)
+        shown = _display(p, project_dir)
         if inject_full:
             block = _state_block(text)
             if block:
-                parts.append(f"\n--- design/tasks/{p.name} — {title} ---\n{block}")
+                parts.append(f"\n--- {shown} — {title} ---\n{block}")
             else:
                 parts.append(
-                    f"\n--- design/tasks/{p.name} — {title} "
+                    f"\n--- {shown} — {title} "
                     "(no ## STATE block — read the file top-to-bottom) ---"
                 )
         else:
             # Digest line — shared by the post-compact pointer mode AND the
             # startup/resume list: path + title + whether a STATE block exists.
             tag = "has ## STATE block" if _state_block(text) else "NO ## STATE block — read top-to-bottom"
-            parts.append(f"  • design/tasks/{p.name} — {title} ({tag})")
+            parts.append(f"  • {shown} — {title} ({tag})")
 
     # Stdout from a SessionStart hook becomes additional context for the first turn.
     print("\n".join(parts))
