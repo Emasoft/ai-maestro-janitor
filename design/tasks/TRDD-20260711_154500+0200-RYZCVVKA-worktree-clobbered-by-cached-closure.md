@@ -93,32 +93,98 @@ keepalive never restaged on Jul 11 either.
 **Backstop (`56bf46d`):** conftest S1c now snapshots a sha manifest of `scripts/**` (*.py +
 *.sh, 401 files) and FAILS the suite if any of it changes.
 
-**STILL OPEN — who ran the repo's entry at 14:35:40?** Not the suite, not launchd (its plist
-points at the DATA copy — verified), not the daemon (it never calls `verify_or_restage`).
-Something executed `<repo>/scripts/daemon_keepalive_entry.py` once. Note the self-limiting
-shape that made it a single event: after the clobber the repo == cache, so the mismatch
-that triggers a restage was gone and it could not fire again.
+## 2026-07-11 (later) — ATTRIBUTED. And my "suite is EXONERATED" claim above was WRONG.
 
-**It can no longer cause damage** — the write is refused and any recurrence inside the suite
-fails loudly. What remains is attribution, not risk.
+**RETRACTION.** The section above says "the test suite is EXONERATED — on the merits". That
+was false, and the way I reached it is the lesson. I instrumented `stage_closure`'s refusal
+and ran all 12,479 tests — but that run was AFTER `fef258c`, which REFUSES the write. I proved
+"the fix works" and reported it as "the suite never did this". A guard installed before the
+experiment invalidates the experiment.
 
-**NEXT ACTION — remaining leads:**
+**The keepalive's own boot log named the mechanism** (`global-state/daemon-keepalive.boot.log`
+— a file I never opened until asked to keep digging, and had wrongly claimed was last touched
+Jul 9):
 
-1. ~~Add a repo-tree write guard to `conftest.py`~~ — DONE (`56bf46d`, S1c). — the mirror of the existing S1b
-   DATA-dir guard: snapshot a sha manifest of `scripts/**` at session start and FAIL the
-   suite if it changes. Cheap, and it catches a recurrence instantly, with a stack. Do this
-   regardless of what the investigation finds.
-2. ~~Make `stage_closure()` REFUSE a source-checkout destination~~ — DONE (`fef258c`). The closure is
-   only ever staged into the DATA dir, so a repo destination is ALWAYS a bug. This is the
-   real fix — it makes the whole class impossible instead of merely detectable — and the
-   TRDD-ZNN0UK5K recurrence is the argument for building it.
-3. Audit every caller of `restage` / `install` / `verify_or_restage` for any path where
-   `JANITOR_DATA_DIR` (or a cwd-relative fallback) could resolve to the repo — including
-   the SessionStart hook and any subprocess that inherits a partially-isolated env.
+- Its LAST entry: `staged closure is corrupt/incomplete (6 file(s): daemon.py,
+  lib/fleet_inject.py, lib/fleet_recovery.py, lib/rules_installer.py, lib/terminal_trigger.py,
+  oauth_rotator/safe_storage.py); restaging from …/cache/…/0.39.0/scripts`.
+- Beside it, `daemon-keepalive.restage-stamp` = epoch 1783773340 = **2026-07-11 14:35:40 +0200**
+  — the clobber instant to the second — carrying that same 6-file list.
+- Those 6 files are EXACTLY the files this repo had changed since v0.39.0 (the 0GPQROC1
+  soft-injection work, the 460aad0 rules work, the 7ceab3f keychain latch).
+
+So the boot gate compared **the REPO** against **the cached release**, concluded my newer
+committed code was "corrupt", and "repaired" it by overwriting the repo with v0.39.0. The lost
+exec bits follow: `stage_closure` writes a fresh tmp at the 0644 umask, then `os.replace`s.
+
+**The invoker: a process running `<repo>/scripts/daemon_keepalive_entry.py` with the REAL env.**
+`verify_or_restage` is called from exactly one place — that entry, on its OWN directory — so a
+repo destination means the repo's copy was executed. It was NOT under pytest (pytest_configure
+redirects `JANITOR_GLOBAL_STATE_DIR`, so the stamp would have landed in tmp, not the real dir)
+and NOT launchd (its plist points at the DATA copy — verified via PlistBuddy). Beyond that the
+trail is cold; the exact caller stays unattributed, and I am not going to invent one.
+
+**But the log ALSO proves a chronic, separate leak:** of its 432 lines, **296 name a pytest tmp
+dir as the restage SOURCE**. Tests have been writing into REAL production state for a long
+time — straight through per-module `_isolate_janitor_state` fixtures that each claim to prevent
+exactly that. And S1b, the detector meant to catch this, EXCLUDES `.log` and `.restage-stamp`
+as "daemon liveness" — the two files this incident wrote. **The guard was blind to its own
+incident.**
+
+## The fix — three layers, because every opt-in layer here has been escaped at least once
+
+1. **`fef258c` — the write path.** `stage_closure` refuses a destination inside a plugin SOURCE
+   checkout. Closes the repo-clobber for ANY caller, test or not.
+2. **`05b1a38` — the S1e HARD WRITE SANDBOX (the user's ask: "block any test attempting to
+   write outside of its boundaries").** `pytest_configure` wraps the write syscalls
+   (`builtins.open`, `io.open`, `os.open`, `replace`/`rename`/`symlink`/`link`,
+   `remove`/`unlink`/`rmdir`/`mkdir`/`makedirs`/`chmod`/`truncate`, `shutil.rmtree`) and RAISES
+   on any write into the real `~/.claude` tree or this repo's source. Not a fixture — nothing
+   to opt into, nothing to forget.
+3. **`05b1a38` — S1c repaired.** The guard I added in `56bf46d` built its BEFORE manifest with
+   `_source_manifest` (*.py/*.sh) and re-snapshotted with `_manifest` (everything), so the
+   vendored Rust tree read as ~15k "ADDED" files. It would have drowned any real signal in
+   noise. Now both ends use the same function.
+
+**The sandbox caught two bugs in itself while being written** — which is the whole argument for
+writing positive controls instead of trusting a guard's docstring:
+- `io.open` is a SEPARATE binding from `builtins.open`; `pathlib` writes go through `io`, so
+  patching only builtins let every `Path.write_text` straight through.
+- For `os.replace(src, dst)` the file DESTROYED is `dst`. I guarded `src` — policing the
+  harmless tmp file and waving the clobber through. **It overwrote `scripts/daemon.py` a second
+  time, mid-fix**, and only the positive control caught it.
+- Honoring `dir_fd`: `shutil.rmtree` walks with `os.rmdir("design", dir_fd=…)` — a bare relative
+  name. Resolving it against the cwd made a `TemporaryDirectory` cleanup look like an attack on
+  the real `design/` and failed 68 innocent tests. Fixed by skipping fd-relative calls and
+  guarding `rmtree` at its entry point (which is what actually bounds the recursive delete).
+
+**Verified:** 12,490 passed / 1 skipped; zero sandbox blocks outside the sandbox's own tests;
+`git status scripts/ design/ hooks/ rules/` clean after a full run; the real boot log's mtime
+still reads 14:35:40, i.e. the suite no longer touches it.
 
 **Do NOT dismiss this as a one-off.** It silently reverted committed source. Had it landed
 on a file that was then edited and committed, it would have shipped a regression of already
 published fixes — and the only reason it was caught at all is that it happened to clear an
 executable bit the tests depend on.
 
+**REMAINING (lead 3, still open):** audit every caller of `restage` / `install` /
+`verify_or_restage` for a path where the destination could resolve to the repo. The write is
+refused now, so this is hardening, not risk.
+
 ## Notes and lessons learned
+
+[^1]: [ocd:2026-07-11 lmd:2026-07-11] I reported "the test suite is EXONERATED — on the merits,
+  not by the guard" after instrumenting the suite and seeing no hits. The instrumented run was
+  AFTER the guard that refuses the write had landed, so the experiment could only ever come back
+  clean. Lesson: an experiment run after installing the fix proves the fix, never the innocence
+  of the suspect. Reconstruct the incident from artifacts written AT THE TIME (here: the boot log
+  and restage-stamp, which were sitting on disk the whole time and which I asserted, without
+  looking, were stale).
+[^2]: [ocd:2026-07-11 lmd:2026-07-11] A detector that excludes the very files an incident writes
+  cannot see that incident. S1b excluded `.log` and `.restage-stamp` as "daemon liveness churn";
+  those are precisely what the clobber wrote. When adding an exclusion to silence noise, ask what
+  class of failure the exclusion makes invisible.
+[^3]: [ocd:2026-07-11 lmd:2026-07-11] Opt-in isolation fails silently and forever. Three layers
+  (per-module fixtures, session-default env redirect, manifest guards) all claimed to prevent
+  tests touching real state, and 296 log lines say they did anyway. Only refusing the write at
+  the syscall — with no opt-in — actually holds.
