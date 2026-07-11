@@ -164,23 +164,12 @@ def main() -> int:
     interval = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_REMINDER_INTERVAL"), 14400)
 
     root = state.project_root()
-    trdd_subpath = os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
-    trdd_dir = root / trdd_subpath
 
-    # Containment check — see trdd-drift.py for the rationale.
-    try:
-        resolved_trdd = trdd_dir.resolve()
-        resolved_root = root.resolve()
-        resolved_trdd.relative_to(resolved_root)
-    except (ValueError, OSError):
-        state.log_line(
-            "trdd-reminder",
-            f"TRDD path {trdd_subpath!r} resolves outside project root — refusing to scan",
-        )
-        return 0
-
-    if not trdd_dir.is_dir():
-        state.log_line("trdd-reminder", f"TRDD dir {trdd_dir} not present — skipping")
+    # BOTH design scopes — PROJECT and LOCAL. `trdd_common` owns the resolution and the
+    # containment check that used to be copied here (see its module docstring).
+    trdds = trdd_common.trdd_files("tasks", str(root))
+    if not trdds:
+        state.log_line("trdd-reminder", "no TRDDs in any design scope — skipping")
         return 0
 
     now = int(time.time())
@@ -188,7 +177,7 @@ def main() -> int:
     seen = state.state_dir() / f"trdd-reminder-session-{session}.txt"
 
     entries: list[str] = []
-    for f in sorted(trdd_dir.glob("TRDD-*.md")):
+    for scope, f in trdds:
         status, column, created = _parse_trdd_state(f)
         # Remind about TRDDs that are actively in flight: v1 status
         # `in-progress`, or a v2 column in the actively-in-flight set.
@@ -210,12 +199,22 @@ def main() -> int:
         # and the prior fix over-corrected to age-only, dropping the staleness the
         # nag exists to surface). `age` is omitted for a legacy TRDD whose
         # frontmatter has no parseable `created:`.
-        idle_days = (now - _last_touched_epoch(f, root, fallback=now)) // 86400
+        # A LOCAL TRDD lives OUTSIDE the repo and is in no git, so its last-commit time is
+        # meaningless — use its mtime. Asking git about a foreign path would silently yield
+        # the `fallback` (now) and make every local TRDD look permanently fresh, i.e. never
+        # stale, which is the exact opposite of what this nag exists to surface.
+        touched = (
+            _last_touched_epoch(f, root, fallback=now)
+            if scope == trdd_common.PROJECT
+            else (state.file_mtime(f) or now)
+        )
+        idle_days = (now - touched) // 86400
         if created is not None:
             label = f"idle {idle_days}d, age {(now - created) // 86400}d"
         else:
             label = f"idle {idle_days}d"
-        entries.append(f"TRDD-{uuid[:8]} ({label})")
+        tag = " (local)" if scope == trdd_common.LOCAL else ""
+        entries.append(f"TRDD-{uuid[:8]}{tag} ({label})")
 
     if not entries:
         return 0

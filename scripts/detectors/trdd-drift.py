@@ -65,33 +65,20 @@ def main() -> int:
     seen = state.state_dir() / "trdd-drift-seen.txt"
 
     root = state.project_root()
-    trdd_subpath = os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
-    trdd_dir = root / trdd_subpath
 
-    # Containment check: a misconfigured CLAUDE_PLUGIN_OPTION_TRDD_PATH
-    # (absolute system path, parent-escape sequence, or a symlink that
-    # escapes the project root) must NOT cause the detector to scan
-    # outside the project. Resolve both paths (resolves symlinks too)
-    # and require the TRDD dir to live under root. The well-formed
-    # default design/tasks always passes; only typo'd values fail.
-    try:
-        resolved_trdd = trdd_dir.resolve()
-        resolved_root = root.resolve()
-        resolved_trdd.relative_to(resolved_root)
-    except (ValueError, OSError):
-        state.log_line(
-            "trdd-drift",
-            f"TRDD path {trdd_subpath!r} resolves outside project root — refusing to scan",
-        )
-        return 0
-
-    if not trdd_dir.is_dir():
-        state.log_line("trdd-drift", f"TRDD dir {trdd_dir} not present — skipping")
+    # BOTH design scopes — PROJECT (`<repo>/design/tasks`, honoring
+    # CLAUDE_PLUGIN_OPTION_TRDD_PATH) and LOCAL (`~/.claude/projects/<slug>/design/tasks`).
+    # `trdd_common` owns the resolution AND the containment check that refuses a TRDD_PATH
+    # escaping the project root — that check lived here as a private copy, which is exactly
+    # how a second root gets missed by one consumer and its tasks go invisible.
+    trdds = trdd_common.trdd_files("tasks", str(root))
+    if not trdds:
+        state.log_line("trdd-drift", "no TRDDs in any design scope — skipping")
         return 0
 
     now = int(time.time())
 
-    for f in sorted(trdd_dir.glob("TRDD-*.md")):
+    for scope, f in trdds:
         status, column = _parse_trdd_state(f)
         # A TRDD is drift-eligible when its v1 status is not-started/in-progress
         # OR its v2 column is one of the actively-in-flight columns. The column
@@ -103,7 +90,15 @@ def main() -> int:
         # column label when only v2 frontmatter is present.
         active_label = status or column
 
-        touched = _last_touched_epoch(f, root)
+        # PROJECT TRDDs are git-tracked, so their last-commit time is the honest "last
+        # touched" (an mtime is churned by any checkout). A LOCAL TRDD lives OUTSIDE the
+        # repo and is in no git at all — asking git about it is meaningless, so use its
+        # mtime directly rather than relying on `git log` to fail quietly on a foreign path.
+        touched = (
+            _last_touched_epoch(f, root)
+            if scope == trdd_common.PROJECT
+            else state.file_mtime(f)
+        )
         if touched == 0:
             continue
 
@@ -124,10 +119,14 @@ def main() -> int:
         # membership check above limits the value to a known set in normal
         # operation, but a future format change could widen it — defang here.
         display_status = state.sanitize_for_drift_line(active_label)
+        # Name the scope only when it is LOCAL — PROJECT is the default board, and tagging
+        # every line with it would be noise. TRDD ids are globally unique, so the dedupe key
+        # needs no scope qualifier.
+        tag = " (local)" if scope == trdd_common.LOCAL else ""
         line = dedupe.emit_once(
             seen,
             f"drift@{uuid}@bucket-{bucket}",
-            f"[trdd-drift] TRDD-{uuid[:8]} status='{display_status}' but file untouched for {age_days}d.",
+            f"[trdd-drift] TRDD-{uuid[:8]}{tag} status='{display_status}' but file untouched for {age_days}d.",
         )
         if line is not None:
             print(line)
