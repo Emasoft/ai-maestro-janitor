@@ -28,10 +28,21 @@
 > authority, approval tiers, and title-based routing — the overlay never
 > restates this base.
 
+> **SCOPE (amended 2026-07-11).** A TRDD is **PROJECT-scoped** (`<project-root>/design/`,
+> git-tracked and pushed) or **LOCAL-scoped** (`~/.claude/projects/<slug>/design/`, outside
+> the repo and machine-private). Its **scope IS its path**. The local root mirrors the
+> project root exactly — the same four lifecycle folders — so everything in this reference
+> applies to both by swapping ONE path. The normative scope-routing rule, the both-roots
+> collision check, and the hard "a PROJECT TRDD MUST NOT cite a LOCAL one" invariant live in
+> the loaded rule (`trdd-design-tasks.md`, step 1); they are not restated here. Where this
+> document says "git-tracked" below, read it as **PROJECT-scoped**.
+
 **Rule:** Every non-trivial feature spec, backlog item, or deferred-work
 design note MUST be saved as a **Task Requirement Design Document (TRDD)**
-in `<project-root>/design/tasks/`. TRDDs are git-tracked artifacts of the
-project. Every TRDD is a single `.md` file with a YAML frontmatter that
+in a `design/tasks/` folder — `<project-root>/design/tasks/` for a PROJECT TRDD,
+`~/.claude/projects/<slug>/design/tasks/` for a LOCAL one. A PROJECT TRDD is a
+git-tracked artifact of the project; a LOCAL TRDD lives outside every repo and is
+never committed. Every TRDD is a single `.md` file with a YAML frontmatter that
 captures all the structured state (column, ownership, dependencies, test
 requirements, deploy/publish target, commit hashes, …) and a body that
 captures the prose. The frontmatter is **grep-first**; tools never need
