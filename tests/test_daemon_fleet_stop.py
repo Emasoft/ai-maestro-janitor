@@ -4,7 +4,8 @@ Real global-state I/O (isolated dir) + real flag setters, but the fleet scan, th
 channel builder, and the FIRE are stubbed so the test never spawns a process or types
 a keystroke. Pins: opt-in-off is inert, flag-none clears stamps, a set flag injects
 the stop command into every OTHER session (never self/daemon/user-active), dedupe,
-and no-stamp-on-fire-failure.
+no-stamp-on-fire-failure, and the soft/hard ESC policy (soft everywhere EXCEPT a
+frozen target, whose wedged turn would never dequeue a soft command).
 """
 
 from __future__ import annotations
@@ -21,10 +22,16 @@ daemon = importlib.import_module("daemon")
 gs = importlib.import_module("global_state")
 
 
-def _inst(pid: int, *, active: bool = False, command: str = "claude") -> object:
+def _inst(
+    pid: int,
+    *,
+    active: bool = False,
+    command: str = "claude",
+    diagnosis: str = "healthy",
+) -> object:
     return fleet_scan.Instance(
         pid=pid, command=command, tty=f"ttys{pid:03d}", project_root=f"/proj/{pid}",
-        terminal={"tmux_pane": f"%{pid}"}, diagnosis="healthy", recovery=None,
+        terminal={"tmux_pane": f"%{pid}"}, diagnosis=diagnosis, recovery=None,
         dispatch_age_s=None, active=active, transcript_age_s=10,
     )
 
@@ -48,10 +55,11 @@ def _wire(monkeypatch, tmp_path, *, fleet, enabled=True, fire_ok=True, plan: str
     monkeypatch.setattr(daemon.os, "getpid", lambda: 1)
 
     def _plan(terminal, command, *, esc_first):
-        # SOFT contract (TRDD-0GPQROC1): a fleet stop lands at each session's turn
-        # boundary — the daemon must never request an ESC-interrupt here.
-        assert esc_first is False, "fleet-stop injection must be soft (no ESC)"
-        return None if plan is None else {"channel": "tmux", "command": command}
+        # Carry esc_first into the fired plan so the tests can pin the soft/hard policy
+        # (soft by default per TRDD-0GPQROC1; hard ONLY for a frozen target).
+        if plan is None:
+            return None
+        return {"channel": "tmux", "command": command, "esc_first": esc_first}
 
     monkeypatch.setattr(daemon.fleet_restart, "command_injection_plan", _plan)
     fire = _Fire(fire_ok)
@@ -123,3 +131,30 @@ def test_unreachable_channel_skipped(monkeypatch, tmp_path) -> None:
     daemon.task_fleet_stop()
     assert fire.calls == []
     assert gs.fleet_injections_seen() == set()
+
+
+def test_healthy_target_is_soft(monkeypatch, tmp_path) -> None:
+    """A live (non-frozen) session gets the stop ENQUEUED — no ESC, so its in-flight
+    turn finishes first (TRDD-0GPQROC1)."""
+    fire = _wire(monkeypatch, tmp_path, fleet=[_inst(41)])
+    gs.set_kill_switch("d")
+    daemon.task_fleet_stop()
+    assert [c["esc_first"] for c in fire.calls] == [False]
+
+
+def test_frozen_target_is_hard(monkeypatch, tmp_path) -> None:
+    """A FROZEN session gets an ESC first: its wedged turn never ends, so a soft command
+    would sit in the input queue forever while the fire is stamped as delivered — the
+    stop would never actually run and the cron would keep billing turns."""
+    fire = _wire(monkeypatch, tmp_path, fleet=[_inst(41, diagnosis="frozen")])
+    gs.set_kill_switch("d")
+    daemon.task_fleet_stop()
+    assert [c["esc_first"] for c in fire.calls] == [True]
+
+
+def test_cron_dead_target_is_soft(monkeypatch, tmp_path) -> None:
+    """cron_dead is a LIVE session with only a dead heartbeat — still soft."""
+    fire = _wire(monkeypatch, tmp_path, fleet=[_inst(41, diagnosis="cron_dead")])
+    gs.set_kill_switch("d")
+    daemon.task_fleet_stop()
+    assert [c["esc_first"] for c in fire.calls] == [False]

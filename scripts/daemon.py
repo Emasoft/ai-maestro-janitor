@@ -1061,8 +1061,19 @@ def _fire_fleet_stop(inst, plan: dict, flag_state: str, now: int) -> None:
     # SOFT (no ESC, TRDD-0GPQROC1): a machine-wide pause/disarm should land at each
     # session's turn boundary — the enqueued command runs when the turn ends, so the
     # stop never destroys in-flight work (user directive 2026-07-10).
+    #
+    # EXCEPT a FROZEN target (code-review finding, 2026-07-11): a wedged turn never
+    # ends, so a softly-typed /janitor-disarm would sit in its input queue forever —
+    # yet fire() succeeds, record_fleet_injection stamps (pid, flag) as delivered, and
+    # the stop is NEVER retried while the flag is held. The frozen session's cron would
+    # keep firing billable turns straight through a machine-wide stop. The ESC IS the
+    # unwedge, so reuse the SAME policy the gentle-recovery path uses (fleet_recovery.
+    # injection_is_hard) instead of hard-coding soft. `inst` is None only when the
+    # scanned fleet lost the pid between scan and fire — then stay soft (no diagnosis
+    # to justify killing a turn).
+    esc_first = fr.injection_is_hard(inst.diagnosis) if inst is not None else False
     cmd_plan = fleet_restart.command_injection_plan(
-        plan["terminal"], plan["command"], esc_first=False
+        plan["terminal"], plan["command"], esc_first=esc_first
     )
     if cmd_plan is None:
         state.log_line(
