@@ -273,7 +273,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=14b1f9a50475 digest=a09ef83ef561 generated=2026-07-11T14:15:49+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=f7c319aee3cd digest=c7078110df20 generated=2026-07-11T14:23:30+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -677,6 +677,10 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/lib/leanctx_allowlist.py` — Self-heal the lean-ctx shell allowlist for the janitor heartbeat
   · required_tokens() -> list[str] — Return the janitor's required lean-ctx allowlist tokens.
   · ensure_janitor_allowed() -> list[str] — Additively allow every janitor-required token on the lean-ctx allowlist.
+`scripts/lib/memory_breadcrumb.py` — SessionStart memory breadcrumb (TRDD-98ISATJZ, surface S2 — janitor#62).
+  · count_notes(root) -> int — How many real memory NOTES live under ``root``.
+  · format_breadcrumb(counts, overview_dir) -> str | None — The one-line breadcrumb, or None when there is nothing to say. PURE.
+  · breadcrumb() -> str | None — Resolve every existing memory scope, count its notes, and render the line.
 `scripts/lib/memory_content_precheck.py` — Cheap, zero-LLM filesystem prechecks for the memory-maintenance SCHEDULER
   · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
   · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
@@ -1133,6 +1137,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · snapshot_to_keychain(email, cookies_db, *, host_filter) -> safe_storage.StoreResult — Extract ``email``'s claude.ai cookies from its Chrome profile and store the jar
   · materialize_from_keychain(email, cookies_db) -> int | None — Load ``email``'s stored cookie jar from safe-storage and INJECT it into the Chrome
   · forget_in_keychain(email) -> None — Best-effort removal of ``email``'s stored cookie jar from safe-storage (retiring
+  · scrub_enabled() -> bool — The scrub's OWN opt-in. DEFAULT OFF (destruction is never implicit).
+  · verify_restorable(email, cookies_db, *, host_filter) -> tuple[bool, str] — Prove the keychain jar can RESTORE this profile's cookies exactly. ``(ok, why)``.
+  · scrub_profile_cookies(email, cookies_db, *, host_filter) -> str — Remove this profile's on-disk claude.ai cookies — but ONLY after proving the
 `scripts/oauth_rotator/reauth.py` — Tier-3 OAuth re-auth — refresh the LIVE Claude credential, hands-free.
   · log(msg) -> None
   · die(msg, code) -> NoReturn

@@ -220,3 +220,179 @@ def test_snapshot_then_materialize_switches_profile(isolated_keychain,  # isolat
         cv.forget_in_keychain(email)
     # After forget, materialize finds nothing.
     assert cv.materialize_from_keychain(email, tmp_path / "profileC" / "Cookies") is None
+
+
+# ---------------------------------------------------------------------------
+# The SCRUB (TRDD-dfc0959a Phase 3) — the one DESTRUCTIVE op in the vault.
+#
+# Scrubbing destroys the only credential that can mint a session without a human, so
+# every test here is about the guard REFUSING. The verdict string is the contract:
+# "skipped:" (opt-in off), "refused:" (proof failed, nothing touched), "scrubbed:".
+# No mocks — the "keychain copy is incomplete" case is produced FOR REAL by adding a
+# cookie to the profile after the snapshot, which is exactly how it happens in life.
+# ---------------------------------------------------------------------------
+def _claude_rows_on_disk(db: Path) -> int:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        return con.execute(
+            "SELECT COUNT(*) FROM cookies WHERE host_key LIKE '%claude.ai'").fetchone()[0]
+    finally:
+        con.close()
+
+
+def test_scrub_is_skipped_when_its_opt_in_is_absent(monkeypatch: pytest.MonkeyPatch,
+                                                    tmp_path: Path) -> None:
+    """DEFAULT OFF: destruction is never implicit, even with a perfect keychain copy."""
+    monkeypatch.delenv(cv.SCRUB_ENV, raising=False)
+    db = tmp_path / "Cookies"
+    _make_db(db, [_row(".claude.ai", "sessionKey", _ENC_SESSION)])
+
+    verdict = cv.scrub_profile_cookies("a@x.com", db)
+
+    assert verdict.startswith("skipped:")
+    assert _claude_rows_on_disk(db) == 1  # untouched
+
+
+def test_scrub_refuses_when_no_jar_is_stored(monkeypatch: pytest.MonkeyPatch,
+                                             tmp_path: Path) -> None:
+    """Opted in, but nothing is in the keychain: deleting now would brick the account."""
+    monkeypatch.setenv(cv.SCRUB_ENV, "1")
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "none")
+    db = tmp_path / "Cookies"
+    _make_db(db, [_row(".claude.ai", "sessionKey", _ENC_SESSION)])
+
+    verdict = cv.scrub_profile_cookies("a@x.com", db)
+
+    assert verdict.startswith("refused:")
+    assert _claude_rows_on_disk(db) == 1  # untouched
+
+
+def test_scrub_refuses_when_there_is_nothing_on_disk(monkeypatch: pytest.MonkeyPatch,
+                                                     tmp_path: Path) -> None:
+    """An empty cookie set proves nothing — "0 == 0" must not read as a good verify."""
+    monkeypatch.setenv(cv.SCRUB_ENV, "1")
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "none")
+    db = tmp_path / "Cookies"
+    _make_db(db, [])
+
+    ok, why = cv.verify_restorable("a@x.com", db)
+
+    assert ok is False
+    assert "nothing to verify" in why
+
+
+def test_scrub_refuses_when_the_profile_db_is_absent(monkeypatch: pytest.MonkeyPatch,
+                                                     tmp_path: Path) -> None:
+    """A missing Cookies DB must be a refusal verdict, never an exception out of a
+    best-effort capture step."""
+    monkeypatch.setenv(cv.SCRUB_ENV, "1")
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "none")
+
+    verdict = cv.scrub_profile_cookies("a@x.com", tmp_path / "gone" / "Cookies")
+
+    assert verdict.startswith("refused:")
+
+
+@pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
+def test_scrub_refuses_when_the_keychain_copy_is_stale(isolated_keychain,
+                                                        monkeypatch: pytest.MonkeyPatch,
+                                                        tmp_path: Path) -> None:
+    """THE brick scenario, reproduced for real: the profile gained a cookie AFTER the
+    snapshot, so the keychain copy can no longer restore the profile. The guard must
+    refuse and leave every cookie on disk — a stale jar that restores only some cookies
+    is indistinguishable from a good one until you have already destroyed the original.
+    """
+    monkeypatch.setenv(cv.SCRUB_ENV, "1")
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "macos")
+    monkeypatch.setattr(cv, "COOKIE_KEYCHAIN_SERVICE", _TEST_COOKIE_SERVICE)
+    email = "stale@x.com"
+    db = tmp_path / "profile" / "Cookies"
+    _make_db(db, [_row(".claude.ai", "sessionKey", _ENC_SESSION)])
+    try:
+        assert cv.snapshot_to_keychain(email, db) is ss.StoreResult.OK
+        # The profile moves on: a second claude.ai cookie appears after the snapshot.
+        con = sqlite3.connect(db)
+        try:
+            cols = ", ".join(cv.COOKIE_COLUMNS)
+            ph = ", ".join("?" for _ in cv.COOKIE_COLUMNS)
+            r = _row(".claude.ai", "cf_clearance", _ENC_CF)
+            con.execute(f"INSERT INTO cookies ({cols}) VALUES ({ph})",
+                        tuple(r[c] for c in cv.COOKIE_COLUMNS))
+            con.commit()
+        finally:
+            con.close()
+
+        ok, why = cv.verify_restorable(email, db)
+        assert ok is False
+        assert "did not reproduce" in why
+
+        verdict = cv.scrub_profile_cookies(email, db)
+        assert verdict.startswith("refused:")
+        assert _claude_rows_on_disk(db) == 2  # BOTH cookies survive
+    finally:
+        cv.forget_in_keychain(email)
+
+
+@pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
+def test_scrub_refuses_when_the_stored_jar_is_corrupt(isolated_keychain,
+                                                       monkeypatch: pytest.MonkeyPatch,
+                                                       tmp_path: Path) -> None:
+    """A jar that cannot be parsed cannot restore anything — refuse, keep the originals."""
+    monkeypatch.setenv(cv.SCRUB_ENV, "1")
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "macos")
+    monkeypatch.setattr(cv, "COOKIE_KEYCHAIN_SERVICE", _TEST_COOKIE_SERVICE)
+    email = "corrupt@x.com"
+    db = tmp_path / "profile" / "Cookies"
+    _make_db(db, [_row(".claude.ai", "sessionKey", _ENC_SESSION)])
+    try:
+        assert ss.store(_TEST_COOKIE_SERVICE, email, "}{ not a jar") is ss.StoreResult.OK
+
+        verdict = cv.scrub_profile_cookies(email, db)
+
+        assert verdict.startswith("refused:")
+        assert "unreadable" in verdict
+        assert _claude_rows_on_disk(db) == 1  # untouched
+    finally:
+        cv.forget_in_keychain(email)
+
+
+@pytest.mark.skipif(not _real_macos_keychain(), reason="needs a real macOS `security` keychain")
+def test_scrub_removes_only_proven_rows_and_the_profile_still_restores(
+        isolated_keychain, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The happy path, end-to-end and reversible: with a verified keychain copy, scrub
+    deletes exactly the claude.ai rows (an unrelated cookie the jar never held survives),
+    and materialize_from_keychain puts the scrubbed cookies back byte-for-byte — which is
+    the whole justification for destroying them in the first place."""
+    monkeypatch.setenv(cv.SCRUB_ENV, "1")
+    monkeypatch.setenv("CLAUDE_SAFE_STORAGE_BACKEND", "macos")
+    monkeypatch.setattr(cv, "COOKIE_KEYCHAIN_SERVICE", _TEST_COOKIE_SERVICE)
+    email = "good@x.com"
+    db = tmp_path / "profile" / "Cookies"
+    _make_db(db, [
+        _row(".claude.ai", "sessionKey", _ENC_SESSION),
+        _row(".claude.ai", "cf_clearance", _ENC_CF),
+        _row(".other.example", "tracker", b"\x01\x02"),   # NOT in the jar's host_filter
+    ])
+    try:
+        original = cv.extract_jar(db)
+        assert cv.snapshot_to_keychain(email, db) is ss.StoreResult.OK
+
+        verdict = cv.scrub_profile_cookies(email, db)
+
+        assert verdict.startswith("scrubbed:"), verdict
+        assert _claude_rows_on_disk(db) == 0            # the proven rows are gone
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            # The unrelated cookie is untouched: we never snapshotted it, so we could not
+            # restore it, so we must not delete it.
+            assert con.execute(
+                "SELECT COUNT(*) FROM cookies WHERE host_key = '.other.example'"
+            ).fetchone()[0] == 1
+        finally:
+            con.close()
+
+        # And the destruction is undoable — the point of the guard.
+        assert cv.materialize_from_keychain(email, db) == 2
+        assert cv.extract_jar(db).rows == original.rows
+    finally:
+        cv.forget_in_keychain(email)

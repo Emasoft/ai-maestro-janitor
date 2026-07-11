@@ -393,8 +393,22 @@ def _snapshot_cookies(profile_email: str) -> None:
         return
     try:
         import cookie_vault  # lazy (see _materialize_cookies)
-        res = cookie_vault.snapshot_to_keychain(profile_email, _cookies_db_for(profile_email))
+        import safe_storage  # lazy, same reason
+        db = _cookies_db_for(profile_email)
+        res = cookie_vault.snapshot_to_keychain(profile_email, db)
         print(f"[capture] snapshotted {profile_email}'s cookies to keychain: {res.value}")
+        # SCRUB (TRDD-dfc0959a Phase 3) — only when the operator opted in AND only after
+        # the vault proves, by rehearsing the full restore path, that the keychain copy
+        # reproduces these cookies exactly. Attempted only on a store that returned OK:
+        # StoreResult is three-valued, and BOTH other values mean the jar is not safely
+        # in a keychain — FAILED (a store is present but the write failed) and NO_BACKEND
+        # (no secret store at all). Treating either as "stored" and then deleting the
+        # originals is precisely how this operation would brick an account. The verify
+        # inside scrub_profile_cookies re-reads the keychain and would catch it anyway,
+        # but not even asking keeps the destructive path one gate further from running.
+        # The verdict is logged; it never raises.
+        if res is safe_storage.StoreResult.OK:
+            print(f"[capture] cookie scrub: {cookie_vault.scrub_profile_cookies(profile_email, db)}")
     except FileNotFoundError:
         pass  # no Cookies DB (profile never logged in) — nothing to snapshot
     except Exception as exc:  # noqa: BLE001

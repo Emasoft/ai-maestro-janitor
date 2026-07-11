@@ -3,7 +3,7 @@ trdd-id: dfc0959a-9e74-40ae-8de9-bf7fd5b378f3
 title: OAuth rotator — 3-layer cascade paradigm + keychain-encrypted cross-platform cookies + consistency fixes
 column: dev
 created: 2026-06-08T16:53:09+0200
-updated: 2026-07-04T05:14:00+0200
+updated: 2026-07-11T14:52:00+0200
 current-owner: janitor-dev-session
 assignee: janitor-dev-session
 priority: 1
@@ -23,9 +23,49 @@ external-refs: []
 
 # TRDD-dfc0959a — Rotator 3-layer cascade + keychain-encrypted cookies + consistency fixes
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-06-08
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-11
 
-**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J) — PARTIALLY SHIPPED, stays dev:** Phases 0/1/2/2c are shipped AND live (cookie_vault.py + cascade.py in-tree; the "daemon still runs cached 0.6.1 — none of this is live yet" fact below is SUPERSEDED — current release v0.31.0). Phase 3 remains OPEN: live capture validation behind `CLAUDE_ROTATOR_KEYCHAIN_COOKIES` (still opt-in, slot_capture_browser.py:361), the verify-before-SCRUB decision, and the deferred A-F* follow-ups.
+**2026-07-11 — the verify-before-SCRUB is DECIDED and IMPLEMENTED (Phase 3 item 3).**
+`cookie_vault.scrub_profile_cookies()` + `verify_restorable()` + `scrub_enabled()`,
+wired into `slot_capture_browser._snapshot_cookies`. The decision:
+
+- **The proof is a RESTORE REHEARSAL, not a byte-compare.** The TRDD asked for
+  "snapshot → materialize-back → byte-compare". A byte-compare of the stored blob only
+  proves bytes reached the keychain. The guard instead runs the REAL restore path
+  (`safe_storage.retrieve` → `jar_from_json` → `inject_jar` into a throwaway DB →
+  `extract_jar`) and compares THAT to the live on-disk cookies. So a bug anywhere in the
+  path a future `materialize_from_keychain` will take is caught while the original still
+  exists — which is the only moment the check is worth anything.
+- **Fail-CLOSED, three verdicts, never raises:** `skipped:` (its own opt-in
+  `CLAUDE_ROTATOR_KEYCHAIN_COOKIES_SCRUB`, DEFAULT OFF — destruction is never implicit),
+  `refused:` (proof failed — nothing touched), `scrubbed:`. An empty on-disk cookie set
+  REFUSES: "0 == 0" must not read as proof.
+- **Scrubs only the `host_filter` rows** the jar actually holds. Deleting the whole
+  Cookies DB would take cookies we never snapshotted and therefore cannot restore.
+- **The capture flow only ASKS on `StoreResult.OK`.** FAILED (keychain present, write
+  refused) and NO_BACKEND (no secret store at all) both mean the jar is nowhere; the
+  verify would catch it, but not even asking keeps the destructive path one gate further
+  from running.
+- **Tests: 7 in `test_cookie_vault.py` + 4 wiring in `test_slot_capture_cookies.py`, no
+  mocks.** The brick scenario is reproduced FOR REAL against an isolated temp macOS
+  keychain: snapshot, then add a cookie to the profile → the jar is now stale → the guard
+  refuses and BOTH cookies survive. Happy path proves the destruction is undoable
+  (`materialize_from_keychain` restores the scrubbed rows byte-for-byte). 474 rotator/
+  oauth/cookie tests green; ruff clean.
+
+**REMAINING Phase 3 (ALL user-gated — I cannot do these):** items 1, 2 and 4 need a
+LIVE, non-429 session and a real human reauth ("stay signed in"): (1) flip
+`CLAUDE_ROTATOR_KEYCHAIN_COOKIES=1` and confirm a real capture materializes-before /
+snapshots-after; (2) confirm RENEW mints via CDP-attach → ROTATE swaps → the cascade log
+is correct; (4) republish + restart Claude Code + restart the daemon. Only after (1)
+validates should `…_SCRUB=1` ever be flipped on a real profile.
+
+**Still deferred (LOW, non-blocking):** A-F3/B-F3 (supervisor inline root/slots-dir dup),
+A-F4 (`_slot_keychain_delete` dead half-primitive), A-F5 (clipboard opt-in), A-F6
+(capture PNGs → diagnostics subdir); plus bringing the user-scope shell scripts into the
+repo with an installer.
+
+**2026-07-04 board-reconciliation (TRDD-GB3Z9U9J):** Phases 0/1/2/2c are shipped AND live (cookie_vault.py + cascade.py in-tree; the "daemon still runs cached 0.6.1 — none of this is live yet" fact below is SUPERSEDED — current release v0.31.0).
 
 **USER design directives (2026-06-08), the authoritative spec:**
 1. **Every rotator script must follow ONE paradigm in 3 parts, each FALLING BACK to the

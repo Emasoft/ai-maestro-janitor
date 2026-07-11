@@ -122,3 +122,64 @@ def test_snapshot_ignores_missing_cookie_db(monkeypatch: pytest.MonkeyPatch) -> 
         raise FileNotFoundError
     monkeypatch.setattr(cookie_vault, "snapshot_to_keychain", _missing)
     scb._snapshot_cookies("a@x.com")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# The SCRUB gate in the capture flow (TRDD-dfc0959a Phase 3).
+#
+# scrub_profile_cookies has its own verify + its own opt-in, so these tests are about
+# ONE thing: the capture flow must not even ASK to destroy the on-disk cookies unless
+# the snapshot actually landed in a keychain. StoreResult is three-valued and only OK
+# means stored — FAILED (keychain present but the write failed) and NO_BACKEND (no
+# secret store at all) both mean the jar is nowhere, and scrubbing then would leave the
+# account with no session and no way back except a human login.
+# ---------------------------------------------------------------------------
+def _capture_scrub_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                         result: safe_storage.StoreResult) -> list:
+    monkeypatch.setenv("CLAUDE_ROTATOR_KEYCHAIN_COOKIES", "1")
+    monkeypatch.setattr(scb.rotator, "_profiles_root", lambda: tmp_path)
+    monkeypatch.setattr(cookie_vault, "snapshot_to_keychain", lambda *a, **k: result)
+    seen: list = []
+    monkeypatch.setattr(cookie_vault, "scrub_profile_cookies",
+                        lambda email, db, **k: seen.append((email, Path(db))) or "scrubbed: 1")
+    scb._snapshot_cookies("a@x.com")
+    return seen
+
+
+def test_scrub_is_attempted_after_a_snapshot_that_stored(monkeypatch: pytest.MonkeyPatch,
+                                                          tmp_path: Path) -> None:
+    """StoreResult.OK → the jar is in a keychain, so the scrub may be considered (its own
+    opt-in + verify still gate whether it actually deletes anything)."""
+    seen = _capture_scrub_calls(monkeypatch, tmp_path, safe_storage.StoreResult.OK)
+    assert seen == [("a@x.com", tmp_path / "chrome-profile-a@x.com" / "Default" / "Cookies")]
+
+
+def test_scrub_is_never_attempted_when_the_keychain_write_failed(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """StoreResult.FAILED → the keychain refused the write. Destroying the on-disk cookies
+    now would brick the account; the flow must not even ask."""
+    seen = _capture_scrub_calls(monkeypatch, tmp_path, safe_storage.StoreResult.FAILED)
+    assert seen == []
+
+
+def test_scrub_is_never_attempted_when_there_is_no_secret_store(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """StoreResult.NO_BACKEND → nothing was stored anywhere. Same rule as FAILED."""
+    seen = _capture_scrub_calls(monkeypatch, tmp_path, safe_storage.StoreResult.NO_BACKEND)
+    assert seen == []
+
+
+def test_scrub_failure_never_breaks_the_capture(monkeypatch: pytest.MonkeyPatch,
+                                                 tmp_path: Path) -> None:
+    """The slot is already filed by this point — a scrub blow-up is pure-hardening loss
+    and must be swallowed like every other step of this opt-in path."""
+    monkeypatch.setenv("CLAUDE_ROTATOR_KEYCHAIN_COOKIES", "1")
+    monkeypatch.setattr(scb.rotator, "_profiles_root", lambda: tmp_path)
+    monkeypatch.setattr(cookie_vault, "snapshot_to_keychain",
+                        lambda *a, **k: safe_storage.StoreResult.OK)
+
+    def _boom(*a, **k):
+        raise RuntimeError("keychain exploded")
+
+    monkeypatch.setattr(cookie_vault, "scrub_profile_cookies", _boom)
+    scb._snapshot_cookies("a@x.com")  # must not raise

@@ -23,6 +23,7 @@ import base64
 import json
 import os
 import sqlite3
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -218,3 +219,113 @@ def forget_in_keychain(email: str) -> None:
     """Best-effort removal of ``email``'s stored cookie jar from safe-storage (retiring
     an account / scrubbing). Never raises."""
     safe_storage.delete(COOKIE_KEYCHAIN_SERVICE, email)
+
+
+# --------------------------------------------------------------------------
+# The on-disk SCRUB (TRDD-dfc0959a Phase 3) — directive #2's "scrub after".
+#
+# This is the one DESTRUCTIVE operation in the vault, and it destroys the ONLY
+# credential that can mint a new session without a human: if the keychain copy is
+# silently incomplete, scrubbing the profile's cookies BRICKS that account's capture
+# (a fresh human login is the only recovery). So it is gated twice:
+#
+#   1. Its OWN opt-in, separate from the parent CLAUDE_ROTATOR_KEYCHAIN_COOKIES flag.
+#      Default OFF — an operator must ask for destruction explicitly.
+#   2. A verify-before-destroy PROOF that fails CLOSED. The proof is not "the bytes
+#      reached the keychain" but a full RESTORE REHEARSAL: retrieve the jar → parse it
+#      → inject it into a throwaway DB → re-extract → compare to what is on disk. That
+#      exercises the exact path a future `materialize_from_keychain` will take, so a
+#      bug anywhere in retrieve/parse/inject would be caught BEFORE the original is
+#      gone — which a plain byte-compare of the stored blob would not catch.
+#
+# It also scrubs ONLY the rows matching `host_filter` — the exact rows the jar holds.
+# Deleting the whole Cookies DB would take cookies we never snapshotted and therefore
+# cannot restore.
+# --------------------------------------------------------------------------
+SCRUB_ENV = "CLAUDE_ROTATOR_KEYCHAIN_COOKIES_SCRUB"
+
+
+def scrub_enabled() -> bool:
+    """The scrub's OWN opt-in. DEFAULT OFF (destruction is never implicit)."""
+    return os.environ.get(SCRUB_ENV, "").strip().lower() in ("1", "true", "on", "yes")
+
+
+def verify_restorable(email: str, cookies_db: Path | str,
+                      *, host_filter: str = "%claude.ai") -> tuple[bool, str]:
+    """Prove the keychain jar can RESTORE this profile's cookies exactly. ``(ok, why)``.
+
+    The rehearsal runs the real restore path (safe_storage.retrieve → jar_from_json →
+    inject_jar → extract_jar) against a throwaway DB and compares the result to the
+    live on-disk cookies. Only an exact match returns True — so a truncated jar, a
+    locked keychain, a corrupt payload, or an inject that silently drops a row all
+    yield False, and the caller must NOT destroy anything.
+
+    An empty on-disk cookie set also returns False: there is nothing to prove and
+    nothing worth destroying, and treating "0 == 0" as proof would let a profile whose
+    cookies already vanished mark itself safely scrubbed.
+    """
+    disk = extract_jar(cookies_db, host_filter=host_filter)  # FileNotFoundError → caller
+    if len(disk) == 0:
+        return (False, "no matching cookies on disk — nothing to verify or scrub")
+
+    payload = safe_storage.retrieve(COOKIE_KEYCHAIN_SERVICE, email)
+    if payload is None:
+        return (False, "no cookie jar stored in the keychain for this account")
+    try:
+        stored = jar_from_json(payload)
+    except ValueError as exc:
+        return (False, f"stored cookie jar is unreadable: {exc}")
+
+    with tempfile.TemporaryDirectory() as td:
+        probe = Path(td) / "Cookies"
+        try:
+            inject_jar(probe, stored)
+            restored = extract_jar(probe, host_filter=host_filter)
+        except (sqlite3.Error, OSError) as exc:
+            return (False, f"restore rehearsal failed: {exc}")
+
+    if restored != disk:
+        return (
+            False,
+            f"restore rehearsal did not reproduce the on-disk cookies "
+            f"({len(restored)} restored vs {len(disk)} on disk)",
+        )
+    return (True, f"{len(disk)} cookie(s) proven restorable from the keychain")
+
+
+def _delete_matching_rows(cookies_db: Path | str, host_filter: str) -> int:
+    """Delete exactly the rows a jar with this ``host_filter`` would carry. Returns the
+    number removed. Chrome must not be running on the profile (it holds a sqlite lock)."""
+    con = sqlite3.connect(Path(cookies_db))
+    try:
+        cur = con.execute("DELETE FROM cookies WHERE host_key LIKE ?", (host_filter,))
+        con.commit()
+        return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
+    finally:
+        con.close()
+
+
+def scrub_profile_cookies(email: str, cookies_db: Path | str,
+                          *, host_filter: str = "%claude.ai") -> str:
+    """Remove this profile's on-disk claude.ai cookies — but ONLY after proving the
+    keychain copy can restore them. Returns a one-line verdict; NEVER raises.
+
+    Verdicts: ``skipped: …`` (opt-in off), ``refused: …`` (the proof failed — nothing
+    was touched), or ``scrubbed: …``. "Refused" is the safe outcome and is expected
+    whenever anything is off; the on-disk cookies are already Chrome-OSCrypt encrypted,
+    so keeping them costs little, while destroying an unrestorable session costs a
+    human login.
+    """
+    if not scrub_enabled():
+        return f"skipped: scrub is opt-in and {SCRUB_ENV} is not set"
+    try:
+        ok, why = verify_restorable(email, cookies_db, host_filter=host_filter)
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
+        return f"refused: verification could not run ({exc})"
+    if not ok:
+        return f"refused: {why}"
+    try:
+        removed = _delete_matching_rows(cookies_db, host_filter)
+    except (sqlite3.Error, OSError) as exc:
+        return f"refused: delete failed after a good verify ({exc})"
+    return f"scrubbed: {removed} on-disk cookie row(s) removed — {why}"
