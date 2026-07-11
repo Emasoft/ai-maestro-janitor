@@ -364,6 +364,23 @@ def main() -> int:
     # fire even while disarmed, so it is free (SessionStart runs anyway). It only helps
     # the NEXT session start, not a session disarmed mid-flight — that residual case
     # needs an out-of-band reminder (documented follow-up).
+    # Memory breadcrumb (TRDD-98ISATJZ S2, janitor#62 gaps 2+3). ONE line naming the
+    # per-scope note counts and the `memgrep overview` entry point, so a fresh session
+    # LEARNS the 3-scope wikimem exists without already knowing memgrep. Printed BEFORE
+    # the global-stop return on purpose: the memory system is independent of the
+    # heartbeat and keeps working while the janitor is disarmed, so a stopped machine
+    # must still get its corpus pointer. Counts only, never note content (see the lib's
+    # docstring — a PROJECT-scope page is untrusted git input). Silent on an empty
+    # corpus; best-effort, never breaks session start.
+    try:
+        from lib import memory_breadcrumb  # noqa: E402  -- local package, not PyPI
+
+        crumb = memory_breadcrumb.breadcrumb()
+        if crumb:
+            print(crumb)
+    except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
+        state.log_line("session-start", f"memory breadcrumb skipped: {exc}")
+
     stop = _active_global_stop(gs)
     if stop is not None:
         # MAINTENANCE WINS OVER A GLOBAL STOP (TRDD-FPL60EKV): maintenance-mode exists

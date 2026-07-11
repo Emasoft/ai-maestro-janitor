@@ -2,12 +2,18 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""UserPromptSubmit hook — OPT-IN automatic memory recall (issue #16, item 2).
+"""UserPromptSubmit hook — automatic memory recall, ON by default (issues #16, #45).
 
-When enabled, every ordinary user prompt is run through `memgrep recall` against
-the AGENT memory corpus (`~/.claude/projects/<slug>/memory/`), and the top notes
-are injected into the agent context via `additionalContext` — so the agent is
-reminded of "have we hit this before?" WITHOUT having to call recall by hand.
+Every ordinary user prompt is run through `memgrep recall` against ALL THREE memory
+scopes (LOCAL + PROJECT + USER), and the top notes are injected into the agent
+context via `additionalContext` — so the agent is reminded of "have we hit this
+before?" WITHOUT having to call recall by hand.
+
+(The docstring's first line used to say "OPT-IN". It was stale: issue #45 flipped the
+default to ON in the code below, but this line and the plugin.json manifest kept
+saying opt-in for seven releases — see TRDD-98ISATJZ. Claude Code only exports
+`CLAUDE_PLUGIN_OPTION_*` when the user SETS the option, so the code default is what
+actually governs; the docs simply lied about it.)
 
 Design contract (load-bearing — keep all of these):
 

@@ -140,7 +140,13 @@ metadata consumed by the scanner detectors. Naming: `<domain>_patterns.py` (e.g.
 `k8s_admission_patterns`, …). **Don't enumerate — grep by domain when needed.**
 
 **Hooks (`scripts/hooks/`, 16)** — `on-session-start` (installs rules + ensures
-daemon), `on-session-start-trdd-state`, `on-prompt-submit`, `on-stop`,
+daemon + prints the MEMORY BREADCRUMB: one line naming the per-scope note counts
+and the `memgrep overview <dir>` entry point, so a fresh session learns the 3-scope
+wikimem exists without already knowing memgrep — TRDD-98ISATJZ S2 / janitor#62;
+counts only, NEVER note content, because the line lands in the session prefix and a
+PROJECT-scope page is untrusted git input; printed even while globally disarmed —
+memory outlives the heartbeat; opt out `…MEMORY_BREADCRUMB=false`),
+`on-session-start-trdd-state`, `on-prompt-submit`, `on-stop`,
 `on-stop-failure`, `post-edit-safety`, `post-mcp-response-sanitizer` (PostToolUse
 → **ON BY DEFAULT**; on a strong injection signal in an `mcp__*` response it
 STRIPS covert invisible/bidi unicode and REPLACES the payload via CC's
@@ -267,7 +273,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=999e54cc65a4 digest=81cf8c030793 generated=2026-07-11T11:55:01+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=14b1f9a50475 digest=a09ef83ef561 generated=2026-07-11T14:15:49+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -306,6 +312,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/cross-scope-reference-drift.py` — Cross-scope reference drift — Python port of cross-scope-reference-drift.sh.
   · main() -> int
 `scripts/detectors/dirty-tree.py` — Dirty-tree detector — Python port of dirty-tree.sh.
+  · main() -> int
+`scripts/detectors/github-issues-watch.py` — github-issues-watch — notify the main Claude of new issues / new comments (TRDD-2KQQAEPP).
   · main() -> int
 `scripts/detectors/historical-cache-scan.py` — historical-cache-scan — known-malicious package version detector.
   · main() -> int
@@ -418,7 +426,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/guard/branch_protection_apply.py` — Tier 2 GUARDED AUTO-REMEDIATION — branch-protection baseline applier.
   · main() -> int
-`scripts/hooks/on-prompt-submit-autorecall.py` — UserPromptSubmit hook — OPT-IN automatic memory recall (issue #16, item 2).
+`scripts/hooks/on-prompt-submit-autorecall.py` — UserPromptSubmit hook — automatic memory recall, ON by default (issues #16, #45).
   · main() -> int
 `scripts/hooks/on-prompt-submit-user-mem.py` — UserPromptSubmit hook — the PRIVATE user-memory commands (TRDD-4334aad0).
   · main() -> int
@@ -621,6 +629,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · IOCRecord — Per-threat IOC bundle — the four-quadrant breakdown distilled from
   · incident_response_advisory(stage) -> str — Return the canonical advisory string for an IR stage.
   · parse_ioc_yaml(path) -> list[IOCRecord] — Load a per-threat IOC bundle (or a list of bundles) from `path`.
+`scripts/lib/issues_watch.py` — GitHub issues-watcher core (TRDD-2KQQAEPP) — the PURE decision layer.
+  · parse_remote_slug(url) -> str | None — `owner/repo` from a git remote URL, or None when it is not a GitHub remote.
+  · parse_issues(payload) -> list[dict[str, Any]] — Parse `gh issue list --json ...` stdout into a list of issue dicts.
+  · comment_count(issue) -> int — How many comments the issue has.
+  · baseline(issues) -> dict[str, str] — The seen-map for a set of open issues.
+  · diff_issues(seen, current) -> list[tuple[dict[str, Any], str]] — The issues to report, each paired with why: "new" or "updated".
+  · format_drift(issue, reason, sanitize) -> str — One capped, greppable drift line for a new/updated issue.
 `scripts/lib/janitor_integrity.py` — File-integrity primitives for the resilient daemon (TRDD-7100178d, Pillar 2).
   · sha256_bytes(data) -> str — Hex sha256 of ``data``.
   · atomic_write_bytes(path, data, *, mode) -> None — Write ``data`` to ``path`` atomically: a uniquely-named tmp file in the SAME
@@ -664,12 +679,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · ensure_janitor_allowed() -> list[str] — Additively allow every janitor-required token on the lean-ctx allowlist.
 `scripts/lib/memory_content_precheck.py` — Cheap, zero-LLM filesystem prechecks for the memory-maintenance SCHEDULER
   · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
-  · consolidate_has_work(root) -> bool — True iff some pair of candidate pages in `root` COULD be a legal merge —
+  · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
+  · consolidate_has_work(root, *, last_fingerprint, stamp_age_s, recheck_after_s) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
   · repair_has_work(root) -> bool — True iff some candidate page in `root` is STRUCTURALLY malformed per the
   · atomize_has_work(root) -> bool — True iff some CURATED wiki page in `root` is still FREE-PROSE — no
   · conflict_has_work(root) -> bool — True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
   · harvest_has_work(scope, root) -> bool — True iff some RAW buffer note in `root` is not yet (or no longer) mirrored
-  · content_has_work(intervention, root, *, split_max_bytes, scope) -> bool — True iff `intervention` has actual work on the `root` corpus.
+  · content_has_work(intervention, root, *, split_max_bytes, scope, last_fingerprint, stamp_age_s) -> bool — True iff `intervention` has actual work on the `root` corpus.
 `scripts/lib/memory_edit_verify.py` — Wikimem edit verifier (TRDD-b92a9dd0) — the oracle that proves an editorial
   · parse_frontmatter(text) -> dict — Flatten a wikimem note's YAML frontmatter into one dict (top-level keys +
   · extract_lessons(text) -> list[str] — Return the normalized body of every `[^N]: …` footnote definition in `text`
@@ -731,6 +747,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · interval_s_for(intervention) -> float — Cadence (seconds) for an intervention, derived from its governing per-day
   · read_last_run(intervention, scope, root) -> int
   · mark_ran(intervention, scope, root, now) -> None — Stamp that `intervention` ran for (scope, root) at `now` (epoch seconds).
+  · read_dispatch_fingerprint(intervention, scope, root) -> str | None — The corpus fingerprint recorded when `intervention` was last DISPATCHED for
+  · mark_dispatch_fingerprint(intervention, scope, root, fingerprint) -> None — Record the corpus fingerprint at the moment `intervention` is dispatched.
   · is_due(intervention, scope, root, now) -> bool — True iff `intervention` is due for (scope, root): enabled AND a cadence
   · harvest_watermark_path(scope, root) -> Path
   · harvest_watermark_read(scope, root) -> dict — Return the ``{note_name: content_sha256}`` map of buffer notes already mirrored
@@ -809,6 +827,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · remove_orphaned_rules() -> list[str] — Partial-uninstall self-heal: remove janitor-installed rules from every KNOWN rules
   · janitor_uninstalled() -> bool — True iff the janitor appears FULLY uninstalled: referenced in NO settings.json
   · cleanup_user_orphans_if_uninstalled() -> list[str] — Daemon entry point (TRDD-H9IBY95W): when the janitor is FULLY uninstalled, remove
+  · references_dir() -> Path — Where the shipped rules' FULL reference docs live: `<DATA>/rules-reference/`.
+  · install_references(plugin_root) -> list[str] — Copy <plugin_root>/rules/references/*.md into `<DATA>/rules-reference/`.
   · install_rules(plugin_root) -> list[str] — Copy <plugin_root>/rules/*.md to every active scope's rules dir.
 `scripts/lib/security_helpers.py` — Shared security primitives — distilled from 10-agent study of 141
   · shannon_entropy(s) -> float — Shannon entropy in bits per character.

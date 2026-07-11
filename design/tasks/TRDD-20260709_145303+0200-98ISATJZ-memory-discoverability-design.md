@@ -1,9 +1,9 @@
 ---
 trdd-id: 98ISATJZ
 title: Memory-system discoverability — own the design (janitor#62)
-column: design
+column: dev
 created: 2026-07-09T14:53:03+0200
-updated: 2026-07-09T14:53:03+0200
+updated: 2026-07-11T14:35:00+0200
 current-owner: janitor-dev
 assignee: janitor-dev
 priority: 4
@@ -28,7 +28,7 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/62", "Emasoft/ai-m
 
 # Memory-system discoverability — own the design (janitor#62)
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-09
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-11
 
 **Origin:** janitor#62 (coordination, from ai-maestro-plugin core) asked the
 **janitor** — as the memory-system owner — to OWN the discoverability design:
@@ -39,13 +39,41 @@ to navigate it. #62 is the standalone split of complaint A; complaint B
 is filed as this coordination). This TRDD IS the design deliverable #62 asked
 for.
 
-**Current state:** DESIGN authored (this doc). No implementation yet. The
-concrete surfaces are named below with the exact hook/rule/skill each maps to.
-Implementation is deferred to per-surface NPT children once the design is
-ratified (and, for surface S3, gated on #52's engine).
+**2026-07-11 — PHASE 1 IMPLEMENTED (S1 + S2). Built inline, no NPT children:**
+each surface was one lib + one wiring point, so splitting them into child TRDDs
+would have cost more than the work.
 
-**NEXT ACTION:** ratify the design (which surfaces to build first), then spawn
-the S1/S2 implementation tasks (both janitor-owned, no external dependency).
+**S1 (autorecall) — was ALREADY DONE in code; the MANIFEST was lying.** The hook
+already composes all three scopes (LOCAL → PROJECT → USER, deduped,
+most-specific-first) and already defaults ON (issue #45). But `plugin.json` still
+declared `"default": false`, titled the option "(OPT-IN)", and described it as
+searching only THIS project's corpus — for seven releases. Claude Code does **not**
+export a userConfig default into the hook env (verified empirically: autorecall
+fires in live sessions with no user config set), so the code default governed and
+the feature really was on — but every user reading the manifest, and the config UI
+rendering it, was told the opposite, and the opt-OUT was undiscoverable.
+`post_mcp_sanitizer_enabled` had the identical drift (ON in code, `false` +
+"(OPT-IN)" in the manifest). Both manifests are now truthful.
+
+**S2 (SessionStart breadcrumb) — BUILT.** `scripts/lib/memory_breadcrumb.py` +
+one wiring point in `on-session-start.py`. ONE line at session start: per-scope
+note counts + the `memgrep overview <dir>` entry point (live on this project:
+*"Memory corpus: 39 local + 17 project + 41 user-global notes"*). Printed BEFORE
+the global-stop early-return on purpose — memory works while the heartbeat is
+disarmed, so a stopped machine must still get its corpus pointer. **Counts only,
+never note content**: a PROJECT-scope page is untrusted git input, and this line
+lands in the session PREFIX, so there is deliberately no interpolation slot a
+poisoned note could ride. Silent when every scope is empty. Opt out with
+`memory_breadcrumb=false`.
+
+**Ratchet (the real deliverable of the S1 finding):**
+`test_no_boolean_option_manifest_default_contradicts_its_code_default` scans every
+`CLAUDE_PLUGIN_OPTION_*` boolean read in `scripts/` and asserts its code default
+equals the manifest default — 25 options checked, so this drift class cannot recur.
+
+**NEXT ACTION:** none for Phase 1. **S3 stays BLOCKED on #52** (ai-maestro-plugin
+must ship the memgrep `publish-sync`/`link` engine first — do NOT build it here);
+it will be its own TRDD when that engine lands. Post the Phase-1 result to #62.
 
 **Coupling / do-NOT-duplicate:** S3 (published-note discovery) couples to #52 —
 it cannot ship until ai-maestro-plugin's memgrep `publish-sync`/`link` engine
