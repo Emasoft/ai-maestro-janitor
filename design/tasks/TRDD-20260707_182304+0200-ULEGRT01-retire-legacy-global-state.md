@@ -1,9 +1,11 @@
 ---
 trdd-id: ULEGRT01
 title: Retire the legacy janitor-global-state read-fallback (EHT of TRDD-2U8AH82F)
-column: planned
+column: blocked
+blocked-by: [publish-of-7ceab3f]
+pre-block-column: planned
 created: 2026-07-07T18:23:04+0200
-updated: 2026-07-07T18:23:04+0200
+updated: 2026-07-11T14:45:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 6
@@ -18,6 +20,45 @@ test-requirements: [unit]
 ---
 
 # TRDD-ULEGRT01 — Retire the legacy `~/.claude/janitor-global-state/` read-fallback
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-11
+
+**GATE RE-ARMED. Do NOT do the removal in the release that ships 7ceab3f.**
+
+Checked the gate on 2026-07-11 and it FAILED — for a reason worth keeping:
+
+- Release count: PASSES. `ba58ebb` shipped in v0.32.0; HEAD is past v0.39.0 (7 releases).
+- "No legacy file newer than the migration marker": **FAILED.** The legacy dir had been
+  written **that same day at 03:34**. The writer was `safe_storage._keychain_latch_path()`,
+  which **hardcoded** `~/.claude/janitor-global-state` — TRDD-2U8AH82F migrated global
+  state to `<DATA>/global-state/` but MISSED this latch. It was self-consistent (same wrong
+  path read and written), so nothing user-visible broke — which is precisely why it went
+  unnoticed and would have kept the legacy dir alive, and this gate shut, forever.
+
+**Fixed in 7ceab3f** (the last live legacy writer is gone): the latch now resolves through
+`global_state.global_state_dir()`, keeps the legacy path as a READ-ONLY fallback (an old
+build's latch must still protect the user), and `clear_keychain_denied()` removes BOTH.
+
+**Why the removal must wait one more release:** 7ceab3f is committed but NOT yet published.
+Until it is live, a session/daemon on the older cached code can still WRITE a legacy latch.
+Removing the read-fallback in the same release would make the new code blind to a latch the
+old code just wrote — re-opening the prompt-flood this whole subsystem exists to prevent.
+
+**NEXT ACTION (re-check the gate AFTER 7ceab3f is published):**
+1. Re-run the gate: `<DATA>/global-state/migrated-from-legacy.ts` exists AND no file under
+   `~/.claude/janitor-global-state/` has an mtime newer than it. (Snapshot at the time of
+   writing: 19 of 180 legacy files were newer, all Jul-9 daemon writes from before the
+   daemon rolled forward, plus the Jul-11 latch that 7ceab3f fixes.)
+2. Verify no stop-class flag lives in the legacy dir before dropping the dual-read —
+   `kill-switch.flag`, `global-pause.flag`, `maintenance-mode.flag`. If one were there and
+   the read-fallback went away, the janitor would silently RE-ARM machine-wide. (Checked
+   2026-07-11: none present; only `reload-needed.flag`, which is generation-stamped and
+   harmless, and the keychain latch.)
+3. Then do the scope below.
+
+**Verification lesson:** the gate is not paperwork. It caught a real, silent bug that had
+been live for 7 releases. Do not wave it through on the release count alone — actually
+stat the legacy dir and find out WHO is still writing to it.
 
 **EHT of TRDD-2U8AH82F** (staged migration to `${CLAUDE_PLUGIN_DATA}/global-state/`,
 shipped in ba58ebb). The migration deliberately kept two version-skew crutches that
