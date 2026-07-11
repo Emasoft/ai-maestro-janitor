@@ -13,9 +13,109 @@ else operates on already-read text + parsed structures.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:  # hooks put scripts/ on sys.path → package import
+    from lib import memory_scopes
+except ImportError:  # detectors/tests put scripts/lib/ on sys.path → flat import
+    import memory_scopes  # type: ignore[no-redef]
+
+# ── The two design SCOPES (the SSOT every TRDD consumer must route through) ──
+#
+# A TRDD's scope IS ITS PATH — exactly like a memory note. There is no `scope:`
+# frontmatter field to keep in sync, and therefore none to get wrong:
+#
+#   PROJECT  <repo>/design/                      git-tracked + PUSHED — shared with
+#                                                every contributor.
+#   LOCAL    ~/.claude/projects/<slug>/design/   machine-private, OUTSIDE any repo —
+#                                                never pushed, and (unlike a gitignored
+#                                                in-repo dir) not destroyed by
+#                                                `git clean -fdx`.
+#
+# LOCAL mirrors the repo's `design/` EXACTLY — the same four lifecycle folders
+# (`proposals/ tasks/ archived/ refused/`). Mirroring the whole dir, rather than
+# hanging a bare `tasks/` off the slug, is what avoids a `tasks/tasks/` once the
+# lifecycle folders land (3-pillars spec, decided by its maintainer 2026-07-11).
+#
+# WHY this is an SSOT and not a constant copied into each caller: before this, all
+# eight consumers (trdd-drift, trdd-reminder, trdd-state-reconciliation,
+# report-to-trdd-drift, fleet_status, and the session-start / pre-compact /
+# post-compact hooks) each hardcoded `project_root / "design" / "tasks"` on their
+# own. Adding a second root by copy-paste would silently miss one, and a TRDD
+# consumer that cannot see a scope makes that scope's tasks invisible — the same
+# "two input paths ≠ SSOT" shape that let the rotator's LOG_FILE diverge from its
+# isolated ROOT and append to the production log.
+#
+# The slug comes from `memory_scopes.project_slug` — the one definition the harness
+# agrees with. It is NOT re-derived here: a separators-only translation of the same
+# idea once resolved a nonexistent dir and silently emptied the whole LOCAL memory
+# subsystem, and a second copy of that logic would put LOCAL design one typo away
+# from the same fate.
+LOCAL = "local"
+PROJECT = "project"
+
+# The four lifecycle folders, in pipeline order. Both scopes carry all four.
+DESIGN_FOLDERS = ("proposals", "tasks", "archived", "refused")
+
+
+def project_design_root(project_dir: str | None = None) -> Path:
+    """`<repo>/design` — the PROJECT (shared, git-tracked) design root."""
+    root = project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    return Path(root) / "design"
+
+
+def local_design_root(project_dir: str | None = None) -> Path:
+    """`~/.claude/projects/<slug>/design` — the LOCAL (machine-private) design root."""
+    root = project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    return memory_scopes.resolve_local_dir_for(str(root)).parent / "design"
+
+
+def design_roots(project_dir: str | None = None) -> list[tuple[str, Path]]:
+    """Every design root that EXISTS, as `(scope, root)`, most-specific first.
+
+    LOCAL before PROJECT, mirroring `memory_scopes.resolve_scope_dirs()`. A root that
+    does not exist is simply absent — a project with no local design dir is the norm,
+    not an error.
+    """
+    out: list[tuple[str, Path]] = []
+    for scope, root in (
+        (LOCAL, local_design_root(project_dir)),
+        (PROJECT, project_design_root(project_dir)),
+    ):
+        if root.is_dir():
+            out.append((scope, root))
+    return out
+
+
+def trdd_files(
+    folder: str = "tasks", project_dir: str | None = None
+) -> list[tuple[str, Path]]:
+    """Every `TRDD-*.md` in `folder` across BOTH scopes, as `(scope, path)`.
+
+    This is what a consumer wants 99% of the time: "all the TRDDs on the board",
+    regardless of which scope owns them. Sorted within each scope so output is stable.
+    """
+    out: list[tuple[str, Path]] = []
+    for scope, root in design_roots(project_dir):
+        out.extend((scope, p) for p in sorted((root / folder).glob("TRDD-*.md")))
+    return out
+
+
+def ensure_local_design(project_dir: str | None = None) -> Path:
+    """Create the LOCAL design root + its four lifecycle folders. Returns the root.
+
+    Only the TRDD-AUTHORING path calls this. Detectors must NOT: a read-only observer
+    that materializes the thing it observes would make every project look like it has
+    local design, and would write to `~/.claude` on every heartbeat.
+    """
+    root = local_design_root(project_dir)
+    for name in DESIGN_FOLDERS:
+        (root / name).mkdir(parents=True, exist_ok=True)
+    return root
+
 
 # ── Filename id extraction ───────────────────────────────────────────────────
 #
