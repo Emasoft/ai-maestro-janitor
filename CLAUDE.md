@@ -273,7 +273,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=ae57f4d7d65a digest=e00d709ca001 generated=2026-07-11T14:31:31+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=7cebb5d1b895 digest=b1a853e4ca34 generated=2026-07-11T18:12:45+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -550,6 +550,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · Instance — One running claude instance + its diagnosed janitor health. ``terminal`` is the
   · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude process in
   · parse_iterm_sessions(text) -> dict[str, str] — ``{normalized_tty: iterm_session_id}`` from the osascript dump of
+  · iterm_automation_blocked(*, iterm_running, sessions) -> bool — True iff iTerm is UP but the osascript enumerated ZERO sessions — the signature of
+  · record_iterm_automation_state(blocked) -> None — Persist (or clear) the TCC-denial condition for the heartbeat to surface.
   · parse_tmux_panes(text) -> dict[str, str] — ``{normalized_tty: pane_id}`` from
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · transcript_age(root, now) -> int | None — Seconds since this project's NEWEST session transcript was written, or
@@ -661,6 +663,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · verify_or_restage(staged_scripts_dir) -> bool — Pre-launch gate the OS-keepalive entry calls BEFORE ``import daemon``.
 `scripts/lib/keepalive_stage.py` — Stage daemon.py's import closure into the persistent DATA dir (TRDD-71ABD7V7).
   · daemon_closure(scripts_dir) -> list[Path] — Every in-tree .py the L0 daemon needs (the verbatim DATA stage list), absolute
+  · UnsafeStageDestination — The stage destination is a plugin SOURCE checkout, not the DATA dir.
+  · is_plugin_source_checkout(path) -> bool — True iff `path` sits inside a plugin SOURCE repo — a git work tree whose ROOT also
   · stage_closure(scripts_dir, dest_scripts_dir) -> list[Path] — Verbatim-copy the closure into `dest_scripts_dir`, preserving the relative layout
 `scripts/lib/launchd_keepalive.py` — OS keepalive orchestrator for the global daemon (TRDD-71ABD7V7, GROUP B / L0).
   · data_dir() -> Path — The janitor's FIXED persistent DATA dir, resolved AT CALL TIME.
