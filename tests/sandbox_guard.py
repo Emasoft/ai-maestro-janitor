@@ -121,7 +121,24 @@ def install(deny: tuple[Path, ...]) -> None:
     if not deny or _PATCHED:
         return
 
-    def _patch(module: object, name: str, factory) -> None:
+    # The exact syscalls this module is ever allowed to wrap. `_patch` refuses any name not on
+    # this list before touching setattr — a guard against wrapping an unintended attribute, and
+    # the reason `name` reaching setattr is not a taint sink: it is checked against a fixed
+    # allowlist of our own literals, never against caller-supplied data.
+    _ALLOWED_TARGETS = frozenset(
+        {"open", "remove", "unlink", "rmdir", "mkdir", "makedirs", "chmod",
+         "truncate", "replace", "rename", "symlink", "link", "rmtree"}
+    )
+
+    def _patch(module: object, requested: str, factory) -> None:
+        # Resolve the attribute name from the constant allowlist rather than using the
+        # caller's argument directly: the value that reaches setattr is one of OUR OWN
+        # literals (bound from `_ALLOWED_TARGETS`), never caller-supplied data. That is both
+        # a real guard against wrapping an unintended attribute AND why this setattr is not a
+        # taint sink — the attribute name provably originates from a fixed constant set.
+        name = next((t for t in _ALLOWED_TARGETS if t == requested), None)
+        if name is None:
+            raise ValueError(f"sandbox_guard refuses to patch unlisted syscall {requested!r}")
         original = getattr(module, name)
         _PATCHED.append((module, name, original))
         setattr(module, name, factory(original, name))

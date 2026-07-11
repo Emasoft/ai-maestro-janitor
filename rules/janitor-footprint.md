@@ -1,15 +1,18 @@
-<!-- ai-maestro-janitor:installed-rule — installed by the ai-maestro-janitor plugin. Safe to
-     delete if the plugin is gone; deleting it never affects any MEMORY store. -->
+<!-- ai-maestro-janitor:installed-rule — copied into your rules dir by the ai-maestro-janitor
+     plugin. SAFE TO REMOVE if the plugin is uninstalled; removing it never affects any MEMORY
+     store, only this rule file. -->
 
 > [!IMPORTANT]
-> **Janitor rule — INERT unless the janitor is active.** Two cheap `$HOME` checks, in order.
-> **UNINSTALLED** — `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` ABSENT ⇒
-> this file is an orphan the plugin could not remove (Claude Code does not clean a plugin's
-> rules dirs on uninstall): treat as INERT and tell the user they may delete it. NEVER delete a
-> MEMORY store — only this rule file, and only with the user's ok. **DISARMED** — else if that
-> dir's `global-state/kill-switch.flag` (or legacy `~/.claude/janitor-global-state/kill-switch.flag`)
-> EXISTS, the janitor is intentionally stopped ⇒ INERT this session. **ACTIVE** — otherwise,
-> apply the rule below.
+> **ai-maestro-janitor rule — CONDITIONAL on the janitor being active.** Check the janitor's
+> state first (cheap `$HOME` existence checks), then act:
+> - **UNINSTALLED** — if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` is
+>   ABSENT, the plugin was uninstalled and this file is an ORPHAN it could not remove. Treat
+>   this rule as INERT, and tell the user it is an orphaned janitor rule they may delete.
+>   NEVER delete any MEMORY store — only this rule file, and only with the user's ok.
+> - **DISARMED** — else if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/kill-switch.flag`
+>   OR the legacy `~/.claude/janitor-global-state/kill-switch.flag` EXISTS, the janitor is
+>   intentionally stopped → treat this rule as INERT this session.
+> - **ACTIVE** — otherwise the janitor is running; apply the rule as written below.
 
 # ai-maestro-janitor — what it creates on this machine
 

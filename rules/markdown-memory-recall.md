@@ -151,7 +151,7 @@ edit.
 ## MEMORY.md is a DEPRECATED STUB
 
 The index is memgrep's and ONLY memgrep's (an agent-invisible, unlimited SQLite index).
-Do **NOT** append pointers to `MEMORY.md`, do **NOT** load it as an index, and **NEVER
+Do **NOT** add pointers to the stub, do **NOT** load it as an index, and **NEVER
 hand-trim it** — agents who trimmed the old ever-growing index lost pointers and corrupted
 the corpus, which is exactly why the index moved into memgrep.
 
