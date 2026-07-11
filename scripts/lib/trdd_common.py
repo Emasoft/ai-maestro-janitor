@@ -61,15 +61,50 @@ PROJECT = "project"
 DESIGN_FOLDERS = ("proposals", "tasks", "archived", "refused")
 
 
-def project_design_root(project_dir: str | None = None) -> Path:
-    """`<repo>/design` — the PROJECT (shared, git-tracked) design root."""
-    root = project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    return Path(root) / "design"
+def _project_root(project_dir: str | None) -> Path:
+    return Path(project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+
+def project_tasks_dir(project_dir: str | None = None) -> Path | None:
+    """The PROJECT tasks dir, honoring `CLAUDE_PLUGIN_OPTION_TRDD_PATH`.
+
+    Returns None when the configured path ESCAPES the project root — a misconfigured
+    option (absolute path, `../` escape, or a symlink out of the tree) must never make a
+    detector scan outside the project. The well-formed default `design/tasks` always
+    passes; only typo'd values fail. This containment check is hoisted verbatim from the
+    detectors, which each carried their own copy.
+    """
+    root = _project_root(project_dir)
+    subpath = os.environ.get("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "design/tasks").rstrip("/")
+    tasks = root / subpath
+    try:
+        tasks.resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return None
+    return tasks
+
+
+def project_design_root(project_dir: str | None = None) -> Path | None:
+    """`<repo>/design` — the PROJECT (shared, git-tracked) design root.
+
+    Derived as the PARENT of the resolved tasks dir, so a project that relocated its
+    TRDDs via `CLAUDE_PLUGIN_OPTION_TRDD_PATH` keeps its whole lifecycle together (the
+    option has only ever governed the tasks dir, and hardcoding `<root>/design` here
+    would silently ignore it). None when the option escapes the root.
+    """
+    tasks = project_tasks_dir(project_dir)
+    return None if tasks is None else tasks.parent
 
 
 def local_design_root(project_dir: str | None = None) -> Path:
-    """`~/.claude/projects/<slug>/design` — the LOCAL (machine-private) design root."""
-    root = project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    """`~/.claude/projects/<slug>/design` — the LOCAL (machine-private) design root.
+
+    NOT containment-checked against the project root: living OUTSIDE the repo is the
+    entire point of this scope, so the check that protects PROJECT would reject LOCAL
+    outright. It needs no such check — the path is derived from the project slug, never
+    from a user-supplied string, so there is nothing here for a bad option to escape with.
+    """
+    root = _project_root(project_dir)
     return memory_scopes.resolve_local_dir_for(str(root)).parent / "design"
 
 
@@ -78,16 +113,32 @@ def design_roots(project_dir: str | None = None) -> list[tuple[str, Path]]:
 
     LOCAL before PROJECT, mirroring `memory_scopes.resolve_scope_dirs()`. A root that
     does not exist is simply absent — a project with no local design dir is the norm,
-    not an error.
+    not an error, and must never be reported as drift.
     """
     out: list[tuple[str, Path]] = []
-    for scope, root in (
-        (LOCAL, local_design_root(project_dir)),
-        (PROJECT, project_design_root(project_dir)),
-    ):
-        if root.is_dir():
-            out.append((scope, root))
+    local = local_design_root(project_dir)
+    if local.is_dir():
+        out.append((LOCAL, local))
+    proj = project_design_root(project_dir)
+    if proj is not None and proj.is_dir():
+        out.append((PROJECT, proj))
     return out
+
+
+def scope_folder(scope: str, folder: str, project_dir: str | None = None) -> Path | None:
+    """The concrete dir for one (scope, lifecycle-folder) pair, or None if unresolvable.
+
+    PROJECT + `tasks` is the ONE case that cannot be derived by joining a folder name to
+    a root: `CLAUDE_PLUGIN_OPTION_TRDD_PATH` names the tasks dir OUTRIGHT, so with
+    `TRDD_PATH=docs/trdds` the design root is `docs/` and joining `tasks` onto it would
+    look in `docs/tasks` — a dir that does not exist. Take the override's own path.
+    """
+    if scope == PROJECT:
+        if folder == "tasks":
+            return project_tasks_dir(project_dir)
+        root = project_design_root(project_dir)
+        return None if root is None else root / folder
+    return local_design_root(project_dir) / folder
 
 
 def trdd_files(
@@ -99,8 +150,10 @@ def trdd_files(
     regardless of which scope owns them. Sorted within each scope so output is stable.
     """
     out: list[tuple[str, Path]] = []
-    for scope, root in design_roots(project_dir):
-        out.extend((scope, p) for p in sorted((root / folder).glob("TRDD-*.md")))
+    for scope, _root in design_roots(project_dir):
+        d = scope_folder(scope, folder, project_dir)
+        if d is not None and d.is_dir():
+            out.extend((scope, p) for p in sorted(d.glob("TRDD-*.md")))
     return out
 
 

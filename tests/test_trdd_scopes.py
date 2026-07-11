@@ -142,6 +142,60 @@ def test_resolvers_do_not_create_anything(tmp_path: Path) -> None:
     assert not local.exists(), "resolving a root must not create it"
 
 
+# ── the CLAUDE_PLUGIN_OPTION_TRDD_PATH override (pre-existing, must survive) ─
+
+
+def test_project_tasks_dir_honors_the_trdd_path_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project that relocated its TRDDs via CLAUDE_PLUGIN_OPTION_TRDD_PATH must keep
+    working — hardcoding <root>/design/tasks in the SSOT would have silently ignored the
+    option that every detector honors today."""
+    root = _project(tmp_path)
+    (root / "docs" / "trdds").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "docs/trdds")
+
+    assert trdd_common.project_tasks_dir(str(root)) == root / "docs" / "trdds"
+    # the whole lifecycle travels with it — the option has only ever governed tasks/
+    assert trdd_common.project_design_root(str(root)) == root / "docs"
+
+    # and discovery must follow the override, not re-derive `<design_root>/tasks` —
+    # that would look in docs/tasks/, which does not exist.
+    (root / "docs" / "trdds" / TRDD).write_text("column: dev\n", encoding="utf-8")
+    assert [p.name for _, p in trdd_common.trdd_files("tasks", str(root))] == [TRDD]
+
+
+def test_trdd_path_escaping_the_project_root_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A misconfigured option (absolute path / ../ escape) must NEVER make a consumer scan
+    outside the project. None = refuse, and the PROJECT root drops off the board."""
+    root = _project(tmp_path)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "../../etc")
+
+    assert trdd_common.project_tasks_dir(str(root)) is None
+    assert trdd_common.project_design_root(str(root)) is None
+    scopes = [scope for scope, _ in trdd_common.design_roots(str(root))]
+    assert trdd_common.PROJECT not in scopes
+
+
+def test_local_scope_survives_a_broken_project_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LOCAL is derived from the project SLUG, never from the user-supplied option — so a
+    typo'd TRDD_PATH cannot take the local board down with it. LOCAL is also deliberately
+    OUTSIDE the project root, so the containment check that guards PROJECT must not be
+    applied to it (doing so would reject the entire scope)."""
+    root = _project(tmp_path)
+    local = trdd_common.ensure_local_design(str(root))
+    (local / "tasks" / TRDD2).write_text("column: dev\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_TRDD_PATH", "/etc")
+
+    found = trdd_common.trdd_files("tasks", str(root))
+
+    assert found == [(trdd_common.LOCAL, local / "tasks" / TRDD2)]
+
+
 @pytest.mark.parametrize("dotted", ["proj.v2", "my_proj", "a-b.c_d"])
 def test_slug_survives_dotted_and_underscored_paths(tmp_path: Path, dotted: str) -> None:
     """REGRESSION: the harness dashes EVERY non-alphanumeric char, not just separators.
