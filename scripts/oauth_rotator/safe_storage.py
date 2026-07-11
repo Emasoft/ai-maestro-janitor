@@ -55,6 +55,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
+from pathlib import Path
 from typing import NamedTuple
 
 # How long to wait on a secret-store CLI before giving up (a hung keyring prompt must
@@ -108,23 +109,71 @@ class SecurityRun(NamedTuple):
     returncode: int | None
 
 
-def _keychain_latch_path() -> str:
-    """Absolute path of the machine-wide denied-latch flag, resolved AT CALL TIME.
+def _canonical_global_state_dir() -> str:
+    """The janitor's CANONICAL global-state dir, resolved AT CALL TIME.
 
-    Honors ``JANITOR_GLOBAL_STATE_DIR`` (the isolation lever every janitor global-state
-    writer + the test suite uses) → else the janitor's global-state dir under HOME. Kept a
-    plain env read (no ``global_state`` import) so safe_storage stays dependency-light and
-    the latch is fully test-isolatable."""
-    d = os.environ.get("JANITOR_GLOBAL_STATE_DIR", "").strip() or os.path.join(
-        os.path.expanduser("~"), ".claude", "janitor-global-state"
+    ``JANITOR_GLOBAL_STATE_DIR`` (the isolation lever every janitor global-state writer +
+    the test suite uses) wins. Otherwise delegate to ``global_state.global_state_dir()`` —
+    the SINGLE SOURCE OF TRUTH for the ladder (env → XDG → plugin DATA dir → legacy while
+    a pre-migration install awaits its daemon, per TRDD-2U8AH82F). The import is lazy so
+    safe_storage still works when imported standalone (no cycle: global_state does not
+    import safe_storage); if it cannot be imported we fall back to the DATA dir directly —
+    the CANONICAL location, never the legacy one.
+
+    BUG THIS FIXES (found 2026-07-11 while gating TRDD-ULEGRT01): this used to hardcode
+    `~/.claude/janitor-global-state` — the LEGACY dir. TRDD-2U8AH82F migrated global state
+    to `<DATA>/global-state/` but missed this latch, leaving it as the last live writer to
+    the legacy dir. It was self-consistent (same path read and written), so nothing broke —
+    but it kept the legacy dir alive, held ULEGRT01's retirement gate shut, and meant any
+    operator following the docs to clear the latch under the canonical dir would find
+    nothing there.
+    """
+    env = os.environ.get("JANITOR_GLOBAL_STATE_DIR", "").strip()
+    if env:
+        return env
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+        import global_state  # noqa: PLC0415  -- lazy on purpose (see docstring)
+
+        return str(global_state.global_state_dir())
+    except Exception:  # noqa: BLE001  -- resolution must never raise into a keychain op
+        return os.path.join(
+            os.path.expanduser("~"), ".claude", "plugins", "data",
+            "ai-maestro-janitor-ai-maestro-plugins", "global-state",
+        )
+
+
+def _keychain_latch_path() -> str:
+    """Absolute path of the machine-wide denied-latch flag (canonical dir)."""
+    return os.path.join(_canonical_global_state_dir(), _KEYCHAIN_LATCH_NAME)
+
+
+def _legacy_keychain_latch_path() -> str | None:
+    """The pre-TRDD-2U8AH82F latch path, or None when an explicit
+    ``JANITOR_GLOBAL_STATE_DIR`` is in force (tests / isolation — no legacy notion there).
+
+    READ-ONLY compatibility: a latch set by a build that wrote the legacy path must still
+    be honored, or the fix would silently un-latch a machine whose keychain really did deny
+    us and we would go straight back to prompt-flooding the user.
+    """
+    if os.environ.get("JANITOR_GLOBAL_STATE_DIR", "").strip():
+        return None
+    return os.path.join(
+        os.path.expanduser("~"), ".claude", "janitor-global-state", _KEYCHAIN_LATCH_NAME
     )
-    return os.path.join(d, _KEYCHAIN_LATCH_NAME)
 
 
 def keychain_denied_latched() -> bool:
     """True iff the denied-latch is set — a prior `security` op was denied/hung, so NO
-    further op should even spawn `security` (it would just prompt again)."""
-    return os.path.isfile(_keychain_latch_path())
+    further op should even spawn `security` (it would just prompt again).
+
+    Checks the canonical path AND (read-only) the legacy one, so a latch written by an
+    older build keeps protecting the user until it is cleared.
+    """
+    if os.path.isfile(_keychain_latch_path()):
+        return True
+    legacy = _legacy_keychain_latch_path()
+    return legacy is not None and os.path.isfile(legacy)
 
 
 def set_keychain_denied(reason: str) -> None:
@@ -155,13 +204,22 @@ def set_keychain_denied(reason: str) -> None:
 def clear_keychain_denied() -> bool:
     """Clear the denied-latch so `security` ops resume. Call this from the arm / ACL-re-grant
     flow (the user has re-granted access). Returns True iff a latch was present + removed.
-    Never raises."""
-    path = _keychain_latch_path()
-    try:
-        os.remove(path)
-        return True
-    except OSError:
-        return False
+    Never raises.
+
+    Clears BOTH the canonical and the legacy path. `keychain_denied_latched` honors either,
+    so clearing only one would leave the other still latching every `security` op — the
+    user would re-grant access, run the clear command, and stay silently locked out.
+    """
+    cleared = False
+    for path in (_keychain_latch_path(), _legacy_keychain_latch_path()):
+        if path is None:
+            continue
+        try:
+            os.remove(path)
+            cleared = True
+        except OSError:
+            continue
+    return cleared
 
 
 def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S) -> SecurityRun:

@@ -290,3 +290,72 @@ def test_keychain_scope_args_confines_to_the_env_keychain(monkeypatch: pytest.Mo
     monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
     assert ss.keychain_scope_args() == []
     assert ss.macos_retrieve_argv("svc", "acct")[-1] == "-w"  # base argv, no keychain scope
+
+
+# ---------------------------------------------------------------------------
+# The denied-latch lives in the CANONICAL global-state dir (bug found 2026-07-11).
+#
+# TRDD-2U8AH82F moved global state to <DATA>/global-state/, but this latch kept a
+# HARDCODED ~/.claude/janitor-global-state path. It was self-consistent (same path read
+# and written) so nothing broke — but it was the last live writer to the legacy dir, it
+# held TRDD-ULEGRT01's retirement gate shut, and an operator clearing the latch under the
+# canonical dir would have found nothing there.
+# ---------------------------------------------------------------------------
+def _no_env_home(monkeypatch: pytest.MonkeyPatch, home) -> None:
+    """Drop the suite's JANITOR_GLOBAL_STATE_DIR isolation and pin HOME at a tmp dir, so
+    the real ladder (env -> XDG -> DATA -> legacy) is exercised against a scratch HOME."""
+    monkeypatch.delenv("JANITOR_GLOBAL_STATE_DIR", raising=False)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(home))
+
+
+def test_latch_path_is_canonical_never_legacy(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """The latch is written under the plugin DATA dir, NOT ~/.claude/janitor-global-state."""
+    _no_env_home(monkeypatch, tmp_path)
+    path = ss._keychain_latch_path()
+    assert "janitor-global-state" not in path, "the latch must not go to the legacy dir"
+    assert "plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state" in path
+
+
+def test_env_override_still_wins(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """JANITOR_GLOBAL_STATE_DIR remains the isolation lever the whole suite relies on, and
+    it disables the legacy notion entirely (a scratch dir has no 'legacy')."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gsd"))
+    assert ss._keychain_latch_path() == str(tmp_path / "gsd" / "keychain-denied.latch")
+    assert ss._legacy_keychain_latch_path() is None
+
+
+def test_a_legacy_latch_is_still_honored(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """A latch written by an OLDER build (legacy path) must keep protecting the user.
+
+    Without this read-fallback the fix would silently UN-latch a machine whose keychain
+    really did deny us — and we would go straight back to prompt-flooding the user, which
+    is the exact failure the latch exists to prevent.
+    """
+    _no_env_home(monkeypatch, tmp_path)
+    legacy = tmp_path / ".claude" / "janitor-global-state"
+    legacy.mkdir(parents=True)
+    (legacy / "keychain-denied.latch").write_text("2026-07-11\told-build denial\n")
+
+    assert ss.keychain_denied_latched() is True
+
+
+def test_clear_removes_both_canonical_and_legacy(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Clearing only one path would leave the other still latching every `security` op —
+    the user re-grants access, runs the clear command, and stays silently locked out."""
+    _no_env_home(monkeypatch, tmp_path)
+    legacy = tmp_path / ".claude" / "janitor-global-state"
+    legacy.mkdir(parents=True)
+    (legacy / "keychain-denied.latch").write_text("old\n")
+    ss.set_keychain_denied("new-trip")          # writes the canonical one
+    assert ss.keychain_denied_latched() is True
+
+    assert ss.clear_keychain_denied() is True
+    assert ss.keychain_denied_latched() is False, "BOTH latches must be gone"
+    assert not (legacy / "keychain-denied.latch").exists()
+
+
+def test_clear_is_false_when_no_latch_anywhere(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """No latch in either location → nothing to clear."""
+    _no_env_home(monkeypatch, tmp_path)
+    assert ss.clear_keychain_denied() is False
