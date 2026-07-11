@@ -1,9 +1,10 @@
 ---
 trdd-id: YXY992BN
 title: Token-waste origin attribution — classify every cache-miss write from the AgentLens raw API bodies
-column: planned
+column: superseded
+superseded-by: [agentlenspro-investigate-burn]
 created: 2026-07-07T15:26:48+0200
-updated: 2026-07-07T15:26:48+0200
+updated: 2026-07-11T13:55:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 2
@@ -20,7 +21,30 @@ labels: [token-meter, observability, telemetry]
 
 # TRDD-YXY992BN — Token-waste ORIGIN attribution (USER directive 2026-07-07)
 
-## The task
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-11
+
+**SUPERSEDED — do NOT build this.** The tool the USER told us to prefer already does it,
+better, today.
+
+This TRDD proposed a home-grown engine to parse `~/.agentlens/otel-bodies/` and classify
+the CAUSE of every `cache_creation` spike. **`agentlenspro investigate_burn` already
+returns exactly that** — verified live 2026-07-11: it named PREMIUM_MODEL_FANOUT (256
+sonnet-5 subagent calls, 34% of the window, ~$21), a FORK_STORM (fat parent forked into a
+cold cache), and FAT_SESSION_REWRITES (2%), with a per-workspace/model/kind attribution
+table. Building our own would duplicate it, would have to re-derive its heuristics, and
+would violate the standing steer (USER, 2026-07-11): *"examine the agentlens skill and
+learn how to use the cli diagnostic tool, much better than the current janitor estimations
+on token usage."*
+
+**The surviving, non-duplicative part** — CONSUME that output from the heartbeat instead of
+re-deriving it — is tracked as **TRDD-HL8H3XCV** (`token-usage-anomaly` ->
+`get_burn_status` / `investigate_burn`), under the adoption umbrella **TRDD-WUUR2DFX**.
+
+**Lesson:** before building an observability engine, check whether the observability tool
+already installed on the machine answers the question. Here it did, and the home-grown
+version would have been strictly worse.
+
+## The task (original — kept for the record; NOT to be implemented)
 
 USER: "i activated the full telemetry of claude code... we need to monitor the origin of
 each token waste." The machine now captures — verified live — every raw API request body
