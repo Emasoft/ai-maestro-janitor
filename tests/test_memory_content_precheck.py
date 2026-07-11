@@ -559,3 +559,88 @@ def test_content_has_work_conflict_delegates(tmp_path):
     assert mcp.content_has_work("conflict", tmp_path, split_max_bytes=_CAP) is False
     _proposal(tmp_path, ["- topic `t`: a vs b"])
     assert mcp.content_has_work("conflict", tmp_path, split_max_bytes=_CAP) is True
+
+
+# ---------------------------------------------------------------------------
+# CONSOLIDATE gate 2 — the UNCHANGED-CORPUS proof (TRDD-3XS3PDCF, 2026-07-11).
+#
+# The structural (tier,type) gate is necessary but NOT sufficient: both live scopes hold
+# many `component/reference` pages, so it passes, a ~260k-token agent spawns, and then
+# abstains on SUBJECT — which the structural gate never examined. Subject-sameness is a
+# semantic judgment we must not guess (the skill's own contract: same subject, "not merely
+# sharing keywords"). What we CAN prove is that nothing changed since the agent last looked.
+# ---------------------------------------------------------------------------
+
+
+def _mergeable_pair(root: Path) -> None:
+    """Two pages that PASS the structural gate (same tier+type) — so any suppression in
+    these tests comes from the fingerprint gate, never from gate 1."""
+    _curated(root, "a.md", tier="component", type_="reference")
+    _curated(root, "b.md", tier="component", type_="reference")
+
+
+def test_fingerprint_is_stable_and_stat_only(tmp_path: Path) -> None:
+    _mergeable_pair(tmp_path)
+    fp1 = mcp.corpus_fingerprint(tmp_path)
+    assert fp1 is not None
+    assert mcp.corpus_fingerprint(tmp_path) == fp1, "same corpus → same fingerprint"
+
+
+def test_fingerprint_moves_when_a_page_changes(tmp_path: Path) -> None:
+    _mergeable_pair(tmp_path)
+    fp1 = mcp.corpus_fingerprint(tmp_path)
+    _curated(tmp_path, "c.md", tier="component", type_="reference")   # a NEW page
+    assert mcp.corpus_fingerprint(tmp_path) != fp1
+
+
+def test_unchanged_corpus_is_suppressed(tmp_path: Path) -> None:
+    """The whole point: the agent already read exactly this content and reached a verdict.
+    Re-spawning it on byte-identical pages cannot produce a different answer."""
+    _mergeable_pair(tmp_path)
+    assert mcp.consolidate_has_work(tmp_path) is True, "no stamp → fail-open"
+    fp = mcp.corpus_fingerprint(tmp_path)
+    assert mcp.consolidate_has_work(tmp_path, last_fingerprint=fp, stamp_age_s=60.0) is False
+
+
+def test_a_changed_corpus_re_arms_immediately(tmp_path: Path) -> None:
+    """Any edit/add/delete must dispatch again on the very next cadence — a new page could
+    be the other half of a real merge."""
+    _mergeable_pair(tmp_path)
+    stale = mcp.corpus_fingerprint(tmp_path)
+    _curated(tmp_path, "c.md", tier="component", type_="reference")
+    assert mcp.consolidate_has_work(tmp_path, last_fingerprint=stale, stamp_age_s=60.0) is True
+
+
+def test_suppression_expires_so_nothing_is_hidden_forever(tmp_path: Path) -> None:
+    """Bounds the two cases an unchanged corpus could still hide work: an agent that
+    CRASHED mid-pass, and LLM non-determinism. After the recheck window we dispatch anyway."""
+    _mergeable_pair(tmp_path)
+    fp = mcp.corpus_fingerprint(tmp_path)
+    fresh = mcp.consolidate_has_work(tmp_path, last_fingerprint=fp, stamp_age_s=60.0)
+    expired = mcp.consolidate_has_work(
+        tmp_path, last_fingerprint=fp, stamp_age_s=mcp._DEFAULT_CONSOLIDATE_RECHECK_S + 1.0
+    )
+    assert fresh is False and expired is True
+
+
+def test_missing_stamp_fails_open(tmp_path: Path) -> None:
+    """No fingerprint or no stamp age → dispatch. We never suppress on missing evidence."""
+    _mergeable_pair(tmp_path)
+    assert mcp.consolidate_has_work(tmp_path, last_fingerprint=None, stamp_age_s=60.0) is True
+    assert mcp.consolidate_has_work(tmp_path, last_fingerprint="deadbeef", stamp_age_s=None) is True
+
+
+def test_structural_gate_still_suppresses_regardless_of_fingerprint(tmp_path: Path) -> None:
+    """Gate 1 is unchanged: a corpus with no legal-merge pair at all is still suppressed."""
+    _curated(tmp_path, "a.md", tier="component", type_="reference")
+    _curated(tmp_path, "b.md", tier="component", type_="project")   # different type
+    assert mcp.consolidate_has_work(tmp_path) is False
+
+
+def test_content_has_work_threads_the_stamp_through(tmp_path: Path) -> None:
+    _mergeable_pair(tmp_path)
+    fp = mcp.corpus_fingerprint(tmp_path)
+    assert mcp.content_has_work(
+        "consolidate", tmp_path, split_max_bytes=_CAP, last_fingerprint=fp, stamp_age_s=60.0
+    ) is False
+    assert mcp.content_has_work("consolidate", tmp_path, split_max_bytes=_CAP) is True

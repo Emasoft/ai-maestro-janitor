@@ -49,6 +49,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 from pathlib import Path
@@ -56,6 +57,13 @@ from pathlib import Path
 import memory_edit_verify  # sibling in scripts/lib/ — the SSOT for merge legality
 import memory_scopes  # sibling in scripts/lib/ (the caller puts lib on sys.path)
 import memory_settings  # sibling in scripts/lib/ — the harvest watermark SSOT
+
+# How long an "unchanged corpus" suppression stays valid before we re-dispatch anyway.
+# Bounds the two cases where a byte-identical corpus could still hide real work: an agent
+# that CRASHED before finishing its pass, and LLM non-determinism (a merge one run would
+# have spotted and another missed). 7 days: long enough to kill the daily drain, short
+# enough that no real merge waits more than a week on a corpus nobody is touching.
+_DEFAULT_CONSOLIDATE_RECHECK_S = 7 * 86400.0
 
 
 def _candidate_pages(root: Path) -> list[Path]:
@@ -76,11 +84,17 @@ def split_has_work(root: Path, *, max_bytes: int) -> bool:
     (the split cap). Mirrors the split skill's `find -size +<cap>c` size gate with
     the SAME cap source (memory_settings split_max_bytes).
 
-    This is the SIZE gate ONLY. The skill additionally refuses a tier:component or a
-    <2-section page (one element = one page / un-splittable leaf), so a rare
-    over-cap-but-unsplittable page still reaches the agent and abstains. The size
-    gate eliminates the COMMON no-op — no page over the cap at all — which is the
-    observed recurring drain; refining to 'over-cap AND splittable' is a follow-up.
+    The size gate is EXACTLY the right condition — the once-planned refinement to
+    "over-cap AND splittable" is OBSOLETE (re-derived 2026-07-11, TRDD-3XS3PDCF) and must
+    NOT be added: it would suppress real work. Since issues #57/#58, EVERY over-cap page
+    gives the agent something to do, because `is_legal_split(..., oversized=True)` refuses
+    only ONE case — `tier: component` — and that case is not an abstain either: the split
+    skill SURFACES an over-cap component as a MIS-TIER to re-tier ("component over the cap —
+    too big to be one element"). A seamless over-cap hub/aspect is likewise fail-safe
+    splittable (the splitter synthesizes seams so it converges instead of abstaining
+    forever). So "over-cap" already implies "the agent has work", and narrowing further
+    would silently drop mis-tier reports on the floor.
+
     The caller guarantees max_bytes > 0 (see content_has_work fail-open)."""
     for p in _candidate_pages(root):
         try:
@@ -95,20 +109,70 @@ def split_has_work(root: Path, *, max_bytes: int) -> bool:
     return False
 
 
-def consolidate_has_work(root: Path) -> bool:
-    """True iff some pair of candidate pages in `root` COULD be a legal merge —
-    the cheap, zero-LLM STRUCTURAL necessary condition of `is_legal_merge`
-    (TRDD-8UD3Q7K5, issue #64).
+def corpus_fingerprint(root: Path) -> str | None:
+    """A cheap, stat-only fingerprint of the candidate corpus under `root`.
 
-    `is_legal_merge` refuses a merge unless both pages share the SAME `metadata.tier`
-    AND that tier is in `_MERGEABLE_TIERS` (= {aspect, component} — a `hub` is an
-    overview, not a leaf) AND both share the SAME `metadata.type`. So a structural
+    sha256 over the sorted `(relpath, size, mtime_ns)` of every candidate page. No file is
+    READ — only stat'd — so this is ~free even on a large corpus.
+
+    Used by `consolidate_has_work` for the "nothing changed since we last looked" gate.
+    Returns None on ANY stat error, which callers MUST treat as fail-open (dispatch): an
+    unreadable corpus is not a provably-unchanged one.
+    """
+    h = hashlib.sha256()
+    try:
+        for p in sorted(_candidate_pages(root)):
+            st = p.stat()
+            h.update(f"{p.relative_to(root)}\0{st.st_size}\0{st.st_mtime_ns}\0".encode())
+    except (OSError, ValueError):
+        return None
+    return h.hexdigest()
+
+
+def consolidate_has_work(
+    root: Path,
+    *,
+    last_fingerprint: str | None = None,
+    stamp_age_s: float | None = None,
+    recheck_after_s: float = _DEFAULT_CONSOLIDATE_RECHECK_S,
+) -> bool:
+    """True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
+
+    TWO gates, both zero-LLM, both fail-open:
+
+    1. STRUCTURAL (TRDD-8UD3Q7K5, issue #64) — see below. Necessary, but NOT sufficient:
+       both live scopes hold many `tier: component, type: reference` pages, so the gate
+       passes, an agent spawns (~260k tokens), and then ABSTAINS on *subject*, which the
+       structural gate never examined.
+
+    2. UNCHANGED-CORPUS (TRDD-3XS3PDCF, 2026-07-11) — if the corpus fingerprint is
+       IDENTICAL to the one stamped at the last dispatch, the agent has already read
+       exactly this content and reached its verdict. Re-spawning it to re-read byte-identical
+       pages cannot produce a different answer, so it is PROVABLY idle → suppress.
+
+       This is the only sound way to gate consolidate. A "subject-overlap"/keyword proxy is
+       NOT sound: the skill's own contract says a merge needs the *same subject*, "not merely
+       sharing keywords" (its example: a `reference` "keychain location" and a `project`
+       "rotator 429" share words but are different subjects), and conversely two same-subject
+       pages may share no words at all — so a keyword gate would both over- and under-fire,
+       and its under-fire silently destroys a real merge. Subject-sameness is the agent's
+       human judgment; we do not guess it. We only observe that nothing has CHANGED.
+
+       Any corpus mutation — a new page, an edit, a deletion — moves the fingerprint and
+       re-arms the chore immediately. And the suppression EXPIRES after `recheck_after_s`
+       (default 7 days), which bounds the two cases where "unchanged corpus" could hide real
+       work: an agent that crashed before finishing, and LLM non-determinism (a merge one
+       run would have seen and another missed).
+
+    A None `last_fingerprint` (no stamp yet), an unreadable corpus, or a None `stamp_age_s`
+    all fail OPEN — dispatch.
+
+    Gate 1 detail: `is_legal_merge` refuses a merge unless both pages share the SAME
+    `metadata.tier` AND that tier is in `_MERGEABLE_TIERS` (= {aspect, component} — a `hub`
+    is an overview, not a leaf) AND both share the SAME `metadata.type`. So a structural
     merge pair exists iff >=2 candidate pages share the same (tier, type) key with a
-    mergeable tier. If NO such pair exists, `is_legal_merge` would categorically
-    refuse EVERY pair, the agent can only abstain, and the dispatch is provably idle
-    → suppress. If a pair DOES exist, return True (fail-open) and let the agent apply
-    the SEMANTIC gate (same subject? a 3rd same-subject page?) — we never suppress a
-    possibly-real merge.
+    mergeable tier. If NO such pair exists, `is_legal_merge` would categorically refuse
+    EVERY pair, the agent can only abstain, and the dispatch is provably idle → suppress.
 
     Cost: one rglob over the shared candidate SSOT + a tiny leading-frontmatter parse
     per page (no body read, no YAML engine, no LLM, no agent). Uses the SAME SSOTs the
@@ -117,6 +181,13 @@ def consolidate_has_work(root: Path) -> bool:
     `memory_edit_verify.parse_frontmatter` / `_MERGEABLE_TIERS` — so the precheck and
     the commit-time `is_legal_merge` can never drift (cf. TRDD-87935f21: one source of
     truth for merge legality)."""
+    # Gate 2 FIRST — it is stat-only, so it is strictly cheaper than gate 1's per-page
+    # frontmatter parse, and on a settled corpus it is the one that fires.
+    if last_fingerprint and stamp_age_s is not None and stamp_age_s < recheck_after_s:
+        current = corpus_fingerprint(root)
+        if current is not None and current == last_fingerprint:
+            return False  # byte-identical corpus already examined → provably idle
+
     by_key: Counter[tuple[object, object]] = Counter()
     for p in _candidate_pages(root):
         try:
@@ -336,23 +407,33 @@ def harvest_has_work(scope: str, root: Path) -> bool:
 
 
 def content_has_work(
-    intervention: str, root: Path, *, split_max_bytes: int, scope: str | None = None
+    intervention: str,
+    root: Path,
+    *,
+    split_max_bytes: int,
+    scope: str | None = None,
+    last_fingerprint: str | None = None,
+    stamp_age_s: float | None = None,
 ) -> bool:
     """True iff `intervention` has actual work on the `root` corpus.
 
     FAIL-OPEN: returns True for every chore WITHOUT a cheap, exact precheck, for
-    SPLIT when the cap is non-positive, and for HARVEST when the caller supplied no
+    SPLIT when the cap is non-positive, for HARVEST when the caller supplied no
     `scope` (the watermark ledger is keyed per (scope, root) — without the scope we
-    can't read it, so we never suppress). A chore is suppressed ONLY when its
-    idleness is cheaply PROVEN; otherwise the scheduler keeps its existing
-    cadence-only behavior."""
+    can't read it, so we never suppress), and for CONSOLIDATE when the caller supplied
+    no dispatch stamp. A chore is suppressed ONLY when its idleness is cheaply PROVEN;
+    otherwise the scheduler keeps its existing cadence-only behavior."""
     if intervention == "split":
         if split_max_bytes <= 0:
             return True  # cap unreadable/disabled → fail-open (do not suppress)
         return split_has_work(root, max_bytes=split_max_bytes)
     if intervention == "consolidate":
-        # STRUCTURAL-only gate (subject-sameness stays agent-discovered, fail-open).
-        return consolidate_has_work(root)
+        # STRUCTURAL gate (subject-sameness stays agent-discovered) + the UNCHANGED-CORPUS
+        # gate: a byte-identical corpus was already examined, so re-spawning cannot yield a
+        # different verdict. Absent stamp → fail-open (both args default to None).
+        return consolidate_has_work(
+            root, last_fingerprint=last_fingerprint, stamp_age_s=stamp_age_s
+        )
     if intervention == "repair":
         # STRUCTURAL page-shape gate (semantic residual documented on the function).
         return repair_has_work(root)
