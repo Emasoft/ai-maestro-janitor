@@ -1,8 +1,8 @@
 ---
 name: janitor-keepalive-test-isolation-fsevents
-description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / how to root-cause an fseventsd or mds RAM/CPU runaway"
+description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / MY COMMITTED WORK WAS SILENTLY REVERTED / the repo's scripts/ got overwritten with the released version / files reverted to an old release with the exec bit cleared / PermissionError running scripts/daemon.py in tests / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / how to stop a test writing outside its boundary / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / how to root-cause an fseventsd or mds RAM/CPU runaway"
 ocd: 2026-07-03
-lmd: 2026-07-09
+lmd: 2026-07-11
 metadata:
   node_type: memory
   type: project
@@ -65,6 +65,55 @@ literally appear in the production boot log.
    SECOND churn source (`.maint-staging/` empty ⇒ the memory txn is clean; append
    logs like `token-meter.jsonl` coalesce and are not the driver).
 
+## The RECURRENCE (TRDD-RYZCVVKA, 2026-07-11) — same gate, new victim: the SOURCE TREE
+
+The ZNN0UK5K fix held for the tests, but the same `verify_or_restage → _repair →
+stage_closure` gate had a second mouth. `daemon_keepalive_entry.py` calls
+`verify_or_restage(_HERE)` — **its own directory**. So executing the **repo's** copy of the
+entry makes the gate compare the REPO against the installed CACHE, judge the newer committed
+code "corrupt/incomplete", and "repair" it by **overwriting the working tree with the released
+version** — silently reverting committed work. Exec bits die too (`stage_closure` writes a
+fresh tmp at the 0644 umask, then `os.replace`s), and that lost `+x` is the ONLY reason it was
+noticed: 22 tests began failing with `PermissionError: .../scripts/daemon.py`.[^2]
+
+**How it was proven** (the artifacts were on disk the whole time): the LAST line of
+`global-state/daemon-keepalive.boot.log` names the restage source (`…/cache/…/0.39.0/scripts`),
+and the sibling `daemon-keepalive.restage-stamp` carries the epoch **and the mismatch list** —
+which was exactly the set of files the repo had changed since that release. Timestamp and file
+list both match the clobber to the second.
+
+**The fixes (three layers, because every OPT-IN layer here has been escaped at least once):**
+
+1. **Refuse the write** (`fef258c`): `keepalive_stage.stage_closure` raises
+   `UnsafeStageDestination` when the destination is inside a plugin SOURCE checkout (a git work
+   tree whose root carries `.claude-plugin/plugin.json`). The closure only ever belongs in the
+   DATA dir, so a repo destination is ALWAYS a bug. The predicate is deliberately narrow —
+   "inside any git repo" would refuse the LEGITIMATE production stage for anyone keeping `~` or
+   `~/.claude` in a dotfiles repo, silently killing the L0 keepalive.
+2. **A HARD WRITE SANDBOX in `tests/conftest.py`** (`05b1a38`, layer S1e): `pytest_configure`
+   wraps the write syscalls — `builtins.open`, **`io.open`**, `os.open`,
+   `replace`/`rename`/`symlink`/`link`, `remove`/`unlink`/`rmdir`/`mkdir`/`makedirs`/`chmod`/
+   `truncate`, and `shutil.rmtree` — and RAISES `SandboxViolation` on any write into the real
+   `~/.claude` tree or the repo source. **Not a fixture**: nothing to opt into, nothing to
+   forget.[^3]
+3. **Manifest guards must re-snapshot with the SAME function** that built the baseline. The S1c
+   source-tree guard compared a `*.py`/`*.sh`-scoped BEFORE against an unscoped AFTER, so 15k
+   vendored Rust artifacts read as "ADDED" and would have drowned every real signal.
+
+**Sandbox implementation traps** (both bit while writing it; both caught by the positive
+controls in `tests/test_write_sandbox.py`, which is the whole argument for proving a guard
+fires rather than trusting its docstring):
+- **`io.open` is a SEPARATE binding from `builtins.open`.** `pathlib.Path.open` (hence
+  `write_text`/`write_bytes`) calls `io.open`, so patching only builtins lets every pathlib
+  write straight through. Patch both.
+- **For `os.replace(src, dst)` the file DESTROYED is `dst`.** Guarding `src` polices the
+  harmless tmp file and waves the clobber through — it overwrote `scripts/daemon.py` a SECOND
+  time, mid-fix.
+- **Honor `dir_fd`.** `shutil.rmtree` walks with `os.rmdir("design", dir_fd=…)` — a BARE
+  relative name. Resolving it against the cwd makes a `TemporaryDirectory` cleanup look like an
+  attack on the real `design/` (it failed 68 innocent tests). Skip fd-relative calls and guard
+  `rmtree` at its ENTRY POINT instead, which is what actually bounds the recursive delete.
+
 ## See also
 
 - [[janitor-architecture]] — the L0–L3 immortality layers this component lives in.
@@ -89,3 +138,25 @@ literally appear in the production boot log.
   proof: janitor suite `pytest tests/` = 12028 passed AND `find
   ~/.claude/janitor-global-state -newermt "25 minutes ago"` empty during the test
   run (real state untouched).
+[^2]: [ocd:2026-07-11 lmd:2026-07-11] **A self-heal is a WEAPON pointed at whatever directory it
+  is handed.** `verify_or_restage(_HERE)` was written to keep the DATA stage honest; nobody asked
+  what it does when `_HERE` is a source checkout, and the `_repair` else-branch even carried a
+  comment blessing that case ("keeps the gate self-consistent if ever invoked from a non-DATA
+  dir"). It restores files to the CACHED release, so aiming it at a repo means "revert all
+  uncommitted-to-release work". Lesson: for any restore/self-heal/sync, enumerate the
+  destinations it can legally have and REFUSE the rest at the write — an authoritative source
+  overwriting a "corrupt" target is indistinguishable from vandalism when the target is actually
+  the newer thing.
+[^3]: [ocd:2026-07-11 lmd:2026-07-11] **Opt-in test isolation fails silently and forever.** THREE
+  layers here each claimed to stop tests touching real state (per-module `_isolate_janitor_state`
+  fixtures, the S1a session-default env redirect, the S1b/S1c manifest guards) — and the REAL
+  `daemon-keepalive.boot.log` still held 432 lines of which **296 name a pytest tmp dir** as the
+  restage source. Worse, S1b EXCLUDED `.log` and `.restage-stamp` as "daemon liveness churn" —
+  the exact two files this incident wrote, so the detector was blind to its own incident. Lessons:
+  (a) an exclusion added to silence noise must be interrogated for the failure class it makes
+  invisible; (b) only refusing the write at the SYSCALL, with no opt-out, actually holds; and
+  (c) I first "EXONERATED" the suite by instrumenting a run that happened AFTER the guard refusing
+  the write had landed — **an experiment run after the fix proves the fix, never the innocence of
+  the suspect.** Reconstruct an incident from artifacts written AT THE TIME (the boot log and
+  restage-stamp were sitting on disk the whole time; I asserted they were stale without opening
+  them).
