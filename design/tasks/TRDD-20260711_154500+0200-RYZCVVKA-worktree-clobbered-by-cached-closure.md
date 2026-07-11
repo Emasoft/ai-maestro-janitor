@@ -3,7 +3,7 @@ trdd-id: RYZCVVKA
 title: The repo working tree was overwritten with the CACHED plugin closure — writer unidentified
 column: todo
 created: 2026-07-11T15:45:00+0200
-updated: 2026-07-11T15:45:00+0200
+updated: 2026-07-11T16:30:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -56,13 +56,59 @@ the keepalive test files alone also left it intact. The conftest's session-defau
 isolation and its S1b write-guard both work. So something OUTSIDE the suite did this, once,
 at 14:35:40.
 
-**NEXT ACTION — find the writer.** In order of value:
+## 2026-07-11 — THE WRITE PATH IS FOUND AND CLOSED. The one-off INVOKER is not.
 
-1. **Add a repo-tree write guard to `conftest.py`** — the mirror of the existing S1b
+**The mechanism (exact, read from the code):**
+
+```
+daemon_keepalive_entry.py:39   _HERE = dirname(abspath(__file__))     # the entry's OWN dir
+daemon_keepalive_entry.py:55   keepalive_boot.verify_or_restage(_HERE)
+keepalive_boot.py:204            else: keepalive_stage.stage_closure(cache, staged)
+                                 # "keeps the gate self-consistent if ever invoked from a non-DATA dir"
+```
+
+`verify_or_restage` compares the closure in the dir it is GIVEN against the trusted cache
+and, on any mismatch, copies the cache OVER that dir. The entry hands it its own directory.
+So **running the REPO's copy of the entry overwrites the repo with the installed plugin's
+files** — and `_repair`'s `else` branch was written to do exactly that on purpose, for a
+"non-DATA dir" that was never supposed to be a source checkout.
+
+Every symptom follows: whole-closure overwrite; byte-identical to the cached v0.39.0; and
+the lost exec bits (`stage_closure` writes a fresh tmp file at the 0644 umask, then
+`os.replace`s it over the original — only the entry itself gets a chmod 755).
+
+**CLOSED (`fef258c`):** `stage_closure` now REFUSES a destination inside a plugin source
+checkout (git work tree + `.claude-plugin/plugin.json` at its root). `verify_or_restage`
+catches everything and fails open, so the refusal degrades to a loud log instead of a
+silent clobber. The predicate is narrow on purpose — "inside any git repo" would refuse the
+LEGITIMATE production stage for anyone who keeps `~` or `~/.claude` in a dotfiles repo, and
+that would silently kill the L0 keepalive (a test covers exactly that false positive).
+
+**The test suite is EXONERATED — on the merits, not by the guard.** The suite was run with
+the refusal instrumented to dump a stack on every hit: across all 12,479 tests the ONLY
+refusal was the guard's own fixture. Nothing in the suite stages into the repo. Independent
+corroboration: the REAL keepalive boot log's last entry is Jul 9, so the production
+keepalive never restaged on Jul 11 either.
+
+**Backstop (`56bf46d`):** conftest S1c now snapshots a sha manifest of `scripts/**` (*.py +
+*.sh, 401 files) and FAILS the suite if any of it changes.
+
+**STILL OPEN — who ran the repo's entry at 14:35:40?** Not the suite, not launchd (its plist
+points at the DATA copy — verified), not the daemon (it never calls `verify_or_restage`).
+Something executed `<repo>/scripts/daemon_keepalive_entry.py` once. Note the self-limiting
+shape that made it a single event: after the clobber the repo == cache, so the mismatch
+that triggers a restage was gone and it could not fire again.
+
+**It can no longer cause damage** — the write is refused and any recurrence inside the suite
+fails loudly. What remains is attribution, not risk.
+
+**NEXT ACTION — remaining leads:**
+
+1. ~~Add a repo-tree write guard to `conftest.py`~~ — DONE (`56bf46d`, S1c). — the mirror of the existing S1b
    DATA-dir guard: snapshot a sha manifest of `scripts/**` at session start and FAIL the
    suite if it changes. Cheap, and it catches a recurrence instantly, with a stack. Do this
    regardless of what the investigation finds.
-2. **Make `stage_closure()` REFUSE a destination inside a git work tree.** The closure is
+2. ~~Make `stage_closure()` REFUSE a source-checkout destination~~ — DONE (`fef258c`). The closure is
    only ever staged into the DATA dir, so a repo destination is ALWAYS a bug. This is the
    real fix — it makes the whole class impossible instead of merely detectable — and the
    TRDD-ZNN0UK5K recurrence is the argument for building it.
