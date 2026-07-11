@@ -106,11 +106,19 @@ Three components separated by `-`:
   check below makes it exact.
 - `<slug>` — kebab-case summary (2-4 words).
 
-Generate the id (regenerate on the rare collision):
+**THE ID + TIMESTAMP RECIPE** (the loaded rule points here). Scans BOTH roots, because an id
+must be unique across the project's PROJECT and LOCAL design roots:
 
 ```bash
-gen() { python3 -c "import random,string; print(''.join(random.choices(string.ascii_uppercase+string.digits,k=8)))"; }
-ID8=$(gen); while ls design/tasks/TRDD-*-"$ID8"-*.md >/dev/null 2>&1; do ID8=$(gen); done
+gen()   { LC_ALL=C tr -dc 'A-Z0-9' < /dev/urandom | head -c 8; }
+# `find … | grep -q .`, NEVER `ls <glob>`: an unmatched glob is DROPPED by some shells, so
+# `ls` runs with NO arguments, lists the cwd and exits 0 — which the loop below reads as
+# "collision" and regenerates forever. That is an infinite loop, not a nit (it hung a real
+# command for 20 minutes on 2026-07-11 before this was fixed).
+taken() { find "$1" "$2" -name "TRDD-*-$3-*.md" 2>/dev/null | grep -q .; }
+SLUG=$(pwd | tr -c '[:alnum:]' '-'); LOCAL_DESIGN="$HOME/.claude/projects/$SLUG/design"
+ID8=$(gen); while taken design "$LOCAL_DESIGN" "$ID8"; do ID8=$(gen); done
+TS=$(date +%Y%m%d_%H%M%S%z); ISO=$(date +%Y-%m-%dT%H:%M:%S%z)
 ```
 
 Example filename:
@@ -409,8 +417,14 @@ land directly on the spec file.
    # Windows filenames are case-insensitive — a lowercase letter could fold onto an
    # existing id and overwrite its file. The while-loop is the create-time collision
    # check: re-roll until no TRDD already owns this id (36⁸ ≈ 2.8e12, so ~never).
-   gen() { python3 -c "import random,string; print(''.join(random.choices(string.ascii_uppercase+string.digits,k=8)))"; }
-   TID=$(gen); while ls design/tasks/TRDD-*-"$TID"-*.md >/dev/null 2>&1; do TID=$(gen); done
+   # It scans BOTH design roots — an id must be unique across PROJECT and LOCAL.
+   gen()   { LC_ALL=C tr -dc 'A-Z0-9' < /dev/urandom | head -c 8; }
+   # `find … | grep -q .`, NEVER `ls <glob>`: an unmatched glob is DROPPED by some shells,
+   # so `ls` runs with NO arguments, lists the cwd and exits 0 — which this loop reads as
+   # "collision" and regenerates forever. An infinite loop, not a nit.
+   taken() { find "$1" "$2" -name "TRDD-*-$3-*.md" 2>/dev/null | grep -q .; }
+   SLUG=$(pwd | tr -c '[:alnum:]' '-'); LOCAL_DESIGN="$HOME/.claude/projects/$SLUG/design"
+   TID=$(gen); while taken design "$LOCAL_DESIGN" "$TID"; do TID=$(gen); done
    SHORT=$TID   # the 8-char id IS the canonical id; SHORT kept as an alias for the steps below
    ```
 

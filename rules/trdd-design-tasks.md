@@ -1,110 +1,74 @@
-<!-- ai-maestro-janitor:installed-rule — copied into your rules dir by the ai-maestro-janitor
-     plugin. SAFE TO REMOVE if the plugin is uninstalled; removing it never affects any MEMORY
-     store, only this rule file. -->
+<!-- ai-maestro-janitor:installed-rule — installed by the ai-maestro-janitor plugin. Safe to
+     delete if the plugin is gone; deleting it never affects any MEMORY store. -->
 
 > [!IMPORTANT]
-> **ai-maestro-janitor rule — CONDITIONAL on the janitor being active.** Check the janitor's
-> state first (cheap `$HOME` existence checks), then act:
-> - **UNINSTALLED** — if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` is
->   ABSENT, the plugin was uninstalled and this file is an ORPHAN it could not remove (Claude
->   Code does not clean a plugin's `~/.claude/rules/` or a project's `.claude/rules/` on
->   uninstall). Treat this rule as INERT, and tell the user it is an orphaned janitor rule they
->   may delete. NEVER delete any MEMORY store — only this rule file, and only with the user's ok.
-> - **DISARMED** — else if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/kill-switch.flag`
->   OR the legacy `~/.claude/janitor-global-state/kill-switch.flag` EXISTS (set by
->   `/janitor-global-disarm`), the janitor is intentionally stopped → treat this rule as INERT
->   this session.
-> - **ACTIVE** — otherwise the janitor is running; apply the rule as written below.
+> **Janitor rule — INERT unless the janitor is active.** Two cheap `$HOME` checks, in order.
+> **UNINSTALLED** — `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` ABSENT ⇒
+> this file is an orphan the plugin could not remove (Claude Code does not clean a plugin's
+> rules dirs on uninstall): treat as INERT and tell the user they may delete it. NEVER delete a
+> MEMORY store — only this rule file, and only with the user's ok. **DISARMED** — else if that
+> dir's `global-state/kill-switch.flag` (or legacy `~/.claude/janitor-global-state/kill-switch.flag`)
+> EXISTS, the janitor is intentionally stopped ⇒ INERT this session. **ACTIVE** — otherwise,
+> apply the rule below.
 
 # TRDD: Task Requirement Design Documents (v2)
 
-> **Layering note.** This is the UNIVERSAL BASE (IND) of the 3-pillars
-> design system — it assumes nothing beyond a git repo and one Claude.
-> In a standalone project the project's own Claude performs every duty
-> named here and the USER is the sole approver. When the project is a
-> registered ai-maestro agent workdir, the server installs an overlay
-> (`aimaestro-trdd-approval.md` and siblings, in the workdir's
-> `.claude/rules/`) that EXPANDS this base with multi-agent transition
-> authority, approval tiers, and title-based routing — the overlay never
-> restates this base.
+> **Layering note.** This is the UNIVERSAL BASE (IND) of the 3-pillars design system — it
+> assumes nothing beyond a git repo and one Claude, who performs every duty named here with
+> the USER as sole approver. In a registered ai-maestro agent workdir the server installs an
+> overlay that EXPANDS this base with multi-agent transition authority, approval tiers and
+> title-based routing; the overlay never restates this base.
 
 **Rule:** every non-trivial feature spec, backlog item, or deferred-work design note is
 saved as a **TRDD** — one `.md` file in a `design/tasks/` folder, with a grep-first YAML
 frontmatter carrying the structured state and a body carrying the prose. A TRDD is
 **PROJECT-scoped** (in the repo, git-tracked, shared) or **LOCAL-scoped** (outside the repo,
-machine-private) — see the scope table in step 1.
+machine-private) — see step 1.
 
 > **FULL REFERENCE (read on demand — do NOT paste it here):**
 > `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/rules-reference/trdd-design-tasks-full.md`
-> It holds the complete 10-group frontmatter schema, the column-transition matrix, the
-> folder lifecycle (proposals/tasks/archived/refused), the approval tiers, the grep
-> cheat-sheet, the v1→v2 migration, the anti-patterns, and the rationale. Read it when you
-> need a field you don't know or a transition you haven't made before. Everything below is
-> normative on its own; the reference only expands it.
+> Holds the id/timestamp recipe, the full frontmatter schema, the column-transition matrix,
+> the folder lifecycle, the grep cheat-sheet, the v1→v2 migration, and the rationale. Read it
+> when you need a field or a transition you don't know. Everything below is normative on its
+> own; the reference only expands it.
 
 ## The normative core
 
-1. **Location — a TRDD is PROJECT- or LOCAL-scoped, and its SCOPE IS ITS PATH.** Same
-   lifecycle, different root:
+1. **Location — a TRDD is PROJECT- or LOCAL-scoped, and its SCOPE IS ITS PATH.** Both roots
+   hold the SAME four lifecycle folders (`proposals/ tasks/ archived/ refused/`), so every
+   rule and tool here works by swapping ONE path:
 
    | scope | root | git |
    |---|---|---|
-   | `project` (the default) | `<project-root>/design/` | **tracked + pushed** — every contributor sees it |
+   | `project` (default) | `<project-root>/design/` | **tracked + pushed** — every contributor sees it |
    | `local` | `~/.claude/projects/<slug>/design/` | **outside the repo — cannot be committed** |
 
-   `<slug>` is the project's absolute path with every non-alphanumeric character replaced by
-   `-` — the SAME slug the LOCAL *memory* scope uses, so the two local corpora sit side by
-   side under one local-scope root. The local root **mirrors the project root exactly** (the
-   same four lifecycle folders `proposals/ tasks/ archived/ refused/`), so every rule,
-   protocol and tool here works by swapping ONE path and nothing else:
+   `<slug>` = the project's absolute path with every non-alphanumeric char replaced by `-` —
+   the SAME slug LOCAL *memory* uses, so both local corpora sit under one local-scope root.
+   PROJECT `design/` MUST NOT be in `.gitignore`. LOCAL needs no gitignore entry at all —
+   nothing is written inside the repo, so a repo the tooling merely visits is not mutated.
 
-   ```
-   ~/.claude/projects/<slug>/
-   ├── memory/          <- LOCAL memory  (already exists)
-   └── design/          <- LOCAL design  (mirrors <repo>/design/ exactly)
-       ├── proposals/   <- a local task still awaiting a decision
-       ├── tasks/       <- OPEN local work (incl. blocked and failed — failed is retryable)
-       ├── archived/    <- completed · cancelled · superseded
-       └── refused/     <- proposals never approved
-   ```
-
-   PROJECT `design/` is git-tracked and MUST NOT be in `.gitignore`. LOCAL needs **no
-   gitignore entry at all** — nothing is written inside the repo, so a repo the tooling
-   merely visits is not mutated. Never put a TRDD in `docs_dev/`. Create with `mkdir -p`.
-
-   **Scope routing — decide BEFORE authoring** (mirrors the memory-scope rule). Ask: *"would
-   this task be TRUE and USEFUL for a contributor who clones this repo on a DIFFERENT
-   machine?"*
+   **Scope routing — decide BEFORE authoring.** Ask: *"would this task be TRUE and USEFUL for
+   a contributor who clones this repo on a DIFFERENT machine?"*
    - **No → LOCAL.** Each of these forces local: an absolute `$HOME` path, a hostname, a
-     username, a credential or token, "on THIS machine", a specific install/cache state,
-     anything about a plugin's own runtime data dir.
-   - **Yes → PROJECT.**
-   - **UNSURE → LOCAL.** Local is the safe scope: promoting local→project later is a
-     deliberate act, whereas a leaked machine-private TRDD is already pushed.
+     username, a credential/token, "on THIS machine", a specific install/cache state.
+   - **Yes → PROJECT.** **UNSURE → LOCAL** — the safe scope: promoting local→project later is
+     deliberate, whereas a leaked machine-private TRDD is already pushed.
+   - A task may SPLIT: machine-agnostic work as a PROJECT TRDD, per-machine state as a LOCAL
+     one, cross-linked.
 
-   A task may SPLIT — the machine-agnostic work as a PROJECT TRDD, the per-machine state as a
-   LOCAL one, cross-linked.
+   A `scope: project | local` field may appear (absent = `project`), but the **path is
+   authoritative** — it is what decides whether the file is git-tracked — so on any
+   disagreement the path wins and the field is a lint target.
 
-   A `scope: project | local` frontmatter field may appear (absent = `project`), but the
-   **path is authoritative**: it is what actually decides whether the file is git-tracked, so
-   on any disagreement the path wins and the field is a lint target, exactly as a memory
-   note's scope is its path.
-
-2. **Filename.** `TRDD-<YYYYMMDD_HHMMSS±HHMM>-<id8>-<slug>.md`.
-   `<id8>` is an **8-char UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id;
-   there is **no UUID**. It must be unique across **BOTH roots of a project**, so the
-   collision check scans both — a citation that could mean two TRDDs destroys the one
-   property the whole citation grammar rests on. Regenerate on the (vanishingly rare) hit:
-   ```bash
-   gen()   { LC_ALL=C tr -dc 'A-Z0-9' < /dev/urandom | head -c 8; }
-   # `find | grep -q .` — NOT `ls <glob>`. An unmatched glob is dropped by some shells, so
-   # `ls` then runs with NO arguments, lists the cwd, and exits 0 — which the loop below
-   # reads as "collision", regenerating forever. That is an infinite loop, not a nit.
-   taken() { find "$1" "$2" -name "TRDD-*-$3-*.md" 2>/dev/null | grep -q .; }
-   SLUG=$(pwd | tr -c '[:alnum:]' '-'); LOCAL_DESIGN="$HOME/.claude/projects/$SLUG/design"
-   ID8=$(gen); while taken design "$LOCAL_DESIGN" "$ID8"; do ID8=$(gen); done
-   TS=$(date +%Y%m%d_%H%M%S%z); ISO=$(date +%Y-%m-%dT%H:%M:%S%z)
-   ```
+2. **Filename.** `TRDD-<YYYYMMDD_HHMMSS±HHMM>-<id8>-<slug>.md`. `<id8>` is an **8-char
+   UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id; there is **no UUID**. It must
+   be unique across **BOTH roots**, so the collision check scans both: a citation that could
+   mean two TRDDs destroys the one property the whole citation grammar rests on. Test for a
+   taken id with `find … | grep -q .`, **never** `ls <glob>` — an unmatched glob is DROPPED by
+   some shells, so `ls` runs with no args, lists the cwd and exits 0, which a
+   regenerate-on-collision loop reads as "taken" forever (an infinite loop, not a nit). Copy
+   the id/timestamp recipe from the full reference.
 3. **Reference a TRDD as `TRDD-<id8>`** (or `#<id8>` casually). Lookups are
    case-insensitive; the id is always WRITTEN uppercase. Put it in the commit subject of
    every commit that implements it, and in any TaskCreate entry that tracks it.
@@ -161,31 +125,26 @@ machine-private) — see the scope table in step 1.
     when superseding, `superseded-by:` may change.)
 13. **One atomic task per TRDD.** If you catch yourself writing "and also do X", X is an
     NPT, an EHT, or its own TRDD.
-14. **One kanban board, `scope` as a badge — not a second board.** A local card renders like
-    any other; columns and transitions are identical. Tools take the root(s) to scan and
-    default to BOTH.
-15. **Approval of a LOCAL TRDD is `none` by default** — it is a chore on the user's own
-    machine and there is no MANAGER for that. The exception is the one that always applies:
-    if the task is **destructive or irreversible on the user's machine** (rotating a
-    credential, deleting a store, purging history), it needs **USER** approval and waits in
-    the local root's `proposals/`. That is why the local root keeps `proposals/` and
-    `refused/` instead of being a flat folder.
+14. **One kanban board, `scope` as a badge — not a second board.** Columns and transitions
+    are identical; tools scan BOTH roots by default.
+15. **A LOCAL TRDD needs no approval** — it is a chore on the user's own machine and there is
+    no MANAGER for that. Sole exception, the one that always applies: if it is **destructive
+    or irreversible on the user's machine** (rotating a credential, deleting a store, purging
+    history) it needs **USER** approval and waits in the local `proposals/`.
 
 ## Authoring, in short
 
 Route the scope (step 1) → generate the id + timestamps (step 2) → write the file with the
 minimal frontmatter → `column: backburner` (or `live_auditing` for an audit TRDD) → same ISO
 datetime in BOTH `created:` and `updated:` → write the prose → create a TaskCreate entry
-naming the id.
+naming the id. A **PROJECT** TRDD is then `git add`-ed **by name** and committed (`docs: add
+TRDD-<id8> — <summary>`); tell the user the id and the commit. A **LOCAL** TRDD is in no repo
+— nothing to commit; tell the user the id and the path.
 
-A **PROJECT** TRDD is then `git add`-ed **by name** and committed (`docs: add TRDD-<id8> —
-<summary>`); tell the user the id and the commit. A **LOCAL** TRDD is in no repo — there is
-nothing to commit, so just tell the user the id and the path.
-
-Resuming later: look the id up in BOTH roots (`find`, not an `ls` glob — see step 2) —
+Resuming later: look the id up in BOTH roots with `find` (never an `ls` glob — step 2):
 `find design ~/.claude/projects/<slug>/design -name 'TRDD-*-<id8>-*.md'` → read the **STATE
-block first**. If the STATE block and the frontmatter disagree, the STATE block wins
-(hand-edits beat stale fields) — then fix the frontmatter.
+block first**. If it disagrees with the frontmatter, the STATE block wins (hand-edits beat
+stale fields) — then fix the frontmatter.
 
 ## Does NOT apply to
 
