@@ -77,6 +77,51 @@ _SESSION_KEYCHAIN: str | None = None
 # re-snapshot with the SAME function or the diff is pure noise)
 _GUARDED: dict[str, tuple[Path, dict[str, str], "Callable[[Path], dict[str, str]]"]] = {}
 
+# S1f — the live-daemon witness (see the long note at the _GUARDED setup site).
+_DAEMON_WITNESS: dict[str, tuple[int, int] | None] = {}
+
+
+def daemon_ticked(
+    before: tuple[int, int] | None, after: tuple[int, int] | None
+) -> bool:
+    """PROOF that one live daemon ran across the whole session. PURE (tested directly).
+
+    True ONLY when the SAME pid was alive at both ends AND its heartbeat ADVANCED. Every
+    weaker signal is deliberately False, because each corresponds to a way a test leak could
+    otherwise hide behind a daemon that was not actually doing the writing:
+      - no daemon at either end        -> nothing to credit a write to
+      - a different pid                -> the daemon we witnessed is not the one that wrote
+      - a frozen heartbeat             -> a stale pid file / a wedged process, writing nothing
+    """
+    return (
+        before is not None
+        and after is not None
+        and before[0] == after[0]
+        and after[1] > before[1]
+    )
+
+
+def _daemon_witness(*roots: Path) -> tuple[int, int] | None:
+    """Return `(pid, heartbeat_epoch)` of a RUNNING janitor daemon, or None.
+
+    The daemon writes `daemon.pid` + `daemon.heartbeat.ts` into its global-state dir. The
+    dir moved to the plugin-DATA dir (TRDD-2U8AH82F) with the legacy path kept as a
+    read-fallback, so check every candidate root rather than assuming one.
+    """
+    for root in roots:
+        for base in (root, root / "global-state"):
+            try:
+                pid = int((base / "daemon.pid").read_text(encoding="utf-8").strip())
+                beat = int((base / "daemon.heartbeat.ts").read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                continue
+            try:
+                os.kill(pid, 0)  # signal 0 = liveness probe, sends nothing
+            except (OSError, ProcessLookupError):
+                continue
+            return (pid, beat)
+    return None
+
 # Files the live daemon legitimately churns while a suite runs — excluded from the S1b
 # guard so it detects TEST pollution, not daemon liveness. Everything else under the real
 # dirs (staged *.py closure, *.flag, quarantine/last-good json, memory pages) stays
@@ -509,6 +554,23 @@ def pytest_configure(config: pytest.Config) -> None:
         real_data = Path(_REAL_ENV["JANITOR_DATA_DIR"] or str(real_home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins"))
         _GUARDED["global-state"] = (real_gsd, _manifest(real_gsd), _manifest)
         _GUARDED["plugin-data"] = (real_data, _manifest(real_data), _manifest)
+        # Attribution, NOT an exclusion list (S1f). The janitor's global DAEMON is a real,
+        # long-lived process that legitimately writes its OWN state dir several times a
+        # minute (memory-guard ps-snapshots, heartbeat stamps, task last-run stamps). If it
+        # happens to be alive while the suite runs, its writes are indistinguishable — by
+        # filesystem inspection alone — from a test escaping isolation, so the guard failed
+        # the suite for work the daemon was *supposed* to do. That is not a cosmetic nit: a
+        # guard that cries wolf is a guard people learn to ignore, which is exactly how the
+        # 2026-07-11 clobber hid in plain sight.
+        #
+        # The tempting fix — excluding the offending filenames — is the SAME mistake that
+        # made the earlier guard blind to that very incident (it excluded `.log` and
+        # `.restage-stamp` as "daemon noise", and those were the two files the incident
+        # wrote). So attribute by PROVENANCE instead: record the daemon's pid and heartbeat
+        # now, and at session end require PROOF it was ticking (same pid alive at both ends,
+        # heartbeat advanced) before crediting any mutation of its own state dir to it.
+        # No live daemon ⇒ every mutation is still a hard failure, exactly as before.
+        _DAEMON_WITNESS["before"] = _daemon_witness(real_gsd, real_data)
         # S1c — the SOURCE TREE guard (TRDD-RYZCVVKA). On 2026-07-11 this repo's whole
         # daemon closure was silently overwritten with the INSTALLED plugin's v0.39.0
         # copies: committed work reverted in the working tree, exec bits cleared. It was
@@ -559,10 +621,27 @@ def _real_state_optout(request: pytest.FixtureRequest, monkeypatch: pytest.Monke
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """S1b: fail the suite if the run mutated guarded real state."""
+    """S1b: fail the suite if the run mutated guarded real state.
+
+    S1f: a mutation inside the daemon's OWN state dir is credited to the daemon ONLY when we
+    can prove it was ticking across the run (same pid alive at both ends AND an advanced
+    heartbeat). Those are reported as daemon activity and do not fail the suite. Everything
+    else — including any mutation of the source tree, and any global-state write with no live
+    daemon to account for it — still fails hard.
+    """
     if not _GUARDED:
         return
+
+    before_witness = _DAEMON_WITNESS.get("before")
+    after_witness = _daemon_witness(*(root for _l, (root, _b, _s) in _GUARDED.items()))
+    # PROOF, not presence — see daemon_ticked() above.
+    ticked = daemon_ticked(before_witness, after_witness)
+    # The daemon owns ONLY its own state; it never writes the source tree. Crediting a
+    # scripts/** mutation to it would re-open the exact hole S1c exists to close.
+    daemon_owned_labels = {"global-state", "plugin-data"}
+
     diffs: list[str] = []
+    daemon_diffs: list[str] = []
     for label, (root, before, snapshot) in _GUARDED.items():
         # Re-snapshot with the SAME function that built `before`. The source-tree guard uses
         # a *.py/*.sh-scoped manifest (the vendored Rust tree under scripts/memgrep/target is
@@ -573,7 +652,22 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             if before.get(rel) == after.get(rel):
                 continue
             kind = "ADDED" if rel not in before else ("REMOVED" if rel not in after else "CHANGED")
-            diffs.append(f"  [{label}] {kind}: {root / rel}")
+            line = f"  [{label}] {kind}: {root / rel}"
+            if ticked and label in daemon_owned_labels:
+                daemon_diffs.append(line)
+            else:
+                diffs.append(line)
+
+    if daemon_diffs and not diffs:
+        # Informational, never silent: the reader must be able to tell "the daemon was busy"
+        # apart from "the guard found nothing", or a real leak could later hide in this line.
+        pid = after_witness[0] if after_witness else "?"
+        print(
+            f"\n[write-guard] {len(daemon_diffs)} mutation(s) in the janitor's own state dir "
+            f"attributed to the LIVE daemon (pid {pid}, heartbeat advanced during the run) — "
+            f"not a test leak. Pause it (/janitor-global-pause) for a clean signal."
+        )
+
     if diffs:
         print("\n" + "=" * 78)
         print("REAL-STATE WRITE GUARD FAILED (TRDD-A8DRPZFM S1b): the test run mutated")
@@ -581,6 +675,9 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         print("trusting this suite. (A daemon self-update mid-run can rarely false-positive;")
         print("re-run to confirm.) Mutations:")
         print("\n".join(diffs))
+        if daemon_diffs:
+            print("\nAlso seen, attributed to the LIVE daemon (not counted as failures):")
+            print("\n".join(daemon_diffs))
         print("=" * 78)
         session.exitstatus = 3
 
