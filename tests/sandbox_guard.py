@@ -854,6 +854,10 @@ def install(deny: tuple[Path, ...]) -> None:
     # dangerous janitor capability (keychain via `security`, OS service via `launchctl`, typing
     # into a real terminal via `osascript`/`tmux`, killing a real pid) is a SUBPROCESS or a
     # SIGNAL and is therefore invisible to them. This closes that class at its own choke point.
+    #
+    # There is deliberately NO env-var kill switch here. Falsification (disabling this call and
+    # proving the 5 enforcement tests fail) is done by EDITING this line, not by shipping an
+    # off-switch: an env var that turns the guard off is a hole in the guard.
     _install_process_guard()
 
 
