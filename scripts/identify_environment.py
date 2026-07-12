@@ -379,6 +379,16 @@ def _gather_plugins(*, online: bool) -> dict:
     hooks = settings.get("hooks")
     if isinstance(hooks, dict):
         out["hook_events"] = sorted(hooks.keys())
+    # Standalone (non-plugin) skills = a dir under ~/.claude/skills/ carrying a SKILL.md.
+    # Plugin-provided skills ride their plugin's version, so their inventory + staleness
+    # is the plugin section above; this counts only the user's own standalone skills.
+    skills_dir = Path(home) / ".claude" / "skills"
+    try:
+        out["standalone_skills"] = sum(
+            1 for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").is_file()
+        ) if skills_dir.is_dir() else 0
+    except OSError:
+        out["standalone_skills"] = 0
     gs = Path(home) / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "global-state"
 
     def _ts(name: str):
@@ -818,6 +828,8 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
                   if plug else "?")
         if pl.get("hook_events"):
             pline += f" · {len(pl['hook_events'])} hook events"
+        if pl.get("standalone_skills"):
+            pline += f" · {pl['standalone_skills']} standalone skills"
         if jan.get("installed_version"):
             stale = f" ({jan['staleness']})" if jan.get("staleness") else ""
             pline += f" · janitor v{jan['installed_version']}{stale}"
