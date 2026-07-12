@@ -1,9 +1,9 @@
 ---
 trdd-id: 0QQX9H0G
 title: TTL-aware dynamically-tiered heartbeat cadence — stop firing 12x more often than the 1h cache TTL needs
-column: complete
+column: published
 created: 2026-07-11T11:25:47+0200
-updated: 2026-07-11T12:19:01+0200
+updated: 2026-07-12T03:02:07+0200
 current-owner: janitor-claude
 assignee: janitor-claude
 priority: 1
@@ -32,6 +32,8 @@ test-failures: 0
 last-test-result: pass
 last-test-at: 2026-07-11T12:17:00+0200
 implementation-commits: [431982f, 39feb86]
+published-version: 0.40.0
+published-at: 2026-07-11T21:30:00+0200
 external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/83", "github.com/Emasoft/ai-maestro-janitor/issues/78"]
 ---
 
@@ -39,7 +41,13 @@ external-refs: ["github.com/Emasoft/ai-maestro-janitor/issues/83", "github.com/E
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-11
 
-**Status: COMPLETE (implemented, tested, committed `431982f`) — awaiting publish.**
+**Status: PUBLISHED in v0.40.0** (commits `431982f` + `39feb86`, both in tag v0.40.0;
+31 tests in `test_heartbeat_cadence.py`; `_phase_cadence_tier` wired at dispatch.py:1263).
+Verified shipped 2026-07-12 — the board was mislabeled `complete` (awaiting publish) when
+the code had already gone out in v0.40.0. The plan file `staged-kindling-lynx.md` is a
+SUPERSEDED draft: the shipped tiers are more conservative than it proposed (FAST stayed
+`*/5` to keep recovery latency identical; MID `*/15`; SLOW `*/30`), and the `_fire_fleet_stop`
+esc_first follow-up it noted is also landed (daemon.py:1074 uses `injection_is_hard`).**
 User-approved plan (plan file `~/.claude/plans/staged-kindling-lynx.md`). Implements
 issue #83 (open); issue #78 (heartbeat-cost CLI) is already shipped (`36aeca4`) and is
 the measurement tool that confirms this works.
