@@ -1,9 +1,9 @@
 ---
 trdd-id: Y9KM5RCJ
 title: Release-triggered janitor self-update — the per-session detector signals the daemon to update NOW
-column: dev
+column: complete
 created: 2026-07-12T07:28:20+0200
-updated: 2026-07-12T07:28:20+0200
+updated: 2026-07-12T08:27:10+0200
 current-owner: janitor-claude
 assignee: null
 priority: 3
@@ -27,10 +27,11 @@ test-requirements: [unit, lint]
 review-requirements: []
 runtime-targets: [macos, linux]
 impacts: [config-schema]
-attempts: 0
+attempts: 1
 test-failures: 0
-last-test-result: not-run
-implementation-commits: []
+last-test-result: pass
+last-test-at: 2026-07-12T08:27:10+0200
+implementation-commits: [5554a51]
 external-refs: []
 ---
 
@@ -38,13 +39,38 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**USER decision (2026-07-12, AskUserQuestion):** make a new janitor release land in
-~5-10 min instead of on the daemon's 6 h `version-update` beat — via a
-**release-triggered** path (detect per-session → signal daemon → daemon updates NOW),
-NOT by merely tightening the poll cadence.
+**2026-07-12 — IMPLEMENTED + TESTED (commit `5554a51`). `column: complete`.** All 4
+pieces landed exactly as designed below:
+1. `global_state.{request,version_update_requested_present,clear}_version_update...` —
+   the boolean request-flag trio (`version-update-requested.flag`, atomic, fail-open, no
+   legacy dual-read).
+2. `version_update_lib.should_request_prompt_update(installed, published, auto,
+   trigger_enabled)` — the detector's pure decision (extracted for testing).
+3. `version-update.py` Branch A auto-arm — raises `gs.request_version_update()` (still
+   read-only w.r.t. the actual update); opt-out
+   `CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER` (default true).
+4. `daemon._consume_version_update_request(tasks)` — clear-before-run, then the
+   `version-update` Task `.run()`; called AFTER stop/pause/maintenance, BEFORE the
+   due-loop.
+`plugin.json` registers the opt-out. 14 new tests (`test_release_triggered_self_update.py`,
+real/no-mocks) + full suite 12585 passed, 1 skipped; ruff clean. CLAUDE.md prose +
+state-file inventory + repomap updated.
 
-**NEXT ACTION:** implement the 4 pieces below, test, then STOP before publish
-(`release-via: publish` is NON-EXEMPT — USER approves the release).
+**NEXT ACTION — STOP before publish.** `release-via: publish` is NON-EXEMPT: the code is
+committed on `main` (ahead of origin, NOT pushed). The USER approves the release; this
+ships on the next `publish.py` run.
+
+**Broader publish-origin auto-update is a SEPARATE task (Phase 2), NOT this TRDD.** This
+TRDD is the NARROW janitor SELF-update only. Detecting a publish ORIGINATING from the
+armed project and updating ANY installed plugin at its scope (marketplace-diff, git-push
+detection, source-matching, workflow-mediated propagation) is a distinct atomic task with
+its own TRDD — it REUSES this request-flag→daemon-consume substrate generalized to an
+arbitrary `<plugin>@<marketplace>:<scope>` update request.
+
+**Prior USER decision (2026-07-12, AskUserQuestion):** make a new janitor release land in
+~5-10 min instead of on the daemon's 6 h `version-update` beat — via a **release-triggered**
+path (detect per-session → signal daemon → daemon updates NOW), NOT by merely tightening
+the poll cadence. — DELIVERED.
 
 ## Problem (verified from code, 2026-07-12)
 
