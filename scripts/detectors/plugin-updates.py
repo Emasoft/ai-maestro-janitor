@@ -134,6 +134,74 @@ def _refresh_marketplace(mp: str, log_path: Path) -> None:
             state.log_line("plugin-updates", f"marketplace refresh failed: {mp} ({exc})")
 
 
+def _is_newer(latest: str, current: str) -> bool:
+    """True iff `latest` is a genuine upgrade over `current`. Semver-shaped versions
+    compare by tuple; otherwise any non-equal value counts (hash-style versions). Empty
+    or equal `latest` is never newer."""
+    if not latest or latest == current:
+        return False
+    if _SEMVER_PREFIX_RE.match(current) and _SEMVER_PREFIX_RE.match(latest):
+        return _semver_tuple(latest) > _semver_tuple(current)
+    return True
+
+
+def should_signal_user_update(
+    *, enabled: bool, scope: str, is_self: bool, is_fleet: bool,
+    user_scope_enabled: bool, installed: str, latest: str,
+) -> bool:
+    """True iff the detector should SIGNAL the daemon to update this USER-scope plugin
+    (TRDD-YMTUPQER): it is enabled, user-scope, the user-scope opt-in is on, it is NOT the
+    janitor itself and NOT an ai-maestro fleet plugin (fleet-skew lockstep — USER decision),
+    and `latest` is a genuine upgrade over `installed`. Pure — no I/O. The detector must NOT
+    run `claude plugin update --scope user` itself (single writer, issue #7 / PRRD S2.1); it
+    only enqueues, the daemon writes."""
+    if not (enabled and scope == "user" and user_scope_enabled):
+        return False
+    if is_self or is_fleet:
+        return False
+    return _is_newer(latest, installed)
+
+
+def _signal_user_scope_updates(plugin_list: list) -> int:
+    """Enqueue a daemon update request for every behind USER-scope enabled plugin that is
+    neither the janitor itself nor an ai-maestro fleet plugin (TRDD-YMTUPQER). Returns the
+    count signaled. Reads the daemon-refreshed marketplace.json — it does NOT refresh a
+    marketplace itself (that machine-global op is the daemon's job, #7). Fail-open per plugin
+    (a bad entry is skipped, never crashes the detector). No-op when the user-scope opt-in is
+    off (falls back to today's project/local-only behavior + the daemon's 1 h user sweep)."""
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_PLUGIN_AUTO_UPDATE_USER_SCOPE", True):
+        return 0
+    signaled = 0
+    for entry in plugin_list:
+        if not isinstance(entry, dict):
+            continue
+        plugin_id = str(entry.get("id") or "")
+        if "@" not in plugin_id or _plugin_excluded(plugin_id):
+            continue
+        plugin_name = plugin_id.split("@", 1)[0]
+        marketplace = plugin_id.split("@", 1)[1]
+        installed = str(entry.get("version") or "")
+        mp_json = _find_marketplace_json(marketplace)
+        latest = _latest_version_in_marketplace(plugin_name, mp_json) if mp_json else None
+        if not should_signal_user_update(
+            enabled=entry.get("enabled") is True,
+            scope=str(entry.get("scope") or ""),
+            is_self=plugin_name == SELF_PLUGIN_NAME,
+            is_fleet=state.is_ai_maestro_plugin_id(plugin_id),
+            user_scope_enabled=True,  # env gate already checked above
+            installed=installed,
+            latest=latest or "",
+        ):
+            continue
+        gs.request_plugin_update(plugin_id, "user", f"{installed}->{latest}")
+        state.log_line(
+            "plugin-updates",
+            f"signaled daemon: update {plugin_id} [scope=user] {installed} -> {latest}",
+        )
+        signaled += 1
+    return signaled
+
+
 def main() -> int:
     state.init_state()
 
@@ -168,6 +236,15 @@ def main() -> int:
     if not isinstance(plugin_list, list):
         state.log_line("plugin-updates", "claude plugin list --json returned non-array — skipping")
         return 0
+
+    # User-scope auto-update (TRDD-YMTUPQER): the janitor must NOT run `claude plugin update
+    # --scope user` itself (single writer, #7). Enqueue a daemon request for every behind
+    # user-scope plugin (excluding self + the ai-maestro fleet); the daemon consumes it within
+    # ~60 s. Runs BEFORE the project/local early-return below so a project with no project/local
+    # plugins still gets its user-scope plugins signaled. Gated by the master auto-update knob.
+    auto_enabled = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_PLUGIN_AUTO_UPDATE_ENABLED", True)
+    if auto_enabled:
+        _signal_user_scope_updates(plugin_list)
 
     # 2. Build the CANDIDATE set first (apply every cheap filter — scope
     #    rejection, projectPath match, self-exclusion, user excludes)
@@ -220,8 +297,6 @@ def main() -> int:
     updates_applied = 0
     update_errors = 0
 
-    auto_enabled = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_PLUGIN_AUTO_UPDATE_ENABLED", True)
-
     for plugin_id, current_version, scope, project_path in candidates:
         plugin_name = plugin_id.split("@", 1)[0]
         marketplace = plugin_id.split("@", 1)[1]
@@ -246,20 +321,7 @@ def main() -> int:
             state.log_line("plugin-updates", f"no version field in marketplace.json for {plugin_id} — skipping")
             continue
 
-        if latest == current_version:
-            continue
-
-        # Decide whether `latest` is genuinely newer. For semver-shaped
-        # versions we compare tuples; for hash-style versions accept any
-        # non-equal as a candidate.
-        update_candidate = False
-        if _SEMVER_PREFIX_RE.match(current_version) and _SEMVER_PREFIX_RE.match(latest):
-            if _semver_tuple(latest) > _semver_tuple(current_version):
-                update_candidate = True
-        else:
-            update_candidate = True
-
-        if not update_candidate:
+        if not _is_newer(latest, current_version):
             continue
 
         if not auto_enabled:

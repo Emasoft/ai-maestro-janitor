@@ -414,6 +414,78 @@ def clear_version_update_request() -> None:
     _version_update_request_path().unlink(missing_ok=True)
 
 
+# ---------- per-plugin update QUEUE (universal auto-update, TRDD-YMTUPQER) -----------
+#
+# Generalizes the version-update self flag above from "update the janitor" to "update ANY
+# plugin at ANY scope". The per-session `plugin-updates` detector raises a request for a
+# behind USER-scope plugin (it must NOT run `claude plugin update --scope user` itself — the
+# daemon is the single global writer, issue #7 / PRRD S2.1); the daemon CONSUMES each request
+# on its loop (≤ ~60 s) and runs the update. A JSON map keyed `<plugin_id>|<scope>` (same
+# shape as fleet-injections.json), consumed clear-before-run: a run that fails is re-signalled
+# by the detector's next ~5 min fire, never stranded. project/local scope keeps updating
+# per-session in the detector (per-repo, not a machine-global race), so only user-scope goes
+# through this queue. NO legacy dual-read — new-code-only writer (detector) + reader (daemon).
+
+def _plugin_update_requests_path() -> Path:
+    return global_state_dir() / "plugin-update-requests.json"
+
+
+def _read_plugin_update_requests_raw() -> dict:
+    """The `{"<plugin_id>|<scope>": {plugin_id, scope, reason}}` map, or {} on a
+    missing/corrupt file (fail-open)."""
+    try:
+        data = json.loads(_plugin_update_requests_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def request_plugin_update(plugin_id: str, scope: str, reason: str = "") -> None:
+    """Enqueue a request for the daemon to update ``plugin_id`` at ``scope`` (TRDD-YMTUPQER).
+    Keyed ``<plugin_id>|<scope>``; idempotent (re-enqueue overwrites the same key). Atomic;
+    best-effort/fail-open — a write hiccup just falls back to the daemon's 1 h user-scope
+    sweep, so this never crashes the read-only detector that calls it."""
+    key = f"{plugin_id}|{scope}"
+    data = _read_plugin_update_requests_raw()
+    data[key] = {"plugin_id": plugin_id, "scope": scope, "reason": reason}
+    try:
+        init_global_state()
+        path = _plugin_update_requests_path()
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def plugin_update_requests() -> list[dict]:
+    """The queued per-plugin update requests (each ``{plugin_id, scope, reason}``). Fail-open
+    ``[]`` on a missing/corrupt file. The daemon reads this each loop and consumes each entry
+    clear-before-run."""
+    return list(_read_plugin_update_requests_raw().values())
+
+
+def clear_plugin_update_request(plugin_id: str, scope: str) -> None:
+    """Remove one consumed request (``<plugin_id>|<scope>``). The daemon calls this BEFORE
+    running the update (clear-before-run: a run that fails is re-signalled by the detector's
+    next ~5 min fire). Idempotent, atomic, fail-open."""
+    key = f"{plugin_id}|{scope}"
+    data = _read_plugin_update_requests_raw()
+    if key not in data:
+        return
+    del data[key]
+    try:
+        path = _plugin_update_requests_path()
+        if not data:
+            path.unlink(missing_ok=True)
+            return
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 # ---------- fleet-stop flag + injection stamps (TRDD-ME8V2YJF) ------------
 #
 # The daemon-driven fleet disarm/pause (fleet_stop.py) reaches every OTHER running

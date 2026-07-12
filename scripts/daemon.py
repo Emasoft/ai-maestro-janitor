@@ -1291,6 +1291,62 @@ def _consume_version_update_request(tasks: list[Task]) -> bool:
     return True
 
 
+def _consume_plugin_update_requests() -> int:
+    """Universal per-plugin update consume (TRDD-YMTUPQER) — the single-writer half.
+
+    The per-session `plugin-updates` detector cannot run `claude plugin update --scope user`
+    itself (N sessions would stampede — issue #7 / PRRD S2.1), so it ENQUEUES a request; this
+    consumes each one here (the daemon is the sole user-scope writer). For each queued request:
+    clear-before-run (a run that fails is re-signalled by the detector's next ~5 min fire, so a
+    daemon crash mid-run never strands it), then — DEFENSE-IN-DEPTH: `is_ai_maestro_plugin_id`
+    excludes BOTH the janitor self (Y9KM5RCJ owns its own update) and every ai-maestro fleet
+    plugin (fleet-skew lockstep — the USER decision) — run `claude plugin marketplace update
+    <mkt>` + `claude plugin update <id> --scope user` under the shared marketplace lock. On a
+    real version change, stamp the reload generation so the target's session picks it up.
+    Returns the count actually updated. Called from the main loop AFTER the
+    stop/pause/maintenance branches — a stopped or idled daemon must never act."""
+    reqs = gs.plugin_update_requests()
+    if not reqs:
+        return 0
+    updated = 0
+    for req in reqs:
+        plugin_id = str(req.get("plugin_id") or "")
+        scope = str(req.get("scope") or "")
+        gs.clear_plugin_update_request(plugin_id, scope)  # clear-before-run
+        if "@" not in plugin_id or scope != "user":
+            continue
+        if state.is_ai_maestro_plugin_id(plugin_id):
+            state.log_line("daemon", f"plugin-update: skipping self/fleet plugin {plugin_id}")
+            continue
+        marketplace = plugin_id.split("@", 1)[1]
+        with gs.marketplace_lock() as got:
+            if not got:
+                # Contention (not failure) — re-enqueue so a later loop retries without
+                # waiting for the detector's ~5 min re-signal.
+                gs.request_plugin_update(plugin_id, scope, str(req.get("reason") or ""))
+                state.log_line("daemon", f"plugin-update deferred (marketplace lock held): {plugin_id}")
+                continue
+            try:
+                subprocess.run(  # noqa: S603 - explicit args, no shell
+                    ["claude", "plugin", "marketplace", "update", marketplace],
+                    capture_output=True, text=True, timeout=120, check=False,
+                )
+                up = subprocess.run(  # noqa: S603
+                    ["claude", "plugin", "update", plugin_id, "--scope", "user"],
+                    capture_output=True, text=True, timeout=180, check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                state.log_line("daemon", f"plugin-update {plugin_id} failed: {exc}")
+                continue
+        if up.returncode == 0 and "updated from" in (up.stdout or ""):
+            gs.set_reload_flag(f"plugin-update@{plugin_id}")
+            state.log_line("daemon", f"plugin-update: updated {plugin_id} [scope=user]; reload flag set")
+            updated += 1
+        else:
+            state.log_line("daemon", f"plugin-update {plugin_id}: no change (rc={up.returncode})")
+    return updated
+
+
 def _setup_os_keepalive() -> None:
     """Best-effort L0 OS-keepalive setup at daemon startup (singleton only — runs after the
     flock is held). Refresh the DATA closure from the FRESHEST cache so a future OS respawn
@@ -1558,6 +1614,9 @@ def main() -> int:
             # branches above (each of which `break`s or `continue`s, so reaching here means
             # the daemon is actively working) and BEFORE the due-loop.
             _consume_version_update_request(tasks)
+            # Universal per-plugin update (TRDD-YMTUPQER): consume USER-scope update requests
+            # the plugin-updates detector enqueued and run them as the single writer (#7).
+            _consume_plugin_update_requests()
 
             for task in tasks:
                 # A flag set mid-loop skips the REMAINING tasks NOW, not after the current

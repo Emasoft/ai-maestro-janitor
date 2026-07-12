@@ -390,14 +390,21 @@
     },
     "plugin_auto_update_enabled": {
       "title": "Plugin Auto-Update Enabled",
-      "description": "When true (default), the plugin-updates detector runs `claude plugin update <id> --scope <scope>` for every project-scoped plugin where the marketplace manifest reports a newer version. When false, the detector only emits an informational drift line and the user runs the update manually. The janitor's own plugin (ai-maestro-janitor) is always handled by version-update, never by this detector.",
+      "description": "When true (default), the plugin-updates detector runs `claude plugin update <id> --scope <scope>` for every project/local-scoped plugin where the marketplace manifest reports a newer version, AND (per plugin_auto_update_user_scope) enqueues a daemon request for every behind user-scope plugin. When false, the detector only emits an informational drift line and the user runs the update manually. The janitor's own plugin (ai-maestro-janitor) is always handled by version-update, never by this detector.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "plugin_auto_update_user_scope": {
+      "title": "Plugin Auto-Update: User Scope (via daemon)",
+      "description": "When true (default), the plugin-updates detector ALSO monitors user-scope (`~/.claude/settings.json`) enabled plugins each heartbeat and, for any behind its marketplace version, ENQUEUES a request the global daemon consumes and runs as `claude plugin update <id> --scope user` (TRDD-YMTUPQER). The detector NEVER runs the user-scope update itself — the daemon is the single global writer, so N Claude sessions across N projects do not stampede the same command (issue #7). The ai-maestro fleet plugins (maintainer/orchestrator/CPV/etc.) are EXCLUDED from this path in both the detector and the daemon — they update in lockstep on the daemon's coordinated beat to avoid fleet version skew (TRDD-db169d9e). The janitor itself fast-updates via the release-triggered self-update path (TRDD-Y9KM5RCJ). Set false to restore the previous project/local-only behavior (user-scope then only via the daemon's slower 1 h sweep). Requires plugin_auto_update_enabled.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "plugin_auto_update_scopes": {
       "title": "Plugin Auto-Update Scopes",
-      "description": "Comma-separated list of project-scoped plugin scopes the auto-updater will touch. Default: \"local,project\". The janitor distinguishes Claude Code's four scopes (managed, project, local, user \u2014 see https://code.claude.com/docs/en/settings.md): `project` = `.claude/settings.json` (committed to the repo, shared with the team), `local` = `.claude/settings.local.json` (gitignored, your personal overrides for THIS project on THIS machine). The janitor HARD-REFUSES to touch `user` (`~/.claude/settings.json`, your global preferences across ALL projects) or `managed` (admin-deployed) scopes regardless of this setting \u2014 a project-armed janitor has no mandate over global or admin-managed plugins. `local`/`project` plugins are also filtered to those whose `projectPath` matches the current project, so a janitor running in project A will not touch project B's installs. Set to just \"local\" to skip the team-shared `.claude/settings.json` updates and only act on your personal `.claude/settings.local.json`.",
+      "description": "Comma-separated list of project-scoped plugin scopes the auto-updater will touch. Default: \"local,project\". The janitor distinguishes Claude Code's four scopes (managed, project, local, user \u2014 see https://code.claude.com/docs/en/settings.md): `project` = `.claude/settings.json` (committed to the repo, shared with the team), `local` = `.claude/settings.local.json` (gitignored, your personal overrides for THIS project on THIS machine). This setting governs ONLY the scopes the detector updates DIRECTLY (per-session). The janitor never DIRECTLY runs a `user`-scope update from a session (single writer, issue #7) \u2014 user-scope is instead handled via the daemon-signal path (see plugin_auto_update_user_scope) \u2014 and never touches `managed` (admin-deployed) at all. `local`/`project` plugins are also filtered to those whose `projectPath` matches the current project, so a janitor running in project A will not touch project B's installs. Set to just \"local\" to skip the team-shared `.claude/settings.json` updates and only act on your personal `.claude/settings.local.json`.",
       "type": "string",
       "default": "local,project",
       "sensitive": false
