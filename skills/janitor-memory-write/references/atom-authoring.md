@@ -74,6 +74,15 @@ The widget retries 3× then fails.[^1][^2]
 > section (mandatory even when empty — the write checklist, REPAIR, and the wikimem
 > model all enforce it). The pools coexist with it; they never replace it. (L8)
 
+**Link every project concept the atom names (the Wikipedia discipline — see
+[wikimem-model.md](wikimem-model.md#link-every-concept-you-name--the-wikipedia-discipline)).**
+Before an atom is done, turn every project element in its prose — a component, a
+protocol/procedure, a config, a functionality, a topic — into a `[[wikilink]]`. If the
+target page does not exist yet, CREATE it (a stub in the SAME scope, both link ends
+wired); if the concept is this page's OWN subject, self-link it anyway (so the edge
+survives a future split); and when ≥2 atoms cite the same link, pool it ONCE as a shared
+`[^N]` under `## See also` instead of repeating the inline `[[link]]`.
+
 `keywords:` is the only REQUIRED prop — it is the atom's recall surface (the
 question words, NOT the answer's jargon); `ocd`/`lmd`/`type` are optional (an atom
 without them inherits the page's). Author an optional **`desc:`** too — a one-line

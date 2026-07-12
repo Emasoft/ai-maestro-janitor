@@ -11,6 +11,7 @@ repeating it.
 - [EXPAND and REDUCE — radiating suns vs receiving terminals](#expand-and-reduce--radiating-suns-vs-receiving-terminals)
 - [The three tiers (a page's role in the pyramid)](#the-three-tiers-a-pages-role-in-the-pyramid)
 - [The edge model — EVERY link is bidirectional (the link law)](#the-edge-model--every-link-is-bidirectional-the-link-law)
+- [Link every concept you name — the Wikipedia discipline](#link-every-concept-you-name--the-wikipedia-discipline)
 - [Page anatomy](#page-anatomy)
 - [Atoms — first-class body elements (block-properties)](#atoms--first-class-body-elements-block-properties)
 
@@ -151,6 +152,46 @@ edit (the janitor librarian backfills any you miss and flags one-sided edges).
 Links are `[[page-name]]` wikilinks (memgrep parses them); a link to a
 not-yet-written page is fine — it marks one to create, and the librarian
 surfaces it as a broken link until the page (and its back-link) exists.
+
+## Link every concept you name — the Wikipedia discipline
+
+The link law above says an edge, once made, lives on both ends. This section is the
+other half: **make the edges in the first place.** A wikimem atom is written like a
+Wikipedia article, not like a plain note — **every project element you NAME in an
+atom's prose becomes a `[[wikilink]]` to that element's page.** A component, a
+protocol or procedure, a config, a functionality, a named topic — if it is a part of
+THIS project and has (or deserves) its own page, it is a link, not bare text. Prose
+that merely mentions `the rotator` or `the publish pipeline` without linking them is
+just text; linking them is what makes it a wiki. Do this PROACTIVELY and
+exhaustively AS YOU AUTHOR — it is not a deferred cleanup pass.
+
+Three rules make the linking generative rather than lossy:
+
+1. **No target page yet? CREATE it — don't leave a dangling link.** A concept worth
+   naming in a memory is worth its own node. When you link `[[thing]]` and `thing`
+   has no page, create at least a stub `component` page for it in the SAME scope (a
+   one-line lead + its `## Governed by` / `## See also` edges + the standing
+   `## Notes and lessons learned`), and wire the reciprocal back-link per the link
+   law. This is HOW the wiki grows — each memory you write pulls the concepts it
+   touches into existence as nodes, the way a Wikipedia edit red-links then fills in
+   new articles. (Scope-local ONLY: never `[[wikilink]]` across scope roots —
+   cross-scope references stay in PROSE, per [Link hygiene](#link-hygiene-simulation-verified-constraints).)
+
+2. **Self-reference the page's own subject too.** If the concept an atom names IS this
+   very page's subject, add the `[[this-page]]` self-link anyway. Pages grow and
+   eventually SPLIT (a busy topic page sheds atoms into sub-pages); an atom that
+   already carries a link back to the page it was born on keeps that edge for FREE
+   when it is later moved — the split never has to re-derive where the atom belonged.
+   A self-link costs one token now and saves a re-link later.
+
+3. **A link ≥2 atoms share becomes ONE pooled `[^N]` See-also footnote — not a
+   repeated inline `[[link]]`.** The `[^N]` footnote pool (the same mechanism that
+   shares a note/lesson across atoms) is ALSO the link de-duplicator: when several
+   atoms on a page all reference `[[backoff-policy]]`, define it ONCE as a `[^N]` in
+   the `## See also` pool and have each atom cite `[^N]`. The path is written once,
+   every atom body stays lean and readable, and recall still returns each atom with
+   its resolved see-also. A link only ONE atom uses may stay inline; promote it to a
+   shared `[^N]` the moment a second atom needs it.
 
 ## Page anatomy
 

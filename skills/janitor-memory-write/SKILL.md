@@ -156,6 +156,21 @@ the page's SHAPE:
 The janitor librarian backfills any reciprocal you miss and flags one-sided
 edges, but it is a safety net — the author wires both ends now.
 
+**Link every concept the atom NAMES, not just the tier edges (the Wikipedia
+discipline).** The edges above are the page's structural skeleton; a real wiki ALSO
+links every project element mentioned in an atom's prose — a component, a
+protocol/procedure, a config, a functionality, a topic — as an inline `[[wikilink]]`,
+proactively as you write. Three follow-through rules (full detail in the model's
+[Link every concept you name](references/wikimem-model.md#link-every-concept-you-name--the-wikipedia-discipline)):
+
+- **No page for it yet? CREATE one** — a stub `component` in the SAME scope, both ends
+  wired. A dangling link is a TODO; a created stub is how the wiki GROWS.
+- **Self-link the page's own subject too** — so the edge survives a future split that
+  moves the atom into a sub-page (it already carries the back-reference).
+- **A link ≥2 atoms share → ONE pooled `[^N]` under `## See also`**, not the inline
+  `[[link]]` repeated in every atom (leaner bodies, deduped path — the same shared-
+  footnote mechanism as notes/lessons).
+
 ### 6. Index it (memgrep only — do NOT touch MEMORY.md)
 
 The wiki index is 100% memgrep's — the agent-invisible, unlimited SQLite
@@ -218,6 +233,7 @@ Copy this checklist and track your progress:
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
 - [ ] `## Notes and lessons learned` section present (even if empty)
 - [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
+- [ ] Every project concept NAMED in an atom's prose is a `[[wikilink]]` (missing page → CREATED as a stub; own-subject → self-linked; a link ≥2 atoms share → pooled once as a `[^N]` under `## See also`)
 - [ ] `memgrep reindex` run if present — the index is memgrep's; do NOT touch `MEMORY.md`
 
 ## Resources
@@ -230,6 +246,7 @@ Copy this checklist and track your progress:
   - EXPAND and REDUCE — radiating suns vs receiving terminals
   - The three tiers (a page's role in the pyramid)
   - The edge model — EVERY link is bidirectional (the link law)
+  - Link every concept you name — the Wikipedia discipline
   - Page anatomy
   - Atoms — first-class body elements (block-properties)
 - [references/atom-authoring.md](references/atom-authoring.md) — full page schema
