@@ -1,13 +1,15 @@
 ---
-description: Report the FULL runtime environment of this Claude Code session — hosting terminal/program (by process ancestry), OS + kernel + WSL, filesystem, container/VM/sandbox, CI (GitHub Actions & friends), editor/IDE + Claude Code surface (CLI vs desktop), interactive-vs-headless/background-agent + linked-git-worktree, network (proxy/VPN/Tailscale/gateway/NAT/DNS/firewall/interfaces + listening services), python venv/conda/uv, AWS/Azure/GCP footprint, user, PATH, installed compilers/runtimes/package-managers/dev-tools, and configured MCP servers. Read-only, secret-safe, no network. Trigger with /janitor-identify-environment or by asking where this session is running.
+description: Report the FULL runtime environment of this Claude Code session — terminal, OS + kernel + WSL, filesystem, container/VM/sandbox, CI, editor/IDE + Claude Code surface (CLI vs desktop) + subscription auth mode, interactive-vs-headless/background-agent + linked-git-worktree, network (proxy/VPN/Tailscale/gateway/NAT/DNS/firewall + listening services), python env, AWS/Azure/GCP, user, PATH, compilers/runtimes/package-managers/dev-tools (incl. tldr/distill), MCP servers, the git repo + GitHub slug/branches/hooks/rulesets, wikimem sizes, and the installed/enabled plugins+hooks+staleness. Secret-safe, fail-open; writes the full detail to disk as JSON and returns a compact digest. Trigger with /janitor-identify-environment or by asking where this session is running.
 ---
 
 # /janitor-identify-environment
 
-Run the backing script and surface its output verbatim to the user:
+Run the backing script and surface its COMPACT digest to the user (the full detail
+is written to disk as JSON — relay the digest + the saved-path line, do NOT paste
+the whole JSON into the conversation):
 
 ```bash
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/identify_environment.py"
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/identify_environment.py" --online
 ```
 
 It reports, for THIS session:
@@ -38,17 +40,39 @@ It reports, for THIS session:
 - **Cloud** — AWS / Azure / GCP footprint (CLI, config dir, region/project, service
   context like Lambda/Cloud Run/App Service) — **presence only, never a credential**.
 - **Toolchain** — installed **compilers**, **runtimes**, **package managers**, and
-  **dev tooling** (with versions), plus **python** venv/conda/pyenv/uv.
+  **dev tooling** (with versions) — including the token-economy tools **tldr-code**,
+  **distill**, **fastedit**, **memgrep**, **lean-ctx** — plus **python**
+  venv/conda/pyenv/uv.
 - **MCP servers** — the servers configured for this session (name + transport +
   scheme://host), with any token/env value **stripped**.
+- **Git repo** — remotes + **GitHub slug**, current branch, all **branches** (with
+  last-commit dates + descriptions), repo last-commit datetime, and the **active git
+  hooks** (honoring `core.hooksPath`).
+- **GitHub** (`--online`) — repo description / default branch / visibility, and the
+  **branch-protection rulesets** (name, target, enforcement, branches, rule types).
+- **Wikimem** — note counts for the LOCAL / PROJECT / USER memory scopes.
+- **Plugins** — installed vs enabled counts, configured **hook events**, the
+  **janitor's own version** + **staleness** (`--online`), and the **last
+  marketplace/version upgrade** timestamps.
+- **Claude auth** — API-key vs subscription (OAuth) mode (tier needs a live probe).
 - **User / PATH / launch process chain**.
 
 Flags:
-- `--json` — a machine-readable object instead of the formatted report.
+- `--online` — enable the GitHub (`gh`) probes: branch-protection rulesets, repo
+  metadata, and the janitor's latest-release staleness check. **OFF by default** so
+  a plain run makes no network call.
+- `--json` — print the raw machine-readable object to stdout (does NOT write a file).
 - `--fast` — skip the two slowest LOCAL probes (per-tool version strings + the
   listening-ports scan) for a quicker run.
 
-**Safety.** Pure observation — it changes nothing, makes **no network call**, never
+By default (no `--json`) the script **writes the full report to
+`<repo>/reports/identify-environment/<timestamp>-env.json`** and prints only the
+compact digest plus that path — so the caller's context holds the summary, not the
+whole object.
+
+**Safety.** Pure observation — it changes nothing (aside from writing its own JSON
+report), makes **no network call except the opt-in `--online` GitHub probes**, never
 emits a secret VALUE (anything key/token/secret/password/credential is reported as
-presence only; proxy URLs and MCP endpoints are credential-stripped), and **fails
-open** (a probe that is unavailable or blocked degrades to "unknown", never a crash).
+presence only; proxy URLs and MCP endpoints are credential-stripped; cloud creds are
+presence-only; no `-w` keychain read), and **fails open** (a probe that is
+unavailable or blocked degrades to "unknown", never a crash).

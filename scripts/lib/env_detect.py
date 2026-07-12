@@ -784,6 +784,9 @@ DEV_TOOLS: tuple[tuple[str, str], ...] = (
     ("tmux", "tmux"), ("nvim", "Neovim"), ("ssh", "OpenSSH"), ("rsync", "rsync"),
     ("curl", "curl"), ("wget", "wget"), ("aws", "AWS CLI"), ("az", "Azure CLI"),
     ("gcloud", "gcloud"), ("tailscale", "Tailscale CLI"),
+    # token-economy tooling (the workflow's saving trio + friends)
+    ("tldr", "tldr-code CLI"), ("distill", "distill"), ("fastedit", "fastedit"),
+    ("memgrep", "memgrep"), ("lean-ctx", "lean-ctx"),
 )
 
 
@@ -815,6 +818,139 @@ def _mcp_transport(cfg: dict) -> str:
     if cfg.get("command"):
         return "stdio"
     return "unknown"
+
+
+# --- git / GitHub -----------------------------------------------------------
+
+
+def github_slug(url: str) -> Optional[str]:
+    """`owner/repo` from a git remote URL (https / ssh / git@ forms), or None.
+    Only returns a slug for github.com hosts."""
+    u = (url or "").strip()
+    if not u:
+        return None
+    m = re.match(r"^(?:https?://|ssh://)?(?:[^@/]+@)?github\.com[:/]([^/]+)/(.+?)(?:\.git)?/?$", u)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    return None
+
+
+def parse_git_config(text: str) -> dict:
+    """Parse a `.git/config` (INI) into {remotes:{name:url}, branch_descriptions:
+    {name:desc}, hooks_path:str|None}. Git keys are case-insensitive. Pure."""
+    remotes: dict[str, str] = {}
+    descriptions: dict[str, str] = {}
+    hooks_path: Optional[str] = None
+    section, sub = "", ""
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if line.startswith("[") and line.endswith("]"):
+            inner = line[1:-1].strip()
+            m = re.match(r'(\S+)\s+"(.*)"', inner)
+            if m:
+                section, sub = m.group(1).lower(), m.group(2)
+            else:
+                section, sub = inner.lower(), ""
+            continue
+        if "=" not in line or line.startswith("#") or line.startswith(";"):
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip().lower(), val.strip()
+        if section == "remote" and key == "url" and sub:
+            remotes[sub] = val
+        elif section == "branch" and key == "description" and sub:
+            descriptions[sub] = val
+        elif section == "core" and key == "hookspath":
+            hooks_path = val
+    return {"remotes": remotes, "branch_descriptions": descriptions, "hooks_path": hooks_path}
+
+
+def parse_branches(text: str) -> list[dict]:
+    """Parse `git for-each-ref --format='%(refname:short)|%(committerdate:iso8601)|
+    %(upstream:short)|%(subject)'` lines into per-branch dicts. Pure."""
+    out: list[dict] = []
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("|", 3)
+        parts += [""] * (4 - len(parts))
+        out.append({"name": parts[0], "last_commit": parts[1],
+                    "upstream": parts[2], "subject": parts[3][:120]})
+    return out
+
+
+def active_git_hooks(entries: list[str], is_exec: Callable[[str], bool]) -> list[str]:
+    """The ACTIVE hooks from a hooks-dir listing: names that are not `*.sample` and
+    are executable (per the injected `is_exec`). Sorted. Pure."""
+    return sorted(n for n in entries if not n.endswith(".sample") and is_exec(n))
+
+
+def summarize_rulesets(rulesets: list) -> list[dict]:
+    """Summarize a `gh api repos/<slug>/rulesets` (+ optional per-ruleset detail)
+    payload into [{name, target, enforcement, branches, rule_types}]. Tolerant of
+    both the list-endpoint summary and a fully-expanded ruleset object. Pure."""
+    out: list[dict] = []
+    for rs in rulesets or []:
+        if not isinstance(rs, dict):
+            continue
+        cond = rs.get("conditions") or {}
+        refname = (cond.get("ref_name") or {}) if isinstance(cond, dict) else {}
+        branches = refname.get("include") if isinstance(refname, dict) else None
+        rules = rs.get("rules") or []
+        rule_types = sorted({str(r["type"]) for r in rules if isinstance(r, dict) and r.get("type")})
+        out.append({
+            "name": rs.get("name"),
+            "target": rs.get("target"),
+            "enforcement": rs.get("enforcement"),
+            "branches": branches if isinstance(branches, list) else [],
+            "rule_types": rule_types,
+        })
+    return out
+
+
+# --- plugins / staleness ----------------------------------------------------
+
+
+def _semver_tuple(s: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(p) for p in re.split(r"[.\-+]", s.strip().lstrip("v"))[:3] if p.isdigit())
+    except (ValueError, AttributeError):
+        return (-1,)
+
+
+def version_stale(installed: str, latest: str) -> str:
+    """Compare two semver-ish strings → 'up-to-date' / 'stale (<latest> available)'
+    / 'unknown'. Pure."""
+    if not installed or not latest:
+        return "unknown"
+    a, b = _semver_tuple(installed), _semver_tuple(latest)
+    if a == (-1,) or b == (-1,):
+        return "unknown"
+    if a >= b:
+        return "up-to-date"
+    return f"stale ({latest} available)"
+
+
+def parse_enabled_plugins(enabled: Mapping[str, object]) -> dict:
+    """Summarize Claude Code's `settings.json.enabledPlugins` map
+    (`name@marketplace -> bool`) into counts + per-marketplace tallies + the enabled
+    names (capped). Pure — never emits anything secret (plugin names are public)."""
+    installed = len(enabled)
+    enabled_names = [k for k, v in enabled.items() if v]
+    by_mkt: dict[str, dict] = {}
+    for name, on in enabled.items():
+        mkt = name.split("@", 1)[1] if "@" in name else "(local)"
+        slot = by_mkt.setdefault(mkt, {"enabled": 0, "total": 0})
+        slot["total"] += 1
+        if on:
+            slot["enabled"] += 1
+    return {
+        "installed": installed,
+        "enabled": len(enabled_names),
+        "disabled": installed - len(enabled_names),
+        "enabled_names": sorted(enabled_names)[:60],
+        "marketplaces": by_mkt,
+    }
 
 
 def detect_subscription(env: Mapping[str, str]) -> dict:

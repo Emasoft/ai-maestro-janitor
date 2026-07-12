@@ -499,3 +499,93 @@ def test_secret_safety_no_secret_values_leak():
     blob = json.dumps(outputs, default=str)
     for leak in ("AKIAFAKE", "ghp_fake", "topsecret", "leakme"):
         assert leak not in blob
+
+
+# --- wave 2: git / GitHub / plugins parsers ---------------------------------
+
+
+def test_github_slug_forms():
+    """https / ssh / git@ github URLs → owner/repo (with .git stripped); non-github → None."""
+    assert ed.github_slug("https://github.com/Owner/Repo.git") == "Owner/Repo"
+    assert ed.github_slug("git@github.com:Owner/Repo.git") == "Owner/Repo"
+    assert ed.github_slug("ssh://git@github.com/Owner/Repo") == "Owner/Repo"
+    assert ed.github_slug("https://gitlab.com/o/r.git") is None
+    assert ed.github_slug("") is None
+
+
+def test_parse_git_config_remotes_desc_hookspath():
+    """A .git/config parses remotes, branch descriptions, and core.hooksPath."""
+    text = (
+        '[remote "origin"]\n\turl = https://github.com/Emasoft/x.git\n'
+        '[branch "main"]\n\tdescription = the trunk\n'
+        "[core]\n\thooksPath = .githooks\n"
+    )
+    cfg = ed.parse_git_config(text)
+    assert cfg["remotes"]["origin"] == "https://github.com/Emasoft/x.git"
+    assert cfg["branch_descriptions"]["main"] == "the trunk"
+    assert cfg["hooks_path"] == ".githooks"
+
+
+def test_parse_git_config_empty():
+    """An empty config yields empty maps and no hooks path."""
+    cfg = ed.parse_git_config("")
+    assert cfg == {"remotes": {}, "branch_descriptions": {}, "hooks_path": None}
+
+
+def test_parse_branches():
+    """for-each-ref lines parse into {name,last_commit,upstream,subject}."""
+    text = ("main|2026-07-13 01:00:00 +0200|origin/main|feat: x\n"
+            "dev|2026-07-10 09:00:00 +0200||wip")
+    got = ed.parse_branches(text)
+    assert got[0] == {"name": "main", "last_commit": "2026-07-13 01:00:00 +0200",
+                      "upstream": "origin/main", "subject": "feat: x"}
+    assert got[1]["upstream"] == ""
+
+
+def test_active_git_hooks_excludes_samples_and_nonexec():
+    """Active hooks are non-.sample AND executable per the injected is_exec."""
+    entries = ["pre-commit", "pre-push.sample", "commit-msg", "README"]
+    execset = {"pre-commit", "commit-msg"}
+    assert ed.active_git_hooks(entries, lambda n: n in execset) == ["commit-msg", "pre-commit"]
+
+
+def test_summarize_rulesets():
+    """Ruleset payloads summarize to name/target/enforcement/branches/rule_types."""
+    rulesets = [{
+        "name": "baseline-history-protect", "target": "branch", "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
+    }]
+    got = ed.summarize_rulesets(rulesets)
+    assert got[0]["name"] == "baseline-history-protect"
+    assert got[0]["enforcement"] == "active"
+    assert got[0]["branches"] == ["~DEFAULT_BRANCH"]
+    assert got[0]["rule_types"] == ["deletion", "non_fast_forward"]
+
+
+def test_summarize_rulesets_tolerates_sparse():
+    """A ruleset missing conditions/rules still summarizes without raising."""
+    got = ed.summarize_rulesets([{"name": "x", "target": "branch", "enforcement": "evaluate"}])
+    assert got[0]["branches"] == [] and got[0]["rule_types"] == []
+
+
+def test_version_stale():
+    """Semver comparison → up-to-date / stale / unknown."""
+    assert ed.version_stale("0.41.0", "0.41.0") == "up-to-date"
+    assert ed.version_stale("0.41.0", "0.42.0") == "stale (0.42.0 available)"
+    assert ed.version_stale("0.42.0", "0.41.0") == "up-to-date"
+    assert ed.version_stale("", "0.42.0") == "unknown"
+
+
+def test_parse_enabled_plugins_counts_and_marketplaces():
+    """enabledPlugins map → installed/enabled/disabled counts + per-marketplace tally."""
+    enabled = {
+        "a@mkt1": True, "b@mkt1": False, "c@mkt2": True, "d": True,
+    }
+    out = ed.parse_enabled_plugins(enabled)
+    assert out["installed"] == 4
+    assert out["enabled"] == 3
+    assert out["disabled"] == 1
+    assert out["marketplaces"]["mkt1"] == {"enabled": 1, "total": 2}
+    assert out["marketplaces"]["(local)"] == {"enabled": 1, "total": 1}
+    assert "a@mkt1" in out["enabled_names"] and "b@mkt1" not in out["enabled_names"]

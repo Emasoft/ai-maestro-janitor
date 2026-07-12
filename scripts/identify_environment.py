@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import sys
 from pathlib import Path
 
@@ -226,11 +227,202 @@ def detect_sandboxing() -> list[str]:
 # --- new gatherers (I/O → pure classifiers) ---------------------------------
 
 
-def _gather_git_context() -> dict:
+def _gather_git_repo() -> dict:
+    """Local git facts: worktree flags (for execution context), remotes + GitHub
+    slug, branches (+ descriptions + last-commit dates), current branch, repo
+    last-commit datetime, and the ACTIVE git hooks (honoring core.hooksPath). Reads
+    `.git/config` as a FILE (the `git config` verb is not needed), and uses only
+    read-only git verbs (`rev-parse`/`for-each-ref`/`log`). Fail-open throughout."""
     inside = _out(["git", "rev-parse", "--is-inside-work-tree"]) == "true"
-    git_dir = _out(["git", "rev-parse", "--absolute-git-dir"]) if inside else ""
-    common = _out(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]) if inside else ""
-    return {"inside": inside, "git_dir": git_dir, "common": common}
+    if not inside:
+        return {"inside": False, "git_dir": "", "common": ""}
+    git_dir = _out(["git", "rev-parse", "--absolute-git-dir"])
+    common = _out(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"])
+    top = _out(["git", "rev-parse", "--show-toplevel"])
+    cfg_text = ""
+    if common:
+        cfg_path = Path(common) / "config"
+        try:
+            cfg_text = cfg_path.read_text(encoding="utf-8") if cfg_path.is_file() else ""
+        except OSError:
+            cfg_text = ""
+    cfg = env_detect.parse_git_config(cfg_text)
+    remotes = cfg["remotes"]
+    slug = None
+    for name in ("origin", *remotes):
+        s = env_detect.github_slug(remotes.get(name, ""))
+        if s:
+            slug = s
+            break
+    branches = env_detect.parse_branches(_out([
+        "git", "for-each-ref", "refs/heads",
+        "--format=%(refname:short)|%(committerdate:iso8601)|%(upstream:short)|%(subject)",
+    ]))
+    for b in branches:
+        d = cfg["branch_descriptions"].get(b["name"])
+        if d:
+            b["description"] = d
+    # Resolve the hooks dir: core.hooksPath (relative to repo top or absolute), else <git-dir>/hooks.
+    hooks_dir = ""
+    if cfg["hooks_path"]:
+        hp = Path(cfg["hooks_path"])
+        hooks_dir = str(hp if hp.is_absolute() else (Path(top) / hp)) if top else str(hp)
+    elif git_dir:
+        hooks_dir = str(Path(git_dir) / "hooks")
+    try:
+        entries = os.listdir(hooks_dir) if hooks_dir and os.path.isdir(hooks_dir) else []
+    except OSError:
+        entries = []
+    hooks = env_detect.active_git_hooks(entries, lambda n: os.access(os.path.join(hooks_dir, n), os.X_OK))
+    return {
+        "inside": True, "git_dir": git_dir, "common": common,
+        "remotes": remotes, "slug": slug,
+        "current_branch": _out(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
+        "branch_count": len(branches), "branches": branches,
+        "last_commit": _out(["git", "log", "-1", "--format=%cI"]),
+        "hooks_path": cfg["hooks_path"], "hooks": hooks,
+    }
+
+
+def _gather_github(slug: str | None, *, online: bool) -> dict:
+    """GitHub repo metadata + branch-protection rulesets via `gh` (network). Runs
+    ONLY under `--online` (the default keeps the no-network invariant). Bounded to
+    10 rulesets; fail-open (a denied/absent `gh` yields an empty/annotated dict)."""
+    if not (online and slug):
+        return {}
+    if not _which("gh"):
+        return {"slug": slug, "note": "gh not installed — GitHub details skipped"}
+    out: dict = {"slug": slug}
+    repo = _out(["gh", "api", f"repos/{slug}", "--jq",
+                 "{description,default_branch,visibility,pushed_at,fork,archived}"], timeout=12.0)
+    if repo:
+        try:
+            out["repo"] = json.loads(repo)
+        except ValueError:
+            pass
+    rulesets_raw = _out(["gh", "api", f"repos/{slug}/rulesets"], timeout=12.0)
+    rulesets = []
+    if rulesets_raw:
+        try:
+            rulesets = json.loads(rulesets_raw)
+        except ValueError:
+            rulesets = []
+    expanded = []
+    for rs in (rulesets if isinstance(rulesets, list) else [])[:10]:
+        rid = rs.get("id") if isinstance(rs, dict) else None
+        det = _out(["gh", "api", f"repos/{slug}/rulesets/{rid}"], timeout=8.0) if rid else ""
+        try:
+            expanded.append(json.loads(det) if det else rs)
+        except ValueError:
+            expanded.append(rs)
+    out["rulesets"] = env_detect.summarize_rulesets(expanded)
+    return out
+
+
+def _dir_note_stats(root: str) -> dict:
+    notes, total = 0, 0
+    try:
+        for dp, _, fns in os.walk(root):
+            for fn in fns:
+                if fn.endswith(".md"):
+                    notes += 1
+                    try:
+                        total += os.path.getsize(os.path.join(dp, fn))
+                    except OSError:
+                        pass
+    except OSError:
+        pass
+    return {"notes": notes, "bytes": total}
+
+
+def _gather_wikimem(top: str) -> dict:
+    """Per-scope wikimem size (LOCAL / PROJECT / USER): note count + bytes. Reads
+    only; approximate note count is every `*.md` under the scope root."""
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    project = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
+    slug = re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(project))
+    roots = {
+        "local": os.path.join(home, ".claude", "projects", slug, "memory"),
+        "project": os.path.join(top or project, ".claude", "project", "memory"),
+        "user": os.path.join(home, ".claude", "plugins", "data",
+                             "ai-maestro-janitor-ai-maestro-plugins", "memory"),
+    }
+    return {scope: {**_dir_note_stats(p), "path": p}
+            for scope, p in roots.items() if os.path.isdir(p)}
+
+
+def _janitor_installed_version(home: str) -> str:
+    base = Path(home) / ".claude" / "plugins" / "cache" / "ai-maestro-plugins" / "ai-maestro-janitor"
+    try:
+        vers = [d.name for d in base.iterdir() if d.is_dir() and re.match(r"^\d+\.\d+", d.name)]
+    except OSError:
+        return ""
+    return sorted(vers, key=env_detect._semver_tuple)[-1] if vers else ""
+
+
+def _gather_plugins(*, online: bool) -> dict:
+    """Installed/enabled plugins, configured hook events, and the janitor's own
+    version + last marketplace/version upgrade timestamps (from its global-state).
+    Reads config files only; `--online` adds the latest-release staleness check."""
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    settings: dict = {}
+    sp = Path(home) / ".claude" / "settings.json"
+    try:
+        if sp.is_file():
+            settings = json.loads(sp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        settings = {}
+    out: dict = {}
+    ep = settings.get("enabledPlugins")
+    if isinstance(ep, dict):
+        out["plugins"] = env_detect.parse_enabled_plugins(ep)
+    hooks = settings.get("hooks")
+    if isinstance(hooks, dict):
+        out["hook_events"] = sorted(hooks.keys())
+    gs = Path(home) / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "global-state"
+
+    def _ts(name: str):
+        p = gs / f"{name}.last-run.ts"
+        try:
+            return int(p.read_text(encoding="utf-8").strip()) if p.is_file() else None
+        except (OSError, ValueError):
+            return None
+
+    installed = _janitor_installed_version(home)
+    janitor: dict = {
+        "installed_version": installed or None,
+        "marketplace_refresh_ts": _ts("marketplace-refresh"),
+        "version_update_ts": _ts("version-update"),
+        "user_plugins_update_ts": _ts("user-plugins-update"),
+    }
+    if online:
+        latest = _out(["gh", "api", "repos/Emasoft/ai-maestro-janitor/releases/latest",
+                       "--jq", ".tag_name"], timeout=12.0).lstrip("v")
+        janitor["latest_version"] = latest or None
+        janitor["staleness"] = env_detect.version_stale(installed, latest)
+    out["janitor"] = janitor
+    return out
+
+
+def _save_json(info: dict) -> str:
+    """Write the FULL report as JSON to `<main-repo>/reports/identify-environment/
+    <ts±tz>-env.json` and return the path, or '' on any failure (fail-open — a
+    blocked/unavailable write must not sink the run)."""
+    main_root = ""
+    wt = _out(["git", "worktree", "list"])
+    if wt:
+        main_root = wt.splitlines()[0].split()[0]
+    if not main_root:
+        main_root = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
+    try:
+        d = Path(main_root) / "reports" / "identify-environment"
+        d.mkdir(parents=True, exist_ok=True)
+        ts = _out(["date", "+%Y%m%d_%H%M%S%z"]) or "env"
+        path = d / f"{ts}-env.json"
+        path.write_text(json.dumps(info, indent=2, default=str), encoding="utf-8")
+        return str(path)
+    except (OSError, ValueError):
+        return ""
 
 
 def _gather_network() -> dict:
@@ -334,9 +526,10 @@ def _identity() -> dict:
     return env_detect.detect_user(os.environ, uid=uid, gid=gid, login=login, is_admin=is_admin)
 
 
-def gather(*, fast: bool = False) -> dict:
+def gather(*, fast: bool = False, online: bool = False) -> dict:
     project = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
-    git = _gather_git_context()
+    git = _gather_git_repo()
+    top = _out(["git", "rev-parse", "--show-toplevel"]) if git.get("inside") else ""
     tty = _session_tty()
     has_tty = bool(tty and tty not in ("??", "?"))
 
@@ -376,6 +569,13 @@ def gather(*, fast: bool = False) -> dict:
         "package_managers": env_detect.detect_present(env_detect.PACKAGE_MANAGERS, which=_which),
         "dev_tools": env_detect.detect_present(env_detect.DEV_TOOLS, which=_which),
         "mcp_servers": _gather_mcp_servers(),
+        # --- wave-2 sections ---
+        "git": ({k: git[k] for k in (
+            "slug", "current_branch", "branch_count", "branches", "last_commit",
+            "remotes", "hooks_path", "hooks") if k in git} if git.get("inside") else None),
+        "github": _gather_github(git.get("slug"), online=online),
+        "wikimem": _gather_wikimem(top),
+        "plugins_env": _gather_plugins(online=online),
     }
 
 
@@ -384,6 +584,22 @@ def gather(*, fast: bool = False) -> dict:
 
 def _fmt_list(items: list[str], empty: str = "none") -> str:
     return ", ".join(items) if items else empty
+
+
+def _ago(ts: object) -> str:
+    """A compact 'Nm/Nh/Nd ago' for an epoch-seconds timestamp, or '?' if unparseable."""
+    import time
+    try:
+        delta = int(time.time()) - int(ts)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return "?"
+    if delta < 0:
+        return "just now"
+    if delta < 3600:
+        return f"{delta // 60}m ago"
+    if delta < 86400:
+        return f"{delta // 3600}h ago"
+    return f"{delta // 86400}d ago"
 
 
 def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching is inherent
@@ -558,6 +774,57 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
         lines.append(f"- **PATH:** {p.get('count', 0)} entries"
                      + (f" · {notable}" if notable else ""))
 
+    # Git / GitHub
+    g = info.get("git")
+    if g:
+        gl = f"- **Git:** branch `{g.get('current_branch') or '?'}` · {g.get('branch_count', 0)} branches"
+        if g.get("slug"):
+            gl += f" · remote `{g['slug']}`"
+        if g.get("last_commit"):
+            gl += f" · last commit {g['last_commit']}"
+        if g.get("hooks"):
+            gl += f" · hooks: {g.get('hooks_path') or '.git/hooks'} ({len(g['hooks'])})"
+        lines.append(gl)
+    gh = info.get("github")
+    if gh and gh.get("slug"):
+        repo = gh.get("repo", {})
+        rs = gh.get("rulesets", [])
+        ghl = f"- **GitHub:** {gh['slug']}"
+        if repo.get("default_branch"):
+            ghl += f" · default `{repo['default_branch']}`"
+        if repo.get("visibility"):
+            ghl += f" · {repo['visibility']}"
+        if rs:
+            ghl += f" · rulesets: {len(rs)} ({', '.join(str(r.get('name')) for r in rs if r.get('name'))})"
+        elif "rulesets" in gh:
+            ghl += " · rulesets: none"
+        lines.append(ghl)
+        if gh.get("note"):
+            lines.append(f"    - {gh['note']}")
+
+    # Wikimem sizes
+    wm = info.get("wikimem", {})
+    if wm:
+        parts = [f"{v['notes']} {scope}" for scope, v in wm.items()]
+        lines.append(f"- **Wikimem:** {' / '.join(parts)} notes")
+
+    # Plugins / janitor
+    pl = info.get("plugins_env", {})
+    if pl:
+        plug = pl.get("plugins", {})
+        jan = pl.get("janitor", {})
+        pline = "- **Plugins:** "
+        pline += (f"{plug.get('enabled', 0)} enabled / {plug.get('installed', 0)} installed"
+                  if plug else "?")
+        if pl.get("hook_events"):
+            pline += f" · {len(pl['hook_events'])} hook events"
+        if jan.get("installed_version"):
+            stale = f" ({jan['staleness']})" if jan.get("staleness") else ""
+            pline += f" · janitor v{jan['installed_version']}{stale}"
+        if jan.get("marketplace_refresh_ts"):
+            pline += f" · marketplace refreshed {_ago(jan['marketplace_refresh_ts'])}"
+        lines.append(pline)
+
     # Project + ancestry
     lines.append(f"- **Project dir:** `{info['project_dir']}`")
     if info["ancestry"]:
@@ -568,12 +835,21 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
 
 
 def main() -> int:
-    fast = "--fast" in sys.argv[1:]
-    info = gather(fast=fast)
-    if "--json" in sys.argv[1:]:
-        print(json.dumps(info, indent=2))
+    args = sys.argv[1:]
+    info = gather(fast="--fast" in args, online="--online" in args)
+    if "--json" in args:
+        # Raw object to stdout (programmatic use) — no file written.
+        print(json.dumps(info, indent=2, default=str))
+        return 0
+    # Default (token-economy): write the FULL detail to disk as JSON and print only
+    # the compact digest + the path, so the caller's context holds the summary, not
+    # the whole object (which carries every branch, ruleset, plugin, and port).
+    path = _save_json(info)
+    print(_render(info))
+    if path:
+        print(f"\n**Full JSON saved:** `{path}`")
     else:
-        print(_render(info))
+        print("\n_(full JSON not saved — report dir unavailable; rerun with --json for the raw object)_")
     return 0
 
 
