@@ -118,7 +118,7 @@ that skips if the prior worker is alive; per-detector cadence + seen-file dedupe
 - *git/workflow hygiene:* pr-reconciler, ci-status (post-push: watch the pushed commit's CI, emit a drift line = notify main Claude on failure — TRDD-AKH7JRAA), github-issues-watch (TRDD-2KQQAEPP — **OFF by default**, one stat of `.janitor/state/issues-watch.flag`; when ON, notifies main Claude of each NEW issue or NEW comment on the project's GitHub tracker and keeps reporting until disabled. Seen-map `{number: updatedAt}` is the dedupe — GitHub bumps `updatedAt` on a comment, so one field catches both; `/janitor-issues-watch-on` seeds a baseline from the currently-open issues so enabling never dumps the backlog into context; issue titles are attacker-controlled and go through `sanitize_for_drift_line`; fail-open on missing/unauthed `gh`), worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
 - *TRDD/task:* trdd-drift, trdd-reminder.
 - *cleanup:* screenshot-purge, trashcan-purge, reports-purge (S8 TRDD-LCO8229M — 30d age retention for `reports/**` excluding the screenshot-purge-owned `screenshots/` subtree, `CLAUDE_PLUGIN_OPTION_REPORTS_MAX_AGE_DAYS`; + `.janitor/state/*seen*` line-cap to the newest `CLAUDE_PLUGIN_OPTION_SEEN_FILE_MAX_LINES`=500, so dedupe horizons stop growing unbounded).
-- *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; default-on, per-bucket-deduped, 5-min cadence), window-burn-rate (TRDD-OY0W6LX5 — reads each account's live 5h/7d utilization%+reset READ-ONLY via the OAuth rotator, alarms when `burn_ratio = util%/(100×elapsed) ≥ RATIO` (1.5) so a window is heading for an early rate-limit; on a trip names the top-consuming project via `token_history.fleet_attribution`/`culprit` (30-min machine-wide cache in the global dir); pure math in `token_burn`, shared gather `rotator_usage`; default-on, min-util floored, fail-open, 15-min cadence; also surfaced by `/janitor-token-attribution` + `token_report --live`).
+- *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; on a local alarm it ENRICHES (never suppresses) the line with agentlensPro's `get_burn_status` burn-rate + `investigate_burn` cause via the shared `agentlens_probe` lib (config-gated `heartbeat_burn_status_command`/`heartbeat_investigate_burn_command`, fail-open — TRDD-HL8H3XCV); default-on, per-bucket-deduped, 5-min cadence), window-burn-rate (TRDD-OY0W6LX5 — reads each account's live 5h/7d utilization%+reset READ-ONLY via the OAuth rotator, alarms when `burn_ratio = util%/(100×elapsed) ≥ RATIO` (1.5) so a window is heading for an early rate-limit; on a trip names the culprit — PREFERRING agentlensPro's `investigate_burn` OTEL cause (config-gated `heartbeat_investigate_burn_command`, fail-open, `agentlens_probe` — TRDD-90B47EM9), else the native top-consuming project via `token_history.fleet_attribution`/`culprit` (30-min machine-wide cache in the global dir); pure math in `token_burn`, shared gather `rotator_usage`; default-on, min-util floored, fail-open, 15-min cadence; also surfaced by `/janitor-token-attribution` + `token_report --live`).
 - *scope drift:* settings-scope-drift, claude-md-scope-drift, cross-scope-reference-drift, subagent-scope-drift, mcp-config-drift.
 - *supply-chain/security:* mcp-rugpull, remote-credentials, supply-chain-fingerprints, typosquat-watcher, provenance-audit, repo-trust-score, package-manager-policy, workflow-security, historical-cache-scan, binary-magic-scanner, ai-context-poisoning, subagent-report, janitor-self-integrity.
 - *updates (some daemon-delegating shims):* marketplace-refresh, plugin-updates, local-plugins-update, project-plugins-update, **user-plugins-update (shim → daemon)**, version-update (shim → daemon).
@@ -273,7 +273,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=7cebb5d1b895 digest=b1a853e4ca34 generated=2026-07-11T18:12:45+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e86b7c13edc1 digest=2f148fa8b6a0 generated=2026-07-12T05:02:39+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -478,6 +478,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · gather() -> dict
   · main() -> int
 `scripts/lib/__init__.py` — Marker file. Makes scripts/lib/ an importable Python package so hooks
+`scripts/lib/agentlens_probe.py` — Shared agentlensPro probe — config-gated, bounded, fail-open (TRDD-WUUR2DFX).
+  · probe_json(command, *, timeout) -> dict | None — Run ``command`` and return its parsed-JSON stdout as a dict, else None.
+  · BurnStatus — The slice of ``get_burn_status`` the janitor trusts (verified authoritative).
+  · parse_burn_status(data) -> BurnStatus | None — Extract the trusted ``BurnStatus`` slice from a ``get_burn_status`` payload.
+  · BurnCause — The top culprit from ``investigate_burn`` — for one enrichment clause.
+  · parse_investigate_cause(data) -> BurnCause | None — Extract the single top culprit from an ``investigate_burn`` payload. Pure.
+  · format_cause_clause(cause) -> str — Render a ``BurnCause`` as a compact, greppable one-line suffix (leading space).
 `scripts/lib/ai_context_extras.py` — AI-context extras — net-new rules from deep-ai-context wave.
   · Finding — A single rule match. Shape-compatible with
   · Rule — A rule with a pre-compiled pattern. Used by the single-regex
@@ -1068,6 +1075,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · evaluate_turn_budget(usage, *, output_advisory, output_hard, cache_creation_advisory, cache_creation_hard, ignore_cache_creation) -> BudgetVerdict — Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
   · summarize(records, *, field) -> Optional[dict] — Distribution stats for `field` over the per-heartbeat records.
 `scripts/lib/trdd_common.py` — Shared TRDD-parsing helpers + the state-reconciliation checks (stdlib-only).
+  · project_tasks_dir(project_dir) -> Path | None — The PROJECT tasks dir, honoring `CLAUDE_PLUGIN_OPTION_TRDD_PATH`.
+  · project_design_root(project_dir) -> Path | None — `<repo>/design` — the PROJECT (shared, git-tracked) design root.
+  · local_design_root(project_dir) -> Path — `~/.claude/projects/<slug>/design` — the LOCAL (machine-private) design root.
+  · design_roots(project_dir) -> list[tuple[str, Path]] — Every design root that EXISTS, as `(scope, root)`, most-specific first.
+  · scope_folder(scope, folder, project_dir) -> Path | None — The concrete dir for one (scope, lifecycle-folder) pair, or None if unresolvable.
+  · trdd_files(folder, project_dir) -> list[tuple[str, Path]] — Every `TRDD-*.md` in `folder` across BOTH scopes, as `(scope, path)`.
+  · ensure_local_design(project_dir) -> Path — Create the LOCAL design root + its four lifecycle folders. Returns the root.
   · extract_uid(filename) -> str | None — Return a TRDD filename's id (UPPERCASE base36 OR legacy UUID), or None.
   · norm_state(value) -> str — Normalise a status/column token to lowercase kebab-case.
   · parse_trdd_state(path) -> tuple[str, str] — Return (status, column) for a TRDD, both normalised kebab-case or ''.

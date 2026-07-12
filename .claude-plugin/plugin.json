@@ -213,6 +213,20 @@
       "default": "",
       "sensitive": false
     },
+    "heartbeat_burn_status_command": {
+      "title": "Burn-rate probe command (token-anomaly corroboration)",
+      "description": "Shell command that prints JSON with a global.costPerHour field naming the CURRENT machine-wide burn rate in $/hour (e.g. AgentLens: 'agentlenspro get_burn_status'). Consulted by the token-usage-anomaly detector ONLY after its local median+MAD baseline has already decided to alarm, to CORROBORATE the spike with the real account-level burn rate \u2014 it never suppresses the local alarm (the local baseline is authoritative for 'this session's own heartbeat cost spiked'). Default: 'agentlenspro get_burn_status' (a bare PATH binary). Empty string disables the probe. Fail-open: a missing binary, non-zero exit, 5s timeout, or unparseable output yields no clause and never blocks the fire (same contract as heartbeat_account_status_command). Config, not a hard-coded path, because such CLIs are machine-local.",
+      "type": "string",
+      "default": "agentlenspro get_burn_status",
+      "sensitive": false
+    },
+    "heartbeat_investigate_burn_command": {
+      "title": "Burn-culprit probe command (window-burn + token-anomaly attribution)",
+      "description": "Shell command that prints JSON with a findings[] array naming the top burn CULPRIT and its cause (e.g. FORK_STORM), shareOfWindow and confidence, derived from real OTEL telemetry (e.g. AgentLens: 'agentlenspro investigate_burn'). Consulted ONLY on a tripped alarm by two detectors: window-burn-rate PREFERS this cause clause over its native transcript-size attribution, and token-usage-anomaly appends it as attribution. Never run speculatively (only post-trip). Default: 'agentlenspro investigate_burn' (a bare PATH binary). Empty string disables the probe, falling back to the native attribution. Fail-open: any failure yields no clause and never blocks the fire. Config, not a hard-coded path, because such CLIs are machine-local.",
+      "type": "string",
+      "default": "agentlenspro investigate_burn",
+      "sensitive": false
+    },
     "version_check_interval": {
       "title": "Version Update Check Cadence (seconds)",
       "description": "Minimum seconds between checks against api.github.com for a newer plugin release. Default: 300 (5 min \u2014 runs every heartbeat by default). The detector queries the repo declared in plugin.json's `repository` field, so forks check against their own releases. Silent on network/auth failures. The GitHub query short-circuits when nothing changed; a 5-min cadence costs ~12 cheap requests/hour, well inside both the unauthenticated (60/h) and `gh`-authenticated (5000/h) API limits.",
