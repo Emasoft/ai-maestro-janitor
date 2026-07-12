@@ -2,7 +2,7 @@
 name: macos-keychain
 description: "macOS keychain dialog opened hundreds of times / 'Security wants to use the login keychain' with no Always Allow button / cannot type — a keychain prompt FLOOD, often right after rotating/re-logging a Claude account. Prompts KEEP coming even after I paused the rotator / iCloudNotificationAgent is ALSO asking for the login keychain / I typed my password (or ran `security unlock-keychain`) and it is NOT sticking / how do I stop the keychain popups and keep them from coming back. The safe `security` protocol every keychain interaction MUST follow so this is structurally impossible: single choke-point, hard timeout, headless fail-fast, one-shot denied-latch, opt-in gate on EVERY keychain-reading path (detectors included), temp-keychain test isolation; plus the user-side fix for a LOCKED login keychain: `security unlock-keychain` + `set-keychain-settings` no-auto-lock (in a real terminal — the Claude lean-ctx wrapper blocks `security`)."
 ocd: 2026-07-09
-lmd: 2026-07-09
+lmd: 2026-07-12
 metadata:
   node_type: memory
   type: reference
@@ -103,6 +103,42 @@ anywhere else. The choke-point enforces, in order:
 7. **Never poll a keychain item in a tight loop.** Read once, cache, re-read only on a real
    auth failure with backoff.
 
+## Gotcha 4 — the DEAD SECURITY SESSION (severity: fleet-down; 2026-07-12 incident)
+
+**Symptom:** EVERY Claude agent on the machine reports `Not logged in`, all at once. New
+`claude` processes fail; ones started earlier keep working (they hold a token in memory).
+`/login` succeeds and **changes nothing**. The keychain item is present, unmodified, and
+readable *from a normal shell*.
+
+**Root cause:** the keychain search list is **per-security-session**, and a security session
+can DIE. A **long-lived terminal/tmux server** (`ppid 1`, started hours ago) holds a securityd
+connection; a **securityd recycle** kills it. Every pane that server forks inherits the dead
+session, and in it the Keychain Services API fails **outright** — not with a clean "denied",
+but with a *parameter* error:
+
+```
+security list-keychains   →  SecKeychainCopySearchList: parameters not valid
+security show-keychain-info →  SecKeychainCopySettings: parameters not valid
+```
+
+So Claude Code in those panes cannot read its OAuth item at all. **The credential was never
+the problem — REACHABILITY was.** The trigger here: an unguarded `dotenclave unlock` in
+`~/.zshrc` runs in every interactive shell and registers its custom keychain via
+`security list-keychains -s`, which **REPLACES** the search list — leaving a **dangling entry**
+(a registered keychain whose file is gone, seen as a bare `""`). One dead entry poisons EVERY
+lookup in that session.
+
+**Fix:** recreate the terminal/tmux server (its panes inherit the dead session; nothing inside
+it can be repaired). Verify by running `security list-keychains` inside a NEW pane. Guard the
+shell-rc hook so it cannot leave a dangling entry.
+
+**THE FRUIT (this is why the gotcha is here):** the janitor is the guardian of the fleet, so
+this must never again go undetected — the **`keychain-health` detector** now runs every
+heartbeat. It is uniquely able to catch it: the per-session heartbeat executes INSIDE the same
+security session as the agent, so it sees exactly what the agent will see. It reports the dead
+session (CRITICAL, *stating that `/login` will not help*), the dangling entry (HIGH — the
+cause, before anything visibly breaks), and an unfindable credential (CRITICAL).[^5]
+
 ## Gotcha 1 & 2 — storage corruption (see the sibling note)
 
 `[[reference_macos_security_keychain_gotchas]]` — the stdin **128-byte getpass truncation**
@@ -183,3 +219,26 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   terminal's lean-ctx shell wrapper BLOCKS the `security` binary, so `! security unlock-keychain`
   in the Claude prompt silently never runs — the user must unlock in a REAL terminal or via the
   Keychain Access GUI. That is why an unlock "didn't stick": it never executed.
+
+[^5]: [ocd:2026-07-12 lmd:2026-07-12] 2026-07-12, the DEAD SECURITY SESSION (gotcha 4) — a
+  fleet-wide `Not logged in` that took a day to diagnose because every hypothesis attacked the
+  WRONG LAYER. What was wrongly blamed, in order: the subscription, the credential (a `/login`
+  was performed — it changed nothing), the agent workdir, the env vars, the OAuth rotator, and
+  the test suite. The truth was one layer lower: the keychain search list is
+  PER-SECURITY-SESSION, and a long-lived tmux server's securityd connection had died, so its
+  panes could not reach the keychain AT ALL. Lessons, each of which cost real time: **(a) A
+  credential that is PRESENT and READABLE from your shell can still be unreachable from another
+  process's security session — "findable" and "readable" and "reachable-from-there" are three
+  different claims. Test in the FAILING context, not in yours.** (b) `mdat` changing on the
+  keychain item is NOT evidence of foul play — Claude Code rewrites it on every normal token
+  refresh; a timestamp tells you WHEN something happened, never WHO or WHY (the same
+  infer-a-mechanism-from-a-timing error recorded in `[[stuck-release-ci-not-publish-blocked]]`).
+  (c) Screen-scraping a tmux pane for the absence of an error string produces FALSE PASSES — a
+  client that has not answered yet scores as OK. Absence of evidence was treated as evidence.
+  Use a real exit code (`claude -p` → rc) instead of reading the screen. (d) When a component is
+  suspected, prove it by its GATE and its STATE, not by its plausibility: the rotator was cleared
+  by `opt-in.flag` absent (its write path returns early) + `state.json` untouched + zero keychain
+  lines in its log — three independent facts, none of them an opinion. (e) THE FRUIT: a guardian
+  that only reports what it was told to look for will keep missing the layer below. The
+  `keychain-health` detector now probes REACHABILITY every heartbeat from inside the agent's own
+  security session — the one vantage point from which this failure is visible.
