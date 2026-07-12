@@ -50,6 +50,36 @@ architecture hub, key-solution component pages, the publish/deploy pipeline page
 
 ## The algorithm
 
+### 0. Route the SUBJECT — is this a CASE fact or a METHODOLOGY lesson?
+
+Do this FIRST, before scope, before choosing a page. **One page = one subject.**
+
+> **Ask:** *is this true only of THIS subject, or would it still be true of a completely
+> different bug in a completely different system?*
+
+| The fact/lesson is… | It belongs in… |
+|---|---|
+| specific to the subject (this API's quirk, this daemon's flag, this keychain's ACL behavior) | **the subject's own page** |
+| a transferable way of WORKING (how to diagnose, verify, falsify, decide; a reasoning trap to avoid) | **the methodology page that owns it** — e.g. `debugging-methodology` |
+
+A general lesson parked inside a case page is **off-topic pollution**: someone recalling
+`claude-client-authentication` wants auth facts, not your lessons about falsification. It is
+doubly wrong because it *scatters* the methodology across every page that happened to teach
+it, so the page that should own it owns nothing.
+
+A single incident often yields BOTH — split it, and cross-link (`[[debugging-methodology]]`):
+the subject fact to the subject page, the transferable lesson to the methodology page.
+
+**Before minting a NEW methodology page, survey the ones that exist** and add to the owner
+instead of creating a fifth near-synonym:
+
+```bash
+memgrep recall "debugging methodology how to diagnose verify falsify" "${ROOTS[@]}"
+```
+
+Methodology is nearly always **USER** scope (a way of working is true across all projects),
+even when the case that taught it is PROJECT or LOCAL.
+
 ### 1. Route the SCOPE (machine-private vs shared vs global)
 
 ```bash

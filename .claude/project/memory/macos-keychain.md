@@ -155,6 +155,13 @@ out AND are skipped when the real keychain is prompting. Prove: timeout honored,
 after one denial, headless skips the `-w` primary, zero login-keychain access (assert no
 `security … login.keychain` proc via a `ps` before/after guard).
 
+## Governed by
+
+- `[[debugging-methodology]]` (USER scope) — the general debugging discipline this page's
+  incidents kept teaching the hard way. Those lessons are NOT restated here: a case page holds
+  facts about ITS case, and a transferable way of working belongs to the one page that owns it,
+  or it ends up scattered across every page that happened to teach it and owned by none.
+
 ## Applies to
 
 - `[[reference_oauth_rotator_keychain_architecture]]` — the rotator's slot/mirror keychain layout.
@@ -221,24 +228,22 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   Keychain Access GUI. That is why an unlock "didn't stick": it never executed.
 
 [^5]: [ocd:2026-07-12 lmd:2026-07-12] 2026-07-12, the DEAD SECURITY SESSION (gotcha 4) — a
-  fleet-wide `Not logged in` that took a day to diagnose because every hypothesis attacked the
-  WRONG LAYER. What was wrongly blamed, in order: the subscription, the credential (a `/login`
-  was performed — it changed nothing), the agent workdir, the env vars, the OAuth rotator, and
-  the test suite. The truth was one layer lower: the keychain search list is
-  PER-SECURITY-SESSION, and a long-lived tmux server's securityd connection had died, so its
-  panes could not reach the keychain AT ALL. Lessons, each of which cost real time: **(a) A
-  credential that is PRESENT and READABLE from your shell can still be unreachable from another
-  process's security session — "findable" and "readable" and "reachable-from-there" are three
-  different claims. Test in the FAILING context, not in yours.** (b) `mdat` changing on the
-  keychain item is NOT evidence of foul play — Claude Code rewrites it on every normal token
-  refresh; a timestamp tells you WHEN something happened, never WHO or WHY (the same
-  infer-a-mechanism-from-a-timing error recorded in `[[stuck-release-ci-not-publish-blocked]]`).
-  (c) Screen-scraping a tmux pane for the absence of an error string produces FALSE PASSES — a
-  client that has not answered yet scores as OK. Absence of evidence was treated as evidence.
-  Use a real exit code (`claude -p` → rc) instead of reading the screen. (d) When a component is
-  suspected, prove it by its GATE and its STATE, not by its plausibility: the rotator was cleared
-  by `opt-in.flag` absent (its write path returns early) + `state.json` untouched + zero keychain
-  lines in its log — three independent facts, none of them an opinion. (e) THE FRUIT: a guardian
-  that only reports what it was told to look for will keep missing the layer below. The
+  fleet-wide `Not logged in` whose cause sat one layer below every hypothesis. KEYCHAIN FACTS
+  this cost a day to learn: (a) The keychain search list is **PER-SECURITY-SESSION**. A
+  long-lived process (here a 22h-old tmux server, ppid 1) can hold a securityd connection that
+  DIES, and every pane it forks inherits that dead session — inside them the Keychain Services
+  API fails outright (`SecKeychainCopySearchList: parameters not valid`), so the credential is
+  unreachable even though it is perfectly intact. (b) Therefore `/login` CANNOT fix this class
+  of failure: the credential was never the problem, REACHABILITY was — a credential that is
+  present and readable from YOUR shell can still be unreachable from another process's security
+  session. (c) The trigger was an unguarded `dotenclave unlock` in `~/.zshrc` running
+  `security list-keychains -s`, which REPLACES the search list and left a dangling `""` entry.
+  (d) `mdat` on the credential item moves on every ORDINARY Claude Code token refresh, so a
+  changed `mdat` is not evidence of tampering (the general trap:
+  `[[debugging-methodology]]#debug-a-timestamp-says-when-never-who`). (e) THE FRUIT: the
   `keychain-health` detector now probes REACHABILITY every heartbeat from inside the agent's own
-  security session — the one vantage point from which this failure is visible.
+  security session — the one vantage point from which this failure is visible at all.
+  The transferable lessons this incident taught (test in the failing context; a story that fits
+  is not a cause; absence of an error is not a PASS; clear a suspect by its gate and its state)
+  are NOT restated here — they are owned by `[[debugging-methodology]]`, which this page is
+  governed by. A case page holds case facts; methodology lives in one place or it lives nowhere.

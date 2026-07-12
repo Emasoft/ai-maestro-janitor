@@ -146,6 +146,27 @@ If memgrep is not installed, install once (it ships in this plugin):
 so one call yields the facts AND every WHY. `--no-notes` = body only;
 `--full-notes` = keep each lesson's `[…]` date/class prefix.
 
+## Two axes, two recalls: the CASE page and the METHODOLOGY page
+
+The corpus keeps them apart on purpose — a case page holds facts about ITS subject, and a
+transferable way of working (how to diagnose, verify, falsify; the reasoning traps) is owned by
+a methodology page such as `debugging-methodology`. That keeps a case page on-topic, but it
+also means **a symptom query alone will never surface the methodology**, because the
+methodology page does not mention your symptom.
+
+So when the task is DIAGNOSTIC (a bug, an outage, a mystery — not a lookup), recall on BOTH
+axes and read the top hit of each:
+
+```bash
+memgrep recall "$SYMPTOM" "${ROOTS[@]}"                      # the CASE — what do we know about THIS?
+memgrep recall "debugging methodology verify falsify" "${ROOTS[@]}"   # the METHOD — how do we not fool ourselves?
+```
+
+The second call is the cheap one that pays: the traps a methodology page records ("verify
+before you 'fix'", "absence of evidence is not evidence", "falsify each layer separately") are
+exactly the ones a session under pressure re-walks into. Recall them BEFORE the investigation,
+not while writing the post-mortem.
+
 ## Enriched recall (verify with `memgrep recall --help`)
 
 - `--sort score|ocd|lmd` (default relevance), `--order asc|desc` — `--sort lmd`
