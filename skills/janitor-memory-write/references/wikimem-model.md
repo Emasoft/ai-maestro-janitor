@@ -11,7 +11,6 @@ repeating it.
 - [EXPAND and REDUCE — radiating suns vs receiving terminals](#expand-and-reduce--radiating-suns-vs-receiving-terminals)
 - [The three tiers (a page's role in the pyramid)](#the-three-tiers-a-pages-role-in-the-pyramid)
 - [The edge model — EVERY link is bidirectional (the link law)](#the-edge-model--every-link-is-bidirectional-the-link-law)
-- [Link every concept you name — the Wikipedia discipline](#link-every-concept-you-name--the-wikipedia-discipline)
 - [Page anatomy](#page-anatomy)
 - [Atoms — first-class body elements (block-properties)](#atoms--first-class-body-elements-block-properties)
 
@@ -153,10 +152,10 @@ Links are `[[page-name]]` wikilinks (memgrep parses them); a link to a
 not-yet-written page is fine — it marks one to create, and the librarian
 surfaces it as a broken link until the page (and its back-link) exists.
 
-## Link every concept you name — the Wikipedia discipline
+### Link every concept you name — the Wikipedia discipline
 
-The link law above says an edge, once made, lives on both ends. This section is the
-other half: **make the edges in the first place.** A wikimem atom is written like a
+The link law above says an edge, once made, lives on both ends. This is the other
+half: **make the edges in the first place.** A wikimem atom is written like a
 Wikipedia article, not like a plain note — **every project element you NAME in an
 atom's prose becomes a `[[wikilink]]` to that element's page.** A component, a
 protocol or procedure, a config, a functionality, a named topic — if it is a part of
