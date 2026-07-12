@@ -225,6 +225,18 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # them. Distinct from cookie-reminder (the cookie/OAuth expiry RACE). 6h cadence;
     # machine-scoped daily dedupe keeps it gentle.
     ("oauth-login-needed", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_LOGIN_NEEDED_INTERVAL"),
+    # keychain-health is the FLEET GUARDIAN's keychain probe (TRDD-KCHEALTH, the 2026-07-12
+    # outage): a long-lived tmux/terminal server that survives a securityd recycle hands every
+    # pane it forks a DEAD security session, in which the Keychain Services API fails outright
+    # — so Claude Code there cannot read its OAuth item and every agent reports "Not logged
+    # in" while the credential is perfectly fine (/login does NOT help). The per-session
+    # heartbeat runs INSIDE that same security session, which makes it the one component able
+    # to see what the agent sees. Checks FINDABILITY only — never `-w` (the secret read is
+    # what causes the ACL prompt FLOOD, macos-keychain gotcha 3) — and routes every call
+    # through safe_storage.run_security (hard timeout + denied-latch). 15 min cadence: this is
+    # a fleet-down condition, so it must surface fast, and the probe is two cheap read-only
+    # `security` calls. Verdict-deduped, so a persistent breakage nags once, not every fire.
+    ("keychain-health", 900, "CLAUDE_PLUGIN_OPTION_KEYCHAIN_HEALTH_INTERVAL"),
     # memory-librarian SURFACES (never mutates) memory aggregation/conflict
     # candidates in the per-project agent-memory corpus (~/.claude/projects/
     # <slug>/memory/) — the librarian half of the memory system (TRDD-c77dae09).

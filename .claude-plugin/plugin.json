@@ -500,6 +500,20 @@
       "default": 300,
       "sensitive": false
     },
+    "keychain_health_enabled": {
+      "title": "Keychain Health Check Enabled",
+      "description": "When true (default, macOS only), the keychain-health detector verifies that THIS shell's macOS security session can actually reach the keychain, and surfaces a CRITICAL drift line when it cannot. It catches the 2026-07-12 fleet outage: a long-lived tmux/terminal server that survives a securityd recycle hands every pane it forks a DEAD security session, in which the Keychain Services API fails outright — so Claude Code there cannot read its OAuth item and EVERY agent reports 'Not logged in' while the credential is perfectly fine (re-running /login does NOT help). It also flags a DANGLING keychain search-list entry (a registered keychain whose file is gone — typically left by a custom-keychain tool such as `dotenclave unlock` calling `security list-keychains -s`), which is the root cause that poisons every lookup in the session. STRICTLY read-only and prompt-safe: it checks FINDABILITY only and NEVER reads a secret (no `-w`), because the secret read is what triggers the macOS ACL prompt flood; every call is routed through the mandated safe-keychain choke point (hard timeout + one-shot denied-latch). Set false to disable.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "keychain_health_interval": {
+      "title": "Keychain Health Check Cadence (seconds)",
+      "description": "Minimum seconds between keychain-health checks. Default: 900 (15 min). A broken security session is a FLEET-DOWN condition — every agent in it is unusable — so it must surface fast, and the probe is only two cheap read-only `security` calls. The verdict is deduped (code + evidence), so a persistent breakage nags once rather than every fire, while a NEW or changed condition always surfaces.",
+      "type": "number",
+      "default": 900,
+      "sensitive": false
+    },
     "branch_protection_enabled": {
       "title": "Branch Protection Check Enabled",
       "description": "When true (default), the branch-protection detector asks the GitHub API (read-only) whether the default branch is covered by classic branch protection OR an active branch ruleset (inherited org/enterprise rulesets count), and surfaces an URGENT drift line only when it can DEFINITIVELY confirm neither is present. It NEVER configures protection itself. Skips silently when gh is absent/unauthenticated, the viewer is not a repo admin, the repo has no GitHub remote, or any probe is indeterminate. Set false to disable.",
