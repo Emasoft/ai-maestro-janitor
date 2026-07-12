@@ -55,6 +55,19 @@ It reports, for THIS session:
   **janitor's own version** + **staleness** (`--online`), and the **last
   marketplace/version upgrade** timestamps.
 - **Claude auth** — API-key vs subscription (OAuth) mode (tier needs a live probe).
+- **gh CLI** — the authenticated GitHub username + token scopes, and whether gh is
+  working (offline: from `hosts.yml`; `--online` confirms live).
+- **GitHub Actions** — installed workflows + the third-party actions they use,
+  **whether a Claude Code action is present**, and the CI target **platforms**.
+- **Releases** (`--online`) — GitHub releases (latest ones) and, for the project's
+  package name, **PyPI / npm (also bun) / crates.io** presence + latest version.
+- **Homebrew tap** — if the repo is a tap (Formula/ dir or `homebrew-*` name), flags
+  that **Homebrew 6.0.0+ requires consumers to `brew trust`** it (third-party taps are
+  no longer trusted by default — [Tap Trust](https://docs.brew.sh/Tap-Trust)).
+- **Fork / collaboration** — whether the repo is a fork and its **upstream** (from
+  `gh` under `--online`, or a local `upstream` remote).
+- **Repo topology** — single-project vs mono-repo, single-git vs multi-git
+  (submodules / nested repos / symlinked repos), and single vs mixed language.
 - **User / PATH / launch process chain**.
 
 Flags:

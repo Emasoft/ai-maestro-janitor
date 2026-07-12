@@ -435,6 +435,188 @@ def _save_json(info: dict) -> str:
         return ""
 
 
+def _read(path: str) -> str:
+    try:
+        p = Path(path)
+        return p.read_text(encoding="utf-8") if p.is_file() else ""
+    except OSError:
+        return ""
+
+
+def _project_name(top: str) -> str | None:
+    root = top or os.getcwd()
+    return env_detect.project_name_from_manifest(
+        pyproject=_read(os.path.join(root, "pyproject.toml")),
+        package_json=_read(os.path.join(root, "package.json")),
+        cargo=_read(os.path.join(root, "Cargo.toml")),
+    )
+
+
+def _gather_gh_auth(*, online: bool) -> dict:
+    """The authenticated gh user (offline from hosts.yml; `--online` confirms live via
+    `gh auth status` + `gh api user`). Never captures the token."""
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    cfg_user = env_detect.parse_active_gh_user(
+        _read(os.path.join(home, ".config", "gh", "hosts.yml")))
+    out: dict = {"installed": _which("gh"), "config_user": cfg_user or None,
+                 "username": cfg_user or None}
+    if online and _which("gh"):
+        st = state.run_subprocess(["gh", "auth", "status"], timeout=10.0, capture=True)
+        text = ((st.stdout or "") + (st.stderr or "")) if st else ""
+        parsed = env_detect.parse_gh_auth(text)
+        live = _out(["gh", "api", "user", "--jq", ".login"], timeout=10.0)
+        out.update({
+            "working": bool(parsed["working"] or live),
+            "username": live or parsed["username"] or cfg_user or None,
+            "scopes": parsed["scopes"],
+        })
+    return out
+
+
+def _gather_github_actions(top: str) -> dict:
+    """Installed GitHub Actions workflows + the third-party actions they use +
+    whether a Claude Code action is present + the CI target platforms (local read)."""
+    wf_dir = Path(top or os.getcwd()) / ".github" / "workflows"
+    texts, names = [], []
+    try:
+        files = sorted(wf_dir.glob("*.yml")) + sorted(wf_dir.glob("*.yaml"))
+    except OSError:
+        files = []
+    for f in files:
+        t = _read(str(f))
+        if t:
+            texts.append(t)
+            names.append(f.name)
+    if not texts:
+        return {}
+    acts = env_detect.parse_workflow_actions(texts)
+    return {"workflows": names, "actions": acts["actions"],
+            "claude_action": acts["claude_action"],
+            "platforms": env_detect.parse_workflow_platforms(texts)}
+
+
+def _gather_releases(slug: str | None, *, online: bool) -> dict:
+    if not (online and slug and _which("gh")):
+        return {}
+    raw = _out(["gh", "api", f"repos/{slug}/releases", "--jq",
+                "[.[0:3][]|{tag:.tag_name,name:.name,published:.published_at,prerelease:.prerelease}]"],
+               timeout=12.0)
+    try:
+        rel = json.loads(raw) if raw else []
+    except ValueError:
+        rel = []
+    return {"has_releases": bool(rel), "latest": rel}
+
+
+def _gather_registries(name: str | None, *, online: bool) -> dict:
+    """Public package-registry presence for the project name: PyPI / npm (also
+    covers bun) / crates.io. Network — `--online` only, bounded, fail-open."""
+    if not (online and name):
+        return {}
+    out: dict = {}
+
+    def _curl(url: str) -> str:
+        return _out(["curl", "-fsSL", "--max-time", "10", url], timeout=12.0)
+
+    pj = _curl(f"https://pypi.org/pypi/{name}/json")
+    if pj:
+        try:
+            out["pypi"] = {"version": json.loads(pj).get("info", {}).get("version")}
+        except ValueError:
+            pass
+    nj = _curl(f"https://registry.npmjs.org/{name}/latest")
+    if nj:
+        try:
+            d = json.loads(nj)
+            if d.get("version"):
+                out["npm"] = {"version": d["version"], "note": "also the bun registry"}
+        except ValueError:
+            pass
+    cj = _curl(f"https://crates.io/api/v1/crates/{name}")
+    if cj:
+        try:
+            v = (json.loads(cj).get("crate") or {}).get("max_version")
+            if v:
+                out["cargo"] = {"version": v}
+        except ValueError:
+            pass
+    return out
+
+
+def _gather_repo_topology(top: str) -> dict:
+    root = top or os.getcwd()
+    manifests = {
+        "pyproject.toml": "python", "setup.py": "python", "package.json": "javascript",
+        "Cargo.toml": "rust", "go.mod": "go", "pom.xml": "java", "build.gradle": "java",
+        "Gemfile": "ruby", "composer.json": "php", "pubspec.yaml": "dart",
+    }
+    langs, _found = [], []
+    for m, lang in manifests.items():
+        if os.path.exists(os.path.join(root, m)):
+            _found.append(m)
+            langs.append(lang)
+    nested = 0
+    _prune = {".venv", "node_modules", ".git", "target", "dist", "build",
+              "_corpus_dev", ".trashcan", "reports", "reports_dev"}
+    try:
+        for dp, dirs, _ in os.walk(root):
+            if ".git" in dirs and os.path.abspath(dp) != os.path.abspath(root):
+                nested += 1
+            dirs[:] = [d for d in dirs if d not in _prune]
+    except OSError:
+        pass
+    has_sub = os.path.exists(os.path.join(root, ".gitmodules"))
+    workspaces = []
+    if "[tool.uv.workspace]" in _read(os.path.join(root, "pyproject.toml")):
+        workspaces.append("uv-workspace")
+    try:
+        pkg = _read(os.path.join(root, "package.json"))
+        if pkg and json.loads(pkg).get("workspaces"):
+            workspaces.append("npm-workspaces")
+    except ValueError:
+        pass
+    if re.search(r"(?m)^\[workspace\]", _read(os.path.join(root, "Cargo.toml"))):
+        workspaces.append("cargo-workspace")
+    repo_symlinks: list[str] = []
+    try:
+        for entry in os.scandir(root):
+            if entry.is_symlink() and os.path.isdir(os.path.join(os.path.realpath(entry.path), ".git")):
+                repo_symlinks.append(entry.name)
+    except OSError:
+        pass
+    return env_detect.classify_repo_topology(
+        languages=langs, nested_git_count=nested, has_submodules=has_sub,
+        workspaces=workspaces, repo_symlinks=repo_symlinks)
+
+
+def _gather_fork(slug: str | None, remotes: dict, *, online: bool) -> dict:
+    upstream = remotes.get("upstream", "") if isinstance(remotes, dict) else ""
+    gh_json: dict = {}
+    if online and slug and _which("gh"):
+        raw = _out(["gh", "repo", "view", slug, "--json", "isFork,parent"], timeout=12.0)
+        try:
+            gh_json = json.loads(raw) if raw else {}
+        except ValueError:
+            gh_json = {}
+    return env_detect.summarize_fork(gh_json, upstream_remote=upstream)
+
+
+def _gather_homebrew(slug: str | None, top: str, *, online: bool):
+    root = top or os.getcwd()
+    has_formula = os.path.isdir(os.path.join(root, "Formula"))
+    repo_name = slug or os.path.basename(os.path.abspath(root))
+    tapped = None
+    if online and slug and _which("brew"):
+        info = _out(["brew", "tap-info", slug, "--json"], timeout=20.0)
+        if info:
+            try:
+                d = json.loads(info)
+                tapped = bool(d and isinstance(d, list) and d[0].get("installed"))
+            except ValueError:
+                tapped = None
+    return env_detect.homebrew_tap_status(repo_name, has_formula_dir=has_formula, tapped=tapped)
+
+
 def _gather_network() -> dict:
     system = platform.system()
     iface_text = _out(["ifconfig", "-a"]) or _out(["ip", "-o", "addr"])
@@ -586,6 +768,14 @@ def gather(*, fast: bool = False, online: bool = False) -> dict:
         "github": _gather_github(git.get("slug"), online=online),
         "wikimem": _gather_wikimem(top),
         "plugins_env": _gather_plugins(online=online),
+        # --- wave-3 sections ---
+        "gh_auth": _gather_gh_auth(online=online),
+        "github_actions": _gather_github_actions(top),
+        "releases": _gather_releases(git.get("slug"), online=online),
+        "registries": _gather_registries(_project_name(top), online=online),
+        "repo_topology": _gather_repo_topology(top),
+        "fork": _gather_fork(git.get("slug"), git.get("remotes", {}), online=online),
+        "homebrew": _gather_homebrew(git.get("slug"), top, online=online),
     }
 
 
@@ -836,6 +1026,66 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
         if jan.get("marketplace_refresh_ts"):
             pline += f" · marketplace refreshed {_ago(jan['marketplace_refresh_ts'])}"
         lines.append(pline)
+
+    # gh CLI auth
+    gha = info.get("gh_auth", {})
+    if gha and gha.get("username"):
+        gline = f"- **gh CLI:** `{gha['username']}`"
+        if gha.get("working") is not None:
+            gline += "  ·  " + ("✓ working" if gha["working"] else "⚠ not verified")
+        if gha.get("scopes"):
+            gline += f" · scopes: {', '.join(gha['scopes'])}"
+        lines.append(gline)
+    elif gha and not gha.get("installed"):
+        lines.append("- **gh CLI:** not installed")
+
+    # GitHub Actions / workflows
+    ga = info.get("github_actions", {})
+    if ga:
+        al = f"- **GitHub Actions:** {len(ga.get('workflows', []))} workflow(s)"
+        al += " · **Claude action present**" if ga.get("claude_action") else " · no Claude action"
+        if ga.get("platforms"):
+            al += f" · platforms: {', '.join(ga['platforms'])}"
+        lines.append(al)
+        if ga.get("actions"):
+            lines.append(f"    - actions: {', '.join(ga['actions'])}")
+
+    # Releases + package registries
+    rel = info.get("releases", {})
+    if rel.get("has_releases"):
+        latest = (rel.get("latest") or [{}])[0]
+        lines.append(f"- **GitHub releases:** yes · latest `{latest.get('tag', '?')}` "
+                     f"({latest.get('published') or '?'})")
+    elif rel:
+        lines.append("- **GitHub releases:** none")
+    reg = info.get("registries", {})
+    if reg:
+        lines.append("- **Package registries:** "
+                     + ", ".join(f"{k}={v.get('version')}" for k, v in reg.items()))
+
+    # Fork / collaboration + Homebrew tap
+    fork = info.get("fork", {})
+    if fork.get("is_fork"):
+        lines.append(f"- **Fork / collaboration:** yes → upstream `{fork.get('upstream') or '?'}`")
+    hb = info.get("homebrew")
+    if hb:
+        t = "trusted" if hb.get("trusted") else ("tapped locally" if hb.get("tapped_locally")
+                                                 else "trust unknown")
+        lines.append(f"- **Homebrew tap:** yes ({t}) — {hb['note']}")
+
+    # Repo topology
+    rt = info.get("repo_topology", {})
+    if rt:
+        tl = f"- **Repo topology:** {rt.get('structure', '?')} · {rt.get('git', '?')}"
+        if rt.get("languages"):
+            tl += f" · {', '.join(rt['languages'])}" + (" (mixed)" if rt.get("mixed_language") else "")
+        if rt.get("workspaces"):
+            tl += f" · workspaces: {', '.join(rt['workspaces'])}"
+        if rt.get("nested_repos"):
+            tl += f" · {rt['nested_repos']} nested repo(s)"
+        if rt.get("repo_symlinks"):
+            tl += f" · symlinked repos: {', '.join(rt['repo_symlinks'])}"
+        lines.append(tl)
 
     # Project + ancestry
     lines.append(f"- **Project dir:** `{info['project_dir']}`")

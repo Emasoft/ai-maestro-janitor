@@ -30,6 +30,7 @@ diagnostic that reads credentials-adjacent state):
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 from collections.abc import Callable, Mapping
@@ -968,6 +969,145 @@ def detect_subscription(env: Mapping[str, str]) -> dict:
         return {"auth_mode": "Claude subscription (OAuth login)",
                 "tier": "unknown (needs a live account probe)"}
     return {"auth_mode": "unknown", "tier": "unknown"}
+
+
+# --- CI workflows / actions / platforms -------------------------------------
+
+
+def parse_workflow_actions(texts: list[str]) -> dict:
+    """From workflow file contents: the deduped set of third-party `uses:` action
+    refs (owner/name, @sha/@tag stripped) + whether a Claude Code action is present.
+    Local (`./…`) actions are ignored. Pure."""
+    actions: set[str] = set()
+    for t in texts or []:
+        for m in re.finditer(r"^\s*-?\s*uses:\s*([^\s#]+)", t or "", re.MULTILINE):
+            ref = m.group(1).strip().strip("\"'")
+            if ref.startswith(".") or ref.startswith("docker://"):
+                continue
+            actions.add(ref.split("@", 1)[0])
+    claude = any("anthropics/claude" in a.lower() or "claude-code-action" in a.lower()
+                 for a in actions)
+    return {"actions": sorted(actions), "claude_action": claude}
+
+
+def _norm_platform(token: str, out: set[str]) -> None:
+    s = token.lower()
+    if "ubuntu" in s or "linux" in s:
+        out.add("linux")
+    if "macos" in s or "mac-" in s or "darwin" in s or s.strip() == "macos":
+        out.add("macos")
+    if "windows" in s or "win-" in s:
+        out.add("windows")
+
+
+def parse_workflow_platforms(texts: list[str]) -> list[str]:
+    """CI target platforms from `runs-on:` values + strategy-matrix `os:` arrays →
+    normalized {linux, macos, windows}. Pure (best-effort over YAML text)."""
+    plats: set[str] = set()
+    for t in texts or []:
+        for m in re.finditer(r"runs-on:\s*(.+)", t or ""):
+            _norm_platform(m.group(1), plats)
+        for m in re.finditer(r"\bos:\s*\[([^\]]+)\]", t or ""):
+            for tok in m.group(1).split(","):
+                _norm_platform(tok, plats)
+    return sorted(plats)
+
+
+# --- gh auth ----------------------------------------------------------------
+
+
+def parse_gh_auth(text: str) -> dict:
+    """Parse `gh auth status` → {logged_in, username, scopes, working}. NEVER reads
+    the token (gh masks it in this output; we extract only login + scopes). Pure."""
+    logged_in = "Logged in to" in (text or "")
+    m = re.search(r"Logged in to \S+ account (\S+)", text or "")
+    username = m.group(1) if m else ""
+    sm = re.search(r"Token scopes:\s*(.+)", text or "")
+    scopes = [s.strip().strip("'\"") for s in sm.group(1).split(",")] if sm else []
+    return {"logged_in": logged_in, "username": username, "scopes": scopes,
+            "working": logged_in and bool(username)}
+
+
+def parse_active_gh_user(hosts_yaml: str) -> str:
+    """The active gh username from `~/.config/gh/hosts.yml` (offline). Pure."""
+    m = re.search(r"^\s*user:\s*(\S+)", hosts_yaml or "", re.MULTILINE)
+    return m.group(1).strip() if m else ""
+
+
+# --- package name / registries / topology / fork / homebrew -----------------
+
+
+def project_name_from_manifest(*, pyproject: str = "", package_json: str = "",
+                               cargo: str = "") -> Optional[str]:
+    """The distributable package name from the first manifest that carries one
+    (pyproject `[project] name`, package.json `name`, Cargo `[package] name`). Pure."""
+    m = re.search(r'(?m)^\s*name\s*=\s*["\']([^"\']+)["\']', pyproject)
+    if m:
+        return m.group(1)
+    try:
+        d = json.loads(package_json) if package_json else {}
+        if isinstance(d, dict) and isinstance(d.get("name"), str) and d["name"]:
+            return d["name"]
+    except ValueError:
+        pass
+    m = re.search(r'(?m)^\s*name\s*=\s*["\']([^"\']+)["\']', cargo)
+    return m.group(1) if m else None
+
+
+def classify_repo_topology(*, languages: list[str], nested_git_count: int,
+                           has_submodules: bool, workspaces: list[str],
+                           repo_symlinks: list[str]) -> dict:
+    """Classify the repo: single-project vs mono-repo, single vs mixed language,
+    single-git vs multi-git. Pure over pre-gathered signals."""
+    multi_git = nested_git_count > 0 or has_submodules
+    mono = bool(workspaces) or multi_git
+    return {
+        "structure": "mono-repo" if mono else "single-project",
+        "languages": sorted(set(languages)),
+        "mixed_language": len(set(languages)) > 1,
+        "git": "multi-git" if multi_git else "single-git",
+        "nested_repos": nested_git_count,
+        "submodules": has_submodules,
+        "workspaces": workspaces,
+        "repo_symlinks": repo_symlinks,
+    }
+
+
+def summarize_fork(gh_json: object, *, upstream_remote: str = "") -> dict:
+    """Fork/collaboration summary from `gh repo view --json isFork,parent` + any
+    local `upstream` remote. Pure."""
+    is_fork = False
+    parent = ""
+    if isinstance(gh_json, dict):
+        is_fork = bool(gh_json.get("isFork"))
+        p = gh_json.get("parent")
+        if isinstance(p, dict):
+            parent = p.get("nameWithOwner") or ""
+            if not parent and isinstance(p.get("owner"), dict):
+                parent = f"{p['owner'].get('login', '')}/{p.get('name', '')}".strip("/")
+    return {"is_fork": is_fork or bool(upstream_remote),
+            "upstream": parent or github_slug(upstream_remote) or upstream_remote or ""}
+
+
+def homebrew_tap_status(repo_name: str, *, has_formula_dir: bool,
+                        tapped: Optional[bool] = None,
+                        trusted: Optional[bool] = None) -> Optional[dict]:
+    """If this repo is a Homebrew TAP (name `homebrew-*` or a Formula/ dir), return
+    its trust status + the Tap-Trust requirement note; None if it is not a tap.
+
+    Homebrew 6.0.0 (2026-06-11) made third-party taps require EXPLICIT trust before
+    their Ruby is evaluated — so a tap's consumers now need `brew trust` (or
+    `trusted: true` in their Brewfile). A repo cannot self-declare trust; this flags
+    the requirement so a tap author documents it. Pure."""
+    name = (repo_name or "").split("/")[-1]
+    if not (name.startswith("homebrew-") or has_formula_dir):
+        return None
+    return {
+        "is_tap": True, "tapped_locally": tapped, "trusted": trusted,
+        "note": ("Homebrew 6.0.0+ requires EXPLICIT trust for third-party taps — "
+                 "consumers must `brew trust --formula <user>/<repo>/<formula>` (or set "
+                 "`trusted: true` in a Brewfile) before install; document this."),
+    }
 
 
 def detect_mcp_servers(configs: list[tuple[str, dict]]) -> list[dict]:

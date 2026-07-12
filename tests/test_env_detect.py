@@ -589,3 +589,80 @@ def test_parse_enabled_plugins_counts_and_marketplaces():
     assert out["marketplaces"]["mkt1"] == {"enabled": 1, "total": 2}
     assert out["marketplaces"]["(local)"] == {"enabled": 1, "total": 1}
     assert "a@mkt1" in out["enabled_names"] and "b@mkt1" not in out["enabled_names"]
+
+
+# --- wave 3: gh / actions / registries / topology / fork / homebrew ---------
+
+
+def test_parse_workflow_actions_and_claude():
+    """`uses:` refs are collected (sha stripped, local ./ ignored); a Claude action is flagged."""
+    wf = ["jobs:\n  x:\n    steps:\n      - uses: actions/checkout@abc123\n"
+          "      - uses: ./local-action\n      - uses: anthropics/claude-code-action@v1"]
+    out = ed.parse_workflow_actions(wf)
+    assert "actions/checkout" in out["actions"]
+    assert "./local-action" not in out["actions"]
+    assert out["claude_action"] is True
+    assert ed.parse_workflow_actions(["- uses: actions/setup-uv@v1"])["claude_action"] is False
+
+
+def test_parse_workflow_platforms():
+    """runs-on + matrix os arrays normalize to linux/macos/windows."""
+    wf = ["runs-on: ubuntu-latest\nstrategy:\n  matrix:\n    os: [macos-latest, windows-latest]"]
+    assert ed.parse_workflow_platforms(wf) == ["linux", "macos", "windows"]
+
+
+def test_parse_gh_auth():
+    """gh auth status → username + scopes + working; token is never captured."""
+    text = ("github.com\n  ✓ Logged in to github.com account Emasoft\n"
+            "  - Token: gho_XXXX\n  - Token scopes: 'gist', 'repo', 'workflow'")
+    out = ed.parse_gh_auth(text)
+    assert out["username"] == "Emasoft"
+    assert out["working"] is True
+    assert out["scopes"] == ["gist", "repo", "workflow"]
+    assert "gho_XXXX" not in json.dumps(out)
+
+
+def test_parse_active_gh_user():
+    """The active user is read from a hosts.yml `user:` line."""
+    assert ed.parse_active_gh_user("github.com:\n    user: Emasoft\n") == "Emasoft"
+    assert ed.parse_active_gh_user("") == ""
+
+
+def test_project_name_from_manifest():
+    """The package name comes from pyproject, else package.json, else Cargo."""
+    assert ed.project_name_from_manifest(pyproject='[project]\nname = "my-pkg"\n') == "my-pkg"
+    assert ed.project_name_from_manifest(package_json='{"name": "js-pkg"}') == "js-pkg"
+    assert ed.project_name_from_manifest(cargo='[package]\nname = "rs-pkg"\n') == "rs-pkg"
+    assert ed.project_name_from_manifest() is None
+
+
+def test_classify_repo_topology():
+    """A workspace or nested git → mono-repo/multi-git; multiple languages → mixed."""
+    single = ed.classify_repo_topology(languages=["python"], nested_git_count=0,
+                                       has_submodules=False, workspaces=[], repo_symlinks=[])
+    assert single["structure"] == "single-project" and single["git"] == "single-git"
+    assert single["mixed_language"] is False
+
+    mono = ed.classify_repo_topology(languages=["python", "rust"], nested_git_count=2,
+                                     has_submodules=True, workspaces=["cargo-workspace"],
+                                     repo_symlinks=[])
+    assert mono["structure"] == "mono-repo" and mono["git"] == "multi-git"
+    assert mono["mixed_language"] is True and mono["nested_repos"] == 2
+
+
+def test_summarize_fork():
+    """isFork + parent → upstream slug; an `upstream` remote alone also marks a fork."""
+    gh = {"isFork": True, "parent": {"nameWithOwner": "Owner/Upstream"}}
+    assert ed.summarize_fork(gh) == {"is_fork": True, "upstream": "Owner/Upstream"}
+    by_remote = ed.summarize_fork({}, upstream_remote="git@github.com:Up/Stream.git")
+    assert by_remote["is_fork"] is True and by_remote["upstream"] == "Up/Stream"
+    assert ed.summarize_fork({"isFork": False}) == {"is_fork": False, "upstream": ""}
+
+
+def test_homebrew_tap_status():
+    """A homebrew-* name or a Formula/ dir → a tap with the Tap-Trust note; else None."""
+    by_name = ed.homebrew_tap_status("user/homebrew-tools", has_formula_dir=False)
+    assert by_name is not None and by_name["is_tap"] is True and "brew trust" in by_name["note"]
+    by_dir = ed.homebrew_tap_status("user/whatever", has_formula_dir=True)
+    assert by_dir is not None and by_dir["is_tap"] is True
+    assert ed.homebrew_tap_status("user/normal-repo", has_formula_dir=False) is None
