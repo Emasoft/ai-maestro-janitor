@@ -33,6 +33,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
+import agentlens_probe as alp  # noqa: E402  # agentlensPro culprit/cause enrichment (TRDD-90B47EM9)
 import dedupe  # noqa: E402
 import rotator_usage  # noqa: E402  # shared READ-ONLY account-usage gather (drives rotator)
 import state  # noqa: E402
@@ -73,6 +74,32 @@ def _short_slug(slug: str) -> str:
     trailing tokens so a drift line stays readable."""
     parts = [p for p in slug.split("-") if p]
     return "-".join(parts[-2:]) if parts else slug
+
+
+def _agentlens_cause_clause() -> str:
+    """The preferred culprit clause from agentlensPro's `investigate_burn`, or "" when the CLI
+    is absent / disabled / uninformative (TRDD-90B47EM9). Config-gated + fail-open: an empty
+    `heartbeat_investigate_burn_command` disables the probe; ANY failure yields "" so the caller
+    falls back to the native `_top_consumer_clause`. Invoked ONLY on a tripped burn — the
+    expensive `investigate_burn` probe is never run speculatively — and its (local-session)
+    output is defanged for a drift line before it is returned.
+
+    WHY prefer it over the native attribution: agentlensPro reads real OTEL telemetry and
+    classifies the CAUSE (FORK_STORM, FAT_SESSION_REWRITES, …); the native `token_history`
+    attribution is a heuristic over transcript sizes. The native path stays as the fallback so
+    a machine without the CLI is byte-identical to before."""
+    command = os.environ.get(
+        "CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND",
+        alp.DEFAULT_INVESTIGATE_BURN_COMMAND,
+    )
+    try:
+        data = alp.probe_json(command)
+        cause = alp.parse_investigate_cause(data) if data is not None else None
+        if cause is None:
+            return ""
+        return state.sanitize_for_drift_line(alp.format_cause_clause(cause))
+    except Exception:
+        return ""
 
 
 def _top_consumer_clause(w5_lo: int | None = None, w7_lo: int | None = None) -> str:
@@ -170,7 +197,11 @@ def main() -> int:
         state.rotate_log_if_big("window-burn-rate")
         return 0
 
-    clause = _top_consumer_clause(w5_lo, w7_lo)  # one fleet scan (cached) shared by every tripped window
+    # Prefer agentlensPro's investigate_burn culprit/cause (authoritative OTEL attribution) when
+    # present; else the native fleet-scan attribution. ONE attribution, shared by every tripped
+    # window. Both run ONLY here (post-trip), so the expensive investigate_burn is never
+    # speculative (TRDD-90B47EM9).
+    clause = _agentlens_cause_clause() or _top_consumer_clause(w5_lo, w7_lo)
     seen = state.state_dir() / "window-burn-rate-seen.txt"
     day = now // 86400
     for trip in trips:

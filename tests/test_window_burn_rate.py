@@ -23,6 +23,16 @@ import token_burn as tbn  # noqa: E402
 
 assert _DETECTOR.is_file(), f"detector not found at {_DETECTOR}"
 
+# Load the hyphenated detector module by path so its private helpers are unit-testable
+# in-process (no mocks — the agentlensPro enrichment tests below drive it with REAL subprocess
+# scripts). Import runs only top-level code (imports + an alias); main() is __main__-guarded.
+import importlib.util  # noqa: E402
+
+_wbr_spec = importlib.util.spec_from_file_location("window_burn_rate_detector", _DETECTOR)
+assert _wbr_spec is not None and _wbr_spec.loader is not None
+_wbr = importlib.util.module_from_spec(_wbr_spec)
+_wbr_spec.loader.exec_module(_wbr)
+
 # Hour-aligned synthetic NOW so window arithmetic is exact.
 NOW = 1_800_000_000
 _5H = 5 * 3600
@@ -163,3 +173,49 @@ def test_detector_silent_when_not_opted_in(tmp_path: Path) -> None:
     r = _run_detector({"CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_ROTATOR_HOME": str(home)})
     assert r.returncode == 0
     assert r.stdout.strip() == ""
+
+
+# ---------- agentlensPro culprit ENRICH (TRDD-90B47EM9) — real subprocess, no mocks ----------
+
+_INVESTIGATE_JSON = (
+    '{"findings":[{"cause":"FORK_STORM","shareOfWindow":0.18,"confidence":"high"}],'
+    '"attribution":[{"workspace":"~/Code/x"}]}'
+)
+
+
+def _cause_script(tmp_path: Path, name: str, body: str) -> str:
+    p = tmp_path / name
+    p.write_text("#!/bin/sh\n" + body + "\n")
+    p.chmod(0o755)
+    return str(p)
+
+
+def test_agentlens_cause_prefers_cli(tmp_path: Path, monkeypatch) -> None:
+    """When investigate_burn answers, the clause carries the agentlensPro cause + share."""
+    cmd = _cause_script(tmp_path, "inv.sh", f"echo '{_INVESTIGATE_JSON}'")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
+    clause = _wbr._agentlens_cause_clause()
+    assert "agentlensPro cause: FORK_STORM" in clause
+    assert "18% of window" in clause
+
+
+def test_agentlens_cause_empty_when_disabled(monkeypatch) -> None:
+    """An empty command disables the probe → "" so the caller uses the native attribution."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", "")
+    assert _wbr._agentlens_cause_clause() == ""
+
+
+def test_agentlens_cause_empty_on_no_findings(tmp_path: Path, monkeypatch) -> None:
+    """A payload with no findings → "" (nothing to attribute → native fallback)."""
+    cmd = _cause_script(tmp_path, "empty.sh", "echo '{\"findings\":[]}'")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
+    assert _wbr._agentlens_cause_clause() == ""
+
+
+def test_agentlens_cause_empty_on_missing_binary(monkeypatch) -> None:
+    """A missing agentlenspro binary → "" (fail-open; the native fallback runs)."""
+    monkeypatch.setenv(
+        "CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND",
+        "/definitely/not/a/binary/xyzzy investigate_burn",
+    )
+    assert _wbr._agentlens_cause_clause() == ""
