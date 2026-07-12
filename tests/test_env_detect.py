@@ -1,0 +1,482 @@
+"""Tests for the PURE environment-detection primitives in scripts/lib/env_detect.py.
+
+Real, no mocks. Every function under test is pure: it takes a synthetic env dict,
+injected which/exists callables, or a raw command-output string, and returns a
+plain dict/list. So the tests construct inputs by hand and assert the return
+value — NO real host, NO subprocess. The load-bearing invariant these tests pin
+is that a diagnostic which reads credential-adjacent state NEVER emits a secret
+VALUE: the SECURITY tests below prove masking of proxies/MCP URLs/credential env
+vars, culminating in a dedicated no-secret-leak assertion.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
+
+import env_detect as ed  # noqa: E402
+
+
+def _no(*_: object) -> bool:
+    """A which/exists stub that reports everything absent."""
+    return False
+
+
+def _only(*names: str):
+    """Build a which/exists stub that reports True only for `names`."""
+    wanted = set(names)
+    return lambda x: x in wanted
+
+
+# --- is_secret_key ----------------------------------------------------------
+
+
+def test_is_secret_key_credential_names_true():
+    """Names matching KEY/TOKEN/SECRET/PASSWORD are secret-bearing (True)."""
+    for name in ("OPENAI_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "DB_PASSWORD"):
+        assert ed.is_secret_key(name) is True
+
+
+def test_is_secret_key_allowlist_and_plain_false():
+    """AWS_PROFILE/AWS_REGION are allow-listed and a plain name is not secret (False)."""
+    assert ed.is_secret_key("AWS_PROFILE") is False
+    assert ed.is_secret_key("AWS_REGION") is False
+    assert ed.is_secret_key("EDITOR") is False
+
+
+# --- env_value --------------------------------------------------------------
+
+
+def test_env_value_secret_key_returns_none():
+    """A secret key never returns its VALUE, even when set."""
+    assert ed.env_value({"GITHUB_TOKEN": "ghp_live"}, "GITHUB_TOKEN") is None
+
+
+def test_env_value_safe_value_and_absent_none():
+    """A safe key returns its value; an absent key returns None."""
+    assert ed.env_value({"EDITOR": "vim"}, "EDITOR") == "vim"
+    assert ed.env_value({"EDITOR": "vim"}, "PAGER") is None
+
+
+# --- mask_proxy -------------------------------------------------------------
+
+
+def test_mask_proxy_strips_scheme_credentials():
+    """http://user:pass@host:3128 has its embedded credentials stripped."""
+    assert ed.mask_proxy("http://alice:s3cr3t@host:3128") == "http://host:3128"
+
+
+def test_mask_proxy_strips_bare_credentials():
+    """A bare user:pass@host form (no scheme) is also credential-stripped."""
+    assert ed.mask_proxy("alice:s3cr3t@host") == "host"
+
+
+def test_mask_proxy_plain_url_unchanged():
+    """A credential-free proxy URL passes through unchanged."""
+    assert ed.mask_proxy("http://host:8080") == "http://host:8080"
+
+
+def test_mask_proxy_empty_returns_empty():
+    """An empty proxy value maps to the empty string."""
+    assert ed.mask_proxy("") == ""
+
+
+# --- detect_terminal --------------------------------------------------------
+
+
+def test_detect_terminal_env_signals_and_kind():
+    """WT_SESSION→Windows Terminal, TERM_PROGRAM=iTerm.app→iTerm2, ancestry kind echoed, iterm session flagged."""
+    wt = ed.detect_terminal({"WT_SESSION": "abc"})
+    assert wt["env_signal"] == "Windows Terminal"
+    assert wt["program"] == "Windows Terminal"
+
+    it = ed.detect_terminal(
+        {"TERM_PROGRAM": "iTerm.app", "ITERM_SESSION_ID": "w0t0p0"}, ancestry_kind="tmux"
+    )
+    assert it["program"] == "iTerm2"
+    assert it["kind"] == "tmux"
+    assert it["iterm_session_present"] is True
+
+
+# --- detect_multiplexer -----------------------------------------------------
+
+
+def test_detect_multiplexer_tmux():
+    """TMUX_PANE identifies a tmux multiplexer and carries the pane id."""
+    m = ed.detect_multiplexer({"TMUX_PANE": "%3"})
+    assert m == {"kind": "tmux", "pane": "%3"}
+
+
+def test_detect_multiplexer_screen():
+    """STY identifies a GNU screen multiplexer."""
+    m = ed.detect_multiplexer({"STY": "1234.pts-0.host"})
+    assert m is not None and m["kind"] == "screen"
+
+
+def test_detect_multiplexer_zellij():
+    """ZELLIJ identifies a zellij multiplexer."""
+    m = ed.detect_multiplexer({"ZELLIJ": "0"})
+    assert m is not None and m["kind"] == "zellij"
+
+
+def test_detect_multiplexer_none_when_bare():
+    """No multiplexer env vars → None."""
+    assert ed.detect_multiplexer({}) is None
+
+
+# --- detect_wsl -------------------------------------------------------------
+
+
+def test_detect_wsl_microsoft_and_none():
+    """'microsoft' in /proc/version → a WSL dict; absent → None."""
+    d = ed.detect_wsl({}, proc_version="Linux version 5.15 Microsoft WSL2")
+    assert d is not None and d["version"] == "WSL2"
+    assert ed.detect_wsl({}, proc_version="Linux version 6.0 generic") is None
+
+
+# --- parse_mount_fstype -----------------------------------------------------
+
+
+def test_parse_mount_fstype_longest_prefix_wins():
+    """The mountpoint that is the LONGEST prefix of the target decides the fstype."""
+    text = (
+        "/dev/disk1s1 on / (apfs, local, journaled)\n"
+        "/dev/disk2 on /Volumes/Data (nfs, remote)"
+    )
+    assert ed.parse_mount_fstype(text, "/Volumes/Data/file") == "nfs"
+    assert ed.parse_mount_fstype(text, "/etc/hosts") == "apfs"
+
+
+# --- filesystem_is_network --------------------------------------------------
+
+
+def test_filesystem_is_network_nfs_smbfs_true_apfs_false():
+    """nfs/smbfs are network filesystems; apfs is local."""
+    assert ed.filesystem_is_network("nfs") is True
+    assert ed.filesystem_is_network("smbfs") is True
+    assert ed.filesystem_is_network("apfs") is False
+
+
+# --- detect_ci --------------------------------------------------------------
+
+
+def test_detect_ci_github_actions_with_details():
+    """GITHUB_ACTIONS → provider GitHub Actions plus a non-secret github detail dict."""
+    ci = ed.detect_ci({
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_WORKFLOW": "CI",
+    })
+    assert ci is not None
+    assert ci["provider"] == "GitHub Actions"
+    assert ci["github"]["repository"] == "owner/repo"
+    assert ci["github"]["workflow"] == "CI"
+
+
+def test_detect_ci_gitlab():
+    """GITLAB_CI → provider GitLab CI (no github detail block)."""
+    ci = ed.detect_ci({"GITLAB_CI": "true"})
+    assert ci is not None
+    assert ci["provider"] == "GitLab CI"
+    assert "github" not in ci
+
+
+def test_detect_ci_bare_generic():
+    """A bare CI flag with no recognised provider → generic CI."""
+    ci = ed.detect_ci({"CI": "true"})
+    assert ci is not None
+    assert ci["provider"] == "generic CI (unidentified provider)"
+
+
+def test_detect_ci_none_when_absent():
+    """No CI signals → None."""
+    assert ed.detect_ci({"HOME": "/home/u"}) is None
+
+
+# --- detect_containers ------------------------------------------------------
+
+
+def test_detect_containers_codespaces():
+    """CODESPACES env marker is reported and labels its source var ($CODESPACES)."""
+    sig = ed.detect_containers({"CODESPACES": "true"}, exists=_no, virt="")
+    assert any("$CODESPACES" in s for s in sig)
+
+
+def test_detect_containers_dockerenv():
+    """An existing /.dockerenv marker file → a docker signal."""
+    sig = ed.detect_containers({}, exists=_only("/.dockerenv"), virt="")
+    assert any("docker" in s for s in sig)
+
+
+def test_detect_containers_virt_kvm():
+    """systemd-detect-virt 'kvm' → a KVM VM virtualization signal."""
+    sig = ed.detect_containers({}, exists=_no, virt="kvm")
+    assert any("KVM VM" in s for s in sig)
+
+
+def test_detect_containers_empty_on_bare():
+    """No markers, no env, no virt → an empty signal list."""
+    assert ed.detect_containers({}, exists=_no, virt="") == []
+
+
+# --- detect_ide -------------------------------------------------------------
+
+
+def test_detect_ide_vscode_and_claude_code():
+    """TERM_PROGRAM=vscode → VS Code; CLAUDECODE set → Claude Code with a surface."""
+    vs = ed.detect_ide({"TERM_PROGRAM": "vscode"})
+    assert vs["editor"] == "VS Code"
+
+    cc = ed.detect_ide({"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli"})
+    assert cc["claude"]["is_claude_code"] is True
+    assert cc["claude"]["surface"] == "CLI / terminal"
+
+
+# --- detect_execution_context ----------------------------------------------
+
+
+def test_detect_execution_context_headless_and_worktree():
+    """No TTY → headless True; a differing git_dir/git_common_dir → linked worktree, equal → not."""
+    h = ed.detect_execution_context({}, has_tty=False)
+    assert h["headless"] is True
+    assert h["interactive_tty"] is False
+
+    linked = ed.detect_execution_context(
+        {}, has_tty=True, git_dir="/repo/.git/worktrees/wt", git_common_dir="/repo/.git"
+    )
+    assert linked["linked_worktree"] is True
+
+    same = ed.detect_execution_context(
+        {}, has_tty=True, git_dir="/repo/.git", git_common_dir="/repo/.git"
+    )
+    assert same["linked_worktree"] is False
+
+
+# --- detect_proxies ---------------------------------------------------------
+
+
+def test_detect_proxies_masks_and_no_proxy():
+    """HTTPS_PROXY credentials are masked; NO_PROXY (a host list) passes through."""
+    out = ed.detect_proxies({
+        "HTTPS_PROXY": "http://alice:s3cr3t@proxy:8443",
+        "NO_PROXY": "localhost,127.0.0.1",
+    })
+    assert out["HTTPS_PROXY"] == "http://proxy:8443"
+    assert out["NO_PROXY"] == "localhost,127.0.0.1"
+    assert "s3cr3t" not in json.dumps(out)
+
+
+# --- parse_interfaces -------------------------------------------------------
+
+
+def test_parse_interfaces_ifconfig_and_ip():
+    """An ifconfig block and an `ip -o addr` line each parse to {name, addrs}."""
+    ifconfig = "en0: flags=8863<UP,BROADCAST> mtu 1500\n\tinet 192.168.1.5 netmask 0xffffff00"
+    got = ed.parse_interfaces(ifconfig, system="Darwin")
+    assert {"name": "en0", "addrs": ["192.168.1.5"]} in got
+
+    iproute = "3: eth0    inet 10.0.0.2/24 brd 10.0.0.255 scope global eth0"
+    got2 = ed.parse_interfaces(iproute, system="Linux")
+    assert got2 == [{"name": "eth0", "addrs": ["10.0.0.2"]}]
+
+
+# --- detect_vpn -------------------------------------------------------------
+
+
+def test_detect_vpn_tailscale():
+    """A tailscale0 interface OR a 100.64/10 CGNAT address flags Tailscale."""
+    by_name = ed.detect_vpn([{"name": "tailscale0", "addrs": ["100.101.102.103"]}], which=_no)
+    assert by_name["tailscale"] is True
+    assert "Tailscale" in by_name["kinds"]
+
+    by_addr = ed.detect_vpn([{"name": "utun3", "addrs": ["100.64.1.2"]}], which=_no)
+    assert by_addr["tailscale"] is True
+
+
+def test_detect_vpn_wireguard_and_openvpn():
+    """A wg0 interface → WireGuard; which('openvpn') → OpenVPN (installed)."""
+    wg = ed.detect_vpn([{"name": "wg0", "addrs": ["10.9.0.1"]}], which=_no)
+    assert "WireGuard" in wg["kinds"]
+
+    ovpn = ed.detect_vpn([], which=_only("openvpn"))
+    assert "OpenVPN (installed)" in ovpn["kinds"]
+
+
+# --- classify_nat -----------------------------------------------------------
+
+
+def test_classify_nat_behind_nat_true():
+    """Only private LAN IPv4 (192.168.x on en0) → behind NAT (True)."""
+    assert ed.classify_nat([{"name": "en0", "addrs": ["192.168.1.5"]}]) is True
+
+
+def test_classify_nat_global_ip_false_and_empty_none():
+    """A globally-routable IPv4 → not behind NAT (False); nothing to judge → None."""
+    assert ed.classify_nat([{"name": "en0", "addrs": ["8.8.8.8"]}]) is False
+    assert ed.classify_nat([]) is None
+
+
+def test_classify_nat_tailscale_does_not_flip():
+    """A Tailscale 100.64/10 addr on a utun interface must NOT flip the LAN to public (still True)."""
+    ifaces = [
+        {"name": "en0", "addrs": ["192.168.1.5"]},
+        {"name": "utun3", "addrs": ["100.64.1.2"]},
+    ]
+    assert ed.classify_nat(ifaces) is True
+
+
+# --- parse_default_gateway --------------------------------------------------
+
+
+def test_parse_default_gateway_macos_and_linux():
+    """Both `route -n get default` (macOS) and `ip route` (Linux) spellings parse."""
+    assert ed.parse_default_gateway("   gateway: 192.168.1.1\n   interface: en0") == "192.168.1.1"
+    assert ed.parse_default_gateway("default via 10.0.0.1 dev eth0") == "10.0.0.1"
+
+
+# --- parse_dns_servers ------------------------------------------------------
+
+
+def test_parse_dns_servers_dedupe_both_formats():
+    """scutil `nameserver[N] :` and resolv.conf `nameserver` both parse, deduped in order."""
+    text = "nameserver[0] : 8.8.8.8\nnameserver 8.8.8.8\nnameserver 1.1.1.1"
+    assert ed.parse_dns_servers(text) == ["8.8.8.8", "1.1.1.1"]
+
+
+# --- parse_firewall_state ---------------------------------------------------
+
+
+def test_parse_firewall_state_variants():
+    """macos-alf enabled/state=0, ufw active, and an empty probe each classify correctly."""
+    assert ed.parse_firewall_state("Firewall is enabled.", kind="macos-alf") == "enabled"
+    assert ed.parse_firewall_state("state = 0", kind="macos-alf") == "disabled"
+    assert ed.parse_firewall_state("Status: active", kind="ufw") == "enabled"
+    assert ed.parse_firewall_state("", kind="macos-alf") == "unknown (not readable / needs root)"
+
+
+# --- parse_listening_ports --------------------------------------------------
+
+
+def test_parse_listening_ports_lsof_and_ss():
+    """An lsof loopback LISTEN line and an ss 0.0.0.0 LISTEN line parse with correct `exposed`."""
+    text = (
+        "node  123 user  22u  IPv4 0x0  0t0  TCP 127.0.0.1:3000 (LISTEN)\n"
+        'LISTEN 0      511          0.0.0.0:8080      0.0.0.0:*    users:(("nginx",pid=1,fd=6))'
+    )
+    ports = ed.parse_listening_ports(text)
+    by_port = {p["port"]: p for p in ports}
+    assert by_port["3000"]["exposed"] is False
+    assert by_port["3000"]["process"] == "node"
+    assert by_port["8080"]["exposed"] is True
+    assert by_port["8080"]["process"] == "nginx"
+
+
+# --- detect_python_env ------------------------------------------------------
+
+
+def test_detect_python_env_venv_and_conda():
+    """VIRTUAL_ENV yields the venv name; CONDA_DEFAULT_ENV yields the conda env."""
+    venv = ed.detect_python_env({"VIRTUAL_ENV": "/home/u/venvs/myproj"})
+    assert venv["virtualenv"]["name"] == "myproj"
+
+    conda = ed.detect_python_env({"CONDA_DEFAULT_ENV": "base"})
+    assert conda["conda"] == "base"
+
+
+# --- detect_cloud -----------------------------------------------------------
+
+
+def test_detect_cloud_credentials_presence_only():
+    """AWS credential presence is flagged (True) without the value; GCP project shown; bare → {}."""
+    aws = ed.detect_cloud({"AWS_ACCESS_KEY_ID": "AKIAFOO"}, which=_no, exists=_no)
+    assert aws["aws"]["credentials_in_env"] is True
+    assert "AKIAFOO" not in json.dumps(aws)
+
+    gcp = ed.detect_cloud({"GOOGLE_CLOUD_PROJECT": "my-proj"}, which=_no, exists=_no)
+    assert gcp["gcp"]["project"] == "my-proj"
+
+    assert ed.detect_cloud({}, which=_no, exists=_no) == {}
+
+
+# --- detect_user ------------------------------------------------------------
+
+
+def test_detect_user_sudo_and_admin():
+    """SUDO_USER → sudo True + sudo_from; injected is_admin is passed through."""
+    u = ed.detect_user({"SUDO_USER": "alice", "USER": "root"}, is_admin=True)
+    assert u["sudo"] is True
+    assert u["sudo_from"] == "alice"
+    assert u["is_admin"] is True
+
+
+# --- detect_path ------------------------------------------------------------
+
+
+def test_detect_path_counts_and_notable():
+    """PATH entries are counted and notable prefixes (homebrew/cargo) flagged."""
+    p = ed.detect_path({"PATH": "/usr/bin:/opt/homebrew/bin:/home/u/.cargo/bin"})
+    assert p["count"] == 3
+    assert p["notable"]["homebrew"] is True
+    assert p["notable"]["cargo"] is True
+
+
+# --- detect_present ---------------------------------------------------------
+
+
+def test_detect_present_only_which_true_with_version():
+    """Only binaries `which` resolves are included, with an injected version string."""
+    table = (("git", "git"), ("docker", "Docker"))
+    got = ed.detect_present(table, which=_only("git"), versions={"git": "2.42.0"})
+    assert got == [{"binary": "git", "label": "git", "version": "2.42.0"}]
+
+
+# --- detect_mcp_servers -----------------------------------------------------
+
+
+def test_detect_mcp_servers_secret_safe():
+    """A stdio and an http MCP server flatten to name+transport+endpoint — never token/env/args."""
+    configs = [(
+        "proj",
+        {"mcpServers": {
+            "local": {"command": "/usr/bin/node", "args": ["server.js"]},
+            "remote": {"url": "https://api.example.com/mcp?token=SECRET", "env": {"API_KEY": "leakme"}},
+        }},
+    )]
+    out = ed.detect_mcp_servers(configs)
+    blob = json.dumps(out)
+    assert "SECRET" not in blob
+    assert "token=" not in blob
+    assert "leakme" not in blob
+    assert "API_KEY" not in blob
+    assert "server.js" not in blob
+    by_name = {s["name"]: s for s in out}
+    assert by_name["local"]["endpoint"] == "node"
+    assert by_name["remote"]["endpoint"] == "https://api.example.com"
+
+
+# --- CRITICAL: no secret VALUE ever reaches an output -----------------------
+
+
+def test_secret_safety_no_secret_values_leak():
+    """No fake secret (env creds, MCP url token, MCP env value) appears in any detector output."""
+    env = {"AWS_SECRET_ACCESS_KEY": "AKIAFAKE", "GITHUB_TOKEN": "ghp_fake"}
+    configs = [(
+        "src",
+        {"mcpServers": {"r": {"url": "https://h/mcp?token=topsecret", "env": {"API_KEY": "leakme"}}}},
+    )]
+    # Secret-bearing env keys must never yield a value.
+    assert ed.env_value(env, "AWS_SECRET_ACCESS_KEY") is None
+    assert ed.env_value(env, "GITHUB_TOKEN") is None
+
+    outputs = [
+        [ed.env_value(env, k) for k in env],
+        ed.detect_cloud(env, which=_no, exists=_no),
+        ed.detect_ci(env),
+        ed.detect_mcp_servers(configs),
+    ]
+    blob = json.dumps(outputs, default=str)
+    for leak in ("AKIAFAKE", "ghp_fake", "topsecret", "leakme"):
+        assert leak not in blob
