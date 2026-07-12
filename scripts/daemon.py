@@ -1265,6 +1265,32 @@ def _run_maintenance_keepalive(tasks: list[Task]) -> None:
             task.run()
 
 
+def _consume_version_update_request(tasks: list[Task]) -> bool:
+    """Release-triggered self-update consume (TRDD-Y9KM5RCJ).
+
+    If a session `version-update` detector raised the request flag (the plugin cache is
+    behind the latest GitHub release), CLEAR it first — clear-before-run: a run that
+    fails is re-signalled by the detector's next ~5 min fire, so a crash after a
+    clear-after-run can never strand the request — then run the version-update Task
+    exactly once via its `.run()` wrapper. Going through the Task (not a bare
+    `task_version_update()` call) FORCES the run past the 6 h cadence yet keeps the
+    normal bookkeeping: the last-run stamp resets the 6 h clock and the failcount/backoff
+    supervision still applies. The detector only re-requests while genuinely behind, so on
+    a successful update the requests stop (self-terminating); a persistently-failing update
+    retries at most at the detector's ~5 min cadence (the flag is cleared here and only
+    re-set on the detector's next fire), never every loop. Returns True iff a request was
+    consumed. Called from the main loop AFTER the stop/pause/maintenance branches — a
+    stopped or idled daemon must never self-update."""
+    if not gs.version_update_requested_present():
+        return False
+    gs.clear_version_update_request()
+    for task in tasks:
+        if task.name == "version-update":
+            task.run()
+            break
+    return True
+
+
 def _setup_os_keepalive() -> None:
     """Best-effort L0 OS-keepalive setup at daemon startup (singleton only — runs after the
     flock is held). Refresh the DATA closure from the FRESHEST cache so a future OS respawn
@@ -1525,6 +1551,13 @@ def main() -> int:
                         break
                     time.sleep(1)
                 continue
+
+            # Release-triggered self-update (TRDD-Y9KM5RCJ): consume any pending request
+            # from a session detector and run the janitor self-update NOW (≤ ~60 s) instead
+            # of on the 6 h version-update beat. Placed AFTER the stop/pause/maintenance
+            # branches above (each of which `break`s or `continue`s, so reaching here means
+            # the daemon is actively working) and BEFORE the due-loop.
+            _consume_version_update_request(tasks)
 
             for task in tasks:
                 # A flag set mid-loop skips the REMAINING tasks NOW, not after the current

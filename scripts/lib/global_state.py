@@ -369,6 +369,51 @@ def clear_global_pause() -> None:
     _global_pause_path().unlink(missing_ok=True)
 
 
+# ---------- version-update REQUEST (release-triggered self-update, TRDD-Y9KM5RCJ) ----
+#
+# A per-session `version-update` detector notices the plugin cache is behind the latest
+# GitHub release ~5 min after a release lands, but must NOT run `claude plugin update`
+# itself — the daemon is the single global writer (issue #7 / PRRD S2.1). So the detector
+# RAISES this request flag and the daemon CONSUMES it on its next loop (≤ ~60 s), running
+# task_version_update NOW instead of on its 6 h beat. A simple boolean flag consumed
+# clear-before-run by the daemon: a run that fails is re-signalled by the detector's next
+# ~5 min fire, never lost. NO legacy dual-read (unlike kill-switch/reload): this flag
+# exists only in code at or past this release, so both writer (detector) and reader
+# (daemon) are new — there is no version-skew writer at the legacy path to miss.
+
+def _version_update_request_path() -> Path:
+    return global_state_dir() / "version-update-requested.flag"
+
+
+def version_update_requested_present() -> bool:
+    """True iff a session detector has requested an immediate janitor self-update
+    (TRDD-Y9KM5RCJ). The daemon checks this each loop and, when set, runs the
+    version-update task NOW rather than waiting for the 6 h beat."""
+    return _version_update_request_path().is_file()
+
+
+def request_version_update(reason: str = "") -> None:
+    """Raise the release-triggered self-update request. Idempotent (re-writing the same
+    flag is harmless; the daemon clears it on consume). Written atomically; content is
+    advisory. Best-effort — a write failure just falls back to the 6 h beat (fail-open),
+    so this never crashes the read-only detector that calls it."""
+    try:
+        init_global_state()
+        path = _version_update_request_path()
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        tmp.write_text(reason or "requested", encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def clear_version_update_request() -> None:
+    """Clear the release-triggered self-update request. The daemon calls this BEFORE
+    running the update (clear-before-run: a run that fails is re-signalled by the
+    detector's next ~5 min fire, never lost to a clear-after-run crash). Idempotent."""
+    _version_update_request_path().unlink(missing_ok=True)
+
+
 # ---------- fleet-stop flag + injection stamps (TRDD-ME8V2YJF) ------------
 #
 # The daemon-driven fleet disarm/pause (fleet_stop.py) reaches every OTHER running

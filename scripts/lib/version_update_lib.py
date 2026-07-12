@@ -84,6 +84,22 @@ def parse_semver(s: str) -> tuple[int, ...]:
     return _semver_tuple(s)
 
 
+def should_request_prompt_update(
+    installed: str, published: str, auto: bool, trigger_enabled: bool,
+) -> bool:
+    """True iff the version-update detector should RAISE the release-triggered self-update
+    request (TRDD-Y9KM5RCJ): auto-update (`auto`) AND the release-trigger opt-in
+    (`trigger_enabled`) are BOTH on, AND the plugin cache (`installed`) is strictly behind
+    the latest published release (`published`). Pure — no I/O; the detector's single
+    testable decision point. When False the detector either shows the manual nudge (auto
+    off) or stays silent (already current, or the trigger opt-in is off)."""
+    if not (auto and trigger_enabled):
+        return False
+    if not (installed and published):
+        return False
+    return _semver_tuple(installed) < _semver_tuple(published)
+
+
 def detect_install_scopes() -> list[str]:
     """Return every scope where the plugin is referenced.
 

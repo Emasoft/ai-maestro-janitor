@@ -44,6 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import global_state as gs  # noqa: E402
 import state  # noqa: E402
 import version_update_lib as vu  # noqa: E402
 
@@ -97,13 +98,31 @@ def main() -> int:
         and vu._semver_tuple(latest_installed) < vu._semver_tuple(latest_published)
     ):
         if auto_enabled:
-            # The daemon owns the auto-update. Silent — the next daemon
-            # cycle will run the update and the cache-vs-cron branch
-            # below will fire after the update lands.
-            state.log_line(
-                "version-update",
-                "auto-update is enabled — daemon will run the update on its next cycle; detector stays silent",
+            # The daemon owns the auto-update (single global writer, issue #7 /
+            # PRRD S2.1) — the detector must NOT run `claude plugin update` itself.
+            # But rather than wait up to 6 h for the daemon's version-update beat,
+            # RAISE a release-triggered request the daemon consumes on its next loop
+            # (≤ ~60 s), so the cache catches up in ~5-6 min not hours (TRDD-Y9KM5RCJ).
+            # Idempotent + best-effort; opt-out CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER
+            # falls back to the pure 6 h beat. Still read-only w.r.t. the actual update:
+            # the flag only REQUESTS; the daemon remains the sole writer.
+            trigger_enabled = state.is_truthy_env(
+                "CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER", True,
             )
+            if vu.should_request_prompt_update(
+                latest_installed, latest_published, auto_enabled, trigger_enabled,
+            ):
+                gs.request_version_update(f"{latest_installed}->{latest_published}")
+                state.log_line(
+                    "version-update",
+                    f"requested release-triggered self-update "
+                    f"({latest_installed}->{latest_published}); daemon consumes on next loop",
+                )
+            else:
+                state.log_line(
+                    "version-update",
+                    "auto-update enabled; release-trigger off — daemon runs on its 6 h beat",
+                )
         else:
             # User opted out of auto-update; surface the manual nudge.
             line = dedupe.emit_once(

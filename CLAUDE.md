@@ -55,6 +55,7 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
     daemon.pid · daemon.flock · daemon.heartbeat.ts · daemon.spawn-attempt.ts
     marketplace-op.lock (NEW) · {marketplace-refresh,user-plugins-update,version-update}.last-run.ts
     kill-switch.flag · reload-needed.flag · skills-reload-needed.flag (fleet /reload-skills gen)
+    version-update-requested.flag (release-triggered self-update request; daemon consumes clear-before-run — TRDD-Y9KM5RCJ)
 $PROJECT/.janitor/state/                                              per-session: last-run-<detector>.ts ·
     rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
     resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files ·
@@ -89,6 +90,15 @@ provenance-marked orphaned rules from `~/.claude/rules/`; the only actor that ca
 full uninstall since CC has no uninstall hook + the daemon outlives the plugin on its orphaned
 cache ~7d; opt-out `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED`; NEVER touches memory).
 All marketplace updates wrap `gs.marketplace_lock()` (skip-if-held).
+**Release-triggered self-update (TRDD-Y9KM5RCJ):** the 6h `version-update` beat is too
+slow to land a fresh janitor release (v0.41.0 sat at cache 0.39.0 for hours). The
+per-session `version-update` detector now RAISES `gs.request_version_update()`
+(`version-update-requested.flag`, global-state) when the cache is behind GitHub AND
+`auto_update_on_new_release` is on; the daemon's `_consume_version_update_request(tasks)`
+runs each loop AFTER the stop/pause/maintenance branches, BEFORE the due-loop —
+clear-before-run, then `version-update` Task `.run()` NOW (≤~60s). Single-writer preserved
+(the detector only requests; issue #7/PRRD S2.1). Latency ~5-6min not 6h. Opt-out
+`CLAUDE_PLUGIN_OPTION_VERSION_UPDATE_ON_RELEASE_TRIGGER`; fail-open to the 6h beat.
 
 ## Core files (verified)
 
@@ -273,7 +283,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e86b7c13edc1 digest=2f148fa8b6a0 generated=2026-07-12T05:02:39+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=ddaab45692a8 digest=d354ed6b46ac generated=2026-07-12T08:26:00+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -594,6 +604,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · global_pause_present() -> bool — True iff the machine-wide PAUSE flag is set (TRDD-a3fa4d5d). Distinct from the
   · set_global_pause(reason) -> None — Set the machine-wide PAUSE flag — the daemon idles (stays alive, keeps ticking
   · clear_global_pause() -> None — Clear the machine-wide PAUSE flag — the daemon resumes running due tasks on its
+  · version_update_requested_present() -> bool — True iff a session detector has requested an immediate janitor self-update
+  · request_version_update(reason) -> None — Raise the release-triggered self-update request. Idempotent (re-writing the same
+  · clear_version_update_request() -> None — Clear the release-triggered self-update request. The daemon calls this BEFORE
   · fleet_stop_flag_state() -> str | None — The current machine-wide fleet-stop flag, or None when neither is set. ``disarm``
   · record_fleet_injection(pid, flag_state, now) -> None — Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
   · fleet_injections_seen() -> set[str] — The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
@@ -1116,6 +1129,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · find_memgrep() -> Optional[str] — Resolve the memgrep binary path (env override → PATH → cargo bin).
 `scripts/lib/version_update_lib.py` — Shared janitor self-update helpers — used by the daemon's
   · parse_semver(s) -> tuple[int, ...] — Public semver-ordering helper: '0.31.0' → (0, 31, 0), or (-1,) on
+  · should_request_prompt_update(installed, published, auto, trigger_enabled) -> bool — True iff the version-update detector should RAISE the release-triggered self-update
   · detect_install_scopes() -> list[str] — Return every scope where the plugin is referenced.
   · list_installed_versions(parent) -> list[str] — Semver-shaped subdir names of `parent`, sorted ascending.
   · resolve_latest_published(plugin_root) -> str | None — GitHub releases/latest tag for the repo declared in plugin.json.

@@ -241,6 +241,13 @@
       "default": true,
       "sensitive": false
     },
+    "version_update_on_release_trigger": {
+      "title": "Release-triggered janitor self-update",
+      "description": "When true (DEFAULT), the per-session version-update detector -- on noticing the plugin cache is behind the latest GitHub release -- raises a global request flag the daemon consumes on its next loop (<= ~60 s), so a new janitor release lands in ~5-6 min instead of on the daemon's 6 h self-update beat (daemon_version_update_interval). The detector still never runs `claude plugin update` itself -- it only REQUESTS; the daemon remains the single global writer (issue #7 / PRRD S2.1). Gated additionally by auto_update_on_new_release: with that off, no request is raised. When false, self-updates fall back to the pure 6 h beat. Fail-open: any flag hiccup silently falls back to the 6 h beat.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
     "daemon_enabled": {
       "title": "Global janitor daemon enabled",
       "description": "When true (default), per-session heartbeats lazy-spawn a single OS-wide daemon (scripts/daemon.py) on ~/.claude/janitor-global-state/ that owns every machine-global auto-update task \u2014 marketplace-refresh and user-plugins-update. Singleton enforced via exclusive flock so N concurrent Claude Code sessions across N projects produce ONE worker, not N (closes issue #7). When false, the daemon is never spawned AND the per-session shims for the global tasks become silent no-ops. Manual kill switch: `touch ~/.claude/janitor-global-state/kill-switch.flag` (running daemon exits on next loop tick).",
