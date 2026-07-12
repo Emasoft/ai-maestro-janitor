@@ -1,9 +1,9 @@
 ---
 trdd-id: 90B47EM9
 title: window-burn-rate — take the window budget from agentlensPro instead of deriving it from the rotator
-column: backburner
+column: complete
 created: 2026-07-11T12:35:46+0200
-updated: 2026-07-11T12:35:46+0200
+updated: 2026-07-12T05:04:10+0200
 current-owner: janitor-claude
 assignee: null
 priority: 3
@@ -29,8 +29,9 @@ runtime-targets: [macos, linux]
 impacts: [config-schema]
 attempts: 0
 test-failures: 0
-last-test-result: not-run
-implementation-commits: []
+last-test-result: pass
+last-test-at: 2026-07-12T05:04:10+0200
+implementation-commits: [e107a57, e2e4e89]
 external-refs: []
 ---
 
@@ -38,12 +39,32 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Status: BACKBURNER.** Child of TRDD-WUUR2DFX (read its invariant section first — the
-config-gated / bounded / fail-open / prefer-when-present contract is non-negotiable and
-already has a shipped reference implementation).
+**Status: COMPLETE — shipped on `main` (commit e107a57), unpushed, awaiting the
+NON-EXEMPT publish approval.** 14 tests green (`tests/test_window_burn_rate.py`), ruff
+clean. Shared probe lib `scripts/lib/agentlens_probe.py` (commit e2e4e89, TRDD-WUUR2DFX).
 
-**NEXT ACTION:** none until the parent's open question (switch vs cross-check) is
-answered by the user.
+**CORRECTION — the original "switch the window BUDGET to agentlensPro" premise below is
+WRONG and SUPERSEDED (live-CLI verification, 2026-07-12).** agentlensPro observes spend
+via OTEL, NOT Anthropic's `/api/oauth/usage`, so with no configured capacity its
+`get_window_budget` / `get_account_status.usageWindows` report `capacitySource: "none"` —
+the window budget / % / projection are all null. There is NO authoritative agentlensPro
+window budget to switch to; the OAuth rotator's `/api/oauth/usage` read STAYS the
+authoritative window% source.
+
+**What SHIPPED instead — CULPRIT/CAUSE enrich, not a budget switch:**
+`_agentlens_cause_clause()` PREFERS agentlensPro's `investigate_burn` cause (FORK_STORM,
+FAT_SESSION_REWRITES, … with shareOfWindow + confidence — authoritative OTEL attribution)
+over the native `token_history.fleet_attribution`/`culprit`; the native path stays as the
+fail-open fallback so a machine without the CLI is byte-identical to before. `token_burn`'s
+pure window% math is UNCHANGED. Config option is **`heartbeat_investigate_burn_command`**
+(default `agentlenspro investigate_burn`, empty disables) — NOT the
+`heartbeat_window_budget_command` the proposal named. The probe runs ONLY post-trip (never
+speculative).
+
+**SUPERSEDED — do NOT carry forward:** the "Proposed change" section below
+(`heartbeat_window_budget_command`, `rotator_usage.accounts_usage()` gains a preferred
+source, budget-cap inference retired) — none of it shipped, because there is no
+agentlensPro window budget. The window% still comes from the rotator.
 
 ## Problem
 

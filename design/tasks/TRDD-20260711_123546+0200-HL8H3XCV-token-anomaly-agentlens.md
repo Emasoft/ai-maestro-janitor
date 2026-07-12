@@ -1,9 +1,9 @@
 ---
 trdd-id: HL8H3XCV
 title: token-usage-anomaly — cross-check the learned baseline against agentlensPro burn status
-column: backburner
+column: complete
 created: 2026-07-11T12:35:46+0200
-updated: 2026-07-11T12:35:46+0200
+updated: 2026-07-12T05:04:10+0200
 current-owner: janitor-claude
 assignee: null
 priority: 4
@@ -29,8 +29,9 @@ runtime-targets: [macos, linux]
 impacts: []
 attempts: 0
 test-failures: 0
-last-test-result: not-run
-implementation-commits: []
+last-test-result: pass
+last-test-at: 2026-07-12T05:04:10+0200
+implementation-commits: [f18e233, e2e4e89]
 external-refs: []
 ---
 
@@ -38,11 +39,29 @@ external-refs: []
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body)
 
-**Status: BACKBURNER.** Child of TRDD-WUUR2DFX (read its invariant section first).
+**Status: COMPLETE — shipped on `main` (commit f18e233), unpushed, awaiting the
+NON-EXEMPT publish approval.** 45 tests green (`tests/test_token_usage_anomaly_detector.py`,
+incl. 3 new real-subprocess cross-check tests), ruff clean. Shared probe lib
+`scripts/lib/agentlens_probe.py` (commit e2e4e89, TRDD-WUUR2DFX).
 
-**NEXT ACTION:** none until the parent's open question (switch vs cross-check) is
-answered. NOTE: unlike its sibling TRDD-90B47EM9, this one is a genuine **cross-check**
-candidate rather than a switch — see below.
+**What SHIPPED — CROSS-CHECK (corroborate + attribute), NEVER suppress.** `_agentlens_enrich()`
+runs ONLY after the local median+MAD baseline (`token_baseline.classify_recent`, PURE +
+untouched) has already decided to alarm, and appends to the drift line: the real
+machine-wide burn RATE (`get_burn_status.global.costPerHour`) and the top culprit CAUSE
+(`investigate_burn`). Config: **`heartbeat_burn_status_command`** + **`heartbeat_investigate_burn_command`**
+(defaults `agentlenspro get_burn_status` / `investigate_burn`; empty disables each).
+Fail-open — a missing CLI leaves the alarm byte-identical to before.
+
+**CORRECTION — proposal item 2 ("Suppress or downgrade a local spike the account-level
+view contradicts") is a DELIBERATE NON-GOAL and did NOT ship (decision 2026-07-12).** The
+local baseline is authoritative for the detector's actual job — "this SESSION's own
+heartbeat cost spiked" — so downgrading a real local signal on an account-level view would
+HIDE a real spike (a false negative on the very thing the detector exists to catch).
+agentlensPro therefore CORROBORATES and ATTRIBUTES only; it never gates the local alarm.
+Items 1 (raise confidence when both agree) + 3 (attribute via `investigate_burn`) shipped.
+
+**SUPERSEDED — do NOT carry forward:** "Why this is a cross-check" item 2 (suppress/
+downgrade) below — never implemented, by design.
 
 ## Problem
 
