@@ -132,6 +132,9 @@ worker that skips if the prior worker is still alive. By function:
 - **memory** — memory-librarian (SURFACES aggregation/conflict candidates,
   never mutates), memory-scope-leak (keeps the PUSHED memory scope free of
   machine/user-private data).
+- **observability** — token-usage-anomaly (token-cost drift vs a learned baseline),
+  window-burn-rate (early-rate-limit alarm); both ENRICH/CROSS-CHECK with the optional
+  agentlensPro CLI — see [[agentlens-diagnostics-integration]].
 - **updates (daemon-delegating shims)** — marketplace-refresh, plugin-updates,
   local-plugins-update, project-plugins-update, user-plugins-update (shim),
   version-update (shim).
