@@ -3,14 +3,14 @@ trdd-id: ULYUOP0Y
 title: Expand /janitor-identify-environment into a full secret-safe environment prober
 column: complete
 created: 2026-07-13T01:16:43+0200
-updated: 2026-07-13T01:16:43+0200
+updated: 2026-07-13T01:40:00+0200
 current-owner: ai-maestro-janitor
 task-type: feature
 scope: project
 release-via: publish
 relevant-rules: [1]
 parent-trdd: db169d9e
-implementation-commits: [eca37bb]
+implementation-commits: [eca37bb, e2a929a, 1ad7a5b]
 last-test-result: pass
 ---
 
@@ -19,7 +19,21 @@ last-test-result: pass
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-13
 
 **DONE. Shipped on `main`, unpushed.** ruff clean; back-compat tests green (10);
-env_detect tests green (44). Live run on this host produced a correct full report.
+env_detect tests green (55). Live run on this host produced a correct full report.
+
+**2026-07-13 WAVE-2 addendum (user expanded the ask):** added git repo (remotes +
+GitHub slug, branches + descriptions + last-commit, active git hooks honoring
+core.hooksPath), GitHub branch-protection **rulesets** + repo meta (`--online`, via
+`gh`, fail-open), **wikimem** 3-scope sizes, installed/enabled **plugins** + hook
+events + janitor version/staleness + last marketplace/version upgrade, Claude **auth
+mode** (API vs subscription; tier needs a live probe), and the token-economy tools
+(tldr/distill/fastedit/memgrep/lean-ctx). **Delivery changed per the user:** the
+default run now WRITES the full detail to `reports/identify-environment/<ts>-env.json`
+(fail-open) and prints only a COMPACT digest + the path, so the caller's context holds
+the summary not the whole object. `--online` gates the only network probes; `--json`
+prints the raw object to stdout. Verified live: git (6 branches, `.githooks`), GitHub
+(3 baseline rulesets), wikimem (42/21/52), plugins (35/76, janitor v0.41.0 up-to-date),
+JSON valid + secret-scan clean.
 
 - `scripts/lib/env_detect.py` — NEW pure decision layer (env-injectable, secret-safe,
   fail-open, no network). All classifiers + parsers live here.
