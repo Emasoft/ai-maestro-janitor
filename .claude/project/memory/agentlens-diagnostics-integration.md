@@ -59,6 +59,11 @@ integration shape.
 
 - [[janitor-architecture]] — the architecture hub (owns `scripts/**`).
 
+## See also
+
+- [[janitor-beat-tasks-and-limitations]] — the heartbeat's dynamic TTL-aware tiers
+  that the agentlensPro TTL-regime probe is meant to inform.
+
 ## Notes and lessons learned
 
 [^1]: [ocd:2026-07-12 lmd:2026-07-12] The GOLDEN-rule verification (probe the live CLI

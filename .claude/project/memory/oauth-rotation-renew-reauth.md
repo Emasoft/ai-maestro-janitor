@@ -426,6 +426,8 @@ The documented past errors — each folded in so the symptom finds the fix:
 
 ## See also
 
+- [[janitor-beat-tasks-and-limitations]] — where the rotator's 60 s `oauth-rotator-tick`
+  and 10 min supervisor beats sit in the daemon's overall schedule.
 - [[project_rotator_let_429_happen_version_skew]] — the full incident record for lesson [^2]
   (the version-skew 429 deadlock) and its now-obsolete hotpatch.
 - [[reference_oauth_token_cloudflare_1010_useragent]] — the CF-1010 / missing-User-Agent

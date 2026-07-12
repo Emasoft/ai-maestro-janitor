@@ -89,7 +89,10 @@ in a cross-process marketplace lock (skip-if-held). The daemon's task set
 includes: `marketplace-refresh` (bulk, ~1200s), `user-plugins-update`
 (`--scope user`, ~3600s), `version-update` (janitor self-update, ~21600s, sets
 the reload flag), plus the opt-in OAuth-rotator beats and the Tier-1 memory
-guard (below).
+guard (below). For the FULL beat schedule — every daemon `Task` with its exact
+cadence, the dynamic per-session heartbeat tiers, and the single-writer /
+fleet-exclusion **limitations** that put a whole class of work on the slow clock
+— see [[janitor-beat-tasks-and-limitations]].
 
 ## The scope invariant (HARD RULE — issue #7, PRRD S2.1)
 
