@@ -332,6 +332,72 @@ def _skip_real_state_when_keychain_prompting(request: "pytest.FixtureRequest") -
         pytest.skip("real macOS keychain locked/prompting for access — skipping real_state test (would hang `security`)")
 
 
+# ─── S1i — the NON-FILE witnesses (keychain + launchd) ──────────────────────────────────
+#
+# Every guard above compares FILE CONTENT, so the two states the suite can damage that are not
+# files were invisible to all of them: the macOS KEYCHAIN (where Claude's OAuth credential
+# lives) and LAUNCHD (where the daemon's OS service is registered). On 2026-07-12 the whole
+# fleet went down and the test suite was the prime suspect for a day — with no evidence either
+# way, because nothing was watching those two. These witnesses are that evidence.
+
+_NONFILE_WITNESS: dict[str, str | None] = {}
+
+
+def _supervised_read(argv: list[str], timeout: int = 8) -> str | None:
+    """Run a READ-ONLY probe that the process sandbox (S1h) would otherwise deny.
+
+    The sandbox refuses unscoped `security` and all `launchctl` — correctly, since they are how
+    a test would damage the real keychain / real OS service. But the guard's own SUPERVISOR must
+    be able to observe exactly what it forbids, so it takes the sandbox's documented escape
+    hatch for the duration of the read and hands it straight back. Scoped to one call, restored
+    in `finally`.
+    """
+    import subprocess as _sp
+
+    previous = os.environ.get(sandbox_guard.ENV_ALLOW_REAL)
+    os.environ[sandbox_guard.ENV_ALLOW_REAL] = os.path.basename(argv[0])
+    try:
+        proc = _sp.run(argv, capture_output=True, text=True, timeout=timeout)
+        return proc.stdout if proc.returncode == 0 else None
+    except (OSError, _sp.SubprocessError):
+        return None  # fail-open: a broken security session must not fail the suite
+    finally:
+        if previous is None:
+            os.environ.pop(sandbox_guard.ENV_ALLOW_REAL, None)
+        else:
+            os.environ[sandbox_guard.ENV_ALLOW_REAL] = previous
+
+
+def _credential_witness() -> str | None:
+    """The REAL Claude OAuth item's modification date — ATTRIBUTES ONLY, never the secret.
+
+    NOTE THE ABSENT `-w`. Reading an item's SECRET when the caller is not on its ACL raises the
+    macOS keychain dialog — the prompt FLOOD that once opened hundreds of modals and locked the
+    user out. `find-generic-password` WITHOUT `-w` returns attributes only: no secret, no ACL
+    check, no prompt. The `mdat` field is all we need; the value is none of our business.
+    """
+    import sys as _sys
+
+    if _sys.platform != "darwin":
+        return None
+    out = _supervised_read(["security", "find-generic-password", "-s", "Claude Code-credentials"])
+    if not out:
+        return None  # absent, or an unreachable security session — nothing to compare
+    return next((ln.strip() for ln in out.splitlines() if '"mdat"' in ln), None)
+
+
+def _launchd_witness() -> str | None:
+    """The janitor's registered OS services. A test must never register or tear one down."""
+    import sys as _sys
+
+    if _sys.platform != "darwin":
+        return None
+    out = _supervised_read(["launchctl", "list"])
+    if out is None:
+        return None
+    return "\n".join(sorted(ln for ln in out.splitlines() if "janitor" in ln.lower()))
+
+
 def _source_manifest(root: Path) -> dict[str, str]:
     """Content manifest of the SOURCE files under ``root`` — only what a clobber would
     damage: ``*.py`` and ``*.sh``.
@@ -528,6 +594,10 @@ def pytest_configure(config: pytest.Config) -> None:
     # That is not theoretical — it is how the source tree was clobbered, and it is why the live
     # daemon's writes were invisible to the guard above.
     _export_write_sandbox_to_children()
+    # S1i: the two states that are NOT files, and so were invisible to every guard above.
+    if not hasattr(config, "workerinput"):
+        _NONFILE_WITNESS["credential"] = _credential_witness()
+        _NONFILE_WITNESS["launchd"] = _launchd_witness()
 
 
 @pytest.fixture(autouse=True)
@@ -606,6 +676,35 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             f"attributed to the LIVE daemon (pid {pid}, heartbeat advanced during the run) — "
             f"not a test leak. Pause it (/janitor-global-pause) for a clean signal."
         )
+
+    # ── S1i: the non-file witnesses ────────────────────────────────────────────────────────
+    #
+    # LAUNCHD is a hard failure: nothing but a test registers or tears down a janitor OS
+    # service mid-run, so a change is unambiguous test pollution.
+    #
+    # The CREDENTIAL is REPORTED, never failed — and the difference is the whole lesson of the
+    # 2026-07-12 incident. The credential DID get rewritten mid-session, the suite was blamed
+    # for a day, and it was innocent: Claude Code had refreshed its OWN token. A live Claude
+    # session does that on its own schedule, so failing here would cry wolf on the majority of
+    # real runs — and conftest's own comment above says why that is fatal: "a guard that cries
+    # wolf is a guard people learn to ignore, which is exactly how the 2026-07-11 clobber hid in
+    # plain sight." The process sandbox (S1h) now makes a test-caused change structurally
+    # impossible (unscoped `security` is denied), so this line is EVIDENCE, not an alarm — the
+    # evidence whose absence cost a day of forensics.
+    if _NONFILE_WITNESS:
+        if _launchd_witness() != _NONFILE_WITNESS.get("launchd"):
+            diffs.append("  [launchd] the janitor's registered OS services CHANGED during the run")
+        if _credential_witness() != _NONFILE_WITNESS.get("credential"):
+            print(
+                "\n[keychain-witness] The REAL 'Claude Code-credentials' item was REWRITTEN "
+                "during this run (its mdat moved).\n"
+                "  This is almost certainly your live Claude Code session refreshing its own "
+                "OAuth token — the exact\n"
+                "  signature of the 2026-07-12 fleet outage, where the test suite was blamed "
+                "for a day and was innocent.\n"
+                "  The process sandbox denies the suite any unscoped `security` call, so a "
+                "test cannot have done this."
+            )
 
     if diffs:
         print("\n" + "=" * 78)
