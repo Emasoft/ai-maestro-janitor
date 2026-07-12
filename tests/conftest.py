@@ -452,6 +452,13 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "real_state: opt out of the session-default janitor state isolation for this test (restores the REAL HOME / JANITOR_GLOBAL_STATE_DIR / JANITOR_DATA_DIR / CLAUDE_PLUGIN_DATA env). Use ONLY for tests that must observe real machine state.",
     )
+    config.addinivalue_line(
+        "markers",
+        "real_subprocess(*binaries): allow this test to spawn the named REAL machine binaries "
+        "(e.g. \"gh\", \"claude\", \"launchctl\"), which the process sandbox denies by default. "
+        "Pass no argument to allow all, and \"kill\" to allow signalling a process this test did "
+        "not spawn. Deliberate friction: it makes a real machine-touching call visible in review.",
+    )
     global _SESSION_TMP
     for name in _ISOLATION_ENVS:
         _REAL_ENV[name] = os.environ.get(name)
@@ -533,6 +540,23 @@ def _real_state_optout(request: pytest.FixtureRequest, monkeypatch: pytest.Monke
             monkeypatch.delenv(name, raising=False)
         else:
             monkeypatch.setenv(name, value)
+
+
+@pytest.fixture(autouse=True)
+def _real_subprocess_optout(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Publish the ``real_subprocess`` opt-in for this test (S1h — the PROCESS sandbox).
+
+    The guard reads the allow-list from the ENVIRONMENT rather than from a module global, for
+    the same reason the write sandbox does: a CHILD process inherits the env but not our
+    globals, and the dangerous binary is usually spawned one level down (a detector shelling
+    `gh`, the daemon shelling `claude`). ``monkeypatch.setenv`` scopes it to this test alone,
+    so an opt-in can never leak into the next one.
+    """
+    marker = request.node.get_closest_marker("real_subprocess")
+    if marker is None:
+        return
+    names = ",".join(str(a) for a in marker.args) if marker.args else "*"
+    monkeypatch.setenv(sandbox_guard.ENV_ALLOW_REAL, names)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

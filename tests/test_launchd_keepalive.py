@@ -293,9 +293,19 @@ def test_is_installed_false_without_staged_installer(
 # ── Real shell expansion (sandboxed $HOME, activation skipped) ───────────────
 
 
+@pytest.mark.real_subprocess("bash")
 def test_real_install_writes_expanded_config_without_activation(tmp_path: Path) -> None:
     """Running the installer for real (sandboxed HOME, KEEPALIVE_SKIP_ACTIVATION) writes a
-    valid OS-service config whose $HOME is fully expanded — and touches no real OS service."""
+    valid OS-service config whose $HOME is fully expanded — and touches no real OS service.
+
+    Marked `real_subprocess("bash")` because the process sandbox denies real shell scripts by
+    default: a shell is the ONE child the sandbox cannot follow into (`sitecustomize` reaches
+    every child PYTHON, but this installer's own `launchctl`/`systemctl` calls are its
+    children, not ours, and would be invisible). The safety here does not come from the
+    sandbox — it comes from `KEEPALIVE_SKIP_ACTIVATION=1`, which is the line that stops the
+    installer before it registers anything with the real OS. The marker exists so that fact is
+    stated out loud and re-checked in review, instead of being an unexamined default.
+    """
     plat = launchd_keepalive.current_platform()
     if plat == "other":
         pytest.skip(f"no OS keepalive on {sys.platform}")
