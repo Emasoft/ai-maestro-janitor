@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import builtins
 import io
+import json
 import os
 import shutil
 from pathlib import Path
@@ -35,6 +36,20 @@ from pathlib import Path
 #: child enforces the SAME roots the parent computed — including the REAL home, which the
 #: child can no longer derive itself once HOME has been redirected into a tmp tree.
 ENV_DENY = "JANITOR_TEST_SANDBOX_DENY"
+
+#: AUDIT MODE (Phase 0 of the process sandbox). When set to a path, every process spawn is
+#: LOGGED there and NOTHING is denied. This exists to build the allow-list from REALITY: the
+#: suite's true subprocess surface is a fact to be measured, not guessed. Guessing it would
+#: either break dozens of tests (too strict) or leave a dangerous binary un-denied (too loose).
+#: Unset ⇒ audit is off and the process guard enforces (deny-by-default).
+ENV_AUDIT = "JANITOR_TEST_SANDBOX_AUDIT"
+
+#: The REAL os primitives, bound at import — BEFORE `install()` wraps `os.open`. The audit
+#: writer must use these: routing its own bookkeeping through the patched syscalls would
+#: recurse through the very guard it is reporting on.
+_REAL_OS_OPEN = os.open
+_REAL_OS_WRITE = os.write
+_REAL_OS_CLOSE = os.close
 
 #: Python writes import bytecode into the source tree on every run; that is the interpreter,
 #: not a test escaping its boundary.
@@ -95,6 +110,76 @@ def check(path: object, op: str, deny: tuple[Path, ...]) -> None:
                 f"Fix the TEST: write to `tmp_path`, and route janitor paths through the isolated "
                 f"HOME / JANITOR_DATA_DIR / JANITOR_GLOBAL_STATE_DIR env."
             )
+
+
+def _audit_target() -> str:
+    """The audit-log path, or "" when audit mode is off. Read from the env EVERY call so a
+    child process (which only inherits the env, never our globals) honours it too."""
+    return os.environ.get(ENV_AUDIT, "").strip()
+
+
+def _argv_of(args: object) -> list[str]:
+    """Normalise Popen's polymorphic `args` (a str under shell=True, else a sequence) into a
+    plain list of str. PURE — the classifier and the audit log share this one shape."""
+    if isinstance(args, (str, bytes)):
+        return [os.fsdecode(args) if isinstance(args, bytes) else args]
+    if isinstance(args, (list, tuple)):
+        return [os.fsdecode(a) if isinstance(a, bytes) else str(a) for a in args]
+    return [str(args)]
+
+
+def record_spawn(argv: list[str]) -> None:
+    """Append one JSON line describing a process spawn to the audit log. No-op when audit mode
+    is off.
+
+    Uses the REAL `os.open/write/close` captured at import (not the patched ones) and O_APPEND,
+    so: (a) it cannot recurse through the file guard it lives beside, and (b) concurrent
+    children — the suite spawns many — interleave safely instead of clobbering each other
+    (a single <PIPE_BUF O_APPEND write is atomic on POSIX).
+
+    NEVER raises: an audit failure must not change the outcome of the run it is only observing.
+    """
+    path = _audit_target()
+    if not path:
+        return
+    try:
+        line = json.dumps(
+            {
+                "argv": argv,
+                "cwd": os.getcwd(),
+                # pytest publishes the running test id here; a child process inherits it, so a
+                # spawn deep inside a subprocess still attributes back to the test that caused it.
+                "test": os.environ.get("PYTEST_CURRENT_TEST", ""),
+                "pid": os.getpid(),
+            },
+            ensure_ascii=False,
+        ) + "\n"
+        fd = _REAL_OS_OPEN(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        try:
+            _REAL_OS_WRITE(fd, line.encode("utf-8", "replace"))
+        finally:
+            _REAL_OS_CLOSE(fd)
+    except Exception:  # noqa: BLE001 — observation must never break the observed
+        pass
+
+
+def _install_process_guard() -> None:
+    """Wrap `subprocess.Popen.__init__` — the ONE choke point every `subprocess.run/call/
+    check_output/check_call` funnels through, so wrapping it covers all of them at once.
+
+    PHASE 0 (this commit): audit only — record the spawn, deny nothing. The allow-list that
+    Phase 1 enforces is built from what this measures.
+    """
+    import subprocess  # local: keep module import cost off the non-sandboxed path
+
+    original_init = subprocess.Popen.__init__
+
+    def guarded_init(self, args, *a, **kw):  # type: ignore[no-untyped-def]
+        record_spawn(_argv_of(args))
+        return original_init(self, args, *a, **kw)
+
+    _PATCHED.append((subprocess.Popen, "__init__", original_init))
+    subprocess.Popen.__init__ = guarded_init  # type: ignore[method-assign]
 
 
 def install(deny: tuple[Path, ...]) -> None:
@@ -190,6 +275,12 @@ def install(deny: tuple[Path, ...]) -> None:
     # invisible to the os.* guards above. Guard its ENTRY POINT instead — one check on the root
     # it was handed covers the whole recursive delete.
     _patch(shutil, "rmtree", _path_guard)
+
+    # The PROCESS surface. The file guards above see only Python-level writes; every genuinely
+    # dangerous janitor capability (keychain via `security`, OS service via `launchctl`, typing
+    # into a real terminal via `osascript`/`tmux`, killing a real pid) is a SUBPROCESS or a
+    # SIGNAL and is therefore invisible to them. This closes that class at its own choke point.
+    _install_process_guard()
 
 
 def remove() -> None:
