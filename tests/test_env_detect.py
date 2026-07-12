@@ -457,6 +457,25 @@ def test_detect_mcp_servers_secret_safe():
     assert by_name["remote"]["endpoint"] == "https://api.example.com"
 
 
+# --- detect_subscription ----------------------------------------------------
+
+
+def test_detect_subscription_api_key_and_oauth():
+    """ANTHROPIC_API_KEY → API auth mode (value never emitted); CLAUDECODE → OAuth subscription."""
+    api = ed.detect_subscription({"ANTHROPIC_API_KEY": "sk-ant-fake"})
+    assert api["auth_mode"] == "API key (pay-as-you-go)"
+    assert "sk-ant-fake" not in json.dumps(api)
+
+    oauth = ed.detect_subscription({"CLAUDECODE": "1"})
+    assert oauth["auth_mode"] == "Claude subscription (OAuth login)"
+    assert "needs a live account probe" in oauth["tier"]
+
+
+def test_detect_subscription_unknown_when_bare():
+    """No Claude/Anthropic auth signals → unknown auth mode and tier."""
+    assert ed.detect_subscription({}) == {"auth_mode": "unknown", "tier": "unknown"}
+
+
 # --- CRITICAL: no secret VALUE ever reaches an output -----------------------
 
 

@@ -367,6 +367,7 @@ def gather(*, fast: bool = False) -> dict:
         "python": env_detect.detect_python_env(
             os.environ, executable=sys.executable, py_version=platform.python_version()),
         "cloud": env_detect.detect_cloud(os.environ, which=_which, exists=os.path.exists),
+        "subscription": env_detect.detect_subscription(os.environ),
         "network": _gather_network(),
         "listening": [] if fast else _gather_listening_ports(),
         "path": env_detect.detect_path(os.environ),
@@ -476,6 +477,11 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
             val = py[k]
             pyline += f" · {k}" + (f"=`{val['name']}`" if isinstance(val, dict) else (f"=`{val}`" if val is not True else ""))
     lines.append(pyline)
+
+    # Claude auth / subscription
+    sub = info.get("subscription", {})
+    if sub and sub.get("auth_mode") != "unknown":
+        lines.append(f"- **Claude auth:** {sub.get('auth_mode')}  ·  tier: {sub.get('tier')}")
 
     # Cloud
     cloud = info.get("cloud", {})

@@ -817,6 +817,23 @@ def _mcp_transport(cfg: dict) -> str:
     return "unknown"
 
 
+def detect_subscription(env: Mapping[str, str]) -> dict:
+    """Best-effort, LOCAL-only Claude/Anthropic auth mode.
+
+    The subscription TIER (Pro / Max / Team / Enterprise / API) is NOT locally
+    determinable — it lives behind a live API call or a keychain read this tool
+    deliberately does not make (no network; no `-w` keychain read, per the ACL-flood
+    lesson). So we report the auth MODE, which IS knowable from env, and mark the
+    tier explicitly as needing a live probe rather than guessing.
+    """
+    if env_present(env, "ANTHROPIC_API_KEY") or env_present(env, "CLAUDE_API_KEY"):
+        return {"auth_mode": "API key (pay-as-you-go)", "tier": "API (usage-billed)"}
+    if env_present(env, "CLAUDECODE") or env_present(env, "CLAUDE_CODE_ENTRYPOINT"):
+        return {"auth_mode": "Claude subscription (OAuth login)",
+                "tier": "unknown (needs a live account probe)"}
+    return {"auth_mode": "unknown", "tier": "unknown"}
+
+
 def detect_mcp_servers(configs: list[tuple[str, dict]]) -> list[dict]:
     """Flatten MCP-server definitions from parsed config files into a SECRET-SAFE
     list. `configs` is [(source_label, parsed_json_dict), ...]; each dict may hold
