@@ -1,9 +1,9 @@
 ---
 trdd-id: YMTUPQER
 title: Universal per-heartbeat plugin auto-update — all enabled scopes, user-scope via the daemon
-column: dispatch
+column: complete
 created: 2026-07-12T09:15:33+0200
-updated: 2026-07-12T09:15:33+0200
+updated: 2026-07-12T09:30:47+0200
 current-owner: janitor-claude
 assignee: null
 priority: 2
@@ -27,10 +27,11 @@ test-requirements: [unit, lint]
 review-requirements: []
 runtime-targets: [macos, linux]
 impacts: [config-schema]
-attempts: 0
+attempts: 1
 test-failures: 0
-last-test-result: not-run
-implementation-commits: []
+last-test-result: pass
+last-test-at: 2026-07-12T09:30:47+0200
+implementation-commits: [92bb9af, 38cb35d]
 external-refs: []
 ---
 
@@ -49,8 +50,12 @@ lockstep beat (fleet-skew avoidance, TRDD-db169d9e R2) — never updated one-at-
 this path. The janitor ITSELF keeps its fast release-triggered self-update via
 [[TRDD-Y9KM5RCJ]] (the NPT this builds on).
 
-**NEXT ACTION:** implement the 4 pieces below, test, then STOP before publish
-(`release-via: publish` is NON-EXEMPT — USER approves the release).
+**STATUS (2026-07-12): COMPLETE.** All 4 pieces implemented + committed `92bb9af`
+(impl) and `38cb35d` (20 real no-mock tests); full suite 12605 passed / 1 skipped,
+ruff clean. Column → `complete`. **NEXT ACTION: none for this TRDD** — it is DONE and
+awaiting the v0.42.0 publish, which is NON-EXEMPT (`release-via: publish`) and gated on
+explicit USER approval. Nothing pushed/published yet; it rides the next release with
+[[TRDD-Y9KM5RCJ]].
 
 ## Problem (verified from code, 2026-07-12)
 
