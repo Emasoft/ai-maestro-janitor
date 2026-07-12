@@ -283,7 +283,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=ddaab45692a8 digest=d354ed6b46ac generated=2026-07-12T08:26:00+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=2ff605553495 digest=de467baca714 generated=2026-07-12T10:34:01+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -361,6 +361,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/package-manager-policy.py` — Package-manager-policy detector — supply-chain hardening audit.
   · main() -> int
 `scripts/detectors/plugin-updates.py` — Plugin-updates detector — Python port of plugin-updates.sh.
+  · should_signal_user_update(*, enabled, scope, is_self, is_fleet, user_scope_enabled, installed, latest) -> bool — True iff the detector should SIGNAL the daemon to update this USER-scope plugin
   · main() -> int
 `scripts/detectors/pr-reconciler.py` — PR reconciler — Python port of pr-reconciler.sh.
   · main() -> int
@@ -607,6 +608,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · version_update_requested_present() -> bool — True iff a session detector has requested an immediate janitor self-update
   · request_version_update(reason) -> None — Raise the release-triggered self-update request. Idempotent (re-writing the same
   · clear_version_update_request() -> None — Clear the release-triggered self-update request. The daemon calls this BEFORE
+  · request_plugin_update(plugin_id, scope, reason) -> None — Enqueue a request for the daemon to update ``plugin_id`` at ``scope`` (TRDD-YMTUPQER).
+  · plugin_update_requests() -> list[dict] — The queued per-plugin update requests (each ``{plugin_id, scope, reason}``). Fail-open
+  · clear_plugin_update_request(plugin_id, scope) -> None — Remove one consumed request (``<plugin_id>|<scope>``). The daemon calls this BEFORE
   · fleet_stop_flag_state() -> str | None — The current machine-wide fleet-stop flag, or None when neither is set. ``disarm``
   · record_fleet_injection(pid, flag_state, now) -> None — Record that ``(pid, flag_state)`` was injected so a held flag does not re-inject
   · fleet_injections_seen() -> set[str] — The set of ``"{pid}:{flag_state}"`` dedupe keys already injected (fail-open
