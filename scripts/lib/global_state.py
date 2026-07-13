@@ -430,6 +430,44 @@ def _plugin_update_requests_path() -> Path:
     return global_state_dir() / "plugin-update-requests.json"
 
 
+@contextlib.contextmanager
+def _plugin_requests_lock() -> Iterator[None]:
+    """Serialise the read-modify-write of plugin-update-requests.json across processes.
+
+    N sessions' `plugin-updates` detectors AND the daemon's consume all mutate this one shared
+    map, so a lock-free read-modify-write silently DROPS a request (lost update): two writers
+    both read {}, each adds its own key, and the second write clobbers the first. Unlike the
+    marketplace lock (skip-and-retry, because it wraps a ~10-min operation), this critical
+    section is microseconds — read + rewrite a tiny JSON — so a BLOCKING exclusive flock is
+    correct and deadlock-free. Fail-open: if the lock cannot be taken (no fcntl, fs error) the
+    body still runs unlocked rather than crash the read-only detector that called it."""
+    fd = None
+    try:
+        init_global_state()
+        fd = os.open(str(global_state_dir() / "plugin-update-requests.lock"),
+                     os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            fd = None
+    try:
+        yield
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
 def _read_plugin_update_requests_raw() -> dict:
     """The `{"<plugin_id>|<scope>": {plugin_id, scope, reason}}` map, or {} on a
     missing/corrupt file (fail-open)."""
@@ -446,16 +484,16 @@ def request_plugin_update(plugin_id: str, scope: str, reason: str = "") -> None:
     best-effort/fail-open — a write hiccup just falls back to the daemon's 1 h user-scope
     sweep, so this never crashes the read-only detector that calls it."""
     key = f"{plugin_id}|{scope}"
-    data = _read_plugin_update_requests_raw()
-    data[key] = {"plugin_id": plugin_id, "scope": scope, "reason": reason}
-    try:
-        init_global_state()
-        path = _plugin_update_requests_path()
-        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-        tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError:
-        pass
+    with _plugin_requests_lock():
+        data = _read_plugin_update_requests_raw()
+        data[key] = {"plugin_id": plugin_id, "scope": scope, "reason": reason}
+        try:
+            path = _plugin_update_requests_path()
+            tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            pass
 
 
 def plugin_update_requests() -> list[dict]:
@@ -470,20 +508,21 @@ def clear_plugin_update_request(plugin_id: str, scope: str) -> None:
     running the update (clear-before-run: a run that fails is re-signalled by the detector's
     next ~5 min fire). Idempotent, atomic, fail-open."""
     key = f"{plugin_id}|{scope}"
-    data = _read_plugin_update_requests_raw()
-    if key not in data:
-        return
-    del data[key]
-    try:
-        path = _plugin_update_requests_path()
-        if not data:
-            path.unlink(missing_ok=True)
+    with _plugin_requests_lock():
+        data = _read_plugin_update_requests_raw()
+        if key not in data:
             return
-        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-        tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError:
-        pass
+        del data[key]
+        try:
+            path = _plugin_update_requests_path()
+            if not data:
+                path.unlink(missing_ok=True)
+                return
+            tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            pass
 
 
 # ---------- fleet-stop flag + injection stamps (TRDD-ME8V2YJF) ------------
