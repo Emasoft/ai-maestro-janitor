@@ -3,7 +3,7 @@ trdd-id: YRPUSIFY
 title: Cache-optimize the hooks, spark agent, skills, commands, and rules — stop prefix invalidation + shrink the per-agent floor
 column: dev
 created: 2026-07-02T15:18:48+0200
-updated: 2026-07-11T13:55:00+0200
+updated: 2026-07-13T10:32:00+0200
 current-owner: ai-maestro-janitor
 assignee: ai-maestro-janitor
 priority: 1
@@ -23,6 +23,31 @@ approval-tier: 0
 ---
 
 # Cache-optimize hooks + spark agent + skills/commands/rules (USER command, 2026-07-02: "immediately")
+
+## ⛔ SUPERSEDED — THE BUCKETING APPROACH IS FALSIFIED (2026-07-13, TRDD-K1RJUYGK)
+
+**Do NOT carry the `_bucket_pct` / `_bucket_tokens` rationale forward. It does not work, and
+this TRDD's claim that it fixes hook-injection cache churn is WRONG.**
+
+This TRDD diagnosed the hooks' cache churn as *"the injected TEXT is unique per call"* and
+fixed it by BUCKETING the volatile numbers (`~70%`, `~40k`) so two calls in the same band
+emit byte-identical text. **Measured falsification (2026-07-13):** bucketing is live in EVERY
+cached version (0.31.0 … 0.41.0) and `agentlenspro get_cache_break_report` still shows
+`hook: PreToolUse:Bash` / `INJECTED_BLOCK_CHANGED` as the **#1 cache-break cause on the
+machine** — 893 breaks, 4.96M tokens, **$23.05** — with 712 breaks in a single session.
+
+**Why it cannot work.** The cost is not the text. Per the janitor's own upstream issue
+(yvgude/lean-ctx#778): Claude Code **STRIPS stale system-reminder blocks retroactively, in
+place, mid-transcript**; the strip mutates the cached PREFIX and re-bills every token after
+it. A block that gets deleted later costs the same *whatever it said*. Stable text does not
+survive a strip. The only remedy is the one that issue states: **"No injection → nothing to
+strip → no break."**
+
+**The real fix (shipped, TRDD-K1RJUYGK, commit d50fe8c):** bound the injection **BUDGET**, not
+its text — the advisory is LATCHED to at most once per session per 10-point band, and
+token-budget's repeat-suppression now fails CLOSED with a 30-minute floor. Bucketing was left
+in place (it is harmless and mildly useful for human readability) but it is **not** the fix and
+must not be cited as one.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-11
 
