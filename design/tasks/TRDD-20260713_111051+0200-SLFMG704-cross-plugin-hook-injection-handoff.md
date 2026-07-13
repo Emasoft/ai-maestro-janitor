@@ -3,7 +3,7 @@ trdd-id: SLFMG704
 title: Hand off the hook-injection cache-thrash finding to the plugins that own the other offending hooks
 column: dev
 created: 2026-07-13T11:10:51+0200
-updated: 2026-07-13T13:05:00+0200
+updated: 2026-07-13T13:22:00+0200
 current-owner: janitor-session
 task-type: infra
 severity: HIGH
@@ -83,6 +83,16 @@ An independent, purely deductive confirmation of the conclusion above — no mea
    observed, NOT the component that emitted it.**
 5. **Therefore `hook: Stop` ($17.90) never implied a Stop hook emitted anything** — exactly
    consistent with the attribution table above, where every Stop hook came back clean.
+
+**A THIRD leg, and the cleanest — `hook: PostToolBatch` ($11.51, 131x).** The other two legs
+each need an argument (a spec clause; a grep of ten scripts). This one needs none:
+`PostToolBatch` is a real CC event, and **ZERO hooks on this machine register it** — verified by
+enumerating all 474 registrations across every settings file and every cached marketplace x
+plugin x version (`scripts_dev/audit_hooks.py`). No hook ran there. No hook could have emitted
+it. **There is nothing to blame but the host.**
+
+Three labels, three boundaries, three different reasons no hook could be responsible. The
+pattern is not a coincidence — it is what the label MEANS.
 
 Corroborating the enumeration: StopFailure hooks on this machine are `agentlenspro` (binary),
 `ai-maestro-janitor/on-stop-failure.py` (emits NO `additionalContext` — it works purely by side
@@ -191,9 +201,17 @@ fan-out dominates. This is the #1 *avoidable cache-break* cause, not the #1 burn
    table above. Probable source is Claude Code's own system-reminders. Do NOT report to any
    plugin owner. Optional follow-up: confirm with Anthropic (a reproducible transcript showing
    a host-emitted reminder present in turn N and absent in turn N+M with no other prefix delta).
-2. **`PostToolBatch` ($11.51) — IDENTIFY THE OWNER.** It is not in any `hooks.json` on this
-   machine, so it is registered by some other mechanism (or is Claude Code's own injection at
-   that boundary). Do not report until attributed.
+2. ~~`PostToolBatch` ($11.51) — IDENTIFY THE OWNER~~ **DONE 2026-07-13 — it has NO owner.**
+   `PostToolBatch` IS a real Claude Code hook event (#10 of the 30 in the hooks reference), but
+   an EXHAUSTIVE enumeration of every hook registration on this machine — 474 of them, across
+   every settings file and every cached marketplace × plugin × version, via
+   `scripts_dev/audit_hooks.py` — finds **ZERO hooks registered on `PostToolBatch`.** It is not
+   even among the 13 distinct event names anything here registers.
+
+   **No hook ran at that boundary, so no hook emitted that block.** This is the THIRD and
+   cleanest independent confirmation of the boundary-vs-emitter proof — the other two rest on a
+   spec clause and on a grep, but this one needs neither: there is simply nothing to blame.
+   The block is the HOST's. **Report it to no one.**
 3. ~~Route the broken ai-maestro hook registrations~~ **CANCELLED 2026-07-13 — there was no bug.**
    The registrations use the documented `args` exec form and are VALID; my extraction had
    dropped the `args` field (see the RETRACTED section). **Nothing is owed to ai-maestro.**
