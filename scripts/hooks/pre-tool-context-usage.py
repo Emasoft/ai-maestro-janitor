@@ -59,6 +59,10 @@ _DEFAULT_WINDOW = 1_000_000
 # AND a deny-after-resume stuck loop (if compaction didn't drop us below the cap we fall
 # through to the advisory, never deny-forever).
 _AUTOCOMPACT_DEDUPE_S = 180
+
+# Cap the advisory latch file (TRDD-K1RJUYGK). One line per (session, tier); a long-lived
+# project dir accumulates sessions, so trim to the newest N rather than growing unbounded.
+_LATCH_MAX_LINES = 200
 # PREPARE tier (TRDD-TKNSTP82 C): once we are within this many tokens of the predicted
 # auto-compact point, warn the agent to finish + hand off BEFORE the forced compaction.
 _DEFAULT_PREPARE_TOKENS = 30_000
@@ -186,6 +190,66 @@ def _mark_compacted(project_dir: str, now: int) -> None:
         os.replace(tmp, p)
     except OSError:
         pass
+
+
+def _latch_path(project_dir: str) -> Path:
+    return Path(project_dir) / ".janitor" / "state" / "context-advisory-latch.txt"
+
+
+def _claim_advisory(project_dir: str, session_id: str, tier: str) -> bool:
+    """True iff this (session, tier) advisory has NOT been injected yet → emit it ONCE.
+
+    TRDD-K1RJUYGK. An `additionalContext` block is neither free nor idempotent. Claude Code
+    STRIPS stale system-reminder blocks retroactively, in place, mid-transcript, and that
+    mutation lands inside the cached PREFIX — so every token after it re-bills as
+    cache_creation. Measured (agentlensPro, from Anthropic's own usage numbers): this hook is
+    the #1 cache-break cause on the machine — 893 breaks, 4.96M tokens, $23.05 — and 712
+    breaks / $8.60 in a SINGLE session.
+
+    TRDD-YRPUSIFY tried to fix this by BUCKETING the injected numbers so the text is
+    byte-identical across a band. That cannot work, and the data falsified it: bucketing was
+    live in every cached version (0.31.0…0.41.0) and the breaks continued. The block is
+    DELETED later regardless of what it said — stable text does not survive a strip.
+
+    So the thing to bound is the injection BUDGET, not its TEXT: announce each tier at most
+    once per session. The ENFORCEMENT tier (permissionDecision deny + auto-compact) is
+    deliberately untouched — it is a decision field, not an injected block, and it fires at
+    most once per compaction episode.
+
+    Fails CLOSED (returns False → stay silent) whenever the latch cannot be read or written:
+    an unwritable state dir must never degrade back into injecting on every tool call, which
+    is the exact bug this guard exists to stop. The >=85% enforcement tier is the backstop.
+    """
+    if not project_dir or not session_id:
+        return False  # cannot latch → cannot bound → do not inject
+    key = f"{session_id} {tier}"
+    p = _latch_path(project_dir)
+    try:
+        seen = p.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        seen = []
+    except OSError:
+        return False
+    if key in seen:
+        return False
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + f".tmp.{os.getpid()}")
+        tmp.write_text("\n".join([*seen[-_LATCH_MAX_LINES:], key]) + "\n", encoding="utf-8")
+        os.replace(tmp, p)
+    except OSError:
+        return False  # could not record the claim → do not inject (fail closed)
+    return True
+
+
+def _advisory_tier(pct: int) -> str:
+    """The latch key for the %-band advisory: one announcement per 10-point band.
+
+    Bands (not a single once-per-session latch) so an escalating session still gets an
+    escalating nudge (60 → 70 → 80) before the >=85% enforcement fires — at a cost of AT MOST
+    three injected blocks per session instead of the measured 712.
+    """
+    return f"suggest:{(pct // 10) * 10}"
 
 
 def _run_compact_trigger(pct: int) -> str:
@@ -321,7 +385,12 @@ def main() -> int:
     if prediction is not None:
         prepare_tokens = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_PREPARE_TOKENS"), _DEFAULT_PREPARE_TOKENS)
         if prediction.tokens_until_compact <= prepare_tokens:
-            sys.stdout.write(json.dumps(_advisory(_format_prepare_line(pct, prediction))))
+            # TRDD-K1RJUYGK: LATCHED — the prepare alert is announced ONCE per session, not on
+            # every tool call inside the zone. Re-emitting it seeds a fresh strippable
+            # system-reminder block per call, and Claude Code's retroactive strip of those
+            # blocks is what re-bills the cached prefix (see `_claim_advisory`).
+            if _claim_advisory(project_dir, session_id, "prepare"):
+                sys.stdout.write(json.dumps(_advisory(_format_prepare_line(pct, prediction))))
             return 0
 
     # ADVISORY tier — stay SILENT below the suggest threshold so the guard costs ZERO
@@ -329,7 +398,13 @@ def main() -> int:
     # forward in the transcript and is re-read every subsequent turn, so injecting one on
     # every low-% tool call would itself add to the very per-turn bleed this guard exists
     # to cut. Below the threshold the statusline already shows the %; we add nothing.
-    if pct >= suggest_pct:
+    #
+    # TRDD-K1RJUYGK: above the threshold it is ALSO latched — one announcement per 10-point
+    # band per session. Injecting on every tool call above 60% made this hook the machine's
+    # #1 prompt-cache breaker (893 breaks, $23.05), because Claude Code retroactively STRIPS
+    # each injected block and that mutation re-bills the whole cached suffix. Bucketing the
+    # text (TRDD-YRPUSIFY) could not help — a stripped block costs the same whatever it said.
+    if pct >= suggest_pct and _claim_advisory(project_dir, session_id, _advisory_tier(pct)):
         sys.stdout.write(json.dumps(_advisory(_format_line(pct, tokens, window, stale, suggest_pct))))
     return 0
 

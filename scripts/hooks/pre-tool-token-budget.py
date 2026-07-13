@@ -76,30 +76,52 @@ _SPAWNER_TOOLS = frozenset({"Task", "Agent"})
 # the window are silenced (advisory) or shrunk to one stable line (hard). Every injected
 # nudge rides the transcript and is re-read by all later turns, so re-injecting the same
 # ~120-token paragraph on EVERY tool call is exactly the context bloat this hook polices.
-_DEFAULT_REPEAT_S = 180
+# TRDD-K1RJUYGK raised this from 180s. 3 minutes sounds conservative but is not: a long
+# session re-injects the nudge every 3 minutes for hours, and EVERY injection seeds a fresh
+# system-reminder block that Claude Code later STRIPS retroactively — and it is the strip,
+# not the text, that mutates the cached prefix and re-bills everything after it. Measured
+# (agentlensPro, from Anthropic's own usage numbers): the janitor's two no-matcher PreToolUse
+# hooks are the #1 cache-break cause on the machine (893 breaks, 4.96M tokens, $23.05). A
+# 30-minute floor cuts the injection count ~10x while still re-warning a genuinely runaway
+# session. Bucketing the text (TRDD-YRPUSIFY) does NOT substitute for this: a stripped block
+# costs the same no matter what it said.
+_DEFAULT_REPEAT_S = 1800
 _HARD_REPEAT_LINE = "⚠⚠ token-guard: hard budget still exceeded — see the prior nudge; wrap up now."
 
 
 def _repeat_suppressed(key: str, now: int, project_dir: str, window_s: int) -> bool:
     """True iff the SAME nudge `key` was already emitted < `window_s` ago (and stamp the
-    emission otherwise). Fail-open: any I/O error → False (never suppress on doubt, and
-    never crash the hook). The stamp lives beside the other per-session state files."""
+    emission otherwise). The stamp lives beside the other per-session state files.
+
+    Fails CLOSED (returns True → SUPPRESS) when the stamp cannot be read or written.
+    TRDD-K1RJUYGK inverted this: it used to fail OPEN ("never suppress on doubt"), which is
+    exactly backwards now that injecting is known to be the expensive act. An unwritable state
+    dir meant we could not remember having warned — and so warned on EVERY tool call, the
+    worst possible outcome. Silence is the safe failure: the hard-tier `deny` (an unstripped
+    decision field, not an injected block) remains the backstop."""
     if window_s <= 0 or not project_dir:
         return False
+    stamp = Path(project_dir) / ".janitor" / "state" / "token-budget-last-nudge.txt"
     try:
-        stamp = Path(project_dir) / ".janitor" / "state" / "token-budget-last-nudge.txt"
+        raw = stamp.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raw = ""
+    except OSError:
+        return True  # cannot read → cannot bound → stay silent
+    if raw:
         try:
-            prev_key, prev_ts = stamp.read_text(encoding="utf-8").rsplit(" ", 1)
+            prev_key, prev_ts = raw.rsplit(" ", 1)
             if prev_key == key and 0 <= now - int(prev_ts) < window_s:
                 return True
-        except (OSError, ValueError):
-            pass  # missing/corrupt stamp — treat as first emission
+        except ValueError:
+            pass  # corrupt stamp — treat as first emission
+    try:
         stamp.parent.mkdir(parents=True, exist_ok=True)
         tmp = stamp.with_suffix(f".tmp.{os.getpid()}")
         tmp.write_text(f"{key} {now}", encoding="utf-8")
         os.replace(tmp, stamp)
     except OSError:
-        return False
+        return True  # cannot record the emission → cannot bound repeats → stay silent
     return False
 
 

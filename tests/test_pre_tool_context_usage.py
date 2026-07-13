@@ -200,3 +200,76 @@ def test_no_permission_decision_emitted(tmp_path: Path) -> None:
     out = json.loads(proc.stdout)
     assert "permissionDecision" not in out["hookSpecificOutput"], "advisory-only: permissionDecision must be absent so the tool's permission flow is untouched"
     assert "permissionDecision" not in out
+
+
+# ---------- TRDD-K1RJUYGK: the advisory must be LATCHED, not per-tool-call --------------
+#
+# WHY these exist: this hook was measured (agentlensPro, using Anthropic's own
+# cache_creation/cache_read numbers) as the #1 prompt-cache breaker on the machine —
+# 893 breaks, 4.96M tokens, $23.05 — because it injected an `additionalContext` block on
+# EVERY tool call once context was >=60%. Claude Code STRIPS those system-reminder blocks
+# retroactively, mid-transcript, and the strip mutates the cached PREFIX, re-billing every
+# token after it. TRDD-YRPUSIFY tried to fix this by making the injected TEXT byte-stable
+# (bucketing); that could not work and the data falsified it — a stripped block costs the
+# same whatever it said. What must be bounded is the injection COUNT.
+
+
+def _snap(pct: int) -> dict:
+    return {"pct": pct, "tokens": pct * 10_000, "window": 1_000_000, "ts": int(time.time())}
+
+
+def test_advisory_is_injected_once_per_band_not_on_every_tool_call(tmp_path: Path) -> None:
+    """The >=60% advisory is announced ONCE per session per 10-point band; later tool calls
+    in the same band inject NOTHING (the fix for the #1 machine-wide cache break)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    seen = [_ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p)) for _ in range(5)]
+    assert seen[0] is not None, "the first crossing must still warn the model"
+    assert all(x is None for x in seen[1:]), (
+        f"tool calls 2..5 in the SAME band must inject nothing; got {seen[1:]!r}. "
+        "Every injected block is later stripped by Claude Code and re-bills the cached prefix."
+    )
+
+
+def test_a_higher_band_re_announces(tmp_path: Path) -> None:
+    """An escalating session still gets an escalating nudge: a NEW 10-point band re-warns."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    first = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p))
+    same = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(67), project=p))
+    higher = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(75), project=p))
+    assert first is not None
+    assert same is None, "67% is the same 60-band as 65% — must not re-inject"
+    assert higher is not None, "crossing into the 70-band must re-warn before enforcement"
+
+
+def test_each_session_gets_its_own_latch(tmp_path: Path) -> None:
+    """The latch is keyed by session: a fresh session warns again (it has a fresh transcript)."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    assert _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+    assert _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p)) is None
+    assert _ctx(_run({"session_id": "s2"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+
+
+def test_latch_fails_closed_when_it_cannot_be_recorded(tmp_path: Path) -> None:
+    """If the latch cannot be written we CANNOT bound repeats, so we must stay SILENT.
+
+    Failing open here would mean injecting on every tool call — the exact bug. The >=85%
+    enforcement tier (a permissionDecision, not an injected block) remains the backstop.
+    """
+    p = tmp_path / "proj"
+    p.mkdir()
+    # Pre-write the snapshot while the state dir is still writable, then make `.janitor`
+    # unwritable so the latch file can be neither created nor read.
+    d = p / ".claude" / "janitor"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "context-usage.s1.json").write_text(json.dumps(_snap(65)), encoding="utf-8")
+    state = p / ".janitor"
+    state.mkdir(parents=True, exist_ok=True)
+    state.chmod(0o500)  # r-x: cannot create the latch file inside
+    try:
+        proc = _run({"session_id": "s1"}, enabled=True, snapshot=None, project=p)
+        assert _ctx(proc) is None, "unwritable latch must suppress the advisory, never inject"
+    finally:
+        state.chmod(0o700)

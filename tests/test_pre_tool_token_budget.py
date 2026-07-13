@@ -358,3 +358,41 @@ def test_same_bucket_emits_identical_text(tmp_path: Path) -> None:
     assert a is not None and b is not None and c is not None
     assert a == b, "same bucket -> identical string (cache-stable)"
     assert a != c, "different bucket -> different string"
+
+
+# ---------- TRDD-K1RJUYGK: repeat-suppression must fail CLOSED -------------------------
+
+
+def test_repeat_suppression_fails_closed_when_the_stamp_cannot_be_written(tmp_path: Path) -> None:
+    """An unwritable state dir must SUPPRESS the nudge, never inject it.
+
+    This inverts the original fail-OPEN default ("never suppress on doubt"). Injecting is the
+    expensive act: every injected block is later STRIPPED by Claude Code, and the strip mutates
+    the cached prefix, re-billing everything after it (measured: the janitor's no-matcher
+    PreToolUse hooks are the machine's #1 cache-break cause — 893 breaks, $23.05). Failing open
+    meant "we cannot remember warning you, so warn again" — i.e. warn on EVERY tool call, the
+    worst possible outcome. The hard-tier `deny` (a decision field, not an injected block)
+    remains the backstop.
+    """
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    state = proj / ".janitor" / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    state.chmod(0o500)  # r-x: the stamp can be neither created nor replaced
+    try:
+        assert hook._repeat_suppressed("t1", 1000, str(proj), 1800) is True
+    finally:
+        state.chmod(0o700)
+
+
+def test_repeat_suppression_still_emits_the_first_time_and_silences_the_repeat(tmp_path: Path) -> None:
+    """Happy path is unchanged: first emission passes, an identical key inside the window is
+    suppressed, and the window is the 30-minute floor (raised from 180s by TRDD-K1RJUYGK)."""
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    assert hook._repeat_suppressed("t1", 1000, str(proj), hook._DEFAULT_REPEAT_S) is False
+    assert hook._repeat_suppressed("t1", 1100, str(proj), hook._DEFAULT_REPEAT_S) is True
+    # ...and after the window elapses it may warn again.
+    assert hook._repeat_suppressed("t1", 1000 + hook._DEFAULT_REPEAT_S + 1, str(proj), hook._DEFAULT_REPEAT_S) is False
+    assert hook._DEFAULT_REPEAT_S >= 1800
