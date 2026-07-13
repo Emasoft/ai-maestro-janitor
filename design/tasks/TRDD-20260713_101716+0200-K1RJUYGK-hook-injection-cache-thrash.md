@@ -3,7 +3,7 @@ trdd-id: K1RJUYGK
 title: The janitor's own PreToolUse hooks are the machine's #1 prompt-cache breaker
 column: dev
 created: 2026-07-13T10:17:16+0200
-updated: 2026-07-13T10:17:16+0200
+updated: 2026-07-13T12:05:00+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: critical
@@ -13,10 +13,42 @@ supersedes-approach-of: YRPUSIFY
 
 # The janitor's own PreToolUse hooks are the machine's #1 prompt-cache breaker
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-13
+## ⛔ ATTRIBUTION RETRACTED (2026-07-13, same day) — READ THIS BEFORE THE NUMBERS BELOW
 
-**MEASURED, not theorized.** `agentlenspro get_cache_break_report` (reads Anthropic's own
-`cache_creation`/`cache_read` numbers from raw API bodies — not estimates):
+**The FIX is right. The BLAME is not proven.** Everything below attributing `hook:
+PreToolUse:Bash` ($23.05 machine-wide / $8.60 in one session / "the #1 cache-break offender") to
+the janitor is **NOT ESTABLISHED**, and the early-session breaks are **provably NOT ours**:
+
+1. `agentlenspro`'s `hook: <Event>` label names the **event BOUNDARY at which a changed block was
+   observed — NOT the component that emitted it.** Proof (deductive, no measurement needed): the
+   hooks spec says `StopFailure` output *"and exit code are ignored"*, so no StopFailure hook can
+   inject anything — yet AgentLens reports a `hook: StopFailure:rate_limit`
+   `INJECTED_BLOCK_CHANGED` break ($5.45). A label that can name a boundary where injection is
+   *impossible* is not an accusation against a hook. (Full argument: TRDD-SLFMG704.)
+2. **Our two PreToolUse hooks are SILENT at low context** — the advisory is gated at ≥60% and
+   token-budget is silent on an idle turn (both verified by running them against synthetic
+   payloads: empty stdout). Yet the `hook: PreToolUse:Bash` breaks in session c8a95d7e begin at
+   **turn 3**, when context was low. **They cannot have been ours.**
+3. Claude Code injects its OWN `<system-reminder>` blocks around tool calls (e.g. the recurring
+   *"The task tools haven't been used recently…"* reminder, and a large skills catalogue) — those
+   are strippable blocks from no hook at all, and they are a far better fit for the early breaks.
+
+**What SURVIVES, and why the fix still ships:** our hooks *did* emit `additionalContext` on every
+tool call above 60% (verified in source). Per-tool-call injection is dangerous on first
+principles — the host strips the block later and the strip re-bills the cached suffix — so
+bounding the injection COUNT is correct regardless of how much of that $23 was ours. The fix
+costs nothing and removes a real hazard. It is the *headline attribution* that was unearned.
+
+**THE ONLY PROOF that settles it:** publish the fix, then re-run
+`agentlenspro get_cache_break_report --sessionId <new session>` and see whether
+`hook: PreToolUse:*` leaves `topOffenders`. If it does NOT, the remaining breaks at that
+boundary are the host's and we were never the cause. Do not claim this fixed until then.
+
+## ⏵ STATE — the original (over-claimed) finding, kept for the record — 2026-07-13
+
+**MEASURED, not theorized** — the NUMBERS below are real (they come from Anthropic's own
+`cache_creation`/`cache_read` figures via `agentlenspro get_cache_break_report`). It is the
+ATTRIBUTION of them to the janitor that is retracted above. Read both.
 
 - **Machine-wide #1 offender:** `hook: PreToolUse:Bash` — cause `INJECTED_BLOCK_CHANGED` —
   **893 occurrences, 4,959,149 wasted tokens, $23.05.** Larger than `IDLE_TTL_EXPIRY`
