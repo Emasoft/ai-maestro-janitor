@@ -1,15 +1,36 @@
 ---
 trdd-id: K1RJUYGK
 title: Bound the injection budget of the janitor's no-matcher PreToolUse hooks (attribution of the cost RETRACTED)
-column: dev
+column: testing
 created: 2026-07-13T10:17:16+0200
-updated: 2026-07-13T12:05:00+0200
+updated: 2026-07-13T15:20:00+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: critical
 relevant-rules: [3]
 supersedes-approach-of: YRPUSIFY
+implementation-commits: [d50fe8c, 6245379]
+released-in: v0.42.0
 ---
+
+## ⏵ PUBLISH STATE — 2026-07-13 (authoritative; supersedes older sections)
+
+**SHIPPED in v0.42.0** (release commit 86ddcd6; hook fixes d50fe8c + the review-pass
+correction 6245379). The fix is now in the published plugin — it is no longer inert.
+
+**Still PENDING — the falsification the TRDD requires before this is `complete`:** re-run
+`agentlenspro get_cache_break_report --sessionId <NEW session on 0.42.0>` once the plugin cache
+rolls to 0.42.0 (the release-triggered self-update, TRDD-Y9KM5RCJ, pulls it within ~5-6 min; a
+`/reload-plugins` in a fresh session activates it). Show whether `hook: PreToolUse:*` has LEFT
+`topOffenders`. Column stays `testing` until that measurement exists — a green unit test is not
+proof (the prior fix, YRPUSIFY, had passing tests and was still wrong). Do NOT mark `complete`
+on the strength of the publish alone.
+
+**What the review pass (6245379) added on top of the original d50fe8c fix** — three real bugs in
+the fix itself: the suppression path was still injecting on the hard tier's hot path; the
+single-key stamp only caught consecutive repeats (an A/B alternation defeated it); and the
+context latch was a one-way door that left every compaction after the first unwarned. All three
+falsified (revert → test fails) and fixed. See 6245379.
 
 # Bound the injection budget of the no-matcher PreToolUse hooks
 
