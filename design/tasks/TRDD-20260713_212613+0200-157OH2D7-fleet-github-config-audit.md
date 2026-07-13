@@ -1,13 +1,14 @@
 ---
 trdd-id: 157OH2D7
 title: Fleet GitHub-config + security audit across all plugin repos with an on-demand fix skill
-column: planned
+column: testing
 created: 2026-07-13T21:26:13+0200
-updated: 2026-07-13T21:26:13+0200
+updated: 2026-07-13T22:05:00+0200
 current-owner: janitor-session
 task-type: security
 severity: high
 relevant-rules: [3]
+implementation-commits: [8bd2949]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-13
@@ -45,9 +46,15 @@ every finding carries the pointer to the fix skill).
 - Also: wire the hint into `branch-protection.py`, flag linear-history there, drop its self-skip;
   fix the stale linear-history claim in the setup skill's description.
 
-**NEXT ACTION:** build A → B → C, tests (pure truth-table + falsification), full pytest + ruff,
-one REAL read-only run against the 13 live repos to reproduce the two reported facts, commit on
-`main` with `TRDD-157OH2D7`. Do NOT push (rides next release).
+**STATUS: IMPLEMENTED + tests green (commit 8bd2949).** `column: testing`. Full suite 12834
+passed; ruff clean; falsification verified for the classifier classes AND the branch-protection
+linear-history emit. Remaining before `complete`: (1) ships on the next `publish.py` release;
+(2) the actual `--apply` of the fix to the live fleet (10 repos carry linear-history, 1 is
+UNPROTECTED) — a REMOTE-mutation Tier-2 action that awaits explicit USER go-ahead (do not run
+`--apply` unprompted).
+
+**NEXT ACTION:** await USER decision on running `/janitor-github-config-fix --all --apply`
+against the live fleet, then the next release. Nothing else forceable.
 
 **Load-bearing facts / gotchas:**
 - Reuse, don't reinvent: `branch_protection_lib.apply_baseline_rulesets` /
