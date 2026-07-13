@@ -14,6 +14,7 @@ proven via injected/monkeypatched spawn points — never a real subprocess.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -163,33 +164,63 @@ def test_aimaestro_command_argv_shape() -> None:
     ]
 
 
-def test_fire_aimaestro_spawns_detached(monkeypatch) -> None:
-    """The aimaestro channel fires the resolved argv via a detached Popen, mirroring
-    the iTerm branch's fire-and-forget contract."""
-    calls: list = []
-    monkeypatch.setattr(fi.subprocess, "Popen", lambda *a, **k: calls.append((a, k)))
-    plan = {
-        "channel": "aimaestro", "command": "/janitor-arm",
-        "argv": ["cli", "session", "command", "agent-foo", "--newline", "--", "/janitor-arm"],
+def _aimaestro_plan(command: str = "/janitor-arm") -> dict:
+    return {
+        "channel": "aimaestro", "command": command,
+        "argv": ["cli", "session", "command", "agent-foo", "--newline", "--", command],
     }
+
+
+def test_fire_aimaestro_runs_the_cli_synchronously_and_bounded(monkeypatch) -> None:
+    """The aimaestro channel runs the resolved argv SYNCHRONOUSLY (subprocess.run, not a
+    detached Popen) under a bound, and reports DELIVERY (returncode 0), not mere spawn.
+    Unlike the keystroke channels it is an RPC with a real exit code (TRDD-3VW434Q8)."""
+    calls: list = []
+
+    def fake_run(*a, **k):
+        calls.append((a, k))
+        return subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(fi.subprocess, "run", fake_run)
+    plan = _aimaestro_plan()
     assert fi.fire(plan) is True
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args[0] == plan["argv"]
-    assert kwargs["start_new_session"] is True
+    assert kwargs["timeout"] == fi.AIMAESTRO_CLI_TIMEOUT_S   # bounded — never an unbounded wait
+    assert kwargs["check"] is False                          # a non-zero exit is data, not an exception
+
+
+def test_fire_aimaestro_nonzero_exit_is_a_failure(monkeypatch) -> None:
+    """THE REGRESSION GUARD (TRDD-3VW434Q8). A non-zero CLI exit — a 403 once ai-maestro
+    strict-classifies the inject verb (their #54), a down server, an unauthenticated CLI,
+    a stale session name — means the command was NOT delivered, so fire() must report
+    False. It previously returned True on spawn, so `_fire_fleet_stop` stamped an
+    UNDELIVERED machine-wide stop as delivered and never retried it."""
+    monkeypatch.setattr(
+        fi.subprocess, "run",
+        lambda *a, **_k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr="403 Forbidden"),
+    )
+    assert fi.fire(_aimaestro_plan()) is False
+
+
+def test_fire_aimaestro_timeout_is_a_failure(monkeypatch) -> None:
+    """A CLI that hangs past the bound is UNDELIVERED, not delivered. TimeoutExpired
+    subclasses SubprocessError, so the branch's existing guard renders it as False —
+    the caller logs FIRE-FAILED and retries next beat."""
+    def hang(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd="cli", timeout=fi.AIMAESTRO_CLI_TIMEOUT_S)
+    monkeypatch.setattr(fi.subprocess, "run", hang)
+    assert fi.fire(_aimaestro_plan()) is False
 
 
 def test_fire_aimaestro_spawn_failure_returns_false(monkeypatch) -> None:
-    """A spawn failure on the aimaestro channel degrades to False, same contract as
-    the iTerm branch — never lets the exception escape."""
+    """An un-spawnable CLI (absent binary) degrades to False rather than letting the
+    OSError escape and crash the whole fleet beat through Task.run's blanket handler."""
     def boom(*_a, **_k):
         raise FileNotFoundError("cli not found")
-    monkeypatch.setattr(fi.subprocess, "Popen", boom)
-    plan = {
-        "channel": "aimaestro", "command": "/x",
-        "argv": ["cli", "session", "command", "s", "--newline", "--", "/x"],
-    }
-    assert fi.fire(plan) is False
+    monkeypatch.setattr(fi.subprocess, "run", boom)
+    assert fi.fire(_aimaestro_plan("/x")) is False
 
 
 def test_fire_wtype_and_xdotool_use_detached_steps(monkeypatch) -> None:

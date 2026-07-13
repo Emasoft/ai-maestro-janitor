@@ -49,6 +49,12 @@ import terminal_trigger  # noqa: E402  (bare sibling import; lib/ is on sys.path
 # tampered registry entry can't smuggle AppleScript into the daemon's own shell.
 _UUID_RE = re.compile(r"^[0-9A-Fa-f-]{8,64}$")
 
+# How long `fire()` waits for the ai-maestro CLI to confirm ONE `session command`
+# (TRDD-3VW434Q8). Deliberately the SAME bound the self-trigger path already proved for
+# the identical CLI verb (terminal_trigger._try_ai_maestro_send, timeout=6.0) — one verb,
+# one bound, so the two callers can never disagree about how long "delivered" may take.
+AIMAESTRO_CLI_TIMEOUT_S = 6.0
+
 # The command-typing rungs → the slash-command each injects. `update` re-arms,
 # which re-bakes the rolled stub and picks up the new version. `esc_nudge`
 # (ESC only) and the hard-restart rungs are deliberately absent — they don't type a
@@ -240,9 +246,17 @@ def build_injection(
 
 
 def fire(plan: dict | None) -> bool:
-    """Fire a built injection plan fully DETACHED — so the daemon never blocks and
-    is never killed by the very ESC the plan sends. Returns True iff a sender was
-    launched, False otherwise. Safe to call with None (a declined plan) → False.
+    """Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
+    False otherwise. Safe to call with None (a declined plan) → False.
+
+    The four KEYSTROKE channels (iterm / tmux / wtype / xdotool) are spawned fully
+    DETACHED — so the daemon never blocks and is never killed by the very ESC the plan
+    sends — and for them "spawned" is the only outcome available: a local keystroke
+    sender has no exit code that means "the pane rejected it".
+
+    The `aimaestro` channel is different in kind and is run SYNCHRONOUSLY (see its branch):
+    it is an RPC to a server, so it HAS a meaningful exit code, and it sends no ESC to the
+    daemon's own pane — the detachment rationale above simply does not apply to it.
 
     A spawn failure (missing `osascript`, a PATH-stripped env, any OSError) returns
     False rather than raising: the caller renders that as a per-instance FIRE-FAILED
@@ -276,18 +290,34 @@ def fire(plan: dict | None) -> bool:
             terminal_trigger._fire_detached_steps(plan["delay_s"], plan["steps"])
             return True
         if plan["channel"] == "aimaestro":
-            # Fire-and-forget (unlike self-trigger's _try_ai_maestro_send, which
-            # waits synchronously for CLI confirmation): the daemon's fleet-stop
-            # beat must never block on a subprocess, so we spawn detached exactly
-            # like the iTerm/osascript branch above (TRDD-ME8V2YJF follow-up).
-            subprocess.Popen(  # noqa: S603 - fixed argv (resolved CLI + validated session), no shell
+            # SYNCHRONOUS + bounded, unlike the detached keystroke channels above
+            # (TRDD-3VW434Q8). This branch used to fire-and-forget with stdout/stderr
+            # → DEVNULL and no returncode check, so it returned True on SPAWN, never on
+            # DELIVERY — and every consumer believed it: _fire_fleet_stop stamped an
+            # UNDELIVERED machine-wide stop as delivered (so it was never retried while
+            # the flag was held, and that session's cron kept billing turns straight
+            # through a stop the user believed was in effect), and the F3 recovery audit
+            # recorded "fired" for a command that never landed. That is not hypothetical:
+            # a down server, an unauthenticated CLI, or a stale tmux session name all
+            # produce it today — and a 403 will, once ai-maestro strict-classifies the
+            # inject verb (their issue #54).
+            #
+            # It is safe to wait here, and it was never necessary not to: the "must never
+            # block" rule this branch inherited from the iTerm/tmux plans defends against
+            # the ESC those plans send KILLING THE DAEMON THAT LAUNCHED THEM. This channel
+            # is an RPC to a server; it sends no ESC to the daemon's pane, so it faces no
+            # such threat. The bound is the one the self-trigger path
+            # (terminal_trigger._try_ai_maestro_send) has already proven for the identical
+            # CLI verb. A timeout is a failure, not a success: it means undelivered.
+            proc = subprocess.run(  # noqa: S603 - fixed argv (resolved CLI + validated session), no shell
                 plan["argv"],
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
+                capture_output=True,
+                text=True,
+                timeout=AIMAESTRO_CLI_TIMEOUT_S,
+                check=False,
             )
-            return True
+            return proc.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
     return False
