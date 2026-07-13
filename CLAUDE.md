@@ -288,7 +288,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=53f008fef23f digest=8671e9698c1f generated=2026-07-13T11:03:05+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=76c881bb091f digest=531c8b8843d5 generated=2026-07-13T23:09:52+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -304,6 +304,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · task_memory_guard() -> None — Tier-1 OOM guard (TRDD-7100178d Pillar 4, Decision 1 — user-signed 2026-05-31).
   · task_cache_prune() -> None — Prune stale plugin-cache version dirs (TRDD-a6d2fdaf, Fix A).
   · task_rules_cleanup() -> None — Post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W).
+  · task_github_config_audit() -> None — Fleet-wide GitHub-config audit (TRDD-157OH2D7) — the single-writer machine-global sweep.
   · task_session_liveness(fleet) -> None — Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
   · task_fleet_stop() -> None — Daemon-driven fleet disarm/pause beat (TRDD-ME8V2YJF): when the machine-wide
   · Task — One periodic unit of work owned by the daemon.
@@ -327,6 +328,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/cross-scope-reference-drift.py` — Cross-scope reference drift — Python port of cross-scope-reference-drift.sh.
   · main() -> int
 `scripts/detectors/dirty-tree.py` — Dirty-tree detector — Python port of dirty-tree.sh.
+  · main() -> int
+`scripts/detectors/fleet-github-config.py` — fleet-github-config — SURFACE the daemon's fleet GitHub-config findings (TRDD-157OH2D7).
   · main() -> int
 `scripts/detectors/github-issues-watch.py` — github-issues-watch — notify the main Claude of new issues / new comments (TRDD-2KQQAEPP).
   · main() -> int
@@ -440,6 +443,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/generate_integrity_manifest.py` — generate_integrity_manifest — write .integrity/manifest-sha256.json.
   · main() -> int
+`scripts/github_config_fix.py` — Backing script for /janitor-github-config-fix (TRDD-157OH2D7) — the on-demand FIX.
+  · main() -> int
 `scripts/global_control_cli.py` — Backing CLI for the MACHINE-WIDE janitor control flags (TRDD-a3fa4d5d).
   · main() -> int
 `scripts/guard/branch_protection_apply.py` — Tier 2 GUARDED AUTO-REMEDIATION — branch-protection baseline applier.
@@ -533,6 +538,17 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · PrunePlan — The prune decision for one plugin dir.
   · plan_cache_prune(cache_root, installed_plugins, *, keep_recent, cutoff_epoch, now) -> list[PrunePlan] — Build a prune plan for every `<marketplace>/<plugin>/` under `cache_root`.
   · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
+`scripts/lib/cold_cache_compact.py` — Cold-cache auto-compact policy + readers (TRDD-EUWIHP0G).
+  · enabled() -> bool
+  · min_context_tokens() -> int
+  · min_idle_seconds() -> int
+  · cooldown_seconds() -> int
+  · should_compact_on_resume(context_tokens, *, min_context_tokens) -> bool — SessionStart (startup/resume) gate: a resumed context at/above the threshold. PURE.
+  · should_compact_after_idle(idle_seconds, context_tokens, *, min_idle_s, min_context_tokens) -> bool — Heartbeat gate for an IN-SESSION gap (rate limit): the cache is cold (idle past the TTL) AND
+  · context_tokens_for(transcript_path) -> int | None — Live context occupancy for a transcript, or None when unknown. Thin, never-raising wrapper
+  · newest_transcript(project_dir) -> Path | None — The newest `*.jsonl` transcript for a project, or None. For the dispatch path, which gets no
+  · in_cooldown(state_dir, *, now) -> bool — True iff a cold-compact was fired within the cooldown window — so a repeat trigger before the
+  · mark_fired(state_dir, *, now) -> None — Record that a cold-compact was fired now (atomic). Best-effort.
 `scripts/lib/daemon_path.py` — Restore a usable tool PATH for the OS-keepalive daemon (TRDD-VQ4LX7ND).
   · default_prefixes(platform) -> tuple[str, ...] — The candidate dirs for a platform. Unknown platforms get none (no guessing).
   · augmented_path(current, *, candidates, exists) -> tuple[str, list[str]] — Return ``(new_path, added_dirs)`` — ``current`` with every candidate that
@@ -639,6 +655,21 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/lib/git_utils.py` — Shared git helpers — Python port of scripts/lib/git-utils.sh.
   · is_squash_merged(branch_ref, base_ref, cwd) -> bool — Detect whether <branch_ref> was squash-merged into <base_ref>.
   · scope_tracking_status(rel) -> str — Probe git tracking status of `rel` (relative to project root).
+`scripts/lib/github_config_audit.py` — Fleet GitHub-config audit — the pure classifier + the read-only gather (TRDD-157OH2D7).
+  · Finding — One classified gap on one repo. `code` is a FINDING_CODES member (fixed vocab,
+  · RepoFacts — Everything `classify_repo` needs about ONE repo — all gathered READ-ONLY.
+  · classify_repo(facts) -> list[Finding] — PURE, total classifier: RepoFacts → the list of Findings for that repo.
+  · nonbaseline_rulesets_with_linear_history(rulesets) -> list[dict] — Every ACTIVE branch ruleset that (a) carries `required_linear_history` AND (b) is
+  · linear_history_present(slug, summary_rulesets) -> bool | None — Given a repo's ALREADY-FETCHED ruleset SUMMARY list, resolve whether any active branch
+  · strip_linear_history_payload(ruleset) -> dict — Build the GitHub 'Update ruleset' (PUT) body for `ruleset` with ONLY the
+  · marketplace_catalog_path(plugins_root) -> Path — Where the ai-maestro-plugins marketplace catalog lives on disk.
+  · fleet_repo_slugs(plugins_root) -> list[str] — Every ai-maestro plugin's `owner/repo` slug, parsed from the marketplace catalog's
+  · gather_repo_facts(slug) -> RepoFacts — READ-ONLY probe of ONE repo into a RepoFacts. Never raises, never mutates.
+  · FleetAudit — The whole-fleet result the daemon serializes to JSON.
+  · FleetAudit.to_json(self) -> dict
+  · audit_fleet(plugins_root, *, now) -> FleetAudit — Probe every fleet repo READ-ONLY and classify. The daemon's single entry point.
+  · findings_digest(payload) -> str — A stable 12-hex digest over the (slug, code) finding set — the dedupe key so an
+  · summarize(payload) -> str | None — Build the ONE compact drift line from a findings payload, or None when clean.
 `scripts/lib/global_state.py` — Shared contract for the GLOBAL janitor daemon — system-wide singleton that
   · global_state_dir() -> Path — Return the system-wide janitor state directory.
   · init_global_state() -> Path — Create the global state dir if missing. Idempotent. Return its path.
@@ -1371,6 +1402,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · cmd_check(root) -> int
   · cmd_remove(root) -> int
   · cmd_generate(root, *, to_stdout, excludes) -> int
+  · main() -> int
+`scripts/resume_trigger.py` — Backing script for /janitor-resume (analogue of reload_trigger.py) — TRDD-HI0BGQGJ.
   · main() -> int
 `scripts/safe_delete.py` — safe-delete — Python port of safe-delete.sh.
   · main() -> int
