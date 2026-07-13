@@ -144,6 +144,25 @@ def build_resurrect(pid: int, project_root: str | None) -> dict:
     return {"rung": "resurrect", "kill_pid": pid, "cwd": cwd, "spawn": argv}
 
 
+def live_cmdline(pid: int) -> str:
+    """The pid's CURRENT command line, read fresh (`ps -p PID -o args=`, POSIX-portable).
+
+    "" on any failure — and callers must treat "" as "cannot confirm", never as "safe".
+    """
+    if pid <= 0:
+        return ""
+    try:
+        proc = subprocess.run(  # noqa: S603 - explicit args, no shell
+            ["ps", "-p", str(pid), "-o", "args="],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return (proc.stdout or "").strip()
+
+
 def fire_restart(
     plan: dict | None,
     *,
@@ -151,19 +170,32 @@ def fire_restart(
     killable: bool,
     killer=os.kill,
     spawner=None,
+    cmdline_reader=live_cmdline,
 ) -> str:
     """Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
-    rung that kills, ``killable`` (the ``is_killable`` verdict the caller computed).
+    rung that kills, ``killable`` (the ``is_killable`` verdict the caller computed) AND the
+    pid is STILL a claude process at the instant we signal it.
     Returns a short status string for the daemon log; never raises.
 
     - not ``enabled`` → ``DRY_RUN:<rung>`` (build everything, execute nothing).
     - ``relaunch`` → fire the keystroke plan (no kill; ``killable`` not required).
     - ``force_restart``/``resurrect`` → refuse with ``REFUSED:not-killable`` unless
-      ``killable``; otherwise kill the pid (injectable ``killer``) then relaunch/spawn
-      (injectable ``spawner``).
+      ``killable``, and ``REFUSED:pid-recycled`` unless the live cmdline re-check passes;
+      otherwise kill the pid (injectable ``killer``) then relaunch/spawn (injectable
+      ``spawner``).
 
-    ``killer``/``spawner`` are injected so tests prove the control flow without
-    touching a real process."""
+    THE RE-CHECK IS NOT REDUNDANT WITH ``is_killable``. That verdict is computed from a
+    process-table SNAPSHOT taken during the fleet scan; the kill happens later, after a
+    diagnosis, a cooldown gate and a plan build. In that window the wedged claude can exit
+    and the OS can hand its pid number to something else — pids are recycled integers, not
+    handles. Signalling on the stale verdict would then SIGTERM an innocent process that did
+    nothing but inherit a number. So we re-read the pid's cmdline at the last possible moment
+    and require it to still be a claude; if we cannot read it, we REFUSE rather than guess,
+    because failing to restart a wedged session costs one more cooldown, while killing the
+    user's editor or build costs their work.
+
+    ``killer``/``spawner``/``cmdline_reader`` are injected so tests prove the control flow
+    without touching a real process."""
     if not plan:
         return "NO_PLAN"
     rung = plan.get("rung", "?")
@@ -174,8 +206,13 @@ def fire_restart(
     if rung in ("force_restart", "resurrect"):
         if not killable:
             return f"REFUSED:not-killable:{rung}"
+        kill_pid = int(plan["kill_pid"])
+        if "claude" not in cmdline_reader(kill_pid):
+            # Either the pid is gone (nothing to kill — the wedge resolved itself) or it now
+            # belongs to an unrelated process (recycled). Both mean: do NOT signal it.
+            return f"REFUSED:pid-recycled:{rung}"
         try:
-            killer(int(plan["kill_pid"]), 15)  # SIGTERM the stuck pid
+            killer(kill_pid, 15)  # SIGTERM the stuck pid
         except (OSError, ProcessLookupError):
             pass  # already gone is success for our purposes
         if rung == "force_restart":

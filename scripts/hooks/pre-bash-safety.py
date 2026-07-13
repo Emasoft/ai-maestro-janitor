@@ -114,9 +114,26 @@ _SENSITIVE_WRITE_PATTERNS = (
 )
 
 # Shell tokens that perform a WRITE (redirect / write subcommand).
+#
+# The redirect half USED to require whitespace on BOTH sides of the operator
+# (`\s>\s`, `\s>>\s`, or the operator at end-of-line). But the shell does not need that
+# whitespace, so every one of these walked straight past the guard:
+#
+#     echo KEY >>~/.ssh/authorized_keys      # no space AFTER `>>`
+#     echo x >~/.aws/credentials             # no space AFTER `>`
+#     echo x>~/.ssh/config                   # no space on EITHER side
+#
+# `check_sensitive_write` gates on this regex FIRST and returns None when it does not
+# match — so the sensitive-path list below was never even consulted. The guard looked
+# airtight and denied nothing.
+#
+# Now: any `>`/`>>` counts, EXCEPT an fd-duplication (`>&`, as in `2>&1` / `>&2`), which
+# writes to an existing descriptor and not to a path. Being liberal here is the safe
+# direction: a deny still requires a SENSITIVE PATH to also match, so at worst a redirect
+# we needn't have flagged is paired with a path that genuinely warrants a look.
 _WRITE_OPERATION_RE = re.compile(
-    r"\b(?:tee|cp|mv|install|ln|chmod\s+\+x|touch)\b|"  # write commands
-    r"\s>\s|\s>>\s|\s>\s*$|\s>>\s*$"                    # shell redirections
+    r"\b(?:tee|cp|mv|install|ln|chmod\s+\+x|touch)\b"  # write commands
+    r"|>>?(?!&)"                                       # output redirection (not an fd dup)
 )
 
 

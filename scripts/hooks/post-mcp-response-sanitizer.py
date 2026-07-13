@@ -46,6 +46,7 @@ import os
 import re
 import sys
 import unicodedata
+from pathlib import Path
 
 
 def _is_truthy_env(name: str, default: bool) -> bool:
@@ -56,15 +57,22 @@ def _is_truthy_env(name: str, default: bool) -> bool:
 
 
 # Invisible code points that hide directives inside seemingly-clean prose.
-# Same set as scripts/lib/security_helpers.has_invisible_unicode but the
-# hook is stdlib-only so we keep its own copy.
-_INVISIBLE_CHARS = (
-    "​‌‍‎‏"  # zero-width spaces + LRE/RLE
-    "‪‫‬‭‮"  # bidi override block
-    "⁠⁡⁢⁣⁤"  # word-joiner family
-    "﻿"                            # ZWNBSP / BOM
-)
-_INVISIBLE_RE = re.compile(f"[{re.escape(_INVISIBLE_CHARS)}]")
+#
+# This hook USED to keep its own hand-maintained copy of the set, on the theory
+# that a hook must be stdlib-only. That copy silently drifted: it was missing the
+# bidi ISOLATES (U+2066 LRI, U+2067 RLI, U+2068 FSI, U+2069 PDI) and U+00AD SOFT
+# HYPHEN, which security_helpers had. Because this hook is DEFAULT-ON and is the
+# thing that STRIPS covert characters out of MCP responses, a gap here is not a
+# missed warning — it is an invisible directive delivered intact into the model's
+# context. Two copies of a security-critical character set is one copy too many, so
+# there is now exactly ONE: security_helpers (which is itself stdlib-only, and is
+# imported the same way pre-tool-token-budget.py imports token_meter).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import security_helpers  # noqa: E402
+
+_has_invisible = security_helpers.has_invisible_unicode
+_strip_invisible = security_helpers.strip_invisible_unicode
 
 # Jailbreak / authority-override phrases that often appear in poisoned MCP
 # responses. Kept short on purpose — broader prose-style detection lives
@@ -79,10 +87,6 @@ _JAILBREAK_PATTERNS = (
     re.compile(r"\b(?:bypass|skip|disable)\s+(?:the\s+)?(?:safety|guardrail|filter)s?\b", re.IGNORECASE),
     re.compile(r"\b(?:authoritative|override\s+safety|priority\s+directive)\b", re.IGNORECASE),
 )
-
-
-def _has_invisible(text: str) -> bool:
-    return bool(_INVISIBLE_RE.search(text))
 
 
 def _has_homoglyph(text: str) -> bool:
@@ -135,11 +139,11 @@ def _extract_response_text(tool_response) -> str:
 
 
 def _strip_invisibles(text: str) -> str:
-    """Remove every zero-width / bidi-override code point. These are pure
+    """Remove every zero-width / bidi-override / bidi-isolate code point. These are pure
     covert-injection vectors — deleting them never loses legible content,
     so it is always safe (unlike NFKC-normalising, which can corrupt legit
     full-width CJK / ligatures / accents — see the homoglyph safeguard)."""
-    return _INVISIBLE_RE.sub("", text)
+    return _strip_invisible(text)
 
 
 def _warn_message(tool: str, flags: list[str]) -> str:

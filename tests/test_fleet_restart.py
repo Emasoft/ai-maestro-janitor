@@ -119,12 +119,17 @@ def test_fire_restart_force_restart_kills_only_when_killable(monkeypatch) -> Non
     monkeypatch.setattr(fn.fleet_inject, "fire", lambda p: True)
     killed: list = []
     plan = fn.build_force_restart(777, {"tmux_pane": "%9"})
+    still_claude = lambda pid: "claude --continue"  # noqa: E731 - the pid is still ours at kill time
     # killable → kills 777 then relaunches
-    out = fn.fire_restart(plan, enabled=True, killable=True, killer=lambda pid, sig: killed.append(pid))
+    out = fn.fire_restart(plan, enabled=True, killable=True,
+                          killer=lambda pid, sig: killed.append(pid),
+                          cmdline_reader=still_claude)
     assert out == "FIRED:force_restart" and killed == [777]
     # NOT killable → refuse, never kill
     killed.clear()
-    out = fn.fire_restart(plan, enabled=True, killable=False, killer=lambda pid, sig: killed.append(pid))
+    out = fn.fire_restart(plan, enabled=True, killable=False,
+                          killer=lambda pid, sig: killed.append(pid),
+                          cmdline_reader=still_claude)
     assert out == "REFUSED:not-killable:force_restart" and killed == []
 
 
@@ -137,16 +142,52 @@ def test_fire_restart_resurrect_kills_then_spawns() -> None:
     def _spawn(argv):  # list.append() returns None; a def keeps the spawner spy truthy cleanly
         spawned.append(argv)
         return True
+    still_claude = lambda pid: "claude --continue"  # noqa: E731 - the pid is still ours at kill time
     out = fn.fire_restart(plan, enabled=True, killable=True,
                           killer=lambda pid, sig: killed.append(pid),
-                          spawner=_spawn)
+                          spawner=_spawn, cmdline_reader=still_claude)
     assert out == "FIRED:resurrect" and killed == [888] and len(spawned) == 1
     killed.clear()
     spawned.clear()
     out = fn.fire_restart(plan, enabled=True, killable=False,
                           killer=lambda pid, sig: killed.append(pid),
-                          spawner=lambda argv: spawned.append(argv))
+                          spawner=lambda argv: spawned.append(argv),
+                          cmdline_reader=still_claude)
     assert out == "REFUSED:not-killable:resurrect" and killed == [] and spawned == []
+
+
+def test_fire_restart_refuses_a_recycled_pid() -> None:
+    """TOCTOU GUARD. `is_killable` is computed from a process-table SNAPSHOT taken during the
+    fleet scan; the kill happens later. In that window the wedged claude can exit and the OS
+    can hand its pid NUMBER to an unrelated process — pids are recycled integers, not handles.
+    Signalling on the stale verdict would SIGTERM an innocent process. So the pid's cmdline is
+    re-read at the instant of the kill and must STILL be a claude."""
+    killed: list = []
+    spawned: list = []
+    plan = fn.build_force_restart(999, {"tmux_pane": "%1"})
+
+    # The pid now belongs to something else entirely → refuse, and never signal it.
+    out = fn.fire_restart(plan, enabled=True, killable=True,
+                          killer=lambda pid, sig: killed.append(pid),
+                          cmdline_reader=lambda pid: "/usr/bin/postgres -D /var/db")
+    assert out == "REFUSED:pid-recycled:force_restart"
+    assert killed == [], "an unrelated process that merely inherited the pid must never be killed"
+
+    # Cannot read the cmdline (ps missing/blocked) ⇒ cannot confirm ⇒ REFUSE, never guess.
+    out = fn.fire_restart(plan, enabled=True, killable=True,
+                          killer=lambda pid, sig: killed.append(pid),
+                          cmdline_reader=lambda pid: "")
+    assert out == "REFUSED:pid-recycled:force_restart"
+    assert killed == []
+
+    # Same guard on the resurrect rung — and it must not spawn either.
+    rplan = fn.build_resurrect(999, "/proj")
+    out = fn.fire_restart(rplan, enabled=True, killable=True,
+                          killer=lambda pid, sig: killed.append(pid),
+                          spawner=lambda argv: spawned.append(argv),
+                          cmdline_reader=lambda pid: "vim notes.md")
+    assert out == "REFUSED:pid-recycled:resurrect"
+    assert killed == [] and spawned == []
 
 
 def test_fire_restart_safe_on_none_and_unknown() -> None:

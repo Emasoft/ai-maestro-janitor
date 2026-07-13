@@ -1229,6 +1229,41 @@ def request_daemon_restart() -> bool:
     pid = daemon_pid()
     if pid is None or not _process_exists(pid):
         return False
+
+    # IDENTITY RE-CHECK BEFORE THE KILL — `daemon.pid` is a FILE, and a pid is a reusable
+    # integer. If the daemon died without clearing that file (SIGKILL, OOM, power loss) the
+    # OS is free to hand its number to any new process, and `_process_exists(pid)` — a bare
+    # `kill(pid, 0)` — cannot tell the difference: it answers "something is alive", never
+    # "the daemon is alive". SIGTERMing on that answer means we can kill an innocent,
+    # unrelated process that merely inherited the number — the user's editor, a build, a
+    # database. Claude Code shipped this exact bug and fixed it in 2.1.200; we are not going
+    # to re-ship it.
+    #
+    # `_read_process_cmdline` is what makes the check real: the pid must still be running a
+    # janitor daemon. It returns "" when it cannot tell (ps missing/blocked), and an
+    # unverifiable pid is NOT a licence to signal it — we refuse and let the next heartbeat
+    # retry, because the cost of not restarting a stale daemon (it lingers one more tick) is
+    # trivially smaller than the cost of killing the wrong process.
+    cmdline = _read_process_cmdline(pid)
+    if not cmdline:
+        state.log_line(
+            "daemon",
+            f"daemon-restart: refusing to signal pid={pid} — cannot read its cmdline to "
+            "confirm it is our daemon (a recycled pid could be any process)",
+        )
+        return False
+    if "daemon.py" not in cmdline and "daemon_keepalive_entry.py" not in cmdline:
+        # The pid is alive but is NOT the daemon → the pid was reused. Clear the stale pid
+        # file so the next `ensure_daemon_running()` lazy-spawns a fresh daemon instead of
+        # forever pointing at a stranger.
+        state.log_line(
+            "daemon",
+            f"daemon-restart: pid={pid} is NOT a janitor daemon (recycled pid; cmdline="
+            f"{cmdline[:120]!r}) — NOT signalling it; clearing the stale daemon.pid",
+        )
+        remove_daemon_pid()
+        return False
+
     import signal as _signal
     try:
         os.kill(pid, _signal.SIGTERM)

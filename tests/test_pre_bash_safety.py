@@ -216,3 +216,53 @@ def test_malformed_input_silent_passthrough() -> None:
     )
     assert r.returncode == 0
     assert r.stdout.strip() == ""
+
+
+# ---------- Redirect-whitespace bypass (regression) ----------------------
+#
+# `_WRITE_OPERATION_RE` once required whitespace on BOTH sides of the redirect
+# operator (`\s>>\s`). The shell requires no such thing, so a redirect written
+# tight against its target slipped past the guard entirely — and because
+# `check_sensitive_write` gates on that regex FIRST, the sensitive-path list was
+# never consulted. The guard looked airtight and denied nothing.
+
+
+def test_denies_append_redirect_with_no_space_before_path() -> None:
+    """`>>~/.ssh/authorized_keys` (no space after `>>`) must be DENIED."""
+    decision = _decision(_run("echo ssh-rsa AAAA >>~/.ssh/authorized_keys"))
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
+
+
+def test_denies_truncate_redirect_with_no_space_before_path() -> None:
+    """`>~/.aws/credentials` (no space after `>`) must be DENIED."""
+    decision = _decision(_run("echo '[default]' >~/.aws/credentials"))
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
+
+
+def test_denies_redirect_with_no_whitespace_at_all() -> None:
+    """`x>~/.ssh/config` (no space on EITHER side) must be DENIED."""
+    decision = _decision(_run("echo Host evil>~/.ssh/config"))
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
+
+
+def test_spaced_redirect_still_denied() -> None:
+    """The originally-covered spaced form must keep working (no regression)."""
+    decision = _decision(_run("echo ssh-rsa AAAA >> ~/.ssh/authorized_keys"))
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
+
+
+def test_fd_duplication_is_not_a_write() -> None:
+    """`2>&1` duplicates a descriptor — it writes no file, so widening the
+    redirect pattern must not turn a harmless read into a false deny."""
+    r = _run("ls ~/.ssh 2>&1")
+    assert _decision(r) is None
+
+
+def test_benign_redirect_to_nonsensitive_path_is_silent() -> None:
+    """A redirect alone is not suspicious — a DENY still needs a sensitive path."""
+    r = _run("echo hi > /tmp/harmless.txt")
+    assert _decision(r) is None
