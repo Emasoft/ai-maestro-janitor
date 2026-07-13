@@ -44,7 +44,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import yaml
+# NOTE (TRDD-157OH2D7): `yaml` is imported LAZILY inside detect_required_status_checks (the ONLY
+# function that parses workflow YAML), NOT at module top. This lets lightweight importers of this
+# module — the `uv run --script` detectors branch-protection.py and fleet-github-config.py, which
+# reach it transitively via github_config_audit and never call detect_required_status_checks —
+# load it WITHOUT declaring pyyaml in their PEP-723 headers. The heavier callers that DO parse
+# workflows (github_config_fix.py, the daemon, the setup/guard paths) run in an env where pyyaml
+# is available (declared in their headers / the project deps).
 
 # The two ratified ruleset names. Recognised by exact name match so the
 # idempotent-apply logic in branch_protection_apply.py PATCHes the right
@@ -391,6 +397,8 @@ def detect_required_status_checks(project_root: Path) -> list[dict]:
     created with a ``required_status_checks`` rule that gates on no
     specific contexts.
     """
+    import yaml  # lazy — see the module-top note; only this function needs it
+
     workflows_dir = project_root / ".github" / "workflows"
     if not workflows_dir.is_dir():
         return []

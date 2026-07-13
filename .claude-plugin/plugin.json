@@ -528,9 +528,37 @@
       "default": 21600,
       "sensitive": false
     },
+    "github_config_audit_enabled": {
+      "title": "Fleet GitHub-Config Audit Enabled (daemon)",
+      "description": "ON by default (TRDD-157OH2D7). The global daemon runs a fleet-wide, READ-ONLY GitHub-config audit across every ai-maestro plugin repo (enumerated from the marketplace catalog) and writes the findings to a file the near-free per-session fleet-github-config detector surfaces. It catches what the per-session branch-protection check structurally cannot: a DIFFERENT plugin's repo left UNPROTECTED (open to stranger PRs/force-pushes), a repo carrying required_linear_history (which BLOCKS Claude's merges), or a missing CI/PR-review gate — none of which are visible unless a session happens to be open in that repo. The daemon owns it (issue #7 single-writer) so N sessions never stampede the GitHub API. Per-repo SILENT when the viewer is not an admin (can't fix it) or a probe is indeterminate; a no-op when gh is absent/unauthenticated. NEVER mutates a repo — the on-demand /janitor-github-config-fix skill does that. Set false to disable the fleet audit.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "daemon_github_config_audit_interval": {
+      "title": "Fleet GitHub-Config Audit Cadence (seconds, daemon)",
+      "description": "Minimum seconds between the daemon's fleet GitHub-config audit passes. Default: 21600 (6 h). Each pass makes a handful of read-only gh calls per plugin repo (~13 repos); branch rulesets change rarely, so a slow cadence is correct. Only consulted when github_config_audit_enabled is true.",
+      "type": "number",
+      "default": 21600,
+      "sensitive": false
+    },
+    "fleet_github_config_enabled": {
+      "title": "Fleet GitHub-Config Surface Enabled (per-session)",
+      "description": "ON by default (TRDD-157OH2D7). The per-session fleet-github-config detector reads ONLY the daemon's findings file (one file read + a content-hash dedupe, ZERO gh calls) and emits ONE compact drift line naming the finding counts, ALWAYS ending with a pointer to /janitor-github-config-fix so the notification carries the remedy. Content-hash deduped: an unchanged finding set never re-nags; a repo getting fixed or a new gap appearing re-alerts exactly once. Silent until the daemon has written a findings file. Set false to stop surfacing the fleet findings in this project's sessions (the daemon still audits).",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "fleet_github_config_interval": {
+      "title": "Fleet GitHub-Config Surface Cadence (seconds)",
+      "description": "Minimum seconds between fleet-github-config surface checks. Default: 1800 (30 min). The check is near-free (one file read + hash-dedupe, no API), so it can run tight enough to surface a finding-set change promptly after the daemon's 6 h audit writes it. Only consulted when fleet_github_config_enabled is true.",
+      "type": "number",
+      "default": 1800,
+      "sensitive": false
+    },
     "guard_mode_enabled": {
       "title": "Guarded Auto-Remediation Mode Enabled",
-      "description": "Opt-in master switch for the Tier 2 guarded auto-apply path (default: false). When true, the heartbeat applies the baseline branch ruleset to the default branch automatically \u2014 force-push block, deletion block, required linear history, pull-request requirement (1 approval, dismiss stale reviews, thread resolution). Every other janitor remediation stays in user-invoked skills. Even with this on, the apply path no-ops unless every safety gate passes: /janitor-autofix-off NOT set, the authenticated gh viewer is repo admin, and the baseline ruleset is not already present. The Tier 1 user-invoked surface (/janitor-branch-protection-setup) works regardless of this knob.",
+      "description": "Opt-in master switch for the Tier 2 guarded auto-apply path (default: false). When true, the heartbeat applies the baseline branch ruleset to the default branch automatically \u2014 force-push block, deletion block, pull-request requirement (1 approval, dismiss stale reviews, thread resolution). The baseline deliberately does NOT require linear history (it jams the many-agent merge workflow). Every other janitor remediation stays in user-invoked skills. Even with this on, the apply path no-ops unless every safety gate passes: /janitor-autofix-off NOT set, the authenticated gh viewer is repo admin, and the baseline ruleset is not already present. The Tier 1 user-invoked surface (/janitor-branch-protection-setup) works regardless of this knob.",
       "type": "boolean",
       "default": false,
       "sensitive": false

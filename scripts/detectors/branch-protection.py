@@ -45,6 +45,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import github_config_audit as gca  # noqa: E402
+import security_helpers  # noqa: E402
 import state  # noqa: E402
 
 _NAME = "branch-protection"
@@ -78,9 +80,11 @@ def _gh_json(args: list[str], *, timeout: float = 15.0):
 def main() -> int:
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_BRANCH_PROTECTION_ENABLED", True):
         return 0
-    # Hard self-scan guard — see state.is_self_scan_target() docstring.
-    if state.is_self_scan_target():
-        return 0
+    # NOTE (TRDD-157OH2D7): unlike the pattern-scanning security detectors, this detector is
+    # NOT self-scan-guarded. The self-scan guard exists so the janitor's own detection
+    # SIGNATURES don't false-positive on its own source — but branch protection is a GitHub
+    # API fact, not a source pattern, and the janitor's own repo must be held to the same
+    # protection bar as any other plugin repo (it was found carrying required_linear_history).
 
     state.init_state()
     project_root = state.project_root()
@@ -152,33 +156,64 @@ def main() -> int:
 
     seen = state.state_dir() / "branch-protection-seen.txt"
     key = f"unprotected@{owner_repo}@{branch}"
+    lin_key = f"linear-history@{owner_repo}@{branch}"
+    safe_repo = state.sanitize_for_drift_line(owner_repo)
+    safe_branch = state.sanitize_for_drift_line(branch)
+
+    # The one-line remedy every finding here carries (TRDD-157OH2D7): the janitor can only
+    # NOTIFY, so the notification MUST point at the fix. `/janitor-github-config-fix` reviews +
+    # fixes (plan-first, mutate-on-confirm); the security-agent hint covers broader triage.
+    fix_hint = (
+        f" → Run {gca.FIX_SKILL} to review + fix (plan-first; mutates only on your ok). "
+        + security_helpers.security_agent_hint(
+            "branch-protection",
+            enabled=state.is_truthy_env(security_helpers.SECURITY_AGENT_HINT_ENV, True),
+        )
+    ).rstrip()
+
+    # LINEAR-HISTORY (TRDD-157OH2D7): a `required_linear_history` rule BLOCKS merge commits and
+    # jams the many-agent merge workflow — a distinct problem from being UNPROTECTED, and it
+    # afflicts a PROTECTED repo (the janitor's own repo was found carrying it). Resolve it from
+    # the rulesets we already listed (fetches per-ruleset detail only for the active branch
+    # rulesets); emit ONLY on a definite True so an indeterminate probe never false-alarms.
+    if ruleset_probe_ok:
+        lin = gca.linear_history_present(
+            owner_repo, rulesets if isinstance(rulesets, list) else []
+        )
+        if lin is True:
+            out_lin = dedupe.emit_once(
+                seen,
+                lin_key,
+                f"[branch-protection] {safe_repo} default branch '{safe_branch}' has a ruleset "
+                f"requiring LINEAR HISTORY — this BLOCKS merge commits and jams Claude's merges."
+                + fix_hint,
+            )
+            if out_lin is not None:
+                print(out_lin)
+        elif lin is False:
+            # Rule is gone — forget so a re-introduction re-alerts.
+            dedupe.emit_forget(seen, lin_key)
 
     if classic_protected or ruleset_protected:
-        # Protected now — forget any prior nag so a future regression (the
+        # Protected now — forget any prior UNPROTECTED nag so a future regression (the
         # ruleset being deleted / disabled) re-alerts instead of staying mute.
         dedupe.emit_forget(seen, key)
         state.rotate_log_if_big(_NAME)
         return 0
 
-    # Only surface when BOTH negatives are DEFINITIVE. A transient/permission
-    # error on either probe means we cannot prove the branch is unprotected,
-    # and an unprovable claim is exactly the false alarm we refuse to emit.
+    # Only surface UNPROTECTED when BOTH negatives are DEFINITIVE. A transient/permission
+    # error on either probe means we cannot prove the branch is unprotected, and an
+    # unprovable claim is exactly the false alarm we refuse to emit.
     if not (ruleset_probe_ok and classic_is_404):
         state.log_line(_NAME, "protection status indeterminate — skipping")
         return 0
 
-    safe_repo = state.sanitize_for_drift_line(owner_repo)
-    safe_branch = state.sanitize_for_drift_line(branch)
     out = dedupe.emit_once(
         seen,
         key,
         f"[branch-protection] URGENT: {safe_repo} default branch '{safe_branch}' "
         f"has NO branch protection and NO active ruleset — anyone with write "
-        f"access can force-push, rewrite history, or delete it. Add a ruleset in "
-        f"GitHub → Settings → Rules → Rulesets (require a pull request, block "
-        f"force-pushes, block deletion), then review with: "
-        f"gh api repos/{owner_repo}/rulesets. The janitor surfaces this but will "
-        f"not change repo settings on its own.",
+        f"access can force-push, rewrite history, or delete it." + fix_hint,
     )
     if out is not None:
         print(out)

@@ -27,8 +27,11 @@ _DETECTOR = _PROJECT_ROOT / "scripts" / "detectors" / "branch-protection.py"
 assert _DETECTOR.is_file(), f"detector not found at {_DETECTOR}"
 
 # Fake gh: dispatches on argv, prints a canned body, exits a canned code.
+# The `/rulesets/<id>` DETAIL endpoint (TRDD-157OH2D7 linear-history check) defaults to rc 99
+# (unhandled) so tests that don't set GH_RULESET_DETAIL_* keep the pre-linear-history behavior:
+# the detail fetch fails → indeterminate → no linear-history line.
 _GH_STUB = '''#!/usr/bin/env python3
-import os, sys
+import os, re, sys
 a = sys.argv[1:]
 def out(body, rc):
     if body:
@@ -42,6 +45,8 @@ if a[:1] == ["api"]:
     t = a[-1]
     if t.endswith("/protection"):
         out(os.environ.get("GH_PROTECTION_BODY", ""), int(os.environ.get("GH_PROTECTION_RC", "0")))
+    if re.search(r"/rulesets/\\d+$", t):
+        out(os.environ.get("GH_RULESET_DETAIL_BODY", ""), int(os.environ.get("GH_RULESET_DETAIL_RC", "99")))
     if t.endswith("/rulesets"):
         out(os.environ.get("GH_RULESETS_BODY", ""), int(os.environ.get("GH_RULESETS_RC", "0")))
 sys.stderr.write("gh-stub: unhandled %r\\n" % (a,))
@@ -194,6 +199,58 @@ def test_disabled_env_silent(tmp_path: Path) -> None:
     r = _run(_make_repo(tmp_path), {"CLAUDE_PLUGIN_OPTION_BRANCH_PROTECTION_ENABLED": "0"})
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
+
+
+# ---- TRDD-157OH2D7: fix-skill hint + linear-history detection --------------
+
+def test_unprotected_line_carries_the_fix_pointer(tmp_path: Path) -> None:
+    """The UNPROTECTED line now points at /janitor-github-config-fix and DROPS the old
+    'will not change repo settings' anti-suggestion (the root cause the user reported)."""
+    r = _run(_make_repo(tmp_path))
+    assert "[branch-protection]" in r.stdout and "URGENT" in r.stdout
+    assert "/janitor-github-config-fix" in r.stdout
+    assert "will not change repo settings" not in r.stdout
+
+
+def test_linear_history_line_fires_on_protected_repo(tmp_path: Path) -> None:
+    """A PROTECTED repo whose active branch ruleset carries required_linear_history → a
+    distinct LINEAR HISTORY line (blocks merges) + the fix pointer, and NO UNPROTECTED nag."""
+    r = _run(
+        _make_repo(tmp_path),
+        {
+            "GH_RULESETS_BODY": json.dumps([{"id": 1, "target": "branch", "enforcement": "active"}]),
+            "GH_RULESET_DETAIL_RC": "0",
+            "GH_RULESET_DETAIL_BODY": json.dumps(
+                {"id": 1, "name": "baseline-history-protect", "target": "branch",
+                 "enforcement": "active",
+                 "rules": [{"type": "deletion"}, {"type": "non_fast_forward"},
+                           {"type": "required_linear_history"}]}
+            ),
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert "[branch-protection]" in r.stdout
+    assert "LINEAR HISTORY" in r.stdout
+    assert "/janitor-github-config-fix" in r.stdout
+    assert "URGENT" not in r.stdout  # it IS protected — only the linear-history problem
+
+
+def test_linear_history_line_falsified_without_the_rule(tmp_path: Path) -> None:
+    """FALSIFY: same protected repo but the detail has NO required_linear_history → no line."""
+    r = _run(
+        _make_repo(tmp_path),
+        {
+            "GH_RULESETS_BODY": json.dumps([{"id": 1, "target": "branch", "enforcement": "active"}]),
+            "GH_RULESET_DETAIL_RC": "0",
+            "GH_RULESET_DETAIL_BODY": json.dumps(
+                {"id": 1, "name": "baseline-history-protect", "target": "branch",
+                 "enforcement": "active",
+                 "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}]}
+            ),
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == ""  # protected + no linear history → fully silent
 
 
 def test_non_git_dir_silent(tmp_path: Path) -> None:

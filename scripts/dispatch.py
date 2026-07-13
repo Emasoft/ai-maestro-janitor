@@ -142,6 +142,13 @@ _DETECTORS: list[tuple[str, int, str]] = [
     #   cadence — branch rulesets change rarely; its seen-file nags once until
     #   fixed and re-arms (emit_forget) if protection is later removed.
     ("branch-protection", 21600, "CLAUDE_PLUGIN_OPTION_BRANCH_PROTECTION_INTERVAL"),
+    # fleet-github-config (TRDD-157OH2D7): the NEAR-FREE surface half of the fleet
+    # GitHub-config audit. Reads ONLY the daemon's github-config-findings.json (one file
+    # read + hash-dedupe, ZERO gh calls — all API cost lives in the daemon's 6h task), so
+    # it can run on a tight cadence to surface a finding-set change promptly. Emits one
+    # compact line + the /janitor-github-config-fix pointer; content-hash deduped so an
+    # unchanged finding set never re-nags.
+    ("fleet-github-config", 1800, "CLAUDE_PLUGIN_OPTION_FLEET_GITHUB_CONFIG_INTERVAL"),
     # package-manager-policy is the DETECTION complement to the
     # pre-tool-pkg-guard PreToolUse hook: the hook PREVENTS weakening at
     # call-time, this detector REPORTS missing hardening at fire-time so

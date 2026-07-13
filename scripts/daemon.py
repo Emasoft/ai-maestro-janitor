@@ -71,6 +71,7 @@ import fleet_recovery as fr  # noqa: E402  # A2 recovery policy (TRDD-324223a6)
 import fleet_restart  # noqa: E402  # raw-command channel builder reused by fleet-stop (TRDD-ME8V2YJF)
 import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import fleet_stop  # noqa: E402  # daemon-driven disarm/pause policy (TRDD-ME8V2YJF)
+import github_config_audit as gca  # noqa: E402  # fleet GitHub-config audit (TRDD-157OH2D7)
 import global_state as gs  # noqa: E402
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
@@ -163,6 +164,14 @@ _INTERVAL_RULES_CLEANUP = _env_interval(
 #  CONFIRMED fully uninstalled. Hourly is ample: after uninstall the daemon lingers on
 #  its orphaned cache for up to ~7 days, so an hourly beat fires many times in that
 #  window while the plugin's own hooks can no longer run.
+_INTERVAL_GITHUB_CONFIG_AUDIT = _env_interval(
+    "CLAUDE_PLUGIN_OPTION_DAEMON_GITHUB_CONFIG_AUDIT_INTERVAL", 21600
+)  # 6 h — fleet-wide GitHub-config audit (TRDD-157OH2D7). READ-ONLY `gh` probes across the
+#  ~13 ai-maestro plugin repos (rulesets / classic protection / workflows), writing findings
+#  to a JSON the near-free per-session `fleet-github-config` detector surfaces. The daemon owns
+#  it because it is fleet-scope machine-global work (issue #7 single-writer) — N sessions each
+#  probing 13 repos would stampede the GitHub API. Branch rulesets change rarely, so 6 h is
+#  ample; a no-op when `gh` is absent/unauthenticated.
 
 # Loop ceiling — heartbeat tick interval upper bound. Must be << the
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
@@ -890,6 +899,46 @@ def task_rules_cleanup() -> None:
         )
 
 
+def task_github_config_audit() -> None:
+    """Fleet-wide GitHub-config audit (TRDD-157OH2D7) — the single-writer machine-global sweep.
+
+    The per-session `branch-protection` detector only ever inspects the CURRENT session's
+    repo, so a DIFFERENT plugin's repo could be UNPROTECTED (open to stranger PRs/force-pushes)
+    or carry `required_linear_history` (which JAMS Claude's merges) and never be seen. This beat
+    probes every ai-maestro plugin repo READ-ONLY (rulesets / classic protection / workflows)
+    ONCE machine-wide and writes the findings to `<global-state>/github-config-findings.json`,
+    which the near-free per-session `fleet-github-config` detector surfaces (that detector makes
+    ZERO `gh` calls — all the API cost lives here). The daemon owns it because fleet-scope work
+    is the daemon's single-writer job (issue #7): N sessions each probing 13 repos would stampede
+    the GitHub API.
+
+    Opt out with CLAUDE_PLUGIN_OPTION_GITHUB_CONFIG_AUDIT_ENABLED=0. A silent no-op when `gh` is
+    absent/unauthenticated (every per-repo probe returns indeterminate → zero findings) or the
+    marketplace catalog is unreadable (no fleet to audit). NEVER mutates a repo — the on-demand
+    /janitor-github-config-fix skill does that.
+    """
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_GITHUB_CONFIG_AUDIT_ENABLED", True):
+        return
+    # Honor the JANITOR_PLUGINS_ROOT test override (same knob state._plugins_root uses), else
+    # the real plugins root = the parent of the cache tree the daemon runs from.
+    plugins_root = Path(
+        os.environ.get("JANITOR_PLUGINS_ROOT", "").strip() or str(_plugins_cache_root().parent)
+    )
+    audit = gca.audit_fleet(plugins_root, now=int(time.time()))
+    # Atomic write (tmp + os.replace) so a per-session reader never sees a half-written file —
+    # the file analogue of the single-writer discipline the daemon already enforces for commands.
+    out = gs.global_state_dir() / gca.FINDINGS_FILENAME
+    tmp = out.with_name(f"{out.name}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(audit.to_json()), encoding="utf-8")
+    os.replace(tmp, out)
+    n = len(audit.findings)
+    state.log_line(
+        "daemon",
+        f"github-config audit: {audit.repos_scanned} repos scanned, {n} finding(s)"
+        + (f" across {len({f.slug for f in audit.findings})} repo(s)" if n else ""),
+    )
+
+
 def task_session_liveness(fleet: list | None = None) -> None:
     """Fleet-guardian beat (TRDD-324223a6, A2): detect frozen / cron-dead /
     version-mismatched claude instances across the WHOLE host and recover them from
@@ -1265,6 +1314,7 @@ def _build_tasks() -> list[Task]:
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
         Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),
+        Task("github-config-audit", _INTERVAL_GITHUB_CONFIG_AUDIT, task_github_config_audit),
         Task("session-liveness", _INTERVAL_SESSION_LIVENESS, task_session_liveness),
         Task("fleet-stop", _INTERVAL_FLEET_STOP, task_fleet_stop),
     ]

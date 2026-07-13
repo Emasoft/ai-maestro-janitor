@@ -1,6 +1,6 @@
 ---
 name: janitor-branch-protection-setup
-description: Applies the ratified two-ruleset branch-protection baseline on the default branch of the project's GitHub repo — baseline-history-protect (block force-push/deletion + linear history) and baseline-pr-and-checks (PR with 1 approval + dismiss-stale + thread-resolution + auto-detected required status checks). Idempotent — re-running PATCHes in place and never duplicates; an orphaned legacy janitor-baseline ruleset is cleaned up. Trigger with /janitor-branch-protection-setup, "set up branch protection", "harden the default branch", or "add a baseline ruleset to GitHub".
+description: Applies the ratified two-ruleset branch-protection baseline on the default branch of the project's GitHub repo — baseline-history-protect (block force-push/deletion; NOT linear history — that is deliberately excluded because it jams the many-agent merge workflow) and baseline-pr-and-checks (PR with 1 approval + dismiss-stale + thread-resolution + auto-detected required status checks). Idempotent — re-running PATCHes in place and never duplicates; an orphaned legacy janitor-baseline ruleset is cleaned up. Trigger with /janitor-branch-protection-setup, "set up branch protection", "harden the default branch", or "add a baseline ruleset to GitHub".
 ---
 
 # Janitor branch-protection setup
@@ -16,8 +16,11 @@ plugin), `target: branch`, `enforcement: active`:
 1. **`baseline-history-protect`** — `bypass_actors: []`
    * `deletion` — blocks branch deletion
    * `non_fast_forward` — blocks force-pushes
-   * `required_linear_history` — fast-forward / squash only (no merge
-     commits)
+   * **NO `required_linear_history`** — deliberately excluded. It forbids
+     merge commits and jams the many-agent merge workflow (Claude cannot
+     merge); `deletion` + `non_fast_forward` are the genuine protection.
+     `/janitor-github-config-fix` REMOVES this rule from any repo still
+     carrying it (an older baseline version added it).
 2. **`baseline-pr-and-checks`** — `bypass_actors: [{actor_id: 5,
    actor_type: RepositoryRole, bypass_mode: always}]` (the repo-admin
    role gets an always-bypass so a solo admin is not locked out of their
