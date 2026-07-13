@@ -1,9 +1,5 @@
 # The wikimem model — memory as a collaborative, navigable wiki
 
-This is the shared data model the three core memory skills (**MEMORIZE**,
-**UPDATE**, **RECALL**) all build on. Read it once; the skills cite it instead of
-repeating it.
-
 ## Table of contents
 
 - [A wiki, not a pile — and collaborative like Wikipedia](#a-wiki-not-a-pile--and-collaborative-like-wikipedia)
@@ -13,6 +9,10 @@ repeating it.
 - [The edge model — EVERY link is bidirectional (the link law)](#the-edge-model--every-link-is-bidirectional-the-link-law)
 - [Page anatomy](#page-anatomy)
 - [Atoms — first-class body elements (block-properties)](#atoms--first-class-body-elements-block-properties)
+
+This is the shared data model the three core memory skills (**MEMORIZE**,
+**UPDATE**, **RECALL**) all build on. Read it once; the skills cite it instead of
+repeating it.
 
 ## A wiki, not a pile — and collaborative like Wikipedia
 

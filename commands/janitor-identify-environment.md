@@ -1,5 +1,5 @@
 ---
-description: Report the FULL runtime environment of this Claude Code session — terminal, OS + kernel + WSL, filesystem, container/VM/sandbox, CI, editor/IDE + Claude Code surface (CLI vs desktop) + subscription auth mode, interactive-vs-headless/background-agent + linked-git-worktree, network (proxy/VPN/Tailscale/gateway/NAT/DNS/firewall + listening services), python env, AWS/Azure/GCP, user, PATH, compilers/runtimes/package-managers/dev-tools (incl. tldr/distill), MCP servers, the git repo + GitHub slug/branches/hooks/rulesets, wikimem sizes, and the installed/enabled plugins+hooks+staleness. Secret-safe, fail-open; writes the full detail to disk as JSON and returns a compact digest. Trigger with /janitor-identify-environment or by asking where this session is running.
+description: Report this Claude Code session's full runtime environment — terminal, OS, filesystem, sandboxing, CI, editor/IDE, network, cloud, python env, git/GitHub, MCP servers, wikimem, and installed plugins (see full breakdown below). Secret-safe and fail-open; writes full detail to disk as JSON and returns a compact digest. Trigger with /janitor-identify-environment or by asking where this session is running.
 ---
 
 # /janitor-identify-environment

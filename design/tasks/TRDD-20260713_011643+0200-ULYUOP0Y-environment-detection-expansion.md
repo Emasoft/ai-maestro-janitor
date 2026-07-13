@@ -43,19 +43,22 @@ JSON valid + secret-scan clean.
 - `commands/janitor-identify-environment.md` — describes the new matrix + flags + safety.
 - `tests/test_env_detect.py` — 44 pure tests (incl. the secret-never-leaked battery).
 
-**2026-07-13 WAVE-3 addendum (user expanded again):** added the authenticated **gh CLI**
-user + scopes + working-state (offline from hosts.yml; `--online` confirms live —
-verified `Emasoft`, never captures the token); **GitHub Actions** — installed workflows
-+ third-party actions used + **Claude-action presence** + CI **platforms** (local read);
-**releases** — GitHub releases + **PyPI/npm(also bun)/crates.io** presence for the
-project's package name (`--online`); **Homebrew tap** detection + the **Tap-Trust**
+**2026-07-13 WAVE-3 addendum (user expanded again):** added the authenticated
+**gh CLI** user + scopes + working-state (offline from hosts.yml; `--online`
+confirms live — verified `Emasoft`, never captures the token); **GitHub
+Actions** — installed workflows and third-party actions used, plus
+**Claude-action presence** and CI **platforms** (local read); **releases** —
+GitHub releases + **PyPI/npm(also bun)/crates.io** presence for the project's
+package name (`--online`); **Homebrew tap** detection + the **Tap-Trust**
 requirement note (Homebrew 6.0.0, 2026-06-11 — third-party taps need explicit
-`brew trust`; researched via web); **fork/collaboration** (isFork + upstream, from gh or
-an `upstream` remote); and **repo topology** (single-project vs mono-repo, single vs
-multi-git via submodules/nested-repos/symlinked-repos, single vs mixed language).
-Verified live: gh `Emasoft` ✓, 6 workflows (no Claude action, linux), releases present,
-topology single-project/single-git/python; registries/fork/homebrew correctly EMPTY
-(this repo is a Claude plugin, not published/forked/a-tap). 73 tests green, ruff clean.
+`brew trust`; researched via web); **fork/collaboration** (isFork + upstream,
+from gh or an `upstream` remote); and **repo topology** (single-project vs
+mono-repo, single vs multi-git via submodules/nested-repos/symlinked-repos,
+single vs mixed language).
+Verified live: gh `Emasoft` ✓, 6 workflows (no Claude action, linux), releases
+present, topology single-project/single-git/python; registries/fork/homebrew
+correctly EMPTY (this repo is a Claude plugin, not published/forked/a-tap). 73
+tests green, ruff clean.
 
 **NEXT ACTION:** nothing here — complete. Publishing (NON-EXEMPT) awaits the user.
 

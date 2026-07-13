@@ -5,24 +5,24 @@ description: MEMORIZE — capture a durable decision/fact into the project's mem
 
 # Janitor memory — MEMORIZE
 
-> **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY for simple ops: create a new Wikimem page, add ONE atomic memory to an existing page, or update a single fact (correction protocol: clean the fact in place + demote the superseded statement to a dated `[^N]` lesson with its WHY). For COMPLEX re-editing — merging same-subject pages, splitting oversized pages, resolving cross-page contradictions, repairing page shape/metadata, deduplicating, checking/redirecting `[[links]]`, harvesting stray artifacts, or any multi-page reorganization — DO NOT do it yourself: the janitor's **`janitor-memory-subconscious-agent`** (launched async in the background by the heartbeat) owns ALL of it. If you notice such work is needed, just note it and move on; the `memory-maintenance` scheduler dispatches the subconscious agent.
+> **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY for simple ops:
+> create a page, add ONE atomic memory, or correct a single fact (clean in place + demote
+> the superseded statement to a dated `[^N]` lesson with its WHY). For COMPLEX re-editing —
+> merging same-subject pages, splitting oversized pages, resolving cross-page contradictions,
+> repairing page shape/metadata, deduplicating, redirecting `[[links]]`, harvesting stray
+> artifacts, or any multi-page reorganization — DO NOT do it yourself: the janitor's
+> **`janitor-memory-subconscious-agent`** (launched async in the background by the heartbeat)
+> owns ALL of it. Noticed such work is needed? Note it and move on; the `memory-maintenance`
+> scheduler dispatches the subconscious agent.
 
 ## Overview
 
 MEMORIZE is the CREATE/CAPTURE leg of the memory wiki. It places a new durable
 decision into the right wikimem page so a future session can navigate to it — not
 dump a loose `.md` into a pile. Read [the wikimem model](references/wikimem-model.md)
-once: pages have a **tier** (hub / aspect / component), a **See-also** context
-web, and a **file→functionality** mapping. This skill is the rules for growing
-that wiki correctly. The model doc's table of contents:
-
-- A wiki, not a pile — and collaborative like Wikipedia
-- The editorial decision flow (run this on any change worth remembering)
-- EXPAND and REDUCE — radiating suns vs receiving terminals
-- The three tiers (a page's role in the pyramid)
-- The edge model — EVERY link is bidirectional (the link law)
-- Page anatomy
-- Atoms — first-class body elements (block-properties)
+once (own table of contents at its top): pages have a **tier** (hub / aspect /
+component), a **See-also** context web, and a **file→functionality** mapping.
+This skill is the rules for growing that wiki correctly.
 
 Only memorize what is NON-OBVIOUS and reusable: design decisions, gotchas,
 constraints not in the code, confirmed preferences, hard-won debugging facts. Do
@@ -32,20 +32,13 @@ CLAUDE.md) or what only matters to this conversation.
 ## PROACTIVE-USE CONTRACT — write AFTER solving, unprompted (commitment 2)
 
 This is the CAPTURE leg of THE PROACTIVE-USE CONTRACT (full text in
-`~/.claude/rules/markdown-memory-recall.md`). **After you solve a non-trivial
-problem, fix a bug, or make a decision** that isn't derivable from the code,
-memorize it **without waiting to be asked** — RECALL first (so you ADD to the
-owning page, never duplicate), then write/update. Route the scope BEFORE
-authoring — **any wiki structure page (a hub / aspect / component describing the
-project's code, architecture, conventions, or pipeline) is project knowledge by
-definition → PROJECT** (git-tracked, shipped with the repo, shared with every
-dev). Route to **LOCAL** ONLY when the content is specifically about THIS machine
-(local absolute paths, this host's name, this machine's credentials/tokens).
-Cross-project machine-independent facts → **USER**. The privacy backstop
-(machine-specific *and* unsure → LOCAL) NEVER demotes a structure page —
-architecture is not "unsure", it is PROJECT. To keep the PROJECT wiki current as you go — the
-architecture hub, key-solution component pages, the publish/deploy pipeline page
-— this skill is the tool; if the project has no wikimem yet, run
+`~/.claude/rules/markdown-memory-recall.md`). **After solving a non-trivial
+problem or making a decision** not derivable from the code, memorize it
+**without waiting to be asked** — RECALL first, then write/update. A wiki
+structure page (hub/aspect/component about code/architecture/conventions/
+pipeline) is PROJECT by definition; the privacy backstop never demotes it.
+Keep the PROJECT wiki current as you go — architecture hub, key-solution
+components, the publish/deploy pipeline. No wikimem yet? Run
 `/janitor-memory-bootstrap` once first.
 
 ## The algorithm
@@ -53,32 +46,14 @@ architecture hub, key-solution component pages, the publish/deploy pipeline page
 ### 0. Route the SUBJECT — is this a CASE fact or a METHODOLOGY lesson?
 
 Do this FIRST, before scope, before choosing a page. **One page = one subject.**
-
-> **Ask:** *is this true only of THIS subject, or would it still be true of a completely
-> different bug in a completely different system?*
-
-| The fact/lesson is… | It belongs in… |
-|---|---|
-| specific to the subject (this API's quirk, this daemon's flag, this keychain's ACL behavior) | **the subject's own page** |
-| a transferable way of WORKING (how to diagnose, verify, falsify, decide; a reasoning trap to avoid) | **the methodology page that owns it** — e.g. `debugging-methodology` |
-
-A general lesson parked inside a case page is **off-topic pollution**: someone recalling
-`claude-client-authentication` wants auth facts, not your lessons about falsification. It is
-doubly wrong because it *scatters* the methodology across every page that happened to teach
-it, so the page that should own it owns nothing.
-
-A single incident often yields BOTH — split it, and cross-link (`[[debugging-methodology]]`):
-the subject fact to the subject page, the transferable lesson to the methodology page.
-
-**Before minting a NEW methodology page, survey the ones that exist** and add to the owner
-instead of creating a fifth near-synonym:
-
-```bash
-memgrep recall "debugging methodology how to diagnose verify falsify" "${ROOTS[@]}"
-```
-
-Methodology is nearly always **USER** scope (a way of working is true across all projects),
-even when the case that taught it is PROJECT or LOCAL.
+Ask: *is this true only of THIS subject, or would it still be true of a
+completely different bug in a completely different system?* Subject-specific →
+the subject's own page. A transferable way of WORKING (diagnose/verify/falsify/
+decide, a reasoning trap) → the methodology page that owns it — survey first
+(`memgrep recall "debugging methodology how to diagnose verify falsify"
+"${ROOTS[@]}"`), don't mint a near-synonym; methodology is nearly always USER
+scope. Split + cross-link when one incident yields both. Full rationale:
+[references/subject-routing.md](references/subject-routing.md).
 
 ### 1. Route the SCOPE (machine-private vs shared vs global)
 
@@ -122,28 +97,25 @@ poisoned PROJECT-scope page arrives via git from any contributor).
 
 Pick exactly one (see the model for the full definition + the WHY):
 
-- **New functionality entirely** (no hub yet for this area) → seed a **`hub`**
-  page: the overview + the big general decisions + the parts map + the file
-  `globs:` the functionality owns. The tip of the iceberg.
-- **EXPAND → a GENERAL, RADIATING page** (`aspect`) — the memory is a *general
-  rule shared by many elements* (a style, protocol, config, brand, convention:
-  `style-system`, `error-envelope`, `dialog-forms`). It is a sun: it will carry
-  links DOWN to EVERY element it governs.
-- **REDUCE → a SPECIFIC, RECEIVING page** (`component`) — the memory is *specific
-  to ONE element and governs nothing else* (`login-panel`, `user-model`,
-  `checkout-endpoint`). It is a terminal: it only links UP to the general pages
-  that govern it.
+- **New functionality entirely** (no hub yet) → seed a **`hub`** page: the
+  overview + the big general decisions + parts map + the `globs:` the
+  functionality owns.
+- **EXPAND → `aspect`** (general, radiating) — a rule shared by many elements
+  (a style, protocol, config, brand, convention: `style-system`,
+  `error-envelope`, `dialog-forms`); links DOWN to EVERY element it governs.
+- **REDUCE → `component`** (specific, receiving) — specific to ONE element,
+  governs nothing else (`login-panel`, `user-model`, `checkout-endpoint`);
+  links UP only to the general pages that govern it.
 
-**Where the page lives:** create it at `$MEMDIR/wikimem/<name>.md` — curated pages
-live in the `wikimem/` sub-dir (`memory_scopes.WIKI_SUBDIR`, USER decision
-2026-07-08); the scope ROOT is the harness-owned buffer (MEMORY.md + raw notes) and
-is never the home of a curated page.
+**Where the page lives:** `$MEMDIR/wikimem/<name>.md` — curated pages live in the
+`wikimem/` sub-dir (`memory_scopes.WIKI_SUBDIR`, USER decision 2026-07-08); the
+scope ROOT is the harness-owned buffer (MEMORY.md + raw notes), never a curated
+page's home.
 
-Keep the new page LEAN — never re-copy a governing rule into a component; link up
-to it. This is what keeps the pyramid from exploding (the model's core WHY).
-Honor the **one-component-one-page** invariant: if a component page for this
-element already exists, the memory goes THERE (→ UPDATE), even if you arrived
-from a different subject. Never make `login-panel-style` beside `login-panel`.
+Keep the new page LEAN — never re-copy a governing rule into a component; link
+up to it instead (this is what keeps the pyramid from exploding). Honor
+**one-component-one-page**: an existing component for this element → UPDATE it
+(even from a different subject), never `login-panel-style` beside `login-panel`.
 
 ### 4. WRITE the page (Write tool, not echo)
 
@@ -161,54 +133,38 @@ component (receiving); `## See also` optional on any tier. Always include the
 standing `## Notes and lessons learned` section even if empty.
 
 **THE LESSON FORM — mandatory metadata, then one terse shape.** A lesson is a first-class
-ATOM OF MEMORY, exactly like a body atom — and a GUARDRAIL, not a story. Every `[^N]` you
-write here (or later demote into here) takes exactly this form:
+ATOM OF MEMORY, exactly like a body atom — a GUARDRAIL, not a story. Every `[^N]` you write
+here (or later demote into here) takes exactly this form:
 
 ```
 [^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-All three metadata keys are REQUIRED — the block is the lesson's ADDRESS, not decoration.
-**Grammar:** a **comma** separates the FIELDS, **quotes** delimit the keywords VALUE, a
-**space** separates the KEYWORDS inside it — so a keyword is a **KEY-PHRASE written
-underscore_joined** (`agent_profile_sidepanel`, never `agent profile sidepanel`), which is
-what keeps a multi-word phrase from being shredded into useless single tokens.
-**`keywords:` is the RECALL SURFACE** (the phrases a future session will SEARCH with — the
-symptom — which are usually NOT the words your prose uses; memgrep indexes them and
-`--only-notes` matches them, so a lesson without them is findable only by accident of
-phrasing, and a memory that cannot be recalled is a memory that does not exist).
-**`ocd:`/`lmd:` are REQUIRED dates**, intrinsic to the lesson (they survive the librarian
-moving it between pages, so they — not file mtime — are its authoritative age).
-
-Then the prose: ONE lesson = ONE mistake (two mistakes = two footnotes); **≤3 lines / ~40
-words** — a long, wandering lesson is not read, and an unread guardrail guards nothing; all
-three parts mandatory — `DO NOT` names the act about to be repeated, `BECAUSE` is the WHY
-(without it the lesson cannot stop the repeat), `DO … instead` is the exit (a lesson that
-only forbids leaves the reader stuck). Chronology ("earlier this page said…"), evidence, and
-reasoning go in the page BODY or a TRDD — never in the lesson.
+All three metadata keys REQUIRED (the block is the lesson's ADDRESS); `keywords:` is the
+RECALL SURFACE, written as underscore_joined key-phrases, not the prose's own words. ONE
+lesson = ONE mistake, **≤3 lines / ~40 words**, and all three parts (`DO NOT` / `BECAUSE` /
+`DO … instead`) mandatory. Full grammar, the comma/quote/space rules, and the WHY each part
+matters: [wikimem-model.md — THE LESSON
+FORM](references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape).
 
 ### 5. WIRE the context — radiate or receive (this is what makes it a wiki)
 
 A page with no edges is a dead note. **THE LINK LAW: every link is bidirectional
-— if A links to B, B links to A, ALWAYS, See-also included.** Wire BOTH ends of
-every edge in the same edit. Links are **scope-local**: a `[[wikilink]]` may only
-target a page in the SAME scope root (LOCAL/PROJECT/USER) — reference another
-scope's page in prose instead (see the model's Link hygiene). The wiring follows
-the page's SHAPE:
+— if A links to B, B links to A, ALWAYS, See-also included.** Wire BOTH ends in
+the same edit. Links are **scope-local** — a `[[wikilink]]` may only target a
+page in the SAME scope root; reference another scope's page in prose instead
+(see the model's Link hygiene). The wiring follows the page's SHAPE:
 
-- **If you EXPANDED (a general/radiating page):** in `## Applies to`, link DOWN to
-  EVERY element this rule governs (find them:
-  `memgrep -l "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`).
-  Then the reciprocal: on each of those component pages, add this page to their
-  `## Governed by`. Also link the new aspect from its hub's parts map (and the
-  hub into the aspect's edges).
-- **If you REDUCED (a component/receiving page):** in `## Governed by`, link UP to
-  EVERY general page that affects this element (its style, protocols, configs).
-  Then the reciprocal: on each of those general pages, add this element to their
-  `## Applies to`. Link the new component from its hub's parts map (and the hub
-  into the component's `## Governed by`).
-- **Any `## See also` lateral link** gets its mirror See-also on the other page,
-  same edit.
+- **EXPANDED (radiating page):** in `## Applies to`, link DOWN to EVERY element
+  this rule governs (find them:
+  `memgrep -l "$MEMDIR" --where 'fm.tier "component" and fm.functionality "<fn>"' | sort -u`);
+  reciprocally, add this page to each of those pages' `## Governed by`. Also
+  link the new aspect from its hub's parts map (and the hub into its edges).
+- **REDUCED (receiving page):** in `## Governed by`, link UP to EVERY general
+  page that affects this element; reciprocally, add this element to each of
+  those pages' `## Applies to`. Link the new component from its hub's parts
+  map (and the hub into the component's `## Governed by`).
+- **Any `## See also`** lateral link gets its mirror on the other page, same edit.
 
 The janitor librarian backfills any reciprocal you miss and flags one-sided
 edges, but it is a safety net — the author wires both ends now.
@@ -216,31 +172,20 @@ edges, but it is a safety net — the author wires both ends now.
 ### 6. Index it (memgrep only — do NOT touch MEMORY.md)
 
 The wiki index is 100% memgrep's — the agent-invisible, unlimited SQLite
-`.memgrep/index.db`. Do **NOT** write to `MEMORY.md` (it is Anthropic's harness-owned
-memory BUFFER, not a wiki index — the harvest mirrors FROM it INTO the wiki; the wiki
-skills never write the buffer, and hand-maintaining a human index is what grew unbounded
-and corrupted memories). Just refresh the search index: `memgrep reindex "$MEMDIR"`
-if memgrep is present (optional — recall falls back to a live walk when the index is stale; it never writes the index itself). Recall finds the new
-page by its `description`/body, never by a human index.
+`.memgrep/index.db`. Do **NOT** write to `MEMORY.md` (Anthropic's harness-owned
+buffer, not a wiki index — the wiki skills never write it; hand-maintaining a
+human index is what grew unbounded and corrupted memories before). Just refresh:
+`memgrep reindex "$MEMDIR"` if memgrep is present (optional — recall falls back
+to a live walk when stale). Recall finds the new page by its `description`/body,
+never by a human index.
 
 ### 7. Sanity-check
 
-- Would a future session find this from the SYMPTOM via `description`? If the
-  description reads like the *answer*, rewrite it as the *question*.
-- Is EVERY link bidirectional — each `## Applies to` ray matched by a
-  `## Governed by` on the element (and vice versa), and each `## See also`
-  mirrored on the other page? No one-sided link of ANY kind (the link law).
-- Is the page LEAN — no governing rule re-copied that should be a link up?
-- Did you respect one-component-one-page (no fragmenting an element)?
-- If you created a hub, are its `globs` precise and non-overlapping with other
-  hubs (one file → one functionality)?
-- Is the frontmatter COMPLETE — `name`, `description`, `ocd`, `lmd`,
-  `metadata.{node_type: memory, type, tier}` (+ `functionality`, and `globs` on a
-  hub) — and is the `## Notes and lessons learned` section present (even if empty)?
-  A page missing any of these is malformed and ranks/repairs poorly.
-- Does the SHAPE match the tier — a `hub`/`aspect` RADIATES via `## Applies to`
-  (NEVER `## Governed by`); a `component` RECEIVES via `## Governed by` (NEVER
-  `## Applies to`)? Inverting these is the most common authoring error.
+Run the Checklist below — it folds in every sanity check (symptom-findability,
+link-law bidirectionality, frontmatter completeness, tier/shape match) plus two
+MEMORIZE-specific ones: the page stays LEAN (no governing rule re-copied that
+should be a link up instead), and a new hub's `globs` are precise and
+non-overlapping with other hubs (one file → one functionality).
 
 ## Output
 
@@ -251,9 +196,7 @@ echo the whole page back into the conversation.
 
 Three worked routing/shape examples (aspect EXPAND, component REDUCE, USER-scope
 feedback) live in [references/write-examples.md](references/write-examples.md)
-(TRDD-82OP4EN9 token-budget move). Its table of contents:
-
-- Worked examples (aspect / component / user-feedback)
+(TRDD-82OP4EN9 token-budget move).
 
 ## Scope
 
@@ -264,26 +207,30 @@ per page; symptom-indexed `description` + non-empty `## See also` are mandatory.
 
 ## Checklist
 
-Copy this checklist and track your progress:
+Copy this checklist and track your progress (step numbers point back to §"The
+algorithm" for full detail on each check):
 
-- [ ] Scope routed — structure/architecture/code → PROJECT; machine-specific → LOCAL; cross-project → USER
-- [ ] RECALL ran first — no existing page already covers this fact
-- [ ] Editorial decision made (new page vs UPDATE an existing page)
-- [ ] Frontmatter COMPLETE: `name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier` (+ `globs` on hubs)
-- [ ] Page written: one subject, symptom-indexed `description:`, correct tier
-- [ ] Each durable body fact carries a `^id [keywords: …]` atom marker (keywords = the search words for THAT fact); optional `desc:` slug = a ≤64-char one-line summary
-- [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
-- [ ] `## Notes and lessons learned` section present (even if empty)
-- [ ] Every lesson in it obeys THE LESSON FORM — metadata `[keywords:"<key_phrase> …", ocd:…, lmd:…]` (all three REQUIRED; key-phrases are underscore_joined; `keywords` is its recall surface — no keywords, no recall) then `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` — one mistake per footnote, ≤3 lines, all three parts present
-- [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
+- [ ] Scope routed (step 1) — PROJECT/LOCAL/USER decided by content, not convenience
+- [ ] RECALL ran first (step 2) — no existing page already covers this fact
+- [ ] Editorial decision made: new page vs UPDATE
+- [ ] `description:` reads as the SYMPTOM/question a future session would search, not the answer
+- [ ] Frontmatter COMPLETE (step 4): `name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier` (+ `globs` on hubs)
+- [ ] Page LEAN and one-component-one-page respected (step 3)
+- [ ] If a hub was created, its `globs` are precise and non-overlapping with other hubs
+- [ ] Each durable body fact carries a `^id [keywords: …]` atom marker; optional `desc:` slug = a ≤64-char one-line summary
+- [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted) — inverting these is the most common authoring error
+- [ ] `## Notes and lessons learned` present (even if empty); every lesson obeys THE LESSON FORM (step 4) — one mistake per footnote, ≤3 lines, all three parts (`DO NOT`/`BECAUSE`/`DO … instead`)
+- [ ] Every `[[link]]` added on BOTH ends (step 5, the bidirectional link law — no one-sided link of any kind)
 - [ ] Every project concept an atom NAMES is a `[[wikilink]]` (missing page → create a stub; own-subject → self-link; a link ≥2 atoms share → pool as one `[^N]` See-also)
-- [ ] `memgrep reindex` run if present — the index is memgrep's; do NOT touch `MEMORY.md`
+- [ ] `memgrep reindex` run if present (step 6) — the index is memgrep's; do NOT touch `MEMORY.md`
 
 ## Resources
 
+Each reference file below opens with its own table of contents.
+
 - [references/wikimem-model.md](references/wikimem-model.md) — the wiki data
   model (tiers, expand/reduce, See-also discipline, file→functionality, memgrep
-  map). The source of truth all three memory skills share. Its table of contents:
+  map). The source of truth all three memory skills share.
   - A wiki, not a pile — and collaborative like Wikipedia
   - The editorial decision flow (run this on any change worth remembering)
   - EXPAND and REDUCE — radiating suns vs receiving terminals
@@ -293,18 +240,19 @@ Copy this checklist and track your progress:
   - Atoms — first-class body elements (block-properties)
 - [references/atom-authoring.md](references/atom-authoring.md) — full page schema
   (frontmatter fields, tier edge sections) and atom block-property grammar with examples.
-  Its table of contents:
-  - Full page schema
-  - Atom block-property grammar
+- [references/subject-routing.md](references/subject-routing.md) — the CASE-fact vs
+  METHODOLOGY-lesson decision (step 0), shared with `/janitor-memory-update`.
+  - The decision
+  - Why it matters — off-topic pollution
+  - Splitting an incident that yields both
+  - Cleaning up an existing violation
 - [references/write-examples.md](references/write-examples.md) — the three worked
-  routing/shape examples. Its table of contents:
+  routing/shape examples.
   - Worked examples (aspect / component / user-feedback)
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" law +
   schema + dual-test method.
 - `/janitor-memory-update` — MODIFY a page / correct a memory (the 2-step
   non-destructive correction protocol lives there).
-- `/janitor-memory-recall` — RECALL: find the right page (run it BEFORE creating,
-  step 2).
-- `/janitor-memory-user-add` (legacy `/to-user-mem`, still works) — saves to the
-  USER's PRIVATE store (agent-invisible); distinct from authoring an agent wikimem
-  page here.
+- `/janitor-memory-recall` — find the right page (run it BEFORE creating, step 2).
+- `/janitor-memory-user-add` (legacy `/to-user-mem`, still works) — the USER's
+  PRIVATE store (agent-invisible), distinct from authoring a wikimem page here.

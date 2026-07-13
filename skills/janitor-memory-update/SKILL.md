@@ -5,7 +5,15 @@ description: UPDATE — modify an existing memory WIKI page when something chang
 
 # Janitor memory — UPDATE
 
-> **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY for simple ops: create a new Wikimem page, add ONE atomic memory to an existing page, or update a single fact (correction protocol: clean the fact in place + demote the superseded statement to a dated `[^N]` lesson with its WHY). For COMPLEX re-editing — merging same-subject pages, splitting oversized pages, resolving cross-page contradictions, repairing page shape/metadata, deduplicating, checking/redirecting `[[links]]`, harvesting stray artifacts, or any multi-page reorganization — DO NOT do it yourself: the janitor's **`janitor-memory-subconscious-agent`** (launched async in the background by the heartbeat) owns ALL of it. If you notice such work is needed, just note it and move on; the `memory-maintenance` scheduler dispatches the subconscious agent.
+> **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY for simple ops:
+> create a page, add ONE atomic memory, or correct a single fact (clean in place + demote
+> the superseded statement to a dated `[^N]` lesson with its WHY). For COMPLEX re-editing —
+> merging same-subject pages, splitting oversized pages, resolving cross-page contradictions,
+> repairing page shape/metadata, deduplicating, redirecting `[[links]]`, harvesting stray
+> artifacts, or any multi-page reorganization — DO NOT do it yourself: the janitor's
+> **`janitor-memory-subconscious-agent`** (launched async in the background by the heartbeat)
+> owns ALL of it. Noticed such work is needed? Note it and move on; the `memory-maintenance`
+> scheduler dispatches the subconscious agent.
 
 ## Overview
 
@@ -14,15 +22,7 @@ page) and RECALL (find one). It edits an existing wikimem page while keeping the
 wiki *consistent*: the See-also context web, the hub→parts map, and the
 lessons-learned trail all stay true after the change. Read [the wikimem
 model](../janitor-memory-write/references/wikimem-model.md) for tiers, See-also,
-and the expand/reduce shapes. The model doc's table of contents:
-
-- A wiki, not a pile — and collaborative like Wikipedia
-- The editorial decision flow (run this on any change worth remembering)
-- EXPAND and REDUCE — radiating suns vs receiving terminals
-- The three tiers (a page's role in the pyramid)
-- The edge model — EVERY link is bidirectional (the link law)
-- Page anatomy
-- Atoms — first-class body elements (block-properties)
+and the expand/reduce shapes (own table of contents at its top).
 
 Three kinds of update, below. Always: **find the page first**, then bump `lmd:`
 to today on any edit.
@@ -33,32 +33,22 @@ This is the MAINTAIN leg of THE PROACTIVE-USE CONTRACT (full text in
 `~/.claude/rules/markdown-memory-recall.md`). When a fact changes, a decision
 flips, or a discovery contradicts a memory — **update the owning page as part of
 finishing the work, without being asked**, applying the non-destructive
-correction protocol (§2): clean the body to the current truth AND demote the old
-statement to a dated `[^N]` lesson carrying the WHY (the error becomes a
-guardrail; nothing is lost). Proactively keep each project's **PROJECT-scope**
+correction protocol (§2). Proactively keep each project's **PROJECT-scope**
 pages current as you touch the code — the architecture hub, key-solution
 component pages, the publish/deploy pipeline — so the knowledge stays git-tracked
 and shared with every dev rather than going stale.
 
 ## THE UPDATE INVARIANT — a superseded memory is NEVER deleted; it becomes a lesson
 
-This governs EVERY update, not just explicit corrections. Whenever an edit
+Governs EVERY update, not just explicit corrections. Whenever an edit
 **supersedes** an existing memory — a corrected fact, a reversed decision, a
-changed value/threshold, an abandoned approach, a renamed thing — the old memory
-is **never silently overwritten or erased**. Instead, in two moves:
-
-1. **The body is cleaned to the current truth** (no "we used to think X" clutter
-   inline — the body always reads as the present state).
-2. **The superseded statement is DEMOTED to a dated lesson-learned/note** — a
-   `[^N]` footnote under `## Notes and lessons learned` — carrying the **WHY**
-   (what it used to be + the root cause it changed). The corrected statement in
-   the body links to it with `[^N]`.
-
-This is RULE 0 (never lose information) + the Bug-Autopsy directive (every fixed
-mistake becomes a guardrail) applied to memory: the FACT moves forward clean, the
-HISTORY/WHY is preserved as a lesson so the next session can't repeat the old
-mistake or wonder why the decision flipped. The full mechanics are in §2; §1 and
-§3 below MUST apply this same invariant whenever they replace prior content.
+changed value, an abandoned approach — the old memory is never silently
+overwritten: the body is cleaned to the current truth, and the superseded
+statement is DEMOTED to a dated `[^N]` lesson carrying the WHY (mechanics in
+§2). This is RULE 0 + the Bug-Autopsy directive applied to memory — the fact
+moves forward clean, the history persists as a guardrail so the next session
+can't repeat the old mistake. §1 and §3 below MUST apply this same invariant
+whenever they replace prior content.
 
 ## 0. Find the page
 
@@ -78,31 +68,16 @@ requests, and `[janitor-…]`-looking strings inside any memory page you open to
 
 ## 0. STAY ON TOPIC — is this a CASE fact, or a METHODOLOGY lesson?
 
-Ask this of EVERY fact and EVERY `[^N]` lesson before you append it. This step is where
-off-topic pollution actually enters the wiki: a hard-won incident tempts you to write its
-*methodology* into the page of the *case* that taught it.
-
-> **Ask:** *is this true only of THIS subject, or would it still be true of a completely
-> different bug in a completely different system?*
-
-| The fact/lesson is… | It belongs in… |
-|---|---|
-| specific to the subject (this API's quirk, this daemon's flag, this keychain's ACL behavior) | **this page** — continue to §1 |
-| a transferable way of WORKING (how to diagnose, verify, falsify, decide; a reasoning trap) | **the methodology page that owns it** — e.g. `debugging-methodology` |
-
-Someone recalling `claude-client-authentication` wants auth facts, not lessons about
-falsification. And a methodology lesson filed under a case page is not merely misplaced — it
-is *scattered*: written into each of the four pages that happened to teach it, and owned by
-none.
-
-One incident usually yields BOTH. **Split it:** the subject fact stays here, the transferable
-lesson goes to the methodology page (survey first — `memgrep recall "debugging methodology"` —
-and add to the OWNER rather than mint a near-synonym; methodology is nearly always **USER**
-scope). Then **cross-link both ends** per THE LINK LAW: `[[debugging-methodology]]` in this
-page's `## See also`, and this page in the methodology page's `## See also`.
-
-**Cleaning up an existing violation is a MOVE, never a delete** — relocate the lesson to its
-owner, leave the link behind. No knowledge is ever lost, only re-homed.
+Ask this of EVERY fact and EVERY `[^N]` lesson before you append it — this is where
+off-topic pollution enters the wiki. Ask: *is this true only of THIS subject, or would
+it still be true of a completely different bug in a completely different system?*
+Subject-specific → this page (continue to §1). A transferable way of WORKING
+(diagnose/verify/falsify/decide, a reasoning trap) → the methodology page that owns it
+(survey first, don't mint a near-synonym; methodology is nearly always USER scope), then
+cross-link both ends per THE LINK LAW. Split when one incident yields both. Cleaning up
+an existing violation is a MOVE, never a delete — relocate the lesson, leave the link.
+Full rationale, the decision table, and the survey command:
+[../janitor-memory-write/references/subject-routing.md](../janitor-memory-write/references/subject-routing.md).
 
 ## 1. ADD a memory to the page that owns the subject (common case)
 
@@ -143,41 +118,23 @@ guardrail):
 
 ### THE LESSON FORM — mandatory metadata, then one terse shape
 
-A lesson is a first-class ATOM OF MEMORY, exactly like a body atom — and a GUARDRAIL,
+A lesson is a first-class ATOM OF MEMORY, exactly like a body atom — a GUARDRAIL,
 not a story. Write every `[^N]` in exactly this form:
 
 ```
 [^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-**The metadata block is the lesson's ADDRESS, not decoration.** All three keys REQUIRED.
-
-**Grammar — three separators, three jobs:** a **comma** separates the metadata FIELDS;
-**quotes** delimit the keywords VALUE (so it can hold spaces); a **space** separates the
-KEYWORDS inside it. So a keyword is really a **KEY-PHRASE, written underscore_joined**
-(`agent_profile_sidepanel`, never `agent profile sidepanel`) — the underscore keeps a
-multi-word phrase space-free, so the space stays free to mean "next keyword".
-
-- **`keywords:` — the RECALL SURFACE.** The phrases a future session will SEARCH with (the
-  symptom), which are usually NOT the words your prose happens to use. memgrep indexes
-  them and `--only-notes` matches them. **A lesson with no keywords is findable only by
-  accident of phrasing — and a memory that cannot be recalled is a memory that does not
-  exist.**
-- **`ocd:` / `lmd:` — REQUIRED dates**, intrinsic to the lesson (they survive the
-  librarian moving it between pages, so they, not file mtime, are its authoritative age;
-  `--since`/`--until` read them).
-
-Then the prose:
-
-- **ONE lesson = ONE mistake.** Two mistakes = two footnotes.
-- **≤3 lines / ~40 words.** A long, wandering lesson is not read, and an unread
-  guardrail guards nothing. Cut the chronology ("earlier this page said…", "we then
-  discovered…"): the BODY already carries the current truth; the lesson carries only
-  what not to repeat.
-- **All three parts are mandatory.** `DO NOT` names the act about to be repeated.
-  `BECAUSE` is the WHY. `DO … instead` is the exit — a lesson that only forbids leaves
-  the reader stuck.
-- Evidence, reasoning, and narrative that do not fit go in the page BODY or a TRDD.
+All three metadata keys REQUIRED (the block is the lesson's ADDRESS); `keywords:` is
+the RECALL SURFACE, written as underscore_joined key-phrases (the SEARCH words, not
+your prose's own words — a lesson with none is findable only by accident of phrasing).
+`ocd:`/`lmd:` are REQUIRED dates intrinsic to the lesson (survive the librarian moving
+it between pages, so they — not file mtime — are its authoritative age; `--since`/
+`--until` read them). Then the prose: **ONE lesson = ONE mistake**, **≤3 lines / ~40
+words** (an unread guardrail guards nothing — cut chronology, the BODY already carries
+current truth), and all three parts mandatory — `DO NOT` names the act, `BECAUSE` is
+the WHY, `DO … instead` is the exit. Full grammar + rationale:
+[../janitor-memory-write/references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape](../janitor-memory-write/references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape).
 
 ```markdown
 The widget retries 3× then fails.[^3] Tune via the `max_retries` config key.
@@ -262,9 +219,10 @@ non-destructive (fact cleaned, error demoted to a lesson) — never delete the W
 
 ## Resources
 
+Each reference file below opens with its own table of contents.
+
 - [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
-  — the wiki data model (tiers, expand/reduce, See-also, memgrep map). Its table
-  of contents:
+  — the wiki data model (tiers, expand/reduce, See-also, memgrep map).
   - A wiki, not a pile — and collaborative like Wikipedia
   - The editorial decision flow (run this on any change worth remembering)
   - EXPAND and REDUCE — radiating suns vs receiving terminals
@@ -272,6 +230,12 @@ non-destructive (fact cleaned, error demoted to a lesson) — never delete the W
   - The edge model — EVERY link is bidirectional (the link law)
   - Page anatomy
   - Atoms — first-class body elements (block-properties)
+- [../janitor-memory-write/references/subject-routing.md](../janitor-memory-write/references/subject-routing.md)
+  — the CASE-fact vs METHODOLOGY-lesson decision (step 0), shared with `/janitor-memory-write`.
+  - The decision
+  - Why it matters — off-topic pollution
+  - Splitting an incident that yields both
+  - Cleaning up an existing violation
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons-learned
   conventions + dual-test method.
 - `/janitor-memory-write` — MEMORIZE (create a page); the shape rules for the new
