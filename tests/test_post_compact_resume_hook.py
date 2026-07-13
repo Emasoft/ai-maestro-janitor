@@ -207,6 +207,10 @@ def test_hook_subprocess_writes_flag(tmp_path: Path) -> None:
         "PATH": __import__("os").environ.get("PATH", ""),
         "CLAUDE_PLUGIN_ROOT": str(_PROJECT_ROOT),
         "CLAUDE_PROJECT_DIR": str(project),
+        # Keep THIS test scoped to "flag written": disable the TRDD-HI0BGQGJ push so
+        # the hook spawns no detached resume_trigger.py. The push path has its own
+        # dedicated unit tests below (_maybe_push_resume).
+        "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED": "false",
     }
     payload = json.dumps(
         {"session_id": "sess-1", "cwd": str(project),
@@ -224,3 +228,173 @@ def test_hook_subprocess_writes_flag(tmp_path: Path) -> None:
     flag = project / ".janitor" / "state" / "resume-after-compact.flag"
     assert flag.exists(), f"flag not written; stderr={proc.stderr!r}"
     assert "TRDD-31095269" in flag.read_text()
+
+
+# ---------- _record_resume_directive return value (the push gate) ---------
+# TRDD-HI0BGQGJ: the push must fire ONLY when a resume target was actually recorded.
+# _record_resume_directive returns that boolean; main() guards the push on it.
+
+def test_record_returns_true_when_flag_written(state_mod) -> None:
+    """An in-flight TRDD → a flag is written → returns True (the push is allowed)."""
+    project, state = state_mod
+    hook = _import_hook()
+    _write_trdd(project / "design" / "tasks", "31095269", "dev",
+                "2026-06-02T05:00:00+0200", "Watchdog")
+    assert hook._record_resume_directive(state) is True
+
+
+def test_record_returns_false_when_nothing_to_resume(state_mod) -> None:
+    """No directive, no in-flight TRDD, no handoff → returns False (no push)."""
+    project, state = state_mod
+    hook = _import_hook()
+    _write_trdd(project / "design" / "tasks", "deadbeef", "complete",
+                "2026-06-02T05:00:00+0200", "Done")
+    assert hook._record_resume_directive(state) is False
+
+
+# ---------- _push_grace_s -------------------------------------------------
+
+def test_push_grace_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    hook = _import_hook()
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S", raising=False)
+    assert hook._push_grace_s() == 180
+
+
+def test_push_grace_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    hook = _import_hook()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S", "42")
+    assert hook._push_grace_s() == 42
+
+
+def test_push_grace_invalid_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    hook = _import_hook()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S", "notanint")
+    assert hook._push_grace_s() == 180
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S", "-5")
+    assert hook._push_grace_s() == 180
+
+
+# ---------- _user_recently_active (the attended detector) -----------------
+
+def _write_presence(home: Path, last_epoch: int) -> None:
+    """Write the cross-plugin user-presence breadcrumb under a controlled HOME."""
+    p = home / ".aimaestro" / "state" / "user-presence.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps(
+            {"last_user_input_epoch": last_epoch, "source": "janitor",
+             "written_at_epoch": last_epoch}
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_user_recently_active_true_when_recent(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    now = int(time.time())
+    _write_presence(home, now - 5)
+    assert hook._user_recently_active(state, now, 180) is True
+
+
+def test_user_recently_active_false_when_old(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    now = int(time.time())
+    _write_presence(home, now - 10_000)
+    assert hook._user_recently_active(state, now, 180) is False
+
+
+def test_user_recently_active_false_when_absent(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No breadcrumb at all → treat as UNATTENDED (fail-safe → the push may fire)."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    assert hook._user_recently_active(state, int(time.time()), 180) is False
+
+
+# ---------- _maybe_push_resume (the three gates; falsifiable) --------------
+
+def _patch_popen(monkeypatch: pytest.MonkeyPatch, hook) -> list:
+    """Replace the hook's subprocess.Popen with a recorder; return the calls list."""
+    calls: list = []
+    monkeypatch.setattr(hook.subprocess, "Popen", lambda argv, **kw: calls.append(list(argv)))
+    return calls
+
+
+def test_push_fires_when_unattended(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unattended + enabled + trigger present → the detached resume_trigger.py is spawned."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))  # no presence file → unattended
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))  # resume_trigger.py exists
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED", raising=False)
+    calls = _patch_popen(monkeypatch, hook)
+    hook._maybe_push_resume(state)
+    assert len(calls) == 1, "push must fire when unattended + enabled + trigger present"
+    assert calls[0][-1].endswith("resume_trigger.py")
+
+
+def test_push_skips_when_attended(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FALSIFICATION of the attended gate: recent user input → NO push."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    _write_presence(home, int(time.time()) - 5)  # attended
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    calls = _patch_popen(monkeypatch, hook)
+    hook._maybe_push_resume(state)
+    assert calls == [], "push must NOT fire while the user is recently active"
+
+
+def test_push_skips_when_disabled(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FALSIFICATION of the enabled gate: config off → NO push even when unattended."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))  # unattended
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED", "false")
+    calls = _patch_popen(monkeypatch, hook)
+    hook._maybe_push_resume(state)
+    assert calls == [], "push must NOT fire when disabled by config"
+
+
+def test_push_skips_when_no_plugin_root(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No CLAUDE_PLUGIN_ROOT → the injector can't be located → NO push (no crash)."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_PLUGIN_ROOT", raising=False)
+    calls = _patch_popen(monkeypatch, hook)
+    hook._maybe_push_resume(state)
+    assert calls == [], "push cannot fire without CLAUDE_PLUGIN_ROOT to locate the trigger"

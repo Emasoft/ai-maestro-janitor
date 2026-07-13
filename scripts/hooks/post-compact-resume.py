@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -197,8 +198,12 @@ def _inflight_trdd_directive(project_root: Path) -> str:
     return f"continue TRDD-{uid8} — read its STATE block first, then proceed."
 
 
-def _record_resume_directive(state) -> None:  # noqa: ANN001 - local module type
-    """Determine + persist the post-compact resume directive (or nothing)."""
+def _record_resume_directive(state) -> bool:  # noqa: ANN001 - local module type
+    """Determine + persist the post-compact resume directive (or nothing).
+
+    Returns True iff a resume flag was written THIS call — the gate the caller uses
+    to decide whether to fire the push (no target recorded → nothing to wake for).
+    """
     state.init_state()
     sd = state.state_dir()
     explicit = _explicit_directive(sd)
@@ -222,7 +227,7 @@ def _record_resume_directive(state) -> None:  # noqa: ANN001 - local module type
                 "post-compact-resume",
                 "no in-flight task and no handoff; no resume flag written",
             )
-            return
+            return False
     directive = pointer + directive
     directive = " ".join(directive.split())  # collapse to a single bounded line
     if len(directive) > _MAX_DIRECTIVE_LEN:
@@ -233,6 +238,85 @@ def _record_resume_directive(state) -> None:  # noqa: ANN001 - local module type
     state.atomic_write(sd / "resume-after-compact.ts", str(int(time.time())))
     state.atomic_write(sd / "resume-after-compact.flag", directive)
     state.log_line("post-compact-resume", f"resume flag written: {directive[:80]}")
+    return True
+
+
+# ---- Post-compact PUSH (TRDD-HI0BGQGJ) -----------------------------------
+# The resume FLAG above is only a note for the NEXT heartbeat cron fire. On an idle
+# session the cron has demoted to the SLOW `*/30` floor, so that fire — and thus the
+# resume — can be up to 30 min away (the "nothing written for 30 min" the user hit).
+# This PUSH closes the gap: it types /janitor-resume into this session's own pane NOW
+# (scripts/resume_trigger.py), so the resume runs in seconds. The cron path stays as
+# the durable fallback — headless / non-automatable panes just fall back to it.
+_PUSH_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED"
+_PUSH_GRACE_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S"
+_PUSH_GRACE_DEFAULT_S = 180
+
+
+def _push_grace_s() -> int:
+    """Attended-grace window in seconds (env-overridable, non-negative)."""
+    raw = os.environ.get(_PUSH_GRACE_ENV, "").strip()
+    if not raw:
+        return _PUSH_GRACE_DEFAULT_S
+    try:
+        value = int(raw)
+    except ValueError:
+        return _PUSH_GRACE_DEFAULT_S
+    return value if value >= 0 else _PUSH_GRACE_DEFAULT_S
+
+
+def _user_recently_active(state, now: int, grace_s: int) -> bool:  # noqa: ANN001
+    """True iff a GENUINE user prompt landed within `grace_s` seconds.
+
+    Reads the cross-plugin user-presence breadcrumb's `last_user_input_epoch` — the
+    SAME field dispatch.py's cadence reads — which the UserPromptSubmit hook bumps
+    ONLY on real user input (never on a cron heartbeat). Gating the push on this is
+    the whole reason it is safe to inject keystrokes automatically: an attended user
+    is left alone (the cron still resumes them), so we never type into a live input
+    line. Fail-safe: any read problem returns False (treat as unattended) — the push
+    itself still degrades to NO_ITERM when there is no automatable pane.
+    """
+    try:
+        data = json.loads(state.user_presence_path().read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    last = data.get("last_user_input_epoch", 0)
+    # bool is an int subclass — reject it so a stray `true` doesn't read as 1.
+    if not isinstance(last, int) or isinstance(last, bool) or last <= 0:
+        return False
+    return (now - last) < grace_s
+
+
+def _maybe_push_resume(state) -> None:  # noqa: ANN001
+    """Fire the detached /janitor-resume push — gated + best-effort.
+
+    Called ONLY after a resume flag was written (so there IS a target). Skips
+    silently when: the push is disabled by config, the user is recently active
+    (attended — the cron path resumes them), or the injector cannot be located.
+    Spawns fully detached so the hook returns immediately; the caller wraps this so
+    a fault never affects the compaction.
+    """
+    if not state.is_truthy_env(_PUSH_ENABLED_ENV, default=True):
+        return
+    if _user_recently_active(state, int(time.time()), _push_grace_s()):
+        state.log_line("post-compact-resume", "user recently active; skipping resume push")
+        return
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    if not plugin_root:
+        return
+    trigger = Path(plugin_root) / "scripts" / "resume_trigger.py"
+    if not trigger.is_file():
+        return
+    subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, str(trigger)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    state.log_line("post-compact-resume", "resume push fired (/janitor-resume)")
 
 
 def main() -> int:
@@ -277,12 +361,27 @@ def main() -> int:
         state.set_project_dir_override(cwd_fallback)
 
     try:
-        _record_resume_directive(state)
+        wrote_flag = _record_resume_directive(state)
     except Exception as exc:  # noqa: BLE001 - a hook fault must never break compaction
         try:
             state.log_line("post-compact-resume", f"failed: {exc}")
         except Exception:  # noqa: BLE001
             print(f"[post-compact-resume] {exc}", file=sys.stderr)
+        return 0
+
+    # PUSH the resume (TRDD-HI0BGQGJ): the flag only wakes the session on the next
+    # heartbeat cron fire — up to 30 min at the SLOW floor. If we recorded a resume
+    # target, wake the session NOW. Separately wrapped so a push fault can never
+    # break the compaction, and gated inside _maybe_push_resume (config / attended /
+    # no automatable pane) — the cron path still resumes if the push is skipped.
+    if wrote_flag:
+        try:
+            _maybe_push_resume(state)
+        except Exception as exc:  # noqa: BLE001 - never let the push break compaction
+            try:
+                state.log_line("post-compact-resume", f"resume push failed: {exc}")
+            except Exception:  # noqa: BLE001
+                print(f"[post-compact-resume] push {exc}", file=sys.stderr)
     return 0
 
 
