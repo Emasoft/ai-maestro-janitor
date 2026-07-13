@@ -184,15 +184,14 @@ def main() -> int:
         "scopes": ["user:inference", "user:sessions:claude_code"],
         "subscriptionType": "max",
     }}
-    rotator.write_slot(email, blob)
-    st = rotator.load_state()
-    st.setdefault("slots", {})[email] = {
-        "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "fp": fp,
-        "expires_at": blob["claudeAiOauth"]["expiresAt"],
-        "via": "setup-token",
-    }
-    rotator.save_state(st)
+    # Keychain write + state.json index entry as ONE locked step: the daemon's 60 s tick
+    # mutates the same state.json, and an unlocked read-modify-write here could orphan this
+    # slot (token in the keychain, no entry indexing it) or clobber the tick's write.
+    if not rotator.file_slot(email, blob, via="setup-token",
+                             expires_at=blob["claudeAiOauth"]["expiresAt"]):
+        print("[capture] FAILED: another rotator operation held the lock; nothing was written. "
+              "Re-run this capture.", file=sys.stderr)
+        return 1
     print("[capture] OK: filed slot for %s (setup-token, ~1y; %s). Live session untouched."
           % (email, detail))
     return 0

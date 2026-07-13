@@ -477,15 +477,15 @@ def capture(email: str, headless: bool) -> int:
               f"ACTUAL account {actual} (authoritative).")
     email = actual
 
-    rotator.write_slot(email, blob)
-    st = rotator.load_state()
-    st.setdefault("slots", {})[email] = {
-        "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "fp": rotator.fingerprint(blob),
-        "expires_at": inner.get("expiresAt"),
-        "via": "slot_capture_browser(full-oauth)",
-    }
-    rotator.save_state(st)
+    # Keychain write + state.json index entry as ONE locked step: the daemon's 60 s tick
+    # mutates the same state.json, and an unlocked read-modify-write here could orphan this
+    # slot (token in the keychain, no entry indexing it) or clobber the tick's write. On a
+    # lock timeout NOTHING is written, so the human simply re-runs — never a half-filed account.
+    if not rotator.file_slot(email, blob, via="slot_capture_browser(full-oauth)",
+                             expires_at=inner.get("expiresAt")):
+        print("[capture] FAILED: another rotator operation held the lock; nothing was written. "
+              "Re-run this capture.")
+        return 1
 
     # opt-in Phase-2c: snapshot the (now possibly refreshed) profile cookies back into the
     # keychain, encrypted at rest. Keyed by the PROFILE owner (argv email), since the

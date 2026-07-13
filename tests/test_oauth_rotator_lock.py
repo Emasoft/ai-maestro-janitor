@@ -149,3 +149,61 @@ def test_rotator_main_skips_mutating_command_when_lock_held(tmp_path: Path) -> N
     # Lock free again → main runs the (monkeypatched) tick normally.
     assert rotator.main(["tick"]) == 0
     assert ran == ["tick"]
+
+
+# ---- oauth_rotator_lock_wait: the CAPTURE path must not drop its write ------
+
+def test_wait_variant_acquires_when_free(tmp_path: Path) -> None:
+    """With the lock free it behaves exactly like the non-blocking form."""
+    _isolate(tmp_path)
+    with gs.oauth_rotator_lock_wait(timeout_s=1) as got:
+        assert got is True
+
+
+def test_wait_variant_waits_for_a_holder_instead_of_skipping(tmp_path: Path) -> None:
+    """The whole point of the wait variant (audit 2026-07-13): a CAPTURE has already cost a
+    human an interactive browser OAuth flow, so "skip, we'll get it next time" would throw
+    that work away. It waits out the daemon's short tick and then proceeds. Real processes,
+    real flock, no mocks."""
+    _isolate(tmp_path)
+    holder = subprocess.Popen([
+        sys.executable, "-c", textwrap.dedent(f"""
+            import os, sys, time
+            os.environ["JANITOR_GLOBAL_STATE_DIR"] = {str(tmp_path)!r}
+            sys.path.insert(0, {str(_LIB)!r})
+            import global_state as gs
+            fd = gs.acquire_oauth_rotator_lock()
+            assert fd is not None
+            print("HELD", flush=True)
+            time.sleep(1.5)
+            gs.release_oauth_rotator_lock(fd)
+        """),
+    ], stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "HELD"    # the lock is genuinely taken
+        assert gs.acquire_oauth_rotator_lock() is None       # the non-blocking form WOULD skip
+        started = time.time()
+        with gs.oauth_rotator_lock_wait(timeout_s=30) as got:
+            waited = time.time() - started
+            assert got is True, "the capture was dropped instead of waiting"
+        assert waited >= 0.5, f"did not actually wait for the holder ({waited:.2f}s)"
+    finally:
+        holder.wait(timeout=30)
+
+
+def test_wait_variant_gives_up_bounded_so_a_wedged_holder_cannot_hang_a_capture(
+    tmp_path: Path,
+) -> None:
+    """Deadlock-proof: a holder that never lets go costs `timeout_s` and a clean False —
+    never a hang. The caller writes NOTHING on that path, so no half-filed account."""
+    _isolate(tmp_path)
+    fd = gs.acquire_oauth_rotator_lock()
+    assert fd is not None
+    try:
+        started = time.time()
+        with gs.oauth_rotator_lock_wait(timeout_s=0.5, poll_s=0.05) as got:
+            assert got is False
+        assert time.time() - started < 10        # bounded, not hung
+    finally:
+        gs.release_oauth_rotator_lock(fd)

@@ -695,6 +695,41 @@ def fingerprint(blob: dict) -> str:
     return hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else ""
 
 
+def file_slot(email: str, blob: dict, *, via: str, expires_at, timeout_s: float = 60.0) -> bool:
+    """Persist a CAPTURED account — the token into the keychain AND its index entry into
+    state.json — as ONE step, under the machine-wide rotator lock.
+
+    The two capture entry points (`slot_capture_browser.py`, `slot_capture_token.py`) each
+    used to do this inline and UNLOCKED, while the daemon's 60 s tick mutates the same
+    `state.json` under `gs.oauth_rotator_lock()`. That is a lost-update race with two ugly
+    outcomes: the tick's read-modify-write can overwrite the capture's entry, ORPHANING a
+    freshly captured account (its token sits in the keychain but no slot indexes it, so the
+    rotator never uses it) — or the capture's stale snapshot can clobber the tick's write and
+    split `state.live_email` from the actual live credential. Those scripts are separate
+    PROCESSES that import this module as a library, so they bypass `main()`'s lock entirely;
+    only a shared OS-level lock can serialise them (audit §3.4, the same reasoning that put
+    the lock in `main()` rather than the daemon's task wrapper).
+
+    Returns False iff the lock could not be taken within `timeout_s` — and NOTHING is written
+    on that path, by construction: the keychain write happens inside the lock, so a lost race
+    can never leave a half-filed account. The caller reports the failure and the human re-runs.
+
+    MUST NOT be called from inside `main()`'s locked commands (see `oauth_rotator_lock_wait`)."""
+    with gs.oauth_rotator_lock_wait(timeout_s) as got:
+        if not got:
+            return False
+        write_slot(email, blob)
+        st = load_state()
+        st.setdefault("slots", {})[email] = {
+            "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "fp": fingerprint(blob),
+            "expires_at": expires_at,
+            "via": via,
+        }
+        save_state(st)
+    return True
+
+
 def expires_in_h(blob: dict) -> float | None:
     exp = _oauth(blob).get("expiresAt")
     if not isinstance(exp, (int, float)):

@@ -1539,3 +1539,57 @@ def test_cmd_tick_stamps_completion_even_on_noop(tmp_path: Path, monkeypatch: py
     stamp = rotator.ROOT / "tick-completed.ts"
     assert stamp.is_file()
     assert abs(int(stamp.read_text()) - time.time()) < 5
+
+
+# ---- file_slot: keychain + state.json as ONE locked step (audit 2026-07-13) ----
+
+def test_file_slot_writes_nothing_when_the_rotator_lock_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two capture scripts used to write the keychain slot and then read-modify-write
+    state.json UNLOCKED, while the daemon's 60 s tick mutates the same state.json under the
+    rotator lock. The lost update could ORPHAN a freshly captured account — its token in the
+    keychain, no slot entry indexing it, so the rotator would never use it.
+
+    file_slot now does both under the lock, and on a lock timeout writes NOTHING AT ALL —
+    the keychain write is inside the lock, so a lost race cannot half-file an account."""
+    import sys as _sys
+    _sys.path.insert(0, str(_HERE.parent / "scripts" / "lib"))
+    import global_state as gs
+
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    wrote: list[str] = []
+    monkeypatch.setattr(rotator, "write_slot", lambda e, b: wrote.append(e))
+    monkeypatch.setattr(rotator, "save_state", lambda s: wrote.append("state"))
+
+    fd = gs.acquire_oauth_rotator_lock()          # stand in for the daemon's in-flight tick
+    assert fd is not None
+    try:
+        ok = rotator.file_slot("a@x", _blob("tok"), via="setup-token",
+                               expires_at=1, timeout_s=0.5)
+    finally:
+        gs.release_oauth_rotator_lock(fd)
+
+    assert ok is False                            # the caller reports it; the human re-runs
+    assert wrote == [], f"a lost race half-filed an account: {wrote}"
+
+
+def test_file_slot_files_the_account_when_the_lock_is_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Happy path: keychain slot + state.json index entry, both written, under the lock."""
+    import sys as _sys
+    _sys.path.insert(0, str(_HERE.parent / "scripts" / "lib"))
+
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    slots: dict[str, dict] = {}
+    saved: dict[str, dict] = {}
+    monkeypatch.setattr(rotator, "write_slot", lambda e, b: slots.__setitem__(e, b))
+    monkeypatch.setattr(rotator, "load_state", lambda: dict(saved))
+    monkeypatch.setattr(rotator, "save_state", lambda s: saved.update(s))
+
+    assert rotator.file_slot("a@x", _blob("tok"), via="setup-token", expires_at=42) is True
+    assert "a@x" in slots                                     # the token reached the keychain
+    entry = saved["slots"]["a@x"]                             # ...and the index knows about it
+    assert entry["via"] == "setup-token" and entry["expires_at"] == 42
+    assert entry["fp"] == rotator.fingerprint(_blob("tok"))

@@ -872,6 +872,37 @@ def oauth_rotator_lock() -> Iterator[bool]:
             release_oauth_rotator_lock(fd)
 
 
+@contextlib.contextmanager
+def oauth_rotator_lock_wait(timeout_s: float = 60.0, poll_s: float = 0.25) -> Iterator[bool]:
+    """Bounded-WAIT variant of `oauth_rotator_lock`, for a one-shot the caller must not drop.
+
+    Skip-and-retry (the default above) is right for the TICK class: the daemon re-fires in
+    60 s and a heartbeat turn must never block. It is wrong for an account CAPTURE. By the
+    time a capture persists anything, a human has already completed an interactive browser
+    OAuth flow, and the resulting token exists only in this process's memory — "skip, we'll
+    get it next time" silently throws that work away. So wait for the (short) tick to
+    finish instead.
+
+    Still deadlock-proof: the wait is BOUNDED, so a wedged holder costs `timeout_s` and a
+    clear failure, never a hang. Yields False on timeout — and the caller must then write
+    NOTHING, so a lost race can never leave a half-filed account (a token in the keychain
+    with no entry in state.json is an ORPHAN the rotator would never use).
+
+    Not reentrant: never call this from a context that already holds the rotator lock (e.g.
+    inside `rotator.main()`'s locked commands) — flock conflicts across open descriptions
+    even within one process, so it would wait out the full timeout and fail."""
+    deadline = time.time() + max(0.0, timeout_s)
+    fd = acquire_oauth_rotator_lock()
+    while fd is None and time.time() < deadline:
+        time.sleep(poll_s)
+        fd = acquire_oauth_rotator_lock()
+    try:
+        yield fd is not None
+    finally:
+        if fd is not None:
+            release_oauth_rotator_lock(fd)
+
+
 # ---------- spawn ---------------------------------------------------------
 
 def daemon_script_path() -> Path:
