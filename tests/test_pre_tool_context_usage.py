@@ -252,6 +252,46 @@ def test_each_session_gets_its_own_latch(tmp_path: Path) -> None:
     assert _ctx(_run({"session_id": "s2"}, enabled=True, snapshot=_snap(65), project=p)) is not None
 
 
+def test_a_compaction_re_arms_the_advisory_for_the_same_session(tmp_path: Path) -> None:
+    """Dropping back below the threshold (i.e. a COMPACTION) must re-arm the advisory.
+
+    `session_id` does NOT change across a compaction, so a latch keyed only on
+    (session, band) is a one-way door: once a long session announced 60/70/80 and `prepare`,
+    it could never announce them again — and EVERY auto-compaction after the first would
+    arrive with no warning at all, which is exactly what the prepare/advisory tiers exist to
+    prevent. Re-arming on the way DOWN keeps the injection budget bounded (~3 blocks per
+    CLIMB, and a climb from 60% to 85% is slow) while restoring the warning.
+    """
+    p = tmp_path / "proj"
+    p.mkdir()
+    s = {"session_id": "s1"}
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p)) is not None, "first climb warns"
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p)) is None, "same band stays silent"
+    # A compaction lands: context falls well below the 60% suggest threshold.
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(20), project=p)) is None, "below threshold: silent"
+    # The SAME session climbs again — it must be warned again, not silently sail into the cap.
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p)) is not None, (
+        "after a compaction the SAME session must be warned again on the next climb — "
+        "otherwise every compaction after the first happens unannounced"
+    )
+
+
+def test_dropping_below_threshold_does_not_re_arm_other_sessions(tmp_path: Path) -> None:
+    """The latch file is shared by every session in the project, so a compaction in session A
+    must release ONLY A's claims — B's latch must survive, or B re-injects a band it already
+    announced."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+    assert _ctx(_run({"session_id": "b"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+    # Session A compacts (drops below threshold) → releases A's claims only.
+    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(20), project=p)) is None
+    assert _ctx(_run({"session_id": "b"}, enabled=True, snapshot=_snap(65), project=p)) is None, (
+        "session B never compacted — its 60-band claim must still hold"
+    )
+    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+
+
 def test_latch_fails_closed_when_it_cannot_be_recorded(tmp_path: Path) -> None:
     """If the latch cannot be written we CANNOT bound repeats, so we must stay SILENT.
 

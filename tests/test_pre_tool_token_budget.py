@@ -42,7 +42,8 @@ _BUDGET_HARD = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_OUTPUT_HARD"
 _CACHE = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION"
 _CACHE_HARD = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_TURN_CACHE_CREATION_HARD"
 _ENFORCE = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE"
-_ALL_VARS = (_ENABLED, _BUDGET, _BUDGET_HARD, _CACHE, _CACHE_HARD, _ENFORCE)
+_REPEAT = "CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_REPEAT_S"
+_ALL_VARS = (_ENABLED, _BUDGET, _BUDGET_HARD, _CACHE, _CACHE_HARD, _ENFORCE, _REPEAT)
 
 
 def _user(text: str) -> str:
@@ -94,6 +95,14 @@ def _run(
     # inherited CLAUDE_PROJECT_DIR pointing at a real project could otherwise pick up a
     # real resume-after-compact.ts and make these tests flaky/non-reproducible.
     env["CLAUDE_PROJECT_DIR"] = project_dir
+    # Disable repeat-suppression by DEFAULT (0 = documented "never suppress"). These tests
+    # exercise the nudge's CONTENT and tiering; dedupe is a separate concern with its own
+    # tests, which call `_repeat_suppressed` directly against a real project dir. Without
+    # this the two get entangled: `_repeat_suppressed` now fails CLOSED when there is no
+    # project dir to stamp into (TRDD-K1RJUYGK — an unbounded hook must go silent rather
+    # than re-inject on every tool call), and `project_dir` is "" here by design, so every
+    # content assertion would see a suppressed, empty response.
+    env[_REPEAT] = "0"
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -368,11 +377,9 @@ def test_repeat_suppression_fails_closed_when_the_stamp_cannot_be_written(tmp_pa
 
     This inverts the original fail-OPEN default ("never suppress on doubt"). Injecting is the
     expensive act: every injected block is later STRIPPED by Claude Code, and the strip mutates
-    the cached prefix, re-billing everything after it (measured: the janitor's no-matcher
-    PreToolUse hooks are the machine's #1 cache-break cause — 893 breaks, $23.05). Failing open
-    meant "we cannot remember warning you, so warn again" — i.e. warn on EVERY tool call, the
-    worst possible outcome. The hard-tier `deny` (a decision field, not an injected block)
-    remains the backstop.
+    the cached prefix, re-billing everything after it. Failing open meant "we cannot remember
+    warning you, so warn again" — i.e. warn on EVERY tool call, the worst possible outcome. The
+    hard-tier `deny` (a decision field, not an injected block) remains the backstop.
     """
     hook = _import_hook()
     proj = tmp_path / "proj"
@@ -396,3 +403,63 @@ def test_repeat_suppression_still_emits_the_first_time_and_silences_the_repeat(t
     # ...and after the window elapses it may warn again.
     assert hook._repeat_suppressed("t1", 1000 + hook._DEFAULT_REPEAT_S + 1, str(proj), hook._DEFAULT_REPEAT_S) is False
     assert hook._DEFAULT_REPEAT_S >= 1800
+
+
+def test_alternating_keys_do_not_defeat_suppression(tmp_path: Path) -> None:
+    """Each key is suppressed on its OWN clock — an A/B alternation must not re-emit both.
+
+    The stamp used to hold a SINGLE `"<key> <ts>"` line, so it only ever suppressed a
+    CONSECUTIVE repeat. The real key is `tier:signal-set` (`advisory:10`, `hard:11`, ...) and
+    it flips between turns as the in-progress turn's output/cache-miss signals change. Every
+    flip saw `prev_key != key` and re-emitted — so in an oscillating runaway session, the one
+    the guard exists to police, the 30-minute window suppressed NOTHING.
+    """
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    w = hook._DEFAULT_REPEAT_S
+    assert hook._repeat_suppressed("advisory:10", 1000, str(proj), w) is False  # first A
+    assert hook._repeat_suppressed("hard:11", 1010, str(proj), w) is False      # first B
+    # Back to A inside its window: MUST still be suppressed (B must not have evicted A).
+    assert hook._repeat_suppressed("advisory:10", 1020, str(proj), w) is True
+    assert hook._repeat_suppressed("hard:11", 1030, str(proj), w) is True
+    # Each key keeps its own clock: A's window elapses independently of B's.
+    assert hook._repeat_suppressed("advisory:10", 1000 + w + 1, str(proj), w) is False
+    assert hook._repeat_suppressed("hard:11", 1000 + w + 1, str(proj), w) is True
+
+
+def test_no_project_dir_fails_closed_but_explicit_zero_window_still_disables() -> None:
+    """No project dir → nowhere to stamp → cannot bound repeats → stay SILENT (fail closed).
+
+    But `window_s <= 0` is the documented way to DISABLE suppression, and a config that says
+    "never suppress" is an instruction, not a doubt — so it must still fail OPEN.
+    """
+    hook = _import_hook()
+    assert hook._repeat_suppressed("t1", 1000, "", 1800) is True   # cannot bound → silent
+    assert hook._repeat_suppressed("t1", 1000, "", 0) is False     # explicitly configured off
+
+
+def test_suppressed_hard_repeat_injects_nothing(tmp_path: Path) -> None:
+    """A suppressed HARD repeat must emit NOTHING — not even a short reminder line.
+
+    This path used to re-inject a "tiny, byte-stable" `additionalContext` reminder on every
+    hard-tier tool call. That is precisely the TRDD-YRPUSIFY reasoning TRDD-K1RJUYGK
+    falsified: the cost is not the block's size or the stability of its text, it is that
+    Claude Code STRIPS the block retroactively and the strip re-bills the cached suffix. So
+    the suppression path was itself injecting on every call in the hook's own hot path.
+    """
+    hook = _import_hook()
+    src = _HOOK.read_text(encoding="utf-8")
+    # The reminder constant is gone, and no _context() call survives on the suppressed path.
+    assert "_HARD_REPEAT_LINE" not in src, "the byte-stable hard-repeat reminder must not return"
+    assert not hasattr(hook, "_HARD_REPEAT_LINE")
+    # End-to-end: a hard-tier turn, run TWICE against a real project dir with the default
+    # window. The first call nudges; the second must be COMPLETELY silent (no stdout at all).
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    t = _write_transcript(tmp_path, _user("go"), _assistant(500_000, tool=True))
+    env = {_BUDGET_HARD: "1000", _REPEAT: str(hook._DEFAULT_REPEAT_S)}
+    first = _run(str(t), project_dir=str(proj), env_extra=env)
+    second = _run(str(t), project_dir=str(proj), env_extra=env)
+    assert _ctx(first) is not None, "the first hard nudge must fire"
+    assert second.stdout.strip() == "", f"a suppressed hard repeat must inject NOTHING, got: {second.stdout!r}"

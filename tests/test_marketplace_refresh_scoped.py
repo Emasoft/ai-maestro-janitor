@@ -108,27 +108,55 @@ def _run_detector(env_paths: dict[str, Path]) -> subprocess.CompletedProcess[str
     )
 
 
-def _wait_for_worker(env_paths: dict[str, Path], deadline: float = 20.0) -> Path:
-    """Block until the detached worker finishes writing the claude log.
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # alive, just not ours to signal
+    return True
 
-    The worker is a DETACHED double-fork that acquires the marketplace flock
-    before exec'ing the stub `claude`, so its first log write can lag the
-    detector's own return. Under full-suite CPU contention that startup
-    occasionally exceeded the old 5s deadline (flaked ~1/11000 in the full run
-    while passing in isolation), yielding an empty log and a false failure. The
-    deadline is therefore generous; the happy path still returns in <1s, the
-    moment the log stabilizes, so the longer ceiling costs nothing when the
-    worker is prompt."""
+
+def _wait_for_worker(env_paths: dict[str, Path], deadline: float = 60.0) -> Path:
+    """Block until the detached worker has EXITED, then return its claude log.
+
+    Waits on the WORKER'S OWN PID (`.janitor/state/marketplace-refresh.pid`, which the
+    detector writes), not on a guess about how long it should take. When the process is gone,
+    it is done writing — so the log is complete, and there is no race left to lose.
+
+    This used to poll the log for content under a fixed deadline and then "wait 0.2s to see if
+    it stabilizes". That is a bet on CPU load, and the bet kept getting called: the deadline
+    had already been raised 5s -> 20s for the exact same flake ("~1/11000 in the full run
+    while passing in isolation, yielding an empty log and a false failure"), and 20s then blew
+    out too the moment the suite got slower. Raising the number a third time would just buy a
+    quieter interval before the next false failure — the flake is not a timeout, it is a
+    missing happens-before edge. So take the edge that actually exists: the worker's own exit.
+
+    An empty log after the worker exits is now a REAL result (the worker ran and refreshed
+    nothing), not an artifact of having looked too early. `deadline` remains only as a
+    runaway backstop; the happy path returns as soon as the process is gone.
+    """
     log = env_paths["claude_log"]
+    pid_file = env_paths["project"] / ".janitor" / "state" / "marketplace-refresh.pid"
     start = time.time()
+
+    # 1) Wait for the worker to announce itself. The detector returns as soon as it has forked,
+    #    so the pid file can lag its return by a hair.
+    pid: int | None = None
     while time.time() - start < deadline:
-        if log.is_file() and log.read_text(encoding="utf-8").strip():
-            # Worker may write more lines — wait a moment for stability.
-            prev = log.read_text(encoding="utf-8")
-            time.sleep(0.2)
-            if log.read_text(encoding="utf-8") == prev:
-                return log
-        time.sleep(0.1)
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            break
+        except (FileNotFoundError, ValueError):
+            time.sleep(0.02)
+
+    # 2) Wait for it to finish. No worker ever appeared → nothing to wait for; fall through and
+    #    let the caller assert on the (empty) log, which is the honest observation.
+    if pid is not None:
+        while time.time() - start < deadline and _pid_is_alive(pid):
+            time.sleep(0.02)
+
     return log
 
 

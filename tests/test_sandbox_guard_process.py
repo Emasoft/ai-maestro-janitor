@@ -101,7 +101,31 @@ def test_the_denial_names_the_fix() -> None:
     ],
 )
 def test_each_machine_touching_binary_is_denied(argv: list[str]) -> None:
-    """Every binary the audit caught escaping — each one reaches real machine state."""
+    """Every binary the audit caught escaping — each one reaches real machine state.
+
+    Asserts the POLICY (deny-by-default: the binary is absent from the allow-table), and THEN
+    the end-to-end denial for those actually installed here.
+
+    The policy assertion is the load-bearing one, because the end-to-end verdict is
+    environment-dependent by design: `classify_argv` deliberately ALLOWS a binary that does not
+    resolve on PATH — a non-existent executable cannot touch the machine (Popen just raises
+    FileNotFoundError), so denying it would replace a real, tested failure mode with a sandbox
+    error and prove nothing.
+
+    That coupling already bit us: this test asserted `lean-ctx` was denied and passed for weeks
+    — but only because lean-ctx happened to be INSTALLED. The day it was uninstalled from the
+    machine, the binary stopped resolving, the guard (correctly) allowed it, and the test went
+    red without a single line of the guard changing. A test whose verdict depends on machine
+    state is measuring the environment, not the policy. So assert the policy first, and treat
+    the real spawn as a bonus check where the environment permits one.
+    """
+    name = os.path.basename(argv[0])
+    assert name not in sandbox_guard._ALLOW_TABLE, (
+        f"{name!r} reaches real machine state and must never be on the allow-table; "
+        "deny-by-default is what makes an unknown binary safe."
+    )
+    if shutil.which(name) is None:
+        return  # not installed here → nothing to spawn → no denial to assert (see above)
     assert _verdict(argv).allowed is False
 
 

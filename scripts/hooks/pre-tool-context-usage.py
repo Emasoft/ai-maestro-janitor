@@ -202,9 +202,18 @@ def _claim_advisory(project_dir: str, session_id: str, tier: str) -> bool:
     TRDD-K1RJUYGK. An `additionalContext` block is neither free nor idempotent. Claude Code
     STRIPS stale system-reminder blocks retroactively, in place, mid-transcript, and that
     mutation lands inside the cached PREFIX — so every token after it re-bills as
-    cache_creation. Measured (agentlensPro, from Anthropic's own usage numbers): this hook is
-    the #1 cache-break cause on the machine — 893 breaks, 4.96M tokens, $23.05 — and 712
-    breaks / $8.60 in a SINGLE session.
+    cache_creation.
+
+    This hook DID emit `additionalContext` on every tool call above the suggest threshold
+    (verified in source), and per-tool-call injection is hazardous on that mechanism alone —
+    which is reason enough to bound it. NOTE: an earlier version of this docstring blamed this
+    hook for a specific measured cost ("the #1 cache-break cause on the machine, $23.05").
+    That attribution is RETRACTED (see the TRDD): agentlensPro's `hook: <Event>` label names
+    the event BOUNDARY at which a changed block was observed, NOT the component that emitted
+    it — it labels breaks at `StopFailure`, whose output the spec says is ignored, and at
+    `PostToolBatch`, which no hook on the machine even registers. Do not restore a $ figure
+    here without proving the emitter twice (the code emits, AND it was non-silent at the
+    moment of the break).
 
     TRDD-YRPUSIFY tried to fix this by BUCKETING the injected numbers so the text is
     byte-identical across a band. That cannot work, and the data falsified it: bucketing was
@@ -240,6 +249,44 @@ def _claim_advisory(project_dir: str, session_id: str, tier: str) -> bool:
     except OSError:
         return False  # could not record the claim → do not inject (fail closed)
     return True
+
+
+def _release_advisory(project_dir: str, session_id: str) -> None:
+    """Re-arm this session's advisory latch. Called when context has fallen back BELOW the
+    suggest threshold — which, within a live session, means a COMPACTION (or an equivalent
+    context shrink) just happened.
+
+    Without this the latch is a one-way door for the whole session: `session_id` does NOT
+    change across a compaction, so once a session claimed `prepare` and the 60/70/80 bands,
+    it could never announce them again — and EVERY SUBSEQUENT auto-compaction would arrive
+    with no warning at all, which is precisely the event the `prepare` tier exists to warn
+    about. A long session compacts many times; only the first one was covered.
+
+    Re-arming on the way DOWN (rather than tracking a compaction counter) keeps the guarantee
+    the injection budget needs: the bands can only be re-claimed after a genuine descent below
+    the threshold, so the ceiling is ~3 blocks per CLIMB, not per tool call. Climbing 60→85%
+    takes a long time, so this stays bounded.
+
+    Only THIS session's claims are released — a shared project latch file must not re-arm
+    other sessions. Best-effort: any I/O error leaves the latch as-is (the safe direction —
+    it stays claimed, so we stay silent).
+    """
+    if not project_dir or not session_id:
+        return
+    p = _latch_path(project_dir)
+    try:
+        seen = p.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, OSError):
+        return  # nothing latched (or unreadable) → nothing to release
+    kept = [ln for ln in seen if not ln.startswith(f"{session_id} ")]
+    if len(kept) == len(seen):
+        return  # this session holds no claims — do not rewrite the file
+    try:
+        tmp = p.with_name(p.name + f".tmp.{os.getpid()}")
+        tmp.write_text("".join(f"{ln}\n" for ln in kept), encoding="utf-8")
+        os.replace(tmp, p)
+    except OSError:
+        pass  # could not release → stays claimed → stays silent (fail closed, as above)
 
 
 def _advisory_tier(pct: int) -> str:
@@ -398,13 +445,22 @@ def main() -> int:
     # forward in the transcript and is re-read every subsequent turn, so injecting one on
     # every low-% tool call would itself add to the very per-turn bleed this guard exists
     # to cut. Below the threshold the statusline already shows the %; we add nothing.
-    #
-    # TRDD-K1RJUYGK: above the threshold it is ALSO latched — one announcement per 10-point
-    # band per session. Injecting on every tool call above 60% made this hook the machine's
-    # #1 prompt-cache breaker (893 breaks, $23.05), because Claude Code retroactively STRIPS
-    # each injected block and that mutation re-bills the whole cached suffix. Bucketing the
-    # text (TRDD-YRPUSIFY) could not help — a stripped block costs the same whatever it said.
-    if pct >= suggest_pct and _claim_advisory(project_dir, session_id, _advisory_tier(pct)):
+    if pct < suggest_pct:
+        # Back below the threshold ⇒ the context shrank ⇒ a compaction happened. Re-arm this
+        # session's advisories so the NEXT climb is warned about too. Without this the latch
+        # is a one-way door and every compaction after the first arrives unannounced — see
+        # `_release_advisory`.
+        _release_advisory(project_dir, session_id)
+        return 0
+
+    # TRDD-K1RJUYGK: above the threshold the advisory is LATCHED — one announcement per
+    # 10-point band, per climb. This hook injected `additionalContext` on EVERY tool call
+    # above 60%, and an injected block is neither free nor idempotent: Claude Code later
+    # STRIPS it retroactively, in place, and that mutation lands inside the cached PREFIX, so
+    # every token after it re-bills as cache_creation. Bucketing the TEXT (TRDD-YRPUSIFY)
+    # cannot help — a stripped block costs the same whatever it said; only NOT injecting does.
+    # Hence: bound the injection COUNT, never its text.
+    if _claim_advisory(project_dir, session_id, _advisory_tier(pct)):
         sys.stdout.write(json.dumps(_advisory(_format_line(pct, tokens, window, stale, suggest_pct))))
     return 0
 

@@ -79,28 +79,48 @@ _SPAWNER_TOOLS = frozenset({"Task", "Agent"})
 # TRDD-K1RJUYGK raised this from 180s. 3 minutes sounds conservative but is not: a long
 # session re-injects the nudge every 3 minutes for hours, and EVERY injection seeds a fresh
 # system-reminder block that Claude Code later STRIPS retroactively — and it is the strip,
-# not the text, that mutates the cached prefix and re-bills everything after it. Measured
-# (agentlensPro, from Anthropic's own usage numbers): the janitor's two no-matcher PreToolUse
-# hooks are the #1 cache-break cause on the machine (893 breaks, 4.96M tokens, $23.05). A
-# 30-minute floor cuts the injection count ~10x while still re-warning a genuinely runaway
-# session. Bucketing the text (TRDD-YRPUSIFY) does NOT substitute for this: a stripped block
-# costs the same no matter what it said.
+# not the text, that mutates the cached prefix and re-bills everything after it. A 30-minute
+# floor cuts the injection count ~10x while still re-warning a genuinely runaway session.
+# Bucketing the text (TRDD-YRPUSIFY) does NOT substitute for this: a stripped block costs the
+# same no matter what it said.
+#
+# NOTE: an earlier version of this comment blamed the janitor's two no-matcher PreToolUse
+# hooks for a measured "#1 cache-break cause on the machine ($23.05)". That attribution is
+# RETRACTED (see the TRDD) — agentlensPro's `hook: <Event>` label names the event BOUNDARY a
+# changed block was observed at, not its emitter. The mechanism is real and bounding the
+# injection is right; the blame was not established. Do not restore a $ figure here.
 _DEFAULT_REPEAT_S = 1800
-_HARD_REPEAT_LINE = "⚠⚠ token-guard: hard budget still exceeded — see the prior nudge; wrap up now."
+
+# Cap the per-key stamp file. The key space is (tier x signal-set) — a handful of values —
+# so this only trims genuinely stale entries.
+_STAMP_MAX_KEYS = 32
 
 
 def _repeat_suppressed(key: str, now: int, project_dir: str, window_s: int) -> bool:
-    """True iff the SAME nudge `key` was already emitted < `window_s` ago (and stamp the
+    """True iff this nudge `key` was already emitted < `window_s` ago (and stamp the
     emission otherwise). The stamp lives beside the other per-session state files.
 
-    Fails CLOSED (returns True → SUPPRESS) when the stamp cannot be read or written.
-    TRDD-K1RJUYGK inverted this: it used to fail OPEN ("never suppress on doubt"), which is
-    exactly backwards now that injecting is known to be the expensive act. An unwritable state
-    dir meant we could not remember having warned — and so warned on EVERY tool call, the
-    worst possible outcome. Silence is the safe failure: the hard-tier `deny` (an unstripped
-    decision field, not an injected block) remains the backstop."""
-    if window_s <= 0 or not project_dir:
-        return False
+    Keeps a stamp PER KEY, not a single last-key stamp. The original stored one
+    `"<key> <ts>"` line, so it only ever suppressed a CONSECUTIVE repeat: the key is
+    `tier:signal-set` (e.g. `advisory:10`, `hard:11`) and it flips between turns as the
+    in-progress turn's output/cache-miss signals change. Any alternation —
+    advisory → hard → advisory — saw `prev_key != key` each time and re-emitted, so the
+    window suppressed nothing in exactly the runaway session it is meant to police.
+
+    Fails CLOSED (returns True → SUPPRESS) whenever the stamp cannot be read or written,
+    AND when there is no project dir to stamp into. TRDD-K1RJUYGK inverted this: it used to
+    fail OPEN ("never suppress on doubt"), which is exactly backwards now that INJECTING is
+    known to be the expensive act. Not being able to remember that we warned meant warning on
+    EVERY tool call — the worst possible outcome. Silence is the safe failure: the hard-tier
+    `deny` (a decision field, not an injected block) remains the backstop.
+
+    `window_s <= 0` is the one deliberate fail-OPEN: it is the documented way to DISABLE
+    repeat-suppression by config, and a config that says "never suppress" must be obeyed.
+    """
+    if window_s <= 0:
+        return False  # explicitly configured OFF — not a doubt, an instruction
+    if not project_dir:
+        return True  # nowhere to stamp → cannot bound repeats → stay silent (fail closed)
     stamp = Path(project_dir) / ".janitor" / "state" / "token-budget-last-nudge.txt"
     try:
         raw = stamp.read_text(encoding="utf-8")
@@ -108,17 +128,24 @@ def _repeat_suppressed(key: str, now: int, project_dir: str, window_s: int) -> b
         raw = ""
     except OSError:
         return True  # cannot read → cannot bound → stay silent
-    if raw:
+    seen: dict[str, int] = {}
+    for line in raw.splitlines():
         try:
-            prev_key, prev_ts = raw.rsplit(" ", 1)
-            if prev_key == key and 0 <= now - int(prev_ts) < window_s:
-                return True
+            k, ts = line.rsplit(" ", 1)
+            seen[k] = int(ts)
         except ValueError:
-            pass  # corrupt stamp — treat as first emission
+            continue  # corrupt line — drop it, treat as never emitted
+    prev = seen.get(key)
+    if prev is not None and 0 <= now - prev < window_s:
+        return True
+    seen[key] = now
+    # Cap the file: keep only the most recent keys. The key space is tiny (tier x
+    # signal-set), so this only ever trims genuinely stale entries.
+    keep = sorted(seen.items(), key=lambda kv: kv[1])[-_STAMP_MAX_KEYS:]
     try:
         stamp.parent.mkdir(parents=True, exist_ok=True)
         tmp = stamp.with_suffix(f".tmp.{os.getpid()}")
-        tmp.write_text(f"{key} {now}", encoding="utf-8")
+        tmp.write_text("".join(f"{k} {ts}\n" for k, ts in keep), encoding="utf-8")
         os.replace(tmp, stamp)
     except OSError:
         return True  # cannot record the emission → cannot bound repeats → stay silent
@@ -352,9 +379,22 @@ def main() -> int:
             key = f"{verdict.tier}:{int(_has_signal(verdict.reasons, 'output '))}{int(_has_signal(verdict.reasons, 'cache-miss write'))}"
             window_s = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_REPEAT_S"), _DEFAULT_REPEAT_S)
             if _repeat_suppressed(key, int(time.time()), project_dir, window_s):
-                if verdict.tier == "hard":
-                    _emit(_context(_HARD_REPEAT_LINE))  # tiny, byte-stable reminder
-                return 0  # advisory repeat: silence — the first nudge already rides the transcript
+                # SILENCE — emit nothing, for the hard tier too (TRDD-K1RJUYGK).
+                #
+                # This path used to re-emit a short `additionalContext` reminder on every
+                # hard-tier tool call, reasoning that a "tiny, byte-stable" block was cheap.
+                # That is exactly the TRDD-YRPUSIFY argument this TRDD falsified: the cost is
+                # not the block's SIZE or the stability of its TEXT, it is that Claude Code
+                # later STRIPS the block retroactively, in place — and that mutation lands
+                # inside the cached PREFIX, re-billing every token after it. A stripped block
+                # costs the same whatever it said. So the suppression path was itself
+                # injecting on every call in the hard tier — the hook's own hot path, in the
+                # exact runaway session it exists to police.
+                #
+                # The signal is not lost: the first full nudge already rides the transcript,
+                # and the hard-tier `deny` of a Task/Agent spawn (a decision field, NOT a
+                # strippable block) is the enforcement backstop.
+                return 0
         _emit(resp)
     return 0
 
