@@ -9,9 +9,14 @@
 
 A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
 
-1. **Per-session heartbeat** — a durable `CronCreate` per project fires a fresh
+1. **Per-session heartbeat** — a `CronCreate` per project fires a fresh
    turn every ~5 min → runs **project-scoped** drift detectors `--one-shot` →
    emits one-line "drift" findings to the model. Silent when nothing drifts.
+   The cron is **SESSION-SCOPED by platform design** (CC docs: scheduled tasks live
+   in the current conversation, are restored only on `--resume`/`--continue`, and
+   expire after 7 days — there is **no** `durable` parameter). It therefore cannot
+   survive a Claude restart on its own: the SessionStart re-arm nudge and the
+   `[janitor-renew]` marker ARE the survival mechanism, not workarounds for a bug.
 2. **Global daemon** — ONE machine-wide singleton process that owns every
    **user/global-scope** mutation (so N sessions don't stampede the same
    command — issue #7). Spawned lazily by any session's heartbeat.
@@ -60,7 +65,7 @@ $PROJECT/.janitor/state/                                              per-sessio
     rate-limited.flag · rate-limited-since.ts · resume-after-compact.flag · resume-after-compact.ts ·
     resume-directive.txt (agent pointer) · heartbeat-armed-at.ts · heartbeat-renew-seen.txt · <detector> seen-files ·
     desired-cadence.cron · armed-cadence.cron · cadence-state.json · ttl-regime.json · last-resume.ts (TTL-aware cadence, TRDD-0QQX9H0G)
-cron: one durable CronCreate per project → fires the stub
+cron: one CronCreate per project (SESSION-SCOPED by design; no `durable` param exists) → fires the stub
 ```
 
 ## Control flow

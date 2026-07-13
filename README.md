@@ -10,7 +10,7 @@
 Session-scoped janitor plugin for Claude Code. Reconciles drift between what
 the repo actually contains and what the todo list / open PRs / worktrees /
 TRDDs claim, and handles rate-limit auto-resume plus prompt-cache keep-alive —
-all through a single durable `CronCreate` heartbeat and hooks. No external
+all through a single (session-scoped) `CronCreate` heartbeat and hooks. No external
 daemons, no monitors.
 
 **Platform:** macOS, Linux, and Windows (everywhere `uv` runs). Required:
@@ -21,7 +21,7 @@ path; the only remaining shell wrapper is the cron back-compat shim.
 
 ## How it works
 
-One durable recurring cron is armed on session start via the `/janitor-arm`
+One recurring cron — session-scoped, re-armed each session — is armed on session start via the `/janitor-arm`
 skill. From v0.4.11 the cron prompt points at an **auto-rolling stub** in
 `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` — a stable path that lives
 OUTSIDE the version-stamped plugin cache. The stub re-resolves the
@@ -609,7 +609,7 @@ rm -rf .trashcan/<timestamp>/ .trashcan/<timestamp>.txt
 
 ### Auto-renewal of the 7-day cron (silent since v0.5.2)
 
-Durable recurring `CronCreate` jobs auto-expire after 7 days. dispatch.py
+Recurring `CronCreate` jobs auto-expire after 7 days. dispatch.py
 tracks the arm time in `.janitor/state/heartbeat-armed-at.ts`, and once the
 cron is 6+ days old it emits a bare `[janitor-renew]` marker on stdout.
 The cron prompt installed by `/janitor-arm` (since v0.5.2) teaches Claude
@@ -648,9 +648,13 @@ Then inside the session, run:
 /janitor-arm
 ```
 
-This arms the durable heartbeat. Because `durable: true` is set, the cron
-survives session restarts — you do not need to re-arm on each launch unless
-the 7-day recurring-cron expiry has hit.
+This arms the heartbeat. The cron is **session-scoped** (Claude Code scheduled tasks
+live in the current conversation and are restored only on `--resume`/`--continue`;
+there is no parameter that outlives the session), so it does **not** survive a Claude
+restart. You do not normally need to re-arm by hand: the SessionStart hook nudges
+`/janitor-arm` on each new session, and a cron nearing the 7-day expiry emits
+`[janitor-renew]`. Work that must genuinely outlive a session belongs to the global
+daemon, not the cron.
 
 On Claude Code v2.1.110+, `claude --resume <session-id>` and
 `claude --continue` also resurrect unexpired scheduled tasks, so the
@@ -771,7 +775,7 @@ network outage (WiFi off for ~90 seconds, then back on):
 
 1. In-flight turn failed during the outage → `StopFailure` hook wrote
    `.janitor/state/rate-limited.flag` and `rate-limited-since.ts`.
-2. The durable heartbeat cron kept ticking inside Claude Code; the fires that
+2. The heartbeat cron kept ticking inside Claude Code; the fires that
    landed during the outage were enqueued.
 3. When the network came back, the next queued fire delivered. `dispatch.py`
    saw the flag, emitted
@@ -782,7 +786,7 @@ network outage (WiFi off for ~90 seconds, then back on):
 
 No bot, no polling loop, no supervisor wrapper — the session never died, only
 the interrupted turn did. The three-component pattern — passive account
-switcher, durable recurring cron, and idempotent state file read each fire —
+switcher, recurring cron, and idempotent state file read each fire —
 is the design the plugin embodies: dispatch.py treats the flag file as the
 single source of truth, so whether the turn that clears it runs 5 seconds or
 5 hours after `StopFailure` wrote it, the user-facing effect is identical.
@@ -893,7 +897,7 @@ any plugin-side change — staying on a recent CC build is recommended:
   `hooks/hooks.json` from `command: "uv run --script ..."` to
   `args: ["uv", "run", "--script", ...]` locally — both forms read
   the same plugin code.
-- **v2.1.142** hardened two failure modes the durable heartbeat
+- **v2.1.142** hardened two failure modes the heartbeat
   depends on. First, plugin cache cleanup no longer deletes the
   *active* plugin version directory when install metadata is
   missing — `/janitor-arm` bakes the running version's absolute
@@ -924,7 +928,7 @@ any plugin-side change — staying on a recent CC build is recommended:
   which is independent of CC's internal cleanup path).
 - **v2.1.144** capped the side-channel "is api.anthropic.com
   reachable" probe at 15s — previously a captive portal / firewall /
-  VPN block could hang CC startup for up to 75s. Because the durable
+  VPN block could hang CC startup for up to 75s. Because the
   heartbeat fires every 5 minutes, a 60s startup tax on every fire
   would cripple the rate-limit recovery loop; v2.1.144 keeps the loop
   responsive on flaky networks. v2.1.144 also fixed completed/stopped

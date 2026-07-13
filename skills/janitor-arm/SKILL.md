@@ -7,7 +7,7 @@ description: Arms or renews the ai-maestro-janitor heartbeat cron. Use when firs
 
 ## Overview
 
-Creates (or replaces) the single CronCreate heartbeat (`durable: true`, though some Claude Code builds downgrade that to session-only — see [Known limitations](#known-limitations-claude-code-platform)). The cron prompt points at an **auto-rolling stub** in `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (path survives every plugin *version* update — but not a load-source change; see Known limitations). The stub re-resolves the highest cached plugin version on every fire and `os.execv`'s into its `scripts/dispatch.py`, so future plugin updates roll forward without re-arming.
+Creates (or replaces) the single CronCreate heartbeat. The cron is **session-scoped by platform design** — it does NOT survive a Claude restart; see [Known limitations](#known-limitations-claude-code-platform). The cron prompt points at an **auto-rolling stub** in `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py` (path survives every plugin *version* update — but not a load-source change; see Known limitations). The stub re-resolves the highest cached plugin version on every fire and `os.execv`'s into its `scripts/dispatch.py`, so future plugin updates roll forward without re-arming.
 
 Re-arming is needed only on: first install, upgrade from pre-stub (≤ v0.4.10) once, or `[janitor-renew]` nudge. Re-running is safe and idempotent.
 
@@ -97,7 +97,7 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
    > ALREADY-armed pre-self-disarm cron still won't self-disarm on a global stop until
    > re-armed; stop such a cron with a one-time `/janitor-disarm`.
 
-5. `CronCreate` with the resolved `$CRON` from step 2, `prompt` from step 4, `durable: true`, `recurring: true`. **Observe the response's durability** — some Claude Code builds (verified 2.1.173–2.1.177) silently downgrade `durable: true` to **session-only**; the response then says "Session-only (not written to disk…)". See [Known limitations](#known-limitations-claude-code-platform).
+5. `CronCreate` with the resolved `$CRON` from step 2, `prompt` from step 4, `recurring: true`. The response will say **"Session-only (not written to disk…)"** — that is CORRECT and expected, not a failure: Claude Code scheduled tasks are session-scoped by design. Do NOT pass `durable: true` expecting persistence; no such guarantee exists (see [Known limitations](#known-limitations-claude-code-platform)).
 
 6. Record arm timestamp + clear stale renew-dedupe:
 
@@ -118,11 +118,13 @@ Full design rationale, atomic install, path-traversal safety, survival contract:
      mv -f "$STATE_DIR/armed-cadence.cron.tmp.$$" "$STATE_DIR/armed-cadence.cron"
    ```
 
-7. **Verify durability, then report honestly.** A durable job persists to `~/.claude/scheduled_tasks.json`; a session-only job does not (and `CronList` shows `[session-only]`). Check the CronCreate response (or `CronList`):
-   - **Durable** → `Janitor armed (durable): <cron> → auto-rolling stub (target: <version>). Heartbeat ID: <id>. Survives restarts.`
-   - **Session-only** (the build downgraded `durable`) → report WITH the warning: `Janitor armed SESSION-ONLY: <cron>. Heartbeat ID: <id>. ⚠ This Claude Code build downgraded durable→session-only — the heartbeat will NOT survive a Claude restart; it re-arms automatically at the next SessionStart (ai-maestro-janitor#23).`
+7. **Report honestly.** The job WILL come back session-only — that is the platform's
+   documented behavior, not a defect. Report:
 
-   Append `(replaced <N>)` if step 3 deleted any. Do NOT claim "survives restarts" when the job came back session-only.
+   `Janitor armed: <cron> → auto-rolling stub (target: <version>). Heartbeat ID: <id>. Session-scoped (re-arms at the next SessionStart).`
+
+   Append `(replaced <N>)` if step 3 deleted any. **Never claim "survives restarts"** — no
+   CronCreate job does. Do not warn about a "downgrade": nothing was downgraded.
 
 ## Output
 
@@ -130,17 +132,27 @@ One line: cron expression, heartbeat ID, current stub target version (durable vs
 
 ## Known limitations (Claude Code platform)
 
-Two harness-derived guarantees the heartbeat design relies on do NOT hold on
-some Claude Code builds (verified 2.1.173–2.1.177). The skill does everything
-correctly; the gaps are upstream. See [janitor-architecture](references/janitor-architecture.md#known-limitations)
-and ai-maestro-janitor#23.
+Two properties the heartbeat design must live with. See
+[janitor-architecture](references/janitor-architecture.md#known-limitations).
 
-1. **`durable: true` may be downgraded to session-only.** The job is not written
-   to `~/.claude/scheduled_tasks.json`, so the heartbeat does NOT survive a Claude
-   restart (crash / `--continue` / OOM / relaunch). Mitigation: the SessionStart
-   hook nudges `/janitor-arm`, so the heartbeat re-arms each new session — the
-   gap is only a mid-session restart. Step 7 reports this honestly instead of
-   claiming "survives restarts".
+1. **The heartbeat cron is SESSION-SCOPED — by design, not by defect.** Claude Code
+   scheduled tasks live in the current conversation, are restored only on
+   `--resume`/`--continue`, and auto-expire after 7 days; **there is no `durable`
+   parameter** (verified against the official `tools-reference` / `scheduled-tasks`
+   docs, 2026-07-13 — CC 2.1.207). The heartbeat therefore does NOT survive a Claude
+   restart (crash / OOM / relaunch), and no argument can make it.
+
+   This corrects a long-held misreading in this project — that "some CC builds silently
+   downgrade `durable: true` to session-only" (ai-maestro-janitor#23). Nothing was ever
+   downgraded: `durable: true` was simply an argument the platform ignores. We inferred a
+   guarantee from a parameter NAME we passed, then filed a bug against the platform when
+   observation disagreed, instead of reading the spec.
+
+   **Consequence (load-bearing):** the SessionStart re-arm nudge + the `[janitor-renew]`
+   marker are the **only** survival mechanism — they are NOT a workaround for an upstream
+   bug and must never be removed on the theory that #23 got "fixed". For work that must
+   genuinely outlive a session, the docs point elsewhere (Routines / desktop scheduled
+   tasks / GitHub Actions) — which is exactly why the global **daemon** exists.
 2. **`${CLAUDE_PLUGIN_DATA}` is not stable across load-source changes.** It
    resolves to `…-inline` for an inline/local load and `…-ai-maestro-plugins`
    for the marketplace load, so re-arming under a different load source writes a
