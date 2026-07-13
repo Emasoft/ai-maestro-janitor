@@ -2,7 +2,7 @@
 name: janitor-beat-tasks-and-limitations
 description: "what is the heartbeat rate / how often does the janitor run each task / daemon beat cadences and intervals / list of periodic daemon tasks / why did my user-scope plugin take up to an hour to update / can the per-session heartbeat update user-scope plugins / the single-writer limitation / why the fleet is excluded from auto-update / how fast does a global disarm reach every session / which beats are opt-in / dynamic heartbeat tiers fast mid slow — the janitor's two-clock schedule and its known limitations"
 ocd: 2026-07-12
-lmd: 2026-07-12
+lmd: 2026-07-13
 metadata:
   node_type: memory
   type: project
@@ -23,9 +23,15 @@ that hub first for the two-tier model, then this for the exact schedule + limits
 
 ## The two clocks
 
-- **Clock A — the per-session heartbeat** (project scope): a durable `CronCreate`,
-  one per project, fires a fresh Claude turn. Runs the project-scoped detectors and
-  surfaces drift + resume/renew/reload markers. Silent when nothing drifts.
+- **Clock A — the per-session heartbeat** (project scope): a `CronCreate`, one per
+  project, fires a fresh Claude turn. Runs the project-scoped detectors and surfaces
+  drift + resume/renew/reload markers. Silent when nothing drifts. **It is
+  SESSION-SCOPED, by platform design** — Claude Code scheduled tasks live in the
+  current conversation, are restored only on `--resume`/`--continue`, and auto-expire
+  after 7 days; there is **no** parameter that outlives the session. The heartbeat
+  therefore CANNOT survive a Claude restart on its own, and the SessionStart re-arm
+  nudge + the `[janitor-renew]` marker are not workarounds for a bug — they ARE the
+  survival mechanism.[^cron-session-scoped]
 - **Clock B — the global daemon loop** (`daemon.py`): ONE machine-wide singleton,
   loop ceiling **60 s**. Each tick runs every DUE `Task` (`Task.is_due()` gates on
   its interval; `Task.run()` stamps `<name>.last-run.ts` unconditionally in
@@ -152,3 +158,21 @@ user plugins EXCEPT the ai-maestro fleet").
   agentlensPro TTL probe — that is UNIMPLEMENTED; the shipped tiers are `*/5`/`*/15`/`*/30`.
   Lesson: verify cadence numbers against the `_INTERVAL_*`/`_DEFAULT_CRON` source, not a
   staged plan — a plan describes what MIGHT ship, not what runs.
+
+[^cron-session-scoped]: [ocd:2026-07-13 lmd:2026-07-13] This page previously called Clock A
+  "a **durable** `CronCreate`", and the codebase (CLAUDE.md, the `/janitor-arm` skill,
+  ai-maestro-janitor#23) treated every session-only cron as a BUILD BUG — "some Claude Code
+  builds silently downgrade `durable: true` to session-only". That framing is WRONG. A
+  2026-07-13 sweep of the official docs (`tools-reference`, `scheduled-tasks`) found **no
+  `durable` parameter at all**: scheduled tasks are documented as *session-scoped* — they
+  live in the current conversation, are restored only on `--resume`/`--continue`, and expire
+  after 7 days; the docs point to Routines / desktop scheduled tasks / GitHub Actions for
+  anything that must outlive a session. So the cron never "downgraded"; it always behaved as
+  designed and `durable: true` was simply an ignored argument. WHY the error persisted: we
+  inferred a platform guarantee from a parameter NAME we passed, and when observation
+  (session-only) contradicted the inference we filed a bug against the platform instead of
+  checking the spec — the same "a name is a hypothesis, not a contract" trap. Consequence
+  worth keeping: the SessionStart re-arm + `[janitor-renew]` are not a workaround for an
+  upstream defect, they are the ONLY survival mechanism, so they must never be "cleaned up"
+  once #23 is closed. Lesson: before filing a platform bug, READ THE SPEC — an argument the
+  platform ignores is not a broken promise, it is a promise never made.
