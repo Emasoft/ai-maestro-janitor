@@ -146,7 +146,7 @@ def _build_osascript(
     for i, command in enumerate(commands):
         if i:
             lines.append("            delay 0.4")  # let each enqueued command register
-        lines.append(f'            write text "{command}"')
+        lines.append(f'            write text "{terminal_trigger.applescript_quote(command)}"')
     lines += [
         "          end tell",
         "        end if",

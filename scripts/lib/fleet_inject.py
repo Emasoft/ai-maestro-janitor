@@ -84,8 +84,20 @@ def iterm_osascript(
     can target ANOTHER pane by its stored UUID.
 
     The caller MUST have passed `session_id` through `valid_session_id()` first —
-    this function trusts it (the UUID is the only interpolated-from-state value;
-    `command` is a fixed internal literal from `_ACTION_COMMAND`, never user input).
+    this function trusts it.
+
+    `command` is ESCAPED (audit finding 3). It used to be raw f-string-interpolated into
+    `write text "…"`, guarded only by the fact that every caller happens to pass a fixed
+    internal literal (`/janitor-arm`, `/reload-plugins --force`, `claude --continue`). But
+    `build_command_plan` and `fleet_restart.command_injection_plan` both ADVERTISE
+    themselves as builders for an "arbitrary"/"raw" command, so a future caller passing
+    untrusted text would inject AppleScript on the iTerm channel — and only there, since
+    tmux/wtype/xdotool pass argv (or `-l` literal) and are already safe. A `"` or `\\` would
+    break the script; a crafted string could append statements. Escape at the sink, so the
+    iTerm channel is as safe as the others no matter who calls it.
+
+    The escaping (and the newline refusal) lives in `terminal_trigger.applescript_quote` —
+    the SSOT every iTerm `write text` builder shares.
     """
     # TWO ESCs (terminal_trigger.HARD_INTERRUPT_ESC_COUNT): one clears a running tool, one
     # ends the (frozen) turn — else the injected command enqueues behind it.
@@ -99,7 +111,7 @@ def iterm_osascript(
         f'        if (id of s) is "{session_id}" then\n'
         "          tell s\n"
         f"{esc}"
-        f'            write text "{command}"\n'
+        f'            write text "{terminal_trigger.applescript_quote(command)}"\n'
         "          end tell\n"
         "        end if\n"
         "      end repeat\n"

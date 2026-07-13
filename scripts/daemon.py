@@ -1368,7 +1368,13 @@ def _consume_plugin_update_requests() -> int:
             except (OSError, subprocess.SubprocessError) as exc:
                 state.log_line("daemon", f"plugin-update {plugin_id} failed: {exc}")
                 continue
-        if up.returncode == 0 and "updated from" in (up.stdout or ""):
+        # Share the ROBUST matcher with the other two update paths in this file (audit
+        # finding 4). A bare `"updated from"` substring made any CLI wording change —
+        # "Updated from", "updated to vX", an arrow form, localized output — a false
+        # negative: the plugin IS updated on disk, but no reload generation is stamped, so
+        # every live session keeps running the OLD cached code until some other path
+        # happens to set the flag.
+        if up.returncode == 0 and _stdout_proves_plugin_updated(up.stdout or ""):
             gs.set_reload_flag(f"plugin-update@{plugin_id}")
             state.log_line("daemon", f"plugin-update: updated {plugin_id} [scope=user]; reload flag set")
             updated += 1

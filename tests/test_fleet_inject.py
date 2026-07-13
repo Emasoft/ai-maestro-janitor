@@ -17,6 +17,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
@@ -299,3 +301,38 @@ def test_gentle_and_hard_paths_agree_on_every_terminal_shape() -> None:
         gentle_ch = gentle["channel"] if gentle else None
         hard_ch = hard["channel"] if hard else None
         assert gentle_ch == hard_ch, f"reachability drift on {term}: {gentle_ch} vs {hard_ch}"
+
+
+# ---- the iTerm sink must be injection-proof (audit finding 3) ----------------
+
+_UUID = "4C4A9B71-0000-4000-8000-000000000000"
+
+
+def test_iterm_command_with_a_quote_cannot_escape_the_applescript_string():
+    """The iTerm channel builds `write text "<command>"` by interpolation, and it is the ONLY
+    channel that does (tmux/wtype/xdotool pass argv or `-l` literal). It used to interpolate
+    raw, guarded only by every caller happening to pass a fixed internal literal — while
+    build_command_plan / command_injection_plan ADVERTISE themselves as builders for an
+    ARBITRARY command. A `"` must be escaped, not close the string."""
+    script = fi.iterm_osascript(_UUID, '/x" & (do shell script "touch /tmp/pwned") & "',
+                                esc_first=False)
+    # The quotes are escaped, so no bare `"` ever terminates the write-text literal early.
+    assert '\\"' in script
+    assert 'write text "/x\\" & (do shell script \\"touch /tmp/pwned\\") & \\""' in script
+
+
+def test_iterm_command_with_a_backslash_is_escaped_before_the_quote():
+    """Order matters: escaping the quote first would then double-escape its own backslashes."""
+    assert 'write text "a\\\\b"' in fi.iterm_osascript(_UUID, "a\\b", esc_first=False)
+
+
+def test_iterm_command_refuses_a_newline():
+    """A newline cannot appear inside an AppleScript string literal, and it would mean typing
+    a SECOND, unreviewed command into the user's shell — refuse, never smuggle."""
+    with pytest.raises(ValueError, match="single line"):
+        fi.iterm_osascript(_UUID, "/janitor-arm\nrm -rf ~", esc_first=False)
+
+
+def test_a_normal_command_is_unchanged():
+    """The escaping must not perturb the fixed internal literals every caller passes today."""
+    assert 'write text "/janitor-arm"' in fi.iterm_osascript(_UUID, "/janitor-arm", esc_first=False)

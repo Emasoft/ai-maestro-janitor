@@ -93,6 +93,28 @@ HARD_INTERRUPT_ESC_COUNT = 2
 _ESC_SETTLE_S = "0.6"
 
 
+def applescript_quote(command: str) -> str:
+    """`command` escaped for interpolation inside an AppleScript double-quoted string —
+    the SSOT sink-hardening for every iTerm `write text "…"` builder (audit finding 3).
+
+    Those builders used to raw f-string-interpolate the command, guarded only by the fact
+    that every caller happens to pass a fixed internal literal (`/janitor-arm`, `/compact`,
+    `/reload-plugins --force`, `claude --continue`). But `fleet_inject.build_command_plan`
+    and `fleet_restart.command_injection_plan` ADVERTISE themselves as builders for an
+    "arbitrary"/"raw" command, so a future caller passing untrusted text would inject
+    AppleScript — and on the iTerm channel ONLY, since tmux/wtype/xdotool pass argv (or `-l`
+    literal) and are already safe. Harden the sink, not the callers, so it holds no matter
+    who calls it.
+
+    Backslash FIRST, then the quote — the reverse order would re-escape the backslashes the
+    quote-escaping just introduced. A newline is REFUSED rather than escaped: it cannot
+    appear inside an AppleScript string literal, and it would mean typing a second,
+    unreviewed command into the user's shell."""
+    if "\n" in command or "\r" in command:
+        raise ValueError("command must be a single line (a newline would submit a second command)")
+    return command.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def iterm_esc_lines(indent: str = "            ") -> list[str]:
     """AppleScript lines for a HARD interrupt inside an iTerm ``tell s`` block:
     ``HARD_INTERRUPT_ESC_COUNT`` raw-ESC writes, each followed by a settle delay. Shared by
