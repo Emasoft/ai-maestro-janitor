@@ -215,8 +215,14 @@ _NETWORK_FSTYPES = frozenset({"nfs", "smbfs", "cifs", "afpfs", "webdav", "fuse.s
 
 
 def filesystem_is_network(fstype: str) -> bool:
-    """True iff `fstype` denotes a network/remote mount (latency + availability risk)."""
-    return fstype.split(".")[0].lower() in {t.split(".")[0] for t in _NETWORK_FSTYPES}
+    """True iff `fstype` denotes a network/remote mount (latency + availability risk).
+
+    Matched on the FULL fstype (case-insensitive), NOT on a `fuse.`-prefix collapse: most FUSE
+    filesystems (fuse.encfs, fuse.rclone, fuse.bindfs) are LOCAL — only fuse.sshfs is remote —
+    so folding every `fuse.*` down to `fuse` (the old `split('.')[0]` behavior) misreported a
+    local FUSE mount as a network mount.
+    """
+    return (fstype or "").lower() in _NETWORK_FSTYPES
 
 
 # --- CI / remote execution --------------------------------------------------
@@ -346,7 +352,7 @@ def detect_ide(env: Mapping[str, str]) -> dict:
     }
     # Desktop app vs CLI: the desktop app bundle id differs from a terminal launch.
     bundle = (env.get("__CFBundleIdentifier") or "").lower()
-    if "com.anthropic.claude" in bundle or "claude" in bundle and "desktop" in bundle:
+    if "com.anthropic.claude" in bundle or ("claude" in bundle and "desktop" in bundle):
         claude["surface"] = "desktop app"
     elif claude["is_claude_code"]:
         claude["surface"] = "CLI / terminal"
