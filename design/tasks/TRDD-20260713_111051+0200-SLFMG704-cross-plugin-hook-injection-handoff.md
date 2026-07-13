@@ -3,7 +3,7 @@ trdd-id: SLFMG704
 title: Hand off the hook-injection cache-thrash finding to the plugins that own the other offending hooks
 column: dev
 created: 2026-07-13T11:10:51+0200
-updated: 2026-07-13T11:10:51+0200
+updated: 2026-07-13T11:34:00+0200
 current-owner: janitor-session
 task-type: infra
 severity: HIGH
@@ -43,7 +43,39 @@ what it said (TRDD-YRPUSIFY's approach; falsified by data).
 | $5.45 | 7 | `hook: StopFailure:rate_limit` | ai-maestro-janitor — *not yet assessed* |
 | $4.48 | 37 | `hook: PreToolUse:Write` | ai-maestro-janitor — FIXED (same no-matcher hooks) |
 
-### ⚠ ATTRIBUTION IS NOT DONE — the trap I nearly walked into
+### ✓ ATTRIBUTION DONE (2026-07-13) — `hook: Stop` belongs to NO PLUGIN
+
+Every Stop hook registered on this machine was checked for an `additionalContext` emission:
+
+| Stop hook | Emits `additionalContext`? |
+|---|---|
+| `claude-menu-system/scripts/menu_emit.py` | **no** — uses `systemMessage`, exactly as its docs claim |
+| `codex/scripts/stop-review-gate-hook.mjs` | **no** |
+| `ai-maestro-assistant-manager-agent/scripts/amama_stop_check.py` | **no** |
+| `ai-maestro-janitor/scripts/hooks/on-stop.py` | **no** |
+| `ai-maestro-janitor/scripts/hooks/on-stop-token-meter.py` | **no** |
+| `agentlenspro hook` (compiled binary, user settings) | **no** — probed with a synthetic Stop payload, emitted nothing |
+| `$HOME/.agentlens/pending-prompt.txt` cat-hook (user settings) | file absent; Stop stdout is NOT injected per the spec (only UserPromptSubmit/UserPromptExpansion/SessionStart stdout becomes context) |
+| `ai-maestro-plugin`, `-architect-agent`, `-chief-of-staff` | **broken registrations** — see below |
+
+**CONCLUSION: no plugin Stop hook injects.** The most probable source of the `hook: Stop`
+`INJECTED_BLOCK_CHANGED` breaks is **Claude Code's OWN `<system-reminder>` blocks** emitted
+around the Stop boundary (e.g. the recurring *"The task tools haven't been used recently…"*
+reminder, observed appearing and then disappearing within a single session transcript). Those
+come from no hook and are stripped by the host itself. AgentLens labels a break by the EVENT
+BOUNDARY it occurred at, **not** by a proven emitter — so `hook: Stop` must not be read as
+"a Stop hook did this". **Do NOT report this to any plugin owner.** If confirmed, it is
+un-fixable by plugin authors and belongs upstream to Anthropic.
+
+### ⛔ SEPARATE BUG FOUND — three ai-maestro plugins have BROKEN Stop hooks
+
+Their registered Stop `command` values are, verbatim: `node` (ai-maestro-plugin), `python3`
+(ai-maestro-architect-agent), and **the empty string** (ai-maestro-chief-of-staff). A hook is
+invoked with its JSON payload on **stdin** — so bare `node` and bare `python3` will attempt to
+**execute that JSON payload as source code** and fail every turn. This is unrelated to the
+cache issue but is a real misconfiguration. **This one IS an ai-maestro item — route it.**
+
+### ⚠ The trap I nearly walked into (keep this lesson)
 
 I initially wrote "`hook: Stop` is owned by ai-maestro" because ai-maestro plugins register
 Stop hooks, and I was one command away from AMP-ing that to another team. **It is not
@@ -76,11 +108,10 @@ fan-out dominates. This is the #1 *avoidable cache-break* cause, not the #1 burn
 
 ## NEXT ACTION
 
-1. **ATTRIBUTE `hook: Stop` BEFORE REPORTING IT TO ANYONE.** Enumerate every Stop-hook script
-   registered on the machine and prove which one(s) emit `additionalContext` (grep the target
-   script; for a compiled/binary hook like `agentlenspro hook`, run it against a synthetic Stop
-   payload and inspect stdout). Only then route the finding to the owner. Nine of ten are
-   unchecked; the one checked was clean.
+1. ~~ATTRIBUTE `hook: Stop`~~ **DONE 2026-07-13 — no plugin injects.** See the attribution
+   table above. Probable source is Claude Code's own system-reminders. Do NOT report to any
+   plugin owner. Optional follow-up: confirm with Anthropic (a reproducible transcript showing
+   a host-emitted reminder present in turn N and absent in turn N+M with no other prefix delta).
 2. **`PostToolBatch` ($11.51) — IDENTIFY THE OWNER.** It is not in any `hooks.json` on this
    machine, so it is registered by some other mechanism (or is Claude Code's own injection at
    that boundary). Do not report until attributed.
