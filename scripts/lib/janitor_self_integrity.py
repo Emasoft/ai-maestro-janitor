@@ -35,13 +35,15 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import fcntl
 import hashlib
 import hmac
 import json
 import os
 import secrets
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 # ----------------------------------------------------------------------------
 # Section 1 — Integrity notice preamble (JAN-SELF-INTEGRITY-PREAMBLE)
@@ -332,8 +334,10 @@ class AuditChain:
     so any middle-edit / re-order / truncation fails verification
     at exactly the tamper point.
 
-    Stdlib-only. Not thread-safe (single-writer model — one heartbeat
-    fires at a time).
+    Stdlib-only. Every mutation is serialized machine-wide by a sibling `.lock`
+    file (see `_chain_lock`) — the "one heartbeat fires at a time" single-writer
+    model this class was originally built on is FALSE for the chain it actually
+    writes (F4, audit 2026-07-13).
     """
 
     def __init__(self, log_path: Path, key: bytes) -> None:
@@ -341,6 +345,50 @@ class AuditChain:
             raise ValueError("AuditChain requires a non-empty key")
         self._log = Path(log_path)
         self._key = key
+
+    # ---- machine-wide chain lock (F4) ------------------------------------
+
+    @contextlib.contextmanager
+    def _chain_lock(self, *, shared: bool = False) -> Iterator[None]:
+        """Serialize access to the chain across PROCESSES.
+
+        F4 (audit 2026-07-13). `append` is a read-modify-write — read the last
+        entry's hmac, then append an entry chained to it — and the chain file is
+        MACHINE-WIDE: TRDD-DKEYCHN7 deliberately moved it into the one FIXED janitor
+        DATA dir so every session shares it. But the writer is a PER-PROJECT,
+        PER-SESSION heartbeat detector, and every armed project on the machine fires
+        its own ~5-minute cron in its own process. So two fires routinely interleave:
+        both read the same `prev`, both append an entry claiming to follow it, and
+        `verify()` then reports a `prev_hmac chain break` at the second one.
+
+        The chain is append-only, so that break is PERMANENT — from then on every
+        heartbeat in every project screams "audit-log tamper-evidence broken", which
+        is the textbook way to train a user to ignore the real alarm. It also DEFEATS
+        the mechanism: with two entries claiming the same predecessor, an attacker who
+        deletes one leaves a chain that verifies exactly as broken as it already was.
+
+        Writers take LOCK_EX; `verify` takes LOCK_SH so it cannot read a half-written
+        line and report the tear as tampering. Blocking (never DROP an audit record) —
+        the critical section is microseconds, and the kernel releases an flock when its
+        holder dies, so a crashed writer cannot wedge the chain.
+
+        Fail-open: if the lock file itself cannot be opened (unwritable dir), proceed
+        UNLOCKED rather than crash a heartbeat — that is exactly today's behavior, and
+        the caller will fail on the real I/O a moment later anyway."""
+        try:
+            self._log.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(self._log) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError:
+            yield
+            return
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
 
     # ---- low-level helpers ----------------------------------------------
 
@@ -416,17 +464,22 @@ class AuditChain:
 
         Reserved field names: `prev_hmac`, `hmac`. If the caller
         passes either, they're ignored — the chain controls them.
+
+        The read-modify-write runs under the machine-wide chain lock (F4): the read of
+        `prev` and the append that chains to it MUST be one indivisible step, or two
+        concurrent heartbeats permanently break the chain they are signing.
         """
-        prev = self._last_hmac()
-        entry = {k: v for k, v in event.items() if k not in ("prev_hmac", "hmac")}
-        entry["prev_hmac"] = prev
-        canonical = _canonical_payload(entry)
-        entry["hmac"] = self._entry_hmac(canonical)
-        # Append atomically — one entry per file write, single newline.
-        self._log.parent.mkdir(parents=True, exist_ok=True)
-        with self._log.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, sort_keys=True, separators=(",", ":"),
-                                ensure_ascii=False) + "\n")
+        with self._chain_lock():
+            prev = self._last_hmac()
+            entry = {k: v for k, v in event.items() if k not in ("prev_hmac", "hmac")}
+            entry["prev_hmac"] = prev
+            canonical = _canonical_payload(entry)
+            entry["hmac"] = self._entry_hmac(canonical)
+            # Append atomically — one entry per file write, single newline.
+            self._log.parent.mkdir(parents=True, exist_ok=True)
+            with self._log.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, sort_keys=True, separators=(",", ":"),
+                                    ensure_ascii=False) + "\n")
         return entry
 
     def trim(self, *, keep_lines: int = 2000, max_bytes: int = 2 * 1024 * 1024) -> bool:
@@ -443,7 +496,17 @@ class AuditChain:
         the key. Prior anchors are dropped on re-trim (superseded by the new head).
 
         Amortised-cheap: no-op below `max_bytes`. Fail-open on I/O errors (an oversized
-        chain is better than a crashed heartbeat). Returns True iff a rewrite happened."""
+        chain is better than a crashed heartbeat). Returns True iff a rewrite happened.
+
+        Runs under the machine-wide chain lock (F4). Trim is read → rewrite → os.replace,
+        so a concurrent `append` would otherwise write into the ORPHANED old inode and
+        vanish — losing an audit record, silently, in the log whose whole job is to make
+        loss detectable."""
+        with self._chain_lock():
+            return self._trim_locked(keep_lines=keep_lines, max_bytes=max_bytes)
+
+    def _trim_locked(self, *, keep_lines: int, max_bytes: int) -> bool:
+        """`trim`'s body — the caller MUST hold the chain lock."""
         try:
             if keep_lines <= 0 or not self._log.is_file() or self._log.stat().st_size <= max_bytes:
                 return False
@@ -480,6 +543,76 @@ class AuditChain:
             return False
         return True
 
+    def concurrent_fork_only(self) -> bool:
+        """True iff the chain's ONLY defects are lost-update FORKS — the artifact the F4
+        race left behind — and nothing was removed, edited, or reordered.
+
+        Why this is needed: the chain is append-only, so a fork the pre-F4 race wrote is
+        PERMANENT. Fixing the race stops NEW forks but cannot heal an existing one, and
+        `verify()` would keep failing forever — leaving every project on the machine with
+        the same unfixable "tamper-evidence broken" alarm the fix was meant to remove.
+        Healing by rewriting the log is not an option: an audit log that erases its own
+        anomalies is not an audit log.
+
+        So classify instead. A fork is provably benign, on two independent grounds:
+
+        1. EVERY entry's own `hmac` still verifies under the key. An attacker who does not
+           hold the key cannot produce one; an attacker who does holds the whole chain
+           anyway. (Two racing heartbeats DO produce valid hmacs — each signed its own
+           entry correctly; they merely read the same `prev_hmac` first.)
+        2. Every entry's `prev_hmac` names a parent that is STILL PRESENT earlier in the
+           file. That is exactly what distinguishes a fork from a deletion: remove entry
+           E_k and E_k+1's `prev_hmac` points at an hmac that appears NOWHERE — which
+           this returns False for, so a truncation, an edit, a reorder, and a splice all
+           still raise the real alarm.
+
+        Deliberately NOT a general "ignore breaks" switch: it requires at least one fork,
+        every entry key-valid, and every parent present."""
+        if not self._log.is_file():
+            return False
+        try:
+            with self._chain_lock(shared=True):
+                content = self._log.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        expected_prev = self._genesis_prev()
+        seen: set[str] = {expected_prev}
+        forks = 0
+        idx = 0
+        for raw in content.splitlines():
+            if not raw.strip():
+                continue
+            try:
+                entry = json.loads(raw)
+            except (ValueError, TypeError):
+                return False
+            if not isinstance(entry, dict):
+                return False
+            actual_prev = entry.get("prev_hmac")
+            actual_hmac = entry.get("hmac")
+            if not isinstance(actual_prev, str) or not isinstance(actual_hmac, str):
+                return False
+            # (1) key-signed, always — a forged or edited entry fails here.
+            if not hmac.compare_digest(actual_hmac, self._entry_hmac(_canonical_payload(entry))):
+                return False
+            if actual_prev != expected_prev:
+                # (2) the parent must still be in the file. Present => a racing sibling
+                # (nothing lost). Absent => its entry was REMOVED => a real tamper.
+                if actual_prev not in seen:
+                    return False
+                forks += 1
+            if idx == 0 and entry.get("type") == _TRIM_ANCHOR_TYPE:
+                resumes = entry.get("resumes_from")
+                if not isinstance(resumes, str) or not resumes:
+                    return False
+                expected_prev = resumes
+                seen.add(resumes)
+            else:
+                expected_prev = actual_hmac
+            seen.add(actual_hmac)
+            idx += 1
+        return forks > 0
+
     def verify(self) -> tuple[bool, int, str]:
         """Verify every entry in the chain, top to bottom.
 
@@ -492,11 +625,16 @@ class AuditChain:
         verifying its hmac, the expected predecessor jumps to `resumes_from`. An
         anchor anywhere else fails the ordinary `prev_hmac` check (its prev is
         genesis) — mid-chain splicing stays detectable.
+
+        The read is taken under a SHARED chain lock (F4) so it cannot observe a
+        half-written entry mid-append and report the tear as `malformed JSON` — a false
+        tamper alarm raised by the very act of auditing.
         """
         if not self._log.is_file():
             return (True, 0, "")
         try:
-            content = self._log.read_text(encoding="utf-8")
+            with self._chain_lock(shared=True):
+                content = self._log.read_text(encoding="utf-8")
         except OSError as exc:
             return (False, 0, f"read failed: {exc}")
         expected_prev = self._genesis_prev()

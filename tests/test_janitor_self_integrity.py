@@ -505,3 +505,180 @@ def test_detector_imports_cleanly() -> None:
     # If there's stdout, it's a finding; either is acceptable here
     # — what matters is no traceback in stderr.
     assert "Traceback" not in r.stderr
+
+
+# ---------- Section 3b: AuditChain concurrency (F4, audit 2026-07-13) ------
+
+
+_APPENDER = """
+import sys, pathlib
+sys.path.insert(0, {libdir!r})
+from janitor_self_integrity import AuditChain, load_or_create_key
+key = load_or_create_key(pathlib.Path({datadir!r}))
+chain = AuditChain(pathlib.Path({chain!r}), key)
+for i in range({n}):
+    chain.append({{"event": "detector.fire", "worker": {w}, "seq": i}})
+"""
+
+
+def test_audit_chain_survives_concurrent_appends_from_many_processes(tmp_path: Path) -> None:
+    """F4: the chain file is MACHINE-WIDE (one fixed janitor DATA dir) but its writer is a
+    PER-PROJECT heartbeat detector — every armed project fires its own cron in its own
+    process and appends to the same file. `append` is a read-modify-write, so without a
+    lock two fires read the same `prev_hmac`, both chain to it, and verify() reports a
+    PERMANENT `prev_hmac chain break` — a false, unfixable tamper alarm in every project
+    on the machine. Real processes, real flock, no mocks."""
+    import subprocess
+
+    libdir = str(_PROJECT_ROOT / "scripts" / "lib")
+    chain_path = tmp_path / "janitor-chain.ndjson"
+    load_or_create_key(data_dir=tmp_path)          # mint the key ONCE, before the fan-out
+
+    workers, per_worker = 6, 12
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-c", _APPENDER.format(
+                libdir=libdir, datadir=str(tmp_path), chain=str(chain_path),
+                n=per_worker, w=w)],
+        )
+        for w in range(workers)
+    ]
+    for p in procs:
+        assert p.wait(timeout=60) == 0
+
+    chain = AuditChain(chain_path, load_or_create_key(data_dir=tmp_path))
+    ok, n, reason = chain.verify()
+    assert ok, f"chain broken at entry {n}: {reason}"
+    assert n == workers * per_worker, f"lost an audit record: {n} of {workers * per_worker}"
+
+
+def test_audit_chain_trim_does_not_lose_a_concurrent_append(tmp_path: Path) -> None:
+    """F4, second half: trim is read → rewrite → os.replace. An append landing inside that
+    window writes into the ORPHANED inode and vanishes. Both take the chain lock, so the
+    trimmed chain still verifies and the concurrent record survives."""
+    import subprocess
+    import time
+
+    libdir = str(_PROJECT_ROOT / "scripts" / "lib")
+    chain_path = tmp_path / "janitor-chain.ndjson"
+    key = load_or_create_key(data_dir=tmp_path)
+    chain = AuditChain(chain_path, key)
+    for i in range(400):                            # enough bulk that a trim actually fires
+        chain.append({"event": "detector.fire", "seq": i, "pad": "x" * 200})
+
+    appender = subprocess.Popen(
+        [sys.executable, "-c", _APPENDER.format(
+            libdir=libdir, datadir=str(tmp_path), chain=str(chain_path), n=40, w=99)],
+    )
+    time.sleep(0.01)                                # let it get into the append loop
+    chain.trim(keep_lines=50, max_bytes=1024)       # rewrite the file under it
+    assert appender.wait(timeout=60) == 0
+
+    ok, n, reason = chain.verify()
+    assert ok, f"chain broken at entry {n}: {reason}"
+
+
+# ---------- Section 3c: fork classification must NOT mask tampering (F4) ---
+
+def _forge(chain: AuditChain, prev: str, event: dict) -> str:
+    """A correctly KEY-SIGNED entry with a caller-chosen `prev_hmac` — exactly what a
+    racing heartbeat produces (a valid signature over a stale predecessor)."""
+    import janitor_self_integrity as jsi
+    entry = dict(event)
+    entry["prev_hmac"] = prev
+    entry["hmac"] = chain._entry_hmac(jsi._canonical_payload(entry))
+    return json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _forked_chain(tmp_path: Path) -> AuditChain:
+    """A chain carrying the permanent artifact of the pre-F4 race: two key-signed entries
+    that both claim the same parent (both heartbeats read `prev` before either wrote)."""
+    key = load_or_create_key(data_dir=tmp_path)
+    path = tmp_path / "chain.ndjson"
+    chain = AuditChain(path, key)
+    chain.append({"event": "detector.fire", "seq": 0})
+    raced_prev = chain._last_hmac()                       # what BOTH sessions read
+    lines = [
+        _forge(chain, raced_prev, {"event": "detector.fire", "seq": 1, "session": "A"}),
+        _forge(chain, raced_prev, {"event": "detector.fire", "seq": 2, "session": "B"}),
+    ]
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    return chain
+
+
+def test_concurrent_fork_verifies_broken_but_is_classified_benign(tmp_path: Path) -> None:
+    """The fork DOES break verify() — and is correctly classified as the (now-fixed) race
+    artifact, so the detector stops raising a permanent, unfixable tamper alarm."""
+    chain = _forked_chain(tmp_path)
+    ok, _, reason = chain.verify()
+    assert not ok and reason == "prev_hmac chain break"
+    assert chain.concurrent_fork_only() is True
+
+
+def test_clean_chain_is_not_reported_as_a_fork(tmp_path: Path) -> None:
+    """No fork, no classification — the predicate requires at least one."""
+    key = load_or_create_key(data_dir=tmp_path)
+    chain = AuditChain(tmp_path / "chain.ndjson", key)
+    for i in range(4):
+        chain.append({"event": "detector.fire", "seq": i})
+    assert chain.verify()[0] is True
+    assert chain.concurrent_fork_only() is False
+
+
+def test_deleted_entry_is_NOT_masked_as_a_fork(tmp_path: Path) -> None:
+    """THE test that keeps the alarm honest. Removing an entry is the attack the chain
+    exists to catch: the next entry's parent is then absent from the file, so this must
+    stay False and the detector must still scream."""
+    key = load_or_create_key(data_dir=tmp_path)
+    path = tmp_path / "chain.ndjson"
+    chain = AuditChain(path, key)
+    for i in range(5):
+        chain.append({"event": "detector.fire", "seq": i})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    del lines[2]                                          # splice out a middle entry
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert chain.verify()[0] is False
+    assert chain.concurrent_fork_only() is False          # NOT excused
+
+
+def test_deleted_entry_is_NOT_masked_even_when_the_chain_also_has_a_real_fork(
+    tmp_path: Path,
+) -> None:
+    """A tamperer must not be able to hide behind a pre-existing benign fork."""
+    chain = _forked_chain(tmp_path)
+    chain.append({"event": "detector.fire", "seq": 3})
+    lines = chain._log.read_text(encoding="utf-8").splitlines()
+    del lines[0]                                          # remove the fork's parent
+    chain._log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert chain.concurrent_fork_only() is False
+
+
+def test_edited_entry_is_NOT_masked_as_a_fork(tmp_path: Path) -> None:
+    """An edited payload no longer verifies under the key — the classifier requires EVERY
+    entry to be key-signed, so an edit can never pass as a race artifact."""
+    key = load_or_create_key(data_dir=tmp_path)
+    path = tmp_path / "chain.ndjson"
+    chain = AuditChain(path, key)
+    for i in range(3):
+        chain.append({"event": "detector.fire", "seq": i, "verdict": "clean"})
+    path.write_text(
+        path.read_text(encoding="utf-8").replace('"verdict":"clean"', '"verdict":"dirty"', 1),
+        encoding="utf-8")
+    assert chain.verify()[0] is False
+    assert chain.concurrent_fork_only() is False
+
+
+def test_reordered_entries_are_NOT_masked_as_a_fork(tmp_path: Path) -> None:
+    """A reorder points an entry at a parent that has not been seen YET (it sits later in
+    the file) — the ancestor-must-be-present rule catches it."""
+    key = load_or_create_key(data_dir=tmp_path)
+    path = tmp_path / "chain.ndjson"
+    chain = AuditChain(path, key)
+    for i in range(4):
+        chain.append({"event": "detector.fire", "seq": i})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    lines[1], lines[2] = lines[2], lines[1]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert chain.verify()[0] is False
+    assert chain.concurrent_fork_only() is False

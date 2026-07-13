@@ -178,6 +178,16 @@ def _check_audit_chain() -> str | None:
         return f"audit chain verify failed ({exc!r})"
     if ok:
         return None
+    # F4 (audit 2026-07-13): before this detector's appends were locked, two projects'
+    # heartbeats could read the same `prev_hmac` and both chain to it. The chain is
+    # append-only, so such a fork is PERMANENT — and it is NOT tampering: every entry is
+    # still key-signed and every parent is still present (nothing was removed). Alarming
+    # on it forever, in every project, is precisely how a user learns to ignore the real
+    # alarm. `concurrent_fork_only` is strict — a truncation, edit, reorder, or splice
+    # makes it False and the alarm below fires — so this stays silent ONLY for the
+    # provably-benign artifact of the now-fixed race.
+    if chain.concurrent_fork_only():
+        return None
     safe_reason = state.sanitize_for_drift_line(reason)
     return (
         f"audit-log tamper-evidence broken at entry index {idx} ({safe_reason}) — "
