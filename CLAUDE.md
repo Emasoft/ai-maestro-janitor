@@ -283,7 +283,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=2ff605553495 digest=de467baca714 generated=2026-07-12T10:34:01+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8f960ed91053 digest=01e576a72646 generated=2026-07-13T05:16:21+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -330,6 +330,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/janitor-install-scope.py` — janitor-install-scope — warn if ai-maestro-janitor is installed at PROJECT/LOCAL scope.
   · main() -> int
 `scripts/detectors/janitor-self-integrity.py` — janitor-self-integrity — heartbeat self-attestation detector.
+  · main() -> int
+`scripts/detectors/keychain-health.py` — keychain-health — detect a security session that cannot reach the keychain.
   · main() -> int
 `scripts/detectors/local-plugins-update.py` — Local-plugins-update detector — Track 2a of the auto-update directive.
   · main() -> int
@@ -480,13 +482,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/hooks/pre-tool-token-budget.py` — PreToolUse hook — real-time token-spike + cache-miss guard (TRDD-KI24GR5Z).
   · main() -> int
 `scripts/identify_environment.py` — Backing script for /janitor-identify-environment (TRDD-db169d9e follow-up).
-  · detect_terminal() -> dict
+  · detect_terminal() -> dict — Terminal identity. Keeps the original keys (`kind`, `in_ai_maestro_agent`)
   · detect_ancestry() -> list[str]
   · detect_tmux() -> dict | None
   · detect_os() -> dict
   · detect_filesystem(path) -> str
-  · detect_sandboxing() -> list[str] — Every container / dev-box / sandbox signal we can observe. Empty = bare host.
-  · gather() -> dict
+  · detect_sandboxing() -> list[str] — Container / VM / sandbox signals. Backed by env_detect.detect_containers,
+  · gather(*, fast, online) -> dict
   · main() -> int
 `scripts/lib/__init__.py` — Marker file. Makes scripts/lib/ an importable Python package so hooks
 `scripts/lib/agentlens_probe.py` — Shared agentlensPro probe — config-gated, bounded, fail-open (TRDD-WUUR2DFX).
@@ -544,6 +546,50 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · DiskPressure.label(self) -> str — The canonical report string: 'NN.N GB writable / +NN.N GB purgeable'.
   · parse_diskutil_purgeable_gb(plist_bytes) -> float | None — Purgeable GB from a `diskutil info -plist` payload, or None when the running
   · disk_pressure(path) -> DiskPressure — The dual metric for the filesystem holding `path`. Never raises.
+`scripts/lib/env_detect.py` — Pure environment-detection primitives for /janitor-identify-environment.
+  · is_secret_key(name) -> bool — True iff `name`'s VALUE must never be emitted (it looks credential-bearing).
+  · env_value(env, key) -> Optional[str] — The value of `key` if safe to show, else None. Secret keys never return a value.
+  · env_present(env, key) -> bool — True iff `key` is set to a non-empty value (no value emitted).
+  · mask_proxy(url) -> str — Return `url` with any `user:pass@` credentials stripped (scheme://host:port/path).
+  · detect_terminal(env, *, ancestry_kind) -> dict — Reconcile the process-ancestry `ancestry_kind` (from `state.terminal_kind`,
+  · detect_multiplexer(env) -> Optional[dict] — The terminal multiplexer, if any: tmux / GNU screen / zellij / byobu.
+  · detect_wsl(env, *, proc_version) -> Optional[dict] — WSL details from /proc/version + env, or None when not under WSL.
+  · parse_mount_fstype(mount_text, target) -> str — macOS/Linux `mount` output → the fstype whose mountpoint is the LONGEST
+  · filesystem_is_network(fstype) -> bool — True iff `fstype` denotes a network/remote mount (latency + availability risk).
+  · detect_ci(env) -> Optional[dict] — The CI/CD provider running this session + non-secret run details, or None.
+  · detect_containers(env, *, exists, virt) -> list[str] — Every container / VM / sandbox signal observable without a network call.
+  · detect_ide(env) -> dict — The hosting editor/IDE and the Claude Code runtime facts (all env-derived).
+  · detect_execution_context(env, *, has_tty, git_dir, git_common_dir, inside_work_tree) -> dict — Whether this is an interactive TTY, a headless/background run, and whether
+  · detect_proxies(env) -> dict — Proxy configuration from env — values MASKED to strip embedded credentials.
+  · parse_interfaces(iface_text, *, system) -> list[dict] — Parse `ifconfig -a` (macOS/BSD) or `ip -o addr` (Linux) → per-interface
+  · detect_vpn(interfaces, *, which) -> dict — Infer VPN presence from tunnel interfaces + installed VPN CLIs. Pure over
+  · classify_nat(interfaces) -> Optional[bool] — True iff the host has only private LAN IPv4s (→ behind NAT), False iff it
+  · parse_default_gateway(route_text) -> str — Default gateway from `route -n get default` (macOS) or `ip route` (Linux).
+  · parse_dns_servers(dns_text) -> list[str] — DNS resolvers from `scutil --dns` (macOS) or /etc/resolv.conf (Linux).
+  · parse_firewall_state(text, *, kind) -> str — Interpret a firewall status probe's output into on/off/unknown.
+  · parse_listening_ports(text, *, limit) -> list[dict] — Parse listening sockets from `lsof -nP -iTCP -sTCP:LISTEN` (macOS/Linux)
+  · detect_python_env(env, *, executable, py_version) -> dict — Active Python isolation: venv / conda / pyenv / uv / poetry / pipenv.
+  · detect_cloud(env, *, which, exists) -> dict — AWS / Azure / GCP footprint — CLIs, config dirs, service context, and
+  · detect_user(env, *, uid, gid, login, is_admin) -> dict — User identity — all non-secret. `is_admin` (root / Windows admin) injected.
+  · detect_path(env) -> dict — PATH entries + which notable tool prefixes are present. Not secret.
+  · detect_present(table, *, which, versions) -> list[dict] — For each (binary, label) in `table`, if `which(binary)` → include it, with
+  · github_slug(url) -> Optional[str] — `owner/repo` from a git remote URL (https / ssh / git@ forms), or None.
+  · parse_git_config(text) -> dict — Parse a `.git/config` (INI) into {remotes:{name:url}, branch_descriptions:
+  · parse_branches(text) -> list[dict] — Parse
+  · active_git_hooks(entries, is_exec) -> list[str] — The ACTIVE hooks from a hooks-dir listing: names that are not `*.sample` and
+  · summarize_rulesets(rulesets) -> list[dict] — Summarize a `gh api repos/<slug>/rulesets` (+ optional per-ruleset detail)
+  · version_stale(installed, latest) -> str — Compare two semver-ish strings → 'up-to-date' / 'stale (<latest> available)'
+  · parse_enabled_plugins(enabled) -> dict — Summarize Claude Code's `settings.json.enabledPlugins` map
+  · detect_subscription(env) -> dict — Best-effort, LOCAL-only Claude/Anthropic auth mode.
+  · parse_workflow_actions(texts) -> dict — From workflow file contents: the deduped set of third-party `uses:` action
+  · parse_workflow_platforms(texts) -> list[str] — CI target platforms from `runs-on:` values + strategy-matrix `os:` arrays →
+  · parse_gh_auth(text) -> dict — Parse `gh auth status` → {logged_in, username, scopes, working}. NEVER reads
+  · parse_active_gh_user(hosts_yaml) -> str — The active gh username from `~/.config/gh/hosts.yml` (offline). Pure.
+  · project_name_from_manifest(*, pyproject, package_json, cargo) -> Optional[str] — The distributable package name from the first manifest that carries one
+  · classify_repo_topology(*, languages, nested_git_count, has_submodules, workspaces, repo_symlinks) -> dict — Classify the repo: single-project vs mono-repo, single vs mixed language,
+  · summarize_fork(gh_json, *, upstream_remote) -> dict — Fork/collaboration summary from `gh repo view --json isFork,parent` + any
+  · homebrew_tap_status(repo_name, *, has_formula_dir, tapped, trusted) -> Optional[dict] — If this repo is a Homebrew TAP (name `homebrew-*` or a Formula/ dir), return
+  · detect_mcp_servers(configs) -> list[dict] — Flatten MCP-server definitions from parsed config files into a SECRET-SAFE
 `scripts/lib/fleet_inject.py` — Fleet recovery injector (TRDD-324223a6, GROUP A / A3) — the ACTUATION layer.
   · action_to_command(action) -> str | None — The slash-command a command-typing recovery `action` injects, or None when
   · valid_session_id(session_id) -> bool — True iff `session_id` is a bare iTerm UUID safe to interpolate into an
@@ -690,6 +736,13 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · UnsafeStageDestination — The stage destination is a plugin SOURCE checkout, not the DATA dir.
   · is_plugin_source_checkout(path) -> bool — True iff `path` sits inside a plugin SOURCE repo — a git work tree whose ROOT also
   · stage_closure(scripts_dir, dest_scripts_dir) -> list[Path] — Verbatim-copy the closure into `dest_scripts_dir`, preserving the relative layout
+`scripts/lib/keychain_health.py` — Keychain-health decision layer — the PURE half of the keychain-health detector.
+  · KeychainVerdict — What the heartbeat should say about this security session's keychain, if anything.
+  · looks_like_broken_session(stderr) -> bool — True iff `stderr` carries the signature of a DEAD securityd connection.
+  · parse_search_list(stdout) -> list[str] — Parse `security list-keychains` output into the keychain paths, in order.
+  · dangling_entries(paths, exists) -> list[str] — The search-list entries that do NOT resolve to a real file — the corruption that
+  · classify(*, list_ok, list_stderr, dangling, credential_findable) -> KeychainVerdict | None — The whole decision, in one pure function. Returns the SINGLE most important verdict, or
+  · format_drift(verdict, sanitize) -> str — One greppable heartbeat line. `sanitize` is injected (the detector passes
 `scripts/lib/launchd_keepalive.py` — OS keepalive orchestrator for the global daemon (TRDD-71ABD7V7, GROUP B / L0).
   · data_dir() -> Path — The janitor's FIXED persistent DATA dir, resolved AT CALL TIME.
   · data_scripts_dir() -> Path — Where the verbatim daemon closure + the installer are staged (beside the entry the
