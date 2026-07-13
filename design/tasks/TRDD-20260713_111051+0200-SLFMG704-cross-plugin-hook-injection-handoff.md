@@ -35,7 +35,7 @@ what it said (TRDD-YRPUSIFY's approach; falsified by data).
 
 | Waste | Occurrences | Block | Owner |
 |---|---|---|---|
-| $17.90 | 151 | `hook: Stop` | **UNATTRIBUTED — DO NOT REPORT YET** (see below) |
+| $17.90 | 151 | `hook: Stop` | **NO PLUGIN** — every Stop hook checked, none injects (see the attribution table below). Probably Claude Code's own system-reminders. **Do not report to a plugin owner.** |
 | $11.51 | 131 | `hook: PostToolBatch` | **UNATTRIBUTED** — no `hooks.json` on this machine registers `PostToolBatch` at all |
 | $12.30 | 7 | `skill catalog` | Claude Code itself (skill set changing mid-session) |
 | $8.60 | 712 | `hook: PreToolUse:Bash` | ai-maestro-janitor — **FIXED**, TRDD-K1RJUYGK / d50fe8c |
