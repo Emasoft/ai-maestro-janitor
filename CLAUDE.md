@@ -288,7 +288,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8f960ed91053 digest=01e576a72646 generated=2026-07-13T05:16:21+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=53f008fef23f digest=8671e9698c1f generated=2026-07-13T11:03:05+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -614,7 +614,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · build_relaunch(terminal) -> dict | None — rung 5 — resume a `dead` (pid-gone) session by typing ``claude --continue`` into
   · build_force_restart(pid, terminal) -> dict | None — rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
   · build_resurrect(pid, project_root) -> dict — rung 7 — the pane is unreachable: spawn a DETACHED background ``claude`` (a new
-  · fire_restart(plan, *, enabled, killable, killer, spawner) -> str — Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
+  · live_cmdline(pid) -> str — The pid's CURRENT command line, read fresh (`ps -p PID -o args=`, POSIX-portable).
+  · fire_restart(plan, *, enabled, killable, killer, spawner, cmdline_reader) -> str — Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
 `scripts/lib/fleet_scan.py` — Daemon-side fleet scanner (TRDD-324223a6) — find EVERY running claude instance
   · Instance — One running claude instance + its diagnosed janitor health. ``terminal`` is the
   · parse_ps_claude(ps_text) -> list[tuple[int, str, str]] — ``(pid, normalized_tty, command)`` for every claude process in
@@ -675,6 +676,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · acquire_oauth_rotator_lock() -> Optional[int] — Non-blocking exclusive flock on oauth-rotator-tick.lock.
   · release_oauth_rotator_lock(fd) -> None — Release the oauth-rotator-tick flock and close the fd. Best-effort.
   · oauth_rotator_lock() -> Iterator[bool] — Serialise an OAuth-rotator tick against every other tick-class process.
+  · oauth_rotator_lock_wait(timeout_s, poll_s) -> Iterator[bool] — Bounded-WAIT variant of `oauth_rotator_lock`, for a one-shot the caller must not drop.
   · daemon_script_path() -> Path — Resolve scripts/daemon.py absolute path.
   · spawn_daemon_detached() -> Optional[int] — Spawn the daemon as a fully-detached child. Return child PID or None.
   · reload_generation() -> int — Return the reload generation (epoch the daemon last stamped after a
@@ -728,6 +730,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · AuditChain — Append-only HMAC-SHA256 chained NDJSON log.
   · AuditChain.append(self, event) -> dict — Append `event` (a dict of caller-supplied fields).
   · AuditChain.trim(self, *, keep_lines, max_bytes) -> bool — Cap the chain WITHOUT sacrificing genesis-anchored verification (S4,
+  · AuditChain.concurrent_fork_only(self) -> bool — True iff the chain's ONLY defects are lost-update FORKS — the artifact the F4
   · AuditChain.verify(self) -> tuple[bool, int, str] — Verify every entry in the chain, top to bottom.
   · compute_manifest(plugin_root, globs) -> dict[str, str] — Compute `{ relative_path: sha256-hex }` over the matched files.
   · write_manifest(manifest, path) -> None — Write the manifest atomically.
@@ -792,7 +795,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · is_legal_split(meta, body, min_sections, oversized) -> tuple[bool, str] — Decide whether a page may be split. Per the wikimem model "one element =
   · split_globs_partition_ok(parent_globs, subpage_globs_list) -> tuple[bool, str] — When a `hub` splits, its `globs:` ownership must PARTITION across the
   · split_converged(page_sizes, max_bytes, unsplittable) -> tuple[bool, list[str]] — Every output page is within the size cap, OR explicitly flagged
-  · verify_merge(source_texts, source_metas, result_text, result_meta, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a MERGE lost nothing before its transaction commits.
+  · verify_merge(source_texts, source_metas, result_text, result_meta, retired_slugs, other_live_pages, fact_source_texts) -> tuple[bool, list[str]] — Prove a MERGE lost nothing before its transaction commits.
   · verify_split(source_text, source_meta, subpage_texts, subpage_metas, overview_text, page_sizes, max_bytes, unsplittable, retired_slugs, other_live_pages) -> tuple[bool, list[str]] — Prove a SPLIT lost nothing before its transaction commits.
   · verify_repair(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an in-place page REPAIR lost nothing AND actually completed the page.
   · verify_atomize(source_text, source_meta, result_text, result_meta) -> tuple[bool, list[str]] — Prove an ATOMIZE pass (TRDD-3b9b2040) ONLY added `^id [keywords:…]` markers and lost nothing.
@@ -852,6 +855,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · harvest_mark_mirrored(scope, root, note_name, note_text) -> None — Record that `note_name` (with this exact content) has been mirrored into the
 `scripts/lib/memory_txn.py` — Memory-edit transaction core (TRDD-b92a9dd0) — the safety substrate every
   · MemoryTxnError — A transaction precondition failed (stale source, vanished source, lock
+  · MemoryTxnConflict — A roll-forward found a source page changed since the txn began, so the txn was
   · editor_enabled() -> bool — Master kill gate for the entire wikimem editor.
   · commit_lock(scope_root) -> Iterator[bool] — Yield True iff this process holds the scope's commit lock. Releases on exit.
   · MemoryTxn — One journaled, crash-resumable, hash-guarded edit of a memory scope root.
@@ -897,7 +901,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/lib/recovery_audit.py` — Recovery audit log (immortality F3, TRDD-F3AUDLOG) — append-only, tamper-evident
   · recovery_audit_path() -> Path — The recovery-audit NDJSON path: ``<global_state_dir>/recovery-audit.ndjson``.
   · record_recovery(*, ts, project_root, pid, tty, diagnosis, rung, channel, outcome, path) -> Optional[dict] — Append ONE recovery-decision record to the audit chain. FAIL-OPEN.
-  · trim_recovery_audit(path, *, keep_lines, max_bytes) -> None — Cap the append-only audit log — mirror of ``token_meter.trim_log``.
+  · trim_recovery_audit(path, *, keep_lines, max_bytes) -> None — Cap the append-only audit log via the chain's OWN key-signed trim.
   · load_records(path) -> list[dict] — Every audit record as a dict, file order. Fail-open ``[]`` on a missing /
   · load_recent(path, *, limit) -> list[dict] — The most-recent ``limit`` records, newest LAST (file order is chronological
   · summarize_recent(records) -> Optional[dict] — A compact rollup of recovery history for the dashboard, or None on empty input.
@@ -1083,6 +1087,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · load(project_root) -> SuppressionTable — Load the project's suppression table.
 `scripts/lib/terminal_trigger.py` — Terminal-aware self-trigger send-abstraction (TRDD-db169d9e R3).
   · valid_tmux_pane(pane) -> bool — True iff `pane` is a bare tmux pane id (`%<n>`) safe to place on a
+  · applescript_quote(command) -> str — `command` escaped for interpolation inside an AppleScript double-quoted string —
   · iterm_esc_lines(indent) -> list[str] — AppleScript lines for a HARD interrupt inside an iTerm ``tell s`` block:
   · build_tmux_steps(pane, commands, *, esc_first) -> list[list[str]] — The ordered send sequence for a tmux pane: an OPTIONAL leading ESC, then each
   · build_wtype_steps(commands, *, esc_first) -> list[list[str]] — The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
@@ -1261,6 +1266,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · read_live_identity_beacon(*, max_age_s, now) -> dict | None — The last session-stamped live identity, or None when absent/garbage/STALE.
   · write_live_blob(blob) -> None — Overwrite the live credential with `blob`, cross-platform.
   · fingerprint(blob) -> str
+  · file_slot(email, blob, *, via, expires_at, timeout_s) -> bool — Persist a CAPTURED account — the token into the keychain AND its index entry into
   · expires_in_h(blob) -> float | None
   · load_state() -> dict — Read the state index with corruption recovery (TRDD-7100178d, Pillar 2). The
   · save_state(state) -> None — Persist the state index with an in-advance backup: `integrity.backup_and_write`
