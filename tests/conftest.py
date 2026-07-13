@@ -395,7 +395,17 @@ def _launchd_witness() -> str | None:
     out = _supervised_read(["launchctl", "list"])
     if out is None:
         return None
-    return "\n".join(sorted(ln for ln in out.splitlines() if "janitor" in ln.lower()))
+    # Compare only the service LABELS, never the volatile PID/Status columns. `launchctl list`
+    # prints `PID<ws>Status<ws>Label`, and a daemon RESPAWN mid-run changes the PID (or flips
+    # PID `-`↔<n>) — which is NOT a register/unregister and must not trip the suite-failing
+    # witness. The label (last whitespace-delimited field, never spaced) is the true identity.
+    labels = []
+    for ln in out.splitlines():
+        parts = ln.split()
+        label = parts[-1] if parts else ""
+        if "janitor" in label.lower():
+            labels.append(label)
+    return "\n".join(sorted(labels))
 
 
 def _source_manifest(root: Path) -> dict[str, str]:
