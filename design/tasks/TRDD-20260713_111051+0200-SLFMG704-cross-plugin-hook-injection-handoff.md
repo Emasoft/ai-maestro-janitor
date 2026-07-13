@@ -3,7 +3,7 @@ trdd-id: SLFMG704
 title: Hand off the hook-injection cache-thrash finding to the plugins that own the other offending hooks
 column: dev
 created: 2026-07-13T11:10:51+0200
-updated: 2026-07-13T11:34:00+0200
+updated: 2026-07-13T11:52:00+0200
 current-owner: janitor-session
 task-type: infra
 severity: HIGH
@@ -40,7 +40,7 @@ what it said (TRDD-YRPUSIFY's approach; falsified by data).
 | $12.30 | 7 | `skill catalog` | Claude Code itself (skill set changing mid-session) |
 | $8.60 | 712 | `hook: PreToolUse:Bash` | ai-maestro-janitor — **FIXED**, TRDD-K1RJUYGK / d50fe8c |
 | $6.31 | 7 | `hook: SessionStart:compact` | ai-maestro-janitor — *not yet assessed*, see NPT below |
-| $5.45 | 7 | `hook: StopFailure:rate_limit` | ai-maestro-janitor — *not yet assessed* |
+| $5.45 | 7 | `hook: StopFailure:rate_limit` | **NO HOOK CAN INJECT HERE** — the spec says StopFailure output is IGNORED. This is the proof that the label is a boundary, not an emitter (see below). |
 | $4.48 | 37 | `hook: PreToolUse:Write` | ai-maestro-janitor — FIXED (same no-matcher hooks) |
 
 ### ✓ ATTRIBUTION DONE (2026-07-13) — `hook: Stop` belongs to NO PLUGIN
@@ -67,13 +67,49 @@ BOUNDARY it occurred at, **not** by a proven emitter — so `hook: Stop` must no
 "a Stop hook did this". **Do NOT report this to any plugin owner.** If confirmed, it is
 un-fixable by plugin authors and belongs upstream to Anthropic.
 
-### ⛔ SEPARATE BUG FOUND — three ai-maestro plugins have BROKEN Stop hooks
+### ✓ PROOF that AgentLens's `hook: <Event>` label is a BOUNDARY, not an EMITTER
 
-Their registered Stop `command` values are, verbatim: `node` (ai-maestro-plugin), `python3`
-(ai-maestro-architect-agent), and **the empty string** (ai-maestro-chief-of-staff). A hook is
-invoked with its JSON payload on **stdin** — so bare `node` and bare `python3` will attempt to
-**execute that JSON payload as source code** and fail every turn. This is unrelated to the
-cache issue but is a real misconfiguration. **This one IS an ai-maestro item — route it.**
+An independent, purely deductive confirmation of the conclusion above — no measurement needed:
+
+1. **Spec (verbatim, hooks reference):** `StopFailure` — *"When the turn ends due to an API
+   error. **Output and exit code are ignored.**"* So NO StopFailure hook's output can ever
+   reach the transcript.
+2. **Yet AgentLens reports** `hook: StopFailure:rate_limit` / `INJECTED_BLOCK_CHANGED`
+   (7 occurrences, $5.45).
+3. **Therefore that block was not emitted by a StopFailure hook** — it *cannot* have been.
+4. **Therefore `hook: <Event>` denotes the event BOUNDARY at which the changed block was
+   observed, NOT the component that emitted it.**
+5. **Therefore `hook: Stop` ($17.90) never implied a Stop hook emitted anything** — exactly
+   consistent with the attribution table above, where every Stop hook came back clean.
+
+Corroborating the enumeration: StopFailure hooks on this machine are `agentlenspro` (binary),
+`ai-maestro-janitor/on-stop-failure.py` (emits NO `additionalContext` — it works purely by side
+effect, writing `rate-limited.flag`), `claude-menu-system/menu_emit.py` (no injection),
+`rechecker-plugin/log-stop-failure.py` (a logger), and `ai-maestro-plugin` (bare `node` — the
+broken registration again).
+
+**CONSEQUENCE — a reporting bug in AgentLens.** The `hook: <Event>` label reads as an
+accusation against a hook and is not one. It is what led me to nearly file a false bug against
+ai-maestro. Worth reporting upstream to agentlensPro: either rename the label (e.g.
+`boundary: Stop`) or attribute the block to its actual source. Cross-project rule applies —
+file an issue on its tracker, do not patch it here.
+
+### ⛔ SEPARATE BUG FOUND — ai-maestro plugins have BROKEN hook registrations
+
+Registered `command` values, verbatim:
+
+| Plugin | Event | `command` |
+|---|---|---|
+| `ai-maestro-plugin` | **Stop** | `node` |
+| `ai-maestro-plugin` | **StopFailure** | `node` |
+| `ai-maestro-architect-agent` | Stop | `python3` |
+| `ai-maestro-chief-of-staff` | Stop | *(the empty string)* |
+
+A hook is invoked with its JSON payload on **stdin** — so bare `node` and bare `python3` will
+attempt to **execute that JSON payload as source code**, and fail on every turn. An empty
+command is a no-op registration. This is unrelated to the cache issue but is a real
+misconfiguration across at least three plugins and two events. **This one IS an ai-maestro item
+— route it** (blocked on AMP; see NEXT ACTION).
 
 ### ⚠ The trap I nearly walked into (keep this lesson)
 
