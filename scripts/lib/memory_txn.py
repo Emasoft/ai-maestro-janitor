@@ -308,6 +308,24 @@ class MemoryTxn:
                     raise MemoryTxnError(f"source vanished since begin: {rel}")
                 if _sha256_file(live) != want:
                     raise MemoryTxnError(f"source changed since begin (stale snapshot): {rel}")
+            # F3 (audit 2026-07-13): a write to a path that is NOT a declared source is
+            # a NEW page by definition — every oracle in this txn treats it as one. If a
+            # live page already sits there, NOTHING has looked at it: the stale-snapshot
+            # re-hash above only iterates `sources`, `_apply`'s hash guard keys on
+            # `sources`, and the CLI removes every write path from the "other live pages"
+            # set before the LINK-LAW check — so the verifier is blinded to it too. The
+            # swap below would `os.replace` that page (its body, its `[^N]` lessons, its
+            # backlinks) out of existence without printing a word. The legitimate way to
+            # edit an existing page IS to declare it a source at `begin`, so this refuses
+            # only unintended collisions. The txn core is the last line of defence and
+            # must not trust the caller's "brand-new" classification.
+            for rel in self.writes:
+                if rel not in self.sources and (self.scope_root / rel).exists():
+                    raise MemoryTxnError(
+                        f"write would clobber a live page not declared as a source: {rel} "
+                        "— re-run `begin` with it as a source (an intentional overwrite), "
+                        "or choose a free path"
+                    )
             self.phase = _PHASE_COMMITTING
             self._persist()
             self._apply()
@@ -366,6 +384,16 @@ class MemoryTxn:
             if want is not None and live.exists() and _sha256_file(live) != want:
                 conflicts.append(f"write {rel}: live page changed since the journal snapshot")
                 continue
+            if want is None and live.exists():
+                # F3 (audit 2026-07-13) — the roll-forward half. `commit()` proved this
+                # non-source path was FREE before flipping to `committing`, and a still-
+                # staged file proves the swap never ran, so a live page here appeared
+                # AFTER the crash: it is someone else's memory, unseen by every oracle
+                # of this txn. Replacing it would delete it silently. (No legitimate
+                # shape reaches this branch — an already-applied write has no staged
+                # file and was skipped above.)
+                conflicts.append(f"write {rel}: a live page now occupies this new-page path")
+                continue
             pending_writes.append(rel)
 
         for rel in self.deletes:
@@ -383,8 +411,8 @@ class MemoryTxn:
             # knowledge is lost — the caller must NOT advance the phase and must NOT
             # clean the staging dir.
             raise MemoryTxnConflict(
-                "roll-forward abandoned — a source page changed since this txn began, and "
-                "applying only part of it would destroy a page: "
+                "roll-forward abandoned — the live tree moved under this txn, and applying "
+                "it now would destroy a page: "
                 + "; ".join(conflicts)
                 + f". Nothing was mutated. The merged content is preserved in {self.staging_dir}."
             )

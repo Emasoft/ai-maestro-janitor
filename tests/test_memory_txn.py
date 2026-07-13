@@ -492,3 +492,60 @@ def test_apply_atomic_failure_mid_swap_leaves_journal_and_resume_completes(
     assert (scope / "c.md").exists() and (scope / "d.md").exists()
     assert not (scope / "a.md").exists() and not (scope / "b.md").exists()
     assert not list(staging_root.glob("*.json")), "journal cleaned after roll-forward"
+
+
+# --------------------------------------------------------------------------- #
+# F3 (audit 2026-07-13) — a "new page" write may not clobber a live page
+# --------------------------------------------------------------------------- #
+
+def test_commit_refuses_to_clobber_a_live_page_not_declared_as_a_source(tmp_path):
+    """A staged page that is NOT a declared source is a NEW page by definition — every
+    oracle in the txn treats it as one (the stale-snapshot re-hash and _apply's hash guard
+    both key on `sources`, and the CLI even removes write paths from the LINK-LAW "other
+    live pages" set). So if a live page already occupies that path, NOTHING has looked at
+    it, and the swap would os.replace its body, its lessons and its backlinks out of
+    existence silently. The txn core refuses instead."""
+    scope = _scope(tmp_path)
+    victim = "---\nname: victim\n---\n\nA page nobody in this txn declared.\n"
+    (scope / "victim.md").write_text(victim, encoding="utf-8")
+
+    txn = MemoryTxn.begin(scope, "split", ["a.md"])
+    txn.stage_write("victim.md", "---\nname: victim\n---\n\nthe sub-page I just carved out\n")
+
+    with pytest.raises(MemoryTxnError, match="clobber"):
+        txn.commit()
+    assert (scope / "victim.md").read_text(encoding="utf-8") == victim   # untouched
+    assert (scope / "a.md").exists()                                     # nothing applied
+    assert txn.staging_dir.exists()                                      # recoverable
+
+
+def test_commit_allows_overwriting_a_page_declared_as_a_source(tmp_path):
+    """The guard rejects only UNINTENDED collisions: declaring the page as a source at
+    `begin` is the sanctioned way to overwrite it (the verifier then sees its content),
+    and that still commits."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "repair", ["a.md"])
+    txn.stage_write("a.md", "---\nname: a\n---\n\nFact A, repaired.\n")
+    txn.commit()
+    assert "repaired" in (scope / "a.md").read_text(encoding="utf-8")
+
+
+def test_roll_forward_refuses_to_clobber_a_page_that_appeared_after_the_crash(tmp_path):
+    """The roll-forward half of F3. commit() proved the path was free before flipping to
+    `committing`, and a still-staged file proves the swap never ran — so a live page here
+    was created AFTER the crash, by someone else. Rolling forward would delete it. Abandon
+    instead: nothing mutated, staging intact, and the conflict is SURFACED."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "split", ["a.md"])
+    txn.stage_write("new.md", "---\nname: new\n---\n\nthe sub-page from the crashed split\n")
+    txn.phase = "committing"     # crash window: guard passed, swap not done
+    txn._persist()
+
+    # ...and in that window a user writes their own page at the very same path.
+    users_page = "---\nname: new\n---\n\nA memory the user wrote while we were down.\n"
+    (scope / "new.md").write_text(users_page, encoding="utf-8")
+
+    acted = memory_txn.resume_pending(scope)
+    assert any("CONFLICT" in a for a in acted), acted
+    assert (scope / "new.md").read_text(encoding="utf-8") == users_page  # NOT destroyed
+    assert txn.staging_dir.exists()                                      # still recoverable
