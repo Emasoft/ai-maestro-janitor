@@ -682,3 +682,78 @@ def test_reordered_entries_are_NOT_masked_as_a_fork(tmp_path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert chain.verify()[0] is False
     assert chain.concurrent_fork_only() is False
+
+
+# ---------- Section 3d: key mint race (F6) ---------------------------------
+
+_MINTER = """
+import sys, pathlib
+sys.path.insert(0, {libdir!r})
+from janitor_self_integrity import load_or_create_key
+k = load_or_create_key(data_dir=pathlib.Path({datadir!r}))
+sys.stdout.write(k.hex() if k else "NONE")
+"""
+
+
+def test_racing_minter_adopts_the_winners_key_instead_of_orphaning_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F6, pinned DETERMINISTICALLY by scheduling the race that the process test below is
+    too coarse to hit reliably.
+
+    The key lives in the FIXED machine-wide DATA dir and is minted lazily by whoever gets
+    there first — so on a fresh install every project's heartbeat races for it. The window
+    is between our "does it exist?" stat and our write. The old temp-file + os.replace was
+    last-writer-wins: the loser kept signing chain entries with a key that had just been
+    OVERWRITTEN on disk, so every later session recomputed its hmacs under a different key
+    and reported `hmac mismatch` at entry 0 — a permanent, false, unfixable tamper alarm.
+
+    Here the winner's key lands INSIDE that window (that is exactly what `racing_open`
+    simulates — the real code path runs, only the interleaving is scheduled). O_EXCL then
+    fails, and the loser must ADOPT the winner's key rather than return its orphan."""
+    import janitor_self_integrity as jsi
+
+    winner = bytes(range(32))
+    real_open = os.open
+
+    def racing_open(path, flags, mode=0o777):
+        Path(path).write_bytes(winner)      # another process wins, after our stat
+        return real_open(path, flags, mode)  # ...so our O_EXCL create must now fail
+
+    monkeypatch.setattr(jsi.os, "open", racing_open)
+    key = jsi.load_or_create_key(data_dir=tmp_path)
+
+    assert key == winner, "the loser returned its ORPHANED key — chains signed with it break"
+    assert (tmp_path / ".integrity-key").read_bytes() == winner  # winner's key left intact
+
+
+def test_concurrent_key_mint_never_orphans_a_key(tmp_path: Path) -> None:
+    """Stress companion to the deterministic test above: 8 real processes minting at once
+    must all end up with the SAME key, and it must be the one on disk. (This alone is a weak
+    falsifier — the stat→write window is narrower than process-spawn jitter, so it does not
+    reliably reproduce the race. The scheduled test above is the real proof.)"""
+    import subprocess
+
+    libdir = str(_PROJECT_ROOT / "scripts" / "lib")
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-c", _MINTER.format(libdir=libdir, datadir=str(tmp_path))],
+            stdout=subprocess.PIPE, text=True,
+        )
+        for _ in range(8)
+    ]
+    keys = {p.communicate(timeout=60)[0].strip() for p in procs}
+    assert all(p.returncode == 0 for p in procs)
+    assert "NONE" not in keys
+    assert len(keys) == 1, f"racing minters ended up with {len(keys)} different keys: orphaned"
+    # ...and the single key they agreed on is the one actually on disk.
+    on_disk = (tmp_path / ".integrity-key").read_bytes()
+    assert on_disk.hex() == keys.pop()
+
+
+def test_key_mint_adopts_an_existing_key_rather_than_overwriting_it(tmp_path: Path) -> None:
+    """The loser's branch, directly: an existing key file is ADOPTED, never replaced."""
+    existing = bytes(range(32))
+    (tmp_path / ".integrity-key").write_bytes(existing)
+    assert load_or_create_key(data_dir=tmp_path) == existing
+    assert (tmp_path / ".integrity-key").read_bytes() == existing

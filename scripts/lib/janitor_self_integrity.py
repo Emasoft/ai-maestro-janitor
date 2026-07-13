@@ -96,6 +96,11 @@ def has_integrity_notice(text: str) -> bool:
 # at whichever plugin owns the running turn.
 _INTEGRITY_KEY_FILENAME = ".integrity-key"
 
+# 256 bits — the width `secrets.token_bytes` mints and the width a key file must have to
+# be adopted. One constant so the mint and the read can never disagree about what a valid
+# key looks like.
+_KEY_LEN = 32
+
 # Base32 truncation length — 12 chars ≈ 60 bits, enough that blind
 # forgery against a single drift line is ~2^60 (infeasible in a session)
 # but short enough to not bloat heartbeat output. Padding stripped.
@@ -142,7 +147,7 @@ def load_or_create_key(data_dir: Path | None = None) -> bytes | None:
     try:
         if path.is_file():
             blob = path.read_bytes()
-            if len(blob) == 32:
+            if len(blob) == _KEY_LEN:
                 return blob
             # Wrong size — likely corrupted; do NOT delete it (RULE 0
             # — never delete uncommitted files without permission). Just
@@ -153,27 +158,37 @@ def load_or_create_key(data_dir: Path | None = None) -> bytes | None:
 
     # Mint a new key. 256 bits from secrets.token_bytes — the canonical
     # CSPRNG path on every platform Python supports.
-    key = secrets.token_bytes(32)
+    key = secrets.token_bytes(_KEY_LEN)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Write through a temp file + os.replace so a concurrent reader
-        # never sees a half-written key blob.
-        tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-        tmp.write_bytes(key)
+        # F6 (audit 2026-07-13): CREATE-EXCLUSIVE, never last-writer-wins. The key lives in
+        # the FIXED machine-wide DATA dir and is minted lazily by whoever gets there first —
+        # and on a fresh install every project's heartbeat, plus the daemon, race for it.
+        # The old temp-file + os.replace overwrote a key another process had ALREADY minted
+        # and started signing with, leaving that process holding an ORPHANED key: its chain
+        # entries verify under a key that no longer exists on disk, so every later session
+        # reports "hmac mismatch" at entry 0 — a permanent, unfixable false tamper alarm.
+        # O_EXCL makes the mint atomic, and the loser ADOPTS the winner's key instead of
+        # signing anything with its own.
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            os.chmod(tmp, 0o600)
+            os.write(fd, key)
+        finally:
+            os.close(fd)
+        return key
+    except FileExistsError:
+        # Another process won the mint between our stat above and here. Its key is the one
+        # on disk and possibly already signing entries — adopt it; never return our orphan.
+        try:
+            blob = path.read_bytes()
         except OSError:
-            # Best-effort on filesystems that don't carry POSIX modes
-            # (e.g. SMB shares). The key still works; only the access
-            # control is weakened.
-            pass
-        os.replace(tmp, path)
+            return None
+        return blob if len(blob) == _KEY_LEN else None
     except OSError:
         # If we can't persist the key, return what we minted anyway so
         # the current session has SOME MAC — the next session will get
         # a different key and break verification. Logged by callers.
         return key
-    return key
 
 
 def compute_finding_hmac(
@@ -535,7 +550,12 @@ class AuditChain:
         }
         anchor["hmac"] = self._entry_hmac(_canonical_payload(anchor))
         try:
-            tmp = self._log.with_name(self._log.name + ".tmp")
+            # PID-unique tmp name (F7): the chain lock already makes two trims mutually
+            # exclusive, but a fixed `.tmp` in a machine-wide dir is a name every janitor
+            # process on the box would reach for. Uniqueness costs nothing and means a
+            # stray/stale `.tmp` from a crashed run can never be os.replace'd over the
+            # live chain by a different process.
+            tmp = self._log.with_name(f"{self._log.name}.tmp.{os.getpid()}")
             body = json.dumps(anchor, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
             tmp.write_text(body + "\n" + "\n".join(raw for raw, _ in kept) + "\n", encoding="utf-8")
             os.replace(tmp, self._log)
