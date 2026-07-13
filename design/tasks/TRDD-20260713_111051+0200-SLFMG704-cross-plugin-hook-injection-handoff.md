@@ -3,7 +3,7 @@ trdd-id: SLFMG704
 title: Hand off the hook-injection cache-thrash finding to the plugins that own the other offending hooks
 column: dev
 created: 2026-07-13T11:10:51+0200
-updated: 2026-07-13T11:52:00+0200
+updated: 2026-07-13T13:05:00+0200
 current-owner: janitor-session
 task-type: infra
 severity: HIGH
@@ -56,7 +56,9 @@ Every Stop hook registered on this machine was checked for an `additionalContext
 | `ai-maestro-janitor/scripts/hooks/on-stop-token-meter.py` | **no** |
 | `agentlenspro hook` (compiled binary, user settings) | **no** — probed with a synthetic Stop payload, emitted nothing |
 | `$HOME/.agentlens/pending-prompt.txt` cat-hook (user settings) | file absent; Stop stdout is NOT injected per the spec (only UserPromptSubmit/UserPromptExpansion/SessionStart stdout becomes context) |
-| `ai-maestro-plugin`, `-architect-agent`, `-chief-of-staff` | **broken registrations** — see below |
+| `ai-maestro-plugin/scripts/ai-maestro-hook.cjs` (exec form via `args`) | **no** |
+| `ai-maestro-architect-agent/scripts/amaa_stop_check.py` (exec form via `args`) | **no** |
+| `ai-maestro-chief-of-staff/scripts/amcos_stop_check.py` | **no** |
 
 **CONCLUSION: no plugin Stop hook injects.** The most probable source of the `hook: Stop`
 `INJECTED_BLOCK_CHANGED` breaks is **Claude Code's OWN `<system-reminder>` blocks** emitted
@@ -85,8 +87,13 @@ An independent, purely deductive confirmation of the conclusion above — no mea
 Corroborating the enumeration: StopFailure hooks on this machine are `agentlenspro` (binary),
 `ai-maestro-janitor/on-stop-failure.py` (emits NO `additionalContext` — it works purely by side
 effect, writing `rate-limited.flag`), `claude-menu-system/menu_emit.py` (no injection),
-`rechecker-plugin/log-stop-failure.py` (a logger), and `ai-maestro-plugin` (bare `node` — the
-broken registration again).
+`rechecker-plugin/log-stop-failure.py` (a logger), and `ai-maestro-plugin`
+(`scripts/ai-maestro-hook.cjs`, exec form — **grepped 2026-07-13: zero `additionalContext`**).
+
+All four ai-maestro Stop/StopFailure scripts (`ai-maestro-hook.cjs`, `amaa_stop_check.py`,
+`amcos_stop_check.py`, `amama_stop_check.py`) were grepped directly: **zero `additionalContext`
+in any of them.** They use `systemMessage` / `hookSpecificOutput` only. The Stop-hook
+enumeration is now complete AND verified — no hand-waving rows left.
 
 **CONSEQUENCE — a reporting bug in AgentLens.** The `hook: <Event>` label reads as an
 accusation against a hook and is not one. It is what led me to nearly file a false bug against
@@ -94,22 +101,46 @@ ai-maestro. Worth reporting upstream to agentlensPro: either rename the label (e
 `boundary: Stop`) or attribute the block to its actual source. Cross-project rule applies —
 file an issue on its tracker, do not patch it here.
 
-### ⛔ SEPARATE BUG FOUND — ai-maestro plugins have BROKEN hook registrations
+### ⛔ RETRACTED (2026-07-13) — "ai-maestro plugins have BROKEN hook registrations" was FALSE
 
-Registered `command` values, verbatim:
+**What I claimed:** that `ai-maestro-plugin` (Stop + StopFailure), `-architect-agent` (Stop) and
+`-chief-of-staff` (Stop) registered bare `node` / `python3` / empty commands, so each would
+"execute the JSON payload on stdin as source code and fail on every turn". I was one command
+away from AMP-ing that to another team.
 
-| Plugin | Event | `command` |
-|---|---|---|
-| `ai-maestro-plugin` | **Stop** | `node` |
-| `ai-maestro-plugin` | **StopFailure** | `node` |
-| `ai-maestro-architect-agent` | Stop | `python3` |
-| `ai-maestro-chief-of-staff` | Stop | *(the empty string)* |
+**Why it was false — my extraction dropped a field.** I printed only `.command` from each
+`hooks.json` and read the result as the whole hook. Every one of those hooks also carries an
+**`args` array**, which my selector never showed me. The real registrations:
 
-A hook is invoked with its JSON payload on **stdin** — so bare `node` and bare `python3` will
-attempt to **execute that JSON payload as source code**, and fail on every turn. An empty
-command is a no-op registration. This is unrelated to the cache issue but is a real
-misconfiguration across at least three plugins and two events. **This one IS an ai-maestro item
-— route it** (blocked on AMP; see NEXT ACTION).
+| Plugin | Event | `command` | `args` | Verdict |
+|---|---|---|---|---|
+| `ai-maestro-plugin` | Stop, StopFailure | `node` | `["${CLAUDE_PLUGIN_ROOT}/scripts/ai-maestro-hook.cjs"]` | **VALID** |
+| `ai-maestro-architect-agent` | Stop | `python3` | `["${CLAUDE_PLUGIN_ROOT}/scripts/amaa_stop_check.py"]` | **VALID** |
+| `ai-maestro-chief-of-staff` | Stop (+4 more) | *absent* | `["python3", "${CLAUDE_PLUGIN_ROOT}/scripts/amcos_stop_check.py"]` | see below |
+
+**The spec (Claude Code hooks reference, verified 2026-07-13):** a command hook runs in **exec
+form when `args` is set, and shell form when `args` is omitted**. In exec form, `command` is
+resolved as an executable on `PATH` and spawned directly with `args` as the argument vector —
+**no shell involved**. So `command: "node"` + `args: [script]` is exactly right. There was never
+a bug in the first two plugins. **Nothing was reported; nothing needed to be.**
+
+### ⚠ RESIDUAL — UNVERIFIED, do NOT report as a bug yet
+
+`ai-maestro-chief-of-staff` (2.20.6) omits `command` entirely and puts the interpreter in
+`args[0]` — **uniformly, in all 5 of its hooks** (SessionStart, SessionEnd, 2× UserPromptSubmit,
+Stop). That is a deliberate convention, not a typo. The docs mark `command` **required** ("the
+executable to spawn directly" when `args` is present), so on a literal reading these hooks name
+no executable and may be rejected or silently skipped — i.e. **chief-of-staff's hooks may never
+fire at all.**
+
+**But I do not know what Claude Code actually does with a missing `command`** (reject at config
+validation? skip the hook? fall back to `args[0]`?) — the docs do not say, and I have not
+tested it. Neither `-chief-of-staff` nor `-architect-agent` is enabled ANYWHERE on this machine
+(checked every settings file), so nothing is failing here and there is no urgency.
+
+**If this is ever raised with ai-maestro, it must be raised as a QUESTION** ("the schema marks
+`command` required and yours is absent — have you confirmed these hooks actually fire?"), never
+as a defect. I have been wrong about this file once already.
 
 ### ⚠ The trap I nearly walked into (keep this lesson)
 
@@ -126,6 +157,18 @@ and the janitor. I checked exactly ONE of them —
 **Registering a Stop hook is not evidence of injecting `additionalContext`.** Attribution
 requires proving the specific hook emits the block. Handing a team a bug that is not theirs
 is worse than saying nothing.
+
+**And then I did it AGAIN, in this same file, on the way to fixing it.** Having decided those
+plugins' hooks were "broken registrations", I wrote `no`/`broken` into the attribution table for
+three scripts I had **never opened** — and separately declared a bug from a `jq` query that
+printed `.command` and silently omitted `.args`. Both errors have the same shape: **I let a
+partial view of a thing stand in for the thing.** The selector showed me one field; I treated
+its output as the whole hook. The narrative said "broken"; I treated that as licence to skip
+reading the script.
+
+The rule that would have caught both, cheaply: **when a query returns something surprising,
+print the WHOLE object once before reasoning about it** (`jq '.'`, not `jq '.command'`). A
+missing field is indistinguishable from a field you didn't ask for.
 
 **Keep it in proportion (do not oversell).** TRDD-YRPUSIFY already measured, via
 `investigate_burn`, that prefix churn is only ~**2% of TOTAL burn** — premium-model subagent
@@ -151,15 +194,20 @@ fan-out dominates. This is the #1 *avoidable cache-break* cause, not the #1 burn
 2. **`PostToolBatch` ($11.51) — IDENTIFY THE OWNER.** It is not in any `hooks.json` on this
    machine, so it is registered by some other mechanism (or is Claude Code's own injection at
    that boundary). Do not report until attributed.
-3. **AMP IS NOT USABLE FROM THIS SESSION — solve that first if AMP is the chosen channel.**
-   `amp-send` returns `HTTP 404 not_found` on routing, and the sender identity is ambiguous:
-   44 agents are registered on this host and NONE is a janitor identity (auto-registration
-   claimed success but produced nothing routable). Sending as one of the other 44 would be
-   impersonation. The USER believes AMP "never fails" — from here it does; tell them. The
-   documented cross-project fallback is a GitHub issue on the owning plugin's tracker
-   (`~/.claude/rules/how-to-fix-issues-of-other-projects.md`); the owning repos are
-   `Emasoft/ai-maestro-plugin`, `-chief-of-staff`, `-architect-agent`,
-   `-assistant-manager-agent`.
+3. ~~Route the broken ai-maestro hook registrations~~ **CANCELLED 2026-07-13 — there was no bug.**
+   The registrations use the documented `args` exec form and are VALID; my extraction had
+   dropped the `args` field (see the RETRACTED section). **Nothing is owed to ai-maestro.**
+   Only the chief-of-staff missing-`command` QUESTION remains, and it is not urgent (that
+   plugin is enabled nowhere on this machine) and must be asked as a question, not filed as a
+   defect.
+
+   For the record, since it will come up again: **AMP is not usable from this session.**
+   `amp-send`/`amp-inbox` abort with *"Multiple AMP agents found. Use --id <uuid>"* — 37
+   registrations share the single name `ai-maestro@emasoft.aimaestro.local`, and none is a
+   janitor identity, so there is no non-impersonating `--id` to send as. The USER believes AMP
+   "never fails"; from here it does not even start. **Tell them, but do not "fix" AMP** — it is
+   another project's system (`~/.claude/rules/how-to-fix-issues-of-other-projects.md`). The
+   documented fallback channel is a GitHub issue on the owning repo.
 4. **NPT — the janitor's OWN remaining two:** `SessionStart:compact` ($6.31) and
    `StopFailure:rate_limit` ($5.45) were NOT fixed by K1RJUYGK (which only touched the two
    no-matcher PreToolUse hooks). SessionStart legitimately injects once per session (the memory
