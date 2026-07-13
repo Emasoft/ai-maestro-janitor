@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "description": "Keeps your dev environment tidy and secure, in the background: drift + supply-chain detectors, secret/injection guards on tool calls, rate-limit auto-resume, prompt-cache keep-alive, and a markdown memory system. Runs on a per-session CronCreate heartbeat (session-scoped, re-armed each session) plus one machine-wide background daemon that owns every global-scope update.",
   "author": {
     "name": "Emasoft",
@@ -397,7 +397,7 @@
     },
     "plugin_auto_update_user_scope": {
       "title": "Plugin Auto-Update: User Scope (via daemon)",
-      "description": "When true (default), the plugin-updates detector ALSO monitors user-scope (`~/.claude/settings.json`) enabled plugins each heartbeat and, for any behind its marketplace version, ENQUEUES a request the global daemon consumes and runs as `claude plugin update <id> --scope user` (TRDD-YMTUPQER). The detector NEVER runs the user-scope update itself — the daemon is the single global writer, so N Claude sessions across N projects do not stampede the same command (issue #7). The ai-maestro fleet plugins (maintainer/orchestrator/CPV/etc.) are EXCLUDED from this path in both the detector and the daemon — they update in lockstep on the daemon's coordinated beat to avoid fleet version skew (TRDD-db169d9e). The janitor itself fast-updates via the release-triggered self-update path (TRDD-Y9KM5RCJ). Set false to restore the previous project/local-only behavior (user-scope then only via the daemon's slower 1 h sweep). Requires plugin_auto_update_enabled.",
+      "description": "When true (default), the plugin-updates detector ALSO monitors user-scope (`~/.claude/settings.json`) enabled plugins each heartbeat and, for any behind its marketplace version, ENQUEUES a request the global daemon consumes and runs as `claude plugin update <id> --scope user` (TRDD-YMTUPQER). The detector NEVER runs the user-scope update itself \u2014 the daemon is the single global writer, so N Claude sessions across N projects do not stampede the same command (issue #7). The ai-maestro fleet plugins (maintainer/orchestrator/CPV/etc.) are EXCLUDED from this path in both the detector and the daemon \u2014 they update in lockstep on the daemon's coordinated beat to avoid fleet version skew (TRDD-db169d9e). The janitor itself fast-updates via the release-triggered self-update path (TRDD-Y9KM5RCJ). Set false to restore the previous project/local-only behavior (user-scope then only via the daemon's slower 1 h sweep). Requires plugin_auto_update_enabled.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -502,14 +502,14 @@
     },
     "keychain_health_enabled": {
       "title": "Keychain Health Check Enabled",
-      "description": "When true (default, macOS only), the keychain-health detector verifies that THIS shell's macOS security session can actually reach the keychain, and surfaces a CRITICAL drift line when it cannot. It catches the 2026-07-12 fleet outage: a long-lived tmux/terminal server that survives a securityd recycle hands every pane it forks a DEAD security session, in which the Keychain Services API fails outright — so Claude Code there cannot read its OAuth item and EVERY agent reports 'Not logged in' while the credential is perfectly fine (re-running /login does NOT help). It also flags a DANGLING keychain search-list entry (a registered keychain whose file is gone — typically left by a custom-keychain tool such as `dotenclave unlock` calling `security list-keychains -s`), which is the root cause that poisons every lookup in the session. STRICTLY read-only and prompt-safe: it checks FINDABILITY only and NEVER reads a secret (no `-w`), because the secret read is what triggers the macOS ACL prompt flood; every call is routed through the mandated safe-keychain choke point (hard timeout + one-shot denied-latch). Set false to disable.",
+      "description": "When true (default, macOS only), the keychain-health detector verifies that THIS shell's macOS security session can actually reach the keychain, and surfaces a CRITICAL drift line when it cannot. It catches the 2026-07-12 fleet outage: a long-lived tmux/terminal server that survives a securityd recycle hands every pane it forks a DEAD security session, in which the Keychain Services API fails outright \u2014 so Claude Code there cannot read its OAuth item and EVERY agent reports 'Not logged in' while the credential is perfectly fine (re-running /login does NOT help). It also flags a DANGLING keychain search-list entry (a registered keychain whose file is gone \u2014 typically left by a custom-keychain tool such as `dotenclave unlock` calling `security list-keychains -s`), which is the root cause that poisons every lookup in the session. STRICTLY read-only and prompt-safe: it checks FINDABILITY only and NEVER reads a secret (no `-w`), because the secret read is what triggers the macOS ACL prompt flood; every call is routed through the mandated safe-keychain choke point (hard timeout + one-shot denied-latch). Set false to disable.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "keychain_health_interval": {
       "title": "Keychain Health Check Cadence (seconds)",
-      "description": "Minimum seconds between keychain-health checks. Default: 900 (15 min). A broken security session is a FLEET-DOWN condition — every agent in it is unusable — so it must surface fast, and the probe is only two cheap read-only `security` calls. The verdict is deduped (code + evidence), so a persistent breakage nags once rather than every fire, while a NEW or changed condition always surfaces.",
+      "description": "Minimum seconds between keychain-health checks. Default: 900 (15 min). A broken security session is a FLEET-DOWN condition \u2014 every agent in it is unusable \u2014 so it must surface fast, and the probe is only two cheap read-only `security` calls. The verdict is deduped (code + evidence), so a persistent breakage nags once rather than every fire, while a NEW or changed condition always surfaces.",
       "type": "number",
       "default": 900,
       "sensitive": false
