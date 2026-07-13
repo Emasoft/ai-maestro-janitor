@@ -362,7 +362,10 @@ def _classify_git(argv: list[str], cwd: str, env: dict) -> Verdict:
         target = os.path.join(cwd, argv[argv.index("-C") + 1])
     i = 1
     while i < len(argv) and argv[i].startswith("-"):
-        i += 2 if argv[i] == "-C" else 1
+        # `-C <dir>` and `-c <name=value>` each consume a SEPARATE following token, so skip two;
+        # otherwise `git -c core.pager=cat log` parses the verb as `core.pager=cat` and a
+        # read-only `log` outside tmp is wrongly denied.
+        i += 2 if argv[i] in ("-C", "-c") else 1
     verb = argv[i] if i < len(argv) else ""
     if verb in _GIT_READONLY_VERBS:
         return _ALLOW
@@ -530,17 +533,12 @@ def classify_argv(argv: list[str], *, cwd: str, env: dict) -> Verdict:
         return classify_argv(inner, cwd=cwd, env=env) if inner else _ALLOW
 
     if _is_python_spawn(name, argv[0]):
-        return _ALLOW  # the child boots this same guard — _harden_child_env guarantees it
-
-    if _PYTHON_EXE.match(name) or name in {"uv", "uvx"} or argv[0].endswith(".py"):
-        return Verdict(
-            False,
-            f"`{name}` was spawned with an explicit `env=` that DROPS the sandbox "
-            f"({ENV_DENY} is absent), so the child would boot UNGUARDED and could write "
-            f"anywhere — the exact shape of the 2026-07-11 source clobber (TRDD-RYZCVVKA).\n"
-            f"Fix the TEST: start from `os.environ.copy()` (or `{{**os.environ, ...}}`) instead "
-            f"of building the child env from scratch.",
-        )
+        # A child Python boots this same guard — `_harden_child_env` (called in guarded_init
+        # before we get here) injects ENV_DENY/PYTHONPATH into the child, and a child spawned
+        # WITHOUT env= inherits them, so it is always guarded, never unguarded. (Every disjunct
+        # of the old "unguarded python → deny" branch that followed this was a subset of
+        # `_is_python_spawn`, so it was unreachable dead code and was removed.)
+        return _ALLOW
 
     rule = _ALLOW_TABLE.get(name)
     if rule is None:
