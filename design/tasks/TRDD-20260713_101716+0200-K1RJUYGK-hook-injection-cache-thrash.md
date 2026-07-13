@@ -1,6 +1,6 @@
 ---
 trdd-id: K1RJUYGK
-title: The janitor's own PreToolUse hooks are the machine's #1 prompt-cache breaker
+title: Bound the injection budget of the janitor's no-matcher PreToolUse hooks (attribution of the cost RETRACTED)
 column: dev
 created: 2026-07-13T10:17:16+0200
 updated: 2026-07-13T12:05:00+0200
@@ -11,7 +11,9 @@ relevant-rules: [3]
 supersedes-approach-of: YRPUSIFY
 ---
 
-# The janitor's own PreToolUse hooks are the machine's #1 prompt-cache breaker
+# Bound the injection budget of the no-matcher PreToolUse hooks
+
+_(Original title: "the machine's #1 prompt-cache breaker" — that attribution is RETRACTED below. The fix stands; the blame does not.)_
 
 ## ⛔ ATTRIBUTION RETRACTED (2026-07-13, same day) — READ THIS BEFORE THE NUMBERS BELOW
 
