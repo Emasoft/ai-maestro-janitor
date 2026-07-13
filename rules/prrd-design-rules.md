@@ -3,16 +3,13 @@
      store, only this rule file. -->
 
 > [!IMPORTANT]
-> **ai-maestro-janitor rule — CONDITIONAL on the janitor being active.** Check the janitor's
-> state first (cheap `$HOME` existence checks), then act:
-> - **UNINSTALLED** — if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` is
->   ABSENT, the plugin was uninstalled and this file is an ORPHAN it could not remove. Treat
->   this rule as INERT, and tell the user it is an orphaned janitor rule they may delete.
->   NEVER delete any MEMORY store — only this rule file, and only with the user's ok.
-> - **DISARMED** — else if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/kill-switch.flag`
->   OR the legacy `~/.claude/janitor-global-state/kill-switch.flag` EXISTS, the janitor is
->   intentionally stopped → treat this rule as INERT this session.
-> - **ACTIVE** — otherwise the janitor is running; apply the rule as written below.
+> **ai-maestro-janitor rule — INERT unless the janitor is active.** Check (cheap `$HOME` stats),
+> where `DATA` = `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`:
+> **UNINSTALLED** (`DATA` absent) → this file is an orphan the plugin could not remove: treat as
+> INERT and tell the user they may delete it — but NEVER any MEMORY store, only this rule file, and
+> only with their ok. **DISARMED** (`DATA/global-state/kill-switch.flag` or legacy
+> `~/.claude/janitor-global-state/kill-switch.flag` exists) → the janitor is intentionally stopped:
+> INERT this session. **ACTIVE** (otherwise) → apply the rule below.
 
 # PRRD: Project Requirements & Rules Document
 

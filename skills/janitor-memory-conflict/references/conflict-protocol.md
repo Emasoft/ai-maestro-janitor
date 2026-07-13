@@ -242,12 +242,15 @@ a story. It takes exactly this form — the same one `~/.claude/rules/markdown-m
 prescribes:
 
 ```
-[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-All three metadata keys REQUIRED. **`keywords:` is the lesson's RECALL SURFACE** — the words a
-future session will SEARCH with, usually NOT the words the prose uses; memgrep indexes them and
-`--only-notes` matches them, so a keyword-less lesson is findable only by accident of phrasing.
+All three metadata keys REQUIRED. Grammar: a **comma** separates the FIELDS, **quotes** delimit
+the keywords VALUE, a **space** separates the KEYWORDS inside it — so each keyword is a
+**KEY-PHRASE written underscore_joined** (`agent_profile_sidepanel`). **`keywords:` is the
+lesson's RECALL SURFACE** — the phrases a future session will SEARCH with, usually NOT the words
+the prose uses; memgrep indexes them and `--only-notes` matches them, so a keyword-less lesson is
+findable only by accident of phrasing.
 When you fold an obsolete/false page into the survivor, its keywords are the ones someone would
 have used to find THE RETIRED PAGE — that is what keeps the retired slug's knowledge reachable
 after its file is gone. Omit them and the fold silently buries the very fact you preserved.

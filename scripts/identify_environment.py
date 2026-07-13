@@ -247,7 +247,7 @@ def _gather_git_repo() -> dict:
         except OSError:
             cfg_text = ""
     cfg = env_detect.parse_git_config(cfg_text)
-    # Mask any embedded credential in a remote URL (`https://user:TOKEN@host/…`) BEFORE it is
+    # Mask any embedded credential in a remote URL (`https://user:secret@host/…`) BEFORE it is
     # stored, rendered, or written to the JSON report. The module's #1 invariant is to never
     # emit a secret VALUE, and a git remote URL is exactly as credential-bearing as a proxy URL
     # (which detect_proxies already masks). `github_slug` still resolves the owner/repo from the

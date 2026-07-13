@@ -226,7 +226,7 @@ a governing rule, link up to it instead.>
 - [[user-model]] — the data this element binds.
 
 ## Notes and lessons learned
-[^N]: [keywords: …, ocd: …, lmd: …] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> …", ocd:…, lmd:…] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
 ### THE LESSON FORM — mandatory metadata, then one terse shape
@@ -236,12 +236,20 @@ GUARDRAIL, not a story. Every `[^N]`, authored fresh or demoted here by the corr
 protocol, takes exactly this form:
 
 ```
-[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-**The metadata block is the lesson's ADDRESS.** All three keys are REQUIRED:
+**The metadata block is the lesson's ADDRESS.** All three keys are REQUIRED.
 
-- **`keywords:` — the RECALL SURFACE**, precisely as on an atom: the words a future session
+**Grammar — three separators, three jobs:** a **comma** separates the metadata FIELDS;
+**quotes** delimit the keywords VALUE (so it may contain spaces); a **space** separates the
+KEYWORDS within it. Hence a keyword is really a **KEY-PHRASE, written underscore_joined** —
+`agent_profile_sidepanel`, never `agent profile sidepanel`. The underscore keeps a multi-word
+phrase space-free, so the space is free to mean "next keyword" and the phrase survives as ONE
+searchable unit instead of three useless tokens. Example:
+`[keywords:"frontend ui agent_profile_sidepanel agent_configuration", ocd:2026-07-13, lmd:2026-07-13]`
+
+- **`keywords:` — the RECALL SURFACE**, precisely as on an atom: the phrases a future session
   will SEARCH with (the symptom), which are usually NOT the words the prose happens to use.
   memgrep stores them (`notes.keywords`) and indexes them (`notes_fts`), and `--only-notes`
   matches against `keywords + text`. **Omit them and the lesson is findable only by accident

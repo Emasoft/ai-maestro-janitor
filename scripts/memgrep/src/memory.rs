@@ -184,20 +184,51 @@ fn parse_note_props(meta: &str) -> BTreeMap<String, Vec<String>> {
 
     let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for item in items {
-        // The key the following bare (colon-less) tokens belong to — this is what lets a value
-        // span several whitespace-separated words, e.g. `keywords: daemon pid reuse`.
+        // The key that following bare (colon-less) tokens belong to — this is what lets ONE
+        // value span several whitespace-separated words, e.g. `keywords:"a b c"`.
         let mut cur: Option<String> = None;
+        // True while we are inside an unterminated `"…"` value (a multi-word key-phrase list).
+        let mut in_quote = false;
+
         for tok in item.split_whitespace() {
+            if in_quote {
+                // Still inside the quoted value: every token is a value element until the one
+                // that carries the closing quote.
+                let closing = tok.ends_with('"');
+                let word = tok.trim_end_matches('"');
+                if !word.is_empty()
+                    && let Some(key) = cur.as_ref()
+                {
+                    map.entry(key.clone()).or_default().push(word.to_string());
+                }
+                if closing {
+                    in_quote = false;
+                }
+                continue;
+            }
+
             if let Some((k, v)) = tok.split_once(':') {
                 let key = k.trim();
                 if key.is_empty() {
                     continue;
                 }
-                let slot = map.entry(key.to_string()).or_default();
-                if !v.is_empty() {
-                    slot.push(v.to_string());
-                }
+                map.entry(key.to_string()).or_default();
                 cur = Some(key.to_string());
+
+                // A value may open a quote: `keywords:"frontend ui agent_profile"`. Strip the
+                // quotes — they DELIMIT the list, they are not part of any keyword.
+                let opened = v.strip_prefix('"');
+                let raw = opened.unwrap_or(v);
+                let closing = opened.is_some() && raw.ends_with('"');
+                let word = raw.trim_end_matches('"');
+                if !word.is_empty() {
+                    map.entry(key.to_string()).or_default().push(word.to_string());
+                }
+                // An opening quote with no closing quote on the SAME token ⇒ the value
+                // continues into the following tokens.
+                if opened.is_some() && !closing {
+                    in_quote = true;
+                }
             } else if let Some(key) = cur.as_ref() {
                 map.entry(key.clone()).or_default().push(tok.to_string());
             }
@@ -209,20 +240,83 @@ fn parse_note_props(meta: &str) -> BTreeMap<String, Vec<String>> {
 /// Pull `ocd`/`lmd` out of a note/lesson's `[...]` metadata prefix. Thin projection of
 /// [`parse_note_props`] — every other key stays available to the caller. Returns `(ocd, lmd)`,
 /// each None when absent.
+///
+/// `date:` is accepted as a SHORTHAND that fills whichever of the two is missing. `ocd` (origin) and
+/// `lmd` (last-modified) stay canonical — they are what `--since`/`--until` read and what the index
+/// stores — but a lesson that carries a single `date:` must not silently end up dateless, which is
+/// what would happen if the key were merely ignored.
 fn parse_meta_dates(meta: &str) -> (Option<String>, Option<String>) {
     let props = parse_note_props(meta);
     let first = |k: &str| props.get(k).and_then(|v| v.first()).cloned();
-    (first("ocd"), first("lmd"))
+    let date = first("date");
+    (
+        first("ocd").or_else(|| date.clone()),
+        first("lmd").or(date),
+    )
 }
 
-/// A lesson's RECALL SURFACE — the space-joined `keywords:` array from its `[...]` metadata prefix
-/// (empty when the prefix carries none). This is the lesson's counterpart of an atom's
-/// `keywords:` block-prop: the terms a future session will search for, which are NOT necessarily the
-/// words the lesson's prose happens to use.
+/// A lesson's RECALL SURFACE — the space-joined `keywords:` KEY-PHRASE array from its `[...]`
+/// metadata prefix (empty when the prefix carries none). This is the lesson's counterpart of an
+/// atom's `keywords:` block-prop: the phrases a future session will search for, which are NOT
+/// necessarily the words the lesson's prose happens to use.
 fn parse_note_keywords(meta: &str) -> String {
     parse_note_props(meta)
         .get("keywords")
         .map(|v| v.join(" "))
+        .unwrap_or_default()
+}
+
+/// A lesson's lifecycle STATUS — `valid` (the guardrail still holds) or `superseded` (the lesson
+/// itself has been overtaken; kept for history, but it must NOT be applied as current guidance).
+///
+/// Defaults to `valid` when the prefix carries no `status:` — the corpus predates the field, and a
+/// lesson written before it existed was, by definition, believed true when written. Any value other
+/// than the two legal ones is normalised to `valid` for the same reason: an unparseable status must
+/// never silently DEMOTE a live guardrail into invisibility.
+fn parse_note_status(meta: &str) -> String {
+    match parse_note_props(meta)
+        .get("status")
+        .and_then(|v| v.first())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        // `superseeded` is a COMMON misspelling of `superseded`, and accepting it is not
+        // pedantry-tolerance — it is a SAFETY property. An unrecognised status falls back to
+        // `valid`, so a single typo would silently resurrect a retired guardrail as live
+        // guidance. Read both spellings; write only the canonical one.
+        Some("superseded" | "superseeded") => "superseded".to_string(),
+        _ => "valid".to_string(),
+    }
+}
+
+/// A lesson's stable, corpus-wide ID (e.g. `ATOM-234P-U35Q`) — empty when the prefix carries none.
+///
+/// The footnote LABEL (`[^3]`) is page-local and renumbers whenever the page is edited, so it can
+/// never be a durable reference. The `id:` is what lets one lesson point at another across pages —
+/// which is the whole mechanism behind `superseded-by:`.
+fn parse_note_id(meta: &str) -> String {
+    parse_note_props(meta)
+        .get("id")
+        .and_then(|v| v.first())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The ID of the atom/lesson that REPLACED this one (`superseded-by:ATOM-26EY-PLD7`), empty when
+/// absent. Meaningful only on a `status:superseded` lesson, where it is the forward pointer from the
+/// retired guardrail to the one that now holds — the link that makes supersession navigable instead
+/// of merely a dead end.
+fn parse_note_superseded_by(meta: &str) -> String {
+    let props = parse_note_props(meta);
+    // Accept the `superseeded-by` misspelling for the same fail-safe reason the status parser does:
+    // an unrecognised KEY is silently dropped, so a single doubled `e` would erase the forward
+    // pointer and leave a retired lesson pointing nowhere — the reader would see [SUPERSEDED] with
+    // no way to reach the rule that replaced it. Read both; write only the canonical spelling.
+    props
+        .get("superseded-by")
+        .or_else(|| props.get("superseeded-by"))
+        .and_then(|v| v.first())
+        .cloned()
         .unwrap_or_default()
 }
 
@@ -332,6 +426,15 @@ pub(crate) struct ResolvedNote {
     /// is found by the terms a future session will SEARCH for, not merely by the words its prose
     /// happens to use. Searched by `--only-notes` and indexed into `notes_fts`.
     pub(crate) keywords: String,
+    /// The lesson's stable corpus-wide ID (`ATOM-234P-U35Q`), empty when absent. The `[^N]` label is
+    /// page-local and renumbers on edit, so only this can be referenced from elsewhere.
+    pub(crate) id: String,
+    /// Lifecycle status — `valid` (the guardrail still holds) or `superseded` (overtaken; kept for
+    /// history, never applied as current guidance). Absent/unrecognised ⇒ `valid`.
+    pub(crate) status: String,
+    /// On a superseded lesson, the ID of the atom/lesson that replaced it — the forward pointer that
+    /// makes supersession navigable rather than a dead end. Empty otherwise.
+    pub(crate) superseded_by: String,
     /// Original/Last-Modified dates of THIS lesson, parsed from `ocd:`/`lmd:` in the metadata prefix
     /// (None when the prefix carries no such key). Intrinsic — survives the librarian's page moves.
     pub(crate) ocd: Option<String>,
@@ -442,12 +545,24 @@ fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
                 .map(parse_meta_dates)
                 .unwrap_or((None, None));
             let keywords = meta.as_deref().map(parse_note_keywords).unwrap_or_default();
+            let status = meta
+                .as_deref()
+                .map(parse_note_status)
+                .unwrap_or_else(|| "valid".to_string());
+            let id = meta.as_deref().map(parse_note_id).unwrap_or_default();
+            let superseded_by = meta
+                .as_deref()
+                .map(parse_note_superseded_by)
+                .unwrap_or_default();
             let urls = extract_urls(&rest);
             out.push(ResolvedNote {
                 num: r.label.clone(),
                 meta,
                 text: rest,
                 keywords,
+                id,
+                status,
+                superseded_by,
                 ocd,
                 lmd,
                 urls,
@@ -2377,9 +2492,26 @@ fn find_only_notes(
             if !q.matches_text(&surface) {
                 continue;
             }
+            // A SUPERSEDED lesson is history, not guidance. It stays searchable (that is the point
+            // of keeping it rather than deleting it), but it must NEVER be read as a live guardrail
+            // — so it is marked inline, and its forward pointer is shown so the reader can go
+            // straight to the rule that DID hold. Rendering it indistinguishably from a valid lesson
+            // would let an overtaken rule be re-applied as current: the exact failure `status:`
+            // exists to prevent.
+            let tag = if ln.status == "superseded" {
+                if ln.superseded_by.is_empty() {
+                    " [SUPERSEDED]".to_string()
+                } else {
+                    format!(" [SUPERSEDED → {}]", ln.superseded_by)
+                }
+            } else {
+                String::new()
+            };
+            // Prefer the STABLE id in the render; the `[^N]` label is page-local and renumbers.
+            let label = if ln.id.is_empty() { ln.num.clone() } else { ln.id.clone() };
             let line = match (&ln.meta, a.full_notes) {
-                (Some(meta), true) => format!("[{}] - [{}] {}", ln.num, meta, ln.text),
-                _ => format!("[{}] - {}", ln.num, ln.text),
+                (Some(meta), true) => format!("[{}]{} - [{}] {}", label, tag, meta, ln.text),
+                _ => format!("[{}]{} - {}", label, tag, ln.text),
             };
             rows.push((q.optional_hits(&surface), line));
         }
@@ -2615,6 +2747,76 @@ mod tests {
         let (ocd, lmd) = parse_meta_dates("keywords: daemon pid reuse sigterm, ocd: 2026-07-13, lmd: 2026-07-13");
         assert_eq!(ocd.as_deref(), Some("2026-07-13"));
         assert_eq!(lmd.as_deref(), Some("2026-07-13"));
+    }
+
+    #[test]
+    fn note_props_parse_quoted_keyphrase_list() {
+        // THE CANONICAL GRAMMAR (user-specified). Three separators, three jobs:
+        //   • COMMA   separates metadata FIELDS,
+        //   • QUOTES  delimit the keywords VALUE (so it can hold spaces),
+        //   • SPACE   separates the KEYWORDS inside that value.
+        // A keyword is therefore a KEY-PHRASE, written underscore_joined so that a multi-word
+        // phrase never needs a space and can never be mistaken for two keywords.
+        let meta = "date:99999999T999999+009, keywords:\"frontend ui agent_profile_sidepanel agent_configuration agent_profile\"";
+        let kw = parse_note_keywords(meta);
+        assert_eq!(
+            kw,
+            "frontend ui agent_profile_sidepanel agent_configuration agent_profile",
+            "the quotes DELIMIT the list — they must never survive into a keyword"
+        );
+        let props = parse_note_props(meta);
+        assert_eq!(
+            props.get("keywords").map(Vec::len),
+            Some(5),
+            "five key-phrases, split on space — not on the spaces inside a phrase"
+        );
+        assert!(props["keywords"].contains(&"agent_profile_sidepanel".to_string()));
+        assert_eq!(props.get("date").map(|v| v.join(" ")).as_deref(), Some("99999999T999999+009"));
+    }
+
+    #[test]
+    fn note_status_defaults_to_valid_and_reads_superseded() {
+        // `status:` is the lesson's lifecycle: `valid` (the guardrail still holds) or `superseded`
+        // (overtaken — kept as history, never applied as current guidance).
+        assert_eq!(parse_note_status("keywords:\"a\", status:superseded, ocd:2026-07-13"), "superseded");
+        assert_eq!(parse_note_status("keywords:\"a\", status:valid"), "valid");
+        // Absent ⇒ valid. The corpus predates the field, and a lesson written before it existed was
+        // believed true when written — defaulting to `superseded` would silently blind every legacy
+        // guardrail in the corpus at once.
+        assert_eq!(parse_note_status("ocd:2026-06-09 lmd:2026-06-09"), "valid");
+        // Unparseable ⇒ valid, for the same reason: a typo must never DEMOTE a live guardrail.
+        assert_eq!(parse_note_status("status:garbage"), "valid");
+    }
+
+    #[test]
+    fn note_id_and_superseded_by_survive_the_common_misspelling() {
+        // The full block, exactly as authored in practice — including the `superseeded` spelling.
+        // An unrecognised KEY is silently DROPPED by the props parser, so `superseeded-by` must be
+        // read too: otherwise a retired lesson renders as [SUPERSEDED] with no pointer, and the
+        // reader has no way to reach the rule that actually holds. That is a worse failure than the
+        // typo itself.
+        let meta = "id:ATOM-234P-U35Q, status:superseeded, superseeded-by:ATOM-26EY-PLD7, \
+                    date:2026-05-01, keywords:\"frontend ui agent_profile_sidepanel\"";
+        assert_eq!(parse_note_id(meta), "ATOM-234P-U35Q");
+        assert_eq!(parse_note_status(meta), "superseded");
+        assert_eq!(parse_note_superseded_by(meta), "ATOM-26EY-PLD7");
+        // The canonical spelling parses identically.
+        let canon = "id:ATOM-1, status:superseded, superseded-by:ATOM-2";
+        assert_eq!(parse_note_status(canon), "superseded");
+        assert_eq!(parse_note_superseded_by(canon), "ATOM-2");
+        // `date:` is a shorthand that must fill BOTH dates rather than leave the lesson dateless.
+        let (ocd, lmd) = parse_meta_dates(meta);
+        assert_eq!(ocd.as_deref(), Some("2026-05-01"));
+        assert_eq!(lmd.as_deref(), Some("2026-05-01"));
+    }
+
+    #[test]
+    fn note_props_quoted_single_keyphrase() {
+        // A one-element quoted list closes its quote on the same token — the parser must not
+        // fall into "still inside a quote" and swallow the rest of the fields.
+        let props = parse_note_props("keywords:\"agent_profile_sidepanel\", ocd: 2026-07-13");
+        assert_eq!(props["keywords"], vec!["agent_profile_sidepanel".to_string()]);
+        assert_eq!(props["ocd"], vec!["2026-07-13".to_string()]);
     }
 
     #[test]

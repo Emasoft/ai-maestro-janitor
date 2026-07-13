@@ -127,14 +127,17 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 
 CREATE TABLE IF NOT EXISTS notes (
-    id         INTEGER PRIMARY KEY,
-    memory_id  INTEGER,
-    label      TEXT,
-    keywords   TEXT,
-    ocd        TEXT,
-    lmd        TEXT,
-    body       TEXT,
-    urls       TEXT
+    id            INTEGER PRIMARY KEY,
+    memory_id     INTEGER,
+    label         TEXT,
+    atom_id       TEXT,
+    keywords      TEXT,
+    status        TEXT,
+    superseded_by TEXT,
+    ocd           TEXT,
+    lmd           TEXT,
+    body          TEXT,
+    urls          TEXT
 );
 
 CREATE TABLE IF NOT EXISTS atoms (
@@ -194,10 +197,17 @@ CREATE INDEX IF NOT EXISTS idx_atoms_cmref   ON atoms(claude_mem_ref);
         }
         // v4: a LESSON is a first-class memory element, so it carries a `keywords:` recall surface
         // exactly like an ATOM does. Same additive-column dance for `notes.keywords`.
-        if let Err(e) = conn.execute_batch("ALTER TABLE notes ADD COLUMN keywords TEXT") {
-            let msg = e.to_string();
-            if !msg.contains("duplicate column name") {
-                return Err(e).context("adding notes.keywords column for schema migration");
+        for ddl in [
+            "ALTER TABLE notes ADD COLUMN atom_id TEXT",
+            "ALTER TABLE notes ADD COLUMN keywords TEXT",
+            "ALTER TABLE notes ADD COLUMN status TEXT",
+            "ALTER TABLE notes ADD COLUMN superseded_by TEXT",
+        ] {
+            if let Err(e) = conn.execute_batch(ddl) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column name") {
+                    return Err(e).context("adding a notes column for schema migration");
+                }
             }
         }
         // …and `notes_fts` must GAIN that column. An FTS5 virtual table's column set is fixed at
@@ -442,8 +452,12 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
     // that can only be found by the words its prose happens to use is not reliably findable at all.
     for ln in crate::memory::resolve_notes_public(path) {
         conn.execute(
-            "INSERT INTO notes(memory_id, label, keywords, ocd, lmd, body, urls) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![mem_id, ln.num, ln.keywords, ln.ocd, ln.lmd, ln.text, ln.urls],
+            "INSERT INTO notes(memory_id, label, atom_id, keywords, status, superseded_by, ocd, lmd, body, urls) \
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                mem_id, ln.num, ln.id, ln.keywords, ln.status, ln.superseded_by,
+                ln.ocd, ln.lmd, ln.text, ln.urls
+            ],
         )?;
         let note_id = conn.last_insert_rowid();
         conn.execute(

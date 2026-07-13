@@ -165,11 +165,15 @@ ATOM OF MEMORY, exactly like a body atom — and a GUARDRAIL, not a story. Every
 write here (or later demote into here) takes exactly this form:
 
 ```
-[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
 All three metadata keys are REQUIRED — the block is the lesson's ADDRESS, not decoration.
-**`keywords:` is its RECALL SURFACE** (the words a future session will SEARCH with — the
+**Grammar:** a **comma** separates the FIELDS, **quotes** delimit the keywords VALUE, a
+**space** separates the KEYWORDS inside it — so a keyword is a **KEY-PHRASE written
+underscore_joined** (`agent_profile_sidepanel`, never `agent profile sidepanel`), which is
+what keeps a multi-word phrase from being shredded into useless single tokens.
+**`keywords:` is the RECALL SURFACE** (the phrases a future session will SEARCH with — the
 symptom — which are usually NOT the words your prose uses; memgrep indexes them and
 `--only-notes` matches them, so a lesson without them is findable only by accident of
 phrasing, and a memory that cannot be recalled is a memory that does not exist).
@@ -270,7 +274,7 @@ Copy this checklist and track your progress:
 - [ ] Each durable body fact carries a `^id [keywords: …]` atom marker (keywords = the search words for THAT fact); optional `desc:` slug = a ≤64-char one-line summary
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
 - [ ] `## Notes and lessons learned` section present (even if empty)
-- [ ] Every lesson in it obeys THE LESSON FORM — metadata `[keywords: …, ocd: …, lmd: …]` (all three REQUIRED; `keywords` is its recall surface — no keywords, no recall) then `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` — one mistake per footnote, ≤3 lines, all three parts present
+- [ ] Every lesson in it obeys THE LESSON FORM — metadata `[keywords:"<key_phrase> …", ocd:…, lmd:…]` (all three REQUIRED; key-phrases are underscore_joined; `keywords` is its recall surface — no keywords, no recall) then `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` — one mistake per footnote, ≤3 lines, all three parts present
 - [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
 - [ ] Every project concept an atom NAMES is a `[[wikilink]]` (missing page → create a stub; own-subject → self-link; a link ≥2 atoms share → pool as one `[^N]` See-also)
 - [ ] `memgrep reindex` run if present — the index is memgrep's; do NOT touch `MEMORY.md`

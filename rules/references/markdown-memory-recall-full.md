@@ -486,3 +486,33 @@ them together. A fresh session was blind to the recall half. This rule is that
 missing piece: it makes "recall before acting" and "index by symptom" a
 standing discipline, with a tool command that degrades to grep when the binary
 isn't present.
+
+## STAY ON TOPIC — the full routing rule (moved out of the rule, 2026-07-13)
+
+The rule states the law; this is the rationale and the routing table it compresses.
+
+**One page = one subject.** Someone who recalls `claude-client-authentication` is looking for
+facts about *claude client authentication* — not for your lessons about how to debug. A
+general, transferable lesson ("verify before you 'fix'", "falsify each layer separately",
+"absence of evidence is not evidence") is **OFF-TOPIC POLLUTION** inside a case page, and it
+is doubly wrong because it *scatters* the methodology across every page that happened to teach
+it, so the one page that should own it owns nothing.
+
+**The routing question, asked of every lesson BEFORE you write it:**
+
+> *Is this true only of THIS subject, or would it still be true of a completely different bug
+> in a completely different system?*
+
+| The lesson is… | It belongs in… |
+|---|---|
+| specific to the subject (this API's quirk, this daemon's flag, this keychain's ACL behavior) | **the subject's own page** |
+| a transferable way of WORKING (how to diagnose, verify, falsify, decide, avoid a reasoning trap) | **the methodology page that owns it** — e.g. `debugging-methodology` |
+
+**Before creating a new methodology page, SURVEY what already exists** (`memgrep recall
+"methodology"` / `"debugging"` across the scopes) and add to the owner rather than minting a
+fifth near-synonym. Methodology is nearly always **USER** scope: a way of working is true
+across all projects, whereas the case facts that taught it usually are not.
+
+**When you MOVE a lesson out of a case page, leave the case page a link, not a hole** — the
+link law still applies (`[[debugging-methodology]]` ↔ `See also`), and no knowledge is
+deleted, only relocated to its rightful owner.

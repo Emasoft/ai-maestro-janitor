@@ -66,7 +66,7 @@ def test_env_value_safe_value_and_absent_none():
 
 def test_mask_proxy_strips_scheme_credentials():
     """http://user:pass@host:3128 has its embedded credentials stripped."""
-    assert ed.mask_proxy("http://alice:s3cr3t@host:3128") == "http://host:3128"
+    assert ed.mask_proxy("http://alice:secret@host:3128") == "http://host:3128"
 
 
 def test_mask_proxy_strips_bare_credentials():
@@ -261,7 +261,7 @@ def test_detect_execution_context_headless_and_worktree():
 def test_detect_proxies_masks_and_no_proxy():
     """HTTPS_PROXY credentials are masked; NO_PROXY (a host list) passes through."""
     out = ed.detect_proxies({
-        "HTTPS_PROXY": "http://alice:s3cr3t@proxy:8443",
+        "HTTPS_PROXY": "http://alice:secret@proxy:8443",
         "NO_PROXY": "localhost,127.0.0.1",
     })
     assert out["HTTPS_PROXY"] == "http://proxy:8443"

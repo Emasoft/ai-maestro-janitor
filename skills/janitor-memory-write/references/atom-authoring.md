@@ -63,7 +63,7 @@ references — defined in the page's bottom pool under section headings:
 The widget retries 3× then fails.[^1][^2]
 
 ## Lessons Learned
-[^1]: [keywords: <the search terms>, ocd: <old>, lmd: <today>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^1]: [keywords:"<key_phrase> <key_phrase> …", ocd:<old>, lmd:<today>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 
 ## See also
 [^2]: [[backoff-policy]]
@@ -88,7 +88,7 @@ question words, NOT the answer's jargon); `ocd`/`lmd`/`type` are optional (an at
 without them inherits the page's).
 
 **A LESSON (`[^N]`) is an atom too, and its metadata block obeys the SAME grammar** —
-`[keywords: …, ocd: …, lmd: …]` — except that on a lesson **all three are REQUIRED**. A
+`[keywords:"<key_phrase> …", ocd:…, lmd:…]` — except that on a lesson **all three are REQUIRED**. A
 lesson cannot inherit dates from a page (the librarian moves lessons BETWEEN pages, so its
 dates must be intrinsic), and without `keywords:` it has no recall surface at all: memgrep
 matches `--only-notes` against `keywords + text` and indexes `notes.keywords`, so a

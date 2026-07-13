@@ -147,12 +147,18 @@ A lesson is a first-class ATOM OF MEMORY, exactly like a body atom — and a GUA
 not a story. Write every `[^N]` in exactly this form:
 
 ```
-[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-**The metadata block is the lesson's ADDRESS, not decoration.** All three keys REQUIRED:
+**The metadata block is the lesson's ADDRESS, not decoration.** All three keys REQUIRED.
 
-- **`keywords:` — the RECALL SURFACE.** The words a future session will SEARCH with (the
+**Grammar — three separators, three jobs:** a **comma** separates the metadata FIELDS;
+**quotes** delimit the keywords VALUE (so it can hold spaces); a **space** separates the
+KEYWORDS inside it. So a keyword is really a **KEY-PHRASE, written underscore_joined**
+(`agent_profile_sidepanel`, never `agent profile sidepanel`) — the underscore keeps a
+multi-word phrase space-free, so the space stays free to mean "next keyword".
+
+- **`keywords:` — the RECALL SURFACE.** The phrases a future session will SEARCH with (the
   symptom), which are usually NOT the words your prose happens to use. memgrep indexes
   them and `--only-notes` matches them. **A lesson with no keywords is findable only by
   accident of phrasing — and a memory that cannot be recalled is a memory that does not
@@ -177,9 +183,9 @@ Then the prose:
 The widget retries 3× then fails.[^3] Tune via the `max_retries` config key.
 
 ## Notes and lessons learned
-[^3]: [keywords: retry cap constant guessed name, ocd: 2026-06-09, lmd: 2026-06-09] DO NOT
-  read a constant off a guessed variable name, BECAUSE `max_attempts` does not exist and
-  the real cap is `max_retries` = 3, not the 5 this page used to claim. DO read the
+[^3]: [keywords:"retry_cap guessed_variable_name constant_lookup", ocd:2026-06-09, lmd:2026-06-09]
+  DO NOT read a constant off a guessed variable name, BECAUSE `max_attempts` does not exist
+  and the real cap is `max_retries` = 3, not the 5 this page used to claim. DO read the
   constant from the source instead.
 ```
 

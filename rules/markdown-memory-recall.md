@@ -3,16 +3,13 @@
      store, only this rule file. -->
 
 > [!IMPORTANT]
-> **ai-maestro-janitor rule — CONDITIONAL on the janitor being active.** Check the janitor's
-> state first (cheap `$HOME` existence checks), then act:
-> - **UNINSTALLED** — if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/` is
->   ABSENT, the plugin was uninstalled and this file is an ORPHAN it could not remove. Treat
->   this rule as INERT, and tell the user it is an orphaned janitor rule they may delete.
->   NEVER delete any MEMORY store — only this rule file, and only with the user's ok.
-> - **DISARMED** — else if `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/kill-switch.flag`
->   OR the legacy `~/.claude/janitor-global-state/kill-switch.flag` EXISTS, the janitor is
->   intentionally stopped → treat this rule as INERT this session.
-> - **ACTIVE** — otherwise the janitor is running; apply the rule as written below.
+> **ai-maestro-janitor rule — INERT unless the janitor is active.** Check (cheap `$HOME` stats),
+> where `DATA` = `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/`:
+> **UNINSTALLED** (`DATA` absent) → this file is an orphan the plugin could not remove: treat as
+> INERT and tell the user they may delete it — but NEVER any MEMORY store, only this rule file, and
+> only with their ok. **DISARMED** (`DATA/global-state/kill-switch.flag` or legacy
+> `~/.claude/janitor-global-state/kill-switch.flag` exists) → the janitor is intentionally stopped:
+> INERT this session. **ACTIVE** (otherwise) → apply the rule below.
 
 # Markdown memory — recall protocol (the search half)
 
@@ -31,47 +28,30 @@ missing half: how to **RECALL** them, and the discipline that makes recall work.
 The memory system is **worthless if it is only used when the user asks**. Four standing
 commitments, for every agent, in every project:
 
-1. **RECALL BEFORE ACTING.** Before you debug a recurring problem, make a design decision,
-   or act on a recurring alert — RECALL FIRST ("have we hit this before?"). It is cheap,
-   and it is the entire reason a memory exists.
-2. **WRITE / UPDATE AFTER SOLVING.** After you solve a non-trivial problem or make a
-   decision that isn't derivable from the code, capture it into the page that OWNS the
-   subject (RECALL first, so you update rather than duplicate). When a new fact supersedes
-   an old one, use the **correction protocol**: clean the body to the current truth AND
-   demote the old statement to a dated `[^N]` lesson carrying the WHY. The fact moves
-   forward clean; the error becomes a guardrail. **Never delete knowledge — relocate it.**
-3. **MAINTAIN THE PROJECT WIKIMEM.** Keep the PROJECT-scope pages current (architecture
-   hub, key-component pages, the publish/deploy pipeline) so the knowledge is git-tracked
-   and shared with every dev, not stranded in one session's head.
-4. **SCOPE ROUTING — decide BEFORE writing** (see the table below). **UNSURE → LOCAL.**
+1. **RECALL BEFORE ACTING.** Before you debug a recurring problem, make a design decision, or
+   act on a recurring alert — RECALL FIRST ("have we hit this before?"). It is cheap, and it is
+   the entire reason a memory exists.
+2. **WRITE / UPDATE AFTER SOLVING.** After solving a non-trivial problem, or making a decision
+   not derivable from the code, capture it into the page that OWNS the subject (RECALL first, so
+   you update rather than duplicate). When a new fact supersedes an old one, use the **correction
+   protocol**: clean the body to the current truth AND demote the old statement to a dated `[^N]`
+   lesson carrying the WHY. The fact moves forward clean; the error becomes a guardrail.
+   **Never delete knowledge — relocate it.**
+3. **MAINTAIN THE PROJECT WIKIMEM.** Keep PROJECT-scope pages current (architecture hub,
+   key components, the publish/deploy pipeline) so knowledge is git-tracked and shared, not
+   stranded in one session's head.
+4. **SCOPE ROUTING — decide BEFORE writing** (table below). **UNSURE → LOCAL.**
 
 ## STAY ON TOPIC: a case page holds CASE facts; METHODOLOGY lives in its own page
 
-**One page = one subject.** Someone who recalls `claude-client-authentication` is looking for
-facts about *claude client authentication* — not for your lessons about how to debug. A
-general, transferable lesson ("verify before you 'fix'", "falsify each layer separately",
-"absence of evidence is not evidence") is **OFF-TOPIC POLLUTION** inside a case page, and it
-is doubly wrong because it *scatters* the methodology across every page that happened to teach
-it, so the one page that should own it owns nothing.
-
-**The routing question, asked of every lesson BEFORE you write it:**
-
-> *Is this true only of THIS subject, or would it still be true of a completely different bug
-> in a completely different system?*
-
-| The lesson is… | It belongs in… |
-|---|---|
-| specific to the subject (this API's quirk, this daemon's flag, this keychain's ACL behavior) | **the subject's own page** |
-| a transferable way of WORKING (how to diagnose, verify, falsify, decide, avoid a reasoning trap) | **the methodology page that owns it** — e.g. `debugging-methodology` |
-
-**Before creating a new methodology page, SURVEY what already exists** (`memgrep recall
-"methodology"` / `"debugging"` across the scopes) and add to the owner rather than minting a
-fifth near-synonym. Methodology is nearly always **USER** scope: a way of working is true
-across all projects, whereas the case facts that taught it usually are not.
-
-**When you MOVE a lesson out of a case page, leave the case page a link, not a hole** — the
-link law still applies (`[[debugging-methodology]]` ↔ `See also`), and no knowledge is
-deleted, only relocated to its rightful owner.
+**One page = one subject.** Ask of EVERY lesson before writing it: *is this true only of THIS
+subject, or would it still be true of a completely different bug in a completely different
+system?* Subject-specific → the subject's page. A transferable way of WORKING (how to diagnose,
+verify, falsify) → **the methodology page that owns it** (`debugging-methodology`), nearly
+always **USER** scope. A general lesson parked in a case page is off-topic pollution AND scatters
+the methodology, so the page that should own it owns nothing. SURVEY before minting a new
+methodology page; when you MOVE a lesson, leave a `[[link]]`, not a hole (nothing is deleted,
+only relocated). Rationale + routing table: the FULL REFERENCE above.
 
 ## The one law that makes memory work: index by the QUESTION, not the answer
 
@@ -92,11 +72,11 @@ Recall is two-hop: a symptom query lands you on the note; the note's BODY gives 
 ```bash
 LOCAL_MEM="$HOME/.claude/projects/<project-slug>/memory"                          # machine-private
 PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/project/memory" # git-tracked, shared
-USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # global (HARD-CODED path;
-                                    # never ${CLAUDE_PLUGIN_DATA} — that is the RUNNING plugin's dir, not the janitor's)
+USER_MEM="$HOME/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory"  # global; HARD-CODED —
+        # never ${CLAUDE_PLUGIN_DATA}, that is the RUNNING plugin's dir, not the janitor's
 ROOTS=(); for d in "$LOCAL_MEM" "$PROJECT_MEM" "$USER_MEM"; do [ -d "$d" ] && ROOTS+=("$d"); done
-# ARRAY, not a space-joined string: zsh does NOT word-split an unquoted "$ROOTS", so the string
-# form passes every root as ONE bogus path and silently returns 0 results. "${ROOTS[@]}" works in both shells.
+        # ARRAY, not a space-joined string: zsh does not word-split an unquoted "$ROOTS", so the
+        # string form passes every root as ONE bogus path and silently returns 0 results.
 SYMPTOM="the user's words / the error / the symptom"   # NOT the answer's jargon
 
 if command -v memgrep >/dev/null 2>&1; then
@@ -106,12 +86,9 @@ else
 fi
 ```
 
-Read the top 1–3 notes it returns. When two scopes conflict, the MORE SPECIFIC wins:
-**LOCAL > PROJECT > USER**. Nothing returned ⇒ the memory doesn't exist yet — write one
-after you solve the problem.
-
-If `memgrep` is missing, install once:
-`cargo install --path <…>/ai-maestro-janitor/scripts/memgrep`.
+Read the top 1–3 notes. On conflict the MORE SPECIFIC scope wins: **LOCAL > PROJECT > USER**.
+Nothing returned ⇒ the memory doesn't exist yet — write one after solving the problem. No
+`memgrep`? `cargo install --path <…>/ai-maestro-janitor/scripts/memgrep`.
 
 Other commands: `memgrep find "+must -exclude \"exact phrase\"" <dir>` (keyword DSL;
 `--only-notes` searches the lessons), `memgrep overview <dir>` (the project's entry-point
@@ -136,10 +113,8 @@ cross-linked. **UNSURE → LOCAL.**
 
 ## Read-the-notes rule — a memory's lessons ARE part of the memory
 
-When you read ANY memory you MUST also read the notes/lessons attached to it — every `[^N]`
-reference and the `## Notes and lessons learned` entries they point at. The lessons are
-*why* the facts are what they are and *what errors not to repeat*. This is FREE: `memgrep
-recall` and `find` auto-resolve and append them.
+Reading ANY memory means also reading its `[^N]` lessons — they are *why* the facts are what
+they are and *what not to repeat*. FREE: `memgrep recall`/`find` auto-resolve and append them.
 
 ## The note format
 
@@ -157,48 +132,35 @@ metadata:
 <body: the one fact; for feedback/project add **Why:** and **How to apply:** lines>
 
 ## Notes and lessons learned
-[^3]: [keywords: retry cap constant guessed name, ocd: 2026-06-09, lmd: 2026-06-09] DO NOT
-  read a constant off a guessed variable name, BECAUSE `max_attempts` does not exist and the
-  real cap is `max_retries` = 3, not 5. DO read the constant from the source instead.
+[^3]: [id:ATOM-234P-U35Q, status:valid, keywords:"retry_cap guessed_variable_name", ocd:2026-06-09, lmd:2026-06-09]
+  DO NOT read a constant off a guessed variable name, BECAUSE `max_attempts` does not exist and
+  the real cap is `max_retries` = 3, not 5. DO read the constant from the source instead.
 ```
 
 `## Notes and lessons learned` is **MANDATORY on every page, even when empty** — it is the
 standing landing zone for a correction lesson.
 
-### THE LESSON FORM — mandatory metadata, then one terse shape
-
-A lesson is a first-class ATOM OF MEMORY, exactly like a body atom — and a GUARDRAIL, not a
-story. Write every `[^N]` in exactly this form:
+### THE LESSON FORM — a lesson is an ATOM, and a GUARDRAIL, not a story
 
 ```
-[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [id:ATOM-xxxx-xxxx, status:valid|superseded, superseded-by:ATOM-xxxx-xxxx, keywords:"<key_phrase> …", ocd:<date>, lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-**The metadata block is not decoration — it is the lesson's ADDRESS.** All three keys are
-REQUIRED:
+**The metadata block is the lesson's ADDRESS.** `id`, `status`, `keywords`, `ocd`, `lmd`
+REQUIRED; `superseded-by` when superseded.
 
-- **`keywords:` — the RECALL SURFACE, and the reason the lesson is reachable at all.** These
-  are the words a future session will SEARCH with (the symptom), which are usually NOT the
-  words the lesson's prose happens to use. `memgrep` indexes them (`notes.keywords`,
-  `notes_fts`) and `--only-notes` matches them, so a lesson without keywords is findable only
-  by accident of phrasing. **A memory that cannot be recalled is a memory that does not
-  exist.**
-- **`ocd:` / `lmd:` — REQUIRED dates.** They are the lesson's own, intrinsic to it: they
-  survive the librarian moving the lesson between pages, so they — not the file's mtime — are
-  its authoritative age, and they are what `--since` / `--until` read.
+- **`keywords:` is the RECALL SURFACE** — the phrases a future session SEARCHES with (the
+  symptom), usually NOT the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not
+  exist.** A **comma** splits FIELDS, **quotes** delimit the keywords VALUE, a **space** splits the
+  KEYWORDS in it — so each is a KEY-PHRASE, `underscore_joined`, never shredded.
+- **`status:`** `valid` (holds) | `superseded` (history — NEVER apply; follow `superseded-by`).
+  **`id:`** is stable and corpus-wide; `[^N]` is page-local and renumbers, so only `id` is a
+  durable reference.
+- **Prose:** ONE lesson = ONE mistake · ≤3 lines / ~40 words · all three parts (`DO NOT` = the
+  act about to be repeated; `BECAUSE` = the WHY, without which it cannot stop the repeat;
+  `DO … instead` = the exit). Chronology/evidence go in the page BODY or a TRDD.
 
-Then the prose, in one shape:
-
-- **ONE lesson = ONE mistake.** Two mistakes = two footnotes. Never a paragraph that
-  wanders across several.
-- **≤3 lines / ~40 words.** A long lesson is not read, and an unread guardrail guards
-  nothing. Cut the chronology ("earlier this page said…", "we then discovered…") — the
-  body already carries the current truth; the lesson carries only what not to repeat.
-- **All three parts are mandatory.** `DO NOT` names the act about to be repeated. `BECAUSE`
-  is the WHY — without it the lesson cannot stop the repeat. `DO … instead` is the exit — a
-  lesson that only forbids leaves the reader stuck.
-- Prose, evidence, and reasoning that do not fit belong in the page BODY or a TRDD, never
-  in the lesson.
+Full grammar + supersession: the FULL REFERENCE above.
 
 ## The wiki layer (wikimem)
 
@@ -214,14 +176,12 @@ edit.
 
 ## MEMORY.md is a DEPRECATED STUB
 
-The index is memgrep's and ONLY memgrep's (an agent-invisible, unlimited SQLite index).
-Do **NOT** add pointers to the stub, do **NOT** load it as an index, and **NEVER
-hand-trim it** — agents who trimmed the old ever-growing index lost pointers and corrupted
-the corpus, which is exactly why the index moved into memgrep.
+The index is memgrep's and ONLY memgrep's (agent-invisible, unlimited SQLite). Do **NOT** add
+pointers to the stub, load it as an index, or **hand-trim it** — agents who trimmed the old
+ever-growing index lost pointers and corrupted the corpus. That is why the index moved to memgrep.
 
 ## Separation of powers
 
-The **janitor** reorganizes structure and *surfaces* contradictions but never edits a fact.
-An **agent** creates and corrects content but never reorganizes. The executable protocol is
-the skills `/janitor-memory-recall`, `/janitor-memory-write`, `/janitor-memory-update`, and
-`/janitor-memory-bootstrap` (stands up a project's wikimem once).
+The **janitor** reorganizes structure and *surfaces* contradictions but never edits a fact. An
+**agent** creates and corrects content but never reorganizes. Executable protocol: the skills
+`/janitor-memory-recall|write|update|bootstrap` (bootstrap stands up a project's wikimem once).
