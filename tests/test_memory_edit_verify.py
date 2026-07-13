@@ -902,3 +902,149 @@ def test_verify_merge_fails_on_orphaned_body_footnote():
         result, v.parse_frontmatter(result), retired_slugs={"a", "b"}, other_live_pages={},
     )
     assert not ok and any("footnote" in r for r in reasons), reasons
+
+
+# ---- fact-preservation searches the WHOLE page, not the body (audit 2026-07-13) ----
+
+def test_body_facts_preserved_counts_a_fact_demoted_into_a_lesson():
+    """A fact MOVED from the body into a `[^N]` lesson is PRESERVED, not dropped — that
+    relocation is exactly what the correction protocol mandates for a superseded fact."""
+    src = _note(body="The rotator retries a failed refresh up to five times before failing over.")
+    result = _note(
+        body="The rotator retries a failed refresh three times before failing over.",
+        lessons="[^1]: superseded — it used to be true that "
+                "the rotator retries a failed refresh up to five times before failing over.\n",
+    )
+    ok, missing = v.body_facts_preserved([src], result)
+    assert ok, missing
+
+
+def test_body_facts_preserved_still_catches_a_truly_dropped_fact():
+    """The widened haystack must not blunt the oracle: a fact present NOWHERE on the
+    result page (neither body nor lessons) is still reported missing."""
+    src = _note(body="The rotator retries a failed refresh up to five times before failing over.")
+    result = _note(body="The rotator has a retry policy.", lessons="[^1]: unrelated lesson text.\n")
+    ok, missing = v.body_facts_preserved([src], result)
+    assert not ok and missing
+
+
+def test_mirror_preservation_sees_past_the_first_pages_lessons_heading():
+    """The harvest gate's `wiki_corpus` is a CONCATENATION of curated pages, each of which
+    mandatorily carries `## Notes and lessons learned`. Truncating at the first such heading
+    hid every page after the first, so a note mirrored into a LATER page read as unmirrored
+    and the pass ABSTAINed forever. The whole-page haystack sees the later page."""
+    buffer_note = ("raw-note.md", "The daemon holds a single machine-wide flock at all times.\n")
+    page1 = _note(name="one", body="Something else entirely, unrelated to the daemon.",
+                  lessons="[^1]: a lesson on page one.\n")
+    page2 = _note(name="two", body="The daemon holds a single machine-wide flock at all times.")
+    ok, missing = v.mirror_preservation_ok([buffer_note], "\n".join([page1, page2]))
+    assert ok, missing
+
+
+def test_verify_split_finds_a_fact_moved_into_a_later_subpages_body():
+    """Regression for the same truncation on the split path: sub-page #1 carries lessons,
+    and the source fact lives in sub-page #2's body — it must still be found."""
+    source = _hub("plat", ["src/a/**", "src/b/**"],
+                  "## Frontend\nUI bits render the agent profile sidepanel.\n"
+                  "## Backend\nServer bits sign every request with the session key.\n",
+                  lessons="[^1]: the build flag is --release, learned the hard way.\n")
+    overview = _hub("plat", ["src/a/**", "src/b/**"],
+                    "Overview: see [[plat-frontend]] and [[plat-backend]].\n")
+    sub1 = _hub("plat-frontend", ["src/a/**"], "UI bits render the agent profile sidepanel.\n",
+                lessons="[^1]: the build flag is --release, learned the hard way.\n")
+    sub2 = _hub("plat-backend", ["src/b/**"],
+                "Server bits sign every request with the session key.\n")
+    sizes = {"plat.md": len(overview.encode()), "plat-frontend.md": len(sub1.encode()),
+             "plat-backend.md": len(sub2.encode())}
+    ok, reasons = v.verify_split(
+        source, v.parse_frontmatter(source), [sub1, sub2],
+        [v.parse_frontmatter(sub1), v.parse_frontmatter(sub2)], overview,
+        sizes, max_bytes=12000, retired_slugs=set(), other_live_pages={},
+    )
+    assert ok, reasons
+
+
+# ---- F2: a CONFLICT merge may supersede the RETIRED page's fact ------------------
+
+def _conflict_pair():
+    """The canonical conflict shape: an obsolete page contradicting the current one."""
+    obsolete = _note(name="obsolete", ocd="2026-05-01", lmd="2026-05-02",
+                     body="The rotator retries a failed refresh up to five times before failing over.")
+    survivor = _note(name="current", ocd="2026-04-01", lmd="2026-06-01",
+                     body="The rotator retries a failed refresh three times before failing over.")
+    # Stage 4: survivor's body = the CURRENT truth; the obsolete claim is REWORDED into a lesson.
+    result = _note(
+        name="current", ocd="2026-04-01", lmd="2026-07-13",
+        body="The rotator retries a failed refresh three times before failing over.",
+        lessons="[^4]: [id:ATOM-234P-U35Q, status:valid, keywords:\"oauth_rotator retry_cap\", "
+                "ocd:2026-07-13, lmd:2026-07-13] DO NOT assert the rotator retries 5x, as page "
+                "obsolete did, BECAUSE 8f960ed capped it at 3. DO use 3 instead.\n",
+    )
+    return obsolete, survivor, result
+
+
+def test_verify_merge_strict_facts_refuses_every_conflict_verdict():
+    """FALSIFIER for the F2 fix: with the DEFAULT (all sources are fact sources), the
+    conflict pass's only two output shapes are un-committable — the retired page's
+    superseded claim is reworded, so it is not a substring of the survivor."""
+    obsolete, survivor, result = _conflict_pair()
+    ok, reasons = v.verify_merge(
+        [obsolete, survivor],
+        [v.parse_frontmatter(obsolete), v.parse_frontmatter(survivor)],
+        result, v.parse_frontmatter(result),
+        retired_slugs={"obsolete"}, other_live_pages={},
+    )
+    assert not ok and any("body fact" in r for r in reasons), reasons
+
+
+def test_verify_merge_conflict_supersedes_the_retired_pages_fact():
+    """F2: narrowing the fact sources to the SURVIVING pages lets the sanctioned conflict
+    verdict commit — while lessons_preserved still guards every source's lessons."""
+    obsolete, survivor, result = _conflict_pair()
+    ok, reasons = v.verify_merge(
+        [obsolete, survivor],
+        [v.parse_frontmatter(obsolete), v.parse_frontmatter(survivor)],
+        result, v.parse_frontmatter(result),
+        retired_slugs={"obsolete"}, other_live_pages={},
+        fact_source_texts=[survivor],          # the conflict pass's narrowing
+    )
+    assert ok, reasons
+
+
+def test_verify_merge_conflict_still_guards_the_survivors_own_body():
+    """F2's narrowing must not become a blanket exemption: a conflict that ALSO drops the
+    SURVIVOR's own body fact is still refused (the survivor is the page it rewrites)."""
+    obsolete, survivor, _ = _conflict_pair()
+    corrupted = _note(
+        name="current", ocd="2026-04-01", lmd="2026-07-13",
+        body="The rotator has a retry policy.",          # the survivor's own fact: GONE
+        lessons="[^4]: DO NOT assert the rotator retries 5x, BECAUSE 8f960ed capped it at 3. "
+                "DO use 3 instead.\n",
+    )
+    ok, reasons = v.verify_merge(
+        [obsolete, survivor],
+        [v.parse_frontmatter(obsolete), v.parse_frontmatter(survivor)],
+        corrupted, v.parse_frontmatter(corrupted),
+        retired_slugs={"obsolete"}, other_live_pages={},
+        fact_source_texts=[survivor],
+    )
+    assert not ok and any("body fact" in r for r in reasons), reasons
+
+
+def test_verify_merge_conflict_still_guards_the_retired_pages_lessons():
+    """The never-lost layer is untouched by F2: the retired page's `[^N]` lesson must still
+    survive verbatim into the survivor, or the conflict verdict is refused."""
+    obsolete, survivor, result = _conflict_pair()
+    obsolete_with_lesson = obsolete.replace(
+        "## Notes and lessons learned\n",
+        "## Notes and lessons learned\n[^9]: DO NOT trust the cached count, BECAUSE it lags. "
+        "DO re-read the source instead.\n",
+    )
+    ok, reasons = v.verify_merge(
+        [obsolete_with_lesson, survivor],
+        [v.parse_frontmatter(obsolete_with_lesson), v.parse_frontmatter(survivor)],
+        result, v.parse_frontmatter(result),      # result never carried [^9]
+        retired_slugs={"obsolete"}, other_live_pages={},
+        fact_source_texts=[survivor],
+    )
+    assert not ok and any("lesson" in r for r in reasons), reasons

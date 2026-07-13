@@ -461,3 +461,66 @@ def test_merge_into_survivor_preserving_everything_commits(tmp_path):
     merged = (scope / "a.md").read_text(encoding="utf-8")
     assert "cap is 3" in merged and "30s timeout" in merged
     assert not (scope / "b.md").exists()
+
+
+# --------------------------------------------------------------------------- #
+# F2 (audit 2026-07-13) — a CONFLICT verdict must be COMMITTABLE
+# --------------------------------------------------------------------------- #
+
+def test_conflict_demote_verdict_commits(tmp_path):
+    """END-TO-END F2: the conflict pass's DEMOTE verdict — retire the obsolete page, keep
+    the survivor's body at the CURRENT truth, demote the superseded claim to a `[^N]`
+    lesson — must COMMIT. Before the fix, the body-fact oracle demanded the retired page's
+    (deliberately superseded, deliberately reworded) claim still appear verbatim in the
+    survivor's body, so BOTH conflict verdicts were structurally un-committable and every
+    cadence threw its whole adversarial fan-out away at this gate."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    obsolete = _note("obsolete", ocd="2026-05-01", lmd="2026-05-02",
+                     body="The rotator retries a failed refresh up to five times before failing over.")
+    current = _note("current", ocd="2026-04-01", lmd="2026-06-01",
+                    body="The rotator retries a failed refresh three times before failing over.")
+    (scope / "obsolete.md").write_text(obsolete, encoding="utf-8")
+    (scope / "current.md").write_text(current, encoding="utf-8")
+
+    txn_id = _txn_id_from_begin(scope, "conflict", "obsolete.md", "current.md")
+    staging = _staging(scope, txn_id)
+    (staging / "obsolete.md").unlink()                       # retire the obsolete page
+    resolved = _note(
+        "current", ocd="2026-04-01", lmd="2026-07-13",
+        body="The rotator retries a failed refresh three times before failing over.",
+        lessons="[^1]: DO NOT assert the rotator retries 5x, as page obsolete did, BECAUSE "
+                "8f960ed capped it at 3. DO use 3 instead.\n",
+    )
+    (staging / "current.md").write_text(resolved, encoding="utf-8")
+
+    rc = _run("commit", scope, txn_id, "--op", "merge")      # conflict commits AS a merge
+    assert rc == 0
+    assert not (scope / "obsolete.md").exists()              # the contradiction is gone
+    live = (scope / "current.md").read_text(encoding="utf-8")
+    assert "three times" in live
+    assert "DO NOT assert the rotator retries 5x" in live    # the WHY survives as a lesson
+
+
+def test_conflict_verdict_that_corrupts_the_survivor_is_still_refused(tmp_path):
+    """F2's narrowing is not a blanket exemption: a conflict that drops the SURVIVOR's own
+    body fact is refused and the live tree is untouched."""
+    scope = tmp_path / "memory"
+    scope.mkdir()
+    obsolete = _note("obsolete", body="The rotator retries a failed refresh up to five times.")
+    current = _note("current", body="The rotator signs every refresh with the stored session key.")
+    (scope / "obsolete.md").write_text(obsolete, encoding="utf-8")
+    (scope / "current.md").write_text(current, encoding="utf-8")
+
+    txn_id = _txn_id_from_begin(scope, "conflict", "obsolete.md", "current.md")
+    staging = _staging(scope, txn_id)
+    (staging / "obsolete.md").unlink()
+    (staging / "current.md").write_text(
+        _note("current", body="The rotator refreshes tokens.",   # the survivor's own fact: GONE
+              lessons="[^1]: DO NOT assert 5x, BECAUSE it is 3. DO use 3 instead.\n"),
+        encoding="utf-8")
+
+    rc = _run("commit", scope, txn_id, "--op", "merge")
+    assert rc != 0
+    assert (scope / "obsolete.md").exists()                  # nothing applied
+    assert "session key" in (scope / "current.md").read_text(encoding="utf-8")

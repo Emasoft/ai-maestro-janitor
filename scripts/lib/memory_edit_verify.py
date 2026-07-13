@@ -207,11 +207,25 @@ def _body_minus_lessons(text: str) -> str:
     return body
 
 
-def _norm_body_blob(text: str) -> str:
-    """Whitespace-collapsed, lowercased body blob — the haystack a source fact line
-    must be a SUBSTRING of. Collapsing newlines means a fact merely reflowed or moved
-    to another section still matches (its words stay contiguous)."""
-    return re.sub(r"\s+", " ", _body_minus_lessons(text)).strip().lower()
+def _norm_page_blob(text: str) -> str:
+    """Whitespace-collapsed, lowercased WHOLE-PAGE blob: frontmatter stripped, lessons
+    KEPT. The haystack every fact-preservation check searches — a source fact line must
+    be a SUBSTRING of it. Collapsing newlines means a fact merely reflowed or moved to
+    another section still matches (its words stay contiguous).
+
+    Two reasons it is the page and not the body (audit 2026-07-13):
+
+    1. A fact DEMOTED into a `[^N]` lesson has MOVED, not vanished — that is precisely
+       what the correction protocol mandates ("clean the body to the current truth AND
+       demote the old statement to a dated `[^N]` lesson"). Only text absent from the
+       WHOLE page is lost. Searching a lessons-stripped body declared every sanctioned
+       correction a "dropped fact".
+    2. `_body_minus_lessons` truncates at the FIRST `## Notes and lessons learned`
+       heading — fatal when the haystack is a CONCATENATION of pages (a split's
+       sub-pages, a harvest's wiki corpus), because every curated page mandatorily
+       carries that heading, so the blob collapsed to page #1's body and every fact
+       living in a later page read as missing."""
+    return re.sub(r"\s+", " ", _strip_frontmatter(text)).strip().lower()
 
 
 def _substantive_body_lines(text: str, min_len: int = 24) -> list[str]:
@@ -238,8 +252,11 @@ def body_facts_preserved(
     added lead, and dedup (a deduped/identical fact still appears once → still a
     substring); CATCHES a DROPPED or PARAPHRASED fact (its text is no longer a
     contiguous substring of the result). The substring (not line-equality) basis is why
-    a reflow / section-move does not false-fail. Returns (ok, [missing facts, ≤8])."""
-    haystack = _norm_body_blob(result)
+    a reflow / section-move does not false-fail. A fact demoted into a `[^N]` lesson
+    counts as PRESERVED — the haystack is the whole page (see `_norm_page_blob`), because
+    demoting a superseded fact to a dated lesson is the correction protocol's mandated
+    move, not a loss. Returns (ok, [missing facts, ≤8])."""
+    haystack = _norm_page_blob(result)
     missing: list[str] = []
     for src in sources:
         for fact in _substantive_body_lines(src, min_len):
@@ -314,8 +331,13 @@ def mirror_preservation_ok(
 
     Returns ``(ok, [unmirrored, ≤8])`` where each entry NAMES the note plus the first
     missing fact, so the agent knows WHICH note to (re)mirror. An empty buffer (the
-    dormant-corpus case — every note already curated) is trivially ``(True, [])``."""
-    haystack = _norm_body_blob(wiki_corpus)
+    dormant-corpus case — every note already curated) is trivially ``(True, [])``.
+
+    The haystack is the whole-page blob (audit 2026-07-13): `wiki_corpus` is a
+    CONCATENATION of every curated page, and the old body-only blob truncated it at the
+    first page's mandatory `## Notes and lessons learned` heading — so the gate saw only
+    page #1 and ABSTAINed on any note mirrored into a later page, forever."""
+    haystack = _norm_page_blob(wiki_corpus)
     unmirrored: list[str] = []
     for name, text in buffer_notes:
         for fact in _substantive_body_lines(text, min_len):
@@ -579,6 +601,7 @@ def verify_merge(
     result_meta: dict,
     retired_slugs,
     other_live_pages: dict,
+    fact_source_texts: list[str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Prove a MERGE lost nothing before its transaction commits.
 
@@ -594,14 +617,27 @@ def verify_merge(
 
     `other_live_pages` is {slug_or_path: text} of every page in the scope OTHER
     than the merged result; the dangling check unions it with the result so a
-    missed redirect anywhere in the corpus is caught. Returns (ok, [reasons])."""
+    missed redirect anywhere in the corpus is caught.
+
+    `fact_source_texts` (default: all sources) narrows WHICH sources the body-fact
+    oracle demands survive. Only the CONFLICT pass passes it, with the SURVIVING
+    sources alone: a conflict resolution exists to SUPERSEDE the retired page's claim
+    (conflict-protocol Stage 4 — the survivor's body becomes the CURRENT truth and the
+    obsolete claim is reworded into a `[^N]` lesson), so demanding that claim survive
+    verbatim in the body is self-contradictory and refused every conflict verdict there
+    has ever been. Narrowing (rather than disabling) the oracle keeps the survivor's own
+    body sacred, which is exactly the page a conflict pass rewrites. The retired page's
+    lessons are still guarded, strictly, by `lessons_preserved` below.
+
+    Returns (ok, [reasons])."""
     reasons: list[str] = []
 
     ok, missing = lessons_preserved(source_texts, result_text)
     if not ok:
         reasons.append("dropped/reworded lesson(s): " + "; ".join(missing))
 
-    ok, missing_facts = body_facts_preserved(source_texts, result_text)
+    fact_sources = source_texts if fact_source_texts is None else fact_source_texts
+    ok, missing_facts = body_facts_preserved(fact_sources, result_text)
     if not ok:
         reasons.append("dropped/paraphrased body fact(s): " + "; ".join(missing_facts))
 
@@ -666,14 +702,11 @@ def verify_split(
     if not ok:
         reasons.append("source lesson(s) lost across sub-pages: " + "; ".join(missing))
 
-    # body_facts_preserved's haystack (_body_minus_lessons) truncates at the FIRST
-    # `## Notes` heading, so a raw multi-page concatenation drops every sub-page
-    # after the first that carries a lessons section — false-failing a fact that
-    # legitimately moved to a later sub-page. Strip each page's lessons BEFORE
-    # joining so the haystack keeps every sub-page's body (lessons are guarded
-    # above by lessons_preserved on the raw concatenation).
-    bodies_only = "\n".join(_body_minus_lessons(t) for t in [*subpage_texts, overview_text])
-    ok, missing_facts = body_facts_preserved([source_text], bodies_only)
+    # The haystack is the raw concatenation: body_facts_preserved now searches the
+    # WHOLE page (`_norm_page_blob`), which neither truncates at a lessons heading nor
+    # loses a fact the split legitimately moved into a sub-page's lessons section. The
+    # old workaround pre-stripped each page's lessons to dodge that truncation.
+    ok, missing_facts = body_facts_preserved([source_text], concatenated)
     if not ok:
         reasons.append(
             "source body fact(s) lost/paraphrased across sub-pages: " + "; ".join(missing_facts)

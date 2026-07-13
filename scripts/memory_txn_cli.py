@@ -137,7 +137,7 @@ def _verify_merge(txn, writes, deletes):
     page's YOUNGER ocd. `retired` stays deletes-only (only removed slugs retire).
     The union guards the degenerate case of a delete the agent forgot to declare
     as a source."""
-    source_texts, source_metas, retired = [], [], []
+    source_texts, source_metas, retired, surviving_texts = [], [], [], []
     delete_set = set(deletes)
     for rel in sorted(set(txn.sources) | delete_set):
         live = txn.scope_root / rel
@@ -146,6 +146,8 @@ def _verify_merge(txn, writes, deletes):
         source_metas.append(verify.parse_frontmatter(text))
         if rel in delete_set:
             retired.append(_slug_of(rel, text))
+        else:
+            surviving_texts.append(text)
 
     # M-2 (wikimem audit 2026-07-07): structural legality is machine-checkable
     # from the metas already in hand, so enforce it AT COMMIT TIME — the
@@ -173,8 +175,20 @@ def _verify_merge(txn, writes, deletes):
 
     touched = set(writes) | set(deletes)
     others = _live_pages_excluding(txn.scope_root, touched)
+
+    # F2 (audit 2026-07-13): a CONFLICT resolution SUPERSEDES the retired page's claim
+    # by construction — conflict-protocol Stage 4 makes the survivor's body the CURRENT
+    # truth and reWORDS the obsolete claim into a `[^N]` lesson. Demanding that claim
+    # still be a substring of the survivor's body therefore refused EVERY conflict
+    # verdict (both DEMOTE and DELETE ride --op merge), so the pass burned its whole
+    # adversarial fan-out each cadence and threw the result away at the gate. Narrow the
+    # body-fact oracle to the SURVIVING sources: the survivor's own body stays sacred
+    # (it is the page a conflict rewrites), while the retired page's superseded facts may
+    # be demoted. lessons_preserved still guards every source's lessons, strictly.
+    fact_sources = surviving_texts if txn.op == "conflict" else None
     ok, reasons = verify.verify_merge(
-        source_texts, source_metas, result_text, result_meta, retired, others
+        source_texts, source_metas, result_text, result_meta, retired, others,
+        fact_source_texts=fact_sources,
     )
     return ok, reasons
 
