@@ -164,18 +164,6 @@ def test_context_tokens_for_none_on_bad_path(tmp_path: Path) -> None:
     assert ccc.context_tokens_for(tmp_path / "does-not-exist.jsonl") is None
 
 
-def test_transcript_idle_seconds_from_mtime(tmp_path: Path) -> None:
-    """idle == now - mtime; a missing/empty path is treated as 'just active' (0)."""
-    t = tmp_path / "session.jsonl"
-    t.write_text("{}\n", encoding="utf-8")
-    import os
-
-    os.utime(t, (1_000_000, 1_000_000))
-    assert ccc.transcript_idle_seconds(t, now=1_000_000 + 4_200) == 4_200
-    assert ccc.transcript_idle_seconds("", now=1_000_000) == 0
-    assert ccc.transcript_idle_seconds(tmp_path / "nope.jsonl", now=1_000_000) == 0
-
-
 def test_newest_transcript_picks_latest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """newest_transcript returns the most-recently-written *.jsonl for a project."""
     import os

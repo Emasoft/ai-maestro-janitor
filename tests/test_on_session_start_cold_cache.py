@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import subprocess
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,15 +65,13 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     spawned: list[list[str]] = []
 
-    def _fake_popen(argv, *_a, **_k):  # noqa: ANN001, ANN002, ANN003
-        spawned.append(list(argv))
+    def _fake_run(cmd, **_kw):  # noqa: ANN001, ANN003
+        spawned.append(list(cmd))
+        return SimpleNamespace(returncode=0, stdout="COMPACT_FIRED\n", stderr="")
 
-        class _P:  # minimal stand-in; the helper never inspects it
-            pid = 4242
-
-        return _P()
-
-    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    # The helper runs compact_trigger SYNCHRONOUSLY (via state.run_subprocess) so it can
+    # read COMPACT_FIRED vs NO_ITERM and commit the cooldown only on a real fire.
+    monkeypatch.setattr(state, "run_subprocess", _fake_run)
 
     hook = _load_hook()
     return hook, state, ccc, spawned, str(_ROOT)
@@ -157,6 +156,28 @@ def test_no_fire_when_in_cooldown(harness, monkeypatch: pytest.MonkeyPatch) -> N
     ccc.mark_fired(state.state_dir(), now=int(time.time()))  # fresh stamp → in cooldown
     assert hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/s.jsonl") is False
     assert spawned == []
+
+
+def test_no_iterm_does_not_burn_the_cooldown(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """REGRESSION (code-review): when the session can't self-compact (headless / NO_ITERM),
+    the helper must report NOT-fired and must NOT stamp the cooldown. The old shape stamped
+    it before a detached fire-and-forget, so a headless session burned the 600s window with
+    no compaction — and that also suppressed the heartbeat trigger. Both trigger points must
+    agree on what 'fired' means."""
+    hook, state, ccc, spawned, plugin_root = harness
+    _set_ctx(monkeypatch, ccc, 600_000)
+    monkeypatch.setattr(
+        state,
+        "run_subprocess",
+        lambda cmd, **_kw: SimpleNamespace(returncode=0, stdout="NO_ITERM\n", stderr=""),
+    )
+
+    fired = hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/s.jsonl")
+
+    assert fired is False, "a session with no automatable pane did not compact"
+    assert ccc.in_cooldown(state.state_dir(), now=int(time.time())) is False, (
+        "cooldown must NOT be stamped when no compaction actually fired"
+    )
 
 
 def test_no_fire_when_compact_trigger_missing(harness, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

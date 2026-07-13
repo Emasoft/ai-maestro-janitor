@@ -97,19 +97,6 @@ def context_tokens_for(transcript_path: str | os.PathLike[str] | None) -> int | 
         return None
 
 
-def transcript_idle_seconds(transcript_path: str | os.PathLike[str] | None, *, now: int) -> int:
-    """Seconds since the transcript was last written (== last API activity — it is appended every
-    turn). 0 when the path is missing/unstattable (treated as 'just active' → the idle gate won't
-    fire, which is the safe default)."""
-    if not transcript_path:
-        return 0
-    try:
-        mtime = int(Path(transcript_path).stat().st_mtime)
-    except OSError:
-        return 0
-    return max(0, now - mtime)
-
-
 def newest_transcript(project_dir: str | os.PathLike[str] | None) -> Path | None:
     """The newest `*.jsonl` transcript for a project, or None. For the dispatch path, which gets no
     hook payload: transcripts live at `~/.claude/projects/<slug>/<session>.jsonl` (slug via the

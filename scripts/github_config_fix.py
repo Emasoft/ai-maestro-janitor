@@ -45,6 +45,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import branch_protection_lib as bpl  # noqa: E402
 import github_config_audit as gca  # noqa: E402
 
+# The finding codes this script can actually remedy by changing repo CONFIG (rulesets).
+# NO_CI is deliberately NOT one of them: no ruleset change adds a CI workflow — that needs
+# /janitor-github-workflow-create in the repo itself. Without this gate a repo whose ONLY
+# finding is NO_CI still got the full 3-ruleset baseline PUT on --apply: a Tier-2 remote
+# mutation for a gap this script cannot fix (and a plan line that promised otherwise).
+_CONFIG_FIXABLE = frozenset(
+    {"UNPROTECTED", "LINEAR_HISTORY", "NO_PR_REVIEW", "NO_REQUIRED_CHECKS", "NO_TAG_PROTECT"}
+)
+
 
 def _current_repo_slug() -> str | None:
     """The slug of the repo whose checkout is the cwd (so we can pass cwd as project_root and
@@ -160,6 +169,16 @@ def main() -> int:
         findings = gca.classify_repo(facts)
         if not findings:
             print(f"\n{slug}: already compliant — nothing to fix.")
+            continue
+        codes = {f.code for f in findings}
+        if not (codes & _CONFIG_FIXABLE):
+            # Only non-config findings (today: NO_CI). Touching the rulesets would change
+            # nothing about them, so do NOT mutate the repo — just route it.
+            print(
+                f"\n{slug}: {len(findings)} finding(s): " + ", ".join(sorted(codes))
+                + " — SKIP: no ruleset change can fix this. Run /janitor-github-workflow-create"
+                " in that repo to add CI."
+            )
             continue
         acted += 1
         print(f"\n{slug}: {len(findings)} finding(s): " + ", ".join(f.code for f in findings))

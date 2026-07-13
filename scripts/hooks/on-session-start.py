@@ -160,25 +160,32 @@ def _maybe_cold_compact_on_session_start(
         compact_py = Path(plugin_root) / "scripts" / "compact_trigger.py"
         if not compact_py.is_file():
             return False
-        # Stamp the cooldown BEFORE firing so a racing heartbeat can't also fire;
-        # then fire the detached SOFT /compact with a self-correcting resume
-        # directive (post-compact-resume + the HI0BGQGJ push auto-resume/re-arm).
-        cold_cache_compact.mark_fired(state.state_dir(), now=now)
         directive = (
             "cold-cache resume: the prompt cache was cold and the context was large on "
             "session start — after this compaction, re-arm the heartbeat if needed "
             "(/janitor-arm) then continue your prior work (read the newest in-flight "
             "TRDD's STATE block first)."
         )
-        import subprocess  # noqa: E402  -- stdlib
-
-        subprocess.Popen(  # noqa: S603 -- fixed argv, no shell
+        # Run compact_trigger SYNCHRONOUSLY so we learn COMPACT_FIRED vs NO_ITERM — the
+        # actual keystroke is detached INSIDE it, so this returns in well under a second,
+        # and it only runs on the rare large-cold-context path. This mirrors the dispatch
+        # rate-limit branch: the cooldown is committed ONLY on a real fire. Stamping it
+        # before a detached fire-and-forget (the previous shape) burned the 600s window on
+        # a headless/NO_ITERM session where NO compaction ever happened, which also
+        # suppressed the heartbeat path — the two trigger points must agree on "fired".
+        proc = state.run_subprocess(
             [sys.executable, str(compact_py), "--directive", directive],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            timeout=20,
+            capture=True,
+            detector_name="session-start",
         )
+        if not (proc and proc.returncode == 0 and "COMPACT_FIRED" in (proc.stdout or "")):
+            state.log_line(
+                "session-start",
+                "cold-cache compact NOT fired (no automatable pane / trigger failed)",
+            )
+            return False
+        cold_cache_compact.mark_fired(state.state_dir(), now=now)
         state.log_line(
             "session-start",
             f"cold-cache compact fired (source={source}, "

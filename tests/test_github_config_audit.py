@@ -71,6 +71,41 @@ def test_unprotected_falsified_by_indeterminate_classic() -> None:
     assert "UNPROTECTED" not in _codes(facts)
 
 
+def test_classic_only_protection_claims_no_ruleset_derived_gap() -> None:
+    """REGRESSION (code-review): a repo protected ONLY by CLASSIC branch protection (no
+    rulesets at all) must NOT be flagged NO_PR_REVIEW / NO_REQUIRED_CHECKS.
+
+    Those two are inferred from the RULE TYPES of the active branch RULESETS. A
+    classic-protected repo keeps its `required_pull_request_reviews` /
+    `required_status_checks` in the classic-protection body, which this audit does not
+    read — so an empty rule-type set proves NOTHING about it. The old gate
+    (`has_branch_protection`, which classic satisfies) claimed both gaps anyway, breaking
+    the module's never-nag-on-unverifiable rule and making /janitor-github-config-fix
+    mutate a compliant repo. NO_TAG_PROTECT is still fair game (tag rulesets WERE read).
+    """
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[], classic_protected=True, has_workflows=True,
+    )
+    codes = _codes(facts)
+    assert "NO_PR_REVIEW" not in codes, "cannot claim a gap in rules we never read"
+    assert "NO_REQUIRED_CHECKS" not in codes, "cannot claim a gap in rules we never read"
+    assert "UNPROTECTED" not in codes, "classic protection IS protection"
+
+
+def test_ruleset_protected_repo_still_reports_review_and_check_gaps() -> None:
+    """The fix must not go too far: a repo protected BY RULESETS whose rules genuinely lack
+    pull_request / required_status_checks must STILL report both gaps (we can read those)."""
+    facts = RepoFacts(
+        slug="o/r", admin=True, default_branch="main",
+        rulesets=[_branch_rs("deletion", "non_fast_forward"), _tag_rs()],
+        classic_protected=None, has_workflows=True,
+    )
+    codes = _codes(facts)
+    assert "NO_PR_REVIEW" in codes
+    assert "NO_REQUIRED_CHECKS" in codes
+
+
 def test_linear_history_fires() -> None:
     """A ruleset carrying required_linear_history → LINEAR_HISTORY, even with full protection."""
     facts = RepoFacts(

@@ -163,10 +163,18 @@ def classify_repo(facts: RepoFacts) -> list[Finding]:
     if "required_linear_history" in all_branch_rule_types:
         findings.append(Finding(facts.slug, "LINEAR_HISTORY", FINDING_BLURB["LINEAR_HISTORY"]))
 
-    # The review / checks / tag gaps are only meaningful for a repo that HAS some branch
-    # protection — an UNPROTECTED repo already subsumes "no PR review" etc., and flagging
-    # all of them on a bare repo would just be noise on top of the headline finding.
-    if has_branch_protection:
+    # The review / checks gaps are inferred from the RULE TYPES of the active branch
+    # RULESETS, so they may only be claimed when protection is actually EXPRESSED as
+    # rulesets (`branch_rs` non-empty). A repo protected ONLY by CLASSIC branch protection
+    # has an empty rule-type set through no fault of its own — its `required_pull_request_
+    # reviews` / `required_status_checks` live in the classic protection body, which this
+    # audit does not read. Gating these on `has_branch_protection` (which classic
+    # satisfies) therefore claimed a gap we cannot see, false-flagging a compliant
+    # classic-protected repo — and /janitor-github-config-fix would then mutate it. That
+    # breaks this module's own never-nag-on-unverifiable rule, so the gate is `branch_rs`:
+    # we only reason about rules we can actually READ. (An UNPROTECTED repo has no
+    # rulesets either, so it is silent here too — the headline finding subsumes it.)
+    if branch_rs:
         if "pull_request" not in all_branch_rule_types:
             findings.append(Finding(facts.slug, "NO_PR_REVIEW", FINDING_BLURB["NO_PR_REVIEW"]))
         # NO_REQUIRED_CHECKS only when CI actually exists (has_workflows True); if there is
@@ -175,8 +183,11 @@ def classify_repo(facts: RepoFacts) -> list[Finding]:
             findings.append(
                 Finding(facts.slug, "NO_REQUIRED_CHECKS", FINDING_BLURB["NO_REQUIRED_CHECKS"])
             )
-        if not tag_rs:
-            findings.append(Finding(facts.slug, "NO_TAG_PROTECT", FINDING_BLURB["NO_TAG_PROTECT"]))
+    # Tag protection is orthogonal to the BRANCH mechanism (it is its own ruleset target),
+    # and `rulesets is not None` means we definitively read the tag rulesets too — so this
+    # one stays gated on "the repo is protected at all", classic included.
+    if has_branch_protection and not tag_rs:
+        findings.append(Finding(facts.slug, "NO_TAG_PROTECT", FINDING_BLURB["NO_TAG_PROTECT"]))
 
     # 3) NO_CI — independent of branch protection: a repo with no workflows runs no CI.
     #    Only when we DEFINITELY saw no workflows (has_workflows is False, not None).
