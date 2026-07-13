@@ -323,7 +323,11 @@ def test_sync_is_additive_and_never_deletes():
 
 
 def test_sync_carries_user_mem_and_index_subdirs():
-    """The private user-mem store and the .memgrep index mirror too (whole corpus)."""
+    """The private user-mem store mirrors (it is real, irreplaceable knowledge). The .memgrep
+    index does NOT (F10, audit 2026-07-13): it is derived state, regeneratable from the notes,
+    and copying a live SQLite file byte-wise can only ever back up a TORN one — which the
+    restore path would then write into the live corpus. The mirror carries knowledge, not
+    caches."""
     primary = msc.resolve_user_dir()
     _seed(primary, "note.md", "x\n")
     _seed(primary / "user-mem", "0001.md", "private\n")
@@ -331,7 +335,23 @@ def test_sync_carries_user_mem_and_index_subdirs():
     assert msc.sync_user_memory_mirror() == "mirrored"
     mirror = msc.resolve_user_mirror_dir()
     assert (mirror / "user-mem" / "0001.md").read_text(encoding="utf-8") == "private\n"
-    assert (mirror / ".memgrep" / "index.db").exists()
+    assert not (mirror / ".memgrep").exists()
+
+
+def test_a_stray_index_in_an_empty_primary_does_not_block_the_restore():
+    """The restore-blocking hazard `_dir_has_memory` used to carry (found while fixing F10).
+
+    That predicate decides the sync DIRECTION, and it counted a bare `.memgrep/` as "primary
+    has memory". So after a plain uninstall wiped the data dir, anything that recreated an
+    index dir before the sync ran would send it down the primary→mirror branch — and the
+    user's ONLY surviving copy of their memory would never be restored. An index is not a
+    memory."""
+    primary = msc.resolve_user_dir()
+    _seed(primary / ".memgrep", "index.db", "SQLITE\n")     # derived state, no notes
+    _seed(msc.resolve_user_mirror_dir(), "note.md", "the only surviving copy\n")
+
+    assert msc.sync_user_memory_mirror() == "restored"
+    assert (primary / "note.md").read_text(encoding="utf-8") == "the only surviving copy\n"
 
 
 def test_sync_is_idempotent():
@@ -340,3 +360,44 @@ def test_sync_is_idempotent():
     assert msc.sync_user_memory_mirror() == "mirrored"
     assert msc.sync_user_memory_mirror() == "mirrored"
     assert (msc.resolve_user_mirror_dir() / "note.md").read_text(encoding="utf-8") == "stable\n"
+
+
+def test_sync_never_mirrors_the_txn_staging_tree_or_the_memgrep_index():
+    """F10: the USER scope ROOT also hosts memory_txn's `.maint-staging/` and memgrep's
+    `.memgrep/`. A blind copytree backed both up — so a SessionStart landing mid-transaction
+    permanently archived that txn's staged page COPIES and its journal, and the restore path
+    wrote them back into the live corpus. memgrep has no staging exclusion (only
+    iter_note_files does), so the agent would then RECALL superseded, half-edited pages as
+    real memories — and a restored `committing` journal is a live roll-forward instruction."""
+    primary = msc.resolve_user_dir()
+    _seed(primary, "note.md", "a real memory\n")
+    staging = primary / ".maint-staging" / "abc123"
+    staging.mkdir(parents=True)
+    (staging / "note.md").write_text("HALF-EDITED staged copy\n", encoding="utf-8")
+    (primary / ".maint-staging" / "abc123.json").write_text('{"phase":"committing"}\n',
+                                                            encoding="utf-8")
+    (primary / ".memgrep").mkdir()
+    (primary / ".memgrep" / "index.db").write_bytes(b"SQLite format 3\x00torn")
+
+    assert msc.sync_user_memory_mirror() == "mirrored"
+
+    mirror = msc.resolve_user_mirror_dir()
+    assert (mirror / "note.md").read_text(encoding="utf-8") == "a real memory\n"
+    assert not (mirror / ".maint-staging").exists(), "staged page copies + journal backed up"
+    assert not (mirror / ".memgrep").exists(), "the SQLite index was copied (possibly torn)"
+
+
+def test_restore_never_reinjects_a_staging_tree_into_the_live_corpus():
+    """The other direction of F10 — the one that actually corrupts recall: a mirror that
+    already carries a stale staging tree must not write it back into the live USER scope."""
+    mirror = msc.resolve_user_mirror_dir()
+    _seed(mirror, "note.md", "survived the uninstall\n")
+    stale = mirror / ".maint-staging" / "old"
+    stale.mkdir(parents=True)
+    (stale / "note.md").write_text("SUPERSEDED half-edited copy\n", encoding="utf-8")
+
+    assert msc.sync_user_memory_mirror() == "restored"
+
+    primary = msc.resolve_user_dir()
+    assert (primary / "note.md").read_text(encoding="utf-8") == "survived the uninstall\n"
+    assert not (primary / ".maint-staging").exists(), "a stale txn was restored into the corpus"

@@ -232,16 +232,36 @@ def resolve_user_mirror_dir() -> Path:
 
 
 def _dir_has_memory(d: Path) -> bool:
-    """True iff ``d`` exists and holds at least one real corpus entry (a ``*.md`` note,
-    the ``user-mem`` private store, the ``.memgrep`` index, or the curated ``wiki``). An
-    empty or missing dir → False."""
+    """True iff ``d`` exists and holds at least one real corpus entry — KNOWLEDGE: a ``*.md``
+    note, the ``user-mem`` private store, or the curated ``wiki``. An empty or missing dir →
+    False.
+
+    The ``.memgrep`` index deliberately does NOT count (F10, audit 2026-07-13). It is derived
+    state, regeneratable from the notes at any time — but this predicate is what decides the
+    sync DIRECTION, so counting it was a restore-blocking hazard: after a plain uninstall
+    wiped the data dir, anything that recreated a bare ``.memgrep/`` in the primary would make
+    this return True, the sync would take the primary→mirror branch, and the user's ONLY
+    surviving copy of their memory would never be restored. An index is not a memory."""
     if not d.is_dir():
         return False
     for child in d.iterdir():
         name = child.name
-        if name.endswith(".md") or name in ("user-mem", ".memgrep", WIKI_SUBDIR):
+        if name.endswith(".md") or name in ("user-mem", WIKI_SUBDIR):
             return True
     return False
+
+
+# F10 (audit 2026-07-13): the mirror must carry NOTES, and nothing else. The USER scope
+# ROOT is also where `memory_txn` puts `.maint-staging/` and memgrep puts `.memgrep/`, and
+# a blind copytree took both:
+#   - `.maint-staging/` holds a live txn's staged page COPIES and its journal. memgrep has
+#     no staging exclusion (only `iter_note_files` does), so restoring those copies makes
+#     the agent RECALL superseded, half-edited pages as if they were memories — and a
+#     restored `committing` journal is a live roll-forward instruction that `resume_pending`
+#     would execute against a corpus months out of step with the hashes it recorded.
+#   - `.memgrep/index.db` is a SQLite file that may be mid-write, so it lands torn — and it
+#     is regeneratable anyway (`memgrep reindex`), so backing it up buys nothing.
+_MIRROR_IGNORE = shutil.ignore_patterns(".maint-staging", ".memgrep")
 
 
 def sync_user_memory_mirror() -> str | None:
@@ -260,17 +280,20 @@ def sync_user_memory_mirror() -> str | None:
     toward keeping memory. Best-effort — any OSError is swallowed so a mirror hiccup can
     never break session start. Cheap: the USER corpus is small markdown + a regeneratable
     index.
+
+    It mirrors NOTES only (``_MIRROR_IGNORE``) — never the transaction staging tree, never
+    the memgrep index. See that constant for why copying them is actively harmful.
     """
     primary = resolve_user_dir()
     mirror = resolve_user_mirror_dir()
     try:
         if _dir_has_memory(primary):
             mirror.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(primary, mirror, dirs_exist_ok=True)
+            shutil.copytree(primary, mirror, dirs_exist_ok=True, ignore=_MIRROR_IGNORE)
             return "mirrored"
         if _dir_has_memory(mirror):
             primary.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(mirror, primary, dirs_exist_ok=True)
+            shutil.copytree(mirror, primary, dirs_exist_ok=True, ignore=_MIRROR_IGNORE)
             return "restored"
     except OSError:
         return None  # a backup hiccup must never break session start
