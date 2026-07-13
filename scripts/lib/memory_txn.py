@@ -30,7 +30,7 @@ import os
 import shutil
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
@@ -191,6 +191,9 @@ class MemoryTxn:
     deletes: list           # rel_paths to unlink from the live tree on commit
     phase: str
     started_at: int = 0
+    # rel_path -> sha256 of the STAGED content (F5). This is what makes "did this write
+    # already apply?" a fail-CLOSED question — see _write_already_applied.
+    write_hashes: dict = field(default_factory=dict)
 
     # ---- construction / persistence ------------------------------------- #
 
@@ -236,6 +239,7 @@ class MemoryTxn:
             "txn_id": self.txn_id, "op": self.op, "scope_root": str(self.scope_root),
             "phase": self.phase, "started_at": self.started_at,
             "sources": self.sources, "writes": self.writes, "deletes": self.deletes,
+            "write_hashes": self.write_hashes,
         }
         state.atomic_write(self.journal_path, json.dumps(data, indent=2, sort_keys=True))
 
@@ -255,6 +259,7 @@ class MemoryTxn:
             journal_path=Path(journal_path), sources=data["sources"],
             writes=data["writes"], deletes=data["deletes"], phase=data["phase"],
             started_at=data.get("started_at", 0),
+            write_hashes=data.get("write_hashes") or {},
         )
 
     # ---- staging -------------------------------------------------------- #
@@ -266,6 +271,10 @@ class MemoryTxn:
         dst = self.staging_dir / rel_path
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(content, encoding="utf-8")
+        # F5: remember WHAT we staged, not just that we staged it. `os.replace` moving the
+        # staged file is only a sound completion oracle if nothing else can remove staged
+        # files — and several things can (see _write_already_applied).
+        self.write_hashes[rel_path] = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if rel_path not in self.writes:
             self.writes.append(rel_path)
         if rel_path in self.deletes:
@@ -286,6 +295,31 @@ class MemoryTxn:
     def staged_text(self, rel_path: str) -> str:
         """Read a staged page's current bytes (the copy the agent edits)."""
         return (self.staging_dir / rel_path).read_text(encoding="utf-8")
+
+    def _write_already_applied(self, rel: str) -> bool:
+        """Did this write ALREADY land? A vanished staged file is NOT the answer (F5).
+
+        `_apply` used to infer "this write already applied" from the staged file being
+        gone — sound ONLY if `os.replace` is the sole thing that can remove a staged file.
+        It is not. `resume_pending`'s stale-staging discard rmtree's it, its orphan-staging
+        sweep rmtree's it, and `.maint-staging/` lives INSIDE the memory scope root — which
+        for PROJECT scope is inside a git repo, so a `git clean -fdx`, a disk cleaner, or a
+        user tidying "that weird dot-dir in my memory folder" all take it too.
+
+        When a staged write vanishes for any of those reasons, reading it as "applied" makes
+        `_apply` skip the write and then RUN THE DELETES — sources retired, merged page never
+        written. Exactly F1's terminal outcome, reached through a different door.
+
+        So ask the fail-CLOSED question instead: is the live page the content we staged? Only
+        then did our write land. Anything else is a destroyed staging tree, and the caller
+        must abandon rather than delete.
+
+        A journal written before this field existed has no hash, so it answers False and the
+        txn is refused rather than half-applied — non-destructive, and such journals live at
+        most `_STALE_SECONDS_DEFAULT` anyway."""
+        want = self.write_hashes.get(rel)
+        live = self.scope_root / rel
+        return bool(want) and live.exists() and _sha256_file(live) == want
 
     # ---- commit / abort / apply ----------------------------------------- #
 
@@ -378,8 +412,18 @@ class MemoryTxn:
             live = self.scope_root / rel
             want = self.sources.get(rel)
             if not staged.exists():
-                # staged gone ⇒ a prior (crashed) commit already applied this write
-                # (os.replace is atomic), so there is nothing left to do for it.
+                # F5: staged gone does NOT mean "applied". os.replace is atomic, so a
+                # completed write does leave no staged file — but so does a racing
+                # stale-discard, an orphan sweep, or a `git clean` on the scope root.
+                # Verify the live page IS what we staged; if it is not, our staging tree was
+                # destroyed under us, and skipping the write while still running the deletes
+                # would retire the sources with nothing written (F1's outcome, F5's door).
+                if self._write_already_applied(rel):
+                    continue
+                conflicts.append(
+                    f"write {rel}: staged content is gone and the live page does not carry "
+                    "it — the staging tree was destroyed mid-transaction"
+                )
                 continue
             if want is not None and live.exists() and _sha256_file(live) != want:
                 conflicts.append(f"write {rel}: live page changed since the journal snapshot")
@@ -504,7 +548,29 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
                 except OSError:
                     fresh_ts = txn.started_at
                 if now - max(fresh_ts, txn.started_at) > stale_seconds:
-                    txn._cleanup()
+                    # F5(b): this branch rmtree's another pass's staging tree, so it MUST
+                    # hold the scope lock — the `committing` branch above already does. The
+                    # CLI's contract is cross-process (begin in one turn, agent work, commit
+                    # in a later turn) and `resume` runs at the start of every editorial
+                    # pass, so two passes on the same scope (the USER scope is dispatched
+                    # against by every project's heartbeat) overlap BY DESIGN. Without the
+                    # lock, this could rmtree the staging dir out from under an in-flight
+                    # `_apply`.
+                    with commit_lock(txn.scope_root) as got:
+                        if not got:
+                            continue  # a live commit owns this scope right now — hands off
+                        # ...and the lock alone is not enough, because `stage_write` does
+                        # NOT hold it: the owner may have bumped the journal (or flipped it
+                        # to `committing`) between our stat and our acquire. RE-READ under
+                        # the lock — that is what actually closes the TOCTOU.
+                        try:
+                            fresh = MemoryTxn._load(jp)
+                            still_stale = int(jp.stat().st_mtime) <= fresh_ts
+                        except (json.JSONDecodeError, KeyError, OSError, MemoryTxnError):
+                            continue
+                        if fresh.phase != _PHASE_STAGING or not still_stale:
+                            continue  # it woke up while we were acquiring — it is ALIVE
+                        fresh._cleanup()
                     acted.append(f"discarded stale {txn.txn_id}")
         except MemoryTxnConflict as exc:
             # F1: NOT a failure — a deliberate, safe refusal. `_apply` proved a source page

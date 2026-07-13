@@ -10,7 +10,10 @@ stale snapshot, and a held scope lock makes a second pass skip.
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -549,3 +552,88 @@ def test_roll_forward_refuses_to_clobber_a_page_that_appeared_after_the_crash(tm
     assert any("CONFLICT" in a for a in acted), acted
     assert (scope / "new.md").read_text(encoding="utf-8") == users_page  # NOT destroyed
     assert txn.staging_dir.exists()                                      # still recoverable
+
+
+# --------------------------------------------------------------------------- #
+# F5 (audit 2026-07-13) — a destroyed staging tree must never read as "applied"
+# --------------------------------------------------------------------------- #
+
+def test_roll_forward_refuses_when_the_staging_tree_was_destroyed(tmp_path):
+    """`_apply` used to infer "this write already applied" from the staged file being GONE.
+    That is sound only if os.replace is the sole thing that can remove a staged file — and it
+    is not: resume's own stale-discard and orphan sweep rmtree it, and `.maint-staging/` sits
+    INSIDE the memory scope root, which for PROJECT scope is inside a git repo (a `git clean
+    -fdx`, a disk cleaner, or a user tidying "that weird dot-dir" all take it).
+
+    When the staged write vanishes that way, treating it as applied made `_apply` skip the
+    write and then RUN THE DELETES — sources retired, merged page never written. F1's
+    terminal outcome through a different door. It must ABANDON instead."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "merge", ["a.md", "b.md"])
+    txn.stage_write("c.md", "---\nname: c\n---\n\nFact A. Fact B.\n")
+    txn.stage_delete("a.md")
+    txn.stage_delete("b.md")
+    txn.phase = "committing"          # crash window: guard passed, swap not done
+    txn._persist()
+
+    # A `git clean` / racing discard / orphan sweep takes the staging tree.
+    shutil.rmtree(txn.staging_dir)
+
+    acted = memory_txn.resume_pending(scope)
+    assert any("CONFLICT" in a for a in acted), acted
+    assert (scope / "a.md").exists() and (scope / "b.md").exists()   # sources NOT retired
+    assert not (scope / "c.md").exists()
+
+
+def test_roll_forward_still_completes_a_genuinely_applied_write(tmp_path):
+    """The oracle must stay useful: a write that REALLY landed (os.replace moved the staged
+    file, and the live page carries exactly that content) is recognised as applied, and the
+    roll-forward finishes the remaining deletes."""
+    scope = _scope(tmp_path)
+    merged = "---\nname: c\n---\n\nFact A. Fact B.\n"
+    txn = MemoryTxn.begin(scope, "merge", ["a.md", "b.md"])
+    txn.stage_write("c.md", merged)
+    txn.stage_delete("a.md")
+    txn.stage_delete("b.md")
+    txn.phase = "committing"
+    txn._persist()
+
+    # Simulate the crash landing AFTER the write's os.replace but BEFORE the deletes.
+    os.replace(txn.staging_dir / "c.md", scope / "c.md")
+
+    acted = memory_txn.resume_pending(scope)
+    assert any("rolled-forward" in a for a in acted), acted
+    assert (scope / "c.md").read_text(encoding="utf-8") == merged
+    assert not (scope / "a.md").exists() and not (scope / "b.md").exists()
+
+
+def test_stale_discard_does_not_rmtree_a_txn_that_woke_up(tmp_path):
+    """F5(b): the stale-staging discard rmtree's another pass's staging tree, so it must hold
+    the scope lock AND re-read the journal under it. `stage_write` does not take the lock, so
+    the owner can bump the journal between our stat and our acquire — discarding then would
+    destroy an in-flight transaction's only copy of the merged page."""
+    scope = _scope(tmp_path)
+    txn = MemoryTxn.begin(scope, "merge", ["a.md", "b.md"])
+    txn.stage_write("c.md", "---\nname: c\n---\n\nthe merged page\n")
+
+    # Backdate the txn so the discard branch is entered at all (started_at floors the
+    # staleness check, so it must be backdated too — then the journal file's mtime, since
+    # _persist rewrites it).
+    old = int(time.time()) - 100_000
+    txn.started_at = old
+    txn._persist()
+    os.utime(txn.journal_path, (old, old))
+
+    # ...but the owner WAKES UP and stages more work in the window before we acquire.
+    def _wake_up(*_a, **_k):
+        txn.stage_write("c.md", "---\nname: c\n---\n\nthe merged page, revised\n")
+        return commit_lock_real(scope)
+
+    commit_lock_real = memory_txn.commit_lock
+    import unittest.mock as _mock
+    with _mock.patch.object(memory_txn, "commit_lock", _wake_up):
+        acted = memory_txn.resume_pending(scope, stale_seconds=1)
+
+    assert not any("discarded" in a for a in acted), acted
+    assert txn.staging_dir.exists()                                  # NOT destroyed
+    assert "revised" in (txn.staging_dir / "c.md").read_text(encoding="utf-8")
