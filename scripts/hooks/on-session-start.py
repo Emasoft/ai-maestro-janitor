@@ -114,6 +114,82 @@ def _cron_liveness_nudge(state, session_id: str) -> None:  # noqa: ANN001 - loca
         state.log_line("session-start", f"cron-liveness nudge skipped: {exc}")
 
 
+def _maybe_cold_compact_on_session_start(
+    state,  # noqa: ANN001 -- local module type
+    plugin_root: str,
+    source: str,
+    transcript_path: str,
+) -> bool:
+    """Cold-cache auto-compact at SessionStart (TRDD-EUWIHP0G). Returns True iff it
+    fired the detached /compact. NEVER raises — a fault here must not break session
+    start (the hook's standing contract).
+
+    After a >1h stop (a rate limit; the user exits and relaunches later; a
+    logout/login) the 1h prompt-cache TTL has expired, so the FIRST resumed turn
+    re-writes the WHOLE context as a cache-creation (~600k avg, ~1.25×), burning the
+    5h window. When a RESUMED session (a fresh process) carries a context at/above
+    the threshold, self-fire /compact NOW so it shrinks to ~50k — the rest of the
+    window (and every FUTURE cold resume) then runs cheap. It canNOT avoid the
+    immediate cold write (any first turn pays that); the win is ongoing + future.
+
+    Gated to `source in {startup, resume}`: a `compact`/`clear` keeps the SAME
+    (already-small) post-compact context in the SAME process, and a truly fresh
+    `startup` has a tiny context — the size guard makes both a no-op, and the source
+    gate is the belt to that suspenders (it also blocks a re-fire loop, since our own
+    /compact re-enters this hook as `source=compact`). SOFT compact: the resumed REPL
+    is idle, so the enqueued /compact never interrupts work. A cooldown stamp (shared
+    with the heartbeat rate-limit path) blocks a double-fire before the compact lands.
+    """
+    if source not in ("startup", "resume"):
+        return False
+    try:
+        import time  # noqa: E402  -- stdlib
+
+        from lib import cold_cache_compact  # noqa: E402  -- local package, not PyPI
+
+        now = int(time.time())
+        if not cold_cache_compact.enabled() or cold_cache_compact.in_cooldown(
+            state.state_dir(), now=now
+        ):
+            return False
+        ctx = cold_cache_compact.context_tokens_for(transcript_path)
+        if not cold_cache_compact.should_compact_on_resume(
+            ctx, min_context_tokens=cold_cache_compact.min_context_tokens()
+        ):
+            return False
+        compact_py = Path(plugin_root) / "scripts" / "compact_trigger.py"
+        if not compact_py.is_file():
+            return False
+        # Stamp the cooldown BEFORE firing so a racing heartbeat can't also fire;
+        # then fire the detached SOFT /compact with a self-correcting resume
+        # directive (post-compact-resume + the HI0BGQGJ push auto-resume/re-arm).
+        cold_cache_compact.mark_fired(state.state_dir(), now=now)
+        directive = (
+            "cold-cache resume: the prompt cache was cold and the context was large on "
+            "session start — after this compaction, re-arm the heartbeat if needed "
+            "(/janitor-arm) then continue your prior work (read the newest in-flight "
+            "TRDD's STATE block first)."
+        )
+        import subprocess  # noqa: E402  -- stdlib
+
+        subprocess.Popen(  # noqa: S603 -- fixed argv, no shell
+            [sys.executable, str(compact_py), "--directive", directive],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        state.log_line(
+            "session-start",
+            f"cold-cache compact fired (source={source}, "
+            f"context={ctx} >= {cold_cache_compact.min_context_tokens()})",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        state.log_line("session-start", f"cold-cache compact skipped: {exc}")
+        return False
+
+
 def main() -> int:
     # All side-effecting code lives inside main() so the hook script is
     # safely importable (no module-scope sys.exit, no module-scope
@@ -169,6 +245,7 @@ def main() -> int:
 
     source = "startup"
     session_id = ""
+    transcript_path = ""
     try:
         if not sys.stdin.isatty():
             raw = sys.stdin.read()
@@ -179,8 +256,18 @@ def main() -> int:
                 # the session id so a clear/compact restart of the SAME session
                 # doesn't repeat it.
                 session_id = str(payload.get("session_id", "") or "")
+                # Cold-cache auto-compact (TRDD-EUWIHP0G) reads the resumed
+                # context size from the transcript SessionStart provides.
+                transcript_path = str(payload.get("transcript_path", "") or "")
     except Exception:  # noqa: BLE001 -- best-effort; never break session start
         source = "startup"
+
+    # Cold-cache auto-compact (TRDD-EUWIHP0G) — the "before any expensive turn"
+    # path. When a RESUMED session (a fresh process) carries a large context whose
+    # 1h prompt cache has gone cold, self-fire /compact NOW so the inevitable ~600k
+    # cache-creation re-write shrinks to ~50k for the rest of the window. See the
+    # helper's docstring for the full rationale + gating. Best-effort by contract.
+    _maybe_cold_compact_on_session_start(state, plugin_root, source, transcript_path)
     if source in ("startup", "resume"):
         state.atomic_write(state.state_dir() / "reload-acked.ts", str(gs.reload_generation()))
         # Same seed for the STANDALONE-skills reload generation (TRDD-LQU7OXXV): a

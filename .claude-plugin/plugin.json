@@ -759,6 +759,34 @@
       "default": 180,
       "sensitive": false
     },
+    "cold_cache_compact_enabled": {
+      "title": "Cold-Cache Auto-Compact on Resume Enabled",
+      "description": "ON by default (TRDD-EUWIHP0G). After a >1h stop (a rate limit; the user exits and relaunches later; a logout/login), the 1h prompt-cache TTL has expired, so the FIRST resumed turn re-writes the WHOLE context as a cache-creation (~600k tokens on average, billed ~1.25×), burning a large chunk of the 5h window. When true, the janitor self-fires /compact on resume whenever a LARGE context comes back cold — at SessionStart (source startup/resume, context >= cold_cache_compact_min_context_tokens) and on the heartbeat rate-limit-clear path (the gap outlived the cache TTL AND the context is large). It CANNOT avoid that immediate cold write (any first turn pays it), but it shrinks the context to ~50k so the REST of the window — and every FUTURE cold resume — runs cheap instead of dragging ~600k forward on every turn. The compaction is SOFT (the resumed REPL is idle, so nothing is interrupted) and the resume is preserved: post-compact-resume records the directive and continues the prior task after compaction. Fully fail-safe — a non-automatable terminal (plain Terminal.app / VS Code / CI) or any fault degrades to the normal resume with no regression. Set to false to opt OUT.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "cold_cache_compact_min_context_tokens": {
+      "title": "Cold-Cache Auto-Compact - Minimum Context (tokens)",
+      "description": "The resumed-context size (input + cache_read + cache_creation of the last assistant turn) at or above which the cold-cache auto-compact fires (default 270000). Below this the context is small enough that a cold re-write is cheap and compacting it saves nothing (and is lossy), so the trigger is a no-op — a fresh/empty session therefore never trips it. Raise it to compact only very large contexts; lower it to compact more eagerly. Only consulted when cold_cache_compact_enabled is true.",
+      "type": "number",
+      "default": 270000,
+      "sensitive": false
+    },
+    "cold_cache_compact_min_idle_seconds": {
+      "title": "Cold-Cache Auto-Compact - Minimum Idle (seconds)",
+      "description": "How long an IN-SESSION gap must last before the heartbeat rate-limit path treats the prompt cache as COLD and eligible for auto-compact (default 3600 — the 1h prompt-cache TTL). Below this the cache is still warm, so compacting would just waste a write; the branch stays silent and emits the normal resume cue. This gate applies ONLY to the heartbeat rate-limit path — the SessionStart path has no idle gate (a fresh process loading a large context is cold by construction). Only consulted when cold_cache_compact_enabled is true.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "cold_cache_compact_cooldown_seconds": {
+      "title": "Cold-Cache Auto-Compact - Cooldown (seconds)",
+      "description": "Seconds after a cold-cache compact fires during which another one is suppressed (default 600), shared by the SessionStart and heartbeat trigger points via a single stamp. This prevents a second, redundant /compact from being queued before the first one actually lands (compaction is not instantaneous). Large enough to cover the window between firing /compact and the compaction completing; a value below the real compaction latency risks a double-fire. Only consulted when cold_cache_compact_enabled is true.",
+      "type": "number",
+      "default": 600,
+      "sensitive": false
+    },
     "memory_autorecall": {
       "title": "Automatic Memory Recall on Prompt",
       "description": "ON by default (issue #45). The `on-prompt-submit-autorecall` UserPromptSubmit hook runs `memgrep recall` over ALL THREE memory scopes \u2014 LOCAL (~/.claude/projects/<slug>/memory/), PROJECT (<git-root>/.claude/project/memory/) and USER (the janitor's plugin-data memory dir) \u2014 on every ordinary user prompt, and injects the top notes into the agent context via additionalContext, so the agent is automatically reminded of relevant prior notes ('have we hit this before?') without calling recall by hand. Recall is AUTOMATIC because discipline-only recall demonstrably fails: a memory-aware agent still re-derived a framework it had itself authored, because it did not recall first. It searches ONLY agent-visible notes: the private user-mem store (.../memory/user-mem/) is structurally excluded (recall is handed explicit file paths, never the dir, and only walks directories), so a private user memory is never surfaced. Cron [janitor-\u2026] prompts, slash commands and sub-threshold prompts ('yes', 'do it') are skipped; a missing memgrep binary, an empty corpus, or any error is a silent no-op (never blocks or crashes the turn). Set to false to opt OUT. Part of the memory system (issues #16/#45); pairs with the markdown-memory-recall rule and the janitor-memory-recall/janitor-memory-write skills.",
