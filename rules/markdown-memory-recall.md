@@ -157,30 +157,46 @@ metadata:
 <body: the one fact; for feedback/project add **Why:** and **How to apply:** lines>
 
 ## Notes and lessons learned
-[^3]: [ocd:2026-06-09 lmd:2026-06-09] DO NOT read a constant off a guessed variable name,
-  BECAUSE `max_attempts` does not exist and the real cap is `max_retries` = 3, not 5.
-  DO read the constant from the source instead.
+[^3]: [keywords: retry cap constant guessed name, ocd: 2026-06-09, lmd: 2026-06-09] DO NOT
+  read a constant off a guessed variable name, BECAUSE `max_attempts` does not exist and the
+  real cap is `max_retries` = 3, not 5. DO read the constant from the source instead.
 ```
 
 `## Notes and lessons learned` is **MANDATORY on every page, even when empty** — it is the
 standing landing zone for a correction lesson.
 
-### THE LESSON FORM — mandatory, terse, one shape
+### THE LESSON FORM — mandatory metadata, then one terse shape
 
-A lesson is a GUARDRAIL, not a story. Write every `[^N]` in exactly this form:
+A lesson is a first-class ATOM OF MEMORY, exactly like a body atom — and a GUARDRAIL, not a
+story. Write every `[^N]` in exactly this form:
 
 ```
-[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
+
+**The metadata block is not decoration — it is the lesson's ADDRESS.** All three keys are
+REQUIRED:
+
+- **`keywords:` — the RECALL SURFACE, and the reason the lesson is reachable at all.** These
+  are the words a future session will SEARCH with (the symptom), which are usually NOT the
+  words the lesson's prose happens to use. `memgrep` indexes them (`notes.keywords`,
+  `notes_fts`) and `--only-notes` matches them, so a lesson without keywords is findable only
+  by accident of phrasing. **A memory that cannot be recalled is a memory that does not
+  exist.**
+- **`ocd:` / `lmd:` — REQUIRED dates.** They are the lesson's own, intrinsic to it: they
+  survive the librarian moving the lesson between pages, so they — not the file's mtime — are
+  its authoritative age, and they are what `--since` / `--until` read.
+
+Then the prose, in one shape:
 
 - **ONE lesson = ONE mistake.** Two mistakes = two footnotes. Never a paragraph that
   wanders across several.
 - **≤3 lines / ~40 words.** A long lesson is not read, and an unread guardrail guards
   nothing. Cut the chronology ("earlier this page said…", "we then discovered…") — the
   body already carries the current truth; the lesson carries only what not to repeat.
-- **All three parts are mandatory.** `DO NOT` is the searchable surface (the next session
-  is about to do exactly X). `BECAUSE` is the WHY — without it the lesson cannot stop the
-  repeat. `DO … instead` is the exit — a lesson that only forbids leaves the reader stuck.
+- **All three parts are mandatory.** `DO NOT` names the act about to be repeated. `BECAUSE`
+  is the WHY — without it the lesson cannot stop the repeat. `DO … instead` is the exit — a
+  lesson that only forbids leaves the reader stuck.
 - Prose, evidence, and reasoning that do not fit belong in the page BODY or a TRDD, never
   in the lesson.
 

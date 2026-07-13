@@ -63,7 +63,7 @@ references — defined in the page's bottom pool under section headings:
 The widget retries 3× then fails.[^1][^2]
 
 ## Lessons Learned
-[^1]: [ocd:<old> lmd:<today>] earlier this said 5×; the cap is 3 — <concise WHY it changed>.
+[^1]: [keywords: <the search terms>, ocd: <old>, lmd: <today>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 
 ## See also
 [^2]: [[backoff-policy]]
@@ -85,7 +85,15 @@ survives a future split); and when ≥2 atoms cite the same link, pool it ONCE a
 
 `keywords:` is the only REQUIRED prop — it is the atom's recall surface (the
 question words, NOT the answer's jargon); `ocd`/`lmd`/`type` are optional (an atom
-without them inherits the page's). Author an optional **`desc:`** too — a one-line
+without them inherits the page's).
+
+**A LESSON (`[^N]`) is an atom too, and its metadata block obeys the SAME grammar** —
+`[keywords: …, ocd: …, lmd: …]` — except that on a lesson **all three are REQUIRED**. A
+lesson cannot inherit dates from a page (the librarian moves lessons BETWEEN pages, so its
+dates must be intrinsic), and without `keywords:` it has no recall surface at all: memgrep
+matches `--only-notes` against `keywords + text` and indexes `notes.keywords`, so a
+keyword-less lesson is findable only by accident of phrasing. Full shape + the DO-NOT /
+BECAUSE / DO prose form: [wikimem-model.md](wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape). Author an optional **`desc:`** too — a one-line
 summary of the atom as a snake_case **slug** (`[a-z0-9_]+`, ≤64 chars, e.g.
 `widget_retries_3x_then_fails`): memgrep + the handoff display it `_`→space beside the
 atom id so a reader knows what the atom is without fetching its body. `desc` is

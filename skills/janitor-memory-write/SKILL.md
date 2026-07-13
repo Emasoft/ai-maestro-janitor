@@ -160,19 +160,28 @@ Edge sections: `## Applies to` on hub/aspect (radiating), `## Governed by` on
 component (receiving); `## See also` optional on any tier. Always include the
 standing `## Notes and lessons learned` section even if empty.
 
-**THE LESSON FORM — mandatory, terse, one shape.** A lesson is a GUARDRAIL, not a story.
-Every `[^N]` you write here (or later demote into here) takes exactly this form:
+**THE LESSON FORM — mandatory metadata, then one terse shape.** A lesson is a first-class
+ATOM OF MEMORY, exactly like a body atom — and a GUARDRAIL, not a story. Every `[^N]` you
+write here (or later demote into here) takes exactly this form:
 
 ```
-[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-ONE lesson = ONE mistake (two mistakes = two footnotes). **≤3 lines / ~40 words** — a long,
-wandering lesson is not read, and an unread guardrail guards nothing. All three parts are
-mandatory: `DO NOT` is the searchable surface (the next session is about to do exactly X),
-`BECAUSE` is the WHY (without it the lesson cannot stop the repeat), `DO … instead` is the
-exit (a lesson that only forbids leaves the reader stuck). Chronology ("earlier this page
-said…"), evidence, and reasoning go in the page BODY or a TRDD — never in the lesson.
+All three metadata keys are REQUIRED — the block is the lesson's ADDRESS, not decoration.
+**`keywords:` is its RECALL SURFACE** (the words a future session will SEARCH with — the
+symptom — which are usually NOT the words your prose uses; memgrep indexes them and
+`--only-notes` matches them, so a lesson without them is findable only by accident of
+phrasing, and a memory that cannot be recalled is a memory that does not exist).
+**`ocd:`/`lmd:` are REQUIRED dates**, intrinsic to the lesson (they survive the librarian
+moving it between pages, so they — not file mtime — are its authoritative age).
+
+Then the prose: ONE lesson = ONE mistake (two mistakes = two footnotes); **≤3 lines / ~40
+words** — a long, wandering lesson is not read, and an unread guardrail guards nothing; all
+three parts mandatory — `DO NOT` names the act about to be repeated, `BECAUSE` is the WHY
+(without it the lesson cannot stop the repeat), `DO … instead` is the exit (a lesson that
+only forbids leaves the reader stuck). Chronology ("earlier this page said…"), evidence, and
+reasoning go in the page BODY or a TRDD — never in the lesson.
 
 ### 5. WIRE the context — radiate or receive (this is what makes it a wiki)
 
@@ -261,7 +270,7 @@ Copy this checklist and track your progress:
 - [ ] Each durable body fact carries a `^id [keywords: …]` atom marker (keywords = the search words for THAT fact); optional `desc:` slug = a ≤64-char one-line summary
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted)
 - [ ] `## Notes and lessons learned` section present (even if empty)
-- [ ] Every lesson in it obeys THE LESSON FORM: `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` — one mistake per footnote, ≤3 lines, all three parts present
+- [ ] Every lesson in it obeys THE LESSON FORM — metadata `[keywords: …, ocd: …, lmd: …]` (all three REQUIRED; `keywords` is its recall surface — no keywords, no recall) then `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` — one mistake per footnote, ≤3 lines, all three parts present
 - [ ] Every `[[link]]` added on BOTH ends (the bidirectional link law)
 - [ ] Every project concept an atom NAMES is a `[[wikilink]]` (missing page → create a stub; own-subject → self-link; a link ≥2 atoms share → pool as one `[^N]` See-also)
 - [ ] `memgrep reindex` run if present — the index is memgrep's; do NOT touch `MEMORY.md`

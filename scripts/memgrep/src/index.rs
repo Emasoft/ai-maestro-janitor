@@ -78,7 +78,7 @@ pub fn open_existing(root: &Path) -> Option<Connection> {
 /// tables. v3 (TRDD-056384eb) adds the `atoms.desc` column (a ≤64-char one-line atom summary). On a
 /// version bump `apply_schema` migrates an older DB forward by clearing the change-detection ledger so
 /// the next `reindex` re-parses every file (and thus fills the new column). See [`apply_schema`].
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Create every table + virtual table + B-tree index, idempotently (`IF NOT EXISTS`). Exactly the
 /// schema the spec pins:
@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS notes (
     id         INTEGER PRIMARY KEY,
     memory_id  INTEGER,
     label      TEXT,
+    keywords   TEXT,
     ocd        TEXT,
     lmd        TEXT,
     body       TEXT,
@@ -156,7 +157,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-    body,
+    keywords, body,
     content='notes', content_rowid='id'
 );
 
@@ -191,6 +192,29 @@ CREATE INDEX IF NOT EXISTS idx_atoms_cmref   ON atoms(claude_mem_ref);
                 return Err(e).context("adding atoms.desc column for schema migration");
             }
         }
+        // v4: a LESSON is a first-class memory element, so it carries a `keywords:` recall surface
+        // exactly like an ATOM does. Same additive-column dance for `notes.keywords`.
+        if let Err(e) = conn.execute_batch("ALTER TABLE notes ADD COLUMN keywords TEXT") {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column name") {
+                return Err(e).context("adding notes.keywords column for schema migration");
+            }
+        }
+        // …and `notes_fts` must GAIN that column. An FTS5 virtual table's column set is fixed at
+        // creation and cannot be ALTERed, and the `CREATE VIRTUAL TABLE IF NOT EXISTS` in the DDL
+        // above SKIPS the pre-v4 one-column table that already exists — so without an explicit
+        // DROP the new `keywords` column would silently never exist and lessons would stay
+        // unsearchable by keyword (the exact bug this migration lands). Dropping is safe: it is an
+        // external-content index over `notes`, holding no data of its own, and the `DELETE FROM
+        // files` below forces a full re-parse that repopulates it.
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS notes_fts;
+             CREATE VIRTUAL TABLE notes_fts USING fts5(
+                 keywords, body,
+                 content='notes', content_rowid='id'
+             );",
+        )
+        .context("rebuilding notes_fts with the keywords column")?;
         conn.execute_batch("DELETE FROM files")
             .context("clearing ledger for schema migration")?;
         conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
@@ -309,17 +333,24 @@ fn delete_rows_for_path(conn: &Connection, path: &str) -> Result<()> {
         rows.collect::<rusqlite::Result<Vec<i64>>>()?
     };
     for mid in &mem_ids {
-        // Clear the notes_fts shadow for each note, then the notes themselves.
-        let mut nstmt = conn.prepare("SELECT id, body FROM notes WHERE memory_id = ?1")?;
-        let notes: Vec<(i64, String)> = nstmt
+        // Clear the notes_fts shadow for each note, then the notes themselves. An external-content
+        // FTS5 `'delete'` command must replay EVERY indexed column's original value (that is how it
+        // locates the terms to remove), so `keywords` is selected and passed alongside `body` — a
+        // delete that omitted it would leave the keyword terms orphaned in the index.
+        let mut nstmt = conn.prepare("SELECT id, keywords, body FROM notes WHERE memory_id = ?1")?;
+        let notes: Vec<(i64, String, String)> = nstmt
             .query_map(params![mid], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    r.get::<_, String>(2)?,
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (nid, body) in notes {
+        for (nid, keywords, body) in notes {
             conn.execute(
-                "INSERT INTO notes_fts(notes_fts, rowid, body) VALUES('delete', ?1, ?2)",
-                params![nid, body],
+                "INSERT INTO notes_fts(notes_fts, rowid, keywords, body) VALUES('delete', ?1, ?2, ?3)",
+                params![nid, keywords, body],
             )?;
         }
         conn.execute("DELETE FROM notes WHERE memory_id = ?1", params![mid])?;
@@ -406,16 +437,18 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
         "INSERT INTO memories_fts(rowid, title, description, body) VALUES(?1, ?2, ?3, ?4)",
         params![mem_id, title, description, text],
     )?;
-    // Resolved lessons (footnotes) → note rows + their FTS shadow.
+    // Resolved lessons (footnotes) → note rows + their FTS shadow. `keywords` is the lesson's recall
+    // surface, the exact counterpart of an atom's — a lesson is a first-class memory element, and one
+    // that can only be found by the words its prose happens to use is not reliably findable at all.
     for ln in crate::memory::resolve_notes_public(path) {
         conn.execute(
-            "INSERT INTO notes(memory_id, label, ocd, lmd, body, urls) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-            params![mem_id, ln.num, ln.ocd, ln.lmd, ln.text, ln.urls],
+            "INSERT INTO notes(memory_id, label, keywords, ocd, lmd, body, urls) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![mem_id, ln.num, ln.keywords, ln.ocd, ln.lmd, ln.text, ln.urls],
         )?;
         let note_id = conn.last_insert_rowid();
         conn.execute(
-            "INSERT INTO notes_fts(rowid, body) VALUES(?1, ?2)",
-            params![note_id, ln.text],
+            "INSERT INTO notes_fts(rowid, keywords, body) VALUES(?1, ?2, ?3)",
+            params![note_id, ln.keywords, ln.text],
         )?;
     }
     // Resolved body ATOMS → atom rows + their FTS shadow (TRDD-3b9b2040). The keyword array is the

@@ -226,24 +226,41 @@ a governing rule, link up to it instead.>
 - [[user-model]] — the data this element binds.
 
 ## Notes and lessons learned
-[^N]: [ocd:… lmd:…] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords: …, ocd: …, lmd: …] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-### THE LESSON FORM — mandatory, terse, one shape
+### THE LESSON FORM — mandatory metadata, then one terse shape
 
-A lesson is a GUARDRAIL, not a story. Every `[^N]` — authored fresh, or demoted here by the
-correction protocol — takes exactly this form:
+A lesson is a FIRST-CLASS ATOM OF MEMORY — the footnote counterpart of a body atom — and a
+GUARDRAIL, not a story. Every `[^N]`, authored fresh or demoted here by the correction
+protocol, takes exactly this form:
 
 ```
-[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
+
+**The metadata block is the lesson's ADDRESS.** All three keys are REQUIRED:
+
+- **`keywords:` — the RECALL SURFACE**, precisely as on an atom: the words a future session
+  will SEARCH with (the symptom), which are usually NOT the words the prose happens to use.
+  memgrep stores them (`notes.keywords`) and indexes them (`notes_fts`), and `--only-notes`
+  matches against `keywords + text`. **Omit them and the lesson is findable only by accident
+  of phrasing — and a memory that cannot be recalled is a memory that does not exist.**
+  (This was literally broken until 2026-07-13: the note grammar was whitespace-tokenised, so
+  a multi-word `keywords:` value could not even be expressed, and the search matched prose
+  only. Atoms were keyword-addressable; lessons were not. See the memgrep schema-v4 note.)
+- **`ocd:` / `lmd:` — REQUIRED dates**, intrinsic to the lesson: they survive the librarian
+  moving it between pages, so they — not the file's mtime — are its authoritative age, and
+  `--since`/`--until` read them.
+
+Then the prose:
 
 - **ONE lesson = ONE mistake.** Two mistakes = two footnotes.
 - **≤3 lines / ~40 words.** Long, dispersive lessons are not read, and an unread guardrail
   guards nothing. This is the single most-violated rule in the corpus.
-- **All three parts mandatory.** `DO NOT` is the searchable surface (the next session is
-  about to do exactly X). `BECAUSE` is the WHY — a lesson without it cannot stop the repeat.
-  `DO … instead` is the exit — a lesson that only forbids leaves the reader stuck.
+- **All three parts mandatory.** `DO NOT` names the act about to be repeated. `BECAUSE` is
+  the WHY — a lesson without it cannot stop the repeat. `DO … instead` is the exit — a lesson
+  that only forbids leaves the reader stuck.
 - Chronology ("earlier this page said…"), evidence, and reasoning belong in the page BODY
   (which always carries the CURRENT truth) or in a TRDD — never in the lesson.
 

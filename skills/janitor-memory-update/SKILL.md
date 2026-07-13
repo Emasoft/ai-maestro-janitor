@@ -141,31 +141,46 @@ guardrail):
    is *why the previous statement was wrong / why the plan failed* — the root
    cause. A lesson without a WHY cannot stop the next repeat.
 
-### THE LESSON FORM — mandatory, terse, one shape
+### THE LESSON FORM — mandatory metadata, then one terse shape
 
-A lesson is a GUARDRAIL, not a story. Write every `[^N]` in exactly this form:
+A lesson is a first-class ATOM OF MEMORY, exactly like a body atom — and a GUARDRAIL,
+not a story. Write every `[^N]` in exactly this form:
 
 ```
-[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
+
+**The metadata block is the lesson's ADDRESS, not decoration.** All three keys REQUIRED:
+
+- **`keywords:` — the RECALL SURFACE.** The words a future session will SEARCH with (the
+  symptom), which are usually NOT the words your prose happens to use. memgrep indexes
+  them and `--only-notes` matches them. **A lesson with no keywords is findable only by
+  accident of phrasing — and a memory that cannot be recalled is a memory that does not
+  exist.**
+- **`ocd:` / `lmd:` — REQUIRED dates**, intrinsic to the lesson (they survive the
+  librarian moving it between pages, so they, not file mtime, are its authoritative age;
+  `--since`/`--until` read them).
+
+Then the prose:
 
 - **ONE lesson = ONE mistake.** Two mistakes = two footnotes.
 - **≤3 lines / ~40 words.** A long, wandering lesson is not read, and an unread
   guardrail guards nothing. Cut the chronology ("earlier this page said…", "we then
   discovered…"): the BODY already carries the current truth; the lesson carries only
   what not to repeat.
-- **All three parts are mandatory.** `DO NOT` is the searchable surface (the next
-  session is about to do exactly X). `BECAUSE` is the WHY. `DO … instead` is the exit
-  — a lesson that only forbids leaves the reader stuck.
+- **All three parts are mandatory.** `DO NOT` names the act about to be repeated.
+  `BECAUSE` is the WHY. `DO … instead` is the exit — a lesson that only forbids leaves
+  the reader stuck.
 - Evidence, reasoning, and narrative that do not fit go in the page BODY or a TRDD.
 
 ```markdown
 The widget retries 3× then fails.[^3] Tune via the `max_retries` config key.
 
 ## Notes and lessons learned
-[^3]: [ocd:2026-06-09 lmd:2026-06-09] DO NOT read a constant off a guessed variable
-  name, BECAUSE `max_attempts` does not exist and the real cap is `max_retries` = 3,
-  not the 5 this page used to claim. DO read the constant from the source instead.
+[^3]: [keywords: retry cap constant guessed name, ocd: 2026-06-09, lmd: 2026-06-09] DO NOT
+  read a constant off a guessed variable name, BECAUSE `max_attempts` does not exist and
+  the real cap is `max_retries` = 3, not the 5 this page used to claim. DO read the
+  constant from the source instead.
 ```
 
 Lessons are first-class: a leading `[ocd:… lmd:…]` prefix carries the lesson's

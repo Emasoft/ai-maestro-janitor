@@ -147,25 +147,83 @@ fn system_time_to_iso_utc(t: std::time::SystemTime) -> String {
     format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
 }
 
-/// Pull `ocd`/`lmd` out of a note/lesson's `[...]` metadata prefix (e.g. `ocd:2025-03-03
-/// lmd:2026-05-05 class:reference`). The prefix is the whitespace-separated `key:value` bag that
-/// `split_note_metadata` isolates; only `ocd`/`lmd` are read here, every other key stays opaque.
-/// Returns `(ocd, lmd)`, each None when absent.
-fn parse_meta_dates(meta: &str) -> (Option<String>, Option<String>) {
-    let mut ocd = None;
-    let mut lmd = None;
-    for tok in meta.split_whitespace() {
-        if let Some(v) = tok.strip_prefix("ocd:") {
-            if !v.is_empty() {
-                ocd = Some(v.to_string());
+/// Parse a lesson's `[...]` metadata prefix into `key → value-ARRAY`, accepting BOTH grammars a
+/// lesson may carry:
+///   • the COMMA-separated block-prop grammar the ATOMS use — `keywords: a b c, ocd: 2026-07-13`;
+///   • the legacy WHITESPACE-token grammar older lessons carry — `ocd:2025-03-03 lmd:2026-05-05`.
+///
+/// Both must work, and neither existing parser could do both. `parse_block_props` alone swallows a
+/// legacy prefix whole: `ocd:X lmd:Y` has no top-level comma, so it becomes ONE property whose value
+/// array is `["X", "lmd:Y"]` — the lmd date silently lost. The old whitespace-token scan alone is
+/// worse: a token IS a whole `key:value`, so a value can never contain a space — which is precisely
+/// why a lesson could never carry a multi-word `keywords:` list, and therefore why lessons were
+/// unreachable by keyword while atoms were not (the wikimem's central promise, broken for half its
+/// elements).
+///
+/// The unifying rule: split on TOP-LEVEL commas → items (a comma inside a `[[wikilink]]` is
+/// depth-protected, as in atoms); within an item, a whitespace token CONTAINING a `:` opens a new
+/// key, and every following token WITHOUT one appends to that key's value array. This reads both
+/// grammars unambiguously. Pure; markdown is data, never executed.
+fn parse_note_props(meta: &str) -> BTreeMap<String, Vec<String>> {
+    let bytes = meta.as_bytes();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let mut items: Vec<&str> = Vec::new();
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'[' => depth += 1,
+            b']' => depth -= 1,
+            b',' if depth == 0 => {
+                items.push(&meta[start..i]);
+                start = i + 1;
             }
-        } else if let Some(v) = tok.strip_prefix("lmd:")
-            && !v.is_empty()
-        {
-            lmd = Some(v.to_string());
+            _ => {}
         }
     }
-    (ocd, lmd)
+    items.push(&meta[start..]);
+
+    let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for item in items {
+        // The key the following bare (colon-less) tokens belong to — this is what lets a value
+        // span several whitespace-separated words, e.g. `keywords: daemon pid reuse`.
+        let mut cur: Option<String> = None;
+        for tok in item.split_whitespace() {
+            if let Some((k, v)) = tok.split_once(':') {
+                let key = k.trim();
+                if key.is_empty() {
+                    continue;
+                }
+                let slot = map.entry(key.to_string()).or_default();
+                if !v.is_empty() {
+                    slot.push(v.to_string());
+                }
+                cur = Some(key.to_string());
+            } else if let Some(key) = cur.as_ref() {
+                map.entry(key.clone()).or_default().push(tok.to_string());
+            }
+        }
+    }
+    map
+}
+
+/// Pull `ocd`/`lmd` out of a note/lesson's `[...]` metadata prefix. Thin projection of
+/// [`parse_note_props`] — every other key stays available to the caller. Returns `(ocd, lmd)`,
+/// each None when absent.
+fn parse_meta_dates(meta: &str) -> (Option<String>, Option<String>) {
+    let props = parse_note_props(meta);
+    let first = |k: &str| props.get(k).and_then(|v| v.first()).cloned();
+    (first("ocd"), first("lmd"))
+}
+
+/// A lesson's RECALL SURFACE — the space-joined `keywords:` array from its `[...]` metadata prefix
+/// (empty when the prefix carries none). This is the lesson's counterpart of an atom's
+/// `keywords:` block-prop: the terms a future session will search for, which are NOT necessarily the
+/// words the lesson's prose happens to use.
+fn parse_note_keywords(meta: &str) -> String {
+    parse_note_props(meta)
+        .get("keywords")
+        .map(|v| v.join(" "))
+        .unwrap_or_default()
 }
 
 fn parse_tags(raw: &str) -> Vec<String> {
@@ -269,6 +327,11 @@ pub(crate) struct ResolvedNote {
     pub(crate) num: String,
     meta: Option<String>,
     pub(crate) text: String,
+    /// The lesson's RECALL SURFACE — the space-joined `keywords:` array from its metadata prefix
+    /// (empty when absent). A lesson is a first-class memory element, so — exactly like an atom — it
+    /// is found by the terms a future session will SEARCH for, not merely by the words its prose
+    /// happens to use. Searched by `--only-notes` and indexed into `notes_fts`.
+    pub(crate) keywords: String,
     /// Original/Last-Modified dates of THIS lesson, parsed from `ocd:`/`lmd:` in the metadata prefix
     /// (None when the prefix carries no such key). Intrinsic — survives the librarian's page moves.
     pub(crate) ocd: Option<String>,
@@ -378,11 +441,13 @@ fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
                 .as_deref()
                 .map(parse_meta_dates)
                 .unwrap_or((None, None));
+            let keywords = meta.as_deref().map(parse_note_keywords).unwrap_or_default();
             let urls = extract_urls(&rest);
             out.push(ResolvedNote {
                 num: r.label.clone(),
                 meta,
                 text: rest,
+                keywords,
                 ocd,
                 lmd,
                 urls,
@@ -2282,12 +2347,18 @@ fn find_gather_index(
     Ok(all)
 }
 
-/// Lessons-only (`--only-notes`) mode: match the DSL against each resolved `[^N]` lesson's text and
-/// print the matching lessons as `[N] - <text>` (or `[N] - [meta] <text>` with `--full-notes`), ranked
-/// by optional-match count (desc, stable). Walks the corpus once via `resolve_notes`; the lesson search
-/// is its own surface (the lesson body). Walk-only by design: the SQLite `notes` table stores the
-/// stripped lesson body but NOT the raw `[...]` metadata prefix, so an index path could not reproduce
-/// `--full-notes` byte-for-byte — resolving per file is cheap and always correct.
+/// Lessons-only (`--only-notes`) mode: match the DSL against each resolved `[^N]` lesson's RECALL
+/// SURFACE — its `keywords:` + its WHY text — and print the matching lessons as `[N] - <text>` (or
+/// `[N] - [meta] <text>` with `--full-notes`), ranked by optional-match count (desc, stable).
+///
+/// The surface is `keywords + text`, not `text` alone. A lesson is a first-class memory element, so
+/// like an atom it must be findable by the words a future session will SEARCH with — which are often
+/// NOT the words its prose uses (that is the whole reason `keywords:` exists). Matching prose only
+/// made a lesson's metadata block decorative: a lesson could carry perfect keywords and still be
+/// unreachable, which is a memory that does not exist.
+///
+/// Walk-only by design: `--full-notes` must reproduce the raw `[...]` prefix byte-for-byte, which the
+/// index does not store — resolving per file is cheap and always correct.
 fn find_only_notes(
     paths: &[PathBuf],
     hidden: bool,
@@ -2301,7 +2372,8 @@ fn find_only_notes(
             continue;
         }
         for ln in resolve_notes(&path) {
-            let surface = ln.text.to_lowercase();
+            // keywords FIRST, then the WHY text — both are the lesson's recall surface.
+            let surface = format!("{} {}", ln.keywords, ln.text).to_lowercase();
             if !q.matches_text(&surface) {
                 continue;
             }
@@ -2531,6 +2603,62 @@ mod tests {
         let (ocd, lmd) = parse_meta_dates("ocd:2025-03-03 lmd:2026-05-05 class:reference");
         assert_eq!(ocd.as_deref(), Some("2025-03-03"));
         assert_eq!(lmd.as_deref(), Some("2026-05-05"));
+    }
+
+    #[test]
+    fn note_props_parse_multiword_keywords_from_comma_grammar() {
+        // A lesson's recall surface is a MULTI-WORD `keywords:` list. The legacy whitespace-token
+        // parser structurally could not hold one (a token was a whole `key:value`), which is why
+        // lessons were unreachable by keyword while atoms were not.
+        let kw = parse_note_keywords("keywords: daemon pid reuse sigterm, ocd: 2026-07-13, lmd: 2026-07-13");
+        assert_eq!(kw, "daemon pid reuse sigterm");
+        let (ocd, lmd) = parse_meta_dates("keywords: daemon pid reuse sigterm, ocd: 2026-07-13, lmd: 2026-07-13");
+        assert_eq!(ocd.as_deref(), Some("2026-07-13"));
+        assert_eq!(lmd.as_deref(), Some("2026-07-13"));
+    }
+
+    #[test]
+    fn note_props_legacy_whitespace_prefix_still_parses_both_dates() {
+        // REGRESSION GUARD. The corpus is full of legacy `[ocd:X lmd:Y]` prefixes with no commas.
+        // Parsing them with the atoms' comma-grammar alone would make the WHOLE prefix one property
+        // — `ocd` = ["2026-06-09", "lmd:2026-06-09"] — silently swallowing the lmd date. The unified
+        // parser must keep reading both, and report no keywords rather than inventing any.
+        let (ocd, lmd) = parse_meta_dates("ocd:2026-06-09 lmd:2026-06-10");
+        assert_eq!(ocd.as_deref(), Some("2026-06-09"));
+        assert_eq!(lmd.as_deref(), Some("2026-06-10"));
+        assert_eq!(parse_note_keywords("ocd:2026-06-09 lmd:2026-06-10"), "");
+    }
+
+    #[test]
+    fn lesson_is_recallable_by_keyword_alone_not_only_by_its_prose() {
+        // THE POINT OF THE WHOLE `keywords:` MECHANISM, and the bug it fixes: a future session
+        // searches with the words of its SYMPTOM, which are usually NOT the words the lesson's prose
+        // happens to use. Here the keywords ("rotate credential") share NO word with the WHY text —
+        // so a search over the prose alone finds nothing, and the lesson may as well not exist.
+        let dir = std::env::temp_dir().join(format!("memgrep_lesson_kw_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let page = dir.join("p.md");
+        std::fs::write(
+            &page,
+            "---\nname: p\ndescription: d\n---\nBody fact.[^1]\n\n## Notes and lessons learned\n\
+             [^1]: [keywords: rotate credential, ocd: 2026-07-13, lmd: 2026-07-13] DO NOT reuse the \
+             stale token, BECAUSE the window already closed. DO mint a fresh one instead.\n",
+        )
+        .expect("write");
+
+        let notes = resolve_notes(&page);
+        assert_eq!(notes.len(), 1, "the referenced lesson must resolve");
+        let ln = &notes[0];
+        assert_eq!(ln.keywords, "rotate credential");
+        // The keywords are genuinely absent from the prose — proving the surface, not the prose,
+        // is what makes this recall work.
+        let prose = ln.text.to_lowercase();
+        assert!(!prose.contains("rotate") && !prose.contains("credential"));
+        // The recall surface `find_only_notes` matches against.
+        let surface = format!("{} {}", ln.keywords, ln.text).to_lowercase();
+        assert!(surface.contains("rotate") && surface.contains("credential"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

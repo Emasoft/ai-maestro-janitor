@@ -173,9 +173,13 @@ uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<obsolete.md>" "
 #   edit staging/<current.md> (a WRITE):
 #     - body = the CURRENT truth (unchanged or clarified), linking the fact to [^N]
 #     - a NEW compounding [^N] under "## Notes and lessons learned", in THE LESSON
-#       FORM (below) with the SOURCED WHY, its own ocd/lmd prefix, citing commit/TRDD:
-#       "DO NOT <assert X, as page <obsolete_slug> did>, BECAUSE <what changed> at
-#        <sha> (TRDD-<8hex>) superseded it. DO <the current truth> instead."
+#       FORM (below) with the SOURCED WHY, citing commit/TRDD. Its metadata carries the
+#       RETIRED page's recall words, so the folded knowledge stays findable after its
+#       file is gone:
+#       "[keywords: <what someone would search to find the RETIRED page>, ocd: <the
+#         obsolete page's ocd>, lmd: <today>] DO NOT <assert X, as page <obsolete_slug>
+#         did>, BECAUSE <what changed> at <sha> (TRDD-<8hex>) superseded it. DO <the
+#         current truth> instead."
 #     - EVERY pre-existing [^N] from BOTH pages copied verbatim (lessons_preserved
 #       is strict: a dropped or reworded lesson FAILS the commit)
 #     - REDIRECT any surviving [[<obsolete_slug>]] backlink → the survivor's slug
@@ -197,10 +201,12 @@ uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<false.md>" "<su
 # In staging:
 #   rm staging/<false.md>                        # retire the false page (a DELETE)
 #   edit staging/<survivor.md> (a WRITE):
-#     - absorb the false fact's history as a compounding [^N], in THE LESSON FORM
-#       (below): "DO NOT <assert X, as page <false_slug> did>, BECAUSE `git log -S`
-#        ran on the reachable repo at <sha> and found NO trace of it (skeptic vote
-#        <m>/<n>). DO <the survivor's truth> instead."  ← plus the retired page's OWN
+#     - absorb the false fact's history as a compounding [^N], in THE LESSON FORM (below),
+#       its keywords being what someone would search to find the RETIRED page:
+#       "[keywords: <the retired page's recall words>, ocd: <the false page's ocd>, lmd:
+#         <today>] DO NOT <assert X, as page <false_slug> did>, BECAUSE `git log -S` ran
+#         on the reachable repo at <sha> and found NO trace of it (skeptic vote <m>/<n>).
+#         DO <the survivor's truth> instead."  ← plus the retired page's OWN
 #       [^N] lessons, verbatim (lessons_preserved is strict)
 #     - REDIRECT any surviving [[<false_slug>]] backlink → the survivor's slug
 #     - frontmatter: survivor ocd = MIN(survivor.ocd, false.ocd); lmd = today
@@ -231,17 +237,25 @@ uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op merge
 
 ## THE LESSON FORM — mandatory for every `[^N]` this pass AUTHORS
 
-The compounding `[^N]` a verdict writes is a GUARDRAIL, not a story. It takes exactly
-this form — the same one `~/.claude/rules/markdown-memory-recall.md` prescribes:
+The compounding `[^N]` a verdict writes is a first-class ATOM OF MEMORY and a GUARDRAIL, not
+a story. It takes exactly this form — the same one `~/.claude/rules/markdown-memory-recall.md`
+prescribes:
 
 ```
-[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords: <the search terms>, ocd: <YYYY-MM-DD>, lmd: <YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-ONE lesson = ONE mistake. **≤3 lines / ~40 words.** All three parts mandatory: `DO NOT`
-is the searchable surface, `BECAUSE` is the sourced WHY (the `<sha>`/TRDD citation lives
-here), `DO … instead` is the exit. A long, wandering lesson is not read — and an unread
-guardrail guards nothing.
+All three metadata keys REQUIRED. **`keywords:` is the lesson's RECALL SURFACE** — the words a
+future session will SEARCH with, usually NOT the words the prose uses; memgrep indexes them and
+`--only-notes` matches them, so a keyword-less lesson is findable only by accident of phrasing.
+When you fold an obsolete/false page into the survivor, its keywords are the ones someone would
+have used to find THE RETIRED PAGE — that is what keeps the retired slug's knowledge reachable
+after its file is gone. Omit them and the fold silently buries the very fact you preserved.
+
+Then the prose: ONE lesson = ONE mistake; **≤3 lines / ~40 words**; all three parts mandatory —
+`DO NOT` names the act about to be repeated, `BECAUSE` is the sourced WHY (the `<sha>`/TRDD
+citation lives here), `DO … instead` is the exit. A long, wandering lesson is not read — and an
+unread guardrail guards nothing.
 
 **This governs only the lessons a pass WRITES.** A PRE-EXISTING `[^N]` — however long or
 wandering — rides into the survivor **verbatim**. `lessons_preserved` is a strict SUBSTRING
