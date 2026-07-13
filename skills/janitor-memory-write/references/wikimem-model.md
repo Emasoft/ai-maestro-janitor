@@ -226,8 +226,33 @@ a governing rule, link up to it instead.>
 - [[user-model]] — the data this element binds.
 
 ## Notes and lessons learned
-[^N]: [ocd:… lmd:…] <a superseded memory, demoted here with its WHY>
+[^N]: [ocd:… lmd:…] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
+
+### THE LESSON FORM — mandatory, terse, one shape
+
+A lesson is a GUARDRAIL, not a story. Every `[^N]` — authored fresh, or demoted here by the
+correction protocol — takes exactly this form:
+
+```
+[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+```
+
+- **ONE lesson = ONE mistake.** Two mistakes = two footnotes.
+- **≤3 lines / ~40 words.** Long, dispersive lessons are not read, and an unread guardrail
+  guards nothing. This is the single most-violated rule in the corpus.
+- **All three parts mandatory.** `DO NOT` is the searchable surface (the next session is
+  about to do exactly X). `BECAUSE` is the WHY — a lesson without it cannot stop the repeat.
+  `DO … instead` is the exit — a lesson that only forbids leaves the reader stuck.
+- Chronology ("earlier this page said…"), evidence, and reasoning belong in the page BODY
+  (which always carries the CURRENT truth) or in a TRDD — never in the lesson.
+
+**The form binds what you WRITE, not what already exists.** An existing lesson is
+effectively IMMUTABLE: `memory_edit_verify.lessons_preserved` is a strict SUBSTRING check,
+so a reworded lesson FAILS every editorial commit (merge/split/repair alike). That is the
+anti-corruption gate working as designed. An old lesson may only be COMPOUNDED — body kept
+verbatim, new history appended. Reshaping the corpus's legacy long lessons therefore needs a
+sanctioned reshape op with its own loss oracle (a separate TRDD), never an ad-hoc reword.
 
 ### Canonical key placement (issue #68 P4 — where ocd/lmd/tier live)
 

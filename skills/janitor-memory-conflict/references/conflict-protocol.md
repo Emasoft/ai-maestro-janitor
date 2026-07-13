@@ -172,9 +172,10 @@ uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<obsolete.md>" "
 #   rm staging/<obsolete.md>                     # retire the obsolete page (a DELETE)
 #   edit staging/<current.md> (a WRITE):
 #     - body = the CURRENT truth (unchanged or clarified), linking the fact to [^N]
-#     - a NEW compounding [^N] under "## Notes and lessons learned" with the SOURCED
-#       WHY: "page <obsolete_slug> asserted X; superseded — <what changed> at <sha>
-#       (TRDD-<8hex>); folded here" (its own ocd/lmd prefix; cite commit/TRDD)
+#     - a NEW compounding [^N] under "## Notes and lessons learned", in THE LESSON
+#       FORM (below) with the SOURCED WHY, its own ocd/lmd prefix, citing commit/TRDD:
+#       "DO NOT <assert X, as page <obsolete_slug> did>, BECAUSE <what changed> at
+#        <sha> (TRDD-<8hex>) superseded it. DO <the current truth> instead."
 #     - EVERY pre-existing [^N] from BOTH pages copied verbatim (lessons_preserved
 #       is strict: a dropped or reworded lesson FAILS the commit)
 #     - REDIRECT any surviving [[<obsolete_slug>]] backlink → the survivor's slug
@@ -196,9 +197,10 @@ uv run scripts/memory_txn_cli.py begin "<scope_root>" conflict "<false.md>" "<su
 # In staging:
 #   rm staging/<false.md>                        # retire the false page (a DELETE)
 #   edit staging/<survivor.md> (a WRITE):
-#     - absorb the false fact's history as a compounding [^N]: "page <false_slug>
-#       asserted X; proven FALSE at <sha> (`git log -S` ran on the reachable repo,
-#       no trace); removed (skeptic vote <m>/<n>)"  ← plus the retired page's OWN
+#     - absorb the false fact's history as a compounding [^N], in THE LESSON FORM
+#       (below): "DO NOT <assert X, as page <false_slug> did>, BECAUSE `git log -S`
+#        ran on the reachable repo at <sha> and found NO trace of it (skeptic vote
+#        <m>/<n>). DO <the survivor's truth> instead."  ← plus the retired page's OWN
 #       [^N] lessons, verbatim (lessons_preserved is strict)
 #     - REDIRECT any surviving [[<false_slug>]] backlink → the survivor's slug
 #     - frontmatter: survivor ocd = MIN(survivor.ocd, false.ocd); lmd = today
@@ -226,6 +228,28 @@ uv run scripts/memory_txn_cli.py commit "<scope_root>" <txn_id> --op merge
 > regardless of the pair's tiers — do NOT pre-screen a conflict consolidation with
 > `is_legal_merge`. Your gate is `verify_merge` (lessons preserved + ocd==min +
 > no new duplicate + no dangling ref).
+
+## THE LESSON FORM — mandatory for every `[^N]` this pass AUTHORS
+
+The compounding `[^N]` a verdict writes is a GUARDRAIL, not a story. It takes exactly
+this form — the same one `~/.claude/rules/markdown-memory-recall.md` prescribes:
+
+```
+[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+```
+
+ONE lesson = ONE mistake. **≤3 lines / ~40 words.** All three parts mandatory: `DO NOT`
+is the searchable surface, `BECAUSE` is the sourced WHY (the `<sha>`/TRDD citation lives
+here), `DO … instead` is the exit. A long, wandering lesson is not read — and an unread
+guardrail guards nothing.
+
+**This governs only the lessons a pass WRITES.** A PRE-EXISTING `[^N]` — however long or
+wandering — rides into the survivor **verbatim**. `lessons_preserved` is a strict SUBSTRING
+check, so a reworded lesson FAILS the commit; that is deliberate (it is the anti-corruption
+gate), and it means **no pass may reshape an old lesson** — not this one, not REPAIR, not
+CONSOLIDATE. Do not try. An old lesson may only be COMPOUNDED (its body kept intact, new
+history appended). Retro-fitting the corpus's legacy long lessons needs a sanctioned reshape
+op with its own loss oracle — a separate TRDD, never an opportunistic reword here.
 
 **On verify FAIL or any error:** `commit` exits non-zero with the reasons and the
 txn self-aborts (live tree untouched). Read the reason, fix it in the staged copy

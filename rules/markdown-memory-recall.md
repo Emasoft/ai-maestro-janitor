@@ -157,12 +157,32 @@ metadata:
 <body: the one fact; for feedback/project add **Why:** and **How to apply:** lines>
 
 ## Notes and lessons learned
-[^3]: [ocd:2026-06-09 lmd:2026-06-09] earlier this said "retries 5x"; wrong, the cap is 3 —
-  the config key was misread. Lesson: verify the constant against the source, not the name.
+[^3]: [ocd:2026-06-09 lmd:2026-06-09] DO NOT read a constant off a guessed variable name,
+  BECAUSE `max_attempts` does not exist and the real cap is `max_retries` = 3, not 5.
+  DO read the constant from the source instead.
 ```
 
 `## Notes and lessons learned` is **MANDATORY on every page, even when empty** — it is the
 standing landing zone for a correction lesson.
+
+### THE LESSON FORM — mandatory, terse, one shape
+
+A lesson is a GUARDRAIL, not a story. Write every `[^N]` in exactly this form:
+
+```
+[^N]: [ocd:<date> lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+```
+
+- **ONE lesson = ONE mistake.** Two mistakes = two footnotes. Never a paragraph that
+  wanders across several.
+- **≤3 lines / ~40 words.** A long lesson is not read, and an unread guardrail guards
+  nothing. Cut the chronology ("earlier this page said…", "we then discovered…") — the
+  body already carries the current truth; the lesson carries only what not to repeat.
+- **All three parts are mandatory.** `DO NOT` is the searchable surface (the next session
+  is about to do exactly X). `BECAUSE` is the WHY — without it the lesson cannot stop the
+  repeat. `DO … instead` is the exit — a lesson that only forbids leaves the reader stuck.
+- Prose, evidence, and reasoning that do not fit belong in the page BODY or a TRDD, never
+  in the lesson.
 
 ## The wiki layer (wikimem)
 
