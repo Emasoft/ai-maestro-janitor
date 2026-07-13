@@ -35,15 +35,15 @@ import state
 # depend on the agent's model — the deterministic verify_* gate in memory_edit_verify.py
 # rejects any lossy edit, so the model only PROPOSES — making autonomy pure cost, made
 # opt-in here. Manual curation stays available via the /janitor-memory-* commands; raise
-# a rate via /janitor-memory-*-frequency-set to re-enable an autonomous pass.
+# a rate via /janitor-memory-frequency <pass> <times-per-day> to re-enable an autonomous pass.
 DEFAULTS: dict = {
-    "consolidation_per_day": 0,     # MERGE pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-*-frequency-set
-    "split_per_day": 0,             # SPLIT pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-*-frequency-set
+    "consolidation_per_day": 0,     # MERGE pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
+    "split_per_day": 0,             # SPLIT pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
     "split_max_bytes": 36000,       # a page over this is a SPLIT candidate (raised 12k→36k: recall returns a memgrep CHUNK + lessons, not the whole page, so larger pages don't bloat context)
-    "conflict_per_day": 0,          # CONFLICT + fact-verify — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-*-frequency-set
-    "repair_per_day": 0,            # REPAIR pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-*-frequency-set
-    "harvest_per_day": 0,           # HARVEST pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-*-frequency-set
-    "atomize_per_day": 0,           # ATOMIZE pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-*-frequency-set
+    "conflict_per_day": 0,          # CONFLICT + fact-verify — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
+    "repair_per_day": 0,            # REPAIR pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
+    "harvest_per_day": 0,           # HARVEST pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
+    "atomize_per_day": 0,           # ATOMIZE pass — OFF by default (USER cost decision 2026-06-30); opt in via /janitor-memory-frequency
     "edit_project_scope": False,    # default LOCAL+USER only; PROJECT memory is in-repo
     "stagger_enabled": True,        # spread each (project,intervention) to a deterministic time-of-day slot (rate-limit smoothing across projects)
 }

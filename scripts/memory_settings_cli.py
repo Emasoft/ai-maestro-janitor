@@ -67,6 +67,7 @@ def _resolve_scope_root(scope: str, root_arg: str | None) -> tuple[str, Path]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="memory_settings_cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list", help="print every setting and its current value")
     g = sub.add_parser("get", help="print a setting")
     g.add_argument("key")
     s = sub.add_parser("set", help="set a setting; no value reverts to default")
@@ -84,7 +85,14 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        if args.cmd == "get":
+        if args.cmd == "list":
+            # Every knob in one shot — the whole reason ONE /janitor-memory-frequency command
+            # can replace the fourteen near-identical get/set commands it superseded (each of
+            # which cost always-on listing tokens in EVERY session, forever, to be typed almost
+            # never).
+            for key in memory_settings.DEFAULTS:
+                print(_describe(key, memory_settings.get(key)))
+        elif args.cmd == "get":
             print(_describe(args.key, memory_settings.get(args.key)))
         elif args.cmd in ("is-due", "mark-ran"):
             label, root = _resolve_scope_root(args.scope, args.root)
