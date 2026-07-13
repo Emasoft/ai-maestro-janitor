@@ -116,6 +116,9 @@ name, never literal paths or secrets).
 
 - `[[project_janitor_publish_blocked_cpv_fps]]` — the publish-gate history + the
   devitalize-or-remove unblock recipe (RESOLVED; v0.7.x shipped).
+- `[[janitor-self-update-bootstrap-gap]]` — the OTHER half of a release: after publish.py
+  succeeds, why the local cache can stay on the old version (the fast-updater can't
+  accelerate its own first release; reload ≠ update).
 
 ## Notes and lessons learned
 [^1]: [ocd:2026-06-13 lmd:2026-06-13] The step numbers intentionally skip 5 —
