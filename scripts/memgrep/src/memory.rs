@@ -606,10 +606,10 @@ fn raw_footnote_defs(lines: &[&str]) -> BTreeMap<String, String> {
     for raw in lines {
         let line = raw.trim_end();
         let starts_def = line.starts_with("[^") && line.contains("]:");
-        if starts_def || line.trim_start().starts_with('#') {
-            if let Some((label, body)) = cur.take() {
-                out.entry(label).or_insert(body);
-            }
+        if (starts_def || line.trim_start().starts_with('#'))
+            && let Some((label, body)) = cur.take()
+        {
+            out.entry(label).or_insert(body);
         }
         if starts_def {
             let close = line.find("]:").unwrap(); // guarded by `contains` above
