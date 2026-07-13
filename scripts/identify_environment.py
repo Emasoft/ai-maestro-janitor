@@ -247,7 +247,12 @@ def _gather_git_repo() -> dict:
         except OSError:
             cfg_text = ""
     cfg = env_detect.parse_git_config(cfg_text)
-    remotes = cfg["remotes"]
+    # Mask any embedded credential in a remote URL (`https://user:TOKEN@host/…`) BEFORE it is
+    # stored, rendered, or written to the JSON report. The module's #1 invariant is to never
+    # emit a secret VALUE, and a git remote URL is exactly as credential-bearing as a proxy URL
+    # (which detect_proxies already masks). `github_slug` still resolves the owner/repo from the
+    # masked form, so downstream slug/fork detection is unaffected.
+    remotes = {name: env_detect.mask_proxy(url) for name, url in cfg["remotes"].items()}
     slug = None
     for name in ("origin", *remotes):
         s = env_detect.github_slug(remotes.get(name, ""))
@@ -275,7 +280,7 @@ def _gather_git_repo() -> dict:
         entries = []
     hooks = env_detect.active_git_hooks(entries, lambda n: os.access(os.path.join(hooks_dir, n), os.X_OK))
     return {
-        "inside": True, "git_dir": git_dir, "common": common,
+        "inside": True, "git_dir": git_dir, "common": common, "top": top,
         "remotes": remotes, "slug": slug,
         "current_branch": _out(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
         "branch_count": len(branches), "branches": branches,
@@ -461,8 +466,10 @@ def _gather_gh_auth(*, online: bool) -> dict:
     out: dict = {"installed": _which("gh"), "config_user": cfg_user or None,
                  "username": cfg_user or None}
     if online and _which("gh"):
-        st = state.run_subprocess(["gh", "auth", "status"], timeout=10.0, capture=True)
-        text = ((st.stdout or "") + (st.stderr or "")) if st else ""
+        # `_out_any` (not a bare run_subprocess) keeps the fail-open invariant: it broad-catches
+        # and returns stdout+stderr regardless of exit code — `gh auth status` prints to stderr
+        # and a raise here (e.g. a blocked probe) must degrade the field, never sink the report.
+        text = _out_any(["gh", "auth", "status"], timeout=10.0)
         parsed = env_detect.parse_gh_auth(text)
         live = _out(["gh", "api", "user", "--jq", ".login"], timeout=10.0)
         out.update({
@@ -721,9 +728,10 @@ def _identity() -> dict:
 def gather(*, fast: bool = False, online: bool = False) -> dict:
     project = os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
     git = _gather_git_repo()
-    top = _out(["git", "rev-parse", "--show-toplevel"]) if git.get("inside") else ""
+    top = git.get("top", "") if git.get("inside") else ""  # already resolved inside _gather_git_repo
     tty = _session_tty()
     has_tty = bool(tty and tty not in ("??", "?"))
+    fs = detect_filesystem(project)  # one `mount` probe, reused for both the type and the network flag
 
     compilers_present = [b for b, _ in env_detect.COMPILERS if _which(b)]
     runtimes_present = [b for b, _ in env_detect.RUNTIMES if _which(b)]
@@ -735,13 +743,13 @@ def gather(*, fast: bool = False, online: bool = False) -> dict:
         "ancestry": detect_ancestry(),
         "tmux": detect_tmux(),
         "os": detect_os(),
-        "filesystem": detect_filesystem(project),
+        "filesystem": fs,
         "sandboxing": detect_sandboxing(),
         "project_dir": project,
         "cwd": os.getcwd(),
         # --- new sections ---
         "multiplexer": env_detect.detect_multiplexer(os.environ),
-        "filesystem_network": env_detect.filesystem_is_network(detect_filesystem(project)),
+        "filesystem_network": env_detect.filesystem_is_network(fs),
         "ci": env_detect.detect_ci(os.environ),
         "ide": env_detect.detect_ide(os.environ),
         "execution": env_detect.detect_execution_context(
@@ -1069,9 +1077,9 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
         lines.append(f"- **Fork / collaboration:** yes → upstream `{fork.get('upstream') or '?'}`")
     hb = info.get("homebrew")
     if hb:
-        t = "trusted" if hb.get("trusted") else ("tapped locally" if hb.get("tapped_locally")
-                                                 else "trust unknown")
-        lines.append(f"- **Homebrew tap:** yes ({t}) — {hb['note']}")
+        tap_state = "trusted" if hb.get("trusted") else (
+            "tapped locally" if hb.get("tapped_locally") else "trust unknown")
+        lines.append(f"- **Homebrew tap:** yes ({tap_state}) — {hb['note']}")
 
     # Repo topology
     rt = info.get("repo_topology", {})
