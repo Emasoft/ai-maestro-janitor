@@ -325,7 +325,7 @@ def verify_drift_line(
 _CHAIN_GENESIS_LABEL = b"JANITOR_CHAIN_GENESIS"
 # The reserved `type` of the key-signed head entry a `trim()` writes (S4, TRDD-7IUTRX29).
 # verify() honors it ONLY at index 0; see AuditChain.trim for the full design note.
-_TRIM_ANCHOR_TYPE = "trim-anchor"
+TRIM_ANCHOR_TYPE = "trim-anchor"
 
 
 def _canonical_payload(entry: dict) -> str:
@@ -534,7 +534,7 @@ class AuditChain:
                 obj = json.loads(raw)
             except (ValueError, TypeError):
                 continue  # a malformed line can't anchor anything — drop it with the head
-            if isinstance(obj, dict) and obj.get("type") != _TRIM_ANCHOR_TYPE:
+            if isinstance(obj, dict) and obj.get("type") != TRIM_ANCHOR_TYPE:
                 real.append((raw, obj))
         kept = real[-keep_lines:]
         if len(kept) == len(real) or not kept:
@@ -543,7 +543,7 @@ class AuditChain:
         if not isinstance(resumes_from, str) or not resumes_from:
             return False  # can't anchor safely — better oversized than broken
         anchor: dict = {
-            "type": _TRIM_ANCHOR_TYPE,
+            "type": TRIM_ANCHOR_TYPE,
             "dropped": len(real) - len(kept),
             "resumes_from": resumes_from,
             "prev_hmac": self._genesis_prev(),
@@ -621,7 +621,7 @@ class AuditChain:
                 if actual_prev not in seen:
                     return False
                 forks += 1
-            if idx == 0 and entry.get("type") == _TRIM_ANCHOR_TYPE:
+            if idx == 0 and entry.get("type") == TRIM_ANCHOR_TYPE:
                 resumes = entry.get("resumes_from")
                 if not isinstance(resumes, str) or not resumes:
                     return False
@@ -678,7 +678,7 @@ class AuditChain:
             recomputed = self._entry_hmac(canonical)
             if not hmac.compare_digest(actual_hmac, recomputed):
                 return (False, idx, "hmac mismatch")
-            if idx == 0 and entry.get("type") == _TRIM_ANCHOR_TYPE:
+            if idx == 0 and entry.get("type") == TRIM_ANCHOR_TYPE:
                 resumes = entry.get("resumes_from")
                 if not isinstance(resumes, str) or not resumes:
                     return (False, idx, "trim-anchor missing resumes_from")

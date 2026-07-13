@@ -149,18 +149,53 @@ def test_load_records_missing_file(isolated) -> None:
 
 
 def test_trim_rotation_keeps_last_n(isolated) -> None:
-    """trim_recovery_audit mirrors token_meter.trim_log: an oversized log is rewritten
-    keeping only the last keep_lines records."""
+    """An oversized log is rotated down to the last keep_lines RECORDS. The file also gains
+    the chain's key-signed trim-anchor head, which is chain metadata — load_records skips it,
+    so it never surfaces as a phantom recovery."""
+    for i in range(50):
+        _rec(ra, outcome="fired", pid=1000 + i)
+    ra.trim_recovery_audit(ra.recovery_audit_path(), keep_lines=10, max_bytes=1)
+    recs = ra.load_records()
+    assert len(recs) == 10
+    assert [r["pid"] for r in recs] == list(range(1040, 1050))
+    assert all(r.get("type") != jsi.TRIM_ANCHOR_TYPE for r in recs)
+
+
+def test_trim_keeps_the_chain_verifiable_from_genesis(isolated) -> None:
+    """F8 — the whole point. The old trim hand-rolled a naive prefix-drop, which left the new
+    first line's prev_hmac pointing at a dropped entry: a full-chain verify() then reported a
+    break FOREVER, indistinguishable from tampering. So nobody could ever run one, and an
+    attacker could DELETE or REORDER any recovery record with zero detection — in the only
+    forensic trace of the daemon killing and relaunching the user's processes.
+
+    AuditChain.trim (on the very class this module already uses) caps the log with a
+    key-signed anchor head instead, keeping verify() genesis-green through a rotation."""
     path = ra.recovery_audit_path()
-    # Write 50 plausible NDJSON lines directly so we control the count + size.
-    lines = [f'{{"ts":{1_750_000_000 + i},"outcome":"fired","n":{i}}}' for i in range(50)]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    # Force a rewrite by setting max_bytes tiny; keep only the last 10.
+    for i in range(60):
+        _rec(ra, outcome="fired", pid=2000 + i)
+    chain = jsi.AuditChain(path, ra._resolve_key())
+    assert chain.verify()[0] is True                      # green before
+
     ra.trim_recovery_audit(path, keep_lines=10, max_bytes=1)
-    kept = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    assert len(kept) == 10
-    assert kept[0].endswith('"n":40}')
-    assert kept[-1].endswith('"n":49}')
+
+    ok, _, reason = chain.verify()
+    assert ok, f"rotation broke the chain: {reason}"      # ...and still green AFTER
+
+
+def test_trim_leaves_a_deleted_record_detectable(isolated) -> None:
+    """The tamper-evidence the F8 fix restores must actually bite: after a rotation, removing
+    a recovery record still breaks verify()."""
+    path = ra.recovery_audit_path()
+    for i in range(60):
+        _rec(ra, outcome="fired", pid=3000 + i)
+    ra.trim_recovery_audit(path, keep_lines=10, max_bytes=1)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    del lines[5]                                          # excise one recovery record
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    chain = jsi.AuditChain(path, ra._resolve_key())
+    assert chain.verify()[0] is False
 
 
 def test_trim_noop_when_small(isolated) -> None:

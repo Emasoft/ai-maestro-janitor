@@ -812,7 +812,7 @@ def _hard_restart_channel(plan: dict) -> str:
     return str(ch) if ch else "spawn"
 
 
-def _run_hard_restart(inst, *, tag, fire, attempts, identity, sf, now, audit) -> None:
+def _run_hard_restart(inst, *, tag, fire, attempts, identity, sf, now, audit, decline) -> None:
     """ONE hard-restart attempt (rungs 5-7) for a dead/frozen-exhausted instance
     (TRDD-56d24c02 increment 2). All kill-path gates live HERE, in order — each
     independently sufficient to stop a kill:
@@ -843,7 +843,9 @@ def _run_hard_restart(inst, *, tag, fire, attempts, identity, sf, now, audit) ->
             f"session-liveness: {tag} UNREACHABLE ({inst.terminal}) — would "
             "hard-restart; skipped (no injection channel)",
         )
-        audit(inst, "unreachable", "relaunch", None)  # plan is None only on `dead`
+        # F9: nothing was tried, so back off + audit once (see `_decline`) instead of
+        # re-recording this identical decision on every 120 s beat, forever.
+        decline("unreachable", "relaunch", None)  # plan is None only on `dead`
         return
     enabled = fire and fleet_restart.hard_restart_enabled()
     killable = fleet_restart.is_killable(
@@ -987,6 +989,34 @@ def task_session_liveness(fleet: list | None = None) -> None:
             str(st.get("attempts", 0)), 0, detector_name="session-liveness", var_name="attempts"
         )
         tag = f"{os.path.basename(inst.project_root)} [{inst.diagnosis}] attempt={attempts}"
+
+        def _decline(outcome: str, rung: str | None, channel: str | None,
+                     *, _inst=inst, _st=st, _sf=sf, _identity=identity) -> None:
+            """A decision that TRIED nothing: stamp the cooldown and audit ONCE (F9).
+
+            `attempts`/`last_ts` used to be stamped ONLY on a successful fire, so any
+            instance we decide about but cannot poke — no injection channel (a plain
+            terminal, VS Code's integrated terminal, an ssh session: neither tmux nor
+            iTerm, i.e. a very common setup), an unwired diagnosis, or a dry run — never
+            tripped the cooldown. It was re-decided and RE-AUDITED every 120 s beat,
+            forever: ~720 identical records/day/instance, which then drove the 1 MB audit
+            trim to evict the real fired/force_restart history it exists to preserve, and
+            made every append re-read the whole megabyte to hash it. It also broke this
+            project's own S3/S4 boundedness invariant ("a self-heal that can run every
+            tick MUST dedupe/back-off on an unchanged input").
+
+            So: stamp `last_ts` (never `attempts` — nothing was tried, so no budget is
+            spent and the crash-loop gate stays honest), which puts the decision behind
+            the normal cooldown; and skip the audit entirely while the (outcome, rung)
+            signature is unchanged, so a STEADY unreachable state is recorded once, not
+            once per cooldown window."""
+            sig = f"{outcome}:{rung or '-'}"
+            _write_recovery_state(
+                _sf, {**_st, "last_ts": now, "identity": _identity, "last_audit": sig}
+            )
+            if _st.get("last_audit") != sig:
+                _audit(_inst, outcome, rung, channel)
+
         decision = fr.gate(last_ts=st.get("last_ts"), attempts=attempts, now=now)
         if decision == "crash_loop":
             if not st.get("alerted"):  # alert ONCE, not every beat
@@ -1010,7 +1040,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # Unknown / unrecoverable diagnosis — we never invent an action for a
             # state we don't recognize. (Since increment 2 wired A5, `dead` maps to
             # the hard rung `relaunch` and no longer lands here.)
-            _audit(inst, "declined_unwired", action, None)
+            _decline("declined_unwired", action, None)
             continue
         if sl.is_hard_rung(action):
             # A5 hard-restart rungs (TRDD-56d24c02 increment 2). Extracted so the
@@ -1018,7 +1048,7 @@ def task_session_liveness(fleet: list | None = None) -> None:
             # DEFAULT-OFF opt-in — else dry-run-logs the built plan.
             _run_hard_restart(
                 inst, tag=tag, fire=fire, attempts=attempts,
-                identity=identity, sf=sf, now=now, audit=_audit,
+                identity=identity, sf=sf, now=now, audit=_audit, decline=_decline,
             )
             continue
         # Hard (ESC) only for a frozen target — a live cron_dead/version_mismatch
@@ -1033,13 +1063,13 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 f"{action}; skipped (no injection channel)",
             )
             # No injection channel exists (that's WHY it's unreachable), so channel=None.
-            _audit(inst, "unreachable", action, None)
+            _decline("unreachable", action, None)
             continue
         if not fire:
             state.log_line(
                 "daemon", f"session-liveness:DRY would {action} → {plan['channel']} for {tag}"
             )
-            _audit(inst, "dry_run", action, str(plan["channel"]))
+            _decline("dry_run", action, str(plan["channel"]))
             continue
         ok = fleet_inject.fire(plan)
         _write_recovery_state(

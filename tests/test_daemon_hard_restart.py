@@ -98,12 +98,17 @@ def test_dead_relaunch_is_dry_run_by_default(tmp_path, monkeypatch) -> None:
 
 def test_dead_with_no_channel_is_logged_unreachable(tmp_path, monkeypatch) -> None:
     """No pane → relaunch cannot type anywhere; no resurrect fallback for `dead`
-    (resurrect KILLS and is_killable is frozen-only). Nothing consumed, audit says why."""
+    (resurrect KILLS and is_killable is frozen-only). No ATTEMPT consumed (nothing was
+    tried, so the crash-loop budget stays honest) — but the decision IS stamped with a
+    cooldown + audit signature (F9), so an instance we can never poke stops being
+    re-decided and re-audited on every 120 s beat."""
     root = str(tmp_path / "proj")
     _setup(monkeypatch, tmp_path, hard="1")  # even ENABLED: no channel → no action
     daemon.task_session_liveness(fleet=[_inst("dead", root, {})])
     assert "UNREACHABLE" in _log(tmp_path)
-    assert _state(tmp_path, root) == {}  # no attempt consumed
+    st = _state(tmp_path, root)
+    assert "attempts" not in st                          # no budget spent
+    assert st["last_ts"] and st["last_audit"] == "unreachable:relaunch"
     assert [r["outcome"] for r in _audit_records(tmp_path)] == ["unreachable"]
 
 

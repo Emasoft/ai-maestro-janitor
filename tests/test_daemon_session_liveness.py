@@ -67,8 +67,10 @@ def _log(tmp_path: Path) -> str:
 
 
 def test_dry_run_detects_but_never_fires(tmp_path, monkeypatch) -> None:
-    """With firing OFF the task logs the would-do plan but injects nothing and
-    bumps no attempt counter — the detection-before-action mode."""
+    """With firing OFF the task logs the would-do plan but injects nothing and bumps no
+    attempt counter — the detection-before-action mode. It DOES stamp a cooldown (F9): a
+    dry run repeated every 120 s used to re-audit forever, and the 1 MB audit trim then
+    evicted the real fired/force_restart history in favour of that noise."""
     fleet = [
         _inst("frozen", "/p/proj-a", {"tmux_pane": "%5"}),
         _inst("healthy", "/p/proj-b", {"tmux_pane": "%6"}),
@@ -79,7 +81,11 @@ def test_dry_run_detects_but_never_fires(tmp_path, monkeypatch) -> None:
     assert fired == []                                   # dry-run fires nothing
     assert "session-liveness:DRY would rearm" in _log(tmp_path)
     assert "proj-a" in _log(tmp_path)
-    assert list((tmp_path / "recovery").glob("*.json")) == []   # no attempt persisted
+    persisted = list((tmp_path / "recovery").glob("*.json"))
+    assert len(persisted) == 1                           # only the frozen one is decided
+    st = json.loads(persisted[0].read_text(encoding="utf-8"))
+    assert "attempts" not in st                          # no attempt consumed
+    assert st["last_ts"] and st["last_audit"] == "dry_run:rearm"
 
 
 def test_fire_recovers_reachable_skips_unreachable(tmp_path, monkeypatch) -> None:
@@ -171,3 +177,26 @@ def test_corrupt_state_file_does_not_crash_the_beat(tmp_path, monkeypatch) -> No
     sf.write_text("[1, 2, 3]", encoding="utf-8")   # valid JSON, NOT a dict
     daemon.task_session_liveness()                 # must not raise
     assert len(fired) == 1                          # treated as fresh → recovered
+
+
+def test_an_unreachable_instance_is_not_re_audited_on_every_beat(tmp_path, monkeypatch) -> None:
+    """F9: `attempts`/`last_ts` used to be stamped ONLY on a successful fire, so an instance
+    we DECIDE about but cannot poke — no injection channel (a plain terminal, VS Code's
+    integrated terminal, an ssh session: neither tmux nor iTerm) — never tripped the cooldown.
+    It was re-decided and re-audited on every 120 s beat, forever: ~720 identical records per
+    day per instance, which then drove the 1 MB audit trim to evict the real
+    fired/force_restart history the log exists to preserve.
+
+    Three consecutive beats on an unchanged unreachable instance must record ONCE."""
+    import recovery_audit as ra
+
+    fleet = [_inst("frozen", "/p/proj-a", {})]          # {} = no pane → no channel
+    monkeypatch.setenv("JANITOR_DATA_DIR", str(tmp_path / "data"))
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+    _setup(monkeypatch, tmp_path, fleet, fire="1")
+
+    for _ in range(3):
+        daemon.task_session_liveness()
+
+    outcomes = [r["outcome"] for r in ra.load_records()]
+    assert outcomes == ["unreachable"], f"re-audited every beat: {outcomes}"

@@ -30,7 +30,6 @@ primary guard and is independently unit-testable.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -138,37 +137,47 @@ def trim_recovery_audit(
     keep_lines: int = _KEEP_LINES,
     max_bytes: int = _MAX_BYTES,
 ) -> None:
-    """Cap the append-only audit log — mirror of ``token_meter.trim_log``.
+    """Cap the append-only audit log via the chain's OWN key-signed trim.
 
-    When the file exceeds ``max_bytes``, atomically rewrite it keeping only the last
-    ``keep_lines`` records. Amortised-cheap: only rewrites when oversized.
+    F8 (audit 2026-07-13). This used to hand-roll a naive prefix-drop — keep the last
+    ``keep_lines`` lines, rewrite the file — and its docstring defended the resulting chain
+    break as an intentional trade-off ("a forensic rollup, not a genesis-anchored
+    attestation"). That defence does not survive contact with the facts:
 
-    TRADE-OFF (documented): the audit log is an ``AuditChain`` whose ``prev_hmac``
-    links each entry back to a key-derived genesis. Trimming the PREFIX means a later
-    full-chain ``verify()`` from genesis will report a break at the new first line.
-    That is acceptable AND intentional here: F3 is a forensic *rollup* ("the last N
-    recoveries"), not a genesis-anchored attestation — so bounded size beats an
-    unbounded chain, exactly as ``token_meter`` chose. Each retained record's OWN
-    ``hmac`` still detects in-place tampering of that record; only the cross-line
-    chain back past the trim point is sacrificed. Fail-open: any I/O error leaves the
-    file untouched.
+    - ``AuditChain.trim()`` — a method on the very class this module instantiates — was
+      written (S4, TRDD-7IUTRX29) precisely to cap a chain WITHOUT breaking it, using a
+      key-signed trim-anchor head that keeps ``verify()`` genesis-green. Re-implementing the
+      broken variant beside the fixed one is a defect, not a trade-off.
+    - The break is not a partial loss of evidence, it is a TOTAL one. After the first
+      rotation a full-chain ``verify()`` is indistinguishable from tampering, so nobody can
+      ever run one — and an attacker can then DELETE or REORDER any recovery record with
+      zero detection. (A per-record hmac still catches an in-place edit; it cannot catch a
+      deletion, a reorder, or a truncation — which are exactly the edits that would hide an
+      autonomous kill/relaunch.) This module's own opening docstring promises "the recovery
+      log is tamper-evident for free".
+    - These records are the only forensic trace of the daemon KILLING and RELAUNCHING the
+      user's processes (rungs 5-7). Tamper-evidence matters more here than anywhere.
+
+    Fail-open: any fault leaves the file untouched — an audit fault must never perturb the
+    recovery beat.
     """
     p = path if path is not None else recovery_audit_path()
     try:
-        if not p.is_file() or p.stat().st_size <= max_bytes:
+        key = _resolve_key()
+        if not key:
             return
-        lines = [ln for ln in p.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
-        kept = lines[-keep_lines:]
-        tmp = p.with_name(p.name + ".tmp")
-        tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
-        os.replace(tmp, p)
-    except OSError:
+        jsi.AuditChain(p, key).trim(keep_lines=keep_lines, max_bytes=max_bytes)
+    except Exception:  # noqa: BLE001 -- an audit fault must never perturb the beat
         pass
 
 
 def load_records(path: Path | None = None) -> list[dict]:
     """Every audit record as a dict, file order. Fail-open ``[]`` on a missing /
-    unreadable / malformed file (one bad line is skipped, not fatal)."""
+    unreadable / malformed file (one bad line is skipped, not fatal).
+
+    The chain's key-signed TRIM-ANCHOR head (written by ``AuditChain.trim`` once the log
+    rotates — F8) is chain metadata, not a recovery record, so it is skipped here: it must
+    never surface as a phantom recovery in the dashboard or the rollup."""
     p = path if path is not None else recovery_audit_path()
     if not p.is_file():
         return []
@@ -185,7 +194,7 @@ def load_records(path: Path | None = None) -> list[dict]:
             rec = json.loads(s)
         except ValueError:
             continue
-        if isinstance(rec, dict):
+        if isinstance(rec, dict) and rec.get("type") != jsi.TRIM_ANCHOR_TYPE:
             out.append(rec)
     return out
 
