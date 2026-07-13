@@ -115,6 +115,22 @@ def die(msg: str, code: int = 1) -> NoReturn:
     raise SystemExit(code)
 
 
+# The consent shows — and we `tmux send-keys` — a `<code>#<state>` pair. Once pasted, it is
+# ON THE PANE, so any pane dump we log carries live credential material (audit finding 2).
+# The code is single-use and expires in minutes, so it is inert once claude exchanges it —
+# but if the exchange fails we still logged a code that stays valid for its full lifetime.
+# Redact the pair (not every long token — over-redacting a diagnostic pane dump defeats the
+# reason we print it at all).
+_CODE_STATE_RE = re.compile(r"[A-Za-z0-9_\-]{16,}#[A-Za-z0-9_\-]{8,}")
+
+
+def _redact(text: str) -> str:
+    """`text` with any OAuth `<code>#<state>` pair masked. Applied to EVERY pane dump: the
+    paste can land between our capture and our log, so redacting only the post-paste sites
+    would be a race."""
+    return _CODE_STATE_RE.sub("<code#state redacted>", text or "")
+
+
 def _indent(text: str, prefix: str = "    | ") -> str:
     lines = (text or "(empty)").splitlines() or ["(empty)"]
     return "\n".join(prefix + ln for ln in lines)
@@ -444,7 +460,7 @@ def main(argv: list[str]) -> int:
         log(f"sending login command into the session: {login_cmd}")
         tmux("send-keys", "-t", args.session, login_cmd, "Enter")
         time.sleep(args.startup_wait)
-        log("pane after startup:\n" + _indent(capture_pane(args.session)))
+        log("pane after startup:\n" + _indent(_redact(capture_pane(args.session))))
 
         # 2. Wait for the consent URL. claude opens the browser ITSELF ("Opening
         #    browser to sign in…") and prints "If the browser didn't open, visit:
@@ -457,7 +473,7 @@ def main(argv: list[str]) -> int:
             timeout=args.url_timeout, label="consent URL",
         )
         if pane is None:
-            log("never saw a consent URL. Current pane:\n" + _indent(capture_pane(args.session)))
+            log("never saw a consent URL. Current pane:\n" + _indent(_redact(capture_pane(args.session))))
             log(f"attach to inspect: tmux attach -t {args.session}")
             die("login flow did not print a consent URL.", code=2)
         m = _AUTHORIZE_URL_RE.search(pane)
@@ -484,7 +500,7 @@ def main(argv: list[str]) -> int:
                 ok = True
                 break
             if any(m in low for m in _FAIL_MARKERS):
-                log("login reported a failure marker:\n" + _indent(capture_pane(args.session)[-600:]))
+                log("login reported a failure marker:\n" + _indent(_redact(capture_pane(args.session)[-600:])))
                 break
             if not args.manual:
                 cok, status, code = authorize_and_capture_code(args.cdp_url, authorize_url, intended)
@@ -511,7 +527,7 @@ def main(argv: list[str]) -> int:
                     last_status = status
             time.sleep(args.click_interval)
 
-        log("final pane:\n" + _indent(capture_pane(args.session)))
+        log("final pane (code redacted):\n" + _indent(_redact(capture_pane(args.session))))
 
         # claude printed "Login successful." — now PROVE the keychain token changed
         # and save the new token into the account's slot for rotation.

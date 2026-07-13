@@ -263,10 +263,15 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                     print("[capture] FAILED: never reached the /oauth/code/callback page within 5 min.")
                     return None
                 page.wait_for_timeout(1500)
-                try:
-                    page.screenshot(path=str(rotator.ROOT / "capture-callback.png"))
-                except Exception:
-                    pass
+                # NO SCREENSHOT HERE (audit finding 2). This module's own docstring promises
+                # "no token is printed or logged" — but the /oauth/code/callback page RENDERS
+                # the `<code>#<state>` for manual copy, so a PNG of it is credential material
+                # sitting on disk under ROOT, readable by any same-user process and
+                # overwritten only by the next capture. The code is single-use and expires in
+                # minutes, so it is inert once exchanged — but if the exchange FAILS (a 5xx, a
+                # URLError) we return early and the still-valid code stays on disk for its
+                # full lifetime, replayable. The consent screenshot above is the diagnostic
+                # one, and that page shows no code.
 
                 # 1) Look for the code in known page elements.
                 for sel in CODE_SELECTORS:
