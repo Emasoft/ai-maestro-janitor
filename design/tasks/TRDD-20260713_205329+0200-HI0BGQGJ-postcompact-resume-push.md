@@ -1,13 +1,14 @@
 ---
 trdd-id: HI0BGQGJ
 title: Push the post-compact resume so an idle session wakes in seconds not up to 30 min
-column: planned
+column: testing
 created: 2026-07-13T20:53:29+0200
-updated: 2026-07-13T20:53:29+0200
+updated: 2026-07-13T21:07:00+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: high
 relevant-rules: [3]
+implementation-commits: [307427a]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-13
@@ -33,9 +34,15 @@ the push): keeps parity for attended users (cron still resumes them) and never t
 input line. Opt-out `CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED` (default on); grace
 `CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S` (default 180).
 
-**NEXT ACTION:** implement the four files (below), tests, `uv run pytest -q` + `uv run ruff
-check`, then commit on `main` with `TRDD-HI0BGQGJ` in the subject. Do NOT push (rides next
-release; v0.42.0 holds unpushed commits).
+**STATUS: IMPLEMENTED + tests green (commit 307427a).** `column: testing`. Remaining before
+`complete`: (1) ships on the next `publish.py` release (rides with the other unpushed commits —
+do NOT push standalone); (2) one manual end-to-end confirmation in an iTerm/tmux session — trigger
+`/compact`, confirm a `[janitor-resume]` turn starts within seconds (not on the `*/30` cron) and
+the directive matches the recorded flag. Falsification of the attended gate was verified
+(neuter → `test_push_skips_when_attended` fails; reverted).
+
+**NEXT ACTION:** await the next release for the e2e confirmation, then move to `complete`. Nothing
+forceable now.
 
 **Load-bearing facts / gotchas:**
 - The hook-spawned `resume_trigger.py` inherits the hook's env; the iTerm/tmux session was
