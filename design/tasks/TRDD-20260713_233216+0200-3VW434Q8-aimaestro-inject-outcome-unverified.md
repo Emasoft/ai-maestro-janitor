@@ -3,10 +3,11 @@ trdd-id: 3VW434Q8
 title: The ai-maestro fleet-inject channel reports success on spawn, not on delivery — a failed inject is invisible
 column: testing
 created: 2026-07-13T23:32:16+0200
-updated: 2026-07-13T23:32:16+0200
+updated: 2026-07-13T23:37:52+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
+implementation-commits: [e7c4624]
 severity: high
 labels: [fleet-recovery, ai-maestro, observability]
 relevant-rules: [1]
@@ -55,22 +56,32 @@ with `timeout=6.0`**, checks `sent.returncode != 0`, and on failure returns `Non
 **degrades to the local tmux keystroke send**. That path is correct and needs no change. Only the
 daemon's fleet path threw the outcome away.
 
-**FIX (decided):** in the `aimaestro` branch of `fire()`, replace the detached `Popen` with a
-**bounded** `subprocess.run(argv, timeout=…, capture_output=True, check=False)` and return
-`proc.returncode == 0`. A timeout → `False`. This is *not* a return to blocking-the-daemon: the
-call is a short bounded RPC (the self-trigger path proves 6 s is the right bound), and the
-"never block" comment on that branch was defending against the **ESC-kills-its-launcher** hazard,
-which this channel does not have. The other four channels keep their detached spawn unchanged.
+**FIX (shipped):** in the `aimaestro` branch of `fire()`, the detached `Popen` is replaced with a
+**bounded** `subprocess.run(argv, timeout=AIMAESTRO_CLI_TIMEOUT_S, capture_output=True,
+check=False)` returning `proc.returncode == 0`. A timeout → `False` (`TimeoutExpired` subclasses
+`SubprocessError`, which the branch's existing guard already renders as `False`). This is *not* a
+return to blocking-the-daemon: the call is a short bounded RPC (the self-trigger path proves 6 s is
+the right bound — the constant is shared so the two callers cannot disagree), and the "never block"
+comment on that branch was defending against the **ESC-kills-its-launcher** hazard, which this
+channel does not have. The other four channels keep their detached spawn unchanged.
 
 Once `ok` is truthful, **every downstream consumer becomes correct for free** — no new machinery:
 `_fire_fleet_stop` stops stamping an undelivered stop (so it retries next beat), the daemon logs
 `FIRE-FAILED`, and the audit records `fire_failed`. That is the whole of "detect/surface a failed
 inject": the signal already has three consumers; it was only ever the *sender* that lied.
 
-**NEXT ACTION:** implement the bounded-run change in `scripts/lib/fleet_inject.py`; add tests that
-(a) a non-zero CLI exit → `fire()` is `False`, (b) a zero exit → `True`, (c) a timeout → `False`,
-(d) the four keystroke channels still spawn detached and still return `True` (no regression); then
-falsify each (neuter the returncode check → its test must fail).
+**STATUS: IMPLEMENTED + tests green (commit e7c4624).** `column: testing`. Two existing tests had
+**pinned the broken shape** (asserting the detached `Popen` and its unconditional `True`) — they
+encoded the bug, so they were replaced by delivery-outcome tests: non-zero exit → `False`, timeout
+→ `False`, zero → `True`, plus the bound and `check=False` asserted. Full suite **12887 passed, 1
+skipped**; ruff clean. **Falsification verified:** neutering the check to `return True` failed
+`test_fire_aimaestro_nonzero_exit_is_a_failure`; reverted.
+
+**NEXT ACTION:** (1) ships on the next `publish.py` release — rides with the other unpushed commits,
+do NOT push standalone. (2) Post the janitor's dependency on ai-maestro#54 + janitor#76 (the gate
+must leave a headless-daemon path, or fleet recovery loses this channel). (3) The end-to-end
+confirmation needs a machine where `aimaestro-agent.sh` is actually installed — it is absent here,
+so the channel is dormant and cannot be exercised locally. Then → `complete`.
 
 **Load-bearing facts / gotchas:**
 - The CLI is `aimaestro-agent.sh`, resolved `$AIMAESTRO_CLI` → `~/.local/bin` → `PATH`
