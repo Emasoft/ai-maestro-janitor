@@ -531,6 +531,38 @@ fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
             .entry(d.label.clone())
             .or_insert_with(|| footnote_def_text(&lines, &d.label, d.start, d.end));
     }
+    // Build ONE ResolvedNote from a `[^label]:` definition body.
+    let build = |label: &str, body: &str| -> ResolvedNote {
+        let (meta, rest) = split_note_metadata(body);
+        let (ocd, lmd) = meta
+            .as_deref()
+            .map(parse_meta_dates)
+            .unwrap_or((None, None));
+        let keywords = meta.as_deref().map(parse_note_keywords).unwrap_or_default();
+        let status = meta
+            .as_deref()
+            .map(parse_note_status)
+            .unwrap_or_else(|| "valid".to_string());
+        let id = meta.as_deref().map(parse_note_id).unwrap_or_default();
+        let superseded_by = meta
+            .as_deref()
+            .map(parse_note_superseded_by)
+            .unwrap_or_default();
+        let urls = extract_urls(&rest);
+        ResolvedNote {
+            num: label.to_string(),
+            meta,
+            text: rest,
+            keywords,
+            id,
+            status,
+            superseded_by,
+            ocd,
+            lmd,
+            urls,
+        }
+    };
+
     // Walk refs in body order; emit each referenced def once.
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out = Vec::new();
@@ -539,35 +571,63 @@ fn resolve_notes(path: &Path) -> Vec<ResolvedNote> {
             continue;
         }
         if let Some(body) = def_text.get(&r.label) {
-            let (meta, rest) = split_note_metadata(body);
-            let (ocd, lmd) = meta
-                .as_deref()
-                .map(parse_meta_dates)
-                .unwrap_or((None, None));
-            let keywords = meta.as_deref().map(parse_note_keywords).unwrap_or_default();
-            let status = meta
-                .as_deref()
-                .map(parse_note_status)
-                .unwrap_or_else(|| "valid".to_string());
-            let id = meta.as_deref().map(parse_note_id).unwrap_or_default();
-            let superseded_by = meta
-                .as_deref()
-                .map(parse_note_superseded_by)
-                .unwrap_or_default();
-            let urls = extract_urls(&rest);
-            out.push(ResolvedNote {
-                num: r.label.clone(),
-                meta,
-                text: rest,
-                keywords,
-                id,
-                status,
-                superseded_by,
-                ocd,
-                lmd,
-                urls,
-            });
+            out.push(build(&r.label, body));
         }
+    }
+    // …then every def the body never REFERENCED, in label order.
+    //
+    // A lesson used to be indexed ONLY if some `[^N]` in the body pointed at it, so an author who
+    // wrote the definition under "## Notes and lessons learned" without anchoring it — an easy and
+    // silent mistake, and one I made writing this very corpus — got a lesson that existed on disk,
+    // read fine to a human, and was INVISIBLE to `memgrep recall`. In a system whose one promise is
+    // "never lose a memory", a lesson you cannot find is a lesson you have lost. Anchoring is still
+    // the correct authoring (a lesson annotates a fact, and the link law wants both ends), but the
+    // INDEX must never be the thing that drops knowledge on the floor. Fail-safe: index it anyway.
+    //
+    // The orphans are recovered from the RAW TEXT, not from `ctx.footnote_defs`: comrak's footnote
+    // extension only emits a definition it can attach to a reference, so an unreferenced one never
+    // becomes an AST node at all — which is precisely why the drop was silent.
+    for (label, body) in raw_footnote_defs(&lines) {
+        if seen.insert(label.clone()) {
+            out.push(build(&label, &body));
+        }
+    }
+    out
+}
+
+/// Every `[^label]: …` definition in the raw source, label → body (continuation lines folded in),
+/// INCLUDING the ones no `[^label]` reference points at — the ones comrak discards.
+///
+/// A definition runs until the next definition, the next ATX heading, or EOF. Deliberately dumb: it
+/// is a safety net under the real parser, not a second markdown implementation.
+fn raw_footnote_defs(lines: &[&str]) -> BTreeMap<String, String> {
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    let mut cur: Option<(String, String)> = None;
+    for raw in lines {
+        let line = raw.trim_end();
+        let starts_def = line.starts_with("[^") && line.contains("]:");
+        if starts_def || line.trim_start().starts_with('#') {
+            if let Some((label, body)) = cur.take() {
+                out.entry(label).or_insert(body);
+            }
+        }
+        if starts_def {
+            let close = line.find("]:").unwrap(); // guarded by `contains` above
+            let label = line[2..close].to_string();
+            let body = line[close + 2..].trim_start().to_string();
+            if !label.is_empty() {
+                cur = Some((label, body));
+            }
+            continue;
+        }
+        if let Some((_, body)) = cur.as_mut() {
+            // Fold a continuation line in, exactly as the resolved-note body reads.
+            body.push('\n');
+            body.push_str(line);
+        }
+    }
+    if let Some((label, body)) = cur {
+        out.entry(label).or_insert(body);
     }
     out
 }
@@ -3004,6 +3064,48 @@ body of b
         // truncate_chars is a no-op below the cap and char-safe (never splits a UTF-8 boundary).
         assert_eq!(truncate_chars("short".to_string(), 64), "short");
         assert_eq!(truncate_chars("héllo_wörld".to_string(), 5).chars().count(), 5);
+    }
+
+    #[test]
+    fn an_unreferenced_lesson_is_still_indexed() {
+        // A lesson used to be resolved ONLY if some `[^N]` in the body pointed at it. Writing the
+        // definition under "## Notes and lessons learned" WITHOUT anchoring it — an easy, silent
+        // authoring slip — produced a lesson that existed on disk, read fine to a human, and was
+        // invisible to recall. In a system whose one promise is "never lose a memory", a lesson you
+        // cannot find is a lesson you have lost. It must be indexed either way, with its metadata.
+        let dir = std::env::temp_dir().join(format!("memgrep_orphannote_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let page = "\
+---
+name: p
+description: d
+---
+The anchored fact.[^1]
+
+## Notes and lessons learned
+[^1]: [id:ATOM-1111-AAAA, status:valid, keywords:\"anchored one\", ocd:2026-07-13, lmd:2026-07-13]
+  DO NOT do the anchored thing, BECAUSE reasons. DO the other thing instead.
+[^2]: [id:ATOM-2222-BBBB, status:superseded, superseded-by:ATOM-3333-CCCC, keywords:\"orphan lesson never anchored\", ocd:2026-07-13, lmd:2026-07-13]
+  DO NOT drop an unanchored lesson, BECAUSE it is still knowledge. DO index it anyway.
+";
+        let path = dir.join("p.md");
+        std::fs::write(&path, page).unwrap();
+
+        let notes = resolve_notes_public(&path);
+        let labels: Vec<&str> = notes.iter().map(|n| n.num.as_str()).collect();
+        assert!(labels.contains(&"1"), "anchored lesson missing: {labels:?}");
+        assert!(
+            labels.contains(&"2"),
+            "UNANCHORED lesson was silently dropped from the index: {labels:?}"
+        );
+
+        // …and it keeps its metadata, so it is findable by key-phrase and its supersession is known.
+        let orphan = notes.iter().find(|n| n.num == "2").unwrap();
+        assert_eq!(orphan.id, "ATOM-2222-BBBB");
+        assert_eq!(orphan.status, "superseded");
+        assert_eq!(orphan.superseded_by, "ATOM-3333-CCCC");
+        assert!(orphan.keywords.contains("orphan"), "{:?}", orphan.keywords);
     }
 
     #[test]

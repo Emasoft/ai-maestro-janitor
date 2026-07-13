@@ -78,7 +78,16 @@ pub fn open_existing(root: &Path) -> Option<Connection> {
 /// tables. v3 (TRDD-056384eb) adds the `atoms.desc` column (a ≤64-char one-line atom summary). On a
 /// version bump `apply_schema` migrates an older DB forward by clearing the change-detection ledger so
 /// the next `reindex` re-parses every file (and thus fills the new column). See [`apply_schema`].
-const SCHEMA_VERSION: i64 = 4;
+/// v5 exists because v4 was extended AFTER it had already been applied to live DBs.
+///
+/// A SHIPPED SCHEMA VERSION IS IMMUTABLE. v4 first landed with only `notes.keywords`; the
+/// `notes.atom_id` / `status` / `superseded_by` columns were added to the SAME version a few
+/// commits later. Any index built by the interim binary already carried `user_version = 4`, so
+/// `ver < SCHEMA_VERSION` was false and the migration was skipped FOREVER — the three columns
+/// could never appear, and a lesson's `id:` / `status:` / `superseded-by:` silently never
+/// indexed, on exactly the corpora that were being actively used. Rebuilding the binary did not
+/// help: the version said "already migrated". Adding a column ALWAYS needs a NEW version number.
+const SCHEMA_VERSION: i64 = 5;
 
 /// Create every table + virtual table + B-tree index, idempotently (`IF NOT EXISTS`). Exactly the
 /// schema the spec pins:
@@ -794,6 +803,67 @@ pub fn is_fresh(root: &Path, files: &[PathBuf]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every column the DDL declares must actually EXIST on the live table — including on a DB
+    /// created by an OLDER binary. This is the guard that was missing when v4 was extended in
+    /// place: the interim binary stamped `user_version = 4` with only `notes.keywords`, so the
+    /// later `atom_id`/`status`/`superseded_by` ALTERs were skipped forever (`4 < 4` is false) and
+    /// a lesson's id/status/superseded-by silently never indexed. A schema version is IMMUTABLE
+    /// once shipped; adding a column needs a NEW version.
+    fn columns_of(conn: &Connection, table: &str) -> Vec<String> {
+        let mut st = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let rows = st
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        rows
+    }
+
+    const NOTES_COLUMNS: [&str; 11] = [
+        "id", "memory_id", "label", "atom_id", "keywords", "status", "superseded_by", "ocd",
+        "lmd", "body", "urls",
+    ];
+
+    #[test]
+    fn fresh_db_has_every_declared_notes_column() {
+        let d = tmp("fresh_schema");
+        let conn = open(&d).unwrap();
+        let cols = columns_of(&conn, "notes");
+        for want in NOTES_COLUMNS {
+            assert!(cols.iter().any(|c| c == want), "notes.{want} missing: {cols:?}");
+        }
+    }
+
+    #[test]
+    fn a_db_left_at_an_older_version_gains_the_missing_columns() {
+        // Reproduce the shipped bug exactly: a `notes` table WITHOUT the three late-added columns,
+        // already stamped with a version the migration would have considered current.
+        let d = tmp("stale_schema");
+        std::fs::create_dir_all(d.join(".memgrep")).unwrap();
+        let db = db_path(&d);
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE notes (
+                     id INTEGER PRIMARY KEY, memory_id INTEGER, label TEXT,
+                     ocd TEXT, lmd TEXT, body TEXT, urls TEXT, keywords TEXT
+                 );
+                 PRAGMA user_version = 4;",
+            )
+            .unwrap();
+        }
+        let conn = open(&d).unwrap(); // must migrate it forward, not shrug
+        let cols = columns_of(&conn, "notes");
+        for want in ["atom_id", "status", "superseded_by"] {
+            assert!(
+                cols.iter().any(|c| c == want),
+                "notes.{want} was never added to a pre-existing table: {cols:?}"
+            );
+        }
+    }
 
     /// A throwaway corpus dir under the system temp, named by the caller for isolation.
     fn tmp(name: &str) -> PathBuf {
