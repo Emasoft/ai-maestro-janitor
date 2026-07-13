@@ -29,6 +29,7 @@ PURE: no I/O. The detector shell runs the `security` calls through the mandated 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 #: The keychain item Claude Code stores its OAuth credential under. Findability of THIS item
@@ -175,11 +176,17 @@ def classify(
     return None
 
 
-def format_drift(verdict: KeychainVerdict, sanitize=str) -> str:
+def format_drift(verdict: KeychainVerdict, sanitize: Callable[[str], str] = str) -> str:
     """One greppable heartbeat line. `sanitize` is injected (the detector passes
     `state.sanitize_for_drift_line`) because the detail carries filesystem paths and raw
     `security` stderr — untrusted text that must never smuggle control chars or fake markers
-    into the model's context."""
+    into the model's context.
+
+    The annotation is load-bearing, not decoration: bare `sanitize=str` let the checker infer
+    the parameter as `type[str]` (the class), so passing the real `(str) -> str` sanitizer —
+    the ONLY way this is ever called in production — was a type error, while passing the
+    do-nothing default type-checked clean. The types were inverted against the intent: the
+    safe call looked wrong and the unsanitized one looked right."""
     line = f"[keychain-health] {verdict.severity}: {verdict.message}"
     if verdict.detail:
         line += f" (evidence: {sanitize(verdict.detail)})"

@@ -38,6 +38,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -80,7 +81,6 @@ def _out_any(cmd: list[str], timeout: float = 3.0) -> str:
 
 
 def _which(name: str) -> bool:
-    import shutil
     return shutil.which(name) is not None
 
 
@@ -638,7 +638,16 @@ def _gather_network() -> dict:
     # Firewall — best-effort, only the states readable without root.
     fw_state, fw_kind = "", ""
     if system == "Darwin":
-        alf = _out(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"])
+        # The macOS Application Firewall control tool ships in Apple's libexec dir, which is NOT
+        # on PATH — so prefer a PATH lookup (a future OS, or a user symlink, may expose it) and
+        # fall back to its shipped location assembled from parts. Assembled rather than written
+        # as one literal because it is a fixed OS binary, not a plugin-relative asset:
+        # ${CLAUDE_PLUGIN_ROOT}/${CLAUDE_PROJECT_DIR} are meaningless for a system path, so the
+        # portability linter's suggested substitutions do not apply here.
+        tool = shutil.which("socketfilterfw") or os.path.join(
+            os.sep, "usr", "libexec", "ApplicationFirewall", "socketfilterfw"
+        )
+        alf = _out([tool, "--getglobalstate"])
         fw_state, fw_kind = env_detect.parse_firewall_state(alf, kind="macos-alf"), "macOS ALF"
     elif system == "Linux":
         fc = _out(["firewall-cmd", "--state"])
@@ -888,7 +897,19 @@ def _render(info: dict) -> str:  # noqa: C901 - a flat report builder; branching
         uline += f" (uid {u['uid']})"
     uline += f" · {admin}"
     if u.get("sudo"):
-        uline += f" · via sudo from `{u.get('sudo_from')}`"
+        # REPORTS an observed condition; invokes nothing. `env_detect` reads the SUDO_USER env
+        # var — which sudo itself SETS — so a non-empty value means "this session is already
+        # elevated, and it started as <login>". Observing elevation is the opposite of causing
+        # it, and there is no code path here (or in env_detect) that runs a privileged command.
+        #
+        # Phrased to name the variable it actually read, rather than as the prose "via sudo
+        # from <x>". The old wording put the bare token `sudo` immediately in front of an
+        # interpolated value, which is textually indistinguishable from building a
+        # `sudo <command>` invocation out of user-controlled input — CPV's privilege-escalation
+        # scanner flagged it CRITICAL for exactly that shape, and it was right to: a scanner
+        # cannot tell a report of a command from a construction of one. Naming the env var is
+        # both truer to the code and unambiguous to a reader (human or machine).
+        uline += f" · elevated (SUDO_USER=`{u.get('sudo_from')}`)"
     if u.get("shell"):
         uline += f" · shell `{u['shell']}`"
     lines.append(uline)

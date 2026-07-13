@@ -35,6 +35,13 @@ import sys
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
+# The PATH fragments that identify a Homebrew install. PUBLIC because `env_detect`'s PATH audit
+# has to recognise the same locations this module PREPENDS — two hand-maintained copies of
+# "where Homebrew lives" would drift the first time a prefix changed, and the drift would be
+# silent (the daemon would find tmux while the environment report claimed Homebrew was absent).
+# One list, one owner.
+HOMEBREW_PATH_MARKERS: tuple[str, ...] = ("/opt/homebrew", "/usr/local/bin")
+
 # Standard user/package-manager prefixes a login shell would have contributed.
 # Ordered most-likely-first; every one is probed for existence before use.
 _MACOS_PREFIXES: tuple[str, ...] = (

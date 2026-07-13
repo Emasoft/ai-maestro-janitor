@@ -36,6 +36,8 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Optional
 
+import daemon_path  # sibling in scripts/lib/ (the caller puts lib on sys.path)
+
 # --- secret-safety ----------------------------------------------------------
 
 # A key is treated as secret-bearing (VALUE never emitted) if it matches any of
@@ -737,7 +739,13 @@ def detect_path(env: Mapping[str, str]) -> dict:
     raw = env.get("PATH") or ""
     entries = [p for p in raw.split(os.pathsep) if p]
     notable = {
-        "homebrew": any("brew" in p or "/opt/homebrew" in p or "/usr/local/bin" in p for p in entries),
+        # Homebrew's locations come from daemon_path, which is the module that PREPENDS them —
+        # see HOMEBREW_PATH_MARKERS. Re-listing them here would be a second copy of the same
+        # fact, free to drift silently away from the one the daemon actually uses.
+        "homebrew": any(
+            "brew" in p or any(m in p for m in daemon_path.HOMEBREW_PATH_MARKERS)
+            for p in entries
+        ),
         "cargo": any(".cargo/bin" in p for p in entries),
         "go": any("/go/bin" in p or "go/bin" in p for p in entries),
         "user_local": any(p.rstrip("/").endswith(".local/bin") for p in entries),
