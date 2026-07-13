@@ -1048,3 +1048,57 @@ def test_verify_merge_conflict_still_guards_the_retired_pages_lessons():
         fact_source_texts=[survivor],
     )
     assert not ok and any("lesson" in r for r in reasons), reasons
+
+
+# ---- F11: a lesson body must not be truncated by its own quoted `#` line ----
+
+def test_extract_lessons_does_not_truncate_at_a_shell_comment_in_the_body():
+    """F11: the heading-stop `^#{1,6}\\s` also matched a SHELL COMMENT at column 0 inside a
+    lesson that quotes a command. The truncation applied to source and result alike, so it
+    could not false-fail — that is the problem: everything after that line silently fell
+    OUTSIDE the sacred never-lost layer, and an editorial pass could drop it while still
+    passing a check that advertises itself as STRICT."""
+    text = (
+        "## Notes and lessons learned\n"
+        "[^1]: DO NOT stage with a wildcard, BECAUSE it sweeps in secrets. Use:\n"
+        "# never use git add -A\n"
+        "git add file1.ts file2.ts\n"
+        "DO name every file instead.\n"
+    )
+    lessons = v.extract_lessons(text)
+    assert len(lessons) == 1
+    assert "do name every file instead" in lessons[0].lower(), lessons
+
+
+def test_extract_lessons_still_stops_at_a_real_section_heading():
+    """The L-2 stop must survive F11: a trailing `## See also` is NOT part of the last
+    lesson (swallowing it contaminates the comparison and false-fails legitimate moves)."""
+    text = (
+        "## Notes and lessons learned\n"
+        "[^1]: DO NOT trust the cached count, BECAUSE it lags. DO re-read the source.\n"
+        "\n## See also\n"
+        "- [[some-other-page]]\n"
+    )
+    lessons = v.extract_lessons(text)
+    assert len(lessons) == 1
+    assert "see also" not in lessons[0].lower()
+    assert "some-other-page" not in lessons[0].lower()
+
+
+def test_extract_lessons_keeps_code_a_lesson_quotes_inside_a_fence():
+    """Fenced code is masked only to find BOUNDARIES — the lesson's real content (the code it
+    quotes) must survive into the compared body, or it would fall outside the never-lost
+    layer too."""
+    text = (
+        "## Notes and lessons learned\n"
+        "[^1]: DO NOT use the wildcard form, BECAUSE it stages secrets:\n"
+        "```bash\n"
+        "# Setup\n"
+        "git add -A\n"
+        "```\n"
+        "DO stage by name instead.\n"
+    )
+    lessons = v.extract_lessons(text)
+    assert len(lessons) == 1
+    assert "git add -a" in lessons[0].lower()               # the quoted code survived
+    assert "do stage by name instead" in lessons[0].lower()  # ...and the fence did not stop it

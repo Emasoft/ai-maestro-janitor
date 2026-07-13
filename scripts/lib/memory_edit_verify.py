@@ -153,9 +153,23 @@ def extract_lessons(text: str) -> list[str]:
     # `## See also`) is swallowed into the LAST lesson's body, contaminating
     # lessons_preserved's comparison and false-failing edits that legitimately
     # move that section.
+    #
+    # F11 (audit 2026-07-13): but `^#{1,6}\s` also matched a SHELL COMMENT at column 0
+    # inside a lesson that quotes a command (`# never use git add -A`) — truncating the
+    # lesson there. The truncation is applied to source AND result alike, so it cannot
+    # false-fail; that is exactly the problem. Everything past that line silently fell
+    # OUTSIDE the sacred never-lost layer, and an editorial pass could drop it and still
+    # pass a check that advertises itself as STRICT. A real markdown section heading is
+    # followed by a capital or a bracket (`## Notes…`, `## [Link]…`); `# never use …` is
+    # not. Fenced code is masked first, so a `# comment` inside a ``` block cannot stop a
+    # lesson either.
+    scan = _mask_code_fences(text)          # offset-preserving, so spans index `text` too
     out: list[str] = []
-    for m in re.finditer(r"(?ms)^\[\^[^\]]+\]:.*?(?=^\[\^[^\]]+\]:|^#{1,6}\s|\Z)", text):
-        norm = _normalize_lesson(m.group(0))
+    for m in re.finditer(r"(?ms)^\[\^[^\]]+\]:.*?(?=^\[\^[^\]]+\]:|^#{1,6} [A-Z(\[]|\Z)", scan):
+        # Slice the ORIGINAL text: the mask exists only to stop a `#`/`[^id]` INSIDE a fence
+        # from being read as a boundary — the lesson's real content (code included) is what
+        # must be compared.
+        norm = _normalize_lesson(text[m.start():m.end()])
         if norm:
             out.append(norm)
     return out
@@ -416,18 +430,26 @@ _FN_ANY_RE = re.compile(r"\[\^([^\]]+)\]")          # ANY `[^id]` occurrence (re
 
 
 def _mask_code_fences(text: str) -> str:
-    """`text` with every fenced-code line blanked (line structure preserved).
+    """`text` with every fenced-code line blanked to SPACES (line structure AND character
+    offsets preserved).
     L-4 (wikimem audit 2026-07-07): a page DOCUMENTING footnote syntax inside a
     ``` fence read as having a dangling `[^id]` ref, permanently failing every
-    merge/split/repair that touched it — fence contents are examples, not refs."""
+    merge/split/repair that touched it — fence contents are examples, not refs.
+
+    Offsets are preserved (F11) because `extract_lessons` scans the MASKED text to find each
+    lesson's boundaries but must slice the ORIGINAL text to keep the lesson's real content —
+    including any code it quotes. Blanking to same-length spaces makes span(masked) ==
+    span(original)."""
     out: list[str] = []
     in_fence = False
     for line in text.splitlines(keepends=True):
-        if line.lstrip().startswith("```"):
+        stripped = line.rstrip("\n")
+        nl = line[len(stripped):]
+        if stripped.lstrip().startswith("```"):
             in_fence = not in_fence
-            out.append("\n" if line.endswith("\n") else "")
+            out.append(" " * len(stripped) + nl)
             continue
-        out.append(("\n" if line.endswith("\n") else "") if in_fence else line)
+        out.append((" " * len(stripped) + nl) if in_fence else line)
     return "".join(out)
 
 

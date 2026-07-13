@@ -241,7 +241,26 @@ class MemoryTxn:
             "sources": self.sources, "writes": self.writes, "deletes": self.deletes,
             "write_hashes": self.write_hashes,
         }
-        state.atomic_write(self.journal_path, json.dumps(data, indent=2, sort_keys=True))
+        # F12: DURABLE, not merely atomic. `state.atomic_write` (tmp + os.replace) is atomic
+        # with respect to other PROCESSES, which covers process death — the page cache
+        # survives that. It does not survive a power loss or a kernel panic, where the classic
+        # outcome is "the rename is durable but the file contents are not" → a ZERO-LENGTH
+        # journal. This journal is the ONLY roll-forward path for a half-applied live tree, so
+        # it must be durable; fsync the file, then the directory (which is what makes the
+        # RENAME itself durable). state.atomic_write stays as-is — it is used on hot
+        # per-session paths where this cost is not worth paying.
+        blob = json.dumps(data, indent=2, sort_keys=True)
+        tmp = self.journal_path.with_name(f"{self.journal_path.name}.tmp.{os.getpid()}")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(blob)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, self.journal_path)
+        dir_fd = os.open(str(self.journal_path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
 
     @classmethod
     def _load(cls, journal_path: Path) -> "MemoryTxn":
