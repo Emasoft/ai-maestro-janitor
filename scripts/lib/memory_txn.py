@@ -61,6 +61,18 @@ class MemoryTxnError(Exception):
     contention, or the editor kill-gate is engaged). Callers abort + re-surface."""
 
 
+class MemoryTxnConflict(MemoryTxnError):
+    """A roll-forward found a source page changed since the txn began, so the txn was
+    ABANDONED with nothing mutated (F1, audit 2026-07-13).
+
+    Distinct from its parent because the handling is different: an ordinary
+    `MemoryTxnError` means the txn never started applying and should be discarded, while
+    this one means the txn is still VALID but cannot be completed safely right now. Its
+    live pages and its staging tree are BOTH intact, and the caller must therefore leave
+    the journal alone — advancing the phase or cleaning the staging dir would throw away
+    the very content this exception was raised to protect."""
+
+
 # --------------------------------------------------------------------------- #
 # kill gate
 # --------------------------------------------------------------------------- #
@@ -312,33 +324,79 @@ class MemoryTxn:
         M-1 (wikimem audit 2026-07-07): a roll-forward can run MINUTES TO HOURS
         after the crash (next heartbeat), and a user `janitor-memory-write` may
         have landed on a source page in that window. The commit-time re-hash only
-        guards the live commit; here each write/delete whose target rel is a
-        recorded SOURCE re-checks the live sha against the journal's begin-time
-        hash and SKIPS on mismatch — the NEWER user content is preserved (the
-        never-lose-a-memory charter beats completing the stale swap; a preserved
-        duplicate re-surfaces on the next consolidate pass). Returns one line per
-        skipped target so resume can surface the decision."""
-        skipped: list[str] = []
+        guards the live commit, so the roll-forward must re-check each source's
+        live sha against the journal's begin-time hash.
+
+        F1 (audit 2026-07-13) — THE CHECK IS PER-TRANSACTION, NOT PER-FILE. M-1
+        originally decided each write and each delete independently, which tears a
+        merge in half. A merge is ONE indivisible mutation — `write(survivor) ∧
+        delete(retired)` — and the DELETE IS WHAT PAYS FOR THE WRITE. Skipping the
+        write while still running the delete removes the retired page, and the merged
+        page (which held the retired page's facts AND its `[^N]` lessons) then dies
+        with the staging tree in `_cleanup()`. Net: content that existed nowhere else
+        is gone, reported by a single line that does not even mention a page was
+        destroyed. That is precisely the outcome the journal exists to prevent, in the
+        one module whose charter is "never lose a memory".
+
+        Worse, that is the LIKELIER direction: the survivor is the page a user is more
+        apt to be editing, because it is the one that still exists and is recall-visible.
+
+        So: decide everything first, mutate nothing until every target is proven
+        current, and on ANY stale source ABANDON THE WHOLE TRANSACTION — mutating
+        nothing, deleting nothing, and leaving the staging tree intact so the merged
+        page remains recoverable. Completing a stale swap would destroy the user's
+        newer edit; half-completing it destroys a page outright. Refusing costs one
+        deferred merge, which the next pass redoes from current content.
+
+        Raises `MemoryTxnConflict` (nothing mutated) when a source moved under us.
+        Returns one line per no-op target otherwise."""
+        # ---- PHASE 1 — DECIDE. No mutation may happen in this loop. ----
+        conflicts: list[str] = []
+        pending_writes: list[str] = []
+        pending_deletes: list[str] = []
+
         for rel in self.writes:
             staged = self.staging_dir / rel
             live = self.scope_root / rel
-            if staged.exists():
-                want = self.sources.get(rel)
-                if want is not None and live.exists() and _sha256_file(live) != want:
-                    skipped.append(f"skipped write {rel}: live content newer than the journal snapshot")
-                    continue
-                live.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(staged, live)
-            # staged gone ⇒ a prior (crashed) commit already applied this write → skip
+            want = self.sources.get(rel)
+            if not staged.exists():
+                # staged gone ⇒ a prior (crashed) commit already applied this write
+                # (os.replace is atomic), so there is nothing left to do for it.
+                continue
+            if want is not None and live.exists() and _sha256_file(live) != want:
+                conflicts.append(f"write {rel}: live page changed since the journal snapshot")
+                continue
+            pending_writes.append(rel)
+
         for rel in self.deletes:
             live = self.scope_root / rel
-            if live.exists():
-                want = self.sources.get(rel)
-                if want is not None and _sha256_file(live) != want:
-                    skipped.append(f"skipped delete {rel}: live content newer than the journal snapshot")
-                    continue
-                live.unlink()
-        return skipped
+            if not live.exists():
+                continue  # already deleted by a crashed commit — idempotent
+            want = self.sources.get(rel)
+            if want is not None and _sha256_file(live) != want:
+                conflicts.append(f"delete {rel}: live page changed since the journal snapshot")
+                continue
+            pending_deletes.append(rel)
+
+        if conflicts:
+            # Abandon. The live tree and the staging tree are BOTH untouched, so no
+            # knowledge is lost — the caller must NOT advance the phase and must NOT
+            # clean the staging dir.
+            raise MemoryTxnConflict(
+                "roll-forward abandoned — a source page changed since this txn began, and "
+                "applying only part of it would destroy a page: "
+                + "; ".join(conflicts)
+                + f". Nothing was mutated. The merged content is preserved in {self.staging_dir}."
+            )
+
+        # ---- PHASE 2 — MUTATE. Every target above was proven current. ----
+        for rel in pending_writes:
+            live = self.scope_root / rel
+            live.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(self.staging_dir / rel, live)
+        for rel in pending_deletes:
+            (self.scope_root / rel).unlink()
+        return []
 
     def abort(self) -> None:
         """Discard a not-yet-committed transaction. Safe to call any time before
@@ -409,9 +467,8 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
                     txn._persist()
                 txn._cleanup()
                 acted.append(f"rolled-forward {txn.txn_id}")
-                # Surface every target the M-1 guard preserved (a concurrent edit
-                # landed in the crash window) — silent data-preservation is still a
-                # divergence from the txn's intended end-state; a human/agent should see it.
+                # Surface every no-op target (a step a crashed commit had already
+                # applied) — a divergence from the intended end-state a human should see.
                 acted.extend(f"{line} ({txn.txn_id})" for line in skipped)
             elif txn.phase == _PHASE_STAGING:
                 try:
@@ -421,6 +478,16 @@ def resume_pending(scope_root, stale_seconds: int = _STALE_SECONDS_DEFAULT) -> l
                 if now - max(fresh_ts, txn.started_at) > stale_seconds:
                     txn._cleanup()
                     acted.append(f"discarded stale {txn.txn_id}")
+        except MemoryTxnConflict as exc:
+            # F1: NOT a failure — a deliberate, safe refusal. `_apply` proved a source page
+            # changed under us and abandoned BEFORE mutating anything, so the live tree and
+            # the staging tree are both intact. We must therefore leave the journal in
+            # `committing` (do NOT advance the phase, do NOT clean the staging dir): the txn
+            # stays rollable-forward, and the merged content stays recoverable. Reported
+            # distinctly from FAILED because "FAILED" reads as breakage, and an operator who
+            # believes something broke may go "clean up" the very staging dir that is now the
+            # only copy of the merged page.
+            acted.append(f"CONFLICT {txn.txn_id}: {exc}")
         except Exception as exc:  # noqa: BLE001 — M-7: isolate per-journal failures
             # One poisoned txn (e.g. a permanent I/O error inside its _apply) must
             # not wedge every later journal — and the skills invoke resume at the

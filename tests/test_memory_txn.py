@@ -355,10 +355,12 @@ def test_resume_refuses_hostile_journal_with_escaping_delete(tmp_path):
 # after the crash; a user edit that landed on a SOURCE page in that window must
 # be PRESERVED (skip the stale write/delete), never silently clobbered.
 
-def test_roll_forward_preserves_concurrent_edit_over_stale_delete(tmp_path):
-    """A merge crashed in phase=committing; the user then edits a to-be-deleted
-    source page. Resume must apply the rest, SKIP that delete (the live content
-    is newer than the journal snapshot), and surface the skip."""
+def test_roll_forward_abandons_whole_txn_when_a_delete_source_was_edited(tmp_path):
+    """A merge crashed in phase=committing; the user then edits a to-be-deleted source.
+    The txn is ABANDONED WHOLE (F1): nothing mutated, both live pages intact, staging
+    kept. Applying "the rest" would write a c.md merged from the STALE b.md while ALSO
+    keeping the user's new b.md — a merged page carrying outdated content. Re-merging
+    from current content on the next pass is both safe and more correct."""
     scope = _scope(tmp_path)
     txn = MemoryTxn.begin(scope, "merge", ["a.md", "b.md"])
     txn.stage_write("c.md", "MERGED")
@@ -371,18 +373,17 @@ def test_roll_forward_preserves_concurrent_edit_over_stale_delete(tmp_path):
     (scope / "b.md").write_text(user_edit, encoding="utf-8")
 
     acted = memory_txn.resume_pending(scope)
-    assert any("rolled-forward" in a for a in acted)
-    assert any("skipped delete b.md" in a for a in acted), acted
-    assert (scope / "c.md").read_text(encoding="utf-8") == "MERGED"   # rest applied
-    assert not (scope / "a.md").exists()                              # unchanged source deleted
+    assert any("CONFLICT" in a for a in acted), acted
+    assert not (scope / "c.md").exists()                              # nothing written
+    assert (scope / "a.md").exists()                                  # nothing deleted
     assert (scope / "b.md").read_text(encoding="utf-8") == user_edit  # newer content preserved
-    assert not txn.staging_dir.exists()
+    assert txn.staging_dir.exists(), "staging must survive — it holds the merged page"
+    assert txn.journal_path.exists(), "the txn stays rollable-forward"
 
 
-def test_roll_forward_preserves_concurrent_edit_over_stale_write(tmp_path):
-    """An in-place repair crashed in phase=committing; the user then edits the
-    page. Resume must NOT overwrite the newer user content with the stale staged
-    result — skip the write and surface it."""
+def test_roll_forward_abandons_whole_txn_when_the_write_target_was_edited(tmp_path):
+    """An in-place repair crashed in phase=committing; the user then edits the page.
+    Resume must NOT overwrite the newer user content with the stale staged result."""
     scope = _scope(tmp_path)
     txn = MemoryTxn.begin(scope, "repair", ["a.md"])
     txn.stage_write("a.md", "---\nname: a\n---\n\nREPAIRED (stale).\n")
@@ -392,9 +393,49 @@ def test_roll_forward_preserves_concurrent_edit_over_stale_write(tmp_path):
     (scope / "a.md").write_text(user_edit, encoding="utf-8")
 
     acted = memory_txn.resume_pending(scope)
-    assert any("skipped write a.md" in a for a in acted), acted
+    assert any("CONFLICT" in a for a in acted), acted
     assert (scope / "a.md").read_text(encoding="utf-8") == user_edit
-    assert not txn.staging_dir.exists()  # txn still completes + cleans
+    assert txn.staging_dir.exists()
+
+
+def test_roll_forward_never_deletes_a_page_whose_merged_survivor_was_skipped(tmp_path):
+    """F1 REGRESSION — the CRITICAL one. THE data-loss path.
+
+    A merge is ONE indivisible mutation: write(survivor) ∧ delete(retired), where the
+    DELETE PAYS FOR THE WRITE. The old code decided the two loops independently, so when
+    the survivor's write was skipped (the user edited it in the crash window) the delete
+    of the retired page RAN ANYWAY — and `_cleanup()` then rmtree'd the staging dir that
+    held the only copy of the merged page. Result: b.md's facts and its `[^N]` lessons
+    existed NOWHERE, reported by a line that never mentioned a page was destroyed.
+
+    This is the likelier direction, too: the survivor is the page a user is more apt to be
+    editing, because it is the one that still exists and is recall-visible.
+
+    Falsification: revert `_apply` to the per-file skip and this test fails on the
+    `b.md` assertion — it is the whole point."""
+    scope = _scope(tmp_path)
+    # a.md is the SURVIVOR (merged into, in place); b.md is RETIRED (its facts fold in).
+    txn = MemoryTxn.begin(scope, "merge", ["a.md", "b.md"])
+    txn.stage_write("a.md", "---\nname: a\n---\n\nFact A. Fact B (folded in).\n")
+    txn.stage_delete("b.md")
+    txn.phase = "committing"
+    txn._persist()
+
+    # The crash window: the user edits the SURVIVOR — an entirely ordinary thing to do.
+    user_edit = "---\nname: a\n---\n\nFact A — user just edited.\n"
+    (scope / "a.md").write_text(user_edit, encoding="utf-8")
+
+    acted = memory_txn.resume_pending(scope)
+
+    # THE assertion: the retired page must still exist. Its content lives nowhere else.
+    assert (scope / "b.md").exists(), (
+        "b.md was DELETED while the merged survivor that absorbed it was skipped — "
+        "its facts and lessons now exist nowhere. This is F1."
+    )
+    assert (scope / "b.md").read_text(encoding="utf-8") == "---\nname: b\n---\n\nFact B.\n"
+    assert (scope / "a.md").read_text(encoding="utf-8") == user_edit  # user's edit intact
+    assert any("CONFLICT" in a for a in acted), acted
+    assert txn.staging_dir.exists(), "the merged page must remain recoverable"
 
 
 # H-2 regression (wikimem audit 2026-07-07): a failure DURING the committing
