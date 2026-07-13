@@ -26,10 +26,13 @@ SAFETY (Tier-2 discipline):
     plan routes them to /janitor-github-workflow-doctor and /janitor-security-agent.
 
 CI-context note: apply_baseline_rulesets auto-detects the required status-check contexts from
-`.github/workflows/` of the LOCAL checkout. So the check contexts are detected only for a repo
-whose working tree is the current directory; for a remote fleet repo we don't have locally, the
-checks rule is still installed but gates on no specific contexts until you re-run this from that
-repo's checkout. The merge-jam + unprotected fixes do NOT depend on that.
+`.github/workflows/` of the LOCAL checkout. So contexts are detected only for the repo whose
+working tree is the current directory. For a remote fleet repo we don't have locally, the
+`required_status_checks` RULE IS OMITTED — GitHub 422s an empty contexts array and that 422
+fails the whole ruleset write, so emitting it would take the `pull_request` gate down with it
+(observed live: 11 of 12 fleet repos 422'd while the one repo that WAS the cwd succeeded).
+The PR-review gate still lands everywhere; re-run this from a repo's own checkout to add its
+checks rule. The merge-jam + unprotected fixes do NOT depend on any of that.
 """
 
 from __future__ import annotations

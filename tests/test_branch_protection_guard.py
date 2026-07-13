@@ -192,6 +192,45 @@ def test_baseline_payloads_return_exactly_three_named_rulesets(project_env: Path
     }
 
 
+def test_pr_checks_omits_the_checks_rule_when_no_contexts(project_env: Path) -> None:
+    """REGRESSION (live 422): with NO detected CI contexts, baseline-pr-and-checks must ship
+    ONLY its pull_request rule — the required_status_checks rule is OMITTED.
+
+    GitHub REJECTS a required_status_checks rule whose contexts array is empty with
+    `422 Validation Failed`, and that 422 fails the WHOLE ruleset write — taking the
+    pull_request gate down with it. The old shape emitted the empty array and claimed it
+    "gates on no specific contexts"; that claim was false. It hid because contexts ARE
+    detected for the one repo whose checkout is the cwd, so only that repo's apply
+    succeeded — 11 of 12 fleet repos 422'd.
+    """
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+
+    pr = bpl.baseline_ruleset_payloads("main", [])[1]
+    assert pr["name"] == "baseline-pr-and-checks"
+    rule_types = [r["type"] for r in pr["rules"]]
+    assert rule_types == ["pull_request"], f"empty contexts must omit the checks rule, got {rule_types}"
+    # The PR-review gate — the part that actually matters — survives everywhere.
+    assert pr["rules"][0]["parameters"]["required_approving_review_count"] == 1
+    # None behaves the same as [].
+    assert [r["type"] for r in bpl.baseline_ruleset_payloads("main", None)[1]["rules"]] == ["pull_request"]
+
+
+def test_pr_checks_includes_the_checks_rule_when_contexts_exist(project_env: Path) -> None:
+    """The fix must not go too far: with real detected contexts the required_status_checks
+    rule IS present and carries them (this is the path that already worked)."""
+    _ = project_env
+    import branch_protection_lib as bpl  # type: ignore[import-not-found]
+
+    ctx = [{"context": "test"}, {"context": "lint"}]
+    pr = bpl.baseline_ruleset_payloads("main", ctx)[1]
+    rule_types = [r["type"] for r in pr["rules"]]
+    assert rule_types == ["pull_request", "required_status_checks"]
+    checks_rule = pr["rules"][1]
+    assert checks_rule["parameters"]["required_status_checks"] == ctx
+    assert checks_rule["parameters"]["strict_required_status_checks_policy"] is True
+
+
 def test_history_protect_ruleset_shape(project_env: Path) -> None:
     """baseline-history-protect: 2 history rules (deletion + non_fast_forward),
     NO bypass actors, ~DEFAULT_BRANCH magic ref. required_linear_history is
@@ -213,10 +252,17 @@ def test_history_protect_ruleset_shape(project_env: Path) -> None:
 
 def test_pr_and_checks_ruleset_shape(project_env: Path) -> None:
     """baseline-pr-and-checks: PR rule + required_status_checks, admin
-    RepositoryRole(5) always-bypass, ~DEFAULT_BRANCH magic ref."""
+    RepositoryRole(5) always-bypass, ~DEFAULT_BRANCH magic ref.
+
+    Exercised WITH detected contexts, because that is the only shape in which the
+    checks rule may legally be emitted: GitHub 422s an empty contexts array (and the
+    422 fails the whole write). The no-contexts shape — checks rule OMITTED — is pinned
+    by test_pr_checks_omits_the_checks_rule_when_no_contexts. This test previously
+    asserted the empty-list form was emitted, which encoded the live 422 bug.
+    """
     _ = project_env
     import branch_protection_lib as bpl  # type: ignore[import-not-found]
-    pr = bpl.baseline_ruleset_payloads("main")[1]
+    pr = bpl.baseline_ruleset_payloads("main", [{"context": "test"}])[1]
     assert pr["target"] == "branch"
     assert pr["enforcement"] == "active"
     assert pr["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
@@ -235,8 +281,8 @@ def test_pr_and_checks_ruleset_shape(project_env: Path) -> None:
     assert pr_rule["parameters"]["required_review_thread_resolution"] is True
     sc_rule = next(r for r in pr["rules"] if r["type"] == "required_status_checks")
     assert sc_rule["parameters"]["strict_required_status_checks_policy"] is True
-    # No checks passed → empty list (rule present, gates on nothing).
-    assert sc_rule["parameters"]["required_status_checks"] == []
+    # Contexts land verbatim — never an empty array (that is the 422).
+    assert sc_rule["parameters"]["required_status_checks"] == [{"context": "test"}]
 
 
 def test_pr_and_checks_embeds_detected_checks_in_context_shape(project_env: Path) -> None:

@@ -124,11 +124,22 @@ def baseline_ruleset_payloads(
     regardless of the literal branch name.
 
     `required_status_checks` is the auto-detected list of
-    `{"context": "<job-id>"}` dicts (see
-    `detect_required_status_checks`). When None or empty, the PR/checks
-    ruleset ships an empty `required_status_checks` list — the rule is
-    still present (strict policy on) but gates on no specific contexts
-    until the repo's CI surfaces some.
+    `{"context": "<job-id>"}` dicts (see `detect_required_status_checks`).
+    When None or empty the `required_status_checks` RULE IS OMITTED ENTIRELY
+    and the PR/checks ruleset ships with only its `pull_request` rule.
+
+    That omission is not a preference — it is forced by the API. GitHub
+    REJECTS a `required_status_checks` rule whose `required_status_checks`
+    parameter is an empty array with `422 Validation Failed`, and the 422
+    fails the WHOLE ruleset write, taking the `pull_request` rule down with
+    it. The previous shape emitted the empty list and claimed the rule
+    "gates on no specific contexts until the repo's CI surfaces some" — that
+    claim was false, and it made every remote-repo apply 422 while the one
+    repo whose checkout happened to be the cwd (so contexts WERE detected)
+    silently succeeded, which is why the bug hid. Omitting the rule keeps the
+    PR-review gate — the part that actually matters — installable everywhere;
+    the checks rule reappears automatically once contexts can be detected
+    (i.e. when run from that repo's own checkout).
     """
     if not default_branch:
         raise ValueError("default_branch must be a non-empty string")
@@ -177,6 +188,8 @@ def baseline_ruleset_payloads(
                 "bypass_mode": "always",
             },
         ],
+        # The checks rule is APPENDED BELOW only when `checks` is non-empty — GitHub
+        # 422s an empty required_status_checks array and fails the whole write.
         "rules": [
             {
                 "type": "pull_request",
@@ -188,15 +201,18 @@ def baseline_ruleset_payloads(
                     "required_review_thread_resolution": True,
                 },
             },
+        ],
+    }
+    if checks:
+        pr_and_checks["rules"].append(
             {
                 "type": "required_status_checks",
                 "parameters": {
                     "strict_required_status_checks_policy": True,
                     "required_status_checks": checks,
                 },
-            },
-        ],
-    }
+            }
+        )
     tag_protect = {
         "name": TAG_PROTECT_RULESET_NAME,
         "target": "tag",
