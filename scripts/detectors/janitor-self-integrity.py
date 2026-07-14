@@ -263,6 +263,42 @@ def _record_fire(verdict: str) -> None:
         state.log_line(_NAME, "audit-chain append failed (OSError)")
 
 
+_TICKET_CODES = {
+    "manifest": "SELFINT-001",
+    "audit-chain": "SELFINT-002",
+    "skill-preamble": "SELFINT-003",
+}
+
+
+def _raise_ticket(finding_class: str, finding: str) -> None:
+    """Open a HARNESS ticket for a self-integrity finding — the janitor repairing its own machinery.
+
+    This is the one detector whose subject IS the janitor, so it dispatches with no human in the loop.
+    The `where` is the finding CLASS, not the finding's text: the text quotes a path that may have been
+    chosen by whoever tampered with the file, and a dedupe key built from an attacker's string is a key
+    an attacker can vary to open one ticket per fire.
+    """
+    code = _TICKET_CODES.get(finding_class)
+    if not code:
+        return
+    try:
+        import issue_catalog  # noqa: PLC0415 — only imported on the (rare) finding path
+
+        r = issue_catalog.raise_issue(
+            code,
+            where=finding_class,
+            evidence=[str(_MANIFEST_PATH)],
+            path=finding,
+            detail=finding,
+        )
+        if r.first_seen and r.line:
+            print(r.line)
+        elif not r.ok:
+            state.log_line(_NAME, f"could not raise {code}: {r.why}")
+    except Exception as exc:  # noqa: BLE001 — a ticket fault must never silence the finding itself
+        state.log_line(_NAME, f"could not raise {code}: {exc}")
+
+
 def main() -> int:
     if not state.is_truthy_env(
         "CLAUDE_PLUGIN_OPTION_JANITOR_SELF_INTEGRITY_ENABLED",
@@ -346,6 +382,7 @@ def main() -> int:
 
     if finding:
         print(f"[{_NAME}] {finding}")
+        _raise_ticket(finding_class, finding)
 
     state.rotate_log_if_big(_NAME)
     return 0

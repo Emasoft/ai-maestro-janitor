@@ -122,6 +122,24 @@ def test_an_APPROVED_finding_stops_being_reminded_and_starts_being_DISPATCHED(pr
     assert "await YOUR approval" not in out, "an approved finding must not still be nagged about"
 
 
+def test_a_HARNESS_finding_dispatches_with_NO_human_in_the_loop(project: Path) -> None:
+    """The other half of the ownership boundary. When the broken thing is the janitor's OWN machinery,
+    nobody else owns it, the blast radius is its own regeneratable state, and waiting for a human to
+    approve the repair of a corrupt index would just mean the index stays corrupt. So it opens its own
+    ticket and the scheduler dispatches it — no proposal, no approval, no reminder."""
+    import issue_catalog
+
+    r = issue_catalog.raise_issue("MEMGREP-001", where="local", scope="local", now=NOW)
+    assert r.ticket_id and not r.trdd, "a harness incident needs no approving TRDD"
+
+    out = _run(project)
+
+    assert "[janitor-ticket]" in out
+    assert r.ticket_id in out
+    assert "janitor-repair-agent" in out
+    assert "await YOUR approval" not in out
+
+
 def test_nothing_pending_nothing_printed(project: Path) -> None:
     """The zero-output contract: a quiet fire costs the reader nothing."""
     assert _run(project) == ""

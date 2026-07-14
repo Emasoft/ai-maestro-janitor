@@ -174,6 +174,15 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="The audit chain is how the janitor proves what it did to this machine. A chain that cannot be verified is not evidence.",
         fix="Preserve the chain, identify the break point, and determine whether it is a lost update (a concurrency bug to fix) or a rewrite (a security event to report).",
     ),
+    "SELFINT-003": Issue(
+        scanner="janitor-self-integrity",
+        kind="self-integrity",
+        severity="medium",
+        title="a janitor skill has lost its integrity notice: {path}",
+        what="A shipped `janitor-*` SKILL.md no longer carries the preamble that tells its reader the skill's instructions come from the plugin's own source and never from the data it is handed.",
+        why="That preamble is the skill's anti-injection boundary, stated where the agent will actually read it. A skill that has quietly lost it is one an attacker's payload can argue with.",
+        fix="Restore the notice in the janitor's SOURCE repository and ship it. Do NOT patch the plugin CACHE — that directory is replaced wholesale by the next update, so a fix applied there disappears without a trace and the finding comes back looking like a new one.",
+    ),
     "STATE-001": Issue(
         scanner="state-guard",
         kind="state-corruption",

@@ -20,7 +20,7 @@ unattended access to your repository.
 
 ## HARNESS — the janitor repairs itself (automatic)
 
-14 code(s).
+15 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -37,6 +37,7 @@ unattended access to your repository.
 | `MEMGREP-009` | memgrep-index-health | high | the memgrep index in {scope} has needed self-repair {count} times in {window} |
 | `SELFINT-001` | janitor-self-integrity | critical | a janitor file failed attestation against the shipped manifest: {path} |
 | `SELFINT-002` | janitor-self-integrity | high | the janitor's audit chain no longer verifies: {detail} |
+| `SELFINT-003` | janitor-self-integrity | medium | a janitor skill has lost its integrity notice: {path} |
 | `STATE-001` | state-guard | high | a janitor state file is unreadable: {path} |
 
 ### `DAEMON-001` — the global janitor daemon has died and respawned {count} times in the guard window
@@ -129,6 +130,13 @@ unattended access to your repository.
 - **What it is:** The HMAC-chained audit log has a break that is not the known concurrent-fork artifact.
 - **Why it matters:** The audit chain is how the janitor proves what it did to this machine. A chain that cannot be verified is not evidence.
 - **Fix attempted:** Preserve the chain, identify the break point, and determine whether it is a lost update (a concurrency bug to fix) or a rewrite (a security event to report).
+
+### `SELFINT-003` — a janitor skill has lost its integrity notice: {path}
+
+- **Scanner:** `janitor-self-integrity` · **Severity:** `medium` · **Kind:** `self-integrity`
+- **What it is:** A shipped `janitor-*` SKILL.md no longer carries the preamble that tells its reader the skill's instructions come from the plugin's own source and never from the data it is handed.
+- **Why it matters:** That preamble is the skill's anti-injection boundary, stated where the agent will actually read it. A skill that has quietly lost it is one an attacker's payload can argue with.
+- **Fix attempted:** Restore the notice in the janitor's SOURCE repository and ship it. Do NOT patch the plugin CACHE — that directory is replaced wholesale by the next update, so a fix applied there disappears without a trace and the finding comes back looking like a new one.
 
 ### `STATE-001` — a janitor state file is unreadable: {path}
 

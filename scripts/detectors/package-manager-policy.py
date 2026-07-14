@@ -53,8 +53,14 @@ import yaml
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import issue_catalog  # noqa: E402
 import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
+
+# The finding's LOCATION for dedupe purposes: the project's package-manager configuration, taken as
+# one surface. The individual knobs live in `found`; they are not separate incidents, because they
+# are not separate repairs.
+_WHERE = "package-manager config"
 
 _NAME = "package-manager-policy"
 
@@ -446,6 +452,9 @@ def main() -> int:
     state.atomic_write(last_hash_file, combined)
 
     if not issues:
+        # Hardened now — withdraw any standing proposal, so a board never carries a gap that has
+        # since been closed.
+        issue_catalog.clear_issue("PKGPOL-001", where=_WHERE)
         state.rotate_log_if_big(_NAME)
         return 0
 
@@ -465,6 +474,23 @@ def main() -> int:
         f"Issues:\n{sample}"
         + (f"\n{hint}" if hint else "")
     )
+
+    # ONE proposal for the project's package-manager config (TRDD-CGYMUKO6): every gap here is the
+    # same job — restore the safeguards in the same handful of config files — so splitting them into
+    # a ticket per knob would dispatch N agents to edit one `.npmrc`.
+    r = issue_catalog.raise_issue(
+        "PKGPOL-001",
+        where=_WHERE,
+        evidence=["package.json", ".npmrc"],
+        path=_WHERE,
+        detail=f"{len(issues)} gap(s)",
+        found="; ".join(issues[:12]),
+    )
+    if r.first_seen and r.line:
+        print(r.line)
+    elif not r.ok:
+        state.log_line(_NAME, f"could not raise PKGPOL-001: {r.why}")
+
     state.rotate_log_if_big(_NAME)
     return 0
 

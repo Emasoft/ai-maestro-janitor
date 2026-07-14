@@ -1029,6 +1029,26 @@ def _phase_crash_loop_rollback() -> None:
     try:
         if not gs.crash_loop_active():
             return  # not crash-looping → nothing to roll back (the common case)
+
+        # OPEN A TICKET (TRDD-CGYMUKO6). The rollback below restores SERVICE; it does not fix the
+        # DEFECT, and if the crash has no bad-version cause (or no fallback to fall back to) the
+        # rollback does nothing at all and the daemon stays dead. This is the janitor's own machinery,
+        # so it repairs itself: a HARNESS ticket opens and dispatches with no human in the loop. The
+        # agent's job is the daemon log and the exception in it — not another restart.
+        try:
+            import issue_catalog  # noqa: PLC0415 — cost only on the crash-loop path, which is rare
+
+            r = issue_catalog.raise_issue(
+                "DAEMON-001",
+                where="global daemon",
+                evidence=[str(gs.global_state_dir() / "daemon.log")],
+                count=gs.recent_spawn_count(),
+            )
+            if r.first_seen and r.line:
+                print(r.line)
+        except Exception as exc:  # noqa: BLE001 — a ticket fault must never block the rollback
+            state.log_line("dispatch", f"could not raise DAEMON-001: {exc}")
+
         plan = vu.plan_crash_loop_rollback(
             _PLUGIN_CACHE_PARENT,
             crash_loop=True,
