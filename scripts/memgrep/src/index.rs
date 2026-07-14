@@ -131,24 +131,69 @@ fn nuke_db(path: &Path) -> Result<()> {
 pub fn open(root: &Path) -> Result<Connection> {
     ensure_sidecar(root)?;
     let path = db_path(root);
-    let conn = Connection::open(&path).with_context(|| format!("opening {}", path.display()))?;
-    apply_schema(&conn)?;
 
-    if verify_fts(&conn).is_err() {
-        // Repair in place first: cheap, and it keeps the change-detection ledger (so the next reindex
-        // stays incremental instead of re-parsing the whole corpus).
-        if rebuild_fts(&conn).and_then(|()| verify_fts(&conn)).is_ok() {
+    // 1 — open, migrate (each step validated + transactional), then validate the WHOLE database.
+    let why = match open_prepared(&path).and_then(|conn| {
+        validate_db(&conn, SCHEMA_VERSION)?;
+        Ok(conn)
+    }) {
+        Ok(conn) => return Ok(conn),
+        Err(e) => e,
+    };
+
+    // 2 — cheap in-place repair. If the damage is confined to the derived FTS indexes, rebuilding
+    // them from their content tables fixes it losslessly (the content tables ARE the truth) and
+    // keeps the change-detection ledger, so the next reindex stays incremental.
+    if let Ok(conn) = Connection::open(&path) {
+        let _ = configure_conn(&conn);
+        if rebuild_fts(&conn)
+            .and_then(|()| validate_db(&conn, SCHEMA_VERSION))
+            .is_ok()
+        {
             return Ok(conn);
         }
-        // Unsalvageable — drop the handle before unlinking so no connection outlives the file.
-        drop(conn);
-        nuke_db(&path)?;
-        let conn = Connection::open(&path)
-            .with_context(|| format!("reopening {} after rebuild", path.display()))?;
-        apply_schema(&conn)?;
-        verify_fts(&conn).context("a FRESHLY BUILT index failed its own integrity check")?;
-        return Ok(conn);
     }
+
+    // 3 — the index is unusable (a rolled-back migration, a stale schema, a DB from a NEWER memgrep,
+    // real file damage). Discard and rebuild. This is safe HERE and only here: the file is a derived
+    // cache, the `.md` notes on disk are the source of truth, and the next reindex refills it —
+    // nothing a user wrote can be lost. That is what earns the right to self-heal rather than fail.
+    eprintln!(
+        "memgrep: rebuilding {} — it did not validate ({why:#})",
+        path.display()
+    );
+    nuke_db(&path)?;
+    let conn = open_prepared(&path).context("rebuilding the index from scratch")?;
+    validate_db(&conn, SCHEMA_VERSION).context(
+        "a FRESHLY BUILT index failed validation — that is a bug in memgrep's own schema, \
+         not damaged state on disk",
+    )?;
+    Ok(conn)
+}
+
+/// How long a connection waits for a lock before giving up.
+///
+/// Without this, ANY genuinely concurrent writer — the autorecall hook (which fires on EVERY prompt),
+/// the librarian detector, a memory agent mid-reindex — fails instantly with `SQLITE_BUSY` rather
+/// than waiting the few milliseconds the other writer needs. It also makes `journal_mode = WAL`
+/// reliable: SQLite cannot switch journal mode while another connection holds a lock, and with no
+/// timeout it gives up SILENTLY, leaving the DB on the rollback journal while the code believes it
+/// is in WAL.
+const BUSY_TIMEOUT_S: u64 = 5;
+
+/// Per-connection settings every handle must have, whether it reads or writes.
+fn configure_conn(conn: &Connection) -> Result<()> {
+    conn.busy_timeout(std::time::Duration::from_secs(BUSY_TIMEOUT_S))
+        .context("setting busy_timeout")?;
+    Ok(())
+}
+
+/// Open + configure + bring the schema to [`SCHEMA_VERSION`]. Not public: callers get the
+/// self-healing [`open`], so no caller can accidentally skip validation.
+fn open_prepared(path: &Path) -> Result<Connection> {
+    let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
+    configure_conn(&conn)?;
+    apply_schema(&conn)?;
     Ok(conn)
 }
 
@@ -159,7 +204,9 @@ pub fn open_existing(root: &Path) -> Option<Connection> {
     if !path.is_file() {
         return None;
     }
-    Connection::open(&path).ok()
+    let conn = Connection::open(&path).ok()?;
+    configure_conn(&conn).ok()?;
+    Some(conn)
 }
 
 /// The index schema version. Bumped whenever a binary adds a derived table/column that an existing
@@ -277,73 +324,342 @@ CREATE INDEX IF NOT EXISTS idx_atoms_cmref   ON atoms(claude_mem_ref);
 "#,
     )
     .context("applying index schema")?;
-    // Schema-version forward migration (see the doc comment). `PRAGMA user_version` cannot be
-    // parameterised, so the literal comes from the in-crate `SCHEMA_VERSION` constant (no injection).
-    let ver: i64 = conn
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .unwrap_or(0);
-    if ver < SCHEMA_VERSION {
-        // Additive column migration (v3, TRDD-056384eb): an `atoms` table created by a pre-v3 binary
-        // exists already, so the `CREATE TABLE IF NOT EXISTS` above skipped it and the new `desc` column
-        // is missing. Add it idempotently — a duplicate-column error (already present, e.g. a fresh DB
-        // just built by the DDL) is benign and ignored; any other failure propagates.
-        if let Err(e) = conn.execute_batch("ALTER TABLE atoms ADD COLUMN desc TEXT") {
-            let msg = e.to_string();
-            if !msg.contains("duplicate column name") {
-                return Err(e).context("adding atoms.desc column for schema migration");
-            }
-        }
-        // v4: a LESSON is a first-class memory element, so it carries a `keywords:` recall surface
-        // exactly like an ATOM does. Same additive-column dance for `notes.keywords`.
-        for ddl in [
-            "ALTER TABLE notes ADD COLUMN atom_id TEXT",
-            "ALTER TABLE notes ADD COLUMN keywords TEXT",
-            "ALTER TABLE notes ADD COLUMN status TEXT",
-            "ALTER TABLE notes ADD COLUMN superseded_by TEXT",
-        ] {
-            if let Err(e) = conn.execute_batch(ddl) {
-                let msg = e.to_string();
-                if !msg.contains("duplicate column name") {
-                    return Err(e).context("adding a notes column for schema migration");
-                }
-            }
-        }
-        // …and `notes_fts` must GAIN that column. An FTS5 virtual table's column set is fixed at
-        // creation and cannot be ALTERed, and the `CREATE VIRTUAL TABLE IF NOT EXISTS` in the DDL
-        // above SKIPS the pre-v4 one-column table that already exists — so without an explicit
-        // DROP the new `keywords` column would silently never exist and lessons would stay
-        // unsearchable by keyword (the exact bug this migration lands).
-        //
-        // The 'rebuild' is NOT optional, and omitting it is how this migration used to CORRUPT the
-        // index it was meant to fix. The DROP+CREATE leaves an EMPTY fts b-tree while `notes` keeps
-        // every row (only the `files` LEDGER is cleared below — the content tables are not). The
-        // next reindex re-parses each file and, for a note it is about to rewrite, first issues the
-        // external-content shadow delete
-        //     INSERT INTO notes_fts(notes_fts, rowid, keywords, body) VALUES('delete', …)
-        // for a rowid the freshly-emptied index does not contain. With `content=`, FTS5 TRUSTS that
-        // delete instead of checking it, so it writes negative postings into the b-tree and the very
-        // next statement fails with `SQLITE_CORRUPT_VTAB` — "database disk image is malformed /
-        // Content in the virtual table is corrupt". Nothing about the file was ever torn; the
-        // corruption is manufactured, deterministically, by the upgrade itself.
-        //
-        // 'rebuild' repopulates the index from its content table, which is the whole point of an
-        // external-content FTS and the sanctioned primitive for exactly this. It also restores the
-        // invariant the delete path depends on: every `notes` row has a matching shadow entry.
-        // (`SELECT count(*) FROM notes_fts` cannot catch the breakage — with `content=` it counts
-        // the CONTENT table, so an emptied index still reports the base-table row count.)
-        conn.execute_batch(
-            "DROP TABLE IF EXISTS notes_fts;
+    migrate(conn)
+}
+
+// --------------------------------------------------------------------------- #
+// Schema migration — versioned, transactional, and VALIDATED (TRDD-VLDMIG14)
+// --------------------------------------------------------------------------- #
+//
+// The rule this framework exists to enforce: **a migration must prove its own output before that
+// output is allowed to become the live index.** The 2026-07-14 corruption happened because the
+// migration rewrote a derived structure (an FTS5 virtual table), handed the result back as if it
+// had succeeded, and nobody ever looked. There was no validation step to fail, so it "passed".
+//
+// Every migration therefore runs inside a TRANSACTION, and the transaction only commits if the
+// resulting database passes [`validate_db`] IN FULL. A migration that damages the DB rolls itself
+// back and reports; `open` then falls back to rebuilding the index from the `.md` sources, which is
+// always safe because this file is a derived cache and never a source of truth.
+
+/// One forward-only schema step. `to` is the `user_version` the DB carries once it commits.
+struct Migration {
+    to: i64,
+    name: &'static str,
+    run: fn(&Connection) -> Result<()>,
+}
+
+/// The migration ladder, ascending. A DB at `user_version = N` runs every step with `to > N`.
+///
+/// APPEND ONLY. **A shipped step is immutable** — never edit one, never renumber one. Changing the
+/// SQL of an already-shipped version is the "v4 was extended after it shipped" bug (see
+/// [`SCHEMA_VERSION`]): every DB that already recorded that version skips the amended step FOREVER,
+/// so the change reaches exactly the corpora that never needed it and never reaches the ones that
+/// did. New work = a new step with a new number.
+const MIGRATIONS: &[Migration] = &[Migration {
+    to: 5,
+    name: "atoms.desc + notes.{atom_id,keywords,status,superseded_by} + notes_fts keywords column",
+    run: migrate_v5,
+}];
+
+/// Add a column, treating "it is already there" as success.
+///
+/// `CREATE TABLE IF NOT EXISTS` cannot add a column to a table that already exists, so an additive
+/// column must be `ALTER`-ed in for an existing DB — while a FRESH DB already has it from the DDL.
+/// Both paths must converge on the same shape, so a duplicate-column error is the expected outcome
+/// on the fresh path, not a failure. Any OTHER error is real and propagates.
+fn add_column(conn: &Connection, ddl: &str) -> Result<()> {
+    match conn.execute_batch(ddl) {
+        Ok(()) => Ok(()),
+        Err(e) if e.to_string().contains("duplicate column name") => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("applying `{ddl}`")),
+    }
+}
+
+/// v5 — the collapsed v3+v4 step: the additive columns, the `notes_fts` column-set change, and the
+/// ledger reset that forces the next reindex to re-parse the corpus and fill the new columns.
+fn migrate_v5(conn: &Connection) -> Result<()> {
+    add_column(conn, "ALTER TABLE atoms ADD COLUMN desc TEXT")?;
+    for ddl in [
+        "ALTER TABLE notes ADD COLUMN atom_id TEXT",
+        "ALTER TABLE notes ADD COLUMN keywords TEXT",
+        "ALTER TABLE notes ADD COLUMN status TEXT",
+        "ALTER TABLE notes ADD COLUMN superseded_by TEXT",
+    ] {
+        add_column(conn, ddl)?;
+    }
+    // …and `notes_fts` must GAIN that column. An FTS5 virtual table's column set is fixed at
+    // creation and cannot be ALTERed, and the `CREATE VIRTUAL TABLE IF NOT EXISTS` in the DDL
+    // above SKIPS the pre-v4 one-column table that already exists — so without an explicit
+    // DROP the new `keywords` column would silently never exist and lessons would stay
+    // unsearchable by keyword (the exact bug this migration lands).
+    //
+    // The 'rebuild' is NOT optional, and omitting it is how this migration used to CORRUPT the
+    // index it was meant to fix. The DROP+CREATE leaves an EMPTY fts b-tree while `notes` keeps
+    // every row (only the `files` LEDGER is cleared below — the content tables are not). The
+    // next reindex re-parses each file and, for a note it is about to rewrite, first issues the
+    // external-content shadow delete
+    //     INSERT INTO notes_fts(notes_fts, rowid, keywords, body) VALUES('delete', …)
+    // for a rowid the freshly-emptied index does not contain. With `content=`, FTS5 TRUSTS that
+    // delete instead of checking it, so it writes negative postings into the b-tree and the very
+    // next statement fails with `SQLITE_CORRUPT_VTAB` — "database disk image is malformed /
+    // Content in the virtual table is corrupt". Nothing about the file was ever torn; the
+    // corruption is manufactured, deterministically, by the upgrade itself.
+    //
+    // 'rebuild' repopulates the index from its content table, which is the whole point of an
+    // external-content FTS and the sanctioned primitive for exactly this. It also restores the
+    // invariant the delete path depends on: every `notes` row has a matching shadow entry.
+    // (`SELECT count(*) FROM notes_fts` cannot catch the breakage — with `content=` it counts
+    // the CONTENT table, so an emptied index still reports the base-table row count.)
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS notes_fts;
              CREATE VIRTUAL TABLE notes_fts USING fts5(
                  keywords, body,
                  content='notes', content_rowid='id'
              );
              INSERT INTO notes_fts(notes_fts) VALUES('rebuild');",
-        )
-        .context("rebuilding notes_fts with the keywords column")?;
-        conn.execute_batch("DELETE FROM files")
-            .context("clearing ledger for schema migration")?;
-        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
-            .context("bumping schema version")?;
+    )
+    .context("rebuilding notes_fts with the keywords column")?;
+    conn.execute_batch("DELETE FROM files")
+        .context("clearing ledger for schema migration")?;
+    Ok(())
+}
+
+/// The DB's recorded schema version (0 for a DB that has never been stamped).
+fn user_version(conn: &Connection) -> i64 {
+    conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap_or(0)
+}
+
+/// Run every pending migration step, each in its own TRANSACTION, each VALIDATED before it commits.
+///
+/// The three properties that make this error-proof:
+///
+/// 1. **Transactional.** A step that throws — or whose output fails validation — is ROLLED BACK. The
+///    DB is never left in the half-migrated state that produced the 2026-07-14 corruption. (The
+///    version stamp is written INSIDE the transaction, so a rolled-back step does not record itself
+///    as done — the single nastiest way to make a broken migration permanent.)
+/// 2. **Validated.** After each step the DB must pass [`validate_db`] IN FULL, at that step's
+///    version. A migration that silently drops a column, empties an FTS index, or orphans a row
+///    cannot commit, because the validator checks those things directly rather than trusting the SQL.
+/// 3. **Forward-only, with a downgrade guard.** A DB stamped NEWER than this binary understands is
+///    not ours to interpret: its tables may mean something we do not know. We refuse to touch it and
+///    let the caller rebuild from the `.md` sources at OUR version.
+fn migrate(conn: &Connection) -> Result<()> {
+    let ver = user_version(conn);
+    if ver > SCHEMA_VERSION {
+        anyhow::bail!(
+            "index was built by a NEWER memgrep (schema v{ver} > v{SCHEMA_VERSION} understood here) \
+             — refusing to migrate it backwards"
+        );
+    }
+    for m in MIGRATIONS.iter().filter(|m| m.to > ver) {
+        // BEGIN IMMEDIATE takes the write lock up front, so a concurrent writer cannot slip in
+        // between our read of user_version and our first write and migrate the same DB twice.
+        conn.execute_batch("BEGIN IMMEDIATE")
+            .with_context(|| format!("opening the transaction for migration v{}", m.to))?;
+
+        let stamped = format!("PRAGMA user_version = {}", m.to);
+        let outcome = (m.run)(conn)
+            .and_then(|()| {
+                conn.execute_batch(&stamped)
+                    .context("stamping the schema version")
+            })
+            .and_then(|()| validate_db(conn, m.to));
+
+        match outcome {
+            Ok(()) => conn
+                .execute_batch("COMMIT")
+                .with_context(|| format!("committing migration v{}", m.to))?,
+            Err(e) => {
+                // Best-effort rollback: if even this fails the DB is beyond saving in place, and the
+                // original error is the one worth reporting — `open` rebuilds from source either way.
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(e).with_context(|| {
+                    format!(
+                        "migration to schema v{} ({}) FAILED ITS OWN VALIDATION and was rolled back",
+                        m.to, m.name
+                    )
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+// --------------------------------------------------------------------------- #
+// Deep validation — what "this database is valid" actually means
+// --------------------------------------------------------------------------- #
+
+/// Every base table and the columns it MUST have. Checked against `PRAGMA table_info`, so a column
+/// that a migration failed to add is caught HERE rather than surfacing months later as a query that
+/// silently returns nothing (which is exactly what the v4-version bug did to `notes.keywords`).
+const EXPECTED_TABLES: &[(&str, &[&str])] = &[
+    (
+        "files",
+        &["path", "size", "mtime_ns", "blob_sha", "indexed_at"],
+    ),
+    (
+        "memories",
+        &[
+            "id",
+            "path",
+            "element_type",
+            "ocd",
+            "lmd",
+            "topic",
+            "title",
+            "description",
+            "tags",
+            "body",
+        ],
+    ),
+    (
+        "notes",
+        &[
+            "id",
+            "memory_id",
+            "label",
+            "atom_id",
+            "keywords",
+            "status",
+            "superseded_by",
+            "ocd",
+            "lmd",
+            "body",
+            "urls",
+        ],
+    ),
+    (
+        "atoms",
+        &[
+            "id",
+            "memory_id",
+            "atom_id",
+            "keywords",
+            "ocd",
+            "lmd",
+            "atom_type",
+            "claude_mem_ref",
+            "claude_mem_hash",
+            "desc",
+            "body",
+        ],
+    ),
+];
+
+/// Every FTS index, its content table, and the column set it MUST expose. An FTS5 column set is
+/// fixed at creation, so a stale index (built before a column was added) can only be fixed by a
+/// DROP+CREATE+'rebuild' — and this check is what proves that happened.
+const EXPECTED_FTS: &[(&str, &str, &[&str])] = &[
+    (
+        "memories_fts",
+        "memories",
+        &["title", "description", "body"],
+    ),
+    ("notes_fts", "notes", &["keywords", "body"]),
+    ("atoms_fts", "atoms", &["keywords", "body"]),
+];
+
+/// The columns a table actually has, per `PRAGMA table_info`. Empty when the table does not exist.
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut st = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .with_context(|| format!("reading the shape of {table}"))?;
+    let cols = st
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(cols)
+}
+
+/// Prove the database is USABLE — not merely openable. Six independent checks, in cheapest-first
+/// order so a cheap failure short-circuits the expensive ones:
+///
+/// 1. **File integrity** (`PRAGMA integrity_check`) — the b-tree pages themselves. This is the ONLY
+///    check most people run, and it is the one that had nothing to say about the 2026-07-14
+///    corruption: it returns `ok` for a database whose FTS index is completely desynced.
+/// 2. **Schema shape** — every expected table exists with every expected column. Catches a migration
+///    that silently failed to add a column (the `notes.keywords` class of bug), which otherwise
+///    manifests as recall quietly returning nothing.
+/// 3. **FTS shape** — every FTS index exposes the columns it is supposed to. An FTS5 column set
+///    cannot be ALTERed, so a stale one is invisible until a query on the new column returns empty.
+/// 4. **FTS content parity** (`('integrity-check', 1)`) — the index MATCHES its content table. The
+///    `rank = 1` argument is load-bearing: the bare form only checks the index is INTERNALLY
+///    consistent, and an emptied index is perfectly self-consistent, so it PASSES. See [`verify_fts`].
+/// 5. **Referential sanity** — no `notes`/`atoms` row points at a `memories` row that is gone. A
+///    dangling parent means the prune path missed rows, and those orphans are unreachable knowledge.
+/// 6. **Version stamp** — the DB records the version we believe it to be at.
+///
+/// Checks 2–5 are the ones that describe the failures we have ACTUALLY had. None of them is
+/// implied by check 1.
+fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
+    // 1. file-level integrity
+    let integrity: String = conn
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .context("running PRAGMA integrity_check")?;
+    if integrity != "ok" {
+        anyhow::bail!("sqlite integrity_check failed: {integrity}");
+    }
+
+    // 2. base-table shape
+    for (table, expected) in EXPECTED_TABLES {
+        let have = table_columns(conn, table)?;
+        if have.is_empty() {
+            anyhow::bail!("schema validation: table `{table}` is MISSING");
+        }
+        for col in *expected {
+            if !have.iter().any(|c| c == col) {
+                anyhow::bail!(
+                    "schema validation: `{table}` is missing column `{col}` \
+                     (a migration failed to add it — recall on that column would silently return nothing)"
+                );
+            }
+        }
+    }
+
+    // 3. FTS column sets
+    for (fts, _content, expected) in EXPECTED_FTS {
+        let have = table_columns(conn, fts)?;
+        if have.is_empty() {
+            anyhow::bail!("schema validation: FTS index `{fts}` is MISSING");
+        }
+        for col in *expected {
+            if !have.iter().any(|c| c == col) {
+                anyhow::bail!(
+                    "schema validation: FTS `{fts}` has no `{col}` column — it is STALE \
+                     (an FTS5 column set cannot be ALTERed; it needs DROP + CREATE + 'rebuild')"
+                );
+            }
+        }
+    }
+
+    // 4. FTS index vs its content table
+    verify_fts(conn)?;
+
+    // 5. referential sanity — no orphaned children
+    for (child, parent) in [("notes", "memories"), ("atoms", "memories")] {
+        let orphans: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT count(*) FROM {child} \
+                     WHERE memory_id IS NOT NULL \
+                       AND memory_id NOT IN (SELECT id FROM {parent})"
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .with_context(|| format!("checking {child} for orphans"))?;
+        if orphans > 0 {
+            anyhow::bail!(
+                "schema validation: {orphans} orphaned `{child}` row(s) whose `{parent}` is gone \
+                 (unreachable knowledge — the prune path missed them)"
+            );
+        }
+    }
+
+    // 6. version stamp
+    let ver = user_version(conn);
+    if ver != expect_version {
+        anyhow::bail!("schema validation: user_version is {ver}, expected {expect_version}");
     }
     Ok(())
 }
@@ -1142,6 +1458,142 @@ mod tests {
         apply_schema(&conn).unwrap();
 
         verify_fts(&conn).expect("the migration itself must leave every FTS consistent");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn validate_db_catches_a_missing_column() {
+        // The `notes.keywords` class of bug: a migration fails to add a column, and the damage shows
+        // up months later as recall silently returning nothing. The validator must catch it AT the
+        // migration, by reading the real shape rather than trusting the SQL to have worked.
+        let d = tmp("val_col");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        let conn = open_existing(&d).unwrap();
+        conn.execute_batch("ALTER TABLE notes RENAME COLUMN keywords TO kw_gone")
+            .unwrap();
+        let err = validate_db(&conn, SCHEMA_VERSION).unwrap_err().to_string();
+        assert!(
+            err.contains("keywords"),
+            "must name the missing column: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn validate_db_catches_a_stale_fts_column_set() {
+        // An FTS5 column set is fixed at creation, so an index built before a column was added stays
+        // stale forever unless something DROPs + re-CREATEs it. Nothing else notices: queries on the
+        // new column just return empty.
+        let d = tmp("val_fts_shape");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        let conn = open_existing(&d).unwrap();
+        conn.execute_batch(
+            "DROP TABLE notes_fts;
+             CREATE VIRTUAL TABLE notes_fts USING fts5(body, content='notes', content_rowid='id');
+             INSERT INTO notes_fts(notes_fts) VALUES('rebuild');",
+        )
+        .unwrap();
+        let err = validate_db(&conn, SCHEMA_VERSION).unwrap_err().to_string();
+        assert!(err.contains("STALE"), "must flag the stale FTS: {err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn validate_db_catches_orphaned_rows() {
+        // A note whose parent memory is gone is unreachable knowledge — the prune path missed it.
+        let d = tmp("val_orphan");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        let conn = open_existing(&d).unwrap();
+        // Insert the FTS shadow too, so FTS parity still passes and we isolate the orphan check.
+        conn.execute_batch(
+            "INSERT INTO notes(id, memory_id, keywords, body) VALUES(9999, 424242, 'k', 'b');
+             INSERT INTO notes_fts(rowid, keywords, body) VALUES(9999, 'k', 'b');",
+        )
+        .unwrap();
+        let err = validate_db(&conn, SCHEMA_VERSION).unwrap_err().to_string();
+        assert!(err.contains("orphaned"), "must flag the orphan: {err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_migration_that_fails_validation_rolls_back_and_does_not_stamp_its_version() {
+        // THE core guarantee of the migration framework. A migration whose OUTPUT does not validate
+        // must leave NOTHING behind — in particular it must not stamp its version, because a
+        // half-applied migration that recorded itself as done is permanent: every later run sees
+        // `ver >= to` and skips the step forever. (That is the mechanism behind the v4-immutability
+        // bug, arrived at from the other direction.)
+        //
+        // Rig it by planting damage the post-migration validator is guaranteed to catch (an orphan),
+        // then forcing the v5 step to run over it.
+        let d = tmp("mig_rollback");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        {
+            let conn = open_existing(&d).unwrap();
+            conn.execute_batch(
+                "INSERT INTO notes(id, memory_id, keywords, body) VALUES(9999, 424242, 'k', 'b');
+                 INSERT INTO notes_fts(rowid, keywords, body) VALUES(9999, 'k', 'b');
+                 PRAGMA user_version = 4;",
+            )
+            .unwrap();
+
+            let err = migrate(&conn).unwrap_err().to_string();
+            assert!(
+                err.contains("FAILED ITS OWN VALIDATION"),
+                "the migration must refuse its own bad output: {err}"
+            );
+            assert_eq!(
+                user_version(&conn),
+                4,
+                "a rolled-back migration MUST NOT stamp its version — otherwise it is skipped forever"
+            );
+        }
+        // …and `open` recovers from it: the index is derived, so it is rebuilt from the .md sources.
+        let conn = open(&d).expect("open must rebuild an index whose migration failed");
+        validate_db(&conn, SCHEMA_VERSION).expect("the rebuilt index validates");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_newer_schema_is_refused_not_mangled() {
+        // A DB stamped by a NEWER memgrep may mean things this binary does not know. Migrating it
+        // "forward" would be guesswork, so `migrate` refuses — and `open` rebuilds it at OUR version
+        // rather than failing (it is a cache; the .md files are the truth).
+        let d = tmp("mig_newer");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        {
+            let conn = open_existing(&d).unwrap();
+            conn.execute_batch("PRAGMA user_version = 99;").unwrap();
+            let err = migrate(&conn).unwrap_err().to_string();
+            assert!(err.contains("NEWER"), "must refuse a future schema: {err}");
+        }
+        let conn = open(&d).expect("open rebuilds a future-schema index at our own version");
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+        validate_db(&conn, SCHEMA_VERSION).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn every_connection_has_a_busy_timeout() {
+        // Without it, a concurrent writer (the autorecall hook fires on EVERY prompt) fails instantly
+        // with SQLITE_BUSY instead of waiting a few ms.
+        let d = tmp("busy");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        for conn in [open(&d).unwrap(), open_existing(&d).unwrap()] {
+            let ms: i64 = conn
+                .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                ms,
+                (BUSY_TIMEOUT_S * 1000) as i64,
+                "busy_timeout must be set"
+            );
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 
