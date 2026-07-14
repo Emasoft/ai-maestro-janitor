@@ -106,11 +106,17 @@ def propose(
     origin: str = "",
     project_dir: str | None = None,
     now: int | None = None,
-) -> tuple[str, str] | None:
-    """Author a proposal TRDD for a PROJECT-domain finding. Returns (trdd_id, suggested_command).
+) -> tuple[str, str, bool] | None:
+    """Author a proposal TRDD for a PROJECT-domain finding. Returns (trdd_id, command, is_new).
 
-    Returns None when a proposal for the same `dedupe_key` already exists — a finding that recurs
-    every 5 minutes must produce ONE proposal, not 288 a day.
+    A finding that recurs every 5 minutes must produce ONE proposal, not 288 a day — so a repeat
+    returns the EXISTING proposal's id with `is_new=False` rather than authoring a second one. The
+    caller still gets the command back, because a PROJECT finding must keep being RECOMMENDED until
+    someone approves it: nothing is fixed until they do, and a reminder that stops is a finding lost
+    (the first line may well have landed during a compaction).
+
+    Returns None only when there is nothing to propose: the kind is not PROJECT-domain, the finding is
+    ALREADY an open ticket (approved — the queue owns it now), or no design root can be resolved.
     """
     spec = tickets.KIND_REGISTRY.get(kind)
     if spec is None or spec.domain != tickets.PROJECT:
@@ -126,7 +132,7 @@ def propose(
             continue
         if fm.get("ticket-dedupe-key", "") == key:
             uid = trdd_common.extract_uid(path.name) or ""
-            return (uid, f"/janitor-support-open-ticket TRDD-{uid}") if uid else None
+            return (uid, f"/janitor-support-open-ticket TRDD-{uid}", False) if uid else None
     for t in tickets.load_all():
         if t.dedupe_key == key and t.status not in tickets.TERMINAL:
             return None
@@ -201,7 +207,7 @@ path, and closes the ticket with an explicit status.
         return None
     folder.mkdir(parents=True, exist_ok=True)
     state.atomic_write(folder / f"TRDD-{stamp}-{uid}-{slug}.md", body)
-    return uid, f"/janitor-support-open-ticket TRDD-{uid}"
+    return uid, f"/janitor-support-open-ticket TRDD-{uid}", True
 
 
 def approve(ref: str, project_dir: str | None = None, now: int | None = None) -> tuple[bool, str]:
