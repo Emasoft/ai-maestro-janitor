@@ -44,8 +44,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
-import dedupe  # noqa: E402
 import github_config_audit as gca  # noqa: E402
+import issue_catalog  # noqa: E402
 import security_helpers  # noqa: E402
 import state  # noqa: E402
 
@@ -154,22 +154,27 @@ def main() -> int:
                 ruleset_protected = True
                 break
 
-    seen = state.state_dir() / "branch-protection-seen.txt"
-    key = f"unprotected@{owner_repo}@{branch}"
-    lin_key = f"linear-history@{owner_repo}@{branch}"
-    safe_repo = state.sanitize_for_drift_line(owner_repo)
-    safe_branch = state.sanitize_for_drift_line(branch)
+    where = f"{owner_repo}@{branch}"
+    evidence = [f"github:{owner_repo}"]
 
     # The one-line remedy every finding here carries (TRDD-157OH2D7): the janitor can only
-    # NOTIFY, so the notification MUST point at the fix. `/janitor-github-config-fix` reviews +
-    # fixes (plan-first, mutate-on-confirm); the security-agent hint covers broader triage.
+    # NOTIFY, so the notification MUST point at the fix. The proposal's approval command schedules
+    # an agent; `/janitor-github-config-fix` is the fix the user can run RIGHT NOW (plan-first,
+    # mutate-on-confirm). Both are offered because they answer different questions — "handle it for
+    # me" and "show me exactly what you would change first".
     fix_hint = (
-        f" → Run {gca.FIX_SKILL} to review + fix (plan-first; mutates only on your ok). "
+        f" → Or fix it now: {gca.FIX_SKILL} (plan-first; mutates only on your ok). "
         + security_helpers.security_agent_hint(
             "branch-protection",
             enabled=state.is_truthy_env(security_helpers.SECURITY_AGENT_HINT_ENV, True),
         )
     ).rstrip()
+
+    # This is the USER's repo, so every finding here is PROJECT-domain: the janitor PROPOSES (it
+    # authors a TRDD and hands back the exact approval command) and never touches the repo itself.
+    # We print on `first_seen` only — the standing reminder is the scheduler's one job, and a
+    # detector on a 6h cadence re-announcing an unapproved finding would just duplicate it. The
+    # proposal is the dedupe now, so the old seen-file has nothing left to remember.
 
     # LINEAR-HISTORY (TRDD-157OH2D7): a `required_linear_history` rule BLOCKS merge commits and
     # jams the many-agent merge workflow — a distinct problem from being UNPROTECTED, and it
@@ -181,23 +186,27 @@ def main() -> int:
             owner_repo, rulesets if isinstance(rulesets, list) else []
         )
         if lin is True:
-            out_lin = dedupe.emit_once(
-                seen,
-                lin_key,
-                f"[branch-protection] {safe_repo} default branch '{safe_branch}' has a ruleset "
-                f"requiring LINEAR HISTORY — this BLOCKS merge commits and jams Claude's merges."
-                + fix_hint,
+            r = issue_catalog.raise_issue(
+                "BRPROT-002",
+                where=where,
+                evidence=evidence,
+                slug=owner_repo,
+                detail=f"a ruleset on '{branch}' requires LINEAR HISTORY, which blocks merge commits",
             )
-            if out_lin is not None:
-                print(out_lin)
+            if r.first_seen and r.line:
+                print(r.line + fix_hint)
+            elif not r.ok:
+                state.log_line(_NAME, f"could not raise BRPROT-002: {r.why}")
         elif lin is False:
-            # Rule is gone — forget so a re-introduction re-alerts.
-            dedupe.emit_forget(seen, lin_key)
+            # The rule is gone — withdraw the proposal. A fixed finding must not be left on the
+            # user's board as a problem that no longer exists.
+            issue_catalog.clear_issue("BRPROT-002", where=where)
 
     if classic_protected or ruleset_protected:
-        # Protected now — forget any prior UNPROTECTED nag so a future regression (the
-        # ruleset being deleted / disabled) re-alerts instead of staying mute.
-        dedupe.emit_forget(seen, key)
+        # Protected now. Withdraw any standing UNPROTECTED proposal so a future regression (the
+        # ruleset being deleted / disabled) proposes afresh instead of finding a stale one and
+        # staying mute.
+        issue_catalog.clear_issue("BRPROT-001", where=where)
         state.rotate_log_if_big(_NAME)
         return 0
 
@@ -208,15 +217,11 @@ def main() -> int:
         state.log_line(_NAME, "protection status indeterminate — skipping")
         return 0
 
-    out = dedupe.emit_once(
-        seen,
-        key,
-        f"[branch-protection] URGENT: {safe_repo} default branch '{safe_branch}' "
-        f"has NO branch protection and NO active ruleset — anyone with write "
-        f"access can force-push, rewrite history, or delete it." + fix_hint,
-    )
-    if out is not None:
-        print(out)
+    r = issue_catalog.raise_issue("BRPROT-001", where=where, evidence=evidence, slug=owner_repo)
+    if r.first_seen and r.line:
+        print(r.line + fix_hint)
+    elif not r.ok:
+        state.log_line(_NAME, f"could not raise BRPROT-001: {r.why}")
 
     state.rotate_log_if_big(_NAME)
     return 0

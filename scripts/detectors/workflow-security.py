@@ -52,9 +52,11 @@ sys.path.insert(0, str(_SCRIPTS / "lib"))
 # package, exactly the way scripts/doctor_classify.py wires the scanner.
 sys.path.insert(0, str(_SCRIPTS))
 
+import issue_catalog  # noqa: E402
 import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
 import suppression  # type: ignore[import-not-found]  # noqa: E402
+import workflow_issue_codes as wfcodes  # noqa: E402
 
 # Only these two severities ride the heartbeat. They mirror SEV_CRITICAL /
 # SEV_HIGH in lib.sentinel.model and the JSON severity contract emitted by
@@ -206,6 +208,10 @@ def main() -> int:
     state.atomic_write(last_hash_file, combined)
 
     if not findings:
+        # Clean workflows — withdraw every standing proposal. A workflow that was fixed by hand must
+        # not leave a TRDD on the board describing a vulnerability that no longer exists.
+        for code in sorted(set(wfcodes.CODE_FOR_RULE.values()) | {wfcodes.FALLBACK_CODE}):
+            issue_catalog.clear_issue(code, where=workflows_rel)
         state.rotate_log_if_big("workflow-security")
         return 0
 
@@ -236,6 +242,34 @@ def main() -> int:
         f"fixes. Findings:\n{sample}"
         + (f"\n{hint}" if hint else "")
     )
+
+    # PROPOSE the fix (TRDD-CGYMUKO6). These are the USER's workflows, so the janitor may only offer —
+    # it authors a proposal TRDD per finding CLASS and hands back the command that authorizes it.
+    #
+    # Per class, not per finding: a class is what ONE agent can fix in one pass (all the injections in
+    # the repo, all the unpinned actions), so a repo with 30 findings gets at most a handful of
+    # tickets instead of 30 agents each re-scanning the same workflows to edit the same file. And per
+    # class rather than one lump ticket, because the user may well want the injection fixed and the
+    # permissions left alone — approval is per class, so it has to be a real choice.
+    by_code: dict[str, list[str]] = {}
+    for sev, rel, line, rule_id in findings:
+        by_code.setdefault(wfcodes.code_for(rule_id), []).append(f"{rel}:{line} {rule_id} ({sev})")
+    for code, occurrences in sorted(by_code.items()):
+        r = issue_catalog.raise_issue(
+            code,
+            where=workflows_rel,
+            evidence=sorted({o.split(":")[0] for o in occurrences})[:8],
+            found="; ".join(occurrences[:20]),
+        )
+        if r.first_seen and r.line:
+            print(r.line)
+        elif not r.ok:
+            state.log_line("workflow-security", f"could not raise {code}: {r.why}")
+    # A class that is now clean while others are still dirty must ALSO be withdrawn — the
+    # no-findings path above only covers a repo that is clean everywhere.
+    for code in sorted(set(wfcodes.CODE_FOR_RULE.values()) | {wfcodes.FALLBACK_CODE}):
+        if code not in by_code:
+            issue_catalog.clear_issue(code, where=workflows_rel)
 
     state.rotate_log_if_big("workflow-security")
     return 0

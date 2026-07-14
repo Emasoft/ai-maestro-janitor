@@ -32,11 +32,67 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import env_detect  # noqa: E402
 import github_config_audit as gca  # noqa: E402
 import global_state as gs  # noqa: E402
+import issue_catalog  # noqa: E402
 import state  # noqa: E402
 
 _NAME = "fleet-github-config"
+
+
+def _current_slug() -> str:
+    """This project's `owner/repo`, from its origin remote. Cheap — no network, no `gh`."""
+    proc = state.run_subprocess(
+        ["git", "remote", "get-url", "origin"],
+        timeout=5,
+        cwd=state.project_root(),
+        detector_name=_NAME,
+    )
+    if proc is None or proc.returncode != 0:
+        return ""
+    return env_detect.github_slug((proc.stdout or "").strip()) or ""
+
+
+def _propose_for_this_repo(payload: object) -> None:
+    """Raise GHCFG-001 for THIS repo's drift only — never for the rest of the fleet.
+
+    The audit covers ~13 plugin repos, but a proposal TRDD is a file in the CURRENT repo's
+    git-tracked design board. Authoring one there about a DIFFERENT repository would litter a project
+    with tasks that do not belong to it — the same instinct the cross-project rule encodes: you do not
+    reach into someone else's tree, and you do not leave your work in it either. The other repos are
+    still NOTIFIED (the summary line above names them and carries the fix skill); they get their own
+    proposal in their own board when the janitor next fires there.
+    """
+    if not isinstance(payload, dict):
+        return
+    slug = _current_slug()
+    if not slug:
+        return
+    mine = sorted(
+        {
+            str(f.get("code"))
+            for f in payload.get("findings", [])
+            if isinstance(f, dict) and f.get("slug") == slug and f.get("code")
+        }
+    )
+    if not mine:
+        # The fleet has drift, but not in OUR repo — so if we proposed one before, it is fixed now.
+        # (The `summarize() is None` path only covers a fleet that is clean EVERYWHERE; without this,
+        # a repo fixed while any other repo is still broken would keep its stale proposal forever.)
+        issue_catalog.clear_issue("GHCFG-001", where=slug)
+        return
+    r = issue_catalog.raise_issue(
+        "GHCFG-001",
+        where=slug,
+        evidence=[f"github:{slug}"],
+        slug=slug,
+        detail=", ".join(mine),
+    )
+    if r.first_seen and r.line:
+        print(r.line)
+    elif not r.ok:
+        state.log_line(_NAME, f"could not raise GHCFG-001: {r.why}")
 
 
 def main() -> int:
@@ -53,7 +109,14 @@ def main() -> int:
 
     line = gca.summarize(payload)
     if line is None:
+        # The fleet is clean — including us. Withdraw any standing proposal for THIS repo so a board
+        # is never left carrying a problem that has since been fixed.
+        slug = _current_slug()
+        if slug:
+            issue_catalog.clear_issue("GHCFG-001", where=slug)
         return 0
+
+    _propose_for_this_repo(payload)
 
     # Dedupe on the finding-SET digest, not the rendered line: the wording could change
     # across versions without the actual gaps changing, and we don't want that to re-nag.

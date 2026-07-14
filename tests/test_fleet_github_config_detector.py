@@ -91,3 +91,59 @@ def test_disabled_env_silent(tmp_path: Path) -> None:
     r = _run(tmp_path, [{"slug": "o/a", "code": "UNPROTECTED", "detail": "d"}], disabled=True)
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
+
+
+# ---- TRDD-CGYMUKO6: it PROPOSES for this repo, and NEVER for another one ----
+
+
+def _with_origin(tmp_path: Path, slug: str) -> Path:
+    """Give the tmp project a GitHub origin, so the detector can recognise itself in the fleet."""
+    proj = tmp_path / "proj"
+    proj.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", f"https://github.com/{slug}.git"], cwd=proj, check=True
+    )
+    return proj
+
+
+def _proposals(tmp_path: Path) -> list[Path]:
+    return sorted((tmp_path / "proj" / "design" / "proposals").glob("TRDD-*.md"))
+
+
+def test_proposes_a_fix_when_THIS_repo_is_the_drifted_one(tmp_path: Path) -> None:
+    """The fleet line only NOTIFIES. For the repo we are actually standing in, the janitor also
+    proposes the fix and hands back the one command that authorizes it."""
+    _with_origin(tmp_path, "o/a")
+
+    r = _run(tmp_path, [{"slug": "o/a", "code": "UNPROTECTED", "detail": "d"}])
+
+    assert "GHCFG-001" in r.stdout
+    assert "/janitor-support-open-ticket TRDD-" in r.stdout
+    assert len(_proposals(tmp_path)) == 1
+
+
+def test_NEVER_writes_a_proposal_about_ANOTHER_repo(tmp_path: Path) -> None:
+    """The load-bearing boundary. A proposal TRDD is a file in THIS repo's git-tracked board; one
+    describing a DIFFERENT repository would litter a project with work that is not its own. The other
+    repos are notified in the summary line and proposed for in their OWN board, when the janitor fires
+    there."""
+    _with_origin(tmp_path, "o/mine")
+
+    r = _run(tmp_path, [{"slug": "o/someone-else", "code": "UNPROTECTED", "detail": "d"}])
+
+    assert "[github-config]" in r.stdout, "the other repo is still NOTIFIED"
+    assert "GHCFG-001" not in r.stdout
+    assert _proposals(tmp_path) == [], "no TRDD about a repo we are not in"
+
+
+def test_a_repo_fixed_while_the_fleet_is_still_dirty_has_its_proposal_WITHDRAWN(tmp_path: Path) -> None:
+    """The clear path that the fleet-is-clean check alone would miss: our repo gets fixed while some
+    OTHER repo is still broken. Without this, the stale proposal sits on our board forever."""
+    _with_origin(tmp_path, "o/mine")
+    assert "GHCFG-001" in _run(tmp_path, [{"slug": "o/mine", "code": "UNPROTECTED", "detail": "d"}]).stdout
+    assert len(_proposals(tmp_path)) == 1
+
+    _run(tmp_path, [{"slug": "o/other", "code": "UNPROTECTED", "detail": "d"}])
+
+    assert _proposals(tmp_path) == []

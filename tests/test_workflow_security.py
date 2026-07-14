@@ -257,3 +257,54 @@ def test_workflow_run_pwn_checkout_critical_rides_heartbeat(tmp_path: Path) -> N
     assert "[workflow-security]" in r.stdout
     assert "workflow-run-pwn-checkout" in r.stdout
     assert "CRITICAL" in r.stdout
+
+
+# ---- TRDD-CGYMUKO6: the finding PROPOSES a fix, grouped by class ------------
+
+
+def _proposals(project_dir: Path) -> list[Path]:
+    return sorted((project_dir / "design" / "proposals").glob("TRDD-*.md"))
+
+
+def test_a_finding_proposes_a_fix_with_the_approval_command(tmp_path: Path) -> None:
+    """These are the USER's workflows, so the janitor may only offer. It authors a proposal TRDD and
+    hands back the one command that authorizes an agent to fix it — a finding whose remedy the reader
+    has to go and look up is a finding that gets skipped."""
+    _write_wf(tmp_path, "vuln.yml", VULN_WF)
+
+    r = _run(tmp_path)
+
+    assert "WFSEC-001" in r.stdout
+    assert "/janitor-support-open-ticket TRDD-" in r.stdout
+    props = _proposals(tmp_path)
+    assert len(props) == 1
+    body = props[0].read_text(encoding="utf-8")
+    assert "shell-injection-expr" in body, "the ticket must name the exact rule and line to fix"
+    assert "column: proposal" in body, "NOT authorized to execute until someone approves"
+
+
+def test_many_findings_of_one_CLASS_are_ONE_proposal(tmp_path: Path) -> None:
+    """Grouping by the FIX, not by the rule. Two injection findings in two files are one job for one
+    agent; two proposals would dispatch two agents to make the same kind of edit, and would ask the
+    user to approve the same decision twice."""
+    _write_wf(tmp_path, "a.yml", VULN_WF)
+    _write_wf(tmp_path, "b.yml", VULN_WF.replace("Building", "Checking"))
+
+    r = _run(tmp_path)
+
+    assert r.stdout.count("/janitor-support-open-ticket") == 1
+    assert len(_proposals(tmp_path)) == 1
+
+
+def test_a_fixed_workflow_WITHDRAWS_its_proposal(tmp_path: Path) -> None:
+    """Fixed by hand → the proposal must leave the board. A design board carrying vulnerabilities that
+    no longer exist teaches its reader to stop trusting the board."""
+    _write_wf(tmp_path, "vuln.yml", VULN_WF)
+    assert "WFSEC-001" in _run(tmp_path).stdout
+    assert len(_proposals(tmp_path)) == 1
+
+    _write_wf(tmp_path, "vuln.yml", SAFE_WF)  # the user fixed it themselves
+
+    r = _run(tmp_path)
+    assert r.stdout == ""
+    assert _proposals(tmp_path) == []

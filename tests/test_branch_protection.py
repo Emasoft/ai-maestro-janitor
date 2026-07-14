@@ -93,13 +93,18 @@ def _run(repo: tuple[Path, Path], overrides: dict[str, str] | None = None) -> su
 
 
 def test_fires_when_unprotected(tmp_path: Path) -> None:
-    """No ruleset + 404 classic protection → URGENT drift line."""
+    """No ruleset + 404 classic protection → the BRPROT-001 finding, with the approval command.
+
+    Since TRDD-CGYMUKO6 the line is not a bare nag: this is the USER's repo, so the janitor may only
+    PROPOSE. It authors a proposal TRDD and hands back the one command that authorizes the fix — a
+    finding whose remedy the reader has to go and look up is a finding that gets skipped.
+    """
     r = _run(_make_repo(tmp_path))
     assert r.returncode == 0, r.stderr
-    assert "[branch-protection]" in r.stdout
-    assert "URGENT" in r.stdout
+    assert "BRPROT-001" in r.stdout
+    assert "unprotected" in r.stdout
     assert "o/r" in r.stdout
-    assert "main" in r.stdout
+    assert "/janitor-support-open-ticket TRDD-" in r.stdout
 
 
 def test_silent_when_ruleset_protected(tmp_path: Path) -> None:
@@ -168,7 +173,7 @@ def test_inactive_ruleset_still_nags(tmp_path: Path) -> None:
         {"GH_RULESETS_BODY": json.dumps([{"id": 1, "target": "branch", "enforcement": "evaluate"}])},
     )
     assert r.returncode == 0, r.stderr
-    assert "[branch-protection]" in r.stdout
+    assert "BRPROT-001" in r.stdout
 
 
 def test_empty_permission_surfaces(tmp_path: Path) -> None:
@@ -180,18 +185,30 @@ def test_empty_permission_surfaces(tmp_path: Path) -> None:
         )},
     )
     assert r.returncode == 0, r.stderr
-    assert "[branch-protection]" in r.stdout
+    assert "BRPROT-001" in r.stdout
 
 
 def test_dedupe_then_rearm(tmp_path: Path) -> None:
-    """Fires once, dedupes, then re-arms after protection is added and later removed."""
-    repo = _make_repo(tmp_path)
+    """Announced once, then quiet; and a REGRESSION re-announces.
+
+    The dedupe is now the proposal itself: a standing finding is one TRDD on the board, and the
+    standing reminder is the scheduler's job (announcing it again from here every 6h would just be a
+    second voice saying the same thing). When the repo gets protected the proposal is WITHDRAWN — so
+    if protection is later removed, the finding is genuinely new again and says so.
+    """
+    project_dir, _binp = repo = _make_repo(tmp_path)
+    proposals = project_dir / "design" / "proposals"
     protected = {"GH_RULESETS_BODY": json.dumps([{"id": 1, "target": "branch", "enforcement": "active"}])}
 
-    assert "[branch-protection]" in _run(repo).stdout          # first: fires
-    assert _run(repo).stdout == ""                              # second: deduped
-    assert _run(repo, protected).stdout == ""                  # protected: silent + forgets
-    assert "[branch-protection]" in _run(repo).stdout          # regression: re-alerts
+    assert "BRPROT-001" in _run(repo).stdout                    # first: fires
+    assert len(list(proposals.glob("TRDD-*.md"))) == 1
+    assert _run(repo).stdout == ""                              # second: already proposed → quiet
+    assert len(list(proposals.glob("TRDD-*.md"))) == 1, "a recurring finding must not stack proposals"
+
+    assert _run(repo, protected).stdout == ""                   # protected: silent…
+    assert list(proposals.glob("TRDD-*.md")) == [], "…and the stale proposal must LEAVE the board"
+
+    assert "BRPROT-001" in _run(repo).stdout                    # regression: re-alerts
 
 
 def test_disabled_env_silent(tmp_path: Path) -> None:
@@ -203,11 +220,14 @@ def test_disabled_env_silent(tmp_path: Path) -> None:
 
 # ---- TRDD-157OH2D7: fix-skill hint + linear-history detection --------------
 
-def test_unprotected_line_carries_the_fix_pointer(tmp_path: Path) -> None:
-    """The UNPROTECTED line now points at /janitor-github-config-fix and DROPS the old
-    'will not change repo settings' anti-suggestion (the root cause the user reported)."""
+def test_unprotected_line_carries_BOTH_remedies(tmp_path: Path) -> None:
+    """The line offers the two remedies that answer different questions — "handle it for me" (approve
+    the proposal; an agent does it at the next slot) and "show me what you'd change first"
+    (/janitor-github-config-fix, plan-first). It DROPS the old 'will not change repo settings'
+    anti-suggestion (the root cause the user reported)."""
     r = _run(_make_repo(tmp_path))
-    assert "[branch-protection]" in r.stdout and "URGENT" in r.stdout
+    assert "BRPROT-001" in r.stdout
+    assert "/janitor-support-open-ticket TRDD-" in r.stdout
     assert "/janitor-github-config-fix" in r.stdout
     assert "will not change repo settings" not in r.stdout
 
@@ -229,10 +249,10 @@ def test_linear_history_line_fires_on_protected_repo(tmp_path: Path) -> None:
         },
     )
     assert r.returncode == 0, r.stderr
-    assert "[branch-protection]" in r.stdout
+    assert "BRPROT-002" in r.stdout
     assert "LINEAR HISTORY" in r.stdout
     assert "/janitor-github-config-fix" in r.stdout
-    assert "URGENT" not in r.stdout  # it IS protected — only the linear-history problem
+    assert "BRPROT-001" not in r.stdout  # it IS protected — only the linear-history problem
 
 
 def test_linear_history_line_falsified_without_the_rule(tmp_path: Path) -> None:

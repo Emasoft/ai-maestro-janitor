@@ -193,41 +193,64 @@ ISSUE_CATALOG: dict[str, Issue] = {
         fix="Run the memory curator's repair pass under the edit transaction, which proves no knowledge was lost before it commits.",
     ),
     # ---------------- PROJECT — the USER's repo. PROPOSE ONLY, never unattended. -------------------
+    # The six WFSEC codes are grouped by THE FIX, not by the scanner's rule name: the workflow auditor
+    # emits 54 rule ids, and two rules belong to the same code exactly when the same repair answers
+    # both. `workflow_issue_codes.CODE_FOR_RULE` is the map (and a test proves it is total), so one
+    # dispatched agent fixes one coherent class across the repo instead of 54 agents each editing the
+    # same file. `{rules}` names the specific rule ids and locations found.
     "WFSEC-001": Issue(
         scanner="workflow-security",
         kind="security-workflow",
         severity="high",
-        title="attacker-controlled expression interpolated into a `run:` block at {where}",
-        what="A GitHub Actions workflow interpolates `${{ github.event.* }}` (or another attacker-controllable expression) directly into a shell `run:` body.",
-        why="Anyone who can open an issue or a PR can put shell metacharacters in that field and execute code on the runner — with the workflow's secrets and token in scope.",
-        fix='Pass the value through an `env:` variable and reference it as `"$VAR"` inside the script. Never interpolate an expression into shell source.',
+        title="a workflow lets attacker-controlled input reach an executable position in {where}",
+        what="A GitHub Actions workflow interpolates `${{ github.event.* }}` (or another attacker-controllable expression) directly into something that gets EXECUTED or EVALUATED — a shell `run:` body, a `github-script` block, `runs-on:`, a matrix, `$GITHUB_ENV`, `$GITHUB_OUTPUT`, or an AI tool's config.",
+        why="Anyone who can open an issue or a PR can put shell metacharacters in that field and execute code on the runner — with the workflow's secrets and token in scope. The title of an issue is not data the workflow gets to trust.",
+        fix='Pass the value through an `env:` variable and reference it as `"$VAR"` inside the script — the value then arrives as data, not as source. Never interpolate an expression into anything that will be parsed as code.',
     ),
     "WFSEC-002": Issue(
         scanner="workflow-security",
         kind="security-workflow",
         severity="critical",
-        title="`pull_request_target` checks out the fork's head at {where}",
-        what="A workflow that runs with the BASE repo's write token and secrets explicitly checks out code from the pull request's head.",
-        why="This executes untrusted contributor code with full write access to the base repository. It is the single most exploited GitHub Actions pattern.",
-        fix="Use `pull_request` (no secrets, no write token) for anything that runs contributor code, or split into a build job (untrusted) and a privileged job that never checks out fork code.",
+        title="a workflow runs fork-controlled code with the base repo's privileges in {where}",
+        what="A workflow that holds the BASE repo's write token and secrets executes code the contributor controls — checking out a PR head under `pull_request_target`, re-running a `workflow_run` head, acting on an `issue_comment`, or handing a fork's artifact/cache to a privileged job.",
+        why="This is the single most exploited GitHub Actions pattern: it executes untrusted code with full write access to the base repository. There is no sandbox — the token is right there.",
+        fix="Use `pull_request` (no secrets, no write token) for anything that runs contributor code, or split into an UNTRUSTED build job and a PRIVILEGED job that never checks out fork code and only consumes verified inputs.",
     ),
     "WFSEC-003": Issue(
         scanner="workflow-security",
         kind="security-workflow",
         severity="medium",
-        title="a workflow declares no `permissions:` block at {where}",
-        what="The workflow inherits the repository's default token permissions instead of declaring least privilege.",
-        why="A compromised step (or a malicious dependency) inherits whatever the default grants — often write access to contents, packages, and issues.",
-        fix="Add a top-level `permissions:` block starting from `{}` and grant only what each job needs.",
+        title="a workflow's token or permission scope is wider than the job needs in {where}",
+        what="The workflow inherits (or explicitly grants) more privilege than it uses: no `permissions:` block, a broad grant, `secrets: inherit`, an unscoped app token, an ungated `id-token: write`, or a checkout that leaves the token persisted on disk.",
+        why="Every excess grant is blast radius. A compromised step — or one malicious dependency in one action — inherits whatever the job holds, and 'write to contents' is enough to rewrite the repository.",
+        fix="Declare least privilege: start from an EMPTY `permissions:` map and grant only what each job actually needs; scope app tokens; gate `id-token: write` behind an environment; stop persisting credentials.",
     ),
     "WFSEC-004": Issue(
         scanner="workflow-security",
         kind="security-workflow",
         severity="medium",
-        title="a third-party action is not pinned to a commit SHA at {where}",
-        what="A step uses a mutable ref (a tag or a branch) for an action outside `actions/` and `github/`.",
-        why="Tags can be moved. An upstream account takeover or a rewritten tag silently changes what runs in the repo's CI, with the repo's secrets.",
-        fix="Pin the action to a full commit SHA with the version in a trailing comment (`pinact run` automates this).",
+        title="a workflow depends on a MUTABLE reference in {where}",
+        what="A step pulls something that can change under it without the repo changing: an action on a tag or branch, an unpinned Docker image, an unfrozen lockfile, a `curl | sh`, or a build that publishes from the same job it built in.",
+        why="Tags move. An upstream account takeover or a rewritten tag silently changes what runs in CI — with the repo's secrets — and the diff that would have shown it does not exist, because nothing in the repo changed.",
+        fix="Pin it: a full commit SHA (with the version in a trailing comment — `pinact run` automates this), an image digest, a frozen lockfile. What ran yesterday must be what runs today.",
+    ),
+    "WFSEC-005": Issue(
+        scanner="workflow-security",
+        kind="security-workflow",
+        severity="critical",
+        title="a workflow exposes a secret in {where}",
+        what="A credential is present where it can escape: hard-coded in the workflow, a static cloud key, a token in a URL or a Docker build-arg, a secret interpolated bare into a `run:` body, or the whole secrets object dumped via `toJSON`.",
+        why="A secret in a workflow is a secret in every fork, every log, and every cached layer. Build-args and env dumps end up in artifacts that outlive the run.",
+        fix="Move it behind `secrets:` (or OIDC, which mints a short-lived token and stores nothing). If it was ever COMMITTED, it is burned: tell the user to ROTATE it — do not rotate it yourself — and only then remove it and purge it from history.",
+    ),
+    "WFSEC-006": Issue(
+        scanner="workflow-security",
+        kind="security-workflow",
+        severity="medium",
+        title="a workflow's own safety rail is missing or defeated in {where}",
+        what="A guard that was supposed to catch failures is absent or neutered: no `timeout-minutes`, an `if:` condition that is always true, `continue-on-error` on a SECURITY step, or a global git config that rewrites what later steps fetch.",
+        why="A defeated guard is worse than no guard: the job reports success, the security step's failure is swallowed, and everyone downstream believes the check ran. A hung job with no timeout burns the runner budget until someone notices by hand.",
+        fix="Restore the guard — set `timeout-minutes`, make the condition mean something, and let a failing security step FAIL the job. A check whose result is ignored is not a check.",
     ),
     "BRPROT-001": Issue(
         scanner="branch-protection",
@@ -419,17 +442,22 @@ def raise_issue(
     fields = _fields(where, data)
     title = _render(issue.title, fields)
 
-    detail = "\n".join(
-        [
-            f"**{code}** ({issue.scanner}, severity `{severity or issue.severity}`)",
-            "",
-            f"**What:** {issue.what}",
-            "",
-            f"**Why it matters:** {issue.why}",
-            "",
-            f"**Fix to attempt:** {issue.fix}",
-        ]
-    )
+    parts = [
+        f"**{code}** ({issue.scanner}, severity `{severity or issue.severity}`)",
+        "",
+        f"**What:** {issue.what}",
+        "",
+        f"**Why it matters:** {issue.why}",
+        "",
+        f"**Fix to attempt:** {issue.fix}",
+    ]
+    # `found` carries THIS occurrence's specifics — the rule ids, the files, the lines. It is passed
+    # as data (already sanitized) rather than rendered into the templates, because `what` and `fix`
+    # quote real Actions syntax (`${{ github.event.* }}`) and running them through a formatter would
+    # eat the braces and leave the ticket teaching the agent a syntax that does not exist.
+    if fields.get("found"):
+        parts += ["", f"**Found:** {fields['found']}"]
+    detail = "\n".join(parts)
     key = _finding_key(code, issue, fields, dedupe_key)
     ev = list(evidence or [])
     org = origin or issue.scanner

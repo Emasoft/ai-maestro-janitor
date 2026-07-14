@@ -140,7 +140,7 @@ unattended access to your repository.
 
 ## PROJECT — your repo (proposed, never automatic)
 
-14 code(s).
+16 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -154,10 +154,12 @@ unattended access to your repository.
 | `GHCFG-001` | fleet-github-config | medium | the GitHub config of {slug} is off-baseline: {detail} |
 | `MCPSEC-001` | mcp-rugpull | high | an installed MCP server changed its fingerprint: {server} |
 | `PKGPOL-001` | package-manager-policy | medium | a package-manager safety knob is disabled in {path}: {detail} |
-| `WFSEC-001` | workflow-security | high | attacker-controlled expression interpolated into a `run:` block at {where} |
-| `WFSEC-002` | workflow-security | critical | `pull_request_target` checks out the fork's head at {where} |
-| `WFSEC-003` | workflow-security | medium | a workflow declares no `permissions:` block at {where} |
-| `WFSEC-004` | workflow-security | medium | a third-party action is not pinned to a commit SHA at {where} |
+| `WFSEC-001` | workflow-security | high | a workflow lets attacker-controlled input reach an executable position in {where} |
+| `WFSEC-002` | workflow-security | critical | a workflow runs fork-controlled code with the base repo's privileges in {where} |
+| `WFSEC-003` | workflow-security | medium | a workflow's token or permission scope is wider than the job needs in {where} |
+| `WFSEC-004` | workflow-security | medium | a workflow depends on a MUTABLE reference in {where} |
+| `WFSEC-005` | workflow-security | critical | a workflow exposes a secret in {where} |
+| `WFSEC-006` | workflow-security | medium | a workflow's own safety rail is missing or defeated in {where} |
 
 ### `AICTX-001` — an agent-context file may be poisoned: {path}
 
@@ -229,33 +231,47 @@ unattended access to your repository.
 - **Why it matters:** These knobs are the only thing standing between a compromised transitive dependency and arbitrary code execution at install time.
 - **Fix attempted:** Restore the safeguard and re-run the install to confirm nothing depended on it being off. If something did, that dependency is the real finding.
 
-### `WFSEC-001` — attacker-controlled expression interpolated into a `run:` block at {where}
+### `WFSEC-001` — a workflow lets attacker-controlled input reach an executable position in {where}
 
 - **Scanner:** `workflow-security` · **Severity:** `high` · **Kind:** `security-workflow`
-- **What it is:** A GitHub Actions workflow interpolates `${{ github.event.* }}` (or another attacker-controllable expression) directly into a shell `run:` body.
-- **Why it matters:** Anyone who can open an issue or a PR can put shell metacharacters in that field and execute code on the runner — with the workflow's secrets and token in scope.
-- **Fix attempted:** Pass the value through an `env:` variable and reference it as `"$VAR"` inside the script. Never interpolate an expression into shell source.
+- **What it is:** A GitHub Actions workflow interpolates `${{ github.event.* }}` (or another attacker-controllable expression) directly into something that gets EXECUTED or EVALUATED — a shell `run:` body, a `github-script` block, `runs-on:`, a matrix, `$GITHUB_ENV`, `$GITHUB_OUTPUT`, or an AI tool's config.
+- **Why it matters:** Anyone who can open an issue or a PR can put shell metacharacters in that field and execute code on the runner — with the workflow's secrets and token in scope. The title of an issue is not data the workflow gets to trust.
+- **Fix attempted:** Pass the value through an `env:` variable and reference it as `"$VAR"` inside the script — the value then arrives as data, not as source. Never interpolate an expression into anything that will be parsed as code.
 
-### `WFSEC-002` — `pull_request_target` checks out the fork's head at {where}
+### `WFSEC-002` — a workflow runs fork-controlled code with the base repo's privileges in {where}
 
 - **Scanner:** `workflow-security` · **Severity:** `critical` · **Kind:** `security-workflow`
-- **What it is:** A workflow that runs with the BASE repo's write token and secrets explicitly checks out code from the pull request's head.
-- **Why it matters:** This executes untrusted contributor code with full write access to the base repository. It is the single most exploited GitHub Actions pattern.
-- **Fix attempted:** Use `pull_request` (no secrets, no write token) for anything that runs contributor code, or split into a build job (untrusted) and a privileged job that never checks out fork code.
+- **What it is:** A workflow that holds the BASE repo's write token and secrets executes code the contributor controls — checking out a PR head under `pull_request_target`, re-running a `workflow_run` head, acting on an `issue_comment`, or handing a fork's artifact/cache to a privileged job.
+- **Why it matters:** This is the single most exploited GitHub Actions pattern: it executes untrusted code with full write access to the base repository. There is no sandbox — the token is right there.
+- **Fix attempted:** Use `pull_request` (no secrets, no write token) for anything that runs contributor code, or split into an UNTRUSTED build job and a PRIVILEGED job that never checks out fork code and only consumes verified inputs.
 
-### `WFSEC-003` — a workflow declares no `permissions:` block at {where}
-
-- **Scanner:** `workflow-security` · **Severity:** `medium` · **Kind:** `security-workflow`
-- **What it is:** The workflow inherits the repository's default token permissions instead of declaring least privilege.
-- **Why it matters:** A compromised step (or a malicious dependency) inherits whatever the default grants — often write access to contents, packages, and issues.
-- **Fix attempted:** Add a top-level `permissions:` block starting from `{}` and grant only what each job needs.
-
-### `WFSEC-004` — a third-party action is not pinned to a commit SHA at {where}
+### `WFSEC-003` — a workflow's token or permission scope is wider than the job needs in {where}
 
 - **Scanner:** `workflow-security` · **Severity:** `medium` · **Kind:** `security-workflow`
-- **What it is:** A step uses a mutable ref (a tag or a branch) for an action outside `actions/` and `github/`.
-- **Why it matters:** Tags can be moved. An upstream account takeover or a rewritten tag silently changes what runs in the repo's CI, with the repo's secrets.
-- **Fix attempted:** Pin the action to a full commit SHA with the version in a trailing comment (`pinact run` automates this).
+- **What it is:** The workflow inherits (or explicitly grants) more privilege than it uses: no `permissions:` block, a broad grant, `secrets: inherit`, an unscoped app token, an ungated `id-token: write`, or a checkout that leaves the token persisted on disk.
+- **Why it matters:** Every excess grant is blast radius. A compromised step — or one malicious dependency in one action — inherits whatever the job holds, and 'write to contents' is enough to rewrite the repository.
+- **Fix attempted:** Declare least privilege: start from an EMPTY `permissions:` map and grant only what each job actually needs; scope app tokens; gate `id-token: write` behind an environment; stop persisting credentials.
+
+### `WFSEC-004` — a workflow depends on a MUTABLE reference in {where}
+
+- **Scanner:** `workflow-security` · **Severity:** `medium` · **Kind:** `security-workflow`
+- **What it is:** A step pulls something that can change under it without the repo changing: an action on a tag or branch, an unpinned Docker image, an unfrozen lockfile, a `curl | sh`, or a build that publishes from the same job it built in.
+- **Why it matters:** Tags move. An upstream account takeover or a rewritten tag silently changes what runs in CI — with the repo's secrets — and the diff that would have shown it does not exist, because nothing in the repo changed.
+- **Fix attempted:** Pin it: a full commit SHA (with the version in a trailing comment — `pinact run` automates this), an image digest, a frozen lockfile. What ran yesterday must be what runs today.
+
+### `WFSEC-005` — a workflow exposes a secret in {where}
+
+- **Scanner:** `workflow-security` · **Severity:** `critical` · **Kind:** `security-workflow`
+- **What it is:** A credential is present where it can escape: hard-coded in the workflow, a static cloud key, a token in a URL or a Docker build-arg, a secret interpolated bare into a `run:` body, or the whole secrets object dumped via `toJSON`.
+- **Why it matters:** A secret in a workflow is a secret in every fork, every log, and every cached layer. Build-args and env dumps end up in artifacts that outlive the run.
+- **Fix attempted:** Move it behind `secrets:` (or OIDC, which mints a short-lived token and stores nothing). If it was ever COMMITTED, it is burned: tell the user to ROTATE it — do not rotate it yourself — and only then remove it and purge it from history.
+
+### `WFSEC-006` — a workflow's own safety rail is missing or defeated in {where}
+
+- **Scanner:** `workflow-security` · **Severity:** `medium` · **Kind:** `security-workflow`
+- **What it is:** A guard that was supposed to catch failures is absent or neutered: no `timeout-minutes`, an `if:` condition that is always true, `continue-on-error` on a SECURITY step, or a global git config that rewrites what later steps fetch.
+- **Why it matters:** A defeated guard is worse than no guard: the job reports success, the security step's failure is swallowed, and everyone downstream believes the check ran. A hung job with no timeout burns the runner budget until someone notices by hand.
+- **Fix attempted:** Restore the guard — set `timeout-minutes`, make the condition mean something, and let a failing security step FAIL the job. A check whose result is ignored is not a check.
 
 
 ## How a finding becomes work
