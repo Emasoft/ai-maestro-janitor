@@ -27,6 +27,7 @@ _LESSONS_HEADING = "## Notes and lessons learned"
 # from the parser-independent lesson check on purpose)
 # --------------------------------------------------------------------------- #
 
+
 def _parse_scalar_or_list(val: str):
     val = val.strip()
     if val.startswith("[") and val.endswith("]"):
@@ -111,7 +112,7 @@ def parse_frontmatter(text: str) -> dict:
             continue
         if indented and in_meta:
             if not val.strip():
-                fm[key] = []          # a block list opens here; items follow
+                fm[key] = []  # a block list opens here; items follow
                 pending_list_key = key
             else:
                 fm[key] = _parse_scalar_or_list(val)
@@ -128,6 +129,7 @@ def parse_frontmatter(text: str) -> dict:
 # --------------------------------------------------------------------------- #
 # lesson preservation — the STRICT, parser-independent anti-data-loss check
 # --------------------------------------------------------------------------- #
+
 
 def _normalize_lesson(body: str) -> str:
     """Reduce a lesson to its substantive text for drop/reword detection: strip
@@ -163,13 +165,13 @@ def extract_lessons(text: str) -> list[str]:
     # followed by a capital or a bracket (`## Notes…`, `## [Link]…`); `# never use …` is
     # not. Fenced code is masked first, so a `# comment` inside a ``` block cannot stop a
     # lesson either.
-    scan = _mask_code_fences(text)          # offset-preserving, so spans index `text` too
+    scan = _mask_code_fences(text)  # offset-preserving, so spans index `text` too
     out: list[str] = []
     for m in re.finditer(r"(?ms)^\[\^[^\]]+\]:.*?(?=^\[\^[^\]]+\]:|^#{1,6} [A-Z(\[]|\Z)", scan):
         # Slice the ORIGINAL text: the mask exists only to stop a `#`/`[^id]` INSIDE a fence
         # from being read as a boundary — the lesson's real content (code included) is what
         # must be compared.
-        norm = _normalize_lesson(text[m.start():m.end()])
+        norm = _normalize_lesson(text[m.start() : m.end()])
         if norm:
             out.append(norm)
     return out
@@ -194,6 +196,7 @@ def lessons_preserved(sources: list[str], result: str) -> tuple[bool, list[str]]
 # --------------------------------------------------------------------------- #
 # body-fact fidelity (issue #48 — an editor pass must never paraphrase/drop a FACT)
 # --------------------------------------------------------------------------- #
+
 
 def _strip_frontmatter(text: str) -> str:
     """The note minus its leading `--- … ---` YAML frontmatter block (the body + lessons section
@@ -257,9 +260,7 @@ def _substantive_body_lines(text: str, min_len: int = 24) -> list[str]:
     return out
 
 
-def body_facts_preserved(
-    sources: list[str], result: str, min_len: int = 24
-) -> tuple[bool, list[str]]:
+def body_facts_preserved(sources: list[str], result: str, min_len: int = 24) -> tuple[bool, list[str]]:
     """STRICT anti-corruption (issue #48): every substantive body FACT line of every
     source must survive into `result` — as a SUBSTRING of the result's normalized body
     blob. Mirrors lessons_preserved, applied to the body. ALLOWS reorganization, an
@@ -287,9 +288,7 @@ def body_facts_preserved(
 _POINTER_RE = re.compile(r"^\s*[-*+]\s*\[[^\]]+\]\(([^)]+)\)")  # `- [Title](target.md) — hook`
 
 
-def harvest_preservation_ok(
-    memory_md_text: str, corpus_text: str, note_filenames
-) -> tuple[bool, list[str]]:
+def harvest_preservation_ok(memory_md_text: str, corpus_text: str, note_filenames) -> tuple[bool, list[str]]:
     """Prove a HARVEST lost nothing BEFORE MEMORY.md is reduced to the stub: every memory
     the old MEMORY.md held now lives in the wiki. A POINTER line (`- [T](target.md) — hook`)
     is preserved iff its target file is among `note_filenames` (the note IS the memory). A
@@ -328,9 +327,8 @@ def harvest_preservation_ok(
 # failure means "mirror more", never "do not stub" (there is no stub step any more).
 # --------------------------------------------------------------------------- #
 
-def mirror_preservation_ok(
-    buffer_notes, wiki_corpus: str, min_len: int = 24
-) -> tuple[bool, list[str]]:
+
+def mirror_preservation_ok(buffer_notes, wiki_corpus: str, min_len: int = 24) -> tuple[bool, list[str]]:
     """Prove a coexistence HARVEST mirrored every raw buffer note into the wiki.
 
     `buffer_notes` is an iterable of ``(name, text)`` pairs — the RAW harness buffer
@@ -365,6 +363,7 @@ def mirror_preservation_ok(
 # duplicate detection (a merge must REMOVE redundancy, never ADD it)
 # --------------------------------------------------------------------------- #
 
+
 def no_new_duplicate_lines(result: str, min_len: int = 24) -> tuple[bool, list[str]]:
     """No substantive content line (length ≥ `min_len`, not a heading/list marker)
     appears more than once in `result`. Catches a naive union that re-introduced
@@ -391,8 +390,46 @@ def no_new_duplicate_lines(result: str, min_len: int = 24) -> tuple[bool, list[s
 # dangling-link / connectedness check (THE LINK LAW)
 # --------------------------------------------------------------------------- #
 
+
 def _wikilinks(text: str) -> set[str]:
     return set(re.findall(r"\[\[([^\]]+)\]\]", text))
+
+
+def canonicalize_retired_links(text: str, retired_slugs, survivor_slug: str) -> str:
+    """Rewrite every `[[retired]]` wikilink to `[[survivor]]` — the redirect a merge MANDATES.
+
+    This exists to resolve a deadlock between two invariants that were each correct alone and
+    contradictory together (TRDD-MQBV844P):
+
+    - `no_dangling_refs` REQUIRES that, once a slug retires, no surviving page still links to it —
+      so the merged page's `[[retired]]` pointer MUST be redirected.
+    - `body_facts_preserved` / `lessons_preserved` REQUIRE that every body line and every lesson
+      survive as a BYTE-IDENTICAL substring — so that same line MUST NOT change.
+
+    No merge output can satisfy both: keeping the pointer fails the first, editing or deleting it
+    fails the second. And this is not an edge case — the wikimem LINK LAW mandates bidirectional
+    links, so any two pages related enough to be merge candidates are GUARANTEED to cross-link.
+    CONSOLIDATE could therefore never merge the very pages it exists to merge, and it failed
+    SILENTLY, by abstaining, on every attempt.
+
+    The resolution is to compare MODULO the mandated redirect: canonicalize the retired links on
+    BOTH sides before matching, so the two oracles finally agree on what a merge *is*. This does not
+    weaken the anti-corruption guarantee (issue #48) — every OTHER character of every line must still
+    survive verbatim, and a genuinely dropped or paraphrased fact still fails. The ONLY edit it
+    permits is the one the other invariant already demands.
+
+    Alias links (`[[slug|shown text]]`) keep their alias; only the target is rewritten.
+    """
+    out = text
+    for slug in retired_slugs:
+        if not slug or slug == survivor_slug:
+            continue
+        out = re.sub(
+            r"\[\[" + re.escape(str(slug)) + r"(\|[^\]]*)?\]\]",
+            lambda m: f"[[{survivor_slug}{m.group(1) or ''}]]",
+            out,
+        )
+    return out
 
 
 def no_dangling_refs(live_pages: dict, retired_slugs) -> tuple[bool, list[str]]:
@@ -425,8 +462,8 @@ def no_dangling_refs(live_pages: dict, retired_slugs) -> tuple[bool, list[str]]:
 # a sibling atom there still cites it, or (b) a ref moves to a new page without
 # its def. This is the verify half of that rule.
 
-_FN_DEF_RE = re.compile(r"(?m)^\[\^([^\]]+)\]:")   # a footnote DEFINITION: line-start `[^id]:`
-_FN_ANY_RE = re.compile(r"\[\^([^\]]+)\]")          # ANY `[^id]` occurrence (refs + def markers)
+_FN_DEF_RE = re.compile(r"(?m)^\[\^([^\]]+)\]:")  # a footnote DEFINITION: line-start `[^id]:`
+_FN_ANY_RE = re.compile(r"\[\^([^\]]+)\]")  # ANY `[^id]` occurrence (refs + def markers)
 
 
 def _mask_code_fences(text: str) -> str:
@@ -444,7 +481,7 @@ def _mask_code_fences(text: str) -> str:
     in_fence = False
     for line in text.splitlines(keepends=True):
         stripped = line.rstrip("\n")
-        nl = line[len(stripped):]
+        nl = line[len(stripped) :]
         if stripped.lstrip().startswith("```"):
             in_fence = not in_fence
             out.append(" " * len(stripped) + nl)
@@ -470,9 +507,7 @@ def footnote_refs_resolve(text: str) -> tuple[bool, list[str]]:
     return (not unresolved, unresolved)
 
 
-def no_new_dangling_footnote_refs(
-    source_texts: list[str], result_texts: list[str]
-) -> tuple[bool, list[str]]:
+def no_new_dangling_footnote_refs(source_texts: list[str], result_texts: list[str]) -> tuple[bool, list[str]]:
     """A split/merge must not INTRODUCE a dangling footnote ref. Compare per-ID
     sets, not counts (L-5, wikimem audit 2026-07-07): the count form let "fixed
     one dangling ref" buy a licence to orphan a DIFFERENT id in the same op. A
@@ -493,6 +528,7 @@ def no_new_dangling_footnote_refs(
 # --------------------------------------------------------------------------- #
 # metadata invariants (ocd/lmd through a merge)
 # --------------------------------------------------------------------------- #
+
 
 def ocd_lmd_ok_merge(source_metas: list[dict], result_meta: dict) -> tuple[bool, str]:
     """The survivor of a merge keeps the OLDEST origin date and a fresh modify
@@ -537,9 +573,7 @@ def is_legal_merge(meta_a: dict, meta_b: dict) -> tuple[bool, str]:
     return (True, "ok")
 
 
-def is_legal_split(
-    meta: dict, body: str, min_sections: int = 2, oversized: bool = False
-) -> tuple[bool, str]:
+def is_legal_split(meta: dict, body: str, min_sections: int = 2, oversized: bool = False) -> tuple[bool, str]:
     """Decide whether a page may be split. Per the wikimem model "one element =
     one page", a `component` is a single element and is NEVER fragmented (an
     oversized component is a MIS-TIER — surfaced for re-tiering + linking UP to
@@ -577,6 +611,7 @@ def is_legal_split(
 # split-specific structural checks
 # --------------------------------------------------------------------------- #
 
+
 def split_globs_partition_ok(parent_globs, subpage_globs_list) -> tuple[bool, str]:
     """When a `hub` splits, its `globs:` ownership must PARTITION across the
     sub-pages: their union equals the parent's set (no pattern dropped) and no
@@ -586,7 +621,7 @@ def split_globs_partition_ok(parent_globs, subpage_globs_list) -> tuple[bool, st
     seen: set = set()
     overlap: set = set()
     for globs in subpage_globs_list:
-        for g in (globs or []):
+        for g in globs or []:
             if g in seen:
                 overlap.add(g)
             seen.add(g)
@@ -615,6 +650,7 @@ def split_converged(page_sizes: dict, max_bytes: int, unsplittable=None) -> tupl
 # its transaction commits. Each composes the primitives above into a single
 # (ok, reasons) verdict; a non-empty `reasons` list aborts the txn.
 # --------------------------------------------------------------------------- #
+
 
 def verify_merge(
     source_texts: list[str],
@@ -654,12 +690,35 @@ def verify_merge(
     Returns (ok, [reasons])."""
     reasons: list[str] = []
 
-    ok, missing = lessons_preserved(source_texts, result_text)
+    # Compare the preservation oracles MODULO the retired→survivor link redirect that
+    # `no_dangling_refs` (below) MANDATES. Without this the two invariants are mutually
+    # unsatisfiable for any cross-linked pair — and the LINK LAW guarantees every merge candidate IS
+    # cross-linked, so CONSOLIDATE could never merge anything and abstained silently forever
+    # (TRDD-MQBV844P). See `canonicalize_retired_links`: it permits ONLY the edit the other invariant
+    # demands; every other character must still survive byte-for-byte, so a genuinely dropped or
+    # paraphrased fact still fails exactly as before.
+    #
+    # `no_dangling_refs` deliberately keeps checking the RAW result, so a merge that FORGOT to
+    # redirect is still caught — we normalize for the *comparison*, never for the link law itself.
+    survivor = str(result_meta.get("name") or "").strip()
+    retired = [s for s in retired_slugs if s]
+    if survivor and retired:
+
+        def _canon(t: str) -> str:
+            return canonicalize_retired_links(t, retired, survivor)
+    else:
+
+        def _canon(t: str) -> str:
+            return t
+
+    result_cmp = _canon(result_text)
+
+    ok, missing = lessons_preserved([_canon(t) for t in source_texts], result_cmp)
     if not ok:
         reasons.append("dropped/reworded lesson(s): " + "; ".join(missing))
 
     fact_sources = source_texts if fact_source_texts is None else fact_source_texts
-    ok, missing_facts = body_facts_preserved(fact_sources, result_text)
+    ok, missing_facts = body_facts_preserved([_canon(t) for t in fact_sources], result_cmp)
     if not ok:
         reasons.append("dropped/paraphrased body fact(s): " + "; ".join(missing_facts))
 
@@ -730,14 +789,10 @@ def verify_split(
     # old workaround pre-stripped each page's lessons to dodge that truncation.
     ok, missing_facts = body_facts_preserved([source_text], concatenated)
     if not ok:
-        reasons.append(
-            "source body fact(s) lost/paraphrased across sub-pages: " + "; ".join(missing_facts)
-        )
+        reasons.append("source body fact(s) lost/paraphrased across sub-pages: " + "; ".join(missing_facts))
 
     if source_meta.get("tier") == "hub":
-        ok, why = split_globs_partition_ok(
-            source_meta.get("globs"), [m.get("globs") for m in subpage_metas]
-        )
+        ok, why = split_globs_partition_ok(source_meta.get("globs"), [m.get("globs") for m in subpage_metas])
         if not ok:
             reasons.append("globs: " + why)
 
