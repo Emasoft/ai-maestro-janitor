@@ -209,8 +209,14 @@ def _strip_frontmatter(text: str) -> str:
     return text
 
 
+# A `[^id]:` footnote-definition line, anchored to a single line (the lessons-pool
+# member `_body_minus_lessons` recognizes). Same shape as `_FN_DEF_RE` below, sans
+# the `(?m)` multi-line flag — this one is `.match()`-ed against one line at a time.
+_FN_DEF_LINE_RE = re.compile(r"^\[\^[^\]]+\]:")
+
+
 def _body_minus_lessons(text: str) -> str:
-    """The note's BODY: frontmatter stripped, and the `## Notes and lessons learned`
+    """The note's BODY: frontmatter stripped, and EVERY `## Notes and lessons learned`
     section stripped (lessons are guarded separately by lessons_preserved)."""
     body = _strip_frontmatter(text)
     # L-3 (wikimem audit 2026-07-07): match the heading as a FULL LINE, never a
@@ -218,10 +224,52 @@ def _body_minus_lessons(text: str) -> str:
     # lessons learned` inline, and a find() on the raw string truncated the body
     # at that mention, leaving later facts unchecked in sources and false-failing
     # results.
-    m = re.search(rf"(?m)^{re.escape(_LESSONS_HEADING)}\s*$", body)
-    if m:
-        body = body[: m.start()]
-    return body
+    #
+    # #88 (2026-07-14): strip EVERY lessons section, not just the FIRST. A memory
+    # CORPUS legitimately concatenates many pages (a split's sub-pages, a harvest's
+    # wiki corpus), each carrying its own mandatory `## Notes and lessons learned`
+    # heading. Truncating at the first heading silently dropped pages 2..N of the
+    # body. That is the DANGEROUS direction: a truncated SOURCE has its later facts
+    # never extracted, so an editorial pass that dropped them still PASSES — a false
+    # PASS in a fail-safe anti-data-loss gate (the truncated-RESULT direction only
+    # false-FAILs).
+    #
+    # A lessons section = its full-line heading + the footnote POOL beneath it
+    # (blank lines, `[^id]:` definition lines, and their indented continuations).
+    # It ends at the first line that is NONE of those — the next page's boundary,
+    # be it a `# heading`, a `---` frontmatter opener, or a bare prose fact — which
+    # is PRESERVED. The boundary is NOT "the next markdown heading": a curated page's
+    # body is often heading-less ("the one fact"), and full pages concatenate through
+    # their `---` frontmatter, so a heading is not a reliable page separator — using
+    # one re-drops every heading-less page's body (the very bug, one shape over).
+    # Fences are masked first (offset-preserving) so a `[^id]:`- or heading-shaped
+    # line quoted INSIDE a lesson's code block is not misread as a pool/boundary line
+    # — the same F11 guard extract_lessons applies. A single page whose lessons
+    # section is last (the common case) has its one pool run to EOF, so the stripped
+    # body is byte-for-byte what the first-match truncation produced.
+    scan_lines = _mask_code_fences(body).splitlines(keepends=True)  # offset/line-count preserving
+    body_lines = body.splitlines(keepends=True)
+    kept: list[str] = []
+    i = 0
+    n = len(scan_lines)
+    while i < n:
+        if scan_lines[i].rstrip() == _LESSONS_HEADING:  # a full-line, column-0 heading
+            i += 1
+            while i < n:
+                line = scan_lines[i]
+                s = line.strip()
+                is_pool_line = (
+                    s == ""                          # blank
+                    or _FN_DEF_LINE_RE.match(line)   # `[^id]:` footnote definition
+                    or (line[:1].isspace() and s)     # indented continuation
+                )
+                if not is_pool_line:
+                    break
+                i += 1
+            continue
+        kept.append(body_lines[i])
+        i += 1
+    return "".join(kept)
 
 
 def _norm_page_blob(text: str) -> str:
@@ -237,11 +285,13 @@ def _norm_page_blob(text: str) -> str:
        demote the old statement to a dated `[^N]` lesson"). Only text absent from the
        WHOLE page is lost. Searching a lessons-stripped body declared every sanctioned
        correction a "dropped fact".
-    2. `_body_minus_lessons` truncates at the FIRST `## Notes and lessons learned`
-       heading — fatal when the haystack is a CONCATENATION of pages (a split's
-       sub-pages, a harvest's wiki corpus), because every curated page mandatorily
-       carries that heading, so the blob collapsed to page #1's body and every fact
-       living in a later page read as missing."""
+    2. The haystack is a CONCATENATION of pages (a split's sub-pages, a harvest's
+       wiki corpus), and every curated page mandatorily carries a `## Notes and
+       lessons learned` heading. A lessons-stripped body would be the wrong haystack
+       here for the same reason it must strip EVERY section, not the first: keeping
+       the whole page sidesteps that entirely. (`_body_minus_lessons` did once
+       truncate at the FIRST such heading — fixed in #88 to strip every section —
+       but the haystack stays whole-page for reason 1 regardless.)"""
     return re.sub(r"\s+", " ", _strip_frontmatter(text)).strip().lower()
 
 

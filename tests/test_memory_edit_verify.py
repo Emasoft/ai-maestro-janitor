@@ -964,6 +964,51 @@ def test_verify_split_finds_a_fact_moved_into_a_later_subpages_body():
     assert ok, reasons
 
 
+# ---- #88: the SOURCE may be a multi-page corpus; every page's facts are read ----
+
+def test_body_facts_preserved_reads_every_page_of_a_multipage_source_corpus():
+    """#88 (the DANGEROUS direction): a SOURCE handed to the fact oracle may be a
+    CONCATENATED multi-page corpus (a split's sub-pages, a harvest's wiki corpus),
+    each page carrying its OWN mandatory `## Notes and lessons learned` section.
+    Stripping the body at the FIRST lessons heading extracted only page 1's facts,
+    so a result that DROPPED a LATER page's fact still PASSED — a false PASS in a
+    fail-safe anti-data-loss gate. Every page's body fact must be checked; dropping
+    page 2's fact must FAIL. (Pages here are heading-less, the `_note` shape — a
+    markdown heading is NOT a reliable page boundary.)"""
+    corpus = "\n".join([
+        _note(name="one", body="The rotator retries three times then fails after a backoff window.",
+              lessons="[^1]: a lesson recorded on the first page.\n"),
+        _note(name="two", body="The daemon holds a single machine-wide flock for the whole host.",
+              lessons="[^1]: a lesson recorded on the second page.\n"),
+    ])
+    dropped_page2 = _note(
+        name="merged",
+        body="The rotator retries three times then fails after a backoff window.",
+        lessons="[^1]: a lesson.\n",
+    )
+    ok, missing = v.body_facts_preserved([corpus], dropped_page2)
+    assert not ok and any("machine-wide flock" in m for m in missing), missing
+
+
+def test_body_facts_preserved_multipage_source_passes_when_every_page_survives():
+    """The counterpart to the above: when the result keeps EVERY page's fact, the
+    multi-page source verifies clean. This also proves the fix strips EVERY page's
+    lessons pool (not just page 1's) — page 1's `[^1]` lesson (a superseded claim
+    absent from the result) must NOT be demanded as a surviving body fact, or the
+    now-every-page reader would over-flag it."""
+    corpus = "\n".join([
+        _note(name="one", body="The rotator retries three times then fails after a backoff window.",
+              lessons="[^1]: an earlier claim that the rotator retried five times before failing over.\n"),
+        _note(name="two", body="The daemon holds a single machine-wide flock for the whole host.",
+              lessons="[^1]: a lesson recorded on the second page.\n"),
+    ])
+    result = _note(name="merged", body=(
+        "The rotator retries three times then fails after a backoff window.\n"
+        "The daemon holds a single machine-wide flock for the whole host."))
+    ok, missing = v.body_facts_preserved([corpus], result)
+    assert ok, missing
+
+
 # ---- F2: a CONFLICT merge may supersede the RETIRED page's fact ------------------
 
 def _conflict_pair():
