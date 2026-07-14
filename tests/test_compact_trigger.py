@@ -26,12 +26,44 @@ def _import():
     return mod
 
 
-def _run(args: list[str], *, project: Path, iterm: str | None) -> subprocess.CompletedProcess:
+def _home(tmp: Path, *, present: bool) -> Path:
+    """A HOME carrying a presence breadcrumb that says the user IS / IS NOT at the keyboard.
+
+    Without this the tests inherit the DEVELOPER's real breadcrumb, and the presence gate then makes
+    them pass or fail depending on whether whoever ran the suite happened to be typing — a test that
+    reports on the tester, not the code. `last_user_input_epoch: 0` means "no user input was ever
+    recorded" (unattended); a fresh epoch means they are here right now.
+    """
+    import json
+    import time
+
+    h = tmp / ("home-present" if present else "home-away")
+    (h / ".aimaestro" / "state").mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time()) if present else 0
+    (h / ".aimaestro" / "state" / "user-presence.json").write_text(
+        json.dumps({"last_user_input_epoch": stamp, "written_at_epoch": int(time.time())}),
+        encoding="utf-8",
+    )
+    return h
+
+
+def _run(
+    args: list[str],
+    *,
+    project: Path,
+    iterm: str | None,
+    home: Path | None = None,
+) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", ""), "CLAUDE_PROJECT_DIR": str(project)}
     # Pin the terminal-kind so these tests exercise the iTerm path deterministically
     # regardless of the host terminal (e.g. running the suite inside tmux). The tmux
     # delegation is covered by test_terminal_trigger.py.
     env["JANITOR_FORCE_TERMINAL_KIND"] = "iterm"
+    # Default to an UNATTENDED user: injection is gated on the user being away (TRDD-RDFWQIFA's
+    # sibling — never type into a pane someone is using), and a test that does not pin presence is a
+    # test whose result depends on the developer's own idle time.
+    if home is not None:
+        env["HOME"] = str(home)
     if iterm is not None:
         env["ITERM_SESSION_ID"] = iterm
     return subprocess.run(
@@ -210,10 +242,39 @@ def test_no_iterm_reports_and_still_records_directive(tmp_path: Path) -> None:
     """No ITERM_SESSION_ID: prints NO_ITERM but the resume directive is still recorded."""
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run(["--directive", "continue TRDD-abcd1234"], project=p, iterm=None)
+    proc = _run(
+        ["--directive", "continue TRDD-abcd1234"],
+        project=p,
+        iterm=None,
+        home=_home(tmp_path, present=False),
+    )
     assert proc.returncode == 0
     assert "NO_ITERM" in proc.stdout
     assert "COMPACT_FIRED" not in proc.stdout
+    assert (p / ".janitor" / "state" / "resume-directive.txt").exists()
+
+
+def test_a_present_user_is_never_typed_at_but_the_directive_IS_recorded(tmp_path: Path) -> None:
+    """The presence gate, from the caller's side.
+
+    Typing `/compact` into a pane the user is actively using DESTROYS what they were typing — it
+    happened to this user, mid-sentence, and it is why the gate exists. So when they are at the
+    keyboard the trigger refuses to send, whatever the terminal supports.
+
+    But it still WRITES THE DIRECTIVE: refusing to inject is not refusing to remember. When the user
+    runs `/compact` themselves, the session must still know where to resume.
+    """
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run(
+        ["--directive", "continue TRDD-abcd1234"],
+        project=p,
+        iterm="w0t0p0:11111111-2222-3333-4444-555555555555",
+        home=_home(tmp_path, present=True),
+    )
+    assert proc.returncode == 0
+    assert "USER_PRESENT" in proc.stdout
+    assert "COMPACT_FIRED" not in proc.stdout, "it must NOT type into a pane the user is using"
     assert (p / ".janitor" / "state" / "resume-directive.txt").exists()
 
 
@@ -221,7 +282,7 @@ def test_no_directive_no_iterm_is_silent_noop(tmp_path: Path) -> None:
     """No directive + no iTerm: writes nothing, prints only NO_ITERM."""
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run([], project=p, iterm=None)
+    proc = _run([], project=p, iterm=None, home=_home(tmp_path, present=False))
     assert proc.returncode == 0
     assert proc.stdout.strip() == "NO_ITERM"
     assert not (p / ".janitor" / "state" / "resume-directive.txt").exists()
@@ -252,8 +313,12 @@ def test_malformed_iterm_id_refuses_to_fire(tmp_path: Path) -> None:
         ["--directive", "continue TRDD-abcd1234"],
         project=p,
         iterm='x:" then do shell script "touch /tmp/pwned" --',
+        # The user is AWAY, so the presence gate is open and the AppleScript-injection guard is the
+        # thing actually under test — otherwise this would pass for the wrong reason.
+        home=_home(tmp_path, present=False),
     )
     assert proc.returncode == 0
     assert "NO_ITERM" in proc.stdout
     assert "COMPACT_FIRED" not in proc.stdout
     assert (p / ".janitor" / "state" / "resume-directive.txt").exists()
+    assert not Path("/tmp/pwned").exists(), "the AppleScript injection must never execute"

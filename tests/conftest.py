@@ -795,3 +795,45 @@ def find_or_build_memgrep() -> str | None:
 
 # Resolved once per session — importable by test modules (`from conftest import ...`).
 MEMGREP_BIN_PATH = find_or_build_memgrep()
+
+
+# ── 3. Deterministic USER-PRESENCE for the self-trigger tests ───────────────────────
+#
+# The four self-triggers (compact / reload / reload-skills / resume) refuse to type into the
+# session's own pane while the USER is at the keyboard (TRDD-RDFWQIFA's sibling): typing `/compact`
+# into a pane someone is mid-sentence in DESTROYS what they were writing. It happened.
+#
+# `user_intent.user_is_present` fails CLOSED — an absent or unreadable breadcrumb means "assume they
+# are there" — so a test that does not pin HOME inherits the DEVELOPER's real breadcrumb and its
+# result depends on whether whoever ran the suite happened to be typing. That is a test reporting on
+# the tester, not the code. These helpers pin it.
+
+
+def away_home(tmp: Path) -> Path:
+    """A HOME whose breadcrumb says the user is UNATTENDED, so injection is permitted."""
+    return _presence_home(tmp, present=False)
+
+
+def present_home(tmp: Path) -> Path:
+    """A HOME whose breadcrumb says the user is AT THE KEYBOARD, so injection must be refused."""
+    return _presence_home(tmp, present=True)
+
+
+def _presence_home(tmp: Path, *, present: bool) -> Path:
+    import json as _json
+    import time as _time
+
+    h = tmp / ("home-present" if present else "home-away")
+    (h / ".aimaestro" / "state").mkdir(parents=True, exist_ok=True)
+    # `last_user_input_epoch: 0` means "no user input was EVER recorded" → unattended. A fresh epoch
+    # means they typed seconds ago.
+    (h / ".aimaestro" / "state" / "user-presence.json").write_text(
+        _json.dumps(
+            {
+                "last_user_input_epoch": int(_time.time()) if present else 0,
+                "written_at_epoch": int(_time.time()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return h

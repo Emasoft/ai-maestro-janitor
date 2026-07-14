@@ -30,12 +30,21 @@ def _import():
     return mod
 
 
-def _run(args: list[str], *, iterm: str | None) -> subprocess.CompletedProcess:
+def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subprocess.CompletedProcess:
+    import tempfile
+
+    from conftest import away_home, present_home  # type: ignore[import-not-found]
+
     env = {"PATH": os.environ.get("PATH", "")}
     # Pin the terminal-kind so these tests exercise the iTerm path deterministically
     # regardless of the host terminal (e.g. running the suite inside tmux). The tmux
     # delegation is covered by test_terminal_trigger.py.
     env["JANITOR_FORCE_TERMINAL_KIND"] = "iterm"
+    # Pin USER PRESENCE too: the trigger refuses to type into a pane the user is actively using, and
+    # `user_is_present` fails CLOSED — so an unpinned HOME makes the result depend on whether the
+    # developer running the suite happened to be typing.
+    tmp = Path(tempfile.mkdtemp())
+    env["HOME"] = str(present_home(tmp) if present else away_home(tmp))
     if iterm is not None:
         env["ITERM_SESSION_ID"] = iterm
     return subprocess.run(

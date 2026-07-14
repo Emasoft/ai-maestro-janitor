@@ -24,6 +24,9 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
 
 import global_control_cli as cli  # type: ignore[import-not-found]  # noqa: E402
 import global_state as gs  # type: ignore[import-not-found]  # noqa: E402
+import pytest  # noqa: E402
+import state as st  # type: ignore[import-not-found]  # noqa: E402
+import user_intent  # type: ignore[import-not-found]  # noqa: E402
 
 # ---------- DISARM (kill-switch) ----------
 
@@ -75,12 +78,63 @@ def test_disarm_and_pause_are_independent(tmp_path, monkeypatch) -> None:
 
 # ---------- the global_control_cli surface ----------
 
+
+@pytest.fixture(autouse=True)
+def _isolate_state_dir():
+    """`state.state_dir()` is lru_cached — a per-process singleton, correct in production (one process,
+    one project) and poison in a test process that hosts many. Clear it around every test so the intent
+    token one test writes can never be read by another."""
+    caches = (st.project_root, st.janitor_root, st.state_dir, st.log_dir)
+    for c in caches:
+        c.cache_clear()
+    yield
+    for c in caches:
+        c.cache_clear()
+
+
+def _user_asked(monkeypatch, tmp_path, prompt: str) -> None:
+    """Simulate the USER typing `prompt` — the only thing that can authorize a machine-wide STOP.
+
+    A stop (`disarm`/`pause`) is intent-gated (TRDD-RDFWQIFA): without it, an agent could set the
+    machine-wide stop itself and every session would then dutifully self-disarm ON THAT STOP'S
+    AUTHORITY — a trivial bypass of the `disarmed.flag` guard, which accepts a genuine global stop as
+    authority. Gating the stop closes the chain, so no link in it is forgeable.
+
+    In production the token is minted by the UserPromptSubmit hook from the user's RAW keystrokes — the
+    one surface the model can never author. Here we mint it through that same function.
+    """
+    proj = tmp_path / "proj"
+    proj.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    for c in (st.project_root, st.janitor_root, st.state_dir, st.log_dir):
+        c.cache_clear()
+    st.init_state()
+    user_intent.record_intent_from_prompt(prompt)
+
+
+def test_a_stop_with_no_user_intent_is_REFUSED(tmp_path, monkeypatch, capsys) -> None:
+    """THE security property. An agent that decides on its own to stop the fleet must fail.
+
+    On 2026-07-14 an agent disarmed the heartbeat to save tokens during a rate limit and the session
+    sat dead for HOURS — the exact stall the heartbeat exists to abolish. A machine-wide stop is worse
+    still: it is the authority every session's self-disarm then relies on. So a stop with no user
+    keystroke behind it does nothing at all.
+    """
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "no-intent"))
+    monkeypatch.setattr(cli.sys, "argv", ["x", "disarm", "an agent decided this on its own"])
+    assert cli.main() != 0, "an unauthorized machine-wide stop must FAIL, not silently succeed"
+    assert gs.kill_switch_present() is False, "no flag may be raised without the user's say-so"
+    assert gs.global_pause_present() is False
+
+
 def test_cli_disarm_arm_roundtrip(tmp_path, monkeypatch, capsys) -> None:
     """DISARM is the TRUE STOP: it raises BOTH the kill-switch AND the global-pause flag
     so per-session heartbeats go silent IMMEDIATELY — even one running a pre-fix cached
     dispatch.py that honors only global-pause (TRDD-NJ22HNC3). ARM clears BOTH (full
     revive)."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    _user_asked(monkeypatch, tmp_path, "/janitor-global-disarm")
     monkeypatch.setattr(cli.sys, "argv", ["x", "disarm", "because"])
     assert cli.main() == 0
     assert gs.kill_switch_present() is True
@@ -99,6 +153,7 @@ def test_cli_pause_does_not_disarm(tmp_path, monkeypatch) -> None:
     """PAUSE stays pause-only — it raises ONLY the global-pause flag, never the
     kill-switch. (Disarm is the superset that raises both; pause is the soft idle.)"""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    _user_asked(monkeypatch, tmp_path, "/janitor-global-pause")
     monkeypatch.setattr(cli.sys, "argv", ["x", "pause", "soft idle"])
     assert cli.main() == 0
     assert gs.global_pause_present() is True
@@ -127,6 +182,7 @@ def test_cli_reload_skills_stamps_only_its_own_flag(tmp_path, monkeypatch, capsy
 
 def test_cli_pause_unpause_roundtrip(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    _user_asked(monkeypatch, tmp_path, "/janitor-global-pause")
     monkeypatch.setattr(cli.sys, "argv", ["x", "pause"])
     assert cli.main() == 0
     assert gs.global_pause_present() is True

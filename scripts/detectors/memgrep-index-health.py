@@ -10,19 +10,25 @@ index: it recreated the table and left it EMPTY while the content table stayed f
 `PRAGMA integrity_check` said `ok`, `SELECT count(*)` read the content table, and recall just… found
 less and less. It surfaced only because an agent tripped over it by accident, days later.
 
-So this detector validates each memory scope's index on a cadence and turns a failure into WORK.
+So this detector watches each memory scope's index — through TWO channels, because one of them alone
+would have missed the very incident that motivated it:
 
-TWO decisions worth the words:
+  1. **The self-heal LEDGER (`.memgrep/self-heal.log`) — the channel that actually catches the bug.**
+     memgrep's `open()` self-heals, and it RACES any observer and wins: every process that opens the
+     index (the autorecall hook on every prompt, the librarian, a memory agent) repairs it in passing.
+     So a probe that inspects the DATABASE always finds it pristine, and a corruption being
+     RE-MANUFACTURED every day is invisible to state inspection. This was not theory — the first live
+     heartbeat test of this detector found a healthy index because another detector had healed it
+     seconds earlier. A repair is an EVENT, and an event can be recorded: the heal writes a line, and
+     REPEATED heals mean something keeps breaking the index. That is the code bug worth a ticket.
 
-  1. **It validates WITHOUT healing.** `memgrep validate` is a separate, non-repairing path precisely
-     because the normal `open()` self-heals (rebuild → nuke → rebuild). A self-heal is right for a
-     caller who wants to USE the index and is exactly how the defect stayed invisible: it papered over
-     the symptom on every open. An observer must not repair what it is measuring.
+  2. **A NON-HEALING validation probe (`memgrep validate`)** for the corruption the self-heal cannot
+     fix — the case where the index is broken and STAYS broken. This path exists precisely because the
+     normal `open()` would repair what it is measuring; an observer must not do that.
 
-  2. **It waits for the failure to RECUR.** A single failure is often a corruption that the next
-     `open()` will heal by itself — a ticket for that would be noise. A failure still present on the
-     NEXT probe means the corruption is being re-manufactured, and a freshly built index that fails
-     validation is a CODE bug, not a data problem. That is the ticket worth an agent's time.
+Channel 2 waits for the failure to RECUR before ticketing (one failure is often a corruption the next
+`open()` heals; a ticket for that is noise). Channel 1 needs no such patience — a heal already IS a
+failure that happened.
 
 The index is HARNESS domain — the janitor's own machinery — so `raise_issue` opens the ticket and the
 scheduler dispatches the repair agent with no human in the loop. Nothing here touches the user's repo.
@@ -34,6 +40,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -50,6 +57,12 @@ _STATE = "memgrep-health.json"
 # every transient corruption that the next open() silently fixes; 2 means "it came back".
 _CONSECUTIVE_BEFORE_TICKET = 2
 
+# Channel 1 — the self-heal ledger. ONE heal is a corruption that got fixed; fine, that is the system
+# working. TWO within a day means something is RE-BREAKING the index, and repairing it a third time
+# would just be participating in the loop.
+_HEALS_BEFORE_TICKET = 2
+_HEAL_WINDOW_S = 86400
+
 # `FAIL <root> [MEMGREP-001] <prose>` — the CODE is the contract, the prose is free to change.
 _FAIL_RE = re.compile(r"^FAIL\s+(?P<root>.+?)\s+\[(?P<code>[A-Z][A-Z0-9]{1,9}-\d{3})\]\s*(?P<msg>.*)$")
 
@@ -60,6 +73,28 @@ def _load(path: Path) -> dict[str, int]:
         return {str(k): int(v) for k, v in data.items()} if isinstance(data, dict) else {}
     except (OSError, ValueError, TypeError):
         return {}
+
+
+def recent_heals(root: str, *, now: int, window_s: int = _HEAL_WINDOW_S) -> list[str]:
+    """The `<epoch> <stage> <why>` heal lines for `root` inside the window. PURE-ish (one file read).
+
+    memgrep writes one line per self-repair. We count only recent ones so a corruption fixed months
+    ago cannot resurrect itself into today's ticket.
+    """
+    try:
+        raw = (Path(root) / ".memgrep" / "self-heal.log").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out: list[str] = []
+    for line in raw.splitlines():
+        head, _, _rest = line.partition(" ")
+        try:
+            ts = int(head)
+        except ValueError:
+            continue  # a malformed line is not a heal — never crash on a log we did not write
+        if now - ts <= window_s:
+            out.append(line)
+    return out
 
 
 def main() -> int:
@@ -74,6 +109,30 @@ def main() -> int:
         return 0
 
     by_root = {str(root): scope for scope, root in scopes}
+    now = int(time.time())
+    lines: list[str] = []
+
+    # ---- Channel 1: the self-heal LEDGER — the one that catches a RE-manufactured corruption. ----
+    # A probe of the database state cannot see this: whoever opens the index next repairs it, so the
+    # state is always clean by the time anyone looks. Only the record of the repairs survives.
+    for root, scope in by_root.items():
+        heals = recent_heals(root, now=now)
+        if len(heals) < _HEALS_BEFORE_TICKET:
+            continue
+        raised = issue_catalog.raise_issue(
+            "MEMGREP-009",
+            scope=scope,
+            where=root,
+            count=len(heals),
+            window="24h",
+            evidence=[f"{root}/.memgrep/self-heal.log"],
+            origin=_NAME,
+        )
+        if raised.line:
+            lines.append(raised.line)
+        state.log_line(_NAME, f"{len(heals)} self-heals on {root} in 24h → {raised.why}")
+
+    # ---- Channel 2: a NON-HEALING validation probe — for damage the self-heal could NOT fix. ----
     proc = state.run_subprocess(
         [memgrep, "validate", *by_root],
         timeout=60,
@@ -81,6 +140,8 @@ def main() -> int:
         detector_name=_NAME,
     )
     if proc is None:
+        if lines:
+            print("\n".join(lines), flush=True)
         return 0  # the probe itself failed (timeout, missing binary) — indeterminate, not a finding
 
     # Whatever the probe says about a root NOW replaces what we believed: a root that passes clears its
@@ -88,7 +149,6 @@ def main() -> int:
     streak_path = state.state_dir() / _STATE
     previous = _load(streak_path)
     current: dict[str, int] = {}
-    lines: list[str] = []
 
     for raw in (proc.stdout or "").splitlines():
         m = _FAIL_RE.match(raw.strip())

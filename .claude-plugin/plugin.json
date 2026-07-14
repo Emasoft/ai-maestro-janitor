@@ -898,6 +898,62 @@
       "type": "number",
       "default": 21600,
       "sensitive": false
+    },
+    "tickets_enabled": {
+      "title": "Support-Ticket Incident Queue",
+      "description": "When true (DEFAULT), the janitor turns a detected incident into a support ticket and repairs it (TRDD-CGYMUKO6). HARNESS incidents — its OWN machinery (a corrupt memgrep index, a failed migration, a crash-looping daemon) — open and dispatch a repair agent automatically. PROJECT incidents — YOUR code, repo, workflows — are only ever PROPOSED: the janitor writes a proposal TRDD and recommends `/janitor-support-open-ticket TRDD-<id>`; nothing is dispatched and nothing in your repo is touched until you run it. Set false to disable the queue entirely (detectors keep detecting; they just stop opening tickets).",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "tickets_per_heartbeat": {
+      "title": "Ticket Dispatches per Heartbeat",
+      "description": "Maximum repair agents the scheduler may dispatch on ONE heartbeat fire. Default: 2. A cap, not a target — an unbounded repair queue is one bug away from being a token fire.",
+      "type": "number",
+      "default": 2,
+      "sensitive": false
+    },
+    "tickets_per_day": {
+      "title": "Ticket Dispatches per Rolling 24h",
+      "description": "Maximum repair agents dispatched in any rolling 24-hour window. Default: 20. The backstop against a repair that keeps failing and keeps being retried.",
+      "type": "number",
+      "default": 20,
+      "sensitive": false
+    },
+    "ticket_max_attempts": {
+      "title": "Ticket Max Attempts",
+      "description": "How many times a ticket may be worked before it becomes `needs_human` and is surfaced on every heartbeat until a person deals with it. Default: 3. It is NEVER silently dropped — a silent give-up is indistinguishable from a fix.",
+      "type": "number",
+      "default": 3,
+      "sensitive": false
+    },
+    "ticket_backoff_s": {
+      "title": "Ticket Retry Backoff (seconds)",
+      "description": "How long a failed ticket waits before it may be dispatched again. Default: 1800 (30 min).",
+      "type": "number",
+      "default": 1800,
+      "sensitive": false
+    },
+    "ticket_stale_s": {
+      "title": "Ticket Stale Reclaim (seconds)",
+      "description": "How long a dispatched ticket may sit with no progress before its agent is presumed DEAD and the ticket is reclaimed for another attempt. Default: 3600 (1 h). Without this, an agent killed mid-work (a rate-limit cap will do it) strands its ticket forever and the queue quietly stops.",
+      "type": "number",
+      "default": 3600,
+      "sensitive": false
+    },
+    "ticket_dispatch_interval": {
+      "title": "Ticket Scheduler Cadence (seconds)",
+      "description": "Minimum seconds between `ticket-dispatch` runs. Default: 300 (every heartbeat) — an empty queue costs a directory glob that finds nothing, and a critical incident should not wait out a long cadence.",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
+    "memgrep_health_interval": {
+      "title": "Memgrep Index-Health Cadence (seconds)",
+      "description": "Minimum seconds between `memgrep-index-health` probes of each memory scope's search index. Default: 1800 (30 min). A failure must RECUR before it becomes a ticket.",
+      "type": "number",
+      "default": 1800,
+      "sensitive": false
     }
   },
   "cpv": {

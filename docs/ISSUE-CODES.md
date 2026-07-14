@@ -20,7 +20,7 @@ unattended access to your repository.
 
 ## HARNESS — the janitor repairs itself (automatic)
 
-13 code(s).
+14 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -34,6 +34,7 @@ unattended access to your repository.
 | `MEMGREP-006` | memgrep-validate | high | the schema version stamp in {scope} disagrees with the database's actual shape |
 | `MEMGREP-007` | memgrep-validate | critical | a base table is missing entirely from the memgrep database in {scope} |
 | `MEMGREP-008` | memgrep-validate | critical | an FTS index is missing entirely from the memgrep database in {scope} |
+| `MEMGREP-009` | memgrep-index-health | high | the memgrep index in {scope} has needed self-repair {count} times in {window} |
 | `SELFINT-001` | janitor-self-integrity | critical | a janitor file failed attestation against the shipped manifest: {path} |
 | `SELFINT-002` | janitor-self-integrity | high | the janitor's audit chain no longer verifies: {detail} |
 | `STATE-001` | state-guard | high | a janitor state file is unreadable: {path} |
@@ -107,6 +108,13 @@ unattended access to your repository.
 - **What it is:** A full-text index the schema requires does not exist — a DROP without the matching CREATE, the shape a half-applied migration leaves behind.
 - **Why it matters:** Search silently returns nothing rather than failing, so the corpus looks empty instead of broken. That is the worst failure mode there is: it is indistinguishable from having no memories.
 - **Fix attempted:** Recreate the FTS table and rebuild it from its content table, then fix the migration step that dropped it without recreating it.
+
+### `MEMGREP-009` — the memgrep index in {scope} has needed self-repair {count} times in {window}
+
+- **Scanner:** `memgrep-index-health` · **Severity:** `high` · **Kind:** `index-corruption`
+- **What it is:** The index keeps failing validation on open, and the self-heal keeps repairing it. The data is fine — something is RE-BREAKING it.
+- **Why it matters:** This is the signal the original incident had no way to produce. The self-heal RACES any observer and wins: every process that opens the index (the autorecall hook on every prompt, the librarian, a memory agent) repairs it in passing, so a probe that inspects the DATABASE always finds it pristine. A corruption re-manufactured daily is invisible to state inspection — and that is exactly how the 2026-07-14 migration bug hid for days. The repair EVENT is the only durable evidence.
+- **Fix attempted:** Do NOT just rebuild it again — that is what has been happening. Read `.memgrep/self-heal.log` for what failed and when, then find the WRITER that keeps corrupting it (a migration step, a schema change, a concurrent writer without the busy timeout). The index is the victim; the code that breaks it is the defect.
 
 ### `SELFINT-001` — a janitor file failed attestation against the shipped manifest: {path}
 

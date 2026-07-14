@@ -150,6 +150,7 @@ pub fn open(root: &Path) -> Result<Connection> {
             .and_then(|()| validate_db(&conn, SCHEMA_VERSION))
             .is_ok()
         {
+            record_self_heal(root, "rebuild-fts", &format!("{why:#}"));
             return Ok(conn);
         }
     }
@@ -162,6 +163,7 @@ pub fn open(root: &Path) -> Result<Connection> {
         "memgrep: rebuilding {} — it did not validate ({why:#})",
         path.display()
     );
+    record_self_heal(root, "nuke-rebuild", &format!("{why:#}"));
     nuke_db(&path)?;
     let conn = open_prepared(&path).context("rebuilding the index from scratch")?;
     validate_db(&conn, SCHEMA_VERSION).context(
@@ -169,6 +171,58 @@ pub fn open(root: &Path) -> Result<Connection> {
          not damaged state on disk",
     )?;
     Ok(conn)
+}
+
+/// The self-heal LEDGER: `<root>/.memgrep/self-heal.log`, one `<epoch> <stage> <why>` line per repair.
+///
+/// **This is the line that makes the corruption observable at all**, and it exists because of a
+/// property that only became obvious once the health detector was tested against a live heartbeat:
+/// the self-heal RACES the observer and wins. Any process that opens the index — the autorecall hook
+/// on every prompt, the librarian, a memory agent — repairs it in passing. So by the time a health
+/// probe looks, the index is pristine, and a corruption that is being RE-MANUFACTURED every single
+/// day is invisible to anything that only inspects the current state. That is precisely how the
+/// 2026-07-14 migration bug survived undetected: every open quietly papered over it.
+///
+/// A repair is an EVENT, and unlike a state, an event can be recorded. So the heal writes down that
+/// it happened, and the janitor's `memgrep-index-health` detector watches the LEDGER rather than the
+/// database: an index that keeps needing repair is an index something keeps breaking, and THAT is the
+/// code bug worth a ticket.
+///
+/// Best-effort and bounded: a failure to log must never fail an open (the repair itself succeeded),
+/// and the file is capped so it cannot grow without limit.
+fn record_self_heal(root: &Path, stage: &str, why: &str) {
+    use std::io::Write;
+
+    const KEEP: usize = 50;
+    let log = memgrep_dir(root).join("self-heal.log");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // One line, newlines flattened: the janitor parses this line-by-line, and an embedded newline in
+    // a sqlite error message would split one event into two.
+    let flat: String = why
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .take(300)
+        .collect();
+
+    let mut lines: Vec<String> = std::fs::read_to_string(&log)
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    lines.push(format!("{now} {stage} {flat}"));
+    let start = lines.len().saturating_sub(KEEP);
+    let body = lines[start..].join("\n") + "\n";
+
+    // Write via a temp file + rename so a concurrent reader never sees a half-written ledger.
+    let tmp = log.with_extension(format!("log.tmp{}", std::process::id()));
+    if let Ok(mut f) = std::fs::File::create(&tmp) {
+        if f.write_all(body.as_bytes()).is_ok() && f.sync_all().is_ok() {
+            let _ = std::fs::rename(&tmp, &log);
+        } else {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
 }
 
 /// How long a connection waits for a lock before giving up.
@@ -1701,6 +1755,65 @@ mod tests {
         assert!(
             hits > 0,
             "the healed index still answers the lesson's keyword"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn every_self_heal_is_recorded_in_the_ledger() {
+        // THE test for the whole observability story, and the one that would have caught the
+        // 2026-07-14 incident on day one.
+        //
+        // The self-heal above is correct AND it is a blindfold: it RACES any observer and wins.
+        // Every process that opens the index repairs it in passing, so a health probe that inspects
+        // the DATABASE always finds it pristine — a corruption re-manufactured every single day is
+        // invisible to state inspection. (Verified live: the first heartbeat test of the health
+        // detector found a healthy index because another detector had healed it seconds earlier.)
+        //
+        // A repair is an EVENT, and an event can be written down. The janitor watches THIS ledger,
+        // not the database, and tickets an index that keeps needing repair.
+        //
+        // FALSIFICATION: delete the `record_self_heal` calls in `open` and this MUST fail.
+        let d = tmp("heal_ledger");
+        write(&d, "oauth-hub.md", NOTE_PAGE);
+        let files = vec![d.join("oauth-hub.md")];
+        reindex(&d, &files, false).unwrap();
+
+        let ledger = memgrep_dir(&d).join("self-heal.log");
+        assert!(
+            !ledger.exists(),
+            "a healthy index heals nothing, so it records nothing"
+        );
+
+        for _ in 0..2 {
+            let conn = open_existing(&d).unwrap();
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS notes_fts;
+                 CREATE VIRTUAL TABLE notes_fts USING fts5(
+                     keywords, body, content='notes', content_rowid='id'
+                 );",
+            )
+            .unwrap();
+            drop(conn);
+            open(&d).expect("open heals it");
+        }
+
+        let log = std::fs::read_to_string(&ledger).expect("the heal wrote a ledger");
+        let lines: Vec<&str> = log.lines().collect();
+        assert_eq!(lines.len(), 2, "one line per repair — the evidence is durable");
+        for line in &lines {
+            let (ts, rest) = line.split_once(' ').expect("`<epoch> <stage> <why>`");
+            assert!(ts.parse::<u64>().is_ok(), "the line starts with an epoch");
+            assert!(rest.starts_with("rebuild-fts"), "it names the repair stage");
+            assert!(rest.contains("[MEMGREP-001]"), "and carries the issue code");
+            assert!(!rest.contains('\n'), "one event is exactly one line");
+        }
+
+        // …while the DATABASE ITSELF is now perfectly healthy. This assert is the whole point: any
+        // detector that only probed the db would report "all clear" on a corpus being corrupted daily.
+        assert!(
+            validate_existing(&d).unwrap(),
+            "the index validates clean — which is exactly why state-probing alone cannot see this"
         );
         let _ = std::fs::remove_dir_all(&d);
     }

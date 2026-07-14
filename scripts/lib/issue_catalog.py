@@ -138,6 +138,15 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="Search silently returns nothing rather than failing, so the corpus looks empty instead of broken. That is the worst failure mode there is: it is indistinguishable from having no memories.",
         fix="Recreate the FTS table and rebuild it from its content table, then fix the migration step that dropped it without recreating it.",
     ),
+    "MEMGREP-009": Issue(
+        scanner="memgrep-index-health",
+        kind="index-corruption",
+        severity="high",
+        title="the memgrep index in {scope} has needed self-repair {count} times in {window}",
+        what="The index keeps failing validation on open, and the self-heal keeps repairing it. The data is fine — something is RE-BREAKING it.",
+        why="This is the signal the original incident had no way to produce. The self-heal RACES any observer and wins: every process that opens the index (the autorecall hook on every prompt, the librarian, a memory agent) repairs it in passing, so a probe that inspects the DATABASE always finds it pristine. A corruption re-manufactured daily is invisible to state inspection — and that is exactly how the 2026-07-14 migration bug hid for days. The repair EVENT is the only durable evidence.",
+        fix="Do NOT just rebuild it again — that is what has been happening. Read `.memgrep/self-heal.log` for what failed and when, then find the WRITER that keeps corrupting it (a migration step, a schema change, a concurrent writer without the busy timeout). The index is the victim; the code that breaks it is the defect.",
+    ),
     "DAEMON-001": Issue(
         scanner="daemon-supervisor",
         kind="daemon-crash-loop",

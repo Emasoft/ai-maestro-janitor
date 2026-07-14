@@ -39,6 +39,7 @@ import state  # type: ignore[import-not-found]  # noqa: E402
 
 DISARM = REPO / "skills" / "janitor-disarm" / "SKILL.md"
 ARM = REPO / "skills" / "janitor-arm" / "SKILL.md"
+GUARD = REPO / "scripts" / "disarm_guard.py"
 
 # A shell line that removes the shared, machine-wide dispatcher stub. Matches any `rm`
 # whose target names the stub, however the data dir is spelled.
@@ -73,15 +74,28 @@ def test_skills_exist() -> None:
     assert ARM.is_file(), f"missing shipped skill: {ARM}"
 
 
-def test_disarm_writes_the_optout_flag() -> None:
-    """Disarm must record the opt-out the whole fleet layer reads.
+def test_disarm_records_the_optout_through_the_guard() -> None:
+    """Disarm must record the opt-out the whole fleet layer reads — but only when a HUMAN asked.
 
-    Without this write, `deliberately_unarmed` is False for every real project and the
-    `unarmed` branch of `diagnose_instance` is dead code — the guardian re-arms a project
-    the user deliberately disarmed.
+    The invariant is unchanged; its writer MOVED (TRDD-RDFWQIFA). The skill used to write the flag
+    unconditionally, which meant an agent running `/janitor-disarm` on its own judgment forged a human
+    decision and permanently disabled the guardian — the one mechanism designed to undo that mistake.
+    It is not hypothetical: on 2026-07-14 an agent disarmed to save tokens and the session sat dead for
+    hours.
+
+    So the flag is now written by `disarm_guard.py`, and ONLY on real authority (a user-intent token
+    stamped from raw keystrokes, or a genuine machine-wide stop). The skill must therefore CALL the
+    guard, and the guard must be the thing that writes the flag. Both halves are asserted here, because
+    either one alone can silently rot: a skill that stops calling the guard writes nothing, and a guard
+    that stops writing leaves every disarm unrecorded.
     """
     shell = "\n".join(_shell_lines(DISARM))
-    assert FLAG_WRITE.search(shell), "janitor-disarm no longer writes .janitor/state/disarmed.flag — the fleet guardian will re-arm projects the user deliberately disarmed"
+    assert "disarm_guard.py" in shell, "janitor-disarm no longer calls disarm_guard.py — nothing records the opt-out, so the fleet guardian will re-arm projects the user deliberately disarmed"
+    assert not FLAG_WRITE.search(shell), "janitor-disarm writes disarmed.flag DIRECTLY again — that is the forgeable path the guard exists to close: an agent could fake a human's opt-out and permanently disable the guardian"
+
+    guard = GUARD.read_text(encoding="utf-8")
+    assert "state.DISARMED_FLAG" in guard, "disarm_guard.py no longer writes the opt-out flag"
+    assert "atomic_write" in guard, "the flag write must be atomic — a torn flag is read as absent"
 
 
 def test_disarm_does_not_delete_the_shared_stub() -> None:
@@ -104,19 +118,24 @@ def test_arm_clears_the_optout_flag() -> None:
     assert hits, "janitor-arm no longer removes .janitor/state/disarmed.flag — a re-armed project would stay 'unarmed' (sacrosanct) forever and never be guarded again"
 
 
-def test_fleet_scan_reads_the_flag_the_skills_write() -> None:
+def test_the_reader_the_writer_and_the_skills_all_name_the_same_flag() -> None:
     """The reader and the writer must agree on the filename.
 
-    This is the assertion that would have caught the original gap: it binds the shipped
-    skill text to the Python that consumes it, which no unit test of either half could do
-    on its own. It routes through `state.DISARMED_FLAG` so the name has exactly one
-    definition — the four readers used to spell it independently, and nobody wrote it.
+    This is the assertion that would have caught the original gap: it binds the shipped skill text to
+    the Python that consumes it, which no unit test of either half could do on its own. It routes
+    through `state.DISARMED_FLAG` so the name has exactly ONE definition — the four readers used to
+    spell it independently, and nobody wrote it.
+
+    Since TRDD-RDFWQIFA the writer is `disarm_guard.py` rather than the skill's own shell, so the chain
+    under test is: guard WRITES the constant → fleet_scan READS the constant → arm REMOVES it.
     """
     scan = (REPO / "scripts" / "lib" / "fleet_scan.py").read_text(encoding="utf-8")
     assert "state.DISARMED_FLAG" in scan, "fleet_scan no longer reads the opt-out flag"
 
-    # The constant is what the skills must write/remove — not some other filename that
-    # merely happens to look like it.
+    guard = GUARD.read_text(encoding="utf-8")
+    assert "state.DISARMED_FLAG" in guard, "disarm_guard.py does not write state.DISARMED_FLAG"
+
+    # Arm still clears it in plain shell — clearing an opt-out needs no authority (re-arming is the
+    # safe direction: the worst case is a guarded project, which is the default anyway).
     name = re.escape(state.DISARMED_FLAG)
-    assert re.search(rf"(touch|>|printf|echo)[^\n]*{name}", "\n".join(_shell_lines(DISARM))), f"janitor-disarm does not write state.DISARMED_FLAG ({state.DISARMED_FLAG})"
     assert re.search(rf"^\s*rm\b[^\n]*{name}", "\n".join(_shell_lines(ARM)), re.MULTILINE), f"janitor-arm does not remove state.DISARMED_FLAG ({state.DISARMED_FLAG})"

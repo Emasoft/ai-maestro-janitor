@@ -268,6 +268,26 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # short (300s = every heartbeat) to give the due-check a chance each fire; an
     # idle fire is essentially free.
     ("memory-maintenance", 300, "CLAUDE_PLUGIN_OPTION_MEMORY_MAINTENANCE_INTERVAL"),
+    # ticket-dispatch is the support-ticket SCHEDULER (TRDD-CGYMUKO6) — the same
+    # DETECT→SCHEDULE→EXECUTE shape as memory-maintenance above, and for the same
+    # reason: a python detector CANNOT spawn an agent, only the cron turn can. It
+    # selects the due tickets under a machine-wide flock (skip-if-held, so N
+    # sessions dispatch ONCE), marks them `dispatched`, and emits ONE bare
+    # forge-proof [janitor-ticket] marker naming them. Authority lives in the
+    # ticket's status, never in the marker — `ticket_cli start` refuses a ticket
+    # nobody dispatched, so a hallucinated marker achieves nothing.
+    # 300s (every fire): an empty queue is a directory glob that finds nothing, and
+    # a critical incident should not wait out a long cadence before it is worked.
+    ("ticket-dispatch", 300, "CLAUDE_PLUGIN_OPTION_TICKET_DISPATCH_INTERVAL"),
+    # memgrep-index-health VALIDATES each memory scope's index and raises the issue
+    # code (TRDD-CGYMUKO6) — the ticket system's motivating producer. It uses the
+    # NON-HEALING `memgrep validate` path on purpose: `open()` self-heals, which is
+    # exactly how the 2026-07-14 migration corruption stayed invisible for days
+    # (every open quietly papered over it). 30 min, and a failure must RECUR before
+    # it becomes a ticket — one failure is often a corruption the next open() heals;
+    # a failure still there on the next probe means it is being RE-manufactured, and
+    # a freshly built index that fails validation is a CODE bug.
+    ("memgrep-index-health", 1800, "CLAUDE_PLUGIN_OPTION_MEMGREP_HEALTH_INTERVAL"),
     # project-map-drift nudges when the fenced CLAUDE.md project map is stale
     # (TRDD-e247a349). DETECTION ONLY — digest-compare against the fence
     # header, zero extraction — and it NEVER writes CLAUDE.md: the write busts
