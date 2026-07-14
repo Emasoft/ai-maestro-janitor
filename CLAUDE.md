@@ -288,7 +288,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=9d5840655c80 digest=3910d92dcdb1 generated=2026-07-14T13:44:08+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6886ad852af3 digest=1cd1b5ed9db2 generated=2026-07-14T19:51:59+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -349,6 +349,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/detectors/mcp-rugpull.py` — MCP rug-pull detector — fingerprint-drift audit on installed MCP servers.
   · main() -> int
+`scripts/detectors/memgrep-index-health.py` — memgrep-index-health — the ticket system's motivating producer (TRDD-CGYMUKO6).
+  · recent_heals(root, *, now, window_s) -> list[str] — The `<epoch> <stage> <why>` heal lines for `root` inside the window. PURE-ish (one file read).
+  · main() -> int
 `scripts/detectors/memorize-nudge.py` — memorize-nudge — nudge the agent to MEMORIZE when code outran the wiki.
   · main() -> int
 `scripts/detectors/memory-librarian.py` — memory-librarian — SURFACE (never mutate) memory aggregation/conflict candidates.
@@ -407,6 +410,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · main() -> int
 `scripts/detectors/task-pr-mismatch.py` — Task/PR mismatch detector — Python port of task-pr-mismatch.sh.
   · main() -> int
+`scripts/detectors/ticket-dispatch.py` — ticket-dispatch — the support-ticket SCHEDULER (TRDD-CGYMUKO6).
+  · main() -> int
 `scripts/detectors/token-usage-anomaly.py` — token-usage-anomaly — flag a SUDDEN token-usage spike vs the session's learned normal.
   · main() -> int
 `scripts/detectors/tracked-ignored.py` — Tracked-ignored detector — Python port of tracked-ignored.sh.
@@ -432,6 +437,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/detectors/workflow-security.py` — Workflow-security detector — heartbeat-cadenced GitHub Actions audit.
   · main() -> int
 `scripts/detectors/worktree-janitor.py` — Worktree janitor — Python port of worktree-janitor.sh.
+  · main() -> int
+`scripts/disarm_guard.py` — Decide whether a disarm may record `disarmed.flag` — the "the USER opted out" claim.
+  · authority() -> str | None — Why this disarm may claim the user chose it — or None when it may not.
   · main() -> int
 `scripts/dispatch.py` — Cron-fire entry point for the janitor heartbeat — Python port of dispatch.sh.
   · main() -> int
@@ -499,6 +507,9 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · detect_filesystem(path) -> str
   · detect_sandboxing() -> list[str] — Container / VM / sandbox signals. Backed by env_detect.detect_containers,
   · gather(*, fast, online) -> dict
+  · main() -> int
+`scripts/issue_catalog_doc.py` — Generate `docs/ISSUE-CODES.md` from the issue catalog (TRDD-CGYMUKO6).
+  · render() -> str
   · main() -> int
 `scripts/lib/__init__.py` — Marker file. Makes scripts/lib/ an importable Python package so hooks
 `scripts/lib/agentlens_probe.py` — Shared agentlensPro probe — config-gated, bounded, fail-open (TRDD-WUUR2DFX).
@@ -703,6 +714,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · release_singleton_flock(fd) -> None — Close the fd; the kernel releases the flock as a side effect.
   · acquire_marketplace_lock() -> Optional[int] — Non-blocking exclusive flock on marketplace-op.lock.
   · release_marketplace_lock(fd) -> None — Release the marketplace-op flock and close the fd. Best-effort.
+  · ticket_dispatch_lock() -> Iterator[bool] — Serialise the support-ticket select→stamp→emit against every other session (TRDD-CGYMUKO6).
   · marketplace_lock() -> Iterator[bool] — Serialise a `claude plugin marketplace update` against every other process.
   · acquire_oauth_rotator_lock() -> Optional[int] — Non-blocking exclusive flock on oauth-rotator-tick.lock.
   · release_oauth_rotator_lock(fd) -> None — Release the oauth-rotator-tick flock and close the fd. Best-effort.
@@ -739,6 +751,14 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · IOCRecord — Per-threat IOC bundle — the four-quadrant breakdown distilled from
   · incident_response_advisory(stage) -> str — Return the canonical advisory string for an IR stage.
   · parse_ioc_yaml(path) -> list[IOCRecord] — Load a per-threat IOC bundle (or a list of bundles) from `path`.
+`scripts/lib/issue_catalog.py` — The ISSUE-CODE CATALOG — every incident the janitor can detect, with a stable id (TRDD-CGYMUKO6).
+  · Issue — One detectable issue. `kind` is the ONLY thing that decides domain + agent (via KIND_REGISTRY).
+  · Raised — The outcome of `raise_issue`. `line` is a ready-to-print heartbeat line (empty when silent).
+  · raise_issue(code, *, evidence, severity, dedupe_key, where, origin, project_dir, now, **data) -> Raised — Turn a detected issue into WORK. The one call a detector makes; the code decides everything else.
+  · clear_issue(code, *, where, dedupe_key, project_dir, **data) -> str | None — The finding is GONE — withdraw its unapproved proposal. Returns the withdrawn TRDD id, or None.
+  · reconcile(code, live_wheres, *, project_dir) -> list[str] — Withdraw every proposal for `code` whose finding is NO LONGER THERE. Returns the withdrawn ids.
+  · issue_domain(code) -> str — The domain a code resolves to, or `""` for an unknown code. For docs + tests.
+  · scanners() -> list[str] — Every scanner that has at least one code, sorted. The coverage handle.
 `scripts/lib/issues_watch.py` — GitHub issues-watcher core (TRDD-2KQQAEPP) — the PURE decision layer.
   · parse_remote_slug(url) -> str | None — `owner/repo` from a git remote URL, or None when it is not a GitHub remote.
   · parse_issues(payload) -> list[dict[str, Any]] — Parse `gh issue list --json ...` stdout into a list of issue dicts.
@@ -818,6 +838,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · harvest_preservation_ok(memory_md_text, corpus_text, note_filenames) -> tuple[bool, list[str]] — Prove a HARVEST lost nothing BEFORE MEMORY.md is reduced to the stub: every memory
   · mirror_preservation_ok(buffer_notes, wiki_corpus, min_len) -> tuple[bool, list[str]] — Prove a coexistence HARVEST mirrored every raw buffer note into the wiki.
   · no_new_duplicate_lines(result, min_len) -> tuple[bool, list[str]] — No substantive content line (length ≥ `min_len`, not a heading/list marker)
+  · canonicalize_retired_links(text, retired_slugs, survivor_slug) -> str — Rewrite every `[[retired]]` wikilink to `[[survivor]]` — the redirect a merge MANDATES.
   · no_dangling_refs(live_pages, retired_slugs) -> tuple[bool, list[str]] — After a merge/split removes some slugs, NO surviving page may still
   · footnote_refs_resolve(text) -> tuple[bool, list[str]] — Every `[^id]` REFERENCE in `text` must resolve to a `[^id]:` DEFINITION on
   · no_new_dangling_footnote_refs(source_texts, result_texts) -> tuple[bool, list[str]] — A split/merge must not INTRODUCE a dangling footnote ref. Compare per-ID
@@ -1124,8 +1145,39 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · build_wtype_steps(commands, *, esc_first) -> list[list[str]] — The Wayland (`wtype`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
   · build_xdotool_steps(commands, *, esc_first) -> list[list[str]] — The X11 (`xdotool`) send sequence, mirroring `build_tmux_steps`: an OPTIONAL
   · match_agent_tmux(agents, cwd_candidates) -> str | None — Pure: the tmux session of the agent whose workingDirectory equals — or is a
-  · send_self_command(commands, *, delay_s, esc_first, dry_run, env) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
+  · send_self_command(commands, *, delay_s, esc_first, dry_run, env, respect_user_presence) -> str — Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
   · main() -> int
+`scripts/lib/ticket_proposal.py` — The PROJECT-domain bridge: propose → approve → ticket (TRDD-CGYMUKO6).
+  · parse_trdd_ref(ref) -> str | None — Accept `TRDD-35AC8I8D` or a bare `35AC8I8D`; return the canonical UPPERCASE id, else None.
+  · find_proposal(trdd_id, project_dir) -> tuple[str, Path] | None — Locate a proposal TRDD by id across both scopes. Returns (scope, path).
+  · propose(*, kind, title, detail, evidence, severity, dedupe_key, origin, project_dir, now) -> tuple[str, str, bool] | None — Author a proposal TRDD for a PROJECT-domain finding. Returns (trdd_id, command, is_new).
+  · approve(ref, project_dir, now) -> tuple[bool, str] — THE APPROVAL. Open the ticket named by a proposal TRDD and promote it `proposal → planned`.
+  · Pending — One unapproved proposal, as the reminder channel needs it. Every field is already sanitized —
+  · pending(project_dir) -> list[Pending] — Every proposal still awaiting approval, most severe first. The REMINDER's single source.
+  · retract(dedupe_key, project_dir, now) -> str | None — The finding CLEARED before anyone approved it — withdraw its proposal. Returns the id, or None.
+`scripts/lib/tickets.py` — The janitor's support-ticket system — incident management (TRDD-CGYMUKO6).
+  · Kind — What a kind of incident IS. Domain and agent come from HERE, never from a ticket's payload.
+  · config(name) -> int | bool — Read one knob from the environment, falling back to its default.
+  · new_id() -> str — `T-` + 8 uppercase base36. Regex-validated (`is_ticket_id`) before it can reach a prompt.
+  · is_ticket_id(value) -> bool — True iff `value` is a well-formed ticket id — the ONLY form allowed into an agent prompt.
+  · Ticket
+  · Ticket.domain(self) -> str — From the REGISTRY, never from the payload. An unknown kind is treated as PROJECT — the
+  · Ticket.agent(self) -> str
+  · Ticket.to_json(self) -> dict
+  · from_json(data) -> Ticket
+  · reclaim_stale(tickets, *, now, stale_s) -> list[Ticket] — Return the in-flight tickets whose agent DIED, reset to `open` with attempts++.
+  · select_due(tickets, *, now, per_fire, budget_left, inflight) -> list[Ticket] — Pick the tickets to dispatch on THIS fire. PURE.
+  · mark_failed(t, *, now, backoff_s, why) -> Ticket — A failed attempt: back off and retry, or give up EXPLICITLY.
+  · budget_left(ledger, *, now, per_day) -> int — Dispatches still allowed in the rolling 24h window.
+  · tickets_dir(state_dir) -> Path
+  · closed_dir(state_dir) -> Path
+  · ledger_path(state_dir) -> Path
+  · load_all(state_dir) -> list[Ticket] — Every OPEN (non-archived) ticket. A corrupt file is skipped, never fatal.
+  · load(ticket_id, state_dir) -> Ticket | None
+  · save(t, state_dir) -> None — Persist a ticket. Terminal ones are ARCHIVED, never deleted (RULE 0's spirit: the record of
+  · open_ticket(*, kind, title, detail, evidence, severity, dedupe_key, origin, trdd, now, state_dir) -> tuple[Ticket | None, str] — Open a ticket, or bump an existing one with the same `dedupe_key`. Returns (ticket, why).
+  · record_dispatch(ticket_id, *, now, state_dir) -> None — Append to the rolling-24h ledger, TRIMMED on every append (no unbounded append sites).
+  · read_ledger(state_dir) -> list[int]
 `scripts/lib/token_attribution_cache.py` — Shared 30-minute fleet-attribution cache (TRDD-OY0W6LX5).
   · cache_path() -> Path — The single machine-wide cache file, in the daemon's global-state dir.
   · load_fresh(now, *, max_age_s, w5_lo, w7_lo) -> dict | None — The cached fleet dict iff it exists, is younger than `max_age_s`, AND was computed
@@ -1212,6 +1264,14 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · ReconcileVerdict — The reconciliation outcome for ONE TRDD — which checks fired + the label.
   · ReconcileVerdict.fires(self) -> bool
   · reconcile(record, commit_in_released_tag, column_of) -> ReconcileVerdict — Run all four checks on one record; return the consolidated verdict.
+`scripts/lib/user_intent.py` — User-intent provenance — the one place that can tell "the USER asked" from "an agent decided".
+  · intent_path(verb, state_dir) -> Path — Where a recorded intent for `verb` lives (per project, alongside the other janitor state).
+  · verbs_for_commands(commands) -> set[str] — Which verbs the given slash-commands correspond to. Unknown commands map to nothing.
+  · record_intent_from_prompt(prompt, *, state_dir, now) -> list[str] — Stamp an intent token for every verb the USER's raw prompt explicitly asks for.
+  · intent_fresh(verb, *, ttl_s, state_dir, now) -> bool — True iff the USER asked for `verb` within the last `ttl_s` seconds.
+  · consume_intent(verb, state_dir) -> None — Spend a recorded intent so ONE request authorizes exactly ONE action, not a standing licence.
+  · user_is_present(*, idle_s, home, now) -> bool — True iff the user typed something recently — i.e. they are AT the terminal right now.
+  · injection_allowed(commands, *, state_dir, home, now) -> tuple[bool, str] — May we type `commands` into the user's own pane right now? Returns (allowed, why).
 `scripts/lib/user_mem_lib.py` — USER-MEMORY subsystem core (TRDD-4334aad0) — a PRIVATE, agent-invisible
   · resolve_user_mem_dir(project_dir) -> Path — Return the user-mem store dir for a project (does not create it).
   · SearchResult — One memgrep hit, annotated with the memory's immutable number.
@@ -1240,6 +1300,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · add_quarantine(version, reason) -> bool — Record ``version`` as proven-bad so the stub skips it fast on later
   · older_runnable_version(cache_parent, newest) -> str | None — The highest installed version STRICTLY OLDER than ``newest`` whose
   · plan_crash_loop_rollback(cache_parent, *, crash_loop) -> tuple[str, str] | None — Decide whether to auto-rollback a crash-looping self-update. PURE — it
+`scripts/lib/workflow_issue_codes.py` — Every workflow rule id → the issue code it raises (TRDD-CGYMUKO6, Phase 3 coverage).
+  · code_for(rule_id) -> str — The issue code for a workflow rule id. Never raises, never returns "" — a security finding
 `scripts/lib/zizmor_classifier.py` — One-pass workflow classifier — google-re2 RegexSet primary, Python re fallback.
   · Finding
   · Classifier — Single-pass workflow classifier. Build once, reuse across files.
@@ -1406,6 +1468,8 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 `scripts/resume_trigger.py` — Backing script for /janitor-resume (analogue of reload_trigger.py) — TRDD-HI0BGQGJ.
   · main() -> int
 `scripts/safe_delete.py` — safe-delete — Python port of safe-delete.sh.
+  · main() -> int
+`scripts/ticket_cli.py` — The janitor support-ticket CLI — the SINGLE mutation surface (TRDD-CGYMUKO6).
   · main() -> int
 `scripts/token_report.py` — Backing script for /janitor-token-report (TRDD-a4e41e89, Phase 1).
   · main() -> int
