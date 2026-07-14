@@ -1,16 +1,16 @@
 ---
 trdd-id: CGYMUKO6
 title: Janitor support-ticket system — incident management with heartbeat-scheduled repair agents
-column: dev
+column: testing
 created: 2026-07-14T14:42:33+0200
-updated: 2026-07-14T17:05:00+0200
+updated: 2026-07-14T18:20:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
 severity: high
 labels: [incident-management, tickets, heartbeat, agents, governance]
 relevant-rules: [1]
-implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3, 10de6e0, 80fd10e, 9c9fd6f]
+implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3, 10de6e0, 80fd10e, 9c9fd6f, 3226ec7]
 ---
 
 # Janitor support-ticket system
@@ -287,16 +287,35 @@ a dedupe key built from an attacker-chosen path is a key an attacker can VARY to
 fire). SELFINT-003 is new, and its fix names the trap: repair the SOURCE repo, never the plugin CACHE,
 which the next update replaces wholesale — a fix applied there vanishes without a trace.
 
-**NEXT ACTION:**
-1. **In flight (delegated):** the last 6 producers — `remote-credentials` (CRED-001),
-   `typosquat-watcher` (DEP-003), `supply-chain-fingerprints` (DEP-001), `historical-cache-scan`
-   (DEP-002), `mcp-rugpull` (MCPSEC-001), `ai-context-poisoning` (AICTX-001). Review the diff for the
-   ONE invariant that fails silently: the `where=` string must be byte-identical between the
-   `raise_issue` and the `clear_issue` for the same finding, or the withdraw never matches and the
-   stale proposal stays on the board forever.
-2. Then: full `pytest` + `ruff` + `cargo test`, regenerate `docs/ISSUE-CODES.md`, and publish.
-3. Upgrade `security_helpers.security_agent_hint()` → a `raise_issue` call, so a security finding
-   PROPOSES a fix with the exact approval command instead of merely suggesting an agent.
+**Supply-chain producers** (`3226ec7`): `remote-credentials` (CRED-001), `typosquat-watcher`
+(DEP-003), `supply-chain-fingerprints` (DEP-001), `historical-cache-scan` (DEP-002), `mcp-rugpull`
+(MCPSEC-001), `ai-context-poisoning` (AICTX-001). **Phase 3 is COMPLETE — every scanner the janitor
+ships now turns a finding into a coded, approvable proposal.**
+
+**`reconcile()` — because `clear_issue` was the WRONG SHAPE for most scanners.** `clear_issue` answers
+*"this exact finding is gone"*, which only works if the detector can still NAME what it wants to
+withdraw. **A scan cannot:** it produces the findings that EXIST, and the vanished ones are by
+definition absent from the result. Asking such a detector to clear what it no longer sees is asking it
+to remember every string it ever emitted — so two detectors were left with NO clear at all (their
+proposals would have sat on the user's board forever), while typosquat-watcher had the opposite
+problem: it cleared per dependency, re-reading the whole design board once per name in the lockfile.
+
+`reconcile(code, live_wheres)` INVERTS it: the detector says what IS here, and anything else on the
+board under that code is stale by construction. One pass, not one per finding. **It must be called on
+the CLEAN run too** — a scanner that only reconciles when it finds something can never withdraw its
+LAST proposal, which is precisely the one the user just fixed.
+
+**A ticket has to be TRUE.** mcp-rugpull now tickets ONLY a fingerprint that CHANGED. It also reports
+servers appearing/disappearing, and those are worth SAYING — but a server appearing is usually the
+user installing one, and a ticket titled "an installed MCP server changed its fingerprint" would then
+be making a claim that is false. A finding may be informational; a ticket is acted on.
+
+**NEXT ACTION:** publish (all gates), then watch CI. Phase 3 has no remaining work.
+
+**Superseded:** the old item "upgrade `security_agent_hint()` → a `raise_issue` call" — the security
+detectors now raise directly, and the hint survives as the COMPLEMENTARY immediate path (run the agent
+NOW) beside the ticket's scheduled one. They answer different questions; collapsing them would lose
+the "show me first" option.
 
 **Live behaviour to watch:** the queue is armed with `tickets_enabled: true`, 2 dispatches/heartbeat,
 20/day. HARNESS incidents auto-dispatch; PROJECT incidents only ever propose. `/janitor-support-tickets`
@@ -339,3 +358,31 @@ Reuses: `state.atomic_write` / `sanitize_for_drift_line` / `state_dir`, the `glo
   authorized", and TRDD authoring is ALREADY approval-exempt. The ticket system just gave that
   existing gate a button. Lesson: when a new subsystem needs an approval model, look for the one the
   project already ratified before inventing one — a second gate is a second thing to drift.
+
+[^3]: [ocd:2026-07-14 lmd:2026-07-14] The raise path shipped without its counterpart, and the gap was
+  invisible because everything it broke happened LATER: a proposal is only litter once the finding it
+  describes is gone, and nothing in the raise path ever looks again. Worse, the first counterpart I
+  built (`clear_issue`, "this exact finding is gone") had the wrong SHAPE for most of its callers — it
+  requires the detector to NAME what it is withdrawing, and a scan structurally cannot name what it no
+  longer finds. Two detectors were duly written with no clear at all, and one cleared per dependency
+  (re-reading the whole board once per name in an 800-name lockfile). Lesson: when an API's callers
+  keep failing to use it, the API is the defect, not the callers. Inverting it (`reconcile` — tell me
+  what IS here, I will retire the rest) made every call site both correct and cheap, and it is the
+  same inversion a garbage collector makes for the same reason: enumerate the live set, not the dead
+  one.
+
+[^4]: [ocd:2026-07-14 lmd:2026-07-14] "Every finding has a code" is the kind of claim that is true
+  the day you write it and false a month later. The workflow auditor emits 54 rule ids across two
+  tiers, and the honest way to hold that line was not a longer catalog but a test that enumerates the
+  rule set FROM THE SCANNERS THEMSELVES and fails on any rule with no mapping — a copied list agrees
+  with itself forever. Lesson: a coverage claim needs an executable witness that reads the SOURCE of
+  truth, not a second copy of it; otherwise the documentation and the code drift apart silently and
+  the docs are the one that lies.
+
+[^5]: [ocd:2026-07-14 lmd:2026-07-14] A subagent routed mcp-rugpull's "new MCP server appeared" line
+  into an MCPSEC-001 ticket titled "an installed MCP server changed its fingerprint". Both are real
+  findings the detector emits, so the mapping looked mechanical — but installing a server is not a
+  rug-pull, and the ticket would have been telling an agent something FALSE about the user's machine.
+  Lesson: a drift line may be informational; a TICKET is acted on, so it must be TRUE. When routing
+  findings into tickets, check each one against what the ticket's text actually CLAIMS, not just
+  against which scanner produced it.
