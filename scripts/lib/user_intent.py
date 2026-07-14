@@ -56,6 +56,8 @@ USER_PRESENT_IDLE_S = 1800  # 30 minutes
 # The verbs whose authority we track. Keyed by verb → the slash-commands that mean it.
 _VERB_COMMANDS: dict[str, tuple[str, ...]] = {
     "disarm": ("/janitor-disarm",),
+    "global-disarm": ("/janitor-global-disarm",),
+    "global-pause": ("/janitor-global-pause",),
     "arm": ("/janitor-arm",),
     "reload": ("/janitor-reload-plugins", "/reload-plugins"),
     "reload-skills": ("/janitor-reload-skills", "/reload-skills"),
@@ -72,6 +74,11 @@ _VERB_PHRASES: dict[str, tuple[str, ...]] = {
         r"\bstop\b[^.!?]{0,30}\bjanitor\b",
         r"\bkill\b[^.!?]{0,30}\b(janitor|heartbeat)\b[^.!?]{0,20}\bcron\b",
     ),
+    "global-disarm": (
+        r"\bdisarm\b[^.!?]{0,40}\b(globally|machine[- ]wide|everywhere|all\s+projects)\b",
+        r"\bstop\b[^.!?]{0,30}\b(all|every)\b[^.!?]{0,20}\bjanitors?\b",
+    ),
+    "global-pause": (r"\bpause\b[^.!?]{0,40}\b(globally|machine[- ]wide|everywhere|all\s+projects)\b",),
     "reload": (r"\breload\b[^.!?]{0,20}\bplugins?\b",),
     "reload-skills": (r"\breload\b[^.!?]{0,20}\bskills?\b",),
     "compact": (r"\bcompact\b[^.!?]{0,30}\b(context|conversation|session)\b",),

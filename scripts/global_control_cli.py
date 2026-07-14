@@ -44,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import global_state as gs  # noqa: E402  (bare sibling import; lib/ is on sys.path)
+import user_intent  # noqa: E402
 
 
 def _status_line() -> str:
@@ -54,23 +55,54 @@ def _status_line() -> str:
     # that honestly (/code-review B6) instead of claiming "daemon idle".
     if gs.maintenance_mode_present():
         if gs.kill_switch_present():
-            return ("MAINTENANCE + DISARMED (sessions still fire cache-refresh-only, but the "
-                    "kill-switch stopped the daemon; run /janitor-global-arm, then "
-                    "/janitor-global-maintenance-off, to fully resume)")
-        return ("MAINTENANCE (heartbeats stay armed but fire cache-refresh-only — no "
-                "detectors, daemon idle; run /janitor-global-maintenance-off to resume full mode)")
+            return "MAINTENANCE + DISARMED (sessions still fire cache-refresh-only, but the kill-switch stopped the daemon; run /janitor-global-arm, then /janitor-global-maintenance-off, to fully resume)"
+        return "MAINTENANCE (heartbeats stay armed but fire cache-refresh-only — no detectors, daemon idle; run /janitor-global-maintenance-off to resume full mode)"
     if gs.kill_switch_present():
-        return ("DISARMED (kill-switch set — daemon stopped AND every per-session "
-                "heartbeat silent; run /janitor-global-arm to revive)")
+        return "DISARMED (kill-switch set — daemon stopped AND every per-session heartbeat silent; run /janitor-global-arm to revive)"
     if gs.global_pause_present():
         return "PAUSED (daemon idle, heartbeats silent; run /janitor-global-unpause to resume)"
     return "RUNNING (no global stop, pause, or maintenance)"
+
+
+# The machine-wide STOPS. These are the only sub-commands that need human authority: each one halts
+# the janitor across EVERY project on this machine, and `disarm` additionally makes every session
+# self-disarm its own cron (the `[janitor-self-disarm]` path). The revives (`arm`, `unpause`) are
+# deliberately NOT gated — restoring a safety system must never be harder than stopping it.
+_STOP_COMMANDS = {"disarm": "global-disarm", "pause": "global-pause"}
+
+
+def _authorized(cmd: str) -> bool:
+    """True iff the USER asked for this stop (TRDD-RDFWQIFA).
+
+    Without this, the disarm guard on `disarmed.flag` would have a trivial bypass: an agent could set
+    the machine-wide stop itself, and every session would then dutifully self-disarm ON that stop's
+    authority. Gating the stop closes the chain, so there is no forgeable link anywhere in it.
+
+    The token is minted by the UserPromptSubmit hook from the user's RAW keystrokes — the one surface
+    an agent can never author. Fails CLOSED: no token, no stop.
+    """
+    verb = _STOP_COMMANDS.get(cmd)
+    if verb is None:
+        return True  # not a stop — nothing to authorize
+    if user_intent.intent_fresh(verb):
+        user_intent.consume_intent(verb)
+        return True
+    return False
 
 
 def main() -> int:
     argv = sys.argv[1:]
     cmd = argv[0] if argv else "status"
     reason = " ".join(argv[1:]) if len(argv) > 1 else ""
+    if not _authorized(cmd):
+        print(
+            f"REFUSED: `{cmd}` stops the janitor on EVERY project on this machine, so it needs the "
+            f"user's own request. No recent user instruction asked for it.\n"
+            f"If you are the user: type /janitor-global-{cmd} yourself and it will run.\n"
+            f"(Agents: a budget/rate-limit problem is answered by /janitor-global-maintenance — "
+            f"which keeps firing cheaply and keeps nudging — never by a stop.)"
+        )
+        return 1
     if cmd == "disarm":
         # DISARM is the TRUE STOP. The kill-switch makes the daemon EXIT and, once the
         # kill-switch-honoring dispatch.py (TRDD-NJ22HNC3) is cached, silences every
@@ -81,9 +113,7 @@ def main() -> int:
         # version to roll out. `arm` clears both.
         gs.set_kill_switch(reason)
         gs.set_global_pause(reason)
-        print("janitor globally DISARMED — the daemon exits on its next loop, "
-              "per-session heartbeats will not re-spawn it, AND every session's "
-              "heartbeat goes silent on its next fire. Run /janitor-global-arm to revive.")
+        print("janitor globally DISARMED — the daemon exits on its next loop, per-session heartbeats will not re-spawn it, AND every session's heartbeat goes silent on its next fire. Run /janitor-global-arm to revive.")
         return 0
     if cmd == "arm":
         # Full revive: clear BOTH the kill-switch and the disarm-raised pause so the
@@ -91,18 +121,15 @@ def main() -> int:
         # /janitor-global-pause — is still lifted by /janitor-global-unpause.)
         gs.clear_kill_switch()
         gs.clear_global_pause()
-        print("janitor global disarm cleared — the daemon may be (re)spawned again "
-              "and per-session heartbeats resume.")
+        print("janitor global disarm cleared — the daemon may be (re)spawned again and per-session heartbeats resume.")
         return 0
     if cmd == "pause":
         gs.set_global_pause(reason)
-        print("janitor globally PAUSED — the daemon stays alive but idles (no tasks), and "
-              "every session's heartbeat goes silent. Run /janitor-global-unpause to resume.")
+        print("janitor globally PAUSED — the daemon stays alive but idles (no tasks), and every session's heartbeat goes silent. Run /janitor-global-unpause to resume.")
         return 0
     if cmd == "unpause":
         gs.clear_global_pause()
-        print("janitor global pause lifted — the daemon resumes running tasks and sessions "
-              "resume emitting drift.")
+        print("janitor global pause lifted — the daemon resumes running tasks and sessions resume emitting drift.")
         return 0
     if cmd == "maintenance":
         # MAINTENANCE (TRDD-FPL60EKV): sessions stay ARMED and keep firing, but each fire is
@@ -110,15 +137,11 @@ def main() -> int:
         # spawn), and the daemon idles its task workloads. The cheap way to keep every
         # project's prompt cache warm (0.1x read) instead of letting it die (1.0x rewrite).
         gs.set_maintenance_mode(reason)
-        print("janitor globally in MAINTENANCE mode — every session's heartbeat stays ARMED but "
-              "fires cache-refresh-only (no detectors, no daemon tasks), keeping every project's "
-              "prompt cache warm at ~1/10 the cost of letting it die. Run "
-              "/janitor-global-maintenance-off to resume full mode.")
+        print("janitor globally in MAINTENANCE mode — every session's heartbeat stays ARMED but fires cache-refresh-only (no detectors, no daemon tasks), keeping every project's prompt cache warm at ~1/10 the cost of letting it die. Run /janitor-global-maintenance-off to resume full mode.")
         return 0
     if cmd == "maintenance-off":
         gs.clear_maintenance_mode()
-        print("janitor global maintenance lifted — heartbeats resume FULL fires (detectors) and "
-              "the daemon resumes its task workloads.")
+        print("janitor global maintenance lifted — heartbeats resume FULL fires (detectors) and the daemon resumes its task workloads.")
         return 0
     if cmd == "reload-skills":
         # FLEET standalone-skills reload. Stamp the machine-wide generation; each live
@@ -129,19 +152,12 @@ def main() -> int:
         # [janitor-reload] path): a heartbeat whose cron prompt was baked BEFORE this
         # marker shipped won't act on it until the session re-arms.
         gs.set_skills_reload_flag(reason)
-        print("janitor global reload-skills requested — every live session's next heartbeat "
-              "will emit [janitor-reload-skills] once and run /reload-skills locally, so newly "
-              "installed STANDALONE skills/commands load fleet-wide. (Already-armed sessions "
-              "honor the new marker only after a re-arm.)")
+        print("janitor global reload-skills requested — every live session's next heartbeat will emit [janitor-reload-skills] once and run /reload-skills locally, so newly installed STANDALONE skills/commands load fleet-wide. (Already-armed sessions honor the new marker only after a re-arm.)")
         return 0
     if cmd == "status":
         print(_status_line())
         return 0
-    sys.exit(
-        f"unknown command: {cmd!r} "
-        "(use: disarm [reason] | arm | pause [reason] | unpause | maintenance [reason] | "
-        "maintenance-off | reload-skills [reason] | status)"
-    )
+    sys.exit(f"unknown command: {cmd!r} (use: disarm [reason] | arm | pause [reason] | unpause | maintenance [reason] | maintenance-off | reload-skills [reason] | status)")
 
 
 if __name__ == "__main__":
