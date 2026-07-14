@@ -96,25 +96,33 @@ def cookie_days(email):
     return None
 
 def oauth_info(email):
-    """(has_refresh, token_expiry_days) from the engine's keychain health (audit C2).
-    Returns (None, None) when the engine did not report this account → UNKNOWN."""
+    """(has_refresh, token_expiry_days, status) from the engine's keychain health (audit C2).
+    Returns (None, None, None) when the engine did not report this account → UNKNOWN.
+    `status` is the janitor #82 per-account read state ("ok" | "latched" | "no-oauth");
+    absent from an OLDER engine's JSON → None (falls through to the pre-#82 behaviour)."""
     h = oauth_health.get(email)
     if not isinstance(h, dict):
-        return (None, None)
-    return (bool(h.get("has_refresh")), h.get("expires_days"))
+        return (None, None, None)
+    return (bool(h.get("has_refresh")), h.get("expires_days"), h.get("status"))
 
-action, oauth_cache = [], {}
+action, oauth_cache, latched = [], {}, []
 print(f"{'account':40} {'cookie/session':>16} {'oauth':>26}  verdict")
 print("-" * 112)
 for email in roster:
     cd = cookie_days(email)
-    has_refresh, oauth_days = oauth_info(email)
+    has_refresh, oauth_days, oauth_status = oauth_info(email)
     oauth_cache[email] = (has_refresh, oauth_days)
+    if oauth_status == "latched":
+        latched.append(email)
     cookie_s = "none/expired" if cd is None else f"{cd:6.1f} d"
     if has_refresh:
         oauth_s = "refresh-capable (auto)"
     elif oauth_days is not None:
         oauth_s = f"setup-token {oauth_days:5.0f} d"
+    elif oauth_status == "latched":
+        # janitor #82 fix #1: the keychain denied-latch is set → this account's OAuth state
+        # is UNKNOWN, NOT proof it has none. "no oauth" here was alarming and wrong.
+        oauth_s = "latched"
     elif not health_known:
         oauth_s = "unknown (engine n/a)"
     else:
@@ -136,6 +144,14 @@ if action:
     if healthy:
         print(f"  Safe window: OAuth still healthy on {len(healthy)}/{len(roster)} account(s). Refreshing now resets the")
         print( "  cookie clock, so cookie-expiry never lands on top of OAuth-expiry. Do it now, not later.")
+    elif latched:
+        # janitor #82 fix #1: a set denied-latch makes OAuth health UNKNOWN — NOT unhealthy.
+        # Firing the URGENT "no healthy OAuth" banner here was the false alarm. And a refresh
+        # would NOT clear the latch (that needs `rotator.py clear-keychain-latch` after the
+        # human re-grants keychain access); a login is a fresh sign-in that needs no old token.
+        print(f"  OAuth health UNKNOWN on {len(latched)}/{len(roster)} account(s): the keychain denied-latch is set, so")
+        print("  `security` reads are suppressed. Re-grant keychain access, then run  rotator.py clear-keychain-latch .")
+        print("  A login is a fresh human sign-in that needs no old token, so /janitor-refresh-claude-logins still works.")
     elif not health_known:
         # The engine could not report OAuth health (older cached rotator without the
         # oauth-health subcommand, or no cached plugin). Do NOT assert "no healthy
@@ -147,6 +163,12 @@ if action:
         print("  ⚠ URGENT: no account has healthy OAuth right now — refresh immediately. (The login is a fresh")
         print("    human sign-in; it does NOT need the old cookie, so the command still works.)")
     sys.exit(1)
+if latched:
+    # janitor #82 fix #1: cookies are fine so no refresh is DUE, but a set denied-latch hides
+    # OAuth health — say so instead of a bare "all healthy", which here would be misleading.
+    print("\n✓ Cookies healthy — nothing urgent. NOTE: keychain denied-latch is set, so OAuth health is UNKNOWN")
+    print(f"  on {len(latched)}/{len(roster)} account(s); run  rotator.py clear-keychain-latch  after re-granting keychain access.")
+    sys.exit(0)
 print("\n✓ All accounts healthy; cookie vs OAuth lifetimes are staggered — nothing to do.")
 sys.exit(0)
 PY

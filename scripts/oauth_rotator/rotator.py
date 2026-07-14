@@ -2267,8 +2267,53 @@ def cmd_print_profiles_root() -> int:
     return 0
 
 
+def build_oauth_health(
+    emails: list[str],
+    live: str | None,
+    slot_blobs: dict[str, dict | None],
+    denied: set[str],
+    live_blob: dict | None,
+) -> dict[str, dict]:
+    """PURE assembly of per-account OAuth health from ALREADY-READ data — no keychain I/O.
+
+    Split out from ``cmd_oauth_health`` so the reporting/degradation logic is testable
+    without a live keychain (janitor #82). Each entry carries a ``status`` that keeps the
+    three cases lifetime-status.sh MUST NOT conflate distinct:
+
+      * ``"ok"``      — a readable blob (it may or may not carry a refresh token / expiry).
+      * ``"latched"`` — the read was DENIED / short-circuited by the machine-wide keychain
+        denied-latch: the account's OAuth state is UNKNOWN, NOT proven absent. Reporting it
+        as "no oauth" (a definite negative) was the alarming-and-wrong bug (janitor #82 fix
+        #1) — a latched store is unknown-state.
+      * ``"no-oauth"`` — the read SUCCEEDED and the account genuinely has no OAuth material
+        (or the item was genuinely not-found, which does not latch).
+
+    For the live account we prefer the fresher ``live_blob`` but fall back to its readable
+    slot when the live read was skipped/denied (janitor #82 fix #2 graceful degradation):
+    one account's unreadable live credential never zeroes the accounts whose slots ARE
+    readable.
+    """
+    health: dict[str, dict] = {}
+    for e in emails:
+        blob = live_blob if (e == live and isinstance(live_blob, dict)) else slot_blobs.get(e)
+        if isinstance(blob, dict):
+            o = _oauth(blob)
+            hrs = expires_in_h(blob)
+            health[e] = {
+                "has_refresh": bool(o.get("refreshToken")),
+                "expires_days": (hrs / 24) if hrs is not None else None,
+                "expires_at": o.get("expiresAt"),
+                "status": "ok",
+            }
+        elif e in denied:
+            health[e] = {"has_refresh": False, "expires_days": None, "expires_at": None, "status": "latched"}
+        else:
+            health[e] = {"has_refresh": False, "expires_days": None, "expires_at": None, "status": "no-oauth"}
+    return health
+
+
 def cmd_oauth_health(as_json: bool) -> int:
-    """Print per-account OAuth health (has_refresh + expiry) read from the KEYCHAIN.
+    """Print per-account OAuth health (has_refresh + expiry + status) read from the KEYCHAIN.
 
     The source is the keychain slots (and the live credential for the live account),
     NOT the legacy plaintext ``slots/<email>.json`` files the keychain migration
@@ -2276,7 +2321,17 @@ def cmd_oauth_health(as_json: bool) -> int:
     safe to refresh" verdict reflects the real keychain state on a migrated machine
     instead of asserting a false "no healthy OAuth" banner (audit C2). Read-only.
 
-    With ``--json`` emits ``{email: {has_refresh, expires_days, expires_at}}``;
+    Read ORDER is load-bearing (janitor #82 fix #2 — graceful degradation): the
+    CLI-written per-account SLOTS are read FIRST — they stay readable even when the
+    signed-app-owned live credential item flaps its ACL/partition-list — and the flaky
+    live-credential read runs LAST, and only while the denied-latch is CLEAR. So a live
+    read that hangs and trips the machine-wide latch can no longer erase the slot truth
+    already captured, and a store that is ALREADY latched is reported as UNKNOWN per
+    account ("latched") instead of a false "no oauth". Every individual read is
+    byte-identical to before — only the order + latch-awareness are new; no credential
+    read/write path is modified.
+
+    With ``--json`` emits ``{email: {has_refresh, expires_days, expires_at, status}}``;
     otherwise a human-readable line per account.
     """
     state = load_state()
@@ -2284,28 +2339,31 @@ def cmd_oauth_health(as_json: bool) -> int:
     live = state.get("live_email")
     if live:
         emails.add(live)
-    live_blob = read_live_blob() if live else None
-    health: dict[str, dict] = {}
-    for e in sorted(emails):
-        # Live account: trust the live keychain blob (freshest); everyone else (and a
-        # failed live read) falls back to that account's stored slot.
-        blob = (live_blob if (e == live and live_blob is not None) else None) or read_slot(e)
-        if not isinstance(blob, dict):
-            health[e] = {"has_refresh": False, "expires_days": None, "expires_at": None}
-            continue
-        o = _oauth(blob)
-        hrs = expires_in_h(blob)
-        health[e] = {
-            "has_refresh": bool(o.get("refreshToken")),
-            "expires_days": (hrs / 24) if hrs is not None else None,
-            "expires_at": o.get("expiresAt"),
-        }
+    ordered = sorted(emails)
+
+    # SLOTS first. A None read is UNKNOWN ("latched") only when the denied-latch is set —
+    # a genuine not-found does NOT latch, so it stays "no-oauth". `keychain_denied_latched()`
+    # only stats a flag FILE (never spawns `security`), so this is not a keychain read.
+    slot_blobs: dict[str, dict | None] = {}
+    denied: set[str] = set()
+    for e in ordered:
+        b = read_slot(e)
+        slot_blobs[e] = b
+        if b is None and safe_storage.keychain_denied_latched():
+            denied.add(e)
+
+    # Live read LAST, and skipped entirely once latched (it would only short-circuit — and
+    # attempting it is the prompt-risk this fix exists to avoid). Enriches only the live
+    # account; every other account already has its (readable) slot captured above.
+    live_blob = read_live_blob() if (live and not safe_storage.keychain_denied_latched()) else None
+
+    health = build_oauth_health(ordered, live, slot_blobs, denied, live_blob)
     if as_json:
         print(json.dumps(health))
     else:
         for e, h in health.items():
             days = ("%.1f" % h["expires_days"]) if h["expires_days"] is not None else "?"
-            print("%s\trefresh=%s\tdays=%s" % (e, "yes" if h["has_refresh"] else "no", days))
+            print("%s\trefresh=%s\tdays=%s\tstatus=%s" % (e, "yes" if h["has_refresh"] else "no", days, h.get("status", "ok")))
     return 0
 
 
