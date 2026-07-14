@@ -3,14 +3,14 @@ trdd-id: CGYMUKO6
 title: Janitor support-ticket system — incident management with heartbeat-scheduled repair agents
 column: dev
 created: 2026-07-14T14:42:33+0200
-updated: 2026-07-14T15:40:22+0200
+updated: 2026-07-14T17:05:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
 severity: high
 labels: [incident-management, tickets, heartbeat, agents, governance]
 relevant-rules: [1]
-implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3]
+implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3, 10de6e0, 80fd10e, 9c9fd6f]
 ---
 
 # Janitor support-ticket system
@@ -242,14 +242,60 @@ ticket and tells the agent to find the WRITER, not to rebuild the index again.
 The Rust test asserts the ledger holds 2 entries **while the database validates clean** — the assertion
 that names the blind spot. Falsified: delete the `record_self_heal` calls and it fails.
 
+## ⏵ PHASE 3 (2026-07-14) — coverage, and the two counterparts the raise path was missing
+
+**A raise with no RETRACT litters** (`10de6e0`). `propose()` writes a TRDD into the user's
+GIT-TRACKED design board, and a finding can vanish with nobody approving anything (the workflow gets
+fixed by hand, the ruleset restored). With no way to withdraw, the board fills with problems that no
+longer exist — worse than an empty board, because it teaches its reader to stop trusting the board.
+`clear_issue(code, where=…)` → `ticket_proposal.retract(key)` moves the proposal to `design/refused/`
+(never approved ⇒ never archived, per the lineage rule) and says in the body that the JANITOR
+withdrew it, since `refused` otherwise reads as the user's judgement.
+
+**It deliberately does NOT cancel a HARNESS ticket.** That is this TRDD's own lesson: the self-heal
+RACES any observer and wins, so a harness incident "clearing" usually means the damage was papered
+over. Cancelling on that signal would rebuild the exact blind spot that hid the migration bug.
+
+**The REMINDER moved to ONE place** (`10de6e0`). A PROJECT finding makes a proposal and NO ticket, so
+the scheduler's "no tickets → return" fast path swallowed every reminder for precisely the findings
+the janitor may not fix itself (pinned by a test that fails against the old fast path). Reminding
+from each detector is wrong twice over: a content-hashing detector (workflow-security) goes silent
+exactly when nothing changes, and a per-fire detector would nag 288×/day. So: `ticket-dispatch`
+reminds, capped at 3 lines, hourly, driven by the board — plus `ticket_cli proposals` so the cap can
+never become a hiding place. Detectors print on `first_seen` only.
+
+**PROJECT producers** (`80fd10e`): `branch-protection` (BRPROT-001/002), `fleet-github-config`
+(GHCFG-001), `workflow-security` (WFSEC-001…006), `package-manager-policy` (PKGPOL-001).
+
+- **The 54-rule map.** The workflow auditor emits 54 rule ids, so "every finding has a code" needed a
+  MAP, not a claim: `scripts/lib/workflow_issue_codes.py`, grouped by **THE FIX** (two rules share a
+  code exactly when the same repair answers both), plus a test that enumerates the rule set FROM THE
+  SCANNERS and fails on any unmapped rule — a copied list agrees with itself forever. WFSEC-005
+  (exposed secret) and WFSEC-006 (defeated guard) are new. **One ticket per CLASS:** 30 findings →
+  a handful of agents, not 30 each re-scanning the same files to edit the same lines; and per class
+  rather than one lump, because the user may want the injection fixed and the permissions left alone.
+- **`what`/`why`/`fix` are NEVER formatted** — they quote real Actions syntax (`${{ github.event.* }}`)
+  and a formatter eats those braces, leaving the ticket teaching its agent a syntax that does not
+  exist. Occurrence specifics ride a separate sanitized `found=` field.
+- **The fleet proposes only for the repo we stand in.** A proposal TRDD is a file in THIS repo's
+  board; one about a DIFFERENT repository would litter a project with work that is not its own.
+
+**HARNESS producers** (`9c9fd6f`): `DAEMON-001` (the crash-loop phase — the rollback restores SERVICE,
+it does not fix the DEFECT, and with no bad-version cause it does nothing at all), and
+`SELFINT-001/002/003` from `janitor-self-integrity` (the `where` is the finding CLASS, not its text —
+a dedupe key built from an attacker-chosen path is a key an attacker can VARY to open one ticket per
+fire). SELFINT-003 is new, and its fix names the trap: repair the SOURCE repo, never the plugin CACHE,
+which the next update replaces wholesale — a fix applied there vanishes without a trace.
+
 **NEXT ACTION:**
-1. **Phase 3 — coverage.** Route the remaining scanners through `raise_issue`: `workflow-security`,
-   `branch-protection`, `fleet-github-config`, `supply-chain-fingerprints`, `remote-credentials`,
-   `typosquat-watcher`, `mcp-rugpull`, `ai-context-poisoning`, the daemon crash-loop, and
-   `janitor-self-integrity`. 28 codes / 16 scanners exist; the acceptance criterion is that every
-   finding every scanner can emit has one. (Each is a small, independent change: import
-   `issue_catalog`, call `raise_issue(<CODE>, …)` instead of printing a bare drift line.)
-2. Upgrade `security_helpers.security_agent_hint()` → a `raise_issue` call, so a security finding
+1. **In flight (delegated):** the last 6 producers — `remote-credentials` (CRED-001),
+   `typosquat-watcher` (DEP-003), `supply-chain-fingerprints` (DEP-001), `historical-cache-scan`
+   (DEP-002), `mcp-rugpull` (MCPSEC-001), `ai-context-poisoning` (AICTX-001). Review the diff for the
+   ONE invariant that fails silently: the `where=` string must be byte-identical between the
+   `raise_issue` and the `clear_issue` for the same finding, or the withdraw never matches and the
+   stale proposal stays on the board forever.
+2. Then: full `pytest` + `ruff` + `cargo test`, regenerate `docs/ISSUE-CODES.md`, and publish.
+3. Upgrade `security_helpers.security_agent_hint()` → a `raise_issue` call, so a security finding
    PROPOSES a fix with the exact approval command instead of merely suggesting an agent.
 
 **Live behaviour to watch:** the queue is armed with `tickets_enabled: true`, 2 dispatches/heartbeat,
