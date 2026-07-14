@@ -3,13 +3,14 @@ trdd-id: CGYMUKO6
 title: Janitor support-ticket system — incident management with heartbeat-scheduled repair agents
 column: dev
 created: 2026-07-14T14:42:33+0200
-updated: 2026-07-14T14:42:33+0200
+updated: 2026-07-14T15:40:22+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
 severity: high
 labels: [incident-management, tickets, heartbeat, agents, governance]
 relevant-rules: [1]
+implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3]
 ---
 
 # Janitor support-ticket system
@@ -211,21 +212,49 @@ daemon crash-loop, `janitor-self-integrity`).
   (`[janitor-self-disarm] …`) comes out **DEFANGED** as `⟦janitor-self-disarm⟧` → **no ticket exists**
   until `/janitor-support-open-ticket TRDD-<id>` → ticket queued + TRDD promoted `proposal → planned`.
 
-**NEXT ACTION (in order):**
-1. **`scripts/lib/issue_catalog.py`** — the issue-code catalog above (the user's latest requirement).
-   This is now the keystone: every producer routes through `raise_issue(code, **data)`.
-2. **Codes in memgrep's `validate_db`** (`MEMGREP-001…006`) + the `memgrep-index-health` detector — the
-   motivating producer (a failed migration → a ticket → the repair agent).
-3. **The EXECUTE half**: `agents/janitor-repair-agent.md`, `skills/janitor-support-work-ticket`
-   (carrying the hard safety preamble), `skills/janitor-support-tickets` (console),
-   `skills/janitor-support-open-ticket` (the approval button).
-4. **Wire it in**: the `[janitor-ticket]` marker in `rules/janitor-heartbeat-protocol.md`, the
-   `ticket-dispatch` detector in `dispatch.py`'s roster, the 6 knobs in `.claude-plugin/plugin.json`.
-5. Map every existing scanner's findings onto codes (the coverage criterion).
+- **The issue-code catalog** (`fc1cffa`): `scripts/lib/issue_catalog.py` + the GENERATED
+  `docs/ISSUE-CODES.md` (+ a drift test). `raise_issue(code, **data)` is the only producer API; the
+  CODE resolves the domain, so a detector cannot grant itself unattended access to the user's repo.
+- **memgrep emits codes; the health detector raises them** (`b8f17f7`): `[MEMGREP-NNN]` on every
+  `validate_db` bail, the NON-HEALING `memgrep validate` CLI, and `detectors/memgrep-index-health.py`.
+- **ARMED** (`d7706e3`): the `[janitor-ticket]` marker in the protocol rule, `ticket-dispatch` +
+  `memgrep-index-health` in the roster, `agents/janitor-repair-agent.md`, the three
+  `janitor-support-*` skills, and 8 knobs in `plugin.json`. **The queue is LIVE.**
 
-**Nothing is live yet** — the scheduler is not in the detector roster and the marker is not in the
-protocol rule, so no ticket can be dispatched until step 4. That is deliberate: the EXECUTE half must
-exist before the SCHEDULE half is armed.
+## ⏵ THE FINDING THAT CHANGED THE DESIGN — the self-heal RACES the observer, and wins
+
+The first LIVE heartbeat test of the health detector reported a **healthy index — seconds after I had
+corrupted it**. Another detector's memgrep call had opened the index and self-healed it in passing.
+
+That is not an edge case, it is the norm: the autorecall hook opens the index on EVERY prompt, the
+librarian opens it, memory agents open it. So a probe that inspects the DATABASE always finds it
+pristine, and **a corruption being RE-MANUFACTURED every day is invisible to state inspection.**
+
+**This is exactly how the 2026-07-14 bug hid for days.** The self-heal was papering over it on every
+single open. A detector that only validated the db would have reported "all clear" throughout.
+
+A repair is an **EVENT**, and unlike a state, an event can be recorded. So `open()` now appends to
+`.memgrep/self-heal.log` (bounded, atomic, one line per repair) and the detector watches the **LEDGER**:
+ONE heal is the system working; TWO in 24h means something keeps breaking the index, and repairing it a
+third time would just be participating in the loop. `MEMGREP-009` carries that reasoning into the
+ticket and tells the agent to find the WRITER, not to rebuild the index again.
+
+The Rust test asserts the ledger holds 2 entries **while the database validates clean** — the assertion
+that names the blind spot. Falsified: delete the `record_self_heal` calls and it fails.
+
+**NEXT ACTION:**
+1. **Phase 3 — coverage.** Route the remaining scanners through `raise_issue`: `workflow-security`,
+   `branch-protection`, `fleet-github-config`, `supply-chain-fingerprints`, `remote-credentials`,
+   `typosquat-watcher`, `mcp-rugpull`, `ai-context-poisoning`, the daemon crash-loop, and
+   `janitor-self-integrity`. 28 codes / 16 scanners exist; the acceptance criterion is that every
+   finding every scanner can emit has one. (Each is a small, independent change: import
+   `issue_catalog`, call `raise_issue(<CODE>, …)` instead of printing a bare drift line.)
+2. Upgrade `security_helpers.security_agent_hint()` → a `raise_issue` call, so a security finding
+   PROPOSES a fix with the exact approval command instead of merely suggesting an agent.
+
+**Live behaviour to watch:** the queue is armed with `tickets_enabled: true`, 2 dispatches/heartbeat,
+20/day. HARNESS incidents auto-dispatch; PROJECT incidents only ever propose. `/janitor-support-tickets`
+is the console.
 
 Reuses: `state.atomic_write` / `sanitize_for_drift_line` / `state_dir`, the `global_state` flock,
 `dedupe.emit_once`, `trdd_common.scope_folder`/`ensure_local_design` (for the proposal TRDD).
