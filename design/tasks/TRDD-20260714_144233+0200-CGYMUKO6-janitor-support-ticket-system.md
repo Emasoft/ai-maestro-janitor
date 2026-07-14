@@ -3,14 +3,14 @@ trdd-id: CGYMUKO6
 title: Janitor support-ticket system — incident management with heartbeat-scheduled repair agents
 column: testing
 created: 2026-07-14T14:42:33+0200
-updated: 2026-07-14T18:20:00+0200
+updated: 2026-07-14T20:34:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
 severity: high
 labels: [incident-management, tickets, heartbeat, agents, governance]
 relevant-rules: [1]
-implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3, 10de6e0, 80fd10e, 9c9fd6f, 3226ec7]
+implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3, 10de6e0, 80fd10e, 9c9fd6f, 3226ec7, 9731c2d]
 ---
 
 # Janitor support-ticket system
@@ -292,6 +292,40 @@ which the next update replaces wholesale — a fix applied there vanishes withou
 (MCPSEC-001), `ai-context-poisoning` (AICTX-001). **Phase 3 is COMPLETE — every scanner the janitor
 ships now turns a finding into a coded, approvable proposal.**
 
+Shipped as **v0.44.0** (`ebe487f`); all 14 publish gates and all 6 CI checks green.
+
+## ⏵ TESTING (2026-07-14) — the surface every actor mutates through had no tests
+
+**NEXT ACTION:** none. The acceptance evidence below is in; move `testing → complete` unless the live
+agent leg is to be exercised first (see the caveat at the end).
+
+`ticket_cli.py` is the SINGLE mutation surface — the skills, the detectors and the dispatched repair
+agent all change the queue through it — and it had **zero tests** (`9731c2d` adds 18). Two properties
+live there, and neither had ever been asserted:
+
+- **A forged marker must be WORTHLESS.** `[janitor-ticket]` is a line of model-visible text, so a
+  hallucination or a payload that survived defanging could put one in front of an agent. The ONLY thing
+  between that and a repair agent running is `start` refusing a ticket the scheduler never dispatched.
+  The tests run the CLI as a **subprocess**, because its exit code IS the contract the skill branches
+  on ("if this REFUSES, stop"). Falsified: delete the status guard and both refusal tests fail.
+- **A ticket is never silently dropped.** A failed repair retries with backoff, then becomes
+  `needs_human` — surfaced on every fire. A ticket that goes quiet is indistinguishable from one that
+  was fixed.
+
+**The bug the tests found** (`9731c2d`): `save()` archived a terminal ticket and unlinked the live
+copy — but `retry` **un-archives** a `needs_human` ticket, and nothing unlinked the archived one. The
+same ticket sat on the live board *and* in the archive, and `list --all` printed it twice: once as in
+flight, once as closed. The move was one-directional. It is now symmetric, destination written before
+the other side is unlinked, so the only crash window leaves a duplicate that `load()` resolves to the
+LIVE copy — never a vanished ticket.
+
+**Caveat, stated rather than papered over:** the one leg still not exercised live is the **agent**
+itself — a dispatched `janitor-repair-agent` claiming a real ticket, repairing, and closing it
+`resolved`. Every step around it is now proven (the marker, the claim gate, the close paths, the
+budget), and the agent's own contract is enforced by the CLI it must call, not by prose. Exercising it
+end-to-end means letting an agent fix something for real, which is a decision for the user, not a test
+I should run unasked.
+
 **`reconcile()` — because `clear_issue` was the WRONG SHAPE for most scanners.** `clear_issue` answers
 *"this exact finding is gone"*, which only works if the detector can still NAME what it wants to
 withdraw. **A scan cannot:** it produces the findings that EXIST, and the vanished ones are by
@@ -386,3 +420,22 @@ Reuses: `state.atomic_write` / `sanitize_for_drift_line` / `state_dir`, the `glo
   Lesson: a drift line may be informational; a TICKET is acted on, so it must be TRUE. When routing
   findings into tickets, check each one against what the ticket's text actually CLAIMS, not just
   against which scanner produced it.
+
+[^6]: [ocd:2026-07-14 lmd:2026-07-14] Every state transition in this system was tested through the
+  LIBRARY (`tickets.py`, 18 tests) — and the CLI that every real actor actually calls had none, so a
+  one-directional archive move survived the whole build. The library's `save()` was exercised only in
+  the direction the library's own tests walked (open → terminal); `retry` walks it backwards, and only
+  the CLI does that. Lesson: test the surface the CALLER uses, not the layer beneath it. A pure core
+  with good tests can still ship a broken product if the only thing that composes the core into a
+  workflow is untested — and the composition is where the asymmetries hide. The corollary that found
+  this one: for any state move, ask what runs it in REVERSE, and whether the reverse undoes everything
+  the forward did.
+
+[^7]: [ocd:2026-07-14 lmd:2026-07-14] While auditing the CLI I grepped `add_parser("` to enumerate the
+  subcommands, saw only 5, and concluded that `start` and `show` — the two the work-ticket skill calls
+  — did not exist, i.e. that the entire agent leg was dead. They exist: they are registered in a
+  `for name in ("show", "start", "cancel", "retry")` loop the grep pattern could not match. Lesson: a
+  grep proves a string is ABSENT, never that a FEATURE is. An absence claim about behavior has to be
+  checked by reading the code (or running it), because code is generated by loops, factories and
+  decorators that no literal pattern will find. Had I acted on the grep, I would have "fixed" a bug
+  that was not there and reported a broken system that worked.
