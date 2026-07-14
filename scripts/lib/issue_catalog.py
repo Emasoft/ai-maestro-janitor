@@ -343,6 +343,24 @@ def _render(template: str, data: dict[str, str]) -> str:
     return string.Formatter().vformat(template, (), _SafeDict(data))
 
 
+def _fields(where: str, data: dict[str, object]) -> dict[str, str]:
+    """Sanitize every value a detector interpolates. The ONE place untrusted text is defanged."""
+    fields = {k: tickets._clean(str(v), 200) for k, v in data.items()}
+    fields["where"] = tickets._clean(where, 200)
+    return fields
+
+
+def _finding_key(code: str, issue: Issue, fields: dict[str, str], dedupe_key: str) -> str:
+    """The identity of ONE finding: per code + LOCATION.
+
+    The same defect found on every fire is ONE ticket; the same defect in two different files is
+    genuinely two. `raise_issue` and `clear_issue` MUST derive this identically — a clear that
+    computed the key even slightly differently would silently never match, and the retract would look
+    like it worked while the proposal stayed on the board forever.
+    """
+    return dedupe_key or f"{code}:{fields['where'] or _render(issue.title, fields)}"
+
+
 @dataclass(frozen=True)
 class Raised:
     """The outcome of `raise_issue`. `line` is a ready-to-print heartbeat line (empty when silent).
@@ -398,8 +416,7 @@ def raise_issue(
         # Fail LOUD but not fatal: a typo'd code must not silently swallow a real finding.
         return Raised(code=code, domain="", ok=False, why=f"unknown issue code `{tickets._clean(code, 24)}`")
 
-    fields = {k: tickets._clean(str(v), 200) for k, v in data.items()}
-    fields["where"] = tickets._clean(where, 200)
+    fields = _fields(where, data)
     title = _render(issue.title, fields)
 
     detail = "\n".join(
@@ -413,9 +430,7 @@ def raise_issue(
             f"**Fix to attempt:** {issue.fix}",
         ]
     )
-    # The dedupe key is per code + LOCATION: the same defect found on every fire is ONE ticket, but the
-    # same defect in two different files is genuinely two.
-    key = dedupe_key or f"{code}:{fields['where'] or title}"
+    key = _finding_key(code, issue, fields, dedupe_key)
     ev = list(evidence or [])
     org = origin or issue.scanner
     kind_spec = tickets.KIND_REGISTRY[issue.kind]
@@ -464,6 +479,38 @@ def raise_issue(
         why="proposed" if is_new else "already proposed — still awaiting approval",
         first_seen=is_new,
     )
+
+
+def clear_issue(
+    code: str,
+    *,
+    where: str = "",
+    dedupe_key: str = "",
+    project_dir: str | None = None,
+    **data: object,
+) -> str | None:
+    """The finding is GONE — withdraw its unapproved proposal. Returns the withdrawn TRDD id, or None.
+
+    Call this on the path where a detector can PROVE the condition is absent (the ruleset is back, the
+    advisory is gone, the workflow was fixed by hand). Pass the SAME `code` + `where`/`dedupe_key` the
+    raise used — the key is derived by the same function, so they cannot drift apart.
+
+    It only ever touches an UNAPPROVED proposal, and that asymmetry is deliberate in both directions:
+
+      PROJECT — nothing has happened yet. No ticket, no agent, no work. Withdrawing the proposal costs
+                nothing and keeps the user's git-tracked board honest.
+      HARNESS — an OPEN harness ticket is NEVER cancelled by a clear, even though it would be easy and
+                would save a dispatch. That is precisely the trap this whole subsystem exists to avoid:
+                the memgrep self-heal RACES any observer and wins, so a harness incident "clearing" is
+                usually the damage being papered over, not repaired. Cancelling the ticket on that
+                signal would reconstruct the exact blind spot that let the migration bug hide for days.
+                An opened harness incident gets worked; the agent decides whether it was real.
+    """
+    issue = ISSUE_CATALOG.get(code)
+    if issue is None or tickets.KIND_REGISTRY[issue.kind].domain != tickets.PROJECT:
+        return None
+    key = _finding_key(code, issue, _fields(where, data), dedupe_key)
+    return ticket_proposal.retract(key, project_dir=project_dir)
 
 
 def issue_domain(code: str) -> str:

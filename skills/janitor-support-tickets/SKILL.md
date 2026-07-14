@@ -10,13 +10,19 @@ The queue of incidents the janitor has found and is repairing. Read-only by defa
 ## Look
 
 ```bash
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" list      # the live queue
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" list --all  # + closed
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" list       # the live queue
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" list --all   # + closed
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" show T-XXXXXXXX
-uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" stats     # counts + budget left
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" proposals  # awaiting YOUR approval
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" stats      # counts + budget left
 ```
 
 Each row is `id · severity · status · kind · [domain] · age · title`. Relay it as a compact table.
+
+`proposals` is the other half of the board, and the one that needs a human. Those findings are in the
+**user's** repo, so the janitor may not touch them — nothing at all happens until someone approves one.
+The heartbeat reminds hourly and lists only the top few; this command shows every one of them, so the
+cap can never become a hiding place.
 
 **`[harness]`** — the janitor's own machinery (its index, its migrations, its daemon). It repairs
 these itself, unattended. **`[project]`** — the user's repo. Those tickets exist **only** because

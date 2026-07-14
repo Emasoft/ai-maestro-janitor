@@ -9,6 +9,7 @@ Every actor goes through here; nothing hand-writes ticket JSON. The skills call 
 agents call it, the detectors call it. One surface means one place where the ownership boundary and
 the injection boundary are enforced.
 
+    ticket_cli.py proposals                 # what is waiting on YOU — the findings the janitor may not fix
     ticket_cli.py approve TRDD-35AC8I8D     # THE approval — open a proposed PROJECT ticket + promote
     ticket_cli.py list [--all]              # the queue
     ticket_cli.py show    T-7QK2M4XZ
@@ -74,8 +75,20 @@ def main() -> int:
     p.add_argument("--report", default="")
 
     sub.add_parser("stats")
+    sub.add_parser("proposals", help="PROJECT findings awaiting approval (nothing is fixed until then)")
     args = ap.parse_args()
     now = int(time.time())
+
+    if args.cmd == "proposals":
+        # The full list the heartbeat's reminder only ever shows the top of. A finding the janitor is
+        # forbidden to fix must be inspectable in one command, or the cap turns into a hiding place.
+        waiting = ticket_proposal.pending()
+        if not waiting:
+            print("no proposals awaiting approval")
+            return 0
+        for p in waiting:
+            print(f"TRDD-{p.trdd}  {p.severity:<8} {p.title[:88]}\n            approve: {p.command}")
+        return 0
 
     if args.cmd == "approve":
         ok, msg = ticket_proposal.approve(args.trdd, now=now)

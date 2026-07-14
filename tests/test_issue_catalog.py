@@ -214,6 +214,71 @@ def test_the_reminder_STOPS_once_the_fix_is_approved(project: Path) -> None:
     assert len(tickets.load_all()) == 1
 
 
+def test_a_finding_that_CLEARS_withdraws_its_proposal(project: Path) -> None:
+    """The counterpart every raise needs. A proposal is a file in the user's GIT-TRACKED design board;
+    a finding that disappears (fixed by hand, transient) must take its proposal with it, or the board
+    fills with problems that no longer exist — worse than an empty board, because it teaches its reader
+    to stop trusting the board."""
+    r = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    assert len(_proposals(project)) == 1
+
+    uid = issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo")
+
+    assert uid == r.trdd
+    assert _proposals(project) == [], "the withdrawn proposal must leave design/proposals/"
+    refused = sorted((project / "design" / "refused").glob("TRDD-*.md"))
+    assert len(refused) == 1, "it is KEPT, never deleted — it is a record of what the janitor saw"
+    text = refused[0].read_text(encoding="utf-8")
+    assert "column: refused" in text
+    assert "WITHDRAWN BY THE JANITOR" in text
+    assert "No human declined this" in text, "`refused` must not be misread as the user's judgement"
+
+
+def test_clear_does_NOT_touch_an_APPROVED_finding(project: Path) -> None:
+    """Once approved, the queue owns it: only the agent working the ticket may close it. A detector
+    withdrawing it mid-repair would race the agent doing the repair."""
+    r = issue_catalog.raise_issue("BRPROT-001", where="acme/repo", slug="acme/repo", now=NOW)
+    ok, _ = ticket_proposal.approve(r.trdd, now=NOW)
+    assert ok
+
+    assert issue_catalog.clear_issue("BRPROT-001", where="acme/repo", slug="acme/repo") is None
+    assert len(tickets.load_all()) == 1, "the approved ticket survives the clear"
+
+
+def test_clear_NEVER_cancels_a_HARNESS_ticket(project: Path) -> None:
+    """THE lesson of this TRDD, encoded as a test. The memgrep self-heal RACES any observer and wins:
+    every process that opens the index repairs it in passing, so a harness incident "clearing" usually
+    means the damage was PAPERED OVER, not fixed. Cancelling the ticket on that signal would rebuild
+    the exact blind spot that let the migration bug hide for days. An opened harness incident gets
+    worked; the AGENT decides whether it was real."""
+    r = issue_catalog.raise_issue("MEMGREP-001", where="local", scope="local", now=NOW)
+    assert r.ticket_id
+
+    assert issue_catalog.clear_issue("MEMGREP-001", where="local", scope="local") is None
+    live = tickets.load_all()
+    assert [t.id for t in live] == [r.ticket_id], "a harness ticket must never be cancelled by a clear"
+    assert live[0].status == tickets.OPEN
+
+
+def test_clearing_an_unknown_finding_is_a_harmless_noop(project: Path) -> None:
+    """A detector calls clear on EVERY healthy fire — the common case is that there is nothing to
+    withdraw, and that must cost nothing and never raise."""
+    assert issue_catalog.clear_issue("BRPROT-001", where="never/seen") is None
+    assert issue_catalog.clear_issue("NOPE-999", where="x") is None
+    assert _proposals(project) == []
+
+
+def test_raise_and_clear_derive_the_SAME_key(project: Path) -> None:
+    """If the two ever computed the key differently, `clear_issue` would silently never match: the
+    retract would look like it worked while the proposal stayed on the board forever. Prove it with a
+    finding whose key falls back to the RENDERED TITLE (no `where`), which is the fragile path."""
+    r = issue_catalog.raise_issue("DEP-003", package="reqeusts", target="requests", now=NOW)
+    assert r.trdd and len(_proposals(project)) == 1
+
+    assert issue_catalog.clear_issue("DEP-003", package="reqeusts", target="requests") == r.trdd
+    assert _proposals(project) == []
+
+
 # --------------------------------------------------------------------------- #
 # 5. the published catalog must never lie
 # --------------------------------------------------------------------------- #

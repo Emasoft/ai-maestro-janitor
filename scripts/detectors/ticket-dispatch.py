@@ -34,6 +34,13 @@ way there:
   * **NEVER a bare nag.** A ticket that exhausted its attempts becomes `needs_human` and is surfaced
     on EVERY fire with the exact command — a silent give-up is indistinguishable from a fix.
 
+It is also the janitor's ONE reminder channel for PROJECT findings awaiting approval. Those cannot be
+fixed until a human (or the main Claude) approves them, so they must not be announced once and
+forgotten — the one line that WAS printed may well have landed inside a compaction. Reminding from
+each producing detector would be wrong twice over: a content-hashing detector goes silent exactly when
+nothing changes (the case where the standing finding matters most), and a per-fire detector would nag
+288 times a day. So the reminder lives here — driven by the board, capped, and rate-limited.
+
 Emits nothing at all when there is no work, which is the common case (the zero-output contract).
 """
 
@@ -48,7 +55,34 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 
 import global_state as gs  # noqa: E402
 import state  # noqa: E402
+import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
+
+_REMIND_EVERY_S = 3600  # a standing finding is re-surfaced hourly, not every fire
+_REMIND_CAP = 3  # …and never more than a handful of lines; the rest are counted, not listed
+
+
+def _proposal_reminder(now: int) -> list[str]:
+    """The standing "these are waiting on YOU" lines, or [] when it is not time (or nothing waits)."""
+    waiting = ticket_proposal.pending()
+    stamp = state.state_dir() / "ticket-remind-at.ts"
+    if not waiting:
+        # Nothing pending → drop the stamp, so the NEXT finding is announced immediately rather than
+        # being swallowed by a cooldown left over from a batch that has since been approved.
+        stamp.unlink(missing_ok=True)
+        return []
+    if now - state.read_int_state(stamp, 0) < _REMIND_EVERY_S:
+        return []
+    state.atomic_write(stamp, str(now))
+
+    out = [
+        f"[ticket] {len(waiting)} janitor proposal(s) await YOUR approval — nothing is fixed until one is approved:"
+    ]
+    for p in waiting[:_REMIND_CAP]:
+        out.append(f"  ({p.severity}) {p.title[:100]} → {p.command}")
+    if len(waiting) > _REMIND_CAP:
+        out.append(f"  …and {len(waiting) - _REMIND_CAP} more → /janitor-support-tickets proposals")
+    return out
 
 
 def main() -> int:
@@ -63,32 +97,33 @@ def main() -> int:
 
     # Serialize the whole select→stamp→emit against every other session on this machine. Skip-if-held:
     # a second session simply stays silent this fire rather than double-dispatching.
+    #
+    # The lock guards DISPATCH, not the reminder: a PROJECT finding produces a PROPOSAL and no ticket
+    # at all, so an empty queue is exactly the state in which the reminder matters. Returning early on
+    # `not live` would make the janitor go quiet about every finding it is forbidden to fix itself.
+    due: list[tickets.Ticket] = []
     with gs.ticket_dispatch_lock() as held:
-        if not held:
-            return 0
+        live = tickets.load_all() if held else []
+        if live:
+            # Reclaim tickets whose agent DIED (the weekly rate cap did exactly this to a background
+            # agent on 2026-07-14). Without this they sit in `dispatched` forever and the queue quietly
+            # stops working — and nothing says so.
+            for t in tickets.reclaim_stale(live, now=now, stale_s=stale_s):
+                tickets.save(t)
+                state.log_line("ticket-dispatch", f"reclaimed {t.id} (agent died); attempt {t.attempts}")
 
-        live = tickets.load_all()
-        if not live:
-            return 0
+            live = tickets.load_all()
+            inflight = sum(1 for t in live if t.status in tickets.IN_FLIGHT)
+            left = tickets.budget_left(tickets.read_ledger(), now=now, per_day=per_day)
 
-        # Reclaim tickets whose agent DIED (the weekly rate cap did exactly this to a background agent
-        # on 2026-07-14). Without this they sit in `dispatched` forever and the queue quietly stops.
-        for t in tickets.reclaim_stale(live, now=now, stale_s=stale_s):
-            tickets.save(t)
-            state.log_line("ticket-dispatch", f"reclaimed {t.id} (agent died); attempt {t.attempts}")
-
-        live = tickets.load_all()
-        inflight = sum(1 for t in live if t.status in tickets.IN_FLIGHT)
-        left = tickets.budget_left(tickets.read_ledger(), now=now, per_day=per_day)
-
-        due = tickets.select_due(live, now=now, per_fire=per_fire, budget_left=left, inflight=inflight)
-        for t in due:
-            t.status = tickets.DISPATCHED
-            t.dispatched_at = now
-            t.updated_at = now
-            tickets.save(t)
-            tickets.record_dispatch(t.id, now=now)
-            state.log_line("ticket-dispatch", f"dispatched {t.id} ({t.kind}) → {t.agent}")
+            due = tickets.select_due(live, now=now, per_fire=per_fire, budget_left=left, inflight=inflight)
+            for t in due:
+                t.status = tickets.DISPATCHED
+                t.dispatched_at = now
+                t.updated_at = now
+                tickets.save(t)
+                tickets.record_dispatch(t.id, now=now)
+                state.log_line("ticket-dispatch", f"dispatched {t.id} ({t.kind}) → {t.agent}")
 
     lines: list[str] = []
     if due:
@@ -103,6 +138,8 @@ def main() -> int:
     stuck = [t for t in tickets.load_all() if t.status == tickets.NEEDS_HUMAN]
     for t in stuck:
         lines.append(f"[ticket] {t.id} NEEDS A HUMAN after {t.attempts} attempts: {t.title[:80]} → inspect: /janitor-support-tickets show {t.id} · retry: /janitor-support-tickets retry {t.id}")
+
+    lines.extend(_proposal_reminder(now))
 
     if lines:
         print("\n".join(lines), flush=True)

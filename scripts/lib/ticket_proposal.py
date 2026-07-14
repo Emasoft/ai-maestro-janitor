@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -265,3 +266,107 @@ def approve(ref: str, project_dir: str | None = None, now: int | None = None) ->
             pass
 
     return True, f"{t.id} queued ({tickets.KIND_REGISTRY[kind].agent}); TRDD-{trdd_id} → planned"
+
+
+@dataclass(frozen=True)
+class Pending:
+    """One unapproved proposal, as the reminder channel needs it. Every field is already sanitized —
+    it is read back from a TRDD the janitor itself authored, never from the finding's source."""
+
+    trdd: str
+    title: str
+    severity: str
+    command: str
+
+
+def pending(project_dir: str | None = None) -> list[Pending]:
+    """Every proposal still awaiting approval, most severe first. The REMINDER's single source.
+
+    The reminding lives HERE, in one place, and not in each detector — which is what keeps it both
+    honest and cheap. A detector that content-hashes its input (workflow-security short-circuits on
+    unchanged workflows) would go SILENT about a standing finding, so per-detector reminders would stop
+    exactly when nothing changes — the case where the reminder matters most. And a detector that runs
+    every fire would nag 288 times a day, which trains its reader to ignore it. One bounded, rate-limited
+    channel, driven by what is actually on the board, is the only shape that is neither.
+    """
+    out: list[Pending] = []
+    for _scope, path in trdd_common.trdd_files("proposals", project_dir):
+        try:
+            fm = _frontmatter(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if fm.get("ticket-kind", "") not in tickets.KIND_REGISTRY:
+            continue  # not a ticket proposal — a hand-written TRDD in the same folder
+        uid = trdd_common.extract_uid(path.name) or ""
+        if not uid:
+            continue
+        out.append(
+            Pending(
+                trdd=uid,
+                title=tickets._clean(fm.get("title", ""), tickets.TITLE_CAP),
+                severity=fm.get("ticket-severity", "medium"),
+                command=f"/janitor-support-open-ticket TRDD-{uid}",
+            )
+        )
+    out.sort(key=lambda p: (-tickets.SEVERITY_RANK.get(p.severity, 0), p.trdd))
+    return out
+
+
+def retract(dedupe_key: str, project_dir: str | None = None, now: int | None = None) -> str | None:
+    """The finding CLEARED before anyone approved it — withdraw its proposal. Returns the id, or None.
+
+    Every `propose()` needs this counterpart, or the janitor litters. A PROJECT proposal is a file in
+    the user's GIT-TRACKED `design/proposals/`, and a detector's finding can disappear without anyone
+    approving anything — the workflow gets fixed by hand, the dependency gets bumped, the ruleset gets
+    restored. Left alone, the board fills with proposals for problems that no longer exist, which is
+    worse than an empty board: it trains its reader to stop trusting the board at all.
+
+    It moves to `design/refused/` because the lineage rule keys on ONE question — *was it ever
+    approved?* This one never was, so it never entered the pipeline and can never be `archived`. But
+    the body says plainly that the JANITOR withdrew it because the finding is gone; `refused` normally
+    means a human declined, and that is a materially different fact about the user's judgement, so it
+    must not be left to be misread from the folder alone.
+
+    An APPROVED finding is never retracted here. Once the ticket exists the queue owns it, and only
+    the agent working it may close it — a detector deciding a ticket is moot mid-repair would race the
+    agent doing the repair.
+    """
+    key = tickets._clean(dedupe_key, 200)
+    if not key:
+        return None
+    found = None
+    for scope, path in trdd_common.trdd_files("proposals", project_dir):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _frontmatter(text).get("ticket-dedupe-key", "") == key:
+            found = (scope, path, text)
+            break
+    if found is None:
+        return None
+    scope, path, text = found
+
+    uid = trdd_common.extract_uid(path.name) or ""
+    refused = trdd_common.scope_folder(scope, "refused", project_dir)
+    if refused is None:
+        return None
+    refused.mkdir(parents=True, exist_ok=True)
+
+    ts = int(time.time()) if now is None else int(now)
+    iso = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ts))
+    out = re.sub(r"(?m)^column: proposal$", "column: refused", text)
+    out = re.sub(r"(?m)^updated: .*$", f"updated: {iso}", out)
+    out = out.replace(
+        "**PROPOSED BY THE JANITOR — awaiting approval. NOT authorized to execute.**",
+        "**WITHDRAWN BY THE JANITOR — the finding is GONE. No human declined this.**\n\n"
+        f"The condition this proposal described is no longer detectable as of {time.strftime('%Y-%m-%d', time.localtime(ts))} "
+        "(fixed by hand, or it was transient). It is kept as a record, never deleted. If the same "
+        "condition reappears, the janitor proposes it again with a NEW id — this one is closed.",
+    )
+    state.atomic_write(refused / path.name, out)
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return uid or None
