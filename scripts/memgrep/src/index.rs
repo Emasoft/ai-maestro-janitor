@@ -53,13 +53,102 @@ fn ensure_sidecar(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The external-content FTS5 indexes, each paired with the content table it shadows. Every one of
+/// them can desync from its content table WITHOUT any file-level damage (see [`verify_fts`]).
+const FTS_TABLES: [&str; 3] = ["memories_fts", "notes_fts", "atoms_fts"];
+
+/// Ask FTS5 to check each external-content index AGAINST ITS CONTENT TABLE. `Err` on the first
+/// inconsistency.
+///
+/// The `rank` argument is load-bearing and is the whole reason this function exists:
+/// - `'integrity-check'` with NO argument (or `0`) only verifies that the FTS index is INTERNALLY
+///   consistent. An index that was emptied while its content table stayed full is perfectly
+///   self-consistent, so it PASSES — which is precisely the corruption we are hunting.
+/// - `('integrity-check', 1)` additionally verifies that the index MATCHES the content table. This is
+///   the only form that catches a desync.
+///
+/// Every cheaper check is blind here: `PRAGMA integrity_check` reports `ok` (the file's pages are
+/// fine — nothing was ever torn), and `SELECT count(*) FROM <fts>` reports the FULL row count (with
+/// `content=`, the count reads the CONTENT table, not the index). A desynced index therefore looks
+/// healthy from every angle except this one.
+fn verify_fts(conn: &Connection) -> Result<()> {
+    for t in FTS_TABLES {
+        conn.execute_batch(&format!(
+            "INSERT INTO {t}({t}, rank) VALUES('integrity-check', 1);"
+        ))
+        .with_context(|| format!("FTS integrity check failed for {t}"))?;
+    }
+    Ok(())
+}
+
+/// Repopulate every external-content FTS index from its content table. The content tables are the
+/// source of truth, so this is lossless by construction.
+fn rebuild_fts(conn: &Connection) -> Result<()> {
+    for t in FTS_TABLES {
+        conn.execute_batch(&format!("INSERT INTO {t}({t}) VALUES('rebuild');"))
+            .with_context(|| format!("rebuilding {t} from its content table"))?;
+    }
+    Ok(())
+}
+
+/// Delete the index DB **and its WAL sidecars**.
+///
+/// The `-wal`/`-shm` removal is not tidiness — it is the whole point. Deleting `index.db` alone and
+/// letting a fresh one be created next to a STALE `-wal` is a textbook way to manufacture REAL
+/// (file-level) corruption: SQLite would replay the old WAL's pages into the new database. So a
+/// nuke must take all three or none.
+fn nuke_db(path: &Path) -> Result<()> {
+    for p in [
+        path.to_path_buf(),
+        path.with_extension("db-wal"),
+        path.with_extension("db-shm"),
+    ] {
+        match std::fs::remove_file(&p) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("removing {}", p.display())),
+        }
+    }
+    Ok(())
+}
+
 /// Open (creating if absent) the index DB at `<root>/.memgrep/index.db`, applying the schema. The
 /// `.memgrep/` sidecar + `.gitignore` are ensured first so the DB is born self-ignoring.
+///
+/// The open is SELF-HEALING, and deliberately so. A schema migration rewrites derived structures
+/// (it must DROP+CREATE an FTS to change its column set), and a migration that hands back its output
+/// without ever checking it is how a corrupt index reaches a caller — which is exactly what happened
+/// to the LOCAL corpus on 2026-07-14, costing that whole scope its recall until it was rebuilt by
+/// hand. So every open now VERIFIES the derived indexes and repairs them if they are bad:
+///
+///   1. `'rebuild'` each FTS from its content table (lossless — the content tables ARE the truth), then
+///   2. if it is STILL inconsistent, delete the DB and rebuild it from scratch.
+///
+/// Step 2 is safe precisely because this file is a derived, regeneratable CACHE and never a memory
+/// store: the notes on disk are the source of truth, and the next `reindex` refills it. Nothing a
+/// user wrote can be lost here — which is what earns the right to self-heal rather than fail.
+/// A fresh DB that STILL fails the check is a bug in this code, not damaged state, so it propagates.
 pub fn open(root: &Path) -> Result<Connection> {
     ensure_sidecar(root)?;
     let path = db_path(root);
     let conn = Connection::open(&path).with_context(|| format!("opening {}", path.display()))?;
     apply_schema(&conn)?;
+
+    if verify_fts(&conn).is_err() {
+        // Repair in place first: cheap, and it keeps the change-detection ledger (so the next reindex
+        // stays incremental instead of re-parsing the whole corpus).
+        if rebuild_fts(&conn).and_then(|()| verify_fts(&conn)).is_ok() {
+            return Ok(conn);
+        }
+        // Unsalvageable — drop the handle before unlinking so no connection outlives the file.
+        drop(conn);
+        nuke_db(&path)?;
+        let conn = Connection::open(&path)
+            .with_context(|| format!("reopening {} after rebuild", path.display()))?;
+        apply_schema(&conn)?;
+        verify_fts(&conn).context("a FRESHLY BUILT index failed its own integrity check")?;
+        return Ok(conn);
+    }
     Ok(conn)
 }
 
@@ -223,15 +312,32 @@ CREATE INDEX IF NOT EXISTS idx_atoms_cmref   ON atoms(claude_mem_ref);
         // creation and cannot be ALTERed, and the `CREATE VIRTUAL TABLE IF NOT EXISTS` in the DDL
         // above SKIPS the pre-v4 one-column table that already exists — so without an explicit
         // DROP the new `keywords` column would silently never exist and lessons would stay
-        // unsearchable by keyword (the exact bug this migration lands). Dropping is safe: it is an
-        // external-content index over `notes`, holding no data of its own, and the `DELETE FROM
-        // files` below forces a full re-parse that repopulates it.
+        // unsearchable by keyword (the exact bug this migration lands).
+        //
+        // The 'rebuild' is NOT optional, and omitting it is how this migration used to CORRUPT the
+        // index it was meant to fix. The DROP+CREATE leaves an EMPTY fts b-tree while `notes` keeps
+        // every row (only the `files` LEDGER is cleared below — the content tables are not). The
+        // next reindex re-parses each file and, for a note it is about to rewrite, first issues the
+        // external-content shadow delete
+        //     INSERT INTO notes_fts(notes_fts, rowid, keywords, body) VALUES('delete', …)
+        // for a rowid the freshly-emptied index does not contain. With `content=`, FTS5 TRUSTS that
+        // delete instead of checking it, so it writes negative postings into the b-tree and the very
+        // next statement fails with `SQLITE_CORRUPT_VTAB` — "database disk image is malformed /
+        // Content in the virtual table is corrupt". Nothing about the file was ever torn; the
+        // corruption is manufactured, deterministically, by the upgrade itself.
+        //
+        // 'rebuild' repopulates the index from its content table, which is the whole point of an
+        // external-content FTS and the sanctioned primitive for exactly this. It also restores the
+        // invariant the delete path depends on: every `notes` row has a matching shadow entry.
+        // (`SELECT count(*) FROM notes_fts` cannot catch the breakage — with `content=` it counts
+        // the CONTENT table, so an emptied index still reports the base-table row count.)
         conn.execute_batch(
             "DROP TABLE IF EXISTS notes_fts;
              CREATE VIRTUAL TABLE notes_fts USING fts5(
                  keywords, body,
                  content='notes', content_rowid='id'
-             );",
+             );
+             INSERT INTO notes_fts(notes_fts) VALUES('rebuild');",
         )
         .context("rebuilding notes_fts with the keywords column")?;
         conn.execute_batch("DELETE FROM files")
@@ -356,7 +462,8 @@ fn delete_rows_for_path(conn: &Connection, path: &str) -> Result<()> {
         // FTS5 `'delete'` command must replay EVERY indexed column's original value (that is how it
         // locates the terms to remove), so `keywords` is selected and passed alongside `body` — a
         // delete that omitted it would leave the keyword terms orphaned in the index.
-        let mut nstmt = conn.prepare("SELECT id, keywords, body FROM notes WHERE memory_id = ?1")?;
+        let mut nstmt =
+            conn.prepare("SELECT id, keywords, body FROM notes WHERE memory_id = ?1")?;
         let notes: Vec<(i64, String, String)> = nstmt
             .query_map(params![mid], |r| {
                 Ok((
@@ -374,7 +481,8 @@ fn delete_rows_for_path(conn: &Connection, path: &str) -> Result<()> {
         }
         conn.execute("DELETE FROM notes WHERE memory_id = ?1", params![mid])?;
         // Clear the atoms_fts shadow for each atom, then the atoms themselves (mirrors notes).
-        let mut astmt = conn.prepare("SELECT id, keywords, body FROM atoms WHERE memory_id = ?1")?;
+        let mut astmt =
+            conn.prepare("SELECT id, keywords, body FROM atoms WHERE memory_id = ?1")?;
         let atoms: Vec<(i64, String, String)> = astmt
             .query_map(params![mid], |r| {
                 Ok((
@@ -823,8 +931,17 @@ mod tests {
     }
 
     const NOTES_COLUMNS: [&str; 11] = [
-        "id", "memory_id", "label", "atom_id", "keywords", "status", "superseded_by", "ocd",
-        "lmd", "body", "urls",
+        "id",
+        "memory_id",
+        "label",
+        "atom_id",
+        "keywords",
+        "status",
+        "superseded_by",
+        "ocd",
+        "lmd",
+        "body",
+        "urls",
     ];
 
     #[test]
@@ -833,7 +950,10 @@ mod tests {
         let conn = open(&d).unwrap();
         let cols = columns_of(&conn, "notes");
         for want in NOTES_COLUMNS {
-            assert!(cols.iter().any(|c| c == want), "notes.{want} missing: {cols:?}");
+            assert!(
+                cols.iter().any(|c| c == want),
+                "notes.{want} missing: {cols:?}"
+            );
         }
     }
 
@@ -907,7 +1027,10 @@ mod tests {
         reindex(&d, &files, false).unwrap();
         let (total, fts) = atom_counts(&d, "rotator");
         assert_eq!(total, 2, "both atoms indexed");
-        assert_eq!(fts, 1, "the keyword 'rotator' surfaces exactly the rotate-failover atom");
+        assert_eq!(
+            fts, 1,
+            "the keyword 'rotator' surfaces exactly the rotate-failover atom"
+        );
         // Provenance + the second atom's keyword are stored too.
         let conn = open_existing(&d).unwrap();
         let cmref: String = conn
@@ -968,8 +1091,103 @@ mod tests {
         // The file on disk is byte-identical (an incremental reindex would normally skip it), but the
         // migration clears the ledger → it re-parses → atoms repopulate.
         let summary = reindex(&d, &files, false).unwrap();
-        assert_eq!(summary.changed, 1, "the migration forced a re-parse of the unchanged file");
-        assert_eq!(atom_counts(&d, "rotator").0, 2, "atoms repopulated after migration");
+        assert_eq!(
+            summary.changed, 1,
+            "the migration forced a re-parse of the unchanged file"
+        );
+        assert_eq!(
+            atom_counts(&d, "rotator").0,
+            2,
+            "atoms repopulated after migration"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A page carrying a LESSON, so the index gets `notes` rows — the table whose external-content
+    /// FTS the v4/v5 migration DROPs and re-CREATEs.
+    const NOTE_PAGE: &str = "---\nname: oauth-hub\nmetadata:\n  node_type: memory\n  tier: hub\n---\n# OAuth hub\nThe rotator hands the live account to a backup first when busy.\n\n## Notes and lessons learned\n\n[^1]: [ocd:2026-07-14 lmd:2026-07-14] The credentials live in the OS keychain, never a plaintext slots dir.\n";
+
+    #[test]
+    fn schema_migration_leaves_notes_fts_consistent() {
+        // REGRESSION (2026-07-14). The v4/v5 migration DROPs + re-CREATEs `notes_fts` to change its
+        // column set, but only the `files` LEDGER is cleared — `notes` keeps every row. Without the
+        // 'rebuild', the index is left EMPTY while its content table is full, and the next reindex
+        // opens by issuing the external-content shadow delete for a rowid the index does not contain.
+        // FTS5 TRUSTS that delete → negative postings → SQLITE_CORRUPT_VTAB ("database disk image is
+        // malformed / Content in the virtual table is corrupt"). This really happened to the LOCAL
+        // corpus and cost that whole scope its recall until it was rebuilt by hand.
+        //
+        // This asserts on apply_schema DIRECTLY, NOT through `open` — `open` now self-heals, and would
+        // happily paper over a migration that still ships a broken index. The migration must be correct
+        // ON ITS OWN; the self-heal is the net, not the fix (see fts_corruption_is_self_healed).
+        //
+        // FALSIFICATION: delete the `INSERT INTO notes_fts(notes_fts) VALUES('rebuild')` from
+        // apply_schema and this test MUST fail.
+        let d = tmp("fts_migrate");
+        write(&d, "oauth-hub.md", NOTE_PAGE);
+        let files = vec![d.join("oauth-hub.md")];
+        reindex(&d, &files, false).unwrap();
+
+        let conn = open_existing(&d).unwrap();
+        let notes: i64 = conn
+            .query_row("SELECT count(*) FROM notes", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            notes > 0,
+            "precondition: the corpus has notes to be mis-deleted"
+        );
+
+        // Simulate a pre-v4 index: rows present, version behind → the DROP+CREATE branch runs next.
+        conn.execute_batch("PRAGMA user_version = 3;").unwrap();
+        apply_schema(&conn).unwrap();
+
+        verify_fts(&conn).expect("the migration itself must leave every FTS consistent");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn fts_corruption_is_self_healed_on_open() {
+        // The net: an index corrupted by ANY cause (a past migration, a killed writer, a stray delete)
+        // must be REPAIRED on open, not handed to the caller. It is a derived cache — the notes on disk
+        // are the truth — so rebuilding it can never lose anything a user wrote.
+        //
+        // FALSIFICATION: remove the verify/repair block from `open` and this MUST fail.
+        let d = tmp("fts_heal");
+        write(&d, "oauth-hub.md", NOTE_PAGE);
+        let files = vec![d.join("oauth-hub.md")];
+        reindex(&d, &files, false).unwrap();
+
+        // Corrupt notes_fts exactly the way the old migration did: empty the index, leave `notes` full.
+        {
+            let conn = open_existing(&d).unwrap();
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS notes_fts;
+                 CREATE VIRTUAL TABLE notes_fts USING fts5(
+                     keywords, body, content='notes', content_rowid='id'
+                 );",
+            )
+            .unwrap();
+            assert!(
+                verify_fts(&conn).is_err(),
+                "precondition: the index really is inconsistent before the heal"
+            );
+        }
+
+        let conn = open(&d).expect("open must heal a corrupt index rather than propagate it");
+        verify_fts(&conn).expect("the healed index is consistent");
+
+        // …and it is genuinely usable, not merely 'consistent because empty'.
+        let hits: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH 'keychain'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            hits > 0,
+            "the healed index still answers the lesson's keyword"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 }
