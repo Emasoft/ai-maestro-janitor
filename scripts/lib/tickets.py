@@ -312,16 +312,24 @@ def load(ticket_id: str, state_dir: Path | None = None) -> Ticket | None:
 
 def save(t: Ticket, state_dir: Path | None = None) -> None:
     """Persist a ticket. Terminal ones are ARCHIVED, never deleted (RULE 0's spirit: the record of
-    what the janitor did to this machine outlives the incident)."""
-    d = closed_dir(state_dir) if t.status in TERMINAL else tickets_dir(state_dir)
-    d.mkdir(parents=True, exist_ok=True)
-    state.atomic_write(d / f"{t.id}.json", json.dumps(t.to_json(), indent=2))
-    if t.status in TERMINAL:
-        live = tickets_dir(state_dir) / f"{t.id}.json"
-        try:
-            live.unlink()
-        except OSError:
-            pass
+    what the janitor did to this machine outlives the incident).
+
+    A ticket lives in EXACTLY ONE of the two dirs, and the move between them runs BOTH ways: `retry`
+    un-archives a `needs_human` ticket. Unlinking only on the way in (the original shape) left the
+    archived copy behind, so the same ticket sat on the live board and in the archive at once — an
+    archive that says "closed" about work that is in flight is a record that lies, and `list --all`
+    printed it twice. Hence: write the destination first, then unlink the other side, so the only
+    crash window leaves a duplicate that `load()` resolves to the LIVE copy — never a vanished ticket.
+    """
+    terminal = t.status in TERMINAL
+    dest = closed_dir(state_dir) if terminal else tickets_dir(state_dir)
+    other = tickets_dir(state_dir) if terminal else closed_dir(state_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    state.atomic_write(dest / f"{t.id}.json", json.dumps(t.to_json(), indent=2))
+    try:
+        (other / f"{t.id}.json").unlink()
+    except OSError:
+        pass
 
 
 def open_ticket(
