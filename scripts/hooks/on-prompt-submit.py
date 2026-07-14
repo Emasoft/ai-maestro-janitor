@@ -81,6 +81,22 @@ def main() -> int:
         state.bump_user_presence()
     except Exception:  # noqa: BLE001 - a breadcrumb write must never abort the turn
         pass
+
+    # Record which janitor verbs the user EXPLICITLY asked for (TRDD-RDFWQIFA, TRDD-USRPRES1).
+    #
+    # This hook is the ONLY surface that sees the user's raw keystrokes — everything downstream is
+    # the model acting — so it is the only place a token meaning "a HUMAN authorized this" can
+    # honestly be minted. Two consumers depend on it: `disarmed.flag` (which tells the fleet guardian
+    # a human stopped the heartbeat, and which an agent could previously forge) and the self-trigger's
+    # presence gate (which must never type into a pane whose human is mid-sentence unless they asked).
+    #
+    # Deliberately AFTER the cron-marker filter above: a `[janitor-…]` prompt is the machine talking
+    # to itself, and it must never be able to authorize anything.
+    try:
+        user_intent = importlib.import_module("user_intent")
+        user_intent.record_intent_from_prompt(prompt)
+    except Exception:  # noqa: BLE001 - intent recording must never abort the turn
+        pass
     return 0
 
 

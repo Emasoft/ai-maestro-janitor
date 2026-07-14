@@ -135,6 +135,11 @@ def main() -> int:
     sent = terminal_trigger.send_self_command(
         "/reload-skills", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
     )
+    # The user is AT the keyboard and did not ask for this — do not type into their pane.
+    if sent == terminal_trigger.USER_PRESENT:
+        print("USER_PRESENT")
+        return 0
+
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("RELOAD_SKILLS_FIRED")

@@ -137,6 +137,13 @@ def main() -> int:
     sent = terminal_trigger.send_self_command(
         "/reload-plugins --force", delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
     )
+    # The user is AT the keyboard and did not ask for this. Do NOT type into their pane —
+    # it would clobber whatever they are writing. Handled before the iTerm fallback below,
+    # which does its own osascript send and would otherwise bypass the gate entirely.
+    if sent == terminal_trigger.USER_PRESENT:
+        print("USER_PRESENT")
+        return 0
+
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("RELOAD_FIRED")

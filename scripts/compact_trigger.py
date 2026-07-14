@@ -225,6 +225,14 @@ def main() -> int:
     sent = terminal_trigger.send_self_command(
         commands, delay_s=args.delay, esc_first=esc_first, dry_run=args.dry_run
     )
+    # The user is AT the keyboard and did not ask for this. Do NOT type into their pane —
+    # a compact injection is the most destructive of all (the HARD form ESC-interrupts the
+    # turn), and clobbering a half-typed prompt is guaranteed. The resume directive was
+    # still recorded above, so a compact the user runs themselves still auto-resumes.
+    if sent == terminal_trigger.USER_PRESENT:
+        print("USER_PRESENT")
+        return 0
+
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("COMPACT_FIRED")

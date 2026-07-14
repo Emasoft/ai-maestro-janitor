@@ -118,6 +118,13 @@ def main() -> int:
     sent = terminal_trigger.send_self_command(
         RESUME_CMD, delay_s=args.delay, esc_first=False, dry_run=args.dry_run
     )
+    # The user is AT the keyboard — they will drive the session themselves, so a resume
+    # nudge is both unnecessary and destructive (it would clobber what they are typing).
+    # Resume injection exists for UNATTENDED sessions; a present user IS the resume.
+    if sent == terminal_trigger.USER_PRESENT:
+        print("USER_PRESENT")
+        return 0
+
     if sent != terminal_trigger.USE_ITERM_PATH:
         if sent.startswith("FIRED:"):
             print("RESUME_FIRED")

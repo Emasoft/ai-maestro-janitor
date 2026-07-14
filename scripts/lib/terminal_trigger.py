@@ -54,6 +54,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import state  # noqa: E402
+import user_intent  # noqa: E402
+
+# Returned when the user is AT the terminal and did not ask for this command. Nothing is
+# sent: typing into a pane whose human is mid-sentence destroys what they were typing.
+# The caller must surface it and let the user run the command themselves.
+USER_PRESENT = "USER_PRESENT"
 
 # Terminals this module automates beyond iTerm. tmux is first-class (verifiable +
 # the ai-maestro agent host). Add "kitty"/"wezterm" here once a real host confirms
@@ -465,6 +471,7 @@ def _try_linux_gui_send(
 def send_self_command(
     commands: str | Sequence[str], *, delay_s: float = 2.0, esc_first: bool = True,
     dry_run: bool = False, env: Mapping[str, str] | None = None,
+    respect_user_presence: bool = True,
 ) -> str:
     """Send one or more fixed slash-commands (e.g. `/compact`) to this session's own
     pane, choosing the mechanism by `state.terminal_kind()`.
@@ -487,9 +494,30 @@ def send_self_command(
         an `ESC+` prefix for a hard send and the `+`-joined command list.
       - `NO_AUTO_TERMINAL:<kind>` — the kind is delegated but its target was
         unresolvable (e.g. `$TMUX_PANE` malformed); caller degrades.
+      - `USER_PRESENT` — the user is AT the terminal and did not ask for this. Nothing
+        was sent; the caller must tell the user to run the command themselves.
+
+    THE PRESENCE GATE (`respect_user_presence`, default True). Typing into a pane whose
+    human is mid-sentence CLOBBERS what they were typing — this is not theoretical: a
+    `[janitor-reload]` marker fired `/reload-plugins` into the user's pane while they
+    were writing and truncated their message. The *fleet* injector has always refused to
+    type into a pane whose user is active (`fleet_stop.is_injectable`); the *self*-trigger
+    never checked, and that asymmetry was the bug. So: **inject only when the user is
+    away, or when the user explicitly asked** (a fresh `user_intent` token, stamped from
+    their raw keystrokes by the UserPromptSubmit hook — which an agent cannot forge).
+
+    The gate lives HERE, at the single chokepoint every self-trigger funnels through, so
+    no caller can forget it. `respect_user_presence=False` exists for a caller that has
+    already established consent by other means; it is not a convenience.
     """
     cmds: list[str] = [commands] if isinstance(commands, str) else list(commands)
     e: Mapping[str, str] = os.environ if env is None else env
+    # Checked BEFORE any channel is chosen: every channel types into the user's pane, so
+    # a gate on one channel would be a gate on none. Dry-run is exempt (it sends nothing).
+    if respect_user_presence and not dry_run:
+        allowed, _ = user_intent.injection_allowed(cmds)
+        if not allowed:
+            return USER_PRESENT
     # Inside an ai-maestro agent the server API is the authoritative way to reach
     # the agent's own terminal. Best-effort — any failure (server down, no match,
     # unconfirmed POST) falls through to the local terminal send below; ai-maestro
