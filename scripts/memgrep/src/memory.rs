@@ -222,7 +222,9 @@ fn parse_note_props(meta: &str) -> BTreeMap<String, Vec<String>> {
                 let closing = opened.is_some() && raw.ends_with('"');
                 let word = raw.trim_end_matches('"');
                 if !word.is_empty() {
-                    map.entry(key.to_string()).or_default().push(word.to_string());
+                    map.entry(key.to_string())
+                        .or_default()
+                        .push(word.to_string());
                 }
                 // An opening quote with no closing quote on the SAME token ⇒ the value
                 // continues into the following tokens.
@@ -249,10 +251,7 @@ fn parse_meta_dates(meta: &str) -> (Option<String>, Option<String>) {
     let props = parse_note_props(meta);
     let first = |k: &str| props.get(k).and_then(|v| v.first()).cloned();
     let date = first("date");
-    (
-        first("ocd").or_else(|| date.clone()),
-        first("lmd").or(date),
-    )
+    (first("ocd").or_else(|| date.clone()), first("lmd").or(date))
 }
 
 /// A lesson's RECALL SURFACE — the space-joined `keywords:` KEY-PHRASE array from its `[...]`
@@ -803,7 +802,11 @@ fn render_atom_record(path: &Path, atom_id: &str, full_notes: bool, with_notes: 
     // least one group is non-empty — which is guaranteed here since `notes` is non-empty).
     out.push('\n');
     out.push_str(&render_atom_group("notes", &g_notes, full_notes));
-    out.push_str(&render_atom_group("lessons learned", &g_lessons, full_notes));
+    out.push_str(&render_atom_group(
+        "lessons learned",
+        &g_lessons,
+        full_notes,
+    ));
     out.push_str(&render_atom_group("see also", &g_seealso, full_notes));
     out
 }
@@ -875,7 +878,9 @@ fn build_graph(paths: &[PathBuf], hidden: bool) -> Graph {
         // reported BROKEN (59/94 on a real corpus). FALLBACK (don't clobber a real stem); mirrors
         // index.rs `topic_of` so the link graph keys on the same identity as the SQLite index.
         if let Some(slug) = &n.name {
-            stem_map.entry(slug.clone()).or_insert_with(|| n.path.clone());
+            stem_map
+                .entry(slug.clone())
+                .or_insert_with(|| n.path.clone());
         }
         if let Some(name) = n.path.file_name().and_then(|s| s.to_str())
             && let Some(c) = trdd_re.captures(name)
@@ -1038,8 +1043,9 @@ fn find_overview_page(files: &[PathBuf]) -> Option<PathBuf> {
 /// ENTRY POINT the recall protocol points the agent at; the MEMORY.md stub carries this exact
 /// command. Bails with guidance when no overview page exists.
 pub fn cmd_overview_cli(args: &[String]) -> Result<()> {
-    let a =
-        OverviewArgs::parse_from(std::iter::once("overview".to_string()).chain(args.iter().cloned()));
+    let a = OverviewArgs::parse_from(
+        std::iter::once("overview".to_string()).chain(args.iter().cloned()),
+    );
     let paths = if a.paths.is_empty() {
         vec![PathBuf::from(".")]
     } else {
@@ -1545,7 +1551,11 @@ fn claude_mem_ref_matches(stored_path: &str, query: &str) -> bool {
 /// memory, so an O(matching-atoms) lookup beats re-parsing every wiki page each call — and falls back to
 /// a LIVE `resolve_atoms` scan otherwise, so the answer is ALWAYS correct (TRDD-3b9b2040). Both paths
 /// apply the exact/basename match and produce byte-identical sorted output.
-fn claude_mem_ref_hits(source: &str, paths: &[PathBuf], hidden: bool) -> Vec<(PathBuf, String, String)> {
+fn claude_mem_ref_hits(
+    source: &str,
+    paths: &[PathBuf],
+    hidden: bool,
+) -> Vec<(PathBuf, String, String)> {
     let root = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
     if crate::index::is_fresh(&root, &collect_md(paths, hidden))
         && let Some(conn) = crate::index::open_existing(&root)
@@ -1609,7 +1619,8 @@ fn scan_footnotes(raw: &str) -> Vec<(String, bool)> {
     let def_re = DEF_RE.get_or_init(|| Regex::new(r"^\s*\[\^([^\]\s]+)\]:").expect("static regex"));
     // Reference: `[^label]` whose `]` is NOT immediately followed by `:` (so a def's own leading
     // marker is not double-counted as a reference).
-    let ref_re = REF_RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\](?:[^:]|$)").expect("static regex"));
+    let ref_re =
+        REF_RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\](?:[^:]|$)").expect("static regex"));
     let mut out: Vec<(String, bool)> = Vec::new();
     let mut def_span_end: Option<usize> = None;
     if let Some(c) = def_re.captures(raw) {
@@ -1705,10 +1716,18 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
                 .any(|k| fm.get(*k).map(|v| !v.trim().is_empty()).unwrap_or(false))
         };
         if !has(&["ocd", "created"]) {
-            violations.push((p.clone(), 0, "missing required frontmatter field `ocd`".into()));
+            violations.push((
+                p.clone(),
+                0,
+                "missing required frontmatter field `ocd`".into(),
+            ));
         }
         if !has(&["lmd", "updated"]) {
-            violations.push((p.clone(), 0, "missing required frontmatter field `lmd`".into()));
+            violations.push((
+                p.clone(),
+                0,
+                "missing required frontmatter field `lmd`".into(),
+            ));
         }
         if !has(&["description", "summary"]) {
             violations.push((
@@ -1724,10 +1743,11 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         // Check 3 (cont.) — the `## Notes and lessons learned` section must be present. The section
         // is MANDATORY on every page (it is the standing landing zone for a `[^N]` correction
         // lesson) even when empty, per the memory model. Match the heading text leniently.
-        let has_notes_section = ctx
-            .headings
-            .iter()
-            .any(|h| h.text.trim().eq_ignore_ascii_case("Notes and lessons learned"));
+        let has_notes_section = ctx.headings.iter().any(|h| {
+            h.text
+                .trim()
+                .eq_ignore_ascii_case("Notes and lessons learned")
+        });
         if !has_notes_section {
             violations.push((
                 p.clone(),
@@ -1751,7 +1771,11 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
                 continue; // inside a fenced code block — not real footnote syntax
             }
             for (label, is_def) in scan_footnotes(raw) {
-                let table = if is_def { &mut def_lines } else { &mut ref_lines };
+                let table = if is_def {
+                    &mut def_lines
+                } else {
+                    &mut ref_lines
+                };
                 table.entry(label).or_insert(line_no);
             }
         }
@@ -2257,7 +2281,9 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         }
     }
 
-    for (_score, path, summary, pathbuf, _ocd, _lmd, atom_id, atom_desc) in scored.into_iter().take(a.top) {
+    for (_score, path, summary, pathbuf, _ocd, _lmd, atom_id, atom_desc) in
+        scored.into_iter().take(a.top)
+    {
         let s = summary.trim();
         let shown: String = if s.chars().count() > 140 {
             s.chars().take(140).collect::<String>() + "…"
@@ -2287,7 +2313,10 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
                     println!("{path}#{aid} — {line_summary}");
                 }
                 // The body always prints (it IS the memory); `--no-notes` suppresses only lessons+see-also.
-                print!("{}", render_atom_record(&pathbuf, aid, a.full_notes, want_notes));
+                print!(
+                    "{}",
+                    render_atom_record(&pathbuf, aid, a.full_notes, want_notes)
+                );
             }
             None => {
                 if shown.is_empty() {
@@ -2568,7 +2597,11 @@ fn find_only_notes(
                 String::new()
             };
             // Prefer the STABLE id in the render; the `[^N]` label is page-local and renumbers.
-            let label = if ln.id.is_empty() { ln.num.clone() } else { ln.id.clone() };
+            let label = if ln.id.is_empty() {
+                ln.num.clone()
+            } else {
+                ln.id.clone()
+            };
             let line = match (&ln.meta, a.full_notes) {
                 (Some(meta), true) => format!("[{}]{} - [{}] {}", label, tag, meta, ln.text),
                 _ => format!("[{}]{} - {}", label, tag, ln.text),
@@ -2802,9 +2835,13 @@ mod tests {
         // A lesson's recall surface is a MULTI-WORD `keywords:` list. The legacy whitespace-token
         // parser structurally could not hold one (a token was a whole `key:value`), which is why
         // lessons were unreachable by keyword while atoms were not.
-        let kw = parse_note_keywords("keywords: daemon pid reuse sigterm, ocd: 2026-07-13, lmd: 2026-07-13");
+        let kw = parse_note_keywords(
+            "keywords: daemon pid reuse sigterm, ocd: 2026-07-13, lmd: 2026-07-13",
+        );
         assert_eq!(kw, "daemon pid reuse sigterm");
-        let (ocd, lmd) = parse_meta_dates("keywords: daemon pid reuse sigterm, ocd: 2026-07-13, lmd: 2026-07-13");
+        let (ocd, lmd) = parse_meta_dates(
+            "keywords: daemon pid reuse sigterm, ocd: 2026-07-13, lmd: 2026-07-13",
+        );
         assert_eq!(ocd.as_deref(), Some("2026-07-13"));
         assert_eq!(lmd.as_deref(), Some("2026-07-13"));
     }
@@ -2820,8 +2857,7 @@ mod tests {
         let meta = "date:99999999T999999+009, keywords:\"frontend ui agent_profile_sidepanel agent_configuration agent_profile\"";
         let kw = parse_note_keywords(meta);
         assert_eq!(
-            kw,
-            "frontend ui agent_profile_sidepanel agent_configuration agent_profile",
+            kw, "frontend ui agent_profile_sidepanel agent_configuration agent_profile",
             "the quotes DELIMIT the list — they must never survive into a keyword"
         );
         let props = parse_note_props(meta);
@@ -2831,14 +2867,20 @@ mod tests {
             "five key-phrases, split on space — not on the spaces inside a phrase"
         );
         assert!(props["keywords"].contains(&"agent_profile_sidepanel".to_string()));
-        assert_eq!(props.get("date").map(|v| v.join(" ")).as_deref(), Some("99999999T999999+009"));
+        assert_eq!(
+            props.get("date").map(|v| v.join(" ")).as_deref(),
+            Some("99999999T999999+009")
+        );
     }
 
     #[test]
     fn note_status_defaults_to_valid_and_reads_superseded() {
         // `status:` is the lesson's lifecycle: `valid` (the guardrail still holds) or `superseded`
         // (overtaken — kept as history, never applied as current guidance).
-        assert_eq!(parse_note_status("keywords:\"a\", status:superseded, ocd:2026-07-13"), "superseded");
+        assert_eq!(
+            parse_note_status("keywords:\"a\", status:superseded, ocd:2026-07-13"),
+            "superseded"
+        );
         assert_eq!(parse_note_status("keywords:\"a\", status:valid"), "valid");
         // Absent ⇒ valid. The corpus predates the field, and a lesson written before it existed was
         // believed true when written — defaulting to `superseded` would silently blind every legacy
@@ -2875,7 +2917,10 @@ mod tests {
         // A one-element quoted list closes its quote on the same token — the parser must not
         // fall into "still inside a quote" and swallow the rest of the fields.
         let props = parse_note_props("keywords:\"agent_profile_sidepanel\", ocd: 2026-07-13");
-        assert_eq!(props["keywords"], vec!["agent_profile_sidepanel".to_string()]);
+        assert_eq!(
+            props["keywords"],
+            vec!["agent_profile_sidepanel".to_string()]
+        );
         assert_eq!(props["ocd"], vec!["2026-07-13".to_string()]);
     }
 
@@ -2961,7 +3006,10 @@ mod tests {
         );
         // Depth-protected comma: `[[A, B]]` stays one value (one element after whitespace-split? No —
         // it splits on the inner space too, but it did NOT split into a separate `B]]` PROPERTY).
-        assert_eq!(m.get("see").unwrap(), &vec!["[[A,".to_string(), "B]]".to_string()]);
+        assert_eq!(
+            m.get("see").unwrap(),
+            &vec!["[[A,".to_string(), "B]]".to_string()]
+        );
         // First-colon only: the URL keeps its `:` in the value.
         assert_eq!(m.get("url").unwrap(), &vec!["https://x/y".to_string()]);
     }
@@ -2992,19 +3040,36 @@ second atom para
 [^1]: a lesson, not an atom
 ";
         let atoms = resolve_atoms_from_text(text);
-        assert_eq!(atoms.len(), 2, "two atoms: {:?}", atoms.iter().map(|a| &a.id).collect::<Vec<_>>());
+        assert_eq!(
+            atoms.len(),
+            2,
+            "two atoms: {:?}",
+            atoms.iter().map(|a| &a.id).collect::<Vec<_>>()
+        );
         assert_eq!(atoms[0].id, "a");
-        assert_eq!(atoms[0].keywords, vec!["alpha".to_string(), "beta".to_string()]);
+        assert_eq!(
+            atoms[0].keywords,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
         assert_eq!(atoms[0].atom_type.as_deref(), Some("reference"));
         assert!(atoms[0].body.contains("first atom para"));
-        assert!(!atoms[0].body.contains("chapter intro"), "pre-first-marker content excluded");
-        assert!(atoms[0].body.contains("^notamarker"), "fenced marker stays content");
+        assert!(
+            !atoms[0].body.contains("chapter intro"),
+            "pre-first-marker content excluded"
+        );
+        assert!(
+            atoms[0].body.contains("^notamarker"),
+            "fenced marker stays content"
+        );
         assert_eq!(atoms[1].id, "b");
         assert_eq!(atoms[1].keywords, vec!["gamma".to_string()]);
         assert!(atoms[1].body.contains("second atom para"));
         assert_eq!(atoms[1].claude_mem_ref.as_deref(), Some("feedback_x.md"));
         assert_eq!(atoms[1].claude_mem_hash.as_deref(), Some("deadbeef"));
-        assert!(!atoms[1].body.contains("a lesson"), "footnote def under heading excluded");
+        assert!(
+            !atoms[1].body.contains("a lesson"),
+            "footnote def under heading excluded"
+        );
     }
 
     #[test]
@@ -3014,7 +3079,10 @@ second atom para
         assert_eq!(atoms.len(), 1, "exactly one atom");
         assert_eq!(atoms[0].body, "The fact is X.[^1] See [[other]].");
         assert!(!atoms[0].body.contains("name:") && !atoms[0].body.contains("# Title"));
-        assert_eq!(atom_referenced_labels(&atoms[0].body), vec!["1".to_string()]);
+        assert_eq!(
+            atom_referenced_labels(&atoms[0].body),
+            vec!["1".to_string()]
+        );
     }
 
     #[test]
@@ -3063,7 +3131,10 @@ body of b
         );
         // truncate_chars is a no-op below the cap and char-safe (never splits a UTF-8 boundary).
         assert_eq!(truncate_chars("short".to_string(), 64), "short");
-        assert_eq!(truncate_chars("héllo_wörld".to_string(), 5).chars().count(), 5);
+        assert_eq!(
+            truncate_chars("héllo_wörld".to_string(), 5).chars().count(),
+            5
+        );
     }
 
     #[test]
@@ -3150,13 +3221,20 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             .expect("see also entry present");
         // Ordering: notes-label < notes-entry < lessons-label < lessons-entry < seealso-label < seealso-entry.
         assert!(
-            notes_i < n1_i && n1_i < lessons_i && lessons_i < n2_i && n2_i < seealso_i && seealso_i < n3_i,
+            notes_i < n1_i
+                && n1_i < lessons_i
+                && lessons_i < n2_i
+                && n2_i < seealso_i
+                && seealso_i < n3_i,
             "groups must render in section order with their entries:\n{out}"
         );
 
         // --no-notes suppresses ALL groups (body still prints).
         let nn = render_atom_record(&path, "a", false, false);
-        assert!(nn.contains("The fact."), "body still prints with --no-notes:\n{nn}");
+        assert!(
+            nn.contains("The fact."),
+            "body still prints with --no-notes:\n{nn}"
+        );
         assert!(
             !nn.contains("notes:") && !nn.contains("lessons learned:") && !nn.contains("see also:"),
             "--no-notes drops every section group:\n{nn}"
@@ -3169,7 +3247,10 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         // The query matches a stored ref by exact string OR by basename (a top-level buffer note's
         // scope-relative path IS its basename), so an absolute-path query still resolves.
         assert!(claude_mem_ref_matches("feedback_x.md", "feedback_x.md"));
-        assert!(claude_mem_ref_matches("feedback_x.md", "/abs/memory/feedback_x.md"));
+        assert!(claude_mem_ref_matches(
+            "feedback_x.md",
+            "/abs/memory/feedback_x.md"
+        ));
         assert!(claude_mem_ref_matches("sub/feedback_x.md", "feedback_x.md")); // basename fallback
         assert!(!claude_mem_ref_matches("feedback_x.md", "feedback_y.md"));
     }
@@ -3205,11 +3286,20 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             .iter()
             .map(|(p, id, h)| format!("{}#{}={}", p.file_stem().unwrap().to_str().unwrap(), id, h))
             .collect();
-        assert!(names.contains(&"oauth-rotation#rotate-drain=hash1".to_string()), "{names:?}");
-        assert!(names.contains(&"oauth-resume#resume-429=hash1".to_string()), "{names:?}");
+        assert!(
+            names.contains(&"oauth-rotation#rotate-drain=hash1".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            names.contains(&"oauth-resume#resume-429=hash1".to_string()),
+            "{names:?}"
+        );
         // The keychain atom is on the matched page but references a DIFFERENT source — excluded.
         assert!(!names.iter().any(|n| n.contains("#keychain")), "{names:?}");
-        assert!(!names.iter().any(|n| n.starts_with("unrelated")), "{names:?}");
+        assert!(
+            !names.iter().any(|n| n.starts_with("unrelated")),
+            "{names:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3262,9 +3352,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let broken: Vec<&String> = g
             .edges
             .iter()
-            .filter(|e| {
-                e.target.is_none() && !e.external && !e.raw.trim_start().starts_with('#')
-            })
+            .filter(|e| e.target.is_none() && !e.external && !e.raw.trim_start().starts_with('#'))
             .map(|e| &e.raw)
             .collect();
         let _ = std::fs::remove_dir_all(&dir);
@@ -3326,7 +3414,10 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         .unwrap();
         let v = lint_paths(&[dir.clone()], false);
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(v.is_empty(), "clean corpus must produce no violations; got: {v:?}");
+        assert!(
+            v.is_empty(),
+            "clean corpus must produce no violations; got: {v:?}"
+        );
     }
 
     #[test]
@@ -3342,7 +3433,10 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         .unwrap();
         let v = lint_paths(&[dir.clone()], false);
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(!v.is_empty(), "dangling [^3] must produce a non-zero (non-empty) result");
+        assert!(
+            !v.is_empty(),
+            "dangling [^3] must produce a non-zero (non-empty) result"
+        );
         assert!(
             has_violation(&v, "`[^3]` has no"),
             "dangling [^3] reference must be reported; got: {v:?}"
@@ -3405,8 +3499,14 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         .unwrap();
         let v = lint_paths(&[dir.clone()], false);
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(has_violation(&v, "field `ocd`"), "missing ocd must be reported; got: {v:?}");
-        assert!(has_violation(&v, "field `lmd`"), "missing lmd must be reported; got: {v:?}");
+        assert!(
+            has_violation(&v, "field `ocd`"),
+            "missing ocd must be reported; got: {v:?}"
+        );
+        assert!(
+            has_violation(&v, "field `lmd`"),
+            "missing lmd must be reported; got: {v:?}"
+        );
         assert!(
             has_violation(&v, "field `description`"),
             "missing description must be reported; got: {v:?}"

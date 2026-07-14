@@ -1561,7 +1561,10 @@ fn where_ignores_leading_dot_placeholder_when_other_path_given() {
         &work.path,
         &["-l", ".", mem.as_str(), "--where", r#"fm.column "dev""#],
     );
-    assert!(o.contains("note1.md"), "the explicit memdir page must be found:\n{o}");
+    assert!(
+        o.contains("note1.md"),
+        "the explicit memdir page must be found:\n{o}"
+    );
     assert!(
         !o.contains("cwd_contaminant.md"),
         "the cwd file must NOT leak in when an explicit path was given:\n{o}"
@@ -1574,7 +1577,10 @@ fn where_lone_dot_still_searches_cwd() {
     let work = TempDir::new("where-lonedot-work");
     work.write("here.md", "---\ncolumn: dev\n---\nhere\n");
     let o = run_in(&work.path, &["-l", "--where", r#"fm.column "dev""#, "."]);
-    assert!(o.contains("here.md"), "a lone `.` must still search cwd:\n{o}");
+    assert!(
+        o.contains("here.md"),
+        "a lone `.` must still search cwd:\n{o}"
+    );
 }
 
 #[test]
@@ -1584,7 +1590,10 @@ fn walk_and_dedups_overlapping_positional_paths() {
     mem.write("note1.md", "---\ncolumn: dev\n---\nfindme\n");
     let o = run(&["-l", "findme", mem.as_str(), mem.as_str()]);
     let hits = o.lines().filter(|l| l.contains("note1.md")).count();
-    assert_eq!(hits, 1, "overlapping positionals must not duplicate a file:\n{o}");
+    assert_eq!(
+        hits, 1,
+        "overlapping positionals must not duplicate a file:\n{o}"
+    );
 }
 
 // ─────────────────── atom-level recall (TRDD-3b9b2040) ───────────────────
@@ -1605,7 +1614,10 @@ fn recall_surfaces_atom_by_unique_keyword() {
         o.contains("oauth-hub.md#rotate-drain — zqxdrain rotator"),
         "the atom must surface as path#atom-id — <keywords>:\n{o}"
     );
-    assert!(!o.contains("#keychain"), "the sibling atom must not surface:\n{o}");
+    assert!(
+        !o.contains("#keychain"),
+        "the sibling atom must not surface:\n{o}"
+    );
     assert!(
         !o.contains("zqxlesson"),
         "an atom result must NOT append the page's [^N] lessons:\n{o}"
@@ -1632,8 +1644,14 @@ fn recall_atom_aggregates_its_own_notes_and_see_also() {
         "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator]\nThe rotator drains the live (near-limit) account first.[^1] It changed.[^2] See [[token-rotation]].[^3]\n\n# Lessons Learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n# Notes\n[^2]: the near-limit threshold is the 5h window, not the 7d one.\n# See also\n[^3]: token-rotation — the sibling keepalive flow.\n",
     );
     let o = run(&["recall", "zqxdrain", d.as_str()]);
-    assert!(o.contains("oauth-hub.md#rotate-drain"), "locator line:\n{o}");
-    assert!(o.contains("The rotator drains the live"), "the atom body is returned:\n{o}");
+    assert!(
+        o.contains("oauth-hub.md#rotate-drain"),
+        "locator line:\n{o}"
+    );
+    assert!(
+        o.contains("The rotator drains the live"),
+        "the atom body is returned:\n{o}"
+    );
     assert!(
         o.contains("lessons learned:") && o.contains("earlier this drained the alternate"),
         "the atom's own [^1] lesson is aggregated under the lessons group:\n{o}"
@@ -1648,7 +1666,10 @@ fn recall_atom_aggregates_its_own_notes_and_see_also() {
     );
     // --no-notes keeps the body but drops every section group.
     let nn = run(&["recall", "zqxdrain", d.as_str(), "--no-notes"]);
-    assert!(nn.contains("The rotator drains the live"), "body still shows with --no-notes:\n{nn}");
+    assert!(
+        nn.contains("The rotator drains the live"),
+        "body still shows with --no-notes:\n{nn}"
+    );
     assert!(
         !nn.contains("earlier this drained the alternate")
             && !nn.contains("notes:")
