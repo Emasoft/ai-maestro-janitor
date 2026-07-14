@@ -272,6 +272,17 @@ def resolve_context(project_dir: str, session_id: str, transcript: str, window_d
     behavior is UNCHANGED, it now just calls this shared implementation, and
     ``/janitor-token-report --live`` reuses it for the same "exact context %" view so the
     two surfaces can never silently drift apart.
+
+    **The snapshot is not trusted blindly.** A `pct` at/above the hardstop makes the
+    context-usage hook fire `/compact` and DENY the tool call — it destroys real
+    conversation — so a single bogus number from outside must not be able to trigger it.
+    Claude Code 2.1.208 fixed exactly such a bug: after a CLI auto-update the context
+    window "briefly reset to 200k", producing a false "100% context used" on long-context
+    sessions. Its signature is `tokens > window`, which is impossible in a healthy session
+    (the harness compacts before occupancy can exceed the window). When we see it, the
+    WINDOW is what is wrong, not the token count — so we recompute the % against
+    `window_default` (the configured expectation) instead of believing the reset one.
+    Users on a pre-2.1.208 CLI are still exposed; the guard costs one comparison.
     """
     snap = read_context_snapshot(project_dir, session_id)
     if snap is not None and isinstance(snap.get("pct"), int):
@@ -279,6 +290,8 @@ def resolve_context(project_dir: str, session_id: str, transcript: str, window_d
         window = snap.get("window") if isinstance(snap.get("window"), int) and snap["window"] > 0 else None
         ts = snap.get("ts")
         stale = isinstance(ts, int) and (now - ts) > _CONTEXT_SNAPSHOT_STALE_AGE_S
+        if tokens is not None and window is not None and tokens > window and window_default > 0:
+            return int(round(100 * tokens / window_default)), tokens, window_default, stale
         return snap["pct"], tokens, window, stale
     if transcript and window_default > 0:
         tokens = latest_context_size(transcript)

@@ -288,6 +288,42 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
+## Claude Code compatibility (changelog reviewed through **2.1.209**; audit ≥2.1.198)
+
+The janitor is coupled to harness internals (plugin options, hooks, subagents, the context
+indicator), so a CC release can break or silently change it. Findings from the ≥2.1.198 sweep —
+**re-run this audit each time CC jumps a few minor versions**, and extend this list:
+
+- **2.1.207 — plugin options are USER-scope only.** `pluginConfigs` is **no longer read from a
+  project `.claude/settings.json`**. It fails SILENTLY (the knob reverts to its default, no
+  error), so a pre-2.1.207 project-scope config makes the janitor behave like a fresh install.
+  README's Configuration section now says user scope. An **`env` block** in project settings is
+  unaffected. ✅ *fixed in docs.*
+- **2.1.207 — `${user_config.*}` rejected in shell-form hook/monitor commands** (shell-injection
+  fix). ✅ *janitor unaffected — verified zero usages; hooks pass options as
+  `$CLAUDE_PLUGIN_OPTION_<KEY>`. Do NOT introduce `${user_config.*}`.*
+- **2.1.208 — false "100% context used" after a CLI auto-update** (the window "briefly reset to
+  200k" on long-context sessions). Not cosmetic here: at ≥85% `pre-tool-context-usage.py` fires
+  `/compact` AND denies the tool call, so a bogus number **destroys real conversation**.
+  `token_meter.resolve_context` now rejects a snapshot whose `tokens > window` (impossible in a
+  healthy session — the harness compacts first) and recomputes against the configured window.
+  ✅ *guarded + regression-tested; the guard stays for pre-2.1.208 CLIs.*
+- **2.1.202 — a re-invoked skill no longer appends a DUPLICATE copy of its instructions.** This
+  changes TRDD-DLI76AUC's cost model: before 2.1.202 every `[janitor-renew]` → `/janitor-arm`
+  stacked another full copy of the (then 12.5 KB) skill into context, so the churn compounded.
+  Post-fix, skill BYTE size is a one-off and `cost ≈ tool_calls × context × 0.1` dominates —
+  which is why the arm's 6→4 tool-call cut is the load-bearing half of that TRDD, not the shrink.
+- **2.1.199 — a subagent killed by a rate limit no longer reports SUCCESS.** The error now
+  reaches the parent (and partial work is returned). Previously a rate-limited
+  `janitor-memory-subconscious-agent` looked like a clean run, so a memory chore could be
+  stamped done having done nothing. No code change needed — but never re-introduce a "the agent
+  returned, therefore it worked" assumption.
+- **2.1.199 — `CLAUDE_CODE_RETRY_WATCHDOG` retries transient errors up to 300×.** Fewer turns die
+  on transient (non-usage) 429s, so `on-stop-failure`'s `rate-limited.flag` fires less often. The
+  flag remains the correct signal; only its frequency drops.
+- **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
+  `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
+
 <+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6886ad852af3 digest=1cd1b5ed9db2 generated=2026-07-14T19:51:59+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.

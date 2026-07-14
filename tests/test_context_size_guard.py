@@ -430,3 +430,48 @@ def test_main_no_iterm_degrades_to_advisory_near_cap(tmp_path: Path, monkeypatch
     hs = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
     assert "additionalContext" in hs
     assert "permissionDecision" not in hs
+
+
+def test_resolve_context_rejects_a_window_smaller_than_the_tokens_it_holds(tmp_path: Path) -> None:
+    """A bogus window (tokens > window) must not be believed — it would DESTROY context.
+
+    Claude Code 2.1.208 fixed a bug where the context window "briefly reset to 200k" after a
+    CLI auto-update, producing a false "100% context used" on long-context sessions. That is
+    not cosmetic here: at >=85% this hook fires `/compact` AND denies the tool call, so a
+    transient bogus number throws away real conversation.
+
+    The signature is `tokens > window`, which cannot happen in a healthy session — the harness
+    compacts before occupancy exceeds the window. So the WINDOW is what is wrong, and the % is
+    recomputed against the configured expectation. Here: a 1M session holding 700k tokens whose
+    window falsely reads 200k must resolve to 70%, NOT the ~100% that would trigger enforcement.
+    Users on a pre-2.1.208 CLI are still exposed, so the guard stays.
+    """
+    mod = _import_hook()
+    sid = "sess-false-reset"
+    snapdir = tmp_path / ".claude" / "janitor"
+    snapdir.mkdir(parents=True)
+    (snapdir / f"context-usage.{sid}.json").write_text(
+        json.dumps({"pct": 100, "tokens": 700_000, "window": 200_000, "ts": 100}), encoding="utf-8"
+    )
+    pct, tokens, window, _stale = mod._resolve_context(str(tmp_path), sid, "", 1_000_000, now=150)
+    assert pct == 70, f"a false-reset window was believed: pct={pct} (would have fired /compact + deny)"
+    assert tokens == 700_000
+    assert window == 1_000_000, "the % must be recomputed against the configured window, not the bogus one"
+
+
+def test_resolve_context_still_trusts_a_legitimately_full_small_window(tmp_path: Path) -> None:
+    """The guard must not misfire on a REAL small window (e.g. a 200k-context model).
+
+    tokens <= window is healthy at any window size, so a genuinely near-full 200k session must
+    still report ~90% and be allowed to trigger enforcement. Without this the guard could
+    silently disable the hardstop for every small-window model.
+    """
+    mod = _import_hook()
+    sid = "sess-small"
+    snapdir = tmp_path / ".claude" / "janitor"
+    snapdir.mkdir(parents=True)
+    (snapdir / f"context-usage.{sid}.json").write_text(
+        json.dumps({"pct": 90, "tokens": 180_000, "window": 200_000, "ts": 100}), encoding="utf-8"
+    )
+    pct, tokens, window, _stale = mod._resolve_context(str(tmp_path), sid, "", 1_000_000, now=150)
+    assert (pct, tokens, window) == (90, 180_000, 200_000)

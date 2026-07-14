@@ -793,9 +793,27 @@ single source of truth, so whether the turn that clears it runs 5 seconds or
 
 ## Configuration
 
-All knobs are `userConfig` entries in `plugin.json`. Set them at install time
-via the `/plugin configure` interface or edit the project's
-`.claude/settings.json` directly.
+All knobs are `userConfig` entries in `plugin.json`. Set them at install time via
+the `/plugin configure` interface, or edit **`~/.claude/settings.json`** (user
+scope) directly.
+
+> **Claude Code 2.1.207 changed where plugin options may live.** Option values
+> (`pluginConfigs`) are **no longer read from a project-level
+> `.claude/settings.json`** — only user, `--settings`, and managed settings are
+> honored. This README used to tell you to edit the project file; that no longer
+> does anything, and it fails **silently** — the knob simply reverts to its
+> default with no error. If you configured the janitor before 2.1.207 and it has
+> started behaving like a fresh install, move your `pluginConfigs` block from
+> `<repo>/.claude/settings.json` to `~/.claude/settings.json`.
+>
+> User scope is the right home for the janitor anyway: it is a **user-scope
+> plugin** guarding the whole machine (the daemon is a machine-wide singleton),
+> and `/janitor-arm` refuses to arm a project/local-scope install.
+>
+> This restriction applies to `pluginConfigs` only. An **`env` block** in a
+> project `.claude/settings.json` still works, so the daemon knobs documented
+> above (`CLAUDE_PLUGIN_OPTION_DAEMON_OS_KEEPALIVE`, …) can still be set there —
+> though user scope is preferable for the same reason.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
