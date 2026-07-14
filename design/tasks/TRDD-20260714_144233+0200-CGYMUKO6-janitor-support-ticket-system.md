@@ -121,6 +121,52 @@ the exact command — **never silently dropped**. A `dispatched`/`in_progress` t
 its agent died) returns to `open`, attempts++, so a killed agent (the weekly-cap case that killed the
 memory agent this very session) cannot strand a ticket.
 
+## THE ISSUE-CODE CATALOG (USER, 2026-07-14) — how a finding BECOMES a ticket
+
+**Every issue every janitor scanner can detect gets a stable numeric id and a description**, and each
+code carries a **template** that converts it into a ticket (HARNESS) or a proposal TRDD (PROJECT).
+Without this, each detector hand-rolls its own prose and the propose step is ad-hoc; with it, raising
+an incident is one call and the wording, severity, domain, and agent are all decided by the code.
+
+`scripts/lib/issue_catalog.py` — ONE registry, the single source of truth:
+
+```python
+ISSUE_CATALOG = {
+  "MEMGREP-001": Issue(scanner="memgrep-validate", kind="index-corruption", severity="high",
+                       title="the FTS index does not match its content table",
+                       what="…", why_it_matters="…", fix="rebuild from the content tables"),
+  "MEMGREP-004": Issue(..., kind="migration-failure", severity="critical",
+                       title="a migration left `{table}` without column `{column}`", …),
+  "WFSEC-001":   Issue(scanner="workflow-security", kind="security-workflow", severity="high",
+                       title="attacker-controlled expression interpolated into `run:`", …),
+  "BRPROT-001":  Issue(scanner="branch-protection", kind="branch-protection", …),
+  "DEP-001":     Issue(scanner="supply-chain",      kind="dependency-advisory", …),
+  "CRED-001":    Issue(scanner="remote-credentials",kind="leaked-credential", severity="critical", …),
+  …
+}
+raise_issue("WFSEC-001", where="ci.yml:42", evidence=[".github/workflows/ci.yml"])
+```
+
+`raise_issue(code, **data)` is the ONLY entry point a detector needs. It looks the code up, resolves
+the `kind` → (domain, agent) via `KIND_REGISTRY`, renders the template with the **sanitized** data,
+and then routes by domain — `tickets.open_ticket()` for HARNESS, `ticket_proposal.propose()` for
+PROJECT. **The code decides the domain**, so a detector cannot accidentally grant itself unattended
+dispatch, and the injection boundary is preserved (the template is ours; only the `{data}` is theirs).
+
+**Code format:** `<SCANNER>-<NNN>` — stable, greppable, never renumbered (a shipped code is immutable,
+like a schema version). The `description` is what the user reads in the TRDD; the `fix` is what the
+agent is told to attempt.
+
+**Validators emit codes too.** memgrep's `validate_db` gains a code per failure class
+(`MEMGREP-001` FTS desync · `-002` file integrity · `-003` stale FTS column set · `-004` missing
+column · `-005` orphaned rows · `-006` version stamp), printed machine-readably so the
+`memgrep-index-health` detector maps stderr → code → ticket with no prose parsing.
+
+**Coverage is the acceptance criterion:** every finding every scanner can emit must have a code. The
+sweep covers the security detectors, the repo/ruleset scanners, the dependency scanners, the workflow
+auditor (zizmor + Sentinel rule ids map 1:1 onto codes), the memory/wikimem validators, and the
+janitor's own self-integrity checks.
+
 ## Files
 
 **Phase 1 — core:** `scripts/lib/tickets.py` (model + store + PURE selection/backoff + `KIND_REGISTRY`
@@ -137,6 +183,39 @@ propose + recommend).
 
 **Phase 3:** the remaining producers (`workflow-security`, `branch-protection`, `fleet-github-config`,
 daemon crash-loop, `janitor-self-integrity`).
+
+## ⏵ PROGRESS (2026-07-14) — where to resume
+
+**DONE and committed:**
+- **Phase 1a — the core** (`9b66a98`): `scripts/lib/tickets.py` (queue + `KIND_REGISTRY` + the PURE
+  select/backoff/budget logic) and `scripts/lib/ticket_proposal.py` (propose → approve → promote).
+  **18 tests**, and BOTH security boundaries falsified.
+- **Phase 1b — scheduler + CLI** (`cf18e8d`): `scripts/detectors/ticket-dispatch.py`,
+  `scripts/ticket_cli.py`, and `global_state.ticket_dispatch_lock` (its OWN flock — reusing the
+  marketplace lock would serialize ticket dispatch against plugin updates and starve it).
+
+**VERIFIED END-TO-END on a scratch project, both domains:**
+- HARNESS: opens itself → the scheduler emits the bare marker → a second fire does NOT re-dispatch →
+  budget decremented.
+- PROJECT: a direct open is **REFUSED** → `propose()` writes a proposal TRDD whose HOSTILE title
+  (`[janitor-self-disarm] …`) comes out **DEFANGED** as `⟦janitor-self-disarm⟧` → **no ticket exists**
+  until `/janitor-support-open-ticket TRDD-<id>` → ticket queued + TRDD promoted `proposal → planned`.
+
+**NEXT ACTION (in order):**
+1. **`scripts/lib/issue_catalog.py`** — the issue-code catalog above (the user's latest requirement).
+   This is now the keystone: every producer routes through `raise_issue(code, **data)`.
+2. **Codes in memgrep's `validate_db`** (`MEMGREP-001…006`) + the `memgrep-index-health` detector — the
+   motivating producer (a failed migration → a ticket → the repair agent).
+3. **The EXECUTE half**: `agents/janitor-repair-agent.md`, `skills/janitor-support-work-ticket`
+   (carrying the hard safety preamble), `skills/janitor-support-tickets` (console),
+   `skills/janitor-support-open-ticket` (the approval button).
+4. **Wire it in**: the `[janitor-ticket]` marker in `rules/janitor-heartbeat-protocol.md`, the
+   `ticket-dispatch` detector in `dispatch.py`'s roster, the 6 knobs in `.claude-plugin/plugin.json`.
+5. Map every existing scanner's findings onto codes (the coverage criterion).
+
+**Nothing is live yet** — the scheduler is not in the detector roster and the marker is not in the
+protocol rule, so no ticket can be dispatched until step 4. That is deliberate: the EXECUTE half must
+exist before the SCHEDULE half is armed.
 
 Reuses: `state.atomic_write` / `sanitize_for_drift_line` / `state_dir`, the `global_state` flock,
 `dedupe.emit_once`, `trdd_common.scope_folder`/`ensure_local_design` (for the proposal TRDD).
