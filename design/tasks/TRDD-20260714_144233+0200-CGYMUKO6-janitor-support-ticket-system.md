@@ -167,6 +167,16 @@ sweep covers the security detectors, the repo/ruleset scanners, the dependency s
 auditor (zizmor + Sentinel rule ids map 1:1 onto codes), the memory/wikimem validators, and the
 janitor's own self-integrity checks.
 
+**The published catalog — `docs/ISSUE-CODES.md` (USER, 2026-07-14).** The janitor's documentation
+carries the full list of every detectable issue code, from every scanner and validator: code, scanner,
+severity, domain (HARNESS/PROJECT), what it means, and how it is fixed.
+
+It is **GENERATED from `issue_catalog.py`, never hand-written** (`scripts/issue_catalog_doc.py
+--write`), and a test asserts the doc matches the catalog — a hand-maintained list drifts the moment
+someone adds a code, and a *stale* catalog of issue codes is worse than none (it is a document that
+lies about what the janitor can see). Same discipline as the fenced CLAUDE.md project map: one source
+of truth, a derived artifact, and a check that fails when they diverge.
+
 ## Files
 
 **Phase 1 — core:** `scripts/lib/tickets.py` (model + store + PURE selection/backoff + `KIND_REGISTRY`
