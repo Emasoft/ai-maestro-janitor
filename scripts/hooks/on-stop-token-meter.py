@@ -2,12 +2,21 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Stop hook — per-heartbeat token meter (TRDD-a4e41e89, Phase 1).
+"""Stop hook — the session token meter (TRDD-a4e41e89 Phase 1; widened by TRDD-DLI76AUC #4).
 
-Fires at the end of every turn. When the turn that just ended was a HEARTBEAT
-turn (its triggering user message started with `[janitor-heartbeat]`), it sums
-the turn's token usage from the transcript tail and appends one line to
-`$PROJECT/.janitor/state/token-meter.jsonl`. `/janitor-token-report` reads that.
+Fires at the end of EVERY turn, sums that turn's token usage from the transcript
+tail, and appends one line to `$PROJECT/.janitor/state/token-meter.jsonl`, tagged
+`heartbeat: true|false`. `/janitor-token-report` and the token-usage-anomaly
+detector read it.
+
+It used to log heartbeat turns ONLY. That made the janitor's own cost telemetry
+blind to every INTERACTIVE turn — including a user-typed `/janitor-arm`, i.e.
+precisely the turn TRDD-DLI76AUC set out to make cheaper, which could therefore
+be argued about but not measured. The same blindness silently under-counted the
+report's rolling 5h/7d window sums, since the user's own turns are usually the
+expensive ones. Consumers that still want only the beat can filter on the tag;
+they must default a MISSING tag to True, because every record written before this
+change was a heartbeat.
 
 This is a SEPARATE hook from the survival-critical on-stop / on-stop-failure
 hooks ON PURPOSE: a meter bug must never be able to break rate-limit resume. It
@@ -52,8 +61,8 @@ def main() -> int:
         from lib import state  # noqa: E402  -- local package, not PyPI
 
         usage = token_meter.tail_turn_usage(transcript_path)
-        if usage is None or not usage.is_heartbeat:
-            return 0  # not a heartbeat turn → log nothing
+        if usage is None:
+            return 0  # turn boundary not found in the tail → nothing to log
 
         state.init_state()
         log_path = state.state_dir() / "token-meter.jsonl"

@@ -4,10 +4,11 @@
 # ///
 """Backing script for /janitor-token-report (TRDD-a4e41e89, Phase 1).
 
-Reads the per-heartbeat token log written by the on-stop-token-meter hook
-(`$PROJECT/.janitor/state/token-meter.jsonl`) and prints recent per-fire costs
-plus distribution stats (mean / p50 / p95 / max) so spikes or a too-high
-average are visible. `--json` for scripting.
+Reads the token log written by the on-stop-token-meter hook
+(`$PROJECT/.janitor/state/token-meter.jsonl`) — one record per TURN, each tagged
+`heartbeat: true|false` — and prints recent per-turn costs plus distribution stats
+(mean / p50 / p95 / max) so spikes or a too-high average are visible. `--json` for
+scripting.
 
 Cost view: `output` tokens are the headline (full-price, the clearest driver of
 agent work); `input` is full price and `cache_creation` is a PREMIUM write (~2x at the
@@ -438,9 +439,9 @@ def _render_attribution(as_json: bool) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Per-heartbeat token report")
+    ap = argparse.ArgumentParser(description="Session token report (heartbeat + interactive turns)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
-    ap.add_argument("--recent", type=int, default=15, help="how many recent fires to list")
+    ap.add_argument("--recent", type=int, default=15, help="how many recent turns to list")
     ap.add_argument("--util5h", type=float, default=None, help="live 5h-window utilization%% (from /api/oauth/usage) → estimate the absolute cap + pace")
     ap.add_argument("--util7d", type=float, default=None, help="live 7d-window utilization%% → estimate the absolute cap + pace")
     ap.add_argument("--live", action="store_true", help="show the CURRENT session's exact context %% + last-turn token breakdown (no heartbeat log needed) instead of the historical report")
@@ -474,8 +475,8 @@ def main() -> int:
         if args.json:
             print(json.dumps({"count": 0, "log": str(log_path)}))
         else:
-            print("[janitor-token-report] no heartbeat token data yet.")
-            print(f"  (the on-stop-token-meter hook logs to {log_path} after each heartbeat fire)")
+            print("[janitor-token-report] no token data yet.")
+            print(f"  (the on-stop-token-meter hook logs to {log_path} after each turn)")
         return 0
 
     out_stats = token_meter.summarize(records, field="output")
@@ -485,12 +486,18 @@ def main() -> int:
     spikes = [r for r in records if int(r.get("output", 0) or 0) >= max(_SPIKE_OUTPUT, p95_out)]
     events = token_meter.load_log(_state_dir() / "window-exhaustion.jsonl")
     window = _window_metrics(records, int(time.time()), args.util5h, args.util7d, events)
+    # A record with NO `heartbeat` key predates TRDD-DLI76AUC #4, when the meter logged
+    # heartbeats exclusively — so a missing key means True, never False.
+    n_beat = sum(1 for r in records if r.get("heartbeat", True))
+    n_user = len(records) - n_beat
 
     if args.json:
         print(
             json.dumps(
                 {
                     "count": out_stats["count"],
+                    "heartbeat_turns": n_beat,
+                    "user_turns": n_user,
                     "output": out_stats,
                     "input": in_stats,
                     "spike_threshold": max(_SPIKE_OUTPUT, p95_out),
@@ -503,25 +510,34 @@ def main() -> int:
         )
         return 0
 
-    print(f"[janitor-token-report] {out_stats['count']} heartbeat fires logged  ·  {log_path}")
+    print(f"[janitor-token-report] {out_stats['count']} turns logged ({n_beat} heartbeat · {n_user} interactive)  ·  {log_path}")
     print()
-    print(f"  output tokens/fire   mean {out_stats['mean']:.0f}  ·  p50 {out_stats['p50']}  ·  p95 {out_stats['p95']}  ·  max {out_stats['max']}  ·  total {out_stats['total']}")
-    print(f"  input  tokens/fire   mean {in_stats['mean']:.0f}  ·  p95 {in_stats['p95']}  ·  max {in_stats['max']}")
+    print(f"  output tokens/turn   mean {out_stats['mean']:.0f}  ·  p50 {out_stats['p50']}  ·  p95 {out_stats['p95']}  ·  max {out_stats['max']}  ·  total {out_stats['total']}")
+    print(f"  input  tokens/turn   mean {in_stats['mean']:.0f}  ·  p95 {in_stats['p95']}  ·  max {in_stats['max']}")
     print()
     _render_window(window)
     print()
-    print(f"  {'when':<12} {'output':>7} {'input':>7} {'cache_rd':>9} {'cache_cr':>8} {'tools':>5}")
-    print(f"  {'-' * 12} {'-' * 7} {'-' * 7} {'-' * 9} {'-' * 8} {'-' * 5}")
+    print(f"  {'when':<12} {'kind':<5} {'output':>7} {'input':>7} {'cache_rd':>9} {'cache_cr':>8} {'tools':>5}")
+    print(f"  {'-' * 12} {'-' * 5} {'-' * 7} {'-' * 7} {'-' * 9} {'-' * 8} {'-' * 5}")
     for r in records[-args.recent :]:
         flag = "  ⚠ spike" if int(r.get("output", 0) or 0) >= max(_SPIKE_OUTPUT, p95_out) else ""
-        print(f"  {_fmt_ts(r.get('ts', 0)):<12} {r.get('output', 0):>7} {r.get('input', 0):>7} {r.get('cache_read', 0):>9} {r.get('cache_creation', 0):>8} {r.get('tool_calls', 0):>5}{flag}")
+        kind = "beat" if r.get("heartbeat", True) else "user"
+        print(f"  {_fmt_ts(r.get('ts', 0)):<12} {kind:<5} {r.get('output', 0):>7} {r.get('input', 0):>7} {r.get('cache_read', 0):>9} {r.get('cache_creation', 0):>8} {r.get('tool_calls', 0):>5}{flag}")
     print()
     if spikes:
-        print(f"  ⚠ {len(spikes)} fire(s) above the spike threshold ({max(_SPIKE_OUTPUT, p95_out)} output tokens).")
-    if out_stats["mean"] >= _HIGH_MEAN_OUTPUT:
-        print(f"  ⚠ mean output/fire ({out_stats['mean']:.0f}) is above {_HIGH_MEAN_OUTPUT} — consider lengthening the heartbeat interval or pushing more work into scripts.")
-    if not spikes and out_stats["mean"] < _HIGH_MEAN_OUTPUT:
-        print("  ✓ no spikes; mean per-fire cost is within budget.")
+        print(f"  ⚠ {len(spikes)} turn(s) above the spike threshold ({max(_SPIKE_OUTPUT, p95_out)} output tokens).")
+
+    # The "lengthen the heartbeat" advice MUST be judged on heartbeat turns alone. The meter now
+    # logs interactive turns too (TRDD-DLI76AUC #4), and those are far larger — so an all-turns
+    # mean would climb during a busy coding session and counsel slowing the beat, which is exactly
+    # backwards: the beat is a cache KEEP-ALIVE, and a session doing real work is the one that most
+    # needs its cache warm. This project has already talked itself into that mistake twice.
+    beat_stats = token_meter.summarize([r for r in records if r.get("heartbeat", True)], field="output")
+    beat_mean = beat_stats["mean"] if beat_stats else 0.0
+    if beat_mean >= _HIGH_MEAN_OUTPUT:
+        print(f"  ⚠ mean output per HEARTBEAT ({beat_mean:.0f}) is above {_HIGH_MEAN_OUTPUT} — keep heartbeat replies terse, or push more work into scripts.")
+    if not spikes and beat_mean < _HIGH_MEAN_OUTPUT:
+        print("  ✓ no spikes; mean per-heartbeat cost is within budget.")
     return 0
 
 

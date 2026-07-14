@@ -51,8 +51,14 @@ class TurnUsage:
     tool_calls: int
 
     def as_record(self, now_epoch: int) -> dict:
+        # `heartbeat` tags WHICH KIND of turn this was. Until TRDD-DLI76AUC #4 the meter logged
+        # heartbeat turns ONLY, so the flag was implicit — and the log was therefore blind to every
+        # interactive turn, including a user-typed `/janitor-arm`. Now every turn is logged and the
+        # flag is explicit. A record WITHOUT the key predates that change and is a heartbeat, which
+        # is why every reader must default it to True rather than False.
         return {
             "ts": int(now_epoch),
+            "heartbeat": bool(self.is_heartbeat),
             "input": self.input_tokens,
             "output": self.output_tokens,
             "cache_read": self.cache_read_input_tokens,
