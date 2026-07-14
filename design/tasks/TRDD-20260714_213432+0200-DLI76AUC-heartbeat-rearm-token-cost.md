@@ -3,7 +3,7 @@ trdd-id: DLI76AUC
 title: The heartbeat re-arm is a model turn, so the dynamic cadence can cost more than it saves
 column: dev
 created: 2026-07-14T21:34:32+0200
-updated: 2026-07-14T21:34:32+0200
+updated: 2026-07-14T23:46:37+0200
 current-owner: janitor-session
 task-type: refactor
 scope: project
@@ -17,9 +17,9 @@ parent-trdd: 0QQX9H0G
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-14
 
-**NEXT ACTION:** Phase 1 — add `scripts/arm_prepare.py` + `scripts/arm_record.py`, rewire
-`skills/janitor-arm` and `skills/janitor-disarm` to call them, and shrink both SKILL.md files.
-Tests first. Phase 2 (the meter) and the churn fix (§Deferred) come after.
+**NEXT ACTION:** Items 2, 3, 4 are DONE (commits `ea6a3b9`, `48523ca`, `a66c7a5`, `1959abc`).
+The only open work is §Deferred item #1 (the demote hysteresis / re-arm cooldown) — the lever that
+actually kills the churn — and it is **awaiting the USER's decision**. Do not start it unprompted.
 
 **Scope approved by the USER (2026-07-14):** items **2, 3, 4** below. Item **1** (the demote
 hysteresis) is DISCUSSED but NOT approved — do not change `heartbeat_cadence_demote_fires`.
@@ -31,7 +31,8 @@ TRDD changes is how EXPENSIVE it is to rewrite the cron's period — not whether
 ## The cost model (measured, not assumed)
 
 From this project's own `.janitor/state/token-meter.jsonl`, weighted =
-`output + 1.25×cache_creation + 0.1×cache_read`:
+`output + input + cache_creation + 0.1×cache_read` (the code weights the write 1×; the `1.25`
+this section first claimed was read out of a DOCSTRING, not the arithmetic — see `[^3]`):
 
 | tool calls in the turn | weighted | per call |
 |---|---|---|
@@ -81,16 +82,28 @@ renews, ~620k weighted, saving nothing. There is also **no re-arm cooldown** any
   doubling the fire cost forever. This is the same "decide which way it fails" reasoning the skill
   already applies to `disarmed.flag`.
 
-- **#3 — shrink the skills.** `janitor-arm/SKILL.md` is 12,528 bytes ≈ 3,100 tokens, and it enters
+- **#3 — shrink the skills. DONE** (`ea6a3b9` arm, `48523ca` disarm). The arm went 12,528 → 5,715 B.
+  The disarm went 7,154 → 6,635 B only — a deliberately modest cut, because the bulk of that file is
+  three prohibitions and each one is a bug that already happened. Safety prose that must be read
+  BEFORE acting cannot be demoted to a reference: a reference is read on demand, and a prohibition
+  read on demand is a prohibition not read. The real find there was a CONTRADICTION — the disarm's
+  checklist told the agent to write `disarmed.flag` directly, which step 3 of the same file forbids
+  and which the guard exists to prevent.
+
+  *(original scoping below)* `janitor-arm/SKILL.md` is 12,528 bytes ≈ 3,100 tokens, and it enters
   the transcript on EVERY invocation and then rides forward on every later turn. Its
   `## Known limitations` section (2,827 B) is a VERBATIM DUPLICATE of
   `references/janitor-architecture.md#known-limitations`, which the skill already links to. Cut it,
   keep the link. With the bash moved into scripts (#2) the Instructions section collapses too.
   Target ≈ 4 KB. Same treatment for `janitor-disarm` (7,154 B).
 
-- **#4 — meter the arm turns.** The arms at 20:38 and 20:48 produced NO `token-meter.jsonl`
-  records, so the janitor's own cost telemetry is blind to precisely the thing this TRDD
-  optimizes. Find out why and fix it, so the win is MEASURED and not argued.
+- **#4 — meter the arm turns. DONE (`a66c7a5`).** Root cause: the Stop hook returned early on
+  `not usage.is_heartbeat`, so the meter logged heartbeat turns and NOTHING else — every
+  interactive turn, a user-typed `/janitor-arm` included, was invisible. Note the TRDD's original
+  premise was only half right: a RENEW-driven arm runs *inside* a heartbeat turn and was always
+  metered; it is the user-typed arm that vanished. The fix logs every turn tagged
+  `heartbeat: true|false`, which also repairs the report's rolling 5h/7d sums (they had been
+  under-counting the user's own — i.e. the expensive — turns).
 
 ## Deferred — NOT approved, do not implement
 
@@ -106,8 +119,9 @@ The cold-cache → `/compact` mechanism the USER asked about **exists and is ena
 `scripts/lib/cold_cache_compact.py`, wired at `dispatch.py:697-740` (after-idle) and
 `on-session-start.py:151-192` (on-resume). Defaults `enabled=True`,
 `min_idle_seconds=3600` (exactly the 60-min cache TTL), `min_context_tokens=270000`,
-`cooldown_seconds=600`. It compacts BEFORE the next turn pays the 1.25× full-price rewrite of a
-dead cache. Shipped as TRDD-EUWIHP0G.
+`cooldown_seconds=600`. It compacts BEFORE the next turn pays the rewrite of a dead cache — and
+that rewrite is billed at **2×** (the main agent's 1-hour cache TTL), not the 1.25× of a 5-minute
+one, so this mechanism is worth MORE than its own docs claimed. Shipped as TRDD-EUWIHP0G.
 
 ## Verification
 
@@ -138,3 +152,26 @@ dead cache. Shipped as TRDD-EUWIHP0G.
   invents a relationship that the data never asserted. Verify the join before trusting the
   aggregate — and prefer a law you can see in the raw rows (here: cost ≈ tool_calls × 52k, visible
   directly in the table) over a summary statistic computed from a guess.
+
+[^3]: [ocd:2026-07-14 lmd:2026-07-14] This TRDD's own cost table wrote the weighted formula as
+  `output + 1.25×cache_creation + …`. The code weights `cache_creation` at **1.0×**; the `1.25`
+  exists only in the surrounding DOCSTRINGS, and I asserted the arithmetic from a grep of the prose
+  instead of reading the expression. That is the SECOND grep-as-proof error in one session (the
+  first: a grep for `add_parser(` "proved" two ticket subcommands did not exist — they were
+  registered in a loop). Compounding it, `1.25×` is the **5-minute-TTL** write price, while the main
+  agent runs a **1-hour** TTL where a write costs **2×**. Both errors are now fixed in the source
+  (`1959abc`). The cost LAW is untouched — it is `cache_read`-driven and 0.1× is right at either
+  TTL. Lesson: **a grep of prose tells you what the author BELIEVED, never what the code DOES**; and
+  a price is meaningless until you name the TIER it is charged at.
+
+[^4]: [ocd:2026-07-14 lmd:2026-07-14] While verifying #4 the full suite failed once in
+  `test_daemon.py` and once — a different run, a DIFFERENT test — in
+  `test_marketplace_refresh_scoped.py`. I briefly concluded "this IS mine" off a single noisy run
+  (a 12× slowdown looked damning). It was not: both pass 44/44 in isolation and repeatedly, the
+  failing test moves between runs, and there is **no import path** from either module to the
+  `token_meter`/`token_report` code I changed. The suite's own write-guard had already named the
+  cause — the LIVE daemon mutating global state mid-run — and told me to `/janitor-global-pause`.
+  Lesson: a failure that MOVES between runs is environmental; before blaming your diff, check
+  whether the failing code can even REACH it. And when a test harness prints a diagnosis, read it
+  before theorising. (The under-load flakiness of these subprocess/global-state tests is real and
+  unfixed — it deserves its own TRDD, and it is not this one.)
