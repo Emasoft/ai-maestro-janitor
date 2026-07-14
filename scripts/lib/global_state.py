@@ -91,10 +91,7 @@ def _legacy_global_state_dir() -> Path:
 
 
 def _data_global_state_dir() -> Path:
-    return (
-        Path.home() / ".claude" / "plugins" / "data"
-        / "ai-maestro-janitor-ai-maestro-plugins" / "global-state"
-    )
+    return Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "global-state"
 
 
 def global_state_dir() -> Path:
@@ -150,9 +147,14 @@ def init_global_state() -> Path:
 # Files that must NOT be copied by the migration: the kernel locks are dir-bound
 # (copying a flock file copies nothing kernel-side, and a stray copy invites a
 # split-brain read), and the pid is re-published by the migrating daemon itself.
-_MIGRATION_SKIP = frozenset({
-    "daemon.flock", "daemon.pid", "marketplace-op.lock", "oauth-rotator-tick.lock",
-})
+_MIGRATION_SKIP = frozenset(
+    {
+        "daemon.flock",
+        "daemon.pid",
+        "marketplace-op.lock",
+        "oauth-rotator-tick.lock",
+    }
+)
 
 
 def migrate_global_state_to_data_dir() -> Optional[int]:
@@ -214,10 +216,7 @@ def migrate_global_state_to_data_dir() -> Optional[int]:
         return None
     with contextlib.suppress(OSError):
         (legacy / "README-MOVED.txt").write_text(
-            "This janitor state dir was MIGRATED to the plugin DATA dir:\n"
-            f"  {new}\n"
-            "Kept only as a read-fallback for not-yet-updated sessions; safe to\n"
-            "remove after every session runs a janitor >= the migration release.\n",
+            f"This janitor state dir was MIGRATED to the plugin DATA dir:\n  {new}\nKept only as a read-fallback for not-yet-updated sessions; safe to\nremove after every session runs a janitor >= the migration release.\n",
             encoding="utf-8",
         )
     return fd
@@ -225,16 +224,49 @@ def migrate_global_state_to_data_dir() -> Optional[int]:
 
 # ---------- file paths (private; callers use the named helpers below) -------
 
-def _flock_path() -> Path: return global_state_dir() / "daemon.flock"
-def _pid_path() -> Path: return global_state_dir() / "daemon.pid"
-def _heartbeat_path() -> Path: return global_state_dir() / "daemon.heartbeat.ts"
-def _killswitch_path() -> Path: return global_state_dir() / "kill-switch.flag"
-def _spawn_marker_path() -> Path: return global_state_dir() / "daemon.spawn-attempt.ts"
-def _spawn_history_path() -> Path: return global_state_dir() / "daemon.spawn-history"
-def _reload_flag_path() -> Path: return global_state_dir() / "reload-needed.flag"
-def _skills_reload_flag_path() -> Path: return global_state_dir() / "skills-reload-needed.flag"
-def _marketplace_lock_path() -> Path: return global_state_dir() / "marketplace-op.lock"
-def _oauth_rotator_lock_path() -> Path: return global_state_dir() / "oauth-rotator-tick.lock"
+
+def _flock_path() -> Path:
+    return global_state_dir() / "daemon.flock"
+
+
+def _pid_path() -> Path:
+    return global_state_dir() / "daemon.pid"
+
+
+def _heartbeat_path() -> Path:
+    return global_state_dir() / "daemon.heartbeat.ts"
+
+
+def _killswitch_path() -> Path:
+    return global_state_dir() / "kill-switch.flag"
+
+
+def _spawn_marker_path() -> Path:
+    return global_state_dir() / "daemon.spawn-attempt.ts"
+
+
+def _spawn_history_path() -> Path:
+    return global_state_dir() / "daemon.spawn-history"
+
+
+def _reload_flag_path() -> Path:
+    return global_state_dir() / "reload-needed.flag"
+
+
+def _skills_reload_flag_path() -> Path:
+    return global_state_dir() / "skills-reload-needed.flag"
+
+
+def _marketplace_lock_path() -> Path:
+    return global_state_dir() / "marketplace-op.lock"
+
+
+def _oauth_rotator_lock_path() -> Path:
+    return global_state_dir() / "oauth-rotator-tick.lock"
+
+
+def _ticket_dispatch_lock_path() -> Path:
+    return global_state_dir() / "ticket-dispatch.lock"
 
 
 def daemon_pid() -> Optional[int]:
@@ -381,6 +413,7 @@ def clear_global_pause() -> None:
 # exists only in code at or past this release, so both writer (detector) and reader
 # (daemon) are new — there is no version-skew writer at the legacy path to miss.
 
+
 def _version_update_request_path() -> Path:
     return global_state_dir() / "version-update-requested.flag"
 
@@ -426,6 +459,7 @@ def clear_version_update_request() -> None:
 # per-session in the detector (per-repo, not a machine-global race), so only user-scope goes
 # through this queue. NO legacy dual-read — new-code-only writer (detector) + reader (daemon).
 
+
 def _plugin_update_requests_path() -> Path:
     return global_state_dir() / "plugin-update-requests.json"
 
@@ -444,8 +478,7 @@ def _plugin_requests_lock() -> Iterator[None]:
     fd = None
     try:
         init_global_state()
-        fd = os.open(str(global_state_dir() / "plugin-update-requests.lock"),
-                     os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(str(global_state_dir() / "plugin-update-requests.lock"), os.O_RDWR | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_EX)
     except OSError:
         if fd is not None:
@@ -535,6 +568,7 @@ def clear_plugin_update_request(plugin_id: str, scope: str) -> None:
 # risks a harmless re-inject (the target session ignores a redundant /janitor-disarm),
 # so every writer here is fail-open (FS errors are swallowed, logic bugs are not).
 
+
 def fleet_stop_flag_state() -> str | None:
     """The current machine-wide fleet-stop flag, or None when neither is set. ``disarm``
     (the kill-switch) DOMINATES ``pause``: a disarm is the true stop (delete the cron),
@@ -607,6 +641,7 @@ def clear_fleet_injections(flag_state: str | None = None) -> None:
 
 # ---------- liveness ------------------------------------------------------
 
+
 def _process_exists(pid: int) -> bool:
     """True iff pid is a running process owned by this uid (or we can signal it).
 
@@ -652,6 +687,7 @@ def daemon_is_alive(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
 
 
 # ---------- singleton flock ----------------------------------------------
+
 
 def acquire_singleton_flock(*, blocking: bool = False) -> Optional[int]:
     """Acquire the exclusive flock on daemon.flock.
@@ -736,6 +772,7 @@ def release_singleton_flock(fd: int) -> None:
 # session's heartbeat turn behind the daemon's ~10-min bulk refresh, or
 # tripping the daemon's own workload timeout. Skip-and-retry is deadlock-proof.
 
+
 def acquire_marketplace_lock() -> Optional[int]:
     """Non-blocking exclusive flock on marketplace-op.lock.
 
@@ -771,6 +808,46 @@ def release_marketplace_lock(fd: int) -> None:
         os.close(fd)
     except OSError:
         pass
+
+
+@contextlib.contextmanager
+def ticket_dispatch_lock() -> Iterator[bool]:
+    """Serialise the support-ticket select→stamp→emit against every other session (TRDD-CGYMUKO6).
+
+    Its OWN lock, deliberately not the marketplace one: two sessions firing the same heartbeat window
+    would otherwise both select the same ticket and both spawn a repair agent for it. Skip-if-held —
+    the loser stays silent this fire, and by then the winner has already moved the tickets to
+    `dispatched`, so the loser no longer sees them as due (the same convergence the memory scheduler
+    relies on).
+
+        with gs.ticket_dispatch_lock() as held:
+            if not held:
+                return 0        # another session is dispatching this window
+    """
+    init_global_state()
+    fd: Optional[int] = None
+    try:
+        fd = os.open(str(_ticket_dispatch_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            fd = None
+    try:
+        yield fd is not None
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 @contextlib.contextmanager
@@ -812,6 +889,7 @@ def marketplace_lock() -> Iterator[bool]:
 # re-fires every 60 s and a manual tick is a one-shot the user re-runs, so skipping
 # is always safe; blocking would risk wedging a session's heartbeat turn or
 # tripping the daemon's workload timeout. Skip-and-retry is deadlock-proof.
+
 
 def acquire_oauth_rotator_lock() -> Optional[int]:
     """Non-blocking exclusive flock on oauth-rotator-tick.lock.
@@ -905,6 +983,7 @@ def oauth_rotator_lock_wait(timeout_s: float = 60.0, poll_s: float = 0.25) -> It
 
 # ---------- spawn ---------------------------------------------------------
 
+
 def daemon_script_path() -> Path:
     """Resolve scripts/daemon.py absolute path.
 
@@ -993,6 +1072,7 @@ def spawn_daemon_detached() -> Optional[int]:
 # unchanged, so a still-running OLD-code session is surfaced once via its legacy
 # is-present check during the one transition update that ships this code.
 
+
 def _generation_from_file(p: Path) -> int:
     """Parse one generation-flag file: `<epoch>\\t<reason>` on the first line.
     Shared by the reload + skills-reload readers (and their legacy dual-reads)."""
@@ -1062,6 +1142,7 @@ def clear_reload_flag() -> None:
 # flag file so a plugin auto-update (which stamps ONLY the plugin generation) never
 # forces a redundant standalone-skills reload, and vice-versa.
 
+
 def skills_reload_generation() -> int:
     """Return the standalone-skills reload generation (epoch of the last
     `/janitor-global-reload-skills`), or 0 if none. NEVER mutated by a reader.
@@ -1099,6 +1180,7 @@ def clear_skills_reload_flag() -> None:
 
 # ---------- daemon-script staleness (self-restart on plugin upgrade) ---------
 
+
 def _read_process_cmdline(pid: int) -> str:
     """Best-effort read of a running process's full command line.
 
@@ -1111,7 +1193,10 @@ def _read_process_cmdline(pid: int) -> str:
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
             ["ps", "-p", str(pid), "-o", "args="],
-            capture_output=True, text=True, check=False, timeout=5,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -1172,8 +1257,9 @@ def _restart_decision(cmdline: str, expected: str, quarantined: set[str]) -> boo
     if expected in cmdline:
         return False
     import version_update_lib as _vul  # lazy: keeps global_state's top-level import
-                                       # graph thin for the many hooks/detectors that
-                                       # import it but never call daemon_needs_restart.
+
+    # graph thin for the many hooks/detectors that
+    # import it but never call daemon_needs_restart.
     running_ver = _cache_version_from_path(cmdline)
     current_ver = _cache_version_from_path(expected)
     if running_ver is None or current_ver is None:
@@ -1236,6 +1322,7 @@ def daemon_needs_restart() -> bool:
     expected = str(daemon_script_path().resolve())
     try:
         import version_update_lib as _vul
+
         quarantined = _vul.read_quarantine()
     except Exception:  # noqa: BLE001 — a recency-gate fault must never crash the heartbeat.
         # version_update_lib unavailable / quarantine read faulted → fall back to the
@@ -1279,8 +1366,7 @@ def request_daemon_restart() -> bool:
     if not cmdline:
         state.log_line(
             "daemon",
-            f"daemon-restart: refusing to signal pid={pid} — cannot read its cmdline to "
-            "confirm it is our daemon (a recycled pid could be any process)",
+            f"daemon-restart: refusing to signal pid={pid} — cannot read its cmdline to confirm it is our daemon (a recycled pid could be any process)",
         )
         return False
     if "daemon.py" not in cmdline and "daemon_keepalive_entry.py" not in cmdline:
@@ -1289,13 +1375,13 @@ def request_daemon_restart() -> bool:
         # forever pointing at a stranger.
         state.log_line(
             "daemon",
-            f"daemon-restart: pid={pid} is NOT a janitor daemon (recycled pid; cmdline="
-            f"{cmdline[:120]!r}) — NOT signalling it; clearing the stale daemon.pid",
+            f"daemon-restart: pid={pid} is NOT a janitor daemon (recycled pid; cmdline={cmdline[:120]!r}) — NOT signalling it; clearing the stale daemon.pid",
         )
         remove_daemon_pid()
         return False
 
     import signal as _signal
+
     try:
         os.kill(pid, _signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError) as exc:
@@ -1306,6 +1392,7 @@ def request_daemon_restart() -> bool:
 
 
 # ---------- Pillar 0 — self-resurrection (TRDD-7100178d Phase 4) -------------
+
 
 def _process_alive_not_zombie(pid: int) -> bool:
     """True iff pid is alive AND not a zombie. The wedge-kill verdict needs this
@@ -1319,7 +1406,10 @@ def _process_alive_not_zombie(pid: int) -> bool:
     try:
         proc = subprocess.run(  # noqa: S603 - explicit args, no shell
             ["ps", "-p", str(pid), "-o", "stat="],
-            capture_output=True, text=True, check=False, timeout=5,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
         return True  # can't tell → assume alive (the conservative direction here)
@@ -1354,8 +1444,7 @@ def _crash_loop_active(now: Optional[int] = None) -> bool:
         raw = _spawn_history_path().read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return False
-    recent = [ln for ln in raw.splitlines()
-              if ln.strip().isdigit() and ts - int(ln.strip()) <= _CRASH_LOOP_WINDOW_S]
+    recent = [ln for ln in raw.splitlines() if ln.strip().isdigit() and ts - int(ln.strip()) <= _CRASH_LOOP_WINDOW_S]
     return len(recent) >= _CRASH_LOOP_SPAWN_LIMIT
 
 
@@ -1392,10 +1481,7 @@ def recent_spawn_count(window_s: Optional[int] = None, now: Optional[int] = None
         raw = _spawn_history_path().read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return 0
-    return sum(
-        1 for ln in raw.splitlines()
-        if ln.strip().isdigit() and ts - int(ln.strip()) <= win
-    )
+    return sum(1 for ln in raw.splitlines() if ln.strip().isdigit() and ts - int(ln.strip()) <= win)
 
 
 def record_spawn_attempt(now: Optional[int] = None) -> None:
@@ -1440,6 +1526,7 @@ def _kill_wedged_daemon(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bo
     only guaranteed terminator for the wedge case. Returns True iff the process
     is gone afterwards. Never raises."""
     import signal as _signal
+
     pid = daemon_pid()
     if pid is None or pid <= 0 or pid == os.getpid() or pid == os.getppid():
         return False
@@ -1457,14 +1544,12 @@ def _kill_wedged_daemon(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bo
     if "daemon.py" not in cmdline and "daemon_keepalive_entry.py" not in cmdline:
         state.log_line(
             "daemon",
-            f"wedge-kill: pid={pid} heartbeat stale but cmdline {cmdline!r} is not a "
-            f"janitor daemon (pid reuse?) — NOT killing; clearing nothing",
+            f"wedge-kill: pid={pid} heartbeat stale but cmdline {cmdline!r} is not a janitor daemon (pid reuse?) — NOT killing; clearing nothing",
         )
         return False
     state.log_line(
         "daemon",
-        f"wedge-kill: daemon pid={pid} heartbeat stale {int(time.time()) - hb}s "
-        f"(> {max_silence_s}s) — sending SIGTERM",
+        f"wedge-kill: daemon pid={pid} heartbeat stale {int(time.time()) - hb}s (> {max_silence_s}s) — sending SIGTERM",
     )
     try:
         os.kill(pid, _signal.SIGTERM)
@@ -1542,8 +1627,7 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
     if _crash_loop_active():
         state.log_line(
             "daemon",
-            f"spawn refused — crash-loop breaker tripped ({_CRASH_LOOP_SPAWN_LIMIT}+ "
-            f"attempts in {_CRASH_LOOP_WINDOW_S}s); will retry once attempts age out",
+            f"spawn refused — crash-loop breaker tripped ({_CRASH_LOOP_SPAWN_LIMIT}+ attempts in {_CRASH_LOOP_WINDOW_S}s); will retry once attempts age out",
         )
         return False
     # Throttle: refuse to re-spawn if the last attempt is still within the
