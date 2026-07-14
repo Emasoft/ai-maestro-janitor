@@ -16,6 +16,53 @@ import sys
 from pathlib import Path
 
 
+def _early_log(message: str) -> None:
+    """Append ONE dated line to session-start.log WITHOUT importing the `lib` package.
+
+    This is the janitor#80 pre-import breadcrumb. It deliberately DUPLICATES the log-path
+    resolution of `lib.state.log_dir()` (JANITOR_LOG_DIR override → $CLAUDE_PROJECT_DIR →
+    git toplevel → cwd, then `/.janitor/logs`) instead of calling it, because its whole
+    reason to exist is to keep working when the `lib` import is the thing that failed — the
+    exact fault that killed this hook silently from 2026-06-20 to 2026-07-11 (a missing
+    scripts/lib sys.path entry → ModuleNotFoundError at import, which Claude Code never
+    surfaces). stdlib-only and best-effort by contract: a logging fault must NEVER become
+    the new way session start breaks, so every path is wrapped and swallowed. The line
+    format matches state.log_line so the two writers interleave cleanly in one file.
+    """
+    try:
+        import subprocess  # stdlib -- local keeps module scope import-clean
+        from datetime import datetime  # stdlib
+
+        override = os.environ.get("JANITOR_LOG_DIR", "").strip()
+        if override:
+            logs = Path(override).expanduser()
+        else:
+            proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+            if proj:
+                root = Path(proj)
+            else:
+                try:
+                    out = subprocess.run(
+                        ["git", "rev-parse", "--show-toplevel"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        timeout=5,
+                    )
+                    root = Path(out.stdout.strip())
+                except (subprocess.SubprocessError, FileNotFoundError, OSError):
+                    root = Path.cwd()
+            logs = root / ".janitor" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+        sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+        prefix = f"[s:{sid[:8]}] " if sid else ""
+        with (logs / "session-start.log").open("a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {prefix}{message}\n")
+    except Exception:  # noqa: BLE001 -- best-effort; a logging fault must never break session start
+        pass
+
+
 def _active_global_stop(gs) -> tuple[str, str, int] | None:
     """(kind, reason, since_epoch) for the active machine-wide stop, or None.
 
@@ -198,6 +245,16 @@ def _maybe_cold_compact_on_session_start(
 
 
 def main() -> int:
+    # DATED PRE-IMPORT BREADCRUMB (janitor#80). The very first thing the hook does is stamp
+    # one line into session-start.log — BEFORE the sys.path juggling and the `lib` imports
+    # below, which is precisely where this hook silently died from 2026-06-20 to 2026-07-11
+    # (a missing scripts/lib path → ModuleNotFoundError at import). Claude Code does not
+    # surface a SessionStart crash, so back then the ONLY symptom was rules quietly ceasing
+    # to install. `_early_log` does NOT import `lib`, so it still writes even when the `lib`
+    # import itself is the thing that fails — turning a future silent early death into a
+    # dated, one-`tail`-away diagnosable log line.
+    _early_log("session-start hook entered (pre-import)")
+
     # All side-effecting code lives inside main() so the hook script is
     # safely importable (no module-scope sys.exit, no module-scope
     # third-party imports). The PEP 723 dependency-completeness check
@@ -206,13 +263,22 @@ def main() -> int:
     # from flagging `state` as a missing PyPI dependency. (`state` is a
     # LOCAL module under scripts/lib/, not on PyPI; declaring it in the
     # PEP 723 `dependencies` block would break `uv run --script`.)
-    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
-    if not plugin_root:
-        print(
-            "[on-session-start] CLAUDE_PLUGIN_ROOT unset; skipping",
-            file=sys.stderr,
-        )
-        return 0
+    #
+    # A SCRIPT KNOWS WHERE IT LIVES (janitor#80). Resolve the plugin root from THIS file's
+    # own location FIRST — it is <plugin_root>/scripts/hooks/on-session-start.py, so
+    # parents[2] IS the plugin root. CLAUDE_PLUGIN_ROOT is only a claim the harness can
+    # fail to export, and the old `if not plugin_root: return 0` on an unset var was itself
+    # a silent no-op path that skipped rule installation entirely. Fall back to the env var
+    # only if — implausibly — the file-derived root is not shaped like the plugin; if
+    # neither is usable the lib-import guard below logs and bails rather than dying blind.
+    here_root = Path(__file__).resolve().parents[2]
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()
+    if (here_root / "scripts" / "lib").is_dir():
+        plugin_root = str(here_root)
+    elif env_root:
+        plugin_root = env_root
+    else:
+        plugin_root = str(here_root)
 
     # Put scripts/ on sys.path so `from lib import …` resolves — the CPV hook
     # validator's local_sibling detector recognises that package form (scripts/lib/ has
@@ -235,8 +301,20 @@ def main() -> int:
     # every hook, so an import-time death can never again pass as silence.
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
     sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
-    from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
-    from lib import memory_scopes, rules_installer, state  # noqa: E402  -- local package, not PyPI
+    try:
+        from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
+        from lib import memory_scopes, rules_installer, state  # noqa: E402  -- local package, not PyPI
+    except Exception as exc:  # noqa: BLE001 -- janitor#80: THIS import silently killed the hook for 3 weeks
+        # Log-not-silently-fatal. Without `lib` the hook genuinely cannot run, but a DATED
+        # failure line (written via the lib-FREE _early_log) makes a recurrence diagnosable
+        # in one `tail` instead of invisible. `return 1` is the honest outcome even though
+        # the __main__ shim discards it (the process still exits 0) — the LOG line, not the
+        # exit code, is the signal, because Claude Code never surfaces a hook crash itself.
+        _early_log(
+            "FATAL: `from lib import ...` failed "
+            f"({type(exc).__name__}: {exc}); plugin_root={plugin_root}; session-start hook aborting"
+        )
+        return 1
 
     state.init_state()
 
