@@ -10,8 +10,13 @@ plus distribution stats (mean / p50 / p95 / max) so spikes or a too-high
 average are visible. `--json` for scripting.
 
 Cost view: `output` tokens are the headline (full-price, the clearest driver of
-agent work); `input` + `cache_creation` are full/premium price too; `cache_read`
-is the cheap (~0.1x) context re-read, shown for context but not the alarm metric.
+agent work); `input` is full price and `cache_creation` is a PREMIUM write (~2x at the
+main agent's 1-hour cache TTL, ~1.25x at a subagent's 5-minute one); `cache_read` is the
+cheap (~0.1x) context re-read, shown for context but not the alarm metric.
+
+The `weighted` column counts the write at 1x, not its true 2x — every learned baseline and
+cap estimate is calibrated against that formula, so it is a RELATIVE load index, not a bill.
+It therefore UNDER-states a cache-miss turn, which is the one turn that hurts most.
 """
 
 from __future__ import annotations
@@ -195,7 +200,7 @@ def _render_live(as_json: bool) -> int:
         phrase = f"~{_fmt_k(until)} until auto-compact" if until > 0 else f"~{_fmt_k(-until)} PAST the auto-compact point"
         print(f"  Auto-compact point: {_fmt_k(pred.effective_compact_point)} (window {_fmt_k(pred.auto_window)} − {_fmt_k(pred.overhead)} summary)  ·  {phrase}")
     if usage is not None:
-        print(f"  Last turn — output: {usage.output_tokens} (full price)  ·  cache_creation: {usage.cache_creation_input_tokens} (one-time write, ~1.25x, billed once per prefix change)  ·  cache_read: {usage.cache_read_input_tokens} (cheap re-read, ~0.1x)")
+        print(f"  Last turn — output: {usage.output_tokens} (full price)  ·  cache_creation: {usage.cache_creation_input_tokens} (premium write, ~2x at the main agent's 1h cache TTL, billed once per prefix change)  ·  cache_read: {usage.cache_read_input_tokens} (cheap re-read, ~0.1x)")
     else:
         print("  Last turn: unavailable (turn boundary not found in the transcript tail)")
     burn = _account_burn_lines()
@@ -337,7 +342,7 @@ def _render_interval(since: int, until: int, as_json: bool, *, graph: bool = Fal
         return 0
     span_h = (until - since) / 3600.0
     print(f"[janitor-token-attribution] {label} {datetime.fromtimestamp(since):%Y-%m-%d %H:%M} → {datetime.fromtimestamp(until):%m-%d %H:%M} ({span_h:.1f}h)  ·  fleet {_fmt_k(total['weighted'])} weighted (transcript-measured, subagents included)")
-    print(f"  fleet by category — output {_fmt_k(total['output'])} (full price)  ·  input {_fmt_k(total['input'])} (uncached, full price)  ·  cache_write {_fmt_k(total['cache_creation'])} (~1.25x, once per prefix change)  ·  cache_read {_fmt_k(total['cache_read'])} (~0.1x re-read)")
+    print(f"  fleet by category — output {_fmt_k(total['output'])} (full price)  ·  input {_fmt_k(total['input'])} (uncached, full price)  ·  cache_write {_fmt_k(total['cache_creation'])} (premium, ~2x main / ~1.25x subagent, once per prefix change)  ·  cache_read {_fmt_k(total['cache_read'])} (~0.1x re-read)")
     print()
     print(f"  {'project':<26} {'weighted':>8} {'share':>6} {'output':>7} {'input':>7} {'cache_wr':>8} {'cache_rd':>8} {'msgs':>5}")
     print(f"  {'-' * 26} {'-' * 8} {'-' * 6} {'-' * 7} {'-' * 7} {'-' * 8} {'-' * 8} {'-' * 5}")

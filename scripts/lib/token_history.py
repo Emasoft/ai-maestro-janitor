@@ -83,9 +83,12 @@ def weighted(usage: dict) -> float:
     """Weighted token cost of one turn's usage dict, mirroring token_report.py:
     `output + input + cache_creation + cache_read/10`.
 
-    The full-price components (output, uncached input, the ~1.25× cache-miss write) count
-    1×; the cheap ~0.1× context re-read (`cache_read`) counts 1/10. A non-dict `usage`
-    (corrupt line) weighs 0.0 rather than raising."""
+    Output, uncached input, and the cache-miss write count 1×; the cheap ~0.1× context
+    re-read (`cache_read`) counts 1/10. NOTE the write is really a PREMIUM: 2× at the main
+    agent's 1-hour cache TTL (1.25× at the 5-minute TTL). Counting it 1× is deliberate —
+    see `token_baseline.weighted_tokens`, whose baselines this formula must match — so this
+    is a relative load index, not a bill. A non-dict `usage` (corrupt line) weighs 0.0
+    rather than raising."""
     if not isinstance(usage, dict):
         return 0.0
     output = _as_int(usage.get("output_tokens"))

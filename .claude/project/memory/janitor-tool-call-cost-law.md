@@ -18,8 +18,12 @@ turn_cost ≈ tool_calls × context_tokens × 0.1
 ```
 
 Measured on this repo's own `.janitor/state/token-meter.jsonl` (2026-07-14, ~520k context;
-weighted = `output + 1.25×cache_creation + 0.1×cache_read`): **1 call ≈ 52k · 3 ≈ 157k · 6 ≈ 311k**
-— dead linear at ~52k/call, which is exactly `520k × 0.1`. A quiet heartbeat fire is ONE tool call.
+weighted = `output + input + cache_creation + 0.1×cache_read`[^3]): **1 call ≈ 52k · 3 ≈ 157k ·
+6 ≈ 311k** — dead linear at ~52k/call, which is exactly `520k × 0.1`. A quiet heartbeat fire is
+ONE tool call.
+
+The law is **`cache_read`-driven, so the 0.1× is the only price that enters it** — it is unaffected
+by how the janitor weights a cache WRITE, and the numbers above stand regardless.
 
 The practical consequence: **a skill's step count is its price tag.** Folding four shell steps into
 one script is not cosmetic — it removes three full context re-reads. This is why `/janitor-arm` runs
@@ -66,6 +70,18 @@ exactly that mistake.
   the feedback loop passes through a billed agent, **price the actuation, not just the steady
   state** — and if you cannot make the adjustment cheap, make it RARE (hysteresis) or the feature
   is negative-value in exactly the volatile conditions it was built for.
+
+[^3]: [ocd:2026-07-14 lmd:2026-07-14] This page first wrote the formula as
+  `output + 1.25×cache_creation + 0.1×cache_read`. The code weights `cache_creation` at **1.0×**
+  (`token_baseline.weighted_tokens`, `token_history.weighted`) — the `1.25` lives only in the
+  surrounding DOCSTRINGS, and I asserted the arithmetic from a grep of the prose instead of reading
+  the expression. That is the SECOND time in one session I claimed code behavior from a string match
+  (see `[^7]` on the TRDD-CGYMUKO6 page: a grep for `add_parser(` "proved" two subcommands did not
+  exist; they were registered in a loop). Compounding it, `1.25×` is the **5-minute-TTL** write
+  price; the main agent runs a **1-hour** TTL where a write costs **2×**. So the metric is a
+  RELATIVE load index that under-counts a cache-miss turn ~2× — deliberately, since every learned
+  baseline is calibrated against it. Lesson: **a grep of prose tells you what the author BELIEVED,
+  never what the code DOES.** To state what code does, read the expression that computes it.
 
 [^2]: [ocd:2026-07-14 lmd:2026-07-14] I first "measured" the arm's cost by joining the token meter's
   records to arm timestamps with a ±4-minute window, and reported an arm costs 25× a quiet fire. It

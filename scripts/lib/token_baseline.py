@@ -19,10 +19,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# cache_read is the cheap ~0.1x context re-read; output/input/cache_creation are full (or
-# 1.25x) price. This weighted proxy tracks the effective billed load closely enough for
-# RELATIVE anomaly detection AND, paired with the OAuth utilization%, for absolute cap
-# estimation (the calibration absorbs the proxy's constant factor).
+# cache_read is the cheap ~0.1x context re-read; output/input are full price; cache_creation
+# is a PREMIUM write — 2x at the main agent's 1-hour cache TTL (1.25x at the 5-minute TTL a
+# subagent, or a session in usage overage, gets). This proxy deliberately counts it 1x anyway:
+# every learned baseline and every empirical cap estimate below is calibrated against THIS
+# formula, so re-weighting one component would silently invalidate them all. Read the result as
+# a RELATIVE load index, not a bill — it under-counts a cache-miss turn by ~2x, which is exactly
+# the turn `cold_cache_compact` exists to prevent.
 def weighted_tokens(rec: dict) -> int:
     return int(rec.get("output", 0) or 0) + int(rec.get("input", 0) or 0) + int(rec.get("cache_creation", 0) or 0) + int(rec.get("cache_read", 0) or 0) // 10
 

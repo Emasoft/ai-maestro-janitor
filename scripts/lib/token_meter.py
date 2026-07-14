@@ -442,9 +442,11 @@ def evaluate_turn_budget(
 
     - **output** tokens — full-price agent work (long replies / many tool calls).
     - **cache_creation** tokens — a CACHE-MISS cache WRITE (the prompt prefix changed, so
-      the new prefix is written to cache at ~1.25× premium). A large value in one turn is
-      the "cache write caused by a cache miss" the guard must catch — distinct from the
-      cheap 0.1× ``cache_read`` re-read, which is NOT billed here.
+      the new prefix is written to cache at a ~2× premium on the main agent's 1-hour cache
+      TTL, ~1.25× on a subagent's 5-minute one). A large value in one turn is the "cache
+      write caused by a cache miss" the guard must catch — distinct from the cheap 0.1×
+      ``cache_read`` re-read, which is NOT billed here. This is the MOST expensive token
+      class there is, which is why it gets its own signal rather than riding on `output`.
 
     Each threshold is checked INDEPENDENTLY; a threshold of ``0`` DISABLES that check
     (so a user can watch only output, only cache-miss, or both). ``tier`` is the worst

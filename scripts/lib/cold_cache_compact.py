@@ -2,10 +2,12 @@
 
 After a >1h stop (rate limit; the user exits + relaunches; a logout/login) the 1h prompt-cache
 TTL has expired, so the first resumed turn re-writes the WHOLE context as a cache-creation
-(~600k avg, ~1.25×), burning the 5h window. This module decides WHEN to auto-inject `/compact`
-so the large context is shrunk — after which the rest of the window runs cheap (~50k) and every
-future cold resume costs ~50k instead of ~600k. (It cannot avoid the IMMEDIATE cold write — any
-first turn pays that — see the TRDD; the win is ongoing + future.)
+(~600k avg) — and a write at the 1-hour TTL is billed at **2×**, the priciest token class there
+is, so a cold resume costs ~1.2M weighted and can swallow a large slice of the 5h window in a
+single turn. This module decides WHEN to auto-inject `/compact` so the large context is shrunk
+— after which the rest of the window runs cheap (~50k) and every future cold resume costs ~50k
+instead of ~600k. (It cannot avoid the IMMEDIATE cold write — any first turn pays that — see the
+TRDD; the win is ongoing + future.)
 
 Split like the rest of the codebase (pure policy vs I/O):
   * `should_compact_on_resume` / `should_compact_after_idle` are PURE + unit-testable.
