@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "description": "Keeps your dev environment tidy and secure, in the background: drift + supply-chain detectors, secret/injection guards on tool calls, rate-limit auto-resume, prompt-cache keep-alive, and a markdown memory system. Runs on a per-session CronCreate heartbeat (session-scoped, re-armed each session) plus one machine-wide background daemon that owns every global-scope update.",
   "author": {
     "name": "Emasoft",
@@ -530,7 +530,7 @@
     },
     "github_config_audit_enabled": {
       "title": "Fleet GitHub-Config Audit Enabled (daemon)",
-      "description": "ON by default (TRDD-157OH2D7). The global daemon runs a fleet-wide, READ-ONLY GitHub-config audit across every ai-maestro plugin repo (enumerated from the marketplace catalog) and writes the findings to a file the near-free per-session fleet-github-config detector surfaces. It catches what the per-session branch-protection check structurally cannot: a DIFFERENT plugin's repo left UNPROTECTED (open to stranger PRs/force-pushes), a repo carrying required_linear_history (which BLOCKS Claude's merges), or a missing CI/PR-review gate — none of which are visible unless a session happens to be open in that repo. The daemon owns it (issue #7 single-writer) so N sessions never stampede the GitHub API. Per-repo SILENT when the viewer is not an admin (can't fix it) or a probe is indeterminate; a no-op when gh is absent/unauthenticated. NEVER mutates a repo — the on-demand /janitor-github-config-fix skill does that. Opt out by setting this to false.",
+      "description": "ON by default (TRDD-157OH2D7). The global daemon runs a fleet-wide, READ-ONLY GitHub-config audit across every ai-maestro plugin repo (enumerated from the marketplace catalog) and writes the findings to a file the near-free per-session fleet-github-config detector surfaces. It catches what the per-session branch-protection check structurally cannot: a DIFFERENT plugin's repo left UNPROTECTED (open to stranger PRs/force-pushes), a repo carrying required_linear_history (which BLOCKS Claude's merges), or a missing CI/PR-review gate \u2014 none of which are visible unless a session happens to be open in that repo. The daemon owns it (issue #7 single-writer) so N sessions never stampede the GitHub API. Per-repo SILENT when the viewer is not an admin (can't fix it) or a probe is indeterminate; a no-op when gh is absent/unauthenticated. NEVER mutates a repo \u2014 the on-demand /janitor-github-config-fix skill does that. Opt out by setting this to false.",
       "type": "boolean",
       "default": true,
       "sensitive": false
@@ -747,35 +747,35 @@
     },
     "postcompact_push_enabled": {
       "title": "Post-Compact Resume Push Enabled",
-      "description": "ON by default (TRDD-HI0BGQGJ). After a context compaction the `post-compact-resume` hook records WHAT to resume in a flag, but the WAKE was pull-only: only the next heartbeat cron fire reads that flag, and on an idle session the cron has demoted to the SLOW ~30-min floor — so nothing was written for up to 30 minutes (the exact 'agent stalled after compaction' failure). When true, the hook ALSO fires a detached `resume_trigger.py` that types /janitor-resume into this session's own iTerm/tmux pane, so the resume runs in seconds instead of waiting for the slow cron. Gated to UNATTENDED sessions only (see postcompact_push_attended_grace_s): a recently-active user is left alone and resumed by the cron path as before, so keystrokes are never typed into a live input line. Fully fail-safe — a non-automatable terminal (plain Terminal.app / VS Code / CI) degrades to the cron path with no regression, and any push fault never affects the compaction. Set to false to opt OUT and keep only the cron-driven resume.",
+      "description": "ON by default (TRDD-HI0BGQGJ). After a context compaction the `post-compact-resume` hook records WHAT to resume in a flag, but the WAKE was pull-only: only the next heartbeat cron fire reads that flag, and on an idle session the cron has demoted to the SLOW ~30-min floor \u2014 so nothing was written for up to 30 minutes (the exact 'agent stalled after compaction' failure). When true, the hook ALSO fires a detached `resume_trigger.py` that types /janitor-resume into this session's own iTerm/tmux pane, so the resume runs in seconds instead of waiting for the slow cron. Gated to UNATTENDED sessions only (see postcompact_push_attended_grace_s): a recently-active user is left alone and resumed by the cron path as before, so keystrokes are never typed into a live input line. Fully fail-safe \u2014 a non-automatable terminal (plain Terminal.app / VS Code / CI) degrades to the cron path with no regression, and any push fault never affects the compaction. Set to false to opt OUT and keep only the cron-driven resume.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "postcompact_push_attended_grace_s": {
       "title": "Post-Compact Resume Push - Attended Grace (seconds)",
-      "description": "Seconds of recency that count a session as ATTENDED for the post-compact resume push (default 180). If a GENUINE user prompt (the cross-plugin user-presence breadcrumb's last_user_input_epoch, bumped only by real input — never by a cron heartbeat) landed within this window, the push is SKIPPED and the session is resumed by the normal cron path instead, so the janitor never types /janitor-resume into a live input line. A larger value is more conservative (treats the user as present for longer — fewer pushes); a smaller value pushes sooner after the last keystroke. Only consulted when postcompact_push_enabled is true.",
+      "description": "Seconds of recency that count a session as ATTENDED for the post-compact resume push (default 180). If a GENUINE user prompt (the cross-plugin user-presence breadcrumb's last_user_input_epoch, bumped only by real input \u2014 never by a cron heartbeat) landed within this window, the push is SKIPPED and the session is resumed by the normal cron path instead, so the janitor never types /janitor-resume into a live input line. A larger value is more conservative (treats the user as present for longer \u2014 fewer pushes); a smaller value pushes sooner after the last keystroke. Only consulted when postcompact_push_enabled is true.",
       "type": "number",
       "default": 180,
       "sensitive": false
     },
     "cold_cache_compact_enabled": {
       "title": "Cold-Cache Auto-Compact on Resume Enabled",
-      "description": "ON by default (TRDD-EUWIHP0G). After a >1h stop (a rate limit; the user exits and relaunches later; a logout/login), the 1h prompt-cache TTL has expired, so the FIRST resumed turn re-writes the WHOLE context as a cache-creation (~600k tokens on average, billed ~1.25×), burning a large chunk of the 5h window. When true, the janitor self-fires /compact on resume whenever a LARGE context comes back cold — at SessionStart (source startup/resume, context >= cold_cache_compact_min_context_tokens) and on the heartbeat rate-limit-clear path (the gap outlived the cache TTL AND the context is large). It CANNOT avoid that immediate cold write (any first turn pays it), but it shrinks the context to ~50k so the REST of the window — and every FUTURE cold resume — runs cheap instead of dragging ~600k forward on every turn. The compaction is SOFT (the resumed REPL is idle, so nothing is interrupted) and the resume is preserved: post-compact-resume records the directive and continues the prior task after compaction. Fully fail-safe — a non-automatable terminal (plain Terminal.app / VS Code / CI) or any fault degrades to the normal resume with no regression. Set to false to opt OUT.",
+      "description": "ON by default (TRDD-EUWIHP0G). After a >1h stop (a rate limit; the user exits and relaunches later; a logout/login), the 1h prompt-cache TTL has expired, so the FIRST resumed turn re-writes the WHOLE context as a cache-creation (~600k tokens on average, billed ~1.25\u00d7), burning a large chunk of the 5h window. When true, the janitor self-fires /compact on resume whenever a LARGE context comes back cold \u2014 at SessionStart (source startup/resume, context >= cold_cache_compact_min_context_tokens) and on the heartbeat rate-limit-clear path (the gap outlived the cache TTL AND the context is large). It CANNOT avoid that immediate cold write (any first turn pays it), but it shrinks the context to ~50k so the REST of the window \u2014 and every FUTURE cold resume \u2014 runs cheap instead of dragging ~600k forward on every turn. The compaction is SOFT (the resumed REPL is idle, so nothing is interrupted) and the resume is preserved: post-compact-resume records the directive and continues the prior task after compaction. Fully fail-safe \u2014 a non-automatable terminal (plain Terminal.app / VS Code / CI) or any fault degrades to the normal resume with no regression. Set to false to opt OUT.",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "cold_cache_compact_min_context_tokens": {
       "title": "Cold-Cache Auto-Compact - Minimum Context (tokens)",
-      "description": "The resumed-context size (input + cache_read + cache_creation of the last assistant turn) at or above which the cold-cache auto-compact fires (default 270000). Below this the context is small enough that a cold re-write is cheap and compacting it saves nothing (and is lossy), so the trigger is a no-op — a fresh/empty session therefore never trips it. Raise it to compact only very large contexts; lower it to compact more eagerly. Only consulted when cold_cache_compact_enabled is true.",
+      "description": "The resumed-context size (input + cache_read + cache_creation of the last assistant turn) at or above which the cold-cache auto-compact fires (default 270000). Below this the context is small enough that a cold re-write is cheap and compacting it saves nothing (and is lossy), so the trigger is a no-op \u2014 a fresh/empty session therefore never trips it. Raise it to compact only very large contexts; lower it to compact more eagerly. Only consulted when cold_cache_compact_enabled is true.",
       "type": "number",
       "default": 270000,
       "sensitive": false
     },
     "cold_cache_compact_min_idle_seconds": {
       "title": "Cold-Cache Auto-Compact - Minimum Idle (seconds)",
-      "description": "How long an IN-SESSION gap must last before the heartbeat rate-limit path treats the prompt cache as COLD and eligible for auto-compact (default 3600 — the 1h prompt-cache TTL). Below this the cache is still warm, so compacting would just waste a write; the branch stays silent and emits the normal resume cue. This gate applies ONLY to the heartbeat rate-limit path — the SessionStart path has no idle gate (a fresh process loading a large context is cold by construction). Only consulted when cold_cache_compact_enabled is true.",
+      "description": "How long an IN-SESSION gap must last before the heartbeat rate-limit path treats the prompt cache as COLD and eligible for auto-compact (default 3600 \u2014 the 1h prompt-cache TTL). Below this the cache is still warm, so compacting would just waste a write; the branch stays silent and emits the normal resume cue. This gate applies ONLY to the heartbeat rate-limit path \u2014 the SessionStart path has no idle gate (a fresh process loading a large context is cold by construction). Only consulted when cold_cache_compact_enabled is true.",
       "type": "number",
       "default": 3600,
       "sensitive": false
@@ -901,14 +901,14 @@
     },
     "tickets_enabled": {
       "title": "Support-Ticket Incident Queue",
-      "description": "When true (DEFAULT), the janitor turns a detected incident into a support ticket and repairs it (TRDD-CGYMUKO6). HARNESS incidents — its OWN machinery (a corrupt memgrep index, a failed migration, a crash-looping daemon) — open and dispatch a repair agent automatically. PROJECT incidents — YOUR code, repo, workflows — are only ever PROPOSED: the janitor writes a proposal TRDD and recommends `/janitor-support-open-ticket TRDD-<id>`; nothing is dispatched and nothing in your repo is touched until you run it. Set false to disable the queue entirely (detectors keep detecting; they just stop opening tickets).",
+      "description": "When true (DEFAULT), the janitor turns a detected incident into a support ticket and repairs it (TRDD-CGYMUKO6). HARNESS incidents \u2014 its OWN machinery (a corrupt memgrep index, a failed migration, a crash-looping daemon) \u2014 open and dispatch a repair agent automatically. PROJECT incidents \u2014 YOUR code, repo, workflows \u2014 are only ever PROPOSED: the janitor writes a proposal TRDD and recommends `/janitor-support-open-ticket TRDD-<id>`; nothing is dispatched and nothing in your repo is touched until you run it. Set false to disable the queue entirely (detectors keep detecting; they just stop opening tickets).",
       "type": "boolean",
       "default": true,
       "sensitive": false
     },
     "tickets_per_heartbeat": {
       "title": "Ticket Dispatches per Heartbeat",
-      "description": "Maximum repair agents the scheduler may dispatch on ONE heartbeat fire. Default: 2. A cap, not a target — an unbounded repair queue is one bug away from being a token fire.",
+      "description": "Maximum repair agents the scheduler may dispatch on ONE heartbeat fire. Default: 2. A cap, not a target \u2014 an unbounded repair queue is one bug away from being a token fire.",
       "type": "number",
       "default": 2,
       "sensitive": false
@@ -922,7 +922,7 @@
     },
     "ticket_max_attempts": {
       "title": "Ticket Max Attempts",
-      "description": "How many times a ticket may be worked before it becomes `needs_human` and is surfaced on every heartbeat until a person deals with it. Default: 3. It is NEVER silently dropped — a silent give-up is indistinguishable from a fix.",
+      "description": "How many times a ticket may be worked before it becomes `needs_human` and is surfaced on every heartbeat until a person deals with it. Default: 3. It is NEVER silently dropped \u2014 a silent give-up is indistinguishable from a fix.",
       "type": "number",
       "default": 3,
       "sensitive": false
@@ -943,7 +943,7 @@
     },
     "ticket_dispatch_interval": {
       "title": "Ticket Scheduler Cadence (seconds)",
-      "description": "Minimum seconds between `ticket-dispatch` runs. Default: 300 (every heartbeat) — an empty queue costs a directory glob that finds nothing, and a critical incident should not wait out a long cadence.",
+      "description": "Minimum seconds between `ticket-dispatch` runs. Default: 300 (every heartbeat) \u2014 an empty queue costs a directory glob that finds nothing, and a critical incident should not wait out a long cadence.",
       "type": "number",
       "default": 300,
       "sensitive": false

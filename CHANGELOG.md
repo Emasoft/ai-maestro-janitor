@@ -2,93 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.42.0] - 2026-07-13
+## [0.43.0] - 2026-07-14
 
 ### Bug Fixes
 
-- Restore the missing exec bit on the detector
-- Mask git remote credentials in the report (TRDD-ULYUOP0Y)
-- Stop misclassifying local FUSE mounts as network (TRDD-ULYUOP0Y)
-- Lock the plugin-update-requests RMW against lost updates (TRDD-YMTUPQER)
-- Git -c arg-skip in verb parse; drop unreachable python-deny branch (TRDD-DQJVVMFN)
-- Launchd witness compares labels, not volatile PID column (TRDD-DQJVVMFN)
-- Plugin description claimed a 'durable' cron and 'No external daemons' — both false
-- A lesson had no keywords, so it was unreachable — give it its address back
-- Four guards that did not guard (audit findings #1/#4/#5/#6)
-- CRITICAL — a crash-recovery could DELETE a page and lose it forever (F1)
-- The conflict pass could never commit, and harvest never converged (F2)
-- A "new page" write could silently overwrite an existing memory (F3)
-- The audit chain broke ITSELF, then cried tampering forever (F4)
-- A captured account could be silently orphaned by the daemon tick
-- Racing key-minters orphaned a key, breaking chain verification (F6, F7)
-- The USER-memory backup mirrored a live transaction, and an index could block restore (F10)
-- The recovery audit log destroyed its own tamper-evidence, then buried itself in noise (F8, F9)
-- "staged file is gone" is not proof a write applied (F5)
-- A lesson could be silently truncated, and the crash journal was not durable (F11, F12)
-- Harden the iTerm AppleScript sink; share the robust update matcher (findings 3, 4)
-- Stop writing the OAuth authorization code to disk and to the log (finding 2)
-- 20 lessons were silently missing from the index (two bugs, both mine)
-- Our own context guard was the machine's #1 prompt-cache breaker (TRDD-K1RJUYGK)
-- The injection guard was still injecting on its own hot path (TRDD-K1RJUYGK)
-- Collapse the nested if in raw_footnote_defs (clippy 1.97 -D warnings)
-- Clear CPV strict-validate gate — 1 CRITICAL + 3 real findings (not scanner appeasement)
+- Push /janitor-resume after a compaction so an idle session wakes in seconds, not up to 30 min (TRDD-HI0BGQGJ)
+- 4 code-review findings on the fleet-audit + cold-cache work
+- Omit required_status_checks when no CI contexts — GitHub 422s an empty array
+- The ai-maestro inject channel reported success on spawn, not delivery (TRDD-3VW434Q8)
+- The schema migration manufactured the FTS corruption it was meant to fix
+- Never type into the user's pane while they are present unless they asked
+- Disarmed.flag now requires real human authority (TRDD-RDFWQIFA)
+- The two merge gates were mutually unsatisfiable (TRDD-MQBV844P)
+- Janitor-github-config-fix had unparseable frontmatter
+- Tighten janitor-github-config-fix description under the token limit
+- Clear the three --strict NITs blocking the release
 
 ### Documentation
 
-- Add Y9KM5RCJ — release-triggered janitor self-update
-- Y9KM5RCJ complete — record impl commit 5554a51 + test pass
-- Add YMTUPQER — universal per-heartbeat plugin auto-update
-- YMTUPQER complete — impl 92bb9af + tests 38cb35d, suite pass
-- Add janitor beat-tasks + limitations wikimem (PROJECT scope)
-- Refresh CLAUDE.md project map for YMTUPQER symbols
-- Record the DEAD SECURITY SESSION gotcha + its lesson (2026-07-12)
-- Stay on topic — a case page holds case facts, methodology lives in one page
-- Add TRDD-DQJVVMFN — test process sandbox (complete)
-- Add TRDD-ULYUOP0Y — environment detection expansion (complete)
-- TRDD-ULYUOP0Y wave-2 addendum + implementation-commits
-- Capture the identify-environment prober design + the "anchor a subprocess loses" lesson
-- TRDD-ULYUOP0Y wave-3 addendum + implementation-commits (gh/CI/releases/registries/homebrew/fork/topology)
-- Refresh CLAUDE.md project map after the code-review source edits
-- The heartbeat cron is session-scoped BY DESIGN — 'durable' was never a real param
-- The heartbeat cron is session-scoped by design — retract the 'durable downgrade' claim
-- A lesson is a guardrail, not a story — prescribe the terse form
-- YRPUSIFY's bucketing approach is falsified — the strip, not the text, breaks the cache
-- Refresh the CLAUDE.md project map after the cache-thrash fix
-- Add TRDD-9K0O5YBQ (Claude Code compat audit) + TRDD-SLFMG704 (cross-plugin handoff)
-- SLFMG704 — hook: Stop belongs to NO plugin; and three ai-maestro Stop hooks are broken
-- SLFMG704 — reconcile the offender table with the completed attribution
-- SLFMG704 — prove AgentLens's "hook: <Event>" label is a boundary, not an emitter
-- K1RJUYGK — RETRACT the attribution; the fix stands, the blame does not
-- Retitle K1RJUYGK — a retraction that leaves the headline standing is not a retraction
-- SLFMG704 — RETRACT the "broken ai-maestro hooks" finding; it was my query that was broken
-- SLFMG704 — PostToolBatch has no owner; the boundary-not-emitter proof gets its cleanest leg
-- Split the two oversized memory SKILL.md bodies under the CPV token gate (lossless)
+- K1RJUYGK shipped in v0.42.0 → column testing; falsification (re-measure) still pending
+- Record the self-update bootstrap gap — a fast-updater can't accelerate its own first release
+- HI0BGQGJ implemented in 307427a → column testing; falsification of the attended gate verified
+- 157OH2D7 implemented in 8bd2949 → column testing
+- EUWIHP0G implemented in dc059f3 → column testing
+- Refresh the fenced CLAUDE.md project map
+- 3VW434Q8 implemented in e7c4624 → column testing; falsification verified
+- Add TRDD-RDFWQIFA — disarmed.flag is a forgeable user opt-out
+- Record the memgrep FTS-desync corruption, indexed by its symptom
+- Add TRDD-MQBV844P — the two merge gates are mutually unsatisfiable
+- Add TRDD-CGYMUKO6 — janitor support-ticket system (incident management)
+- The issue-code catalog + resume state
+- Publish the issue-code catalog as docs/ISSUE-CODES.md
+- TRDD-CGYMUKO6 — record the finding that changed the design
 
 ### Features
 
-- Release-triggered janitor self-update (TRDD-Y9KM5RCJ)
-- Universal user-scope auto-update via daemon signal (TRDD-YMTUPQER)
-- Detect a security session that cannot reach the keychain
-- Full secret-safe environment prober (TRDD-ULYUOP0Y)
-- Add Claude auth-mode / subscription detection (TRDD-ULYUOP0Y)
-- Git/GitHub/wikimem/plugins detection + JSON-to-disk (TRDD-ULYUOP0Y)
-- Count standalone (non-plugin) skills (TRDD-ULYUOP0Y)
-- Gh user, CI actions/Claude-action, releases, registries, homebrew-tap-trust, fork, topology (TRDD-ULYUOP0Y)
-- A lesson is an ATOM — give it id, status, key-phrases (schema v4)
+- Fleet-wide GitHub-config audit + on-demand fix skill (TRDD-157OH2D7)
+- Cold-cache auto-compact on resume after a >1h idle gap (TRDD-EUWIHP0G)
+- Validated, transactional schema migrations — a migration must prove its own output
+- The support-ticket core — incident queue + the ownership boundary (TRDD-CGYMUKO6)
+- The scheduler + the CLI — dispatch across heartbeats (TRDD-CGYMUKO6)
+- The issue-code catalog — one entry point every scanner raises through (TRDD-CGYMUKO6)
+- Memgrep emits issue codes; the health detector turns them into work (TRDD-CGYMUKO6)
+- Arm the incident queue — the self-heal ledger, the agent, the wiring (TRDD-CGYMUKO6)
 
 ### Miscellaneous
 
-- Bootstrap .trashcan (gitignore + survival markers) after first safe-delete
+- Refresh the fenced CLAUDE.md project map (stale digest)
 
-### Performance
+### Styling
 
-- 14 memory-frequency knobs -> 1 command (-1262 tok EVERY session)
-
-### Tests
-
-- Real no-mock tests for universal user-scope auto-update (TRDD-YMTUPQER)
-- Add audit mode — record every process spawn (Phase 0)
-- Deny-by-default process + signal guard (S1h)
-- Prove the process guard guards (35 tests + falsification)
-- Witness the two states that are not files (S1i)
+- Apply cargo fmt
 
