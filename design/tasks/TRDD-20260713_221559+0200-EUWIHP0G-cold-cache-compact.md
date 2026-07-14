@@ -43,8 +43,8 @@ heartbeat rate-limit path AND after a login/logout.
   (`cold-compact-fired.ts`) prevents a double-fire before the compact lands.
 
 **STATUS: IMPLEMENTED + tests green (commit dc059f3).** `column: testing`. Shipped:
-`scripts/lib/cold_cache_compact.py` (pure `should_compact_on_resume` / `should_compact_after_idle`
-+ readers + cooldown + 4 knobs); SessionStart wiring via the testable helper
+`scripts/lib/cold_cache_compact.py` (pure `should_compact_on_resume` / `should_compact_after_idle`,
+plus readers, cooldown and 4 knobs); SessionStart wiring via the testable helper
 `_maybe_cold_compact_on_session_start` in `scripts/hooks/on-session-start.py`; the dispatch
 rate-limit branch `_maybe_cold_compact_on_rate_limit` wired into `_phase_rate_limit_recovery` in
 `scripts/dispatch.py`; the 4 `.claude-plugin/plugin.json` userConfig knobs. 47 new tests
