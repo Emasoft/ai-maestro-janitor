@@ -52,6 +52,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -288,6 +289,42 @@ def main() -> int:
         hits.extend(_scan_node_modules(nm, incidents))
 
     state.atomic_write(last_hash_file, combined)
+
+    # Route each curated incident into the issue catalog. The incident
+    # itself (name@version, from the user-maintained .janitor/incidents.txt
+    # blocklist) is a bounded, ENUMERABLE identity — unlike a free-text
+    # regex match, we already know the whole domain of possible findings,
+    # so a version that's purged from the blocklist (or from every cache)
+    # cleanly withdraws its own proposal here.
+    raised = 0
+    skipped = 0
+    for name, version in sorted(incidents):
+        where = f"{name}@{version}"
+        matches = [h for h in hits if f"{name}@{version}" in h]
+        if not matches:
+            issue_catalog.clear_issue("DEP-002", where=where)
+            continue
+        if raised < issue_catalog.MAX_RAISES_PER_FIRE:
+            r = issue_catalog.raise_issue(
+                "DEP-002",
+                where=where,
+                evidence=[".janitor/incidents.txt"],
+                package=name,
+                version=version,
+                found=matches[0],
+            )
+            if r.first_seen and r.line:
+                print(r.line)
+            elif not r.ok:
+                state.log_line(_NAME, f"could not raise DEP-002: {r.why}")
+            raised += 1
+        else:
+            skipped += 1
+    if skipped:
+        state.log_line(
+            _NAME,
+            f"{skipped} DEP-002 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
+        )
 
     if not hits:
         state.rotate_log_if_big(_NAME)

@@ -277,6 +277,7 @@ class Pending:
     title: str
     severity: str
     command: str
+    key: str = ""  # the finding's dedupe key — what `reconcile` matches a live finding against
 
 
 def pending(project_dir: str | None = None) -> list[Pending]:
@@ -306,6 +307,7 @@ def pending(project_dir: str | None = None) -> list[Pending]:
                 title=tickets._clean(fm.get("title", ""), tickets.TITLE_CAP),
                 severity=fm.get("ticket-severity", "medium"),
                 command=f"/janitor-support-open-ticket TRDD-{uid}",
+                key=fm.get("ticket-dedupe-key", ""),
             )
         )
     out.sort(key=lambda p: (-tickets.SEVERITY_RANK.get(p.severity, 0), p.trdd))

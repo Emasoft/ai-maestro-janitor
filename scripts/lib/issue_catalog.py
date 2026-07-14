@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 import string
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,13 @@ import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
 
 CODE_RE = re.compile(r"^[A-Z][A-Z0-9]{1,9}-\d{3}$")
+
+# How many proposals ONE detector may author in ONE fire. A proposal is a file in the user's
+# git-tracked design board, so a scanner that trips over a vendored tree full of matches must not be
+# able to commit a hundred of them. The ones over the cap are not lost — the finding is still printed,
+# and the next fire proposes them (dedupe means the earlier ones do not repeat). Any detector that
+# caps MUST log what it dropped: a silent truncation reads as "that was everything".
+MAX_RAISES_PER_FIRE = 5
 
 
 @dataclass(frozen=True)
@@ -548,6 +556,43 @@ def clear_issue(
         return None
     key = _finding_key(code, issue, _fields(where, data), dedupe_key)
     return ticket_proposal.retract(key, project_dir=project_dir)
+
+
+def reconcile(
+    code: str,
+    live_wheres: Iterable[object],
+    *,
+    project_dir: str | None = None,
+) -> list[str]:
+    """Withdraw every proposal for `code` whose finding is NO LONGER THERE. Returns the withdrawn ids.
+
+    `clear_issue` answers "this exact finding is gone" — which only works when the detector can still
+    NAME the finding it wants to clear. Most scanners cannot: a scan produces the findings that EXIST,
+    and the ones that vanished are, by definition, not in the result. Asking such a detector to clear
+    what it no longer sees is asking it to remember every string it has ever emitted.
+
+    So invert it. The detector passes the `where` of every finding it found THIS run, and anything else
+    on the board under this code is stale by construction. That is also why it is one pass over the
+    proposals rather than one pass per finding: a lockfile with 800 dependencies must not re-read the
+    whole design board 800 times to discover that 799 of them are fine.
+
+    Call it on EVERY run, including the clean one (with an empty set) — a scanner that only reconciles
+    when it finds something can never withdraw its last proposal, which is precisely the one that
+    matters.
+    """
+    issue = ISSUE_CATALOG.get(code)
+    if issue is None or tickets.KIND_REGISTRY[issue.kind].domain != tickets.PROJECT:
+        return []
+    live = {_finding_key(code, issue, _fields(str(w), {}), "") for w in (live_wheres or [])}
+    prefix = f"{code}:"
+    withdrawn: list[str] = []
+    for p in ticket_proposal.pending(project_dir):
+        if not p.key.startswith(prefix) or p.key in live:
+            continue
+        uid = ticket_proposal.retract(p.key, project_dir=project_dir)
+        if uid:
+            withdrawn.append(uid)
+    return withdrawn
 
 
 def issue_domain(code: str) -> str:

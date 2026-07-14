@@ -36,6 +36,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sh  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -241,6 +242,11 @@ def _scan_project(project_root: Path) -> list[str]:
     skip_dirs = {"node_modules", ".venv", "venv", "env",
                  "vendor", "third_party", ".git"}
 
+    # Raised here, not in main(): this loop is the only place that still holds the
+    # (ecosystem, name, target, rel) tuple — main() only ever sees the formatted string.
+    raised = 0
+    skipped = 0
+    live: list[str] = []
     for lockname, (ecosystem, parser) in _LOCKFILE_PARSERS.items():
         for path in project_root.rglob(lockname):
             # Skip vendored / cached lockfiles.
@@ -254,12 +260,40 @@ def _scan_project(project_root: Path) -> list[str]:
                 target = sh.is_typosquat_candidate(
                     name, popular, max_distance=max_dist,
                 )
-                if target and target != name:
-                    rel = path.relative_to(project_root)
-                    issues.append(
-                        f"{ecosystem}:{name} looks like a typosquat of "
-                        f"'{target}' (distance ≤ {max_dist}) — installed via {rel}"
+                if not target or target == name:
+                    continue
+                rel = path.relative_to(project_root)
+                where = f"{ecosystem}:{name}"
+                live.append(where)
+                issues.append(
+                    f"{ecosystem}:{name} looks like a typosquat of "
+                    f"'{target}' (distance ≤ {max_dist}) — installed via {rel}"
+                )
+                if raised < issue_catalog.MAX_RAISES_PER_FIRE:
+                    r = issue_catalog.raise_issue(
+                        "DEP-003",
+                        where=where,
+                        evidence=[str(rel)],
+                        package=name,
+                        target=target,
+                        found=f"{ecosystem}:{name} vs '{target}' (distance ≤ {max_dist}) in {rel}",
                     )
+                    if r.first_seen and r.line:
+                        print(r.line)
+                    elif not r.ok:
+                        state.log_line(_NAME, f"could not raise DEP-003: {r.why}")
+                    raised += 1
+                else:
+                    skipped += 1
+    if skipped:
+        state.log_line(_NAME, f"{skipped} DEP-003 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap")
+
+    # ONE sweep at the end, not a clear per dependency. A dependency that stops looking like a
+    # typosquat (it was removed, or renamed to the real package) has its proposal withdrawn because it
+    # is absent from `live` — and a lockfile with 800 names must not re-read the whole design board
+    # 800 times to learn that 799 of them are fine.
+    for uid in issue_catalog.reconcile("DEP-003", live):
+        state.log_line(_NAME, f"withdrew TRDD-{uid} — the typosquat is gone")
     return issues
 
 

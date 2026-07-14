@@ -45,6 +45,7 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -311,6 +312,45 @@ def main() -> int:
     # Always update the fingerprint snapshot — first run baselines, later
     # runs land the new state so a drift only fires once.
     state.atomic_write(fingerprint_file, _stable_json(current))
+
+    # Ticket ONLY the rug-pull: a server that was already installed and whose fingerprint CHANGED.
+    #
+    # The detector also reports servers appearing and disappearing, and those are worth SAYING — but
+    # they are not this incident. A server appearing is usually the user installing one, and a ticket
+    # titled "an installed MCP server changed its fingerprint" would then be making a claim that is
+    # simply false. A finding is allowed to be informational; a ticket has to be TRUE, because someone
+    # is going to act on it.
+    #
+    # A server that is GONE takes its proposal with it: whatever the rug-pull was, it cannot bite from
+    # a server that is no longer installed. A drifted server that stays drifted does NOT auto-clear —
+    # only its removal, or a human approving the fix, ends it.
+    if not is_first_run:
+        raised = 0
+        skipped = 0
+        drifted = [k for k in sorted(set(last) & set(current)) if last[k] != current[k]]
+        for name in drifted:
+            if raised >= issue_catalog.MAX_RAISES_PER_FIRE:
+                skipped += 1
+                continue
+            r = issue_catalog.raise_issue(
+                "MCPSEC-001",
+                where=name,
+                evidence=[f"mcp:{name}"],
+                server=name,
+                found=f"fingerprint drifted ({last[name]} → {current[name]})",
+            )
+            if r.first_seen and r.line:
+                print(r.line)
+            elif not r.ok:
+                state.log_line(_NAME, f"could not raise MCPSEC-001: {r.why}")
+            raised += 1
+        for removed in sorted(set(last) - set(current)):
+            issue_catalog.clear_issue("MCPSEC-001", where=removed)
+        if skipped:
+            state.log_line(
+                _NAME,
+                f"{skipped} MCPSEC-001 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
+            )
 
     if not issues:
         state.rotate_log_if_big(_NAME)

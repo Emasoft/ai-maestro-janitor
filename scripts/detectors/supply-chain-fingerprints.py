@@ -89,6 +89,7 @@ from typing import Any
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sec  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -777,6 +778,10 @@ def main() -> int:
         for issue in issues
     ]
     if not flat:
+        # Clean — withdraw every standing proposal. Reconciling only when there IS a finding would
+        # strand the last one on the board, which is precisely the one the user just fixed.
+        for uid in issue_catalog.reconcile("DEP-001", []):
+            state.log_line(_NAME, f"withdrew TRDD-{uid} — the fingerprint is gone")
         state.rotate_log_if_big(_NAME)
         return 0
 
@@ -810,6 +815,43 @@ def main() -> int:
     # even after the drift line scrolls off.
     for rule, issue in flat:
         state.log_line(_NAME, f"[{rule}] {issue}")
+
+    # Route each finding into the issue catalog — one proposal per distinct (rule, issue) pair, capped
+    # so a noisy sub-check cannot commit a pile of TRDD files in one fire.
+    raised = 0
+    skipped = 0
+    live: list[str] = []
+    for rule, issue in flat:
+        where = f"{rule}:{issue}"
+        live.append(where)
+        if raised >= issue_catalog.MAX_RAISES_PER_FIRE:
+            skipped += 1
+            continue
+        r = issue_catalog.raise_issue(
+            "DEP-001",
+            where=where,
+            evidence=[rule],
+            package=rule,
+            version="",
+            advisory=issue,
+            found=issue,
+        )
+        if r.first_seen and r.line:
+            print(r.line)
+        elif not r.ok:
+            state.log_line(_NAME, f"could not raise DEP-001: {r.why}")
+        raised += 1
+    if skipped:
+        state.log_line(
+            _NAME,
+            f"{skipped} DEP-001 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
+        )
+
+    # These sub-checks match free text, so the detector cannot NAME a finding that has stopped
+    # matching — but it does not have to. Reconcile against what IS here: anything on the board under
+    # DEP-001 that this scan did not produce is stale by construction.
+    for uid in issue_catalog.reconcile("DEP-001", live):
+        state.log_line(_NAME, f"withdrew TRDD-{uid} — the fingerprint is gone")
 
     state.rotate_log_if_big(_NAME)
     return 0

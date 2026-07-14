@@ -279,6 +279,54 @@ def test_raise_and_clear_derive_the_SAME_key(project: Path) -> None:
     assert _proposals(project) == []
 
 
+def test_reconcile_withdraws_the_findings_that_are_GONE_and_keeps_the_rest(project: Path) -> None:
+    """The sweep a free-text scanner needs. A scan produces the findings that EXIST; the vanished ones
+    are, by definition, absent from the result — so a detector cannot CLEAR what it can no longer NAME.
+    Reconcile inverts it: the detector says what IS here, and anything else under that code is stale."""
+    a = issue_catalog.raise_issue("DEP-001", where="npm:left-pad", package="left-pad", now=NOW)
+    b = issue_catalog.raise_issue("DEP-001", where="npm:evil", package="evil", now=NOW)
+    assert len(_proposals(project)) == 2
+
+    withdrawn = issue_catalog.reconcile("DEP-001", ["npm:evil"])  # left-pad is fixed; evil remains
+
+    assert withdrawn == [a.trdd]
+    remaining = _proposals(project)
+    assert len(remaining) == 1
+    assert b.trdd in remaining[0].name
+
+
+def test_reconcile_with_NOTHING_live_clears_the_board(project: Path) -> None:
+    """The clean run. A detector that only reconciles when it finds something can never withdraw its
+    LAST proposal — which is exactly the one the user just fixed."""
+    issue_catalog.raise_issue("DEP-001", where="npm:evil", package="evil", now=NOW)
+
+    assert len(issue_catalog.reconcile("DEP-001", [])) == 1
+    assert _proposals(project) == []
+
+
+def test_reconcile_never_touches_ANOTHER_code(project: Path) -> None:
+    """One scanner's sweep must not withdraw another scanner's findings — they know nothing about each
+    other's domains, and a scan that found no typosquats says nothing at all about the workflows."""
+    keep = issue_catalog.raise_issue("WFSEC-001", where=".github/workflows", now=NOW)
+    issue_catalog.raise_issue("DEP-003", package="reqeusts", target="requests", now=NOW)
+
+    issue_catalog.reconcile("DEP-003", [])
+
+    live = _proposals(project)
+    assert len(live) == 1 and keep.trdd in live[0].name
+
+
+def test_reconcile_leaves_an_APPROVED_finding_alone(project: Path) -> None:
+    """Once approved there is no proposal left to withdraw — the queue owns it, and only the agent
+    working the ticket may close it."""
+    r = issue_catalog.raise_issue("DEP-001", where="npm:evil", package="evil", now=NOW)
+    ok, _ = ticket_proposal.approve(r.trdd, now=NOW)
+    assert ok
+
+    assert issue_catalog.reconcile("DEP-001", []) == []
+    assert len(tickets.load_all()) == 1
+
+
 # --------------------------------------------------------------------------- #
 # 5. the published catalog must never lie
 # --------------------------------------------------------------------------- #

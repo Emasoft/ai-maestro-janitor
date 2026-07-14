@@ -42,6 +42,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
 import agent_config_patterns as acp  # type: ignore[import-not-found]  # noqa: E402
+import issue_catalog  # type: ignore[import-not-found]  # noqa: E402
 import security_helpers as sh  # type: ignore[import-not-found]  # noqa: E402
 import state  # type: ignore[import-not-found]  # noqa: E402
 
@@ -143,10 +144,14 @@ def _scan_source_file(path: Path) -> list[str]:
     return snips
 
 
-def _scan_node_modules(project_root: Path, budget: int) -> list[str]:
-    """Return drift bullets for any node_modules package that writes to an
-    agent-context file from its installable shipping code."""
-    issues: list[str] = []
+def _scan_node_modules(project_root: Path, budget: int) -> list[tuple[str, str]]:
+    """Return (drift bullet, path) pairs for any node_modules package that
+    writes to an agent-context file from its installable shipping code.
+
+    The path is returned alongside the bullet (not re-parsed from it later)
+    so the issue-catalog raise below has the finding's LOCATION without
+    reaching back into a formatted string."""
+    issues: list[tuple[str, str]] = []
     seen_pkgs: set[str] = set()
     for pkg_dir in _iter_node_packages(project_root):
         if budget <= 0:
@@ -171,18 +176,19 @@ def _scan_node_modules(project_root: Path, budget: int) -> list[str]:
                 continue
             seen_pkgs.add(pkg_name)
             rel = src.relative_to(project_root)
-            issues.append(
+            issues.append((
                 f"npm:{pkg_name} writes to agent-context file from {rel} — "
-                f"first hit: {snips[0]}"
-            )
+                f"first hit: {snips[0]}",
+                str(rel),
+            ))
             break  # one finding per package is enough
     return issues
 
 
-def _scan_site_packages(project_root: Path, budget: int) -> list[str]:
-    """Return drift bullets for any installed Python package whose source
-    writes to an agent-context file."""
-    issues: list[str] = []
+def _scan_site_packages(project_root: Path, budget: int) -> list[tuple[str, str]]:
+    """Return (drift bullet, path) pairs for any installed Python package
+    whose source writes to an agent-context file."""
+    issues: list[tuple[str, str]] = []
     seen_pkgs: set[str] = set()
     for sp in _iter_site_packages(project_root):
         if budget <= 0:
@@ -207,10 +213,11 @@ def _scan_site_packages(project_root: Path, budget: int) -> list[str]:
                 continue
             seen_pkgs.add(pkg_name)
             rel = src.relative_to(project_root)
-            issues.append(
+            issues.append((
                 f"py:{pkg_name} writes to agent-context file from {rel} — "
-                f"first hit: {snips[0]}"
-            )
+                f"first hit: {snips[0]}",
+                str(rel),
+            ))
     return issues
 
 
@@ -268,20 +275,26 @@ def main() -> int:
             pass
 
     budget = _max_files()
-    issues: list[str] = []
-    issues.extend(_scan_node_modules(project_root, budget))
+    findings: list[tuple[str, str]] = []
+    findings.extend(_scan_node_modules(project_root, budget))
     # Re-compute budget for python scan based on what node consumed:
     # cheap approximation — give each scan half the total budget if both
     # trees are present.
     py_budget = max(100, budget // 2)
-    issues.extend(_scan_site_packages(project_root, py_budget))
+    findings.extend(_scan_site_packages(project_root, py_budget))
 
     state.atomic_write(last_hash_file, combined)
 
-    if not issues:
+    if not findings:
+        # Clean now — withdraw every standing proposal. Reconciling ONLY when there is something to
+        # report would leave the last proposal on the board forever, and that is exactly the one that
+        # matters: the finding the user just fixed.
+        for uid in issue_catalog.reconcile("AICTX-001", []):
+            state.log_line(_NAME, f"withdrew TRDD-{uid} — the poisoned package is gone")
         state.rotate_log_if_big(_NAME)
         return 0
 
+    issues = [f[0] for f in findings]
     cap = 5
     sample = "\n".join(f"  - {state.sanitize_for_drift_line(s)}" for s in issues[:cap])
     if len(issues) > cap:
@@ -298,6 +311,38 @@ def main() -> int:
         f"that silently modify agent behaviour at install time.\n{sample}"
         + (f"\n{hint}" if hint else "")
     )
+
+    # Route each finding into the issue catalog, capped per fire.
+    raised = 0
+    skipped = 0
+    for issue, path in findings:
+        if raised >= issue_catalog.MAX_RAISES_PER_FIRE:
+            skipped += 1
+            continue
+        r = issue_catalog.raise_issue(
+            "AICTX-001",
+            where=path,
+            evidence=[path],
+            path=path,
+            found=issue,
+        )
+        if r.first_seen and r.line:
+            print(r.line)
+        elif not r.ok:
+            state.log_line(_NAME, f"could not raise AICTX-001: {r.why}")
+        raised += 1
+    if skipped:
+        state.log_line(
+            _NAME,
+            f"{skipped} AICTX-001 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
+        )
+
+    # Withdraw the proposals whose finding is no longer in the scan. A detector cannot CLEAR what it
+    # can no longer name — a scan yields the findings that EXIST, and the vanished ones are by
+    # definition absent from the result — so the reconcile is driven by what IS here, not by what was.
+    for uid in issue_catalog.reconcile("AICTX-001", [p for _, p in findings]):
+        state.log_line(_NAME, f"withdrew TRDD-{uid} — the poisoned package is gone")
+
     state.rotate_log_if_big(_NAME)
     return 0
 

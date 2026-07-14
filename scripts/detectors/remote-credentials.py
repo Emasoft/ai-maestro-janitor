@@ -29,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import dedupe  # noqa: E402
+import issue_catalog  # noqa: E402
 import security_helpers as sec  # noqa: E402
 import state  # noqa: E402
 
@@ -91,6 +92,8 @@ def main() -> int:
         enabled=state.is_truthy_env(sec.SECURITY_AGENT_HINT_ENV, True),
     )
     seen_remotes: set[str] = set()
+    raised = 0
+    skipped = 0
     for line in proc.stdout.splitlines():
         # Format: `<name>\t<url> (fetch|push)` — split on whitespace, take
         # first two columns. The third column is direction; we don't need it.
@@ -108,7 +111,15 @@ def main() -> int:
             continue
         seen_remotes.add(key)
 
+        # The remote's NAME (not its URL, which changes when the secret is
+        # rotated) is the stable identity for this incident — a proposal
+        # opened for 'origin' must withdraw itself once 'origin' is clean,
+        # even if that happened by rotating the credential rather than
+        # stripping it.
+        where = f"remote:{name}"
+
         if not _has_password_in_url(url):
+            issue_catalog.clear_issue("CRED-001", where=where)
             continue
 
         clean_url = _strip_userinfo(url)
@@ -138,6 +149,28 @@ def main() -> int:
         )
         if out is not None:
             print(out)
+
+        if raised < issue_catalog.MAX_RAISES_PER_FIRE:
+            r = issue_catalog.raise_issue(
+                "CRED-001",
+                where=where,
+                evidence=[f"git-remote:{name}"],
+                path=clean_url,
+                found=f"remote '{name}' → {clean_url}",
+            )
+            if r.first_seen and r.line:
+                print(r.line)
+            elif not r.ok:
+                state.log_line("remote-credentials", f"could not raise CRED-001: {r.why}")
+            raised += 1
+        else:
+            skipped += 1
+
+    if skipped:
+        state.log_line(
+            "remote-credentials",
+            f"{skipped} CRED-001 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
+        )
 
     state.rotate_log_if_big("remote-credentials")
     return 0
