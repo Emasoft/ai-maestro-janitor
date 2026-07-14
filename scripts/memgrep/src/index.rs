@@ -76,7 +76,7 @@ fn verify_fts(conn: &Connection) -> Result<()> {
         conn.execute_batch(&format!(
             "INSERT INTO {t}({t}, rank) VALUES('integrity-check', 1);"
         ))
-        .with_context(|| format!("FTS integrity check failed for {t}"))?;
+        .with_context(|| format!("[MEMGREP-001] FTS integrity check failed for {t}"))?;
     }
     Ok(())
 }
@@ -207,6 +207,60 @@ pub fn open_existing(root: &Path) -> Option<Connection> {
     let conn = Connection::open(&path).ok()?;
     configure_conn(&conn).ok()?;
     Some(conn)
+}
+
+/// DIAGNOSE an existing index — validate it and REPORT, healing nothing. `Ok(false)` = no index here.
+///
+/// This exists because [`open`] SELF-HEALS: it rebuilds, and failing that nukes and re-creates. That
+/// is the right behaviour for a caller who wants to USE the index, and it makes the corruption
+/// invisible to a caller who wants to KNOW about it. The janitor's `memgrep-index-health` detector is
+/// the second kind: a repeatedly-corrupting index is a CODE defect (the 2026-07-14 migration
+/// manufactured one), and a self-heal that quietly papers over it every time is precisely how that
+/// defect survived undetected. So the observer needs a path that does not repair what it is measuring.
+pub fn validate_existing(root: &Path) -> Result<bool> {
+    let path = db_path(root);
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let conn = Connection::open(&path).with_context(|| format!("opening {}", path.display()))?;
+    configure_conn(&conn)?;
+    validate_db(&conn, SCHEMA_VERSION)?;
+    Ok(true)
+}
+
+/// `memgrep validate <dir>…` — the health probe the janitor's heartbeat runs. One machine-readable
+/// line per root, so the detector never parses prose:
+///
+/// ```text
+/// OK   /path/to/memory
+/// NONE /path/to/memory                       (no index built yet — nothing to validate)
+/// FAIL /path/to/memory [MEMGREP-001] FTS integrity check failed for notes_fts: …
+/// ```
+///
+/// Exits non-zero iff any root FAILed. It repairs NOTHING — see [`validate_existing`].
+pub fn cmd_validate_cli(args: &[String]) -> Result<()> {
+    let roots: Vec<PathBuf> = if args.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        args.iter().map(PathBuf::from).collect()
+    };
+    let mut failed = 0usize;
+    for root in &roots {
+        match validate_existing(root) {
+            Ok(true) => println!("OK   {}", root.display()),
+            Ok(false) => println!("NONE {}", root.display()),
+            // `{:#}` renders anyhow's whole context chain on ONE line, which is what carries the
+            // `[MEMGREP-NNN]` code out of `verify_fts`'s `.with_context(…)`.
+            Err(e) => {
+                failed += 1;
+                println!("FAIL {} {:#}", root.display(), e);
+            }
+        }
+    }
+    if failed > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 /// The index schema version. Bumped whenever a binary adds a derived table/column that an existing
@@ -591,25 +645,31 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
 ///
 /// Checks 2–5 are the ones that describe the failures we have ACTUALLY had. None of them is
 /// implied by check 1.
+/// Every failure carries a `[MEMGREP-NNN]` ISSUE CODE from the janitor's catalog
+/// (`scripts/lib/issue_catalog.py`, `docs/ISSUE-CODES.md`). The code — not the prose — is the
+/// contract: the `memgrep-index-health` detector greps it out of stderr and hands it to
+/// `raise_issue`, which decides the severity, the repair to attempt, and the agent to dispatch. That
+/// is why the wording here is free to change and the code is not: a detector that had to pattern-match
+/// English would break the moment someone improved a sentence.
 fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
     // 1. file-level integrity
     let integrity: String = conn
         .query_row("PRAGMA integrity_check", [], |r| r.get(0))
         .context("running PRAGMA integrity_check")?;
     if integrity != "ok" {
-        anyhow::bail!("sqlite integrity_check failed: {integrity}");
+        anyhow::bail!("[MEMGREP-002] sqlite integrity_check failed: {integrity}");
     }
 
     // 2. base-table shape
     for (table, expected) in EXPECTED_TABLES {
         let have = table_columns(conn, table)?;
         if have.is_empty() {
-            anyhow::bail!("schema validation: table `{table}` is MISSING");
+            anyhow::bail!("[MEMGREP-007] schema validation: table `{table}` is MISSING");
         }
         for col in *expected {
             if !have.iter().any(|c| c == col) {
                 anyhow::bail!(
-                    "schema validation: `{table}` is missing column `{col}` \
+                    "[MEMGREP-004] schema validation: `{table}` is missing column `{col}` \
                      (a migration failed to add it — recall on that column would silently return nothing)"
                 );
             }
@@ -620,12 +680,12 @@ fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
     for (fts, _content, expected) in EXPECTED_FTS {
         let have = table_columns(conn, fts)?;
         if have.is_empty() {
-            anyhow::bail!("schema validation: FTS index `{fts}` is MISSING");
+            anyhow::bail!("[MEMGREP-008] schema validation: FTS index `{fts}` is MISSING");
         }
         for col in *expected {
             if !have.iter().any(|c| c == col) {
                 anyhow::bail!(
-                    "schema validation: FTS `{fts}` has no `{col}` column — it is STALE \
+                    "[MEMGREP-003] schema validation: FTS `{fts}` has no `{col}` column — it is STALE \
                      (an FTS5 column set cannot be ALTERed; it needs DROP + CREATE + 'rebuild')"
                 );
             }
@@ -650,7 +710,7 @@ fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
             .with_context(|| format!("checking {child} for orphans"))?;
         if orphans > 0 {
             anyhow::bail!(
-                "schema validation: {orphans} orphaned `{child}` row(s) whose `{parent}` is gone \
+                "[MEMGREP-005] schema validation: {orphans} orphaned `{child}` row(s) whose `{parent}` is gone \
                  (unreachable knowledge — the prune path missed them)"
             );
         }
@@ -659,7 +719,9 @@ fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
     // 6. version stamp
     let ver = user_version(conn);
     if ver != expect_version {
-        anyhow::bail!("schema validation: user_version is {ver}, expected {expect_version}");
+        anyhow::bail!(
+            "[MEMGREP-006] schema validation: user_version is {ver}, expected {expect_version}"
+        );
     }
     Ok(())
 }

@@ -20,7 +20,7 @@ unattended access to your repository.
 
 ## HARNESS — the janitor repairs itself (automatic)
 
-11 code(s).
+13 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -32,6 +32,8 @@ unattended access to your repository.
 | `MEMGREP-004` | memgrep-validate | critical | a migration left `{table}` without column `{column}` in {scope} |
 | `MEMGREP-005` | memgrep-validate | high | orphaned rows in {scope}: {table} references memories that no longer exist |
 | `MEMGREP-006` | memgrep-validate | high | the schema version stamp in {scope} disagrees with the database's actual shape |
+| `MEMGREP-007` | memgrep-validate | critical | a base table is missing entirely from the memgrep database in {scope} |
+| `MEMGREP-008` | memgrep-validate | critical | an FTS index is missing entirely from the memgrep database in {scope} |
 | `SELFINT-001` | janitor-self-integrity | critical | a janitor file failed attestation against the shipped manifest: {path} |
 | `SELFINT-002` | janitor-self-integrity | high | the janitor's audit chain no longer verifies: {detail} |
 | `STATE-001` | state-guard | high | a janitor state file is unreadable: {path} |
@@ -91,6 +93,20 @@ unattended access to your repository.
 - **What it is:** `PRAGMA user_version` was stamped without the migration that earns it (or the database is NEWER than this build's schema).
 - **Why it matters:** A wrong stamp makes every future migration skip or repeat. A newer-than-expected database must never be 'migrated' downward — that mangles data written by a build we do not know.
 - **Fix attempted:** If the stamp is ahead of this build's schema, REFUSE to touch it and tell the user to update. Otherwise rebuild from the notes and re-run the ladder transactionally.
+
+### `MEMGREP-007` — a base table is missing entirely from the memgrep database in {scope}
+
+- **Scanner:** `memgrep-validate` · **Severity:** `critical` · **Kind:** `migration-failure`
+- **What it is:** A table the schema requires does not exist at all — the schema was never fully applied, or something dropped it.
+- **Why it matters:** Every query against that table throws. Unlike a missing column (which fails quietly), this fails loudly — but only once something reads it, which may be days later.
+- **Fix attempted:** Re-apply the schema and reindex from the markdown notes, which are the source of truth. Then find what dropped the table — a table does not vanish on its own.
+
+### `MEMGREP-008` — an FTS index is missing entirely from the memgrep database in {scope}
+
+- **Scanner:** `memgrep-validate` · **Severity:** `critical` · **Kind:** `migration-failure`
+- **What it is:** A full-text index the schema requires does not exist — a DROP without the matching CREATE, the shape a half-applied migration leaves behind.
+- **Why it matters:** Search silently returns nothing rather than failing, so the corpus looks empty instead of broken. That is the worst failure mode there is: it is indistinguishable from having no memories.
+- **Fix attempted:** Recreate the FTS table and rebuild it from its content table, then fix the migration step that dropped it without recreating it.
 
 ### `SELFINT-001` — a janitor file failed attestation against the shipped manifest: {path}
 

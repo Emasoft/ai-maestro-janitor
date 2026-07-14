@@ -235,3 +235,25 @@ def test_every_code_appears_in_the_published_doc() -> None:
     doc = (ROOT / "docs" / "ISSUE-CODES.md").read_text(encoding="utf-8")
     for code in issue_catalog.ISSUE_CATALOG:
         assert f"`{code}`" in doc, f"{code} is missing from docs/ISSUE-CODES.md"
+
+
+# --------------------------------------------------------------------------- #
+# 6. COVERAGE — a code a producer can EMIT but the catalog does not KNOW is a
+#    finding that silently evaporates. Prove the two sides agree, mechanically.
+# --------------------------------------------------------------------------- #
+
+
+def test_every_code_the_rust_validator_emits_exists_in_the_catalog() -> None:
+    """memgrep's `validate_db` bails with `[MEMGREP-NNN]`, and the health detector feeds that code
+    straight to `raise_issue`. A code the Rust side emits but the catalog lacks would come back
+    `unknown issue code` — the detector would have found real corruption and dropped it on the floor.
+
+    This is the coverage criterion, enforced across the language boundary where nothing else can.
+    """
+    import re
+
+    rust = (ROOT / "scripts" / "memgrep" / "src" / "index.rs").read_text(encoding="utf-8")
+    emitted = set(re.findall(r"\[(MEMGREP-\d{3})\]", rust))
+    assert emitted, "the validator emits no issue codes — did the [MEMGREP-NNN] prefixes get dropped?"
+    missing = sorted(emitted - set(issue_catalog.ISSUE_CATALOG))
+    assert not missing, f"index.rs emits codes the catalog does not know: {missing}"
