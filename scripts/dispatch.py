@@ -659,11 +659,32 @@ def _pending_agent_directive_lines() -> list[str]:
 
 
 def _pending_agent_count() -> int:
-    """W4 (TRDD-82OP4EN9): how many background agents the manifest lists. Fail-open 0."""
+    """W4 (TRDD-82OP4EN9): how many background agents the manifest lists. Fail-open 0.
+
+    Counts ALL agents on purpose — the keep-going/resume nudge that reads this must
+    still name a housekeeping fork that died at the 5h cap. The cadence FAST probe
+    uses _pending_user_relevant_count() instead (issue #89)."""
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
         return len(pending_agents.pending())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _pending_user_relevant_count() -> int:
+    """Pending background agents EXCLUDING the janitor's OWN housekeeping agents
+    (issue #89). The cadence FAST probe MUST read this, not _pending_agent_count():
+    the janitor's own [janitor-memory-*] markers instruct the session to spawn a
+    background memory-maintenance agent, which then raises the pending count — so a
+    probe that counts it is measuring a condition the controller itself creates, and
+    the heartbeat tier oscillates */5 ↔ */15, burning a re-arm turn per flip. A
+    housekeeping chore is not "the user is waiting on something time-sensitive", so
+    it must never promote to FAST. Fail-open 0."""
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        return len(pending_agents.pending_user_relevant())
     except Exception:  # noqa: BLE001
         return 0
 
@@ -1377,14 +1398,21 @@ def _read_json_file(path: Path) -> dict | None:
 def _cadence_active_waiting(sd: Path, now: int) -> bool:
     """True iff this session is waiting on something time-sensitive (→ FAST tier):
     a RECENT resume cue (rate-limit or post-compact), a pending directive resume, an
-    explicit keep-going opt-in, or in-flight background agents. Fail-open (any read
-    error → the pending agents probe, itself fail-open).
+    explicit keep-going opt-in, or in-flight USER-relevant background agents.
+    Fail-open (any read error → the pending agents probe, itself fail-open).
 
     The resume signal is the `last-resume.ts` STAMP, not the `rate-limited.flag` /
     `resume-after-compact.flag` files: those are unlinked by their own phase, which
     then early-returns from main() BEFORE this phase runs, so testing them here would
     always read False. The stamp survives the flag, so the fire AFTER a resume cue
     promotes to FAST and the recovery retry loop runs at the fast cadence.
+
+    The pending-agent term uses _pending_user_relevant_count(), which EXCLUDES the
+    janitor's own housekeeping agents (issue #89). A [janitor-memory-*] marker makes
+    the session spawn a background memory-maintenance agent, so counting it here
+    would make the controller read an input it creates itself and oscillate the
+    tier — the probe's own contract is "the USER is waiting", and a background
+    consolidate pass definitionally is not that.
     """
     try:
         last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
@@ -1397,7 +1425,7 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
             return True
     except OSError:
         pass
-    return _pending_agent_count() > 0
+    return _pending_user_relevant_count() > 0
 
 
 def _stamp_resume(sd: Path, now: int) -> None:

@@ -89,6 +89,33 @@ def test_add_then_pending_roundtrip(iso) -> None:
     ]
 
 
+def test_pending_user_relevant_excludes_janitor_housekeeping(iso) -> None:
+    """issue #89: pending_user_relevant() drops the janitor's OWN background
+    housekeeping agents (memory maintenance / security) so the cadence FAST probe
+    does not oscillate on the janitor's own [janitor-memory-*] chores. It matches
+    the plugin-SCOPED agent_type Claude Code emits for a plugin subagent, and a
+    bare janitor-* name — but keeps a genuine user agent. pending() stays UNFILTERED
+    (the resume path must still see a housekeeping fork that died at the 5h cap)."""
+    pa = iso["pa"]
+    pa.add("mem", "ai-maestro-janitor:janitor-memory-subconscious-agent", now=1000)
+    pa.add("sec", "janitor-security-agent", now=1000)  # bare form
+    pa.add("user", "general-purpose", now=1000)
+    assert {e["agentId"] for e in pa.pending(now=1000)} == {"mem", "sec", "user"}
+    assert [e["agentId"] for e in pa.pending_user_relevant(now=1000)] == ["user"]
+
+
+def test_is_housekeeping_entry_predicate(iso) -> None:
+    """The predicate keys on the agent NAME (after any <plugin>: scope); an empty
+    description reads False (fail towards user-relevant — never silently drop)."""
+    pa = iso["pa"]
+    assert pa.is_housekeeping_entry({"description": "ai-maestro-janitor:janitor-memory-subconscious-agent"})
+    assert pa.is_housekeeping_entry({"description": "janitor-security-agent"})
+    assert not pa.is_housekeeping_entry({"description": "general-purpose"})
+    assert not pa.is_housekeeping_entry({"description": "my-plugin:reviewer"})
+    assert not pa.is_housekeeping_entry({"description": ""})
+    assert not pa.is_housekeeping_entry("not-a-dict")
+
+
 def test_remove_clears_entry(iso) -> None:
     """remove() deletes exactly the named id and keeps the others."""
     pa = iso["pa"]

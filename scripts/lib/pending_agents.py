@@ -77,6 +77,19 @@ MAX_NUDGES = 3
 # Bound persisted description length (hook payloads are model-adjacent data).
 _MAX_DESC_LEN = 120
 
+# The prefix every agent the JANITOR ITSELF spawns for its own background
+# housekeeping carries in its name — janitor-memory-subconscious-agent (the
+# memory-maintenance chores) and janitor-security-agent (security sweeps). Issue
+# #89: the cadence FAST probe counted these and oscillated the heartbeat tier,
+# because the janitor's own [janitor-memory-*] markers RAISE the pending count —
+# a controller must never read an input it creates itself. The stored
+# `description` is the SubagentStart `agent_type`, which Claude Code reports for a
+# PLUGIN subagent in the plugin-scoped form
+# `ai-maestro-janitor:janitor-memory-subconscious-agent`, so we match on the
+# agent's own NAME (the part after any `<plugin>:` scope) carrying this prefix —
+# covering both the scoped form and a bare `janitor-*` name.
+_HOUSEKEEPING_NAME_PREFIX = "janitor-"
+
 
 def _manifest_path() -> Path:
     return state.state_dir() / MANIFEST_NAME
@@ -194,6 +207,34 @@ def pending(now: int | None = None) -> list[dict]:
         return _load_unlocked(t)
     except Exception:  # noqa: BLE001 - readers (resume phases) must never die
         return []
+
+
+def is_housekeeping_entry(entry: object) -> bool:
+    """True iff `entry` names an agent the janitor spawns for its OWN background
+    housekeeping (memory maintenance / security sweeps) — see issue #89.
+
+    Keyed on the stored `description` (the SubagentStart `agent_type`): strip any
+    `<plugin>:` scope prefix and test the agent's own name for
+    `_HOUSEKEEPING_NAME_PREFIX`. A missing/empty description reads False (fail
+    towards "user-relevant", the safe direction — an unidentifiable agent is
+    counted, never silently dropped from the resume path or the probe)."""
+    if not isinstance(entry, dict):
+        return False
+    name = str(entry.get("description", "") or "").rsplit(":", 1)[-1].strip()
+    return name.startswith(_HOUSEKEEPING_NAME_PREFIX)
+
+
+def pending_user_relevant(now: int | None = None) -> list[dict]:
+    """Live entries EXCLUDING the janitor's OWN housekeeping agents (issue #89).
+
+    The cadence FAST probe (dispatch `_cadence_active_waiting`) must use THIS, not
+    `pending()`: a background memory/security chore the janitor itself scheduled is
+    housekeeping, NOT "the user is waiting on something time-sensitive", so it must
+    not promote the heartbeat to the FAST tier. `pending()` and `directive_lines()`
+    stay UNFILTERED on purpose — a housekeeping fork that died at the 5h cap still
+    needs a deterministic resume, so the resume path must still see every entry.
+    Fail-open []."""
+    return [e for e in pending(now) if not is_housekeeping_entry(e)]
 
 
 def directive_lines(now: int | None = None) -> list[str]:

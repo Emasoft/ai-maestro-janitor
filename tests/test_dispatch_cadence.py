@@ -28,7 +28,11 @@ def proj(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (project / ".janitor" / "state").mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "global"))
-    for mod in ("dispatch", "state", "global_state"):
+    # pending_agents caches its own `state` reference at import (and state_dir() is
+    # lru_cached), so it MUST be purged alongside state — else a later test's
+    # cadence probe reads a PRIOR test's pending-agents.json. In production this
+    # never bites: one process, one shared `state` singleton (issue #89 tests).
+    for mod in ("dispatch", "state", "global_state", "pending_agents"):
         sys.modules.pop(mod, None)
     return project
 
@@ -162,6 +166,66 @@ def test_rate_limit_fire_stamps_resume_then_next_fire_goes_fast(
     assert "rate-limit cleared" not in out2  # the flag is consumed; no second cue
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
     assert "[janitor-renew]" in out2  # re-arm to FAST
+
+
+def test_janitor_housekeeping_agent_does_not_promote_to_fast(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """issue #89 regression: a pending JANITOR housekeeping agent (its own
+    memory-maintenance fork) must NOT flip the cadence to FAST or emit a re-arm.
+
+    The janitor's [janitor-memory-*] markers make the session spawn a background
+    memory agent; counting it in the FAST probe is the controller reading an input
+    it creates itself, which oscillated */5 ↔ */15 and burned a re-arm turn per flip.
+    With armed already at the idle */30, an idle fire whose ONLY pending agent is
+    housekeeping must stay */30 and print nothing.
+
+    Before the fix (probe counted ALL pending agents) this fire promoted to FAST →
+    desired */5 ≠ armed */30 → [janitor-renew]; the two asserts below both failed.
+    """
+    import json
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    (_state(proj) / "armed-cadence.cron").write_text("*/30 * * * *")
+    (_state(proj) / "pending-agents.json").write_text(
+        json.dumps(
+            [
+                {
+                    "agentId": "mem-1",
+                    "description": "ai-maestro-janitor:janitor-memory-subconscious-agent",
+                    "ts": int(time.time()),
+                    "nudges": 0,
+                }
+            ]
+        )
+    )
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch)
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
+    assert "[janitor-renew]" not in out
+
+
+def test_real_pending_agent_still_promotes_to_fast(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard the other direction: a genuine USER background agent still promotes to
+    FAST and re-arms — the #89 fix must narrow the probe to housekeeping only, not
+    disable the pending-agent FAST signal wholesale."""
+    import json
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    (_state(proj) / "armed-cadence.cron").write_text("*/30 * * * *")
+    (_state(proj) / "pending-agents.json").write_text(
+        json.dumps(
+            [{"agentId": "u-1", "description": "general-purpose", "ts": int(time.time()), "nudges": 0}]
+        )
+    )
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch)
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+    assert "[janitor-renew]" in out
 
 
 def test_api_key_regime_all_tiers_5min(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
