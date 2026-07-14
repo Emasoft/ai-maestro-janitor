@@ -263,7 +263,7 @@ unattended access to your repository.
 ### `WFSEC-004` — a workflow depends on a MUTABLE reference in {where}
 
 - **Scanner:** `workflow-security` · **Severity:** `medium` · **Kind:** `security-workflow`
-- **What it is:** A step pulls something that can change under it without the repo changing: an action on a tag or branch, an unpinned Docker image, an unfrozen lockfile, a `curl | sh`, or a build that publishes from the same job it built in.
+- **What it is:** A step pulls something that can change under it without the repo changing: an action on a tag or branch, an unpinned Docker image, an unfrozen lockfile, a remote script fetched and piped straight into a shell, or a build that publishes from the same job it built in.
 - **Why it matters:** Tags move. An upstream account takeover or a rewritten tag silently changes what runs in CI — with the repo's secrets — and the diff that would have shown it does not exist, because nothing in the repo changed.
 - **Fix attempted:** Pin it: a full commit SHA (with the version in a trailing comment — `pinact run` automates this), an image digest, a frozen lockfile. What ran yesterday must be what runs today.
 
