@@ -40,6 +40,10 @@ import state  # type: ignore[import-not-found]  # noqa: E402
 DISARM = REPO / "skills" / "janitor-disarm" / "SKILL.md"
 ARM = REPO / "skills" / "janitor-arm" / "SKILL.md"
 GUARD = REPO / "scripts" / "disarm_guard.py"
+# Since TRDD-DLI76AUC the arm's shell steps live in this script rather than in the skill's
+# markdown: each tool round-trip re-reads the whole conversation and is billed for it, so the arm
+# was folded from six calls into four. The opt-out removal moved with them.
+PREPARE = REPO / "scripts" / "arm_prepare.py"
 
 # A shell line that removes the shared, machine-wide dispatcher stub. Matches any `rm`
 # whose target names the stub, however the data dir is spelled.
@@ -49,6 +53,10 @@ STUB_RM = re.compile(r"^\s*rm\b[^\n]*dispatcher-stub\.py")
 FLAG_WRITE = re.compile(r"(touch|>|printf|echo)[^\n]*disarmed\.flag")
 # Removing the flag: an `rm` whose target names it.
 FLAG_RM = re.compile(r"^\s*rm\b[^\n]*disarmed\.flag")
+# Removing the flag from PYTHON — `(sd / state.DISARMED_FLAG).unlink()`. Matched through the
+# CONSTANT, never the literal filename: the flag's name must have exactly one definition, which is
+# the whole point of this file (it once had four independent spellings and zero writers).
+FLAG_UNLINK_PY = re.compile(r"state\.DISARMED_FLAG\s*\)\s*\.unlink\(")
 
 
 def _shell_lines(doc: Path) -> list[str]:
@@ -113,9 +121,14 @@ def test_arm_clears_the_optout_flag() -> None:
 
     Otherwise a re-armed project stays classified `unarmed` forever and the guardian
     never protects it again.
+
+    Since TRDD-DLI76AUC the removal lives in `arm_prepare.py` rather than the skill's shell. That
+    move STRENGTHENS the invariant rather than dodging it: the step is now real code with a
+    behavioral test (`test_arm_scripts.py::test_prepare_revokes_the_opt_out_and_installs_the_stub`
+    actually creates the flag and watches the script delete it) instead of markdown an agent had to
+    remember to run. What this test still guards is that the step EXISTS AT ALL — wherever it lives.
     """
-    hits = [ln for ln in _shell_lines(ARM) if FLAG_RM.search(ln)]
-    assert hits, "janitor-arm no longer removes .janitor/state/disarmed.flag — a re-armed project would stay 'unarmed' (sacrosanct) forever and never be guarded again"
+    assert FLAG_UNLINK_PY.search(PREPARE.read_text(encoding="utf-8")), "arm_prepare.py no longer removes state.DISARMED_FLAG — a re-armed project would stay 'unarmed' (sacrosanct) forever and the fleet guardian would never protect it again"
 
 
 def test_the_reader_the_writer_and_the_skills_all_name_the_same_flag() -> None:
@@ -126,8 +139,12 @@ def test_the_reader_the_writer_and_the_skills_all_name_the_same_flag() -> None:
     through `state.DISARMED_FLAG` so the name has exactly ONE definition — the four readers used to
     spell it independently, and nobody wrote it.
 
-    Since TRDD-RDFWQIFA the writer is `disarm_guard.py` rather than the skill's own shell, so the chain
-    under test is: guard WRITES the constant → fleet_scan READS the constant → arm REMOVES it.
+    Since TRDD-RDFWQIFA the writer is `disarm_guard.py` rather than the skill's own shell, and since
+    TRDD-DLI76AUC the remover is `arm_prepare.py` rather than the arm skill's shell. So the chain
+    under test is: guard WRITES the constant → fleet_scan READS the constant → arm_prepare REMOVES
+    it. All three name `state.DISARMED_FLAG`; none of them spells the filename itself. That is the
+    entire point — the flag once had four independent spellings and no writer at all, and nobody
+    noticed because no unit test of any single half could see the disagreement.
     """
     scan = (REPO / "scripts" / "lib" / "fleet_scan.py").read_text(encoding="utf-8")
     assert "state.DISARMED_FLAG" in scan, "fleet_scan no longer reads the opt-out flag"
@@ -135,7 +152,7 @@ def test_the_reader_the_writer_and_the_skills_all_name_the_same_flag() -> None:
     guard = GUARD.read_text(encoding="utf-8")
     assert "state.DISARMED_FLAG" in guard, "disarm_guard.py does not write state.DISARMED_FLAG"
 
-    # Arm still clears it in plain shell — clearing an opt-out needs no authority (re-arming is the
-    # safe direction: the worst case is a guarded project, which is the default anyway).
-    name = re.escape(state.DISARMED_FLAG)
-    assert re.search(rf"^\s*rm\b[^\n]*{name}", "\n".join(_shell_lines(ARM)), re.MULTILINE), f"janitor-arm does not remove state.DISARMED_FLAG ({state.DISARMED_FLAG})"
+    # Arm clears it with no authority check — re-arming is the SAFE direction (the worst case is a
+    # guarded project, which is the default anyway), so unlike the disarm it needs no guard.
+    prepare = PREPARE.read_text(encoding="utf-8")
+    assert "state.DISARMED_FLAG" in prepare, f"arm_prepare.py does not name state.DISARMED_FLAG ({state.DISARMED_FLAG}) — a hardcoded literal here is exactly the drift this test exists to prevent"

@@ -1,0 +1,217 @@
+"""The arm's prepare/record pair (TRDD-DLI76AUC) — the tool-call collapse and its crash-safety.
+
+A tool call is not free: every round-trip re-reads the whole conversation at the 0.1x cache-read
+rate, so at a ~520k context one costs ~52k weighted. The arm was SIX of them, which made a
+re-arm cost about what six quiet heartbeat fires cost — and the dynamic cadence re-arms on every
+tier change, so switching tiers could cost more than the slower tier saved. These two scripts
+fold four calls into one, and remove the `CronList` from the steady state by remembering the
+cron's id.
+
+That memory is the dangerous part, and it is what most of this file tests. A STALE id is worse
+than no id: `CronDelete` on a dead id fails harmlessly, the arm then creates a heartbeat anyway,
+and if a live-but-unrecorded cron already existed the session ends up with TWO heartbeats firing
+forever — silently double cost, the exact failure this whole TRDD is trying to avoid. So the id
+is CONSUMED by `arm_prepare` before any cron is touched: a turn that dies mid-arm leaves no id,
+and the next arm sweeps with a `CronList` instead of trusting one.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+PREPARE = ROOT / "scripts" / "arm_prepare.py"
+RECORD = ROOT / "scripts" / "arm_record.py"
+sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+
+import state  # noqa: E402
+
+
+@pytest.fixture
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """An isolated project + HOME + plugin DATA dir, so no test touches the real heartbeat."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    for cached in (state.project_root, state.janitor_root, state.state_dir, state.log_dir):
+        cached.cache_clear()
+    yield tmp_path
+    for cached in (state.project_root, state.janitor_root, state.state_dir, state.log_dir):
+        cached.cache_clear()
+
+
+def _sd(project: Path) -> Path:
+    return project / ".janitor" / "state"
+
+
+def _run(script: Path, project: Path, *args: str) -> tuple[int, dict[str, str], str]:
+    """Run a script the way the skill does; return (rc, parsed key=value lines, raw stdout)."""
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(project / "home"),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "CLAUDE_PLUGIN_DATA": str(project / "data"),
+    }
+    proc = subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, env=env, cwd=project)
+    kv = {}
+    for line in proc.stdout.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            kv[k.strip()] = v.strip()
+    return proc.returncode, kv, proc.stdout
+
+
+def _prepare(project: Path) -> tuple[int, dict[str, str], str]:
+    return _run(PREPARE, project, "--plugin-root", str(ROOT), "--data-dir", str(project / "data"))
+
+
+# --------------------------------------------------------------------------- #
+# The crash-safety property — a half-finished arm must never leak a heartbeat
+# --------------------------------------------------------------------------- #
+
+
+def test_a_crash_between_prepare_and_record_forces_a_SWEEP(project: Path) -> None:
+    """THE test. `arm_prepare` CONSUMES the stored id before any cron is touched, so a turn that
+    dies mid-arm leaves nothing behind to trust. The next arm must report `sweep=yes` and go find
+    every heartbeat with a CronList.
+
+    If the id survived a crash it would be STALE — pointing at a cron that was already deleted —
+    and the CronDelete would silently no-op while CronCreate added another. A previously-created
+    but unrecorded heartbeat would then keep firing alongside the new one: two heartbeats, double
+    the fire cost, forever, and nothing anywhere would say so."""
+    _sd(project).mkdir(parents=True)
+    (_sd(project) / "heartbeat-cron-id.txt").write_text("ff020fd5", encoding="utf-8")
+
+    rc, kv, _ = _prepare(project)  # the arm begins…
+    assert rc == 0
+    assert kv["prior-cron-id"] == "ff020fd5", "the id must be handed to the caller to delete"
+    # …and now the turn dies. `arm_record` never runs.
+
+    rc, kv, _ = _prepare(project)  # the NEXT arm
+    assert rc == 0
+    assert kv["prior-cron-id"] == "", "a consumed id must not come back"
+    assert kv["sweep"] == "yes", "an unknown id MUST fall back to a full CronList sweep"
+
+
+def test_a_completed_arm_stores_the_id_so_the_next_one_needs_no_CronList(project: Path) -> None:
+    """The steady state, and the entire point: with the id on disk the next arm deletes the old
+    cron directly — four tool calls instead of five."""
+    _sd(project).mkdir(parents=True)
+    _prepare(project)
+    rc, _, _ = _run(RECORD, project, "--cron", "*/15 * * * *", "--id", "abc123")
+    assert rc == 0
+
+    rc, kv, _ = _prepare(project)
+
+    assert rc == 0
+    assert kv["prior-cron-id"] == "abc123"
+    assert kv["sweep"] == "no", "a known id means no CronList round-trip"
+
+
+def test_the_first_ever_arm_sweeps(project: Path) -> None:
+    """No id has ever been stored, so we cannot know what is out there — sweep."""
+    rc, kv, _ = _prepare(project)
+
+    assert rc == 0
+    assert kv["sweep"] == "yes"
+
+
+# --------------------------------------------------------------------------- #
+# What prepare resolves
+# --------------------------------------------------------------------------- #
+
+
+def test_prepare_arms_the_cadence_the_DISPATCHER_asked_for(project: Path) -> None:
+    """A `[janitor-renew]` fire exists precisely because the dynamic cadence (TRDD-0QQX9H0G) wants
+    a different tier. If the arm ignored `desired-cadence.cron` and re-armed the default, the
+    dispatcher would ask again on the next fire — a renew loop that re-arms forever and never
+    converges, each iteration costing a full model turn."""
+    _sd(project).mkdir(parents=True)
+    (_sd(project) / "desired-cadence.cron").write_text("*/30 * * * *\n", encoding="utf-8")
+
+    rc, kv, _ = _prepare(project)
+
+    assert rc == 0
+    assert kv["cron"] == "*/30 * * * *"
+
+
+def test_prepare_falls_back_to_the_default_cadence(project: Path) -> None:
+    """No tier chosen yet (dynamic cadence off, or a first arm) — the documented default."""
+    rc, kv, _ = _prepare(project)
+
+    assert rc == 0
+    assert kv["cron"] == "*/5 * * * *"
+
+
+def test_prepare_revokes_the_opt_out_and_installs_the_stub(project: Path) -> None:
+    """The opt-out is cleared FIRST so a turn that dies leaves no cron AND no opt-out — the fleet
+    guardian then reads `cron_dead` and re-arms, and the arm self-heals. Clearing it last would
+    leave a cron plus a stale opt-out, and the guardian would file the project under "the user
+    opted out" and never touch it again. The stub is what the cron actually fires."""
+    _sd(project).mkdir(parents=True)
+    (_sd(project) / "disarmed.flag").write_text("x", encoding="utf-8")
+
+    rc, _, _ = _prepare(project)
+
+    assert rc == 0
+    assert not (_sd(project) / "disarmed.flag").exists(), "arming must revoke the opt-out"
+    stub = project / "data" / "dispatcher-stub.py"
+    assert stub.is_file(), "the cron fires the stub — it must exist before the cron does"
+    assert stub.stat().st_mode & 0o111, "the stub must be executable"
+
+
+# --------------------------------------------------------------------------- #
+# What record writes — and what it refuses to write
+# --------------------------------------------------------------------------- #
+
+
+def test_record_writes_the_state_the_dispatcher_reads_back(project: Path) -> None:
+    """`armed-cadence.cron` is how the dispatcher's cadence phase knows the live tier already
+    matches the tier it wants — without it, it would keep emitting `[janitor-renew]` at a cron
+    that is already correct, re-arming on every single fire."""
+    rc, _, out = _run(RECORD, project, "--cron", "*/15 * * * *", "--id", "1d703364")
+
+    assert rc == 0
+    sd = _sd(project)
+    assert (sd / "armed-cadence.cron").read_text(encoding="utf-8") == "*/15 * * * *"
+    assert (sd / "heartbeat-cron-id.txt").read_text(encoding="utf-8") == "1d703364"
+    assert int((sd / "heartbeat-armed-at.ts").read_text(encoding="utf-8")) > 0
+    assert "1d703364" in out
+
+
+def test_record_clears_the_stale_renew_dedupe(project: Path) -> None:
+    """The renew-marker dedupe is about the cron we just replaced. Carried across an arm it would
+    suppress the NEXT genuine renew, stranding the heartbeat on a tier nobody wants."""
+    _sd(project).mkdir(parents=True)
+    (_sd(project) / "heartbeat-renew-seen.txt").write_text("seen", encoding="utf-8")
+
+    _run(RECORD, project, "--cron", "*/5 * * * *", "--id", "abc")
+
+    assert not (_sd(project) / "heartbeat-renew-seen.txt").exists()
+
+
+@pytest.mark.parametrize("bad", ["", "id with spaces", "id;rm -rf /", "a" * 65, "id$(whoami)"])
+def test_record_REFUSES_a_malformed_cron_id(project: Path, bad: str) -> None:
+    """A stored id becomes a `CronDelete` argument on the NEXT arm. Validate its shape at the
+    moment it is produced, so a malformed value fails loudly here rather than silently becoming a
+    delete that never matches — which would leak a live heartbeat and double the fire cost with
+    nothing anywhere reporting it."""
+    rc, _, out = _run(RECORD, project, "--cron", "*/5 * * * *", "--id", bad)
+
+    assert rc == 2, "a malformed id must be a hard refusal"
+    assert "refused" in out
+    assert not (_sd(project) / "heartbeat-cron-id.txt").exists(), "nothing may be stored"
+
+
+def test_record_refuses_an_empty_cron(project: Path) -> None:
+    """Arming 'nothing' would record a heartbeat that does not exist."""
+    rc, _, out = _run(RECORD, project, "--cron", "  ", "--id", "abc")
+
+    assert rc == 2
+    assert "refused" in out

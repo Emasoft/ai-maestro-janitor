@@ -82,10 +82,15 @@ def test_rule_scopes_itself_to_heartbeat_fires_and_survives_disarm():
 
 
 def _baked_prompt_block() -> str:
-    """Extract the step-4 ```text fence content from the arm SKILL."""
+    """Extract the cron-prompt ```text fence from the arm SKILL.
+
+    Anchored on the FENCE, not on a sentence. It used to index from the prose "Build the heartbeat
+    prompt", which meant rewording a heading anywhere above the fence raised `ValueError: substring
+    not found` — a test that fails for a reason having nothing to do with what it checks. The skill
+    has exactly one ```text fence and it is the cron prompt; that is the stable landmark.
+    """
     skill = _SKILL_PATH.read_text(encoding="utf-8")
-    anchor = skill.index("Build the heartbeat prompt")
-    start = skill.index("```text", anchor) + len("```text")
+    start = skill.index("```text") + len("```text")
     end = skill.index("```", start)
     return skill[start:end]
 
@@ -123,9 +128,7 @@ def test_installer_ships_the_protocol_rule(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
     claude = project / ".claude"
     claude.mkdir(parents=True)
-    (claude / "settings.json").write_text(
-        '{"enabledPlugins":["ai-maestro-janitor@marketplace"]}', encoding="utf-8"
-    )
+    (claude / "settings.json").write_text('{"enabledPlugins":["ai-maestro-janitor@marketplace"]}', encoding="utf-8")
     copied = rules_installer.install_rules(_PROJECT_ROOT)
     dest = claude / "rules" / "janitor-heartbeat-protocol.md"
     assert str(dest) in copied
