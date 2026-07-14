@@ -288,7 +288,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
 
 **Design docs (`design/tasks/`)** — TRDDs (see `~/.claude/rules/trdd-design-tasks.md`).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=76c881bb091f digest=531c8b8843d5 generated=2026-07-13T23:09:52+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=9d5840655c80 digest=3910d92dcdb1 generated=2026-07-14T13:44:08+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -618,7 +618,7 @@ Real, no mocks; isolate global state via `JANITOR_GLOBAL_STATE_DIR` and `HOME`/`
   · aimaestro_command_argv(cli, session, command) -> list[str] — argv for ``<cli> session command <session> --newline -- <command>`` — the
   · build_command_plan(terminal, command, *, esc_first, delay_s) -> dict | None — THE single channel-selection builder: turn a resolved `terminal` identity plus
   · build_injection(terminal, action, *, esc_first, delay_s) -> dict | None — Build the keystroke-injection PLAN for a GENTLE recovery `action` into a
-  · fire(plan) -> bool — Fire a built injection plan fully DETACHED — so the daemon never blocks and
+  · fire(plan) -> bool — Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
 `scripts/lib/fleet_recovery.py` — Fleet recovery POLICY (TRDD-324223a6, GROUP A / A2) — the PURE decisions the
   · action_for(diagnosis, attempts, *, include_hard) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
   · injection_is_hard(diagnosis) -> bool — Hard/soft policy for a gentle command-typing injection (TRDD-0GPQROC1). PURE.
