@@ -3,7 +3,7 @@ trdd-id: EQJPPZ2L
 title: Rotator keychain WRITE triggers an ACL prompt (uv-python) — every token refresh re-latches the rotator dead
 column: dev
 created: 2026-07-15T11:28:10+0200
-updated: 2026-07-15T14:41:15+0200
+updated: 2026-07-15T16:40:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -16,43 +16,50 @@ implementation-commits: [fa46a49]
 
 # Rotator keychain WRITE triggers an ACL prompt — every refresh re-latches the rotator dead
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (14:41)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (16:40) — ROOT CAUSE NAILED
 
-**PART 1 (code) DONE + committed `fa46a49`. USER-APPROVED the `-A` tradeoff.** The fix is LANDED
-but INERT until PART 2 re-stores the 3 real slots with `-A` (a user-present step — see NEXT ACTION).
+**DEFINITIVE ROOT CAUSE (proven, 3 throwaway-keychain tests, unconfounded):** `security
+add-generic-password -U` with **ANY ACL flag (`-A` OR `-T`)** on an **existing** item forces
+`SecKeychainItemSetAccess` — re-applying the item's ACL — which is a PRIVILEGED op that **PROMPTS
+every single time** (error signature: `SecKeychainItemSetAccess: User canceled the operation`).
+The item's DATA update still succeeds; only the ACL re-set prompts. `rotator._add_password_argv`
+passes an ACL flag (`-T` originally, `-A` after fa46a49) on **EVERY** write → every UPDATE
+re-triggers SetAccess → hang → 5 s timeout → `keychain-denied.latch` → rotation dark. This is NOT
+login-keychain-specific (the throwaway keychain prompted identically), NOT access-ACL, NOT the
+uv-python-path theory, NOT dialog contention. All earlier diagnoses in this file are SUPERSEDED.
 
-**CORRECTION to the original diagnosis below (do NOT be misled by it):** the fix did NOT go into
-`safe_storage.macos_store_argv`. That builder is used only by `safe_storage.store()` (COOKIES),
-NOT by slot-token writes. Slot writes go `write_slot → _slot_keychain_write →
-_security_add_password_via_stdin → rotator._add_password_argv` — a DIFFERENT builder that ALREADY
-carried `-T /usr/bin/security -T os.path.realpath(sys.executable)`. So the trigger was NOT "no -A
-and no -T" (as §"The bug" claims); it was the **unstable `-T <uv-python-realpath>` partner** — uv's
-interpreter path shifts across versions, so the item's baked-in ACL never matched the running
-python → re-prompt on every write. **Fix (committed):** in `rotator._add_password_argv`, emit `-A`
-(allow-all) INSTEAD of the two `-T` partners, gated by SERVICE in `_slot_keychain_write` to the
-slot family ONLY (`SLOT_KEYCHAIN_SERVICE` + `SLOT_BACKUP_KEYCHAIN_SERVICE`). The live-cred family
-(`KEYCHAIN_SERVICE`/`LIVE_BACKUP_KEYCHAIN_SERVICE`) keeps `-T` — `-A` there exposes the ACTIVE
-token allow-all (a separate, broader user decision — NOT yet made). Verified: 3 unit tests
-(`test_add_password_argv_carries_acl_partners`, `..._allow_any_uses_A_and_drops_T`,
-`test_slot_keychain_write_gates_allow_any_by_service`) + a raw `security add-generic-password -A`
-round-trip (rc=0). ruff clean.
+**PROVEN FIX (throwaway keychain, all silent rc=0 <0.02 s):** set the ACL ONCE at CREATE (`-A`),
+then UPDATE **data-only — NO `-A`/`-T`** thereafter. Test matrix:
+`create -A`=silent · `update -A`=HANGS 84 s (SetAccess prompt) · `update (no flag)`=silent ·
+`update (no flag) ×2`=silent · read-back=correct.
 
-**NEXT ACTION (PART 2 — needs USER present, AND a reboot first):** re-store the 3 real slots WITH
-`-A` so the LANDED code takes effect (until re-stored, the existing items keep their old `-T` ACL
-and still prompt). Steps: (1) reboot to clear the login-keychain lock (securityd-recycle recurred
-this session — see below); (2) with the user present, run a rotator `capture`/`tick` so
-`_slot_keychain_write` re-writes each slot with the new `-A` argv — click "Always Allow" the few
-times it prompts; (3) `safe_storage.clear_keychain_denied()` (clear the latch); (4) restore opt-in
-(`mv opt-in.flag.PAUSED-write-acl-flood-20260715 opt-in.flag`); (5) verify the FIRST daemon rotator
-tick after restore does NOT re-trip the latch (tail rotator.log; no hung `security` procs).
+**fa46a49 (`-A` on every write) IS THE WRONG FIX — same failure mode as the original `-T`.** It
+must be SUPERSEDED, not built on. Do NOT re-store slots "with `-A`" (that was the old, wrong plan).
 
-**⚠ NEW INCIDENT this session (2026-07-15 ~13:5x):** my temp-keychain VERIFICATION scripts called
-`security` DIRECTLY (bypassing the latch) → a fresh popup flood. Root-caused + stopped: 0 `security`
-procs, search list clean (login+System only — unchanged), temp keychains removed. LESSON: never
-drive a live `security` round-trip to "prove" the fix — the unit tests + a raw-shell `-A` write are
-sufficient; the real no-reprompt proof IS part 2 (user present). Separately, the user reports the
-login keychain is prompting for sudo/unlock via popup again = the securityd-recycle re-lock (known
-open issue) — only a reboot reliably re-unlocks.
+**NEXT ACTION (implement the real fix — code, then ONE login validation):**
+1. In `rotator._slot_keychain_write` (and the live-cred writers), probe existence first
+   (`find-generic-password` attribute-only = silent). Pass `-A` to `_add_password_argv` ONLY when
+   the item is NEW (create); on an EXISTING item pass NO ACL flag (data-only update). Thread an
+   `item_exists` / `set_acl` boolean; drop the `allow_any`-on-every-write logic from fa46a49.
+2. Unit-test: assert create-argv carries `-A`, update-argv carries neither `-A` nor `-T`.
+3. ONE login-keychain validation (should be SILENT now — data-only update, no SetAccess): clear
+   latch, idempotent data-only write-back of one real slot, confirm no hang / no latch trip.
+4. Then clear latch + restore opt-in (`mv opt-in.flag.PAUSED-write-acl-flood-20260715 opt-in.flag`)
+   → rotation live. The existing login items already carry the user's GUI "allow all" ACL, so
+   data-only updates modify them without prompting.
+
+**Cookie Monster.app was the CONSTANT flooder (SEPARATE issue, now ERADICATED):** a third-party app
+polling `Claude Code-credentials -w` every few sec → constant dialogs (each Claude-only → prompt).
+It bypassed the janitor latch entirely (direct `security`, not via `run_security`). Killed + app
+deleted by user + LaunchAgent `com.cookiemonster.usage` unloaded & removed + pref removed + gone
+from launchd (2026-07-15 16:23). The RELENTLESS popups all session were Cookie Monster; the
+rotator's own write-prompt is OCCASIONAL (on-change only — writes are fingerprint-guarded).
+
+**LESSON (do NOT repeat):** every "-A / allow-all" test on the REAL login keychain popped a dialog
+and, while Cookie Monster was live, was confounded. The DECISIVE evidence came from THROWAWAY
+keychains (`JANITOR_ROTATOR_KEYCHAIN`-scoped, isolated gstate) — no login contact, and `time`
+distinguishes silent (0.0x s) from hung (timeout). Diagnose keychain-write behavior on a throwaway
+keychain with `time`, never on the user's login keychain.
 
 **Current machine state (LOCAL — not durable across machines):** rotator opt-in PAUSED
 (`opt-in.flag.PAUSED-write-acl-flood-20260715`); `keychain-denied.latch` SET; janitor FULLY ARMED
