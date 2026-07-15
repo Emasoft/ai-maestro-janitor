@@ -1,9 +1,9 @@
 ---
 trdd-id: AP2X9A0H
-title: Atom desc metadata field + proactive memgrep-recall invite on every user prompt
+title: Atom desc metadata field — required <=200-char prose summary shown in memgrep listings
 column: backburner
 created: 2026-07-15T19:12:40+0200
-updated: 2026-07-15T19:12:40+0200
+updated: 2026-07-15T19:55:48+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -51,32 +51,22 @@ atom worth reading in full — cutting recall token cost and improving hit preci
 - **Back-compat:** legacy atoms without `desc` still work (memgrep falls back). New/edited atoms get
   `desc`. No mass migration required; atoms gain `desc` as pages are touched.
 
-### Feature 2 — proactive memgrep-recall INVITE on every user prompt (for-now version)
+### Feature 2 — SPLIT OUT to its own TRDD
 
-A `UserPromptSubmit` hook injects, as `additionalContext`, a short INVITATION for the agent to
-proactively `memgrep recall`/`find` for memories related to the user's prompt BEFORE acting. It does
-**NOT** suggest specific memories — it only PROMPTS the agent to search itself (with keywords/phrases
-derived from the prompt). This is the "for now" version.
-
-- **Future (not this TRDD):** a more powerful Rust hook extracts keywords/keyphrases from the prompt
-  PROGRAMMATICALLY and auto-suggests the most relevant ATOMS and whole-topic WIKIMEM PAGES. This TRDD
-  ships only the invitation; the keyword-extraction+auto-suggest hook is a follow-up.
-- **Existing surface to reconcile:** there is already an autorecall hook
-  (`scripts/hooks/on-prompt-submit-autorecall.py`, issues #16/#45) that surfaces relevant notes by
-  symptom. Decide whether Feature 2 is (a) a new invite-only hook, or (b) a mode/enhancement of the
-  existing autorecall (the existing one already auto-surfaces; the user's ask is an INVITE, which is
-  lighter). Prefer extending/aligning with the existing hook over adding a parallel one — audit it
-  first (it already injects context each prompt, per the SessionStart memory breadcrumb).
+The proactive memgrep-recall INVITE hook (a `UserPromptSubmit` nudge to search before acting) was
+split into **TRDD-7B1THXTB** so each TRDD is one atomic task (per the USER's "a series of TRDD" +
+the one-atomic-task rule). This TRDD now covers ONLY the `desc` atom field (Feature 1). The
+subconscious-agent wikimem-maintenance duties the USER also specified are **TRDD-87RKBYJ8**.
 
 ## NEXT ACTION
-1. Audit `on-prompt-submit-autorecall.py` — does it already inject an invite, or only auto-surface
-   notes? Decide Feature-2 shape against it (extend vs new).
-2. Spec the `desc` format in the memory-write skill + the atomize/harvest procedures; enforce ≤200.
-3. memgrep (Rust, `scripts/memgrep`): parse `desc`; show it in `recall`/`find` listings; body-prefix
+1. DONE this session: `skills/janitor-memory-write/SKILL.md` now requires the ≤200-char prose `desc`
+   on every body atom + `[^N]` lesson (committed 383ddac).
+2. Sync `skills/janitor-memory-write/references/atom-authoring.md` (still says ≤64 slug) + the
+   atomize/harvest procedures the subconscious agent loads (also covered by TRDD-87RKBYJ8 duty 2).
+3. memgrep (Rust, `scripts/memgrep`): parse `desc`; show it in `recall`/`find` LISTINGS; body-prefix
    fallback for legacy atoms. Add a test.
-4. Ship Feature 2 (invite injection), aligned with the existing autorecall hook.
-5. Publish (the skill + hook + memgrep binary live in the plugin → a release + cache update is
-   required for them to take effect, per `macos-keychain.md [^2]` / TRDD-EQJPPZ2L: repo ≠ deployed).
+4. Publish (the skill + memgrep binary live in the plugin → a release + cache update is required for
+   them to take effect, per `macos-keychain.md [^2]` / TRDD-EQJPPZ2L: repo ≠ deployed).
 
 ## Verification
 - A page's atoms each carry a ≤200-char `desc`; `memgrep recall "<symptom>" <dir>` LISTS atoms by
