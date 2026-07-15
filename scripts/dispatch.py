@@ -659,11 +659,30 @@ def _pending_agent_directive_lines() -> list[str]:
 
 
 def _pending_agent_count() -> int:
-    """W4 (TRDD-82OP4EN9): how many background agents the manifest lists. Fail-open 0."""
+    """W4 (TRDD-82OP4EN9): how many background agents the manifest lists. Fail-open 0.
+
+    Counts ALL agents — used by the resume nudge (an agent that died must still be
+    named for a SendMessage-resume, janitor-spawned or not). The CADENCE probe uses
+    `_pending_external_agent_count` instead (TRDD-CI6ZTNB9)."""
     try:
         import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
 
         return len(pending_agents.pending())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _pending_external_agent_count() -> int:
+    """Background agents the manifest lists EXCLUDING the janitor's own housekeeping
+    agents (memory-maintenance / security) — the count the cadence FAST probe must
+    use (TRDD-CI6ZTNB9 / issue #89). The janitor spawns those agents itself via the
+    `[janitor-memory-*]` markers, so counting them makes the cadence controller
+    react to a signal it produces — two wasted re-arm turns per memory chore. A
+    USER-spawned background agent still counts (a real time-sensitive wait). Fail-open 0."""
+    try:
+        import pending_agents  # noqa: PLC0415 - lazy: fail-open when lib is absent
+
+        return len(pending_agents.pending_external())
     except Exception:  # noqa: BLE001
         return 0
 
@@ -1397,7 +1416,12 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
             return True
     except OSError:
         pass
-    return _pending_agent_count() > 0
+    # EXTERNAL agents only (TRDD-CI6ZTNB9): a janitor-spawned memory/security agent
+    # is housekeeping the janitor queued, not a time-sensitive wait — counting it
+    # here would make this controller react to its own output and re-arm twice per
+    # memory chore. The resume/keep-going/directive signals above are legitimate and
+    # unchanged; only this pending-agent term was self-perturbing.
+    return _pending_external_agent_count() > 0
 
 
 def _stamp_resume(sd: Path, now: int) -> None:

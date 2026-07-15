@@ -447,3 +447,77 @@ def test_cron_liveness_nudge_missing_session_id_still_nudges(iso, capsys) -> Non
     hook = _import_session_start_hook()
     hook._cron_liveness_nudge(state, "")
     assert "verify the cron exists" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-CI6ZTNB9 / issue #89 — the cadence FAST probe must ignore the janitor's
+# OWN housekeeping agents (memory-maintenance / security), or the controller
+# reacts to a signal it produces and re-arms twice per memory chore.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "desc",
+    [
+        "janitor-memory-subconscious-agent",  # short spawn form
+        "ai-maestro-janitor:janitor-memory-subconscious-agent",  # plugin-qualified
+        "janitor-security-agent",
+        "AI-Maestro-Janitor:Janitor-Security-Agent",  # case-insensitive
+    ],
+)
+def test_is_janitor_agent_recognizes_housekeeping_agents(iso, desc: str) -> None:
+    """The memory + security agent-type signatures are recognized in both the short
+    and plugin-qualified forms, case-insensitively — that is what the payload's
+    ``agent_type`` (stored in ``description``) actually looks like."""
+    pa = iso["pa"]
+    assert pa.is_janitor_agent({"description": desc}) is True
+
+
+@pytest.mark.parametrize("desc", ["some user fork", "wikimem rename", "", "gs-researcher"])
+def test_is_janitor_agent_false_for_non_janitor(iso, desc: str) -> None:
+    """A user-spawned agent (or an entry with no description) is NOT janitor — the
+    filter must be janitor-agents-only so a real time-sensitive wait still counts."""
+    pa = iso["pa"]
+    assert pa.is_janitor_agent({"description": desc}) is False
+
+
+def test_pending_external_excludes_only_janitor_agents(iso) -> None:
+    """`pending_external` drops the janitor's own agents but keeps a user fork.
+
+    This is the exact scenario of issue #89: a `[janitor-memory-*]` marker spawned a
+    memory agent, and its presence must NOT be read as "the user is waiting"."""
+    pa = iso["pa"]
+    pa.add("mem-1", "ai-maestro-janitor:janitor-memory-subconscious-agent", now=1000)
+    pa.add("sec-1", "janitor-security-agent", now=1000)
+    pa.add("user-fork", "a real background research task", now=1000)
+    ext = pa.pending_external(now=1000)
+    ids = {e["agentId"] for e in ext}
+    assert ids == {"user-fork"}  # both janitor agents filtered, the user fork kept
+    assert len(pa.pending(now=1000)) == 3  # pending() itself is unchanged (resume still lists all)
+
+
+def test_cadence_probe_ignores_a_lone_janitor_memory_agent(iso) -> None:
+    """THE fix (TRDD-CI6ZTNB9): with a janitor memory agent in flight and NO other
+    FAST signal, the session is NOT active-waiting → no promotion to FAST → no re-arm
+    churn. Removing the filter (counting the janitor agent) fails this test.
+
+    Seed at wall-clock now: the dispatch counters call `pending()` with the real
+    clock, so an ancient ts=1000 entry would be swept by the 7-day age gate."""
+    state, pa = iso["state"], iso["pa"]
+    now = int(time.time())
+    pa.add("mem-1", "janitor-memory-subconscious-agent", now=now)
+    dispatch = _import_dispatch()
+    assert dispatch._pending_external_agent_count() == 0
+    assert dispatch._pending_agent_count() == 1  # the resume path still sees it
+    assert dispatch._cadence_active_waiting(state.state_dir(), now) is False
+
+
+def test_cadence_probe_still_flips_for_a_user_agent(iso) -> None:
+    """The opposite failure guard (DERIVED task 3): a USER-spawned background agent
+    IS a time-sensitive wait, so it must still promote the tier to FAST."""
+    state, pa = iso["state"], iso["pa"]
+    now = int(time.time())
+    pa.add("user-fork", "a real background task", now=now)
+    dispatch = _import_dispatch()
+    assert dispatch._pending_external_agent_count() == 1
+    assert dispatch._cadence_active_waiting(state.state_dir(), now) is True

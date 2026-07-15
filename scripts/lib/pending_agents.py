@@ -77,6 +77,22 @@ MAX_NUDGES = 3
 # Bound persisted description length (hook payloads are model-adjacent data).
 _MAX_DESC_LEN = 120
 
+# Agent-type signatures for the agents the JANITOR ITSELF spawns as housekeeping
+# (memory-maintenance + security), matched as a substring of the ``description``
+# the SubagentStart hook records from the payload's ``agent_type``. A janitor
+# background agent is housekeeping the janitor queued — NOT a time-sensitive wait
+# — so it must be excluded from the heartbeat cadence FAST probe (TRDD-CI6ZTNB9 /
+# issue #89). A controller whose FAST input is a condition it produces itself
+# oscillates for free: dispatch emits a `[janitor-memory-*]` marker → the memory
+# agent spawns → the pending count flips the tier to FAST → a re-arm burns a turn,
+# then the agent finishes and another re-arm burns a second — for every memory
+# chore. Keyed on a substring so BOTH the short (`janitor-memory-…`) and the
+# plugin-qualified (`ai-maestro-janitor:janitor-memory-…`) agent-type forms match.
+_JANITOR_AGENT_SIGNATURES = (
+    "janitor-memory-subconscious-agent",
+    "janitor-security-agent",
+)
+
 
 def _manifest_path() -> Path:
     return state.state_dir() / MANIFEST_NAME
@@ -194,6 +210,29 @@ def pending(now: int | None = None) -> list[dict]:
         return _load_unlocked(t)
     except Exception:  # noqa: BLE001 - readers (resume phases) must never die
         return []
+
+
+def is_janitor_agent(entry: dict) -> bool:
+    """True iff this manifest entry is a background agent the JANITOR spawned for
+    its OWN housekeeping (memory maintenance or security), identified by the
+    ``agent_type`` the SubagentStart hook stored in ``description``. Such an agent
+    is NOT a time-sensitive wait, so the cadence FAST probe must exclude it
+    (TRDD-CI6ZTNB9). Substring match so both the short and plugin-qualified
+    agent-type forms register; an empty/absent description is NOT janitor (fail
+    toward counting it, which only over-promotes to FAST — the safe direction)."""
+    desc = str(entry.get("description", "") or "").lower()
+    return any(sig in desc for sig in _JANITOR_AGENT_SIGNATURES)
+
+
+def pending_external(now: int | None = None) -> list[dict]:
+    """Live entries EXCLUDING the janitor's own housekeeping agents — the set the
+    heartbeat cadence FAST probe must count (TRDD-CI6ZTNB9). A USER-spawned
+    background agent (a genuine time-sensitive wait) is still counted; only the
+    janitor's memory/security agents are filtered, so the controller stops
+    perturbing its own FAST input. Distinct from `pending()`, which the resume
+    directive still uses in full (a janitor agent that died is listed there so it
+    is not silently stranded)."""
+    return [e for e in pending(now) if not is_janitor_agent(e)]
 
 
 def directive_lines(now: int | None = None) -> list[str]:
