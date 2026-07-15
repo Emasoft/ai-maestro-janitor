@@ -794,6 +794,13 @@
       "default": true,
       "sensitive": false
     },
+    "memory_recall_invite": {
+      "title": "Recall Invite on Prompt",
+      "description": "ON by default (TRDD-7B1THXTB). On every non-trivial user prompt the autorecall hook ALSO injects a one-line INVITATION for the agent to run its own `memgrep recall` with keywords IT derives — on a recall hit the invite is appended after the surfaced notes; on a miss it is injected alone. The invite never names or suggests a specific memory (that stays the agent's job); it exists because auto-surfacing ranks the RAW prompt and can miss the note that matters — the motivating failure re-hit a trap already documented in the corpus because nothing prompted a search. Kept to one line (it rides every prompt). Set to false to restore silence on a recall miss; setting memory_autorecall to false disables the whole hook, invite included.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
     "memory_breadcrumb": {
       "title": "Session-Start Memory Breadcrumb",
       "description": "ON by default. At session start the janitor prints ONE line naming how many memory notes each scope holds (LOCAL + PROJECT + USER) and the `memgrep overview <dir>` entry point \u2014 the missing 'what do I have?' breadcrumb (janitor#62 gaps 2+3). Without it the 3-scope wikimem is invisible to a fresh session unless the agent already knows memgrep: autorecall only pushes a note when a prompt happens to match it. The line carries COUNTS ONLY, never note content, so an untrusted PROJECT-scope page (git input from any contributor) cannot inject text into the session prefix through this surface. Silent when every scope is empty, so an install with no memory corpus pays nothing. Set to false to opt out.",

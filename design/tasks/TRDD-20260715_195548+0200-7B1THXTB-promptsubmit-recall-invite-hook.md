@@ -1,9 +1,9 @@
 ---
 trdd-id: 7B1THXTB
 title: UserPromptSubmit hook — invite the agent to proactively memgrep-recall before acting
-column: backburner
+column: dev
 created: 2026-07-15T19:55:48+0200
-updated: 2026-07-15T19:55:48+0200
+updated: 2026-07-16T09:00:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -37,17 +37,19 @@ read it. See `macos-keychain.md [^8]` (ATOM-MX20-QO8S).
   PAGES.
 
 ## NEXT ACTION
-1. **Audit the existing hook first** — `scripts/hooks/on-prompt-submit-autorecall.py` (issues #16/#45)
-   already runs on UserPromptSubmit and, per the SessionStart breadcrumb, auto-surfaces relevant notes
-   by symptom. DECIDE: is the user's INVITE (a) a lighter mode of that hook, or (b) a new hook? The
-   existing one auto-SURFACES; the user asked for an INVITE (Claude searches itself). Prefer
-   extending/aligning the existing hook over adding a parallel one — two UserPromptSubmit hooks both
-   injecting context each prompt is token waste and confusing.
-2. Implement the invite injection (via `additionalContext`), kept SHORT (it rides every prompt — token
-   economy). No specific memory named.
-3. Test: a fresh prompt shows the invite; no specific memory is named by the hook.
-4. Publish (the hook lives in the plugin → needs a release + cache update to deploy, per
-   `macos-keychain.md [^2]` / TRDD-EQJPPZ2L: repo ≠ deployed).
+**IMPLEMENTED 2026-07-16 — decision (a): the invite is part of the EXISTING autorecall hook** (no
+parallel UserPromptSubmit hook — one injection surface per prompt). `on-prompt-submit-autorecall.py`:
+- constant `_INVITE` (one line, from OUR code, names no memory: the agent derives its own keywords);
+- HIT → notes first, invite appended last; MISS → invite ALONE (the miss is the motivating case);
+- EMPTY corpus / no memgrep / trivial-cron-slash prompts → still fully silent (unchanged no-ops);
+- separate opt-out `CLAUDE_PLUGIN_OPTION_MEMORY_RECALL_INVITE` (default ON), declared as
+  `memory_recall_invite` in plugin.json userConfig; `memory_autorecall=false` kills the whole hook.
+Tests: 20/20 green in `tests/test_autorecall_hook.py` (3 new: miss→invite-only + no memory named,
+hit→notes-then-invite ordering, invite opt-out restores miss-silence).
+
+**REMAINING:** publish (the hook lives in the plugin → release + cache update to deploy, per
+`macos-keychain.md [^2]` / TRDD-EQJPPZ2L: repo ≠ deployed). FUTURE (separate TRDD, not this one):
+the Rust keyword-extraction hook that auto-suggests atoms/pages.
 
 ## Verification
 - On any user prompt, the agent sees a short invite to `memgrep recall` before acting; the hook names

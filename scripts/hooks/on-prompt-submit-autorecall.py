@@ -45,8 +45,20 @@ Design contract (load-bearing — keep all of these):
     proceeds. The injection is advisory; failure to recall is never fatal.
 
   - additionalContext is the ONLY channel used (the documented field that
-    reaches the model). It is set only on a genuine hit; on no hit nothing is
-    emitted, so an empty corpus is indistinguishable from the hook being off.
+    reaches the model). On a genuine hit it carries the recalled notes + a short
+    recall INVITE; on a miss it carries the INVITE alone (TRDD-7B1THXTB); on an
+    EMPTY corpus nothing is emitted, so a no-corpus install stays silent.
+
+  - THE RECALL INVITE (TRDD-7B1THXTB). Auto-surfacing ranks the RAW prompt, which
+    can miss the note that matters (the motivating failure: macos-keychain.md [^2]
+    existed, was not surfaced for the go-live prompt, and the trap was re-hit).
+    So every non-trivial prompt ALSO gets a one-line invitation for the agent to
+    run its OWN `memgrep recall` with keywords IT derives — the hook never names
+    or suggests a specific memory (a future Rust hook may add programmatic
+    keyword extraction; this is deliberately just the nudge). Kept to one line
+    because it rides every prompt (token economy). Opt out separately with
+    `CLAUDE_PLUGIN_OPTION_MEMORY_RECALL_INVITE=false` (opting out of AUTORECALL
+    disables the whole hook, invite included).
 """
 
 from __future__ import annotations
@@ -230,6 +242,23 @@ def _recall(memgrep: str, query: str, note_paths: list[str]) -> str:
     return proc.stdout
 
 
+# The one-line recall INVITE (TRDD-7B1THXTB). Constant, from OUR code — never from
+# corpus data — and it names no memory: the agent derives its own keywords. One
+# line only: it rides every non-trivial prompt, so every extra word is a standing
+# per-turn tax.
+_INVITE = (
+    "[janitor-memory] Invite: BEFORE acting, consider running your own "
+    '`memgrep recall "<symptom keywords you choose>" <memdir>` across the 3 memory '
+    "scopes (protocol: ~/.claude/rules/markdown-memory-recall.md) — the corpus may "
+    "already know this."
+)
+
+
+def _invite_enabled(state) -> bool:
+    """The invite's own opt-out (default ON), separate from AUTORECALL's."""
+    return state.is_truthy_env("CLAUDE_PLUGIN_OPTION_MEMORY_RECALL_INVITE", default=True)
+
+
 def _format_context(recall_out: str) -> str | None:
     """Turn recall's `path — description` lines into a compact additionalContext
     block, or None when there are no usable lines. Caps total length so a few
@@ -349,6 +378,12 @@ def main() -> int:
 
     recall_out = _recall(memgrep, stripped, note_paths)
     context = _format_context(recall_out)
+
+    # TRDD-7B1THXTB: the invite fires on hit AND miss — the miss is exactly the
+    # case that burned us (the right note existed but the raw-prompt ranking did
+    # not surface it). Only an EMPTY corpus (returned above) stays fully silent.
+    if _invite_enabled(state):
+        context = f"{context}\n{_INVITE}" if context is not None else _INVITE
     if context is None:
         return 0
 

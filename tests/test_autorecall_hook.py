@@ -319,11 +319,43 @@ def test_f14_injected_lines_are_sanitized(tmp_path):
 
 
 @_needs_memgrep
-def test_on_no_matching_note_is_noop(tmp_path):
-    """A prompt with no recall hit injects nothing (empty stdout)."""
+def test_on_no_matching_note_injects_invite_only(tmp_path):
+    """TRDD-7B1THXTB: a prompt with NO recall hit still injects the one-line recall
+    INVITE (the miss is the case that burned us — the right note existed but the
+    raw-prompt ranking did not surface it), and names NO memory."""
     memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
     _write_note(memdir, "n1", "completely unrelated topic about gardening tomatoes")
     rc, out, _err = _run_hook(_prompt("quantum chromodynamics lattice gauge theory"), _ON, tmp_path / "proj", tmp_path / "home")
+    assert rc == 0
+    assert out.strip() != ""
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "memgrep recall" in ctx  # the invite
+    assert "n1.md" not in ctx  # no memory named — the agent searches itself
+    assert "Possibly-relevant notes" not in ctx  # no fake hit block on a miss
+
+
+@_needs_memgrep
+def test_on_hit_appends_invite_after_notes(tmp_path):
+    """TRDD-7B1THXTB: on a HIT the surfaced notes come first, then the invite line
+    (the agent may still search with better keywords than the raw prompt)."""
+    memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
+    _write_note(memdir, "zarvox", "zarvox flux compensator failed where is the reset switch")
+    rc, out, _err = _run_hook(_prompt("the zarvox flux compensator failed again"), _ON, tmp_path / "proj", tmp_path / "home")
+    assert rc == 0
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "zarvox.md" in ctx and "memgrep recall" in ctx
+    assert ctx.index("zarvox.md") < ctx.index("Invite:")  # notes first, invite last
+
+
+@_needs_memgrep
+def test_invite_optout_restores_miss_silence(tmp_path):
+    """CLAUDE_PLUGIN_OPTION_MEMORY_RECALL_INVITE=false → a miss is silent again
+    (the pre-TRDD-7B1THXTB behavior), while autorecall itself stays on."""
+    memdir = _agent_memdir(tmp_path / "home", tmp_path / "proj")
+    _write_note(memdir, "n1", "completely unrelated topic about gardening tomatoes")
+    env = dict(_ON)
+    env["CLAUDE_PLUGIN_OPTION_MEMORY_RECALL_INVITE"] = "false"
+    rc, out, _err = _run_hook(_prompt("quantum chromodynamics lattice gauge theory"), env, tmp_path / "proj", tmp_path / "home")
     assert rc == 0
     assert out.strip() == ""
 
