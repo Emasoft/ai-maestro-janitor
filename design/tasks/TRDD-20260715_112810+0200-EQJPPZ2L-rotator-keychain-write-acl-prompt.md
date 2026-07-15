@@ -3,7 +3,7 @@ trdd-id: EQJPPZ2L
 title: Rotator keychain WRITE triggers an ACL prompt (uv-python) — every token refresh re-latches the rotator dead
 column: dev
 created: 2026-07-15T11:28:10+0200
-updated: 2026-07-15T16:57:50+0200
+updated: 2026-07-15T17:47:28+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -16,7 +16,30 @@ implementation-commits: [fa46a49, 1cedf28]
 
 # Rotator keychain WRITE triggers an ACL prompt — every refresh re-latches the rotator dead
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (16:57) — CODE FIX LANDED (1cedf28)
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (17:47) — 🟢 ROTATION LIVE
+
+**GO-LIVE COMPLETE (user directive "we cannot wait anymore", present + engaged).** The ACL-prompt
+fix (1cedf28) is validated on the REAL login keychain and rotation is LIVE:
+- Pre-flight clean: no hung `security` procs; latch was set; opt-in paused.
+- `verify_live_slot.py` on the real login keychain: latch cleared → read slot → idempotent
+  data-only write-back ×2 → both `True`, read-back matches, **latch did NOT trip** (PASS). The
+  operation that HUNG pre-fix is now silent.
+- Manual `rotator.py tick` (the real flooding path — keepalive-refresh + slot WRITES): silent,
+  refreshed a slot, resolved live `emanuele.sabetta` (5h=8% 7d=61% within limits), **no latch trip**.
+- `mv opt-in.flag.PAUSED-write-acl-flood-20260715 opt-in.flag` → **opt-in RESTORED**; daemon
+  (PID 10762) alive to take the 60 s beat. Final oauth-health: all 3 slots `refresh=yes`, latch clean.
+
+**REMAINING (durability — the recurring-incident root the fix ALONE doesn't close):**
+- **Latch AUTO-RECOVERY (next).** The `keychain-denied.latch` is still a single point of failure:
+  a future TRANSIENT that trips it → rotation dark forever (self-perpetuating — a latched
+  `run_security` short-circuits every write, so nothing can clear it). Needs a TTL/cooldown that
+  permits ONE probe write after N minutes + a loud drift alarm. THIS is what makes rotation
+  survive a blip, not just work today. (TRDD DERIVED task 3 / §C.1-2.)
+- (separate follow-up) the 98/99 switch + SAFE alignment (§policy).
+
+---
+
+## ⏵ STATE — 2026-07-15 (16:57) — CODE FIX LANDED (1cedf28)
 
 **PROGRESS:** The real fix is IMPLEMENTED + tested + committed as `1cedf28` (supersedes fa46a49).
 NEXT ACTION items 1 (code) and 2 (unit tests) are DONE. What remains: item 3 (ONE login-keychain
