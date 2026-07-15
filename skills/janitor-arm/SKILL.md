@@ -49,7 +49,9 @@ is already gone is fine — proceed.
 
 Build the heartbeat prompt, then `CronCreate` with `cron` **exactly as step 1 printed it** (it is
 the tier the dispatcher asked for — re-arming a different cadence makes the dispatcher ask again on
-the next fire, a renew loop that never converges), `recurring: true`, `durable: true`. Replace
+the next fire, a renew loop that never converges) and `recurring: true`. Do **not** pass
+`durable: true`: the CronCreate tool documents it as having no effect — every scheduled job is
+session-only by platform design — so sending it implies a persistence that does not exist. Replace
 `{{STUB_DEST}}` with the absolute path `${CLAUDE_PLUGIN_DATA}/dispatcher-stub.py`:
 
 ```text
@@ -75,14 +77,13 @@ heartbeat and double the fire cost with nothing reporting it.
 
 ## 5. Report honestly
 
-Check whether `CronCreate` came back **durable** or **session-only** (some Claude Code builds
-silently downgrade `durable: true`; the response says so, and `CronList` shows `[session-only]`).
+Every scheduled job is **session-only** — it is not written to disk and dies on a Claude restart
+(`CronList` shows `[session-only]`; the CronCreate response says the same). The heartbeat re-arms
+itself at the next SessionStart, so a restart costs only the gap until the next session begins.
 
-- Durable → `Janitor armed (durable): <cron>. Heartbeat ID: <id>. Survives restarts.`
-- Session-only → `Janitor armed SESSION-ONLY: <cron>. Heartbeat ID: <id>. ⚠ This build downgraded durable→session-only — the heartbeat will NOT survive a Claude restart; it re-arms at the next SessionStart (ai-maestro-janitor#23).`
-
-Append `(replaced <N>)` if you deleted any. **Never claim "survives restarts" for a session-only
-job.**
+Report: `Janitor armed (session-only): <cron>. Heartbeat ID: <id>. Re-arms at the next SessionStart
+after a restart (ai-maestro-janitor#23).` Append `(replaced <N>)` if you deleted any. **Never claim
+"survives restarts"** — no scheduled job does on the current platform.
 
 ## Scope
 

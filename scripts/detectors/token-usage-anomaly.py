@@ -4,9 +4,10 @@
 # ///
 """token-usage-anomaly — flag a SUDDEN token-usage spike vs the session's learned normal.
 
-The Stop-hook meter logs every heartbeat turn's token cost to `token-meter.jsonl`. This
-heartbeat detector reads that log, learns a ROBUST baseline (median + MAD) of per-5-min
-weighted-token usage, and emits ONE drift line when the most-recent COMPLETE 5-min bucket
+The Stop-hook meter logs every turn's token cost to `token-meter.jsonl` tagged
+`heartbeat: true|false`. This heartbeat detector reads the HEARTBEAT records only (interactive
+turns are larger and would pollute the baseline — see main()), learns a ROBUST baseline
+(median + MAD) of per-5-min weighted-token usage, and emits ONE drift line when the most-recent COMPLETE 5-min bucket
 is a genuine outlier — robust-z >= Z AND above the FLOOR_PCT percentile of history — i.e.
 SUDDEN anomalous behaviour, not a normal agent-spawn burst. The log is heavy-tailed +
 bursty (measured: top 10% of buckets hold ~61% of tokens), so the threshold is
@@ -104,7 +105,15 @@ def _agentlens_enrich() -> str:
 def main() -> int:
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_TOKEN_ANOMALY_ENABLED", True):
         return 0
-    records = _load(state.state_dir() / "token-meter.jsonl")
+    # HEARTBEAT-ONLY baseline (TRDD-a4e41e89 → widened by TRDD-DLI76AUC #4). The Stop-hook
+    # meter now logs EVERY turn tagged `heartbeat: true|false`; this detector's job is "did
+    # THIS SESSION'S HEARTBEAT cost spike vs its own normal", so it must learn from — and
+    # alarm on — heartbeat turns alone. Interactive turns are far larger and would both
+    # inflate the median/MAD baseline AND masquerade as outliers, producing spurious alarms
+    # on ordinary user activity. A record with NO `heartbeat` key predates the widening and
+    # was a heartbeat by construction, so a missing tag defaults to True (same convention as
+    # token_report.py).
+    records = [r for r in _load(state.state_dir() / "token-meter.jsonl") if r.get("heartbeat", True)]
     if not records:
         return 0
 

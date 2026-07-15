@@ -482,14 +482,25 @@ def main() -> int:
     out_stats = token_meter.summarize(records, field="output")
     in_stats = token_meter.summarize(records, field="input")
     assert out_stats is not None and in_stats is not None
-    p95_out = out_stats["p95"]
-    spikes = [r for r in records if int(r.get("output", 0) or 0) >= max(_SPIKE_OUTPUT, p95_out)]
     events = token_meter.load_log(_state_dir() / "window-exhaustion.jsonl")
     window = _window_metrics(records, int(time.time()), args.util5h, args.util7d, events)
-    # A record with NO `heartbeat` key predates TRDD-DLI76AUC #4, when the meter logged
-    # heartbeats exclusively — so a missing key means True, never False.
-    n_beat = sum(1 for r in records if r.get("heartbeat", True))
+
+    # Heartbeat partition, computed ONCE — both the spike threshold and the beat-mean advice
+    # below need it (TRDD-DLI76AUC #4). A record with NO `heartbeat` key predates that change,
+    # when the meter logged heartbeats exclusively, so a missing tag defaults to True.
+    beats = [r for r in records if r.get("heartbeat", True)]
+    n_beat = len(beats)
     n_user = len(records) - n_beat
+    beat_stats = token_meter.summarize(beats, field="output")
+
+    # A "spike" is a HEARTBEAT concept — "did a heartbeat fire's output blow up vs the heartbeat
+    # baseline". The threshold MUST be the heartbeat p95, not the all-turns p95: since the meter
+    # now logs the (far larger) interactive turns too, an all-turns p95 rises to interactive
+    # magnitudes and masks a genuine heartbeat runaway. Only heartbeat turns can register a spike;
+    # interactive turns are expected to be large and are never flagged.
+    beat_p95 = beat_stats["p95"] if beat_stats else 0
+    spike_threshold = max(_SPIKE_OUTPUT, beat_p95)
+    spikes = [r for r in beats if int(r.get("output", 0) or 0) >= spike_threshold]
 
     if args.json:
         print(
@@ -500,7 +511,7 @@ def main() -> int:
                     "user_turns": n_user,
                     "output": out_stats,
                     "input": in_stats,
-                    "spike_threshold": max(_SPIKE_OUTPUT, p95_out),
+                    "spike_threshold": spike_threshold,
                     "spikes": len(spikes),
                     "window": window,
                     "log": str(log_path),
@@ -520,23 +531,26 @@ def main() -> int:
     print(f"  {'when':<12} {'kind':<5} {'output':>7} {'input':>7} {'cache_rd':>9} {'cache_cr':>8} {'tools':>5}")
     print(f"  {'-' * 12} {'-' * 5} {'-' * 7} {'-' * 7} {'-' * 9} {'-' * 8} {'-' * 5}")
     for r in records[-args.recent :]:
-        flag = "  ⚠ spike" if int(r.get("output", 0) or 0) >= max(_SPIKE_OUTPUT, p95_out) else ""
-        kind = "beat" if r.get("heartbeat", True) else "user"
+        is_beat = r.get("heartbeat", True)
+        flag = "  ⚠ spike" if is_beat and int(r.get("output", 0) or 0) >= spike_threshold else ""
+        kind = "beat" if is_beat else "user"
         print(f"  {_fmt_ts(r.get('ts', 0)):<12} {kind:<5} {r.get('output', 0):>7} {r.get('input', 0):>7} {r.get('cache_read', 0):>9} {r.get('cache_creation', 0):>8} {r.get('tool_calls', 0):>5}{flag}")
     print()
     if spikes:
-        print(f"  ⚠ {len(spikes)} turn(s) above the spike threshold ({max(_SPIKE_OUTPUT, p95_out)} output tokens).")
+        print(f"  ⚠ {len(spikes)} heartbeat fire(s) above the spike threshold ({spike_threshold} output tokens).")
 
-    # The "lengthen the heartbeat" advice MUST be judged on heartbeat turns alone. The meter now
-    # logs interactive turns too (TRDD-DLI76AUC #4), and those are far larger — so an all-turns
-    # mean would climb during a busy coding session and counsel slowing the beat, which is exactly
-    # backwards: the beat is a cache KEEP-ALIVE, and a session doing real work is the one that most
-    # needs its cache warm. This project has already talked itself into that mistake twice.
-    beat_stats = token_meter.summarize([r for r in records if r.get("heartbeat", True)], field="output")
-    beat_mean = beat_stats["mean"] if beat_stats else 0.0
-    if beat_mean >= _HIGH_MEAN_OUTPUT:
-        print(f"  ⚠ mean output per HEARTBEAT ({beat_mean:.0f}) is above {_HIGH_MEAN_OUTPUT} — keep heartbeat replies terse, or push more work into scripts.")
-    if not spikes and beat_mean < _HIGH_MEAN_OUTPUT:
+    # The "lengthen the heartbeat" advice MUST be judged on heartbeat turns alone (`beats`,
+    # partitioned once above). The meter now logs interactive turns too (TRDD-DLI76AUC #4), and
+    # those are far larger — so an all-turns mean would climb during a busy coding session and
+    # counsel slowing the beat, which is exactly backwards: the beat is a cache KEEP-ALIVE, and a
+    # session doing real work is the one that most needs its cache warm. This project has already
+    # talked itself into that mistake twice. With ZERO heartbeat records the verdict is unavailable
+    # — say so, rather than print a reassuring "within budget" computed from no data.
+    if not beats or beat_stats is None:
+        print("  (no heartbeat turns logged yet — per-heartbeat verdict unavailable.)")
+    elif beat_stats["mean"] >= _HIGH_MEAN_OUTPUT:
+        print(f"  ⚠ mean output per HEARTBEAT ({beat_stats['mean']:.0f}) is above {_HIGH_MEAN_OUTPUT} — keep heartbeat replies terse, or push more work into scripts.")
+    elif not spikes:
         print("  ✓ no spikes; mean per-heartbeat cost is within budget.")
     return 0
 
