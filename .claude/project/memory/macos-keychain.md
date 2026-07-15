@@ -2,7 +2,7 @@
 name: macos-keychain
 description: "macOS keychain dialog opened hundreds of times / 'Security wants to use the login keychain' with no Always Allow button / cannot type — a keychain prompt FLOOD, often right after rotating/re-logging a Claude account. Prompts KEEP coming even after I paused the rotator / iCloudNotificationAgent is ALSO asking for the login keychain / I typed my password (or ran `security unlock-keychain`) and it is NOT sticking / how do I stop the keychain popups and keep them from coming back. The safe `security` protocol every keychain interaction MUST follow so this is structurally impossible: single choke-point, hard timeout, headless fail-fast, one-shot denied-latch, opt-in gate on EVERY keychain-reading path (detectors included), temp-keychain test isolation; plus the user-side fix for a LOCKED login keychain: `security unlock-keychain` + `set-keychain-settings` no-auto-lock (in a real terminal — the Claude lean-ctx wrapper blocks `security`)."
 ocd: 2026-07-09
-lmd: 2026-07-12
+lmd: 2026-07-15
 metadata:
   node_type: memory
   type: reference
@@ -76,15 +76,46 @@ Note a **second, independent** flooder existed the same night — the user's *Ag
 polling `Claude Code-credentials`; diagnose the ACTUAL reader by tracing
 `security → parent → …` before blaming any one component.
 
+## Gotcha 3b — the WRITE-side ACL prompt (severity: kills rotation; 2026-07-15 incident)
+
+Gotcha 3 is about a READ (`-w`) prompting. There is a DISTINCT write-side prompt that was the real
+recurring rotation-death, nailed 2026-07-15 (TRDD-EQJPPZ2L): `security add-generic-password -U` with
+**ANY ACL flag (`-A` OR `-T`) on an item that ALREADY EXISTS** forces `SecKeychainItemSetAccess`
+(re-applying the item's ACL), a **privileged op that PROMPTS every single time** (error signature:
+`SecKeychainItemSetAccess: User canceled the operation`). The item's DATA update still succeeds — only
+the ACL re-set prompts. Unattended, that prompt hangs → the 5s timeout trips the denied-latch →
+rotation dark.
+
+**The proven fix:** set the ACL **only at CREATE**; on an EXISTING item write **data-only — NO
+`-A`/`-T`**. The write path probes existence first with a silent attribute-only
+`find-generic-password` (no `-w`, never touches the secret, never prompts) and sets `set_acl = not
+exists`. New items are born with their ACL; every later update is a silent data-only `-U`. Proven on a
+throwaway keychain with `time` (create-with-ACL=silent · update-with-`-A`/`-T`=HANGS on the SetAccess
+prompt · update-no-flag=silent) AND end-to-end on the real login keychain.[^6]
+
+**Superseded wrong fix:** commit `fa46a49` pinned `-A` on EVERY write believing `-A`-on-`-U` was a
+harmless no-op that would stop the `-T` re-prompt. It was the IDENTICAL failure mode — `-A` on an
+existing item triggers the same SetAccess prompt. The earlier belief that `-T`-on-`-U` "keeps the old
+ACL harmlessly" was also wrong. Only NO-ACL-flag-on-update is silent.[^6]
+
 ## The SAFE KEYCHAIN PROTOCOL (mandatory for every `security` interaction)
 
 Route EVERY keychain read/write/delete through the ONE choke-point
 (`scripts/oauth_rotator/safe_storage.py`) — no ad-hoc `subprocess.run(["security", …])`
 anywhere else. The choke-point enforces, in order:
 
-1. **Denied-latch check FIRST.** A persistent `keychain-denied` flag (global-state dir): if
-   set, return "denied" WITHOUT spawning `security`. Guarantees **≤1 prompt ever**,
-   machine-wide, until a human clears it (re-grant ACL → clear latch).
+1. **Denied-latch check FIRST — now a self-healing TTL circuit breaker.** A persistent
+   `keychain-denied` flag (global-state dir): if set AND younger than
+   `CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S` (default 600s), return "denied" WITHOUT spawning
+   `security`. Guarantees **≤1 prompt** per cooldown, machine-wide. Once older than the cooldown,
+   ONE call is let through as a **half-open probe** (the latch is re-stamped first so concurrent
+   callers stay closed — ≤1 probe per cooldown); a silent success CLEARS the latch (recovered), a
+   re-denial re-stamps and backs off another cooldown. WHY the change (2026-07-15, TRDD-EQJPPZ2L):
+   the old latch was **self-perpetuating** — a latched `run_security` short-circuits every op, so
+   nothing could ever succeed to clear it, and ONE transient (a momentary lock, a hung read during
+   a user `/login`) killed rotation **forever** until a human ran `clear-keychain-latch`. The
+   breaker turns "dark forever" into "dark ≤ one cooldown". `cooldown<=0` restores the old
+   permanent-latch behaviour.[^7]
 2. **Hard timeout** on the subprocess (`_CLI_TIMEOUT_S`). A `security` call blocked on a
    prompt must time out, never hang.
 3. **Headless / fail-fast — NEVER prompt on a routine path.** A liveness/presence check must
@@ -247,3 +278,38 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   is not a cause; absence of an error is not a PASS; clear a suspect by its gate and its state)
   are NOT restated here — they are owned by `[[debugging-methodology]]`, which this page is
   governed by. A case page holds case facts; methodology lives in one place or it lives nowhere.
+
+[^6]: [id:ATOM-FEAH-NCJV, status:valid, keywords:"SecKeychainItemSetAccess write prompt add-generic-password -U -A -T ACL update create rotation-death fa46a49", desc:"ACL flag (-A/-T) on `add-generic-password -U` of an EXISTING item forces SecKeychainItemSetAccess → prompts every time; set ACL only at CREATE, data-only UPDATE after.", ocd:2026-07-15, lmd:2026-07-15]
+  DO NOT pass ANY ACL flag (`-A` or `-T`) on a `security add-generic-password -U` write when the item
+  may already exist, BECAUSE on an existing item `-U`+ACL re-applies the ACL via the privileged
+  `SecKeychainItemSetAccess`, which PROMPTS every time ("User canceled the operation") and hangs the
+  unattended daemon — the recurring rotation-death, and the identical failure mode that `-T` (original)
+  and `-A` (fa46a49, the WRONG fix) both hit. DO probe existence first with a silent attribute-only
+  `find-generic-password` (no `-w`) and set the ACL flag ONLY on CREATE; on an existing item write
+  data-only (no ACL flag) → silent. Verify write-path silence on a THROWAWAY keychain with `time`
+  (silent 0.0xs vs hung timeout), never the login keychain. Cross-ref Gotcha 3b above.
+
+[^7]: [id:ATOM-OM90-QVUI, status:valid, keywords:"denied-latch self-perpetuating half-open circuit breaker TTL cooldown auto-recovery dark-forever CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S", desc:"A latch that blocks the very op that could clear it = permanent outage on one transient; make it a TTL half-open breaker (one probe per cooldown; silent success clears).", ocd:2026-07-15, lmd:2026-07-15]
+  DO NOT build a denied-latch that short-circuits EVERY op while set, BECAUSE it is self-perpetuating —
+  no write can ever succeed to clear it, so ONE transient (a momentary lock, a hung read during a user
+  `/login`) kills the feature FOREVER until a human intervenes (this is why rotation kept dying
+  overnight). DO make it a TTL half-open circuit breaker: after a cooldown, let exactly ONE call
+  through as a probe (re-stamp the latch first so concurrent callers stay closed — ≤1 probe/cooldown);
+  a silent success CLEARS it (recovered), a re-denial backs off another cooldown. Turns "dark forever"
+  into "dark ≤ one cooldown". See SAFE PROTOCOL point 1.
+
+[^8]: [id:ATOM-MX20-QO8S, status:valid, keywords:"recall before acting re-hit documented trap cache-vs-repo staged closure publish deploy opt-in go-live sequence /login broke", desc:"The daemon/heartbeat run the CACHE + DATA-staged closure, NOT the repo; a repo-only fix is inert until published+cache-updated+restaged. I re-hit this DOCUMENTED trap by not recalling first.", ocd:2026-07-15, lmd:2026-07-15]
+  DO NOT restore a keychain-writing feature's opt-in (or clear the kill-switch) after a REPO-only fix,
+  BECAUSE the daemon + heartbeat execute the INSTALLED CACHE and the L0 daemon runs a closure STAGED
+  into `${DATA}/scripts/` — a repo-only fix is INERT there, so the OLD code re-floods (on 2026-07-15
+  this broke the user's own Claude Code `/login`, exactly the trap `[^2]` documented on 2026-07-09).
+  DO follow the full go-live chain, in order: publish → `claude plugin update <name>@<marketplace>`
+  (the qualified id; bare name → "not found") → `keepalive_boot.verify_or_restage(<DATA>/scripts)` +
+  byte-verify the staged rotator/safe_storage has the fix → prove the DEPLOYED code silent with a
+  manual `tick` (latch stays clean) → ONLY THEN restore opt-in. META-LESSON (the biggest of the
+  session): this trap was ALREADY in this page; I re-hit it because I did not RECALL before acting.
+  RECALL `macos-keychain.md` before ANY rotator/keychain go-live. (This failure is the motivating case
+  for the prompt-submit memgrep-recall invite — TRDD-AP2X9A0H.) Also: third-party keychain CLIs
+  (`kc`, `mxkey`) do NOT solve the unattended case — their Touch-ID/prompt-on-read is the opposite of
+  headless, `mxkey` uses the exact `-T`-on-`-U` pattern that regresses this bug, and `kc`'s protection
+  is app-layer + bypassable (`--no-touch-id`); good standalone secret CLIs, not a rotator backend.
