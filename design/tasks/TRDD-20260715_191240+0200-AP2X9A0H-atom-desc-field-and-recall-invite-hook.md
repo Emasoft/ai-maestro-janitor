@@ -23,6 +23,15 @@ acting. The memory existed; nothing prompted me to read it. These two features c
 
 ### Feature 1 — the `desc` atom metadata field (≤200 chars)
 
+> **UPDATE 2026-07-15:** `desc` ALREADY EXISTS in the memory-write skill — but as an *optional
+> ≤64-char snake_case slug*. This feature UPGRADES it to a *REQUIRED ≤200-char PROSE summary of the
+> atom body*. **DONE this session:** `skills/janitor-memory-write/SKILL.md` updated (body-atom desc
+> + lesson-form desc both now required ≤200-char prose; checklist synced) — commit follows. **STILL
+> TODO:** (a) sync `skills/janitor-memory-write/references/atom-authoring.md` (the full schema still
+> says ≤64 slug); (b) sync the subconscious agent's atomize/harvest procedures; (c) the memgrep Rust
+> display of `desc` in `recall`/`find` LISTINGS (verify it shows the ≤200 summary, body-prefix
+> fallback for legacy atoms). Items (a)-(c) need a publish+cache-update to deploy.
+
 Every ATOM (both the `[^N]:` footnote-lesson form AND the `^id ⟦…⟧` block-property form) gains a
 `desc` metadata key: a SHORT (max 200 chars) summary of that atom's body — the per-atom analogue of a
 skill's `description`. WHY: `memgrep recall`/`find` today must show either just the page

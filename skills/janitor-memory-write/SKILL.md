@@ -121,10 +121,14 @@ up to it instead (this is what keeps the pyramid from exploding). Honor
 
 Author `"$MEMDIR/<slug>.md"` with the model's page schema (frontmatter + tier-typed
 edge sections + `## Notes and lessons learned`). **Make each durable body fact an ATOM**
-with a `^id [keywords: …]` block-property marker so it is individually recallable; add an
-optional `desc:` snake_case slug (≤64 chars, a one-line summary memgrep + the handoff show
-beside the atom id). Full schema, atom grammar, and examples:
-[references/atom-authoring.md](references/atom-authoring.md).
+with a `^id [keywords: …]` block-property marker so it is individually recallable; and give
+each atom a **`desc:"…"`** — a REQUIRED, ≤200-char PROSE summary of that atom's body (as short
+as possible; the per-atom analogue of a skill's `description`). WHY it is load-bearing: memgrep
+shows `desc` — NOT the full atom body — when it LISTS the atoms matching a `recall`/`find`
+query, so the agent reads the `desc` of every hit but the full body of only the ONE atom worth
+opening. A missing/weak `desc` makes an atom invisible-at-a-glance in results and costs tokens
+(the reader must open bodies to triage). Keep it a real summary of the body, not a slug. Full
+schema, atom grammar, and examples: [references/atom-authoring.md](references/atom-authoring.md).
 
 Required frontmatter fields: `name`, `description` (symptom-indexed), `ocd`, `lmd`,
 `metadata.{node_type: memory, type, tier}` (+ `functionality`; + `globs` on hubs).
@@ -137,11 +141,13 @@ ATOM OF MEMORY, exactly like a body atom — a GUARDRAIL, not a story. Every `[^
 here (or later demote into here) takes exactly this form:
 
 ```
-[^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> <key_phrase> …", desc:"<≤200-char prose summary of this lesson>", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-All three metadata keys REQUIRED (the block is the lesson's ADDRESS); `keywords:` is the
-RECALL SURFACE, written as underscore_joined key-phrases, not the prose's own words. ONE
+All FOUR metadata keys REQUIRED (the block is the lesson's ADDRESS): `keywords:` is the
+RECALL SURFACE, written as underscore_joined key-phrases, not the prose's own words; `desc:`
+is the ≤200-char prose summary memgrep shows for this lesson in `recall`/`find` LISTINGS (so a
+reader triages by `desc`, opening only the lesson whose body they need). ONE
 lesson = ONE mistake, **≤3 lines / ~40 words**, and all three parts (`DO NOT` / `BECAUSE` /
 `DO … instead`) mandatory. Full grammar, the comma/quote/space rules, and the WHY each part
 matters: [wikimem-model.md — THE LESSON
@@ -217,7 +223,7 @@ algorithm" for full detail on each check):
 - [ ] Frontmatter COMPLETE (step 4): `name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier` (+ `globs` on hubs)
 - [ ] Page LEAN and one-component-one-page respected (step 3)
 - [ ] If a hub was created, its `globs` are precise and non-overlapping with other hubs
-- [ ] Each durable body fact carries a `^id [keywords: …]` atom marker; optional `desc:` slug = a ≤64-char one-line summary
+- [ ] Each durable body fact carries a `^id [keywords: …]` atom marker AND a required `desc:"…"` = a ≤200-char prose summary of the atom (the surface memgrep lists in results)
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted) — inverting these is the most common authoring error
 - [ ] `## Notes and lessons learned` present (even if empty); every lesson obeys THE LESSON FORM (step 4) — one mistake per footnote, ≤3 lines, all three parts (`DO NOT`/`BECAUSE`/`DO … instead`)
 - [ ] Every `[[link]]` added on BOTH ends (step 5, the bidirectional link law — no one-sided link of any kind)
