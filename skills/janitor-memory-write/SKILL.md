@@ -107,6 +107,23 @@ Pick exactly one (see the model for the full definition + the WHY):
   governs nothing else (`login-panel`, `user-model`, `checkout-endpoint`);
   links UP only to the general pages that govern it.
 
+**NAME THE PAGE BY ITS TOPIC — NEVER by the memory you are saving (TRDD-NM4TPCQ9).**
+A page exists ONLY to collect the atoms of ONE topic, so its name IS that broad,
+reusable topic — a name many future atoms will file under. The recurring agent
+error this rule exists to stop: titling a new page with the single memory's
+DESCRIPTION, producing a useless one-atom singleton.
+
+- **BAD:** `implementation-of-duckdb-ingestion-of-otel-logs.md` — a sentence
+  describing one fact; no future atom will ever join it.
+- **GOOD:** `agents-tracing.md`, `claude-telemetry-and-logging.md` — broad topics
+  that collect this atom AND the next twenty.
+
+The tell: a filename that reads like a description of one memory (long
+hyphen-joined verb-phrase — `implementation-of-…`, `how-to-…`, `fix-for-…`)
+instead of a short topic noun. If your candidate name fails this test, you either
+skipped step 2 (the topic page already exists — go UPDATE it) or you must rename
+to the broad topic before writing.
+
 **Where the page lives:** `$MEMDIR/wikimem/<name>.md` — curated pages live in the
 `wikimem/` sub-dir (`memory_scopes.WIKI_SUBDIR`, USER decision 2026-07-08); the
 scope ROOT is the harness-owned buffer (MEMORY.md + raw notes), never a curated
@@ -219,6 +236,7 @@ algorithm" for full detail on each check):
 - [ ] Scope routed (step 1) — PROJECT/LOCAL/USER decided by content, not convenience
 - [ ] RECALL ran first (step 2) — no existing page already covers this fact
 - [ ] Editorial decision made: new page vs UPDATE
+- [ ] New page's NAME is a broad TOPIC (step 3), never the memory's description — `agents-tracing`, not `implementation-of-duckdb-ingestion-of-otel-logs`
 - [ ] `description:` reads as the SYMPTOM/question a future session would search, not the answer
 - [ ] Frontmatter COMPLETE (step 4): `name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier` (+ `globs` on hubs)
 - [ ] Page LEAN and one-component-one-page respected (step 3)

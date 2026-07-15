@@ -3,7 +3,7 @@ trdd-id: NM4TPCQ9
 title: Enforce topic-named wikimem pages — agents create description-named pages, the spec is ignored
 column: backburner
 created: 2026-07-15T20:31:04+0200
-updated: 2026-07-15T20:31:04+0200
+updated: 2026-07-15T21:55:25+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -51,9 +51,10 @@ extends existing duties 10/14/15 (merge-same-topic / relocate-off-topic / create
 NAMING axis.
 
 ## NEXT ACTION
-1. `janitor-memory-write/SKILL.md` + `references/atom-authoring.md`: add the LOUD topic-naming rule at
-   the page-creation step, with the USER's BAD/GOOD examples and the "recall an existing topic page
-   FIRST" gate. (These files already got the `desc` change in AP2X9A0H — same publish batch.)
+1. **DONE 2026-07-15 (Prong 1):** `janitor-memory-write/SKILL.md` (naming rule at step 3 + checklist
+   line) + `references/atom-authoring.md` (naming rule at the schema's `name:` field), both with the
+   USER's BAD/GOOD examples verbatim. Same commit also synced the `desc` ≤200-prose spec
+   (AP2X9A0H item a) into `atom-authoring.md` + `wikimem-model.md`. Deploys with the next publish.
 2. TRDD-87RKBYJ8: add the corrective duty (detect description-named page → merge/rename to topic) to
    group E/G and to the duty verification.
 3. Consider a cheap heuristic the subconscious agent (or a detector) can flag: a page filename with

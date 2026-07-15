@@ -236,10 +236,11 @@ GUARDRAIL, not a story. Every `[^N]`, authored fresh or demoted here by the corr
 protocol, takes exactly this form:
 
 ```
-[^N]: [keywords:"<key_phrase> <key_phrase> …", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> <key_phrase> …", desc:"<≤200-char prose summary of this lesson>", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-**The metadata block is the lesson's ADDRESS.** All three keys are REQUIRED.
+**The metadata block is the lesson's ADDRESS.** All FOUR keys are REQUIRED
+(`desc` joined the required set with TRDD-AP2X9A0H, USER 2026-07-15).
 
 **Grammar — three separators, three jobs:** a **comma** separates the metadata FIELDS;
 **quotes** delimit the keywords VALUE (so it may contain spaces); a **space** separates the
@@ -247,7 +248,7 @@ KEYWORDS within it. Hence a keyword is really a **KEY-PHRASE, written underscore
 `agent_profile_sidepanel`, never `agent profile sidepanel`. The underscore keeps a multi-word
 phrase space-free, so the space is free to mean "next keyword" and the phrase survives as ONE
 searchable unit instead of three useless tokens. Example:
-`[keywords:"frontend ui agent_profile_sidepanel agent_configuration", ocd:2026-07-13, lmd:2026-07-13]`
+`[keywords:"frontend ui agent_profile_sidepanel agent_configuration", desc:"Do not edit the sidepanel config by hand — regenerate it from the agent profile.", ocd:2026-07-13, lmd:2026-07-13]`
 
 - **`keywords:` — the RECALL SURFACE**, precisely as on an atom: the phrases a future session
   will SEARCH with (the symptom), which are usually NOT the words the prose happens to use.
@@ -257,6 +258,9 @@ searchable unit instead of three useless tokens. Example:
   (This was literally broken until 2026-07-13: the note grammar was whitespace-tokenised, so
   a multi-word `keywords:` value could not even be expressed, and the search matched prose
   only. Atoms were keyword-addressable; lessons were not. See the memgrep schema-v4 note.)
+- **`desc:` — the LISTING surface** (quoted, ≤200-char prose summary of the lesson):
+  what memgrep shows for this lesson in `recall`/`find` listings so a reader triages
+  hits without opening bodies — same role as on a body atom.
 - **`ocd:` / `lmd:` — REQUIRED dates**, intrinsic to the lesson: they survive the librarian
   moving it between pages, so they — not the file's mtime — are its authoritative age, and
   `--since`/`--until` read them.
@@ -332,7 +336,7 @@ a trailing marker would silently attach every fact to the WRONG atom (H1, wikime
 audit 2026-07-07: this doc used to show the trailing form):
 
 ```markdown
-^rotate-drain [desc: rotator_drains_busy_account_first, keywords: rotator drain rate-limit oauth alternate, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
+^rotate-drain [desc: "The rotator drains the near-limit live account first, then rotates to an alternate below SAFE on both the 5h and 7d windows.", keywords: rotator drain rate-limit oauth alternate, type: reference, ocd: 2026-06-23, lmd: 2026-06-23]
 The rotator drains the live (near-limit) account first, then rotates to a safe
 alternate that is below SAFE on BOTH the 5h and 7d windows.
 ```
@@ -344,19 +348,22 @@ Parsing grammar (memgrep implements exactly this):
 - the trimmed value is **split on whitespace into a VALUE ARRAY** (the AI-Maestro
   extension — `keywords: a b c` is three values; a value with no space is a 1-array).
 
-**`keywords:` is the only REQUIRED prop** — it is the atom's **recall surface**, the
-array of terms a future search will use to find THIS fact (the page's `description`
-does the same job for the whole page). `ocd`/`lmd`/`type` are optional (an atom with
-none inherits the page's). **`desc:`** is an optional **one-line summary** of the atom —
-"almost a title" — that memgrep results and the PreCompact handoff show beside the atom
-id so a future session knows what an atom is WITHOUT fetching its body. Its value is a
-snake_case **SLUG** (`[a-z0-9_]+`, ≤64 chars, e.g.
-`rotator_drains_busy_account_first`): STORED as the slug but DISPLAYED with `_`→space
-("rotator drains busy account first"). `desc` is a **DISPLAY** field, NOT a recall
-surface — `keywords` stays the only thing FTS ranks on; `desc` is never indexed. The
-slug form is the Obsidian-safety guarantee: a single `[a-z0-9_]` token has no space,
-comma, `:`, `[`, or `]`, so it cannot perturb the comma-splits-properties /
-whitespace-splits-into-array grammar above or the Obsidian Block-Properties rendering.
+**TWO props are REQUIRED: `keywords:` and `desc:`** (TRDD-AP2X9A0H upgraded `desc` from
+optional slug to required prose, USER 2026-07-15). `keywords:` is the atom's **recall
+surface**, the array of terms a future search will use to find THIS fact (the page's
+`description` does the same job for the whole page). `ocd`/`lmd`/`type` are optional (an
+atom with none inherits the page's). **`desc:`** is a REQUIRED **≤200-char PROSE summary**
+of the atom's body — the per-atom analogue of a skill's `description` — that memgrep
+results and the PreCompact handoff show beside the atom id. WHY: memgrep LISTS matching
+atoms by `desc` (not full body), so a reader triages every hit at a glance and opens the
+body of only the ONE atom worth reading. Its value is **QUOTED** (`desc:"…"`); the quotes
+are the grammar-safety guarantee — commas/colons inside a quoted value are not
+property-splits, so prose cannot perturb the comma-splits-properties /
+whitespace-splits-into-array grammar above. `desc` is a **LISTING** field, NOT a recall
+surface — `keywords` stays the only thing FTS ranks on; `desc` is never indexed. (Legacy
+atoms with the old optional ≤64-char snake_case-slug `desc` — displayed `_`→space — stay
+valid; memgrep falls back to a body-prefix when `desc` is absent; upgrade a legacy slug
+to prose whenever you touch its atom.)
 It is a different KEY at a different LEVEL from the page frontmatter `description:`
 (the two-metadata-levels rule) — naming it `desc` keeps them distinct. Two more props
 are stamped only on **harvested** atoms (an atom imported from the Claude `MEMORY.md`

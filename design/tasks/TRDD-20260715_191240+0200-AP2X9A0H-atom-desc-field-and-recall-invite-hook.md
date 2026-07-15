@@ -3,7 +3,7 @@ trdd-id: AP2X9A0H
 title: Atom desc metadata field — required <=200-char prose summary shown in memgrep listings
 column: backburner
 created: 2026-07-15T19:12:40+0200
-updated: 2026-07-15T19:55:48+0200
+updated: 2026-07-15T21:55:25+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -26,11 +26,14 @@ acting. The memory existed; nothing prompted me to read it. These two features c
 > **UPDATE 2026-07-15:** `desc` ALREADY EXISTS in the memory-write skill — but as an *optional
 > ≤64-char snake_case slug*. This feature UPGRADES it to a *REQUIRED ≤200-char PROSE summary of the
 > atom body*. **DONE this session:** `skills/janitor-memory-write/SKILL.md` updated (body-atom desc
-> + lesson-form desc both now required ≤200-char prose; checklist synced) — commit follows. **STILL
-> TODO:** (a) sync `skills/janitor-memory-write/references/atom-authoring.md` (the full schema still
-> says ≤64 slug); (b) sync the subconscious agent's atomize/harvest procedures; (c) the memgrep Rust
-> display of `desc` in `recall`/`find` LISTINGS (verify it shows the ≤200 summary, body-prefix
-> fallback for legacy atoms). Items (a)-(c) need a publish+cache-update to deploy.
+> + lesson-form desc both now required ≤200-char prose; checklist synced) — commit 383ddac.
+> **Item (a) DONE 2026-07-15 (same commit as NM4TPCQ9 Prong 1):** `references/atom-authoring.md` AND
+> the shared `references/wikimem-model.md` both synced — atom desc = REQUIRED ≤200-char QUOTED prose
+> (quotes are the grammar-safety replacing the old slug's token-safety), lesson form = FOUR required
+> keys, legacy-slug back-compat noted. **STILL TODO:** (b) sync the subconscious agent's
+> atomize/harvest procedures; (c) the memgrep Rust display of `desc` in `recall`/`find` LISTINGS
+> (verify it shows the ≤200 summary, body-prefix fallback for legacy atoms). (b)-(c) need a
+> publish+cache-update to deploy.
 
 Every ATOM (both the `[^N]:` footnote-lesson form AND the `^id ⟦…⟧` block-property form) gains a
 `desc` metadata key: a SHORT (max 200 chars) summary of that atom's body — the per-atom analogue of a
