@@ -62,6 +62,19 @@ from typing import NamedTuple
 # never wedge the unattended daemon tick).
 _CLI_TIMEOUT_S = 10.0
 
+# Circuit-breaker half-open cooldown (TRDD-EQJPPZ2L, durability). The denied-latch is
+# otherwise SELF-PERPETUATING — once set, every `security` op short-circuits, so no write can
+# ever succeed to clear it, and rotation stays dark FOREVER until a human runs
+# `clear-keychain-latch`. That is the recurring rotation-death: a single transient (a momentary
+# keychain lock, a hung read during a user `/login`) kills rotation permanently. This cooldown
+# makes the latch a TEMPORARY breaker: after this many seconds a latched state permits exactly
+# ONE probe `security` op (half-open); if the keychain answers WITHOUT prompting the latch
+# clears (recovered), else it re-stamps and backs off another cooldown. Post-ACL-fix the probe
+# is a silent data-only op, so a recovered keychain self-heals within one cooldown. Env-override
+# `CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S`; a value <= 0 DISABLES auto-recovery (permanent latch,
+# pre-EQJPPZ2L behaviour — a hand `clear-keychain-latch` is then the only exit).
+_LATCH_COOLDOWN_DEFAULT_S = 600.0
+
 
 # ==========================================================================
 # THE SAFE KEYCHAIN PROTOCOL (TRDD-K3WQ7XM9 P1) — one choke-point every `security`
@@ -176,9 +189,13 @@ def keychain_denied_latched() -> bool:
     return legacy is not None and os.path.isfile(legacy)
 
 
-def set_keychain_denied(reason: str) -> None:
+def set_keychain_denied(reason: str, *, quiet: bool = False) -> None:
     """Set the persistent denied-latch (atomic tmp+replace) and log ONE actionable line.
-    Idempotent — never raises (a latch we can't write must not crash the caller)."""
+    Idempotent — never raises (a latch we can't write must not crash the caller).
+
+    ``quiet=True`` (TRDD-EQJPPZ2L) suppresses the log line — used for the half-open RE-STAMP
+    in ``run_security``, which must refresh the latch's timestamp (to serialize concurrent
+    probers) WITHOUT spamming the actionable "LATCH SET" banner once per cooldown."""
     path = _keychain_latch_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -189,6 +206,8 @@ def set_keychain_denied(reason: str) -> None:
         os.replace(tmp, path)
     except OSError:
         pass  # best-effort — the in-call denial still returned; the latch is an optimization
+    if quiet:
+        return
     try:
         print(
             "[safe-storage] KEYCHAIN DENIED-LATCH SET: %s. All further `security` ops are "
@@ -222,15 +241,60 @@ def clear_keychain_denied() -> bool:
     return cleared
 
 
+def _latch_age_seconds() -> float | None:
+    """Seconds since the denied-latch was last (re-)stamped, or None if there is no latch /
+    it is unreadable (TRDD-EQJPPZ2L). Uses the file MTIME — refreshed on every set/re-stamp via
+    the atomic replace — so it is format-independent (no ISO-stamp parsing). Checks the canonical
+    path then the legacy one, matching ``keychain_denied_latched`` / ``clear_keychain_denied``."""
+    for path in (_keychain_latch_path(), _legacy_keychain_latch_path()):
+        if path is None:
+            continue
+        try:
+            return max(0.0, time.time() - os.path.getmtime(path))
+        except OSError:
+            continue
+    return None
+
+
+def _latch_cooldown_s() -> float:
+    """The half-open cooldown in seconds (TRDD-EQJPPZ2L). Env-override
+    ``CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S`` (a malformed value is ignored → the default); a value
+    <= 0 DISABLES auto-recovery (the latch stays a permanent kill until cleared by hand)."""
+    raw = os.environ.get("CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return _LATCH_COOLDOWN_DEFAULT_S
+
+
 def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S) -> SecurityRun:
     """THE single gate EVERY `security` invocation (safe_storage AND rotator) routes through.
 
     Enforces the protocol in order: (b) denied-latch short-circuit BEFORE spawning →
     (a) hard timeout → (d) latch-on-denial. Never raises. When the latch is unset and no
-    denial occurs, this is byte-identical to a plain ``subprocess.run(argv, timeout=...)``."""
+    denial occurs, this is byte-identical to a plain ``subprocess.run(argv, timeout=...)``.
+
+    (c) HALF-OPEN AUTO-RECOVERY (TRDD-EQJPPZ2L): the latch is no longer a permanent kill. While
+    it is set AND younger than the cooldown the op still short-circuits (CLOSED — no spawn, no
+    prompt). Once the latch is older than the cooldown, exactly ONE call is let through as a
+    half-open PROBE: it re-stamps the latch first (so concurrent callers see a fresh latch and
+    stay closed — at most one probe per cooldown machine-wide), then spawns the op once. If the
+    keychain answers WITHOUT prompting (spawned and not denied — even a benign not-found proves
+    it is reachable and silent) the latch is CLEARED (recovered). If it hangs or denies again,
+    the timeout/denial branch re-stamps the latch and it backs off another cooldown."""
+    half_open = False
     if keychain_denied_latched():
-        # Short-circuit: the latch is set, so we must NOT spawn `security` (it would prompt).
-        return SecurityRun(ok=False, stdout="", stderr="", spawned=False, denied=True, returncode=None)
+        cooldown = _latch_cooldown_s()
+        age = _latch_age_seconds()
+        if cooldown <= 0 or age is None or age < cooldown:
+            # CLOSED: latch fresh (or auto-recovery disabled / age unknown) → never spawn.
+            return SecurityRun(ok=False, stdout="", stderr="", spawned=False, denied=True, returncode=None)
+        # HALF-OPEN: allow exactly one probe. Re-stamp NOW (quiet) so any concurrent caller sees
+        # a young latch and short-circuits — bounding the machine to one probe per cooldown.
+        half_open = True
+        set_keychain_denied("keychain-denied latch: half-open probe (auto-recovery, TRDD-EQJPPZ2L)", quiet=True)
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
@@ -243,6 +307,10 @@ def run_security(argv: list[str], *, timeout: float = _CLI_TIMEOUT_S) -> Securit
     if proc.returncode != 0 and _is_denial(stderr):
         set_keychain_denied("`security` returned an ACL/auth/user-canceled denial")
         return SecurityRun(ok=False, stdout=proc.stdout or "", stderr=stderr, spawned=True, denied=True, returncode=proc.returncode)
+    # Spawned and NOT denied → the keychain answered without prompting. If this was the half-open
+    # probe, the transient has cleared: drop the latch so normal ops resume (TRDD-EQJPPZ2L).
+    if half_open:
+        clear_keychain_denied()
     return SecurityRun(ok=(proc.returncode == 0), stdout=proc.stdout or "", stderr=stderr,
                        spawned=True, denied=False, returncode=proc.returncode)
 

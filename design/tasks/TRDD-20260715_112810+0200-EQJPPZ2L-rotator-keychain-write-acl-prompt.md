@@ -3,7 +3,7 @@ trdd-id: EQJPPZ2L
 title: Rotator keychain WRITE triggers an ACL prompt (uv-python) — every token refresh re-latches the rotator dead
 column: dev
 created: 2026-07-15T11:28:10+0200
-updated: 2026-07-15T17:47:28+0200
+updated: 2026-07-15T18:10:51+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -16,10 +16,44 @@ implementation-commits: [fa46a49, 1cedf28]
 
 # Rotator keychain WRITE triggers an ACL prompt — every refresh re-latches the rotator dead
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (17:47) — 🟢 ROTATION LIVE
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (18:10) — ⛔ GO-LIVE REVERTED — PUBLISH FIRST
 
-**GO-LIVE COMPLETE (user directive "we cannot wait anymore", present + engaged).** The ACL-prompt
-fix (1cedf28) is validated on the REAL login keychain and rotation is LIVE:
+**THE LOAD-BEARING LESSON (cost a real popup incident + broke the user's `/login`):** the running
+**daemon and every heartbeat execute from the INSTALLED CACHE, NOT the repo working tree.** The repo
+is at 0.44.0 + the fix commits, but the installed cache was stuck at **0.41.0**, which has NONE of the
+fix (`set_acl=0`, `_keychain_item_exists` absent in EVERY cached version). Restoring opt-in made the
+long-running daemon keepalive-WRITE slots with the OLD `-T`-on-update code → prompt → latch → dark,
+AND the prompts collided with Claude Code's own `/login` write → `/login` failed. Re-pausing opt-in
+did NOT stop it (the daemon is a live process mid-loop). **CORRECT SEQUENCE: publish → the cache
+installs the fixed version → the daemon rolls to it → ONLY THEN restore opt-in.** Never restore opt-in
+while the cache lacks the fix. (This is the [^2] lesson generalized: "prompt-free in the REPO" ≠
+"prompt-free in the RUNNING daemon" — the daemon runs cache.)
+
+**EMERGENCY STOP TAKEN (current safe state):** janitor GLOBALLY DISARMED (kill-switch SET), daemon
+KILLED (PIDs 10762/16003, won't respawn), this project's heartbeat cron DELETED (`disarmed.flag`),
+rotator opt-in RE-PAUSED (`opt-in.flag.PAUSED-daemon-runs-unfixed-cache-20260715`), latch CLEAR, the
+one hung `security` prompt killed. The janitor touches the keychain nowhere now. `/login` recovery:
+retry with nothing prompting; unlock the login keychain with the Mac password if asked.
+
+**NEXT ACTIONS (in order):** (1) publish the fix (this bumps + tags + GH release). (2) FORCE the cache
+to install it — the auto-update was lagging (cache 0.41.0 vs repo 0.44.0), so a manual
+`claude plugin update` is needed; the daemon auto-update alone did not keep up. (3) `/janitor-global-arm`
++ `/janitor-arm` to revive on FIXED code. (4) restore opt-in → rotation live on fixed code, self-healing
+(the latch auto-recovery in this same fix bounds any future transient to ≤ one cooldown, not forever).
+
+**ALSO SHIPPING IN THIS FIX — latch auto-recovery (durability, safe_storage.py):** the denied-latch is
+now a half-open circuit breaker (TTL `CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S`, default 600s): after the
+cooldown, ONE latched call is let through as a probe (re-stamped first to serialize concurrent probers,
+so ≤ one probe per cooldown machine-wide); a silent success clears the latch (recovered), a re-denial
+backs off another cooldown. Turns "dark forever" into "dark for ≤ one cooldown." 32 safe_storage tests
++ 91 rotator tests green, ruff clean.
+
+---
+
+## ⏵ STATE — 2026-07-15 (17:47) — go-live attempt (REVERTED — see above)
+
+**GO-LIVE ATTEMPT (validated in-repo, but the daemon runs CACHE — REVERTED).** The ACL-prompt
+fix (1cedf28) is validated on the REAL login keychain via the repo code:
 - Pre-flight clean: no hung `security` procs; latch was set; opt-in paused.
 - `verify_live_slot.py` on the real login keychain: latch cleared → read slot → idempotent
   data-only write-back ×2 → both `True`, read-back matches, **latch did NOT trip** (PASS). The

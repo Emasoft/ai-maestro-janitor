@@ -281,6 +281,116 @@ def test_run_security_latches_on_denial_not_on_not_found(monkeypatch: pytest.Mon
     assert run.denied is False and ss.keychain_denied_latched() is False
 
 
+def _backdate_latch_past_cooldown() -> None:
+    """Age the current latch file 1h into the past (well past the 600s default cooldown) so the
+    next run_security enters the half-open branch. Uses os.utime off the file's own mtime — no
+    wall-clock import needed."""
+    latch = ss._keychain_latch_path()
+    mt = os.path.getmtime(latch)
+    os.utime(latch, (mt - 3600, mt - 3600))
+
+
+def test_half_open_probe_recovers_latch_on_silent_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """(P1.c, TRDD-EQJPPZ2L) Once the latch is OLDER than the cooldown, exactly one call is let
+    through as a half-open probe; a silent success (the keychain answered without prompting)
+    CLEARS the latch — turning the self-perpetuating 'dark forever' into 'dark for <= one
+    cooldown'. This is the durability fix for the recurring rotation-death."""
+    ss.clear_keychain_denied()
+    ss.set_keychain_denied("old transient")
+    _backdate_latch_past_cooldown()
+    age = ss._latch_age_seconds()
+    assert age is not None and age >= ss._latch_cooldown_s()
+
+    class _Ok:
+        returncode = 0
+        stdout = "secret"
+        stderr = ""
+    monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _Ok())
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    assert run.spawned is True and run.ok is True and run.denied is False
+    assert ss.keychain_denied_latched() is False, "a silent probe must CLEAR the latch (recovered)"
+
+
+def test_half_open_probe_recovers_on_benign_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A half-open probe that returns errSecItemNotFound (rc 44, NOT a denial) still proves the
+    keychain is reachable and silent → the latch clears. Recovery keys off 'answered without
+    prompting', not off the specific item existing."""
+    ss.clear_keychain_denied()
+    ss.set_keychain_denied("old transient")
+    _backdate_latch_past_cooldown()
+
+    class _NotFound:
+        returncode = 44
+        stdout = ""
+        stderr = "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain."
+    monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _NotFound())
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y"])
+    assert run.spawned is True and run.denied is False and run.ok is False  # not-found, but healthy
+    assert ss.keychain_denied_latched() is False, "a reachable-but-not-found probe recovers the latch"
+
+
+def test_half_open_probe_backs_off_on_repeat_denial(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the half-open probe DENIES again (keychain still broken), the latch stays set and is
+    RE-STAMPED young — so the machine backs off another full cooldown before the next probe
+    (one probe per cooldown, never a flood)."""
+    ss.clear_keychain_denied()
+    ss.set_keychain_denied("old transient")
+    _backdate_latch_past_cooldown()
+
+    class _Denied:
+        returncode = 51
+        stdout = ""
+        stderr = "SecKeychain: errSecAuthFailed / -25293 authorization denied"
+    monkeypatch.setattr(ss.subprocess, "run", lambda *a, **k: _Denied())
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    assert run.denied is True
+    assert ss.keychain_denied_latched() is True, "a re-denial must keep the latch set"
+    age = ss._latch_age_seconds()
+    assert age is not None and age < ss._latch_cooldown_s(), "the latch must be re-stamped young (backed off)"
+    ss.clear_keychain_denied()
+
+
+def test_fresh_latch_stays_closed_no_half_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A JUST-SET latch (age << cooldown) short-circuits WITHOUT spawning — the half-open branch
+    only opens once the cooldown has elapsed, so a fresh trip never re-prompts."""
+    ss.clear_keychain_denied()
+
+    def _landmine(*a, **k):  # type: ignore[no-untyped-def]
+        raise AssertionError("run_security spawned during the CLOSED (fresh-latch) window")
+    monkeypatch.setattr(ss.subprocess, "run", _landmine)
+    ss.set_keychain_denied("fresh-trip")  # age ~0 << 600s cooldown
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    assert run.spawned is False and run.denied is True
+    ss.clear_keychain_denied()
+
+
+def test_cooldown_zero_disables_auto_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S=0 restores the pre-EQJPPZ2L permanent latch: even an
+    ancient latch short-circuits WITHOUT a probe (a hand `clear-keychain-latch` is the only exit)."""
+    ss.clear_keychain_denied()
+    ss.set_keychain_denied("old transient")
+    _backdate_latch_past_cooldown()
+    monkeypatch.setenv("CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S", "0")
+    assert ss._latch_cooldown_s() == 0
+
+    def _landmine(*a, **k):  # type: ignore[no-untyped-def]
+        raise AssertionError("run_security probed while auto-recovery was disabled (cooldown<=0)")
+    monkeypatch.setattr(ss.subprocess, "run", _landmine)
+    run = ss.run_security(["security", "find-generic-password", "-s", "x", "-a", "y", "-w"])
+    assert run.spawned is False and run.denied is True
+    ss.clear_keychain_denied()
+
+
+def test_latch_age_seconds_none_when_unlatched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_latch_age_seconds is None with no latch, and a small non-negative age right after a set."""
+    ss.clear_keychain_denied()
+    assert ss._latch_age_seconds() is None
+    ss.set_keychain_denied("now")
+    age = ss._latch_age_seconds()
+    assert age is not None and 0.0 <= age < 60.0
+    ss.clear_keychain_denied()
+
+
 def test_keychain_scope_args_confines_to_the_env_keychain(monkeypatch: pytest.MonkeyPatch) -> None:
     """(P1.iv) The scope lever appends the JANITOR_ROTATOR_KEYCHAIN path so EVERY op is confined
     to that keychain; empty when unset (production → login keychain, argv unchanged)."""
