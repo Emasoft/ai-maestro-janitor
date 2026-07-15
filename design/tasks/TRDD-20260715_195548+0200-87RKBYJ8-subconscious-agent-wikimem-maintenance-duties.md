@@ -3,7 +3,7 @@ trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
 column: backburner
 created: 2026-07-15T19:55:48+0200
-updated: 2026-07-15T19:55:48+0200
+updated: 2026-07-15T20:19:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -22,6 +22,13 @@ editorial duties below. Some already exist as chores (consolidate / split / conf
 atomize / harvest); this TRDD is the COMPLETE, authoritative duty list to reconcile the agent's
 skills against — implement the missing ones, and make the existing ones enforce these rules. Depends
 on the `desc` field (TRDD-AP2X9A0H).
+
+**ROOT PRINCIPLE (USER, 2026-07-15) — the WHY behind duties 10/14/15:** *a wikimem page exists ONLY
+to collect the atoms about the SAME topic, so every page must be a single, distinct topic (or
+subtopic).* Topic (not the title string) decides a page's identity. Every same-topic-merge (10),
+off-topic-relocate (14), and create-page-for-orphan-topic (15) duty is a direct consequence: they
+exist to keep each page topic-pure. Captured as an atom on the wikimem overview page
+(`wikimem-atom-block-properties.md ^9K3ZP7QW`).
 
 **Implementation note:** the wikimem editor is transaction-gated (`memory_txn` /
 `memory_edit_verify`), and every edit must pass the deterministic `verify_*` oracle (no knowledge
