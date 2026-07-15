@@ -105,6 +105,10 @@ deliberate `/janitor-global-disarm`; use `/janitor-global-arm` for that. To stop
   indirection, the survival contract, and the
   [known platform limitations](references/janitor-architecture.md#known-limitations) (the
   `durable`→session-only downgrade; the DATA path not surviving a load-source change).
+  - [Why the stub exists](references/janitor-architecture.md#why-the-stub-exists)
+  - [Operational rules](references/janitor-architecture.md#operational-rules)
+  - [Responsibility split and safety](references/janitor-architecture.md#responsibility-split-and-safety)
+  - [Known limitations](references/janitor-architecture.md#known-limitations)
 - `${CLAUDE_PLUGIN_ROOT}/scripts/arm_prepare.py` · `arm_record.py` — steps 1 and 4.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — reads `desired-cadence.cron`; writes
   `armed-cadence.cron`, `heartbeat-cron-id.txt`, `heartbeat-armed-at.ts`; removes `disarmed.flag`

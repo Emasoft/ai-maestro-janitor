@@ -37,16 +37,17 @@ retry with nothing prompting; unlock the login keychain with the Mac password if
 
 **NEXT ACTIONS (in order):** (1) publish the fix (this bumps + tags + GH release). (2) FORCE the cache
 to install it — the auto-update was lagging (cache 0.41.0 vs repo 0.44.0), so a manual
-`claude plugin update` is needed; the daemon auto-update alone did not keep up. (3) `/janitor-global-arm`
-+ `/janitor-arm` to revive on FIXED code. (4) restore opt-in → rotation live on fixed code, self-healing
-(the latch auto-recovery in this same fix bounds any future transient to ≤ one cooldown, not forever).
+`claude plugin update` is needed; the daemon auto-update alone did not keep up. (3) run
+`/janitor-global-arm` then `/janitor-arm` to revive on FIXED code. (4) restore opt-in → rotation live on
+fixed code, self-healing (the latch auto-recovery in this same fix bounds any future transient to ≤ one
+cooldown, not forever).
 
 **ALSO SHIPPING IN THIS FIX — latch auto-recovery (durability, safe_storage.py):** the denied-latch is
 now a half-open circuit breaker (TTL `CLAUDE_KEYCHAIN_LATCH_COOLDOWN_S`, default 600s): after the
 cooldown, ONE latched call is let through as a probe (re-stamped first to serialize concurrent probers,
 so ≤ one probe per cooldown machine-wide); a silent success clears the latch (recovered), a re-denial
-backs off another cooldown. Turns "dark forever" into "dark for ≤ one cooldown." 32 safe_storage tests
-+ 91 rotator tests green, ruff clean.
+backs off another cooldown. Turns "dark forever" into "dark for ≤ one cooldown." Tests green: 32
+safe_storage and 91 rotator, ruff clean.
 
 ---
 
