@@ -322,12 +322,16 @@ def _keychain_account() -> str:
     return os.environ.get("USER") or os.environ.get("LOGNAME") or ""
 
 
-def _security_add_password_via_stdin(service: str, account: str, data: str, *, allow_any: bool = False) -> None:
+def _security_add_password_via_stdin(service: str, account: str, data: str, *, allow_any: bool = False, set_acl: bool = True) -> None:
     """Write a keychain item with `security add-generic-password`, value on argv.
 
-    `allow_any` (TRDD-EQJPPZ2L) is threaded straight to `_add_password_argv` — see there
-    for the full rationale. The caller passes True ONLY for the rotator's own slot family
-    (user-approved allow-ALL ACL); every other write keeps the default `-T` ACL.
+    `allow_any` + `set_acl` (TRDD-EQJPPZ2L) are threaded straight to `_add_password_argv` —
+    see there for the full rationale. `set_acl` MUST be True only when the item is being
+    CREATED; on an UPDATE of an existing item it MUST be False (a data-only write, no ACL
+    flag) or the ACL re-set prompts and hangs the daemon. `allow_any` picks `-A` (slot
+    family) vs `-T` (live-cred family) for the create case. The caller
+    (`_slot_keychain_write`, `write_live_blob`) decides both via a silent existence probe
+    (`_keychain_item_exists`).
 
     NAME IS HISTORICAL — it now uses argv, NOT stdin. WHY (TRDD-5539cd6e, the
     "rotator never worked" bug): the previous stdin-PROMPT mode (`-w` with no value,
@@ -354,7 +358,7 @@ def _security_add_password_via_stdin(service: str, account: str, data: str, *, a
     # Routed through the Safe Keychain Protocol choke-point (TRDD-K3WQ7XM9 P1): latch
     # short-circuit → hard timeout → latch-on-denial. Preserve this fn's historical
     # exception contract so `_slot_keychain_write` still fails CLOSED on any failure.
-    run = safe_storage.run_security(_add_password_argv(service, account, data, allow_any=allow_any), timeout=5)
+    run = safe_storage.run_security(_add_password_argv(service, account, data, allow_any=allow_any, set_acl=set_acl), timeout=5)
     if not run.spawned and not run.denied:
         raise FileNotFoundError("`security` not found")  # not macOS → caller tries secret-tool
     if not run.ok:
@@ -364,34 +368,43 @@ def _security_add_password_via_stdin(service: str, account: str, data: str, *, a
         )
 
 
-def _add_password_argv(service: str, account: str, data: str, *, allow_any: bool = False) -> list[str]:
+def _add_password_argv(service: str, account: str, data: str, *, allow_any: bool = False, set_acl: bool = True) -> list[str]:
     """The `security add-generic-password` argv, as a PURE builder so tests can assert
     its shape without touching a keychain.
 
-    F3 (TRDD-7PYTX4E9): every rotator-written item carries `-T` ACL partners for
-    /usr/bin/security (the binary ALL our reads go through — authorizing it makes the
-    item readable prompt-free from a headless daemon context) and the real python
-    binary. CAVEAT (documented, by design): `-T` sets the ACL only when the item is
-    CREATED — `-U` updating an EXISTING item keeps that item's old ACL. And a user
-    `/login` always REPLACES the live item with a Claude-only-ACL one the daemon
-    cannot read; no write-side flag can prevent that, which is exactly why the
-    beacon (F2) + mirror-source distrust (F1) exist.
+    THE CREATE-vs-UPDATE RULE (TRDD-EQJPPZ2L — the definitive rotation-death fix). An
+    ACL flag (`-A` or the `-T` partners) is emitted ONLY on CREATE (`set_acl=True`); a
+    data-only UPDATE (`set_acl=False`) carries NO ACL flag. WHY this is the whole fix:
+    under `-U`, passing ANY ACL flag on an item that ALREADY EXISTS forces macOS to
+    re-apply the ACL via `SecKeychainItemSetAccess` — a PRIVILEGED op that PROMPTS every
+    single time ("SecKeychainItemSetAccess: User canceled the operation"). The DATA still
+    updates; only the ACL re-set prompts. Unattended (daemon tick) that prompt HANGS →
+    the 5 s timeout trips `keychain-denied.latch` → every later `security` op
+    short-circuits → rotation goes dark (the recurring window-exhaustion incident).
+    Proven on throwaway keychains: `create -A`=silent · `update -A`/`-T`=HANGS on the
+    SetAccess prompt · `update (no ACL flag)`=silent. The earlier belief that `-T` on
+    `-U` was a harmless no-op ("keeps the item's old ACL") was WRONG — it triggers the
+    same prompt; fa46a49's `-A`-on-EVERY-write had the identical failure mode and is
+    SUPERSEDED by this. The caller decides create-vs-update with a silent attribute-only
+    existence probe (`_keychain_item_exists`).
 
-    `allow_any` (TRDD-EQJPPZ2L — the rotation-death fix): emit `-A` (allow ANY
-    application) INSTEAD of the two `-T` partners. WHY it is load-bearing — the `-T`
-    python partner is `os.path.realpath(sys.executable)`, and under uv the interpreter
-    lives at an UNSTABLE cache path that shifts across uv/plugin versions. So each
-    rotator write ran from a python whose realpath was NOT the one baked into the
-    item's ACL when it was created → macOS raised an ACL prompt → in the unattended
-    daemon that prompt HUNG → the 5 s timeout tripped `keychain-denied.latch` → every
-    later `security` op short-circuited → rotation went dark (the recurring
-    window-exhaustion incident). `-A` pins a stable allow-ALL ACL, so no future python
-    path can ever mismatch and re-prompt. USER-APPROVED for the rotator's OWN slot
-    tokens ONLY (`SLOT_KEYCHAIN_SERVICE` + its backup) — the caller gates it by
-    service, so `-A` never touches the live-cred family or cookies. `-A` and `-T` are
-    mutually exclusive by intent (allow-all vs a partner list), so `-A` REPLACES the
-    `-T` partners rather than joining them."""
-    acl = ["-A"] if allow_any else ["-T", "/usr/bin/security", "-T", os.path.realpath(sys.executable)]
+    `allow_any` selects WHICH ACL to set on CREATE: `-A` (allow ANY application) for the
+    rotator's OWN slot family (`SLOT_KEYCHAIN_SERVICE` + its backup — USER-APPROVED, so a
+    shifting uv-python cache path can never later mismatch the item's ACL and re-prompt),
+    vs the two `-T` partners (/usr/bin/security — the binary ALL our reads go through —
+    plus the real python) for the live-cred family. It is consulted ONLY when `set_acl`
+    is True; on an update no ACL flag is emitted at all, so `allow_any` is irrelevant
+    there. `-A` and `-T` are mutually exclusive by intent (allow-all vs a partner list).
+
+    On CREATE the item is born with the chosen ACL; every later data-only update
+    preserves it (macOS keeps the existing item's ACL when `-U` carries no ACL flag). A
+    user `/login` still REPLACES the live item with a Claude-only-ACL one the daemon
+    cannot read — no write-side flag prevents that, which is why the beacon (F2) +
+    mirror-source distrust (F1) exist."""
+    if set_acl:
+        acl = ["-A"] if allow_any else ["-T", "/usr/bin/security", "-T", os.path.realpath(sys.executable)]
+    else:
+        acl = []  # data-only UPDATE — NO ACL flag → no SecKeychainItemSetAccess → no prompt
     return [
         "security", "add-generic-password", "-U",
         "-s", service, "-a", account,
@@ -401,6 +414,29 @@ def _add_password_argv(service: str, account: str, data: str, *, allow_any: bool
         # keychain when JANITOR_ROTATOR_KEYCHAIN is set — TRDD-K3WQ7XM9 FIX B).
         *safe_storage.keychain_scope_args(),
     ]
+
+
+def _keychain_item_exists(service: str, account: str) -> bool:
+    """True iff a keychain item (service, account) PROVABLY exists — via an attribute-only
+    `find-generic-password` (NO `-w`), so it never touches the ACL-protected secret and never
+    prompts (the whole reason it is safe to call before every write). TRDD-EQJPPZ2L.
+
+    The write path uses this to choose create-vs-update: an ACL flag (`-A`/`-T`) is set ONLY
+    when the item is NEW; re-applying an ACL to an EXISTING item forces `SecKeychainItemSetAccess`,
+    which PROMPTS every time (the rotation-death flood). So absence must be PROVEN
+    (errSecItemNotFound = rc 44 / "could not be found") — every other outcome (not macOS, a
+    latched/hung/denied probe, an odd rc) returns True, "assume it exists", so the write NEVER
+    sets an ACL on a maybe-present item: the safe direction is to never risk the prompt. The
+    latched/hung branches are moot anyway — the write itself short-circuits/fails-closed there."""
+    run = safe_storage.run_security(
+        ["security", "find-generic-password", "-s", service, "-a", account, *safe_storage.keychain_scope_args()],
+        timeout=5,
+    )
+    if run.ok:
+        return True  # rc 0 → the item exists
+    if run.spawned and not run.denied and (run.returncode == 44 or "could not be found" in run.stderr):
+        return False  # errSecItemNotFound → PROVEN absent → create with its ACL
+    return True  # not macOS / latched / hung / ambiguous → assume exists (never set an ACL flag)
 
 
 def _primary_secret_read_permitted() -> bool:
@@ -674,7 +710,12 @@ def write_live_blob(blob: dict) -> None:
     keychain_ok = False
     acct = _keychain_account()
     try:
-        _security_add_password_via_stdin(KEYCHAIN_SERVICE, acct, data)
+        # TRDD-EQJPPZ2L: set the `-T` live-cred ACL ONLY when creating the item; a data-only
+        # update of the EXISTING live item carries no ACL flag (no SecKeychainItemSetAccess
+        # prompt). allow_any stays False → the live cred never gets the slot family's `-A`.
+        _security_add_password_via_stdin(
+            KEYCHAIN_SERVICE, acct, data, set_acl=not _keychain_item_exists(KEYCHAIN_SERVICE, acct)
+        )
         keychain_ok = True
     except FileNotFoundError:
         pass  # not macOS — fall through to file / keyring
@@ -839,17 +880,22 @@ def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SE
                                 NOT drop a plaintext token file.
     """
     data = json.dumps(blob, separators=(",", ":"))
-    # TRDD-EQJPPZ2L: pin an allow-ALL (`-A`) ACL on the rotator's OWN slot tokens (and
-    # their backup mirror) so a shifting uv python path can never re-prompt on the
-    # every-tick capture/keepalive write — the flood that hung the daemon, tripped
-    # `keychain-denied.latch`, and killed rotation. Scoped to the SLOT family ONLY
-    # (USER-approved: service `Claude Code-rotator-slot` + backup). The live-cred
-    # family (`KEYCHAIN_SERVICE` / `LIVE_BACKUP_KEYCHAIN_SERVICE`) keeps its `-T` ACL —
-    # `-A` there would expose the ACTIVE session token to every app, a broader decision
-    # left to the user (write_live_blob / _live_backup_write pass allow_any=False).
+    # TRDD-EQJPPZ2L (the definitive rotation-death fix). Two orthogonal ACL decisions:
+    #  • WHICH ACL on CREATE — `allow_any`: `-A` (allow-ALL) for the rotator's OWN slot
+    #    family (SLOT_KEYCHAIN_SERVICE + backup, USER-approved — a shifting uv-python cache
+    #    path can then never re-prompt); `-T` partners for the live-cred family (`-A` there
+    #    would expose the ACTIVE session token to every app — a broader, user-only choice).
+    #  • WHETHER to set an ACL at all — `set_acl`: ONLY on CREATE. Re-applying an ACL to an
+    #    EXISTING item forces SecKeychainItemSetAccess, which PROMPTS every time and —
+    #    unattended — hangs the daemon, trips `keychain-denied.latch`, and kills rotation
+    #    (fa46a49's `-A`-on-EVERY-write hit this exact wall; it is SUPERSEDED). So probe
+    #    existence first (attribute-only → silent) and set the ACL only when the item is
+    #    NEW; an existing item is updated DATA-ONLY (no ACL flag) → no prompt. New machines
+    #    self-migrate: the first write creates with `-A`, every later write is data-only.
     allow_any = service in (SLOT_KEYCHAIN_SERVICE, SLOT_BACKUP_KEYCHAIN_SERVICE)
+    set_acl = not _keychain_item_exists(service, email)
     try:
-        _security_add_password_via_stdin(service, email, data, allow_any=allow_any)
+        _security_add_password_via_stdin(service, email, data, allow_any=allow_any, set_acl=set_acl)
         return True
     except FileNotFoundError:
         pass  # `security` ABSENT → not macOS — try the Linux keyring below

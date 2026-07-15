@@ -372,6 +372,35 @@ def test_keychain_write_roundtrips_real_keychain_over_128_bytes(isolated_keychai
     assert rotator._slot_keychain_read(account, service=service) is None  # cleaned up
 
 
+def test_slot_write_create_then_update_is_silent(isolated_keychain) -> None:  # isolated temp keychain — NEVER login (TRDD-EQJPPZ2L)
+    """TRDD-EQJPPZ2L END-TO-END PROOF on the REAL `security` binary: a CREATE followed by two
+    UPDATEs of the SAME slot item — with NO delete-in-between — all complete SILENTLY (rc 0, no
+    hang, no latch), and each read-back returns the freshly written token. This is the exact
+    pattern the rotator's every-tick keepalive write does, and the exact pattern that used to
+    HANG: re-asserting the ACL on `-U` update forced a SecKeychainItemSetAccess prompt →
+    headless timeout → `keychain-denied.latch` → rotation dark. The fix (ACL only at CREATE via
+    the silent existence probe; data-only UPDATE thereafter) makes all three writes prompt-free.
+    A regression here does NOT hang the suite — a re-appearing prompt trips the 5 s write timeout
+    and returns KEYCHAIN_WRITE_FAILED, which the `is True` assertions catch. 🐌"""
+    if sys.platform != "darwin":
+        pytest.skip("real macOS keychain test")
+    rotator.safe_storage.clear_keychain_denied()  # start from a clean latch (isolated gstate)
+    service = "Claude Code-rotator-cvu-%d" % os.getpid()
+    email = "cvu-%d@example.test" % os.getpid()
+    rotator._slot_keychain_delete(email, service=service)  # guarantee a fresh CREATE
+    try:
+        for i, tok in enumerate(("tok-CREATE", "tok-UPDATE-1", "tok-UPDATE-2")):
+            blob = _blob(tok, expires_ms=123456789000)
+            result = rotator._slot_keychain_write(email, blob, service=service)
+            assert result is True, f"write #{i} ({tok}) did not succeed silently: {result!r}"
+            assert not rotator.safe_storage.keychain_denied_latched(), f"write #{i} tripped the denied-latch (a prompt hung)"
+            assert rotator._slot_keychain_read(email, service=service) == blob, f"read-back mismatch after write #{i}"
+    finally:
+        rotator._slot_keychain_delete(email, service=service)
+        rotator.safe_storage.clear_keychain_denied()
+    assert rotator._slot_keychain_read(email, service=service) is None  # cleaned up
+
+
 def test_write_slot_uses_keychain_when_available(isolated_keychain, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # isolated temp keychain (TRDD-K3WQ7XM9 FIX B)
     """On a keychain host, write_slot stores the token ENCRYPTED in the keychain (NO plaintext file) and read_slot round-trips it. 🐌"""
     if sys.platform != "darwin":
@@ -1305,9 +1334,10 @@ def test_read_live_blob_with_source_tags_provenance(monkeypatch: pytest.MonkeyPa
     assert rotator.read_live_blob_with_source() == (None, "none")
 
 
-def test_add_password_argv_carries_acl_partners(monkeypatch: pytest.MonkeyPatch) -> None:
-    """F3: every rotator keychain write authorizes /usr/bin/security + the real python
-    binary via -T, so rotator-written items stay readable from a headless daemon."""
+def test_add_password_argv_carries_acl_partners_on_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F3 (create case): a CREATE (`set_acl=True`, the default) authorizes /usr/bin/security +
+    the real python binary via `-T`, so rotator-written items stay readable from a headless
+    daemon. TRDD-EQJPPZ2L: this ACL is set ONLY at create — see the update test below."""
     # Assert the BASE argv shape (the -w VALUE stays last) — unset the session-default keychain
     # scope that would otherwise append a trailing keychain positional (TRDD-K3WQ7XM9).
     monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
@@ -1321,39 +1351,84 @@ def test_add_password_argv_carries_acl_partners(monkeypatch: pytest.MonkeyPatch)
     assert argv[-2:] == ["-w", "DATA"]  # the secret stays LAST (stdin-prompt shape preserved)
 
 
-def test_add_password_argv_allow_any_uses_A_and_drops_T(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TRDD-EQJPPZ2L: allow_any=True emits `-A` (allow-ALL ACL) and DROPS the -T partners,
-    so a shifting uv python path can never re-prompt on a rotator slot write."""
+def test_add_password_argv_update_carries_no_acl_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-EQJPPZ2L (the definitive fix): a data-only UPDATE (`set_acl=False`) carries NEITHER
+    `-A` NOR `-T`. Re-applying ANY ACL to an existing item forces the SecKeychainItemSetAccess
+    prompt that hangs the daemon and kills rotation; a flagless `-U` write updates the DATA
+    silently. Holds regardless of `allow_any` — it is only consulted when an ACL IS set."""
     monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
-    argv = rotator._add_password_argv("svc", "acct", "DATA", allow_any=True)
+    for allow_any in (False, True):
+        argv = rotator._add_password_argv("svc", "acct", "DATA", allow_any=allow_any, set_acl=False)
+        assert "-A" not in argv and "-T" not in argv  # data-only → no ACL flag → no prompt
+        assert argv[:3] == ["security", "add-generic-password", "-U"]
+        assert argv[-2:] == ["-w", "DATA"]  # the secret still stays LAST
+
+
+def test_add_password_argv_allow_any_uses_A_on_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-EQJPPZ2L: on CREATE, allow_any=True emits `-A` (allow-ALL ACL) and DROPS the -T
+    partners, so a shifting uv python path can never re-prompt on a rotator slot write."""
+    monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
+    argv = rotator._add_password_argv("svc", "acct", "DATA", allow_any=True)  # set_acl=True default
     assert argv[:3] == ["security", "add-generic-password", "-U"]
-    assert "-A" in argv          # allow-all ACL pinned
+    assert "-A" in argv          # allow-all ACL pinned at create
     assert "-T" not in argv      # mutually exclusive — the partner list is gone
     assert argv[-2:] == ["-w", "DATA"]  # the secret still stays LAST
 
 
-def test_slot_keychain_write_gates_allow_any_by_service(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TRDD-EQJPPZ2L: `-A` is scoped to the rotator's OWN slot family (SLOT_KEYCHAIN_SERVICE +
-    backup) — the live-cred family (KEYCHAIN_SERVICE / LIVE_BACKUP) keeps the `-T` ACL, so the
-    active session token is never exposed allow-all without a separate user decision."""
+def test_keychain_item_exists_proves_absence_else_assumes_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-EQJPPZ2L: the create-vs-update probe returns False ONLY on a PROVEN errSecItemNotFound
+    (rc 44 / "could not be found"); rc 0 → True, and EVERY ambiguous outcome (odd rc, latched,
+    hung, not-macOS) → True ("assume it exists"), so the write never sets an ACL on a maybe-present
+    item and can never trigger the SetAccess prompt."""
+    SR = rotator.safe_storage.SecurityRun
+    cases = [
+        (SR(ok=True, stdout="", stderr="", spawned=True, denied=False, returncode=0), True),                       # exists (rc 0)
+        (SR(ok=False, stdout="", stderr="could not be found", spawned=True, denied=False, returncode=44), False),  # PROVEN absent
+        (SR(ok=False, stdout="", stderr="boom", spawned=True, denied=False, returncode=1), True),                  # odd rc → assume present
+        (SR(ok=False, stdout="", stderr="", spawned=False, denied=True, returncode=None), True),                   # latched → assume present
+        (SR(ok=False, stdout="", stderr="", spawned=True, denied=True, returncode=None), True),                    # hung/denied → assume present
+        (SR(ok=False, stdout="", stderr="", spawned=False, denied=False, returncode=None), True),                  # not macOS → assume present
+    ]
+    for run, expected in cases:
+        monkeypatch.setattr(rotator.safe_storage, "run_security", lambda *_a, _r=run, **_k: _r)
+        assert rotator._keychain_item_exists("svc", "acct") is expected
+
+
+def test_slot_keychain_write_sets_acl_only_when_item_is_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-EQJPPZ2L end-to-end at the write site: `_slot_keychain_write` probes existence
+    (silent attribute-only `find`) and sets an ACL flag ONLY on CREATE — `-A` for the slot
+    family (SLOT_KEYCHAIN_SERVICE + backup), `-T` for the live-cred family. An EXISTING item is
+    updated DATA-ONLY (no ACL flag → no SecKeychainItemSetAccess prompt) for EVERY family."""
+    monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
+    SR = rotator.safe_storage.SecurityRun
     captured: dict[str, list[str]] = {}
+    state = {"exists": False}
 
     def _fake_run(argv: list[str], *, timeout: float = 5.0):  # noqa: ARG001
-        captured["argv"] = argv
-        return rotator.safe_storage.SecurityRun(ok=True, stdout="", stderr="", spawned=True, denied=False, returncode=0)
+        if "find-generic-password" in argv:  # the silent existence probe
+            if state["exists"]:
+                return SR(ok=True, stdout="", stderr="", spawned=True, denied=False, returncode=0)
+            return SR(ok=False, stdout="", stderr="could not be found", spawned=True, denied=False, returncode=44)
+        captured["argv"] = argv  # the add-generic-password WRITE
+        return SR(ok=True, stdout="", stderr="", spawned=True, denied=False, returncode=0)
 
     monkeypatch.setattr(rotator.safe_storage, "run_security", _fake_run)
-    monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
+    blob = {"claudeAiOauth": {"accessToken": "t"}}
 
-    # SLOT family → allow-all (`-A`), no `-T`.
-    rotator._slot_keychain_write("me@x", {"claudeAiOauth": {"accessToken": "t"}}, service=rotator.SLOT_KEYCHAIN_SERVICE)
+    # CREATE (item absent) → slot family gets `-A`; live-cred family gets `-T`.
+    state["exists"] = False
+    rotator._slot_keychain_write("me@x", blob, service=rotator.SLOT_KEYCHAIN_SERVICE)
     assert "-A" in captured["argv"] and "-T" not in captured["argv"]
-    rotator._slot_keychain_write("me@x", {"claudeAiOauth": {"accessToken": "t"}}, service=rotator.SLOT_BACKUP_KEYCHAIN_SERVICE)
+    rotator._slot_keychain_write("me@x", blob, service=rotator.SLOT_BACKUP_KEYCHAIN_SERVICE)
     assert "-A" in captured["argv"] and "-T" not in captured["argv"]
+    rotator._slot_keychain_write("me@x", blob, service=rotator.LIVE_BACKUP_KEYCHAIN_SERVICE)
+    assert "-T" in captured["argv"] and "-A" not in captured["argv"]
 
-    # LIVE-cred family → keeps the `-T` partner ACL (never allow-all — active token).
-    rotator._slot_keychain_write("me@x", {"claudeAiOauth": {"accessToken": "t"}}, service=rotator.LIVE_BACKUP_KEYCHAIN_SERVICE)
-    assert "-A" not in captured["argv"] and "-T" in captured["argv"]
+    # UPDATE (item exists) → NO ACL flag for ANY family (the prompt-free data-only write).
+    state["exists"] = True
+    for svc in (rotator.SLOT_KEYCHAIN_SERVICE, rotator.SLOT_BACKUP_KEYCHAIN_SERVICE, rotator.LIVE_BACKUP_KEYCHAIN_SERVICE):
+        rotator._slot_keychain_write("me@x", blob, service=svc)
+        assert "-A" not in captured["argv"] and "-T" not in captured["argv"]
 
 
 def test_beacon_round_trip_email_from_slot_fp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
