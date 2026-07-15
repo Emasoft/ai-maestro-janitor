@@ -1102,3 +1102,55 @@ def test_extract_lessons_keeps_code_a_lesson_quotes_inside_a_fence():
     assert len(lessons) == 1
     assert "git add -a" in lessons[0].lower()               # the quoted code survived
     assert "do stage by name instead" in lessons[0].lower()  # ...and the fence did not stop it
+
+
+def test_extract_lessons_stops_at_an_atom_marker():
+    """MADJ00KA (issue #97): a `[^N]:` footnote followed by atomized fact content with NO
+    closing `##` heading must STOP at the first atom marker — not swallow both atom blocks
+    into one giant "lesson". Before the fix this returned one ~289-char lesson; the atomize
+    and split passes collide on their own output otherwise (a split of an atomized oversized
+    hub page false-fails, because no sub-page can reproduce the blob without staying unsplit)."""
+    source = (
+        "# Acme hub\n\n"
+        "## Notes and lessons learned\n"
+        "[^1]: the config key was misread; the cap is 3 not 5.\n\n"
+        "^atom-1 [keywords: config, retries, cap]\n"
+        "Retries are capped at 3 in acme.config.MAX_RETRIES, enforced at call time.\n\n"
+        "^atom-2 [keywords: timeout, deadline]\n"
+        "The request deadline defaults to 30s and is not configurable per-call.\n"
+    )
+    lessons = v.extract_lessons(source)
+    assert len(lessons) == 1, lessons
+    assert "the config key was misread" in lessons[0].lower()
+    assert "atom-1" not in lessons[0].lower()   # the atom content is NOT part of the lesson
+    assert "max_retries" not in lessons[0].lower()
+
+
+def test_extract_lessons_still_captures_a_plain_footnote_to_eof():
+    """DERIVED (MADJ00KA): the EOF alternative must remain — a page with NO atoms (a plain
+    multi-line footnote running to end-of-file) still captures the WHOLE lesson body."""
+    text = (
+        "## Notes and lessons learned\n"
+        "[^1]: a multi-line lesson body\n"
+        "  that continues onto a second line and must be captured whole to EOF.\n"
+    )
+    lessons = v.extract_lessons(text)
+    assert len(lessons) == 1
+    assert "captured whole to eof" in lessons[0].lower()
+
+
+def test_extract_lessons_atom_marker_inside_a_fence_does_not_stop_a_lesson():
+    """DERIVED (MADJ00KA task 1): the atom-marker stop matches on the FENCE-MASKED `scan`,
+    so an `^id [..]` line quoted inside a code fence is masked to spaces and cannot
+    prematurely truncate a real lesson — same discipline as the `#`-heading boundary."""
+    text = (
+        "## Notes and lessons learned\n"
+        "[^1]: an atomize marker looks like this:\n"
+        "```\n"
+        "^atom-x [keywords: a, b]\n"
+        "```\n"
+        "DO keep this trailing explanation in the lesson.\n"
+    )
+    lessons = v.extract_lessons(text)
+    assert len(lessons) == 1
+    assert "do keep this trailing explanation" in lessons[0].lower()

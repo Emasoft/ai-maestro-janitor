@@ -21,6 +21,16 @@ import re
 
 _LESSONS_HEADING = "## Notes and lessons learned"
 
+# Core shape of an ATOMIZE block-property marker — `^<id> [<props>]` (kebab id, a
+# bracketed props blob). Shared so BOTH the atomize verifier (`_ATOM_MARKER_RE`,
+# full-line, defined below) AND `extract_lessons`' footnote-capture stop-set key on
+# ONE notion of "an atom marker": the atomize pass WRITES these lines, and split's
+# lesson capture must STOP at them, or a `[^N]:` footnote followed by atomized fact
+# content swallows the whole tail to EOF as one giant "lesson" and false-fails every
+# legal split of that page (TRDD-MADJ00KA / issue #97). `[^\n]` (not `.`) bounds the
+# props to one line regardless of the DOTALL flag on the surrounding pattern.
+_ATOM_MARKER_CORE = r"\^[A-Za-z0-9_-]+\s*\[[^\n]*\]"
+
 
 # --------------------------------------------------------------------------- #
 # minimal frontmatter parsing (the SMALL, metadata-only concern — kept separate
@@ -167,7 +177,18 @@ def extract_lessons(text: str) -> list[str]:
     # lesson either.
     scan = _mask_code_fences(text)  # offset-preserving, so spans index `text` too
     out: list[str] = []
-    for m in re.finditer(r"(?ms)^\[\^[^\]]+\]:.*?(?=^\[\^[^\]]+\]:|^#{1,6} [A-Z(\[]|\Z)", scan):
+    # MADJ00KA (issue #97): the stop-set ALSO ends a footnote body at an atom-marker
+    # line (`^id [keywords: …]`, shared `_ATOM_MARKER_CORE`). Without it, a `[^N]:`
+    # lesson followed by atomized fact content with no closing `##` heading swallowed
+    # the whole tail to EOF as one giant "lesson", false-failing every legal split of
+    # that page. The atom alternative is line-anchored (`^\s*…\s*$` under `(?m)`), so
+    # only a WHOLE atom-marker line stops a lesson — never a `^` mid-sentence — and it
+    # matches on `scan`, so an atom marker inside a masked code fence cannot stop one.
+    stop = (
+        r"(?ms)^\[\^[^\]]+\]:.*?"
+        r"(?=^\[\^[^\]]+\]:|^#{1,6} [A-Z(\[]|^\s*" + _ATOM_MARKER_CORE + r"\s*$|\Z)"
+    )
+    for m in re.finditer(stop, scan):
         # Slice the ORIGINAL text: the mask exists only to stop a `#`/`[^id]` INSIDE a fence
         # from being read as a boundary — the lesson's real content (code included) is what
         # must be compared.
@@ -887,8 +908,11 @@ def verify_repair(
 
 # An atom block-property marker on its own line: `^<id> [<props>]` (TRDD-3b9b2040). The atomize pass
 # adds markers on dedicated lines so every existing FACT line stays byte-identical — the regex matches
-# exactly that shape (optional indent, kebab id, optional space, a bracketed props blob).
-_ATOM_MARKER_RE = re.compile(r"^\s*\^[A-Za-z0-9_-]+\s*\[.*\]\s*$")
+# exactly that shape (optional indent, kebab id, optional space, a bracketed props blob). Built from the
+# SHARED `_ATOM_MARKER_CORE` so extract_lessons' stop-set and this full-line matcher can never disagree
+# on what an atom marker is (TRDD-MADJ00KA). Byte-identical to the prior literal: without a DOTALL flag
+# `.` already excluded newlines, so `[^\n]*` inside the core changes nothing here.
+_ATOM_MARKER_RE = re.compile(rf"^\s*{_ATOM_MARKER_CORE}\s*$")
 
 
 def verify_atomize(
