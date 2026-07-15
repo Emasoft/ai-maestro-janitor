@@ -3,7 +3,7 @@ trdd-id: EQJPPZ2L
 title: Rotator keychain WRITE triggers an ACL prompt (uv-python) — every token refresh re-latches the rotator dead
 column: dev
 created: 2026-07-15T11:28:10+0200
-updated: 2026-07-15T16:40:00+0200
+updated: 2026-07-15T16:57:50+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -11,12 +11,43 @@ severity: critical
 labels: [oauth-rotator, keychain, macos, acl, reliability, unattended]
 relevant-rules: []
 parent-trdd: 32acd15f
-implementation-commits: [fa46a49]
+implementation-commits: [fa46a49, 1cedf28]
 ---
 
 # Rotator keychain WRITE triggers an ACL prompt — every refresh re-latches the rotator dead
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (16:40) — ROOT CAUSE NAILED
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (16:57) — CODE FIX LANDED (1cedf28)
+
+**PROGRESS:** The real fix is IMPLEMENTED + tested + committed as `1cedf28` (supersedes fa46a49).
+NEXT ACTION items 1 (code) and 2 (unit tests) are DONE. What remains: item 3 (ONE login-keychain
+validation — GATED on the user being present + rebooted) then item 4 (clear latch + restore opt-in
+→ go live). Do NOT run any `security` write against the LOGIN keychain unprompted; ask the user first.
+
+**What `1cedf28` did (in `scripts/oauth_rotator/rotator.py`):**
+- `_add_password_argv` gained `set_acl: bool` — the ACL flag (`-A`/`-T`) is emitted ONLY when
+  `set_acl=True` (CREATE); a data-only UPDATE (`set_acl=False`) carries NO ACL flag. `allow_any`
+  now only picks WHICH ACL on create (`-A` slot family / `-T` live-cred), consulted only when
+  `set_acl` is True.
+- NEW `_keychain_item_exists(service, account)` — a silent attribute-only `find-generic-password`
+  (no `-w`, never prompts). Returns False ONLY on a PROVEN errSecItemNotFound (rc 44); every
+  ambiguous outcome (latched/hung/not-macOS/odd rc) returns True ("assume exists") so the write
+  never risks the prompt (those cases fail closed anyway).
+- Both write paths thread it: `_slot_keychain_write` (probes, `set_acl = not exists`) and
+  `write_live_blob` (same). `_security_add_password_via_stdin` threads `set_acl`.
+- Tests (`tests/test_oauth_rotator.py`, 91 pass, ruff clean): create-argv carries the ACL flag;
+  update-argv carries neither `-A` nor `-T`; `_keychain_item_exists` proven-absent-vs-assume-present
+  matrix; write-site create-vs-update by service; and the strongest — `test_slot_write_create_then_
+  update_is_silent` runs the REAL `security` binary on an ISOLATED keychain, doing create→update→
+  update with NO delete-between, asserting all three are silent (a regression trips the 5 s write
+  timeout instead of hanging). This test would have HUNG under fa46a49's `-A`-on-every-write.
+
+**Self-migration:** new machines need no migration step — the first slot write creates with `-A`,
+every later write is data-only. The user's EXISTING login slots already carry a GUI "allow all"
+ACL, so their data-only updates are silent too.
+
+---
+
+## ⏵ STATE (earlier) — 2026-07-15 (16:40) — ROOT CAUSE NAILED
 
 **DEFINITIVE ROOT CAUSE (proven, 3 throwaway-keychain tests, unconfounded):** `security
 add-generic-password -U` with **ANY ACL flag (`-A` OR `-T`)** on an **existing** item forces
