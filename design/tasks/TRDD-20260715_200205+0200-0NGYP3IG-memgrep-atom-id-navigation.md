@@ -29,6 +29,22 @@ the always-updated background index:
 The **background-updated index** (`.memgrep` SQLite sidecar) gives memgrep everything it needs to
 resolve an id to either its page path or its content, fast.
 
+**WHY the index is the ONLY reliable source of the atom→page mapping (USER, 2026-07-15):** atoms are
+**MOBILE** — the subconscious agent MOVES an atom from one wikimem page to another when it
+splits / merges / extends / reduces / relocates-to-the-right-topic a page (TRDD-87RKBYJ8). So the
+page that contains a given atom **changes over time**; the page path must NEVER be baked into the atom
+or hardcoded anywhere — it is resolved through the always-updated index, which alone knows where the
+atom lives at THIS moment. This is the load-bearing reason id→page-path must be an index lookup, not a
+stored back-reference.
+
+**THEREFORE atom ids must be GLOBALLY-UNIQUE 8-char UUIDs (corpus-wide, latin letters + numbers).**
+Because an atom keeps its id when it moves between pages, the id must be unique across the WHOLE
+corpus — not merely within its current page. Format: 8 alphanumeric chars `[A-Z0-9]` (the existing
+`ATOM-XXXX-XXXX` shape carries exactly 8 payload chars). The id generator MUST check the index for a
+collision across ALL pages/scopes before assigning a new id (an id reused on two atoms breaks both
+resolution modes — id→page becomes ambiguous, id→content returns the wrong atom). Corpus-wide id
+uniqueness is a hard invariant memgrep's index can and must enforce/verify.
+
 **Existing state (RECALLED — verify before implementing):** per `wikimem-atom-block-properties-
 harvest-and-status.md` ⟦2⟧ and TRDD-3b9b2040, the atom engine is ALREADY built: block-properties
 parser + `resolve_atoms`, the `atoms` / `atoms_fts` index tables (schema-v2), atom-level recall, and
