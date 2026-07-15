@@ -13,6 +13,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
@@ -1154,3 +1156,39 @@ def test_extract_lessons_atom_marker_inside_a_fence_does_not_stop_a_lesson():
     lessons = v.extract_lessons(text)
     assert len(lessons) == 1
     assert "do keep this trailing explanation" in lessons[0].lower()
+
+
+def test_body_minus_lessons_single_page_is_unchanged():
+    """842PBES7: a normal single page — body up to its ONE lessons heading, lessons stripped."""
+    page = (
+        "# Page one\n\n"
+        "Fact one is a reasonably long body fact about the first page here.\n\n"
+        "## Notes and lessons learned\n[^1]: lesson one.\n"
+    )
+    out = v._body_minus_lessons(page)
+    assert "fact one" in out.lower()
+    assert "lesson one" not in out.lower()
+
+
+def test_body_minus_lessons_raises_on_a_multi_page_concatenation():
+    """842PBES7 (issue #88 residual): TWO full-line lessons headings ⇒ a concatenation the
+    single-page extractor must REFUSE, not silently truncate at the first (which would drop
+    page 2's facts from the check — a false PASS). Concatenations must route through the
+    non-truncating _norm_page_blob instead."""
+    page1 = "# One\n\nFact one is a long body fact.\n\n## Notes and lessons learned\n[^1]: a.\n"
+    page2 = "# Two\n\nFact two is a long body fact.\n\n## Notes and lessons learned\n[^1]: b.\n"
+    with pytest.raises(ValueError, match="multi-page concatenation"):
+        v._body_minus_lessons(page1 + page2)
+
+
+def test_body_minus_lessons_does_not_raise_on_an_inline_heading_mention():
+    """842PBES7 DERIVED task 1 (the L-3 case): a meta-page that mentions the heading text
+    INLINE (not on its own line) has only ONE full-line heading, so it must NOT raise — the
+    raise keys on the same FULL-LINE anchoring as the truncation."""
+    meta = (
+        "# Meta page about the memory system\n\n"
+        "Every note carries a `## Notes and lessons learned` section, mentioned here inline.\n\n"
+        "## Notes and lessons learned\n[^1]: the real lesson.\n"
+    )
+    out = v._body_minus_lessons(meta)  # must not raise
+    assert "mentioned here inline" in out.lower()

@@ -231,17 +231,37 @@ def _strip_frontmatter(text: str) -> str:
 
 
 def _body_minus_lessons(text: str) -> str:
-    """The note's BODY: frontmatter stripped, and the `## Notes and lessons learned`
-    section stripped (lessons are guarded separately by lessons_preserved)."""
+    """The note's BODY (singular): frontmatter stripped, and the ONE
+    `## Notes and lessons learned` section stripped (lessons are guarded separately
+    by lessons_preserved).
+
+    Raises ValueError on a SECOND full-line lessons heading (TRDD-842PBES7 / issue
+    #88 residual). A curated page mandates exactly one such heading, so two means the
+    caller handed a multi-page CONCATENATION (or a malformed page) — and this
+    extractor would otherwise SILENTLY truncate at the first, dropping every later
+    page's facts from the check: a false PASS (the dangerous direction), since a
+    merge/atomize that dropped those facts would be certified. A fail-safe verifier
+    must fail LOUD on misuse, not certify silently. Callers that legitimately handle
+    concatenations route through `_norm_page_blob` (which never truncates), so none
+    needs to change."""
     body = _strip_frontmatter(text)
     # L-3 (wikimem audit 2026-07-07): match the heading as a FULL LINE, never a
     # substring — meta-pages about the memory system mention `## Notes and
     # lessons learned` inline, and a find() on the raw string truncated the body
     # at that mention, leaving later facts unchecked in sources and false-failing
-    # results.
-    m = re.search(rf"(?m)^{re.escape(_LESSONS_HEADING)}\s*$", body)
-    if m:
-        body = body[: m.start()]
+    # results. The multi-heading raise below keys on the SAME full-line anchoring,
+    # so an inline mention never trips it (only a genuine second section does).
+    matches = list(re.finditer(rf"(?m)^{re.escape(_LESSONS_HEADING)}\s*$", body))
+    if len(matches) > 1:
+        raise ValueError(
+            f"_body_minus_lessons received text with {len(matches)} "
+            f"'{_LESSONS_HEADING}' headings — a single-page extractor cannot handle a "
+            "multi-page concatenation (it would silently drop pages 2..N's facts, a "
+            "false PASS). Route concatenations through _norm_page_blob instead "
+            "(TRDD-842PBES7 / issue #88)."
+        )
+    if matches:
+        body = body[: matches[0].start()]
     return body
 
 
