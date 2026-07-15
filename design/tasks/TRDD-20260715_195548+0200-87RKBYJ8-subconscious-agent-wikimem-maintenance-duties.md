@@ -3,7 +3,7 @@ trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
 column: backburner
 created: 2026-07-15T19:55:48+0200
-updated: 2026-07-15T20:19:00+0200
+updated: 2026-07-15T20:31:04+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -80,6 +80,11 @@ agent loads. These duties EXTEND / TIGHTEN those.
 14. Detect an OFF-TOPIC atom and MOVE it to the wikimem page right for its topic (e.g. methodological
     considerations → the best-practices page).
 15. If an off-topic atom's topic has **no page yet**, CREATE that page.
+15b. Detect a page whose TITLE is a memory-DESCRIPTION, not a TOPIC (e.g.
+    `implementation-of-duckdb-ingestion-of-otel-logs.md` vs the correct `agents-tracing.md`) → MERGE
+    its atom(s) into the right topic page (redirect `[[links]]` + ref-count footnotes) or, if the
+    topic has no page, RENAME it to the broad topic. This is the NAMING axis of duties 10/14/15 —
+    owned by **TRDD-NM4TPCQ9** (which also adds the write-time prevention in `janitor-memory-write`).
 
 ### H. Links / references integrity
 16. EDIT / POLISH the references + links to other wikimem pages and atoms; PRUNE the ones that are
