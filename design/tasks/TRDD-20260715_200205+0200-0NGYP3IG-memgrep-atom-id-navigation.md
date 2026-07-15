@@ -1,9 +1,9 @@
 ---
 trdd-id: 0NGYP3IG
 title: memgrep atom-id resolution — id to page-path for wiki navigation, and id to atom content
-column: backburner
+column: dev
 created: 2026-07-15T20:02:05+0200
-updated: 2026-07-15T20:02:05+0200
+updated: 2026-07-16T00:45:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -54,17 +54,24 @@ ergonomic commands, and add whichever is missing** — especially the id→page-
 (the "browse the wiki" primitive) and a clean id→atom-only fetch.
 
 ## NEXT ACTION
-1. Audit `scripts/memgrep` (Rust): does it expose (a) `atom id → owning page path`, and (b) `atom id
-   → atom content only`, both index-backed? Check `resolve_atoms` + the `atoms` table columns (does a
-   row carry its page path?).
-2. Add/confirm two ergonomic commands (names TBD): one prints the OWNING PAGE PATH for an atom id
-   (navigation — page path + id is the address), one prints just the ATOM CONTENT for an atom id.
-3. Ensure the background index carries page-path per atom so both are O(1) lookups; keep it current
-   (the existing reindex/watch path).
-4. Tests (Rust): id→page-path returns the correct owning page; id→content returns only that atom;
-   both work off the index without scanning files.
-5. Publish (memgrep binary lives in the plugin → release + cache update to deploy, per
-   `macos-keychain.md [^2]` / TRDD-EQJPPZ2L: repo ≠ deployed).
+**IMPLEMENTED 2026-07-16** (background agent; verified by the orchestrator with a fresh cargo
+test + clippy run and a real-corpus smoke test):
+1. `memgrep atom-page <id> <memdir>` — prints the OWNING PAGE PATH (navigation: page path + id =
+   the address). Verified live: `atom-page 9K3ZP7QW` → `wikimem-atom-block-properties.md`. ✅
+2. `memgrep atom <id> <memdir>` — prints just that atom's full record (content + resolved `[^N]`
+   footnotes, same aggregation recall uses). Verified live. ✅
+3. Index-backed via the existing atoms/notes→memories JOIN — **no schema bump needed** (the atoms
+   table already relates to its memory row, which carries the path). Accepts bare 8-char ids,
+   `ATOM-XXXX-XXXX`, and legacy `^marker` names. Ambiguous id (corpus corruption) → lists ALL
+   matches and exits non-zero. Fallback to a live walk when the index is absent (matching the
+   crate's existing pattern); walk-vs-index verified byte-identical on real-corpus copies.
+4. Tests: cargo 168/168 green, clippy `-D warnings` clean. desc-in-listings (AP2X9A0H item c)
+   landed in the SAME change set: quoted-prose desc verbatim, legacy slug `_`→space, ~120-char
+   body-prefix fallback, quote-aware property splitter shared by both grammars; `find` lists
+   atoms too. Report: `reports/memgrep/20260716_003056+0200-atom-id-nav-and-desc-listings.md`.
+
+**REMAINING:** 5. Publish (memgrep binary lives in the plugin → release + cache update +
+`cargo install` to deploy, per `macos-keychain.md [^2]` / TRDD-EQJPPZ2L: repo ≠ deployed).
 
 ## Verification
 - `memgrep <id→page-path cmd> ATOM-xxxx-xxxx` → the path of the page that contains it (navigation).

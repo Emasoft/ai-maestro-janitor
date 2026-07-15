@@ -1032,7 +1032,7 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
                 atom.atom_type,
                 atom.claude_mem_ref,
                 atom.claude_mem_hash,
-                atom.desc, // TRDD-056384eb: the ≤64-char one-line summary slug (display-only, not FTS-indexed)
+                atom.desc, // the one-line summary — slug or ≤200-char prose (display-only, NEVER FTS-indexed)
                 atom.body
             ],
         )?;
@@ -1200,8 +1200,9 @@ pub struct AtomCandidate {
     pub body: String,
     pub ocd: Option<String>,
     pub lmd: Option<String>,
-    /// The atom's ≤64-char one-line summary slug (TRDD-056384eb), read back from the `atoms.desc`
-    /// column so the index round-trips it. DISPLAY-only — the recall scorer never ranks on it.
+    /// The atom's one-line summary (a legacy slug OR the ≤200-char quoted prose of TRDD-AP2X9A0H),
+    /// read back from the `atoms.desc` column so the index round-trips it. DISPLAY-only — the
+    /// recall scorer never ranks on it, and it is deliberately absent from `atoms_fts`.
     pub desc: Option<String>,
 }
 
@@ -1270,6 +1271,33 @@ pub fn claude_mem_ref_atoms(conn: &Connection) -> Result<Vec<(String, String, St
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, String>(3)?,
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Every indexed atom-id LOCATOR row: `(page_path, stored_id, is_lesson)` — one per body ATOM
+/// (`atoms.atom_id`) and one per LESSON carrying a corpus-wide `id:` (`notes.atom_id`). This is the
+/// index-backed source for `memgrep atom` / `memgrep atom-page` (TRDD-0NGYP3IG): the page path comes
+/// from the `memories` JOIN — the atoms/notes tables deliberately carry NO path column of their own,
+/// because an atom is MOBILE (the librarian moves it between pages) and its owner must always be
+/// resolved through its CURRENT memory row, never a stored back-reference. The caller applies the id
+/// match (bare-8/`ATOM-XXXX-XXXX` canonicalisation cannot be expressed as one SQL predicate) and
+/// falls back to a live walk on ANY error, so a pre-v5 index can never produce a wrong answer here.
+pub fn atom_locator_rows(conn: &Connection) -> Result<Vec<(String, String, bool)>> {
+    let mut stmt = conn.prepare(
+        "SELECT m.path, a.atom_id, 0 FROM atoms a JOIN memories m ON a.memory_id = m.id
+          WHERE a.atom_id IS NOT NULL AND a.atom_id != ''
+         UNION ALL
+         SELECT m.path, n.atom_id, 1 FROM notes n JOIN memories m ON n.memory_id = m.id
+          WHERE n.atom_id IS NOT NULL AND n.atom_id != ''
+         ORDER BY 1, 2",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)? != 0,
         ))
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1354,12 +1382,10 @@ mod tests {
         let mut st = conn
             .prepare(&format!("PRAGMA table_info({table})"))
             .unwrap();
-        let rows = st
-            .query_map([], |r| r.get::<_, String>(1))
+        st.query_map([], |r| r.get::<_, String>(1))
             .unwrap()
             .map(|r| r.unwrap())
-            .collect();
-        rows
+            .collect()
     }
 
     const NOTES_COLUMNS: [&str; 11] = [

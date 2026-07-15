@@ -147,6 +147,36 @@ fn system_time_to_iso_utc(t: std::time::SystemTime) -> String {
     format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
 }
 
+/// Split a metadata/properties string on TOP-LEVEL commas — the shared first stage of BOTH
+/// grammars (atom block-props and lesson `[...]` prefixes). Two protections: a comma inside `[…]`
+/// brackets (a `[[wikilink]]` value) does not split, and a comma inside a `"…"` quoted value does
+/// not split either — the quoted ≤200-char prose `desc:"…, …"` form (TRDD-AP2X9A0H) made quote-
+/// awareness load-bearing (a prose summary legitimately contains commas). Brackets are NOT
+/// depth-tracked while inside quotes: a quoted `desc:"8-char [A-Z0-9] ids"` (real corpus text)
+/// must never corrupt the depth counter. An unclosed quote degrades to "the rest is one item".
+/// All tracked bytes (`"`/`[`/`]`/`,`) are ASCII, so slicing never lands mid-UTF-8-char.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    let mut in_quote = false;
+    let mut start = 0usize;
+    let mut items: Vec<&str> = Vec::new();
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'"' => in_quote = !in_quote,
+            b'[' if !in_quote => depth += 1,
+            b']' if !in_quote => depth -= 1,
+            b',' if !in_quote && depth == 0 => {
+                items.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    items.push(&s[start..]);
+    items
+}
+
 /// Parse a lesson's `[...]` metadata prefix into `key → value-ARRAY`, accepting BOTH grammars a
 /// lesson may carry:
 ///   • the COMMA-separated block-prop grammar the ATOMS use — `keywords: a b c, ocd: 2026-07-13`;
@@ -160,30 +190,14 @@ fn system_time_to_iso_utc(t: std::time::SystemTime) -> String {
 /// unreachable by keyword while atoms were not (the wikimem's central promise, broken for half its
 /// elements).
 ///
-/// The unifying rule: split on TOP-LEVEL commas → items (a comma inside a `[[wikilink]]` is
-/// depth-protected, as in atoms); within an item, a whitespace token CONTAINING a `:` opens a new
-/// key, and every following token WITHOUT one appends to that key's value array. This reads both
-/// grammars unambiguously. Pure; markdown is data, never executed.
+/// The unifying rule: split on TOP-LEVEL commas → items (a comma inside a `[[wikilink]]` or a
+/// `"…"` quoted value is protected — see `split_top_level_commas`); within an item, a whitespace
+/// token CONTAINING a `:` opens a new key, and every following token WITHOUT one appends to that
+/// key's value array. This reads both grammars unambiguously. Pure; markdown is data, never
+/// executed.
 fn parse_note_props(meta: &str) -> BTreeMap<String, Vec<String>> {
-    let bytes = meta.as_bytes();
-    let mut depth = 0i32;
-    let mut start = 0usize;
-    let mut items: Vec<&str> = Vec::new();
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'[' => depth += 1,
-            b']' => depth -= 1,
-            b',' if depth == 0 => {
-                items.push(&meta[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    items.push(&meta[start..]);
-
     let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for item in items {
+    for item in split_top_level_commas(meta) {
         // The key that following bare (colon-less) tokens belong to — this is what lets ONE
         // value span several whitespace-separated words, e.g. `keywords:"a b c"`.
         let mut cur: Option<String> = None;
@@ -232,7 +246,22 @@ fn parse_note_props(meta: &str) -> BTreeMap<String, Vec<String>> {
                     in_quote = true;
                 }
             } else if let Some(key) = cur.as_ref() {
-                map.entry(key.clone()).or_default().push(tok.to_string());
+                // A bare token may itself OPEN the preceding key's quoted value — the space-after-
+                // colon spelling `desc: "multi word prose"` (TRDD-AP2X9A0H allows both `desc:"…"`
+                // and `desc: "…"`). Without this, the delimiting quotes would survive into the
+                // stored value as literal characters.
+                if let Some(rest) = tok.strip_prefix('"') {
+                    let closing = rest.ends_with('"');
+                    let word = rest.trim_end_matches('"');
+                    if !word.is_empty() {
+                        map.entry(key.clone()).or_default().push(word.to_string());
+                    }
+                    if !closing {
+                        in_quote = true;
+                    }
+                } else {
+                    map.entry(key.clone()).or_default().push(tok.to_string());
+                }
             }
         }
     }
@@ -1274,37 +1303,33 @@ pub fn cmd_links_cli(args: &[String]) -> Result<()> {
 
 /// Parse a block-property string (`key: value, key2: a b c`) into `key → VALUE-ARRAY`. Implements the
 /// Obsidian Block-Properties spec + the AI-Maestro ARRAY extension:
-///   • split on TOP-LEVEL commas → properties (a comma inside a `[[wikilink]]` is depth-protected);
+///   • split on TOP-LEVEL commas → properties (a comma inside a `[[wikilink]]` or a `"…"` quoted
+///     value is protected — see `split_top_level_commas`);
 ///   • split each property on its FIRST `:` → (key, value-string) (colons in values are allowed);
-///   • TRIM the value, then split it on WHITESPACE → the value array (no internal space → 1 element).
+///   • TRIM the value; a `"…"`-quoted value (the `desc:"…"` / `desc: "…"` prose form of
+///     TRDD-AP2X9A0H, mirroring the lesson grammar's quoted `keywords:"…"`) sheds its DELIMITING
+///     quotes first — they mark the value's extent, they are not part of it;
+///   • split on WHITESPACE → the value array (no internal space → 1 element).
 /// Keys are trimmed; an empty key is dropped. Pure; markdown is data, never executed.
 fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
-    let bytes = props.as_bytes();
-    let mut depth = 0i32;
-    let mut start = 0usize;
-    let mut items: Vec<&str> = Vec::new();
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'[' => depth += 1,
-            b']' => depth -= 1,
-            b',' if depth == 0 => {
-                items.push(&props[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    items.push(&props[start..]);
     let mut map = BTreeMap::new();
-    for item in items {
+    for item in split_top_level_commas(props) {
         if let Some((k, v)) = item.split_once(':') {
             let key = k.trim();
             if key.is_empty() {
                 continue;
             }
-            // `split_whitespace` already skips leading/trailing/repeated whitespace, so it both trims
-            // and tokenises the value into the array in one pass (no separate `.trim()` needed).
-            let arr: Vec<String> = v.split_whitespace().map(str::to_string).collect();
+            // Shed the delimiting quotes of a quoted value (both `key:"…"` and `key: "…"` spellings
+            // trim to the same shape). An unclosed quote degrades to "strip the opener only" — the
+            // comma-splitter already kept the whole value in this item, so nothing is lost.
+            let val = v.trim();
+            let inner = match val.strip_prefix('"') {
+                Some(rest) => rest.strip_suffix('"').unwrap_or(rest),
+                None => val,
+            };
+            // `split_whitespace` skips leading/trailing/repeated whitespace, so it both trims and
+            // tokenises the value into the array in one pass.
+            let arr: Vec<String> = inner.split_whitespace().map(str::to_string).collect();
             map.insert(key.to_string(), arr);
         }
     }
@@ -1377,10 +1402,11 @@ pub struct Atom {
     pub lmd: Option<String>,
     pub claude_mem_ref: Option<String>,
     pub claude_mem_hash: Option<String>,
-    /// A ≤64-char one-line summary of the atom (TRDD-056384eb). STORED as a snake_case slug
-    /// (`[a-z0-9_]+`, a single token — so the existing single-valued `first_val` path parses it with
-    /// no `parse_block_props` change), DISPLAYED with `_`→space. DISPLAY-only: it is NOT a recall
-    /// surface (`keywords` stays what FTS ranks on). Absent → `None`.
+    /// A one-line summary of the atom — the LISTING triage surface. Two forms coexist in the corpus
+    /// (TRDD-AP2X9A0H): the NEW required form is a `"…"`-quoted ≤200-char PROSE summary (stored with
+    /// its delimiting quotes stripped, whitespace-normalised); the LEGACY form (TRDD-056384eb) is a
+    /// single snake_case slug, displayed `_`→space. DISPLAY-only: it is NOT a recall surface
+    /// (`keywords` stays what FTS ranks on). Absent → `None`.
     pub desc: Option<String>,
     /// The atom's content (everything BELOW its opening marker, up to the next marker / heading / EOF).
     pub body: String,
@@ -1391,9 +1417,9 @@ fn first_val(m: &BTreeMap<String, Vec<String>>, key: &str) -> Option<String> {
     m.get(key).and_then(|v| v.first()).cloned()
 }
 
-/// Truncate `s` to at most `max` CHARACTERS (not bytes) — guards the `desc` 64-char cap on multibyte
-/// input without ever splitting a UTF-8 boundary (TRDD-056384eb). A clean defensive cap; the authoring
-/// skill already emits a short slug, so this rarely fires.
+/// Truncate `s` to at most `max` CHARACTERS (not bytes) — guards the `desc` 200-char cap on multibyte
+/// input without ever splitting a UTF-8 boundary. A clean defensive cap; the authoring skill already
+/// enforces the limit, so this rarely fires.
 fn truncate_chars(s: String, max: usize) -> String {
     if s.chars().count() <= max {
         s
@@ -1402,11 +1428,40 @@ fn truncate_chars(s: String, max: usize) -> String {
     }
 }
 
-/// Render a stored `desc` SLUG for display: `_`→space (TRDD-056384eb). Storage stays the single-token
-/// slug; the reader sees a natural phrase (`new_handoff_carries_recent_turns` → "new handoff carries
-/// recent turns").
-fn desc_display(slug: &str) -> String {
-    slug.replace('_', " ")
+/// Render a stored `desc` for a listing line. The LEGACY form — a single snake_case slug token
+/// (TRDD-056384eb) — displays `_`→space (`new_handoff_carries_recent_turns` → "new handoff carries
+/// recent turns"). The NEW quoted-prose form (TRDD-AP2X9A0H) is shown VERBATIM: prose may
+/// legitimately contain an underscore (an identifier, a filename), and rewriting it would corrupt
+/// the summary. The two are told apart by shape — only a lone `[A-Za-z0-9_]+` token is a slug.
+fn desc_display(desc: &str) -> String {
+    let is_legacy_slug =
+        !desc.is_empty() && desc.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if is_legacy_slug {
+        desc.replace('_', " ")
+    } else {
+        desc.to_string()
+    }
+}
+
+/// The one-line LISTING summary for an atom — the triage surface a `recall`/`find` hit prints on its
+/// locator line (TRDD-AP2X9A0H item c): the atom's `desc` when it carries one (legacy slug rendered
+/// `_`→space, quoted prose verbatim), else the first ~120 chars of the BODY flattened to one line.
+/// The body-prefix fallback replaces the old raw-keyword fallback: keywords are the RECALL surface
+/// (the terms a search uses), not a summary a reader can triage by. `None` only for an atom with
+/// neither desc nor body (the caller then falls back to the keyword surface).
+fn atom_listing_summary(desc: Option<&str>, body: &str) -> Option<String> {
+    if let Some(d) = desc.filter(|d| !d.is_empty()) {
+        return Some(desc_display(d));
+    }
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.is_empty() {
+        return None;
+    }
+    Some(if flat.chars().count() > 120 {
+        flat.chars().take(120).collect::<String>() + "…"
+    } else {
+        flat
+    })
 }
 
 /// Parse a page's body into ATOMS (TRDD-3b9b2040). A LEADING `^id [props]` marker line OPENS an atom; the
@@ -1434,10 +1489,15 @@ fn make_atom(id: String, p: BTreeMap<String, Vec<String>>, acc: &[String]) -> At
         lmd: first_val(&p, "lmd"),
         claude_mem_ref: first_val(&p, "claude_mem_ref"),
         claude_mem_hash: first_val(&p, "claude_mem_hash"),
-        // `desc` is a single-token slug → the SAME single-valued path as type/ocd/lmd, capped to 64
-        // chars defensively (TRDD-056384eb). No `parse_block_props` change: the slug whitespace-splits
-        // to a 1-element array, so `first_val` returns it.
-        desc: first_val(&p, "desc").map(|s| truncate_chars(s, 64)),
+        // `desc` may be the legacy single-token slug OR the new quoted ≤200-char prose
+        // (TRDD-AP2X9A0H) — parse_block_props stripped the delimiting quotes, so both arrive as the
+        // value ARRAY; joining restores the prose (whitespace-normalised). NOT `first_val`: that
+        // would keep only the first word of a multi-word summary. Capped at the spec's 200 chars.
+        desc: p
+            .get("desc")
+            .map(|v| v.join(" "))
+            .filter(|s| !s.is_empty())
+            .map(|s| truncate_chars(s, 200)),
         body: acc.join("\n").trim().to_string(),
         id,
     }
@@ -1601,6 +1661,214 @@ pub fn cmd_find_claude_mem_ref_cli(args: &[String]) -> Result<()> {
     );
     for (path, atom_id, hash) in claude_mem_ref_hits(&a.source, &a.paths, a.hidden) {
         println!("{}#{}\t{}", rel(&path), atom_id, hash);
+    }
+    Ok(())
+}
+
+// ─────────────── `memgrep atom` / `memgrep atom-page` (TRDD-0NGYP3IG) ───────────────
+//
+// The two atom-id RESOLUTION modes: id → owning-page PATH (the navigation primitive — page path +
+// atom id together are the address, so an agent browses the wiki like Wikipedia) and id → atom
+// CONTENT (the targeted read, no page load by the caller). Atoms are MOBILE — the librarian moves
+// them between pages on split/merge/relocate — so the owning page is NEVER baked anywhere; it is
+// resolved through the always-updated SQLite index (the only component that knows where an atom
+// lives at THIS moment), with the live walk as the correctness fallback.
+
+/// The canonical 8-char payload of a corpus-wide atom id, or None when `s` is not id-shaped.
+/// Normalises every accepted spelling to one comparable key: an optional `ATOM-` prefix (any case)
+/// is stripped, hyphens dropped, letters uppercased — so `ATOM-234P-U35Q`, `234PU35Q`, and
+/// `234pu35q` all canonicalise to `234PU35Q`. A legacy `^marker` name (`rotate-drain`) is not
+/// 8 chars after de-hyphenation and yields None — those match EXACTLY, never fuzzily.
+fn atom_id_canonical8(s: &str) -> Option<String> {
+    let rest = match s.get(..5) {
+        Some(p) if p.eq_ignore_ascii_case("ATOM-") => &s[5..],
+        _ => s,
+    };
+    let payload: String = rest
+        .chars()
+        .filter(|c| *c != '-')
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    (payload.chars().count() == 8 && payload.chars().all(|c| c.is_ascii_alphanumeric()))
+        .then_some(payload)
+}
+
+/// Does a STORED atom/lesson id answer to the QUERIED one? Exact match first (legacy `^marker`
+/// names resolve only this way); else both sides must canonicalise to the SAME 8-char payload —
+/// which is what makes `234PU35Q` reach a lesson stored as `id:ATOM-234P-U35Q`.
+fn atom_id_matches(stored: &str, query: &str) -> bool {
+    if stored == query {
+        return true;
+    }
+    matches!(
+        (atom_id_canonical8(stored), atom_id_canonical8(query)),
+        (Some(a), Some(b)) if a == b
+    )
+}
+
+/// One id-resolution hit: the OWNING page, the id as stored in the corpus, and whether it is a
+/// `[^N]` lesson (vs a `^id [props]` body atom). Ord/Eq derive on this field order gives the
+/// stable page-then-id output ordering the ambiguity listing prints.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct AtomIdHit {
+    page: PathBuf,
+    stored_id: String,
+    is_lesson: bool,
+}
+
+/// EVERY atom/lesson answering to `query`, resolved from the FRESH SQLite index when one exists
+/// (an O(rows) scan of the already-extracted locator rows — no page parsing) and from a live
+/// `resolve_atoms`/`resolve_notes` walk otherwise, so the answer is ALWAYS correct even with a
+/// stale or absent index (the same policy every other index-backed query in this crate follows —
+/// a stale index would name the page an atom lived on YESTERDAY, which for a navigation primitive
+/// is precisely the wrong answer). Sorted + deduped; >1 hit means the corpus-unique-id invariant
+/// is broken and the caller must treat it as an error.
+fn atom_id_hits(query: &str, paths: &[PathBuf], hidden: bool) -> Vec<AtomIdHit> {
+    let root = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+    if crate::index::is_fresh(&root, &collect_md(paths, hidden))
+        && let Some(conn) = crate::index::open_existing(&root)
+        && let Ok(rows) = crate::index::atom_locator_rows(&conn)
+    {
+        let mut hits: Vec<AtomIdHit> = rows
+            .into_iter()
+            .filter(|(_, id, _)| atom_id_matches(id, query))
+            .map(|(page, stored_id, is_lesson)| AtomIdHit {
+                page: PathBuf::from(page),
+                stored_id,
+                is_lesson,
+            })
+            .collect();
+        hits.sort();
+        hits.dedup();
+        return hits;
+    }
+    // Live-walk fallback (no / stale index): parse atoms + lessons straight from disk.
+    let mut hits = Vec::new();
+    for p in collect_md(paths, hidden) {
+        for atom in resolve_atoms(&p) {
+            if atom_id_matches(&atom.id, query) {
+                hits.push(AtomIdHit {
+                    page: p.clone(),
+                    stored_id: atom.id,
+                    is_lesson: false,
+                });
+            }
+        }
+        for ln in resolve_notes(&p) {
+            if !ln.id.is_empty() && atom_id_matches(&ln.id, query) {
+                hits.push(AtomIdHit {
+                    page: p.clone(),
+                    stored_id: ln.id,
+                    is_lesson: true,
+                });
+            }
+        }
+    }
+    hits.sort();
+    hits.dedup();
+    hits
+}
+
+/// Resolve `id` to EXACTLY ONE hit, or fail: zero hits is "not found"; more than one is corpus
+/// corruption (ids must be corpus-unique — a duplicated id breaks BOTH resolution modes, so per
+/// the spec every match is printed and the command exits non-zero rather than guessing).
+fn atom_id_unique_hit(id: &str, paths: &[PathBuf], hidden: bool) -> Result<AtomIdHit> {
+    // A leading `^` is the marker SIGIL, not part of the id — accept the copy-pasted `^name` form.
+    let query = id.strip_prefix('^').unwrap_or(id);
+    let mut hits = atom_id_hits(query, paths, hidden);
+    match hits.len() {
+        0 => anyhow::bail!("no atom with id `{id}` found"),
+        1 => Ok(hits.remove(0)),
+        n => {
+            for h in &hits {
+                println!("{}#{}", rel(&h.page), h.stored_id);
+            }
+            anyhow::bail!(
+                "atom id `{id}` is AMBIGUOUS — {n} atoms carry it (all listed above); \
+                 atom ids must be corpus-unique, so this is corpus corruption to repair"
+            )
+        }
+    }
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep atom-page",
+    about = "print the path of the wikimem page that currently contains an atom id (navigation: page path + id = the address)"
+)]
+struct AtomPageArgs {
+    /// The atom id: a `^marker` name (`^` optional), an `ATOM-XXXX-XXXX` id, or its bare
+    /// 8-char payload (case-insensitive).
+    id: String,
+    /// Memory dir(s) to search (default: current dir).
+    paths: Vec<PathBuf>,
+    /// Also descend into hidden files/dirs (off by default, mirroring the other subcommands).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// `memgrep atom-page <id> [memdir]` — atom id → OWNING PAGE PATH (TRDD-0NGYP3IG mode 1). Prints
+/// the single page path; ambiguity prints every `path#id` match and exits non-zero.
+pub fn cmd_atom_page_cli(args: &[String]) -> Result<()> {
+    let a = AtomPageArgs::parse_from(
+        std::iter::once("atom-page".to_string()).chain(args.iter().cloned()),
+    );
+    let hit = atom_id_unique_hit(&a.id, &a.paths, a.hidden)?;
+    println!("{}", rel(&hit.page));
+    Ok(())
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep atom",
+    about = "print one atom's full record (content + its resolved [^N] footnotes) by atom id"
+)]
+struct AtomArgs {
+    /// The atom id: a `^marker` name (`^` optional), an `ATOM-XXXX-XXXX` id, or its bare
+    /// 8-char payload (case-insensitive).
+    id: String,
+    /// Memory dir(s) to search (default: current dir).
+    paths: Vec<PathBuf>,
+    /// Content only — do NOT resolve/append the footnote groups (notes/lessons/see-also).
+    #[arg(long = "no-notes")]
+    no_notes: bool,
+    /// Keep each footnote's leading `[...]` metadata prefix (default: stripped).
+    #[arg(long = "full-notes")]
+    full_notes: bool,
+    /// Also descend into hidden files/dirs (off by default, mirroring the other subcommands).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// `memgrep atom <id> [memdir]` — atom id → ATOM CONTENT (TRDD-0NGYP3IG mode 2): the targeted
+/// read. A body atom prints the SAME full aggregated record a recall hit does (its content + its
+/// own referenced `[^N]` footnotes, grouped by defining section); a lesson prints its resolved
+/// `[id] - <text>` line, exactly as `find --only-notes` renders it. The INDEX only LOCATES the
+/// atom (id → owning page); the record itself is rendered from that one page's live parse — a
+/// single-file read, never a corpus walk, and always the current bytes on disk.
+pub fn cmd_atom_cli(args: &[String]) -> Result<()> {
+    let a = AtomArgs::parse_from(std::iter::once("atom".to_string()).chain(args.iter().cloned()));
+    let hit = atom_id_unique_hit(&a.id, &a.paths, a.hidden)?;
+    if hit.is_lesson {
+        // The index can name a lesson the page no longer carries only when it is stale — and the
+        // stale case never reaches here (atom_id_hits walks instead). Guard anyway: fail loud, not
+        // with an empty print.
+        let Some(ln) = resolve_notes(&hit.page)
+            .into_iter()
+            .find(|n| n.id == hit.stored_id)
+        else {
+            anyhow::bail!(
+                "lesson `{}` not found on {} — the page changed underneath; run `memgrep reindex`",
+                hit.stored_id,
+                rel(&hit.page)
+            );
+        };
+        println!("{}", render_lesson_line(&ln, a.full_notes));
+    } else {
+        print!(
+            "{}",
+            render_atom_record(&hit.page, &hit.stored_id, a.full_notes, !a.no_notes)
+        );
     }
     Ok(())
 }
@@ -1947,8 +2215,8 @@ const STOPWORDS: &[&str] = &[
 /// summary, pathbuf, ocd, lmd, atom_id, atom_desc)`. Built identically from the live walk OR the SQLite
 /// index, so both paths feed the SAME finalize step and produce byte-identical output. `atom_id` is
 /// `Some(id)` when the row is a body ATOM (printed `path#id`, no lesson append) and `None` for a PAGE
-/// (TRDD-3b9b2040). `atom_desc` is the atom's stored ≤64-char one-line summary SLUG (TRDD-056384eb),
-/// `Some` only for an atom that carries one — threaded so the print step shows it WITHOUT re-parsing the
+/// (TRDD-3b9b2040). `atom_desc` is the atom's resolved one-line LISTING summary (its `desc`, else a
+/// body prefix — TRDD-AP2X9A0H item c) — threaded so the print step shows it WITHOUT re-parsing the
 /// page (and so the index readback is the single source on the index path). Atoms and pages interleave
 /// in ONE ranked list by score.
 type RecallScored = (
@@ -1966,7 +2234,7 @@ type RecallScored = (
 /// The rank row AFTER the precision-first filter: `(score, display_path, summary, pathbuf, ocd,
 /// lmd, atom_id, atom_desc)` — what the date filter + sort + print operate on. `atom_id` survives so the
 /// print step formats atoms as `path#id` and suppresses their (page-level) lesson append; `atom_desc`
-/// survives so the print step renders the one-line summary (TRDD-056384eb).
+/// survives so the print step renders the one-line listing summary (TRDD-AP2X9A0H item c).
 type RecallRanked = (
     i64,
     String,
@@ -2008,9 +2276,10 @@ struct CandidateMeta {
     /// `Some(atom-id)` when this candidate is a body ATOM (its surface is the keyword array, it prints
     /// as `path#atom-id`, and it has no page-lessons of its own); `None` for a whole-page candidate.
     atom_id: Option<String>,
-    /// The atom's stored ≤64-char one-line summary SLUG (TRDD-056384eb); `Some` only for an atom that
-    /// carries a `desc:` block-prop. Threaded to the print step so the one-line summary shows without a
-    /// re-parse. Always `None` for a page candidate.
+    /// The atom's resolved one-line LISTING summary (TRDD-AP2X9A0H item c): its `desc` (legacy slug
+    /// rendered, prose verbatim), else a ~120-char body prefix — already display-ready, built by
+    /// `atom_listing_summary` at gather time so the print step never re-parses a page. `None` for a
+    /// page candidate, and for an atom with neither desc nor body (keyword-surface fallback).
     atom_desc: Option<String>,
 }
 
@@ -2051,10 +2320,13 @@ fn score_candidate(
     }
 }
 
-/// Build the recall `CandidateMeta` for ONE body atom (TRDD-3b9b2040): its keyword array is BOTH the
-/// ranked surface (title is empty, summary == tags == keywords) AND the display summary. `display_path`
-/// is the PAGE path — the print step composes `path#atom-id`. The page's date is passed as the already-
-/// resolved fallback for an atom that carries none.
+/// Build the recall `CandidateMeta` for ONE body atom (TRDD-3b9b2040): its keyword array is the
+/// ranked surface (title is empty, summary == tags == keywords). `display_path` is the PAGE path —
+/// the print step composes `path#atom-id`. The page's date is passed as the already-resolved
+/// fallback for an atom that carries none. The LISTING summary (desc, else a body prefix —
+/// TRDD-AP2X9A0H item c) is resolved HERE, where both the walk and the index path still hold the
+/// atom's body — the print step must never re-parse a page to build a locator line.
+#[allow(clippy::too_many_arguments)] // a plain projection of one atom's fields; a struct would just rename them
 fn atom_meta(
     display_path: String,
     pathbuf: PathBuf,
@@ -2063,6 +2335,7 @@ fn atom_meta(
     ocd: Option<String>,
     lmd: Option<String>,
     desc: Option<String>,
+    body: &str,
 ) -> CandidateMeta {
     CandidateMeta {
         display_path,
@@ -2073,7 +2346,7 @@ fn atom_meta(
         ocd,
         lmd,
         atom_id: Some(atom_id),
-        atom_desc: desc,
+        atom_desc: atom_listing_summary(desc.as_deref(), body),
     }
 }
 
@@ -2120,6 +2393,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
                 atom.ocd.or_else(|| page_ocd.clone()),
                 atom.lmd.or_else(|| page_lmd.clone()),
                 atom.desc,
+                &atom.body,
             );
             if let Some(row) = score_candidate(terms, meta, || Some(body)) {
                 all.push(row);
@@ -2153,10 +2427,9 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
     }
     // Body ATOMS from the index (TRDD-3b9b2040) — same keyword-surface scoring as the walk, so an
     // index-backed atom recall is byte-identical to `gather_from_walk`'s `resolve_atoms` pass. The
-    // stored `desc` (TRDD-056384eb) is carried straight from the index readback, so the index path
-    // shows the one-line summary WITHOUT re-parsing the page.
+    // stored `desc` + body are carried straight from the index readback, so the index path builds
+    // the one-line listing summary WITHOUT re-parsing the page.
     for c in crate::index::recall_atom_candidates(conn)? {
-        let body = c.body;
         let meta = atom_meta(
             c.page_path.clone(),
             PathBuf::from(&c.page_path),
@@ -2165,7 +2438,9 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
             c.ocd,
             c.lmd,
             c.desc,
+            &c.body,
         );
+        let body = c.body;
         if let Some(row) = score_candidate(terms, meta, || Some(body)) {
             all.push(row);
         }
@@ -2297,13 +2572,12 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         // see-also are PER-ATOM and are ALL standard markdown footnotes.
         match &atom_id {
             Some(aid) => {
-                // Prefer the atom's one-line `desc` SLUG (rendered `_`→space) as the locator summary so
-                // the agent can pick WITHOUT opening the atom (TRDD-056384eb); fall back to the keyword
-                // surface `shown` when the atom carries no `desc` (today's behaviour for un-described
-                // atoms). `atom_desc` is threaded from the gather step (walk: parsed once; index: read
-                // straight from the `atoms.desc` column) — no re-parse here.
-                let desc = atom_desc.as_deref().map(desc_display);
-                let line_summary: &str = match desc.as_deref() {
+                // The locator's summary is the atom's LISTING summary (TRDD-AP2X9A0H item c): its
+                // `desc` (legacy slug rendered `_`→space, quoted prose verbatim), else a ~120-char
+                // body prefix — resolved by `atom_listing_summary` at GATHER time on both the walk
+                // and index paths, so no re-parse happens here. The keyword surface `shown` remains
+                // the last-resort fallback for an atom with neither desc nor body.
+                let line_summary: &str = match atom_desc.as_deref() {
                     Some(d) if !d.is_empty() => d,
                     _ => shown.as_str(),
                 };
@@ -2505,6 +2779,8 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
             continue;
         };
         let body = md::read_text(&path).unwrap_or_default();
+        let p = path.clone();
+        let (page_ocd, page_lmd) = (note.ocd.clone(), note.lmd.clone());
         let meta = CandidateMeta {
             display_path: rel(&path),
             title: note.title,
@@ -2518,6 +2794,25 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
         };
         if let Some(row) = find_score_note(q, meta, &body) {
             all.push(row);
+        }
+        // Body ATOMS pass the SAME DSL gate as pages (TRDD-AP2X9A0H item c: `find` listings show
+        // atoms by their desc, exactly like recall). An atom's matchable surface is its keyword
+        // array + its body — `desc` is display-only and is deliberately NOT matched against.
+        for atom in resolve_atoms(&p) {
+            let kw = atom.keywords.join(" ");
+            let meta = atom_meta(
+                rel(&p),
+                p.clone(),
+                atom.id,
+                kw,
+                atom.ocd.or_else(|| page_ocd.clone()),
+                atom.lmd.or_else(|| page_lmd.clone()),
+                atom.desc,
+                &atom.body,
+            );
+            if let Some(row) = find_score_note(q, meta, &atom.body) {
+                all.push(row);
+            }
         }
     }
     all
@@ -2548,7 +2843,51 @@ fn find_gather_index(
             all.push(row);
         }
     }
+    // Body ATOMS from the index, through the same DSL gate — mirrors `find_gather_walk`'s
+    // `resolve_atoms` pass so index-backed `find` equals the walk (TRDD-AP2X9A0H item c).
+    for c in crate::index::recall_atom_candidates(conn)? {
+        let meta = atom_meta(
+            c.page_path.clone(),
+            PathBuf::from(&c.page_path),
+            c.atom_id,
+            c.keywords,
+            c.ocd,
+            c.lmd,
+            c.desc,
+            &c.body,
+        );
+        if let Some(row) = find_score_note(q, meta, &c.body) {
+            all.push(row);
+        }
+    }
     Ok(all)
+}
+
+/// Render ONE resolved lesson as its `[<id-or-N>] - <text>` result line — the shared shape of a
+/// `find --only-notes` hit and a `memgrep atom <lesson-id>` targeted read (one renderer, so the
+/// two commands can never drift apart).
+///
+/// A SUPERSEDED lesson is history, not guidance. It stays searchable (that is the point of keeping
+/// it rather than deleting it), but it must NEVER be read as a live guardrail — so it is marked
+/// inline, and its forward pointer is shown so the reader can go straight to the rule that DID
+/// hold. Rendering it indistinguishably from a valid lesson would let an overtaken rule be
+/// re-applied as current: the exact failure `status:` exists to prevent. The STABLE `id:` is
+/// preferred over the `[^N]` label, which is page-local and renumbers on every edit.
+fn render_lesson_line(ln: &ResolvedNote, full_notes: bool) -> String {
+    let tag = if ln.status == "superseded" {
+        if ln.superseded_by.is_empty() {
+            " [SUPERSEDED]".to_string()
+        } else {
+            format!(" [SUPERSEDED → {}]", ln.superseded_by)
+        }
+    } else {
+        String::new()
+    };
+    let label = if ln.id.is_empty() { &ln.num } else { &ln.id };
+    match (&ln.meta, full_notes) {
+        (Some(meta), true) => format!("[{}]{} - [{}] {}", label, tag, meta, ln.text),
+        _ => format!("[{}]{} - {}", label, tag, ln.text),
+    }
 }
 
 /// Lessons-only (`--only-notes`) mode: match the DSL against each resolved `[^N]` lesson's RECALL
@@ -2581,32 +2920,10 @@ fn find_only_notes(
             if !q.matches_text(&surface) {
                 continue;
             }
-            // A SUPERSEDED lesson is history, not guidance. It stays searchable (that is the point
-            // of keeping it rather than deleting it), but it must NEVER be read as a live guardrail
-            // — so it is marked inline, and its forward pointer is shown so the reader can go
-            // straight to the rule that DID hold. Rendering it indistinguishably from a valid lesson
-            // would let an overtaken rule be re-applied as current: the exact failure `status:`
-            // exists to prevent.
-            let tag = if ln.status == "superseded" {
-                if ln.superseded_by.is_empty() {
-                    " [SUPERSEDED]".to_string()
-                } else {
-                    format!(" [SUPERSEDED → {}]", ln.superseded_by)
-                }
-            } else {
-                String::new()
-            };
-            // Prefer the STABLE id in the render; the `[^N]` label is page-local and renumbers.
-            let label = if ln.id.is_empty() {
-                ln.num.clone()
-            } else {
-                ln.id.clone()
-            };
-            let line = match (&ln.meta, a.full_notes) {
-                (Some(meta), true) => format!("[{}]{} - [{}] {}", label, tag, meta, ln.text),
-                _ => format!("[{}]{} - {}", label, tag, ln.text),
-            };
-            rows.push((q.optional_hits(&surface), line));
+            rows.push((
+                q.optional_hits(&surface),
+                render_lesson_line(&ln, a.full_notes),
+            ));
         }
     }
     let asc = a.order == Order::Asc;
@@ -3087,8 +3404,8 @@ second atom para
 
     #[test]
     fn resolve_atoms_parses_desc_slug_via_single_valued_path() {
-        // TRDD-056384eb: `desc` is a snake_case slug parsed through the EXISTING single-valued path
-        // (no parse_block_props change). It is STORED as the slug; an atom with no `desc` → None.
+        // TRDD-056384eb: a legacy snake_case `desc` slug is one token, so the value-array join
+        // stores it verbatim. It is STORED as the slug; an atom with no `desc` → None.
         let text = "\
 ^a [desc: a_concise_title, keywords: x y]
 body of a
@@ -3111,30 +3428,144 @@ body of b
     }
 
     #[test]
-    fn resolve_atoms_truncates_over_64_char_desc_to_64_chars() {
-        // The 64-char cap is enforced in make_atom (defensive). A 70-`a` slug truncates to exactly 64.
-        let slug = "a".repeat(70);
-        let text = format!("^a [desc: {slug}, keywords: kw]\nbody\n");
+    fn resolve_atoms_truncates_over_200_char_desc_to_200_chars() {
+        // The spec's 200-char cap (TRDD-AP2X9A0H) is enforced in make_atom (defensive). A 210-`a`
+        // desc truncates to exactly 200.
+        let long = "a".repeat(210);
+        let text = format!("^a [desc: {long}, keywords: kw]\nbody\n");
         let atoms = resolve_atoms_from_text(&text);
         assert_eq!(atoms.len(), 1);
         let d = atoms[0].desc.as_deref().expect("desc present");
-        assert_eq!(d.chars().count(), 64, "desc is capped to 64 chars");
-        assert_eq!(d, "a".repeat(64), "the cap keeps the first 64 chars");
+        assert_eq!(d.chars().count(), 200, "desc is capped to 200 chars");
+        assert_eq!(d, "a".repeat(200), "the cap keeps the first 200 chars");
     }
 
     #[test]
-    fn desc_display_renders_slug_underscores_as_spaces() {
-        // The DISPLAY transform: storage stays the slug, the reader sees a phrase (TRDD-056384eb).
+    fn resolve_atoms_parses_quoted_prose_desc_with_commas_and_colons() {
+        // THE new required desc form (TRDD-AP2X9A0H): quoted ≤200-char PROSE. The quotes DELIMIT the
+        // value; commas and colons INSIDE them are prose, not property separators — a splitter that
+        // wasn't quote-aware truncated the desc at its first comma AND could eat trailing props.
+        // Both spellings (`desc:"…"` and `desc: "…"`) must parse identically.
+        for marker in [
+            "^a [desc:\"L0 trap: staged closure, cache vs repo\", keywords: kw1 kw2]",
+            "^a [desc: \"L0 trap: staged closure, cache vs repo\", keywords: kw1 kw2]",
+        ] {
+            let text = format!("{marker}\nbody\n");
+            let atoms = resolve_atoms_from_text(&text);
+            assert_eq!(atoms.len(), 1, "one atom for {marker}");
+            assert_eq!(
+                atoms[0].desc.as_deref(),
+                Some("L0 trap: staged closure, cache vs repo"),
+                "the quoted prose survives whole (quotes stripped) for {marker}"
+            );
+            assert_eq!(
+                atoms[0].keywords,
+                vec!["kw1".to_string(), "kw2".to_string()],
+                "the props AFTER the quoted desc still parse for {marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn split_top_level_commas_is_quote_and_bracket_aware() {
+        // The shared first stage of both grammars: a comma splits only OUTSIDE quotes and brackets,
+        // and a bracket inside quotes must not corrupt the depth (real corpus: desc:"[A-Z0-9] ids").
+        assert_eq!(
+            split_top_level_commas("a: 1, b:\"x, y\", c: [[W, Z]], d:\"has [A-Z0-9], ok\", e: 2"),
+            vec![
+                "a: 1",
+                " b:\"x, y\"",
+                " c: [[W, Z]]",
+                " d:\"has [A-Z0-9], ok\"",
+                " e: 2"
+            ]
+        );
+        // An unclosed quote degrades to "the rest is one item" — never a panic, never data loss.
+        assert_eq!(
+            split_top_level_commas("a: 1, b:\"open, never closed"),
+            vec!["a: 1", " b:\"open, never closed"]
+        );
+    }
+
+    #[test]
+    fn note_props_space_after_colon_quoted_value_sheds_its_quotes() {
+        // The lesson grammar accepts the `desc: "…"` spelling too (TRDD-AP2X9A0H): a bare token
+        // opening with `"` continues the preceding key's quoted value, quotes stripped.
+        let props = parse_note_props("desc: \"two words, one: value\", ocd:2026-07-15");
+        assert_eq!(
+            props.get("desc").map(|v| v.join(" ")).as_deref(),
+            Some("two words, one: value")
+        );
+        assert_eq!(props["ocd"], vec!["2026-07-15".to_string()]);
+    }
+
+    #[test]
+    fn desc_display_renders_slug_underscores_as_spaces_and_prose_verbatim() {
+        // The DISPLAY transform: a LEGACY single snake_case slug reads as a phrase; the NEW prose
+        // form is shown verbatim — prose may carry a real underscore (an identifier) that a blanket
+        // `_`→space rewrite would corrupt.
         assert_eq!(
             desc_display("new_handoff_carries_recent_turns"),
             "new handoff carries recent turns"
         );
+        assert_eq!(
+            desc_display("keep agent_profile literal, it is an identifier"),
+            "keep agent_profile literal, it is an identifier"
+        );
         // truncate_chars is a no-op below the cap and char-safe (never splits a UTF-8 boundary).
-        assert_eq!(truncate_chars("short".to_string(), 64), "short");
+        assert_eq!(truncate_chars("short".to_string(), 200), "short");
         assert_eq!(
             truncate_chars("héllo_wörld".to_string(), 5).chars().count(),
             5
         );
+    }
+
+    #[test]
+    fn atom_listing_summary_prefers_desc_then_body_prefix() {
+        // The listing triage surface (TRDD-AP2X9A0H item c): desc wins; a desc-less atom shows the
+        // first ~120 chars of its body flattened to ONE line; neither → None (keyword fallback).
+        assert_eq!(
+            atom_listing_summary(Some("a_slug"), "ignored body"),
+            Some("a slug".to_string())
+        );
+        assert_eq!(
+            atom_listing_summary(None, "line one\n  line two"),
+            Some("line one line two".to_string()),
+            "the body prefix is flattened to one line"
+        );
+        let long_body = "word ".repeat(50); // 250 chars once flattened
+        let s = atom_listing_summary(None, &long_body).expect("prefix present");
+        assert_eq!(
+            s.chars().count(),
+            121,
+            "120 body chars + the ellipsis marker"
+        );
+        assert!(s.ends_with('…'), "a truncated prefix ends with an ellipsis");
+        assert_eq!(atom_listing_summary(None, "   "), None);
+    }
+
+    #[test]
+    fn atom_id_matching_accepts_every_spelling_of_a_corpus_wide_id() {
+        // TRDD-0NGYP3IG: the 8-char payload is the identity — `ATOM-234P-U35Q`, `234PU35Q`, and
+        // `234pu35q` all name the same atom. A legacy `^marker` name matches EXACTLY only.
+        assert_eq!(
+            atom_id_canonical8("ATOM-234P-U35Q").as_deref(),
+            Some("234PU35Q")
+        );
+        assert_eq!(atom_id_canonical8("234pu35q").as_deref(), Some("234PU35Q"));
+        assert_eq!(
+            atom_id_canonical8("rotate-drain"),
+            None,
+            "a marker name is not 8-char id-shaped"
+        );
+        assert!(atom_id_matches("ATOM-234P-U35Q", "234PU35Q"));
+        assert!(atom_id_matches("ATOM-234P-U35Q", "234pu35q"));
+        assert!(atom_id_matches("rotate-drain", "rotate-drain"));
+        assert!(
+            !atom_id_matches("rotate-drain", "rotate_drain"),
+            "marker names never match fuzzily"
+        );
+        assert!(!atom_id_matches("ATOM-234P-U35Q", "ATOM-XXXX-XXXX"));
     }
 
     #[test]
@@ -3281,7 +3712,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "---\nname: unrelated\nmetadata:\n  node_type: memory\n---\nOther.\n^other [keywords: x, claude_mem_ref: feedback_other.md, claude_mem_hash: hashO]\n",
         )
         .unwrap();
-        let hits = claude_mem_ref_hits("feedback_oauth.md", &[dir.clone()], false);
+        let hits = claude_mem_ref_hits("feedback_oauth.md", std::slice::from_ref(&dir), false);
         let names: Vec<String> = hits
             .iter()
             .map(|(p, id, h)| format!("{}#{}={}", p.file_stem().unwrap().to_str().unwrap(), id, h))
@@ -3348,7 +3779,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "---\nname: other\n---\nsee [[feedback-opus-for-security]]\n",
         )
         .unwrap();
-        let g = build_graph(&[dir.clone()], false);
+        let g = build_graph(std::slice::from_ref(&dir), false);
         let broken: Vec<&String> = g
             .edges
             .iter()
@@ -3412,7 +3843,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
              body.\nsee [[a]]\n\n## Notes and lessons learned\n",
         )
         .unwrap();
-        let v = lint_paths(&[dir.clone()], false);
+        let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             v.is_empty(),
@@ -3431,7 +3862,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
              body refers to a lesson.[^3]\n\n## Notes and lessons learned\n",
         )
         .unwrap();
-        let v = lint_paths(&[dir.clone()], false);
+        let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             !v.is_empty(),
@@ -3453,7 +3884,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
              body with no footnote refs at all.\n\n## Notes and lessons learned\n[^9]: orphan lesson.\n",
         )
         .unwrap();
-        let v = lint_paths(&[dir.clone()], false);
+        let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             has_violation(&v, "`[^9]:` is never referenced"),
@@ -3478,7 +3909,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
              no back-link here.\n\n## Notes and lessons learned\n",
         )
         .unwrap();
-        let v = lint_paths(&[dir.clone()], false);
+        let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             has_violation(&v, "one-sided link"),
@@ -3497,7 +3928,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             "---\nname: bare\n---\njust a body, no required metadata, no lessons section.\n",
         )
         .unwrap();
-        let v = lint_paths(&[dir.clone()], false);
+        let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             has_violation(&v, "field `ocd`"),

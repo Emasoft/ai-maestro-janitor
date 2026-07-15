@@ -114,7 +114,7 @@ agent loads. These duties EXTEND / TIGHTEN those.
 | 9 | superseded→lesson rewrite (DO NOT/BECAUSE/INSTEAD + old TRDD links) | update (correction protocol) | 🟡 per-correction demotion EXISTS; bulk retro-pass chore MISSING |
 | 10 | merge same-TOPIC pages (title differs) | consolidate | ✅ EXISTS; topic-not-title made explicit 2026-07-16 |
 | 11 | cross-page atom dedup (one carrier, others cite) | consolidate | 🟡 lesson-dedup inside a merge only; cross-page atom dedup MISSING |
-| 12 | split oversized → subtopics + summary atom | split | ✅ EXISTS (`verify_split`; oracle bugs #97/#88 open) |
+| 12 | split oversized → subtopics + summary atom | split | ✅ EXISTS (`verify_split`; oracle bugs #97/#88 verified FIXED on disk 2026-07-16 — reproducers don't reproduce, full suite green; issues just need closing) |
 | 13 | split multi-topic atoms | atomize | ❌ atomize adds markers, never splits an atom |
 | 14 | relocate off-topic atom | — | ❌ NET-NEW relocate chore (move rule spec'd, no executor) |
 | 15 | create page for orphan topic | write (authoring) | 🟡 at creation only; corrective chore MISSING |
@@ -131,8 +131,10 @@ agent loads. These duties EXTEND / TIGHTEN those.
    (21) published-globally symlink at user-scope (coordinate with issue #52's cross-project design);
    (9) the bulk superseded→lesson retro-pass as a verified transaction; (2) desc backfill in repair.
    Each is its own bounded implementation (likely its own child TRDD — one atomic task each).
-3. Fix the split-oracle bugs first (#97 `lessons_preserved` false-fail, #88 `_body_minus_lessons`
-   truncation) — duties 12/9 depend on a correct oracle.
+3. ~~Fix the split-oracle bugs (#97, #88)~~ **VERIFIED FIXED 2026-07-16** — already fixed on disk
+   with regression tests (a prior session fixed them without closing the issues); each issue's own
+   reproducer no longer reproduces, full pytest suite 13051 passed / 0 failed. Report:
+   `reports/memory-edit-verify/20260716_002102+0200-fix-issues-97-88.md`. Close the two issues.
 4. Publish (skills + memgrep live in the plugin → release + cache update to deploy).
 
 ## Verification

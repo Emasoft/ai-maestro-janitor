@@ -83,6 +83,25 @@ fn run_fail_clean(args: &[&str]) {
     );
 }
 
+/// Run memgrep expecting a clean NON-zero exit AND return its stdout — for commands whose failure
+/// contract includes printed output (the atom-id AMBIGUITY listing prints every match, THEN fails).
+fn run_fail_capture(args: &[&str]) -> String {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    assert!(
+        !out.status.success(),
+        "memgrep should have failed for {args:?}"
+    );
+    assert!(
+        out.status.code().is_some(),
+        "memgrep died from a signal (no exit code) on {args:?}"
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 #[test]
 fn plain_pattern_finds_prose_and_code() {
     // 3 prose mentions + 1 inside the code block.
@@ -1610,9 +1629,14 @@ fn recall_surfaces_atom_by_unique_keyword() {
     let d = TempDir::new("atom-recall");
     d.write("oauth-hub.md", ATOM_CORPUS);
     let o = run(&["recall", "zqxdrain", d.as_str()]); // no index yet → walk path
+    // The locator's summary is the atom's LISTING summary (TRDD-AP2X9A0H item c): this atom has no
+    // `desc:`, so the ~120-char body prefix shows — never the raw keyword array (keywords are the
+    // recall surface, not something a reader can triage by).
     assert!(
-        o.contains("oauth-hub.md#rotate-drain — zqxdrain rotator"),
-        "the atom must surface as path#atom-id — <keywords>:\n{o}"
+        o.contains(
+            "oauth-hub.md#rotate-drain — The rotator drains the live account first when near a limit."
+        ),
+        "the atom must surface as path#atom-id — <listing summary>:\n{o}"
     );
     assert!(
         !o.contains("#keychain"),
@@ -1721,14 +1745,89 @@ fn recall_atom_renders_desc_slug_as_spaced_phrase() {
 }
 
 #[test]
-fn recall_atom_without_desc_falls_back_to_keywords() {
-    // A desc-less atom keeps today's behaviour: the locator shows the keyword surface, not a desc.
+fn recall_atom_without_desc_falls_back_to_body_prefix() {
+    // TRDD-AP2X9A0H item c: a legacy desc-less atom lists by a ~120-char BODY PREFIX — a summary a
+    // reader can actually triage by — not by its raw keyword array (the recall surface).
     let d = TempDir::new("atom-desc-none");
     d.write("handoff-hub.md", DESC_CORPUS);
     let o = run(&["recall", "zqxplain", d.as_str()]);
     assert!(
-        o.contains("handoff-hub.md#plain — zqxplain bare"),
-        "a desc-less atom falls back to its keyword summary:\n{o}"
+        o.contains("handoff-hub.md#plain — This atom carries no desc slug."),
+        "a desc-less atom falls back to its body prefix:\n{o}"
+    );
+    assert!(
+        !o.contains("#plain — zqxplain"),
+        "the raw keyword array must no longer be the locator summary:\n{o}"
+    );
+}
+
+#[test]
+fn recall_atom_shows_quoted_prose_desc_verbatim() {
+    // TRDD-AP2X9A0H: the NEW desc form is quoted ≤200-char PROSE. It shows VERBATIM on the locator
+    // line — including the commas and colon inside the quotes, which is exactly what the quote-aware
+    // property splitter exists to keep whole (the old splitter truncated at the first comma).
+    let d = TempDir::new("atom-desc-prose");
+    d.write(
+        "trap-hub.md",
+        "---\nname: trap-hub\ndescription: keepalive traps\ntags: [keepalive]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# Trap hub\n\n^l0-trap [desc:\"L0 keepalive trap: staged closure, cache vs repo\", keywords: zqxtrap keepalive]\nThe staged closure under DATA is what launchd runs, not the repo checkout.\n",
+    );
+    let o = run(&["recall", "zqxtrap", d.as_str()]); // no index → walk
+    assert!(
+        o.contains("trap-hub.md#l0-trap — L0 keepalive trap: staged closure, cache vs repo"),
+        "the quoted prose desc shows whole and verbatim:\n{o}"
+    );
+    // Walk/index parity for the prose form (the stored atoms.desc column must round-trip it).
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["recall", "zqxtrap", d.as_str(), "--use-index"]);
+    assert_eq!(
+        o, indexed,
+        "index-backed prose-desc display must match the walk byte-for-byte:\nwalk:\n{o}\nindex:\n{indexed}"
+    );
+}
+
+#[test]
+fn recall_atom_body_prefix_is_truncated_to_one_line() {
+    // The body-prefix fallback is a TRIAGE line: ~120 chars, flattened, ellipsis-marked — never the
+    // whole multi-line body on the locator line.
+    let d = TempDir::new("atom-prefix-cap");
+    let long_body = format!("{} zzztail", "alpha beta gamma delta ".repeat(10)); // ≫120 chars
+    d.write(
+        "long-hub.md",
+        &format!(
+            "---\nname: long-hub\ndescription: long body\ntags: [long]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# Long hub\n\n^longbody [keywords: zqxlong verbose]\n{long_body}\n"
+        ),
+    );
+    let o = run(&["recall", "zqxlong", d.as_str(), "--no-notes"]);
+    let locator = o
+        .lines()
+        .find(|l| l.contains("#longbody"))
+        .expect("locator line present");
+    assert!(
+        locator.contains('…'),
+        "an over-120-char body prefix is ellipsis-truncated:\n{locator}"
+    );
+    assert!(
+        !locator.contains("zzztail"),
+        "the body tail must not reach the locator line:\n{locator}"
+    );
+}
+
+#[test]
+fn find_lists_atoms_by_their_desc_summary() {
+    // TRDD-AP2X9A0H item c names BOTH commands: `find` listings show each matching atom by its desc
+    // (here the legacy slug, rendered `_`→space), exactly like recall — and the index path agrees.
+    let d = TempDir::new("find-atom-desc");
+    d.write("handoff-hub.md", DESC_CORPUS);
+    let walk = run(&["find", "+zqxdesc", d.as_str()]);
+    assert!(
+        walk.contains("handoff-hub.md#new-handoff — new handoff carries recent turns"),
+        "find must list the atom by its rendered desc:\n{walk}"
+    );
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["find", "+zqxdesc", d.as_str(), "--use-index"]);
+    assert_eq!(
+        walk, indexed,
+        "index-backed find atom listing must match the walk byte-for-byte:\nwalk:\n{walk}\nindex:\n{indexed}"
     );
 }
 
@@ -1787,6 +1886,133 @@ fn find_claude_mem_ref_index_matches_live_scan() {
         live, indexed,
         "indexed and live-scan find-cmref must match byte-for-byte:\nlive:\n{live}\nindexed:\n{indexed}"
     );
+}
+
+// ─────────────── atom-id resolution: `atom-page` / `atom` (TRDD-0NGYP3IG) ───────────────
+
+/// A page carrying one body ATOM and one LESSON with a corpus-wide `ATOM-XXXX-XXXX` id — both id
+/// families the resolver must answer for.
+const ATOM_ID_CORPUS: &str = "---\nname: oauth-hub\ndescription: oauth rotation overview\ntags: [oauth]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator]\nThe rotator drains the live account first when near a limit.[^1]\n\n## Notes and lessons learned\n[^1]: [id:ATOM-234P-U35Q, status:valid, keywords:\"drain order\", ocd:2026-07-15, lmd:2026-07-15] DO drain the live account first, BECAUSE it hits the cap sooner.\n";
+
+#[test]
+fn atom_page_prints_owning_page_path_walk_and_index() {
+    // Mode 1 (navigation): id → the PATH of the page that CONTAINS the atom. The `^` sigil is
+    // accepted (copy-paste of the marker), and the index-backed answer equals the walk's.
+    let d = TempDir::new("atom-page");
+    d.write("oauth-hub.md", ATOM_ID_CORPUS);
+    let walk = run(&["atom-page", "rotate-drain", d.as_str()]); // no index yet → walk
+    assert_eq!(
+        walk.trim(),
+        d.join("oauth-hub.md").to_str().expect("utf-8"),
+        "atom-page prints exactly the owning page path"
+    );
+    let caret = run(&["atom-page", "^rotate-drain", d.as_str()]);
+    assert_eq!(caret, walk, "the ^-prefixed marker spelling resolves too");
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["atom-page", "rotate-drain", d.as_str()]); // fresh index → index path
+    assert_eq!(
+        walk, indexed,
+        "index-backed atom-page must match the walk byte-for-byte"
+    );
+}
+
+#[test]
+fn atom_page_resolves_lesson_ids_in_every_spelling() {
+    // A lesson's corpus-wide id resolves in all three spellings: hyphenated `ATOM-XXXX-XXXX`, the
+    // bare 8-char payload, and case-insensitively (the payload charset is [A-Z0-9]).
+    let d = TempDir::new("atom-page-lesson");
+    d.write("oauth-hub.md", ATOM_ID_CORPUS);
+    let want = format!("{}\n", d.join("oauth-hub.md").display());
+    for spelling in ["ATOM-234P-U35Q", "234PU35Q", "234pu35q"] {
+        let o = run(&["atom-page", spelling, d.as_str()]);
+        assert_eq!(o, want, "spelling `{spelling}` must resolve to the page");
+    }
+}
+
+#[test]
+fn atom_page_unknown_id_fails() {
+    // Not-found is an ERROR (exit non-zero), never a silent empty success — a navigation primitive
+    // that prints nothing and exits 0 would let a caller navigate to nowhere.
+    let d = TempDir::new("atom-page-miss");
+    d.write("oauth-hub.md", ATOM_ID_CORPUS);
+    run_fail(&["atom-page", "NOPE9999", d.as_str()]);
+}
+
+#[test]
+fn atom_page_ambiguous_id_lists_all_matches_and_fails() {
+    // Corpus corruption: the SAME id on two pages breaks the corpus-unique-id invariant, so both
+    // resolution modes must refuse to guess — print EVERY match, exit non-zero (per the spec).
+    let d = TempDir::new("atom-page-dupe");
+    d.write(
+        "a.md",
+        "---\nname: a\ndescription: page a\n---\n# A\n\n^dupe-id [keywords: zqxa]\nbody a\n",
+    );
+    d.write(
+        "b.md",
+        "---\nname: b\ndescription: page b\n---\n# B\n\n^dupe-id [keywords: zqxb]\nbody b\n",
+    );
+    let o = run_fail_capture(&["atom-page", "dupe-id", d.as_str()]);
+    assert!(
+        o.contains("a.md#dupe-id") && o.contains("b.md#dupe-id"),
+        "every ambiguous match must be listed:\n{o}"
+    );
+    // …and the same contract holds for the content mode.
+    let c = run_fail_capture(&["atom", "dupe-id", d.as_str()]);
+    assert!(
+        c.contains("a.md#dupe-id") && c.contains("b.md#dupe-id"),
+        "`atom` lists the ambiguous matches too:\n{c}"
+    );
+}
+
+#[test]
+fn atom_prints_full_record_for_a_body_atom() {
+    // Mode 2 (targeted read): id → the atom's FULL aggregated record (body + the [^N] footnotes ITS
+    // body references, grouped) — the same aggregation a recall hit prints, with no page load by the
+    // caller. `--no-notes` keeps the body only.
+    let d = TempDir::new("atom-read");
+    d.write(
+        "oauth-hub.md",
+        "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator]\nThe rotator drains the live (near-limit) account first.[^1]\n\n# Lessons Learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n",
+    );
+    let o = run(&["atom", "rotate-drain", d.as_str()]); // no index → walk resolution
+    assert!(
+        o.contains("The rotator drains the live"),
+        "the atom body is returned:\n{o}"
+    );
+    assert!(
+        o.contains("lessons learned:") && o.contains("earlier this drained the alternate"),
+        "the atom's own [^1] lesson is aggregated:\n{o}"
+    );
+    assert!(
+        !o.contains("#rotate-drain"),
+        "no locator line — the caller asked for the content, it already has the address:\n{o}"
+    );
+    let nn = run(&["atom", "rotate-drain", d.as_str(), "--no-notes"]);
+    assert!(
+        nn.contains("The rotator drains the live") && !nn.contains("lessons learned:"),
+        "--no-notes keeps the body, drops the groups:\n{nn}"
+    );
+    // Index-backed LOCATION renders the identical record (the record itself always comes from the
+    // page's live parse, so walk vs index cannot diverge on content).
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["atom", "rotate-drain", d.as_str()]);
+    assert_eq!(o, indexed, "index-backed atom read equals the walk");
+}
+
+#[test]
+fn atom_resolves_a_lesson_id_to_its_lesson_record() {
+    // A LESSON id is a first-class atom address too: `atom <ATOM-…>` prints the resolved lesson
+    // line (stable id label, WHY text) — the same shape `find --only-notes` renders.
+    let d = TempDir::new("atom-read-lesson");
+    d.write("oauth-hub.md", ATOM_ID_CORPUS);
+    let o = run(&["atom", "234PU35Q", d.as_str()]); // bare-8 spelling of ATOM-234P-U35Q
+    assert!(
+        o.contains("[ATOM-234P-U35Q] - DO drain the live account first"),
+        "the lesson resolves by its bare-8 id to its record line:\n{o}"
+    );
+    run(&["reindex", d.as_str()]);
+    let indexed = run(&["atom", "234PU35Q", d.as_str()]);
+    assert_eq!(o, indexed, "index-backed lesson read equals the walk");
 }
 
 #[test]
