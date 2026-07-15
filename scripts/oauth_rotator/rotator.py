@@ -322,8 +322,12 @@ def _keychain_account() -> str:
     return os.environ.get("USER") or os.environ.get("LOGNAME") or ""
 
 
-def _security_add_password_via_stdin(service: str, account: str, data: str) -> None:
+def _security_add_password_via_stdin(service: str, account: str, data: str, *, allow_any: bool = False) -> None:
     """Write a keychain item with `security add-generic-password`, value on argv.
+
+    `allow_any` (TRDD-EQJPPZ2L) is threaded straight to `_add_password_argv` — see there
+    for the full rationale. The caller passes True ONLY for the rotator's own slot family
+    (user-approved allow-ALL ACL); every other write keeps the default `-T` ACL.
 
     NAME IS HISTORICAL — it now uses argv, NOT stdin. WHY (TRDD-5539cd6e, the
     "rotator never worked" bug): the previous stdin-PROMPT mode (`-w` with no value,
@@ -350,7 +354,7 @@ def _security_add_password_via_stdin(service: str, account: str, data: str) -> N
     # Routed through the Safe Keychain Protocol choke-point (TRDD-K3WQ7XM9 P1): latch
     # short-circuit → hard timeout → latch-on-denial. Preserve this fn's historical
     # exception contract so `_slot_keychain_write` still fails CLOSED on any failure.
-    run = safe_storage.run_security(_add_password_argv(service, account, data), timeout=5)
+    run = safe_storage.run_security(_add_password_argv(service, account, data, allow_any=allow_any), timeout=5)
     if not run.spawned and not run.denied:
         raise FileNotFoundError("`security` not found")  # not macOS → caller tries secret-tool
     if not run.ok:
@@ -360,7 +364,7 @@ def _security_add_password_via_stdin(service: str, account: str, data: str) -> N
         )
 
 
-def _add_password_argv(service: str, account: str, data: str) -> list[str]:
+def _add_password_argv(service: str, account: str, data: str, *, allow_any: bool = False) -> list[str]:
     """The `security add-generic-password` argv, as a PURE builder so tests can assert
     its shape without touching a keychain.
 
@@ -371,12 +375,27 @@ def _add_password_argv(service: str, account: str, data: str) -> list[str]:
     CREATED — `-U` updating an EXISTING item keeps that item's old ACL. And a user
     `/login` always REPLACES the live item with a Claude-only-ACL one the daemon
     cannot read; no write-side flag can prevent that, which is exactly why the
-    beacon (F2) + mirror-source distrust (F1) exist."""
+    beacon (F2) + mirror-source distrust (F1) exist.
+
+    `allow_any` (TRDD-EQJPPZ2L — the rotation-death fix): emit `-A` (allow ANY
+    application) INSTEAD of the two `-T` partners. WHY it is load-bearing — the `-T`
+    python partner is `os.path.realpath(sys.executable)`, and under uv the interpreter
+    lives at an UNSTABLE cache path that shifts across uv/plugin versions. So each
+    rotator write ran from a python whose realpath was NOT the one baked into the
+    item's ACL when it was created → macOS raised an ACL prompt → in the unattended
+    daemon that prompt HUNG → the 5 s timeout tripped `keychain-denied.latch` → every
+    later `security` op short-circuited → rotation went dark (the recurring
+    window-exhaustion incident). `-A` pins a stable allow-ALL ACL, so no future python
+    path can ever mismatch and re-prompt. USER-APPROVED for the rotator's OWN slot
+    tokens ONLY (`SLOT_KEYCHAIN_SERVICE` + its backup) — the caller gates it by
+    service, so `-A` never touches the live-cred family or cookies. `-A` and `-T` are
+    mutually exclusive by intent (allow-all vs a partner list), so `-A` REPLACES the
+    `-T` partners rather than joining them."""
+    acl = ["-A"] if allow_any else ["-T", "/usr/bin/security", "-T", os.path.realpath(sys.executable)]
     return [
         "security", "add-generic-password", "-U",
         "-s", service, "-a", account,
-        "-T", "/usr/bin/security",
-        "-T", os.path.realpath(sys.executable),
+        *acl,
         "-w", data,
         # Trailing keychain scope (empty in production → argv unchanged; a test's temp
         # keychain when JANITOR_ROTATOR_KEYCHAIN is set — TRDD-K3WQ7XM9 FIX B).
@@ -820,8 +839,17 @@ def _slot_keychain_write(email: str, blob: dict, service: str = SLOT_KEYCHAIN_SE
                                 NOT drop a plaintext token file.
     """
     data = json.dumps(blob, separators=(",", ":"))
+    # TRDD-EQJPPZ2L: pin an allow-ALL (`-A`) ACL on the rotator's OWN slot tokens (and
+    # their backup mirror) so a shifting uv python path can never re-prompt on the
+    # every-tick capture/keepalive write — the flood that hung the daemon, tripped
+    # `keychain-denied.latch`, and killed rotation. Scoped to the SLOT family ONLY
+    # (USER-approved: service `Claude Code-rotator-slot` + backup). The live-cred
+    # family (`KEYCHAIN_SERVICE` / `LIVE_BACKUP_KEYCHAIN_SERVICE`) keeps its `-T` ACL —
+    # `-A` there would expose the ACTIVE session token to every app, a broader decision
+    # left to the user (write_live_blob / _live_backup_write pass allow_any=False).
+    allow_any = service in (SLOT_KEYCHAIN_SERVICE, SLOT_BACKUP_KEYCHAIN_SERVICE)
     try:
-        _security_add_password_via_stdin(service, email, data)
+        _security_add_password_via_stdin(service, email, data, allow_any=allow_any)
         return True
     except FileNotFoundError:
         pass  # `security` ABSENT → not macOS — try the Linux keyring below

@@ -1317,7 +1317,43 @@ def test_add_password_argv_carries_acl_partners(monkeypatch: pytest.MonkeyPatch)
     t_vals = [argv[i + 1] for i, a in enumerate(argv) if a == "-T"]
     assert "/usr/bin/security" in t_vals
     assert os.path.realpath(sys.executable) in t_vals
+    assert "-A" not in argv  # default keeps the -T partner ACL, never allow-all
     assert argv[-2:] == ["-w", "DATA"]  # the secret stays LAST (stdin-prompt shape preserved)
+
+
+def test_add_password_argv_allow_any_uses_A_and_drops_T(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-EQJPPZ2L: allow_any=True emits `-A` (allow-ALL ACL) and DROPS the -T partners,
+    so a shifting uv python path can never re-prompt on a rotator slot write."""
+    monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
+    argv = rotator._add_password_argv("svc", "acct", "DATA", allow_any=True)
+    assert argv[:3] == ["security", "add-generic-password", "-U"]
+    assert "-A" in argv          # allow-all ACL pinned
+    assert "-T" not in argv      # mutually exclusive — the partner list is gone
+    assert argv[-2:] == ["-w", "DATA"]  # the secret still stays LAST
+
+
+def test_slot_keychain_write_gates_allow_any_by_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-EQJPPZ2L: `-A` is scoped to the rotator's OWN slot family (SLOT_KEYCHAIN_SERVICE +
+    backup) — the live-cred family (KEYCHAIN_SERVICE / LIVE_BACKUP) keeps the `-T` ACL, so the
+    active session token is never exposed allow-all without a separate user decision."""
+    captured: dict[str, list[str]] = {}
+
+    def _fake_run(argv: list[str], *, timeout: float = 5.0):  # noqa: ARG001
+        captured["argv"] = argv
+        return rotator.safe_storage.SecurityRun(ok=True, stdout="", stderr="", spawned=True, denied=False, returncode=0)
+
+    monkeypatch.setattr(rotator.safe_storage, "run_security", _fake_run)
+    monkeypatch.delenv("JANITOR_ROTATOR_KEYCHAIN", raising=False)
+
+    # SLOT family → allow-all (`-A`), no `-T`.
+    rotator._slot_keychain_write("me@x", {"claudeAiOauth": {"accessToken": "t"}}, service=rotator.SLOT_KEYCHAIN_SERVICE)
+    assert "-A" in captured["argv"] and "-T" not in captured["argv"]
+    rotator._slot_keychain_write("me@x", {"claudeAiOauth": {"accessToken": "t"}}, service=rotator.SLOT_BACKUP_KEYCHAIN_SERVICE)
+    assert "-A" in captured["argv"] and "-T" not in captured["argv"]
+
+    # LIVE-cred family → keeps the `-T` partner ACL (never allow-all — active token).
+    rotator._slot_keychain_write("me@x", {"claudeAiOauth": {"accessToken": "t"}}, service=rotator.LIVE_BACKUP_KEYCHAIN_SERVICE)
+    assert "-A" not in captured["argv"] and "-T" in captured["argv"]
 
 
 def test_beacon_round_trip_email_from_slot_fp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
