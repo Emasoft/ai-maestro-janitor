@@ -1,9 +1,9 @@
 ---
 trdd-id: 87RKBYJ8
 title: Subconscious agent — full per-changed-page wikimem maintenance duties spec
-column: backburner
+column: dev
 created: 2026-07-15T19:55:48+0200
-updated: 2026-07-15T20:31:04+0200
+updated: 2026-07-16T09:20:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -100,13 +100,39 @@ agent loads. These duties EXTEND / TIGHTEN those.
 21. Ensure each page is at the CORRECT scope level (LOCAL / PROJECT / USER); a page whose frontmatter
     carries the **published-globally** value must be **SYMLINKED at user-scope**.
 
+## Gap list — 2026-07-16 reconciliation (duty → owning chore → status)
+
+| # | Duty | Chore | Status |
+|---|---|---|---|
+| 1 | fix broken frontmatter | repair | ✅ EXISTS (`verify_repair`; live — backfilled `tier` 2026-07-15) |
+| 2 | desc present ≤200 + correct | write/atomize/harvest + repair | 🟡 authoring REQUIRED everywhere (2026-07-15/16); repair does NOT yet backfill/validate desc |
+| 3 | atom metadata coherent w/ content | repair | 🟡 shape validated; keyword/content COHERENCE unchecked |
+| 4 | greppable markdown formatting | repair + librarian | 🟡 librarian SURFACES page-shape; repair fixes structure only |
+| 5 | `[^x]` footnotes + inline links | model + repair | 🟡 spec'd; no enforcement pass |
+| 6 | body = only atoms (no stray prose) | atomize | ✅ EXISTS (live — 2 pages atomized 2026-07-15) |
+| 7-8 | up-to-date first / superseded below a memgrep-excluded delimiter | — | ❌ NET-NEW: delimiter convention + memgrep default-exclude + reorder pass |
+| 9 | superseded→lesson rewrite (DO NOT/BECAUSE/INSTEAD + old TRDD links) | update (correction protocol) | 🟡 per-correction demotion EXISTS; bulk retro-pass chore MISSING |
+| 10 | merge same-TOPIC pages (title differs) | consolidate | ✅ EXISTS; topic-not-title made explicit 2026-07-16 |
+| 11 | cross-page atom dedup (one carrier, others cite) | consolidate | 🟡 lesson-dedup inside a merge only; cross-page atom dedup MISSING |
+| 12 | split oversized → subtopics + summary atom | split | ✅ EXISTS (`verify_split`; oracle bugs #97/#88 open) |
+| 13 | split multi-topic atoms | atomize | ❌ atomize adds markers, never splits an atom |
+| 14 | relocate off-topic atom | — | ❌ NET-NEW relocate chore (move rule spec'd, no executor) |
+| 15 | create page for orphan topic | write (authoring) | 🟡 at creation only; corrective chore MISSING |
+| 15b | description-named page → merge/rename | consolidate | 🟡 merge half LANDED 2026-07-16 (survivor rule + rename-candidate finding); rename executor MISSING |
+| 16-17 | prune/repair links; dangling → create | librarian (surface) | 🟡 librarian SURFACES (132 link findings); fixing executor MISSING |
+| 18 | TRDD backlinks per atom | — | ❌ NET-NEW |
+| 19 | atom reachability (unique id/keywords/dates) | repair + memgrep | 🟡 shape ok; corpus-wide id-uniqueness check lands with TRDD-0NGYP3IG (ambiguous-id = error) |
+| 20 | expander/reducer (hub/aspect/component) revalidation | write (at creation) + librarian | 🟡 flagged, not corrected |
+| 21 | scope validation + published-globally USER symlink | scope-leak detector | 🟡 privacy direction policed; symlink publishing infra MISSING (= issue **#52**) |
+
 ## NEXT ACTION
-1. Reconcile this list against the current `janitor-memory-*` skills + `memory_edit_verify` oracles;
-   produce a gap list (existing vs missing).
-2. Prioritize the NET-NEW duties that need infra: (8) the up-to-date/superseded delimiter + memgrep
-   default-exclude; (21) the published-globally symlink at user-scope; (9) superseded→lesson rewrite
-   as a verified transaction; (2) desc enforcement (depends on TRDD-AP2X9A0H).
-3. Implement per chore, each as a verified transaction; add tests to `memory_edit_verify`.
+1. ~~Reconcile → gap list~~ **DONE 2026-07-16 (table above).**
+2. Implement the NET-NEW infra, in priority order: (7-8) delimiter + memgrep default-exclude;
+   (21) published-globally symlink at user-scope (coordinate with issue #52's cross-project design);
+   (9) the bulk superseded→lesson retro-pass as a verified transaction; (2) desc backfill in repair.
+   Each is its own bounded implementation (likely its own child TRDD — one atomic task each).
+3. Fix the split-oracle bugs first (#97 `lessons_preserved` false-fail, #88 `_body_minus_lessons`
+   truncation) — duties 12/9 depend on a correct oracle.
 4. Publish (skills + memgrep live in the plugin → release + cache update to deploy).
 
 ## Verification

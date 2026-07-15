@@ -66,28 +66,36 @@ content (the marker OPENS the atom; the content below it, up to the next marker 
 body):
 
 ```markdown
-^<page-unique-kebab-id> [desc: <snake_case_slug_summary>, keywords: <the search terms a future session will use for THIS fact>, type: <type>, ocd: <fact's date>, lmd: <today>]
+^<8-char-A-Z0-9-uuid> [desc: "<≤200-char PROSE summary of this fact>", keywords: <the search terms a future session will use for THIS fact>, type: <type>, ocd: <fact's date>, lmd: <today>]
 <the fact's content — the paragraph(s) / table / code block this atom holds>
 ```
 
 - **Marker PLACEMENT is LEADING, not trailing** — the `^id [...]` line goes BEFORE the fact's
   content, never after it. memgrep's parser opens an atom at the marker and reads the lines below
   it as the body. (A trailing marker would mis-attribute the WRONG content to the atom.)
-- **`keywords:` is the only REQUIRED prop** — the SYMPTOM/question words a future search will
-  use, NOT the answer's jargon (this is the atom's recall surface). `type`/`ocd`/`lmd` optional.
-- **Author a `desc:` slug too** — a ≤64-char snake_case **SLUG** summarising the atom's topic
-  ("almost a title", e.g. `rotator_drains_busy_account_first`). Derive it from the fact: emit
-  ONLY `[a-z0-9_]`, spaces→`_`, punctuation dropped, then truncate to 64 chars. It is DISPLAY-only
-  (memgrep + the handoff render it `_`→space beside the atom id so a reader knows what the atom is
-  without fetching its body) — NOT a recall surface, so do NOT duplicate keywords into it. The
-  slug is a single token, so it can never break the bracket grammar.
+- **TWO REQUIRED props: `keywords:` AND `desc:`** (TRDD-AP2X9A0H). `keywords:` — the
+  SYMPTOM/question words a future search will use, NOT the answer's jargon (the atom's recall
+  surface). `type`/`ocd`/`lmd` optional.
+- **`desc:` is a REQUIRED ≤200-char PROSE summary of the atom's body, QUOTED** (`desc:"…"` — the
+  quotes protect commas/colons in prose from the property-splitter). It is the LISTING surface:
+  memgrep shows `desc` — not the full body — when it lists the atoms matching a `recall`/`find`
+  query, so the reader triages by `desc` and opens only the one atom worth reading. Write a true
+  summary, as short as possible, never a slug; do NOT duplicate keywords into it. (Legacy atoms
+  with the old ≤64-char snake_case-slug `desc` stay valid — upgrade a legacy slug to prose
+  whenever you touch its atom.)
 - **Per-atom notes/lessons/see-also are AUTOMATIC.** An atom OWNS the `[^N]` footnotes its body
   references inline — those are already in the prose, so you DO NOT move them; marking the fact is
   enough, memgrep aggregates the rest. memgrep groups each referenced `[^N]` by which bottom
   section DEFINES it: `# Notes` → notes, `# Lessons Learned` → lessons, `# See also` → see-also
   (see-also is a `[^N]` footnote whose def links out, NOT a bare `[[wikilink]]` in the body). A
   footnote can be SHARED by multiple atoms, which is why the defs live POOLED at the page bottom.
-- **Block-ids** are page-unique kebab slugs (`^rotate-drain`) or `^memory-<uid>`.
+- **Block-ids are CORPUS-WIDE-UNIQUE 8-char `[A-Z0-9]` UUIDs** (`^9K3ZP7QW`) — unique across ALL
+  pages and ALL scopes, not per page (TRDD-0NGYP3IG): atoms are MOBILE (editorial ops move them
+  between pages), the id travels with the atom, and memgrep resolves id→owning-page-path off the
+  index — a reused id breaks that resolution. COLLISION-CHECK a candidate id across all three
+  scope roots (grep `\^<id>` in LOCAL + PROJECT + USER) before assigning. Legacy ids (kebab slugs
+  `^rotate-drain`, `^memory-<uid>`) remain valid on existing atoms — never rename them; only NEW
+  atoms get the UUID form.
 - Add **nothing else** — no rewording, no new prose, no moved lines. The page lead, the headings,
   the bottom footnote pool, every fact line stay byte-identical.
 - Bump the page frontmatter `lmd:` to today.

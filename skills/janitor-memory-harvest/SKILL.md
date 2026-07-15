@@ -119,6 +119,11 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
   superseded statement to a dated `[^N]` lesson). Do NOT create a duplicate.
 - **No existing page** → CREATE `wikimem/<name>.md` — the `/janitor-memory-write` discipline:
   - **One subject per page; same-theme memories share ONE page.**
+  - **NAME = the broad TOPIC, never the buffer note's description (TRDD-NM4TPCQ9).** Harvest is
+    where this failure happens most: mirroring ONE buffer note tempts a one-note page named
+    like the note (`implementation-of-duckdb-ingestion-of-otel-logs`). Wrong — name the page
+    for the topic many future atoms will share (`agents-tracing`, `claude-telemetry-and-logging`).
+    A candidate name that reads like a sentence about one fact fails; broaden it.
   - **Complete frontmatter** — `name`, symptom-indexed `description`, `ocd`, `lmd`,
     `metadata.{node_type: memory, type, tier}`.
   - **Tier expand/reduce** — a general rule → `aspect` (radiates `## Applies to`); one
@@ -138,6 +143,11 @@ memgrep recall "<the note's subject, in the user's words>" "$MEMDIR"
     `memory_txn_cli.py begin <scope> --op repair <rel>` → edit the staged copy →
     `commit --op repair` (one source, the write at the same path — the shape the
     repair gate accepts).
+
+  **In BOTH branches, every mirrored atom follows the atom grammar** (TRDD-AP2X9A0H /
+  TRDD-0NGYP3IG): a corpus-wide-unique 8-char `[A-Z0-9]` id (collision-checked across all three
+  scope roots), REQUIRED `keywords:` (recall surface) AND REQUIRED `desc:"…"` — a ≤200-char
+  QUOTED PROSE summary of the atom body (the surface memgrep lists per hit).
 
   **In BOTH branches (UPDATE and CREATE), stamp PROVENANCE on every mirrored atom** —
   the wikimem-model's harvested-atom props: add `claude_mem_ref: <buffer-note rel-path>`

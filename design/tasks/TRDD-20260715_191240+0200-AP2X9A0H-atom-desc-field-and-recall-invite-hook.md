@@ -1,9 +1,9 @@
 ---
 trdd-id: AP2X9A0H
 title: Atom desc metadata field — required <=200-char prose summary shown in memgrep listings
-column: backburner
+column: dev
 created: 2026-07-15T19:12:40+0200
-updated: 2026-07-15T21:55:25+0200
+updated: 2026-07-16T09:20:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -30,9 +30,11 @@ acting. The memory existed; nothing prompted me to read it. These two features c
 > **Item (a) DONE 2026-07-15 (same commit as NM4TPCQ9 Prong 1):** `references/atom-authoring.md` AND
 > the shared `references/wikimem-model.md` both synced — atom desc = REQUIRED ≤200-char QUOTED prose
 > (quotes are the grammar-safety replacing the old slug's token-safety), lesson form = FOUR required
-> keys, legacy-slug back-compat noted. **STILL TODO:** (b) sync the subconscious agent's
-> atomize/harvest procedures; (c) the memgrep Rust display of `desc` in `recall`/`find` LISTINGS
-> (verify it shows the ≤200 summary, body-prefix fallback for legacy atoms). (b)-(c) need a
+> keys, legacy-slug back-compat noted. **Item (b) DONE 2026-07-16:** `janitor-memory-atomize`
+> (marker example, TWO-required-props, ≤200 quoted prose, corpus-wide 8-char ids per 0NGYP3IG) +
+> `janitor-memory-harvest` (mirrored-atom grammar bullet + topic-naming bullet per NM4TPCQ9) both
+> synced. **Item (c) IN FLIGHT 2026-07-16:** memgrep Rust desc-in-listings delegated to a
+> background agent alongside 0NGYP3IG's id-resolution (one crate change set). All items need a
 > publish+cache-update to deploy.
 
 Every ATOM (both the `[^N]:` footnote-lesson form AND the `^id ⟦…⟧` block-property form) gains a

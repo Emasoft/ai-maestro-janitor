@@ -1,9 +1,9 @@
 ---
 trdd-id: NM4TPCQ9
 title: Enforce topic-named wikimem pages — agents create description-named pages, the spec is ignored
-column: backburner
+column: dev
 created: 2026-07-15T20:31:04+0200
-updated: 2026-07-15T21:55:25+0200
+updated: 2026-07-16T09:20:00+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -55,8 +55,11 @@ NAMING axis.
    line) + `references/atom-authoring.md` (naming rule at the schema's `name:` field), both with the
    USER's BAD/GOOD examples verbatim. Same commit also synced the `desc` ≤200-prose spec
    (AP2X9A0H item a) into `atom-authoring.md` + `wikimem-model.md`. Deploys with the next publish.
-2. TRDD-87RKBYJ8: add the corrective duty (detect description-named page → merge/rename to topic) to
-   group E/G and to the duty verification.
+2. **DONE 2026-07-16 (Prong 2, merge half):** duty 15b added to TRDD-87RKBYJ8; the consolidate
+   skill's step 2 now treats a description-named singleton as a PRIME candidate, with the survivor
+   rule (topic-named page survives) and the `rename-candidate` finding when no topic page exists.
+   The harvest skill's CREATE branch carries the topic-naming bullet (harvest is where the failure
+   happens most). REMAINING: the RENAME executor (no topic page exists → rename in a verified txn).
 3. Consider a cheap heuristic the subconscious agent (or a detector) can flag: a page filename with
    ≥4 hyphen-joined tokens AND a leading verb/gerund (`implementation-of-`, `how-to-`, `fix-for-`) is a
    likely description-name — SURFACE it for review (never auto-rename without the verify_* gate).

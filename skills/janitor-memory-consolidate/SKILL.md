@@ -139,7 +139,21 @@ abstain — that is success, not failure.
 Read A and B fully. They are the same subject iff a reader would say "these two
 pages are about the *same thing* and should be one page" — same element, same
 aspect, same scope. Different facets of different things ⇒ abstain. Uncertain ⇒
-abstain.
+abstain. **It is the TOPIC that decides sameness, never the title string** — two
+pages whose titles differ can still be the same topic (TRDD-87RKBYJ8 duty 10).
+
+**Description-named singletons are PRIME candidates (TRDD-NM4TPCQ9, corrective
+prong).** A page whose NAME reads like the description of one memory — a long
+hyphen-joined verb-phrase (`implementation-of-…`, `how-to-…`, `fix-for-…`, e.g.
+`implementation-of-duckdb-ingestion-of-otel-logs.md`) — is the recurring agent
+naming error: one atom stranded on a page no future atom will join. In step 1,
+treat such a page as a candidate A and search for its broad TOPIC page (e.g.
+`agents-tracing`) as B. **Survivor rule:** when the pair merges, the TOPIC-named
+page survives and the description-named singleton retires (redirect its
+`[[links]]`, ref-count its footnotes per the move rule). If NO topic page exists,
+this is not a merge — abstain here and surface a
+`[janitor-memory] rename-candidate: <page> (description-named, no topic page)`
+finding instead.
 
 ### 3. Legality gate — `is_legal_merge` (BEFORE you open a transaction)
 
