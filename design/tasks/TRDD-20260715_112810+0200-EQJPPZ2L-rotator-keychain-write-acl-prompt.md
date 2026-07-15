@@ -3,7 +3,7 @@ trdd-id: EQJPPZ2L
 title: Rotator keychain WRITE triggers an ACL prompt (uv-python) — every token refresh re-latches the rotator dead
 column: dev
 created: 2026-07-15T11:28:10+0200
-updated: 2026-07-15T18:10:51+0200
+updated: 2026-07-15T18:40:00+0200
 current-owner: janitor-session
 task-type: bugfix
 scope: project
@@ -16,7 +16,40 @@ implementation-commits: [fa46a49, 1cedf28]
 
 # Rotator keychain WRITE triggers an ACL prompt — every refresh re-latches the rotator dead
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (18:10) — ⛔ GO-LIVE REVERTED — PUBLISH FIRST
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15 (18:40) — 🟢 LIVE ON PUBLISHED+DEPLOYED CODE
+
+**DONE — rotation is live on FIXED, DEPLOYED code (the correct sequence, this time).** Full chain
+verified end-to-end:
+1. Published **v0.44.1** (`4c9b69b` cleared two CPV `--strict` doc blockers — a list-marker NIT in this
+   TRDD + a janitor-arm TOC-embed MINOR; the rotator fix itself was already committed: `1cedf28`
+   ACL-only-at-create + `59c9f3b` latch auto-recovery). All 14 publish gates green.
+2. **Updated the CACHE** `claude plugin update ai-maestro-janitor@ai-maestro-plugins` (0.41.0 → 0.44.1 —
+   the qualified id; bare `ai-maestro-janitor` gives "not found"). The auto-update HAD been lagging
+   (cache stuck at 0.41.0 for the whole incident) — manual update was required.
+3. **Re-staged the L0 daemon closure** — `keepalive_boot.verify_or_restage(<DATA>/scripts)` refreshed the
+   DATA staged daemon copy (it was stale `set_acl=0`) to 0.44.1. BOTH code paths now fixed: heartbeat
+   (cache via the auto-rolling stub) + L0 daemon (DATA staged closure).
+4. **Proved deployed code silent** — a manual `tick` from cache 0.44.1 did a real slot-refresh WRITE +
+   resolved the live account, **latch clean, zero prompts**. Then re-armed (opt-in restored, kill-switch
+   cleared, cron `94b0748e` `*/15`), force-spawned the daemon, and its **autonomous** tick also left the
+   latch clean. Daemon now RUNNING on 0.44.1 (was PID 80433/80434).
+
+**Current live state:** opt-in ON, kill-switch CLEAR, heartbeat armed, daemon on 0.44.1, latch clean,
+`/login` works. The latch is now a self-healing breaker (a future transient → dark ≤ one 600s cooldown,
+not forever).
+
+**THE PERMANENT LESSON (do not lose):** the daemon + heartbeat run from the INSTALLED CACHE (and the L0
+daemon from the DATA-staged closure), NEVER the repo working tree. A repo-only fix is INERT until
+(a) published AND (b) the cache is updated AND (c) the DATA daemon closure is re-staged. Restoring opt-in
+before all three re-floods with the OLD code (that broke `/login` mid-incident). Correct order is fixed
+here: publish → update cache → re-stage daemon closure → prove deployed code silent → THEN opt-in.
+
+**ONLY REMAINING (separate follow-up, non-urgent):** the 98/99 switch policy — raise `SWITCH_AT_5H=98`,
+`SWITCH_AT_7D=99` + align `SAFE_*` (§policy below). Not blocking; rotation works at the current 97/90.
+
+---
+
+## ⏵ STATE — 2026-07-15 (18:10) — GO-LIVE REVERTED — PUBLISH FIRST (superseded by the LIVE block above)
 
 **THE LOAD-BEARING LESSON (cost a real popup incident + broke the user's `/login`):** the running
 **daemon and every heartbeat execute from the INSTALLED CACHE, NOT the repo working tree.** The repo
