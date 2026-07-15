@@ -445,6 +445,13 @@ def _run_detector(
     # Default test config: opt OUT of self-scan, point CLAUDE_PROJECT_DIR
     # somewhere harmless. The detector inspects its OWN __file__-derived
     # plugin root regardless of CLAUDE_PROJECT_DIR.
+    #
+    # ISOLATION WARNING (ticket T-DTTXJGC7): any caller that ENABLES the
+    # detector MUST override BOTH `CLAUDE_PROJECT_DIR` (else the sig file,
+    # and — on a finding — a REAL support ticket land in this repo's live
+    # `.janitor/state/`) AND `JANITOR_DATA_DIR` (else `_record_fire` appends
+    # to the REAL machine-wide audit chain). A pytest run at 2026-07-16 00:19
+    # did exactly that and opened the false CRITICAL ticket T-DTTXJGC7.
     env.setdefault("CLAUDE_PROJECT_DIR", str(cwd or _PROJECT_ROOT))
     env.pop("CLAUDE_PLUGIN_OPTION_JANITOR_SELF_INTEGRITY_ENABLED", None)
     if env_overrides:
@@ -470,6 +477,10 @@ def test_detector_silent_when_no_manifest_exists(tmp_path: Path) -> None:
         "CLAUDE_PLUGIN_OPTION_JANITOR_SELF_INTEGRITY_ENABLED": "1",
         "CLAUDE_PROJECT_DIR": str(tmp_path),
         "CLAUDE_PLUGIN_DATA": str(tmp_path / "data"),
+        # Post-TRDD-DKEYCHN7 the chain/key live in the FIXED data dir, not
+        # $CLAUDE_PLUGIN_DATA — isolate it too, or the test appends to the
+        # REAL machine-wide audit chain (T-DTTXJGC7 isolation class).
+        "JANITOR_DATA_DIR": str(tmp_path / "data"),
     })
     assert r.returncode == 0
     # Detector might fire on real SKILL.md files missing the preamble
@@ -489,7 +500,7 @@ def test_detector_opt_in_default_off_even_with_dirty_state(tmp_path: Path) -> No
     assert r.stdout == ""
 
 
-def test_detector_imports_cleanly() -> None:
+def test_detector_imports_cleanly(tmp_path: Path) -> None:
     """The detector script must import its lib module without error.
 
     Since we cannot easily inject a tampered manifest into the live
@@ -497,9 +508,20 @@ def test_detector_imports_cleanly() -> None:
     root), this end-to-end test only confirms the wiring is clean.
     The library-level tests above cover the actual tamper-detection
     behaviour for every check class.
+
+    ISOLATION (the DEFECT behind ticket T-DTTXJGC7): this test runs the
+    real detector ENABLED. Before 2026-07-16 it inherited the repo as
+    CLAUDE_PROJECT_DIR and the real machine data dir — so whenever the
+    repo's release manifest was stale (i.e. after ANY post-release
+    commit touching an instruction file) a green pytest run silently
+    opened a REAL critical SELFINT-001 ticket in this repo's
+    `.janitor/state/tickets/` and appended to the machine audit chain.
+    Both roots MUST stay pointed at tmp_path.
     """
     r = _run_detector(env_overrides={
         "CLAUDE_PLUGIN_OPTION_JANITOR_SELF_INTEGRITY_ENABLED": "1",
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        "JANITOR_DATA_DIR": str(tmp_path / "data"),
     })
     assert r.returncode == 0
     # If there's stdout, it's a finding; either is acceptable here
@@ -757,3 +779,76 @@ def test_key_mint_adopts_an_existing_key_rather_than_overwriting_it(tmp_path: Pa
     (tmp_path / ".integrity-key").write_bytes(existing)
     assert load_or_create_key(data_dir=tmp_path) == existing
     assert (tmp_path / ".integrity-key").read_bytes() == existing
+
+
+# ---------- Section 6: source-checkout guard (T-DTTXJGC7 / T-BR3M3IUU) ----
+#
+# The .integrity manifest is a RELEASE artifact — publish.py regenerates it at
+# each release — so in a git SOURCE CHECKOUT every legitimate post-release
+# commit that touches an instruction file makes the tree differ from the
+# manifest. The detector read that as "mutated" and raised a CRITICAL
+# SELFINT-001 ticket after every release (tickets T-BR3M3IUU, then T-DTTXJGC7).
+# The manifest check must therefore be SKIPPED when the plugin root is a
+# source checkout (git work tree whose root carries .claude-plugin/plugin.json)
+# — and must KEEP firing for installed roots (never a git work tree).
+
+
+def _load_detector_module():
+    """Import the detector script as a module so its module-level root/manifest
+    constants can be repointed at a synthetic tree (its __file__-derived root is
+    otherwise always this repo)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("jsi_detector_under_test", _DETECTOR)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _seed_stale_manifest_tree(root: Path) -> Path:
+    """A plugin tree whose manifest is STALE: baseline written, then README
+    mutated afterwards — the exact shape of a post-release commit."""
+    root.mkdir(parents=True, exist_ok=True)  # _seed_plugin_tree assumes the root exists
+    _seed_plugin_tree(root)
+    manifest_path = root / ".integrity" / "manifest-sha256.json"
+    write_manifest(compute_manifest(root), manifest_path)
+    (root / "README.md").write_text("# a legitimate post-release commit\n", encoding="utf-8")
+    return manifest_path
+
+
+def test_manifest_check_skipped_in_source_checkout(tmp_path: Path) -> None:
+    """REGRESSION (T-DTTXJGC7): a stale manifest in a git SOURCE CHECKOUT is dev
+    work, not tampering — the manifest check must return no finding there."""
+    root = tmp_path / "checkout"
+    manifest_path = _seed_stale_manifest_tree(root)
+    # What makes it a SOURCE checkout per keepalive_stage.is_plugin_source_checkout:
+    # a .git entry at a root that also carries .claude-plugin/plugin.json.
+    (root / ".git").mkdir()
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
+
+    mod = _load_detector_module()
+    mod._PLUGIN_ROOT = root
+    mod._MANIFEST_PATH = manifest_path
+    assert mod._check_manifest() is None, (
+        "manifest check fired on a source checkout — every post-release commit "
+        "re-opens a false CRITICAL SELFINT-001 ticket (this is ticket T-DTTXJGC7)"
+    )
+
+
+def test_manifest_check_still_fires_outside_source_checkout(tmp_path: Path) -> None:
+    """The guard must NOT neuter the detector: an installed root (no .git work
+    tree) with a mutated file must still produce the drift finding."""
+    root = tmp_path / "installed"
+    manifest_path = _seed_stale_manifest_tree(root)
+    # Installed cache trees carry .claude-plugin/plugin.json but never .git —
+    # so this root must NOT be classified as a source checkout.
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin" / "plugin.json").write_text("{}\n", encoding="utf-8")
+
+    mod = _load_detector_module()
+    mod._PLUGIN_ROOT = root
+    mod._MANIFEST_PATH = manifest_path
+    finding = mod._check_manifest()
+    assert finding is not None and "mutated=1" in finding and "README.md" in finding

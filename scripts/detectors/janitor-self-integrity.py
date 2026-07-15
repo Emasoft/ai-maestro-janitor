@@ -23,7 +23,10 @@ most one drift line per fire):
      If `${CLAUDE_PLUGIN_ROOT}/.integrity/manifest-sha256.json` exists,
      compare the live README.md / CLAUDE.md / skills/**/SKILL.md /
      commands/**/*.md / rules/**/*.md file hashes against the baseline.
-     Surface "mutated/missing/extra" file counts.
+     Surface "mutated/missing/extra" file counts. SKIPPED when the
+     plugin root is a git SOURCE checkout: the manifest is a release
+     artifact, so post-release commits are dev work, not tampering
+     (tickets T-BR3M3IUU / T-DTTXJGC7).
 
   2. Audit-chain verification
      If `<FIXED janitor DATA dir>/janitor-chain.ndjson` exists (the SAME
@@ -65,6 +68,7 @@ from janitor_self_integrity import (  # type: ignore[import-not-found]  # noqa: 
     load_or_create_key,
     verify_manifest,
 )
+from keepalive_stage import is_plugin_source_checkout  # type: ignore[import-not-found]  # noqa: E402
 
 _NAME = "janitor-self-integrity"
 
@@ -125,9 +129,25 @@ def _check_manifest() -> str | None:
     """Return a drift-line body if manifest verification flags drift.
 
     Returns None if no manifest exists yet (legitimate pre-publish
-    state) OR if everything verifies clean.
+    state) OR if everything verifies clean OR if the plugin root is a
+    git SOURCE CHECKOUT (see the guard below).
     """
     if not _MANIFEST_PATH.is_file():
+        return None
+    # SOURCE-CHECKOUT guard (tickets T-BR3M3IUU, T-DTTXJGC7). The manifest is a
+    # RELEASE artifact — publish.py regenerates it at each release — so in a git
+    # source checkout every legitimate post-release commit touching an
+    # instruction file makes the tree differ from the manifest. That is dev
+    # work under git's own integrity (every "mutation" is a tracked commit),
+    # not tampering — yet this check read it as "mutated" and raised a false
+    # CRITICAL SELFINT-001 ticket after every release. Installed roots (the
+    # version cache, the DATA stage) are never git work trees, so the guard
+    # cannot silence a real install. Security note: this does not weaken the
+    # posture — an attacker who could plant a fake `.git/` in the cache could
+    # already rewrite this same-tree UNSIGNED manifest directly; the anchor
+    # against cache tampering is the dispatcher stub's C3 HMAC pin (keyed from
+    # the DATA dir), not this check.
+    if is_plugin_source_checkout(_PLUGIN_ROOT):
         return None
     try:
         mutated, missing, extra = verify_manifest(_PLUGIN_ROOT, _MANIFEST_PATH)
