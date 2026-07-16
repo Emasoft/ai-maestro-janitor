@@ -353,8 +353,16 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
     # parent-prefix rule, an agent registered at a broad root (e.g. ~/Code) matches EVERY
     # project under it, and list order would route this session's keystrokes (ESC,
     # /compact, …) into that OTHER agent's pane. Keystroke injection must never guess.
+    #
+    # AM8JD9SG F5: an EXACT-workdir TIE (two ai-maestro agents registered on the SAME
+    # repo — a documented dev+reviewer pattern) is NOT disambiguable by cwd. The old
+    # `len(wdr) > best_len` silently kept the FIRST such agent (registry order — the very
+    # thing this docstring forbids), routing keystrokes into a coin-flip pane. On a genuine
+    # ambiguous tie we now REFUSE (return None) so the caller degrades to "ask the user"
+    # rather than typing an ESC + /compact into the wrong agent's in-flight turn.
     best_ts: str | None = None
     best_len = -1
+    best_ambiguous = False
     for agent in agents:
         if not isinstance(agent, dict):
             continue
@@ -364,9 +372,14 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
         wdr = os.path.realpath(wd)
         if any(c == wdr or c.startswith(wdr + os.sep) for c in cands):
             ts = _agent_tmux_session(agent)
-            if ts and len(wdr) > best_len:
-                best_ts, best_len = ts, len(wdr)
-    return best_ts
+            if not ts:
+                continue
+            if len(wdr) > best_len:
+                best_ts, best_len, best_ambiguous = ts, len(wdr), False
+            elif len(wdr) == best_len and ts != best_ts:
+                # Same specificity, DIFFERENT target session → we cannot choose safely.
+                best_ambiguous = True
+    return None if best_ambiguous else best_ts
 
 
 def _try_ai_maestro_send(commands: Sequence[str], *, dry_run: bool, env: Mapping[str, str]) -> str | None:
@@ -406,13 +419,22 @@ def _try_ai_maestro_send(commands: Sequence[str], *, dry_run: bool, env: Mapping
     # 2) Type each command into that agent's terminal via the CLI (frozen interface
     #    over POST /api/sessions/<tmux>/command). `--newline` presses Enter;
     #    requireIdle stays False (flag omitted). `--` guards a dash-leading command.
-    for command in commands:
+    for i, command in enumerate(commands):
         sent = _run_aimaestro_cli(
             cli, ["session", "command", tmux, "--newline", "--", command],
             env=env, timeout=6.0,
         )
         if sent is None or sent.returncode != 0:
-            return None  # unconfirmed → caller falls back to the tmux keystroke send
+            if i == 0:
+                return None  # nothing delivered yet → safe to fall back and re-type all
+            # AM8JD9SG F8: PARTIAL delivery. Commands [0:i] already ran on the agent, so
+            # returning None (→ caller's tmux fallback re-types the WHOLE list) would
+            # double-run them — e.g. a soft-handoff ['/janitor-write-handoff', '/compact']
+            # would run the handoff twice and /compact on the already-compacted session.
+            # Report partial so the caller treats it as delivered and does NOT re-send;
+            # losing the undelivered tail (cmds[i:]) is recoverable at the next fire and
+            # strictly safer than the duplication.
+            return f"FIRED:aimaestro:partial:{i}/{len(commands)}"
     return "FIRED:aimaestro"
 
 

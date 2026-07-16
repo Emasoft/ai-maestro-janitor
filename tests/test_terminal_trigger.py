@@ -28,6 +28,28 @@ sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
 
 import terminal_trigger as tt  # noqa: E402
 
+try:  # conftest is importable by test modules (see its module docstring)
+    from conftest import away_home  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover — conftest is always on path under pytest
+    away_home = None  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True)
+def _unattended_home(monkeypatch, tmp_path):
+    """Pin HOME to an UNATTENDED presence breadcrumb so every test in this module is
+    hermetic w.r.t. whether a real human is at the machine.
+
+    `send_self_command`'s presence gate (`user_intent.injection_allowed`) reads the
+    machine-global user-presence breadcrumb under $HOME; unpinned, these tests inherit
+    the DEVELOPER's live breadcrumb and return USER_PRESENT whenever whoever ran the
+    suite happened to be typing — "a test reporting on the tester, not the code"
+    (conftest.py). None of this module's tests exercise the gate itself (that lives in
+    test_user_intent.py), so an unattended HOME is the correct isolation — matching the
+    sibling reload/resume/reload-skills trigger tests. AM8JD9SG F9-adjacent (pre-existing
+    isolation gap surfaced during the ai-maestro audit)."""
+    if away_home is not None:
+        monkeypatch.setenv("HOME", str(away_home(tmp_path)))
+
 
 def _force(monkeypatch, kind: str) -> None:
     # terminal_kind() reads JANITOR_FORCE_TERMINAL_KIND live (not cached), so just set it.
@@ -272,6 +294,42 @@ def test_match_agent_tmux_no_match(tmp_path):
     assert tt.match_agent_tmux(agents, [str(tmp_path / "y")]) is None
 
 
+def test_match_agent_tmux_ambiguous_same_workdir_refuses(tmp_path):
+    # AM8JD9SG F5: two ai-maestro agents on the SAME workdir (same specificity, DIFFERENT
+    # tmux session) cannot be disambiguated by cwd — the old `len > best` kept the first in
+    # list order, routing keystrokes into a coin-flip pane. We now REFUSE (None) so the
+    # self-trigger degrades to "ask the user" instead of typing into the wrong agent.
+    wd = str(tmp_path)
+    agents = [
+        {"workingDirectory": wd, "session": {"tmuxSessionName": "agent-A"}},
+        {"workingDirectory": wd, "session": {"tmuxSessionName": "agent-B"}},
+    ]
+    assert tt.match_agent_tmux(agents, [wd]) is None
+
+
+def test_match_agent_tmux_same_workdir_same_session_is_not_ambiguous(tmp_path):
+    # The SAME session listed twice on one workdir has a single unambiguous target — not a
+    # tie. Only DIFFERENT sessions at equal specificity are ambiguous.
+    wd = str(tmp_path)
+    agents = [
+        {"workingDirectory": wd, "session": {"tmuxSessionName": "agent-A"}},
+        {"workingDirectory": wd, "session": {"tmuxSessionName": "agent-A"}},
+    ]
+    assert tt.match_agent_tmux(agents, [wd]) == "agent-A"
+
+
+def test_match_agent_tmux_most_specific_still_wins_over_parent(tmp_path):
+    # Regression guard: a broad parent-root agent must NOT make a deeper exact-match agent
+    # ambiguous — the deeper (longer) workingDirectory is strictly more specific and wins.
+    parent = str(tmp_path)
+    child = str(tmp_path / "proj")
+    agents = [
+        {"workingDirectory": parent, "session": {"tmuxSessionName": "root-agent"}},
+        {"workingDirectory": child, "session": {"tmuxSessionName": "proj-agent"}},
+    ]
+    assert tt.match_agent_tmux(agents, [child]) == "proj-agent"
+
+
 def test_ai_maestro_cli_send_end_to_end(monkeypatch, tmp_path):
     """Inside an ai-maestro agent: send_self_command resolves the agent's tmux
     session via `aimaestro-agent.sh list --json` and types the command via
@@ -304,6 +362,42 @@ def test_ai_maestro_cli_multi_command_types_each_in_order(monkeypatch, tmp_path)
     calls = log.read_text().splitlines()
     assert "session command sess-h --newline -- /janitor-write-handoff" in calls[0]
     assert "session command sess-h --newline -- /compact" in calls[1]
+
+
+def test_ai_maestro_cli_partial_delivery_reports_partial_not_none(monkeypatch, tmp_path):
+    """AM8JD9SG F8: command 1 delivered, command 2 fails → send returns a PARTIAL status,
+    NOT None. None would make send_self_command re-type the WHOLE list via the tmux
+    fallback, double-running the already-delivered command (a duplicate handoff, then a
+    /compact on the just-compacted session). The spy fails the SECOND `session command`."""
+    wd = str(tmp_path)
+    agents = [{"workingDirectory": wd, "session": {"tmuxSessionName": "sess-p"}}]
+    agents_file = tmp_path / "agents.json"
+    agents_file.write_text(json.dumps(agents))
+    log = tmp_path / "cli-calls.log"
+    cli = tmp_path / "aimaestro-agent.sh"
+    cli.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = "list" ]; then cat "{agents_file}"; exit 0; fi\n'
+        f'if [ "$1" = "session" ] && [ "$2" = "command" ]; then '
+        # Fail the SECOND command: once the log already has a line, exit non-zero.
+        f'n=$(wc -l < "{log}" 2>/dev/null || echo 0); '
+        f'if [ "$n" -ge 1 ]; then exit 1; fi; '
+        f'printf "%s\\n" "$*" >> "{log}"; exit 0; fi\n'
+        "exit 0\n"
+    )
+    cli.chmod(0o755)
+    # tmux kind + a valid pane: if the fix regressed to None, send_self_command would fall
+    # back to the tmux path and re-type BOTH commands — so a non-partial return proves the
+    # no-duplicate contract.
+    _force(monkeypatch, "tmux")
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")
+    monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
+    monkeypatch.setenv("TMUX_PANE", "%9")
+    out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False)
+    assert out == "FIRED:aimaestro:partial:1/2"
+    # Only the FIRST command reached the CLI — the tail was not retried on this channel.
+    assert log.read_text().count("session command") == 1
 
 
 def test_ai_maestro_cli_dry_run_does_not_send(monkeypatch, tmp_path):
