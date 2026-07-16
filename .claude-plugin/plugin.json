@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.45.0",
+  "version": "0.46.0",
   "description": "Keeps your dev environment tidy and secure, in the background: drift + supply-chain detectors, secret/injection guards on tool calls, rate-limit auto-resume, prompt-cache keep-alive, and a markdown memory system. Runs on a per-session CronCreate heartbeat (session-scoped, re-armed each session) plus one machine-wide background daemon that owns every global-scope update.",
   "author": {
     "name": "Emasoft",
@@ -40,7 +40,7 @@
     },
     "keep_going_default": {
       "title": "Never-stop keep-going nudge is ON by default",
-      "description": "When true (DEFAULT, user directive 2026-07-16), every due heartbeat emits the never-stop continue-nudge in EVERY mode — the janitor keeps an unattended fleet working in the user's absence without needing a per-session opt-in. The nudge is bounded (one line added to an already-scheduled heartbeat turn) and is silenced only by a deliberate act: the explicit `/janitor-keep-going off` sentinel (full mode only — maintenance mode always nudges and is exited via `/janitor-maintenance-mode off`). Set to false to restore the pre-2026-07-16 opt-IN behaviour: silent in full mode unless the per-session keep-going flag is set.",
+      "description": "When true (DEFAULT, user directive 2026-07-16), every due heartbeat emits the never-stop continue-nudge in EVERY mode \u2014 the janitor keeps an unattended fleet working in the user's absence without needing a per-session opt-in. The nudge is bounded (one line added to an already-scheduled heartbeat turn) and is silenced only by a deliberate act: the explicit `/janitor-keep-going off` sentinel (full mode only \u2014 maintenance mode always nudges and is exited via `/janitor-maintenance-mode off`). Set to false to restore the pre-2026-07-16 opt-IN behaviour: silent in full mode unless the per-session keep-going flag is set.",
       "type": "boolean",
       "default": true,
       "sensitive": false
