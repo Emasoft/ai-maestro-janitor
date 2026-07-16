@@ -26,7 +26,7 @@ acting. The memory existed; nothing prompted me to read it. These two features c
 > **UPDATE 2026-07-15:** `desc` ALREADY EXISTS in the memory-write skill — but as an *optional
 > ≤64-char snake_case slug*. This feature UPGRADES it to a *REQUIRED ≤200-char PROSE summary of the
 > atom body*. **DONE this session:** `skills/janitor-memory-write/SKILL.md` updated (body-atom desc
-> + lesson-form desc both now required ≤200-char prose; checklist synced) — commit 383ddac.
+> plus lesson-form desc, both now required ≤200-char prose; checklist synced) — commit 383ddac.
 > **Item (a) DONE 2026-07-15 (same commit as NM4TPCQ9 Prong 1):** `references/atom-authoring.md` AND
 > the shared `references/wikimem-model.md` both synced — atom desc = REQUIRED ≤200-char QUOTED prose
 > (quotes are the grammar-safety replacing the old slug's token-safety), lesson form = FOUR required

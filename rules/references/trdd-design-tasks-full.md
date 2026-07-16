@@ -521,8 +521,8 @@ installed.
 | `testing → ai_review` | `last-test-result: pass`; `last-test-at:` set |
 | `testing → dev` (failure) | `test-failures:` += 1; post-mortem added |
 | `ai_review → human_review` | only when `review-requirements:` includes human-review |
-| `ai_review|human_review → complete` | all reviews passed |
-| `complete → publish|deploy` | release pipeline begins |
+| `ai_review\|human_review → complete` | all reviews passed |
+| `complete → publish\|deploy` | release pipeline begins |
 | `publish → published` | `published-version:`, `published-at:` set |
 | `deploy → live` | `live-since:` set |
 | `live → live_auditing` (soak) | optional; only when `soak-duration:` set |

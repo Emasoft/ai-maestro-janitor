@@ -18,8 +18,8 @@ relevant-rules: []
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-15
 
 **The problem (USER, 2026-07-15) — it is COMPLIANCE, not the spec.** The specs already state the rule
-(one page = one topic; a page's name is its topic — see `wikimem-atom-block-properties.md` `^9K3ZP7QW`
-+ `^TPCNM5RK`). But the **AGENTS do not follow it.** Observed repeatedly: an agent creates a wikimem
+(one page = one topic; a page's name is its topic — see `wikimem-atom-block-properties.md`
+`^9K3ZP7QW` and `^TPCNM5RK`). But the **AGENTS do not follow it.** Observed repeatedly: an agent creates a wikimem
 page whose title is a MEMORY'S DESCRIPTION — a long, specific, useless filename like
 `implementation-of-duckdb-ingestion-of-otel-logs.md` — instead of putting that atom into a broad TOPIC
 page like `agents-tracing.md` or `claude-telemetry-and-logging.md`. One memory becomes one orphan page;
