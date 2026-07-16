@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline
 description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, and the CPV-only validate policy"
 ocd: 2026-06-13
-lmd: 2026-06-25
+lmd: 2026-07-16
 metadata:
   node_type: memory
   type: project
@@ -69,8 +69,13 @@ ordered set of gates; **any gate failing exits non-zero and the release stops**
 13. **Step 11 — commit** the bump + CHANGELOG (stages only known-modified files
     by name — NEVER `git add -A`, which could pick up secrets or scratch).
 14. **Step 12 — annotated tag** `vX.Y.Z` whose body is the extracted release
-    notes.
-15. **Step 13 — push** commit + tag to `origin/<default-branch>`.
+    notes, PLUS the bare **resolver twin tag** `<plugin-name>--vX.Y.Z` — Claude
+    Code ≥ 2.1.110 dependents resolve `dependencies` version constraints ONLY
+    against `{name}--v{version}` tags, so a release without the twin tag breaks
+    every dependent's constrained install (#85/#90; shipped v0.45.0). The
+    resolution mechanics live on the USER-scope `claude-plugin-dependencies`
+    page.[^3]
+15. **Step 13 — push** commit + BOTH tags to `origin/<default-branch>`.
 16. **Step 14 — create the GitHub release** (mandatory; `gh release create` with
     `--notes-file`) so Claude Code's plugin-update detector sees the new version.
     Missing/unauthenticated `gh` fails the pipeline (no silent skip).
@@ -140,3 +145,15 @@ name, never literal paths or secrets).
   publish.py's), MASKING a validate failure — drop the trailing echo, and ALWAYS
   recheck version+branch after a "successful" publish (a failed validate bumps
   nothing and pushes nothing).
+[^3]: [ocd:2026-07-16 lmd:2026-07-16] Three v0.45.0 release lessons. (a) TWO SIZE
+  gates exist and both bit: CPV `--strict` caps each SKILL.md body at **5000 BPE
+  tokens** (janitor-memory-write ~5538 and consolidate ~5095 blocked as MAJORs
+  after feature additions; fix = compress the body, push detail into
+  `references/` — it took TWO shave rounds, the first left write at 5007); and
+  the repo's own `test_shipped_rules_stay_under_the_context_floor_cap` caps the
+  shipped `rules/*.md` corpus at **52000 bytes** and sat at ZERO headroom, so
+  any rule addition must DISPLACE an equal number of bytes from the corpus. (b)
+  I committed a "fix" (99a611e) the gate still rejected — run the failing gate
+  BEFORE the commit that claims to fix it, not after. (c) The resolver twin tag
+  was MISSING from every pre-0.45.0 release; publish.py Step 12/13 now emits it
+  automatically (7b47f7c) — never hand-tag it, the pipeline owns it.

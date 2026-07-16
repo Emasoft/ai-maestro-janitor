@@ -2,7 +2,7 @@
 name: project_janitor_publish_blocked_cpv_fps
 description: "janitor won't publish / publish.py fails the CPV strict gate / why is the janitor blocked from publishing / cpv flags the scanner's own patterns / how was the publish unblocked / CI validate fails but the local publish gate passed on the same commit / the Release job keeps getting CANCELLED at exactly the job timeout / which CPV version should we pin and how do I bump it"
 ocd: 2026-06-11
-lmd: 2026-07-09
+lmd: 2026-07-16
 metadata:
   node_type: memory
   type: project
@@ -68,8 +68,8 @@ then triage each finding: real → devitalize/remove (never suppress); FP/gap �
 file a NEW CPV issue (see #112/#113/#115/#116/#158/#160 as templates). publish.py
 Step 4 is the ONLY validation (CPV plugin via uvx) — never add local validator
 copies. Note the recurring FP shape: CPV rules keep firing on plugin-AUTHORED
-markdown (`design/**` prose, `rules/**`), never on the code — the fix belongs in
-CPV's path-classification layer, not per-detector. See also
+markdown (`design/**` prose, `rules/**`) and doc comments, never on live code —
+the fix belongs in CPV's path-classification layer, not per-detector.[^5] See also
 `[[janitor-publish-pipeline]]` (the full gate-order page) and
 `[[project_rotator_let_429_happen_version_skew]]` (the rotator deadlock that this
 publish-block kept alive — a fix doesn't run until it's published).
@@ -139,3 +139,12 @@ STATE §1.[^2]
   'claude-plugins-validation'`), not for the places you expect it. Fixed in v0.35.8;
   all three sites now carry a BUMP PROTOCOL comment naming the other two, so a future
   bump cannot pin a subset.
+[^5]: [ocd:2026-07-16 lmd:2026-07-16] v0.45.0 occurrence of the recurring FP shape
+  (a scanner reading prose as code): skillaudit read a memgrep Rust DOC COMMENT —
+  a backtick-wrapped variable plus the phrase "the command exits non-zero" in one
+  sentence — as CMD_INJECTION. It was a demoted NIT, and **demoted NITs still
+  BLOCK under `--strict`** (exit 4 = NIT-block, same stop as exit 2). Cleared by
+  rewording the prose with identical meaning (b7dca2d), per the never-suppress
+  policy. Lesson: scanner-prose devitalization applies to CODE COMMENTS too, not
+  just markdown — in shipped prose, keep backtick-code tokens and execution verbs
+  ("exits", "runs", "executes") out of the same sentence.
