@@ -3,7 +3,7 @@ trdd-id: PZLVT2RN
 title: ai-maestro-tailored janitor (#J) + normal-janitor scope-flip (#N) + shared-codebase two-backend split
 column: backburner
 created: 2026-07-16T15:44:27+0200
-updated: 2026-07-16T16:03:13+0200
+updated: 2026-07-16T16:05:06+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -24,15 +24,15 @@ server half is ai-maestro's `TRDD-KCRMSNL7` (parent) + `TRDD-H24DF6ZC` (R16 toke
 - **Alignment** — DONE. ai-maestro accepted every point, confirmed the Q3 contract, authored its
   server-side TRDDs. AgentlensPro locked its CLI contract with CI tests. Nothing moves under
   KCRMSNL7 on my side.
-- **This TRDD** — authored (design captured); `column: backburner`. NOT yet in plan mode, NO code.
-- **Ack on janitor#100** — the NEXT ACTION after authoring.
+- **This TRDD** — authored + committed (`b04dd92`); `column: backburner`. NOT yet in plan mode, NO code.
+- **Ack on janitor#100** — DONE (comment `4992821256`, 2026-07-16): aligned, PZLVT2RN authored,
+  nothing of mine moves under KCRMSNL7.
 - **Implementation** — NOT started, and MUST NOT start before the owner directs (owner process:
   coordinate → TRDDs → plan mode). This TRDD is the "TRDDs" step.
 
-**NEXT ACTION (one concrete step):** Post the alignment ack on `Emasoft/ai-maestro-janitor#100`
-(shared identity — sign `_Posted by the Claude developing **ai-maestro-janitor**…_`): "aligned,
-authored TRDD-PZLVT2RN against the confirmed contract; nothing of mine moves under KCRMSNL7." Then
-STOP for owner direction.
+**NEXT ACTION (one concrete step):** AWAIT owner direction. Both halves (this + server's KCRMSNL7)
+are now TRDD'd; the next legitimate step is the owner saying "go to plan mode". Do NOT enter plan
+mode or write `#J`/`#N` code before then. Publish stays HELD.
 
 **Load-bearing facts / gotchas:**
 - The #7 machine-wide singleton is the `daemon.flock`, NOT install scope — so `#N`'s USER→LOCAL
