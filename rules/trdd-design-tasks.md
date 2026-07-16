@@ -62,13 +62,10 @@ machine-private) — see step 1.
    disagreement the path wins and the field is a lint target.
 
 2. **Filename.** `TRDD-<YYYYMMDD_HHMMSS±HHMM>-<id8>-<slug>.md`. `<id8>` is an **8-char
-   UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id; there is **no UUID**. It must
-   be unique across **BOTH roots**, so the collision check scans both: a citation that could
-   mean two TRDDs destroys the one property the whole citation grammar rests on. Test for a
-   taken id with `find … | grep -q .`, **never** `ls <glob>` — an unmatched glob is DROPPED by
-   some shells, so `ls` runs with no args, lists the cwd and exits 0, which a
-   regenerate-on-collision loop reads as "taken" forever (an infinite loop, not a nit). Copy
-   the id/timestamp recipe from the full reference.
+   UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id (no UUID), unique across
+   **BOTH roots** (the collision check scans both). Test for a taken id with
+   `find … | grep -q .`, **never** `ls <glob>` — an unmatched glob can make `ls` list the
+   cwd and exit 0 → an infinite regenerate loop. Id/timestamp recipe: the reference.
 3. **Reference a TRDD as `TRDD-<id8>`** (or `#<id8>` casually). Lookups are
    case-insensitive; the id is always WRITTEN uppercase. Put it in the commit subject of
    every commit that implements it, and in any TaskCreate entry that tracks it.
@@ -107,12 +104,9 @@ machine-private) — see step 1.
 9. **NPT vs EHT.** `npt:` = Necessary Prerequisite Tasks — must finish BEFORE the parent
    proceeds past `dev`. `eht:` = Effects Handling Tasks — handle the CONSEQUENCES of the
    parent's work; the parent may land its code but **cannot reach `complete` until every
-   EHT is terminal** (the completion gate). **Derived TRDDs are MANDATORY (the platelet
-   rule):** `eht: []` is an assertion, usually false — verify each platelet against its
-   downstream surface. **Depth is exactly 1:** a derived TRDD has `npt: []`/`eht: []` and
-   is never a `parent-trdd:`; sibling ordering uses `blocked-by:`, never `npt:`/`eht:`.
-   `created-by:` is set once; a refused proposal archives `approved: false`; only the
-   superseding actor sets `superseded-by:`. (Full semantics: the reference.)
+   EHT is terminal**. **Derived TRDDs are MANDATORY and depth-1**: a derived TRDD has
+   empty `npt:`/`eht:` and is never a `parent-trdd:`; siblings order via `blocked-by:`;
+   `created-by:` is set once; refusals archive `approved: false`. (Full: the reference.)
 10. **STATE head block — MANDATORY once a TRDD spans more than one session.** A TRDD grows
     append-only, so a reader (or a compaction summary) hits the OLDEST, often SUPERSEDED
     facts first. Immediately after the title, before the first body section:
