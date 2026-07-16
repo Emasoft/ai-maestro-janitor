@@ -1,13 +1,14 @@
 ---
 trdd-id: 93TKV769
 title: never-stop keep-going nudge is ON by default in every mode (fleet worked idle overnight)
-column: testing
+column: complete
 created: 2026-07-16T17:46:21+0200
-updated: 2026-07-16T17:46:21+0200
+updated: 2026-07-16T17:50:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
-implementation-commits: []
+release-via: publish
+implementation-commits: [7cd8ea0]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-07-16
@@ -27,13 +28,14 @@ absence" + "no matter what, even in maintenance mode, it always nudges the claud
 - **IMMEDIATE (running fleet)** — DONE. Wrote the `keep-going` flag into all **41** armed projects,
   and cleared **6** stray local + the global maintenance flags. The CURRENTLY-CACHED dispatch.py
   (v0.45.0) already honors `keep-going`, so the live fleet nudges on the next fire with NO publish.
-- **DURABLE (code)** — DONE (this commit). `_phase_keep_going_nudge` defaults ON; silenced only by
-  the explicit `keep-going-off` sentinel (full mode) or `keep_going_default=false`; maintenance
-  always nudges. Tests green (59 in `test_dispatch_phases.py`), ruff clean.
+- **DURABLE (code)** — DONE + COMMITTED (`7cd8ea0`). `_phase_keep_going_nudge` defaults ON;
+  silenced only by the explicit `keep-going-off` sentinel (full mode) or `keep_going_default=false`;
+  maintenance always nudges. Full suite 13111 pass (the one inverted test fixed), ruff clean.
 - **PUBLISH** — the durable code reaches the fleet only after a release + daemon roll + reload.
   Still HELD by the owner's gate; the IMMEDIATE flag-write is what un-idles the fleet now.
 
-**NEXT ACTION:** run the full `pytest` + `ruff` gate, then commit. Publish only on the owner's go.
+**NEXT ACTION:** none — code complete + committed + verified. `column: complete`, `release-via:
+publish`. The ONLY remaining step is the (held) publish; take it only on the owner's explicit go.
 
 ## Problem
 
