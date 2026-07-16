@@ -1,9 +1,9 @@
 ---
 trdd-id: 3KDN6O9Z
 title: window-burn alarm mis-blamed a workspace — gate the agentlens cause on materiality
-column: complete
+column: published
 created: 2026-07-16T20:12:44+0200
-updated: 2026-07-16T20:12:44+0200
+updated: 2026-07-16T20:24:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project

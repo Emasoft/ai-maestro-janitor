@@ -1,9 +1,9 @@
 ---
 trdd-id: 93TKV769
 title: never-stop keep-going nudge is ON by default in every mode (fleet worked idle overnight)
-column: complete
+column: published
 created: 2026-07-16T17:46:21+0200
-updated: 2026-07-16T17:50:00+0200
+updated: 2026-07-16T20:24:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project

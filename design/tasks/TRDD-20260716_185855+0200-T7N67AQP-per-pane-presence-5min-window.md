@@ -1,9 +1,9 @@
 ---
 trdd-id: T7N67AQP
 title: self-trigger presence is PER-PANE with a 5-minute window (was machine-global, 30 min)
-column: complete
+column: published
 created: 2026-07-16T18:58:56+0200
-updated: 2026-07-16T18:58:56+0200
+updated: 2026-07-16T20:24:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
