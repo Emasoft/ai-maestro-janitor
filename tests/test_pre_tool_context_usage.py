@@ -292,6 +292,72 @@ def test_dropping_below_threshold_does_not_re_arm_other_sessions(tmp_path: Path)
     assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(65), project=p)) is not None
 
 
+# ---------- issue #79: PREPARE gets a periodic re-nudge while it persists ---------------
+#
+# The %-band advisory above already only announces on a genuine climb, never periodically
+# (that part already matched the "no re-nudge at a steady tier" fix). PREPARE is the one
+# additionalContext tier in this hook close enough to a forced compaction to be worth
+# repeating while it lingers — the hook's analog of the sibling token-budget hook's "hard
+# tier persists" clause. These tests exercise `_prepare_should_emit` directly and the real
+# hook end-to-end.
+
+
+def _prepare_snapshot(tokens: int, pct: int = 65) -> dict:
+    return {"pct": pct, "tokens": tokens, "window": 1_000_000, "ts": int(time.time())}
+
+
+def test_prepare_should_emit_fires_on_claim_then_renudges_after_interval(tmp_path: Path) -> None:
+    hook = _import_hook()
+    p = tmp_path / "proj"
+    (p / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    assert hook._prepare_should_emit(str(p), "s1", 1000, 600) is True, "first claim fires"
+    assert hook._prepare_should_emit(str(p), "s1", 1300, 600) is False, "inside the window: silent"
+    assert hook._prepare_should_emit(str(p), "s1", 1600, 600) is True, "600s elapsed: renudges"
+    assert hook._prepare_should_emit(str(p), "s1", 1650, 600) is False, "clock reset by the renudge"
+
+
+def test_prepare_renudge_zero_disables_periodic_but_not_the_first_claim(tmp_path: Path) -> None:
+    """`renudge_s <= 0` disables ONLY the periodic half — the transition (first-claim)
+    half stays governed by the latch, matching the "0 = documented opt-out" convention."""
+    hook = _import_hook()
+    p = tmp_path / "proj"
+    (p / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    assert hook._prepare_should_emit(str(p), "s1", 1000, 0) is True
+    assert hook._prepare_should_emit(str(p), "s1", 999_999, 0) is False
+
+
+def test_prepare_alert_fires_end_to_end_then_silent_within_the_renudge_window(tmp_path: Path) -> None:
+    """The PREPARE alert fires on first entry into the zone; an immediate repeat call —
+    well inside the default 600s renudge window — must be silent."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    env = {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "700000"}
+    s = {"session_id": "s1"}
+    first = _ctx(_run(s, enabled=True, snapshot=_prepare_snapshot(650_000), project=p, extra_env=env))
+    second = _ctx(_run(s, enabled=True, snapshot=_prepare_snapshot(650_000), project=p, extra_env=env))
+    assert first is not None and "PREPARE" in first
+    assert second is None, "an immediate repeat inside the renudge window must be silent"
+
+
+def test_prepare_renudge_fires_end_to_end_after_the_interval(tmp_path: Path) -> None:
+    """A stale prepare-nudge stamp -> the next in-zone call re-fires, proving the periodic
+    renudge (not just a one-shot-forever latch) is wired through main()."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    env = {
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "700000",
+        "CLAUDE_PLUGIN_OPTION_CONTEXT_PREPARE_RENUDGE_S": "5",
+    }
+    s = {"session_id": "s1"}
+    first = _ctx(_run(s, enabled=True, snapshot=_prepare_snapshot(650_000), project=p, extra_env=env))
+    assert first is not None
+    # Backdate the stamp past the 5s window so the NEXT call sees the interval as elapsed.
+    stamp = p / ".janitor" / "state" / "context-prepare-last-nudge.ts"
+    stamp.write_text(str(int(time.time()) - 10), encoding="utf-8")
+    second = _ctx(_run(s, enabled=True, snapshot=_prepare_snapshot(650_000), project=p, extra_env=env))
+    assert second is not None, "renudge must fire once the interval has elapsed"
+
+
 def test_latch_fails_closed_when_it_cannot_be_recorded(tmp_path: Path) -> None:
     """If the latch cannot be written we CANNOT bound repeats, so we must stay SILENT.
 

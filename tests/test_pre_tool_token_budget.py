@@ -369,97 +369,137 @@ def test_same_bucket_emits_identical_text(tmp_path: Path) -> None:
     assert a != c, "different bucket -> different string"
 
 
-# ---------- TRDD-K1RJUYGK: repeat-suppression must fail CLOSED -------------------------
+# ---------- issue #79: throttle to STATE TRANSITIONS, not a time-windowed repeat --------
+#
+# TRDD-4MMXTJFB / TRDD-K1RJUYGK's `_repeat_suppressed` (removed) periodically re-nudged a
+# STEADY tier (advisory included) every window. agentlensPro's raw-body measurement in
+# issue #79 — taken AFTER K1RJUYGK shipped — still classified HOOK_INJECTION as the #2
+# cache-break cause (~440-520k tokens re-billed per strip). `_track_tier` replaces it:
+# advisory nudges ONLY on a genuine tier change (never periodically); hard still gets a
+# periodic renudge, but on a shorter, hard-only interval (default 600s, was 1800s for
+# every tier). These tests exercise `_track_tier` directly, mirroring the old suite's
+# style of unit-testing the throttle helper in isolation.
 
 
-def test_repeat_suppression_fails_closed_when_the_stamp_cannot_be_written(tmp_path: Path) -> None:
-    """An unwritable state dir must SUPPRESS the nudge, never inject it.
+def test_track_tier_fails_closed_without_project_dir() -> None:
+    """No project dir → nowhere to persist the last tier → cannot detect a transition →
+    stay SILENT (fail closed, same direction as the removed `_repeat_suppressed`)."""
+    hook = _import_hook()
+    assert hook._track_tier("hard", "", 1000, 600) is False
+    assert hook._track_tier("advisory", "", 1000, 600) is False
 
-    This inverts the original fail-OPEN default ("never suppress on doubt"). Injecting is the
-    expensive act: every injected block is later STRIPPED by Claude Code, and the strip mutates
-    the cached prefix, re-billing everything after it. Failing open meant "we cannot remember
-    warning you, so warn again" — i.e. warn on EVERY tool call, the worst possible outcome. The
-    hard-tier `deny` (a decision field, not an injected block) remains the backstop.
-    """
+
+def test_track_tier_window_disabled_always_fresh(tmp_path: Path) -> None:
+    """`hard_renudge_s <= 0` is the documented full opt-out: every non-ok tier is always
+    fresh (restores the pre-issue-#79 always-nudge behavior), and "ok" never is."""
     hook = _import_hook()
     proj = tmp_path / "proj"
-    state = proj / ".janitor" / "state"
-    state.mkdir(parents=True, exist_ok=True)
-    state.chmod(0o500)  # r-x: the stamp can be neither created nor replaced
+    assert hook._track_tier("advisory", str(proj), 1000, 0) is True
+    assert hook._track_tier("advisory", str(proj), 1001, 0) is True  # steady, still fresh
+    assert hook._track_tier("hard", str(proj), 1002, -5) is True
+    assert hook._track_tier("ok", str(proj), 1003, 0) is False
+
+
+def test_track_tier_emits_only_on_transition_for_advisory(tmp_path: Path) -> None:
+    """A steady ADVISORY tier is NOT fresh after the first call — no periodic re-nudge at
+    all (the behavior change from the old uniform time window)."""
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    assert hook._track_tier("advisory", str(proj), 1000, 600) is True, "ok(unseen)->advisory is a transition"
+    assert hook._track_tier("advisory", str(proj), 1010, 600) is False, "steady advisory: silent"
+    assert hook._track_tier("advisory", str(proj), 100_000, 600) is False, "still silent no matter how long it sits"
+    assert hook._track_tier("hard", str(proj), 100_010, 600) is True, "advisory->hard is a transition"
+    assert hook._track_tier("hard", str(proj), 100_020, 600) is False, "steady hard, inside the renudge window"
+    assert hook._track_tier("advisory", str(proj), 100_030, 600) is True, "hard->advisory is a transition"
+
+
+def test_track_tier_hard_renudges_after_interval(tmp_path: Path) -> None:
+    """A steady HARD tier re-fires once `hard_renudge_s` has elapsed since the last
+    emission, and the elapsed-clock resets on each re-fire."""
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    assert hook._track_tier("hard", str(proj), 1000, 600) is True, "first hard observation"
+    assert hook._track_tier("hard", str(proj), 1300, 600) is False, "300s < 600s: still silent"
+    assert hook._track_tier("hard", str(proj), 1599, 600) is False, "599s < 600s: still silent"
+    assert hook._track_tier("hard", str(proj), 1600, 600) is True, "600s elapsed: renudge fires"
+    assert hook._track_tier("hard", str(proj), 1650, 600) is False, "clock reset by the renudge"
+    assert hook._track_tier("hard", str(proj), 2200, 600) is True, "another 600s: renudges again"
+
+
+def test_track_tier_ok_is_recorded_so_a_later_climb_is_a_fresh_transition(tmp_path: Path) -> None:
+    """The "ok" tier is tracked too (even though it never itself nudges) — otherwise
+    advisory -> ok -> advisory would be missed as a "steady advisory" replay of the FIRST
+    advisory's stale persisted state (issue #79's explicit ok<->advisory example)."""
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    assert hook._track_tier("advisory", str(proj), 1000, 600) is True
+    assert hook._track_tier("ok", str(proj), 1010, 600) is False, "advisory->ok never nudges"
+    reason = "ok->advisory IS a fresh transition, even though 'ok' itself never emitted — proves 'ok' observations are persisted, not skipped"
+    assert hook._track_tier("advisory", str(proj), 1020, 600) is True, reason
+
+
+def test_track_tier_recovers_from_a_corrupt_stamp(tmp_path: Path) -> None:
+    """A garbled state file resolves to 'never seen before' — the fail-open direction that
+    can only cause an EXTRA nudge, never suppress a real transition."""
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    state_dir = proj / ".janitor" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "token-budget-last-tier.txt").write_text("not a valid stamp\n\x00\xff", encoding="utf-8")
+    assert hook._track_tier("hard", str(proj), 1000, 600) is True
+
+
+def test_track_tier_fails_closed_when_the_stamp_dir_is_unwritable(tmp_path: Path) -> None:
+    """An unwritable state dir must still resolve the CURRENT call from its (unreadable)
+    read side — `_read_last_tier` fails open to "" — so the first call still fires; but a
+    write failure must never crash the hook."""
+    hook = _import_hook()
+    proj = tmp_path / "proj"
+    state_dir = proj / ".janitor" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.chmod(0o500)  # r-x: the stamp can be neither created nor replaced
     try:
-        assert hook._repeat_suppressed("t1", 1000, str(proj), 1800) is True
+        assert hook._track_tier("hard", str(proj), 1000, 600) is True
     finally:
-        state.chmod(0o700)
+        state_dir.chmod(0o700)
 
 
-def test_repeat_suppression_still_emits_the_first_time_and_silences_the_repeat(tmp_path: Path) -> None:
-    """Happy path is unchanged: first emission passes, an identical key inside the window is
-    suppressed, and the window is the 30-minute floor (raised from 180s by TRDD-K1RJUYGK)."""
+def test_hard_default_renudge_is_ten_minutes() -> None:
+    """issue #79 explicitly asks for a 10-minute default (down from the old 30-minute
+    window that used to also cover a steady advisory)."""
     hook = _import_hook()
-    proj = tmp_path / "proj"
-    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
-    assert hook._repeat_suppressed("t1", 1000, str(proj), hook._DEFAULT_REPEAT_S) is False
-    assert hook._repeat_suppressed("t1", 1100, str(proj), hook._DEFAULT_REPEAT_S) is True
-    # ...and after the window elapses it may warn again.
-    assert hook._repeat_suppressed("t1", 1000 + hook._DEFAULT_REPEAT_S + 1, str(proj), hook._DEFAULT_REPEAT_S) is False
-    assert hook._DEFAULT_REPEAT_S >= 1800
+    assert hook._DEFAULT_HARD_RENUDGE_S == 600
 
 
-def test_alternating_keys_do_not_defeat_suppression(tmp_path: Path) -> None:
-    """Each key is suppressed on its OWN clock — an A/B alternation must not re-emit both.
-
-    The stamp used to hold a SINGLE `"<key> <ts>"` line, so it only ever suppressed a
-    CONSECUTIVE repeat. The real key is `tier:signal-set` (`advisory:10`, `hard:11`, ...) and
-    it flips between turns as the in-progress turn's output/cache-miss signals change. Every
-    flip saw `prev_key != key` and re-emitted — so in an oscillating runaway session, the one
-    the guard exists to police, the 30-minute window suppressed NOTHING.
-    """
-    hook = _import_hook()
-    proj = tmp_path / "proj"
-    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
-    w = hook._DEFAULT_REPEAT_S
-    assert hook._repeat_suppressed("advisory:10", 1000, str(proj), w) is False  # first A
-    assert hook._repeat_suppressed("hard:11", 1010, str(proj), w) is False      # first B
-    # Back to A inside its window: MUST still be suppressed (B must not have evicted A).
-    assert hook._repeat_suppressed("advisory:10", 1020, str(proj), w) is True
-    assert hook._repeat_suppressed("hard:11", 1030, str(proj), w) is True
-    # Each key keeps its own clock: A's window elapses independently of B's.
-    assert hook._repeat_suppressed("advisory:10", 1000 + w + 1, str(proj), w) is False
-    assert hook._repeat_suppressed("hard:11", 1000 + w + 1, str(proj), w) is True
+# ---------- end-to-end: the real hook wires _track_tier correctly -----------------------
 
 
-def test_no_project_dir_fails_closed_but_explicit_zero_window_still_disables() -> None:
-    """No project dir → nowhere to stamp → cannot bound repeats → stay SILENT (fail closed).
-
-    But `window_s <= 0` is the documented way to DISABLE suppression, and a config that says
-    "never suppress" is an instruction, not a doubt — so it must still fail OPEN.
-    """
-    hook = _import_hook()
-    assert hook._repeat_suppressed("t1", 1000, "", 1800) is True   # cannot bound → silent
-    assert hook._repeat_suppressed("t1", 1000, "", 0) is False     # explicitly configured off
-
-
-def test_suppressed_hard_repeat_injects_nothing(tmp_path: Path) -> None:
-    """A suppressed HARD repeat must emit NOTHING — not even a short reminder line.
-
-    This path used to re-inject a "tiny, byte-stable" `additionalContext` reminder on every
-    hard-tier tool call. That is precisely the TRDD-YRPUSIFY reasoning TRDD-K1RJUYGK
-    falsified: the cost is not the block's size or the stability of its text, it is that
-    Claude Code STRIPS the block retroactively and the strip re-bills the cached suffix. So
-    the suppression path was itself injecting on every call in the hook's own hot path.
-    """
-    hook = _import_hook()
-    src = _HOOK.read_text(encoding="utf-8")
-    # The reminder constant is gone, and no _context() call survives on the suppressed path.
-    assert "_HARD_REPEAT_LINE" not in src, "the byte-stable hard-repeat reminder must not return"
-    assert not hasattr(hook, "_HARD_REPEAT_LINE")
-    # End-to-end: a hard-tier turn, run TWICE against a real project dir with the default
-    # window. The first call nudges; the second must be COMPLETELY silent (no stdout at all).
+def test_second_identical_hard_call_is_silent_then_renudges_after_the_interval(tmp_path: Path) -> None:
+    """Two identical hard-tier tool calls in a row against a real project dir: the first
+    nudges, the second (same tier, well inside the renudge window) is COMPLETELY silent —
+    the concrete fix for issue #79's measured per-strip-event cost."""
     proj = tmp_path / "proj"
     (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
     t = _write_transcript(tmp_path, _user("go"), _assistant(500_000, tool=True))
-    env = {_BUDGET_HARD: "1000", _REPEAT: str(hook._DEFAULT_REPEAT_S)}
+    env = {_BUDGET_HARD: "1000", _REPEAT: "600"}
     first = _run(str(t), project_dir=str(proj), env_extra=env)
     second = _run(str(t), project_dir=str(proj), env_extra=env)
     assert _ctx(first) is not None, "the first hard nudge must fire"
-    assert second.stdout.strip() == "", f"a suppressed hard repeat must inject NOTHING, got: {second.stdout!r}"
+    assert second.stdout.strip() == "", f"a steady hard tier inside the renudge window must inject NOTHING, got: {second.stdout!r}"
+
+
+def test_deny_path_fires_every_time_regardless_of_the_additionalContext_throttle(tmp_path: Path) -> None:
+    """ENFORCEMENT must be UNCHANGED by issue #79: two consecutive hard+spawner+ENFORCE
+    calls must BOTH deny, even though the additionalContext channel would suppress the
+    second one — the deny is a decision field, not a strippable transcript block."""
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True, exist_ok=True)
+    t = _write_transcript(tmp_path, _user("go"), _assistant(500_000, tool=True))
+    env = {_BUDGET_HARD: "1000", _REPEAT: "600", _ENFORCE: "true"}
+    first = _decision(_run(str(t), tool_name="Task", project_dir=str(proj), env_extra=env))
+    second = _decision(_run(str(t), tool_name="Task", project_dir=str(proj), env_extra=env))
+    assert first.get("permissionDecision") == "deny"
+    assert second.get("permissionDecision") == "deny", "the deny path must never be throttled"

@@ -36,6 +36,11 @@ CONFIG (all `CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_*`; any threshold of 0 disables t
   * TURN_CACHE_CREATION_HARD — hard cache-miss-write budget (default 75000).
   * ENFORCE                  — DEFAULT OFF; when on, a `Task`/`Agent` spawn at the hard
                                tier is DENIED (not just advised).
+  * REPEAT_S                 — issue #79: seconds a STEADY hard tier must persist before
+                               its `additionalContext` nudge re-fires (default 600 = 10m).
+                               Does NOT apply to advisory (which only nudges on a tier
+                               CHANGE, never periodically) and does NOT gate the deny path.
+                               <= 0 disables ALL throttling (every non-ok tier always nudges).
 
 DATA: reuses `token_meter.tail_turn_usage` (the tested turn-boundary parser the Stop-hook
 meter uses) + `token_meter.evaluate_turn_budget` (a pure decision fn). No new accounting.
@@ -52,6 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
 import time
 
+import state  # noqa: E402  # atomic_write — the tier-transition state file (issue #79)
 import token_meter  # noqa: E402
 
 _DEFAULT_TURN_OUTPUT = 10_000
@@ -71,84 +77,95 @@ _DEFAULT_COMPACT_GRACE_S = 600
 _SPAWNER_TOOLS = frozenset({"Task", "Agent"})
 
 
-# TRDD-4MMXTJFB — repeat-nudge suppression window (seconds). While a turn stays in the
-# SAME (tier, signal-set) state, the full nudge paragraph is injected ONCE; repeats within
-# the window are silenced (advisory) or shrunk to one stable line (hard). Every injected
-# nudge rides the transcript and is re-read by all later turns, so re-injecting the same
-# ~120-token paragraph on EVERY tool call is exactly the context bloat this hook polices.
-# TRDD-K1RJUYGK raised this from 180s. 3 minutes sounds conservative but is not: a long
-# session re-injects the nudge every 3 minutes for hours, and EVERY injection seeds a fresh
-# system-reminder block that Claude Code later STRIPS retroactively — and it is the strip,
-# not the text, that mutates the cached prefix and re-bills everything after it. A 30-minute
-# floor cuts the injection count ~10x while still re-warning a genuinely runaway session.
-# Bucketing the text (TRDD-YRPUSIFY) does NOT substitute for this: a stripped block costs the
-# same no matter what it said.
+# issue #79 — throttle to STATE TRANSITIONS instead of a time-windowed repeat-suppression.
 #
-# NOTE: an earlier version of this comment blamed the janitor's two no-matcher PreToolUse
-# hooks for a measured "#1 cache-break cause on the machine ($23.05)". That attribution is
-# RETRACTED (see the TRDD) — agentlensPro's `hook: <Event>` label names the event BOUNDARY a
-# changed block was observed at, not its emitter. The mechanism is real and bounding the
-# injection is right; the blame was not established. Do not restore a $ figure here.
-_DEFAULT_REPEAT_S = 1800
+# TRDD-4MMXTJFB (a repeat-suppression keyed on `tier:signal-set`, 180s) and TRDD-K1RJUYGK
+# (raised the window to 1800s, fixed a fail-open bug and an A/B-alternation bypass) both
+# reduced injection VOLUME but kept periodically RE-nudging a steady ADVISORY tier every
+# window — agentlensPro's raw-body measurement in issue #79 (opened 2 days after K1RJUYGK
+# shipped) still classified HOOK_INJECTION as the #2 cache-break cause, ~25.6% of wasted
+# cache_creation. The remaining waste was exactly those steady-state re-nudges: an
+# `additionalContext` block is not free just because its TEXT is byte-stable (TRDD-YRPUSIFY
+# tried that and the data falsified it) — Claude Code strips it retroactively regardless of
+# content, and the strip mutates the cached prefix.
+#
+# The fix: persist the LAST COMPUTED tier (not "last emitted", so an "ok" tier is recorded
+# too — see `_track_tier`) and emit an advisory ONLY on a genuine tier change. The ADVISORY
+# tier never periodically re-nudges on its own now (that's the behavior change from
+# K1RJUYGK's uniform 1800s window). The HARD tier still gets a periodic re-nudge — a
+# sustained runaway is worth reminding about — but on a shorter, HARD-only interval: default
+# 10 minutes (600s), down from the old 30-minute window that used to also cover advisory.
+_DEFAULT_HARD_RENUDGE_S = 600
 
-# Cap the per-key stamp file. The key space is (tier x signal-set) — a handful of values —
-# so this only trims genuinely stale entries.
-_STAMP_MAX_KEYS = 32
+
+def _last_tier_path(project_dir: str) -> Path:
+    return Path(project_dir) / ".janitor" / "state" / "token-budget-last-tier.txt"
 
 
-def _repeat_suppressed(key: str, now: int, project_dir: str, window_s: int) -> bool:
-    """True iff this nudge `key` was already emitted < `window_s` ago (and stamp the
-    emission otherwise). The stamp lives beside the other per-session state files.
+def _read_last_tier(project_dir: str) -> tuple[str, int]:
+    """The (tier, epoch) persisted by the previous call, or ("", 0) when absent/corrupt.
 
-    Keeps a stamp PER KEY, not a single last-key stamp. The original stored one
-    `"<key> <ts>"` line, so it only ever suppressed a CONSECUTIVE repeat: the key is
-    `tier:signal-set` (e.g. `advisory:10`, `hard:11`) and it flips between turns as the
-    in-progress turn's output/cache-miss signals change. Any alternation —
-    advisory → hard → advisory — saw `prev_key != key` each time and re-emitted, so the
-    window suppressed nothing in exactly the runaway session it is meant to police.
-
-    Fails CLOSED (returns True → SUPPRESS) whenever the stamp cannot be read or written,
-    AND when there is no project dir to stamp into. TRDD-K1RJUYGK inverted this: it used to
-    fail OPEN ("never suppress on doubt"), which is exactly backwards now that INJECTING is
-    known to be the expensive act. Not being able to remember that we warned meant warning on
-    EVERY tool call — the worst possible outcome. Silence is the safe failure: the hard-tier
-    `deny` (a decision field, not an injected block) remains the backstop.
-
-    `window_s <= 0` is the one deliberate fail-OPEN: it is the documented way to DISABLE
-    repeat-suppression by config, and a config that says "never suppress" must be obeyed.
+    Read failures resolve to "never seen before" (tier ""), which — combined with
+    `_track_tier`'s fail-CLOSED behavior on a missing `project_dir` — means a corrupt or
+    unreadable stamp can only ever cause an EXTRA transition-emit, never suppress a real
+    one; the opposite direction (silently swallowing a genuine escalation) is the one this
+    hook must never risk.
     """
-    if window_s <= 0:
-        return False  # explicitly configured OFF — not a doubt, an instruction
+    try:
+        raw = _last_tier_path(project_dir).read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, OSError):
+        return "", 0
+    tier, _, ts_raw = raw.partition(" ")
+    try:
+        return tier, int(ts_raw)
+    except ValueError:
+        return "", 0
+
+
+def _write_last_tier(project_dir: str, tier: str, now: int) -> None:
+    """Best-effort persist via the shared atomic-write helper. A failed write just means
+    the NEXT call re-derives the transition from a stale tier — worst case one extra
+    emission, never a suppressed real one (see `_read_last_tier`)."""
+    try:
+        state.atomic_write(_last_tier_path(project_dir), f"{tier} {now}\n")
+    except OSError:
+        pass
+
+
+def _track_tier(tier: str, project_dir: str, now: int, hard_renudge_s: int) -> bool:
+    """Unconditional per-call bookkeeping (issue #79). Called ONCE per invocation for
+    every computed `tier` (including "ok"), regardless of whether it ends up producing a
+    deny or an additionalContext — so an "ok" observation is always recorded, which is
+    what makes a LATER ok->advisory climb detectable as a genuine transition rather than a
+    stale replay of whatever tier was last observed.
+
+    Returns True iff THIS call is a "fresh signal" worth an additionalContext nudge:
+      * the tier CHANGED since the last observed call (ok<->advisory<->hard, either
+        direction) — always fresh, except "ok" itself never nudges; or
+      * the tier is steadily "hard" and >= `hard_renudge_s` seconds have passed since the
+        last fresh signal — a sustained runaway is worth periodically re-flagging.
+    Any other case (steady ok, steady advisory, steady hard inside its renudge window) is
+    NOT fresh — the hook stays silent, which is the whole point of issue #79: a steady
+    tier no longer re-injects an `additionalContext` block on every tool call.
+
+    `hard_renudge_s <= 0` is the documented full opt-out (matches the pre-issue-#79
+    contract of the env var it reads from): every non-ok tier is always fresh and nothing
+    is persisted, restoring the always-nudge behavior. Missing `project_dir` fails CLOSED
+    (not fresh) — mirrors TRDD-K1RJUYGK: an unbounded per-call injection is worse than an
+    occasional missed reminder, and the hard-tier `deny` (a decision field, never
+    stripped) remains the real backstop for the case that matters most.
+    """
+    if hard_renudge_s <= 0:
+        return tier != "ok"
     if not project_dir:
-        return True  # nowhere to stamp → cannot bound repeats → stay silent (fail closed)
-    stamp = Path(project_dir) / ".janitor" / "state" / "token-budget-last-nudge.txt"
-    try:
-        raw = stamp.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raw = ""
-    except OSError:
-        return True  # cannot read → cannot bound → stay silent
-    seen: dict[str, int] = {}
-    for line in raw.splitlines():
-        try:
-            k, ts = line.rsplit(" ", 1)
-            seen[k] = int(ts)
-        except ValueError:
-            continue  # corrupt line — drop it, treat as never emitted
-    prev = seen.get(key)
-    if prev is not None and 0 <= now - prev < window_s:
+        return False
+    last_tier, last_ts = _read_last_tier(project_dir)
+    if tier != last_tier:
+        _write_last_tier(project_dir, tier, now)
+        return tier != "ok"
+    if tier == "hard" and (now - last_ts) >= hard_renudge_s:
+        _write_last_tier(project_dir, tier, now)
         return True
-    seen[key] = now
-    # Cap the file: keep only the most recent keys. The key space is tiny (tier x
-    # signal-set), so this only ever trims genuinely stale entries.
-    keep = sorted(seen.items(), key=lambda kv: kv[1])[-_STAMP_MAX_KEYS:]
-    try:
-        stamp.parent.mkdir(parents=True, exist_ok=True)
-        tmp = stamp.with_suffix(f".tmp.{os.getpid()}")
-        tmp.write_text("".join(f"{k} {ts}\n" for k, ts in keep), encoding="utf-8")
-        os.replace(tmp, stamp)
-    except OSError:
-        return True  # cannot record the emission → cannot bound repeats → stay silent
     return False
 
 
@@ -363,6 +380,14 @@ def main() -> int:
         ),
         ignore_cache_creation=ignore_cache_creation,
     )
+    # issue #79 — unconditional per-call tier bookkeeping, BEFORE building the response.
+    # Must run for every tier (including "ok") so a later climb is a detectable transition
+    # (see `_track_tier`), and must run whether the eventual response is a deny or an
+    # additionalContext — the two are gated differently below.
+    now_ts = int(time.time())
+    hard_renudge_s = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_REPEAT_S"), _DEFAULT_HARD_RENUDGE_S)
+    fresh_signal = _track_tier(verdict.tier, project_dir, now_ts, hard_renudge_s)
+
     resp = _response(
         verdict,
         usage,
@@ -370,31 +395,18 @@ def main() -> int:
         _optin(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_ENFORCE")),
     )
     if resp is not None:
-        # TRDD-4MMXTJFB — repeat-nudge suppression: only additionalContext nudges are
-        # deduped (a deny must ALWAYS fire — it gates a real spawn). Key = tier +
-        # signal-set (NOT the bucketed counts, which drift as the turn grows — the point
-        # is "same situation", not "same numbers").
+        # ENFORCEMENT is UNCHANGED (issue #79 explicitly scopes the throttle to the
+        # additionalContext channel only): a `deny` gates a real subagent spawn and must
+        # ALWAYS fire when the verdict says so — it is a decision field, never an injected
+        # transcript block, so it is never retroactively stripped and never re-bills the
+        # cached prefix. Only the additionalContext nudge is gated on `fresh_signal`.
         hso = resp.get("hookSpecificOutput", {})
-        if isinstance(hso, dict) and "additionalContext" in hso:
-            key = f"{verdict.tier}:{int(_has_signal(verdict.reasons, 'output '))}{int(_has_signal(verdict.reasons, 'cache-miss write'))}"
-            window_s = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_BUDGET_REPEAT_S"), _DEFAULT_REPEAT_S)
-            if _repeat_suppressed(key, int(time.time()), project_dir, window_s):
-                # SILENCE — emit nothing, for the hard tier too (TRDD-K1RJUYGK).
-                #
-                # This path used to re-emit a short `additionalContext` reminder on every
-                # hard-tier tool call, reasoning that a "tiny, byte-stable" block was cheap.
-                # That is exactly the TRDD-YRPUSIFY argument this TRDD falsified: the cost is
-                # not the block's SIZE or the stability of its TEXT, it is that Claude Code
-                # later STRIPS the block retroactively, in place — and that mutation lands
-                # inside the cached PREFIX, re-billing every token after it. A stripped block
-                # costs the same whatever it said. So the suppression path was itself
-                # injecting on every call in the hard tier — the hook's own hot path, in the
-                # exact runaway session it exists to police.
-                #
-                # The signal is not lost: the first full nudge already rides the transcript,
-                # and the hard-tier `deny` of a Task/Agent spawn (a decision field, NOT a
-                # strippable block) is the enforcement backstop.
-                return 0
+        if isinstance(hso, dict) and "additionalContext" in hso and not fresh_signal:
+            # SILENCE — a steady tier (or a hard tier still inside its renudge window)
+            # injects NOTHING. The signal is not lost: the transition nudge already rode
+            # the transcript, and the hard-tier `deny` (when ENFORCE is on) is the
+            # enforcement backstop regardless of this channel's state.
+            return 0
         _emit(resp)
     return 0
 

@@ -35,6 +35,17 @@ SAFETY (this hook fires on EVERY tool call in EVERY session — USER scope):
     the advisory — NEVER a stuck "denied with no way to compact". A short dedupe window
     means it triggers/denies at most once per compaction episode (no deny-after-resume
     loop, no /compact spam).
+
+issue #79 (2026-07): agentlensPro's raw-body cache-break measurement showed the janitor's
+no-matcher PreToolUse `additionalContext` nudges as the #2 cause of prompt-cache
+invalidation — every injected block is later STRIPPED by Claude Code retroactively,
+mid-transcript, and that strip re-bills everything after it as cache_creation. The %-band
+ADVISORY already only announces on a genuine climb (TRDD-K1RJUYGK), never periodically —
+that part already matched the fix. PREPARE now gets the same "transition, plus a periodic
+re-nudge while it persists" treatment as the sibling token-budget hook's hard tier (see
+`_prepare_should_emit`), since it is the one tier here close enough to a forced compaction
+to be worth repeating. ENFORCEMENT (the deny above) is untouched — a decision field is
+never stripped, so it was never part of the problem.
 """
 
 from __future__ import annotations
@@ -49,6 +60,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent  # scripts/hooks/
 sys.path.insert(0, str(_HERE.parent / "lib"))
 
+import state  # noqa: E402  # atomic_write — the latch + prepare-renudge state files (issue #79)
 import token_meter  # noqa: E402  # latest_context_size — transcript-based occupancy
 
 _DEFAULT_SUGGEST_PCT = 60
@@ -66,6 +78,15 @@ _LATCH_MAX_LINES = 200
 # PREPARE tier (TRDD-TKNSTP82 C): once we are within this many tokens of the predicted
 # auto-compact point, warn the agent to finish + hand off BEFORE the forced compaction.
 _DEFAULT_PREPARE_TOKENS = 30_000
+# issue #79: the %-band advisory below (60/70/80) already only nudges on a genuine climb
+# (never periodically) — that part already matched the "no re-nudge at a steady tier"
+# invariant. PREPARE is the one additionalContext tier in THIS hook that is genuinely
+# urgent (imminent forced compaction) and has NO other channel reminding the agent while
+# it lingers — unlike ENFORCEMENT (a `deny`, unaffected here) or a runaway (the sibling
+# token-budget hook's hard tier). So PREPARE is this hook's analog of "hard": it gets a
+# periodic re-nudge while it persists, on a SEPARATE, shorter interval than the old
+# once-per-climb latch alone would give it. Default matches the sibling hook (10 min).
+_DEFAULT_PREPARE_RENUDGE_S = 600
 
 
 def _truthy(raw: str | None, *, default: bool) -> bool:
@@ -242,10 +263,10 @@ def _claim_advisory(project_dir: str, session_id: str, tier: str) -> bool:
     if key in seen:
         return False
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_name(p.name + f".tmp.{os.getpid()}")
-        tmp.write_text("\n".join([*seen[-_LATCH_MAX_LINES:], key]) + "\n", encoding="utf-8")
-        os.replace(tmp, p)
+        # issue #79: reuse the shared atomic-write helper (write tmp, os.replace into
+        # place) instead of hand-rolling it here — same atomicity guarantee, one fewer
+        # bespoke implementation to keep in sync with the other hook's state files.
+        state.atomic_write(p, "\n".join([*seen[-_LATCH_MAX_LINES:], key]) + "\n")
     except OSError:
         return False  # could not record the claim → do not inject (fail closed)
     return True
@@ -282,11 +303,50 @@ def _release_advisory(project_dir: str, session_id: str) -> None:
     if len(kept) == len(seen):
         return  # this session holds no claims — do not rewrite the file
     try:
-        tmp = p.with_name(p.name + f".tmp.{os.getpid()}")
-        tmp.write_text("".join(f"{ln}\n" for ln in kept), encoding="utf-8")
-        os.replace(tmp, p)
+        state.atomic_write(p, "".join(f"{ln}\n" for ln in kept))
     except OSError:
         pass  # could not release → stays claimed → stays silent (fail closed, as above)
+
+
+def _prepare_renudge_path(project_dir: str) -> Path:
+    return Path(project_dir) / ".janitor" / "state" / "context-prepare-last-nudge.ts"
+
+
+def _mark_prepare_nudge(project_dir: str, now: int) -> None:
+    """Best-effort stamp of the last PREPARE emission. A failed write just means the next
+    call re-derives from a stale/missing stamp — worst case one extra nudge, never a
+    suppressed real one (mirrors the token-budget hook's `_write_last_tier`)."""
+    try:
+        state.atomic_write(_prepare_renudge_path(project_dir), str(now))
+    except OSError:
+        pass
+
+
+def _prepare_should_emit(project_dir: str, session_id: str, now: int, renudge_s: int) -> bool:
+    """issue #79 — TRUE iff the PREPARE alert should fire now: either this is a fresh claim
+    of the 'prepare' band (a genuine transition — see `_claim_advisory`), or PREPARE has
+    persisted for >= `renudge_s` seconds since it was last announced. Unlike the %-band
+    advisory (which never periodically re-nudges — see module docstring), PREPARE is close
+    enough to a forced compaction that a lingering warning is worth repeating; this is the
+    hook's analog of the sibling token-budget hook's "hard tier persists" clause.
+
+    `renudge_s <= 0` disables ONLY the periodic half — the transition half (`_claim_advisory`)
+    is untouched by that knob, matching the "0 = documented full opt-out" convention used
+    throughout these hooks.
+    """
+    if _claim_advisory(project_dir, session_id, "prepare"):
+        _mark_prepare_nudge(project_dir, now)
+        return True
+    if renudge_s <= 0:
+        return False
+    try:
+        last = int(_prepare_renudge_path(project_dir).read_text(encoding="utf-8").strip() or "0")
+    except (FileNotFoundError, OSError, ValueError):
+        return False  # cannot read the stamp → cannot bound the interval → stay silent
+    if now - last >= renudge_s:
+        _mark_prepare_nudge(project_dir, now)
+        return True
+    return False
 
 
 def _advisory_tier(pct: int) -> str:
@@ -432,11 +492,15 @@ def main() -> int:
     if prediction is not None:
         prepare_tokens = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_PREPARE_TOKENS"), _DEFAULT_PREPARE_TOKENS)
         if prediction.tokens_until_compact <= prepare_tokens:
-            # TRDD-K1RJUYGK: LATCHED — the prepare alert is announced ONCE per session, not on
-            # every tool call inside the zone. Re-emitting it seeds a fresh strippable
-            # system-reminder block per call, and Claude Code's retroactive strip of those
-            # blocks is what re-bills the cached prefix (see `_claim_advisory`).
-            if _claim_advisory(project_dir, session_id, "prepare"):
+            # TRDD-K1RJUYGK + issue #79: the prepare alert is announced on a genuine
+            # transition into the zone, THEN periodically re-fires while it lingers (this
+            # tier is close enough to a forced compaction that a stale, unrepeated warning
+            # is a real risk) — never on every tool call inside the zone. Re-emitting on
+            # every call would seed a fresh strippable system-reminder block per call, and
+            # Claude Code's retroactive strip of those blocks is what re-bills the cached
+            # prefix (see `_prepare_should_emit`).
+            renudge_s = _coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_CONTEXT_PREPARE_RENUDGE_S"), _DEFAULT_PREPARE_RENUDGE_S)
+            if _prepare_should_emit(project_dir, session_id, now, renudge_s):
                 sys.stdout.write(json.dumps(_advisory(_format_prepare_line(pct, prediction))))
             return 0
 
