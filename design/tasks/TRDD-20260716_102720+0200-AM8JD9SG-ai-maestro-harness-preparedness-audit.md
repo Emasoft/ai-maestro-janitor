@@ -11,7 +11,7 @@ scope: project
 severity: major
 labels: [ai-maestro, fleet-inject, fleet-stop, fleet-recovery, presence, user-intent, terminal-trigger, cross-project]
 implementation-commits: [eb9faa1]
-blocked-by: [USER-F1-F6-decision]
+blocked-by: [ai-maestro#46]
 relevant-rules: []
 ---
 
@@ -122,11 +122,17 @@ The global switches (`fleet_stop` disarm/pause) and `/reload-plugins` fleet-wide
   F3/F4 (presence: an injected prompt is NOT human input; the disarm latch needs an authenticated
   user action, not prompt text), **F11 (R42.5 compliance): the guardian must NOT cross-inject
   `/janitor-arm` or `/janitor-resume` — only the global switches + `/reload-plugins`).**
-- **USER DECISION (Tier 3), batched — F1+F6 as ONE decision:** *who may act on this machine with
-  no human present, and what may they prove?* (a third scoped/revocable principal class for the
-  daemon + a prompt-provenance root of trust) OR (confine the daemon to read-only + make
-  "a prompt cannot prove anything" a permanent property + narrow injectors per R42). Surfaced to
-  the USER; ai-maestro will post the ruling on #68.
+- **USER DECISION (Tier 3), batched F1+F6 — RULED 2026-07-16: "scoped daemon principal +
+  provenance root".** The owner chose the MORE CAPABLE option: F6 → the daemon gets its own
+  **scoped, revocable** third principal class (NOT owner-wide — that's the R48 collision, avoided
+  by scoping); F1 → the system DOES get a prompt-provenance root of trust (signing-root or
+  server-side-channel, ai-maestro's choice, subject to the `#56` no-janitor-required invariant).
+  **Server-side design is ai-maestro-led (Tier 2/3 authz model), gated on `ai-maestro#46`** (can't
+  grant a capability to a principal you can't uniquely identify) — hence `blocked-by: ai-maestro#46`.
+  The janitor's `#60` (signed daemon identity) is an INPUT to their design, not a spec. **Interim
+  until the principal ships: cross-agent recovery stays refuse+alert** (capability ratified, no
+  credential yet). Relayed on ai-maestro#68; awaiting their F6 design issue for key-registration +
+  verb requirements to mirror here.
 - **F9** — janitor-side timeout-budget fix (make the ai-maestro self-trigger send detached), still
   design-needed, independent of the above.
 
