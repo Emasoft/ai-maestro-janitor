@@ -1780,15 +1780,29 @@ Examples:
         final_notes = f"Release v{new_version}"
     run(["git", "tag", "-a", f"v{new_version}", "-m", final_notes], cwd=git_root)
     print(f"{GREEN}ok Tagged v{new_version} (annotated, body = release notes){NC}")
+    # Dependency-resolver tag (issues #85/#90). Since Claude Code 2.1.110 a
+    # version-constrained plugin dependency ("version": "^X.Y.Z") is resolved by
+    # listing the dependency repo's tags and keeping ONLY those named
+    # `{plugin-name}--v{version}` — the plain v{version} tag does NOT match, so
+    # without this twin tag any plugin depending on us reports "no git tag
+    # satisfying <range>". CPV's auto-migration silently skips this repo (its
+    # injector anchors on a single combined atomic push we don't use — #90), so
+    # the stage is hand-written here. Lightweight tag is sufficient: the
+    # resolver only matches the NAME; the annotated v-tag stays the release
+    # record.
+    resolver_tag = f"{plugin_info['name']}--v{new_version}"
+    run(["git", "tag", resolver_tag], cwd=git_root)
+    print(f"{GREEN}ok Tagged {resolver_tag} (dependency-resolver twin tag){NC}")
 
-    # ── Step 13: Push commit + tag to origin ──
+    # ── Step 13: Push commit + tags to origin ──
     # The pre-push hook verifies its caller via PROCESS ANCESTRY: it walks
     # the PID tree and looks for a `python.*scripts/publish.py` ancestor.
     # Because this process IS scripts/publish.py, the hook will find it and
     # allow the push. No env var needed — process trees can't be spoofed.
-    print(f"\n{BLUE}=== Step 13: Push commit + tag to origin/{default_branch} ==={NC}")
+    print(f"\n{BLUE}=== Step 13: Push commit + tags to origin/{default_branch} ==={NC}")
     run(["git", "push", "origin", "HEAD"], cwd=git_root)
     run(["git", "push", "origin", f"v{new_version}"], cwd=git_root)
+    run(["git", "push", "origin", resolver_tag], cwd=git_root)
     print(f"\n{GREEN}ok Published v{new_version} ({info.name}){NC}")
 
     # ── Step 14: Create GitHub release with release notes (MANDATORY) ──
