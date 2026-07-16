@@ -219,3 +219,44 @@ def test_agentlens_cause_empty_on_missing_binary(monkeypatch) -> None:
         "/definitely/not/a/binary/xyzzy investigate_burn",
     )
     assert _wbr._agentlens_cause_clause() == ""
+
+
+# The MATERIALITY GATE (2026-07-16): a tiny agentlens finding must not override the native
+# attribution and mis-blame its workspace. The motivating incident: IMAGE_BLOB_RESIDENT at 2% of
+# window was surfaced as "the cause" of a 58% burn in a workspace that did not drive it.
+_IMMATERIAL_CAUSE_JSON = (
+    '{"findings":[{"cause":"IMAGE_BLOB_RESIDENT","shareOfWindow":0.02,"confidence":"medium"}],'
+    '"attribution":[{"workspace":"~/Code/EMASOFT-ORCHESTRATOR-AGENT"}]}'
+)
+_NO_SHARE_CAUSE_JSON = '{"findings":[{"cause":"FORK_STORM","confidence":"high"}]}'
+
+
+def test_agentlens_cause_dropped_when_immaterial(tmp_path: Path, monkeypatch) -> None:
+    """A 2%-of-window finding is noise, not the culprit → "" so the native attribution is used
+    instead of falsely naming the finding's workspace as the cause of the whole burn."""
+    cmd = _cause_script(tmp_path, "tiny.sh", f"echo '{_IMMATERIAL_CAUSE_JSON}'")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
+    assert _wbr._agentlens_cause_clause() == ""
+
+
+def test_agentlens_cause_dropped_when_share_missing(tmp_path: Path, monkeypatch) -> None:
+    """No reported shareOfWindow → unquantified → dropped (can't confirm it is material)."""
+    cmd = _cause_script(tmp_path, "noshare.sh", f"echo '{_NO_SHARE_CAUSE_JSON}'")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
+    assert _wbr._agentlens_cause_clause() == ""
+
+
+def test_agentlens_cause_kept_when_material(tmp_path: Path, monkeypatch) -> None:
+    """A finding at/above the threshold IS the culprit → its clause is shown (18% ≥ 15% default)."""
+    cmd = _cause_script(tmp_path, "big.sh", f"echo '{_INVESTIGATE_JSON}'")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
+    assert "FORK_STORM" in _wbr._agentlens_cause_clause()
+
+
+def test_agentlens_cause_threshold_is_tunable(tmp_path: Path, monkeypatch) -> None:
+    """CLAUDE_PLUGIN_OPTION_WINDOW_BURN_CAUSE_MIN_SHARE tunes the bar: raise it above 18% and the
+    same finding is dropped."""
+    cmd = _cause_script(tmp_path, "big2.sh", f"echo '{_INVESTIGATE_JSON}'")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_CAUSE_MIN_SHARE", "0.25")
+    assert _wbr._agentlens_cause_clause() == ""

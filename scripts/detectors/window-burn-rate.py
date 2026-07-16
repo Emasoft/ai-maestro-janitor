@@ -87,15 +87,30 @@ def _agentlens_cause_clause() -> str:
     WHY prefer it over the native attribution: agentlensPro reads real OTEL telemetry and
     classifies the CAUSE (FORK_STORM, FAT_SESSION_REWRITES, …); the native `token_history`
     attribution is a heuristic over transcript sizes. The native path stays as the fallback so
-    a machine without the CLI is byte-identical to before."""
+    a machine without the CLI is byte-identical to before.
+
+    MATERIALITY GATE (2026-07-16): `investigate_burn`'s top finding is the CAUSE of the burn only
+    when it explains a MATERIAL fraction of the window. A tiny finding (e.g. IMAGE_BLOB_RESIDENT at
+    2% of window) is noise, not the culprit — and preferring it unconditionally over the native fleet
+    attribution MIS-BLAMES whatever workspace it names: a 2%-of-window finding in the orchestrator was
+    surfaced as "the cause" of a 58% burn the orchestrator did not drive. So a cause below
+    `CLAUDE_PLUGIN_OPTION_WINDOW_BURN_CAUSE_MIN_SHARE` (default 0.15), or with no reported share, is
+    dropped → the caller falls back to the honest native top-consumer attribution."""
     command = os.environ.get(
         "CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND",
         alp.DEFAULT_INVESTIGATE_BURN_COMMAND,
+    )
+    min_share = _coerce_float(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_CAUSE_MIN_SHARE"), 0.15
     )
     try:
         data = alp.probe_json(command)
         cause = alp.parse_investigate_cause(data) if data is not None else None
         if cause is None:
+            return ""
+        # Only a MATERIAL cause (share of the window ≥ threshold) may override the native
+        # attribution; a tiny or unquantified finding is noise that would mis-blame its workspace.
+        if cause.share is None or cause.share < min_share:
             return ""
         return state.sanitize_for_drift_line(alp.format_cause_clause(cause))
     except Exception:
