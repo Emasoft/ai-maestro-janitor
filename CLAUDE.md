@@ -324,7 +324,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=5e1eb3e0cb53 digest=02478eab7de5 generated=2026-07-16T03:28:11+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8e0e099cc75c digest=41abaca1106d generated=2026-07-16T20:53:11+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1162,7 +1162,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · init_state() -> None — Create state/ and logs/ directories if missing. Idempotent.
   · atomic_write(target, value) -> None — Atomic-by-rename write: write to tmp, then os.replace into place.
   · user_presence_path(home) -> Path — Path of the cross-plugin user-presence breadcrumb under HOME.
-  · bump_user_presence(home, now) -> None — Record a GENUINE user-input event — stamp BOTH epochs to `now`.
+  · terminal_pane_key(env) -> str | None — A stable, filesystem-safe id for THIS terminal pane, or None if unresolvable.
+  · per_pane_presence_path(pane_key, home) -> Path — Path of THIS pane's presence breadcrumb (sibling of the machine-global one).
+  · bump_user_presence(home, now, env) -> None — Record a GENUINE user-input event — stamp BOTH epochs to `now`.
   · refresh_user_presence_written_at(home, now) -> None — Refresh the breadcrumb's liveness (written_at_epoch) WITHOUT touching input recency.
   · read_int_state(path, default) -> int — Read a non-negative int from a state file.
   · is_truthy_env(name, default) -> bool — Read a yes/no env var with friendly false-spellings.
@@ -1323,8 +1325,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · record_intent_from_prompt(prompt, *, state_dir, now) -> list[str] — Stamp an intent token for every verb the USER's raw prompt explicitly asks for.
   · intent_fresh(verb, *, ttl_s, state_dir, now) -> bool — True iff the USER asked for `verb` within the last `ttl_s` seconds.
   · consume_intent(verb, state_dir) -> None — Spend a recorded intent so ONE request authorizes exactly ONE action, not a standing licence.
-  · user_is_present(*, idle_s, home, now) -> bool — True iff the user typed something recently — i.e. they are AT the terminal right now.
-  · injection_allowed(commands, *, state_dir, home, now) -> tuple[bool, str] — May we type `commands` into the user's own pane right now? Returns (allowed, why).
+  · user_is_present(*, idle_s, home, now, env) -> bool — True iff the user typed recently IN THIS PANE — i.e. they are AT this terminal right now.
+  · injection_allowed(commands, *, state_dir, home, now, env) -> tuple[bool, str] — May we type `commands` into the user's own pane right now? Returns (allowed, why).
 `scripts/lib/user_mem_lib.py` — USER-MEMORY subsystem core (TRDD-4334aad0) — a PRIVATE, agent-invisible
   · resolve_user_mem_dir(project_dir) -> Path — Return the user-mem store dir for a project (does not create it).
   · SearchResult — One memgrep hit, annotated with the memory's immutable number.
