@@ -1769,9 +1769,9 @@ fn atom_id_hits(query: &str, paths: &[PathBuf], hidden: bool) -> Vec<AtomIdHit> 
     hits
 }
 
-/// Resolve `id` to EXACTLY ONE hit, or fail: zero hits is "not found"; more than one is corpus
-/// corruption (ids must be corpus-unique — a duplicated id breaks BOTH resolution modes, so per
-/// the spec every match is printed and the command exits non-zero rather than guessing).
+/// Resolve the given atom id to EXACTLY ONE hit, or fail: zero hits is "not found"; more than
+/// one is corpus corruption (ids must be corpus-unique — a duplicated id breaks BOTH resolution
+/// modes, so per the spec every match is printed and we exit with a failure status, never guess).
 fn atom_id_unique_hit(id: &str, paths: &[PathBuf], hidden: bool) -> Result<AtomIdHit> {
     // A leading `^` is the marker SIGIL, not part of the id — accept the copy-pasted `^name` form.
     let query = id.strip_prefix('^').unwrap_or(id);
