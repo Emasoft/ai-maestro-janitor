@@ -5,15 +5,12 @@ description: MEMORIZE — capture a durable decision/fact into the project's mem
 
 # Janitor memory — MEMORIZE
 
-> **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY for simple ops:
-> create a page, add ONE atomic memory, or correct a single fact (clean in place + demote
-> the superseded statement to a dated `[^N]` lesson with its WHY). For COMPLEX re-editing —
-> merging same-subject pages, splitting oversized pages, resolving cross-page contradictions,
-> repairing page shape/metadata, deduplicating, redirecting `[[links]]`, harvesting stray
-> artifacts, or any multi-page reorganization — DO NOT do it yourself: the janitor's
-> **`janitor-memory-subconscious-agent`** (launched async in the background by the heartbeat)
-> owns ALL of it. Noticed such work is needed? Note it and move on; the `memory-maintenance`
-> scheduler dispatches the subconscious agent.
+> **SIMPLE authoring only — delegate complex editing.** Use this skill ONLY to create a
+> page, add ONE atomic memory, or correct a single fact (clean in place + demote the
+> superseded statement to a dated `[^N]` lesson with its WHY). COMPLEX re-editing (merge,
+> split, cross-page conflicts, shape repair, dedup, link redirects, harvest, any multi-page
+> reorg) belongs to the **`janitor-memory-subconscious-agent`** — note it and move on; the
+> `memory-maintenance` scheduler dispatches it.
 
 ## Overview
 
@@ -108,21 +105,12 @@ Pick exactly one (see the model for the full definition + the WHY):
   links UP only to the general pages that govern it.
 
 **NAME THE PAGE BY ITS TOPIC — NEVER by the memory you are saving (TRDD-NM4TPCQ9).**
-A page exists ONLY to collect the atoms of ONE topic, so its name IS that broad,
-reusable topic — a name many future atoms will file under. The recurring agent
-error this rule exists to stop: titling a new page with the single memory's
-DESCRIPTION, producing a useless one-atom singleton.
-
-- **BAD:** `implementation-of-duckdb-ingestion-of-otel-logs.md` — a sentence
-  describing one fact; no future atom will ever join it.
-- **GOOD:** `agents-tracing.md`, `claude-telemetry-and-logging.md` — broad topics
-  that collect this atom AND the next twenty.
-
-The tell: a filename that reads like a description of one memory (long
-hyphen-joined verb-phrase — `implementation-of-…`, `how-to-…`, `fix-for-…`)
-instead of a short topic noun. If your candidate name fails this test, you either
-skipped step 2 (the topic page already exists — go UPDATE it) or you must rename
-to the broad topic before writing.
+A page exists ONLY to collect the atoms of ONE topic; its name is that broad, reusable
+topic. BAD: `implementation-of-duckdb-ingestion-of-otel-logs.md` (one memory's
+description — no future atom joins it). GOOD: `agents-tracing.md`. The tell: a filename
+reading like a sentence about one fact (`implementation-of-…`, `how-to-…`, `fix-for-…`).
+A failing name means you skipped step 2 (UPDATE the topic page) or must broaden it.
+Full rule + examples: [references/atom-authoring.md](references/atom-authoring.md).
 
 **Where the page lives:** `$MEMDIR/wikimem/<name>.md` — curated pages live in the
 `wikimem/` sub-dir (`memory_scopes.WIKI_SUBDIR`, USER decision 2026-07-08); the
@@ -138,13 +126,10 @@ up to it instead (this is what keeps the pyramid from exploding). Honor
 
 Author `"$MEMDIR/<slug>.md"` with the model's page schema (frontmatter + tier-typed
 edge sections + `## Notes and lessons learned`). **Make each durable body fact an ATOM**
-with a `^id [keywords: …]` block-property marker so it is individually recallable; and give
-each atom a **`desc:"…"`** — a REQUIRED, ≤200-char PROSE summary of that atom's body (as short
-as possible; the per-atom analogue of a skill's `description`). WHY it is load-bearing: memgrep
-shows `desc` — NOT the full atom body — when it LISTS the atoms matching a `recall`/`find`
-query, so the agent reads the `desc` of every hit but the full body of only the ONE atom worth
-opening. A missing/weak `desc` makes an atom invisible-at-a-glance in results and costs tokens
-(the reader must open bodies to triage). Keep it a real summary of the body, not a slug. Full
+with a `^id [keywords: …]` block-property marker, and give each atom a REQUIRED
+**`desc:"…"`** — a ≤200-char PROSE summary of the body (memgrep LISTS hits by `desc`, not
+full body, so the reader triages by desc and opens only the one atom worth reading; a
+missing/weak desc makes the atom invisible-at-a-glance). A real summary, never a slug. Full
 schema, atom grammar, and examples: [references/atom-authoring.md](references/atom-authoring.md).
 
 Required frontmatter fields: `name`, `description` (symptom-indexed), `ocd`, `lmd`,
@@ -153,21 +138,15 @@ Edge sections: `## Applies to` on hub/aspect (radiating), `## Governed by` on
 component (receiving); `## See also` optional on any tier. Always include the
 standing `## Notes and lessons learned` section even if empty.
 
-**THE LESSON FORM — mandatory metadata, then one terse shape.** A lesson is a first-class
-ATOM OF MEMORY, exactly like a body atom — a GUARDRAIL, not a story. Every `[^N]` you write
-here (or later demote into here) takes exactly this form:
+**THE LESSON FORM.** A lesson is a first-class atom — a GUARDRAIL, not a story:
 
 ```
-[^N]: [keywords:"<key_phrase> <key_phrase> …", desc:"<≤200-char prose summary of this lesson>", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+[^N]: [keywords:"<key_phrase> …", desc:"<≤200-char prose summary>", ocd:<YYYY-MM-DD>, lmd:<YYYY-MM-DD>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
 
-All FOUR metadata keys REQUIRED (the block is the lesson's ADDRESS): `keywords:` is the
-RECALL SURFACE, written as underscore_joined key-phrases, not the prose's own words; `desc:`
-is the ≤200-char prose summary memgrep shows for this lesson in `recall`/`find` LISTINGS (so a
-reader triages by `desc`, opening only the lesson whose body they need). ONE
-lesson = ONE mistake, **≤3 lines / ~40 words**, and all three parts (`DO NOT` / `BECAUSE` /
-`DO … instead`) mandatory. Full grammar, the comma/quote/space rules, and the WHY each part
-matters: [wikimem-model.md — THE LESSON
+All FOUR metadata keys REQUIRED (`keywords:` = recall surface, underscore_joined phrases;
+`desc:` = the listing surface). ONE lesson = ONE mistake, **≤3 lines / ~40 words**, all three
+prose parts mandatory. Full grammar + WHY: [wikimem-model.md — THE LESSON
 FORM](references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape).
 
 ### 5. WIRE the context — radiate or receive (this is what makes it a wiki)
@@ -194,13 +173,10 @@ edges, but it is a safety net — the author wires both ends now.
 
 ### 6. Index it (memgrep only — do NOT touch MEMORY.md)
 
-The wiki index is 100% memgrep's — the agent-invisible, unlimited SQLite
-`.memgrep/index.db`. Do **NOT** write to `MEMORY.md` (Anthropic's harness-owned
-buffer, not a wiki index — the wiki skills never write it; hand-maintaining a
-human index is what grew unbounded and corrupted memories before). Just refresh:
-`memgrep reindex "$MEMDIR"` if memgrep is present (optional — recall falls back
-to a live walk when stale). Recall finds the new page by its `description`/body,
-never by a human index.
+The wiki index is 100% memgrep's — the agent-invisible SQLite `.memgrep/index.db`.
+Do **NOT** write to `MEMORY.md` (the harness-owned buffer; hand-maintained indexes
+grew unbounded and corrupted memories before). Just refresh: `memgrep reindex
+"$MEMDIR"` if present (optional — recall falls back to a live walk when stale).
 
 ### 7. Sanity-check
 
