@@ -1,15 +1,17 @@
 ---
 trdd-id: AM8JD9SG
 title: ai-maestro harness preparedness — fleet-injection/presence/recovery gaps when the janitor runs inside an ai-maestro agent
-column: dev
+column: blocked
+pre-block-column: dev
 created: 2026-07-16T10:27:20+0200
-updated: 2026-07-16T10:41:00+0200
+updated: 2026-07-16T11:02:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
 severity: major
 labels: [ai-maestro, fleet-inject, fleet-stop, fleet-recovery, presence, user-intent, terminal-trigger, cross-project]
 implementation-commits: [eb9faa1]
+blocked-by: [ai-maestro#68]
 relevant-rules: []
 ---
 
@@ -55,6 +57,21 @@ both the 8s inner cap and the CLI's ~11s worst case, so the harness kills the wh
 regardless. The real fix reconciles the whole 5s/8s/11s budget (most likely: make the ai-maestro
 self-trigger send DETACHED like the tmux path, so the hook returns fast and `_mark_compacted` is
 deterministic). Not a one-liner → deferred.
+
+## COORDINATION + PUBLISH GATE (2026-07-16)
+
+- **Coordination anchor: `Emasoft/ai-maestro#68`** — asks the ai-maestro Claude for the PLANNED/
+  ratified direction on the janitor-facing surface each gated finding needs (provenance marker,
+  daemon auth, interrupt primitive, managed-agent relaunch, channel priority). Consolidates the
+  janitor-side of the overlapping open threads `#60` (my unanswered daemon-auth ask), `#55` (USER
+  auth path), `#54` (keystroke-inject classification), `#56` (heartbeat coverage). AMP is down →
+  the answer arrives on GitHub (see LOCAL memory `ai-maestro-amp-down-coordinate-via-github-issues`).
+- **PUBLISH IS GATED (USER directive 2026-07-16):** do NOT publish a janitor release until (a) all
+  pending tasks are complete AND (b) the janitor is brought up to speed with ai-maestro's plans —
+  i.e. `#68` is answered and the 8 gated findings below are designed to mirror the ratified
+  direction. The 2 safe fixes (F5/F8, commit `eb9faa1`) are committed-not-published and ride the
+  next gated release. **The design pass cannot start until `#68` returns direction** — this TRDD is
+  `blocked-by: ai-maestro#68`.
 
 ## NEXT ACTION — the 8 DESIGN-NEEDED findings (do NOT blind-fix; each needs a decision or ai-maestro API knowledge)
 
