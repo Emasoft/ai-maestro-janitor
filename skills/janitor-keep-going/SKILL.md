@@ -1,6 +1,6 @@
 ---
 name: janitor-keep-going
-description: Opt this session into the janitor's never-stop continue-nudge — every due heartbeat prints a resume cue telling the agent to keep working on its pending task instead of silently idling between turns. Trigger with /janitor-keep-going, "keep going", "never stop", "don't stall between turns"; add "off" to disable.
+description: Control the janitor's never-stop continue-nudge for this session — every due heartbeat prints a resume cue telling the agent to keep working on its pending task instead of silently idling between turns. The nudge is ON BY DEFAULT (user directive 2026-07-16); this skill re-asserts it after an opt-out, or turns it off. Trigger with /janitor-keep-going, "keep going", "never stop", "don't stall between turns"; add "off" to disable this session's full-mode nudge.
 ---
 
 # Janitor keep-going
@@ -9,21 +9,23 @@ description: Opt this session into the janitor's never-stop continue-nudge — e
 
 Keep-going mode makes every due heartbeat fire emit a `[janitor-resume]` cue plus a short
 "continue your pending task" nudge, so an unattended agent never silently stalls between turns.
-Without it, a FULL-mode heartbeat with nothing else to say (no rate-limit resume, no compact
-resume, no drift) emits nothing at all — correct for an interactive session where a human is
-watching, but wrong for an autonomous session that finished a turn mid-task with no external
-trigger to continue.
+As of the 2026-07-16 user directive this nudge is **ON BY DEFAULT** in every mode — the whole
+point of the janitor is to keep the fleet working in the user's absence, and a FULL-mode
+heartbeat that stayed silent (no rate-limit resume, no compact resume, no drift) let unattended
+agents idle overnight. This skill's ON path re-asserts the default after an opt-out; its OFF path
+writes the explicit opt-out sentinel that silences THIS session's full-mode nudge.
 
-**WHY it exists (TRDD-TKNSTP82 Part B, user 2026-07-02):** "even in maintenance mode the janitor
-must nudge the agent to continue … they must never stop." Maintenance-mode ALREADY gets this
-nudge unconditionally (see `/janitor-maintenance-mode`) — keep-going is the STANDALONE opt-in
-for a session running in normal FULL mode that also wants the never-stop nudge, without giving
-up detectors/daemon/drift reporting.
+**WHY it exists (TRDD-TKNSTP82 Part B, user 2026-07-02; DEFAULT-ON user 2026-07-16):** "even in
+maintenance mode the janitor must nudge the agent to continue … they must never stop." Maintenance
+mode nudges unconditionally (see `/janitor-maintenance-mode`); full mode now nudges by default too,
+without giving up detectors/daemon/drift reporting. The default is set by the `keep_going_default`
+config knob (true); set it false to restore the pre-2026-07-16 opt-IN behaviour.
 
 | trigger | scope | nudge fires when |
 |---|---|---|
+| default (`keep_going_default=true`) | every armed session | every fire, unless opted out |
 | `/janitor-maintenance-mode` | this session (or global) | every fire, unconditionally |
-| `/janitor-keep-going` | this session only | every fire, ONLY while this flag is set |
+| `/janitor-keep-going off` | this session only | writes the opt-out that silences full-mode fires |
 
 ## Prerequisites
 
@@ -37,24 +39,37 @@ up detectors/daemon/drift reporting.
 1. Parse the request into an action: contains "off" / "stop" / "disable" → action = OFF;
    otherwise ON.
 
-2. **ON** — write the sentinel atomically:
+   The nudge is **ON BY DEFAULT** (user directive 2026-07-16): every armed session
+   nudges in every mode unless explicitly turned off. So ON clears the opt-out sentinel,
+   and OFF *writes* it (removing the on-flag alone would not silence the default).
+
+2. **ON** — clear the opt-out sentinel and (re)assert the on-flag atomically:
 
    ```bash
    STATE_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state"
    mkdir -p "$STATE_DIR"
+   rm -f "$STATE_DIR/keep-going-off"          # clear the explicit opt-out (default-ON resumes)
    printf '%s' 'keep-going: never-stop continue-nudge active' > "$STATE_DIR/keep-going.tmp.$$"
    mv -f "$STATE_DIR/keep-going.tmp.$$" "$STATE_DIR/keep-going"
    ```
 
-   **OFF** — remove it:
+   **OFF** — write the explicit opt-out sentinel (the ONE lever that silences the
+   default full-mode nudge) and drop the on-flag:
 
    ```bash
-   rm -f "${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state/keep-going"
+   STATE_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state"
+   mkdir -p "$STATE_DIR"
+   rm -f "$STATE_DIR/keep-going"              # drop the on-flag
+   printf '%s' 'keep-going-off: full-mode continue-nudge suppressed' > "$STATE_DIR/keep-going-off.tmp.$$"
+   mv -f "$STATE_DIR/keep-going-off.tmp.$$" "$STATE_DIR/keep-going-off"
    ```
 
+   OFF silences only FULL-mode fires — maintenance mode always nudges and is exited with
+   `/janitor-maintenance-mode off`.
+
 3. Report one line:
-   - ON → `Janitor keep-going ON — every due heartbeat will nudge you to continue your pending task until you run /janitor-keep-going off.`
-   - OFF → `Janitor keep-going OFF — heartbeats stop emitting the continue-nudge (maintenance mode, if active, still nudges on its own).`
+   - ON → `Janitor keep-going ON — every due heartbeat nudges you to continue your pending task (this is the default; the opt-out is cleared).`
+   - OFF → `Janitor keep-going OFF — full-mode heartbeats stop emitting the continue-nudge (a deliberate opt-out; maintenance mode, if active, still nudges on its own).`
    - If the heartbeat is not armed, append `Note: heartbeat not armed; run /janitor-arm to start firing.`
 
 ## Output

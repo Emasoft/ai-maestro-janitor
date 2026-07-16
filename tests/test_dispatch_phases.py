@@ -795,15 +795,15 @@ _KEEP_GOING_LINE = "continue your pending task (keep-going mode) — if the work
 _MAINTENANCE_LINE = "continue your pending task (maintenance mode) — if you are blocked on a human decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone keep-going off-switch does not apply to it; maintenance is exited deliberately with /janitor-maintenance-mode off)"
 
 
-def test_phase_keep_going_nudge_silent_full_mode_no_flag(env_isolation: dict) -> None:
-    """RUNAWAY GUARD: full mode with no keep-going flag and not maintenance → silent. This is
-    what keeps a plain interactive/default session from ever seeing the nudge."""
+def test_phase_keep_going_nudge_default_on_full_mode_no_flag(env_isolation: dict) -> None:
+    """DEFAULT-ON (user 2026-07-16): full mode, no flag, no opt-out → nudges anyway. Keeping an
+    unattended session working is the janitor's #1 job, so the nudge is the default, not opt-in."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    assert out == "", f"full mode with no opt-in must stay silent, got {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"default-on nudge expected, got {out!r}"
 
 
 def test_phase_keep_going_nudge_emits_in_full_mode_with_flag(env_isolation: dict) -> None:
@@ -888,19 +888,48 @@ def test_phase_keep_going_nudge_flag_and_maintenance_uses_maintenance_line(env_i
     assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE]
 
 
-def test_phase_keep_going_nudge_full_no_flag_still_silent_issue74(env_isolation: dict) -> None:
-    """issue #74: the driver-aware fix preserves the RUNAWAY GUARD — full mode, no flag, not
-    maintenance stays completely silent (no runaway on default / interactive sessions)."""
+def test_phase_keep_going_nudge_full_silenced_by_off_sentinel(env_isolation: dict) -> None:
+    """DEFAULT-ON opt-out: full mode + keep-going-off sentinel → silent. This is the ONE lever
+    that silences the default nudge; `/janitor-keep-going off` writes exactly this sentinel."""
     dispatch = _import_dispatch()
     import state
 
     state.init_state()
+    (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
-    assert out == "", f"the guard must keep a plain full-mode session silent, got {out!r}"
+    assert out == "", f"the keep-going-off sentinel must silence the full-mode nudge, got {out!r}"
 
 
-def test_main_full_mode_no_keep_going_flag_no_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """BEHAVIORAL PROOF: plain full mode, no flag, not maintenance → no nudge text at all."""
+def test_phase_keep_going_nudge_maintenance_overrides_off_sentinel(env_isolation: dict) -> None:
+    """User 2026-07-16 'even in maintenance mode it always nudges': the keep-going-off opt-out
+    silences FULL mode only — maintenance keeps nudging (it is exited via /janitor-maintenance-mode off)."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE], f"maintenance must ignore the opt-out, got {out!r}"
+
+
+def test_phase_keep_going_nudge_knob_false_restores_opt_in(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """KEEP_GOING_DEFAULT=false restores the pre-2026-07-16 opt-IN: full mode is silent without the
+    flag, but the standalone keep-going flag still opts in."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", "false")
+    silent = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert silent == "", f"knob off + no flag → silent, got {silent!r}"
+    (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert out.splitlines() == ["[janitor-resume]", _KEEP_GOING_LINE], f"flag must still opt in with knob off, got {out!r}"
+
+
+def test_main_full_mode_default_on_nudges(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """BEHAVIORAL PROOF (default-on): plain full mode, no flag, no opt-out → the nudge fires
+    end-to-end. This is the overnight-idle fix — an unattended fire keeps the agent working."""
     dispatch = _import_dispatch()
     import global_state as gs
     import state
@@ -913,7 +942,26 @@ def test_main_full_mode_no_keep_going_flag_no_nudge(env_isolation: dict, monkeyp
     monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
 
     out = _capture_stdout(dispatch.main)
-    assert "[janitor-resume]" not in out, f"a plain full-mode fire with no opt-in must not nudge, got {out!r}"
+    assert "keep-going mode" in out, f"default-on: a plain full-mode fire must nudge, got {out!r}"
+
+
+def test_main_full_mode_off_sentinel_suppresses_nudge(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """BEHAVIORAL PROOF: the explicit keep-going-off opt-out silences the default-on nudge
+    end-to-end (full mode still runs its detector roster — only the nudge is suppressed)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch, "_phase_guard_branch_protection", lambda: None)
+
+    out = _capture_stdout(dispatch.main)
+    assert "keep-going mode" not in out, f"the opt-out must suppress the nudge, got {out!r}"
     assert "keep-going mode" not in out
 
 

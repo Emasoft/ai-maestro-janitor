@@ -1227,21 +1227,21 @@ def _phase_heartbeat_renew() -> None:
 
 
 def _phase_keep_going_nudge(mode: str) -> None:
-    """Emit a never-stop continue-nudge when the session explicitly opted into it.
+    """Emit a never-stop continue-nudge to keep an unattended session working (DEFAULT-ON).
 
-    WHY (TRDD-TKNSTP82 Part B, user 2026-07-02): maintenance-mode was over-optimized
-    into full silence — an unattended agent that finishes a turn while maintenance is
-    active (or with the standalone `/janitor-keep-going` flag set) had nothing telling
-    it to keep working, so it silently stalled forever. This phase EMITS a
-    resume-shaped nudge but does NOT early-return — callers downstream (the
-    maintenance early-return that follows it in main(), or the full detector roster)
-    run exactly as they did before this phase existed.
+    WHY (TRDD-TKNSTP82 Part B, user 2026-07-02; DEFAULT-ON user 2026-07-16): a healthy
+    heartbeat detects drift and re-arms dead crons, but on its own it never tells an
+    idle agent to keep working — so an unattended fleet went silent overnight even
+    though the janitor was firing the whole time. This phase EMITS a resume-shaped nudge
+    but does NOT early-return — callers downstream (the maintenance early-return that
+    follows it in main(), or the full detector roster) run exactly as before.
 
-    RUNAWAY GUARD: fires ONLY under an explicit, deliberate opt-in — the per-session
-    `.janitor/state/keep-going` flag (see /janitor-keep-going) OR `mode ==
-    "maintenance"`. A plain full-mode session with neither set stays silent here and
-    idles normally, so this can never cause a fleet-wide token runaway on default /
-    interactive sessions.
+    DEFAULT-ON: fires in EVERY mode by default — the whole point is that an unattended
+    fleet keeps working "no matter what". It is bounded, not a runaway: each fire is one
+    already-scheduled heartbeat turn and the nudge adds a single resume line to it. It is
+    silenced only by a deliberate act — the explicit `keep-going-off` sentinel
+    (`/janitor-keep-going off`, full mode only) or `KEEP_GOING_DEFAULT=false` (restores
+    the legacy opt-in). See the gate below.
 
     No dedupe: unlike the day-bucketed renew nudge above, this is meant to re-fire on
     EVERY due heartbeat while the opt-in holds — that repetition is the whole
@@ -1249,9 +1249,28 @@ def _phase_keep_going_nudge(mode: str) -> None:
     several heartbeats in a row).
     """
     keep_going_flag = state.state_dir() / "keep-going"
+    keep_going_off = state.state_dir() / "keep-going-off"
     maintenance = mode == "maintenance"
-    if not keep_going_flag.is_file() and not maintenance:
-        return
+    # DEFAULT-ON (user directive 2026-07-16, TRDD-93TKV769): keeping the fleet working
+    # in the user's absence is the #1 janitor promise, so the never-stop nudge fires in
+    # EVERY mode BY DEFAULT — not only under an explicit opt-in. The overnight-idle
+    # incident that motivated this: keep-going was opt-in + off everywhere, so a healthy
+    # heartbeat re-armed dead crons but never told the agents to keep working.
+    # Silencing is now the deliberate act, via exactly two levers:
+    #   * keep-going-off sentinel — the explicit `/janitor-keep-going off` opt-out. It
+    #     silences the DEFAULT full-mode nudge but NOT maintenance (maintenance keeps its
+    #     own "exit only via /janitor-maintenance-mode off" lifecycle — user: "even in
+    #     maintenance mode it always nudges").
+    #   * CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT=false — restores the pre-2026-07-16
+    #     opt-IN behaviour (silent in full mode unless the keep-going flag is set) for
+    #     anyone who relied on silence-by-default.
+    default_on = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", True)
+    if maintenance:
+        pass  # maintenance ALWAYS nudges — never silenced here
+    elif keep_going_off.is_file():
+        return  # the explicit opt-out — the ONE lever that silences the default nudge
+    elif not default_on and not keep_going_flag.is_file():
+        return  # knob off → legacy opt-in: silent in full mode without the keep-going flag
     print("[janitor-resume]")
     # W4 (TRDD-82OP4EN9): point the nudge at the ACTUAL pending work when we can
     # name it — a generic "continue" lets an idle session answer "nothing to do"
@@ -1285,11 +1304,11 @@ def _phase_keep_going_nudge(mode: str) -> None:
         # maintenance-driven nudge, so we never name it here.
         print("continue your pending task (maintenance mode) — if you are blocked on a human decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone keep-going off-switch does not apply to it; maintenance is exited deliberately with /janitor-maintenance-mode off)")
     else:
-        # Flag is the SOLE driver here, so /janitor-keep-going off IS the correct
-        # lever. WHY (issue #74): reworded from "if nothing remains" so a session
-        # merely BLOCKED ON A HUMAN DECISION (a RULE-1 autonomy boundary) does not
-        # disable the never-stop guardian exactly when a human is expected to
-        # re-engage — only genuinely-finished work should turn it off.
+        # Full mode (default-ON or the standalone flag). `/janitor-keep-going off` IS
+        # the correct lever — it writes the keep-going-off sentinel that silences the
+        # default nudge. WHY (issue #74): a session merely BLOCKED ON A HUMAN DECISION
+        # (a RULE-1 autonomy boundary) must NOT disable the never-stop guardian exactly
+        # when a human is expected to re-engage — only genuinely-finished work turns it off.
         print("continue your pending task (keep-going mode) — if the work is genuinely finished (not merely blocked on a human decision), say so briefly and run /janitor-keep-going off")
 
 

@@ -380,11 +380,25 @@ def test_keep_going_nudge_generic_when_nothing_pending(iso, capsys) -> None:
     assert "/janitor-maintenance-mode off" in out
 
 
-def test_keep_going_nudge_silent_in_plain_full_mode(iso, capsys) -> None:
-    """Runaway guard preserved: full mode with no keep-going flag stays silent
-    even when the manifest is non-empty (W4 must not widen the opt-in)."""
+def test_keep_going_nudge_default_on_names_pending_agent_full_mode(iso, capsys) -> None:
+    """DEFAULT-ON (user 2026-07-16): full mode nudges by default, and when a background agent is
+    pending the manifest pointer ENRICHES the nudge (W4) instead of being wasted on a silent fire."""
     pa = iso["pa"]
     pa.add("fork-D", now=int(time.time()))
+    dispatch = _import_dispatch()
+    dispatch._phase_keep_going_nudge("full")
+    out = capsys.readouterr().out
+    assert "[janitor-resume]" in out
+    assert "1 background agent(s) pending" in out
+    assert "pending-agents.json" in out
+
+
+def test_keep_going_nudge_off_sentinel_silent_even_with_pending_agent(iso, capsys) -> None:
+    """The explicit `keep-going-off` opt-out silences the full-mode nudge even with a pending
+    background agent — the ONE deliberate lever that replaces the old implicit full-mode silence."""
+    state, pa = iso["state"], iso["pa"]
+    pa.add("fork-E", now=int(time.time()))
+    (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
     dispatch = _import_dispatch()
     dispatch._phase_keep_going_nudge("full")
     assert capsys.readouterr().out == ""

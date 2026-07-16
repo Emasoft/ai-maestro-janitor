@@ -38,6 +38,13 @@
       "default": "*/5 * * * *",
       "sensitive": false
     },
+    "keep_going_default": {
+      "title": "Never-stop keep-going nudge is ON by default",
+      "description": "When true (DEFAULT, user directive 2026-07-16), every due heartbeat emits the never-stop continue-nudge in EVERY mode — the janitor keeps an unattended fleet working in the user's absence without needing a per-session opt-in. The nudge is bounded (one line added to an already-scheduled heartbeat turn) and is silenced only by a deliberate act: the explicit `/janitor-keep-going off` sentinel (full mode only — maintenance mode always nudges and is exited via `/janitor-maintenance-mode off`). Set to false to restore the pre-2026-07-16 opt-IN behaviour: silent in full mode unless the per-session keep-going flag is set.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
     "heartbeat_cadence_dynamic": {
       "title": "Dynamic TTL-aware heartbeat cadence",
       "description": "When true (DEFAULT), the dispatcher self-selects the heartbeat cadence each fire (TRDD-0QQX9H0G, issue #83): FAST=*/5 when the session is actively waiting (rate-limited, a pending resume, in-flight background agents, keep-going) \u2014 the same cadence as today, so recovery latency is unchanged; MID=*/15 on recent user activity; SLOW=*/30 (bounded by the real cache-TTL) when idle \u2014 cutting idle heartbeat cost ~6x (a measured quiet fire on a large session \u2248 $0.76; */5 = 12 fires/h vs */30 = 2/h) with NO recovery regression. A tier change is applied by re-arming through the existing [janitor-renew] marker (dispatch cannot call CronCreate itself). When false, the phase is a total no-op and the fixed heartbeat_cron is used unchanged.",
