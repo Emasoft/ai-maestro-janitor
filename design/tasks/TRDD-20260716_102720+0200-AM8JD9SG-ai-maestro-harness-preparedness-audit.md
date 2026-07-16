@@ -4,14 +4,14 @@ title: ai-maestro harness preparedness — fleet-injection/presence/recovery gap
 column: blocked
 pre-block-column: dev
 created: 2026-07-16T10:27:20+0200
-updated: 2026-07-16T11:02:00+0200
+updated: 2026-07-16T12:20:00+0200
 current-owner: janitor-session
 task-type: audit
 scope: project
 severity: major
 labels: [ai-maestro, fleet-inject, fleet-stop, fleet-recovery, presence, user-intent, terminal-trigger, cross-project]
 implementation-commits: [eb9faa1]
-blocked-by: [ai-maestro#68]
+blocked-by: [USER-F1-F6-decision]
 relevant-rules: []
 ---
 
@@ -57,6 +57,78 @@ both the 8s inner cap and the CLI's ~11s worst case, so the harness kills the wh
 regardless. The real fix reconciles the whole 5s/8s/11s budget (most likely: make the ai-maestro
 self-trigger send DETACHED like the tmux path, so the hook returns fast and `_mark_compacted` is
 deterministic). Not a one-liner → deferred.
+
+## ⏵ DIRECTION RECEIVED — ai-maestro#68 answered (2026-07-16), the ground shifted under 3 findings
+
+**READ THIS BEFORE the NEXT ACTION list below — it supersedes several findings' framing.**
+The ai-maestro Claude gave a decisive answer. The full text is issue **ai-maestro#68** (durable);
+the load-bearing deltas:
+
+**R42 LANDED (`6dcc57fd`, `TRDD-BF3JN4TL`, `docs/GOVERNANCE-RULES.md` R42) — cross-agent DRIVE
+injection is REVOKED, not restricted.** `lib/authorization.ts DRIVE_ACTIONS = {send-command,
+restart-session}` → any caller with `targetAgentId != auth.agentId` is DENIED, no title exempt,
+fails closed. The set of principals that may put characters into an agent's session is now
+**{USER, the agent itself (R42.4), the janitor's R42.5 GLOBAL switches}**. Mirror the three-class
+line: **DRIVE** (arbitrary text → makes victim act — REVOKED cross-agent) vs **LIFECYCLE** (one
+fixed key, starts/stops a process — PERMITTED to MANAGER/COS/USER) vs **CONFIGURATION** (changes
+what the agent IS — PERMITTED, R42.6).
+
+**R42.5 janitor exception is EXACT** — global disarm/re-arm, pause/unpause heartbeat, global
+reload plugins+skills. **Everything else is self-only, `/compact` included.** ⇒ NET-NEW FINDING
+**F11 (compliance):** the fleet guardian's gentle rungs inject `/janitor-arm` (per-project, NOT
+global) and `/janitor-resume` (not on the list) into OTHER agents' panes — **no longer permitted**.
+The global switches (`fleet_stop` disarm/pause) and `/reload-plugins` fleet-wide ARE covered.
+
+### Per-finding verdicts (ai-maestro#68 summary table)
+
+| # | Verdict | Direction |
+|---|---|---|
+| **F7** relaunch | **(a) exists** | Use `hibernate`→`wake` (LIFECYCLE), NEVER `restart` (DRIVE, revoked). Given F6 undecided the guardian has no principal to call `wake` cross-agent → **refuse + alert, do not spawn the sibling.** Also: ai-maestro agents launch with NO resume flag (fresh convo) while our `claude --continue` RESUMES → that divergence IS the two-claude-one-transcript bug. `TRDD-SB5I53K1` (fleet restart verb) is deliberately HELD. |
+| **F10** CLI vs tmux | **(b) YES, always CLI** for a managed pane | Raw tmux is the documented R42 HONEST LIMIT (works because one OS uid — tamper-EVIDENT not tamper-PROOF); the decoupling invariant makes the `aimaestro-*` script layer the ONLY sanctioned boundary. Raw tmux stays legit ONLY for an UNMANAGED pane. |
+| **F2** interrupt | **(b) not planned** | No interrupt verb exists (`queue-cancel` ≠ in-flight cancel; `C-c` only inside stop/restart). Shape would be LIFECYCLE (R42-compatible) but the caller collapses into F6. **Ship the janitor-side "stop reporting delivered for a frozen target + escalate" fix NOW — do not wait on the server** (same lesson as `TRDD-3VW434Q8`: a green result never verified is worse than a red one). |
+| **F6** daemon auth | **(c) USER** | #55's mechanical half SHIPPED (`bc177864`): a path exists, but the daemon runs as the owner uid → the server believes it is the human OWNER (max authority, no scope, no revocation, no audit split) — collides with R48 (`bf70bf47`, MAESTRO gated on physical console presence). A scoped/revocable THIRD principal class is a new authz model = Tier 2/3, gated on `#46`, adjacent to R16. **Only the USER can pick: third principal class, or confine the daemon to the read-only surface.** |
+| **F1** provenance | **(c) USER (mechanism)** | Diagnosis SETTLED (mirror, not a choice): the inject path is raw `tmux send-keys -l` (`agents-core-service.ts:1573`→`agent-runtime.ts:345`) — **no turn object to mark; an env var is process-scoped so cannot mark a running turn; any in-text marker is forgeable.** Provenance EXISTS at the boundary (`aim_session`=human / `AID_AUTH`=agent) but `sendKeys` flattens both to identical bytes. A prefix is a convention, not a control. **The MECHANISM (a signing root of trust vs. a server side-channel vs. narrow-the-injectors) is a new machine-wide root of trust → USER, batched with F6.** |
+| **F3/F4** | **(c) inherited** | ai-maestro needs them STATED (the issue didn't describe them) — done in the #68 reply. |
+| **F9** | **unstated** | Named nowhere in #68 → stated in the reply. |
+
+### Two F1 halves that are JANITOR-SIDE and fixable NOW (no server change, no USER needed)
+1. **The forged `/janitor-disarm` latch — a prompt is DATA, never AUTHORITY.** Minting a durable
+   "the user opted out" `disarmed.flag` from prompt TEXT is the bug; no server marker turns text
+   into proof. The latch's authority must come from an explicit user action against an authenticated
+   route, not from a `[janitor-…]`-looking line. → tighten `user_intent`/`disarm_guard`.
+2. **The presence breadcrumb is the JANITOR'S OWN.** ai-maestro's presence record
+   (`~/.aimaestro/user-presence.json`) is bumped ONLY by an explicit `POST /api/sessions/me/user-input`
+   (AMAMA-only), never by a keystroke. If injected text bumps a presence breadcrumb it is the
+   janitor's own (written by `on-prompt-submit.py`) → this is F1/F3/F4's janitor-side core: the
+   `[janitor-…]`-prefix discriminator must not count an injected prompt as human input.
+
+### Canonical pointers to mirror (from #68)
+- R42 + DRIVE/LIFECYCLE/CONFIG: `docs/GOVERNANCE-RULES.md` R42; `lib/authorization.ts`
+  (`DRIVE_ACTIONS`, `SELF_DRIVE_ACTIONS`); `TRDD-BF3JN4TL`. Agent-facing form:
+  `rules/aimaestro/aimaestro-agent-rules.md`.
+- Relaunch: `aimaestro-agent.sh hibernate|wake` → `POST /api/agents/[id]/{hibernate,wake}`;
+  `TRDD-D5XDT49I` (no agent launches with a resume flag), `TRDD-SB5I53K1` (held).
+- Agents never face sudo: R32.3, R28 three-check. Janitor strict-route reality: `TRDD-SCLSRS6E`
+  (blocked — every strict route 403s every agent caller), `lib/sudo-guard.ts` (`STRICT_AGENT_RULES`).
+- USER auth path SHIPPED: `bc177864`; `scripts/shell-helpers/common.sh:370-440`;
+  `aimaestro-governance.sh login`. Console presence: `lib/peer-address.mjs` `isConsolePeer`
+  (PRESENCE only — "do not apply elsewhere"), R48, `TRDD-P7XKV3N9`/`TRDD-PLOVIPZE` (held).
+
+### Reclassified action buckets (post-direction)
+- **JANITOR-SIDE, UNBLOCKED — implement (design pass, this TRDD):** F10 (managed pane → CLI first
+  in `fleet_inject.build_command_plan`), F2-honesty (`fleet_inject.fire`: no "delivered" for a
+  frozen no-ESC CLI target → escalate), F7 (hard rungs: refuse+alert, never spawn unmanaged
+  sibling; if ever relaunching, `hibernate`→`wake` not raw `claude --continue`), F1-two-halves +
+  F3/F4 (presence: an injected prompt is NOT human input; the disarm latch needs an authenticated
+  user action, not prompt text), **F11 (R42.5 compliance): the guardian must NOT cross-inject
+  `/janitor-arm` or `/janitor-resume` — only the global switches + `/reload-plugins`).**
+- **USER DECISION (Tier 3), batched — F1+F6 as ONE decision:** *who may act on this machine with
+  no human present, and what may they prove?* (a third scoped/revocable principal class for the
+  daemon + a prompt-provenance root of trust) OR (confine the daemon to read-only + make
+  "a prompt cannot prove anything" a permanent property + narrow injectors per R42). Surfaced to
+  the USER; ai-maestro will post the ruling on #68.
+- **F9** — janitor-side timeout-budget fix (make the ai-maestro self-trigger send detached), still
+  design-needed, independent of the above.
 
 ## COORDINATION + PUBLISH GATE (2026-07-16)
 
