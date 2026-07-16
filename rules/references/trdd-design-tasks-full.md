@@ -479,12 +479,14 @@ land directly on the spec file.
    TID=$(gen); while ls design/tasks/TRDD-*-"$TID"-*.md >/dev/null 2>&1; do TID=$(gen); done
    SHORT=$TID   # the 8-char id IS the canonical id; SHORT kept as an alias for the steps below
    ```
+
 2. Capture timestamps:
 
    ```bash
    TS=$(date +%Y%m%d_%H%M%S%z)
    ISO=$(date +%Y-%m-%dT%H:%M:%S%z)
    ```
+
 3. Ensure `design/tasks/` exists; verify `design/` is NOT in `.gitignore`.
 4. Create the TRDD at `design/tasks/TRDD-$TS-$SHORT-<slug>.md` with the
    mandatory frontmatter; initialise `column: backburner` (or
@@ -497,6 +499,7 @@ land directly on the spec file.
    git add "design/tasks/TRDD-$TS-$SHORT-<slug>.md"
    git commit -m "docs: add TRDD-$SHORT — <short description>"
    ```
+
 7. Tell the user the TRDD ID + commit hash.
 
 ### Transitioning a TRDD between columns
@@ -545,6 +548,7 @@ installed.
    ```bash
    ls design/tasks/TRDD-*-K3QX9P2W-*
    ```
+
 2. Read the TRDD top-to-bottom — STATE block FIRST.
 3. Verify the STATE block agrees with the frontmatter `column:`. If they
    disagree, the STATE block wins (newer hand-edits beat structured fields).
