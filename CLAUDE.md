@@ -324,8 +324,19 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6886ad852af3 digest=1cd1b5ed9db2 generated=2026-07-14T19:51:59+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=5e1eb3e0cb53 digest=02478eab7de5 generated=2026-07-16T03:28:11+0200
 ## Project map (auto-generated — do not edit between the fences)
+`scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
+  · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
+  · resolve_cron(state_dir, env) -> str — The cadence to arm: the tier the dispatcher ASKED for, else config, else the default.
+  · take_prior_cron_id(state_dir) -> str — Read the stored cron id AND clear it. Returns "" when unknown (⇒ the caller must sweep).
+  · install_stub(plugin_root, data_dir) -> Path — Copy the dispatcher stub into the persistent DATA dir, atomically (tmp + rename).
+  · scope_is_user(plugin_root) -> tuple[bool, str] — The janitor MUST be a user-scope install: it guards OAuth, the machine-global daemon, and
+  · main() -> int
+`scripts/arm_record.py` — Everything /janitor-arm must do AFTER the cron exists (TRDD-DLI76AUC).
+  · valid_cron_id(value) -> bool
+  · record(state_dir, *, cron, cron_id, now) -> None
+  · main() -> int
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
 `scripts/compact_trigger.py` — Backing script for /janitor-compact-context (TRDD-31095269).
@@ -505,7 +516,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · main() -> int
 `scripts/hooks/on-stop-failure.py` — StopFailure hook — Python port of on-stop-failure.sh.
   · main() -> int
-`scripts/hooks/on-stop-token-meter.py` — Stop hook — per-heartbeat token meter (TRDD-a4e41e89, Phase 1).
+`scripts/hooks/on-stop-token-meter.py` — Stop hook — the session token meter (TRDD-a4e41e89 Phase 1; widened by TRDD-DLI76AUC #4).
   · main() -> int
 `scripts/hooks/on-stop.py` — Stop hook — Python port of on-stop.sh.
   · main() -> int
@@ -777,6 +788,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · CadenceState — Persisted (``.janitor/state/cadence-state.json``) hysteresis state.
   · raw_tier(signals) -> str — The un-smoothed tier this fire's signals ask for. Pure.
   · commit_tier(raw, prev, demote_fires) -> CadenceState — Apply hysteresis: promote to a faster tier IMMEDIATELY, demote to a slower
+  · should_emit_renew(*, desired_differs, committed, prev, now, dwell_s) -> bool — Decide whether THIS fire may emit ``[janitor-renew]`` (issue #89 half 2).
+  · stamp_rearm(state, now) -> CadenceState — Return `state` with `last_rearm_ts` set to `now`.
   · tier_to_cron(tier, ttl_minutes, overrides) -> str — Map (tier, real cache-TTL) -> a 5-field cron. Pure.
   · probe_account_status(command, *, timeout) -> int | None — Run the configured account-status command and return ``cacheTtl.minutes``.
   · resolve_ttl_minutes(*, now, regime_config, cached, probe_interval, probe, env) -> tuple[int, dict | None] — Resolve the authoritative cache-TTL (minutes) for the SLOW ceiling.
@@ -871,6 +884,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · extract_lessons(text) -> list[str] — Return the normalized body of every `[^N]: …` footnote definition in `text`
   · lessons_preserved(sources, result) -> tuple[bool, list[str]] — STRICT: every source lesson's substantive body must survive into `result`.
   · body_facts_preserved(sources, result, min_len) -> tuple[bool, list[str]] — STRICT anti-corruption (issue #48): every substantive body FACT line of every
+  · load_bearing_tokens(text) -> set[str] — Extract LOAD-BEARING TOKENS from `text`'s substantive body — frontmatter and
+  · fact_tokens_preserved(sources, result) -> tuple[bool, list[str]] — STRICT, syntactic anti-corruption check (issue #91): every load-bearing token
   · harvest_preservation_ok(memory_md_text, corpus_text, note_filenames) -> tuple[bool, list[str]] — Prove a HARVEST lost nothing BEFORE MEMORY.md is reduced to the stub: every memory
   · mirror_preservation_ok(buffer_notes, wiki_corpus, min_len) -> tuple[bool, list[str]] — Prove a coexistence HARVEST mirrored every raw buffer note into the wiki.
   · no_new_duplicate_lines(result, min_len) -> tuple[bool, list[str]] — No substantive content line (length ≥ `min_len`, not a heading/list marker)
@@ -965,6 +980,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · add(agent_id, description, now) -> None — Record a spawned subagent. Fail-open: swallows everything.
   · remove(agent_id, now) -> None — Clear a finished subagent. No-op on empty/unknown id (fail-open).
   · pending(now) -> list[dict] — Live (unswept) entries, oldest-first. Fail-open [].
+  · is_janitor_agent(entry) -> bool — True iff this manifest entry is a background agent the JANITOR spawned for
+  · pending_external(now) -> list[dict] — Live entries EXCLUDING the janitor's own housekeeping agents — the set the
   · directive_lines(now) -> list[str] — Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
 `scripts/lib/plugin_freshness.py` — Plugin-freshness helper (issue #69, TRDD-YF4NDYYE) — verify cached-vs-live BEFORE
   · cached_version(plugin_root) -> str | None — The version of the plugin tree being audited (its own plugin.json).
@@ -1426,7 +1443,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/oauth_rotator/safe_storage.py` — Cross-platform OS secret storage — the single abstraction for keeping rotator
   · SecurityRun — Outcome of ONE gated `security` invocation via ``run_security``.
   · keychain_denied_latched() -> bool — True iff the denied-latch is set — a prior `security` op was denied/hung, so NO
-  · set_keychain_denied(reason) -> None — Set the persistent denied-latch (atomic tmp+replace) and log ONE actionable line.
+  · set_keychain_denied(reason, *, quiet) -> None — Set the persistent denied-latch (atomic tmp+replace) and log ONE actionable line.
   · clear_keychain_denied() -> bool — Clear the denied-latch so `security` ops resume. Call this from the arm / ACL-re-grant
   · run_security(argv, *, timeout) -> SecurityRun — THE single gate EVERY `security` invocation (safe_storage AND rotator) routes through.
   · StoreResult — Outcome of a ``store`` call — three-valued so callers can fail closed.
