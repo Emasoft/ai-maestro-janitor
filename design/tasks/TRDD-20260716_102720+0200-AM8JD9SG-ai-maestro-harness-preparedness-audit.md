@@ -136,6 +136,41 @@ The global switches (`fleet_stop` disarm/pause) and `/reload-plugins` fleet-wide
 - **F9** — janitor-side timeout-budget fix (make the ai-maestro self-trigger send detached), still
   design-needed, independent of the above.
 
+## ⏵ DAEMON-MIGRATION ARCHITECTURE — coordination in flight (janitor#100, 2026-07-16)
+
+**Owner directed (2026-07-16) a bigger architecture that SUPERSEDES most of this audit's residual:**
+ai-maestro absorbs the janitor DAEMON's continuity functions and serves them via api/scripts; a
+special LOCAL-scoped `#J` janitor runs in each ai-maestro agent (NO daemon — it delegates to the
+server); the NORMAL `#N` janitor flips user→local scope for non-ai-maestro machines.
+
+- **ai-maestro's coordination ask = `Emasoft/ai-maestro-janitor#100`.** I replied with the
+  **authoritative daemon inventory** (the durable artifact — read the #100 comment, not this
+  summary): 11 daemon tasks split into **Family A = continuity** (OAuth rotation, account-mgmt on
+  429/network, session-liveness recovery, resurrection → MOVE TO SERVER) and **Family B =
+  dev-hygiene** (plugin/self update, cache-prune, rules-cleanup, OOM guard, gh-config audit → STAY
+  with the janitor; moving them breaks ai-maestro's own `#56` "runs with no janitor" invariant).
+- **The #J/#N line:** `#J` does only the ~35 workdir-scoped detectors locally + delegates Family A
+  to the server via `aimaestro-session.sh slash/queue` (self-targeted, R42-clean, no auth problem —
+  `queue` is strictly better than ESC-injection); does NO Family B, NO daemon, NO global writes.
+- **The residual `#N` keeps:** Family B on any machine + OAuth-rotation FALLBACK when there's no
+  server + recovering the ai-maestro SERVER ITSELF if it dies (server can't resurrect itself). Scope
+  flip user→local does NOT reopen #7 — the singleton is guaranteed by the machine-wide `daemon.flock`,
+  not by install scope (corrected my earlier caution).
+- **R16 token posture (sign-off gate):** tokens live ENCRYPTED in the OS keychain
+  (`Claude Code-credentials` live + `Claude Code-rotator-slot` slots), never in a file, **never in
+  any API/CLI response an agent/model can read**; one live-credential writer (server-when-up /
+  daemon-fallback, mutually exclusive); REAUTH stays a human `/login`.
+- **AgentlensPro#2 RESOLVED** — the 3 CLI-contract paths are confirmed + LOCKED by
+  `cliContract.janitor.test.ts` (commit `d1a3074`); drift now fails their gate. The token-monitoring
+  half is unblocked.
+
+**NEXT ACTION (post-coordination):** wait for ai-maestro to fold the inventory into their server-side
+TRDDs + confirm the Q3 api/scripts contract shape → THEN author the **janitor-side TRDD** (`#J` build
++ `#N` scope-flip + shared-codebase/two-backends split + the `#N`-fallback-when-no-server residual).
+Process is coordinate → TRDDs → plan mode (owner-directed); do NOT jump to plan mode or author the
+big TRDD before ai-maestro confirms the contract. Cross-refs: ai-maestro#68 (parent), ai-maestro#70 /
+AgentlensPro#3 (AgentlensPro dependency), ai-maestro TRDD-1222f06a §9.
+
 ## COORDINATION + PUBLISH GATE (2026-07-16)
 
 - **Coordination anchor: `Emasoft/ai-maestro#68`** — asks the ai-maestro Claude for the PLANNED/
