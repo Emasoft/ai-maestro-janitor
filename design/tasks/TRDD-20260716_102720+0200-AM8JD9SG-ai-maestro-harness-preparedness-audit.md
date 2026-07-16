@@ -165,8 +165,8 @@ server); the NORMAL `#N` janitor flips user→local scope for non-ai-maestro mac
   half is unblocked.
 
 **NEXT ACTION (post-coordination):** wait for ai-maestro to fold the inventory into their server-side
-TRDDs + confirm the Q3 api/scripts contract shape → THEN author the **janitor-side TRDD** (`#J` build
-+ `#N` scope-flip + shared-codebase/two-backends split + the `#N`-fallback-when-no-server residual).
+TRDDs + confirm the Q3 api/scripts contract shape → THEN author the **janitor-side TRDD** (`#J` build,
+`#N` scope-flip, shared-codebase/two-backends split, and the `#N`-fallback-when-no-server residual).
 Process is coordinate → TRDDs → plan mode (owner-directed); do NOT jump to plan mode or author the
 big TRDD before ai-maestro confirms the contract. Cross-refs: ai-maestro#68 (parent), ai-maestro#70 /
 AgentlensPro#3 (AgentlensPro dependency), ai-maestro TRDD-1222f06a §9.

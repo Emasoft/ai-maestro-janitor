@@ -91,6 +91,6 @@ unattended self-management.
 
 ## Verify
 
-`uv run pytest tests/test_user_intent.py tests/test_user_presence_breadcrumb.py tests/test_compact_trigger.py -q`
-+ full `pytest` (13125 pass) + `ruff check` green. Live proof (post-publish): a pane idle >5 min
+`uv run pytest tests/test_user_intent.py tests/test_user_presence_breadcrumb.py tests/test_compact_trigger.py -q`,
+full `pytest` (13125 pass), and `ruff check` green. Live proof (post-publish): a pane idle >5 min
 self-triggers reload/compact even while the user is active in another pane.
