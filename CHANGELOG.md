@@ -2,41 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.44.1] - 2026-07-15
+## [0.45.0] - 2026-07-16
 
 ### Bug Fixes
 
-- A retried ticket was in the queue AND the archive (TRDD-CGYMUKO6)
-- The checklist told the agent to forge the flag the guard exists to gate
-- Guard the ≥85% context hardstop against CC 2.1.208's false 100%; doc the 2.1.207 plugin-option scope break
-- Heartbeat-filter the anomaly detector + spike threshold; drop the false durable narrative
-- Exclude the janitor's own agents from the FAST probe (TRDD-CI6ZTNB9)
-- Stop extract_lessons at an atom marker (TRDD-MADJ00KA)
-- _body_minus_lessons fails loud on a multi-page concatenation (TRDD-842PBES7)
-- Pin allow-ALL (-A) ACL on slot-token keychain writes (TRDD-EQJPPZ2L)
-- Set keychain ACL only at CREATE, data-only UPDATE thereafter (TRDD-EQJPPZ2L)
-- Self-healing keychain-denied latch (half-open circuit breaker) (TRDD-EQJPPZ2L)
+- Skip manifest attestation in git source checkouts (T-DTTXJGC7, SELFINT-001 false positive)
+- \#77 bounded parts — global-arm output honesty + advisory armed-stamp in fleet_status
+- Compress the #81 point-9 addition under the 52KB shipped-rules floor cap
+- Final 2 prose snips to clear the 52KB floor cap (the corpus sat AT the cap pre-#81)
+- Re-arm dwell window kills the renew oscillation (#89, TRDD-CI6ZTNB9)
+- Throttle PreToolUse additionalContext to tier TRANSITIONS (#79)
 
 ### Documentation
 
-- Refresh the fenced project map (the ticket system's new modules)
-- TRDD-CGYMUKO6 — the CLI had no tests, and that is where the bug was
-- The tool-call cost law, and why the cadence's own re-arm is billed
-- A cache write costs 2x, not 1.25x — the main agent runs a 1h TTL
-- Items 2, 3, 4 done; record the grep-as-proof and moving-failure lessons
-- Add TRDD-CI6ZTNB9, TRDD-MADJ00KA, TRDD-842PBES7 — 3 verified issues from the GitHub triage
-- Add TRDD-EQJPPZ2L — rotator keychain WRITE triggers an ACL prompt (the recurring rotation-death root cause)
-- EQJPPZ2L part 1 landed (fa46a49) + correct the fix target
-- EQJPPZ2L definitive root cause — ACL flag on -U update prompts (SecKeychainItemSetAccess)
-- EQJPPZ2L code fix landed (1cedf28) — items 1+2 done; login validation gated on user
-- EQJPPZ2L — rotation GO-LIVE, validated on the real login keychain (TRDD-EQJPPZ2L)
-- Clear publish gate — TRDD list-marker NIT (#113) + janitor-arm TOC embed MINOR (TRDD-EQJPPZ2L)
+- EQJPPZ2L LIVE on published+deployed code (v0.44.1) — full go-live chain verified (TRDD-EQJPPZ2L)
+- Capture the 2026-07-15 keychain lessons + author the desc-field/recall-invite TRDD
+- Capture the USER's memory-system directives as a 3-TRDD series
+- 0NGYP3IG — memgrep atom-id resolution (id->page-path navigation, id->atom content)
+- 0NGYP3IG — atoms are mobile, so the index is the sole atom→page source + ids are corpus-wide unique
+- 87RKBYJ8 — capture the ROOT principle (one page = one topic) behind duties 10/14/15
+- NM4TPCQ9 — enforce topic-named pages (agents make description-named ones)
+- Re-import IND trdd-design-tasks from ai-maestro governance-rules (#81)
+- W8KDPT2M (adopt AI Maestro CLI layer, #76 epic) + V5RXQ4NB (keychain READ partition-list flap, #82)
+- Declare the three new userConfig options from #89/#79 (dwell + the two nudge repeat intervals)
+- Refresh the auto-generated CLAUDE.md project map (project-map-drift)
 
 ### Features
 
-- Log every turn, not just heartbeats — the arm was unmeasurable (TRDD-DLI76AUC #4)
+- Require a <=200-char prose desc on every atom (upgrade from optional <=64 slug) (TRDD-AP2X9A0H)
+- Topic-named pages rule (NM4TPCQ9 prong 1) + desc<=200 prose sync in references (AP2X9A0H a)
+- Recall INVITE on every non-trivial prompt (TRDD-7B1THXTB)
+- Sync subconscious procedures — desc<=200, corpus-wide atom ids, topic-naming corrective (AP2X9A0H b, NM4TPCQ9 prong 2, 87RKBYJ8 gap list)
+- Atom-id navigation (atom-page/atom) + desc in listings (TRDD-0NGYP3IG, TRDD-AP2X9A0H c)
+- Push the {plugin}--v{version} dependency-resolver twin tag (#85, #90)
+- Load-bearing-token fidelity gate in the verify oracle (#91)
 
-### Performance
+### Styling
 
-- The re-arm was six billed tool calls, not a config write (TRDD-DLI76AUC)
+- Blank lines around 4 fences in the imported reference (MD031 publish-gate)
+- Clear 4 publish-gate NITs — MD056 escaped pipes in the imported table, MD004 wrapped lines reading as plus-markers
+- Compress janitor-memory-write + consolidate bodies under the 5000-token CPV cap
+- Two more shaves — write body was 5007 vs the 5000-token cap
+- Reword a doc comment the skillaudit scanner read as CMD_INJECTION (publish-gate NIT)
 

@@ -1,6 +1,6 @@
 {
   "name": "ai-maestro-janitor",
-  "version": "0.44.1",
+  "version": "0.45.0",
   "description": "Keeps your dev environment tidy and secure, in the background: drift + supply-chain detectors, secret/injection guards on tool calls, rate-limit auto-resume, prompt-cache keep-alive, and a markdown memory system. Runs on a per-session CronCreate heartbeat (session-scoped, re-armed each session) plus one machine-wide background daemon that owns every global-scope update.",
   "author": {
     "name": "Emasoft",
@@ -215,14 +215,14 @@
     },
     "heartbeat_cadence_dwell_s": {
       "title": "Cadence Re-arm Dwell (seconds)",
-      "description": "After a heartbeat re-arm (a [janitor-renew] that changed the cadence tier), suppress further renew emissions for this many seconds UNLESS promoting to FAST for a genuine non-self signal (janitor#89 / TRDD-CI6ZTNB9). Kills the tier oscillation where the controller chased the background agents it itself spawned — each memory chore used to cost 2 wasted re-arm turns. Default 1200 (20 min); 0 disables the dwell.",
+      "description": "After a heartbeat re-arm (a [janitor-renew] that changed the cadence tier), suppress further renew emissions for this many seconds UNLESS promoting to FAST for a genuine non-self signal (janitor#89 / TRDD-CI6ZTNB9). Kills the tier oscillation where the controller chased the background agents it itself spawned \u2014 each memory chore used to cost 2 wasted re-arm turns. Default 1200 (20 min); 0 disables the dwell.",
       "type": "number",
       "default": 1200,
       "sensitive": false
     },
     "token_budget_repeat_s": {
       "title": "Token-Spike Nudge Repeat Interval (seconds)",
-      "description": "The pre-tool-token-budget hook now injects its advisory additionalContext only on a TIER TRANSITION (janitor#79 — steady-tier per-call injection was the #2 measured cause of prompt-cache re-bills). At a steady HARD tier it re-nudges after this interval so a persistent spike is not forgotten. Default 600 (10 min). Enforcement (the opt-in deny of agent spawns at the hard tier) is unaffected by this throttle.",
+      "description": "The pre-tool-token-budget hook now injects its advisory additionalContext only on a TIER TRANSITION (janitor#79 \u2014 steady-tier per-call injection was the #2 measured cause of prompt-cache re-bills). At a steady HARD tier it re-nudges after this interval so a persistent spike is not forgotten. Default 600 (10 min). Enforcement (the opt-in deny of agent spawns at the hard tier) is unaffected by this throttle.",
       "type": "number",
       "default": 600,
       "sensitive": false
@@ -817,7 +817,7 @@
     },
     "memory_recall_invite": {
       "title": "Recall Invite on Prompt",
-      "description": "ON by default (TRDD-7B1THXTB). On every non-trivial user prompt the autorecall hook ALSO injects a one-line INVITATION for the agent to run its own `memgrep recall` with keywords IT derives — on a recall hit the invite is appended after the surfaced notes; on a miss it is injected alone. The invite never names or suggests a specific memory (that stays the agent's job); it exists because auto-surfacing ranks the RAW prompt and can miss the note that matters — the motivating failure re-hit a trap already documented in the corpus because nothing prompted a search. Kept to one line (it rides every prompt). Set to false to restore silence on a recall miss; setting memory_autorecall to false disables the whole hook, invite included.",
+      "description": "ON by default (TRDD-7B1THXTB). On every non-trivial user prompt the autorecall hook ALSO injects a one-line INVITATION for the agent to run its own `memgrep recall` with keywords IT derives \u2014 on a recall hit the invite is appended after the surfaced notes; on a miss it is injected alone. The invite never names or suggests a specific memory (that stays the agent's job); it exists because auto-surfacing ranks the RAW prompt and can miss the note that matters \u2014 the motivating failure re-hit a trap already documented in the corpus because nothing prompted a search. Kept to one line (it rides every prompt). Set to false to restore silence on a recall miss; setting memory_autorecall to false disables the whole hook, invite included.",
       "type": "boolean",
       "default": true,
       "sensitive": false
