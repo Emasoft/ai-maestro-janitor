@@ -1,9 +1,10 @@
 ---
 trdd-id: 7B1THXTB
 title: UserPromptSubmit hook — invite the agent to proactively memgrep-recall before acting
-column: dev
+column: published
+published-version: 0.45.0
 created: 2026-07-15T19:55:48+0200
-updated: 2026-07-16T09:00:00+0200
+updated: 2026-07-16T04:31:06+0200
 current-owner: janitor-session
 task-type: feature
 scope: project

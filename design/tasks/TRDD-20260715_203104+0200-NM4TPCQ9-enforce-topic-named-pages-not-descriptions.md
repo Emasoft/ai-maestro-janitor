@@ -1,9 +1,10 @@
 ---
 trdd-id: NM4TPCQ9
 title: Enforce topic-named wikimem pages — agents create description-named pages, the spec is ignored
-column: dev
+column: published
+published-version: 0.45.0
 created: 2026-07-15T20:31:04+0200
-updated: 2026-07-16T09:20:00+0200
+updated: 2026-07-16T04:31:06+0200
 current-owner: janitor-session
 task-type: feature
 scope: project

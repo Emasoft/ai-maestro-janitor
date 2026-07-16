@@ -1,9 +1,10 @@
 ---
 trdd-id: 0NGYP3IG
 title: memgrep atom-id resolution — id to page-path for wiki navigation, and id to atom content
-column: dev
+column: published
+published-version: 0.45.0
 created: 2026-07-15T20:02:05+0200
-updated: 2026-07-16T00:45:00+0200
+updated: 2026-07-16T04:31:06+0200
 current-owner: janitor-session
 task-type: feature
 scope: project

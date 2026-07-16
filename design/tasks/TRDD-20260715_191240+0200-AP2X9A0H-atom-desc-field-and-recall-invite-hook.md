@@ -1,9 +1,10 @@
 ---
 trdd-id: AP2X9A0H
 title: Atom desc metadata field — required <=200-char prose summary shown in memgrep listings
-column: dev
+column: published
+published-version: 0.45.0
 created: 2026-07-15T19:12:40+0200
-updated: 2026-07-16T09:20:00+0200
+updated: 2026-07-16T04:31:06+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
