@@ -66,6 +66,17 @@ _SLOW_TTL_MIN = 30
 _TTL_SUBSCRIPTION_MIN = 60
 _TTL_API_KEY_MIN = 5
 
+# Default minimum gap (seconds) between two ACTUAL re-arms (issue #89 half 2,
+# TRDD-CI6ZTNB9's sibling). A re-arm is a full billed model turn — a cron
+# divergence is necessary but not sufficient to re-emit [janitor-renew]; the
+# last re-arm must also be at least this old, unless the fire is PROMOTING to a
+# faster tier (see `should_emit_renew`). Public (not `_`-prefixed) so the
+# dispatcher's env-default and this module share one source of truth instead of
+# two copies of the same magic number drifting apart. 20 min: long enough that
+# a few fires of tier noise settle before another re-arm is paid for, short
+# enough that a genuinely-persistent tier change is not stuck behind it for long.
+DEFAULT_DWELL_S = 1200
+
 
 @dataclass(frozen=True)
 class Signals:
@@ -91,11 +102,16 @@ class CadenceState:
     ``stable_count`` — consecutive fires the raw tier has held (drives demote
     hysteresis).
     ``committed_tier`` — the tier actually in force (what maps to the cron).
+    ``last_rearm_ts`` — epoch of the last fire that actually emitted
+    [janitor-renew] (0 = never), the anchor `should_emit_renew` dwells against
+    (issue #89 half 2). Defaults to 0 so every pre-existing caller/test that
+    builds a `CadenceState` without naming this field keeps working.
     """
 
     raw_tier: str
     stable_count: int
     committed_tier: str
+    last_rearm_ts: int = 0
 
 
 def raw_tier(signals: Signals) -> str:
@@ -116,16 +132,76 @@ def commit_tier(raw: str, prev: CadenceState | None, demote_fires: int) -> Caden
     flag appears). Demoting eagerly would flap the cron — a single idle fire
     between active ones would trigger a needless re-arm — so a slower raw tier
     must persist for ``demote_fires`` fires before it commits. Pure.
+
+    ``last_rearm_ts`` is carried forward UNCHANGED from ``prev`` (0 when
+    ``prev`` is None) — this function decides which tier WINS, never whether a
+    re-arm is actually emitted. `should_emit_renew` + `stamp_rearm` own that;
+    keeping the two concerns in separate functions is what makes the dwell
+    layer (issue #89 half 2) testable independent of the tier hysteresis.
     """
     if prev is None:
-        return CadenceState(raw_tier=raw, stable_count=1, committed_tier=raw)
+        return CadenceState(raw_tier=raw, stable_count=1, committed_tier=raw, last_rearm_ts=0)
     count = prev.stable_count + 1 if prev.raw_tier == raw else 1
     committed = prev.committed_tier
     if _TIER_RANK[raw] > _TIER_RANK[committed]:
         committed = raw  # faster -> commit now
     elif _TIER_RANK[raw] < _TIER_RANK[committed] and count >= max(1, demote_fires):
         committed = raw  # slower and stable long enough -> demote
-    return CadenceState(raw_tier=raw, stable_count=count, committed_tier=committed)
+    return CadenceState(
+        raw_tier=raw, stable_count=count, committed_tier=committed, last_rearm_ts=prev.last_rearm_ts
+    )
+
+
+def should_emit_renew(
+    *,
+    desired_differs: bool,
+    committed: CadenceState,
+    prev: CadenceState | None,
+    now: int,
+    dwell_s: int,
+) -> bool:
+    """Decide whether THIS fire may emit ``[janitor-renew]`` (issue #89 half 2).
+
+    A re-arm is a full billed model turn (CronDelete + CronCreate + state
+    writes) — so a differing desired cron is NECESSARY but not SUFFICIENT to
+    re-emit the marker; the last ACTUAL re-arm must also be at least
+    ``dwell_s`` old. The one exception is a tier PROMOTION (the committed tier
+    ranks faster than the previous fire's committed tier, or this is the very
+    first commit) — that always bypasses the dwell, matching `commit_tier`'s
+    own "promote immediately" philosophy: after the TRDD-CI6ZTNB9 self-exclusion
+    fix, a promotion can only be driven by a genuine time-sensitive signal
+    (resume / keep-going / directive / a USER-spawned background agent), never
+    the janitor's own housekeeping, so there is nothing left to damp there.
+
+    A DEMOTION (or a same-tier cron change, e.g. an override edited) is
+    therefore gated by TWO independent hysteresis layers that damp different
+    things: `demote_fires` (inside `commit_tier`) decides WHICH tier wins;
+    this dwell decides how OFTEN the winning tier may actually pay for a
+    re-arm. Neither alone stops a controller that flips its committed tier
+    every `demote_fires`-th fire from re-arming every time it does. Pure.
+    """
+    if not desired_differs:
+        return False
+    prev_rank = _TIER_RANK.get(prev.committed_tier, -1) if prev is not None else -1
+    if _TIER_RANK[committed.committed_tier] > prev_rank:
+        return True  # promotion (incl. the very first commit) — never dwell-gated
+    if dwell_s <= 0 or committed.last_rearm_ts <= 0:
+        return True  # dwell disabled, or no re-arm has ever landed to dwell against
+    return (now - committed.last_rearm_ts) >= dwell_s
+
+
+def stamp_rearm(state: CadenceState, now: int) -> CadenceState:
+    """Return `state` with `last_rearm_ts` set to `now`.
+
+    Call this ONLY on a fire that actually emits [janitor-renew] — the next
+    fire's dwell check must measure from a REAL re-arm, not from every fire
+    that merely computed a differing desired cron (issue #89 half 2)."""
+    return CadenceState(
+        raw_tier=state.raw_tier,
+        stable_count=state.stable_count,
+        committed_tier=state.committed_tier,
+        last_rearm_ts=now,
+    )
 
 
 def tier_to_cron(tier: str, ttl_minutes: int, overrides: Mapping[str, str] | None = None) -> str:
@@ -261,12 +337,18 @@ def state_to_dict(state: CadenceState) -> dict:
         "raw_tier": state.raw_tier,
         "stable_count": int(state.stable_count),
         "committed_tier": state.committed_tier,
+        "last_rearm_ts": int(state.last_rearm_ts),
     }
 
 
 def state_from_dict(data: Mapping[str, object] | None) -> CadenceState | None:
     """Parse CadenceState from disk. None on absent/malformed input (treated as
     "no prior state" by commit_tier — the first fire simply commits its raw tier).
+
+    ``last_rearm_ts`` defaults to 0 when absent — a pre-dwell (issue #89 half 2)
+    state file has no such key, and 0 means "no re-arm to dwell against yet",
+    which is the safe direction (the next differing cron re-arms immediately
+    rather than being wrongly held back by a dwell window that never started).
     """
     if not isinstance(data, Mapping):
         return None
@@ -275,4 +357,7 @@ def state_from_dict(data: Mapping[str, object] | None) -> CadenceState | None:
     if raw not in _TIER_RANK or committed not in _TIER_RANK:
         return None
     count = _as_int(data.get("stable_count", 1), 1)
-    return CadenceState(raw_tier=str(raw), stable_count=max(1, count), committed_tier=str(committed))
+    last_rearm = max(0, _as_int(data.get("last_rearm_ts", 0), 0))
+    return CadenceState(
+        raw_tier=str(raw), stable_count=max(1, count), committed_tier=str(committed), last_rearm_ts=last_rearm
+    )

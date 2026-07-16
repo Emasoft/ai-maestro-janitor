@@ -1465,6 +1465,12 @@ def _phase_cadence_tier() -> None:
     stamp they leave behind — see _cadence_active_waiting. A TOTAL no-op when
     heartbeat_cadence_dynamic is off. Fail-open throughout: a cadence bug must never
     break the fire.
+
+    A differing desired cron does not automatically re-emit [janitor-renew]: a
+    re-arm dwell (issue #89 half 2, hc.should_emit_renew) also gates it, so a
+    committed-tier flip does not pay for a full re-arm turn more often than
+    once per dwell window — UNLESS the flip is a genuine tier PROMOTION, which
+    stays immediate (see hc.should_emit_renew's docstring).
     """
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", True):
         return
@@ -1506,9 +1512,8 @@ def _phase_cadence_tier() -> None:
         )
         prev = hc.state_from_dict(_read_json_file(sd / _CADENCE_STATE_FILE))
         committed = hc.commit_tier(raw, prev, demote_fires)
-        state.atomic_write(sd / _CADENCE_STATE_FILE, json.dumps(hc.state_to_dict(committed)))
 
-        # 4. tier → desired cron; re-arm (via [janitor-renew]) only if the live cron differs.
+        # 4. tier → desired cron.
         overrides = {
             hc.FAST: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_FAST", ""),
             hc.MID: os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CRON_MID", ""),
@@ -1524,7 +1529,30 @@ def _phase_cadence_tier() -> None:
                 armed = armed_path.read_text().strip()
         except OSError:
             armed = ""
-        if desired.strip() != armed:
+
+        # 5. re-arm dwell (issue #89 half 2): a differing cron is necessary but not
+        # sufficient to re-emit [janitor-renew] — the LAST actual re-arm must also be
+        # at least dwell_s old, unless this fire is PROMOTING to a faster tier (a
+        # genuine time-sensitive signal — after the TRDD-CI6ZTNB9 self-exclusion fix
+        # the FAST/MID promotion path can no longer be the janitor's own housekeeping,
+        # so there is nothing left to damp on a promotion). This is a SEPARATE damping
+        # axis from demote_fires: that decides WHICH tier wins; this decides how OFTEN
+        # the winning tier may actually pay for a re-arm. Persisted in cadence-state.json
+        # (hc.CadenceState.last_rearm_ts) so the dwell survives across fires.
+        dwell_s = state.coerce_int(
+            os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S"), hc.DEFAULT_DWELL_S
+        )
+        do_renew = hc.should_emit_renew(
+            desired_differs=desired.strip() != armed,
+            committed=committed,
+            prev=prev,
+            now=now,
+            dwell_s=dwell_s,
+        )
+        if do_renew:
+            committed = hc.stamp_rearm(committed, now)
+        state.atomic_write(sd / _CADENCE_STATE_FILE, json.dumps(hc.state_to_dict(committed)))
+        if do_renew:
             # Re-cadence == re-arm: the protocol rule maps [janitor-renew] to
             # /janitor-arm, which reads desired-cadence.cron, bakes it, and writes
             # armed-cadence.cron — so this marker stops firing once reconciled.

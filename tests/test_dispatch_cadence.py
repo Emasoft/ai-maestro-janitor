@@ -216,3 +216,137 @@ def test_maintenance_fire_runs_cadence_before_return(proj: Path, monkeypatch: py
     out = _run_main(dispatch)
     assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
     assert "[janitor-renew]" in out  # first fire, armed absent → re-arm to SLOW
+
+
+# --------------------------------------------------------------------------- #
+# issue #89 half 2 — the re-arm DWELL. desired_differs != committed-tier-change:
+# even once the tier hysteresis picks a new committed tier, the ACTUAL re-arm
+# (a full billed model turn) must not fire again inside the dwell window unless
+# this is a genuine tier PROMOTION. Sibling of TRDD-CI6ZTNB9 (half 1, the
+# self-exclusion fix, tested above).
+# --------------------------------------------------------------------------- #
+
+
+def _seed_cadence_state(proj: Path, *, raw_tier: str, committed_tier: str, last_rearm_ts: int, stable_count: int = 1) -> None:
+    import json
+
+    (_state(proj) / "cadence-state.json").write_text(
+        json.dumps(
+            {
+                "raw_tier": raw_tier,
+                "stable_count": stable_count,
+                "committed_tier": committed_tier,
+                "last_rearm_ts": last_rearm_ts,
+            }
+        )
+    )
+
+
+def test_dwell_suppresses_demotion_renew_within_window(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A demotion (FAST->SLOW, demote_fires=1 so it commits on this fire) whose last
+    re-arm was recent must NOT emit [janitor-renew] — this is exactly the re-arm
+    churn issue #89 describes. desired-cadence.cron is still updated (so /janitor-arm
+    picks up the right value once the dwell later allows a renew)."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
+    now = int(time.time())
+    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 500)
+    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")  # armed to the old FAST cron
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch)
+    assert out == ""  # dwell (default 1200s) suppresses the renew at only 500s
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
+
+
+def test_dwell_allows_demotion_renew_after_window_expires(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The SAME demotion, but the last re-arm is old enough — dwell no longer blocks it."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
+    now = int(time.time())
+    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 1300)
+    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch)
+    assert out.strip() == "[janitor-renew]"
+    import json
+
+    data = json.loads((_state(proj) / "cadence-state.json").read_text())
+    assert data["committed_tier"] == "slow"
+    assert data["last_rearm_ts"] > now - 1300  # re-stamped to THIS fire
+
+
+def test_dwell_bypassed_for_a_genuine_fast_promotion(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A PROMOTION (SLOW->FAST via a fresh resume stamp) renews immediately even
+    seconds after the last re-arm — recovery latency must never wait on the dwell."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    now = int(time.time())
+    _seed_cadence_state(proj, raw_tier="slow", committed_tier="slow", last_rearm_ts=now - 10)
+    (_state(proj) / "armed-cadence.cron").write_text("*/30 * * * *")  # armed to the old SLOW cron
+    (_state(proj) / "last-resume.ts").write_text(str(now))  # a genuine active-waiting signal
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch)
+    assert out.strip() == "[janitor-renew]"
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+
+
+def test_dwell_env_var_zero_disables_the_feature(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S=0 restores the pre-dwell
+    behavior: every cron divergence renews, even a demotion moments after the
+    previous re-arm."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S", "0")
+    now = int(time.time())
+    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 5)
+    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch)
+    assert out.strip() == "[janitor-renew]"
+
+
+def test_dwell_env_var_custom_window_honored(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A short custom dwell (e.g. 60s) lets a re-arm land sooner than the 1200s default."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DWELL_S", "60")
+    now = int(time.time())
+    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 90)
+    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch)
+    assert out.strip() == "[janitor-renew]"  # 90s >= the 60s custom dwell
+
+
+def test_dwell_state_persists_across_two_suppressed_fires(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE regression this whole half exists to prevent: issue #89's observed
+    oscillation (*/15 <-> */5 every fire). Two consecutive fires inside the dwell
+    window must BOTH stay silent, and neither may reset the dwell anchor."""
+    import json
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
+    now = int(time.time())
+    _seed_cadence_state(proj, raw_tier="fast", committed_tier="fast", last_rearm_ts=now - 100)
+    (_state(proj) / "armed-cadence.cron").write_text("*/5 * * * *")
+    dispatch = _import_dispatch()
+
+    out1 = _run_phase(dispatch)
+    assert out1 == ""
+    data1 = json.loads((_state(proj) / "cadence-state.json").read_text())
+    assert data1["last_rearm_ts"] == now - 100  # unchanged — no renew happened
+
+    out2 = _run_phase(dispatch)
+    assert out2 == ""
+    data2 = json.loads((_state(proj) / "cadence-state.json").read_text())
+    assert data2["last_rearm_ts"] == now - 100  # still unchanged on the second silent fire

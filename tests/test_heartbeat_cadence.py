@@ -82,6 +82,20 @@ def test_commit_tier_equal_raw_keeps_committed() -> None:
     assert s.stable_count == 2
 
 
+def test_commit_tier_carries_last_rearm_ts_forward_unchanged() -> None:
+    """commit_tier decides which tier WINS, never the re-arm dwell anchor — it
+    must carry last_rearm_ts through untouched (issue #89 half 2)."""
+    prev = hc.CadenceState(raw_tier=hc.SLOW, stable_count=1, committed_tier=hc.SLOW, last_rearm_ts=12345)
+    s = hc.commit_tier(hc.FAST, prev, demote_fires=2)
+    assert s.last_rearm_ts == 12345
+
+
+def test_commit_tier_first_fire_last_rearm_ts_is_zero() -> None:
+    """No prior state → last_rearm_ts starts at 0 (never armed under dwell tracking)."""
+    s = hc.commit_tier(hc.SLOW, None, demote_fires=2)
+    assert s.last_rearm_ts == 0
+
+
 # ---------- tier_to_cron ----------
 
 
@@ -245,7 +259,7 @@ def test_resolve_auto_probe_fail_env_fallback_api_key() -> None:
 
 
 def test_state_round_trip() -> None:
-    s = hc.CadenceState(raw_tier=hc.MID, stable_count=3, committed_tier=hc.FAST)
+    s = hc.CadenceState(raw_tier=hc.MID, stable_count=3, committed_tier=hc.FAST, last_rearm_ts=555)
     assert hc.state_from_dict(hc.state_to_dict(s)) == s
 
 
@@ -260,3 +274,144 @@ def test_state_from_dict_bad_count_defaults_to_one() -> None:
     s = hc.state_from_dict({"raw_tier": hc.SLOW, "committed_tier": hc.SLOW, "stable_count": "nope"})
     assert s is not None
     assert s.stable_count == 1
+
+
+def test_state_from_dict_missing_last_rearm_ts_defaults_zero() -> None:
+    """A pre-dwell (issue #89 half 2) state file has no last_rearm_ts key — it
+    must parse with 0 (never armed), not raise or drop the whole state."""
+    s = hc.state_from_dict({"raw_tier": hc.SLOW, "committed_tier": hc.SLOW})
+    assert s is not None
+    assert s.last_rearm_ts == 0
+
+
+def test_state_from_dict_negative_last_rearm_ts_clamped_to_zero() -> None:
+    """A corrupt/negative timestamp must not produce a negative dwell anchor."""
+    s = hc.state_from_dict({"raw_tier": hc.SLOW, "committed_tier": hc.SLOW, "last_rearm_ts": -99})
+    assert s is not None
+    assert s.last_rearm_ts == 0
+
+
+# ---------- should_emit_renew / stamp_rearm (issue #89 half 2 — re-arm dwell) ----------
+
+
+def _cs(tier: str, *, last_rearm_ts: int = 0) -> hc.CadenceState:
+    return hc.CadenceState(raw_tier=tier, stable_count=1, committed_tier=tier, last_rearm_ts=last_rearm_ts)
+
+
+def test_should_emit_renew_false_when_cron_matches() -> None:
+    """No divergence → never renew, regardless of dwell state."""
+    committed = _cs(hc.SLOW, last_rearm_ts=0)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=False, committed=committed, prev=None, now=100000, dwell_s=1200
+        )
+        is False
+    )
+
+
+def test_should_emit_renew_first_commit_always_renews() -> None:
+    """prev=None (the very first commit) is treated as a promotion — always renews,
+    matching the pre-dwell behavior for a session's first-ever cadence fire."""
+    committed = _cs(hc.SLOW, last_rearm_ts=0)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=True, committed=committed, prev=None, now=100000, dwell_s=1200
+        )
+        is True
+    )
+
+
+def test_should_emit_renew_promotion_bypasses_dwell() -> None:
+    """A tier PROMOTION (SLOW->FAST) renews immediately even seconds after the last
+    re-arm — recovery latency must never wait out a dwell window."""
+    prev = _cs(hc.SLOW, last_rearm_ts=99990)
+    committed = hc.CadenceState(raw_tier=hc.FAST, stable_count=1, committed_tier=hc.FAST, last_rearm_ts=99990)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=True, committed=committed, prev=prev, now=100000, dwell_s=1200
+        )
+        is True
+    )
+
+
+def test_should_emit_renew_mid_promotion_also_bypasses_dwell() -> None:
+    """SLOW->MID (genuine user activity) is a promotion too — not just ->FAST."""
+    prev = _cs(hc.SLOW, last_rearm_ts=99990)
+    committed = hc.CadenceState(raw_tier=hc.MID, stable_count=1, committed_tier=hc.MID, last_rearm_ts=99990)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=True, committed=committed, prev=prev, now=100000, dwell_s=1200
+        )
+        is True
+    )
+
+
+def test_should_emit_renew_demotion_suppressed_within_dwell() -> None:
+    """THE fix: a demotion (FAST->SLOW) within the dwell window does NOT renew —
+    this is exactly the churn issue #89 describes (a re-arm every tier flip)."""
+    prev = _cs(hc.FAST, last_rearm_ts=99500)
+    committed = hc.CadenceState(raw_tier=hc.SLOW, stable_count=1, committed_tier=hc.SLOW, last_rearm_ts=99500)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=True, committed=committed, prev=prev, now=100000, dwell_s=1200
+        )
+        is False
+    )  # only 500s since the last re-arm, dwell_s=1200 — still inside the window
+
+
+def test_should_emit_renew_demotion_allowed_after_dwell_expires() -> None:
+    """The SAME demotion, but the last re-arm is now old enough — renews."""
+    prev = _cs(hc.FAST, last_rearm_ts=98000)
+    committed = hc.CadenceState(raw_tier=hc.SLOW, stable_count=1, committed_tier=hc.SLOW, last_rearm_ts=98000)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=True, committed=committed, prev=prev, now=100000, dwell_s=1200
+        )
+        is True
+    )  # 2000s since the last re-arm >= dwell_s=1200
+
+
+def test_should_emit_renew_same_tier_cron_change_is_dwell_gated() -> None:
+    """Same committed tier (e.g. an override env var changed the cron, or the TTL
+    regime flipped) is NOT a promotion — it is dwell-gated like a demotion."""
+    prev = _cs(hc.MID, last_rearm_ts=99900)
+    committed = _cs(hc.MID, last_rearm_ts=99900)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=True, committed=committed, prev=prev, now=100000, dwell_s=1200
+        )
+        is False
+    )
+
+
+def test_should_emit_renew_dwell_disabled_always_renews() -> None:
+    """dwell_s<=0 disables the feature entirely — every divergence (that isn't a
+    same-fire no-op) renews immediately, matching the pre-dwell behavior."""
+    prev = _cs(hc.FAST, last_rearm_ts=99999)
+    committed = _cs(hc.SLOW, last_rearm_ts=99999)
+    assert (
+        hc.should_emit_renew(desired_differs=True, committed=committed, prev=prev, now=100000, dwell_s=0)
+        is True
+    )
+
+
+def test_should_emit_renew_no_prior_rearm_always_renews() -> None:
+    """last_rearm_ts==0 means no re-arm has ever landed — nothing to dwell against,
+    so the fire may renew even though it is a demotion vs the prior committed tier."""
+    prev = _cs(hc.FAST, last_rearm_ts=0)
+    committed = _cs(hc.SLOW, last_rearm_ts=0)
+    assert (
+        hc.should_emit_renew(
+            desired_differs=True, committed=committed, prev=prev, now=100000, dwell_s=1200
+        )
+        is True
+    )
+
+
+def test_stamp_rearm_sets_timestamp_preserves_tier_fields() -> None:
+    s = hc.CadenceState(raw_tier=hc.MID, stable_count=4, committed_tier=hc.FAST, last_rearm_ts=0)
+    stamped = hc.stamp_rearm(s, 42424)
+    assert stamped.last_rearm_ts == 42424
+    assert stamped.raw_tier == hc.MID
+    assert stamped.stable_count == 4
+    assert stamped.committed_tier == hc.FAST
