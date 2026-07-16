@@ -2,7 +2,7 @@
 name: janitor-architecture
 description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub"
 ocd: 2026-06-13
-lmd: 2026-07-07
+lmd: 2026-07-16
 metadata:
   node_type: memory
   type: project
@@ -340,3 +340,25 @@ must report a crash.[^3]
   held the LEGACY lock — two live daemons. Hence resolver-marker + copy under
   the legacy flock + NEW flock acquired BEFORE the marker (both held for the
   daemon's lifetime) + dual-read of control flags for old-code sessions.
+
+[^5]: [id:ATOM-KEEPGO-IDLE, status:valid, keywords:"fleet_idle_overnight agents_did_not_continue heartbeat_did_not_nudge keep_going_off never_stop", ocd:2026-07-16, lmd:2026-07-16, trdd:93TKV769, commits:7cd8ea0]
+  DO NOT leave the never-stop keep-going nudge OPT-IN (the pre-2026-07-16 default: silent in full
+  mode unless the per-session `keep-going` flag was set), BECAUSE the whole fleet sat idle overnight —
+  a healthy heartbeat detected drift and even re-armed `cron_dead` sessions (guardian `rearm` rungs in
+  the recovery-audit), but `rearm` restarts the HEARTBEAT, it never tells the agent to keep WORKING,
+  so every unattended session that finished a turn with no rate-limit/compact/drift signal went
+  silent. DO keep `_phase_keep_going_nudge` DEFAULT-ON in every mode (`keep_going_default=true`),
+  silenced only by the explicit `keep-going-off` sentinel (full mode) or the knob — keeping the fleet
+  working in the user's absence is the janitor's #1 job, not an opt-in.
+
+[^6]: [id:ATOM-PRESENCE-PERPANE, status:valid, keywords:"USER_PRESENT_wrong_while_absent self_trigger_refused_reload_compact presence_machine_global 30_minute_window per_pane", ocd:2026-07-16, lmd:2026-07-16, trdd:T7N67AQP, commits:"001bb3e,e5888b2"]
+  DO NOT gate the self-trigger (`/compact`, `/reload-plugins`) on a MACHINE-GLOBAL presence breadcrumb
+  with a 30-min window, BECAUSE a human typing in ANY session then marked EVERY unattended pane on the
+  machine "present" for half an hour and the self-trigger refused everywhere (the user kept seeing
+  `USER_PRESENT` while absent and had to reload by hand). The gate exists to avoid clobbering a human's
+  IN-PROGRESS keystrokes — a harm that lasts seconds and is scoped to the pane they type in. DO make
+  presence PER-PANE (`state.terminal_pane_key`: tmux/iTerm/kitty/WezTerm, namespaced by source; ABSENT
+  per-pane file = away) with a 5-MIN window; no pane id (Apple Terminal/xterm) falls back to global.
+  Inside ai-maestro the signal must come from the SERVER (`aimaestro-session.sh state`/user-idle, or
+  `queue`/`--require-idle`), NOT the local breadcrumb — tracked on ai-maestro#73, wired under
+  [[trdd-pzlvt2rn]] `#J`.
