@@ -107,7 +107,19 @@ machine-private) — see step 1.
 9. **NPT vs EHT.** `npt:` = Necessary Prerequisite Tasks — must finish BEFORE the parent
    proceeds past `dev`. `eht:` = Effects Handling Tasks — handle the CONSEQUENCES of the
    parent's work; the parent may land its code but **cannot reach `complete` until every
-   EHT is terminal**.
+   EHT is terminal** (the completion gate).
+   **Derived TRDDs are MANDATORY, not optional (the platelet rule):** a TRDD is authored
+   TOGETHER with its NPTs/EHTs — `eht: []` is an assertion ("this change touches nothing
+   around it") and it is usually false; verify each platelet before authoring it (name the
+   downstream surface, then go read it — no consumers ⇒ no hole).
+   **Depth is exactly 1:** a derived TRDD has `npt: []` and `eht: []`, and no TRDD may name
+   a derived TRDD as its `parent-trdd:`. Sibling ordering uses `blocked-by:` (a runtime
+   edge), never `npt:`/`eht:` (derivation edges — they alone establish parenthood). A
+   derived TRDD gated by its own effects gets a new SIBLING in the parent's `eht:` and
+   lists it in its own `blocked-by:`.
+   **Authorship + supersession record:** `created-by:` is set once and never changes hands;
+   a refused proposal archives with `approved: false`; only the actor that supersedes a
+   TRDD populates its `superseded-by:`.
 10. **STATE head block — MANDATORY once a TRDD spans more than one session.** A TRDD grows
     append-only, so a reader (or a compaction summary) hits the OLDEST, often SUPERSEDED
     facts first. Immediately after the title, before the first body section:

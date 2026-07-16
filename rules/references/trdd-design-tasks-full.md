@@ -27,22 +27,11 @@
 > `.claude/rules/`) that EXPANDS this base with multi-agent transition
 > authority, approval tiers, and title-based routing — the overlay never
 > restates this base.
->
-> **SCOPE (amended 2026-07-11).** A TRDD is **PROJECT-scoped** (`<project-root>/design/`,
-> git-tracked and pushed) or **LOCAL-scoped** (`~/.claude/projects/<slug>/design/`, outside
-> the repo and machine-private). Its **scope IS its path**. The local root mirrors the
-> project root exactly — the same four lifecycle folders — so everything in this reference
-> applies to both by swapping ONE path. The normative scope-routing rule, the both-roots
-> collision check, and the hard "a PROJECT TRDD MUST NOT cite a LOCAL one" invariant live in
-> the loaded rule (`trdd-design-tasks.md`, step 1); they are not restated here. Where this
-> document says "git-tracked" below, read it as **PROJECT-scoped**.
 
 **Rule:** Every non-trivial feature spec, backlog item, or deferred-work
 design note MUST be saved as a **Task Requirement Design Document (TRDD)**
-in a `design/tasks/` folder — `<project-root>/design/tasks/` for a PROJECT TRDD,
-`~/.claude/projects/<slug>/design/tasks/` for a LOCAL one. A PROJECT TRDD is a
-git-tracked artifact of the project; a LOCAL TRDD lives outside every repo and is
-never committed. Every TRDD is a single `.md` file with a YAML frontmatter that
+in `<project-root>/design/tasks/`. TRDDs are git-tracked artifacts of the
+project. Every TRDD is a single `.md` file with a YAML frontmatter that
 captures all the structured state (column, ownership, dependencies, test
 requirements, deploy/publish target, commit hashes, …) and a body that
 captures the prose. The frontmatter is **grep-first**; tools never need
@@ -106,19 +95,11 @@ Three components separated by `-`:
   check below makes it exact.
 - `<slug>` — kebab-case summary (2-4 words).
 
-**THE ID + TIMESTAMP RECIPE** (the loaded rule points here). Scans BOTH roots, because an id
-must be unique across the project's PROJECT and LOCAL design roots:
+Generate the id (regenerate on the rare collision):
 
 ```bash
-gen()   { LC_ALL=C tr -dc 'A-Z0-9' < /dev/urandom | head -c 8; }
-# `find … | grep -q .`, NEVER `ls <glob>`: an unmatched glob is DROPPED by some shells, so
-# `ls` runs with NO arguments, lists the cwd and exits 0 — which the loop below reads as
-# "collision" and regenerates forever. That is an infinite loop, not a nit (it hung a real
-# command for 20 minutes on 2026-07-11 before this was fixed).
-taken() { find "$1" "$2" -name "TRDD-*-$3-*.md" 2>/dev/null | grep -q .; }
-SLUG=$(pwd | tr -c '[:alnum:]' '-'); LOCAL_DESIGN="$HOME/.claude/projects/$SLUG/design"
-ID8=$(gen); while taken design "$LOCAL_DESIGN" "$ID8"; do ID8=$(gen); done
-TS=$(date +%Y%m%d_%H%M%S%z); ISO=$(date +%Y-%m-%dT%H:%M:%S%z)
+gen() { python3 -c "import random,string; print(''.join(random.choices(string.ascii_uppercase+string.digits,k=8)))"; }
+ID8=$(gen); while ls design/tasks/TRDD-*-"$ID8"-*.md >/dev/null 2>&1; do ID8=$(gen); done
 ```
 
 Example filename:
@@ -154,6 +135,7 @@ created: 2026-06-02T11:53:00+0200        # ISO 8601 + local TZ
 updated: 2026-06-02T11:53:00+0200        # bump on EVERY edit
 
 # ─────────── 2. OWNERSHIP
+created-by: main-session                 # WHO AUTHORED IT — set once, never changes hands
 current-owner: main-session              # session name with write-lock on body
 assignee: main-session                   # who executes (standalone: always this project's Claude)
 priority: 3                              # 0 = highest, 9 = lowest
@@ -340,8 +322,84 @@ A parent's transition to `complete` is gated on:
 
 ```
 (column == ai_review or human_review)  ─ tests + reviews passed
-  AND  all eht children are in terminal column (complete | published | live | superseded)
+  AND  every child in (npt: ∪ eht:) is in a terminal column
+       (complete | published | live | superseded)
 ```
+
+**A parent whose flock is still open is not complete — it is `blocked`.** Not
+"complete with follow-ups", not "complete pending EHTs": the kanban column reads
+`blocked`, `blocked-by:` names every open child, and `pre-block-column:` records
+where it was. The parent's own tests going green is not completion; completion is
+the change **plus the holes it opened being closed**. `blocked` is the only honest
+column for "my work is done, my flock is not" — the TRDD is blocked, on itself.
+
+### Derived TRDDs are MANDATORY, not optional (the platelet rule)
+
+**A TRDD is authored together with its derived TRDDs — its NPTs and EHTs.** No
+change exists in isolation; everything affects what is around it. If TRDDs are
+the red blood cells of the system, the derived TRDDs are the **platelets**: they
+close the holes the change opens. A TRDD shipped without them does more damage
+than good, because the change lands and the holes stay open.
+
+So `eht: []` is not a default. **It is an assertion — "this change touches
+nothing around it" — and it is usually false.** Any TRDD that alters an
+observable behavior (an API response shape, a status field, a rendered state, a
+timing, an error code) owes one EHT per downstream surface that behavior reaches.
+Any TRDD that depends on work not yet done owes an NPT.
+
+The gate above is what gives the rule teeth: a parent cannot reach `complete`
+while an EHT is open. Prose in a STATE block is not a platelet — it cannot be
+assigned, it does not block `complete`, and nothing bleeds when it is ignored.
+
+**But verify each platelet before authoring it.** A derived TRDD invented to
+satisfy a quota is worse than none: it dilutes the ones that matter and it
+misstates the blast radius. The test is mechanical — name the downstream surface,
+then go read it. If it has no consumers, there is no hole; record the verified
+non-effect inside a sibling EHT so nobody re-derives it. Platelets clot holes;
+they do not clot healthy vessels.
+
+### A derived TRDD has no derived TRDDs — the depth is exactly 1
+
+**A derived TRDD may not spawn derived TRDDs of its own.** It either contains
+every change it needs, or it is *accompanied* by further derived TRDDs —
+**siblings under the same parent**, never children of itself.
+
+```
+this TRDD is derived   ⇒   npt: []   and   eht: []
+no TRDD may name a derived TRDD as its `parent-trdd:`
+```
+
+Without this, the platelet count is unbounded: each patch's own side effects
+spawn patches, those spawn patches, and the parent's `complete` gate — *all
+children terminal* — recurses forever over a tree nobody can enumerate. At
+depth 1 the flock is a **finite, enumerated set written on the parent**, so the
+gate is decidable by one file read plus one `column:` check per child. The
+depth rule and the completion gate are one design; neither works alone.
+
+**Sibling ordering is `blocked-by:`, never `npt:`.** The two edges look alike
+and are not. `npt:`/`eht:` are **derivation** edges — this TRDD spawned that one
+— and they alone establish parenthood. `blocked-by:` is a **runtime** edge —
+this TRDD cannot proceed until that one resolves — and it establishes nothing.
+When derived TRDD *A* must wait on its sibling *B*, that goes in `A.blocked-by`;
+`B` stays exactly where it already is, in the parent's `npt:`/`eht:`. Putting
+`B` in `A.npt:` would give `B` two parents and re-introduce the depth this rule
+forbids.
+
+**Flattening loses one thing, and it is written down rather than modelled.** When
+an effect of a derived TRDD becomes its sibling, the graph no longer records
+*which* flock member caused it — only that both belong to the same parent. Say it
+in the new TRDD's STATE block ("this is an effect of *B*'s fix, commit `<sha>`").
+A finite, decidable flock plus one prose sentence beats an exact tree nobody can
+enumerate.
+
+**So how is a derived TRDD gated by its own effects?** By `blocked-by:`, which is
+the whole reason the runtime edge exists. A derived TRDD *B* that opens a hole
+gets a new sibling *C* covering it — registered in the **parent's** `eht:`, since
+`B.eht` must stay empty — and *B* lists `C` in `B.blocked-by`. *B* then cannot
+reach `complete` while *C* is open, exactly as if *C* were its child. The
+completion gate is unchanged; only the field carrying it moves. Read together:
+the **parent** owns the derivation (who spawned whom), each **member** owns its
+own ordering (who waits on whom), and no edge crosses a generation.
 
 ## The 8-char id reference syntax
 
@@ -417,24 +475,16 @@ land directly on the spec file.
    # Windows filenames are case-insensitive — a lowercase letter could fold onto an
    # existing id and overwrite its file. The while-loop is the create-time collision
    # check: re-roll until no TRDD already owns this id (36⁸ ≈ 2.8e12, so ~never).
-   # It scans BOTH design roots — an id must be unique across PROJECT and LOCAL.
-   gen()   { LC_ALL=C tr -dc 'A-Z0-9' < /dev/urandom | head -c 8; }
-   # `find … | grep -q .`, NEVER `ls <glob>`: an unmatched glob is DROPPED by some shells,
-   # so `ls` runs with NO arguments, lists the cwd and exits 0 — which this loop reads as
-   # "collision" and regenerates forever. An infinite loop, not a nit.
-   taken() { find "$1" "$2" -name "TRDD-*-$3-*.md" 2>/dev/null | grep -q .; }
-   SLUG=$(pwd | tr -c '[:alnum:]' '-'); LOCAL_DESIGN="$HOME/.claude/projects/$SLUG/design"
-   TID=$(gen); while taken design "$LOCAL_DESIGN" "$TID"; do TID=$(gen); done
+   gen() { python3 -c "import random,string; print(''.join(random.choices(string.ascii_uppercase+string.digits,k=8)))"; }
+   TID=$(gen); while ls design/tasks/TRDD-*-"$TID"-*.md >/dev/null 2>&1; do TID=$(gen); done
    SHORT=$TID   # the 8-char id IS the canonical id; SHORT kept as an alias for the steps below
    ```
-
 2. Capture timestamps:
 
    ```bash
    TS=$(date +%Y%m%d_%H%M%S%z)
    ISO=$(date +%Y-%m-%dT%H:%M:%S%z)
    ```
-
 3. Ensure `design/tasks/` exists; verify `design/` is NOT in `.gitignore`.
 4. Create the TRDD at `design/tasks/TRDD-$TS-$SHORT-<slug>.md` with the
    mandatory frontmatter; initialise `column: backburner` (or
@@ -447,7 +497,6 @@ land directly on the spec file.
    git add "design/tasks/TRDD-$TS-$SHORT-<slug>.md"
    git commit -m "docs: add TRDD-$SHORT — <short description>"
    ```
-
 7. Tell the user the TRDD ID + commit hash.
 
 ### Transitioning a TRDD between columns
@@ -469,8 +518,8 @@ installed.
 | `testing → ai_review` | `last-test-result: pass`; `last-test-at:` set |
 | `testing → dev` (failure) | `test-failures:` += 1; post-mortem added |
 | `ai_review → human_review` | only when `review-requirements:` includes human-review |
-| `ai_review\|human_review → complete` | all reviews passed |
-| `complete → publish\|deploy` | release pipeline begins |
+| `ai_review|human_review → complete` | all reviews passed |
+| `complete → publish|deploy` | release pipeline begins |
 | `publish → published` | `published-version:`, `published-at:` set |
 | `deploy → live` | `live-since:` set |
 | `live → live_auditing` (soak) | optional; only when `soak-duration:` set |
@@ -496,7 +545,6 @@ installed.
    ```bash
    ls design/tasks/TRDD-*-K3QX9P2W-*
    ```
-
 2. Read the TRDD top-to-bottom — STATE block FIRST.
 3. Verify the STATE block agrees with the frontmatter `column:`. If they
    disagree, the STATE block wins (newer hand-edits beat structured fields).
@@ -514,8 +562,8 @@ A TRDD lives in exactly one of four folders, by lifecycle state:
 |---|---|---|
 | `design/proposals/` | `proposal` | Authored, awaiting approval. **NOT** authorized to execute. |
 | `design/tasks/` | `planned` (then every downstream `column:` — `todo`, `dispatch`, `dev`, `testing`, …) | Approved/authorized. In the execution pipeline. |
-| `design/refused/` | `refused` | A **proposal that was NEVER approved** — declined at the proposal gate. Kept as an audit record; never deleted. |
-| `design/archived/` | `completed` · `cancelled` · `superseded` | **Once-approved** TRDDs that reached a terminal-DONE state — finished, withdrawn, or replaced. Kept; never deleted. **`failed` is NOT here** — it stays in `design/tasks/` (retryable). |
+| `design/refused/` | `refused` | A proposal a judge **DECLINED**. Kept as an audit record; never deleted. |
+| `design/archived/` | `completed` · `cancelled` · `superseded` | TRDDs that reached a terminal-DONE state — finished, withdrawn, or replaced. Kept; never deleted. **`failed` is NOT here** — it stays in `design/tasks/` (retryable). |
 
 `proposal`, `planned`, `refused`, `cancelled`, `completed`, and
 `superseded` are **overlay values of the v2 `column:` field**. `proposal`
@@ -523,11 +571,26 @@ precedes `planned`; `planned` is the approved-entry column from which the
 owner advances the TRDD through the normal v2 flow (`todo` → `dispatch`
 → `dev` → …).
 
-**Lineage rule (which terminal folder?):** the dividing line is *was it
-ever approved?* A proposal that is **declined** never entered the
-pipeline → `design/refused/`. A TRDD that **was approved** (reached
-`design/tasks/`) and later finishes, is cancelled, or is superseded →
-`design/archived/`.
+**Lineage rule (which terminal folder?):** the dividing line is *did a
+judge decline it?* — **not** *was it ever approved*. Only a DECLINED
+proposal goes to `design/refused/`. Everything else that ends —
+completed, cancelled, or superseded — goes to `design/archived/`,
+**whether or not it was ever approved**. A proposal made obsolete by a
+newer TRDD is superseded, never refused: nobody judged it, it was
+overtaken. It is archived with `approved: false` and
+`column: superseded`, which says exactly what happened. Refusing it
+would record a decision that no one made.
+
+**Only the author of the NEW TRDD may mark the old one superseded.**
+Superseding is a claim that *this* work replaces *that* work, and only
+the person making the replacement can honestly make it. So the writer of
+`T_new` sets `T_old.column: superseded` and `T_old.superseded-by:
+[T_new]`; nobody else may. `created-by:` is what makes the rule
+checkable: the editor's identity must equal `T_new.created-by`.
+
+`created-by:` is set once, at creation, and never changes. It is NOT
+`current-owner:` (who holds the write-lock right now) and NOT `assignee:`
+(who executes). Those two change hands; authorship does not.
 
 **`failed` is NOT terminal and is NOT archived.** A failed TRDD stays in
 `design/tasks/` with `column: failed`; failure is a *retryable* state —
