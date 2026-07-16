@@ -54,6 +54,19 @@ authored plugin instruction surface, so under it NO plugin can ship a `rules/`
 directory (upstream CPV#160). The pin is what turned that into a caught
 regression instead of a blocked release.
 
+**Resolver-tag detector FPs → FIXED in CPV `v2.159.0` (2026-07-15).** The janitor's
+own `publish.py` resolver twin-tag stage (`{plugin}--vX.Y.Z`, shipped v0.45.0) is the
+kind of push shape CPV's `RC-DEP-TAG-PIPELINE` detector used to false-positive on:
+janitor issues **CPV#167** (migration `standardize --fix` silently skipped 6/13 fleet
+push shapes — its `_PUBLISH_PUSH_ARGV_RE` matched one narrow shape) and **CPV#168**
+(the detector flagged a correct manifest-derived tag whose literal never appears in
+`publish.py`) are BOTH resolved in v2.159.0 (the CPV author replaced the regex with an
+AST walk over the push argv). **ACTION before the next (gated) publish:** bump the CPV
+pin from `v2.153.1` toward `v2.159.0+` — but per this page's own rule, RUN the candidate
+ref against the tree FIRST (all THREE call sites: `publish.py`, `.github/workflows/
+release.yml`, `.github/workflows/ci.yml`, bumped in ONE commit), and only then close
+CPV#167/#168 with the 0/0/0/0 evidence. Do NOT close them on the author's word alone.[^6]
+
 **The CPV gate HANGS intermittently.** `cpv-remote-validate` sometimes makes no
 progress while the identical local gate has already passed on the same commit. A
 healthy validate takes ~3.5 min. Every call site therefore wraps it in
@@ -148,3 +161,11 @@ STATE §1.[^2]
   policy. Lesson: scanner-prose devitalization applies to CODE COMMENTS too, not
   just markdown — in shipped prose, keep backtick-code tokens and execution verbs
   ("exits", "runs", "executes") out of the same sentence.
+[^6]: [ocd:2026-07-16 lmd:2026-07-16] WHY the "verify before bumping AND before closing"
+  discipline is repeated for CPV v2.159.0: `v2.153.2` already taught that a CPV point-release
+  can FIX one thing and REGRESS another (it fixed nothing the janitor needed and raised 8
+  CRITICAL on `rules/`). So even a release that fixes the janitor's OWN reported FP (#167/#168)
+  must be run against the tree before the pin moves — the fix being real does not prove the
+  release is clean on everything else the janitor ships. Lesson: a maintainer's "fixed in vX"
+  is a reason to TEST vX, never a reason to pin vX unseen or to close the issue before the
+  local gate is green on the same commit.
