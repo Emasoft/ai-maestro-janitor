@@ -350,6 +350,191 @@ def test_verify_split_fails_on_paraphrased_body_fact():
     assert not ok and any("body fact" in r for r in reasons)
 
 
+# ---- load-bearing token fidelity (issue #91) --------------------------------
+#
+# body_facts_preserved (above) guards whole FACT LINES >= 24 chars — it already
+# catches a wholesale reworded/dropped sentence, but by DESIGN it ignores lines
+# shorter than 24 chars and lines starting with "#" (headings) as "structural".
+# The tests below prove those are REAL gaps for a load-bearing PATH/constant living
+# in exactly that shape of line (the documented v0.10.0 wrong-scope-root split bug),
+# then prove `fact_tokens_preserved` closes them while staying LOOSER than
+# body_facts_preserved about ordinary prose rewording around an intact token.
+
+def test_load_bearing_tokens_extracts_paths_urls_constants_semver_and_hex_ids():
+    """load_bearing_tokens recognizes every documented token class in one pass."""
+    a = _note(body=(
+        "See https://code.claude.com/docs/skills for details.\n"
+        "Config lives at `~/.claude/rules/` on disk.\n"
+        "Set `CLAUDE_PLUGIN_ROOT` before running v1.2.3 of the tool.\n"
+        "The commit sha 9f8a7b6c1d landed the fix.\n"
+        "Retries cap at 1800s per call.\n"
+    ))
+    toks = v.load_bearing_tokens(a)
+    assert "https://code.claude.com/docs/skills" in toks
+    assert "~/.claude/rules/" in toks
+    assert "CLAUDE_PLUGIN_ROOT" in toks
+    assert "v1.2.3" in toks
+    assert "9f8a7b6c1d" in toks
+    assert "1800s" in toks
+
+
+def test_load_bearing_tokens_excludes_lesson_and_frontmatter_paths():
+    """A path living ONLY inside a `[^N]` lesson or the frontmatter is exempt —
+    matching how body_facts_preserved scopes itself to the body."""
+    a = _note(
+        body="A short unrelated fact line here that is unrelated to paths at all.",
+        lessons="[^1]: [ocd:2026-06-01 lmd:2026-06-01] mentions `~/.claude/old-path/` here.\n",
+    )
+    toks = v.load_bearing_tokens(a)
+    assert not any("old-path" in t for t in toks)
+
+
+def test_fact_tokens_preserved_passes_on_clean_move():
+    """A token that survives verbatim → preserved."""
+    a = _note(body="Config lives at `~/.claude/rules/` on disk and stays that way.")
+    result = _note(name="c", body="Config lives at `~/.claude/rules/` on disk and stays that way.")
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert ok and missing == []
+
+
+def test_fact_tokens_preserved_passes_on_reworded_sentence_with_token_intact():
+    """Issue #91 design goal: unlike body_facts_preserved (whole-line verbatim),
+    fact_tokens_preserved is SET containment — a legitimate rewording of the
+    sentence around an UNCHANGED path must not false-fail."""
+    a = _note(body="Config for the rotator lives at `~/.claude/rules/` and nowhere else on disk.")
+    result = _note(name="c", body="The rotator reads its config from `~/.claude/rules/`.")
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert ok and missing == []
+    # Contrast: the same reword DOES fail the stricter line-level check (proves the
+    # two checks are complementary, not duplicates).
+    line_ok, _ = v.body_facts_preserved([a], result)
+    assert not line_ok
+
+
+def test_fact_tokens_preserved_fails_on_mutated_path_in_short_bullet():
+    """The proven gap: a load-bearing path in a SHORT (<24 char) bullet line is
+    invisible to body_facts_preserved but must still be caught here."""
+    a = _note(body="- USER: `~/.claude/mem`")
+    result = _note(name="c", body="- USER: `~/.claude/xyz`")
+    line_ok, _ = v.body_facts_preserved([a], result)
+    assert line_ok, "sanity: confirms body_facts_preserved is blind to this short-line mutation"
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert not ok and "~/.claude/mem" in missing
+
+
+def test_fact_tokens_preserved_fails_on_mutated_path_in_heading():
+    """The proven gap: a load-bearing path stated in a markdown HEADING is
+    invisible to body_facts_preserved (headings are excluded as structural) but
+    must still be caught here."""
+    a = _note(body=(
+        "## PROJECT scope lives at `<repo-root>/.claude/project/memory/`\n\n"
+        "Filler sentence describing this scope in more depth for the reader here."
+    ))
+    result = _note(name="c", body=(
+        "## PROJECT scope lives at `<repo-root>/memory/`\n\n"
+        "Filler sentence describing this scope in more depth for the reader here."
+    ))
+    line_ok, _ = v.body_facts_preserved([a], result)
+    assert line_ok, "sanity: confirms body_facts_preserved is blind to this heading mutation"
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert not ok and any("<repo-root>/.claude/project/memory" in m for m in missing)
+
+
+def test_fact_tokens_preserved_fails_on_dropped_url():
+    """A URL present in the source and absent from the result → FAIL."""
+    a = _note(body="Full docs live at https://code.claude.com/docs/skills for reference.")
+    result = _note(name="c", body="Full docs live somewhere in the reference material.")
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert not ok and any("code.claude.com" in m for m in missing)
+
+
+def test_fact_tokens_preserved_fails_on_changed_env_constant():
+    """An ALL-CAPS env/config key mutated to a different key → FAIL."""
+    a = _note(body="Set `CLAUDE_PLUGIN_ROOT` before running any script in this repo.")
+    result = _note(name="c", body="Set `CLAUDE_PLUGIN_DATA` before running any script in this repo.")
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert not ok and "CLAUDE_PLUGIN_ROOT" in missing
+
+
+def test_fact_tokens_preserved_fails_on_changed_numeric_unit_constant():
+    """A numeric constant with a unit (a timeout, a cap) silently changed → FAIL."""
+    a = _note(body="The subprocess workload is capped at 1800s per run in this daemon.")
+    result = _note(name="c", body="The subprocess workload is capped at 3600s per run in this daemon.")
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert not ok and "1800s" in missing
+
+
+def test_fact_tokens_preserved_counts_a_token_demoted_into_a_lesson():
+    """Correction-protocol parity with body_facts_preserved: a token MOVED into a
+    dated `[^N]` lesson (superseded-fact demotion) counts as preserved, not lost."""
+    a = _note(body="- OLD path: `~/.claude/old-config/`")
+    result = _note(
+        name="c",
+        body="This page now uses the new layout.",
+        lessons="[^1]: [ocd:2026-06-01 lmd:2026-06-09] the old path was `~/.claude/old-config/` "
+                "before the migration.\n",
+    )
+    ok, missing = v.fact_tokens_preserved([a], result)
+    assert ok and missing == []
+
+
+def test_verify_split_fails_on_mutated_token_body_facts_preserved_misses():
+    """End-to-end (the actual v0.10.0 bug shape): a hub's short scope-root bullets
+    get condensed into sub-pages with a WRONG, mutated path — body_facts_preserved
+    alone passes this clean; verify_split must still fail via the token check."""
+    src = _note(name="page", tier="hub", body=(
+        "## Roots\n\n- USER: `~/.claude/mem`\n- PROJECT: `~/.claude/proj`\n"
+    ))
+    sub1 = _note(name="page-a", body="- USER: `~/.claude/xyz`\n")
+    sub2 = _note(name="page-b", body="- PROJECT: `~/.claude/proj`\n")
+    overview = _note(name="page", tier="hub", body="Overview linking the sub-pages of this topic together in more depth.")
+    sizes = {"page.md": 100, "page-a.md": 100, "page-b.md": 100}
+
+    concatenated = "\n".join([sub1, sub2, overview])
+    line_ok, _ = v.body_facts_preserved([src], concatenated)
+    assert line_ok, "sanity: confirms body_facts_preserved alone is blind to this short-bullet mutation"
+
+    ok, reasons = v.verify_split(
+        src, v.parse_frontmatter(src), [sub1, sub2],
+        [v.parse_frontmatter(sub1), v.parse_frontmatter(sub2)],
+        overview, sizes, 12000,
+    )
+    assert not ok
+    assert any("load-bearing token" in r for r in reasons)
+    assert not any("body fact" in r for r in reasons)
+
+
+def test_verify_merge_fails_on_mutated_load_bearing_token():
+    """End-to-end: verify_merge catches a mutated short-bullet path token."""
+    a = _note(name="a", body="- USER: `~/.claude/mem`")
+    b = _note(name="b", body="Timeouts default to thirty seconds per the platform config file.")
+    result = _note(name="a", body=(
+        "- USER: `~/.claude/wrong`\n"
+        "Timeouts default to thirty seconds per the platform config file."
+    ))
+    ok, reasons = v.verify_merge(
+        [a, b], [v.parse_frontmatter(a), v.parse_frontmatter(b)],
+        result, v.parse_frontmatter(result), set(), {},
+    )
+    assert not ok and any("load-bearing token" in r for r in reasons)
+
+
+def test_verify_atomize_fails_on_mutated_load_bearing_token():
+    """End-to-end: verify_atomize catches a mutated path token even when a legal
+    atom marker is also added alongside it."""
+    src = _note(body=(
+        "- USER: `~/.claude/mem`\n"
+        "Some unrelated additional filler sentence for the body content section."
+    ))
+    result = _note(body=(
+        "- USER: `~/.claude/wrong`\n"
+        "Some unrelated additional filler sentence for the body content section.\n"
+        "^p1 [keywords: user, path]"
+    ))
+    ok, reasons = v.verify_atomize(src, v.parse_frontmatter(src), result, v.parse_frontmatter(result))
+    assert not ok and any("load-bearing token" in r for r in reasons)
+
+
 # ---- harvest preservation (Part C) -----------------------------------------
 
 def test_harvest_preservation_ok_when_pointer_target_exists():

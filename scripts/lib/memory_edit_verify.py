@@ -322,6 +322,143 @@ def body_facts_preserved(sources: list[str], result: str, min_len: int = 24) -> 
 
 
 # --------------------------------------------------------------------------- #
+# load-bearing token fidelity (issue #91 — a path/constant can be silently
+# MUTATED without the whole sentence around it changing enough to trip
+# body_facts_preserved)
+#
+# body_facts_preserved guards whole FACT LINES >= min_len chars — a coarse,
+# sentence-shaped net. It already catches a wholesale reworded/dropped sentence
+# (any single mutated character breaks the substring match), but it has two
+# blind spots by DESIGN, not oversight:
+#   1. `_substantive_body_lines` drops any line shorter than `min_len` (24 chars)
+#      as "structural" — but a short bullet like "- USER: `~/.claude/mem`" can
+#      still carry a load-bearing path.
+#   2. `_substantive_body_lines` drops every line starting with "#" as a
+#      heading — but a heading like "## PROJECT scope lives at `<repo-root>/…`"
+#      can carry the SAME kind of fact.
+# Both are proven gaps (not hypothetical): a source page with a scope-root path
+# stated only in a short bullet or a heading passes body_facts_preserved clean
+# even when that exact path is rewritten to something else on the result side.
+# This is precisely the shape of the documented v0.10.0 wrong-scope-root split
+# bug (issue #91): the split condensed §5's prose into new, shorter, WRONG
+# path bullets, and nothing caught it at gate time.
+#
+# The fix here is deliberately TOKEN-grained rather than LINE-grained: extract
+# the mechanically-recognizable "fact atoms" (paths, URLs, ALL-CAPS env/config
+# keys, semver strings, hex ids, numeric constants with units) from a source's
+# substantive body (frontmatter and the lessons section excluded, matching how
+# body_facts_preserved scopes itself) and assert each survives VERBATIM
+# somewhere in the result — regardless of the line length or heading/bullet it
+# lived in, and regardless of how much the SURROUNDING prose was legitimately
+# reworded. Set containment, not position: a legitimate paraphrase of the
+# sentence around an unchanged path never false-fails, only the path itself
+# vanishing or mutating does. Deliberately syntactic (exact-token survival),
+# not semantic — cheap, deterministic, stdlib `re` only.
+# --------------------------------------------------------------------------- #
+
+# Backtick-quoted spans are the near-universal convention this corpus uses for a
+# path/env-var reference (`~/.claude/rules/`, `${CLAUDE_PLUGIN_ROOT}`,
+# `<repo-root>/.claude/project/memory/`) — capture the span's INNER text (the
+# backticks themselves are formatting, not the fact) whenever it looks
+# path-like: contains a "/" or opens with "$"/"${" (an env-var expansion).
+_BACKTICK_PATH_RE = re.compile(r"`([^`\s]*(?:/|\$\{?[A-Za-z_])[^`\s]*)`")
+
+# Bare (non-backticked) rooted paths: ~/…, $HOME/…, ${VAR}/…, <placeholder-root>/…
+# (this project's own convention for a generic root, e.g. `<repo-root>/design/`),
+# or an absolute /a/b (2+ segments — a single "/" alone is too weak a signal and
+# would match ordinary prose like "and/or").
+_BARE_PATH_RE = re.compile(
+    r"(?:"
+    r"~(?:/[A-Za-z0-9_.<>\-]+)+"
+    r"|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?(?:/[A-Za-z0-9_.<>\-]+)+"
+    r"|<[A-Za-z0-9_\-]+>(?:/[A-Za-z0-9_.<>\-]+)+"
+    r"|(?:/[A-Za-z0-9_.\-]+){2,}"
+    r")"
+)
+
+_URL_RE = re.compile(r"https?://[^\s)\]\"'`,]+")
+
+# An ALL-CAPS constant with at least one underscore (an env/config key shape like
+# `CLAUDE_PLUGIN_ROOT`) — requiring the underscore excludes ordinary all-caps
+# English words (RULE, GOLDEN, IMPORTANT) that carry no fact of their own.
+_ENV_CONST_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+
+_SEMVER_RE = re.compile(r"\bv?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b")
+
+# A hex id (git SHA, HMAC tag, …): 7-40 hex chars with a WORD boundary, requiring
+# at least one a-f letter so a plain decimal number (all-digit, e.g. "1234567")
+# is never misread as a hex id.
+_HEX_ID_RE = re.compile(r"\b(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{7,40}\b")
+
+_NUMERIC_UNIT_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s?(?:ms|secs?|s|mins?|hrs?|h|d|days?|weeks?|wks?|years?|yrs?"
+    r"|MB|GB|KB|TB|tokens?|%|px|em|rem)\b"
+)
+
+
+def load_bearing_tokens(text: str) -> set[str]:
+    """Extract LOAD-BEARING TOKENS from `text`'s substantive body — frontmatter and
+    the `## Notes and lessons learned` section (lessons/footnote defs) excluded,
+    matching how body_facts_preserved scopes itself (issue #91). A load-bearing token
+    is a mechanically-recognizable "fact atom": a filesystem path, a URL, an ALL-CAPS
+    env/config key, a semver string, a hex id, or a numeric constant with a unit.
+
+    Deliberately UNFILTERED by line length or heading-ness (unlike
+    `_substantive_body_lines`): a short bullet or a markdown heading can carry a
+    load-bearing path exactly as easily as a long paragraph, and reusing the 24-char
+    line/heading filter here would silently re-open the very gap this function exists
+    to close. Fenced code is NOT masked (a bash example quoting a real path is exactly
+    the kind of place a load-bearing fact lives), matching body_facts_preserved's own
+    fence-inclusive behavior."""
+    body = _body_minus_lessons(text)
+    tokens: set[str] = set()
+    tokens.update(_BACKTICK_PATH_RE.findall(body))
+    tokens.update(_BARE_PATH_RE.findall(body))
+    tokens.update(_URL_RE.findall(body))
+    tokens.update(_ENV_CONST_RE.findall(body))
+    tokens.update(_SEMVER_RE.findall(body))
+    tokens.update(_HEX_ID_RE.findall(body))
+    tokens.update(_NUMERIC_UNIT_RE.findall(body))
+    return tokens
+
+
+def _token_haystack(text: str) -> str:
+    """Whitespace-collapsed, CASE-PRESERVING whole-page blob for token-fidelity
+    comparison: frontmatter stripped, lessons KEPT (mirrors `_norm_page_blob`'s
+    demoted-to-lesson rationale — a fact demoted into a dated `[^N]` lesson has MOVED,
+    not vanished, so the correction protocol must not be misread as a token loss).
+    Case is preserved here, UNLIKE `_norm_page_blob`, because a load-bearing token's
+    fidelity is asserted VERBATIM (issue #91) — an env key's or a path's exact casing
+    IS the fact, and lowercasing it away would silently accept a casing mutation."""
+    return re.sub(r"\s+", " ", _strip_frontmatter(text))
+
+
+def fact_tokens_preserved(sources: list[str], result: str) -> tuple[bool, list[str]]:
+    """STRICT, syntactic anti-corruption check (issue #91): every load-bearing token
+    (see `load_bearing_tokens`) extracted from a source's substantive body must
+    survive VERBATIM somewhere in `result`. Set containment, not position — a
+    legitimate rewording of the sentence around an unchanged token never false-fails.
+
+    Complements `body_facts_preserved` rather than replacing it: that check already
+    catches a wholesale reworded/dropped FACT LINE >= 24 chars; this one additionally
+    catches a token silently mutated inside a SHORT line or a markdown HEADING, both
+    of which `body_facts_preserved` treats as non-fact structure by design (see the
+    section comment above). Returns (ok, [missing tokens, ≤8])."""
+    haystack = _token_haystack(result)
+    missing: list[str] = []
+    seen: set[str] = set()
+    for src in sources:
+        for tok in load_bearing_tokens(src):
+            if tok in seen:
+                continue
+            seen.add(tok)
+            if tok not in haystack:
+                missing.append(tok)
+    missing.sort()
+    return (not missing, missing[:8])
+
+
+# --------------------------------------------------------------------------- #
 # harvest preservation (TRDD-a5780c23 Part C — never stub MEMORY.md while a memory
 # it held is not yet in the wiki)
 # --------------------------------------------------------------------------- #
@@ -763,6 +900,14 @@ def verify_merge(
     if not ok:
         reasons.append("dropped/paraphrased body fact(s): " + "; ".join(missing_facts))
 
+    # issue #91 — token-grained sibling of the line-grained check above: catches a
+    # path/constant mutated inside a SHORT line or a HEADING, both of which
+    # body_facts_preserved's 24-char/heading-exclusion filters treat as non-fact
+    # structure. Same _canon() modulo-redirect comparison as the check above.
+    ok, missing_tokens = fact_tokens_preserved([_canon(t) for t in fact_sources], result_cmp)
+    if not ok:
+        reasons.append("dropped/mutated load-bearing token(s): " + "; ".join(missing_tokens))
+
     ok, why = ocd_lmd_ok_merge(source_metas, result_meta)
     if not ok:
         reasons.append("ocd/lmd: " + why)
@@ -831,6 +976,14 @@ def verify_split(
     ok, missing_facts = body_facts_preserved([source_text], concatenated)
     if not ok:
         reasons.append("source body fact(s) lost/paraphrased across sub-pages: " + "; ".join(missing_facts))
+
+    # issue #91 — the documented v0.10.0 wrong-scope-root bug's exact shape: a split
+    # that CONDENSES §-level prose into new, shorter path bullets can drop a
+    # load-bearing token even when body_facts_preserved's 24-char/heading filters
+    # let the surrounding sentence's disappearance read as mere restructuring.
+    ok, missing_tokens = fact_tokens_preserved([source_text], concatenated)
+    if not ok:
+        reasons.append("source load-bearing token(s) lost/mutated across sub-pages: " + "; ".join(missing_tokens))
 
     if source_meta.get("tier") == "hub":
         ok, why = split_globs_partition_ok(source_meta.get("globs"), [m.get("globs") for m in subpage_metas])
@@ -965,6 +1118,13 @@ def verify_atomize(
     ok, dropped_facts = body_facts_preserved([source_text], result_text)
     if not ok:
         reasons.append("body fact(s) dropped/reworded in atomize: " + "; ".join(dropped_facts))
+
+    # issue #91 — defense-in-depth alongside the additive-lines-only guard below: a
+    # token-grained check catches the same class of mutation the line-grained
+    # body_facts_preserved does, independent of line length or heading placement.
+    ok, dropped_tokens = fact_tokens_preserved([source_text], result_text)
+    if not ok:
+        reasons.append("load-bearing token(s) dropped/mutated in atomize: " + "; ".join(dropped_tokens))
 
     dropped = [k for k in source_meta if k not in result_meta]
     if dropped:
