@@ -119,9 +119,21 @@ def main() -> int:
         # Full revive: clear BOTH the kill-switch and the disarm-raised pause so the
         # daemon may respawn and heartbeats resume. (A pause set on its own — via
         # /janitor-global-pause — is still lifted by /janitor-global-unpause.)
+        #
+        # janitor#77 item 1: this clears two machine-wide FLAGS only — it creates no
+        # cron, anywhere. A project whose heartbeat cron never existed (or already
+        # died) stays exactly that way after this call; only /janitor-arm, run inside
+        # that project's own session, creates its cron. Say so in the printed output
+        # itself (not just the skill doc) so a user reading just the CLI's own line
+        # cannot mistake this for a fleet-wide arm.
         gs.clear_kill_switch()
         gs.clear_global_pause()
-        print("janitor global disarm cleared — the daemon may be (re)spawned again and per-session heartbeats resume.")
+        print(
+            "janitor global disarm cleared — the daemon may be (re)spawned again and "
+            "already-armed per-session heartbeats resume. This does NOT arm any "
+            "per-project heartbeat cron: a project with no cron (or a dead one) stays "
+            "unarmed. Run /janitor-arm inside each project that needs one."
+        )
         return 0
     if cmd == "pause":
         gs.set_global_pause(reason)

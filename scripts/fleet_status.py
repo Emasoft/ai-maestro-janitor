@@ -526,7 +526,10 @@ _COL_TIPS = {
     "model": "Model id from the session's newest transcript (best-effort tail-read).",
     "branch": "Current git branch of the project.",
     "repo": "GitHub repo (owner/name) from the origin remote.",
-    "armed": "Is the janitor heartbeat armed here? (heartbeat-armed-at.ts present)",
+    "armed": "ADVISORY ONLY — presence of the last /janitor-arm stamp (heartbeat-armed-at.ts). "
+    "Can be stale in EITHER direction (a live cron never re-stamps; a stamp can outlive a dead "
+    "cron or a restart — janitor#77 item 2), so it is never used to compute the diagnosis. "
+    "Trust the 'diag'/'cron' columns (derived from the live transcript) for current liveness.",
     "active": "Is the session actively working? (transcript advanced in the last 5 min)",
     "cron": "Heartbeat liveness, derived from the transcript: alive / DEAD / alive (busy).",
     "wait": "What the session is waiting on (rate-limit, dead cron, ending a turn, …).",
@@ -562,7 +565,25 @@ def _flags(r: dict) -> str:
     """At-a-glance attention icons for one instance — each carries its own tooltip."""
     diag = str(r["diag"])
     spans = [_flag_span(_DIAG_EMOJI.get(diag) or "❔", _DIAG_TIP.get(diag) or diag)]
-    if r["armed"] == "no":
+    # janitor#77 item 2: `heartbeat-armed-at.ts` can lie in EITHER direction — a live
+    # cron never re-stamps it, and a stamp can outlive a dead cron or a restart (see
+    # `fleet_scan.diagnose_root`'s docstring, which is why the diagnosis itself never
+    # reads this file). Treat the stamp as ADVISORY here too: suppress the "NOT
+    # armed" nudge whenever the transcript-derived `diag` already outranks it.
+    #   - diag == "healthy": the transcript is provably fresh RIGHT NOW — a stronger,
+    #     live signal the stamp cannot contradict. A missing stamp on a healthy
+    #     session is exactly the race #77 item 3 describes (a turn that rate-limited
+    #     between CronCreate and the stamp write) or a pre-stamp legacy install, and
+    #     it self-heals on the next SessionStart (TRDD-EFTQB9RR item A re-arms
+    #     unconditionally there) — flagging it here would be a false positive.
+    #   - diag == "unarmed": `disarmed.flag` makes this project sacrosanct — the user
+    #     deliberately opted out. A "needs /janitor-arm" nudge would reintroduce, on
+    #     the dashboard, the exact disarm-optout bug TRDD-EFTQB9RR fixed for the
+    #     SessionStart nudge (a stale/absent stamp getting read as "please re-arm").
+    # Every other diagnosis (frozen/cron_dead/version_mismatch/dead) already carries
+    # its own icon + tooltip recommending the same recovery, so leaving the extra
+    # flag there is redundant, never wrong — no need to special-case those too.
+    if r["armed"] == "no" and diag not in ("healthy", "unarmed"):
         spans.append(_flag_span("⚠️", "janitor NOT armed in this project — needs /janitor-arm"))
     if r["ci"] in _CI_BAD:
         spans.append(_flag_span("❌", "latest CI run failed (" + r["ci"] + ")"))
