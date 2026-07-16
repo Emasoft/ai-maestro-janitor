@@ -21,10 +21,15 @@ the USER-global `~/.claude/settings.json`, with TWO distinct merge modes:
   key is "missing" iff absent from the settings.json `env` block). Deduped from the user's list
   (`CLAUDE_CODE_FORK_SUBAGENT` appeared twice):
   `ENABLE_BACKGROUND_TASKS=1`, `ENABLE_TOOL_SEARCH=false`, `CLAUDE_CODE_FORK_SUBAGENT=1`,
-  `CLAUDE_AUTO_BACKGROUND_TASKS=1`, `CLAUDE_CODE_RETRY_WATCHDOG=1`, `CLAUDE_AFK_COUNTDOWN_MS=120000`,
-  `CLAUDE_AFK_TIMEOUT_MS=15000`, `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS=2000000`.
+  `CLAUDE_AUTO_BACKGROUND_TASKS=1`, `CLAUDE_CODE_RETRY_WATCHDOG=1`, `CLAUDE_AFK_COUNTDOWN_MS=20000`,
+  `CLAUDE_AFK_TIMEOUT_MS=300000`, `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS=2000000`.
+  NB: `CLAUDE_AFK_TIMEOUT_MS` (5 min) OVERRIDES the Group-B `askUserQuestionTimeout` when set (CC
+  env-vars doc), and `CLAUDE_AFK_COUNTDOWN_MS` (the warning countdown) is capped at that timeout so
+  it must stay ≤ it.
 - **Group B — 1 top-level key → ENFORCE (set-if-missing-OR-different, overwrite when the value
-  differs):** `askUserQuestionTimeout = "120"` (verbatim string, as the user wrote it).
+  differs):** `askUserQuestionTimeout = "60s"` (verbatim string — the trailing "s" for seconds is
+  why it is a string). This is a SAFE FALLBACK; `CLAUDE_AFK_TIMEOUT_MS=300000` (Group A) overrides
+  it to 5 min whenever set, so 60 s applies only if that env var is unset.
 
 **Design.** New `scripts/lib/settings_ensurer.py` (constants + `enabled()` opt-out +
 `ensure_recommended_settings(*, home=None)`); wired into `scripts/hooks/on-session-start.py` beside
@@ -58,9 +63,10 @@ the USER-global `~/.claude/settings.json`, with TWO distinct merge modes:
   is the narrow only-on-delta write window + the atomic `os.replace` (never a torn file).
 - **`ENABLE_TOOL_SEARCH="false"` is GLOBAL** — it disables tool-search for every project/session
   (token-economy L2). Intended; Group A respects an existing user override (add-if-missing).
-- **`askUserQuestionTimeout` value is stored verbatim as string `"120"`** (as the user specified).
-  Verify against the CC settings doc that the key is top-level and sanity-check the type; store
-  verbatim regardless.
+- **`askUserQuestionTimeout` value is stored verbatim as string `"60s"`** (the trailing "s" for
+  seconds is why it is a string). Verified against the CC settings doc: top-level key, accepts
+  `"60s"`/`"5m"`/`"10m"`/`"never"`, default `"never"`, USER-scope only, needs CC ≥ 2.1.200. It is a
+  FALLBACK — `CLAUDE_AFK_TIMEOUT_MS` (Group A) overrides it when that env var is set.
 
 ## Approval log
 

@@ -269,6 +269,10 @@ def _ticket_dispatch_lock_path() -> Path:
     return global_state_dir() / "ticket-dispatch.lock"
 
 
+def _settings_ensurer_lock_path() -> Path:
+    return global_state_dir() / "settings-ensurer.lock"
+
+
 def daemon_pid() -> Optional[int]:
     """Read daemon.pid → int, or None if missing / malformed."""
     p = _pid_path()
@@ -979,6 +983,69 @@ def oauth_rotator_lock_wait(timeout_s: float = 60.0, poll_s: float = 0.25) -> It
     finally:
         if fd is not None:
             release_oauth_rotator_lock(fd)
+
+
+# ---------- settings-ensurer lock ----------------------------------------
+#
+# Serialises the per-session settings-ensurer's read-merge-write of the SINGLE
+# shared user file ~/.claude/settings.json across concurrent Claude Code sessions
+# (each SessionStart hook runs the ensurer). Idempotency already prevents key loss
+# — every janitor writer adds the SAME keys and enforces the SAME target value, so
+# last-writer-wins converges — but a shared lock removes the write-write race
+# outright and guards any future non-idempotent change. Non-blocking BY DESIGN: a
+# loser SKIPS (another session is already applying the identical settings), so a
+# heartbeat/session-start turn never blocks. It cannot protect against a NON-janitor
+# writer (the user's editor); the ensurer's only-write-on-delta window + the atomic
+# os.replace cover that (never a torn file).
+
+
+def acquire_settings_ensurer_lock() -> Optional[int]:
+    """Non-blocking exclusive flock on settings-ensurer.lock.
+
+    Return the fd on success (caller MUST release via release_settings_ensurer_lock),
+    or None when another process holds it — the caller MUST then SKIP (never block).
+    """
+    init_global_state()
+    fd = os.open(str(_settings_ensurer_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except (BlockingIOError, OSError) as exc:
+        try:
+            os.close(fd)
+        finally:
+            pass
+        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
+            return None
+        state.log_line("session-start", f"unexpected settings-ensurer-lock flock error: {exc}")
+        return None
+
+
+def release_settings_ensurer_lock(fd: int) -> None:
+    """Release the settings-ensurer flock and close the fd. Best-effort."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def settings_ensurer_lock() -> Iterator[bool]:
+    """Serialise a settings-ensurer write against every other session's ensurer.
+
+    Yields True when the lock was acquired (apply the settings), or False when another
+    session holds it (SKIP — it is applying the identical settings). Releases on exit.
+    """
+    fd = acquire_settings_ensurer_lock()
+    try:
+        yield fd is not None
+    finally:
+        if fd is not None:
+            release_settings_ensurer_lock(fd)
 
 
 # ---------- spawn ---------------------------------------------------------

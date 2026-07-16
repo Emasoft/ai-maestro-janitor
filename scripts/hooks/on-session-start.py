@@ -236,7 +236,7 @@ def main() -> int:
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
     sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
     from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
-    from lib import memory_scopes, rules_installer, state  # noqa: E402  -- local package, not PyPI
+    from lib import memory_scopes, rules_installer, settings_ensurer, state  # noqa: E402  -- local package, not PyPI
 
     state.init_state()
 
@@ -364,6 +364,25 @@ def main() -> int:
             "session-start",
             f"installed plugin rule(s): {', '.join(copied)}",
         )
+
+    # Ensure the recommended Claude Code settings exist in ~/.claude/settings.json (TRDD-EQ792YPX):
+    # 8 env keys ADD-IF-MISSING + askUserQuestionTimeout ENFORCED. Idempotent, atomic, fail-safe
+    # (a malformed settings.json is left untouched). settings.json is read at Claude Code STARTUP,
+    # so a change here applies on the NEXT launch — the notice below says so. Best-effort: a
+    # failure must never break session start.
+    try:
+        changed = settings_ensurer.ensure_recommended_settings()
+        n = len(changed["env_added"]) + len(changed["top_level_set"])
+        if n:
+            keys = ", ".join(changed["env_added"] + changed["top_level_set"])
+            print(
+                f"[ai-maestro-janitor] Updated {n} recommended setting(s) in ~/.claude/settings.json "
+                f"({keys}). They take effect on the NEXT Claude Code launch (settings.json is read "
+                f"at startup).",
+                file=sys.stderr,
+            )
+    except Exception as exc:  # noqa: BLE001 -- best-effort; never break session start
+        state.log_line("session-start", f"settings-ensurer failed: {exc}")
 
     # Ship the rules' FULL reference docs to <DATA>/rules-reference/ (TRDD-YRPUSIFY axis
     # B). They live OUTSIDE any .claude/rules/ dir on purpose: everything in a rules dir

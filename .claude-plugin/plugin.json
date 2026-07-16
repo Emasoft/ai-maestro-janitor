@@ -290,6 +290,13 @@
       "default": true,
       "sensitive": false
     },
+    "ensure_settings_enabled": {
+      "title": "Ensure recommended Claude Code settings in ~/.claude/settings.json",
+      "description": "When true (DEFAULT), the SessionStart hook keeps a fixed set of recommended settings in the user-global ~/.claude/settings.json. Group A: 8 env keys (ENABLE_BACKGROUND_TASKS, ENABLE_TOOL_SEARCH=false, CLAUDE_CODE_FORK_SUBAGENT, CLAUDE_AUTO_BACKGROUND_TASKS, CLAUDE_CODE_RETRY_WATCHDOG, CLAUDE_AFK_COUNTDOWN_MS, CLAUDE_AFK_TIMEOUT_MS, CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS) added to the env block ONLY IF MISSING (an existing value is never overwritten). Group B: askUserQuestionTimeout=60s enforced at the top level (set if missing OR different; note CLAUDE_AFK_TIMEOUT_MS=300000 overrides it to 5 min when set). Idempotent, atomic (tmp+os.replace), and fail-safe (a malformed settings.json is left untouched). settings.json is read at Claude Code startup, so changes apply on the NEXT launch, not the current session. Set to false to manage these settings yourself.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
     "daemon_marketplace_refresh_interval": {
       "title": "Daemon Marketplace Refresh Cadence (seconds)",
       "description": "Minimum seconds the daemon waits between bulk `claude plugin marketplace update` runs (no args = every configured marketplace). Default: 1200 (20 min). The daemon is the only writer of the GLOBAL refresh, so a moderate cadence is enough \u2014 there is no per-session contention to compensate for. Narrower per-session refreshes of just the local+project plugins' marketplaces still run every 5 min (see marketplace_refresh_interval), so newly-installed marketplaces in `.claude/settings.json` / `.claude/settings.local.json` reach the catalog quickly even while the daemon is between fires. Heartbeat per-session shim emits a stale-daemon drift line when the actual last-run is older than 2\u00d7 this value.",
