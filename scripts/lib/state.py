@@ -195,6 +195,40 @@ def user_presence_path(home: Path | None = None) -> Path:
     return base / ".aimaestro" / "state" / "user-presence.json"
 
 
+def terminal_pane_key(env: Mapping[str, str] | None = None) -> str | None:
+    """A stable, filesystem-safe id for THIS terminal pane, or None if unresolvable.
+
+    Presence is PER-PANE (user directive 2026-07-16): a human typing in pane A must not
+    mark an unattended pane B as "present" and block B's self-trigger. The pane id is the
+    ONE thing both the WRITER (the UserPromptSubmit hook, via `bump_user_presence`) and the
+    READER (the self-trigger gate, via `user_is_present`) can independently resolve from the
+    SAME session env — so keying the presence file on it makes the gate per-pane with no
+    cross-pane contamination.
+
+    tmux `$TMUX_PANE` (e.g. `%3`) is preferred (focus-independent, stable per pane); iTerm
+    `$ITERM_SESSION_ID` (e.g. `w0t1p0:UUID`) is the macOS fallback. Any char outside
+    `[A-Za-z0-9._-]` is mapped to `-` so the value is a safe filename on every platform.
+    Returns None off tmux/iTerm (a plain terminal has no per-pane addressing, and also
+    cannot be self-triggered) — the caller then falls back to the machine-global breadcrumb.
+    """
+    e: Mapping[str, str] = os.environ if env is None else env
+    raw = (e.get("TMUX_PANE") or e.get("ITERM_SESSION_ID") or "").strip()
+    if not raw:
+        return None
+    key = re.sub(r"[^A-Za-z0-9._-]", "-", raw)[:128]
+    return key or None
+
+
+def per_pane_presence_path(pane_key: str, home: Path | None = None) -> Path:
+    """Path of THIS pane's presence breadcrumb (sibling of the machine-global one).
+
+    Lives under `~/.aimaestro/state/user-presence-panes/<pane_key>.json`. Absence means the
+    user has never typed in this pane → unattended here (the reader treats it as "away").
+    """
+    base = Path(home) if home is not None else Path.home()
+    return base / ".aimaestro" / "state" / "user-presence-panes" / f"{pane_key}.json"
+
+
 def _write_user_presence(path: Path, last_user_input_epoch: int, written_at_epoch: int) -> None:
     """Atomically write the three-field breadcrumb. Single serialization site."""
     payload = json.dumps(
@@ -207,12 +241,19 @@ def _write_user_presence(path: Path, last_user_input_epoch: int, written_at_epoc
     atomic_write(path, payload)
 
 
-def bump_user_presence(home: Path | None = None, now: int | None = None) -> None:
+def bump_user_presence(
+    home: Path | None = None, now: int | None = None, env: Mapping[str, str] | None = None
+) -> None:
     """Record a GENUINE user-input event — stamp BOTH epochs to `now`.
 
     Called by the UserPromptSubmit hook ONLY for real user prompts (cron
     `[janitor-…]` prompts must be filtered out by the caller first). Best-effort:
     any filesystem error is swallowed so the user's turn is never aborted.
+
+    Writes TWO breadcrumbs: the machine-global one (kept for cross-plugin consumers that
+    read `~/.aimaestro/state/user-presence.json`) AND a PER-PANE one keyed by this pane's
+    id (user directive 2026-07-16) so the self-trigger gate can tell "the user is active in
+    THIS pane" from "a human typed in some OTHER pane on the machine".
     """
     ts = int(time.time()) if now is None else int(now)
     try:
@@ -220,6 +261,12 @@ def bump_user_presence(home: Path | None = None, now: int | None = None) -> None
     except OSError:
         # Never crash the session on a breadcrumb write failure.
         pass
+    pane_key = terminal_pane_key(env)
+    if pane_key is not None:
+        try:
+            _write_user_presence(per_pane_presence_path(pane_key, home), ts, ts)
+        except OSError:
+            pass
 
 
 def refresh_user_presence_written_at(home: Path | None = None, now: int | None = None) -> None:

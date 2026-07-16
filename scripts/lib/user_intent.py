@@ -32,9 +32,11 @@ decision or a clobbered prompt. We therefore match conservatively and NEVER gues
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,11 +49,15 @@ INTENT_TTL_S = 600  # 10 minutes
 
 # How long after the user's last keystroke we still consider them PRESENT at the terminal.
 #
-# Biased LONG on purpose. The cost of wrongly believing the user is present is trivial (we print
-# "run /reload-plugins yourself" instead of typing it). The cost of wrongly believing they are ABSENT
-# is destroying whatever they were typing. Unattended overnight work — the case self-injection exists
-# for — has no input for HOURS, so a 30-minute window costs it nothing.
-USER_PRESENT_IDLE_S = 1800  # 30 minutes
+# The per-pane presence window (user directive 2026-07-16): "if I typed in the pane in the last 5
+# minutes I must be considered present." Before per-pane keying this was biased LONG (30 min)
+# because the breadcrumb was machine-global and a false-absent could clobber a human typing in ANY
+# session; now the gate is scoped to THIS pane (state.terminal_pane_key), so 30 min was pure
+# over-block — it kept an unattended pane gated for a full half-hour after the user's last keystroke
+# HERE, defeating self-trigger. 5 min covers a human who is actively working this pane while letting
+# a pane they walked away from self-trigger promptly. Tunable via env; any value ≤0 coerces back to
+# the default so the gate can never be silently disabled to 0s.
+USER_PRESENT_IDLE_S = 300  # 5 minutes
 
 # The verbs whose authority we track. Keyed by verb → the slash-commands that mean it.
 _VERB_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -162,26 +168,82 @@ def consume_intent(verb: str, state_dir: Path | None = None) -> None:
         pass
 
 
-def user_is_present(*, idle_s: int = USER_PRESENT_IDLE_S, home: Path | None = None, now: int | None = None) -> bool:
-    """True iff the user typed something recently — i.e. they are AT the terminal right now.
+def _presence_epoch(path: Path) -> int | None:
+    """`last_user_input_epoch` from a presence breadcrumb, or None if unreadable/corrupt.
 
-    Reads the cross-plugin presence breadcrumb the UserPromptSubmit hook maintains
-    (`state.bump_user_presence`), whose `last_user_input_epoch` is stamped ONLY for genuine user
-    prompts — cron heartbeat fires are filtered out upstream, so a busy unattended session does not
-    look "present" merely because the janitor keeps waking it.
-
-    Fails CLOSED: an unreadable/absent/corrupt breadcrumb returns True (assume the user IS there), so
-    a breadcrumb problem can never license typing into someone's pane.
+    None is the fail-CLOSED signal (the caller treats it as "present, do not inject"); a
+    valid `0` means the breadcrumb exists but no input was ever recorded.
     """
     try:
-        raw = state.user_presence_path(home).read_text(encoding="utf-8")
-        last = int(json.loads(raw)["last_user_input_epoch"])
+        raw = path.read_text(encoding="utf-8")
+        return int(json.loads(raw)["last_user_input_epoch"])
     except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def user_is_present(
+    *,
+    idle_s: int = USER_PRESENT_IDLE_S,
+    home: Path | None = None,
+    now: int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """True iff the user typed recently IN THIS PANE — i.e. they are AT this terminal right now.
+
+    Presence is PER-PANE (user directive 2026-07-16). The old machine-global breadcrumb made a
+    human typing in ANY session mark EVERY unattended pane on the machine "present" for 30 min,
+    so a fleet where the user pokes one session had self-trigger (compact/reload) blocked
+    everywhere. Now the gate reads THIS pane's own breadcrumb (keyed by `state.terminal_pane_key`,
+    the SAME id the UserPromptSubmit hook stamps): a pane the user has never typed in is
+    correctly "away", regardless of activity elsewhere.
+
+    Resolution order:
+      * pane id resolvable (tmux/iTerm) → read the PER-PANE breadcrumb. ABSENT means the user
+        never typed HERE → away (safe to inject: there are no in-progress keystrokes to clobber,
+        the one harm the gate exists to prevent). Present+recent → present; present+old → away;
+        corrupt → present (fail-closed).
+      * pane id NOT resolvable (plain terminal — which also cannot be self-triggered) → fall back
+        to the machine-global breadcrumb, preserving the pre-2026-07-16 behaviour.
+
+    Fails CLOSED: a corrupt/unreadable breadcrumb returns True (assume present), so a breadcrumb
+    problem can never license typing into someone's pane.
+    """
+    current = int(time.time()) if now is None else int(now)
+    pane_key = state.terminal_pane_key(env)
+    if pane_key is not None:
+        pane_path = state.per_pane_presence_path(pane_key, home)
+        if not pane_path.exists():
+            return False  # user never typed in THIS pane → unattended here
+        last = _presence_epoch(pane_path)
+        if last is None:
+            return True  # corrupt → fail closed
+        if last <= 0:
+            return False  # stamped but no real input recorded → unattended
+        return (current - last) <= idle_s
+    # No pane id → machine-global fallback (unchanged behaviour).
+    last = _presence_epoch(state.user_presence_path(home))
+    if last is None:
         return True  # unknown → assume present → do not inject
     if last <= 0:
         return False  # breadcrumb exists but no user input was EVER recorded → unattended
-    current = int(time.time()) if now is None else int(now)
     return (current - last) <= idle_s
+
+
+def _resolve_idle_s(env: Mapping[str, str] | None) -> int:
+    """The presence window in seconds — the 5-min default, overridable via env.
+
+    ``CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S`` tunes it; a non-int or a value ≤0
+    coerces back to the default, so the gate can never be silently disabled to a 0-second
+    window (which would let a self-trigger clobber a human who typed a moment ago)."""
+    e = os.environ if env is None else env
+    raw = e.get("CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S")
+    if raw is None:
+        return USER_PRESENT_IDLE_S
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return USER_PRESENT_IDLE_S
+    return val if val > 0 else USER_PRESENT_IDLE_S
 
 
 def injection_allowed(
@@ -190,14 +252,17 @@ def injection_allowed(
     state_dir: Path | None = None,
     home: Path | None = None,
     now: int | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> tuple[bool, str]:
     """May we type `commands` into the user's own pane right now? Returns (allowed, why).
 
-    The rule, in one line: **inject only when the user is away, or when the user asked for it.**
+    The rule, in one line: **inject only when the user is away FROM THIS PANE, or when they asked.**
 
-    A fresh intent token is CONSUMED on success, so one request buys one injection.
+    Presence is per-pane and the window is 5 min (user directive 2026-07-16); see
+    `user_is_present`. A fresh intent token is CONSUMED on success, so one request buys one
+    injection.
     """
-    if not user_is_present(home=home, now=now):
+    if not user_is_present(idle_s=_resolve_idle_s(env), home=home, now=now, env=env):
         return True, "user is away"
     for verb in verbs_for_commands(list(commands)):
         if intent_fresh(verb, state_dir=state_dir, now=now):

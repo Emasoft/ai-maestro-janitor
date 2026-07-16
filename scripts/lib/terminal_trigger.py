@@ -537,7 +537,10 @@ def send_self_command(
     # Checked BEFORE any channel is chosen: every channel types into the user's pane, so
     # a gate on one channel would be a gate on none. Dry-run is exempt (it sends nothing).
     if respect_user_presence and not dry_run:
-        allowed, _ = user_intent.injection_allowed(cmds)
+        # Forward the resolved env so the PER-PANE presence gate (TRDD, 2026-07-16) reads the same
+        # pane id this send targets — otherwise the reader would fall back to os.environ and the
+        # gate could disagree with the channel it is gating.
+        allowed, _ = user_intent.injection_allowed(cmds, env=e)
         if not allowed:
             return USER_PRESENT
     # Inside an ai-maestro agent the server API is the authoritative way to reach

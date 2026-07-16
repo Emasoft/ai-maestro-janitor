@@ -15,9 +15,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "lib"))
 
+import state  # noqa: E402
 import user_intent  # noqa: E402
 
 NOW = 1_784_000_000
+
+# Presence is PER-PANE (user directive 2026-07-16). The gate keys on the terminal pane id, so an
+# env carrying a TMUX_PANE selects the per-pane path; an empty env forces the machine-global fallback.
+PANE_A = {"TMUX_PANE": "%3"}
+PANE_B = {"TMUX_PANE": "%9"}
+NO_PANE: dict[str, str] = {}  # no pane id → machine-global fallback path
 
 
 @pytest.fixture
@@ -27,10 +34,9 @@ def sdir(tmp_path: Path) -> Path:
     return d
 
 
-def _presence(home: Path, last_input_epoch: int) -> Path:
-    p = home / ".aimaestro" / "state" / "user-presence.json"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
+def _breadcrumb(path: Path, last_input_epoch: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps(
             {
                 "last_user_input_epoch": last_input_epoch,
@@ -39,6 +45,19 @@ def _presence(home: Path, last_input_epoch: int) -> Path:
             }
         )
     )
+
+
+def _presence(home: Path, last_input_epoch: int) -> Path:
+    """Write the machine-GLOBAL breadcrumb (the no-pane-id fallback path)."""
+    _breadcrumb(state.user_presence_path(home), last_input_epoch)
+    return home
+
+
+def _pane_presence(home: Path, last_input_epoch: int, *, pane: str = "%3") -> Path:
+    """Write THIS pane's own breadcrumb (the primary per-pane path)."""
+    key = state.terminal_pane_key({"TMUX_PANE": pane})
+    assert key is not None
+    _breadcrumb(state.per_pane_presence_path(key, home), last_input_epoch)
     return home
 
 
@@ -97,27 +116,76 @@ def test_intent_is_absent_by_default(sdir: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_recent_input_means_present(tmp_path: Path) -> None:
-    home = _presence(tmp_path, NOW - 60)
-    assert user_intent.user_is_present(home=home, now=NOW)
+# presence — PER PANE (the primary path, user directive 2026-07-16)
 
 
-def test_long_silence_means_away(tmp_path: Path) -> None:
-    home = _presence(tmp_path, NOW - user_intent.USER_PRESENT_IDLE_S - 1)
-    assert not user_intent.user_is_present(home=home, now=NOW)
+def test_recent_input_in_this_pane_means_present(tmp_path: Path) -> None:
+    """Typed in THIS pane 1 min ago (< the 5-min window) → present."""
+    home = _pane_presence(tmp_path, NOW - 60)
+    assert user_intent.user_is_present(home=home, now=NOW, env=PANE_A)
 
 
-def test_missing_breadcrumb_fails_CLOSED(tmp_path: Path) -> None:
-    """Unknown presence → assume the user IS there. A breadcrumb problem must never license typing
-    into someone's pane; the cost of being wrong that way is destroying their input."""
-    assert user_intent.user_is_present(home=tmp_path, now=NOW)
+def test_silence_past_window_in_this_pane_means_away(tmp_path: Path) -> None:
+    """Last keystroke in THIS pane was past the 5-min window → away."""
+    home = _pane_presence(tmp_path, NOW - user_intent.USER_PRESENT_IDLE_S - 1)
+    assert not user_intent.user_is_present(home=home, now=NOW, env=PANE_A)
 
 
-def test_corrupt_breadcrumb_fails_CLOSED(tmp_path: Path) -> None:
-    p = tmp_path / ".aimaestro" / "state" / "user-presence.json"
+def test_window_is_five_minutes(tmp_path: Path) -> None:
+    """The window is exactly 5 min (user directive): at the edge = present, one second past = away."""
+    assert user_intent.USER_PRESENT_IDLE_S == 300
+    edge = _pane_presence(tmp_path, NOW - 300)
+    assert user_intent.user_is_present(home=edge, now=NOW, env=PANE_A)
+
+
+def test_never_typed_in_this_pane_means_away_despite_global(tmp_path: Path) -> None:
+    """THE per-pane fix: a pane with no breadcrumb of its own is UNATTENDED and self-trigger is
+    allowed — even though the machine-global breadcrumb (some OTHER pane's activity) says present."""
+    _presence(tmp_path, NOW - 10)  # a human typed 10s ago — but in some OTHER pane
+    assert not user_intent.user_is_present(home=tmp_path, now=NOW, env=PANE_A)
+
+
+def test_activity_in_pane_A_does_not_mark_pane_B_present(tmp_path: Path) -> None:
+    """Cross-pane isolation: the user hammering pane A must not block pane B's self-trigger."""
+    _pane_presence(tmp_path, NOW - 5, pane="%3")  # pane A active right now
+    assert user_intent.user_is_present(home=tmp_path, now=NOW, env=PANE_A)  # A: present
+    assert not user_intent.user_is_present(home=tmp_path, now=NOW, env=PANE_B)  # B: away
+
+
+def test_corrupt_per_pane_breadcrumb_fails_CLOSED(tmp_path: Path) -> None:
+    """A corrupt (not merely absent) per-pane breadcrumb → assume present. Absence is 'away'; a
+    parse error is a breadcrumb PROBLEM and must never license typing."""
+    key = state.terminal_pane_key(PANE_A)
+    assert key is not None
+    p = state.per_pane_presence_path(key, tmp_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("{ not json")
-    assert user_intent.user_is_present(home=tmp_path, now=NOW)
+    assert user_intent.user_is_present(home=tmp_path, now=NOW, env=PANE_A)
+
+
+# presence — machine-GLOBAL fallback (no pane id, e.g. a plain terminal)
+
+
+def test_global_fallback_recent_input_means_present(tmp_path: Path) -> None:
+    home = _presence(tmp_path, NOW - 60)
+    assert user_intent.user_is_present(home=home, now=NOW, env=NO_PANE)
+
+
+def test_global_fallback_long_silence_means_away(tmp_path: Path) -> None:
+    home = _presence(tmp_path, NOW - user_intent.USER_PRESENT_IDLE_S - 1)
+    assert not user_intent.user_is_present(home=home, now=NOW, env=NO_PANE)
+
+
+def test_global_fallback_missing_breadcrumb_fails_CLOSED(tmp_path: Path) -> None:
+    """Unknown presence → assume the user IS there. A breadcrumb problem must never license typing
+    into someone's pane; the cost of being wrong that way is destroying their input."""
+    assert user_intent.user_is_present(home=tmp_path, now=NOW, env=NO_PANE)
+
+
+def test_global_fallback_corrupt_breadcrumb_fails_CLOSED(tmp_path: Path) -> None:
+    _breadcrumb(state.user_presence_path(tmp_path), 0)
+    state.user_presence_path(tmp_path).write_text("{ not json")
+    assert user_intent.user_is_present(home=tmp_path, now=NOW, env=NO_PANE)
 
 
 # --------------------------------------------------------------------------- #
@@ -127,25 +195,34 @@ def test_corrupt_breadcrumb_fails_CLOSED(tmp_path: Path) -> None:
 
 def test_injection_refused_while_user_present_and_silent(tmp_path: Path, sdir: Path) -> None:
     """The bug that truncated the user's message: a [janitor-reload] marker typed /reload-plugins
-    into their pane while they were writing."""
-    home = _presence(tmp_path, NOW - 10)
-    allowed, why = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW)
+    into their pane while they were writing. Present IN THIS PANE, no request → refuse."""
+    home = _pane_presence(tmp_path, NOW - 10)
+    allowed, why = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=PANE_A)
     assert not allowed
     assert "did not ask" in why
 
 
 def test_injection_allowed_when_user_is_away(tmp_path: Path, sdir: Path) -> None:
-    """The unattended case self-injection exists for — hours of silence, nobody to clobber."""
-    home = _presence(tmp_path, NOW - user_intent.USER_PRESENT_IDLE_S - 1)
-    allowed, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW)
+    """The unattended case self-injection exists for — silent in THIS pane, nobody to clobber."""
+    home = _pane_presence(tmp_path, NOW - user_intent.USER_PRESENT_IDLE_S - 1)
+    allowed, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=PANE_A)
     assert allowed
+
+
+def test_injection_allowed_in_this_pane_when_other_pane_is_busy(tmp_path: Path, sdir: Path) -> None:
+    """The overnight-fleet fix: the user is active in pane A, but pane B (this one) has no keystrokes
+    of its own → B's self-trigger is allowed. Before per-pane keying this was blocked machine-wide."""
+    _pane_presence(tmp_path, NOW - 5, pane="%3")  # the user is hammering pane A
+    allowed, why = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=tmp_path, now=NOW, env=PANE_B)
+    assert allowed
+    assert "away" in why
 
 
 def test_injection_allowed_when_present_user_asked(tmp_path: Path, sdir: Path) -> None:
     """A present user who TYPED the command must still get it — the gate protects them, not blocks them."""
-    home = _presence(tmp_path, NOW - 5)
+    home = _pane_presence(tmp_path, NOW - 5)
     user_intent.record_intent_from_prompt("/reload-plugins", state_dir=sdir, now=NOW)
-    allowed, why = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW)
+    allowed, why = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=PANE_A)
     assert allowed
     assert "explicitly asked" in why
 
@@ -153,17 +230,29 @@ def test_injection_allowed_when_present_user_asked(tmp_path: Path, sdir: Path) -
 def test_one_request_authorizes_exactly_one_injection(tmp_path: Path, sdir: Path) -> None:
     """The token is CONSUMED. Otherwise one `/reload-plugins` would license every injection for the
     next 10 minutes — a standing licence is not what the user granted."""
-    home = _presence(tmp_path, NOW - 5)
+    home = _pane_presence(tmp_path, NOW - 5)
     user_intent.record_intent_from_prompt("/reload-plugins", state_dir=sdir, now=NOW)
-    first, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW)
-    second, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW)
+    first, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=PANE_A)
+    second, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=PANE_A)
     assert first
     assert not second, "the intent token must be spent, not standing"
 
 
 def test_intent_for_one_verb_does_not_authorize_another(tmp_path: Path, sdir: Path) -> None:
     """Asking to reload plugins is not consent to ESC-interrupt the turn and compact the context."""
-    home = _presence(tmp_path, NOW - 5)
+    home = _pane_presence(tmp_path, NOW - 5)
     user_intent.record_intent_from_prompt("/reload-plugins", state_dir=sdir, now=NOW)
-    allowed, _ = user_intent.injection_allowed(["/compact"], state_dir=sdir, home=home, now=NOW)
+    allowed, _ = user_intent.injection_allowed(["/compact"], state_dir=sdir, home=home, now=NOW, env=PANE_A)
     assert not allowed
+
+
+def test_env_override_tunes_the_window(tmp_path: Path, sdir: Path) -> None:
+    """CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S tunes the window; a value ≤0 coerces back
+    to the 5-min default so the gate can never be silently disabled to 0s."""
+    home = _pane_presence(tmp_path, NOW - 120)  # typed 2 min ago in this pane
+    tight = {**PANE_A, "CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S": "60"}
+    allowed, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=tight)
+    assert allowed, "a 60s window makes 2-min-ago AWAY"
+    coerced = {**PANE_A, "CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S": "0"}
+    allowed2, _ = user_intent.injection_allowed(["/reload-plugins --force"], state_dir=sdir, home=home, now=NOW, env=coerced)
+    assert not allowed2, "≤0 coerces to the 300s default, so 2-min-ago is PRESENT"

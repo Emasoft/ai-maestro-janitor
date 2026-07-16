@@ -16,6 +16,9 @@ from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _PROJECT_ROOT / "scripts" / "compact_trigger.py"
+sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
+
+import state  # noqa: E402  # for the per-pane presence key (user directive 2026-07-16)
 
 
 def _import():
@@ -26,24 +29,33 @@ def _import():
     return mod
 
 
-def _home(tmp: Path, *, present: bool) -> Path:
+def _home(tmp: Path, *, present: bool, pane_id: str | None = None) -> Path:
     """A HOME carrying a presence breadcrumb that says the user IS / IS NOT at the keyboard.
 
     Without this the tests inherit the DEVELOPER's real breadcrumb, and the presence gate then makes
     them pass or fail depending on whether whoever ran the suite happened to be typing — a test that
     reports on the tester, not the code. `last_user_input_epoch: 0` means "no user input was ever
     recorded" (unattended); a fresh epoch means they are here right now.
+
+    Presence is PER-PANE (user directive 2026-07-16): when `present` and a `pane_id` is given (the
+    iTerm/tmux id the trigger targets), also stamp THIS pane's own breadcrumb — otherwise the gate
+    reads an absent per-pane file and treats the pane as unattended regardless of the global stamp.
     """
     import json
     import time
 
+    now = int(time.time())
     h = tmp / ("home-present" if present else "home-away")
     (h / ".aimaestro" / "state").mkdir(parents=True, exist_ok=True)
-    stamp = int(time.time()) if present else 0
-    (h / ".aimaestro" / "state" / "user-presence.json").write_text(
-        json.dumps({"last_user_input_epoch": stamp, "written_at_epoch": int(time.time())}),
-        encoding="utf-8",
-    )
+    stamp = now if present else 0
+    payload = json.dumps({"last_user_input_epoch": stamp, "written_at_epoch": now})
+    (h / ".aimaestro" / "state" / "user-presence.json").write_text(payload, encoding="utf-8")
+    if present and pane_id is not None:
+        key = state.terminal_pane_key({"ITERM_SESSION_ID": pane_id})
+        assert key is not None
+        pane_path = state.per_pane_presence_path(key, h)
+        pane_path.parent.mkdir(parents=True, exist_ok=True)
+        pane_path.write_text(payload, encoding="utf-8")
     return h
 
 
@@ -266,11 +278,12 @@ def test_a_present_user_is_never_typed_at_but_the_directive_IS_recorded(tmp_path
     """
     p = tmp_path / "proj"
     p.mkdir()
+    pane = "w0t0p0:11111111-2222-3333-4444-555555555555"
     proc = _run(
         ["--directive", "continue TRDD-abcd1234"],
         project=p,
-        iterm="w0t0p0:11111111-2222-3333-4444-555555555555",
-        home=_home(tmp_path, present=True),
+        iterm=pane,
+        home=_home(tmp_path, present=True, pane_id=pane),
     )
     assert proc.returncode == 0
     assert "USER_PRESENT" in proc.stdout

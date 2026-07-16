@@ -282,3 +282,81 @@ def test_hook_is_registered_in_hooks_json():
     commands = [h["command"] for entry in ups for h in entry["hooks"]]
     assert any("on-prompt-submit.py" in c for c in commands), "prompt-submit hook not registered"
     assert _HOOK.is_file()
+
+
+# --------------------------------------------------------------------------
+# (c) PER-PANE presence (user directive 2026-07-16)
+# --------------------------------------------------------------------------
+
+
+def _run_hook_env(prompt: str, home: Path, extra_env: dict[str, str]) -> int:
+    """Invoke the hook with extra env (e.g. a pane id) merged in. Returns the exit code."""
+    import os
+
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    env["CLAUDE_PLUGIN_ROOT"] = str(_PROJECT_ROOT)
+    env.update(extra_env)
+    proc = subprocess.run(
+        [sys.executable, str(_HOOK)],
+        input=json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": prompt}),
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    return proc.returncode
+
+
+def test_terminal_pane_key_prefers_tmux_and_sanitizes():
+    """tmux $TMUX_PANE wins; iTerm is the fallback; unsafe chars → '-'; empty → None."""
+    assert state.terminal_pane_key({"TMUX_PANE": "%3"}) == "-3"  # '%' is not filename-safe
+    assert state.terminal_pane_key({"TMUX_PANE": "%3", "ITERM_SESSION_ID": "w0t1p0:UUID"}) == "-3"
+    assert state.terminal_pane_key({"ITERM_SESSION_ID": "w0t1p0:ABC-DEF"}) == "w0t1p0-ABC-DEF"
+    assert state.terminal_pane_key({}) is None
+    assert state.terminal_pane_key({"TMUX_PANE": "  "}) is None
+
+
+def test_genuine_prompt_writes_per_pane_breadcrumb(tmp_path):
+    """A genuine prompt with a pane id stamps BOTH the global breadcrumb AND this pane's own file."""
+    home = tmp_path / "home"
+    rc = _run_hook_env("a real question", home, {"TMUX_PANE": "%7"})
+    assert rc == 0
+    key = state.terminal_pane_key({"TMUX_PANE": "%7"})
+    assert key is not None
+    pane_path = state.per_pane_presence_path(key, home)
+    assert pane_path.is_file(), "the per-pane breadcrumb must be written"
+    data = json.loads(pane_path.read_text())
+    assert data["last_user_input_epoch"] > 0
+    # The machine-global one is still written too (cross-plugin consumers depend on it).
+    assert _breadcrumb_path(home).is_file()
+
+
+def test_heartbeat_marker_writes_no_per_pane_breadcrumb(tmp_path):
+    """A [janitor-…] cron prompt is the machine talking to itself — it must not stamp presence
+    in ANY form, per-pane included (else an active heartbeat marks its own pane present forever)."""
+    home = tmp_path / "home"
+    rc = _run_hook_env("[janitor-heartbeat]\n/path/to/stub.py", home, {"TMUX_PANE": "%7"})
+    assert rc == 0
+    key = state.terminal_pane_key({"TMUX_PANE": "%7"})
+    assert key is not None
+    assert not state.per_pane_presence_path(key, home).exists()
+    assert not _breadcrumb_path(home).exists()
+
+
+def test_no_pane_id_writes_global_only(tmp_path):
+    """With no pane id (plain terminal) only the global breadcrumb is written — nothing to key on."""
+    home = tmp_path / "home"
+    import os
+
+    env = dict(os.environ)
+    for k in ("TMUX_PANE", "ITERM_SESSION_ID"):
+        env.pop(k, None)
+    env["HOME"] = str(home)
+    env["CLAUDE_PLUGIN_ROOT"] = str(_PROJECT_ROOT)
+    proc = subprocess.run(
+        [sys.executable, str(_HOOK)],
+        input=json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": "a real question"}),
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    assert proc.returncode == 0
+    assert _breadcrumb_path(home).is_file()
+    panes_dir = home / ".aimaestro" / "state" / "user-presence-panes"
+    assert not panes_dir.exists() or not any(panes_dir.iterdir()), "no per-pane file without a pane id"
