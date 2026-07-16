@@ -213,6 +213,27 @@
       "default": "",
       "sensitive": false
     },
+    "heartbeat_cadence_dwell_s": {
+      "title": "Cadence Re-arm Dwell (seconds)",
+      "description": "After a heartbeat re-arm (a [janitor-renew] that changed the cadence tier), suppress further renew emissions for this many seconds UNLESS promoting to FAST for a genuine non-self signal (janitor#89 / TRDD-CI6ZTNB9). Kills the tier oscillation where the controller chased the background agents it itself spawned — each memory chore used to cost 2 wasted re-arm turns. Default 1200 (20 min); 0 disables the dwell.",
+      "type": "number",
+      "default": 1200,
+      "sensitive": false
+    },
+    "token_budget_repeat_s": {
+      "title": "Token-Spike Nudge Repeat Interval (seconds)",
+      "description": "The pre-tool-token-budget hook now injects its advisory additionalContext only on a TIER TRANSITION (janitor#79 — steady-tier per-call injection was the #2 measured cause of prompt-cache re-bills). At a steady HARD tier it re-nudges after this interval so a persistent spike is not forgotten. Default 600 (10 min). Enforcement (the opt-in deny of agent spawns at the hard tier) is unaffected by this throttle.",
+      "type": "number",
+      "default": 600,
+      "sensitive": false
+    },
+    "context_prepare_renudge_s": {
+      "title": "Context-Usage Nudge Repeat Interval (seconds)",
+      "description": "The pre-tool-context-usage hook now injects its advisory additionalContext only on a SEVERITY TRANSITION (janitor#79). While the context stays in the prepare/advisory band it re-nudges after this interval instead of on every tool call. Default 600 (10 min). The >=85% ENFORCEMENT path (auto-compact + deny) is unaffected.",
+      "type": "number",
+      "default": 600,
+      "sensitive": false
+    },
     "heartbeat_burn_status_command": {
       "title": "Burn-rate probe command (token-anomaly corroboration)",
       "description": "Shell command that prints JSON with a global.costPerHour field naming the CURRENT machine-wide burn rate in $/hour (e.g. AgentLens: 'agentlenspro get_burn_status'). Consulted by the token-usage-anomaly detector ONLY after its local median+MAD baseline has already decided to alarm, to CORROBORATE the spike with the real account-level burn rate \u2014 it never suppresses the local alarm (the local baseline is authoritative for 'this session's own heartbeat cost spiked'). Default: 'agentlenspro get_burn_status' (a bare PATH binary). Empty string disables the probe. Fail-open: a missing binary, non-zero exit, 5s timeout, or unparseable output yields no clause and never blocks the fire (same contract as heartbeat_account_status_command). Config, not a hard-coded path, because such CLIs are machine-local.",
