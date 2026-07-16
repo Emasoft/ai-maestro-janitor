@@ -305,13 +305,25 @@ def _run_hook_env(prompt: str, home: Path, extra_env: dict[str, str]) -> int:
     return proc.returncode
 
 
-def test_terminal_pane_key_prefers_tmux_and_sanitizes():
-    """tmux $TMUX_PANE wins; iTerm is the fallback; unsafe chars → '-'; empty → None."""
-    assert state.terminal_pane_key({"TMUX_PANE": "%3"}) == "-3"  # '%' is not filename-safe
-    assert state.terminal_pane_key({"TMUX_PANE": "%3", "ITERM_SESSION_ID": "w0t1p0:UUID"}) == "-3"
-    assert state.terminal_pane_key({"ITERM_SESSION_ID": "w0t1p0:ABC-DEF"}) == "w0t1p0-ABC-DEF"
+def test_terminal_pane_key_namespaces_by_source_and_sanitizes():
+    """The key is `<source>-<sanitized id>`; tmux wins, then iTerm/kitty/WezTerm; unsafe runs → one
+    '-' trimmed at the ends; a terminal with no per-pane id → None."""
+    # tmux is preferred and focus-independent; '%' is not filename-safe → collapses, leading '-' trimmed.
+    assert state.terminal_pane_key({"TMUX_PANE": "%3"}) == "tmux-3"
+    assert state.terminal_pane_key({"TMUX_PANE": "%3", "ITERM_SESSION_ID": "w0t1p0:UUID"}) == "tmux-3"
+    # iTerm fallback; ':' → '-'.
+    assert state.terminal_pane_key({"ITERM_SESSION_ID": "w0t1p0:ABC-DEF"}) == "iterm-w0t1p0-ABC-DEF"
+    # Other terminal types are detected too (the user's "another type of terminal" requirement).
+    assert state.terminal_pane_key({"KITTY_WINDOW_ID": "3"}) == "kitty-3"
+    assert state.terminal_pane_key({"WEZTERM_PANE": "0"}) == "wezterm-0"
+    # Precedence: iTerm beats kitty beats WezTerm when several are present.
+    assert state.terminal_pane_key({"ITERM_SESSION_ID": "s", "KITTY_WINDOW_ID": "3"}) == "iterm-s"
+    assert state.terminal_pane_key({"KITTY_WINDOW_ID": "3", "WEZTERM_PANE": "0"}) == "kitty-3"
+    # No per-pane id (Apple Terminal / plain xterm) → None → machine-global fallback.
     assert state.terminal_pane_key({}) is None
     assert state.terminal_pane_key({"TMUX_PANE": "  "}) is None
+    # A source namespace prevents cross-terminal collision: tmux '%3' and kitty '3' differ.
+    assert state.terminal_pane_key({"TMUX_PANE": "%3"}) != state.terminal_pane_key({"KITTY_WINDOW_ID": "3"})
 
 
 def test_genuine_prompt_writes_per_pane_breadcrumb(tmp_path):

@@ -25,9 +25,19 @@ terminal pane id) with a 5-MINUTE window.
 
 **Current state:** DONE + committed. Full suite 13125 pass, ruff clean.
 
-**NEXT ACTION:** none — code complete. The durable behaviour reaches the fleet only on PUBLISH
-(still held by the owner). NOTE: unlike the keep-going fix, there is NO immediate state-file
-mitigation — the running cached janitor has no per-pane code, so this one needs the release.
+**NEXT ACTION:** none for the local fix — code complete. Two follow-ups are tracked, not blocking:
+- **Terminal coverage extended** (commit 2): `terminal_pane_key` now also detects kitty
+  (`$KITTY_WINDOW_ID`) + WezTerm (`$WEZTERM_PANE`), namespaced by source. Other terminals with no
+  per-pane id (Apple Terminal, plain xterm) still use the global fallback — correct, they have no
+  per-pane addressing.
+- **ai-maestro presence backend** (BLOCKED on `Emasoft/ai-maestro#73`): inside an ai-maestro agent
+  the presence signal must come from the SERVER (`aimaestro-session.sh state <self>` / a user-idle
+  field, or route self-injection through `queue`/`--require-idle`), NOT the local breadcrumb. Issue
+  #73 asks for the exact command / to add user-idle-seconds. Wire the `#J` presence backend against
+  their reply under TRDD-PZLVT2RN.
+
+NOTE: unlike the keep-going fix, there is NO immediate state-file mitigation — the running cached
+janitor has no per-pane code, so the local fix needs the release.
 
 **Load-bearing facts:**
 - Pane id SSOT: `state.terminal_pane_key(env)` — tmux `$TMUX_PANE` preferred, iTerm

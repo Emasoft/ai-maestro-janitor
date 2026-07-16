@@ -195,28 +195,42 @@ def user_presence_path(home: Path | None = None) -> Path:
     return base / ".aimaestro" / "state" / "user-presence.json"
 
 
+# Per-pane presence works on any terminal that exports a STABLE per-pane id in the env — the ONE
+# thing the WRITER (the UserPromptSubmit hook) and the READER (the self-trigger gate) can both
+# resolve from the same session env. Ordered by reliability: a multiplexer pane id (tmux) is
+# focus-independent and beats a GUI-window id, so it is tried first; then the GUI terminals that
+# expose a per-pane/window id. A terminal NOT in this table (Apple Terminal, plain xterm, …) has no
+# per-pane addressing → the gate falls back to the machine-global breadcrumb. Each source is a
+# distinct NAMESPACE so two terminals' ids can never collide into one presence file.
+_PANE_ID_ENV_VARS: tuple[tuple[str, str], ...] = (
+    ("tmux", "TMUX_PANE"),          # e.g. %3 — the multiplexer pane, focus-independent
+    ("iterm", "ITERM_SESSION_ID"),  # e.g. w0t1p0:UUID — macOS iTerm2
+    ("kitty", "KITTY_WINDOW_ID"),   # e.g. 3 — kitty's per-OS-window id
+    ("wezterm", "WEZTERM_PANE"),    # e.g. 0 — WezTerm's per-pane id
+)
+
+
 def terminal_pane_key(env: Mapping[str, str] | None = None) -> str | None:
     """A stable, filesystem-safe id for THIS terminal pane, or None if unresolvable.
 
-    Presence is PER-PANE (user directive 2026-07-16): a human typing in pane A must not
-    mark an unattended pane B as "present" and block B's self-trigger. The pane id is the
-    ONE thing both the WRITER (the UserPromptSubmit hook, via `bump_user_presence`) and the
-    READER (the self-trigger gate, via `user_is_present`) can independently resolve from the
-    SAME session env — so keying the presence file on it makes the gate per-pane with no
-    cross-pane contamination.
-
-    tmux `$TMUX_PANE` (e.g. `%3`) is preferred (focus-independent, stable per pane); iTerm
-    `$ITERM_SESSION_ID` (e.g. `w0t1p0:UUID`) is the macOS fallback. Any char outside
-    `[A-Za-z0-9._-]` is mapped to `-` so the value is a safe filename on every platform.
-    Returns None off tmux/iTerm (a plain terminal has no per-pane addressing, and also
-    cannot be self-triggered) — the caller then falls back to the machine-global breadcrumb.
+    Presence is PER-PANE (user directive 2026-07-16): a human typing in pane A must not mark an
+    unattended pane B as "present" and block B's self-trigger. The key is `"<source>-<sanitized id>"`
+    resolved from the first matching env var in `_PANE_ID_ENV_VARS` — tmux first (focus-independent),
+    then the GUI terminals that expose a per-pane id (iTerm, kitty, WezTerm). The `<source>` prefix
+    namespaces the key so, e.g., tmux `%3` and kitty window `3` never map to the same file. Any run of
+    chars outside `[A-Za-z0-9._]` collapses to a single `-`, trimmed at the ends, so the value is a
+    safe filename on every platform. Returns None on a terminal that exports NO per-pane id (Apple
+    Terminal, plain xterm) — the caller then falls back to the machine-global breadcrumb.
     """
     e: Mapping[str, str] = os.environ if env is None else env
-    raw = (e.get("TMUX_PANE") or e.get("ITERM_SESSION_ID") or "").strip()
-    if not raw:
-        return None
-    key = re.sub(r"[^A-Za-z0-9._-]", "-", raw)[:128]
-    return key or None
+    for source, var in _PANE_ID_ENV_VARS:
+        raw = (e.get(var) or "").strip()
+        if not raw:
+            continue
+        sanitized = re.sub(r"[^A-Za-z0-9._]+", "-", raw).strip("-")[:128]
+        if sanitized:
+            return f"{source}-{sanitized}"
+    return None
 
 
 def per_pane_presence_path(pane_key: str, home: Path | None = None) -> Path:
