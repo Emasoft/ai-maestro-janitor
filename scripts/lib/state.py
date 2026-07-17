@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -346,6 +347,36 @@ def is_truthy_env(name: str, default: bool) -> bool:
     return raw.lower() not in ("false", "0", "no", "off")
 
 
+def parse_nonneg_int(s: str) -> Optional[int]:
+    """Parse a non-negative integer from a config-value string, or None.
+
+    Accepts the SAME spellings Claude Code's own integer env vars accept as of CC
+    2.1.208/2.1.211 (which fixed `1e6` silently becoming `1`, then added digit
+    separators) — so a janitor knob and a CC knob read the same string identically:
+
+      * plain digits           — "270000"
+      * digit-separator "_"    — "64_000", "270_000"  (Python int-literal underscores)
+      * scientific notation    — "1e6", "2.7e5"       (must resolve to a WHOLE number)
+
+    Returns None for anything else — a fractional value ("1.5"), a negative
+    ("-1e6"), hex ("0x10"), NaN/inf, or junk — so the caller falls back to its
+    default rather than silently using a wrong number. PURE."""
+    # Plain / underscore-separated integer (base 10 — never hex/octal for a knob).
+    try:
+        n = int(s, 10)
+    except ValueError:
+        # Scientific / float spelling; must be a finite, non-negative WHOLE number,
+        # matching CC's "integer env var" contract (2.7e5 == 270000, but 1.5 is not).
+        try:
+            f = float(s)
+        except ValueError:
+            return None
+        if not math.isfinite(f) or not f.is_integer():
+            return None
+        n = int(f)
+    return n if n >= 0 else None
+
+
 def coerce_int(
     value: Optional[str],
     default: int = 0,
@@ -355,23 +386,25 @@ def coerce_int(
 ) -> int:
     """Coerce a (possibly user-supplied) value to a non-negative int.
 
-    Accepts None, empty string, and non-numeric text — all return
-    `default`. Used for `CLAUDE_PLUGIN_OPTION_*` env vars where a typo
-    like "900 seconds" should not crash the heartbeat.
+    Accepts None, empty string, and non-numeric text — all return `default`. Used
+    for `CLAUDE_PLUGIN_OPTION_*` env vars where a typo like "900 seconds" should not
+    crash the heartbeat. Numeric spellings match Claude Code's own int env vars
+    (plain, `64_000`, `1e6` — see `parse_nonneg_int`), so a knob set the way CC
+    documents is honored rather than silently reverting to the default.
 
-    If `detector_name` is provided AND a non-empty value failed to
-    coerce, log a one-line note so the user can see in the detector
-    log that their config knob is being ignored. The log fires only
-    on the "had a value but it wasn't a number" case — empty/unset
-    values (the common path) stay silent. `var_name` lets the log
-    point at the offending env var.
+    If `detector_name` is provided AND a non-empty value failed to coerce, log a
+    one-line note so the user can see in the detector log that their config knob is
+    being ignored. The log fires only on the "had a value but it wasn't a
+    non-negative integer" case — empty/unset values (the common path) stay silent.
+    `var_name` lets the log point at the offending env var.
     """
     if value is None:
         return default
     s = value.strip()
     if not s:
         return default
-    if not s.isdigit():
+    parsed = parse_nonneg_int(s)
+    if parsed is None:
         if detector_name:
             label = var_name or "config value"
             log_line(
@@ -379,7 +412,7 @@ def coerce_int(
                 f"coerce_int: {label}={s!r} is not a non-negative integer — using default {default}",
             )
         return default
-    return int(s)
+    return parsed
 
 
 def autofix_mode() -> str:

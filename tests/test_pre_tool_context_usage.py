@@ -83,6 +83,20 @@ def test_coerce_int_defaults_on_junk() -> None:
     assert hook._coerce_int("-5", 60) == 60  # negative rejected → default
 
 
+def test_coerce_int_accepts_cc_env_spellings() -> None:
+    """CC-compat (2.1.208/2.1.211): the hook honors the same int env-var spellings Claude
+    Code's own vars accept — digit separators and scientific notation — instead of
+    silently reverting a knob to the default."""
+    hook = _import_hook()
+    assert hook._coerce_int("64_000", 60) == 64_000       # digit separator
+    assert hook._coerce_int("270_000", 60) == 270_000
+    assert hook._coerce_int("1e6", 60) == 1_000_000       # scientific notation
+    assert hook._coerce_int("2.7e5", 60) == 270_000
+    assert hook._coerce_int("1.5", 60) == 60              # fractional → default
+    assert hook._coerce_int("-1e6", 60) == 60             # negative → default
+    assert hook._coerce_int("0x10", 60) == 60             # hex → default (never for a knob)
+
+
 def test_bucket_tokens_and_pct() -> None:
     """TRDD-YRPUSIFY: the cache-stable bucketers floor tokens to 10k and pct to 5-pt
     steps, so a band of raw values renders as ONE identical label."""

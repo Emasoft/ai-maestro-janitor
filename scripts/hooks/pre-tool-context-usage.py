@@ -97,14 +97,15 @@ def _truthy(raw: str | None, *, default: bool) -> bool:
 
 
 def _coerce_int(raw: str | None, default: int) -> int:
-    """Best-effort non-negative int; any junk → default (a typo must not crash a hook)."""
+    """Best-effort non-negative int; any junk → default (a typo must not crash a hook).
+
+    Delegates to the shared parser (one source of truth) so a knob set the way Claude
+    Code documents its own int env vars — `1e6`, `64_000` (CC 2.1.208/2.1.211) — is
+    honored here too, not silently reverted to the default."""
     if not raw:
         return default
-    try:
-        val = int(raw.strip())
-    except (ValueError, AttributeError):
-        return default
-    return val if val >= 0 else default
+    parsed = state.parse_nonneg_int(raw.strip())
+    return parsed if parsed is not None else default
 
 
 def _bucket_tokens(n: int) -> str:
