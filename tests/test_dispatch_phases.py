@@ -828,9 +828,10 @@ def test_phase_keep_going_nudge_emits_in_maintenance_mode_no_flag(env_isolation:
     assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE], f"unexpected nudge output: {out!r}"
 
 
-def test_phase_keep_going_nudge_no_dedupe_refires_every_call(env_isolation: dict) -> None:
+def test_phase_keep_going_nudge_refires_every_call_absent_a_recent_resume(env_isolation: dict) -> None:
     """Unlike the day-bucketed renew nudge, this MUST re-fire on every due heartbeat while the
-    opt-in holds — a one-time nudge would miss a session idle across several heartbeats."""
+    opt-in holds — a one-time nudge would miss a session idle across several heartbeats. The
+    sole exception (a resume cue moments ago) needs a `last-resume.ts` stamp, absent here."""
     dispatch = _import_dispatch()
     import state
 
@@ -1160,3 +1161,95 @@ def test_iterm_alarm_refires_when_the_condition_recurs(env_isolation: dict,
     dispatch._phase_iterm_automation_alarm()
 
     assert "cannot enumerate its sessions" in capsys.readouterr().out
+
+
+# ---------- TRDD-QW6RVAKN: "janitor resume is called twice after compacting" ----
+
+
+def test_keep_going_muted_by_recent_resume_decision_table(env_isolation: dict) -> None:
+    """The pure gate. Small window ON PURPOSE: it must swallow exactly the ONE fire that
+    follows a resume cue at the FAST */5 tier, and nothing at */15 or */30 where the next
+    fire is 900/1800s away and a nudge is genuinely wanted again."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    now = 1_000_000
+
+    # No stamp at all → never mute (fail-open: the nudge is the survival pulse).
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now) is False
+
+    dispatch._stamp_resume(sd, now)
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now) is True           # same instant
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now + 300) is True     # the */5 next fire
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now + 330) is True     # + cron jitter
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now + 600) is False    # the fire after → nudge
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now + 900) is False    # */15 → never muted
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now + 1800) is False   # */30 → never muted
+    # A stamp from the FUTURE (clock skew) must not mute forever.
+    assert dispatch._keep_going_muted_by_recent_resume(sd, now - 60) is False
+
+
+def test_compact_resume_then_nudge_emits_only_one_resume_cue(env_isolation: dict) -> None:
+    """THE REGRESSION TEST for the user report (2026-07-17): "janitor resume is called twice
+    after compacting". Reproduces the real two-fire sequence — fire A runs the post-compact
+    resume (and early-returns), fire B finds the flag gone and used to emit a SECOND
+    [janitor-resume] telling the agent to do what it was already doing."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    (sd / "resume-after-compact.flag").write_text("continue TRDD-ABCD1234", encoding="utf-8")
+
+    # Fire A: the post-compact resume cue — one marker, carrying the directive.
+    fire_a = _capture_stdout(lambda: dispatch._phase_compact_resume())
+    assert fire_a.splitlines()[0] == "[janitor-resume]"
+    assert "continue TRDD-ABCD1234" in fire_a
+    assert fire_a.count("[janitor-resume]") == 1
+
+    # Fire B (the next heartbeat): the nudge must NOT repeat the cue.
+    fire_b = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert fire_b == "", f"a SECOND [janitor-resume] fired right after the compact resume: {fire_b!r}"
+
+    # ...and the never-stop pulse resumes once the dedupe window passes.
+    past = int(time.time()) - (dispatch._KEEP_GOING_RESUME_DEDUPE_S + 1)
+    dispatch._stamp_resume(sd, past)
+    fire_c = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert fire_c.splitlines()[0] == "[janitor-resume]", "the never-stop nudge must come back"
+
+
+def test_rate_limit_resume_then_nudge_emits_only_one_resume_cue(env_isolation: dict) -> None:
+    """Same double, other resume path: a rate-limit recovery cue must not be echoed by the
+    nudge on the very next fire."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    (sd / "rate-limited.flag").write_text("", encoding="utf-8")
+
+    fire_a = _capture_stdout(lambda: dispatch._phase_rate_limit_recovery())
+    assert fire_a.count("[janitor-resume]") == 1
+    fire_b = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("full"))
+    assert fire_b == "", f"a SECOND [janitor-resume] fired right after the rate-limit resume: {fire_b!r}"
+
+
+def test_keep_going_dedupe_applies_in_maintenance_mode_too(env_isolation: dict) -> None:
+    """The dedupe is the ONE case where maintenance skips a nudge. It does not weaken "even in
+    maintenance it always nudges": we defer to a cue that fired ONE heartbeat ago and carried
+    the resume DIRECTIVE — strictly stronger than this generic nudge — and only that one fire
+    is skipped."""
+    dispatch = _import_dispatch()
+    import state
+
+    state.init_state()
+    sd = state.state_dir()
+    dispatch._stamp_resume(sd, int(time.time()))
+    assert _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance")) == ""
+
+    # Next fire past the window: maintenance nudges again, unconditionally.
+    dispatch._stamp_resume(sd, int(time.time()) - (dispatch._KEEP_GOING_RESUME_DEDUPE_S + 1))
+    out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE]

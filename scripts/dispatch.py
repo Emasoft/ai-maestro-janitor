@@ -1236,6 +1236,38 @@ def _phase_heartbeat_renew() -> None:
         print(line)
 
 
+# A keep-going nudge is SKIPPED when a [janitor-resume] cue fired within this window —
+# i.e. on the single fire right after a rate-limit / post-compact resume (TRDD-QW6RVAKN).
+# Sized just over the FAST 300s tier (+ the scheduler's ≤10% jitter) so it swallows EXACTLY
+# ONE fire at */5 and NOTHING at */15 or */30, where the next fire is 900/1800s away and a
+# nudge is genuinely wanted again. It must stay small: this is a de-duplicator, not a mute
+# button — the never-stop pulse is the whole point of the phase.
+_KEEP_GOING_RESUME_DEDUPE_S = 360
+
+
+def _keep_going_muted_by_recent_resume(sd: Path, now: int) -> bool:
+    """True iff a [janitor-resume] cue already fired moments ago, making this nudge a
+    DUPLICATE of it. PURE-ish (one stamp read), fail-open (any error → nudge).
+
+    WHY (user report 2026-07-17, "janitor resume is called twice after compacting"): both
+    resume phases and this nudge print the SAME `[janitor-resume]` marker. The resume phases
+    early-return, so they never collide on one fire — but the NEXT fire found the flag gone
+    and emitted the nudge, so a compaction produced two back-to-back resume cues telling the
+    agent to do the one thing it was already doing. _phase_rate_limit_recovery already guards
+    this exact class ("prevents a second, redundant [janitor-resume] on the next fire") for
+    the rate-limit × compact overlap; this extends the same rule to the nudge.
+
+    NOT a never-stop regression: the cue we defer to IS a stronger nudge (it carries the
+    resume DIRECTIVE), it fired one heartbeat ago, and only that single fire is skipped.
+    Reuses `last-resume.ts` — the stamp both resume phases already write — so there is no new
+    state to leak, and a stale stamp simply falls outside the window and mutes nothing."""
+    try:
+        last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
+    except OSError:
+        return False
+    return last_resume > 0 and 0 <= now - last_resume < _KEEP_GOING_RESUME_DEDUPE_S
+
+
 def _phase_keep_going_nudge(mode: str) -> None:
     """Emit a never-stop continue-nudge to keep an unattended session working (DEFAULT-ON).
 
@@ -1253,14 +1285,25 @@ def _phase_keep_going_nudge(mode: str) -> None:
     (`/janitor-keep-going off`, full mode only) or `KEEP_GOING_DEFAULT=false` (restores
     the legacy opt-in). See the gate below.
 
-    No dedupe: unlike the day-bucketed renew nudge above, this is meant to re-fire on
-    EVERY due heartbeat while the opt-in holds — that repetition is the whole
+    Re-fires on EVERY due heartbeat while the opt-in holds — that repetition is the whole
     "never stop" point (a one-time nudge would miss a session that stays idle across
-    several heartbeats in a row).
+    several heartbeats in a row). Exactly ONE exception, and it is a de-duplicator rather
+    than a mute: the single fire immediately after a rate-limit / post-compact resume cue,
+    which already told the agent to continue and carried the directive too — see
+    _keep_going_muted_by_recent_resume.
     """
-    keep_going_flag = state.state_dir() / "keep-going"
-    keep_going_off = state.state_dir() / "keep-going-off"
+    sd = state.state_dir()
+    keep_going_flag = sd / "keep-going"
+    keep_going_off = sd / "keep-going-off"
     maintenance = mode == "maintenance"
+    # DEDUPE (TRDD-QW6RVAKN) — checked FIRST, so it applies in EVERY mode, maintenance
+    # included. This is the ONE case where maintenance skips a nudge, and it does not
+    # weaken the "even in maintenance it always nudges" directive: we are deferring to a
+    # [janitor-resume] cue that fired ONE heartbeat ago and carried a resume DIRECTIVE —
+    # a strictly stronger nudge than this generic one. Repeating it is duplication, not
+    # survival; the nudge resumes on the very next fire.
+    if _keep_going_muted_by_recent_resume(sd, int(time.time())):
+        return
     # DEFAULT-ON (user directive 2026-07-16, TRDD-93TKV769): keeping the fleet working
     # in the user's absence is the #1 janitor promise, so the never-stop nudge fires in
     # EVERY mode BY DEFAULT — not only under an explicit opt-in. The overnight-idle
@@ -1276,7 +1319,7 @@ def _phase_keep_going_nudge(mode: str) -> None:
     #     anyone who relied on silence-by-default.
     default_on = state.is_truthy_env("CLAUDE_PLUGIN_OPTION_KEEP_GOING_DEFAULT", True)
     if maintenance:
-        pass  # maintenance ALWAYS nudges — never silenced here
+        pass  # maintenance ALWAYS nudges — the only exception is the resume-dedupe above
     elif keep_going_off.is_file():
         return  # the explicit opt-out — the ONE lever that silences the default nudge
     elif not default_on and not keep_going_flag.is_file():
