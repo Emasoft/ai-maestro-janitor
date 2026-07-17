@@ -1,9 +1,9 @@
 ---
 trdd-id: FENWWB4E
 title: Per-project findings ledger — the traceable per-project index + concise session-start surfacing
-column: testing
+column: published
 created: 2026-07-17T16:45:17+0200
-updated: 2026-07-17T18:40:00+0200
+updated: 2026-07-17T19:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project

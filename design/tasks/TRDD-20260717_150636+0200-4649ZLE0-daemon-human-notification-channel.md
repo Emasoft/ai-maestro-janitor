@@ -1,9 +1,9 @@
 ---
 trdd-id: 4649ZLE0
 title: Human-notification channel for daemon findings when no session is alive
-column: testing
+column: published
 created: 2026-07-17T15:06:36+0200
-updated: 2026-07-17T19:05:00+0200
+updated: 2026-07-17T19:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
