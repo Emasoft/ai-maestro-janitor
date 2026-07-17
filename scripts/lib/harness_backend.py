@@ -36,15 +36,42 @@ import state  # noqa: E402  -- sibling lib
 
 # Test/override surface. "up" | "down" | "unknown" (or truthy/falsy spellings).
 SERVER_STATE_ENV = "JANITOR_AIMAESTRO_SERVER_STATE"
-# Dedicated override for the singleton-CHORE ownership signal (falls back to the
-# family-A probe when unset) — lets an operator force chore takeover/yield without
-# also flipping the fleet-actuation exclusion.
+# Dedicated override for the singleton-CHORE ownership signal (applies to EVERY chore
+# class) — lets an operator force chore takeover/yield without also flipping the
+# fleet-actuation exclusion.
 SERVER_CHORES_ENV = "JANITOR_AIMAESTRO_SERVER_CHORES"
 # Explicit path override for the continuity CLI (mirrors $AIMAESTRO_CLI for the agent CLI).
 CONTINUITY_CLI_ENV = "JANITOR_AIMAESTRO_CONTINUITY_CLI"
+# Test/operator override for the server-liveness probe file path.
+LIVENESS_FILE_ENV = "JANITOR_AIMAESTRO_LIVENESS_FILE"
 
 BACKEND_AIMAESTRO = "aimaestro"
 BACKEND_STANDALONE = "standalone"
+
+# The per-class capability tokens of the #100 probe contract (ARCHITECTURE.md rev 2,
+# §6.1). Each token is present in the probe file ONLY while its class is live and
+# running server-side — the server's own load-bearing rule, so membership is a
+# CONFIDENT signal both ways when the file is fresh.
+CAP_FAMILY_A = "family-a"
+CAP_SINGLETON_CHORES = "singleton-chores"
+CAP_FLEET_RECOVERY = "fleet-recovery"  # reserved server-side (ai-maestro#60), never emitted yet
+
+# The SSOT map: absorbed daemon task → the capability token that gates its yield
+# (TRDD-N9YAH5E7, #100 round 1 §6.2). ONE bit must never gate two classes — the first
+# class that goes live would silence chores nothing runs. daemon.py derives its
+# absorbed-set from THIS map; daemon_watchdog gates the singleton-chores shims on the
+# matching class.
+SERVER_ABSORBED_TASK_CLASS: dict[str, str] = {
+    "marketplace-refresh": CAP_SINGLETON_CHORES,
+    "user-plugins-update": CAP_SINGLETON_CHORES,
+    "version-update": CAP_SINGLETON_CHORES,
+    "oauth-rotator-supervisor": CAP_FAMILY_A,
+    "oauth-rotator-tick": CAP_FAMILY_A,
+}
+
+# Staleness window the probe contract mandates: the server rewrites the file every 30 s;
+# consumers treat `now - ts > 90` (or file absent) as "no live capability claim".
+LIVENESS_STALE_AFTER_S = 90
 
 _TRUE = frozenset({"up", "true", "1", "yes", "on"})
 _FALSE = frozenset({"down", "false", "0", "no", "off"})
@@ -77,19 +104,58 @@ def _resolve_agent_cli() -> str | None:
         return None
 
 
-def server_owns_family_a(*, timeout: int = 10) -> bool | None:
-    """Does a LIVE ai-maestro server own Family-A continuity for this machine's harness agents?
+def _liveness_path() -> Path:
+    """The server-liveness probe file path — `~/.aimaestro/server-liveness.json` per the
+    #100 contract, env-overridable for tests. HOME resolved at CALL time (the
+    frozen-constant-vs-monkeypatched-HOME trap; see `continuity_cli`)."""
+    override = os.environ.get(LIVENESS_FILE_ENV, "").strip()
+    if override:
+        return Path(override)
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    return Path(home) / ".aimaestro" / "server-liveness.json"
 
-    Returns True / False / None(unknown). Resolution ladder:
-      1. `$JANITOR_AIMAESTRO_SERVER_STATE` override — tests + emergency operator control.
-      2. (Reserved slot: the canonical probe ai-maestro specifies on janitor#100 — wire it
-         HERE; no call site changes.)
-      3. Heuristic: `aimaestro-agent.sh list --json` — verified to curl the server's
-         `/api/agents` with a 5s cap, so SUCCESS is a live-server proof. CLI absent ⇒ no
-         ai-maestro install on this machine ⇒ False (the only CONFIDENT False). CLI
-         present but the call fails ⇒ None — a down server and a transient error are
-         indistinguishable here, and the doctrine (module docstring) requires the tie to
-         break toward "hands off", so None it stays until #100 pins a sharper probe.
+
+def server_capabilities(*, now: Optional[float] = None) -> frozenset[str] | None:
+    """The LIVE server's advertised capability tokens, or None when there is no fresh claim.
+
+    Reads the auth-free probe file the ai-maestro server rewrites every 30 s
+    (`lib/server-liveness.ts`, #100 round 1 §6.1): `{"ts", "pid", "capabilities": [...]}`.
+    Fresh (`now - ts <= 90`) ⇒ the token frozenset — a CONFIDENT per-class claim both
+    ways, because the server includes a token ONLY while that class is live and running.
+    Absent / stale / malformed ⇒ None ("no live capability claim" — the safe default).
+    NEVER raises: this runs inside the daemon loop and per-session watchdogs.
+    """
+    try:
+        import time  # noqa: PLC0415 -- stdlib, keep module import-light
+
+        data = json.loads(_liveness_path().read_text(encoding="utf-8"))
+        ts = data.get("ts")
+        caps = data.get("capabilities")
+        if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not isinstance(caps, list):
+            return None
+        t = time.time() if now is None else now
+        if t - float(ts) > LIVENESS_STALE_AFTER_S:
+            return None
+        return frozenset(c for c in caps if isinstance(c, str))
+    except Exception:  # noqa: BLE001 -- no-claim beats a crashed daemon loop
+        return None
+
+
+def _server_owns_capability(capability: str) -> bool | None:
+    """The ONE per-class ownership ladder (TRDD-N9YAH5E7):
+
+      1. `$JANITOR_AIMAESTRO_SERVER_STATE` override — tests + emergency operator control
+         (forces EVERY class: "down" is the adoption escape hatch, "up" a forced yield).
+      2. The fresh probe file: `capability in capabilities` — CONFIDENT True/False.
+      3. No fresh claim: CLI absent ⇒ False (no ai-maestro install at all — the only
+         confident False); CLI present ⇒ None (a down or pre-probe server — capability
+         unknowable; each caller's own None-policy breaks the tie).
+
+    The legacy `aimaestro-agent.sh list --json` rung was REMOVED here deliberately: a
+    successful agent-list proves LIVENESS, not capability — treating it as a True source
+    would let a live server that never claimed a class silence the janitor's chores for
+    that class (#100 round 1 §6.2, the exact conflict this rewrite fixes). It also 401'd
+    without AID_AUTH from the daemon's context anyway (F6), so nothing real is lost.
     """
     override = os.environ.get(SERVER_STATE_ENV, "").strip().lower()
     if override in _TRUE:
@@ -98,39 +164,35 @@ def server_owns_family_a(*, timeout: int = 10) -> bool | None:
         return False
     if override == "unknown":
         return None
-
-    # NEVER-RAISE from here down: this probe runs inside the daemon main loop, the
-    # maintenance keepalive, and per-session watchdogs — an exception here (a sandboxed
-    # test env forbidding subprocess spawn, a broken PATH, anything) must degrade to
-    # None (unknown), never kill the caller. The pytest sandbox guard proved the
-    # subprocess spawn CAN raise in constrained environments.
+    caps = server_capabilities()
+    if caps is not None:
+        return capability in caps
     try:
-        cli = _resolve_agent_cli()
-        if cli is None:
-            return False
-        proc = state.run_subprocess(
-            [cli, "list", "--json"],
-            timeout=timeout,
-            capture=True,
-            detector_name="harness-backend",
-        )
-        if proc is None or proc.returncode != 0:
-            return None
-        json.loads(proc.stdout or "")
-        return True
-    except Exception:  # noqa: BLE001 -- unknown beats a crashed daemon loop
+        return False if _resolve_agent_cli() is None else None
+    except Exception:  # noqa: BLE001 -- unknown beats a crashed caller
         return None
 
 
-# server_owns_singleton_chores() memo: (monotonic_ts, value). The daemon calls this
-# every loop tick (60 s) and the probe spawns a subprocess, so amortize it. 300 s max
-# staleness is fine for chores whose cadences are 60 s (lock-protected) to hours.
+def server_owns_family_a(*, timeout: int = 10) -> bool | None:  # noqa: ARG001
+    """Does a LIVE ai-maestro server own Family-A continuity for this machine's harness agents?
+
+    True/False/None per `_server_owns_capability(CAP_FAMILY_A)` — the #100 canonical
+    probe is wired (the formerly-reserved rung 2), with zero call-site changes as
+    designed. `timeout` is retained for call-site compatibility; the probe is now a
+    file read, no subprocess.
+    """
+    return _server_owns_capability(CAP_FAMILY_A)
+
+
+# Per-class chore-ownership memo: {capability: (monotonic_ts, value)}. The daemon calls
+# the chore gate every loop tick (60 s); amortize the file read. 300 s max staleness is
+# fine for chores whose cadences are 60 s (lock-protected) to hours.
 _CHORES_TTL_S = 300
-_chores_cache: tuple[float, bool | None] | None = None
+_chores_cache: dict[str, tuple[float, bool | None]] = {}
 
 
-def server_owns_singleton_chores(*, timeout: int = 10) -> bool | None:
-    """Does a LIVE ai-maestro server own the machine-wide ONCE-ONLY chores?
+def server_owns_chore_class(capability: str) -> bool | None:
+    """Does a LIVE ai-maestro server own the chore CLASS gated by `capability`?
 
     Owner directive (2026-07-17, verbatim intent): "if the ai-maestro server is active,
     the non-aimaestro-janitor daemon must deactivate all the chores that only need to be
@@ -138,9 +200,16 @@ def server_owns_singleton_chores(*, timeout: int = 10) -> bool | None:
     monitoring, etc.)" — while the population-split operations (liveness recovery,
     fleet-stop, reload flags) keep running on BOTH sides, each for its own population.
 
-    Returns True / False / None. Resolution: `$JANITOR_AIMAESTRO_SERVER_CHORES` override
-    first (chores-only knob), else delegate to `server_owns_family_a()` (which has its
-    own override + the reserved #100 canonical-probe slot). Memoized for _CHORES_TTL_S.
+    PER-CLASS (TRDD-N9YAH5E7, #100 round 1 §6.2): each absorbed task yields on its OWN
+    token (`SERVER_ABSORBED_TASK_CLASS`) — the OAuth pair on `family-a`, the
+    marketplace/version trio on `singleton-chores` (which the server never emits today,
+    so the janitor keeps them). One shared bit would let the first live class silence
+    chores nothing runs.
+
+    Resolution: `$JANITOR_AIMAESTRO_SERVER_CHORES` override first (chores-only knob,
+    every class), then the memoized `_server_owns_capability(capability)` ladder (which
+    starts with the `$JANITOR_AIMAESTRO_SERVER_STATE` override — both env rungs bypass
+    the memo so an operator flip acts immediately, never up to _CHORES_TTL_S late).
 
     NONE-POLICY — deliberately the OPPOSITE of the fleet-actuation exclusion, and this
     asymmetry is load-bearing:
@@ -150,10 +219,7 @@ def server_owns_singleton_chores(*, timeout: int = 10) -> bool | None:
         machine — tokens lapse, plugins rot; doing it twice is merely wasteful and the
         cross-process file locks — oauth-rotator-tick.lock, marketplace-op.lock — are
         the collision backstop, per the #100 lock contract).
-    So a caller yields a chore IFF this returns CONFIDENTLY True. Today (F6: the
-    agent-list probe 401s without AID_AUTH) that means never — the gating ships dormant
-    and goes live the moment the #100 capability probe lands in rung 2 of
-    `server_owns_family_a()`, with no call-site changes.
+    So a caller yields a chore IFF this returns CONFIDENTLY True.
     """
     override = os.environ.get(SERVER_CHORES_ENV, "").strip().lower()
     if override in _TRUE:
@@ -162,21 +228,30 @@ def server_owns_singleton_chores(*, timeout: int = 10) -> bool | None:
         return False
     if override == "unknown":
         return None
-    # The family-A override rung must ALSO bypass the memo — an operator flip (or a
+    # The STATE override rung must ALSO bypass the memo — an operator flip (or a
     # test's monkeypatched env) acts immediately, never up to _CHORES_TTL_S late.
-    fam_override = server_state_override()
-    if fam_override is not None:
-        return fam_override
+    state_override = server_state_override()
+    if state_override is not None:
+        return state_override
 
-    global _chores_cache
     import time  # noqa: PLC0415 -- stdlib, keep module import-light
 
     now = time.monotonic()
-    if _chores_cache is not None and now - _chores_cache[0] < _CHORES_TTL_S:
-        return _chores_cache[1]
-    value = server_owns_family_a(timeout=timeout)
-    _chores_cache = (now, value)
+    cached = _chores_cache.get(capability)
+    if cached is not None and now - cached[0] < _CHORES_TTL_S:
+        return cached[1]
+    value = _server_owns_capability(capability)
+    _chores_cache[capability] = (now, value)
     return value
+
+
+def server_owns_singleton_chores(*, timeout: int = 10) -> bool | None:  # noqa: ARG001
+    """The `singleton-chores` class gate (marketplace-refresh / user-plugins-update /
+    version-update — the chores the server does NOT perform today, so this is
+    False/None until ai-maestro ships them and emits the token). Kept as a named
+    wrapper because the two singleton-chores per-session shims (daemon_watchdog) gate
+    on it by name. `timeout` retained for call-site compatibility (file read now)."""
+    return server_owns_chore_class(CAP_SINGLETON_CHORES)
 
 
 def server_state_override() -> bool | None:

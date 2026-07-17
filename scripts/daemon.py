@@ -56,7 +56,7 @@ import sys
 import time
 from pathlib import Path
 from types import FrameType
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
@@ -1463,41 +1463,50 @@ _MAINTENANCE_KEEPALIVE_TASK_NAMES = frozenset({"oauth-rotator-tick"})
 
 # Machine-wide ONCE-ONLY chores the ai-maestro SERVER absorbs while it is active
 # (TRDD-PZLVT2RN Phase B2; owner directive 2026-07-17: "deactivate all the chores that
-# only need to be executed once ... to avoid doing the same chores twice"). The daemon
-# YIELDS these iff `harness_backend.server_owns_singleton_chores()` is CONFIDENTLY True;
-# on False/None it runs them (a machine with no visible server must never lose its
-# chores — the cross-process file locks remain the collision backstop). Everything NOT
-# in this set keeps running regardless: the population-split ops (session-liveness,
-# fleet-stop — each side actuates only its own population, already enforced
-# per-instance via the `server_owned` diagnosis) and the janitor-only Family-B chores
-# (memory-guard, cache-prune, rules-cleanup, github-config-audit).
-_SERVER_ABSORBED_TASK_NAMES = frozenset(
-    {
-        "marketplace-refresh",
-        "user-plugins-update",
-        "version-update",
-        "oauth-rotator-supervisor",
-        "oauth-rotator-tick",
+# only need to be executed once ... to avoid doing the same chores twice"). PER-CLASS
+# since TRDD-N9YAH5E7 (#100 round 1 §6.2): each task yields IFF its OWN capability
+# class is CONFIDENTLY server-owned — the OAuth pair gates on `family-a`, the
+# marketplace/version trio on `singleton-chores` (never emitted by the server today,
+# so the janitor keeps them). One shared ownership bit would let the first live class
+# silence chores nothing runs. On False/None a task runs (a machine with no visible
+# server must never lose its chores — the cross-process file locks remain the
+# collision backstop). Everything NOT in this map keeps running regardless: the
+# population-split ops (session-liveness, fleet-stop — each side actuates only its own
+# population, already enforced per-instance via the `server_owned` diagnosis) and the
+# janitor-only Family-B chores (memory-guard, cache-prune, rules-cleanup,
+# github-config-audit). The task→class map is the SSOT in harness_backend.
+_SERVER_ABSORBED_TASK_CLASS = harness_backend.SERVER_ABSORBED_TASK_CLASS
+_SERVER_ABSORBED_TASK_NAMES = frozenset(_SERVER_ABSORBED_TASK_CLASS)
+
+
+def _owned_chore_classes() -> dict[str, bool | None]:
+    """Resolve each absorbed capability class's server-ownership ONCE per loop pass
+    (the underlying probe-file read is memoized in harness_backend, but resolving here
+    keeps one consistent snapshot across the whole pass)."""
+    return {
+        cap: harness_backend.server_owns_chore_class(cap)
+        for cap in sorted(set(_SERVER_ABSORBED_TASK_CLASS.values()))
     }
-)
 
 
-def _task_yielded_to_server(task_name: str, owned: bool | None) -> bool:
+def _task_yielded_to_server(task_name: str, owned_by_class: Mapping[str, bool | None]) -> bool:
     """PURE: must the daemon yield `task_name` to the active ai-maestro server?
 
-    True ONLY for a server-absorbed chore AND a CONFIDENT True ownership signal —
-    the None-policy asymmetry documented on `server_owns_singleton_chores` (chores run
-    on unknown; only a confirmed-active server silences them).
+    True ONLY for a server-absorbed chore whose OWN capability class carries a
+    CONFIDENT True ownership signal — the None-policy asymmetry documented on
+    `server_owns_chore_class` (chores run on unknown; only a class the server is
+    confirmed to be running silences its tasks).
     """
-    return task_name in _SERVER_ABSORBED_TASK_NAMES and owned is True
+    cap = _SERVER_ABSORBED_TASK_CLASS.get(task_name)
+    return cap is not None and owned_by_class.get(cap) is True
 
 
-def _yielded_task_names(tasks: list[Task], owned: bool | None) -> set[str]:
+def _yielded_task_names(tasks: list[Task], owned_by_class: Mapping[str, bool | None]) -> set[str]:
     """The names in `tasks` yielded to the server for this loop iteration. A yielded
     task must be excluded from BOTH the due-loop AND the next-due sleep computation —
     a due-but-yielded task left in `time_until_due` would clamp the sleep to ~1 s and
     busy-spin the daemon for as long as the server stays up."""
-    return {t.name for t in tasks if _task_yielded_to_server(t.name, owned)}
+    return {t.name for t in tasks if _task_yielded_to_server(t.name, owned_by_class)}
 
 
 def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
@@ -1576,9 +1585,9 @@ def _run_maintenance_keepalive(tasks: list[Task]) -> None:
     `task_oauth_rotator_tick()` call) so the normal cadence stamp + failure-backoff
     bookkeeping in `Task.run()` still applies.
     """
-    owned = harness_backend.server_owns_singleton_chores()
+    owned_by_class = _owned_chore_classes()
     for task in tasks:
-        if _task_yielded_to_server(task.name, owned):
+        if _task_yielded_to_server(task.name, owned_by_class):
             continue  # the active server owns the keepalive too (Phase B2)
         if task.name in _MAINTENANCE_KEEPALIVE_TASK_NAMES and task.is_due():
             task.run()
@@ -1936,11 +1945,13 @@ def main() -> int:
 
             # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server owns the
             # machine-wide once-only chores, yield them — running them here too would be
-            # "doing the same chores twice" (owner directive 2026-07-17). Resolved once
-            # per loop iteration (the probe memoizes for 300 s); a server that goes down
-            # stops returning True and the chores resume on their own within the memo TTL.
-            server_owns_chores = harness_backend.server_owns_singleton_chores()
-            yielded = _yielded_task_names(tasks, server_owns_chores)
+            # "doing the same chores twice" (owner directive 2026-07-17). PER-CLASS since
+            # TRDD-N9YAH5E7: each absorbed task yields on its OWN capability token, so a
+            # live `family-a` (OAuth) claim never silences the marketplace/version trio.
+            # Resolved once per loop iteration (the probe memoizes for 300 s); a server
+            # that goes down stops claiming and the chores resume within the memo TTL.
+            owned_by_class = _owned_chore_classes()
+            yielded = _yielded_task_names(tasks, owned_by_class)
             if bool(yielded) != chores_yielded_last_loop:  # log transitions, not every tick
                 chores_yielded_last_loop = bool(yielded)
                 state.log_line(

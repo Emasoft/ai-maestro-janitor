@@ -62,7 +62,10 @@ def emit_if_daemon_stale(
     # once-only chores, the daemon deliberately YIELDS them — so their completion stamps
     # go stale BY DESIGN. Alarming on that would train users to ignore this watchdog.
     # Only a CONFIDENT True suppresses (same policy as the daemon's own gate); a probe
-    # failure changes nothing about the alarm path.
+    # failure changes nothing about the alarm path. Per-class since TRDD-N9YAH5E7: this
+    # module's only callers are the two `singleton-chores`-class shims
+    # (marketplace-refresh, user-plugins-update), so the singleton-chores gate is the
+    # matching class here — an oauth-class (`family-a`) claim must NOT silence these.
     try:
         import harness_backend  # noqa: PLC0415 -- lazy sibling; keep the hot path import-light
 
