@@ -355,7 +355,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=f45a590fdd03 digest=d3e98034fe6c generated=2026-07-17T09:42:04+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=c71b87282d2c digest=f7ca9911b0c9 generated=2026-07-17T12:05:48+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -647,6 +647,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · mark_fired(state_dir, *, now) -> None — Record that a cold-compact was fired now (atomic). Best-effort.
   · mark_compacted(state_dir, *, now) -> None — Record that a compaction just happened — the PostCompact hook's only job here.
   · read_floor(state_dir) -> tuple[int | None, int] — `(floor_tokens, measured_after_compact_ts)` — the context size observed right AFTER the most
+  · floor_needs_learning(state_dir) -> bool — True iff a compaction has LANDED that no floor measurement has observed yet.
   · refresh_floor(state_dir, context_tokens) -> int | None — Learn this session's POST-COMPACTION FLOOR from the live context, and return it.
 `scripts/lib/daemon_path.py` — Restore a usable tool PATH for the OS-keepalive daemon (TRDD-VQ4LX7ND).
   · default_prefixes(platform) -> tuple[str, ...] — The candidate dirs for a platform. Unknown platforms get none (no guessing).

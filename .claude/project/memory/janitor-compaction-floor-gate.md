@@ -64,6 +64,14 @@ itself is too early, because the compacted size does not exist until a turn has 
 Measuring at a turn's end can only OVER-state the floor, which under-states the gain and biases
 toward NOT firing: a missed optimization, never a destroyed context.
 
+**The measurement runs BEFORE the action gates** (TRDD-28XF77X6, fixed same day v0.49.0 shipped):
+both call sites check `cold_cache_compact.floor_needs_learning` (cheap: `last_compact > floor_ts`)
+and record the floor FIRST, then apply cooldown / user-present / active-waiting to the compact
+decision only. The compaction stamps all three gates itself (`mark_fired` → 600s cooldown; its
+auto-resume → `last-resume.ts`, 30-min recency; keep-going → active forever), so a measurement
+placed behind them never ran in exactly the unattended sessions the trigger targets — v0.49.0
+shipped with the floor gate inert, saved only by the 350k threshold sitting above the ~308k floor.
+
 `last-compact.ts` is a high-water TIMESTAMP, never a consume-once flag — a flag some reader clears
 could let a compaction go unobserved, and an unobserved compaction is one whose floor is never
 learned, which silently re-opens the loop.
@@ -104,3 +112,19 @@ floor grows past 350k (more plugins/MCP), that test is the alarm — re-measure,
   runs as a tool call, so the burn is already paid. DO prevent it upstream — keep an idle context
   small while the cache is WARM (Stop, which fires at the end of every turn, is the event that can;
   crons cannot fire mid-query, so a >1h working turn has no heartbeat inside it).
+
+[^3]: [id:ATOM-OBSV-GATE, status:valid, keywords:"floor_never_learned observation_behind_action_gates compact_floor_json_absent measurement_blocked_by_cooldown gate_inert_in_production", ocd:2026-07-17, lmd:2026-07-17]
+  DO NOT place a passive MEASUREMENT behind the gates that veto the ACTION it informs, BECAUSE
+  the action's own side effects can hold every gate closed in exactly the target population —
+  the compaction stamped the cooldown AND the resume recency, keep-going holds active-waiting
+  forever, so `refresh_floor` never ran and v0.49.0's floor gate was inert (verified live: three
+  fires after a real compaction, `compact-floor.json` never written). DO gate observations only
+  on "is there something unobserved?" (`floor_needs_learning`) and record before any early-return.
+
+[^4]: [id:ATOM-TEST-IMPS, status:valid, keywords:"test_passed_on_impossible_state fixture_missing_side_effects mark_compacted_without_mark_fired regression_test_wrong_state", ocd:2026-07-17, lmd:2026-07-17]
+  DO NOT hand-build a test fixture from the ONE stamp the assertion needs, BECAUSE the production
+  event writes SEVERAL stamps and the omitted ones may be exactly what blocks the code under test
+  — the loop test stamped `mark_compacted` alone (no `mark_fired`, no `last-resume.ts`), a state
+  production can never reach, so it proved the floor gate worked in a configuration that does not
+  exist. DO reproduce the event's FULL side-effect set, and prove the test FAILS on the pre-fix
+  code (stash the fix, run, restore).
