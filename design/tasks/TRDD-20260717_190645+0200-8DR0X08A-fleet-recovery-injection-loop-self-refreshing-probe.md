@@ -1,15 +1,15 @@
 ---
 trdd-id: 8DR0X08A
 title: Fleet-recovery injection loop — the injected keystroke refreshes its own liveness probe, so wedged sessions get typed at forever
-column: todo
+column: testing
 created: 2026-07-17T19:06:45+0200
-updated: 2026-07-17T19:06:45+0200
+updated: 2026-07-17T19:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
-related-trdd: [324223A6, 56D24C02, 4649ZLE0, ME8V2YJF]
-implementation-commits: []
+related-trdd: [324223A6, 56D24C02, 4649ZLE0, ME8V2YJF, 0QQX9H0G]
+implementation-commits: [db9c2f0]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
@@ -79,9 +79,35 @@ freshness; a genuinely-recovered target (substantive lines after injection) must
 clear attempts. Regression: the 2026-07-17 daemon.log pattern (repeated `attempt=0` on
 the same root) becomes structurally impossible.
 
-**NEXT ACTION:** await the owner's decision on immediate mitigation vs straight to the
-fix; then implement F1–F3 with tests (`tests/test_session_liveness.py` /
-`test_fleet_scan.py` additions).
+**IMPLEMENTED (2026-07-17 evening, commit `db9c2f0` — same session as the report; the
+owner was AFK on the mitigation-vs-fix question, and the env-knob mitigation was found
+UNRELIABLE anyway: the L0 launchd keepalive respawns the daemon with launchd's own env,
+so a knob set in a session/shell loses the respawn race — shipping the fixed daemon IS
+the mitigation):**
+
+- **F1/F3** — `fleet_scan.transcript_activity()` + pure `substantive_age_from_tail()`:
+  liveness is now the age of the newest SUBSTANTIVE transcript line (queue-operation
+  bookkeeping excluded; all-enqueue tails use their OLDEST timestamp — conservative);
+  `transcript_age()` is a thin wrapper so every caller inherits it. The injection can
+  no longer refresh its own probe.
+- **F2** — daemon wedged short-circuit: `Instance.trailing_enqueues ≥ 1` on a SOFT
+  rung ⇒ no injection, one `declined_wedged` audit (sig-deduped), attempts+1 (the
+  budget walks to crash_loop), one `notify.push(code="FLEET-WEDGED")` naming the
+  project. ESC-first rungs (frozen) exempt — the ESC is the unwedge, same policy as
+  `_fire_fleet_stop`.
+- **F4** (added during implementation) — `stale_threshold_for(armed_cron)`:
+  `diagnose_root` scales the staleness window to 3× the target's ARMED cadence
+  (`armed-cadence.cron`), floored at the */5 default — so sessions the dynamic
+  cadence (TRDD-0QQX9H0G) legitimately demoted to */15–*/30 are no longer flagged
+  cron_dead between their own healthy beats (the latent next instance of this bug).
+
+**Verification:** 8 new tests (4 pure tail cases, end-to-end tmp-HOME transcript,
+threshold table, slow-cadence diagnose, daemon wedged + ESC-exempt) — 59 green in the
+touched files, 154 green across the daemon/fleet/notify neighborhood, ruff clean.
+
+**NEXT ACTION:** ships in v0.51.1; then watch one real daemon generation (the
+2026-07-17 pattern — repeated `attempt=0` on the same root in `daemon.log` — must not
+recur; wedged targets must instead show ONE `declined_wedged` + a FLEET-WEDGED push).
 
 ## Notes and lessons learned
 
