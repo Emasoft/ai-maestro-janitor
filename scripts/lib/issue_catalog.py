@@ -39,6 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import findings_ledger  # noqa: E402
 import ticket_proposal  # noqa: E402
 import tickets  # noqa: E402
 
@@ -498,6 +499,16 @@ def raise_issue(
         if t is None:
             return Raised(code=code, domain=tickets.HARNESS, ok=False, why=why)
         first_time = why.startswith("opened")
+        if first_time:
+            # Findings-ledger sink (TRDD-FENWWB4E): index the finding EVENT (once, at
+            # birth — the ticket layer already dedupes re-raises) in the affected
+            # project's per-project mailbox, ref'd by the ticket id so a later session
+            # (or the dashboard) resolves the body on demand. The returned drift line
+            # is deliberately ignored: `line` below is this call's richer surface.
+            findings_ledger.record(
+                sev=t.severity, code=code, src=org, msg=title, ref=t.id,
+                project_dir=project_dir, now=now,
+            )
         line = f"[ticket] {code} {t.id} ({t.severity}): {title} — the janitor will repair this itself" if first_time else ""
         return Raised(code=code, domain=tickets.HARNESS, ok=True, ticket_id=t.id, line=line, why=why, first_seen=first_time)
 
@@ -517,6 +528,13 @@ def raise_issue(
         # correct: re-recommending a fix that is already scheduled would be noise.
         return Raised(code=code, domain=tickets.PROJECT, ok=True, why="already an open ticket")
     uid, command, is_new = proposed
+    if is_new:
+        # Findings-ledger sink (TRDD-FENWWB4E) — same once-at-birth indexing as the
+        # HARNESS branch, ref'd by the proposal TRDD id.
+        findings_ledger.record(
+            sev=severity or issue.severity, code=code, src=org, msg=title,
+            ref=f"TRDD-{uid}", project_dir=project_dir, now=now,
+        )
     line = f"[ticket] {code} ({severity or issue.severity}): {title} — approve the fix with: {command}"
     return Raised(
         code=code,

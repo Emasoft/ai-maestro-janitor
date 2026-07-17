@@ -370,3 +370,49 @@ def test_every_code_the_rust_validator_emits_exists_in_the_catalog() -> None:
     assert emitted, "the validator emits no issue codes — did the [MEMGREP-NNN] prefixes get dropped?"
     missing = sorted(emitted - set(issue_catalog.ISSUE_CATALOG))
     assert not missing, f"index.rs emits codes the catalog does not know: {missing}"
+
+
+# --------------------------------------------------------------------------- #
+# 7. FINDINGS-LEDGER WIRING (TRDD-FENWWB4E) — every raised issue lands ONE
+#    indexed event in the affected project's mailbox, ref'd to its body.
+# --------------------------------------------------------------------------- #
+
+
+def _ledger_entries(project: Path) -> list[dict]:
+    import json
+
+    path = project / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            out.append(json.loads(line))
+    return out
+
+
+def test_a_harness_raise_lands_one_ledger_entry_ref_the_ticket(project: Path) -> None:
+    """The finding EVENT is indexed once, at birth, with the ticket id as `ref` — the
+    traceable handle a later session (or the dashboard) resolves the body from."""
+    r = issue_catalog.raise_issue("MEMGREP-001", scope="local", now=NOW)
+    entries = _ledger_entries(project)
+    assert len(entries) == 1
+    assert entries[0]["code"] == "MEMGREP-001" and entries[0]["ref"] == r.ticket_id
+
+
+def test_a_project_raise_lands_one_ledger_entry_ref_the_proposal_trdd(project: Path) -> None:
+    r = issue_catalog.raise_issue("WFSEC-001", where="ci.yml:42", now=NOW)
+    entries = _ledger_entries(project)
+    assert len(entries) == 1
+    assert entries[0]["ref"] == f"TRDD-{r.trdd}" and entries[0]["src"] != ""
+
+
+def test_a_reraise_adds_no_second_ledger_entry(project: Path) -> None:
+    """The ledger indexes finding EVENTS, not reminders: the same finding raised every
+    heartbeat is ONE line (the ticket/proposal layer's dedupe is the birth signal), so
+    a months-unattended mailbox is a list of findings, not a log of nags."""
+    issue_catalog.raise_issue("WFSEC-001", where="ci.yml:42", now=NOW)
+    issue_catalog.raise_issue("WFSEC-001", where="ci.yml:42", now=NOW + 300)
+    issue_catalog.raise_issue("MEMGREP-001", scope="local", now=NOW)
+    issue_catalog.raise_issue("MEMGREP-001", scope="local", now=NOW + 300)
+    assert len(_ledger_entries(project)) == 2, "one entry per finding, not per raise"
