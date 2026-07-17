@@ -111,6 +111,27 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    # SELF-CANCEL when there is nothing to resume (user report 2026-07-17: repeated
+    # `/janitor-resume` typed into the pane long after the session had resumed). The
+    # flags this command exists to consume are `resume-after-compact.flag` /
+    # `rate-limited.flag`; when NEITHER is present at fire time (the cron fire beat
+    # this push to the consumption, or a second compaction fired a second push), a
+    # typed `/janitor-resume` is pure queue spam — it would sit behind the current
+    # turn and run as a visible no-op later. Fail-open: an unresolvable project dir
+    # must not kill the push (typing a redundant command is annoying; missing a real
+    # resume strands an unattended session).
+    try:
+        import state  # noqa: PLC0415 -- sibling lib, resolved via the path insert above
+
+        sdir = state.state_dir()
+        if not any(
+            (sdir / f).is_file() for f in ("resume-after-compact.flag", "rate-limited.flag")
+        ):
+            print("NOTHING_PENDING")
+            return 0
+    except Exception:  # noqa: BLE001 -- fail-open toward firing
+        pass
+
     # Prefer a non-iTerm automatable terminal (tmux) when detected via process
     # ancestry. iTerm / unknown / not-yet-automated terminals return USE_ITERM_PATH
     # and fall through to the proven iTerm-osascript path below (TRDD-db169d9e R3).

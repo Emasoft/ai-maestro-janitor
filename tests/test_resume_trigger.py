@@ -30,7 +30,9 @@ def _import():
     return mod
 
 
-def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subprocess.CompletedProcess:
+def _run(
+    args: list[str], *, iterm: str | None, present: bool = False, pending: bool = True
+) -> subprocess.CompletedProcess:
     import tempfile
 
     from conftest import away_home, present_home  # type: ignore[import-not-found]
@@ -45,6 +47,15 @@ def _run(args: list[str], *, iterm: str | None, present: bool = False) -> subpro
     # developer running the suite happened to be typing.
     tmp = Path(tempfile.mkdtemp())
     env["HOME"] = str(present_home(tmp) if present else away_home(tmp))
+    # Pin the PROJECT too (never the developer's real repo): the self-cancel gate reads
+    # `.janitor/state/` of the resolved project, so an unpinned cwd would make results
+    # depend on whatever flags the live repo happens to carry. `pending=True` seeds the
+    # post-compact flag (the state the PostCompact hook guarantees before firing us).
+    proj = tmp / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    if pending:
+        (proj / ".janitor" / "state" / "resume-after-compact.flag").touch()
+    env["CLAUDE_PROJECT_DIR"] = str(proj)
     if iterm is not None:
         env["ITERM_SESSION_ID"] = iterm
     return subprocess.run(
@@ -109,3 +120,44 @@ def test_malformed_iterm_id_refuses_to_fire() -> None:
     assert proc.returncode == 0
     assert "NO_ITERM" in proc.stdout
     assert "RESUME_FIRED" not in proc.stdout
+
+
+# ---------- the self-cancel gate (user report 2026-07-17) -------------------
+
+def test_nothing_pending_self_cancels_before_typing() -> None:
+    """With NEITHER resume flag present, the push must NOT type — a `/janitor-resume`
+    typed after the flag was already consumed sits in the input queue and runs as a
+    visible no-op much later (the observed spam: repeated resumes long after the
+    session had resumed)."""
+    proc = _run(["--dry-run"], iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE", pending=False)
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "NOTHING_PENDING"
+
+
+def test_rate_limited_flag_alone_still_fires() -> None:
+    """The gate honors BOTH flags: a rate-limit capture (no compaction) must still
+    get its wake-up push."""
+    proc = _run(["--dry-run"], iterm="w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE", pending=False)
+    assert proc.stdout.strip() == "NOTHING_PENDING"  # control: gate really was closed
+    import tempfile
+
+    # Re-run with ONLY rate-limited.flag seeded (bypass the helper's compact-flag default).
+    tmp = Path(tempfile.mkdtemp())
+    proj = tmp / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    (proj / ".janitor" / "state" / "rate-limited.flag").touch()
+    from conftest import away_home  # type: ignore[import-not-found]
+
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "JANITOR_FORCE_TERMINAL_KIND": "iterm",
+        "HOME": str(away_home(tmp)),
+        "CLAUDE_PROJECT_DIR": str(proj),
+        "ITERM_SESSION_ID": "w0t3p0:789D8299-5AA2-48CF-9325-3BC972B9BEAE",
+    }
+    proc2 = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--dry-run"],
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    assert proc2.returncode == 0
+    assert "DRY_RUN" in proc2.stdout and "NOTHING_PENDING" not in proc2.stdout
