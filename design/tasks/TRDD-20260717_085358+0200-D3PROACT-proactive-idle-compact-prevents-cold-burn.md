@@ -1,9 +1,9 @@
 ---
 trdd-id: D3PROACT
 title: Proactively compact an idle large context to prevent the cold-cache burn
-column: dev
+column: published
 created: 2026-07-17T08:53:58+0200
-updated: 2026-07-17T09:52:00+0200
+updated: 2026-07-17T10:18:00+0200
 current-owner: session
 task-type: feature
 release-via: publish
@@ -15,7 +15,8 @@ implementation-commits: [432d800, fa8687d, 1a69ec6]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-17
 
-**NEXT ACTION:** part of the pre-publish batch — publish after the CC-compat pass, on the USER's go.
+**NEXT ACTION:** none — SHIPPED in **v0.49.0** (2026-07-17, USER "go"; release-bump `b5c298a`).
+The daemon auto-deploys the cache within ~5 min of a release, so publishing IS deploying here.
 
 **⚠ SUPERSEDED — do NOT carry forward: "Self-limiting (context small after → size gate fails)".**
 That claim was FALSE and would have shipped an INFINITE COMPACT LOOP. The USER caught it

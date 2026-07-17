@@ -1,9 +1,9 @@
 ---
 trdd-id: CCCOMPAT
 title: Bring the janitor up to speed with Claude Code through 2.1.212
-column: dev
+column: published
 created: 2026-07-17T09:04:12+0200
-updated: 2026-07-17T09:52:00+0200
+updated: 2026-07-17T10:18:00+0200
 current-owner: session
 task-type: infra
 release-via: publish
@@ -14,8 +14,8 @@ implementation-commits: [2b6b1d8]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-17
 
-**NEXT ACTION:** part of the pre-publish batch — publish after this and the two sibling fixes
-([[TRDD-QW6RVAKN]], [[TRDD-D3PROACT]]) are committed.
+**NEXT ACTION:** none — SHIPPED in **v0.49.0** (2026-07-17) alongside [[TRDD-D3PROACT]];
+[[TRDD-QW6RVAKN]] shipped earlier in v0.48.1.
 
 **The ask (USER, 2026-07-17):** before publishing, bring the janitor up to speed with the recent
 Claude Code changes — make all changes needed and adopt new features where possible. The user
