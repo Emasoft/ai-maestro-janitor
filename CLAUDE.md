@@ -21,6 +21,32 @@ A Claude Code plugin that keeps the dev environment tidy & secure. Two tiers:
    **user/global-scope** mutation (so N sessions don't stampede the same
    command — issue #7). Spawned lazily by any session's heartbeat.
 
+## Two runtime backends — one plugin (TRDD-PZLVT2RN, v0.50.0)
+
+The SAME plugin branches at runtime on `harness_backend.py` (SSOT; discriminator
+`state.in_ai_maestro_agent_env()` — env flags `AIMAESTRO_AGENT`/`THIS_IS_AIMAESTRO`,
+fallback `AMP_AGENT_ID`/`AID_AUTH`):
+
+- **#N standalone** (outside ai-maestro): FULL mode — heartbeat + detectors + the global
+  daemon, exactly as documented in this file.
+- **#J harness** (inside an ai-maestro agent): THIN mode — workdir detectors only; **no
+  daemon spawn, no outside-project writes**; Family-A continuity (resume/rate-limit/compact
+  survival) is DELEGATED to the server's `aimaestro-continuity.sh` (e.g. `on-stop-failure`
+  fires `ensure-resume` via the agent CLI, detached). The SERVER is the daemon for harness
+  agents.
+- **Actuation exclusion:** the #N daemon's fleet recovery/stop marks server-owned agents
+  (`server_owned` diagnosis) and NEVER types into their panes — unknown ⇒ HANDS OFF.
+- **Chore coordination (Phase B2):** the once-only machine chores
+  (`_SERVER_ABSORBED_TASK_NAMES`: marketplace-refresh, user-plugins-update, version-update,
+  oauth-rotator-supervisor, oauth-rotator-tick) YIELD to the server iff
+  `server_owns_singleton_chores()` is CONFIDENTLY **True** — the OPPOSITE None-policy from
+  actuation: a chore RUNS on unknown (file locks are the collision backstop). Dormant today:
+  the probe 401s without AID_AUTH (F6); goes live when ai-maestro lands the auth-free
+  capability probe (janitor#100), with zero call-site changes.
+- **Per-project channeling invariant (TRDD-X92VBFNF, security):** any AUTOMATIC surface
+  carries ONLY the firing project's data — never another project's findings, names, or
+  aggregate counts. Fleet-wide views exist only behind explicit human commands.
+
 ## Scope invariant (HARD RULE — issue #7)
 
 - **user/global-scope ops → daemon ONLY.** Bulk `claude plugin marketplace
@@ -363,7 +389,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=c71b87282d2c digest=f7ca9911b0c9 generated=2026-07-17T12:05:48+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=00e134dc653e digest=8c00708ac0be generated=2026-07-17T16:29:50+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -396,6 +422,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · Task — One periodic unit of work owned by the daemon.
   · Task.time_until_due(self) -> int
   · Task.is_due(self) -> bool
+  · Task.child_alive(self) -> bool — True iff this task's detached background child is still running.
+  · Task.spawn_background(self) -> None — Start this task's fn in a DETACHED child (`daemon.py --run-task <name>`).
+  · Task.poll_background(self) -> None — Reap a finished detached child: stamp last-run + failcount exactly as a
   · Task.run(self) -> None
   · main() -> int
 `scripts/daemon_keepalive_entry.py` — L0 OS-keepalive entry point (TRDD-71ABD7V7) — run the co-located daemon.
@@ -750,7 +779,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
   · transcript_age(root, now) -> int | None — Seconds since this project's NEWEST session transcript was written, or
   · sweep_stale_rate_limit(root, *, now, max_age_s) -> bool — Delete `<root>/.janitor/state/rate-limited.flag` if it is stale. Returns True if swept.
-  · diagnose_root(root, *, now, transcript_age, stale_s) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
+  · diagnose_root(root, *, now, transcript_age, stale_s, server_owned) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
   · tag_aimaestro_identity(terminal, *, agents, cli, root) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the ai-maestro CLI
   · tag_linux_gui_identity(terminal, *, channel) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the Linux
   · gather_fleet(*, now, sweep_stale_rate_limit_s) -> list[Instance] — Scan the whole host: every running claude instance whose cwd resolves to a
@@ -777,7 +806,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · FleetAudit.to_json(self) -> dict
   · audit_fleet(plugins_root, *, now) -> FleetAudit — Probe every fleet repo READ-ONLY and classify. The daemon's single entry point.
   · findings_digest(payload) -> str — A stable 12-hex digest over the (slug, code) finding set — the dedupe key so an
-  · summarize(payload) -> str | None — Build the ONE compact drift line from a findings payload, or None when clean.
+  · payload_for_slug(payload, slug) -> dict — The findings sub-payload for ONE repo — the ONLY view a per-session surface may
+  · summarize_for_slug(payload, slug) -> str | None — Build THIS repo's one-line drift summary, or None when this repo is clean.
 `scripts/lib/global_state.py` — Shared contract for the GLOBAL janitor daemon — system-wide singleton that
   · global_state_dir() -> Path — Return the system-wide janitor state directory.
   · init_global_state() -> Path — Create the global state dir if missing. Idempotent. Return its path.
@@ -836,6 +866,20 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · recent_spawn_count(window_s, now) -> int — PUBLIC read-only: how many daemon spawn attempts landed within the last
   · record_spawn_attempt(now) -> None — PUBLIC: record one daemon spawn attempt into the crash-loop ring.
   · ensure_daemon_running(max_silence_s) -> bool — If the daemon is dead AND not kill-switched AND enabled, spawn it.
+`scripts/lib/harness_backend.py` — Harness-backend SSOT (TRDD-PZLVT2RN) — the ONE place that answers "which world am I in?".
+  · is_harness_session(env) -> bool — True iff THIS process runs inside an ai-maestro harness agent.
+  · backend(env) -> str — The actuation backend for THIS session: "aimaestro" (thin #J) or "standalone" (#N).
+  · server_owns_family_a(*, timeout) -> bool | None — Does a LIVE ai-maestro server own Family-A continuity for this machine's harness agents?
+  · server_owns_singleton_chores(*, timeout) -> bool | None — Does a LIVE ai-maestro server own the machine-wide ONCE-ONLY chores?
+  · server_state_override() -> bool | None — JUST the `$JANITOR_AIMAESTRO_SERVER_STATE` override rung: True/False when the
+  · agent_workdirs(agents) -> list[str] — The registered workingDirectory of every ai-maestro agent, deduped, order-kept.
+  · remember_agent_roots(roots) -> None — Persist the last-known harness-agent workdirs (global-state, atomic, best-effort).
+  · recall_agent_roots() -> list[str] — The cached last-known harness-agent workdirs. Fail-open [].
+  · agents_home() -> str — The ai-maestro agents home (workdir root of registry agents), default `~/agents`.
+  · root_under_agents_home(root) -> bool — True iff `root` sits inside the agents home — the REGISTRY-FREE harness signal.
+  · instance_is_server_owned(*, tagged, root, cli_present, list_ok, cached_roots, override, under_agents_home) -> bool — PURE: is THIS scanned instance a harness agent a live server owns (⇒ the daemon
+  · self_agent_ref(env) -> str | None — THIS harness agent's own id for `<self>` CLI arguments (
+  · continuity_cli() -> str | None — Path of `aimaestro-continuity.sh` (the Family-A delegation surface: `status <self>`,
 `scripts/lib/heartbeat_cadence.py` — TTL-aware heartbeat cadence tiers (TRDD-0QQX9H0G, issue #83).
   · Signals — The two booleans the dispatcher resolves from state files each fire.
   · CadenceState — Persisted (``.janitor/state/cadence-state.json``) hysteresis state.
@@ -1202,7 +1246,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · recovery_action_for(attempt) -> str — The recovery action for the Nth (0-based) consecutive failed wake. Walks
   · is_hard_rung(action) -> bool — True iff ``action`` kills/replaces the claude process (subject to the
   · crash_loop_tripped(hard_attempts_in_window, max_in_window) -> bool — True iff the hard-restart rungs have fired too many times in the guard window —
-  · diagnose_instance(*, deliberately_unarmed, pane_alive, transcript_stale, rate_limited, version_stale) -> str — Classify ONE armed claude instance's janitor health from pre-gathered
+  · diagnose_instance(*, deliberately_unarmed, pane_alive, transcript_stale, rate_limited, version_stale, server_owned) -> str — Classify ONE armed claude instance's janitor health from pre-gathered
   · recovery_for_diagnosis(diagnosis) -> str | None — The recovery action for a diagnosis, or None to leave the instance alone
   · normalize_tty(raw) -> str — Normalize a TTY name to a comparable key (the device basename, e.g.
   · resolve_terminal_for_tty(tty, *, iterm_by_tty, tmux_by_tty) -> dict[str, str] — Resolve a process's terminal-injection identity from its (normalized) TTY,

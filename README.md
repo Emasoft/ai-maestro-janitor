@@ -55,6 +55,20 @@ window clears. For how the heartbeat, the daemon, and the OS keepalive keep
 each other alive through crashes and bad self-updates, see
 [Immortality](#immortality-self-healing-daemon).
 
+### Inside an ai-maestro agent (harness mode)
+
+Since v0.50.0 the same plugin detects at runtime whether it is running inside an
+[ai-maestro](https://github.com/Emasoft/ai-maestro) harness agent and switches to a
+**thin** mode there: the per-workdir detectors keep running, but the plugin spawns **no
+global daemon** and performs **no writes outside the agent's own project** — session
+continuity (rate-limit resume, compaction resume) is delegated to the ai-maestro server,
+which acts as the daemon for its agents. Outside the harness nothing changes (full mode,
+as described above). A standalone janitor daemon on the same machine detects
+server-managed agents and leaves them strictly alone, and machine-wide once-only chores
+(marketplace refresh, plugin updates, OAuth keepalive) are coordinated so the two daemons
+never do the same chore twice. All automatic notifications are channeled strictly
+per-project: no agent ever receives another project's findings.
+
 ## Detectors
 
 | Detector | Internal cadence | What it surfaces |

@@ -1,16 +1,16 @@
 ---
 trdd-id: PZLVT2RN
 title: ai-maestro-tailored janitor (#J) + normal-janitor scope-flip (#N) + shared-codebase two-backend split
-column: dev
+column: testing
 created: 2026-07-16T15:44:27+0200
-updated: 2026-07-17T14:33:00+0200
+updated: 2026-07-17T16:45:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 related-audit: AM8JD9SG
 server-trdds: [KCRMSNL7, H24DF6ZC]
 coordination-issue: janitor#100
-implementation-commits: [0874122, e613314, 47926b3]
+implementation-commits: [0874122, e613314, 47926b3, 27684dc, cbfd43c, 2758241]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-17
@@ -48,7 +48,13 @@ server half is ai-maestro's `TRDD-KCRMSNL7` (parent) + `TRDD-H24DF6ZC` (R16 toke
   functions hardened NEVER-RAISE (a sandboxed env proved the subprocess spawn can
   throw). Related same-day fix: the PostCompact resume push self-cancels when nothing is
   pending (`cbfd43c`, TRDD-8IZ8COQ8 — user-reported injection spam).
-- **Phase E (docs + repomap + full suite + v0.50.0 release on owner go + #100 update)** — NEXT.
+- **Phase B2 commit:** `27684dc`. **Phase D commit:** `2758241` (self-cancel fix `cbfd43c`).
+- **Phase E (docs + repomap + full suite + v0.50.0 release + #100 update)** — IN FLIGHT
+  2026-07-17: owner GO given ("Ship v0.50.0 first", AskUserQuestion answer in the approved
+  plan `~/.claude/plans/staged-kindling-lynx.md`); CLAUDE.md two-backend section + README
+  harness note written; release train also carries TRDD-X92VBFNF (per-project channeling,
+  `41eecae`) and TRDD-H7NVKSAX (daemon background bulk lane — oauth-starvation incident fix,
+  `0bbd2ff`).
 - **Known flaky (pre-existing, tracked):** `test_marketplace_refresh_scoped` e2e worker
   race — TRDD-UO93APWN (proven pass/pass/fail on an identical tree; not a Phase B2/D
   regression).
@@ -85,10 +91,11 @@ the exclusion lifts.
 **Verified 2026-07-17:** `~/ai-maestro/scripts/aimaestro-continuity.sh` EXISTS beside
 `aimaestro-session.sh` (their DXJZM3BW shipped) — the Q3 contract surface `#J` consumes is real.
 
-**NEXT ACTION (one concrete step):** Phase E — CLAUDE.md architecture section (two-backend split +
-exclusion + chore coordination), README harness note, repomap regen, full pytest + ruff, then HOLD
-for the owner's go before publishing v0.50.0; close with the #100 comment (what shipped + the
-deviation note + the capability probe still owed).
+**NEXT ACTION (one concrete step):** run `scripts/publish.py` (14-gate) → v0.50.0, then post the
+#100 comment (what shipped + the deviation note: no #J local install exercised end-to-end yet; F6
+— the agent-list probe 401s without AID_AUTH so chore-yield ships DORMANT; the auth-free
+capability probe is still OWED by ai-maestro). Docs + repomap + full suite are done; the owner GO
+is on record.
 
 **Load-bearing facts / gotchas:**
 - The #7 machine-wide singleton is the `daemon.flock`, NOT install scope — so `#N`'s USER→LOCAL
