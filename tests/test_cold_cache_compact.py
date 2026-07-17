@@ -103,9 +103,21 @@ def test_enabled_opt_out(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_min_context_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ccc.MIN_CONTEXT_ENV, raising=False)
-    assert ccc.min_context_tokens() == ccc.DEFAULT_MIN_CONTEXT_TOKENS == 270_000
+    assert ccc.min_context_tokens() == ccc.DEFAULT_MIN_CONTEXT_TOKENS == 350_000
     monkeypatch.setenv(ccc.MIN_CONTEXT_ENV, "500000")
     assert ccc.min_context_tokens() == 500_000
+
+
+def test_default_threshold_sits_above_the_measured_post_compaction_floor() -> None:
+    """The default threshold is only meaningful RELATIVE to the post-compaction floor — a
+    threshold below it can never close once compacted (see refresh_floor). 308,644 is the real
+    floor measured in this repo on 2026-07-17. This pins the invariant so a future 'let's lower
+    it to 200k for more savings' cannot silently re-open the infinite-compact loop."""
+    MEASURED_FLOOR = 308_644
+    assert ccc.DEFAULT_MIN_CONTEXT_TOKENS > MEASURED_FLOOR, (
+        f"threshold {ccc.DEFAULT_MIN_CONTEXT_TOKENS} is at/below the measured post-compaction "
+        f"floor {MEASURED_FLOOR}: the size gate could never close after a compaction"
+    )
 
 
 def test_min_idle_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -200,22 +212,98 @@ def test_should_compact_proactively_idle_all_three_gates() -> None:
     import cold_cache_compact as ccc
 
     MIN = 270_000
-    # The one firing case: absent + idle + large.
+    # The one firing case: absent + idle + large. No floor learned yet → judged on size alone.
     assert ccc.should_compact_proactively_idle(
-        300_000, user_present=False, active_waiting=False, min_context_tokens=MIN) is True
+        300_000, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=None, min_gain=150_000) is True
 
     # Present user vetoes (never compact out from under active work).
     assert ccc.should_compact_proactively_idle(
-        300_000, user_present=True, active_waiting=False, min_context_tokens=MIN) is False
+        300_000, user_present=True, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=None, min_gain=150_000) is False
     # Active-waiting vetoes (a resume / keep-going / directive / agent is pending).
     assert ccc.should_compact_proactively_idle(
-        300_000, user_present=False, active_waiting=True, min_context_tokens=MIN) is False
+        300_000, user_present=False, active_waiting=True, min_context_tokens=MIN,
+        floor_tokens=None, min_gain=150_000) is False
     # Small context saves nothing (and would be a pointless lossy compaction).
     assert ccc.should_compact_proactively_idle(
-        100_000, user_present=False, active_waiting=False, min_context_tokens=MIN) is False
+        100_000, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=None, min_gain=150_000) is False
     # Unknown context size → never fire (can't prove it's worth it).
     assert ccc.should_compact_proactively_idle(
-        None, user_present=False, active_waiting=False, min_context_tokens=MIN) is False
+        None, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=None, min_gain=150_000) is False
+
+
+def test_floor_gate_closes_the_infinite_compact_loop() -> None:
+    """THE REGRESSION THAT MATTERS — pins the REAL numbers measured in this repo 2026-07-17.
+
+    A compaction took the context 343,007 -> 308,644 (only 10%: the base — CLAUDE.md, ~10
+    plugins, rules, skills, MCP schemas, the summary — reloads every time and cannot be compacted
+    away). 308,644 is ABOVE the 270,000 threshold, so a SIZE-ONLY gate never closes and the
+    trigger re-fires every cooldown forever, destroying context each time. The floor gate is the
+    only thing that stops it: at the floor there is nothing left to reclaim.
+    """
+    import cold_cache_compact as ccc
+
+    MIN, GAIN = 270_000, 150_000
+    PRE_COMPACT, FLOOR = 343_007, 308_644
+
+    # Sanity: this scenario is exactly the one a size-only gate CANNOT stop.
+    assert FLOOR >= MIN, "if the floor were under the threshold the size gate alone would suffice"
+
+    # At the floor: still over the threshold, but a compaction would reclaim NOTHING → no fire.
+    # Without this the loop is infinite.
+    assert ccc.should_compact_proactively_idle(
+        FLOOR, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=FLOOR, min_gain=GAIN) is False
+    # The pre-compact size that legitimately fired ONCE must not fire again once the floor is
+    # known — reclaiming 34,363 is not worth a lossy compaction, which is why it looped.
+    assert ccc.should_compact_proactively_idle(
+        PRE_COMPACT, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=FLOOR, min_gain=GAIN) is False
+    # Real work HAS piled up above the floor → firing reclaims ~291k → fire. The gate must not be
+    # a permanent latch; a session that grows large again still gets its compaction.
+    assert ccc.should_compact_proactively_idle(
+        600_000, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=FLOOR, min_gain=GAIN) is True
+    # Exactly at the boundary fires (>= min_gain), one token under does not.
+    assert ccc.should_compact_proactively_idle(
+        FLOOR + GAIN, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=FLOOR, min_gain=GAIN) is True
+    assert ccc.should_compact_proactively_idle(
+        FLOOR + GAIN - 1, user_present=False, active_waiting=False, min_context_tokens=MIN,
+        floor_tokens=FLOOR, min_gain=GAIN) is False
+
+
+def test_refresh_floor_learns_only_after_a_compaction(tmp_path: Path) -> None:
+    """The floor is (re)measured EXACTLY when a compaction has happened since the last
+    measurement — never otherwise, or ordinary context growth would be mistaken for a floor and
+    permanently wedge the trigger off."""
+    import cold_cache_compact as ccc
+
+    sd = tmp_path / "state"
+    sd.mkdir()
+
+    # No compaction ever → no floor. The first fire is judged on size alone.
+    assert ccc.refresh_floor(sd, 600_000) is None
+    assert ccc.read_floor(sd) == (None, 0)
+
+    # A compaction happens; the next observed context IS the floor.
+    ccc.mark_compacted(sd, now=1000)
+    assert ccc.refresh_floor(sd, 308_644) == 308_644
+    assert ccc.read_floor(sd) == (308_644, 1000)
+
+    # Context grows with ordinary work — NOT a new floor (no compaction since).
+    assert ccc.refresh_floor(sd, 500_000) == 308_644
+    assert ccc.read_floor(sd) == (308_644, 1000)
+
+    # A second compaction re-measures it.
+    ccc.mark_compacted(sd, now=2000)
+    assert ccc.refresh_floor(sd, 312_000) == 312_000
+
+    # An unreadable context size must not disturb a known floor.
+    assert ccc.refresh_floor(sd, None) == 312_000
 
 
 def test_proactive_idle_enabled_requires_master_switch(monkeypatch) -> None:

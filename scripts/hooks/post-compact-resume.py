@@ -360,6 +360,17 @@ def main() -> int:
     if cwd_fallback:
         state.set_project_dir_override(cwd_fallback)
 
+    # Stamp that a compaction just happened, so the proactive-idle trigger can learn this
+    # session's post-compaction FLOOR (see cold_cache_compact.refresh_floor — that floor is the
+    # only thing that makes the trigger terminate). Its OWN try: this is an optimization, and a
+    # fault here must never cost us the resume flag below, which is survival-critical.
+    try:
+        from lib import cold_cache_compact  # noqa: PLC0415 - local package, not PyPI
+
+        cold_cache_compact.mark_compacted(state.state_dir(), now=int(time.time()))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[post-compact-resume] compact stamp skipped ({exc})", file=sys.stderr)
+
     try:
         wrote_flag = _record_resume_directive(state)
     except Exception as exc:  # noqa: BLE001 - a hook fault must never break compaction

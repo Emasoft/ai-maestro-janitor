@@ -934,8 +934,16 @@ def _phase_proactive_idle_compact() -> bool:
     Gates (all injected into the pure `should_compact_proactively_idle`): enabled + off-cooldown,
     the user is ABSENT from this pane (never compact out from under active work — lossy), the
     session is NOT active-waiting (no resume/keep-going/directive/pending agents to interrupt),
-    and the context is large. Self-limiting: after the compact the context is small, so the size
-    gate fails next fire, and the shared cooldown blocks a re-fire before the compact lands.
+    the context is large, AND a compaction could actually reclaim `min_gain` tokens above this
+    session's learned post-compaction floor.
+
+    That LAST gate is what makes this phase terminate, and it is not optional. The original design
+    claimed to be "self-limiting: after the compact the context is small, so the size gate fails
+    next fire." That claim is FALSE and was measured false in this repo on 2026-07-17: a real
+    compaction went 343,007 -> 308,644, and 308,644 is ABOVE the 270,000 threshold — so the size
+    gate NEVER closed and this phase would have re-fired every cooldown, forever, destroying
+    context each time. The cooldown only defers a loop; it cannot end one. See
+    cold_cache_compact.refresh_floor.
 
     Placed BEFORE the maintenance early-return in main() ON PURPOSE: a long unattended
     maintenance session is the PRIME target — it is exactly the one that sits idle for hours and
@@ -958,11 +966,14 @@ def _phase_proactive_idle_compact() -> bool:
             return False
         transcript = cold_cache_compact.newest_transcript(state.project_root())
         ctx = cold_cache_compact.context_tokens_for(transcript)
+        floor = cold_cache_compact.refresh_floor(sd, ctx)
         if not cold_cache_compact.should_compact_proactively_idle(
             ctx,
             user_present=present,
             active_waiting=active,
             min_context_tokens=cold_cache_compact.min_context_tokens(),
+            floor_tokens=floor,
+            min_gain=cold_cache_compact.min_gain_tokens(),
         ):
             return False
 

@@ -104,6 +104,39 @@ def test_fires_when_turn_ends_idle_with_a_large_context(harness, monkeypatch: py
     assert harness.ccc.in_cooldown(sd, now=int(_t.time()) + 1) is True
 
 
+def test_does_not_loop_after_a_compaction(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE LOOP GUARD, end-to-end through the hook — the bug the user caught 2026-07-17.
+
+    Real numbers from this repo: a compaction went 343,007 -> 308,644 (only 10%; the base
+    reloads and cannot be compacted away). With a size-only gate the hook would fire, compact,
+    land at 308,644, wait out the cooldown, and fire AGAIN — forever, destroying context each
+    time. Here the compaction is observed, the floor is learned from the very next Stop, and the
+    hook goes silent even though the context is still huge and the user is still away.
+    """
+    hook = _load_hook()
+    import time as _t
+
+    sd = harness.state.state_dir()
+    # A compaction just happened, and the context it left behind is the floor.
+    harness.ccc.mark_compacted(sd, now=int(_t.time()))
+    _set(harness, monkeypatch, present=False, ctx=308_644)
+
+    assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
+    assert harness.spawned == [], "compacting at the post-compaction floor reclaims nothing"
+    assert harness.ccc.read_floor(sd)[0] == 308_644, "the floor must be learned from this Stop"
+
+    # The cooldown expiring must NOT resurrect it — the cooldown only defers a loop, the floor
+    # ends it. Even the pre-compact size that legitimately fired once is now silent.
+    _set(harness, monkeypatch, present=False, ctx=343_007)
+    assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
+    assert harness.spawned == [], "34k of reclaimable context is not worth a lossy compaction"
+
+    # But real growth above the floor still fires — the guard must not be a permanent latch.
+    _set(harness, monkeypatch, present=False, ctx=700_000)
+    assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
+    assert len(harness.spawned) == 1, "a session that grows large again still gets its compaction"
+
+
 def test_silent_during_interactive_work(harness, monkeypatch: pytest.MonkeyPatch) -> None:
     """The user just typed → present → NEVER compact out from under them (it is lossy).
     This is the overwhelmingly common Stop, and it must cost a stat and nothing else."""

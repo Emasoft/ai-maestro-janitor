@@ -19,6 +19,7 @@ The CALLERS (the SessionStart hook + dispatch's rate-limit path) fire `/compact`
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -42,12 +43,27 @@ COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_COOLDOWN_SECONDS"
 # context is already small when the next cold event (a >1h working turn, a rate limit, a
 # restart) strikes — turning the "inevitable cold write" from ~600k into ~50k. Default ON.
 PROACTIVE_IDLE_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED"
+# TRDD-D3PROACT follow-up: how much a compaction must be able to RECLAIM before firing one is
+# worth it. Guards the infinite-compact loop documented on `refresh_floor` — a size-only gate
+# cannot close on a heavy install, because the post-compaction floor sits ABOVE the threshold.
+MIN_GAIN_ENV = "CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_MIN_GAIN_TOKENS"
 
-DEFAULT_MIN_CONTEXT_TOKENS = 270_000  # the user's number: compact a resumed context at/above this
+# 350k (user, 2026-07-17), raised from the original 270k. It MUST sit above this install's
+# POST-COMPACTION FLOOR — the context a compaction leaves behind (base: CLAUDE.md + ~10 plugins +
+# rules + skills + MCP schemas + the summary; measured 308,644 here on 2026-07-17). A threshold
+# BELOW the floor is a gate that can never close once compacted: the preventive path would re-fire
+# forever, and the reactive paths (SessionStart / rate-limit resume, which have no floor gate at
+# all) would each burn a lossy compaction that reclaims nothing. This is the reactive paths' ONLY
+# protection against that, which is why the number is deliberately floor-relative, not a round
+# fraction of the window. Re-measure it if the base grows (more plugins/MCP servers → higher floor).
+DEFAULT_MIN_CONTEXT_TOKENS = 350_000
 DEFAULT_MIN_IDLE_SECONDS = 3_600      # the 1h prompt-cache TTL — below this the cache is still warm
 DEFAULT_COOLDOWN_SECONDS = 600        # don't re-fire within 10 min (before the compact lands)
+DEFAULT_MIN_GAIN_TOKENS = 150_000     # reclaimable tokens below which a lossy compact isn't worth it
 
 _FIRED_STAMP = "cold-compact-fired.ts"
+_FLOOR_STAMP = "compact-floor.json"
+_LAST_COMPACT_STAMP = "last-compact.ts"  # high-water mark, written by the PostCompact hook
 
 
 def enabled() -> bool:
@@ -64,6 +80,10 @@ def min_idle_seconds() -> int:
 
 def cooldown_seconds() -> int:
     return state.coerce_int(os.environ.get(COOLDOWN_ENV), DEFAULT_COOLDOWN_SECONDS)
+
+
+def min_gain_tokens() -> int:
+    return state.coerce_int(os.environ.get(MIN_GAIN_ENV), DEFAULT_MIN_GAIN_TOKENS)
 
 
 def proactive_idle_enabled() -> bool:
@@ -104,13 +124,15 @@ def should_compact_proactively_idle(
     user_present: bool,
     active_waiting: bool,
     min_context_tokens: int,
+    floor_tokens: int | None,
+    min_gain: int,
 ) -> bool:
     """PREVENTIVE gate (TRDD-D3PROACT): shrink a large context DURING a cheap warm idle
     heartbeat, so a future cold event reads ~50k, not ~600k. PURE — the runtime facts
-    (`user_present`, `active_waiting`, `context_tokens`) are injected by the caller.
+    (`user_present`, `active_waiting`, `context_tokens`, `floor_tokens`) are injected.
 
     Deliberately NOT cold-aware: the whole point is to fire while the cache is still WARM
-    (the shrink turn is then cheap) so no cold event is ever expensive. All three must hold:
+    (the shrink turn is then cheap) so no cold event is ever expensive. ALL FOUR must hold:
 
       * NOT user_present  — the user has not typed in THIS pane recently (>= the 5-min idle
         window). Compaction is lossy, so it must never fire out from under someone actively
@@ -120,13 +142,20 @@ def should_compact_proactively_idle(
         genuinely has nothing queued to "continue" this instant.
       * context_tokens >= threshold — small contexts save nothing; only a large one is worth
         the lossy compaction and is what makes a cold event expensive.
+      * context_tokens - floor >= min_gain — a compaction can only reclaim what sits ABOVE this
+        session's post-compaction floor, so this is the only gate that asks the real question:
+        "would compacting actually free anything?" It is what makes the trigger TERMINATE —
+        see `refresh_floor` for the measured loop it kills. A floor of None (none observed yet)
+        skips this clause: the first fire is judged on size alone, and it is that fire's own
+        result that teaches the floor.
     """
-    return (
-        not user_present
-        and not active_waiting
-        and context_tokens is not None
-        and context_tokens >= min_context_tokens
-    )
+    if user_present or active_waiting or context_tokens is None:
+        return False
+    if context_tokens < min_context_tokens:
+        return False
+    if floor_tokens is not None and (context_tokens - floor_tokens) < min_gain:
+        return False
+    return True
 
 
 # --- best-effort readers (never raise) --------------------------------------
@@ -180,3 +209,64 @@ def mark_fired(state_dir: Path, *, now: int) -> None:
         state.atomic_write(state_dir / _FIRED_STAMP, str(now))
     except OSError:
         pass
+
+
+# --- the post-compaction floor (what makes the preventive trigger terminate) -------
+
+def mark_compacted(state_dir: Path, *, now: int) -> None:
+    """Record that a compaction just happened — the PostCompact hook's only job here.
+
+    A high-water TIMESTAMP, never a consume-once flag: a flag that some reader clears could let
+    a compaction go unobserved, and an unobserved compaction is one whose floor is never learned
+    — which silently re-opens the loop `refresh_floor` documents. Best-effort.
+    """
+    try:
+        state.atomic_write(state_dir / _LAST_COMPACT_STAMP, str(now))
+    except OSError:
+        pass
+
+
+def read_floor(state_dir: Path) -> tuple[int | None, int]:
+    """`(floor_tokens, measured_after_compact_ts)` — the context size observed right AFTER the most
+    recent compaction. `(None, 0)` when no floor has been measured yet. Never raises."""
+    try:
+        data = json.loads((state_dir / _FLOOR_STAMP).read_text(encoding="utf-8"))
+        tokens = int(data["tokens"])
+        ts = int(data.get("compact_ts", 0))
+    except (FileNotFoundError, OSError, ValueError, KeyError, TypeError):
+        return None, 0
+    return (tokens if tokens > 0 else None), ts
+
+
+def refresh_floor(state_dir: Path, context_tokens: int | None) -> int | None:
+    """Learn this session's POST-COMPACTION FLOOR from the live context, and return it.
+
+    THE LOOP THIS KILLS (measured in this very repo, 2026-07-17): a real compaction took the
+    context 343,007 -> 308,644. Only 10% — because the base (CLAUDE.md + ~10 plugins + rules +
+    skills + MCP schemas + the summary itself) reloads after EVERY compaction and cannot be
+    compacted away. 308,644 is ABOVE the 270,000 threshold, so a size-only gate NEVER closes:
+    compact -> still over -> cooldown expires -> compact again, every 10 minutes, forever,
+    destroying context each time. No threshold can fix that, because the floor is a property of
+    the install, not a number we get to choose. Only measuring the floor can.
+
+    So: once a compaction has happened since we last measured, the CURRENT context IS the floor
+    — record it. `should_compact_proactively_idle` then requires `ctx - floor >= min_gain`, which
+    is precisely "exclude the compaction case" (user, 2026-07-17): at the floor the reclaimable
+    amount is 0, so the trigger is dead until genuinely new work has piled up above it.
+
+    Measuring at a turn's end can only OVER-state the floor (that turn's own tokens are included),
+    which under-states the gain and biases toward NOT firing — a missed optimization rather than a
+    destroyed context. The safe direction.
+    """
+    last_compact = state.read_int_state(state_dir / _LAST_COMPACT_STAMP, 0)
+    floor, floor_ts = read_floor(state_dir)
+    if context_tokens is None or last_compact <= floor_ts:
+        return floor  # no compaction since the last measurement → the known floor still stands
+    try:
+        state.atomic_write(
+            state_dir / _FLOOR_STAMP,
+            json.dumps({"tokens": int(context_tokens), "compact_ts": last_compact}),
+        )
+    except OSError:
+        return floor
+    return int(context_tokens)

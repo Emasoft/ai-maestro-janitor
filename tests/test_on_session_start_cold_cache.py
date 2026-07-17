@@ -105,7 +105,9 @@ def test_fires_on_startup_with_large_context(harness, monkeypatch: pytest.Monkey
     """`startup` is also eligible (a --continue may report startup on some builds); the
     size guard is the real gate."""
     hook, state, ccc, spawned, plugin_root = harness
-    _set_ctx(monkeypatch, ccc, 300_000)
+    # Above the default threshold, which is floor-relative (350k > the 308,644 post-compaction
+    # floor) — 300k used to qualify as "large" and no longer does, by design.
+    _set_ctx(monkeypatch, ccc, 400_000)
     assert hook._maybe_cold_compact_on_session_start(state, plugin_root, "startup", "/x/s.jsonl") is True
     assert len(spawned) == 1
 

@@ -88,11 +88,17 @@ def main() -> int:
             ctx = cold_cache_compact.context_tokens_for(
                 cold_cache_compact.newest_transcript(state.project_root())
             )
+        # Stop is the RIGHT place to learn the floor: it is the first moment after a compaction
+        # at which the resulting context size is observable at all (the post-compact size only
+        # exists once a turn has run against it — PostCompact itself is too early to see it).
+        floor = cold_cache_compact.refresh_floor(sd, ctx)
         if not cold_cache_compact.should_compact_proactively_idle(
             ctx,
             user_present=False,
             active_waiting=False,
             min_context_tokens=cold_cache_compact.min_context_tokens(),
+            floor_tokens=floor,
+            min_gain=cold_cache_compact.min_gain_tokens(),
         ):
             return 0
 
