@@ -180,6 +180,69 @@ def test_held_lock_makes_the_ensurer_skip(monkeypatch, tmp_path):
         gs.release_settings_ensurer_lock(fd)
 
 
+# ---- supersecure verified write: swap ONLY after proving only-intended-edits ----------
+
+
+def test_verify_invariants_accepts_intended_edits():
+    """The verifier passes a result that differs from the original by ONLY the intended edits."""
+    original = {"a": 1, "env": {"KEEP": "x"}}
+    result = {
+        "a": 1,
+        "env": {"KEEP": "x", "ENABLE_BACKGROUND_TASKS": "1"},
+        "askUserQuestionTimeout": se.TOP_LEVEL_ENFORCE["askUserQuestionTimeout"],
+    }
+    ok, reason = se._verify_invariants(original, result, ["ENABLE_BACKGROUND_TASKS"], ["askUserQuestionTimeout"])
+    assert ok, reason
+
+
+def test_verify_invariants_rejects_unrelated_top_level_change():
+    """An unrelated top-level value changing is a corruption the verifier must reject."""
+    ok, _ = se._verify_invariants({"a": 1, "env": {}}, {"a": 999, "env": {"ENABLE_BACKGROUND_TASKS": "1"}}, ["ENABLE_BACKGROUND_TASKS"], [])
+    assert not ok
+
+
+def test_verify_invariants_rejects_removed_key():
+    """Dropping a pre-existing key is rejected — the write must preserve everything else."""
+    ok, _ = se._verify_invariants({"a": 1, "keepme": 2, "env": {}}, {"a": 1, "env": {}}, [], [])
+    assert not ok
+
+
+def test_verify_invariants_rejects_existing_env_value_change():
+    """Overwriting a pre-existing env value (Group A never does this) is rejected."""
+    ok, _ = se._verify_invariants({"env": {"KEEP": "old"}}, {"env": {"KEEP": "TAMPERED", "ENABLE_BACKGROUND_TASKS": "1"}}, ["ENABLE_BACKGROUND_TASKS"], [])
+    assert not ok
+
+
+def test_verify_invariants_rejects_unexpected_new_key():
+    """A new top-level key that is neither `env` nor an enforced key is rejected."""
+    ok, _ = se._verify_invariants({"env": {}}, {"env": {}, "surprise": "!"}, [], [])
+    assert not ok
+
+
+def test_verified_write_swaps_on_valid_result(monkeypatch, tmp_path):
+    """The happy path: a valid result is written and swapped in; no temp residue."""
+    sp = _isolate(monkeypatch, tmp_path)
+    original = {"enabledPlugins": ["x"], "env": {"KEEP": "1"}}
+    sp.write_text(json.dumps(original), encoding="utf-8")
+    result = {"enabledPlugins": ["x"], "env": {"KEEP": "1", "ENABLE_BACKGROUND_TASKS": "1"}}
+    assert se._verified_atomic_write(sp, original, result, ["ENABLE_BACKGROUND_TASKS"], []) is True
+    assert _read(sp) == result
+    assert _no_tmp_residue(sp)
+
+
+def test_verified_write_refuses_and_preserves_on_corruption(monkeypatch, tmp_path):
+    """If the result altered an UNRELATED value, the write refuses to swap and the LIVE FILE is
+    left exactly as it was — the core supersecure guarantee."""
+    sp = _isolate(monkeypatch, tmp_path)
+    original = {"enabledPlugins": ["x"], "env": {"KEEP": "1"}}
+    sp.write_text(json.dumps(original), encoding="utf-8")
+    before = sp.read_bytes()
+    tampered = {"enabledPlugins": ["TAMPERED"], "env": {"KEEP": "1", "ENABLE_BACKGROUND_TASKS": "1"}}
+    assert se._verified_atomic_write(sp, original, tampered, ["ENABLE_BACKGROUND_TASKS"], []) is False
+    assert sp.read_bytes() == before  # untouched — never swapped
+    assert _no_tmp_residue(sp)
+
+
 def test_path_resolved_at_call_time_honors_injected_home(monkeypatch, tmp_path):
     """Isolation proof: the settings path follows the injected HOME (no frozen Path.home() constant),
     and an explicit home= writes there — never the real ~/.claude/settings.json."""

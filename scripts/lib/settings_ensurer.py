@@ -27,7 +27,9 @@ Safety (all load-bearing):
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -113,6 +115,109 @@ def _compute_delta(data: dict) -> tuple[list[str], list[str]]:
     return env_add, top_set
 
 
+def _verify_invariants(
+    original: dict, result: dict, env_add: list[str], top_set: list[str]
+) -> tuple[bool, str]:
+    """Prove `result` differs from `original` ONLY by the intended edits — the whole point of the
+    supersecure write. Pure. Returns (ok, reason); reason is a short diagnostic when not ok.
+
+    Intended edits: Group-A env keys in `env_add` ADDED to the `env` block with their recommended
+    values; Group-B keys in `top_set` SET at top level to their enforced values. Everything else —
+    every other top-level key, every pre-existing env key, the presence of every original key — must
+    be byte-for-byte the same. Any deviation means the merge (or the on-disk write) corrupted the
+    file, so the caller must NOT swap it in.
+    """
+    enforced = set(TOP_LEVEL_ENFORCE)
+
+    # (a) The intended top-level changes are present and correct.
+    for k in top_set:
+        if result.get(k) != TOP_LEVEL_ENFORCE[k]:
+            return False, f"enforced top-level {k!r} not set to {TOP_LEVEL_ENFORCE[k]!r}"
+
+    # (b) Every ORIGINAL top-level key is unchanged, except an enforced key we intended to overwrite.
+    for k, v in original.items():
+        if k == "env":
+            continue  # the env block is checked below
+        if k in enforced and k in top_set:
+            continue  # this key's change was intended
+        if result.get(k) != v:
+            return False, f"unrelated top-level key {k!r} changed"
+
+    # (c) No UNEXPECTED top-level key was added (allowed new keys: enforced keys + a created `env`).
+    allowed_new_top = enforced | {"env"}
+    for k in result:
+        if k not in original and k not in allowed_new_top:
+            return False, f"unexpected new top-level key {k!r}"
+
+    # (d) No top-level key was removed.
+    for k in original:
+        if k not in result:
+            return False, f"top-level key {k!r} was removed"
+
+    # (e) env block: additions present+correct, originals unchanged, nothing extra, nothing removed.
+    orig_env_raw = original.get("env")
+    orig_env = orig_env_raw if isinstance(orig_env_raw, dict) else {}
+    res_env = result.get("env")
+    if not isinstance(res_env, dict):
+        return False, "result 'env' is not an object"
+    for k in env_add:
+        if res_env.get(k) != ENV_ADD_IF_MISSING[k]:
+            return False, f"env key {k!r} not added as {ENV_ADD_IF_MISSING[k]!r}"
+    for k, v in orig_env.items():
+        if res_env.get(k) != v:
+            return False, f"existing env key {k!r} changed"
+    allowed_env = set(orig_env) | set(env_add)
+    for k in res_env:
+        if k not in allowed_env:
+            return False, f"unexpected new env key {k!r}"
+    for k in orig_env:
+        if k not in res_env:
+            return False, f"env key {k!r} was removed"
+
+    return True, ""
+
+
+def _verified_atomic_write(
+    path: Path, original: dict, result: dict, env_add: list[str], top_set: list[str]
+) -> bool:
+    """SUPERSECURE write: serialise `result`, write it to a SAME-DIR tmp, then — before swapping —
+    RE-READ the tmp from disk and prove it (1) is valid JSON, (2) round-trips exactly to `result`,
+    and (3) differs from `original` ONLY by the intended edits (`_verify_invariants`). ONLY when all
+    three pass does it `os.replace` the tmp into place (atomic). On ANY failure the tmp is removed
+    and the LIVE FILE IS LEFT UNTOUCHED. Returns True iff the swap happened.
+
+    Re-reading the tmp FROM DISK (not trusting the in-memory string) is deliberate: it catches a
+    truncated/short write or an encoding fault in the exact bytes that would become the live file.
+    """
+    text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    swapped = False
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        # (1) valid JSON on disk + (2) exact round-trip — verify the ACTUAL bytes, not our string.
+        reparsed = json.loads(tmp.read_text(encoding="utf-8"))
+        if reparsed != result:
+            state.log_line("session-start", "settings-ensurer: tmp round-trip mismatch — NOT swapping")
+            return False
+        # (3) only the intended values changed.
+        ok, reason = _verify_invariants(original, reparsed, env_add, top_set)
+        if not ok:
+            state.log_line("session-start", f"settings-ensurer: invariant check failed ({reason}) — NOT swapping")
+            return False
+        os.replace(tmp, path)  # atomic swap — reached ONLY after every check passed
+        swapped = True
+        return True
+    except (OSError, ValueError) as exc:
+        state.log_line("session-start", f"settings-ensurer: verified write failed ({exc}) — NOT swapping")
+        return False
+    finally:
+        if not swapped:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
 def ensure_recommended_settings(*, home: Optional[Path] = None) -> dict[str, list[str]]:
     """Ensure the recommended settings exist in ~/.claude/settings.json.
 
@@ -150,13 +255,18 @@ def ensure_recommended_settings(*, home: Optional[Path] = None) -> dict[str, lis
         env_add, top_set = _compute_delta(data)
         if not env_add and not top_set:
             return {"env_added": [], "top_level_set": []}
-        env_block = data.setdefault("env", {})
+        # Build the RESULT as a deepcopy so `data` stays the untouched ORIGINAL that the supersecure
+        # write compares against. json.loads→dumps preserves the user's key ORDER and content; only
+        # whitespace is normalised to indent=2, and our new keys append at the end.
+        original = data
+        result = copy.deepcopy(original)
+        env_block = result.setdefault("env", {})
         for k in env_add:
             env_block[k] = ENV_ADD_IF_MISSING[k]
         for k in top_set:
-            data[k] = TOP_LEVEL_ENFORCE[k]
-        # json.loads→dumps preserves the user's key ORDER (dict insertion order) and content; only
-        # whitespace is normalised to indent=2, and our new keys append at the end.
-        state.atomic_write(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            result[k] = TOP_LEVEL_ENFORCE[k]
+        if not _verified_atomic_write(path, original, result, env_add, top_set):
+            # Verification refused the swap → the live file was NOT touched; it is exactly as found.
+            return {"env_added": [], "top_level_set": []}
 
     return {"env_added": env_add, "top_level_set": top_set}
