@@ -12,15 +12,20 @@ stampede the API). This per-session detector is the CHEAP half: it reads ONLY th
 `<global-state>/github-config-findings.json` (one file read + a content-hash dedupe) and makes
 ZERO `gh` calls, so a fire costs almost nothing.
 
-It emits ONE compact drift line naming the finding counts by class, and ALWAYS ends it with a
-pointer to `/janitor-github-config-fix` — the janitor can only NOTIFY the main Claude, so the
-notification must carry the remedy (the user's explicit requirement). Content-hash dedupe means
-an unchanged finding set never re-nags; a repo getting fixed (or a NEW gap appearing) changes
-the digest and re-alerts exactly once.
+It emits ONE compact drift line about THIS PROJECT'S REPO ONLY, and ALWAYS ends it with a
+pointer to `/janitor-github-config-fix --slug <this repo>` — the janitor can only NOTIFY the
+main Claude, so the notification must carry the remedy (the user's explicit requirement).
+PER-PROJECT CHANNELING (user directive 2026-07-17): findings about OTHER repos never reach
+this session — not even as counts. A session in repo A has the wrong skills and token budget
+for repo B, is forbidden from acting on another agent's workdir/repo, and would become a
+data-exfiltration surface into projects with weaker protections. Repos with no live session
+reach the HUMAN via the daemon's notification channel (TRDD-4649ZLE0), never another project.
+Content-hash dedupe is scoped to THIS repo's finding set: an unchanged set never re-nags, and
+another repo's fix can neither re-alert nor silence this session.
 
-Silent when: the daemon has not written a findings file yet, the file is empty/unreadable, or
-there are no findings. Read-only: it never calls the API and never mutates a repo — the
-on-demand fix skill does that, only on the user's confirmation.
+Silent when: the daemon has not written a findings file yet, the file is empty/unreadable,
+this project has no resolvable GitHub slug, or THIS repo is clean. Read-only: it never calls
+the API and never mutates a repo — the on-demand fix skill does that, only on confirmation.
 """
 
 from __future__ import annotations
@@ -107,26 +112,30 @@ def main() -> int:
         # No audit written yet (daemon hasn't run its 6h beat), or unreadable → silent.
         return 0
 
-    line = gca.summarize(payload)
+    # PER-PROJECT CHANNELING: everything below is scoped to THIS repo's slug. No slug ⇒
+    # surface NOTHING (an unattributable session must never receive another repo's data).
+    slug = _current_slug()
+    if not slug:
+        return 0
+
+    line = gca.summarize_for_slug(payload, slug)
     if line is None:
-        # The fleet is clean — including us. Withdraw any standing proposal for THIS repo so a board
-        # is never left carrying a problem that has since been fixed.
-        slug = _current_slug()
-        if slug:
-            issue_catalog.clear_issue("GHCFG-001", where=slug)
+        # THIS repo is clean (whatever the rest of the fleet looks like) — withdraw any
+        # standing proposal so the board never carries a problem that has been fixed.
+        issue_catalog.clear_issue("GHCFG-001", where=slug)
         return 0
 
     _propose_for_this_repo(payload)
 
-    # Dedupe on the finding-SET digest, not the rendered line: the wording could change
-    # across versions without the actual gaps changing, and we don't want that to re-nag.
-    # A genuine change (repo fixed / new gap) shifts the digest and re-alerts exactly once.
+    # Dedupe on THIS repo's finding-SET digest, not the rendered line or the fleet set:
+    # wording changes never re-nag, a genuine change in OUR repo re-alerts exactly once,
+    # and another repo's fix/break can neither re-alert nor silence this session.
     #
-    # No sanitize_for_drift_line here: `summarize` emits ONLY the fixed finding vocabulary +
-    # integer counts + the fixed fix-skill pointer — no slug, no untrusted text reaches the
-    # line — so defanging would only mangle the `[github-config]` label for nothing.
+    # No sanitize_for_drift_line here: `summarize_for_slug` emits only the fixed finding
+    # vocabulary + counts + the fix-skill pointer, and the slug is shape-validated by its
+    # _SLUG_RE fullmatch before it can reach the line — defanging would mangle it for nothing.
     seen = state.state_dir() / "fleet-github-config-seen.txt"
-    out = dedupe.emit_once(seen, gca.findings_digest(payload), line)
+    out = dedupe.emit_once(seen, gca.findings_digest(gca.payload_for_slug(payload, slug)), line)
     if out is not None:
         print(out)
 

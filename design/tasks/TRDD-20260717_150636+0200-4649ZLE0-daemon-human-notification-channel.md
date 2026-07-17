@@ -21,10 +21,13 @@ will start the claude code instance interested by the iseue and tell the claude 
 
 **The gap, precisely:** the daemon's machine-wide chores (fleet github-config audit, its own
 task failures/quarantines, security-relevant findings) surface ONLY through per-session
-heartbeat detectors. Any LIVE session surfaces the whole fleet's findings — so one open
-session anywhere suffices — but with ZERO live sessions the findings sit unread in
-`fleet-github-audit.json` + `daemon.log` indefinitely. The one process guaranteed alive (the
-daemon) has no path to a human.
+heartbeat detectors — and (SECOND user directive, same day, PER-PROJECT CHANNELING —
+TRDD-X92VBFNF) each session may receive ONLY its own project's findings. So a finding about a
+repo with no live session reaches NOBODY: it sits unread in the findings JSON + `daemon.log`
+indefinitely. The one process guaranteed alive (the daemon) has no path to a human — and the
+human channel is now the ONLY legitimate route for unattended projects (cross-surfacing into
+other projects' sessions is banned: wrong skills, wrong budget, forbidden cross-repo action,
+data exfiltration into weaker-protected projects).
 
 **NEXT ACTION:** implement after v0.50.0 ships (kept out of the architecture release
 deliberately — this is its own feature with its own blast radius).
@@ -48,10 +51,13 @@ sessions would stampede the channel with duplicates):
   quarantine after repeated failures); AND
 - content-hash dedupe (same finding never pushes twice; rolling 24 h digest cap, e.g. ≤3
   pushes/day, remainder folded into one digest line); AND
-- **the no-live-session escalation rule:** while ≥1 janitor session is alive the heartbeat is
-  the channel (push only CRITICAL); with ZERO live sessions ANY ≥HIGH finding pushes — that
-  is exactly the user's "nobody is watching" scenario. The daemon already scans the fleet
-  every liveness beat, so "zero sessions alive" is a fact it holds for free.
+- **the PER-PROJECT no-live-session escalation rule (revised by the channeling directive):**
+  routing is strictly per project. While the AFFECTED project has a live session, that
+  session's own heartbeat is the channel (push only CRITICAL); when the affected project has
+  NO live session, any ≥HIGH finding about it pushes to the human — naming that project, so
+  the human opens THAT project's Claude. Never routed through another project's session,
+  whatever is or isn't open. The daemon's fleet scan already maps sessions→projects every
+  liveness beat, so "does repo X have a live session" is a fact it holds for free.
 
 **Message shape:** one line — `[janitor] <severity> <code> on <repo/project>: <summary> —
 open a Claude session there and run /janitor-github-config-fix` (the notification's job is to

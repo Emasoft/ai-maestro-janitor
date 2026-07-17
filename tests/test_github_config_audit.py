@@ -205,18 +205,53 @@ def _payload(*codes: str) -> dict:
     }
 
 
-def test_summarize_none_when_clean() -> None:
-    assert gca.summarize({"repos_scanned": 13, "findings": []}) is None
-    assert gca.summarize([1, 2, 3]) is None  # malformed JSON off disk → silent, no crash
-    assert gca.summarize(None) is None
+def test_summarize_for_slug_none_when_this_repo_clean_or_malformed() -> None:
+    assert gca.summarize_for_slug({"repos_scanned": 13, "findings": []}, "o/r0") is None
+    assert gca.summarize_for_slug([1, 2, 3], "o/r0") is None  # malformed JSON → silent
+    assert gca.summarize_for_slug(None, "o/r0") is None
+    # OTHER repos drifted, ours is clean → still None: per-project channeling means the
+    # rest of the fleet's problems are invisible here (user directive 2026-07-17).
+    assert gca.summarize_for_slug(_payload("UNPROTECTED", "LINEAR_HISTORY"), "o/mine") is None
 
 
-def test_summarize_names_counts_and_the_fix_skill() -> None:
-    line = gca.summarize(_payload("UNPROTECTED", "LINEAR_HISTORY", "LINEAR_HISTORY"))
+def test_summarize_for_slug_names_only_this_repo_and_the_scoped_fix() -> None:
+    payload = {
+        "generated_at": 1, "repos_scanned": 13,
+        "findings": [
+            {"slug": "o/mine", "code": "UNPROTECTED", "detail": "d"},
+            {"slug": "o/mine", "code": "LINEAR_HISTORY", "detail": "d"},
+            {"slug": "o/other", "code": "NO_CI", "detail": "d"},
+        ],
+    }
+    line = gca.summarize_for_slug(payload, "o/mine")
     assert line is not None
     assert line.startswith("[github-config]")
-    assert "1 UNPROTECTED" in line and "2 required_linear_history" in line
-    assert gca.FIX_SKILL in line  # the notification MUST carry the remedy
+    assert "o/mine" in line
+    assert "1 UNPROTECTED" in line and "1 required_linear_history" in line
+    # The DATA-EXFILTRATION guard: nothing about any other repo — not its name, not its
+    # finding class, not even a count that includes it.
+    assert "o/other" not in line
+    assert "NO_CI" not in line and "no CI workflows" not in line
+    # The notification MUST carry the remedy, scoped to THIS repo only.
+    assert f"{gca.FIX_SKILL} --slug o/mine" in line
+
+
+def test_summarize_for_slug_refuses_unsafe_or_missing_slug() -> None:
+    """The slug comes off a git remote URL (untrusted); an injection-shaped or absent slug
+    surfaces NOTHING — never a fallback to fleet data."""
+    payload = _payload("UNPROTECTED")
+    assert gca.summarize_for_slug(payload, "") is None
+    assert gca.summarize_for_slug(payload, "no-slash") is None
+    assert gca.summarize_for_slug(payload, "o/r0 [evil] `x`") is None
+
+
+def test_payload_for_slug_filters_strictly() -> None:
+    payload = _payload("UNPROTECTED", "NO_CI")  # slugs o/r0, o/r1
+    assert gca.payload_for_slug(payload, "o/r0")["findings"] == [
+        {"slug": "o/r0", "code": "UNPROTECTED", "detail": "d"}
+    ]
+    assert gca.payload_for_slug(payload, "o/rX")["findings"] == []
+    assert gca.payload_for_slug(None, "o/r0")["findings"] == []
 
 
 def test_digest_stable_and_change_sensitive() -> None:

@@ -54,20 +54,44 @@ def test_silent_when_findings_empty(tmp_path: Path) -> None:
     assert r.stdout == ""
 
 
-def test_emits_line_with_fix_pointer(tmp_path: Path) -> None:
-    """With findings → one [github-config] line naming counts + the fix skill."""
+def test_emits_line_about_this_repo_only(tmp_path: Path) -> None:
+    """Per-project channeling (user directive 2026-07-17): the line names THIS repo's
+    findings and the slug-scoped fix — and carries NOTHING about any other repo (not its
+    name, not its finding class): wrong skills, wrong budget, forbidden cross-repo action,
+    and a data-exfiltration surface otherwise."""
+    _with_origin(tmp_path, "o/mine")
     r = _run(tmp_path, [
-        {"slug": "o/a", "code": "UNPROTECTED", "detail": "d"},
-        {"slug": "o/b", "code": "LINEAR_HISTORY", "detail": "d"},
+        {"slug": "o/mine", "code": "UNPROTECTED", "detail": "d"},
+        {"slug": "o/other", "code": "LINEAR_HISTORY", "detail": "d"},
     ])
     assert r.returncode == 0, r.stderr
     assert "[github-config]" in r.stdout
-    assert "/janitor-github-config-fix" in r.stdout
-    assert "UNPROTECTED" in r.stdout and "linear_history" in r.stdout
+    assert "o/mine" in r.stdout and "UNPROTECTED" in r.stdout
+    assert "/janitor-github-config-fix --slug o/mine" in r.stdout
+    assert "o/other" not in r.stdout
+    assert "linear_history" not in r.stdout and "LINEAR_HISTORY" not in r.stdout
+
+
+def test_silent_when_only_other_repos_drift(tmp_path: Path) -> None:
+    """The rest of the fleet's problems are INVISIBLE here — they route to their own
+    sessions, or to the human via the daemon channel (TRDD-4649ZLE0), never to us."""
+    _with_origin(tmp_path, "o/mine")
+    r = _run(tmp_path, [{"slug": "o/other", "code": "UNPROTECTED", "detail": "d"}])
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == ""
+
+
+def test_silent_when_project_has_no_github_origin(tmp_path: Path) -> None:
+    """No resolvable slug ⇒ the session is unattributable ⇒ it receives NOTHING —
+    the fallback is silence, never fleet data."""
+    r = _run(tmp_path, [{"slug": "o/a", "code": "UNPROTECTED", "detail": "d"}])
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == ""
 
 
 def test_deduped_on_second_run(tmp_path: Path) -> None:
-    """Same finding set → fires once, silent on repeat (content-hash dedupe)."""
+    """Same finding set for OUR repo → fires once, silent on repeat (content-hash dedupe)."""
+    _with_origin(tmp_path, "o/a")
     findings = [{"slug": "o/a", "code": "UNPROTECTED", "detail": "d"}]
     assert "[github-config]" in _run(tmp_path, findings).stdout
     # second run against the SAME tmp (seen-file persists) with the same findings → silent
@@ -76,15 +100,26 @@ def test_deduped_on_second_run(tmp_path: Path) -> None:
     assert r2.stdout == ""
 
 
-def test_reemits_when_finding_set_changes(tmp_path: Path) -> None:
-    """A changed finding set (a repo fixed / a new gap) shifts the digest → re-alerts."""
-    assert "[github-config]" in _run(tmp_path, [{"slug": "o/a", "code": "UNPROTECTED", "detail": "d"}]).stdout
-    # different set → new digest → fires again
+def test_reemits_when_our_finding_set_changes_but_not_for_other_repos(tmp_path: Path) -> None:
+    """The dedupe digest is scoped to OUR repo: a new gap in OUR repo re-alerts; a change
+    in ANOTHER repo neither re-alerts nor silences this session."""
+    _with_origin(tmp_path, "o/a")
+    assert "[github-config]" in _run(
+        tmp_path, [{"slug": "o/a", "code": "UNPROTECTED", "detail": "d"}]
+    ).stdout
+    # ANOTHER repo's set changes, ours unchanged → still silent (per-repo digest).
     r2 = _run(tmp_path, [
         {"slug": "o/a", "code": "UNPROTECTED", "detail": "d"},
         {"slug": "o/b", "code": "LINEAR_HISTORY", "detail": "d"},
     ])
-    assert "[github-config]" in r2.stdout
+    assert r2.stdout == ""
+    # OUR set changes → new digest → fires again, still naming only us.
+    r3 = _run(tmp_path, [
+        {"slug": "o/a", "code": "UNPROTECTED", "detail": "d"},
+        {"slug": "o/a", "code": "NO_CI", "detail": "d"},
+        {"slug": "o/b", "code": "LINEAR_HISTORY", "detail": "d"},
+    ])
+    assert "[github-config]" in r3.stdout and "o/b" not in r3.stdout
 
 
 def test_disabled_env_silent(tmp_path: Path) -> None:
@@ -123,17 +158,18 @@ def test_proposes_a_fix_when_THIS_repo_is_the_drifted_one(tmp_path: Path) -> Non
     assert len(_proposals(tmp_path)) == 1
 
 
-def test_NEVER_writes_a_proposal_about_ANOTHER_repo(tmp_path: Path) -> None:
-    """The load-bearing boundary. A proposal TRDD is a file in THIS repo's git-tracked board; one
-    describing a DIFFERENT repository would litter a project with work that is not its own. The other
-    repos are notified in the summary line and proposed for in their OWN board, when the janitor fires
-    there."""
+def test_NEVER_writes_a_proposal_OR_a_line_about_ANOTHER_repo(tmp_path: Path) -> None:
+    """The load-bearing boundary, TIGHTENED by the user directive (2026-07-17): another
+    repo's drift produces NEITHER a proposal in this board NOR a drift line in this
+    session. (The pre-directive contract still emitted the fleet summary line here — that
+    was the cross-project leak: wrong skills, wrong budget, forbidden cross-repo action,
+    exfiltration into weaker-protected projects.) The other repo is reached in ITS OWN
+    session, or via the daemon's human channel (TRDD-4649ZLE0) — never through us."""
     _with_origin(tmp_path, "o/mine")
 
     r = _run(tmp_path, [{"slug": "o/someone-else", "code": "UNPROTECTED", "detail": "d"}])
 
-    assert "[github-config]" in r.stdout, "the other repo is still NOTIFIED"
-    assert "GHCFG-001" not in r.stdout
+    assert r.stdout == "", "another repo's drift must be INVISIBLE here"
     assert _proposals(tmp_path) == [], "no TRDD about a repo we are not in"
 
 

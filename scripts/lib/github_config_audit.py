@@ -458,33 +458,46 @@ def findings_digest(payload: object) -> str:
     return hashlib.sha256("\n".join(keys).encode("utf-8")).hexdigest()[:12]
 
 
-def summarize(payload: object) -> str | None:
-    """Build the ONE compact drift line from a findings payload, or None when clean.
+# A well-formed `owner/repo` — the ONLY slug shape allowed into a drift line (it comes off
+# a git remote URL, so it is untrusted text; the fullmatch doubles as the sanitizer).
+_SLUG_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
-    PURE — the detector just reads the file and calls this, so the wording is unit-tested
-    here and never diverges. The line names the counts by class (worst-first) and ALWAYS
-    ends with the fix-skill pointer (the user's requirement: notify + carry the remedy).
 
-    `payload` is typed `object` (see findings_digest) — it is untrusted JSON off disk.
+def payload_for_slug(payload: object, slug: str) -> dict:
+    """The findings sub-payload for ONE repo — the ONLY view a per-session surface may
+    consume. PURE. `payload` is untrusted JSON off disk (see findings_digest)."""
+    findings = payload.get("findings", []) if isinstance(payload, dict) else []
+    return {"findings": [f for f in findings if isinstance(f, dict) and f.get("slug") == slug]}
+
+
+def summarize_for_slug(payload: object, slug: str) -> str | None:
+    """Build THIS repo's one-line drift summary, or None when this repo is clean.
+
+    REPLACES the fleet-aggregate `summarize` (user directive 2026-07-17): an
+    automatically-surfaced line must speak ONLY about the project it appears in. A session
+    in repo A receiving findings about repo B — even as counts — has the wrong skills, the
+    wrong token budget, is FORBIDDEN from acting on another agent's workdir/repo, and
+    becomes a data-exfiltration surface into projects with weaker protections. Fleet-wide
+    views exist only on the HUMAN's explicit ask (`/janitor-github-config-fix --all`,
+    `/janitor-show-global-status`) — never on the automatic per-session channel.
+
+    PURE — unit-tested here so the wording never diverges. Always ends with the fix-skill
+    pointer scoped to THIS slug (notify + carry the remedy, for this repo only).
     """
-    if not isinstance(payload, dict):
-        return None
-    findings = [f for f in payload.get("findings", []) if isinstance(f, dict)]
-    if not findings:
-        return None
-    scanned = payload.get("repos_scanned")
-    affected = len({f.get("slug") for f in findings})
-    # Count per code, render in FINDING_CODES order (worst first).
+    if not slug or not _SLUG_RE.fullmatch(slug):
+        return None  # unattributable or unsafe slug → surface NOTHING, never fleet data
+    mine = payload_for_slug(payload, slug)["findings"]
     counts: dict[str, int] = {}
-    for f in findings:
+    for f in mine:
         code = f.get("code")
         if code in _SHORT:
             counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return None
     parts = [f"{counts[c]} {_SHORT[c]}" for c in FINDING_CODES if c in counts]
-    scope = f"{affected}/{scanned}" if isinstance(scanned, int) else str(affected)
     return (
-        f"[github-config] {scope} ai-maestro plugin repo(s) drifted: "
+        f"[github-config] THIS repo ({slug}) has GitHub-config drift: "
         + "; ".join(parts)
-        + f". → Run {FIX_SKILL} to review + fix (shows a plan first; mutates a repo "
-        "only on your confirmation, and only where you are an admin)."
+        + f". → Run {FIX_SKILL} --slug {slug} to review + fix (shows a plan first; "
+        "mutates the repo only on your confirmation, and only if you are an admin)."
     )
