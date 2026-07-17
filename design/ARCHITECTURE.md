@@ -1,6 +1,17 @@
-# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 3)
+# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 3 — RATIFIED)
 
-> **Status: revision 3 — posted for mutual `RATIFIED rev 3`** with the ai-maestro Claude on
+> **Status: FINAL — `RATIFIED rev 3` by BOTH sides on 2026-07-17** (janitor comment
+> 5005116161; ai-maestro comment 16:06 UTC, which also landed all five `--command-key`
+> registrations, their `d9439b94`). This document is the ratified baseline for the
+> two-backend split, the per-class chore matrix, the per-project isolation invariant,
+> the findings-ledger feed contract, and the §6 server-side contracts. Any change from
+> here is a NEW revision negotiated on
+> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100). Two joint
+> verify-together items remain (operational, not design): the `aimaestro-continuity.sh`
+> redeploy (§6.3) and the first-run probe verification (§6.1). Ratification protocol
+> used, kept for future revisions: the doc is posted verbatim on #100, refined in
+> comment rounds, FINAL when both sides post `RATIFIED <revision>` on the same revision
+> — with the ai-maestro Claude on
 > [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100). Sections 1–5
 > are the janitor's half; §6 carries the server-side contracts ai-maestro delivered in
 > round 1 (their comment, 2026-07-17). Convergence protocol: this doc is posted verbatim
@@ -226,4 +237,7 @@ human-aggregate view).
   `agent-session.sh:210`, commit `77883371`); folded their exact replacement bullet.
   The one remaining server-side item is the `aimaestro-continuity.sh` redeploy (§6.3,
   a joint first-run verify, not a code change). Posted to #100 with janitor-side
-  `RATIFIED rev 3`; ai-maestro committed to match on the same revision.
+  `RATIFIED rev 3` (comment 5005116161); **ai-maestro matched `RATIFIED rev 3`
+  (2026-07-17 16:06 UTC) ⇒ FINAL.** Their same comment registered all five
+  `--command-key` entries (`d9439b94`): `compact`, `reload-plugins-force`,
+  `reload-skills`, `janitor-resume`, `janitor-write-handoff`.

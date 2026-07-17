@@ -1,9 +1,9 @@
 ---
 trdd-id: FENWWB4E
 title: Per-project findings ledger — the traceable per-project index + concise session-start surfacing
-column: design
+column: todo
 created: 2026-07-17T16:45:17+0200
-updated: 2026-07-17T17:50:00+0200
+updated: 2026-07-17T18:10:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -63,8 +63,16 @@ clicked `ref` body read-only from the affected project's own store. The line sha
 `{ts,sev,code,src,ref,msg}` (≤200 chars, sanitized) is therefore the FROZEN dashboard
 feed contract from rev 2 on — no shape changes after ratification without a new revision.
 
-**NEXT ACTION:** rev 2 posted with janitor-side `RATIFIED rev 2`; on the matching
-server-side `RATIFIED rev 2` → column `todo` and implement (plan Phase 4).
+**RATIFIED (2026-07-17): `design/ARCHITECTURE.md` rev 3 is FINAL** — both sides posted
+`RATIFIED rev 3` on #100. The ledger line shape `{ts,sev,code,src,ref,msg}` is the
+frozen dashboard feed contract; the server tails only its own registry agents' ledgers.
+
+**NEXT ACTION:** implement (plan Phase 4): `lib/findings_ledger.py::record()` (3 sinks —
+ledger append + own-session drift line + the 4649ZLE0 human-push SEAM, a no-op callable
+until Phase 5 lands notify.py), wire `issue_catalog.raise_issue` through it, SessionStart
+cursor reader (cap ~10 lines + fold, ≤1 KB), `/janitor-findings` command, trim caps,
+isolation tests; then the `window-burn-rate` token-quietness rework (alarms only in the
+culprit project's own sessions; unrelated sessions provably silent).
 
 ## Notes and lessons learned
 
