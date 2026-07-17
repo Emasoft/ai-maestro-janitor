@@ -1,9 +1,9 @@
 ---
 trdd-id: H7NVKSAX
 title: Oauth rotation starved by 20-min bulk chores blocking the daemon loop — background bulk lane
-column: testing
+column: published
 created: 2026-07-17T16:23:14+0200
-updated: 2026-07-17T16:23:14+0200
+updated: 2026-07-17T17:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
@@ -75,8 +75,9 @@ in 3h" and the user had to switch accounts BY HAND (~15:52, live → emanuele.sa
   TRDD-4649ZLE0's human channel when it persists (added there as a derived case). The
   ACL re-grant itself needs the user.
 
-**NEXT ACTION:** ships with v0.50.0 (Phase 0 of the approved redesign plan) → column
-`complete`. Author EHT TRDD-FQXBURNR (F3) before or with the release commit.
+**SHIPPED: v0.50.0 published 2026-07-17** (fix commit `0bbd2ff`, release `103c84a`); the
+running daemon auto-rolls to the fixed code via the release-triggered self-update within
+minutes. EHT TRDD-FQXBURNR (F3) authored, open. F4 routed into TRDD-4649ZLE0.
 
 ## Verification
 

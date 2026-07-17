@@ -1,9 +1,10 @@
 ---
 trdd-id: X92VBFNF
 title: Per-project channeling invariant — no automatic surface carries another project's findings
-column: testing
+column: published
 created: 2026-07-17T15:19:39+0200
-updated: 2026-07-17T15:19:39+0200
+updated: 2026-07-17T17:05:00+0200
+implementation-commits: [41eecae]
 current-owner: claude-ai-maestro-janitor
 task-type: security
 scope: project
@@ -58,7 +59,8 @@ flag if it should be redacted to "another project (see /janitor-token-attributio
 another session). ai-maestro notified on janitor#100 — the invariant binds the server's
 daemon-function equally (route findings only to the affected agent; no broadcast).
 
-**NEXT ACTION:** ships with v0.50.0 (already-built release train); then column → complete.
+**SHIPPED: v0.50.0 published 2026-07-17** (commit `41eecae`, release `103c84a`). The
+window-burn-rate borderline stays scheduled for the plan's Phase 4 (token-quietness rework).
 
 ## Notes and lessons learned
 
