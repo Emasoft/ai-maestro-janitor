@@ -238,6 +238,28 @@ def read_floor(state_dir: Path) -> tuple[int | None, int]:
     return (tokens if tokens > 0 else None), ts
 
 
+def floor_needs_learning(state_dir: Path) -> bool:
+    """True iff a compaction has LANDED that no floor measurement has observed yet.
+
+    THE ORDERING CONTRACT (the v0.49.0 bug this exists to fix — TRDD-28XF77X6): callers MUST
+    check this and record the floor BEFORE their action gates (cooldown / user-present /
+    active-waiting), never after. Those gates veto the lossy COMPACT — but the compaction that
+    makes the floor observable stamps every one of them itself (`mark_fired` starts the 600s
+    cooldown, the compaction's auto-resume stamps `last-resume.ts` for 30 min, and a keep-going
+    session never stops "waiting"), so a measurement placed behind them is unreachable in
+    exactly the unattended sessions the proactive trigger targets. Verified live 2026-07-17:
+    a real compaction, three fires and several Stops after it, floor never recorded — the
+    loop-killing gain gate never engaged; only the 350k threshold held. Measuring is a passive
+    read; no gate that exists to protect in-flight work applies to it.
+
+    Two tiny state reads; never raises. False when no compaction ever landed, or once
+    `refresh_floor` has recorded a floor for the newest one.
+    """
+    last_compact = state.read_int_state(state_dir / _LAST_COMPACT_STAMP, 0)
+    floor_ts = read_floor(state_dir)[1]
+    return last_compact > floor_ts
+
+
 def refresh_floor(state_dir: Path, context_tokens: int | None) -> int | None:
     """Learn this session's POST-COMPACTION FLOOR from the live context, and return it.
 

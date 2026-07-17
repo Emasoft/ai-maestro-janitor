@@ -306,6 +306,36 @@ def test_refresh_floor_learns_only_after_a_compaction(tmp_path: Path) -> None:
     assert ccc.refresh_floor(sd, None) == 312_000
 
 
+def test_floor_needs_learning_tracks_unobserved_compactions(tmp_path: Path) -> None:
+    """The cheap pre-gate the call sites check BEFORE their action gates (TRDD-28XF77X6):
+    True exactly while a landed compaction has no floor measurement yet. This is what lets the
+    measurement run through a closed cooldown / resume-recency / keep-going — the v0.49.0 bug
+    was measuring only after those gates, which the compaction itself stamps shut."""
+    import cold_cache_compact as ccc
+
+    sd = tmp_path / "state"
+    sd.mkdir()
+
+    # No compaction ever → nothing to observe.
+    assert ccc.floor_needs_learning(sd) is False
+
+    # A compaction lands → an observation is due, and STAYS due until one succeeds.
+    ccc.mark_compacted(sd, now=1000)
+    assert ccc.floor_needs_learning(sd) is True
+    assert ccc.refresh_floor(sd, None) is None  # unreadable context → not observed yet
+    assert ccc.floor_needs_learning(sd) is True
+
+    # The observation succeeds → nothing pending.
+    assert ccc.refresh_floor(sd, 308_644) == 308_644
+    assert ccc.floor_needs_learning(sd) is False
+
+    # A LATER compaction re-arms it; the earlier floor does not satisfy the new one.
+    ccc.mark_compacted(sd, now=2000)
+    assert ccc.floor_needs_learning(sd) is True
+    assert ccc.refresh_floor(sd, 312_000) == 312_000
+    assert ccc.floor_needs_learning(sd) is False
+
+
 def test_proactive_idle_enabled_requires_master_switch(monkeypatch) -> None:
     """The preventive path is gated by BOTH the master cold-compact switch AND its own knob."""
     import cold_cache_compact as ccc

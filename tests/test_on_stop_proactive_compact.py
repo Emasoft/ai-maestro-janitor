@@ -105,28 +105,38 @@ def test_fires_when_turn_ends_idle_with_a_large_context(harness, monkeypatch: py
 
 
 def test_does_not_loop_after_a_compaction(harness, monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE LOOP GUARD, end-to-end through the hook — the bug the user caught 2026-07-17.
+    """THE LOOP GUARD, end-to-end through the hook, in the REAL post-compaction state.
 
     Real numbers from this repo: a compaction went 343,007 -> 308,644 (only 10%; the base
-    reloads and cannot be compacted away). With a size-only gate the hook would fire, compact,
-    land at 308,644, wait out the cooldown, and fire AGAIN — forever, destroying context each
-    time. Here the compaction is observed, the floor is learned from the very next Stop, and the
-    hook goes silent even though the context is still huge and the user is still away.
+    reloads and cannot be compacted away). And a real compaction closes ALL the action gates
+    with its OWN side effects: the compact that caused it stamped the cooldown (mark_fired)
+    and its auto-resume stamped last-resume.ts (30-min recency). The original version of this
+    test stamped only mark_compacted — a state production can never be in — which is exactly
+    how the v0.49.0 bug (floor learning placed BEHIND those gates → unreachable) passed the
+    suite while the floor stayed unlearned live (TRDD-28XF77X6).
     """
     hook = _load_hook()
     import time as _t
 
     sd = harness.state.state_dir()
-    # A compaction just happened, and the context it left behind is the floor.
-    harness.ccc.mark_compacted(sd, now=int(_t.time()))
+    now = int(_t.time())
+    # The REAL state seconds after a compaction lands:
+    harness.ccc.mark_fired(sd, now=now)  # the compact that caused it started the cooldown
+    harness.ccc.mark_compacted(sd, now=now)  # the compaction landed
+    (sd / "last-resume.ts").write_text(str(now), encoding="utf-8")  # its auto-resume stamped
     _set(harness, monkeypatch, present=False, ctx=308_644)
 
+    # First Stop after the compaction: every action gate is closed by the compaction's own
+    # side effects — yet the floor MUST be learned. Measuring is an observation, not an action.
     assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
-    assert harness.spawned == [], "compacting at the post-compaction floor reclaims nothing"
-    assert harness.ccc.read_floor(sd)[0] == 308_644, "the floor must be learned from this Stop"
+    assert harness.spawned == [], "the compact's own cooldown/resume stamps must veto a re-compact"
+    assert harness.ccc.read_floor(sd)[0] == 308_644, "the floor must be learned THROUGH the closed gates"
 
-    # The cooldown expiring must NOT resurrect it — the cooldown only defers a loop, the floor
-    # ends it. Even the pre-compact size that legitimately fired once is now silent.
+    # Time passes: cooldown + resume recency expire. The floor — not the gates — is now the only
+    # thing standing between this hook and the infinite loop. Even the pre-compact size that
+    # legitimately fired once is silent (34k of reclaimable context < the 150k min gain).
+    harness.ccc.mark_fired(sd, now=now - 3_600)
+    (sd / "last-resume.ts").write_text(str(now - 3_600), encoding="utf-8")
     _set(harness, monkeypatch, present=False, ctx=343_007)
     assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
     assert harness.spawned == [], "34k of reclaimable context is not worth a lossy compaction"
@@ -135,6 +145,27 @@ def test_does_not_loop_after_a_compaction(harness, monkeypatch: pytest.MonkeyPat
     _set(harness, monkeypatch, present=False, ctx=700_000)
     assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
     assert len(harness.spawned) == 1, "a session that grows large again still gets its compaction"
+
+
+def test_floor_learned_even_when_every_action_gate_is_closed(harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE v0.49.0 REGRESSION (TRDD-28XF77X6), strongest form: user PRESENT + keep-going ON +
+    cooldown ACTIVE + resume recency HELD. Every action gate vetoes the compact — and none of
+    them may block the measurement. A keep-going session (the prime unattended target) holds
+    active-waiting TRUE forever, so a floor measured behind that gate would never be measured."""
+    hook = _load_hook()
+    import time as _t
+
+    sd = harness.state.state_dir()
+    now = int(_t.time())
+    harness.ccc.mark_fired(sd, now=now)
+    harness.ccc.mark_compacted(sd, now=now)
+    (sd / "last-resume.ts").write_text(str(now), encoding="utf-8")
+    (sd / "keep-going").write_text("", encoding="utf-8")
+    _set(harness, monkeypatch, present=True, ctx=312_000)
+
+    assert _run(hook, {"transcript_path": "/tmp/fake.jsonl"}, monkeypatch) == 0
+    assert harness.spawned == [], "every action gate is closed — no compact may fire"
+    assert harness.ccc.read_floor(sd)[0] == 312_000, "the measurement must run regardless"
 
 
 def test_silent_during_interactive_work(harness, monkeypatch: pytest.MonkeyPatch) -> None:

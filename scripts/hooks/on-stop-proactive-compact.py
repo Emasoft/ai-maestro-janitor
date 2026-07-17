@@ -74,24 +74,45 @@ def main() -> int:
         state.init_state()
         sd = state.state_dir()
         now = int(time.time())
-        if not cold_cache_compact.proactive_idle_enabled() or cold_cache_compact.in_cooldown(sd, now=now):
+        if not cold_cache_compact.proactive_idle_enabled():
             return 0
-        # Cheap stat-only gates first — skip the transcript read entirely during
-        # interactive work (the overwhelmingly common Stop).
+
+        def _resolve_ctx() -> int | None:
+            c = cold_cache_compact.context_tokens_for(transcript_path)
+            if c is None:
+                c = cold_cache_compact.context_tokens_for(
+                    cold_cache_compact.newest_transcript(state.project_root())
+                )
+            return c
+
+        # LEARN THE FLOOR FIRST — observation BEFORE the action gates (TRDD-28XF77X6). Stop is
+        # the first moment after a compaction at which the resulting context size is observable
+        # at all (PostCompact is too early — the compacted size only exists once a turn has run
+        # against it). And the measurement MUST sit above the gates below: the compaction that
+        # makes the floor observable stamps every one of them itself (mark_fired starts the
+        # cooldown, its auto-resume stamps last-resume.ts, keep-going sessions never idle), so
+        # in v0.49.0 — where this sat behind them — the floor was never learned in exactly the
+        # unattended sessions this hook targets, and the loop-killing gain gate never engaged.
+        # Cost on the common Stop: two tiny state reads; the transcript is read here only while
+        # a compaction is actually unmeasured (once per compaction).
+        ctx: int | None = None
+        if cold_cache_compact.floor_needs_learning(sd):
+            ctx = _resolve_ctx()
+            cold_cache_compact.refresh_floor(sd, ctx)
+
+        # ACTION gates — they veto the lossy compact, never the measurement above. Cheap
+        # stat-only gates first: skip the transcript read entirely during interactive work
+        # (the overwhelmingly common Stop).
+        if cold_cache_compact.in_cooldown(sd, now=now):
+            return 0
         if user_intent.user_is_present(now=now):
             return 0
         if _active_waiting(sd, now):
             return 0
 
-        ctx = cold_cache_compact.context_tokens_for(transcript_path)
         if ctx is None:
-            ctx = cold_cache_compact.context_tokens_for(
-                cold_cache_compact.newest_transcript(state.project_root())
-            )
-        # Stop is the RIGHT place to learn the floor: it is the first moment after a compaction
-        # at which the resulting context size is observable at all (the post-compact size only
-        # exists once a turn has run against it — PostCompact itself is too early to see it).
-        floor = cold_cache_compact.refresh_floor(sd, ctx)
+            ctx = _resolve_ctx()
+        floor = cold_cache_compact.read_floor(sd)[0]
         if not cold_cache_compact.should_compact_proactively_idle(
             ctx,
             user_present=False,

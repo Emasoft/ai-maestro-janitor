@@ -322,3 +322,24 @@ def test_proactive_idle_respects_opt_out(iso, monkeypatch: pytest.MonkeyPatch) -
     calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
     _, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
     assert ret is False and calls == []
+
+
+def test_proactive_idle_learns_floor_through_its_own_side_effects(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE v0.49.0 REGRESSION (TRDD-28XF77X6), heartbeat side: the compact this phase fires
+    stamps the cooldown itself, and the compaction's auto-resume holds active-waiting for
+    30 min — so a floor measurement placed behind those gates never ran, and the loop-killing
+    gain gate stayed inert in production. The measurement must run on the very next fire,
+    through the closed gates; the compact ACTION must still be vetoed by them."""
+    d, state, ccc = iso.dispatch, iso.state, iso.ccc
+    sd = state.state_dir()
+    now = int(time.time())
+    ccc.mark_fired(sd, now=now)  # the compact this phase fired started the cooldown…
+    ccc.mark_compacted(sd, now=now)  # …the compaction landed…
+    _patch_idle(monkeypatch, iso, present=False, active=True)  # …and its auto-resume is pending
+    _set_ctx(monkeypatch, iso, 312_000)
+    calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
+
+    out, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is False and calls == [], "cooldown + active-waiting must veto the compact"
+    assert out == ""
+    assert ccc.read_floor(sd)[0] == 312_000, "but the floor must still be learned on this fire"

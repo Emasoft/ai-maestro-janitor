@@ -943,7 +943,10 @@ def _phase_proactive_idle_compact() -> bool:
     compaction went 343,007 -> 308,644, and 308,644 is ABOVE the 270,000 threshold — so the size
     gate NEVER closed and this phase would have re-fired every cooldown, forever, destroying
     context each time. The cooldown only defers a loop; it cannot end one. See
-    cold_cache_compact.refresh_floor.
+    cold_cache_compact.refresh_floor. The floor MEASUREMENT runs BEFORE this phase's action
+    gates (cold_cache_compact.floor_needs_learning): the compaction stamps those gates itself
+    (cooldown + resume recency + keep-going), so a measurement behind them never runs and the
+    floor gate stays inert — the v0.49.0 bug, TRDD-28XF77X6.
 
     Placed BEFORE the maintenance early-return in main() ON PURPOSE: a long unattended
     maintenance session is the PRIME target — it is exactly the one that sits idle for hours and
@@ -957,16 +960,34 @@ def _phase_proactive_idle_compact() -> bool:
 
         sd = state.state_dir()
         now = int(time.time())
-        if not cold_cache_compact.proactive_idle_enabled() or cold_cache_compact.in_cooldown(sd, now=now):
+        if not cold_cache_compact.proactive_idle_enabled():
             return False
-        # Cheap gates (no transcript I/O) first: presence + active-waiting are stat-only.
+        # LEARN THE FLOOR FIRST — observation BEFORE the action gates (TRDD-28XF77X6). The
+        # compaction that makes the floor observable stamps every gate below itself
+        # (mark_fired starts the cooldown, its auto-resume stamps last-resume.ts, keep-going
+        # sessions never idle), so in v0.49.0 — where refresh_floor sat behind them — the
+        # floor was never learned in exactly the unattended sessions this phase targets, and
+        # the loop-killing gain gate never engaged. The transcript is read here only while a
+        # compaction is actually unmeasured (once per compaction).
+        ctx = None
+        if cold_cache_compact.floor_needs_learning(sd):
+            ctx = cold_cache_compact.context_tokens_for(
+                cold_cache_compact.newest_transcript(state.project_root())
+            )
+            cold_cache_compact.refresh_floor(sd, ctx)
+        # ACTION gates — they veto the lossy compact, never the measurement above. Cheap
+        # gates (no transcript I/O) first: presence + active-waiting are stat-only.
+        if cold_cache_compact.in_cooldown(sd, now=now):
+            return False
         present = user_intent.user_is_present(now=now)
         active = _cadence_active_waiting(sd, now)
         if present or active:
             return False
-        transcript = cold_cache_compact.newest_transcript(state.project_root())
-        ctx = cold_cache_compact.context_tokens_for(transcript)
-        floor = cold_cache_compact.refresh_floor(sd, ctx)
+        if ctx is None:
+            ctx = cold_cache_compact.context_tokens_for(
+                cold_cache_compact.newest_transcript(state.project_root())
+            )
+        floor = cold_cache_compact.read_floor(sd)[0]
         if not cold_cache_compact.should_compact_proactively_idle(
             ctx,
             user_present=present,
