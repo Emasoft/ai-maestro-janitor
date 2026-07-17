@@ -8,7 +8,7 @@ current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
-related-trdd: [PZLVT2RN, 157OH2D7]
+related-trdd: [PZLVT2RN, 157OH2D7, FENWWB4E, H7NVKSAX]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
@@ -29,8 +29,9 @@ human channel is now the ONLY legitimate route for unattended projects (cross-su
 other projects' sessions is banned: wrong skills, wrong budget, forbidden cross-repo action,
 data exfiltration into weaker-protected projects).
 
-**NEXT ACTION:** implement after v0.50.0 ships (kept out of the architecture release
-deliberately — this is its own feature with its own blast radius).
+**NEXT ACTION:** implement in plan Phase 5 (after #100 ratification), as sink 3 of the
+findings-ledger choke point `findings_ledger.record()` (TRDD-FENWWB4E) — one router,
+three sinks (ledger, session line, human push); see `design/ARCHITECTURE.md` §5.
 
 ## Design (staged, zero-config first)
 
