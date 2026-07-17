@@ -12,13 +12,21 @@ window burning ≥ RATIO× that even pace, emits ONE drift line so the main Clau
 is heading for an early rate-limit — the model records per-turn usage but cannot know its
 own subscription baseline; only the janitor can.
 
-When a burn trips, it ALSO attributes the spend across the fleet (`token_history` via the
-shared 30-min cache) and names the top-consuming project + where its spike came from, so
-the advisory points at WHO to throttle — the account util% is aggregate across ~10 parallel
-projects and can't say that on its own.
+When a burn trips, it attributes the spend across the fleet (`token_history` via the
+shared 30-min cache) — and, per the TOKEN-QUIETNESS invariant (`design/ARCHITECTURE.md`
+§3, ratified rev 3; owner directive 2026-07-17: *"unless there is an anomalous burning
+rate or cache miss rate, no report about tokens must be done"*), the alarm surfaces
+ONLY inside the CULPRIT project's own sessions: a session whose project is not the
+attributed top consumer stays SILENT — alarming a Claude about another project's burn
+"makes the models drop their intelligence because of the fret". An UNATTRIBUTABLE trip
+(no project passes the culprit bar) is silent in EVERY session for the same reason —
+the machine-wide view stays behind the explicit `/janitor-token-report --live` /
+`/janitor-token-attribution` commands, and the no-live-session culprit is the
+TRDD-4649ZLE0 human channel's job (plan Phase 5). A surfaced alarm is also indexed in
+the project's own findings ledger (TRDD-FENWWB4E) for traceability.
 
-READ-ONLY + FAIL-OPEN: it never writes, rotates, or mutates any credential, and every step
-is wrapped so a rotator/network failure is a SILENT skip — a detector crash must never break
+READ-ONLY + FAIL-OPEN: it never rotates or mutates any credential, and every step is
+wrapped so a rotator/network failure is a SILENT skip — a detector crash must never break
 the heartbeat. OPT-OUT via CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED=false.
 """
 
@@ -35,6 +43,8 @@ sys.path.insert(0, str(_HERE.parent / "oauth_rotator"))
 
 import agentlens_probe as alp  # noqa: E402  # agentlensPro culprit/cause enrichment (TRDD-90B47EM9)
 import dedupe  # noqa: E402
+import findings_ledger  # noqa: E402  # per-project mailbox for a surfaced alarm (TRDD-FENWWB4E)
+import memory_scopes  # noqa: E402  # project_slug — the SAME slug token_history keys projects by
 import rotator_usage  # noqa: E402  # shared READ-ONLY account-usage gather (drives rotator)
 import state  # noqa: E402
 import token_attribution_cache as tac  # noqa: E402
@@ -113,6 +123,38 @@ def _agentlens_cause_clause() -> str:
         if cause.share is None or cause.share < min_share:
             return ""
         return state.sanitize_for_drift_line(alp.format_cause_clause(cause))
+    except Exception:
+        return ""
+
+
+def _own_project_trip(culprit_slug: str | None, current_slug: str) -> bool:
+    """THE token-quietness gate (ARCHITECTURE.md §3, ratified): may this session surface
+    the tripped burn? PURE. True ONLY when the fleet attribution names THIS project as
+    the culprit. None/"" (unattributable) or another project's slug ⇒ False — silence
+    here; the culprit's own sessions (or, for a session-less culprit, the Phase-5 human
+    channel) carry the alarm."""
+    return bool(culprit_slug) and culprit_slug == current_slug
+
+
+def _culprit_slug(w5_lo: int | None, w7_lo: int | None) -> str | None:
+    """The attributed top-consumer project slug for the LIVE windows, or None on any
+    failure / no project passing the culprit bar. Fail-open — an attribution failure
+    must not crash the heartbeat (it silences the alarm in this session; the explicit
+    token commands still show the machine-wide view)."""
+    try:
+        now = int(time.time())
+        projects_root = Path.home() / ".claude" / "projects"
+        fleet = tac.get(projects_root, now, w5_lo=w5_lo, w7_lo=w7_lo)
+        return th.culprit(fleet)
+    except Exception:
+        return None
+
+
+def _current_slug() -> str:
+    """THIS session's project slug, in the SAME dashed form `token_history` keys the
+    fleet attribution by (`~/.claude/projects/<slug>`)."""
+    try:
+        return memory_scopes.project_slug(str(state.project_root()))
     except Exception:
         return ""
 
@@ -212,6 +254,21 @@ def main() -> int:
         state.rotate_log_if_big("window-burn-rate")
         return 0
 
+    # TOKEN-QUIETNESS GATE (ARCHITECTURE.md §3, ratified rev 3 — owner directive
+    # 2026-07-17): the alarm surfaces ONLY inside the CULPRIT project's own sessions.
+    # Every other session — including EVERY session when the trip is unattributable —
+    # stays silent: a fleet-wide capacity alarm in an unrelated session is exactly the
+    # fret the directive bans. The suppression is LOGGED (not printed) so a human
+    # inspecting the detector log can see the trip was seen and deliberately routed away.
+    culprit = _culprit_slug(w5_lo, w7_lo)
+    if not _own_project_trip(culprit, _current_slug()):
+        state.log_line(
+            "window-burn-rate",
+            f"trip suppressed (token-quietness): culprit={culprit or 'unattributed'} is not this project",
+        )
+        state.rotate_log_if_big("window-burn-rate")
+        return 0
+
     # Prefer agentlensPro's investigate_burn culprit/cause (authoritative OTEL attribution) when
     # present; else the native fleet-scan attribution. ONE attribution, shared by every tripped
     # window. Both run ONLY here (post-trip), so the expensive investigate_burn is never
@@ -226,6 +283,18 @@ def main() -> int:
             # emit_once stored line+clause; if the clause changed but the key already fired
             # today it stays deduped — the burn condition (account+window+day) is the signal.
             print(line)
+            # Index the surfaced alarm in THIS project's findings ledger (TRDD-FENWWB4E)
+            # so it stays traceable after the session ends ("why did we hit the wall on
+            # the 17th?"). ref "-": a burn alarm has no ticket/TRDD body — the line IS
+            # the finding. Own-project by construction (the gate above). The returned
+            # drift line is ignored — `line` was already printed.
+            try:
+                findings_ledger.record(
+                    sev="HIGH", code="WINDOW-BURN", src="window-burn-rate",
+                    msg=trip["line"], ref="-", now=now,
+                )
+            except Exception:
+                pass  # the mailbox must never break the alarm
 
     state.rotate_log_if_big("window-burn-rate")
     return 0

@@ -260,3 +260,85 @@ def test_agentlens_cause_threshold_is_tunable(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_INVESTIGATE_BURN_COMMAND", cmd)
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_WINDOW_BURN_CAUSE_MIN_SHARE", "0.25")
     assert _wbr._agentlens_cause_clause() == ""
+
+
+# --------------------------------------------------------------------------- #
+# TOKEN-QUIETNESS GATE (ARCHITECTURE.md §3, ratified rev 3 — owner directive
+# 2026-07-17): the alarm surfaces ONLY inside the CULPRIT project's own sessions.
+# --------------------------------------------------------------------------- #
+
+
+def test_own_project_trip_gate_is_strict() -> None:
+    """PURE gate table: only an exact culprit==current match surfaces; another project,
+    an unattributable trip (None/''), and an empty current slug all suppress."""
+    me = "-Users-me-Code-proj-a"
+    other = "-Users-me-Code-proj-b"
+    assert _wbr._own_project_trip(me, me) is True
+    assert _wbr._own_project_trip(other, me) is False
+    assert _wbr._own_project_trip(None, me) is False
+    assert _wbr._own_project_trip("", me) is False
+    assert _wbr._own_project_trip(me, "") is False
+
+
+def _drive_main_with_trip(monkeypatch, tmp_path: Path, *, culprit: str | None) -> str:
+    """Run the REAL main() end-to-end with the gather/keychain seams pinned so a trip
+    always fires, attribution names `culprit`, and the current project is tmp's slug.
+    Returns captured stdout. (The rotator/keychain cannot be real in CI; everything
+    downstream of the seams — the gate, dedupe, the ledger sink — runs for real.)"""
+    import contextlib
+    import io
+
+    proj = tmp_path / "proj"
+    (proj / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(proj))
+    for fn in (_wbr.state.project_root, _wbr.state.janitor_root, _wbr.state.state_dir, _wbr.state.log_dir):
+        fn.cache_clear()
+    monkeypatch.setattr(_wbr, "_keychain_opt_in_ok", lambda: True)
+    monkeypatch.setattr(_wbr.rotator_usage, "accounts_usage", lambda: [])
+    tripping = [{"key": "acct-5h", "line": "⚠ acct 5h window 80% at 40% elapsed — 2.0x pace"}]
+    monkeypatch.setattr(_wbr.token_burn, "evaluate_trips", lambda *_a, **_k: tripping)
+    monkeypatch.setattr(_wbr.token_burn, "window_starts", lambda *_a, **_k: (None, None))
+    monkeypatch.setattr(_wbr, "_culprit_slug", lambda *_a, **_k: culprit)
+    monkeypatch.setattr(_wbr, "_agentlens_cause_clause", lambda: "")
+    monkeypatch.setattr(_wbr, "_top_consumer_clause", lambda *_a, **_k: "")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = _wbr.main()
+    assert rc == 0
+    for fn in (_wbr.state.project_root, _wbr.state.janitor_root, _wbr.state.state_dir, _wbr.state.log_dir):
+        fn.cache_clear()
+    return buf.getvalue()
+
+
+def test_unrelated_session_stays_silent_on_a_fleet_trip(monkeypatch, tmp_path: Path) -> None:
+    """THE isolation proof the plan demands: a tripped account window whose culprit is
+    ANOTHER project produces ZERO stdout in this session — no fleet window alarms in
+    unrelated sessions (and no ledger line here either)."""
+    out = _drive_main_with_trip(monkeypatch, tmp_path, culprit="-Users-me-Code-other-project")
+    assert out == ""
+    ledger = tmp_path / "proj" / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    assert not ledger.exists(), "a suppressed alarm must not land in this project's mailbox"
+
+
+def test_unattributable_trip_is_silent_everywhere(monkeypatch, tmp_path: Path) -> None:
+    """No project passes the culprit bar ⇒ silence in every session — machine-level
+    capacity views belong to the explicit commands + the Phase-5 human channel."""
+    assert _drive_main_with_trip(monkeypatch, tmp_path, culprit=None) == ""
+
+
+def test_culprit_project_session_gets_the_alarm_and_the_ledger_line(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The one place the alarm belongs: the culprit's own session prints it AND indexes
+    it in its own findings ledger (TRDD-FENWWB4E) with the frozen line shape."""
+    import json
+
+    sys.path.insert(0, str(_LIB))
+    import memory_scopes  # noqa: PLC0415
+
+    culprit = memory_scopes.project_slug(str(tmp_path / "proj"))
+    out = _drive_main_with_trip(monkeypatch, tmp_path, culprit=culprit)
+    assert "2.0x pace" in out
+    ledger = tmp_path / "proj" / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    entry = json.loads(ledger.read_text(encoding="utf-8").strip())
+    assert entry["code"] == "WINDOW-BURN" and entry["src"] == "window-burn-rate"
