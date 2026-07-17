@@ -532,6 +532,23 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
         state.log_line("session-start", f"memory breadcrumb skipped: {exc}")
 
+    # Findings inbox (TRDD-FENWWB4E, ARCHITECTURE.md §4 — ratified rev 3): surface the
+    # UNREAD entries of THIS project's findings ledger — the per-project mailbox where
+    # the daemon (and past sessions' detectors) indexed findings while no session was
+    # alive. Capped (~10 lines + one fold, ≤ ~1 KB — the owner's context-budget
+    # constraint); the cursor advances on surfacing, so it prints once. Printed BEFORE
+    # the global-stop return on purpose: an unattended project's inbox is exactly what
+    # a session on a stopped machine must still see (like the memory breadcrumb, the
+    # mailbox outlives the heartbeat). Silent on an empty inbox.
+    try:
+        from lib import findings_ledger  # noqa: E402  -- local package, not PyPI
+
+        block = findings_ledger.surface_block(None)
+        if block:
+            print(block)
+    except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
+        state.log_line("session-start", f"findings inbox skipped: {exc}")
+
     stop = _active_global_stop(gs)
     if stop is not None:
         # MAINTENANCE WINS OVER A GLOBAL STOP (TRDD-FPL60EKV): maintenance-mode exists
