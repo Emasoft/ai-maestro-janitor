@@ -1,21 +1,42 @@
 ---
 trdd-id: 6AABK2BG
 title: A stale live-identity beacon blinds proactive rotation after a manual login
-column: dev
+column: published
 created: 2026-07-17T06:41:19+0200
-updated: 2026-07-17T06:41:19+0200
+updated: 2026-07-17T07:02:00+0200
 current-owner: session
 task-type: bugfix
 release-via: publish
 parent-trdd: 7PYTX4E9
-implementation-commits: []
+implementation-commits: [8eed48e, b597355]
+released-in: v0.48.0
 ---
 
 # A stale live-identity beacon blinds proactive rotation after a manual login
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-17
 
-**NEXT ACTION:** implement the mdat-gated beacon refresh (§The fix), then tests → publish.
+**SHIPPED + DEPLOYED in v0.48.0** — the full chain done in the order TRDD-EQJPPZ2L's permanent
+lesson mandates (a repo-only fix is INERT): published v0.48.0 (14 gates green, NIT=0) → updated
+the CACHE 0.47.0 → 0.48.0 → re-staged the L0 daemon closure (`verify_or_restage` found
+`rotator.py` stale and refreshed it) → ran the **cache-deployed** detector: exit 0, silent, and
+`keychain-latch-status` still `clear` (no prompt storm).
+
+**NEXT ACTION:** none — only an observation remains: the next real `/login` should produce a
+`beacon: live account changed A -> B` line in rotator.log within one heartbeat, after which
+`cmd_auto` must name the REAL live account. Rotation at 97% then follows on the existing,
+already-working F2 path. If that line never appears after a manual rotation, re-open here.
+
+**Verified end-to-end against the LIVE system (not inferred):**
+`_primary_last_modified()` → `1784261209.0` = 06:06:49 — byte-exact with the `mdat` read by hand
+from the keychain, proving the parser matches the true wire format. The current beacon (06:39:08)
+is newer → the gate reports "current" → **zero `-w` reads**. During the incident at 06:10 the
+beacon predated that same `mdat`, so this gate would have fired.
+
+**Do NOT "simplify" the gate away.** The non-prompting `mdat` check is not an optimization — it
+is what makes an every-fire cadence prompt-SAFE. Replacing it with a plain per-fire
+`write_live_identity_beacon()` re-creates the ACL prompt flood of [[TRDD-EQJPPZ2L]] /
+[[TRDD-K3WQ7XM9]].
 
 **The symptom (USER, 2026-07-17):** *"i had to rotate the oauth manually again"* — proactive
 rotation never fires, repeatedly, so the user rotates by hand. The USER's standing directive is
