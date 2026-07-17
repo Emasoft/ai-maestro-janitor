@@ -257,7 +257,7 @@ def test_record_returns_false_when_nothing_to_resume(state_mod) -> None:
 def test_push_grace_default(monkeypatch: pytest.MonkeyPatch) -> None:
     hook = _import_hook()
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S", raising=False)
-    assert hook._push_grace_s() == 180
+    assert hook._push_grace_s() == 10
 
 
 def test_push_grace_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,9 +269,9 @@ def test_push_grace_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_push_grace_invalid_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     hook = _import_hook()
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S", "notanint")
-    assert hook._push_grace_s() == 180
+    assert hook._push_grace_s() == 10
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S", "-5")
-    assert hook._push_grace_s() == 180
+    assert hook._push_grace_s() == 10
 
 
 # ---------- _user_recently_active (the attended detector) -----------------

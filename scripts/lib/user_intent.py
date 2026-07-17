@@ -47,17 +47,25 @@ import state  # noqa: E402
 # later — this only has to bridge that gap. Generous, but far short of "the rest of the session".
 INTENT_TTL_S = 600  # 10 minutes
 
-# How long after the user's last keystroke we still consider them PRESENT at the terminal.
+# How long after the user's last PROMPT SUBMIT we still consider them PRESENT at the terminal.
 #
-# The per-pane presence window (user directive 2026-07-16): "if I typed in the pane in the last 5
-# minutes I must be considered present." Before per-pane keying this was biased LONG (30 min)
-# because the breadcrumb was machine-global and a false-absent could clobber a human typing in ANY
-# session; now the gate is scoped to THIS pane (state.terminal_pane_key), so 30 min was pure
-# over-block — it kept an unattended pane gated for a full half-hour after the user's last keystroke
-# HERE, defeating self-trigger. 5 min covers a human who is actively working this pane while letting
-# a pane they walked away from self-trigger promptly. Tunable via env; any value ≤0 coerces back to
-# the default so the gate can never be silently disabled to 0s.
-USER_PRESENT_IDLE_S = 300  # 5 minutes
+# NOTE the signal is SUBMIT-based, not per-keystroke: the breadcrumb is stamped only by the
+# UserPromptSubmit hook (state.bump_user_presence), so "typed in the last N seconds" really means
+# "submitted a prompt in the last N seconds" — a user composing a long follow-up they have NOT yet
+# submitted reads as ABSENT once the window elapses. That is the risk a small window trades against
+# faster resume, and it is why the window can never coerce to 0s (below).
+#
+# The window shrank 5 min → 10 s (owner directive 2026-07-17): a compacted session the user was
+# WATCHING sat visibly frozen because the 5-min per-pane window (and the post-compact push's 3-min
+# machine-global grace) suppressed the resume injection while the user was nominally "present".
+# The owner's rule, verbatim: "reduce it to the last 10 seconds — so it will not catch the user
+# typing, but if the user did not type in the last 10 seconds, inject the command." 10 s is short
+# enough that a walked-away pane resumes almost immediately, and just long enough not to land on a
+# submit the user made a moment ago. Per-pane keying (user directive 2026-07-16) still holds: the
+# gate reads THIS pane's own breadcrumb, so activity in another session never blocks this pane.
+# Tunable via CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S; any value ≤0 coerces back to the
+# default so the gate can never be silently disabled to a 0-second window.
+USER_PRESENT_IDLE_S = 10  # 10 seconds (owner directive 2026-07-17)
 
 # The verbs whose authority we track. Keyed by verb → the slash-commands that mean it.
 _VERB_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -230,11 +238,11 @@ def user_is_present(
 
 
 def _resolve_idle_s(env: Mapping[str, str] | None) -> int:
-    """The presence window in seconds — the 5-min default, overridable via env.
+    """The presence window in seconds — the 10-second default, overridable via env.
 
     ``CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S`` tunes it; a non-int or a value ≤0
     coerces back to the default, so the gate can never be silently disabled to a 0-second
-    window (which would let a self-trigger clobber a human who typed a moment ago)."""
+    window (which would let a self-trigger clobber a human who submitted a moment ago)."""
     e = os.environ if env is None else env
     raw = e.get("CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S")
     if raw is None:
@@ -258,7 +266,7 @@ def injection_allowed(
 
     The rule, in one line: **inject only when the user is away FROM THIS PANE, or when they asked.**
 
-    Presence is per-pane and the window is 5 min (user directive 2026-07-16); see
+    Presence is per-pane and the window is 10 s (owner directive 2026-07-17); see
     `user_is_present`. A fresh intent token is CONSUMED on success, so one request buys one
     injection.
     """

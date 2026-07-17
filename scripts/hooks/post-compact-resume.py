@@ -250,7 +250,12 @@ def _record_resume_directive(state) -> bool:  # noqa: ANN001 - local module type
 # the durable fallback — headless / non-automatable panes just fall back to it.
 _PUSH_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED"
 _PUSH_GRACE_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S"
-_PUSH_GRACE_DEFAULT_S = 180
+# Attended-grace shrank 3 min → 10 s (owner directive 2026-07-17): a compacted session the user was
+# WATCHING sat visibly frozen because this grace (machine-global, submit-based) suppressed the
+# resume push while the user was nominally "recently active". Matched to the per-pane injection gate
+# (user_intent.USER_PRESENT_IDLE_S = 10) so both halves of the resume path use the same 10 s window:
+# push if no prompt was submitted in the last 10 s; otherwise the cron path still resumes.
+_PUSH_GRACE_DEFAULT_S = 10
 
 
 def _push_grace_s() -> int:
