@@ -181,10 +181,21 @@ def test_enabled_fresh_low_silent_below_suggest(tmp_path: Path) -> None:
 def test_enabled_high_injects_suggestion(tmp_path: Path) -> None:
     p = tmp_path / "proj"
     p.mkdir()
-    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 70, "tokens": 700_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 82, "tokens": 820_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
     ctx = _ctx(proc)
-    assert ctx is not None and "70%" in ctx
+    assert ctx is not None and "80%" in ctx  # the advisory renders the 10-point BAND label
     assert "/janitor-compact-context" in ctx
+
+
+def test_mid_band_is_silent_by_default(tmp_path: Path) -> None:
+    """Token-quietness audit (ARCHITECTURE.md §3, 2026-07-17): 70% is below the new
+    default runway band (80) — the harness's own near-full warning covers the mid band,
+    so the janitor stays silent there unless the user lowers SUGGEST_PCT."""
+    p = tmp_path / "proj"
+    p.mkdir()
+    proc = _run({"session_id": "s1"}, enabled=True, snapshot={"pct": 70, "tokens": 700_000, "window": 1_000_000, "ts": int(time.time())}, project=p)
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "", "mid-band capacity chatter duplicates the harness warning"
 
 
 def test_enabled_missing_snapshot_silent(tmp_path: Path) -> None:
@@ -232,12 +243,20 @@ def _snap(pct: int) -> dict:
     return {"pct": pct, "tokens": pct * 10_000, "window": 1_000_000, "ts": int(time.time())}
 
 
+# The latch tests below pin the pre-audit 60% threshold explicitly: they exercise the
+# BAND/LATCH machinery (which is threshold-relative), not the default threshold — the
+# token-quietness audit raised that default to 80 (see
+# test_mid_band_is_silent_by_default), and without this pin their 65/67/75% snapshots
+# would fall below the threshold and pass vacuously without touching the latch.
+_BAND60 = {"CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT": "60"}
+
+
 def test_advisory_is_injected_once_per_band_not_on_every_tool_call(tmp_path: Path) -> None:
     """The >=60% advisory is announced ONCE per session per 10-point band; later tool calls
     in the same band inject NOTHING (the fix for the #1 machine-wide cache break)."""
     p = tmp_path / "proj"
     p.mkdir()
-    seen = [_ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p)) for _ in range(5)]
+    seen = [_ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) for _ in range(5)]
     assert seen[0] is not None, "the first crossing must still warn the model"
     assert all(x is None for x in seen[1:]), (
         f"tool calls 2..5 in the SAME band must inject nothing; got {seen[1:]!r}. "
@@ -249,9 +268,9 @@ def test_a_higher_band_re_announces(tmp_path: Path) -> None:
     """An escalating session still gets an escalating nudge: a NEW 10-point band re-warns."""
     p = tmp_path / "proj"
     p.mkdir()
-    first = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p))
-    same = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(67), project=p))
-    higher = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(75), project=p))
+    first = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60))
+    same = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(67), project=p, extra_env=_BAND60))
+    higher = _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(75), project=p, extra_env=_BAND60))
     assert first is not None
     assert same is None, "67% is the same 60-band as 65% — must not re-inject"
     assert higher is not None, "crossing into the 70-band must re-warn before enforcement"
@@ -261,9 +280,9 @@ def test_each_session_gets_its_own_latch(tmp_path: Path) -> None:
     """The latch is keyed by session: a fresh session warns again (it has a fresh transcript)."""
     p = tmp_path / "proj"
     p.mkdir()
-    assert _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p)) is not None
-    assert _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p)) is None
-    assert _ctx(_run({"session_id": "s2"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+    assert _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is not None
+    assert _ctx(_run({"session_id": "s1"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is None
+    assert _ctx(_run({"session_id": "s2"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is not None
 
 
 def test_a_compaction_re_arms_the_advisory_for_the_same_session(tmp_path: Path) -> None:
@@ -279,12 +298,12 @@ def test_a_compaction_re_arms_the_advisory_for_the_same_session(tmp_path: Path) 
     p = tmp_path / "proj"
     p.mkdir()
     s = {"session_id": "s1"}
-    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p)) is not None, "first climb warns"
-    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p)) is None, "same band stays silent"
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is not None, "first climb warns"
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is None, "same band stays silent"
     # A compaction lands: context falls well below the 60% suggest threshold.
-    assert _ctx(_run(s, enabled=True, snapshot=_snap(20), project=p)) is None, "below threshold: silent"
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(20), project=p, extra_env=_BAND60)) is None, "below threshold: silent"
     # The SAME session climbs again — it must be warned again, not silently sail into the cap.
-    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p)) is not None, (
+    assert _ctx(_run(s, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is not None, (
         "after a compaction the SAME session must be warned again on the next climb — "
         "otherwise every compaction after the first happens unannounced"
     )
@@ -296,14 +315,14 @@ def test_dropping_below_threshold_does_not_re_arm_other_sessions(tmp_path: Path)
     announced."""
     p = tmp_path / "proj"
     p.mkdir()
-    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(65), project=p)) is not None
-    assert _ctx(_run({"session_id": "b"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is not None
+    assert _ctx(_run({"session_id": "b"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is not None
     # Session A compacts (drops below threshold) → releases A's claims only.
-    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(20), project=p)) is None
-    assert _ctx(_run({"session_id": "b"}, enabled=True, snapshot=_snap(65), project=p)) is None, (
+    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(20), project=p, extra_env=_BAND60)) is None
+    assert _ctx(_run({"session_id": "b"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is None, (
         "session B never compacted — its 60-band claim must still hold"
     )
-    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(65), project=p)) is not None
+    assert _ctx(_run({"session_id": "a"}, enabled=True, snapshot=_snap(65), project=p, extra_env=_BAND60)) is not None
 
 
 # ---------- issue #79: PREPARE gets a periodic re-nudge while it persists ---------------
@@ -389,7 +408,9 @@ def test_latch_fails_closed_when_it_cannot_be_recorded(tmp_path: Path) -> None:
     state.mkdir(parents=True, exist_ok=True)
     state.chmod(0o500)  # r-x: cannot create the latch file inside
     try:
-        proc = _run({"session_id": "s1"}, enabled=True, snapshot=None, project=p)
+        # _BAND60 keeps the 65% snapshot ABOVE the threshold so this actually exercises
+        # the unwritable-latch path (at the new default 80 it would pass vacuously).
+        proc = _run({"session_id": "s1"}, enabled=True, snapshot=None, project=p, extra_env=_BAND60)
         assert _ctx(proc) is None, "unwritable latch must suppress the advisory, never inject"
     finally:
         state.chmod(0o700)

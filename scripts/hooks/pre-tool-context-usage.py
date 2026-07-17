@@ -11,9 +11,14 @@ regardless of output. The ONLY thing that shrinks per-turn cost is a COMPACTION,
 hook reads the live context occupancy on every tool call and FORCES one near the cap.
 
 Two tiers:
-  * ADVISORY (≥ SUGGEST_PCT, default 60%) — inject the context % + a nudge to run
+  * ADVISORY (≥ SUGGEST_PCT, default 80%) — inject the context % + a nudge to run
     /janitor-compact-context while there's still headroom. additionalContext only, NO
-    permissionDecision, so the tool's normal permission flow is untouched.
+    permissionDecision, so the tool's normal permission flow is untouched. Default 80
+    (was 60) per the token-quietness audit (ARCHITECTURE.md §3, ratified 2026-07-17):
+    the Claude Code harness already warns near-full, so the janitor's routine mid-band
+    (60/70) capacity chatter duplicated it; one advisory band remains directly below
+    enforcement as the compact-at-a-natural-boundary runway. Restore the old behavior
+    with CLAUDE_PLUGIN_OPTION_CONTEXT_COMPACT_SUGGEST_PCT=60.
   * ENFORCEMENT (≥ HARDSTOP_PCT, default 85%, gated by AUTOCOMPACT_ENABLED) — run
     compact_trigger.py (records a resume directive + queues ESC+/compact on the pane)
     and DENY this tool call so the turn ends cleanly for /compact; post-compact-resume
@@ -63,7 +68,9 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 import state  # noqa: E402  # atomic_write — the latch + prepare-renudge state files (issue #79)
 import token_meter  # noqa: E402  # latest_context_size — transcript-based occupancy
 
-_DEFAULT_SUGGEST_PCT = 60
+# 80, not 60 (token-quietness audit 2026-07-17): the harness's own near-full warning
+# covers the mid band; the janitor adds exactly ONE pre-enforcement runway band.
+_DEFAULT_SUGGEST_PCT = 80
 _DEFAULT_HARDSTOP_PCT = 85
 _DEFAULT_WINDOW = 1_000_000
 # Trigger/deny at most once per compaction episode: after a compact fires, the next turn
