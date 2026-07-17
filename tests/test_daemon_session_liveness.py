@@ -29,12 +29,14 @@ import daemon  # type: ignore[import-not-found]  # noqa: E402
 import fleet_scan  # type: ignore[import-not-found]  # noqa: E402
 
 
-def _inst(diagnosis: str, root: str, terminal: dict) -> "fleet_scan.Instance":
+def _inst(
+    diagnosis: str, root: str, terminal: dict, *, trailing: int = 0
+) -> "fleet_scan.Instance":
     """A synthetic Instance — only diagnosis/root/terminal matter to the task."""
     return fleet_scan.Instance(
         pid=1, command="claude", tty="ttys1", project_root=root, terminal=terminal,
         diagnosis=diagnosis, recovery=None, dispatch_age_s=None, active=False,
-        transcript_age_s=None,
+        transcript_age_s=None, trailing_enqueues=trailing,
     )
 
 
@@ -200,3 +202,35 @@ def test_an_unreachable_instance_is_not_re_audited_on_every_beat(tmp_path, monke
 
     outcomes = [r["outcome"] for r in ra.load_records()]
     assert outcomes == ["unreachable"], f"re-audited every beat: {outcomes}"
+
+
+def test_wedged_target_is_never_typed_at_again(tmp_path, monkeypatch) -> None:
+    """TRDD-8DR0X08A F2: queued-but-unexecuted commands at the target's transcript
+    tail prove typed input is NOT executing there — the beat must not inject (the
+    queue would only grow), must spend an attempt (so the budget walks to crash_loop
+    instead of looping), and must route to the human channel instead."""
+    fleet = [_inst("cron_dead", "/p/proj-w", {"tmux_pane": "%5"}, trailing=2)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    pushes: list = []
+    monkeypatch.setattr(
+        daemon.notify, "push", lambda **kw: pushes.append(kw) or "PUSHED"
+    )
+    daemon.task_session_liveness()
+    assert fired == []                                    # never typed at
+    assert "WEDGED" in _log(tmp_path)
+    sf = daemon._recovery_state_path(tmp_path / "recovery", "/p/proj-w")
+    st = json.loads(sf.read_text(encoding="utf-8"))
+    assert st["attempts"] == 1                            # budget consumed, not reset
+    assert st["last_audit"] == "declined_wedged:rearm"
+    assert pushes and pushes[0]["code"] == "FLEET-WEDGED"
+    assert pushes[0]["project"] == "proj-w"
+
+
+def test_wedged_short_circuit_exempts_esc_first_rungs(tmp_path, monkeypatch) -> None:
+    """A FROZEN target's gentle rungs are ESC-first — the ESC itself is the unwedge
+    (the same policy _fire_fleet_stop applies) — so trailing enqueues must NOT block
+    them; only soft enqueue-style injections are pointless against a stuck turn."""
+    fleet = [_inst("frozen", "/p/proj-f", {"tmux_pane": "%6"}, trailing=3)]
+    fired = _setup(monkeypatch, tmp_path, fleet)
+    daemon.task_session_liveness()
+    assert len(fired) == 1                                # still fired: ESC unwedges

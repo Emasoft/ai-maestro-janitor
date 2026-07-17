@@ -1179,6 +1179,42 @@ def task_session_liveness(fleet: list | None = None) -> None:
                 identity=identity, sf=sf, now=now, audit=_audit, decline=_decline,
             )
             continue
+        # TRDD-8DR0X08A F2 — wedged-target short-circuit. Queued-but-never-executed
+        # commands at the transcript tail PROVE typed input is not executing in this
+        # pane (a stuck turn: permission dialog / pending question). A SOFT injection
+        # would only grow that queue — the exact "janitor keeps printing commands"
+        # pile-up the owner reported — so never type again: spend an attempt (the
+        # 4-attempt budget must still walk to crash_loop, not loop) and push ONE
+        # human notification naming the project. notify's content-hash dedupe + the
+        # cooldown keep the push singular. A HARD (ESC-first) rung is exempt: the
+        # ESC is the unwedge (same policy _fire_fleet_stop already applies).
+        if getattr(inst, "trailing_enqueues", 0) >= 1 and not fr.injection_is_hard(
+            inst.diagnosis
+        ):
+            sig = f"declined_wedged:{action}"
+            _write_recovery_state(
+                sf,
+                {"attempts": attempts + 1, "last_ts": now, "identity": identity,
+                 "last_audit": sig},
+            )
+            state.log_line(
+                "daemon",
+                f"session-liveness: {tag} WEDGED ({inst.trailing_enqueues} queued "
+                f"unexecuted command(s)) — would {action}; notifying a human instead",
+            )
+            if st.get("last_audit") != sig:
+                _audit(inst, "declined_wedged", action, None)
+            try:
+                notify.push(
+                    sev="HIGH",
+                    code="FLEET-WEDGED",
+                    project=os.path.basename(inst.project_root),
+                    summary="session wedged mid-turn — typed commands queue but never run",
+                    hint="open that project's pane and answer the pending dialog",
+                )
+            except Exception:  # noqa: BLE001 -- a notify fault must never break the beat
+                pass
+            continue
         # Hard (ESC) only for a frozen target — a live cron_dead/version_mismatch
         # session gets a soft enqueue so its in-flight turn survives (TRDD-0GPQROC1).
         plan = fleet_inject.build_injection(

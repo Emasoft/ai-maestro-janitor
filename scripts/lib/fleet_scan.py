@@ -90,6 +90,10 @@ class Instance:
     dispatch_age_s: int | None
     active: bool
     transcript_age_s: int | None
+    # Typed-but-never-executed commands queued at the newest transcript's tail —
+    # the wedged-session evidence the daemon's recovery beat short-circuits on
+    # (TRDD-8DR0X08A F2). Defaulted so pre-existing constructors stay valid.
+    trailing_enqueues: int = 0
 
 
 def parse_ps_claude(ps_text: str) -> list[tuple[int, str, str]]:
@@ -220,13 +224,94 @@ def _age(path: str, now: int) -> int | None:
         return None
 
 
-def transcript_age(root: str, now: int) -> int | None:
-    """Seconds since this project's NEWEST session transcript was written, or
-    ``None`` if no transcript exists. A fresh transcript = the agent is actively
-    working — the signal that gates every disruptive recovery. The transcript
-    lives outside ``.janitor`` (``~/.claude/projects/<dashed-cwd>/*.jsonl``), so
-    this maps the project root to its harness slug the same way the memory scopes
-    do (the absolute path with every separator replaced by a dash)."""
+def stale_threshold_for(armed_cron: str, base_stale_s: int = STALE_S) -> int:
+    """The staleness window for a session armed at ``armed_cron`` — 3× its heartbeat
+    interval (the same two-missed-fires tolerance ``STALE_S`` encodes for */5), never
+    below ``base_stale_s``. Pure; an empty/unparseable cron keeps the base window
+    (fail to the stricter default, never to a looser one). TRDD-8DR0X08A F4."""
+    minutes = 0
+    first = armed_cron.strip().split()[0] if armed_cron.strip() else ""
+    if first.startswith("*/"):
+        try:
+            minutes = int(first[2:])
+        except ValueError:
+            minutes = 0
+    return max(base_stale_s, 3 * minutes * 60)
+
+
+def _tail_lines(path: str, max_bytes: int = 64 * 1024) -> list[str]:
+    """The last ``max_bytes`` of ``path`` as text lines (first line dropped when the
+    read started mid-line). Empty list on any I/O failure — the caller falls back to
+    mtime semantics, never crashes the scan."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            if size > max_bytes:
+                fh.seek(size - max_bytes)
+            data = fh.read(max_bytes + 1)
+    except OSError:
+        return []
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if len(lines) > 1 and size > max_bytes:
+        lines = lines[1:]  # the first line is almost certainly truncated mid-record
+    return [ln for ln in lines if ln.strip()]
+
+
+def substantive_age_from_tail(
+    tail: list[str], *, now: int, fallback_age: int | None
+) -> tuple[int | None, int]:
+    """``(substantive_age_s, trailing_enqueues)`` for a transcript tail.
+
+    TRDD-8DR0X08A: the fleet guardian's own typed recovery command makes Claude Code
+    append a ``{"type":"queue-operation","operation":"enqueue",...}`` line to the
+    target's transcript — which refreshed the mtime this scanner used as the liveness
+    signal, so every injection diagnosed the target "healthy" on the next beat, reset
+    its attempt budget, and re-injected forever. The liveness signal must therefore be
+    the age of the newest SUBSTANTIVE line (anything that is not queue bookkeeping),
+    never the file mtime alone.
+
+    Pure. Walks the tail backwards: consecutive trailing ``queue-operation`` lines are
+    counted (``operation == "enqueue"`` only — the queued-but-never-executed evidence);
+    the first non-queue line with a parseable ``timestamp`` yields the age. A tail that
+    is ALL queue bookkeeping uses its OLDEST parseable timestamp (a lower bound on the
+    true substantive age — conservative: keeps a wedged session diagnosed stale). No
+    parseable timestamp at all → ``fallback_age`` (the mtime — degrade to the old
+    behavior rather than break the scan on an unknown transcript format)."""
+    import token_history
+
+    trailing_enqueues = 0
+    oldest_seen: int | None = None
+    in_trailing_run = True
+    for raw in reversed(tail):
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            rec = None  # malformed → treat as substantive content of unknown time
+        ts = token_history.parse_ts(rec.get("timestamp", "")) if isinstance(rec, dict) else None
+        if ts is not None:
+            oldest_seen = ts if oldest_seen is None else min(oldest_seen, ts)
+        if isinstance(rec, dict) and rec.get("type") == "queue-operation":
+            if in_trailing_run and rec.get("operation") == "enqueue":
+                trailing_enqueues += 1
+            continue
+        in_trailing_run = False
+        if ts is not None:
+            return max(0, now - ts), trailing_enqueues
+        # substantive but timestamp-less (e.g. malformed) — keep walking for a
+        # parseable neighbor; adjacent lines are seconds apart, close enough.
+    if oldest_seen is not None:
+        return max(0, now - oldest_seen), trailing_enqueues
+    return fallback_age, trailing_enqueues
+
+
+def transcript_activity(root: str, now: int) -> tuple[int | None, int]:
+    """``(substantive_age_s, trailing_enqueues)`` for this project's transcripts —
+    ``(None, 0)`` when none exist. The age is seconds since the newest SUBSTANTIVE
+    transcript line (see ``substantive_age_from_tail``); ``trailing_enqueues`` is how
+    many typed-but-never-executed commands sit queued at the newest transcript's tail
+    — the daemon's wedged-session evidence (TRDD-8DR0X08A F2). The transcript lives
+    outside ``.janitor`` (``~/.claude/projects/<dashed-cwd>/*.jsonl``), so this maps
+    the project root to its harness slug the same way the memory scopes do."""
     # SSOT slug (memory_scopes.project_slug): the harness dashes EVERY non-alphanumeric
     # char, not just "/" — a separators-only replace returned None for any dotted or
     # underscored project path, so the fleet guardian never saw those sessions' activity.
@@ -234,16 +319,36 @@ def transcript_age(root: str, now: int) -> int | None:
 
     slug = memory_scopes.project_slug(os.path.realpath(root))
     tdir = os.path.join(os.path.expanduser("~"), ".claude", "projects", slug)
-    youngest: int | None = None
+    ages: list[tuple[int, str]] = []
     try:
         for name in os.listdir(tdir):
             if name.endswith(".jsonl"):
                 age = _age(os.path.join(tdir, name), now)
-                if age is not None and (youngest is None or age < youngest):
-                    youngest = age
+                if age is not None:
+                    ages.append((age, os.path.join(tdir, name)))
     except OSError:
-        return None
-    return youngest
+        return None, 0
+    if not ages:
+        return None, 0
+    ages.sort()
+    newest_mtime_age, newest_path = ages[0]
+    sub_age, trailing = substantive_age_from_tail(
+        _tail_lines(newest_path), now=now, fallback_age=newest_mtime_age
+    )
+    # Another session's transcript may be substantively younger than the newest file's
+    # substantive age (its mtime is an upper bound on its own substantive age) — take
+    # the minimum so a genuinely-working sibling session keeps the project "alive".
+    candidates = [a for a, _ in ages[1:]]
+    if sub_age is not None:
+        candidates.append(sub_age)
+    return (min(candidates) if candidates else None), trailing
+
+
+def transcript_age(root: str, now: int) -> int | None:
+    """Seconds since this project's newest SUBSTANTIVE transcript line, or ``None``
+    if no transcript exists. Thin wrapper over ``transcript_activity`` kept for the
+    existing callers; see there for the queue-operation exclusion (TRDD-8DR0X08A)."""
+    return transcript_activity(root, now)[0]
 
 
 def sweep_stale_rate_limit(root: str, *, now: int, max_age_s: int) -> bool:
@@ -302,7 +407,18 @@ def diagnose_root(
     ldir = os.path.join(root, ".janitor", "logs")
     deliberately_unarmed = os.path.isfile(os.path.join(sdir, state.DISARMED_FLAG))
     rate_limited = os.path.isfile(os.path.join(sdir, state.RATE_LIMITED_FLAG))
-    transcript_stale = transcript_age is not None and transcript_age >= stale_s
+    # TRDD-8DR0X08A F4: the dynamic cadence (TRDD-0QQX9H0G) legitimately demotes an
+    # idle session's heartbeat to */15 or */30 — a fixed 15-min staleness window would
+    # flag every such session as cron_dead BETWEEN its own healthy beats. Scale the
+    # window to the cadence the session is actually ARMED at (same 3-missed-beats
+    # tolerance STALE_S encodes for */5), never below the caller's floor.
+    try:
+        with open(os.path.join(sdir, "armed-cadence.cron"), encoding="utf-8") as fh:
+            armed = fh.read()
+    except OSError:
+        armed = ""
+    effective_stale_s = stale_threshold_for(armed, stale_s)
+    transcript_stale = transcript_age is not None and transcript_age >= effective_stale_s
     diagnosis = session_liveness.diagnose_instance(
         deliberately_unarmed=deliberately_unarmed,
         pane_alive=True,  # the caller only diagnoses processes found alive in ps
@@ -466,7 +582,7 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
         root = find_janitor_root(_cwd_of(pid))
         if not root:
             continue
-        tr_age = transcript_age(root, now)
+        tr_age, trailing_enqueues = transcript_activity(root, now)
         active = tr_age is not None and tr_age < ACTIVE_FRESH_S
         if sweep_stale_rate_limit_s is not None and sweep_stale_rate_limit(
             root, now=now, max_age_s=sweep_stale_rate_limit_s
@@ -508,6 +624,7 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
                 dispatch_age_s=dispatch_age,
                 active=active,
                 transcript_age_s=tr_age,
+                trailing_enqueues=trailing_enqueues,
             )
         )
     return fleet

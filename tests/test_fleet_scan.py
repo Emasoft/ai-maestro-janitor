@@ -252,3 +252,139 @@ def test_recording_never_raises_on_an_unusable_state_dir(monkeypatch: "pytest.Mo
     for mod in ("global_state",):
         sys.modules.pop(mod, None)
     fs.record_iterm_automation_state(True)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# TRDD-8DR0X08A — substantive liveness: the guardian's own typed command appends
+# a queue-operation line that refreshed the mtime probe, resetting the attempt
+# budget and re-injecting forever. These pin the fix at every layer.
+# ---------------------------------------------------------------------------
+
+def _iso(epoch: int) -> str:
+    """A transcript-style UTC timestamp ('2026-07-17T16:55:41.797Z' shape)."""
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z"
+    )
+
+
+def _enqueue_line(epoch: int, content: str = "/janitor-arm") -> str:
+    import json as _json
+
+    return _json.dumps(
+        {"type": "queue-operation", "operation": "enqueue",
+         "timestamp": _iso(epoch), "content": content}
+    )
+
+
+def _substantive_line(epoch: int) -> str:
+    import json as _json
+
+    return _json.dumps({"type": "assistant", "timestamp": _iso(epoch), "message": {}})
+
+
+def test_substantive_age_ignores_trailing_enqueues() -> None:
+    """Enqueue bookkeeping must not refresh liveness: the age comes from the newest
+    SUBSTANTIVE line, and the queued commands are counted as wedged evidence."""
+    now = 1_784_300_000
+    tail = [
+        _substantive_line(now - 2000),
+        _enqueue_line(now - 10),
+        _enqueue_line(now - 5),
+    ]
+    age, trailing = fs.substantive_age_from_tail(tail, now=now, fallback_age=5)
+    assert age == 2000
+    assert trailing == 2
+
+
+def test_substantive_age_all_enqueue_tail_stays_stale() -> None:
+    """A tail that is ALL queue bookkeeping uses its OLDEST timestamp — a lower bound
+    on the true substantive age — so a wedged session keeps diagnosing stale instead
+    of oscillating healthy on every injection."""
+    now = 1_784_300_000
+    tail = [_enqueue_line(now - 3000), _enqueue_line(now - 5)]
+    age, trailing = fs.substantive_age_from_tail(tail, now=now, fallback_age=5)
+    assert age == 3000
+    assert trailing == 2
+
+
+def test_substantive_age_falls_back_to_mtime_on_unknown_format() -> None:
+    """No parseable timestamp anywhere → degrade to the mtime age, never crash."""
+    age, trailing = fs.substantive_age_from_tail(
+        ["not json at all"], now=1_784_300_000, fallback_age=42
+    )
+    assert age == 42
+    assert trailing == 0
+
+
+def test_substantive_age_counts_only_enqueues_in_trailing_run() -> None:
+    """A non-enqueue queue-operation (e.g. a dequeue/remove) in the trailing run is
+    skipped as bookkeeping but never counted as wedged evidence; a malformed line
+    ends the trailing run without ending the timestamp walk."""
+    now = 1_784_300_000
+    import json as _json
+
+    dequeue = _json.dumps(
+        {"type": "queue-operation", "operation": "remove", "timestamp": _iso(now - 100)}
+    )
+    tail = [_substantive_line(now - 500), dequeue, _enqueue_line(now - 50)]
+    age, trailing = fs.substantive_age_from_tail(tail, now=now, fallback_age=5)
+    assert age == 500
+    assert trailing == 1
+
+    tail2 = [_substantive_line(now - 900), "garbage-line", _enqueue_line(now - 10)]
+    age2, trailing2 = fs.substantive_age_from_tail(tail2, now=now, fallback_age=5)
+    assert age2 == 900
+    assert trailing2 == 1
+
+
+def test_transcript_activity_sees_through_enqueue_freshness(
+    tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
+) -> None:
+    """End-to-end on real files: a transcript whose tail is fresh enqueue lines (fresh
+    mtime!) must report the OLD substantive age plus the queued-command count."""
+    import memory_scopes  # type: ignore[import-not-found]
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    now = 1_784_300_000
+    root = tmp_path / "proj"
+    root.mkdir()
+    slug = memory_scopes.project_slug(os.path.realpath(str(root)))
+    tdir = tmp_path / ".claude" / "projects" / slug
+    tdir.mkdir(parents=True)
+    lines = [
+        _substantive_line(now - 4000),
+        _enqueue_line(now - 20),
+        _enqueue_line(now - 3),
+    ]
+    (tdir / "s1.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    age, trailing = fs.transcript_activity(str(root), now)
+    assert age == 4000
+    assert trailing == 2
+    assert fs.transcript_age(str(root), now) == 4000
+
+
+def test_stale_threshold_scales_with_armed_cadence() -> None:
+    """F4: the staleness window is 3× the armed heartbeat interval, floored at the
+    */5 default — a session legitimately demoted to */30 is not stale at 20 min."""
+    assert fs.stale_threshold_for("*/5 * * * *") == fs.STALE_S
+    assert fs.stale_threshold_for("*/15 * * * *") == 3 * 15 * 60
+    assert fs.stale_threshold_for("*/30 * * * *") == 3 * 30 * 60
+    assert fs.stale_threshold_for("") == fs.STALE_S
+    assert fs.stale_threshold_for("7 * * * *") == fs.STALE_S
+    assert fs.stale_threshold_for("*/bogus * * * *") == fs.STALE_S
+
+
+def test_diagnose_root_respects_slow_armed_cadence(tmp_path: Path) -> None:
+    """A */30-armed idle session is HEALTHY at a 28-min-old transcript (its own next
+    beat has not even fired yet) and cron_dead only past 3× its interval."""
+    root = tmp_path / "p"
+    sdir = root / ".janitor" / "state"
+    sdir.mkdir(parents=True)
+    (sdir / "armed-cadence.cron").write_text("*/30 * * * *\n", encoding="utf-8")
+    now = 1_000_000
+    assert fs.diagnose_root(str(root), now=now, transcript_age=1700)[:2] == ("healthy", None)
+    assert fs.diagnose_root(str(root), now=now, transcript_age=6000)[:2] == (
+        "cron_dead", "rearm",
+    )
