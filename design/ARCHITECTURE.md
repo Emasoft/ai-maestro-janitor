@@ -1,7 +1,6 @@
-# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 2)
+# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 3)
 
-> **Status: revision 2 — janitor-side items from round 1 LANDED; posted for mutual
-> `RATIFIED rev 2`** with the ai-maestro Claude on
+> **Status: revision 3 — posted for mutual `RATIFIED rev 3`** with the ai-maestro Claude on
 > [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100). Sections 1–5
 > are the janitor's half; §6 carries the server-side contracts ai-maestro delivered in
 > round 1 (their comment, 2026-07-17). Convergence protocol: this doc is posted verbatim
@@ -16,6 +15,9 @@
 > ownership bit (janitor code landed: TRDD-N9YAH5E7); §6 rewritten from "TO FILL" to the
 > DELIVERED server contracts (probe file, continuity verbs, session-command verb,
 > dashboard ledger-feed acceptance).
+> **Rev 2 → rev 3 change** (ai-maestro's rev-2 review, one factual fix): §6.4 first
+> bullet corrected — the `session command` CLI verb EXISTS and is DEPLOYED (round 1
+> mis-stated it as missing; retracted on #100 comment 5004880793). No contract change.
 
 ## 1. Two backends, one plugin
 
@@ -186,10 +188,12 @@ sweep is async-chunked/offloaded so it never stalls the per-minute beat.
 ### 6.4 Agent/session command contracts
 
 - The janitor's `fleet_inject.aimaestro_command_argv` builds
-  `aimaestro-agent.sh session command <tmux> --newline -- <cmd>`. The route
-  `POST /api/sessions/[id]/command` EXISTS; the CLI verb does not yet — **ai-maestro
-  adds it** as a thin wrapper over the existing route, so the janitor's argv runs
-  unchanged (no retarget).
+  `aimaestro-agent.sh session command <tmux> --newline -- <cmd>`. **Both the route
+  `POST /api/sessions/[id]/command` AND the CLI verb EXIST and are DEPLOYED**
+  (`agent-session.sh:210` `cmd_session_command`, commit `77883371`) — the janitor's
+  argv runs against the deployed CLI today; **no verb owed.** (Corrects ai-maestro's
+  round-1 §6.4, which mis-stated the verb as missing — retracted on #100, comment
+  5004880793.)
 - Live self-inject channels the deployed `aimaestro-session.sh` already exposes:
   `inject <agent> --command "…" [--no-newline] [--require-idle]`, and
   `queue <agent> --command-key <key> [--when …] [--wake-first]` — the sanctioned
@@ -216,6 +220,10 @@ human-aggregate view).
 - rev 1 — 2026-07-17, authored janitor-side; posted to #100 for round 1.
 - rev 2 — 2026-07-17: folded ai-maestro's round-1 refinement (§2 per-class capability
   gating — janitor code landed as TRDD-N9YAH5E7; §6 filled with their delivered
-  contracts). Posted to #100 with janitor-side `RATIFIED rev 2`; awaiting the matching
-  server-side `RATIFIED rev 2` (their remaining items: the `session command` CLI verb,
-  the continuity-script redeploy — neither changes this doc's contracts).
+  contracts). Posted to #100 with janitor-side `RATIFIED rev 2`.
+- rev 3 — 2026-07-17: ai-maestro's rev-2 review found rev 2 §6.4 still carried their
+  RETRACTED round-1 claim (the `session command` verb "missing" — it is deployed,
+  `agent-session.sh:210`, commit `77883371`); folded their exact replacement bullet.
+  The one remaining server-side item is the `aimaestro-continuity.sh` redeploy (§6.3,
+  a joint first-run verify, not a code change). Posted to #100 with janitor-side
+  `RATIFIED rev 3`; ai-maestro committed to match on the same revision.
