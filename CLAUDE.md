@@ -355,7 +355,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=fe05cd248232 digest=5baaa5b98670 generated=2026-07-17T02:54:14+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=2b6eebd40c12 digest=2c96a31eac6f generated=2026-07-17T09:11:11+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -442,6 +442,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/detectors/memory-scope-leak.py` — memory-scope-leak — keep the PUSHED memory scope free of machine/user-private data.
   · main() -> int
 `scripts/detectors/nested-git-safety.py` — Nested-git-safety detector — Python port of nested-git-safety.sh.
+  · main() -> int
+`scripts/detectors/oauth-beacon-refresh.py` — oauth-beacon-refresh — keep the live-identity beacon fresh so rotation isn't blinded.
   · main() -> int
 `scripts/detectors/oauth-cookie-reminder.py` — OAuth-cookie refresh reminder (opt-in) — surfacing half of the OAuth-rotator
   · main() -> int
@@ -632,8 +634,10 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · min_context_tokens() -> int
   · min_idle_seconds() -> int
   · cooldown_seconds() -> int
+  · proactive_idle_enabled() -> bool — The preventive path is gated by BOTH the master cold-compact switch AND its own knob, so
   · should_compact_on_resume(context_tokens, *, min_context_tokens) -> bool — SessionStart (startup/resume) gate: a resumed context at/above the threshold. PURE.
   · should_compact_after_idle(idle_seconds, context_tokens, *, min_idle_s, min_context_tokens) -> bool — Heartbeat gate for an IN-SESSION gap (rate limit): the cache is cold (idle past the TTL) AND
+  · should_compact_proactively_idle(context_tokens, *, user_present, active_waiting, min_context_tokens) -> bool — PREVENTIVE gate (TRDD-D3PROACT): shrink a large context DURING a cheap warm idle
   · context_tokens_for(transcript_path) -> int | None — Live context occupancy for a transcript, or None when unknown. Thin, never-raising wrapper
   · newest_transcript(project_dir) -> Path | None — The newest `*.jsonl` transcript for a project, or None. For the dispatch path, which gets no
   · in_cooldown(state_dir, *, now) -> bool — True iff a cold-compact was fired within the cooldown window — so a repeat trigger before the
@@ -1205,6 +1209,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · refresh_user_presence_written_at(home, now) -> None — Refresh the breadcrumb's liveness (written_at_epoch) WITHOUT touching input recency.
   · read_int_state(path, default) -> int — Read a non-negative int from a state file.
   · is_truthy_env(name, default) -> bool — Read a yes/no env var with friendly false-spellings.
+  · parse_nonneg_int(s) -> Optional[int] — Parse a non-negative integer from a config-value string, or None.
   · coerce_int(value, default, *, detector_name, var_name) -> int — Coerce a (possibly user-supplied) value to a non-negative int.
   · autofix_mode() -> str — Return the current autofix mode for this project — "on" or "off".
   · autofix_enabled() -> bool — True iff the "act, don't ask" autofix policy is active.
@@ -1449,6 +1454,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · read_live_blob() -> dict | None — The live credential, robust against a corrupt/missing primary: the PRIMARY store ladder
   · write_live_identity_beacon(*, now) -> bool — Stamp the live credential's identity from a context that can READ the primary.
   · read_live_identity_beacon(*, max_age_s, now) -> dict | None — The last session-stamped live identity, or None when absent/garbage/STALE.
+  · beacon_needs_restamp(*, primary_mtime, now) -> bool — Would a re-stamp change anything? PURE — `primary_mtime` is injected (see
+  · refresh_beacon_if_stale(*, now) -> bool — Re-stamp the live-identity beacon ONLY when the credential actually changed.
   · write_live_blob(blob) -> None — Overwrite the live credential with `blob`, cross-platform.
   · fingerprint(blob) -> str
   · file_slot(email, blob, *, via, expires_at, timeout_s) -> bool — Persist a CAPTURED account — the token into the keychain AND its index entry into
