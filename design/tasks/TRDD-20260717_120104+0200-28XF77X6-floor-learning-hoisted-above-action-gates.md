@@ -1,9 +1,9 @@
 ---
 trdd-id: 28XF77X6
 title: Learn the post-compaction floor BEFORE the action gates — the v0.49.0 floor gate never engaged
-column: complete
+column: published
 created: 2026-07-17T12:01:04+0200
-updated: 2026-07-17T12:14:00+0200
+updated: 2026-07-17T13:22:00+0200
 current-owner: session
 task-type: bugfix
 release-via: publish
@@ -15,11 +15,11 @@ implementation-commits: [87c8b56]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-17
 
-**NEXT ACTION:** publish (patch bump) on USER go — the janitor runs from the installed CACHE, so
-this fix is INERT until released + auto-deployed. Code LANDED in `87c8b56`: the new
-`floor_needs_learning` plus the learn-first reorder at both call sites plus the test fixes. All
-4 new/updated regressions were
-proven to FAIL on the pre-fix code (stash → run → restore); 350 related tests + ruff green.
+**NEXT ACTION:** none — SHIPPED in **v0.49.1** (2026-07-17, published via the approved
+PZLVT2RN-plan prerequisite; the daemon auto-deploys the cache within ~5 min). Code in `87c8b56`:
+the new `floor_needs_learning` plus the learn-first reorder at both call sites plus the test
+fixes. All 4 new/updated regressions were proven to FAIL on the pre-fix code (stash → run →
+restore); 350 related tests + ruff green; full 14-gate publish pipeline green.
 
 ## The bug (found LIVE, 2026-07-17, this session — never reported by any test)
 
