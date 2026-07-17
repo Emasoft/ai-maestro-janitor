@@ -91,11 +91,11 @@ the exclusion lifts.
 **Verified 2026-07-17:** `~/ai-maestro/scripts/aimaestro-continuity.sh` EXISTS beside
 `aimaestro-session.sh` (their DXJZM3BW shipped) — the Q3 contract surface `#J` consumes is real.
 
-**NEXT ACTION (one concrete step):** run `scripts/publish.py` (14-gate) → v0.50.0, then post the
-#100 comment (what shipped + the deviation note: no #J local install exercised end-to-end yet; F6
-— the agent-list probe 401s without AID_AUTH so chore-yield ships DORMANT; the auth-free
-capability probe is still OWED by ai-maestro). Docs + repomap + full suite are done; the owner GO
-is on record.
+**NEXT ACTION (one concrete step):** run `scripts/publish.py` (14-gate) → v0.50.0, then post
+the janitor#100 comment (what shipped + the deviation note: no #J local install exercised
+end-to-end yet; F6 — the agent-list probe 401s without AID_AUTH so chore-yield ships DORMANT;
+the auth-free capability probe is still OWED by ai-maestro). Docs + repomap + full suite are
+done; the owner GO is on record.
 
 **Load-bearing facts / gotchas:**
 - The #7 machine-wide singleton is the `daemon.flock`, NOT install scope — so `#N`'s USER→LOCAL
