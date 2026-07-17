@@ -36,6 +36,10 @@ import state  # noqa: E402  -- sibling lib
 
 # Test/override surface. "up" | "down" | "unknown" (or truthy/falsy spellings).
 SERVER_STATE_ENV = "JANITOR_AIMAESTRO_SERVER_STATE"
+# Dedicated override for the singleton-CHORE ownership signal (falls back to the
+# family-A probe when unset) — lets an operator force chore takeover/yield without
+# also flipping the fleet-actuation exclusion.
+SERVER_CHORES_ENV = "JANITOR_AIMAESTRO_SERVER_CHORES"
 # Explicit path override for the continuity CLI (mirrors $AIMAESTRO_CLI for the agent CLI).
 CONTINUITY_CLI_ENV = "JANITOR_AIMAESTRO_CONTINUITY_CLI"
 
@@ -111,6 +115,63 @@ def server_owns_family_a(*, timeout: int = 10) -> bool | None:
     except ValueError:
         return None
     return True
+
+
+# server_owns_singleton_chores() memo: (monotonic_ts, value). The daemon calls this
+# every loop tick (60 s) and the probe spawns a subprocess, so amortize it. 300 s max
+# staleness is fine for chores whose cadences are 60 s (lock-protected) to hours.
+_CHORES_TTL_S = 300
+_chores_cache: tuple[float, bool | None] | None = None
+
+
+def server_owns_singleton_chores(*, timeout: int = 10) -> bool | None:
+    """Does a LIVE ai-maestro server own the machine-wide ONCE-ONLY chores?
+
+    Owner directive (2026-07-17, verbatim intent): "if the ai-maestro server is active,
+    the non-aimaestro-janitor daemon must deactivate all the chores that only need to be
+    executed once (i.e. oauth rotation, upgrade all marketplaces, ~/.claude config
+    monitoring, etc.)" — while the population-split operations (liveness recovery,
+    fleet-stop, reload flags) keep running on BOTH sides, each for its own population.
+
+    Returns True / False / None. Resolution: `$JANITOR_AIMAESTRO_SERVER_CHORES` override
+    first (chores-only knob), else delegate to `server_owns_family_a()` (which has its
+    own override + the reserved #100 canonical-probe slot). Memoized for _CHORES_TTL_S.
+
+    NONE-POLICY — deliberately the OPPOSITE of the fleet-actuation exclusion, and this
+    asymmetry is load-bearing:
+      * Actuation on a harness AGENT: unknown ⇒ HANDS OFF (two actuators on one agent
+        corrupt it; doing nothing is safe).
+      * A machine-wide CHORE: unknown ⇒ RUN IT (nobody doing the chore breaks the
+        machine — tokens lapse, plugins rot; doing it twice is merely wasteful and the
+        cross-process file locks — oauth-rotator-tick.lock, marketplace-op.lock — are
+        the collision backstop, per the #100 lock contract).
+    So a caller yields a chore IFF this returns CONFIDENTLY True. Today (F6: the
+    agent-list probe 401s without AID_AUTH) that means never — the gating ships dormant
+    and goes live the moment the #100 capability probe lands in rung 2 of
+    `server_owns_family_a()`, with no call-site changes.
+    """
+    override = os.environ.get(SERVER_CHORES_ENV, "").strip().lower()
+    if override in _TRUE:
+        return True
+    if override in _FALSE:
+        return False
+    if override == "unknown":
+        return None
+    # The family-A override rung must ALSO bypass the memo — an operator flip (or a
+    # test's monkeypatched env) acts immediately, never up to _CHORES_TTL_S late.
+    fam_override = server_state_override()
+    if fam_override is not None:
+        return fam_override
+
+    global _chores_cache
+    import time  # noqa: PLC0415 -- stdlib, keep module import-light
+
+    now = time.monotonic()
+    if _chores_cache is not None and now - _chores_cache[0] < _CHORES_TTL_S:
+        return _chores_cache[1]
+    value = server_owns_family_a(timeout=timeout)
+    _chores_cache = (now, value)
+    return value
 
 
 def server_state_override() -> bool | None:

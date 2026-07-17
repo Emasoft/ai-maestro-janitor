@@ -1,34 +1,56 @@
 ---
 trdd-id: PZLVT2RN
 title: ai-maestro-tailored janitor (#J) + normal-janitor scope-flip (#N) + shared-codebase two-backend split
-column: design
+column: dev
 created: 2026-07-16T15:44:27+0200
-updated: 2026-07-17T12:40:00+0200
+updated: 2026-07-17T14:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 related-audit: AM8JD9SG
 server-trdds: [KCRMSNL7, H24DF6ZC]
 coordination-issue: janitor#100
-implementation-commits: []
+implementation-commits: [0874122, e613314, 47926b3]
 ---
 
-## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-16
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-17
 
 **What this is.** The janitor-side design TRDD for the owner-directed daemon-migration
 architecture. The plan is ALIGNED with the ai-maestro Claude (janitor#100, comments 13:05 +
 13:42) and the AgentlensPro Claude (AgentlensPro#2/#3). This TRDD captures the janitor half; the
 server half is ai-maestro's `TRDD-KCRMSNL7` (parent) + `TRDD-H24DF6ZC` (R16 token NPT).
 
-**Current state of each component:**
-- **Alignment** — DONE. ai-maestro accepted every point, confirmed the Q3 contract, authored its
-  server-side TRDDs. AgentlensPro locked its CLI contract with CI tests. Nothing moves under
-  KCRMSNL7 on my side.
-- **This TRDD** — authored + committed (`b04dd92`); `column: backburner`. NOT yet in plan mode, NO code.
-- **Ack on janitor#100** — DONE (comment `4992821256`, 2026-07-16): aligned, PZLVT2RN authored,
-  nothing of mine moves under KCRMSNL7.
-- **Implementation** — NOT started, and MUST NOT start before the owner directs (owner process:
-  coordinate → TRDDs → plan mode). This TRDD is the "TRDDs" step.
+**Current state of each component (implementation IN FLIGHT — approved plan at
+`~/.claude/plans/staged-kindling-lynx.md`):**
+- **Phase A (backend SSOT `harness_backend.py`)** — DONE, commit `0874122`.
+- **Phase B (daemon-side harness exclusion: `server_owned` diagnosis, fleet-stop skip,
+  agent-roots cache, `~/agents/` registry-free signal)** — DONE, commit `e613314`.
+- **Phase C (#J thin mode: no daemon spawn, no outside-world writers at SessionStart,
+  `_NON_HARNESS_DETECTORS` roster filter)** — DONE, commit `47926b3`.
+- **Phase B2 (daemon singleton-chore coordination — the SECOND owner directive below)** —
+  code done this session: `server_owns_singleton_chores()` (TTL-memoized, chores-only env
+  override `JANITOR_AIMAESTRO_SERVER_CHORES`), daemon `_SERVER_ABSORBED_TASK_NAMES`
+  {marketplace-refresh, user-plugins-update, version-update, oauth-rotator-supervisor,
+  oauth-rotator-tick} gated in due-loop + maintenance-keepalive + both consume paths +
+  next-due sleep (busy-spin guard), `daemon_watchdog` suppression, tests in
+  `tests/test_chore_coordination.py`.
+- **Phase D (#J delegation + self-trigger hardening: ensure-resume on stop-failure, F9/F10/F2)** — NEXT.
+- **Phase E (docs + v0.50.0 release on owner go + #100 update)** — pending.
+
+**SECOND OWNER DIRECTIVE (2026-07-17, verbatim):** *"it is important that the ai-maestro server
+daemon-function will coordinate with the janitor daemon (non-aimaestro-version) to avoid doing the
+same chores twice. if the ai-maestro server is active, the non-aimaestro-janitor daemon must
+deactivate all the chores that only need to be executed once (i.e. oauth rotation, upgrade all
+marketplaces, ~/.claude config monitoring, etc.), while it must execute the operations that can be
+done by both daemons (like global reload-plugins, global disarm, global rearm, global pause, global
+reload skills, global restart claude, etc.) because those are split between the two types of
+agents: those inside the ai-maestro harness are managed by the server ai-maestro janitor
+daemon-function, while those outside ai-maestro harness are managed by the external janitor daemon
+subprocess."* Implementation = Phase B2 above. Policy: yield a once-only chore IFF the ownership
+signal is CONFIDENTLY True (None/False ⇒ run — a machine with no visible server must never lose
+its chores; the cross-process file locks are the collision backstop). Owner also confirmed
+(mid-turn, same day): the single runtime-branched plugin "simplifies things enormously" — the
+packaging decision stands.
 
 **OWNER DIRECTIVE RECEIVED (2026-07-17, verbatim):** *"coordinate with the ai-maestro claude while
 creating the new version of the plugin (of, if you can, making this same plugin behave differently
@@ -47,9 +69,10 @@ the exclusion lifts.
 **Verified 2026-07-17:** `~/ai-maestro/scripts/aimaestro-continuity.sh` EXISTS beside
 `aimaestro-session.sh` (their DXJZM3BW shipped) — the Q3 contract surface `#J` consumes is real.
 
-**NEXT ACTION (one concrete step):** design the implementation plan (plan mode) for the phased
-build, and settle on janitor#100 the one contract gap the code branches on: the canonical
-"server is up / capability" probe (for BOTH `#J` delegation and `#N` fallback adoption).
+**NEXT ACTION (one concrete step):** commit Phase B2, then Phase D per the approved plan:
+`on-stop-failure.py` fires `aimaestro-continuity.sh ensure-resume <self>` best-effort inside the
+harness (feature-detect via `harness_backend.continuity_cli`), plus the AM8JD9SG folds F9
+(detached ai-maestro self-send), F10 (channel priority), F2 (delivery honesty).
 
 **Load-bearing facts / gotchas:**
 - The #7 machine-wide singleton is the `daemon.flock`, NOT install scope — so `#N`'s USER→LOCAL
@@ -63,8 +86,13 @@ build, and settle on janitor#100 the one contract gap the code branches on: the 
   concurrent) is the single highest-risk seam.
 
 **SUPERSEDED — do NOT carry forward:** an earlier framing had ai-maestro absorbing the WHOLE daemon
-(incl. Family B). REJECTED — only Family A moves. Any note that says "the janitor loses
-plugin-update / OOM / cache-prune / github-config to the server" is wrong.
+(incl. Family B). REJECTED — only Family A moves as OWNERSHIP. Refined by the second directive
+(2026-07-17): the Family-B *code* stays janitor-side forever (the #56 mirror binds), but the
+RUNTIME EXECUTION of the machine-wide once-only chores (marketplace refresh, user-scope plugin
+updates, janitor self-update) DEFERS to the server whenever the server confirms it is active and
+owns them — runtime dedup ("don't do the same chore twice"), not code migration. A note that says
+"the janitor loses plugin-update / OOM / cache-prune / github-config CODE to the server" is still
+wrong; a note that says "the janitor never yields chore execution" is now ALSO wrong.
 
 **Durable artifacts to read before acting:** this STATE block; `janitor#100` comments (the real
 alignment, not a summary); `TRDD-AM8JD9SG` STATE (the 8 audit findings + F11, the janitor-side

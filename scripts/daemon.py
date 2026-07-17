@@ -73,6 +73,7 @@ import fleet_scan  # noqa: E402  # fleet discovery + diagnosis (TRDD-324223a6)
 import fleet_stop  # noqa: E402  # daemon-driven disarm/pause policy (TRDD-ME8V2YJF)
 import github_config_audit as gca  # noqa: E402  # fleet GitHub-config audit (TRDD-157OH2D7)
 import global_state as gs  # noqa: E402
+import harness_backend  # noqa: E402  # server chore-ownership probe (TRDD-PZLVT2RN B2)
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
 import recovery_audit as ra  # noqa: E402  # F3 recovery audit log (TRDD-F3AUDLOG) — fail-open side-channel
@@ -1335,6 +1336,44 @@ def _build_tasks() -> list[Task]:
 # work only — everything else in `tasks` is exactly what maintenance means to skip.
 _MAINTENANCE_KEEPALIVE_TASK_NAMES = frozenset({"oauth-rotator-tick"})
 
+# Machine-wide ONCE-ONLY chores the ai-maestro SERVER absorbs while it is active
+# (TRDD-PZLVT2RN Phase B2; owner directive 2026-07-17: "deactivate all the chores that
+# only need to be executed once ... to avoid doing the same chores twice"). The daemon
+# YIELDS these iff `harness_backend.server_owns_singleton_chores()` is CONFIDENTLY True;
+# on False/None it runs them (a machine with no visible server must never lose its
+# chores — the cross-process file locks remain the collision backstop). Everything NOT
+# in this set keeps running regardless: the population-split ops (session-liveness,
+# fleet-stop — each side actuates only its own population, already enforced
+# per-instance via the `server_owned` diagnosis) and the janitor-only Family-B chores
+# (memory-guard, cache-prune, rules-cleanup, github-config-audit).
+_SERVER_ABSORBED_TASK_NAMES = frozenset(
+    {
+        "marketplace-refresh",
+        "user-plugins-update",
+        "version-update",
+        "oauth-rotator-supervisor",
+        "oauth-rotator-tick",
+    }
+)
+
+
+def _task_yielded_to_server(task_name: str, owned: bool | None) -> bool:
+    """PURE: must the daemon yield `task_name` to the active ai-maestro server?
+
+    True ONLY for a server-absorbed chore AND a CONFIDENT True ownership signal —
+    the None-policy asymmetry documented on `server_owns_singleton_chores` (chores run
+    on unknown; only a confirmed-active server silences them).
+    """
+    return task_name in _SERVER_ABSORBED_TASK_NAMES and owned is True
+
+
+def _yielded_task_names(tasks: list[Task], owned: bool | None) -> set[str]:
+    """The names in `tasks` yielded to the server for this loop iteration. A yielded
+    task must be excluded from BOTH the due-loop AND the next-due sleep computation —
+    a due-but-yielded task left in `time_until_due` would clamp the sleep to ~1 s and
+    busy-spin the daemon for as long as the server stays up."""
+    return {t.name for t in tasks if _task_yielded_to_server(t.name, owned)}
+
 
 def _run_maintenance_keepalive(tasks: list[Task]) -> None:
     """Run ONLY the keepalive-critical task(s) while otherwise idling under MAINTENANCE.
@@ -1350,7 +1389,10 @@ def _run_maintenance_keepalive(tasks: list[Task]) -> None:
     `task_oauth_rotator_tick()` call) so the normal cadence stamp + failure-backoff
     bookkeeping in `Task.run()` still applies.
     """
+    owned = harness_backend.server_owns_singleton_chores()
     for task in tasks:
+        if _task_yielded_to_server(task.name, owned):
+            continue  # the active server owns the keepalive too (Phase B2)
         if task.name in _MAINTENANCE_KEEPALIVE_TASK_NAMES and task.is_due():
             task.run()
 
@@ -1643,6 +1685,7 @@ def main() -> int:
 
     exit_reason = "signal"
     last_keepalive_check = 0.0  # wall-clock stamp gating the keepalive self-heal cadence
+    chores_yielded_last_loop = False  # Phase B2 transition logging (yield ↔ resume), not per-tick spam
     try:
         while _running:
             if gs.kill_switch_present():
@@ -1704,15 +1747,40 @@ def main() -> int:
                     time.sleep(1)
                 continue
 
-            # Release-triggered self-update (TRDD-Y9KM5RCJ): consume any pending request
-            # from a session detector and run the janitor self-update NOW (≤ ~60 s) instead
-            # of on the 6 h version-update beat. Placed AFTER the stop/pause/maintenance
-            # branches above (each of which `break`s or `continue`s, so reaching here means
-            # the daemon is actively working) and BEFORE the due-loop.
-            _consume_version_update_request(tasks)
-            # Universal per-plugin update (TRDD-YMTUPQER): consume USER-scope update requests
-            # the plugin-updates detector enqueued and run them as the single writer (#7).
-            _consume_plugin_update_requests()
+            # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server owns the
+            # machine-wide once-only chores, yield them — running them here too would be
+            # "doing the same chores twice" (owner directive 2026-07-17). Resolved once
+            # per loop iteration (the probe memoizes for 300 s); a server that goes down
+            # stops returning True and the chores resume on their own within the memo TTL.
+            server_owns_chores = harness_backend.server_owns_singleton_chores()
+            yielded = _yielded_task_names(tasks, server_owns_chores)
+            if bool(yielded) != chores_yielded_last_loop:  # log transitions, not every tick
+                chores_yielded_last_loop = bool(yielded)
+                state.log_line(
+                    "daemon",
+                    (
+                        f"chore-coordination: yielding to active ai-maestro server: {sorted(yielded)}"
+                        if yielded
+                        else "chore-coordination: server no longer confirmed active — resuming singleton chores"
+                    ),
+                )
+
+            # The consume paths are cadence-bypass entrances to two absorbed tasks, so each
+            # gates on ITS OWN task being yielded (not on "anything yielded" — that would
+            # over-suppress if the absorbed set ever narrows). While the server owns the
+            # update chores the requests stay QUEUED, not consumed — so the moment the
+            # server drops, the takeover starts from the pending queue.
+            if "version-update" not in yielded:
+                # Release-triggered self-update (TRDD-Y9KM5RCJ): consume any pending request
+                # from a session detector and run the janitor self-update NOW (≤ ~60 s) instead
+                # of on the 6 h version-update beat. Placed AFTER the stop/pause/maintenance
+                # branches above (each of which `break`s or `continue`s, so reaching here means
+                # the daemon is actively working) and BEFORE the due-loop.
+                _consume_version_update_request(tasks)
+            if "user-plugins-update" not in yielded:
+                # Universal per-plugin update (TRDD-YMTUPQER): consume USER-scope update requests
+                # the plugin-updates detector enqueued and run them as the single writer (#7).
+                _consume_plugin_update_requests()
 
             for task in tasks:
                 # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
@@ -1726,6 +1794,8 @@ def main() -> int:
                     or gs.maintenance_mode_present()
                 ):
                     break
+                if task.name in yielded:
+                    continue  # the active server owns this chore (Phase B2)
                 if task.is_due():
                     task.run()
 
@@ -1743,7 +1813,13 @@ def main() -> int:
 
             # Sleep precisely until the next task is due, but in 1-second
             # increments so signals interrupt promptly.
-            next_due = min((t.time_until_due() for t in tasks), default=_LOOP_CEILING_SEC)
+            # Yielded tasks are excluded here too: a due-but-yielded task would report
+            # time_until_due()==0 and clamp the sleep to 1 s — a busy-spin for as long
+            # as the server stays up (Phase B2).
+            next_due = min(
+                (t.time_until_due() for t in tasks if t.name not in yielded),
+                default=_LOOP_CEILING_SEC,
+            )
             sleep_for = max(1, min(_LOOP_CEILING_SEC, next_due))
             for _ in range(sleep_for):
                 if not _running or gs.kill_switch_present():
