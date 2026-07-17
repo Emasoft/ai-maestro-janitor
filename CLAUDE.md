@@ -36,16 +36,35 @@ fallback `AMP_AGENT_ID`/`AID_AUTH`):
   agents.
 - **Actuation exclusion:** the #N daemon's fleet recovery/stop marks server-owned agents
   (`server_owned` diagnosis) and NEVER types into their panes — unknown ⇒ HANDS OFF.
-- **Chore coordination (Phase B2):** the once-only machine chores
-  (`_SERVER_ABSORBED_TASK_NAMES`: marketplace-refresh, user-plugins-update, version-update,
-  oauth-rotator-supervisor, oauth-rotator-tick) YIELD to the server iff
-  `server_owns_singleton_chores()` is CONFIDENTLY **True** — the OPPOSITE None-policy from
-  actuation: a chore RUNS on unknown (file locks are the collision backstop). Dormant today:
-  the probe 401s without AID_AUTH (F6); goes live when ai-maestro lands the auth-free
-  capability probe (janitor#100), with zero call-site changes.
+- **Chore coordination (Phase B2, PER-CLASS since TRDD-N9YAH5E7):** each absorbed chore
+  yields on its OWN capability token (`harness_backend.SERVER_ABSORBED_TASK_CLASS`): the
+  OAuth pair (`oauth-rotator-tick`/`-supervisor`) on `family-a`; the update trio
+  (marketplace-refresh, user-plugins-update, version-update) on `singleton-chores`
+  (never emitted today ⇒ the janitor keeps them). The signal is the auth-free probe file
+  `~/.aimaestro/server-liveness.json` (`{ts,pid,capabilities}`, 30 s beat / 90 s
+  staleness — `server_capabilities()`); the legacy agent-list rung was REMOVED (liveness
+  ≠ capability; it also 401'd, F6). Same None-policy: a chore RUNS on unknown (file
+  locks are the collision backstop); yield needs a CONFIDENT fresh token. Ratified on
+  janitor#100 (`design/ARCHITECTURE.md` rev 3 — the canonical contract doc).
 - **Per-project channeling invariant (TRDD-X92VBFNF, security):** any AUTOMATIC surface
   carries ONLY the firing project's data — never another project's findings, names, or
-  aggregate counts. Fleet-wide views exist only behind explicit human commands.
+  aggregate counts. Fleet-wide views exist only behind explicit human commands. TOKEN
+  TELEMETRY included: `window-burn-rate` alarms only inside the CULPRIT project's own
+  sessions (unattributable trips silent everywhere); the context-advisory default is 80%
+  (one runway band below the 85% enforcement — the CC harness covers the mid band).
+- **Findings pipeline (v0.51.0 — TRDD-FENWWB4E + TRDD-4649ZLE0, ARCHITECTURE.md §4/§5):**
+  `lib/findings_ledger.py::record()` is the ONE choke point, three sinks — the AFFECTED
+  project's `.janitor/state/findings-ledger.ndjsonl` (append-only INDEX, frozen line shape
+  `{ts,sev,code,src,ref,msg}` ≤200 chars — the ai-maestro dashboard feed contract; bodies
+  live in the ticket/TRDD named by `ref`), the firing session's drift line (own project
+  only), and the human push. `issue_catalog.raise_issue` records once per finding birth;
+  SessionStart injects unread entries (cap ~10 + fold, ≤1 KB, cursor-acked);
+  `/janitor-findings` (backed by `scripts/findings_cli.py`) is the on-demand browser.
+  `lib/notify.py` is the DAEMON-ONLY human channel (Tier 1 desktop notification
+  default-on; Tier 2 opt-in webhook `CLAUDE_PLUGIN_OPTION_NOTIFY_WEBHOOK_URL`; gates:
+  sev ≥ HIGH + content-hash dedupe + 24 h cap with one-per-day digest fold) — wired to
+  supervisor alerts, the F4 keychain-degradation probe, task-quarantine entry, and the
+  fleet github-config digest.
 
 ## Scope invariant (HARD RULE — issue #7)
 
@@ -167,7 +186,7 @@ that skips if the prior worker is alive; per-detector cadence + seen-file dedupe
 - *git/workflow hygiene:* pr-reconciler, ci-status (post-push: watch the pushed commit's CI, emit a drift line = notify main Claude on failure — TRDD-AKH7JRAA), github-issues-watch (TRDD-2KQQAEPP — **OFF by default**, one stat of `.janitor/state/issues-watch.flag`; when ON, notifies main Claude of each NEW issue or NEW comment on the project's GitHub tracker and keeps reporting until disabled. Seen-map `{number: updatedAt}` is the dedupe — GitHub bumps `updatedAt` on a comment, so one field catches both; `/janitor-issues-watch-on` seeds a baseline from the currently-open issues so enabling never dumps the backlog into context; issue titles are attacker-controlled and go through `sanitize_for_drift_line`; fail-open on missing/unauthed `gh`), worktree-janitor, dirty-tree, tracked-ignored, nested-git-safety, branch-protection, stale-stash, task-pr-mismatch, stale-task.
 - *TRDD/task:* trdd-drift, trdd-reminder.
 - *cleanup:* screenshot-purge, trashcan-purge, reports-purge (S8 TRDD-LCO8229M — 30d age retention for `reports/**` excluding the screenshot-purge-owned `screenshots/` subtree, `CLAUDE_PLUGIN_OPTION_REPORTS_MAX_AGE_DAYS`; + `.janitor/state/*seen*` line-cap to the newest `CLAUDE_PLUGIN_OPTION_SEEN_FILE_MAX_LINES`=500, so dedupe horizons stop growing unbounded).
-- *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; on a local alarm it ENRICHES (never suppresses) the line with agentlensPro's `get_burn_status` burn-rate + `investigate_burn` cause via the shared `agentlens_probe` lib (config-gated `heartbeat_burn_status_command`/`heartbeat_investigate_burn_command`, fail-open — TRDD-HL8H3XCV); default-on, per-bucket-deduped, 5-min cadence), window-burn-rate (TRDD-OY0W6LX5 — reads each account's live 5h/7d utilization%+reset READ-ONLY via the OAuth rotator, alarms when `burn_ratio = util%/(100×elapsed) ≥ RATIO` (1.5) so a window is heading for an early rate-limit; on a trip names the culprit — PREFERRING agentlensPro's `investigate_burn` OTEL cause (config-gated `heartbeat_investigate_burn_command`, fail-open, `agentlens_probe` — TRDD-90B47EM9), else the native top-consuming project via `token_history.fleet_attribution`/`culprit` (30-min machine-wide cache in the global dir); pure math in `token_burn`, shared gather `rotator_usage`; default-on, min-util floored, fail-open, 15-min cadence; also surfaced by `/janitor-token-attribution` + `token_report --live`).
+- *observability:* token-usage-anomaly (TRDD-EDSFEQ5C — reads `token-meter.jsonl`, learns a ROBUST per-5-min baseline (median+MAD, never mean — the log is heavy-tailed+bursty), alarms on a SUDDEN outlier via `token_baseline.classify_recent`'s `max(p99-floor, robust-z band, median×ratio)` bar; the SLOW pattern signal complementing the FAST per-turn `pre-tool-token-budget` guard; on a local alarm it ENRICHES (never suppresses) the line with agentlensPro's `get_burn_status` burn-rate + `investigate_burn` cause via the shared `agentlens_probe` lib (config-gated `heartbeat_burn_status_command`/`heartbeat_investigate_burn_command`, fail-open — TRDD-HL8H3XCV); default-on, per-bucket-deduped, 5-min cadence), window-burn-rate (TRDD-OY0W6LX5 — reads each account's live 5h/7d utilization%+reset READ-ONLY via the OAuth rotator, alarms when `burn_ratio = util%/(100×elapsed) ≥ RATIO` (1.5) so a window is heading for an early rate-limit; **TOKEN-QUIETNESS (v0.51.0, ARCHITECTURE.md §3):** the alarm surfaces ONLY in the CULPRIT project's own sessions (`_own_project_trip`: fleet attribution slug == this project's slug; unattributable trips silent everywhere, suppression logged) and a surfaced alarm is indexed in the project's findings ledger (`WINDOW-BURN`); enrichment PREFERS agentlensPro's `investigate_burn` OTEL cause (config-gated, fail-open, `agentlens_probe` — TRDD-90B47EM9), else the native attribution via `token_history.fleet_attribution`/`culprit` (30-min machine-wide cache); pure math in `token_burn`, shared gather `rotator_usage`; default-on, min-util floored, fail-open, 15-min cadence; the machine-wide view lives behind `/janitor-token-attribution` + `token_report --live`).
 - *scope drift:* settings-scope-drift, claude-md-scope-drift, cross-scope-reference-drift, subagent-scope-drift, mcp-config-drift.
 - *supply-chain/security:* mcp-rugpull, remote-credentials, supply-chain-fingerprints, typosquat-watcher, provenance-audit, repo-trust-score, package-manager-policy, workflow-security, historical-cache-scan, binary-magic-scanner, ai-context-poisoning, subagent-report, janitor-self-integrity.
 - *updates (some daemon-delegating shims):* marketplace-refresh, plugin-updates, local-plugins-update, project-plugins-update, **user-plugins-update (shim → daemon)**, version-update (shim → daemon).
@@ -203,7 +222,7 @@ STRIPS covert invisible/bidi unicode and REPLACES the payload via CC's
 safeguard; opt out `…POST_MCP_SANITIZER_ENABLED=false`, warn-only
 `…_STRIP=false`),
 `pre-bash-safety`, `pre-tool-pkg-guard`, `pre-tool-context-usage` (DEFAULT-ON
-PreToolUse → context-size runaway guard: ADVISORY nudge ≥60%, ENFORCEMENT
+PreToolUse → context-size runaway guard: ADVISORY nudge ≥80% (was 60 — token-quietness audit: the CC harness covers the mid band), ENFORCEMENT
 (auto-compact + deny the tool call) ≥85%; statusline snapshot or transcript
 fallback; fail-open — TRDD-SMZFJVZ3), `post-compact-resume` (PostCompact → writes
 `resume-after-compact.flag` so the next heartbeat emits `[janitor-resume]
@@ -228,7 +247,7 @@ NOT billed) — into ok/advisory/hard. **DEFAULT-ON** (opt-out
 `…TOKEN_BUDGET_ENFORCE` — a `permissionDecision: deny` of a `Task`/`Agent` spawn at
 the hard tier (subagents are the biggest multiplier). Any threshold 0 disables it. The context-watchdog trio
 (pre-tool-context-usage + post-compact-resume + the `janitor-compact-context`
-skill + `scripts/compact_trigger.py`) is DEFAULT-ON (advisory ≥60%, enforcing
+skill + `scripts/compact_trigger.py`) is DEFAULT-ON (advisory ≥80%, enforcing
 ≥85%; fail-open) via `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`
 (`…CONTEXT_HARDSTOP_PCT`, `…CONTEXT_AUTOCOMPACT_ENABLED`,
 `…CONTEXT_WINDOW_TOKENS`) — TRDD-SMZFJVZ3.
@@ -389,7 +408,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=00e134dc653e digest=8c00708ac0be generated=2026-07-17T16:29:50+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=be471ef4779d digest=c8ddf129e775 generated=2026-07-17T18:43:15+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -563,6 +582,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/dispatcher-stub.py` — ai-maestro-janitor cron dispatcher stub — auto-rolling dispatcher.
   · main() -> int
 `scripts/doctor_classify.py` — Doctor's second-pass workflow classifier — CLI driver.
+  · main() -> int
+`scripts/findings_cli.py` — Backing CLI for /janitor-findings (TRDD-FENWWB4E — ARCHITECTURE.md §4, ratified rev 3).
   · main() -> int
 `scripts/fleet_status.py` — Backing script for /janitor-show-global-status (TRDD-324223a6, Group F2).
   · main() -> int
@@ -748,6 +769,14 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · summarize_fork(gh_json, *, upstream_remote) -> dict — Fork/collaboration summary from `gh repo view --json isFork,parent` + any
   · homebrew_tap_status(repo_name, *, has_formula_dir, tapped, trusted) -> Optional[dict] — If this repo is a Homebrew TAP (name `homebrew-*` or a Formula/ dir), return
   · detect_mcp_servers(configs) -> list[dict] — Flatten MCP-server definitions from parsed config files into a SECRET-SAFE
+`scripts/lib/findings_ledger.py` — Per-project findings ledger — the ONE choke point for finding events (TRDD-FENWWB4E).
+  · state_dir_for(project_dir) -> Path — The janitor state dir of the AFFECTED project. None ⇒ the CURRENT project
+  · ledger_path(project_dir) -> Path
+  · render_line(entry) -> str — One greppable session line for a ledger entry. Values were sanitized at record
+  · record(*, sev, code, src, msg, ref, project_dir, now, notify) -> str | None — THE choke point: record one finding event into the affected project's ledger.
+  · unread_entries(project_dir, *, cap, budget_bytes) -> tuple[list[str], int] — (rendered unread lines, NEWEST first, capped by count AND byte budget;
+  · advance_cursor(project_dir) -> None — Mark everything currently in the ledger as surfaced (the ack). Atomic; never raises.
+  · surface_block(project_dir) -> str — The SessionStart injection: capped unread lines + ONE fold line, then the cursor
 `scripts/lib/fleet_inject.py` — Fleet recovery injector (TRDD-324223a6, GROUP A / A3) — the ACTUATION layer.
   · action_to_command(action) -> str | None — The slash-command a command-typing recovery `action` injects, or None when
   · valid_session_id(session_id) -> bool — True iff `session_id` is a bare iTerm UUID safe to interpolate into an
@@ -869,8 +898,10 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/lib/harness_backend.py` — Harness-backend SSOT (TRDD-PZLVT2RN) — the ONE place that answers "which world am I in?".
   · is_harness_session(env) -> bool — True iff THIS process runs inside an ai-maestro harness agent.
   · backend(env) -> str — The actuation backend for THIS session: "aimaestro" (thin #J) or "standalone" (#N).
+  · server_capabilities(*, now) -> frozenset[str] | None — The LIVE server's advertised capability tokens, or None when there is no fresh claim.
   · server_owns_family_a(*, timeout) -> bool | None — Does a LIVE ai-maestro server own Family-A continuity for this machine's harness agents?
-  · server_owns_singleton_chores(*, timeout) -> bool | None — Does a LIVE ai-maestro server own the machine-wide ONCE-ONLY chores?
+  · server_owns_chore_class(capability) -> bool | None — Does a LIVE ai-maestro server own the chore CLASS gated by `capability`?
+  · server_owns_singleton_chores(*, timeout) -> bool | None — The `singleton-chores` class gate (marketplace-refresh / user-plugins-update /
   · server_state_override() -> bool | None — JUST the `$JANITOR_AIMAESTRO_SERVER_STATE` override rung: True/False when the
   · agent_workdirs(agents) -> list[str] — The registered workingDirectory of every ai-maestro agent, deduped, order-kept.
   · remember_agent_roots(roots) -> None — Persist the last-known harness-agent workdirs (global-state, atomic, best-effort).
@@ -1067,6 +1098,11 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · MemoryTxn.abort(self) -> None — Discard a not-yet-committed transaction. Safe to call any time before
   · resume_pending(scope_root, stale_seconds) -> list[str] — Roll forward / clean every interrupted transaction under `scope_root`.
   · apply_atomic(scope_root, op, source_rel_paths, writes, deletes, verify) -> str — begin → stage `writes`/`deletes` → optional `verify(txn)` → commit, all in
+`scripts/lib/notify.py` — Human-notification channel — DAEMON-ONLY (TRDD-4649ZLE0, ARCHITECTURE.md §5, ratified).
+  · enabled() -> bool
+  · webhook_url() -> str
+  · build_message(*, sev, code, project, summary, hint) -> str — The one-line push body (ARCHITECTURE.md §5 shape): name the project so the human
+  · push(*, sev, code, project, summary, hint, now, runner, opener) -> str — THE gated push. Returns the outcome constant (for the daemon log + tests).
 `scripts/lib/output_formats.py` — Output formats — HMAC-signed scan badge, approval-gate protocol, FP-filters DSL.
   · make_badge(report_id, verdict, scanned_at, key, expiry_days) -> str — Build a signed badge token.
   · verify_badge(badge, key, *, now) -> tuple[bool, str] — Verify a signed badge token.

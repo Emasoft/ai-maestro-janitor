@@ -1,14 +1,15 @@
 ---
 trdd-id: 4649ZLE0
 title: Human-notification channel for daemon findings when no session is alive
-column: todo
+column: testing
 created: 2026-07-17T15:06:36+0200
-updated: 2026-07-17T16:25:00+0200
+updated: 2026-07-17T19:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 severity: high
 related-trdd: [PZLVT2RN, 157OH2D7, FENWWB4E, H7NVKSAX]
+implementation-commits: [fe864d5]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
@@ -29,9 +30,25 @@ human channel is now the ONLY legitimate route for unattended projects (cross-su
 other projects' sessions is banned: wrong skills, wrong budget, forbidden cross-repo action,
 data exfiltration into weaker-protected projects).
 
-**NEXT ACTION:** implement in plan Phase 5 (after #100 ratification), as sink 3 of the
-findings-ledger choke point `findings_ledger.record()` (TRDD-FENWWB4E) — one router,
-three sinks (ledger, session line, human push); see `design/ARCHITECTURE.md` §5.
+**IMPLEMENTED (plan Phase 5, 2026-07-17, commit `fe864d5` — 8 tests green):**
+`scripts/lib/notify.py` (Tier 1 osascript/notify-send default-on; Tier 2 opt-in webhook
+`CLAUDE_PLUGIN_OPTION_NOTIFY_WEBHOOK_URL`; gates: sev ≥ HIGH tunable, content-hash
+dedupe, 24 h cap default 3 with a one-per-day digest fold; injectable runner/opener).
+Daemon wirings: supervisor alert findings; the F4 primary-keychain-UNREADABLE
+degradation (derived case d); task-quarantine entry (case a, fired exactly at the
+threshold); the fleet github-config digest (re-pushes only when `findings_digest`
+changes). Case (b) holds by construction — a chore yielded to the server never runs,
+so the janitor never pushes for it. Case (c) tests: dedupe / severity gate /
+cap+digest / webhook-never-without-URL / sanitized single-line shape all pinned in
+`tests/test_notify.py`.
+
+**Residual (honest):** `findings_ledger.record()`'s `notify` SEAM remains available but
+no caller passes it yet — today no daemon path writes ANOTHER project's ledger (the
+fleet audit is slug-keyed, not workdir-keyed), so the per-project no-live-session push
+via the seam activates when such a producer appears. The three machine-level wirings
+above cover every finding the daemon currently produces.
+
+**NEXT ACTION:** human review; ships in v0.51.0.
 
 ## Design (staged, zero-config first)
 

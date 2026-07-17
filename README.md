@@ -66,8 +66,25 @@ which acts as the daemon for its agents. Outside the harness nothing changes (fu
 as described above). A standalone janitor daemon on the same machine detects
 server-managed agents and leaves them strictly alone, and machine-wide once-only chores
 (marketplace refresh, plugin updates, OAuth keepalive) are coordinated so the two daemons
-never do the same chore twice. All automatic notifications are channeled strictly
+never do the same chore twice — per capability CLASS, driven by the server's auth-free
+liveness probe file (the contract co-ratified with ai-maestro in
+`design/ARCHITECTURE.md`). All automatic notifications are channeled strictly
 per-project: no agent ever receives another project's findings.
+
+### The findings ledger and the human channel (v0.51.0)
+
+Every finding the janitor raises is indexed in the affected project's own
+`.janitor/state/findings-ledger.ndjsonl` — an append-only, capped, per-project mailbox
+(one sanitized JSON line per finding, pointing at the ticket/TRDD that carries the full
+report). The next session in that project sees its unread findings at session start
+(at most ~10 concise lines) and can browse them with `/janitor-findings` (list /
+`show <ref>` / ack). When a finding concerns machinery no session owns — a quarantined
+daemon task, an OAuth-rotator degradation, a fleet repo-config gap — the daemon pushes
+ONE severity-gated, deduplicated, daily-capped notification to the human: a native
+desktop notification by default, plus an optional generic webhook
+(`notify_webhook_url` in the plugin config — one HTTPS POST covers Slack, Telegram,
+Discord, ntfy.sh). Token telemetry follows the same quietness rule: burn-rate alarms
+surface only in the project actually driving the burn.
 
 ## Detectors
 
