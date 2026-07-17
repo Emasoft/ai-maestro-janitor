@@ -1,16 +1,16 @@
 ---
 trdd-id: LU0C5KAR
 title: Binary server-liveness chore switch — server running means ALL absorbed chores are its responsibility
-column: testing
+column: published
 created: 2026-07-17T19:31:40+0200
-updated: 2026-07-17T19:48:00+0200
+updated: 2026-07-17T20:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
 severity: high
 related-trdd: [N9YAH5E7, PZLVT2RN, H7NVKSAX]
 coordination-issue: janitor#100
-implementation-commits: []
+implementation-commits: [76fef0b, 7f279b2]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
@@ -79,11 +79,13 @@ switch; §6.1 "writing the file IS the claim", capabilities informational; §6.2
 conflict class redefined away; ratification-log entry). CLAUDE.md prose + repomap
 regenerated. 101 tests green across the affected suites, ruff clean.
 
-**NEXT ACTION:** ships in v0.52.0 (same train as TRDD-8DR0X08A) → post rev 4 +
-janitor-side `RATIFIED rev 4` on #100 — the server half to ratify: writing a fresh
-probe file now claims ALL absorbed chores (implement them as
-unconditional-while-running; resolve R16-off ⇒ OAuth dark while the server runs, which
-is now by definition a server bug).
+**SHIPPED + POSTED (2026-07-17 evening):** released in v0.52.0 (`7f279b2`, refactor
+`76fef0b`); rev 4 + janitor-side `RATIFIED rev 4` posted on #100
+(issuecomment-5005932763) naming the three server-half items: only write the probe when
+prepared to own ALL absorbed chores; implement them unconditional-while-running; resolve
+R16-off ⇒ OAuth dark while the server runs (now by definition a server bug). AWAITING
+the ai-maestro side's `RATIFIED rev 4` — any follow-up is coordination on #100, not new
+janitor work.
 
 ## Notes and lessons learned
 

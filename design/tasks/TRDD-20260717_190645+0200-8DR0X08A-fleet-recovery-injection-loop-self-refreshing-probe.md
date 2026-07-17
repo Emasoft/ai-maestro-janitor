@@ -1,15 +1,15 @@
 ---
 trdd-id: 8DR0X08A
 title: Fleet-recovery injection loop — the injected keystroke refreshes its own liveness probe, so wedged sessions get typed at forever
-column: testing
+column: published
 created: 2026-07-17T19:06:45+0200
-updated: 2026-07-17T19:25:00+0200
+updated: 2026-07-17T20:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 related-trdd: [324223A6, 56D24C02, 4649ZLE0, ME8V2YJF, 0QQX9H0G]
-implementation-commits: [db9c2f0]
+implementation-commits: [db9c2f0, 7f279b2]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
