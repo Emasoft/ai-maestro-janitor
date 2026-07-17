@@ -2,7 +2,7 @@
 name: janitor-tool-call-cost-law
 description: "why did the re-arm/arm cost so many tokens / is the dynamic cadence actually saving anything or is it wasting more than it saves / how much does one tool call cost / the heartbeat keeps re-arming itself"
 ocd: 2026-07-14
-lmd: 2026-07-14
+lmd: 2026-07-17
 metadata:
   node_type: memory
   type: project
@@ -59,6 +59,12 @@ how often the cron's PERIOD is rewritten, not whether it exists. Disarming to sa
 recurring misdiagnosis and it BACKFIRES (it kills the cache keep-alive and forces full-price
 rebuilds) — see [[reference_heartbeat_token_baseline]], whose `[^1]` records a session that made
 exactly that mistake.
+
+## See also
+
+- [[janitor-compaction-floor-gate]] — this law is WHY the janitor compacts an idle context at
+  all (context size is the cost multiplier); that page owns when compacting is worth it, and
+  the post-compaction FLOOR that caps how much it can ever buy back.
 
 ## Notes and lessons learned
 

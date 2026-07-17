@@ -2,7 +2,7 @@
 name: janitor-hooks-two-import-conventions
 description: "writing a new janitor hook / ModuleNotFoundError: No module named 'state' / my hook dies on import but the detectors work / from lib import X fails at runtime / which sys.path entries does a hook need / why does dispatch.py import differently than the hooks"
 ocd: 2026-07-11
-lmd: 2026-07-11
+lmd: 2026-07-17
 metadata:
   node_type: memory
   type: project
@@ -48,6 +48,12 @@ in the code says which convention a given module tolerates — a module that onl
   safe under BOTH conventions regardless of who loads it.
 - `tests/test_hooks_execute.py` executes every hook as a subprocess and will fail loudly if
   this is ever gotten wrong again — see [[feedback-test-the-entry-point-the-way-the-platform-runs-it]].
+
+## See also
+
+- [[janitor-compaction-floor-gate]] — `on-stop-proactive-compact.py` and its tests sit on this
+  exact fault line: patching bare `state` instead of `lib.state` let a test run the REAL
+  compact_trigger and type `/compact` into the developer's own pane (2026-07-17).
 
 ## Notes and lessons learned
 
