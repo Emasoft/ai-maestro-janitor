@@ -110,8 +110,8 @@ NON-EMPTY change summary → a change was just applied → a restart is needed t
   presence gate from TRDD-T7N67AQP).
 
 **NEXT ACTION:** when the user is back — resolve the 3 open decisions (AskUserQuestion) and check
-ai-maestro#75 for the server answers; then plan + implement (normal-mode first; ai-maestro-mode once
-#75 lands). Do NOT build the fleet-wide auto-restart before the user confirms the disruption.
+ai-maestro#75 for the server answers; then plan + implement (normal-mode first; ai-maestro-mode
+once #75 lands). Do NOT build the fleet-wide auto-restart before the user confirms the disruption.
 
 ## Approval log
 
