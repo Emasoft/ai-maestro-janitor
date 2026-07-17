@@ -11,7 +11,9 @@ metadata:
 
 The janitor's PROACTIVE-idle auto-compact trigger (`cold_cache_compact` +
 `on-stop-proactive-compact.py` + `dispatch._phase_proactive_idle_compact`) and the one gate that
-makes it terminate. Shipped 2026-07-17 (TRDD-D3PROACT; commits `1a69ec6`, `4b2c15c`).
+makes it terminate. Shipped in **v0.49.0** (2026-07-17; TRDD-D3PROACT; the loop fix is `1a69ec6`,
+release-bump `b5c298a`). The buggy loop-prone form was NEVER published — it was caught in the
+pre-publish batch, so no release ever shipped the size-only gate.
 
 ## Governed by
 
