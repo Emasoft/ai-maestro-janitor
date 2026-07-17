@@ -1,14 +1,21 @@
-# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 1)
+# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 2)
 
-> **Status: DRAFT for co-ratification** with the ai-maestro Claude on
-> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100). Sections 1–5 are
-> the janitor's half; ai-maestro contributes the server-side command contracts (§6, theirs
-> to fill) and reviews the chore matrix for conflicts. Convergence protocol: this doc is
-> posted verbatim on #100, refined in comment rounds, and is FINAL when both sides post
+> **Status: revision 2 — janitor-side items from round 1 LANDED; posted for mutual
+> `RATIFIED rev 2`** with the ai-maestro Claude on
+> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100). Sections 1–5
+> are the janitor's half; §6 carries the server-side contracts ai-maestro delivered in
+> round 1 (their comment, 2026-07-17). Convergence protocol: this doc is posted verbatim
+> on #100, refined in comment rounds, and is FINAL when both sides post
 > `RATIFIED <revision>` on the same revision. Owner directives it encodes (2026-07-17):
 > one runtime-branched plugin; no chore done twice; strict per-project channeling;
 > unattended findings must reach the human, traceable and referenceable; session-start
 > report injection as concise as possible; token telemetry only on own-project anomalies.
+>
+> **Rev 1 → rev 2 changes** (from ai-maestro's round-1 conflict review): §2 executor 2 is
+> now PER-CLASS — each absorbed task yields on its OWN capability token, never a shared
+> ownership bit (janitor code landed: TRDD-N9YAH5E7); §6 rewritten from "TO FILL" to the
+> DELIVERED server contracts (probe file, continuity verbs, session-command verb,
+> dashboard ledger-feed acceptance).
 
 ## 1. Two backends, one plugin
 
@@ -35,13 +42,22 @@ Three executors, one criterion each:
 
 1. **Per-agent chores** → each Claude's own heartbeat (workdir detectors). Never daemon-run.
 2. **Machine-wide once-only chores with a server equivalent** → the #N daemon, which
-   **YIELDS iff `server_owns_singleton_chores()` is CONFIDENTLY True**
-   (`_SERVER_ABSORBED_TASK_NAMES`: `marketplace-refresh`, `user-plugins-update`,
-   `version-update`, `oauth-rotator-supervisor`, `oauth-rotator-tick`).
-   None-policy is deliberately the OPPOSITE of actuation: a chore RUNS on unknown —
-   nobody doing it breaks the machine; doing it twice is merely wasteful and the
-   cross-process file locks (`oauth-rotator-tick.lock`, `marketplace-op.lock`) are the
-   collision backstop. **DORMANT** until the capability probe (§6) lands.
+   yields **PER CLASS**: each absorbed task yields iff **its OWN capability token** is
+   CONFIDENTLY server-claimed (a fresh §6.1 probe file carrying that token). The
+   task→class map (`harness_backend.SERVER_ABSORBED_TASK_CLASS`, TRDD-N9YAH5E7):
+
+   | absorbed task | capability token | server status today |
+   |---|---|---|
+   | `oauth-rotator-tick`, `oauth-rotator-supervisor` | `family-a` | emitted iff the R16 OAuth flag is ON (USER's flip) |
+   | `marketplace-refresh`, `user-plugins-update`, `version-update` | `singleton-chores` | RESERVED — never emitted; the janitor keeps these |
+
+   **One shared ownership bit is forbidden** — the first class that goes live would
+   silence chores nothing runs ("a token without its live chore silences the janitor").
+   A successful agent-list (or any liveness signal) is NOT a capability claim: liveness
+   ≠ capability, so the legacy list-probe rung was removed from the gate. None-policy is
+   deliberately the OPPOSITE of actuation: a chore RUNS on unknown — nobody doing it
+   breaks the machine; doing it twice is merely wasteful and the cross-process file
+   locks (`oauth-rotator-tick.lock`, `marketplace-op.lock`) are the collision backstop.
 3. **Population-split operations** run on BOTH sides, each strictly for its own
    population: session-liveness recovery, fleet-stop/pause/rearm, reload-plugins /
    reload-skills propagation, restart-claude. The split IS the per-instance
@@ -118,20 +134,88 @@ ledger is an INDEX, never a payload):
 - When the server owns the once-only chores (§2), it owns the notifications for them
   too; the janitor pushes only for chores it actually ran.
 
-## 6. Server-side contracts — AI-MAESTRO TO FILL (their refinement half)
+## 6. Server-side contracts — DELIVERED by ai-maestro (round 1, 2026-07-17)
 
-Requested on #100:
+Source-grounded by the ai-maestro Claude against the deployed CLI, `lib/server-liveness.ts`,
+and the janitor's `harness_backend.py` / `fleet_inject.py`.
 
-- **The auth-free capability probe** (the one blocker): must advertise
-  `{ts, capabilities: [...]}`, not bare liveness; slots into
-  `harness_backend.server_owns_family_a()` rung 2 with zero janitor call-site changes.
-- `aimaestro-continuity.sh` — command surface + semantics (`ensure-resume`, …) the #J
-  hooks invoke.
-- `aimaestro-agent.sh` / `aimaestro-session.sh` — the agent/session command contracts
-  the janitor's channel builders use (`session command <tmux> --newline -- <cmd>`).
-- The dashboard daemon section consuming the ledger-file contract (§4/§5).
-- Conflict review of the chore matrix (§2) against the server scheduler.
+### 6.1 The auth-free capability probe — DELIVERED (`lib/server-liveness.ts`, ai-maestro TRDD-P7RPOR5O)
+
+- **File:** `~/.aimaestro/server-liveness.json` — auth-free, world-readable, atomic
+  (tmp + rename). No `AID_AUTH`, no 401 — readable by the outside `#N` daemon.
+- **Shape:** `{"ts": <epoch-seconds>, "pid": <server-pid>, "capabilities": [...]}`.
+- **Cadence/staleness:** rewritten every **30 s**; consumers apply a **90 s** staleness
+  window. `now - ts > 90` OR file absent ⇒ "no live capability claim" (the safe default:
+  janitor owns everything).
+- **Tokens — each present ONLY while its class is LIVE and RUNNING right now:**
+  `family-a` (the OAuth rotator tick is enabled — the R16 flag file; absent until the
+  USER flips it); `singleton-chores` (RESERVED, not emitted — the update trio is not
+  built server-side); `fleet-recovery` (RESERVED, design-gated on ai-maestro#60 —
+  janitor keeps liveness/fleet-stop recovery for harness agents until it lands).
+- **Janitor wiring (LANDED, TRDD-N9YAH5E7):** `harness_backend.server_capabilities()`
+  reads the file (test override `JANITOR_AIMAESTRO_LIVENESS_FILE`); the formerly-reserved
+  rung 2 of `server_owns_family_a()` is now this read; `server_owns_chore_class(cap)`
+  gates each chore class on its own token per the §2 matrix. Fresh-file membership is
+  CONFIDENT both ways; no fresh claim ⇒ CLI absent = False, CLI present = None.
+- **Verify-together caveat:** the file appears on disk only once the running server is
+  restarted onto the probe build; until then every consumer sees "no file → safe default".
+
+### 6.2 Chore-matrix conflict review — RESOLVED
+
+Round 1 found the one silent breakage: the janitor's `server_owns_singleton_chores()`
+delegated to `server_owns_family_a()` (one bit, five chores) — flipping the OAuth flag
+would have silenced the marketplace/version trio nothing runs. Fixed janitor-side by the
+per-class gating in §2 (TRDD-N9YAH5E7). The bulk-lane invariant (TRDD-H7NVKSAX, §2) is
+accepted as binding server-side too: the server's 60 s OAuth beat is async
+(`setInterval().unref()`, async subprocess/fetch actuators) and any server-side bulk
+sweep is async-chunked/offloaded so it never stalls the per-minute beat.
+
+### 6.3 `aimaestro-continuity.sh` — Family-A delegation surface
+
+- Deployed verbs (ai-maestro TRDD-DXJZM3BW): `status <self>` (5 continuity-status
+  fields incl. the OAuth cascade `next_action` = `ok|rotating|reauth-needed`);
+  `ensure-resume <self>` (idempotent resume; no-op if live). Auth: agent callers export
+  `AID_AUTH`; **R42 self-only** (`<self>` must be the caller's own agent).
+- **Install gap (ai-maestro owns):** the script ships via `install-messaging.sh` but has
+  not been re-installed on this machine since it landed — the janitor's Phase-D
+  `on-stop-failure → ensure-resume` delegation feature-detects it and is a silent no-op
+  until they redeploy. First-run-together verification item.
+- `restart-self` (ai-maestro#75) is the third continuity verb they owe — self-only by
+  construction; gives the self-scoped restart primitive for the settings-change case.
+
+### 6.4 Agent/session command contracts
+
+- The janitor's `fleet_inject.aimaestro_command_argv` builds
+  `aimaestro-agent.sh session command <tmux> --newline -- <cmd>`. The route
+  `POST /api/sessions/[id]/command` EXISTS; the CLI verb does not yet — **ai-maestro
+  adds it** as a thin wrapper over the existing route, so the janitor's argv runs
+  unchanged (no retarget).
+- Live self-inject channels the deployed `aimaestro-session.sh` already exposes:
+  `inject <agent> --command "…" [--no-newline] [--require-idle]`, and
+  `queue <agent> --command-key <key> [--when …] [--wake-first]` — the sanctioned
+  self-trigger gate (fires at hook-authoritative `idle_prompt`, subagent-safe, survives
+  hibernation). Follow-up: register the janitor's #J soft-send commands as curated
+  `--command-key` entries (`compact`, `reload-plugins`, `reload-skills`,
+  `janitor-resume`, `janitor-write-handoff`) and route Phase-D self-triggers through
+  `queue` instead of the local presence breadcrumb.
+
+### 6.5 Dashboard daemon section — ledger feed contract ACCEPTED
+
+The server takes `<workdir>/.janitor/state/findings-ledger.ndjsonl` (§4/§5) as the feed:
+it tails ONLY its own registry agents' ledgers (gated through
+`checkAuthorizedAgentWorkdir`, the one workdir authority) — never another host's, never a
+non-agent dir — and renders a rolling log + severity toasts. The janitor owns the stable
+line shape + ids (`{ts,sev,code,src,ref,msg}`, ≤200 chars); the UI is ai-maestro's. A
+clicked `ref` resolves the `T-…`/`TRDD-…` body from the affected project's own store,
+read-only. Per-project channeling holds by construction on the server side (their audit
+2026-07-17: point-to-point surfaces only; the dashboard is the ONE sanctioned
+human-aggregate view).
 
 ## Ratification log
 
-- rev 1 — 2026-07-17, authored janitor-side; posted to #100 for round 1. (pending)
+- rev 1 — 2026-07-17, authored janitor-side; posted to #100 for round 1.
+- rev 2 — 2026-07-17: folded ai-maestro's round-1 refinement (§2 per-class capability
+  gating — janitor code landed as TRDD-N9YAH5E7; §6 filled with their delivered
+  contracts). Posted to #100 with janitor-side `RATIFIED rev 2`; awaiting the matching
+  server-side `RATIFIED rev 2` (their remaining items: the `session command` CLI verb,
+  the continuity-script redeploy — neither changes this doc's contracts).

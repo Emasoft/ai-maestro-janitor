@@ -3,7 +3,7 @@ trdd-id: FENWWB4E
 title: Per-project findings ledger — the traceable per-project index + concise session-start surfacing
 column: design
 created: 2026-07-17T16:45:17+0200
-updated: 2026-07-17T16:45:17+0200
+updated: 2026-07-17T17:50:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -55,8 +55,16 @@ must be ratified before code freezes it. Phase 4 also reroutes `window-burn-rate
 `record()` (token alarms only in the culprit's own sessions — owner token-quietness
 directive).
 
-**NEXT ACTION:** wait for #100 round-1 feedback on `design/ARCHITECTURE.md` §4 (posted
-with the doc); fold refinements here; on ratification → column `todo` and implement.
+**Round-1 outcome (2026-07-17, folded):** ai-maestro **ACCEPTED the ledger feed contract
+as written** (their §6.5 reply): the server tails ONLY its own registry agents'
+`<workdir>/.janitor/state/findings-ledger.ndjsonl` (gated through
+`checkAuthorizedAgentWorkdir`), renders rolling log + severity toasts, and resolves a
+clicked `ref` body read-only from the affected project's own store. The line shape
+`{ts,sev,code,src,ref,msg}` (≤200 chars, sanitized) is therefore the FROZEN dashboard
+feed contract from rev 2 on — no shape changes after ratification without a new revision.
+
+**NEXT ACTION:** rev 2 posted with janitor-side `RATIFIED rev 2`; on the matching
+server-side `RATIFIED rev 2` → column `todo` and implement (plan Phase 4).
 
 ## Notes and lessons learned
 

@@ -1,15 +1,16 @@
 ---
 trdd-id: N9YAH5E7
 title: Per-class capability chore gating — wire the server-liveness probe, stop sharing one ownership bit
-column: dev
+column: testing
 created: 2026-07-17T17:36:45+0200
-updated: 2026-07-17T17:36:45+0200
+updated: 2026-07-17T17:52:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 related-trdd: [PZLVT2RN, H7NVKSAX, FENWWB4E]
 coordination-issue: janitor#100
+implementation-commits: [616ab18]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
