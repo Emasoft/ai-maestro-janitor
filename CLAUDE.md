@@ -355,7 +355,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=2b6eebd40c12 digest=2c96a31eac6f generated=2026-07-17T09:11:11+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=f45a590fdd03 digest=d3e98034fe6c generated=2026-07-17T09:42:04+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -549,6 +549,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · main() -> int
 `scripts/hooks/on-stop-failure.py` — StopFailure hook — Python port of on-stop-failure.sh.
   · main() -> int
+`scripts/hooks/on-stop-proactive-compact.py` — Stop hook — shrink a large context the moment the session goes idle (TRDD-D3PROACT).
+  · main() -> int
 `scripts/hooks/on-stop-token-meter.py` — Stop hook — the session token meter (TRDD-a4e41e89 Phase 1; widened by TRDD-DLI76AUC #4).
   · main() -> int
 `scripts/hooks/on-stop.py` — Stop hook — Python port of on-stop.sh.
@@ -634,14 +636,18 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · min_context_tokens() -> int
   · min_idle_seconds() -> int
   · cooldown_seconds() -> int
+  · min_gain_tokens() -> int
   · proactive_idle_enabled() -> bool — The preventive path is gated by BOTH the master cold-compact switch AND its own knob, so
   · should_compact_on_resume(context_tokens, *, min_context_tokens) -> bool — SessionStart (startup/resume) gate: a resumed context at/above the threshold. PURE.
   · should_compact_after_idle(idle_seconds, context_tokens, *, min_idle_s, min_context_tokens) -> bool — Heartbeat gate for an IN-SESSION gap (rate limit): the cache is cold (idle past the TTL) AND
-  · should_compact_proactively_idle(context_tokens, *, user_present, active_waiting, min_context_tokens) -> bool — PREVENTIVE gate (TRDD-D3PROACT): shrink a large context DURING a cheap warm idle
+  · should_compact_proactively_idle(context_tokens, *, user_present, active_waiting, min_context_tokens, floor_tokens, min_gain) -> bool — PREVENTIVE gate (TRDD-D3PROACT): shrink a large context DURING a cheap warm idle
   · context_tokens_for(transcript_path) -> int | None — Live context occupancy for a transcript, or None when unknown. Thin, never-raising wrapper
   · newest_transcript(project_dir) -> Path | None — The newest `*.jsonl` transcript for a project, or None. For the dispatch path, which gets no
   · in_cooldown(state_dir, *, now) -> bool — True iff a cold-compact was fired within the cooldown window — so a repeat trigger before the
   · mark_fired(state_dir, *, now) -> None — Record that a cold-compact was fired now (atomic). Best-effort.
+  · mark_compacted(state_dir, *, now) -> None — Record that a compaction just happened — the PostCompact hook's only job here.
+  · read_floor(state_dir) -> tuple[int | None, int] — `(floor_tokens, measured_after_compact_ts)` — the context size observed right AFTER the most
+  · refresh_floor(state_dir, context_tokens) -> int | None — Learn this session's POST-COMPACTION FLOOR from the live context, and return it.
 `scripts/lib/daemon_path.py` — Restore a usable tool PATH for the OS-keepalive daemon (TRDD-VQ4LX7ND).
   · default_prefixes(platform) -> tuple[str, ...] — The candidate dirs for a platform. Unknown platforms get none (no guessing).
   · augmented_path(current, *, candidates, exists) -> tuple[str, list[str]] — Return ``(new_path, added_dirs)`` — ``current`` with every candidate that
