@@ -1,9 +1,9 @@
 ---
 trdd-id: PZLVT2RN
 title: ai-maestro-tailored janitor (#J) + normal-janitor scope-flip (#N) + shared-codebase two-backend split
-column: backburner
+column: design
 created: 2026-07-16T15:44:27+0200
-updated: 2026-07-16T16:05:06+0200
+updated: 2026-07-17T12:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -30,9 +30,26 @@ server half is ai-maestro's `TRDD-KCRMSNL7` (parent) + `TRDD-H24DF6ZC` (R16 toke
 - **Implementation** — NOT started, and MUST NOT start before the owner directs (owner process:
   coordinate → TRDDs → plan mode). This TRDD is the "TRDDs" step.
 
-**NEXT ACTION (one concrete step):** AWAIT owner direction. Both halves (this + server's KCRMSNL7)
-are now TRDD'd; the next legitimate step is the owner saying "go to plan mode". Do NOT enter plan
-mode or write `#J`/`#N` code before then. Publish stays HELD.
+**OWNER DIRECTIVE RECEIVED (2026-07-17, verbatim):** *"coordinate with the ai-maestro claude while
+creating the new version of the plugin (of, if you can, making this same plugin behave differently
+in the ai-maestro harness and outside, making the daemon outside only affecting the claude code
+instances running outside of the ai-maestro harness, while those inside the ai-maestro harness
+will use the very ai-maestro server as the daemon. right now the ai-maestro claude is porting the
+functionality of the daemon into ai-maestro server."* This (a) is the go for the janitor-side
+build, and (b) SETTLES the packaging choice this TRDD had left open: **ONE plugin, runtime-branched
+backends** ("this same plugin behave differently") — NOT two plugin ids. It also makes EXPLICIT a
+deliverable that was implicit in "neither touches the other's agents": **the OUTSIDE daemon's
+fleet actuation (session-liveness recovery, fleet-stop injection, memory-guard victim selection)
+must EXCLUDE harness agents while a live server owns them** — with the already-agreed residual
+(server down ⇒ `#N` daemon is the Family-A fallback, incl. resurrecting the server) governing when
+the exclusion lifts.
+
+**Verified 2026-07-17:** `~/ai-maestro/scripts/aimaestro-continuity.sh` EXISTS beside
+`aimaestro-session.sh` (their DXJZM3BW shipped) — the Q3 contract surface `#J` consumes is real.
+
+**NEXT ACTION (one concrete step):** design the implementation plan (plan mode) for the phased
+build, and settle on janitor#100 the one contract gap the code branches on: the canonical
+"server is up / capability" probe (for BOTH `#J` delegation and `#N` fallback adoption).
 
 **Load-bearing facts / gotchas:**
 - The #7 machine-wide singleton is the `daemon.flock`, NOT install scope — so `#N`'s USER→LOCAL
