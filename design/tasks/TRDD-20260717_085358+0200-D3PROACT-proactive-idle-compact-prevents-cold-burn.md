@@ -3,12 +3,12 @@ trdd-id: D3PROACT
 title: Proactively compact an idle large context to prevent the cold-cache burn
 column: dev
 created: 2026-07-17T08:53:58+0200
-updated: 2026-07-17T08:53:58+0200
+updated: 2026-07-17T09:52:00+0200
 current-owner: session
 task-type: feature
 release-via: publish
 parent-trdd: EUWIHP0G
-implementation-commits: []
+implementation-commits: [432d800, fa8687d, 1a69ec6]
 ---
 
 # Proactively compact an idle large context to prevent the cold-cache burn

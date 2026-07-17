@@ -1,13 +1,13 @@
 ---
 trdd-id: QW6RVAKN
 title: A compaction emits two back-to-back janitor-resume cues
-column: dev
+column: published
 created: 2026-07-17T08:18:01+0200
-updated: 2026-07-17T08:18:01+0200
+updated: 2026-07-17T09:52:00+0200
 current-owner: session
 task-type: bugfix
 release-via: publish
-implementation-commits: []
+implementation-commits: [0b5e37e]
 ---
 
 # A compaction emits two back-to-back janitor-resume cues

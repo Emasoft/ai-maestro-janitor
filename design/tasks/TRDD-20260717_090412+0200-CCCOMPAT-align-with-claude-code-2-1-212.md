@@ -3,11 +3,11 @@ trdd-id: CCCOMPAT
 title: Bring the janitor up to speed with Claude Code through 2.1.212
 column: dev
 created: 2026-07-17T09:04:12+0200
-updated: 2026-07-17T09:04:12+0200
+updated: 2026-07-17T09:52:00+0200
 current-owner: session
 task-type: infra
 release-via: publish
-implementation-commits: []
+implementation-commits: [2b6b1d8]
 ---
 
 # Bring the janitor up to speed with Claude Code through 2.1.212
