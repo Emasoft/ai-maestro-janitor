@@ -12,6 +12,53 @@ relevant-rules: [7]
 implementation-commits: []
 ---
 
+## ⏵ ARCHITECTURE CORRECTION (2026-07-17, AUTHORITATIVE — supersedes the per-session framing below)
+
+The USER re-scoped this: **settings-enforcement + restart is a DAEMON GLOBAL command, NOT a
+per-session hook.** v0.47.0 shipped the enforcer in `on-session-start` (per-session) — that was the
+wrong altitude. It must MOVE to the daemon, because restarting agents + a machine-wide settings write
+are global-scope single-writer ops (issue #7), and R42's "no agent drives another" has an explicit
+**"except the janitor daemon"** exception for machine-wide switches.
+
+**Two plugins, two agent GROUPS, NO overlap:**
+- **#J (ai-maestro-tailored):** the daemon *is the ai-maestro server*. It performs the global commands
+  (set the 8 env keys + `askUserQuestionTimeout` add-if-missing-OR-different, RESTORE on drift, and
+  restart all SAME-HOST agents) **directly via server API / function calls — NO scripts**. Acts ONLY on
+  ai-maestro-harness agents. Restart auto-fires when the ai-maestro-plugins marketplace updates. Built
+  in the **ai-maestro repo** (Family-A) — NOT here.
+- **#N (non-ai-maestro):** retains the current standalone daemon (`scripts/daemon.py`). It handles the
+  same global commands for **all agents OUTSIDE the ai-maestro harness**. Built HERE.
+
+**Both daemons edit the SAME `~/.claude/settings.json` with the SAME values ⇒ no conflict.** The
+`settings_ensurer` LOGIC (2 merge modes + supersecure verified write, already shipped) is REUSED by
+both; only the CALLER moves (hook → daemon task) and gains drift-restore + post-change restart.
+
+**Global disarm/arm/pause/resume stay DAEMON-ONLY** (the janitor skills do only the LOCAL versions
+directly) — already true via `global_control_cli.py` + the daemon.
+
+**JANITOR-SIDE (#N) work, buildable now — the daemon already has the fleet machinery:**
+1. New daemon `Task("settings-enforce", …)` calling `settings_ensurer.ensure_recommended_settings()`
+   (single-writer, global scope) + DRIFT-RESTORE (re-apply on the periodic beat if a value drifts).
+2. On a change, daemon-driven fleet-restart of the #N agent group, reusing `fleet_restart`
+   (build_relaunch/force_restart/resurrect + fire_restart) + `task_fleet_stop`'s injection pattern.
+3. **CRITICAL GATE:** the daemon spawns UNCONDITIONALLY today (the #N/#J split, PZLVT2RN, is NOT done),
+   so the daemon restart MUST be gated to the NON-ai-maestro group (skip ai-maestro-managed sessions —
+   the server owns those, with its automated launch string) until PZLVT2RN lands. The settings WRITE is
+   safe either way (idempotent, same values). Reuse the same idle-safe/presence gate as the local path.
+4. Retire the per-session hook enforcer (EQ792YPX) once the daemon task is the sole #N writer — OR keep
+   it as a fallback for hosts where the daemon is disabled. DECISION PENDING.
+
+**ai-maestro-side (#J) work (their repo, coordinated on Emasoft/ai-maestro#75 + the new chat):** the
+server settings-enforcer + restore watchdog + fleet-restart + the R42 wording extension (USER-gated
+IRON rule). They confirmed no host-settings.json editor exists there yet and no `aimaestro-manage-clients.sh`
+(the real self-restart verb is `aimaestro-agent.sh restart <id>` → POST /api/sessions/[id]/restart).
+
+**This is entangled with PZLVT2RN (the daemon #N/#J migration).** Likely the #N daemon-enforcer lands
+here as its own TRDD; the #J half is an ai-maestro Family-A TRDD. NEXT: confirm with USER whether to
+(a) build the #N daemon-enforcer now (gated to non-ai-maestro), (b) fold into PZLVT2RN, and (c) keep or
+retire the per-session hook. Do NOT build the daemon fleet-restart before the idle-safe/scope
+decisions are confirmed (high blast radius).
+
 ## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-07-17
 
 **Why.** The settings-ensurer (TRDD-EQ792YPX, shipped v0.47.0) writes recommended settings into
