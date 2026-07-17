@@ -224,6 +224,16 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # expires AND while OAuth is still healthy, so the two expiries never coincide
     # (TRDD-32acd15f). 6h cadence; machine-scoped daily dedupe keeps it gentle.
     ("oauth-cookie-reminder", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_COOKIE_REMINDER_INTERVAL"),
+    # oauth-beacon-refresh keeps the live-identity beacon fresh (TRDD-6AABK2BG). The beacon
+    # can ONLY be stamped from a context that can read the primary credential, and the daemon
+    # is headless by design (FIX B2) — so the per-session heartbeat is the one component able
+    # to do it. Without it the beacon is stamped once per SessionStart, a manual /login goes
+    # unnoticed for up to 24h, and rotation evaluates the WRONG account's usage (always "within
+    # limits") while the real one burns to its cap — the user then rotates by hand. Same
+    # opt-in-by-presence gate as the other rotator detectors. 300s (every fire) is affordable
+    # because a NON-prompting `mdat` attribute read gates the stamp: steady state is one cheap
+    # metadata call and ZERO `-w` secret reads. Silent — a re-stamp is maintenance, not drift.
+    ("oauth-beacon-refresh", 300, "CLAUDE_PLUGIN_OPTION_OAUTH_BEACON_REFRESH_INTERVAL"),
     # oauth-login-needed is the reactive sibling of oauth-cookie-reminder, same
     # opt-in-by-presence gate (a rotator home with a state.json). It surfaces the
     # accounts that need a ONE-TIME human login because they can neither self-renew

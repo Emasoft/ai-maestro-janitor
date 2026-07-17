@@ -1704,3 +1704,132 @@ def test_file_slot_files_the_account_when_the_lock_is_free(
     entry = saved["slots"]["a@x"]                             # ...and the index knows about it
     assert entry["via"] == "setup-token" and entry["expires_at"] == 42
     assert entry["fp"] == rotator.fingerprint(_blob("tok"))
+
+
+# ---------------------------------------------------------------------------
+# TRDD-6AABK2BG — the mdat-gated beacon refresh (a stale beacon blinded rotation)
+# ---------------------------------------------------------------------------
+
+
+def _mdat_line(stamp: str = "20260717040649Z") -> str:
+    """A VERBATIM `security find-generic-password` attribute line (captured from a real
+    macOS run during the incident) — so the parser is tested against the true wire form."""
+    hexed = stamp.encode("ascii").hex().upper() + "00"
+    return '    "mdat"<timedate>=0x%s  "%s\\000"' % (hexed, stamp)
+
+
+def test_parse_keychain_timedate_is_utc_not_local() -> None:
+    """The wire form is UTC. Parsing it as LOCAL time (time.mktime) would skew every
+    comparison by the machine's offset and flip the staleness verdict near a /login —
+    so pin the exact epoch of the real observed mdat, computed independently."""
+    # 20260717040649Z == 2026-07-17T04:06:49+00:00 == 1784261209.0
+    assert rotator._parse_keychain_timedate(_mdat_line()) == 1784261209.0
+
+
+def test_parse_keychain_timedate_hex_fallback_and_garbage() -> None:
+    """A `security` build that emits only the hex form must still parse (else the gate
+    would silently read 'unknown' forever); garbage must yield None, never a bogus epoch."""
+    hex_only = '    "mdat"<timedate>=0x%s' % ("20260717040649Z".encode("ascii").hex().upper() + "00")
+    assert rotator._parse_keychain_timedate(hex_only) == 1784261209.0
+    assert rotator._parse_keychain_timedate('    "mdat"<timedate>=<null>') is None
+    assert rotator._parse_keychain_timedate("nonsense") is None
+
+
+def test_primary_last_modified_never_reads_the_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PROMPT SAFETY (the reason this gate exists): the freshness probe must be an
+    ATTRIBUTE-only read. A `-w` on this cadence is the ACL prompt flood that keychain-health,
+    TRDD-EQJPPZ2L and TRDD-K3WQ7XM9 FIX B2 all exist to prevent."""
+    seen: dict = {}
+
+    def fake_run_security(argv, timeout=None):
+        seen["argv"] = list(argv)
+        return rotator.safe_storage.SecurityRun(
+            ok=True, stdout=_mdat_line(), stderr="", spawned=True, denied=False, returncode=0
+        )
+
+    monkeypatch.setenv("USER", "someone")
+    monkeypatch.setattr(rotator.safe_storage, "run_security", fake_run_security)
+    assert rotator._primary_last_modified() == 1784261209.0
+    assert "-w" not in seen["argv"], "the freshness probe must NEVER read the secret"
+    assert "find-generic-password" in seen["argv"]
+
+
+def test_primary_last_modified_unknown_when_probe_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A latched/hung/absent probe with no credentials file yields None ('unknowable')."""
+    monkeypatch.setenv("USER", "someone")
+    monkeypatch.setattr(
+        rotator.safe_storage, "run_security",
+        lambda argv, timeout=None: rotator.safe_storage.SecurityRun(
+            ok=False, stdout="", stderr="", spawned=False, denied=True, returncode=None),
+    )
+    monkeypatch.setattr(rotator.Path, "home", staticmethod(lambda: Path("/nonexistent-home-xyz")))
+    assert rotator._primary_last_modified() is None
+
+
+def test_beacon_needs_restamp_decision_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pure gate. FAIL-OPEN on unknown is deliberate: a wrong beacon left in place is
+    the bug; a needless re-stamp is harmless (the latch bounds it)."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    # No beacon at all → must stamp.
+    assert rotator.beacon_needs_restamp(primary_mtime=1000.0, now=1000.0) is True
+
+    live = _blob("LIVE-A")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live), "slots": {}})
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live)
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+
+    assert rotator.beacon_needs_restamp(primary_mtime=None, now=1000.0) is True      # unknown → fail-open
+    assert rotator.beacon_needs_restamp(primary_mtime=1001.0, now=1000.0) is True    # changed AFTER the stamp
+    assert rotator.beacon_needs_restamp(primary_mtime=999.0, now=1000.0) is False    # unchanged → free
+    assert rotator.beacon_needs_restamp(primary_mtime=1000.0, now=1000.0) is False   # same instant → not newer
+    # A beacon past its freshness window is unusable regardless of mtime.
+    assert rotator.beacon_needs_restamp(
+        primary_mtime=999.0, now=1000.0 + rotator.BEACON_MAX_AGE_S + 1) is True
+
+
+def test_refresh_beacon_if_stale_is_free_when_credential_unchanged(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Steady state must cost ZERO `-w` secret reads — that is what makes an every-fire
+    cadence affordable AND prompt-safe."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live = _blob("LIVE-A")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live), "slots": {}})
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live)
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: 999.0)
+    monkeypatch.setattr(
+        rotator, "_read_live_primary",
+        lambda: pytest.fail("the secret must NOT be read when the credential is unchanged"))
+    assert rotator.refresh_beacon_if_stale(now=1000.0) is False
+
+
+def test_refresh_beacon_restamps_after_a_manual_login(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE REGRESSION TEST for the incident: a manual /login changes the live credential with
+    no SessionStart. Before this fix nothing re-stamped the beacon, so it stayed fresh-but-WRONG
+    (naming account A) for up to 24h and rotation evaluated A's usage while B burned to its cap."""
+    monkeypatch.setattr(rotator, "STATE_FILE", tmp_path / "state.json")
+    live_a, live_b = _blob("LIVE-A"), _blob("LIVE-B")
+    rotator.save_state({"live_email": "a@x", "live_fp": rotator.fingerprint(live_a),
+                        "slots": {"a@x": {}, "b@x": {}}})
+    monkeypatch.setattr(rotator, "read_slot", lambda e: {"a@x": live_a, "b@x": live_b}.get(e))
+    monkeypatch.setattr(rotator, "account_email", lambda *_a: None)
+
+    # Session start stamps the beacon: account A is live.
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_a)
+    assert rotator.write_live_identity_beacon(now=1000.0) is True
+    assert rotator.read_live_identity_beacon(now=1000.0)["email"] == "a@x"
+
+    # The user rotates BY HAND at t=2000 — the credential (and its mdat) changes; no SessionStart.
+    monkeypatch.setattr(rotator, "_read_live_primary", lambda: live_b)
+    monkeypatch.setattr(rotator, "_primary_last_modified", lambda: 2000.0)
+    assert rotator.refresh_beacon_if_stale(now=2001.0) is True
+
+    beacon = rotator.read_live_identity_beacon(now=2001.0)
+    assert beacon["email"] == "b@x", "the beacon must name the account that is ACTUALLY live"
+    assert beacon["fp"] == rotator.fingerprint(live_b)
+    # And it is now current, so the next fire is free again.
+    assert rotator.refresh_beacon_if_stale(now=2002.0) is False

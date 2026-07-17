@@ -41,9 +41,11 @@ Safety invariants
 
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -482,6 +484,70 @@ def _read_primary_macos_keychain(acct: str) -> dict | None:
     return None
 
 
+# `security` renders a timedate attribute BOTH as hex and as a quoted ASCII form:
+#   "mdat"<timedate>=0x32303236303731373034303634395A00  "20260717040649Z\000"
+# Prefer the quoted form; fall back to decoding the hex, since a `security` build that
+# emits only the hex would otherwise silently yield "unknown" forever.
+_KEYCHAIN_TIMEDATE_QUOTED = re.compile(r'"(\d{14})Z')
+_KEYCHAIN_TIMEDATE_HEX = re.compile(r"=0x([0-9A-Fa-f]+)")
+
+
+def _parse_keychain_timedate(raw: str) -> float | None:
+    """Parse ONE `security` attribute line's timedate into an epoch, or None. PURE.
+
+    The wire form is UTC (`YYYYMMDDHHMMSSZ`), so it is parsed as UTC via calendar.timegm —
+    NEVER time.mktime, which would silently apply the LOCAL offset and skew every comparison
+    by hours (here: the beacon-vs-credential staleness test would flip near a /login)."""
+    m = _KEYCHAIN_TIMEDATE_QUOTED.search(raw)
+    stamp = m.group(1) if m else None
+    if stamp is None:
+        h = _KEYCHAIN_TIMEDATE_HEX.search(raw)
+        if h is not None:
+            try:
+                decoded = bytes.fromhex(h.group(1)).decode("ascii", "ignore")
+            except ValueError:
+                return None
+            m2 = re.search(r"(\d{14})Z", decoded)
+            stamp = m2.group(1) if m2 else None
+    if stamp is None:
+        return None
+    try:
+        return float(calendar.timegm(time.strptime(stamp, "%Y%m%d%H%M%S")))
+    except (ValueError, OverflowError):
+        return None
+
+
+def _primary_last_modified() -> float | None:
+    """When the PRIMARY live credential last changed, as an epoch — or None if unknowable.
+
+    The whole point is that this NEVER prompts and NEVER reads the secret (TRDD-6AABK2BG):
+      - macOS: an attribute-only `find-generic-password` (NO `-w`) → the `mdat` attribute.
+        Same shape/choke-point as _keychain_item_exists; a `-w` read here would reintroduce
+        the ACL prompt flood this gate exists to avoid.
+      - else: ~/.claude/.credentials.json mtime — on Linux/Windows the primary is a plain
+        file, so there is no keychain and no prompt to avoid in the first place.
+    None = unknowable (not macOS + no file, latched, hung, item absent); callers must treat
+    it as "assume changed" so an unknowable state never SUPPRESSES a needed re-stamp."""
+    acct = _keychain_account()
+    if acct:
+        run = safe_storage.run_security(
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", acct, *safe_storage.keychain_scope_args()],
+            timeout=5,
+        )
+        # The attribute dump goes to STDOUT (verified on macOS 15: stderr is empty on rc 0);
+        # stderr is still scanned so a future/older `security` that splits them still parses.
+        if run.ok:
+            for line in (run.stdout + "\n" + run.stderr).splitlines():
+                if '"mdat"' in line:
+                    ts = _parse_keychain_timedate(line)
+                    if ts is not None:
+                        return ts
+    try:
+        return (Path.home() / ".claude" / ".credentials.json").stat().st_mtime
+    except OSError:
+        return None
+
+
 def _read_live_primary() -> dict | None:
     """Return the parsed live credential from its PRIMARY store, or None if absent/unreadable.
     read_live_blob() wraps this with the -livebak mirror fallback (Pillar 2).
@@ -673,6 +739,61 @@ def read_live_identity_beacon(*, max_age_s: float | None = None, now: float | No
     if ((now if now is not None else time.time()) - ts) > limit:
         return None
     return data
+
+
+def beacon_needs_restamp(*, primary_mtime: float | None, now: float | None = None) -> bool:
+    """Would a re-stamp change anything? PURE — `primary_mtime` is injected (see
+    refresh_beacon_if_stale) so the decision is testable without a keychain.
+
+    True iff the beacon is absent/garbage/stale, OR the primary's last-modified is UNKNOWN,
+    OR the credential changed after the beacon was stamped (mtime > ts).
+
+    FAIL-OPEN on unknown is deliberate and safe: the re-stamp it triggers attempts a `-w`
+    read that the denied-latch short-circuits WITHOUT spawning, so an unknowable state can
+    never become a prompt loop — whereas fail-CLOSED would leave a wrong beacon in place,
+    which is the exact bug this gate exists to kill (TRDD-6AABK2BG)."""
+    beacon = read_live_identity_beacon(now=now)
+    if beacon is None:
+        return True
+    if primary_mtime is None:
+        return True
+    ts = beacon.get("ts")
+    if not isinstance(ts, (int, float)):
+        return True
+    return primary_mtime > ts
+
+
+def refresh_beacon_if_stale(*, now: float | None = None) -> bool:
+    """Re-stamp the live-identity beacon ONLY when the credential actually changed.
+
+    THE BUG THIS FIXES (TRDD-6AABK2BG): the beacon is only stamped from a context that can
+    read the primary, and the sole automatic one is SessionStart — ONCE per session. The
+    daemon's own cmd_tick stamp is a guaranteed no-op (it runs headless, so FIX B2 skips the
+    primary read by design). So a manual /login mid-session left the beacon FRESH-BUT-WRONG
+    for up to BEACON_MAX_AGE_S (24h); _resolve_untrusted_live then matched it against the
+    equally-stale mirror, "confirmed" the wrong account, and rotation watched a phantom while
+    the real account burned to its cap.
+
+    Returns True iff a beacon was written. The gate keeps the steady state free (one cheap
+    attribute read, ZERO `-w` reads); only a real credential change pays for a stamp."""
+    before = read_live_identity_beacon(now=now)
+    if not beacon_needs_restamp(primary_mtime=_primary_last_modified(), now=now):
+        return False
+    if not write_live_identity_beacon(now=now):
+        return False
+    after = read_live_identity_beacon(now=now)
+    # Log ONLY a real identity change: an unchanged re-stamp is routine bookkeeping and would
+    # bury the durable rotator.log in noise, but a live-account change is exactly the event
+    # whose absence made this bug invisible for so long.
+    old = (before or {}).get("email")
+    new = (after or {}).get("email")
+    if after is not None and old != new:
+        _decide(
+            "beacon: live account changed %s -> %s — re-stamped the session identity beacon "
+            "so rotation evaluates the REAL live account (TRDD-6AABK2BG)"
+            % (old or "(unknown)", new or "(unknown)")
+        )
+    return True
 
 
 def _stamp_tick_completed(*, now: float | None = None) -> None:
@@ -2385,7 +2506,7 @@ def cmd_oauth_health(as_json: bool) -> int:
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("usage: rotator.py {capture [--only-if-claude-running] | tick [--only-if-claude-running] | auto | usage | live-email | known-emails | print-profiles-root | oauth-health [--json] | list | beacon | switch <email> | migrate-slots | delete-plaintext-slots | migrate-root}")
+        print("usage: rotator.py {capture [--only-if-claude-running] | tick [--only-if-claude-running] | auto | usage | live-email | known-emails | print-profiles-root | oauth-health [--json] | list | beacon [--if-stale] | switch <email> | migrate-slots | delete-plaintext-slots | migrate-root}")
         return 2
     cmd = argv[0]
     # ── Read-only commands: no lock needed (they never write state.json / keychain). ──
@@ -2404,6 +2525,14 @@ def main(argv: list[str]) -> int:
         # atomic live-identity.json (never state.json / keychain), so it is safe
         # lock-free — the SessionStart hook spawns it detached and must never block
         # behind the daemon's tick lock.
+        #
+        # --if-stale (TRDD-6AABK2BG): re-stamp ONLY when the credential actually changed,
+        # decided by a NON-prompting attribute read. This is what the heartbeat detector
+        # runs every fire; the bare form stays unconditional because SessionStart wants an
+        # unconditional stamp. rc 0 = wrote, rc 1 = did not (already current, or no primary
+        # readable) — never an error either way.
+        if "--if-stale" in argv[1:]:
+            return 0 if refresh_beacon_if_stale() else 1
         return 0 if write_live_identity_beacon() else 1
     if cmd == "usage":
         return cmd_usage()

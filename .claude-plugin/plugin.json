@@ -549,6 +549,20 @@
       "default": 900,
       "sensitive": false
     },
+    "oauth_beacon_refresh_enabled": {
+      "title": "OAuth Live-Identity Beacon Refresh Enabled",
+      "description": "When true (default), the oauth-beacon-refresh detector keeps the OAuth rotator's live-identity beacon fresh, so proactive rotation evaluates the account that is ACTUALLY live. It is opt-in by presence: a silent no-op unless a configured rotator home exists. Why it is needed: the beacon can only be stamped from a context that can READ the primary credential, and the global daemon is headless by design (a `-w` secret read there could only raise a GUI prompt nobody can answer), so the daemon can never stamp it — leaving SessionStart as the only automatic stamp, once per session. A manual /login mid-session then left the beacon fresh-but-WRONG for up to 24h, and rotation evaluated the OLD account's usage (always 'within limits') while the real one burned to its cap. Prompt-safe: a NON-prompting attribute read (mdat, never `-w`) gates the stamp, so the steady state costs one cheap metadata call and ZERO secret reads. Set false to disable.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
+    "oauth_beacon_refresh_interval": {
+      "title": "OAuth Beacon Refresh Cadence (seconds)",
+      "description": "Minimum seconds between live-identity beacon freshness checks. Default: 300 (every heartbeat fire). This bounds how long rotation can watch a stale account after a manual /login. It is affordable at every fire because the check is gated by a non-prompting `mdat` attribute read: when the credential has not changed, nothing else runs.",
+      "type": "number",
+      "default": 300,
+      "sensitive": false
+    },
     "branch_protection_enabled": {
       "title": "Branch Protection Check Enabled",
       "description": "When true (default), the branch-protection detector asks the GitHub API (read-only) whether the default branch is covered by classic branch protection OR an active branch ruleset (inherited org/enterprise rulesets count), and surfaces an URGENT drift line only when it can DEFINITIVELY confirm neither is present. It NEVER configures protection itself. Skips silently when gh is absent/unauthenticated, the viewer is not a repo admin, the repo has no GitHub remote, or any probe is indeterminate. Set false to disable.",
