@@ -77,6 +77,7 @@ import global_state as gs  # noqa: E402
 import harness_backend  # noqa: E402  # server chore-ownership probe (TRDD-PZLVT2RN B2)
 import launchd_keepalive as ka  # noqa: E402  # L0 OS keepalive install/uninstall (TRDD-71ABD7V7)
 import memory_guard as mg  # noqa: E402  # Tier-1 OOM guard (TRDD-7100178d Pillar 4)
+import notify  # noqa: E402  # human-notification channel — daemon-only (TRDD-4649ZLE0)
 import recovery_audit as ra  # noqa: E402  # F3 recovery audit log (TRDD-F3AUDLOG) — fail-open side-channel
 import rules_installer as ri  # noqa: E402  # post-uninstall orphaned-rule cleanup (TRDD-H9IBY95W)
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
@@ -556,17 +557,52 @@ def task_oauth_rotator_supervisor() -> None:
     if not facts.opt_in:
         return  # rotator not activated on this machine -> silent no-op
     findings = oauth_supervisor.diagnose(facts)
-    if not findings:
-        return
 
     def _log(msg: str) -> None:
         state.log_line("daemon", f"  {msg}")
 
-    res = oauth_supervisor.apply(findings, log=_log)
-    state.log_line(
-        "daemon",
-        f"  oauth-rotator-supervisor: alerts={res.alerts or '[]'}",
-    )
+    if findings:
+        res = oauth_supervisor.apply(findings, log=_log)
+        state.log_line(
+            "daemon",
+            f"  oauth-rotator-supervisor: alerts={res.alerts or '[]'}",
+        )
+        # Human push (TRDD-4649ZLE0): every supervisor finding is BY DEFINITION an alert
+        # only a human can act on (the supervisor heals nothing), and the rotator has no
+        # project session to surface into — so the daemon's channel is the ONLY route.
+        # notify's content-hash dedupe + daily cap keep a persistent condition from
+        # buzzing more than once.
+        for f in findings:
+            outcome = notify.push(
+                sev="HIGH", code=f.code, project="oauth-rotator", summary=f.message,
+                hint="/janitor-credential-window-audit",
+            )
+            _log(f"notify[{f.code}]: {outcome}")
+
+    # F4 (TRDD-H7NVKSAX → TRDD-4649ZLE0 derived case d): the daemon context that cannot
+    # READ the primary live keychain item logged "primary UNREADABLE … using the MIRROR"
+    # every minute into rotator.log where nobody looks — a PERSISTENT security
+    # degradation only the USER can fix (the keychain ACL re-grant). Probe it here (the
+    # read ladder is bounded by safe_storage's run_security timeout + denied-latch, so
+    # this cannot wedge the loop) and push it through the human channel. Dedupe makes
+    # the standing condition ONE notification, not a drumbeat.
+    try:
+        import rotator as _rotator  # noqa: PLC0415 -- oauth_rotator sibling, lazy
+
+        _blob, source = _rotator.read_live_blob_with_source()
+        if source == "mirror":
+            outcome = notify.push(
+                sev="HIGH", code="OAUTH-PRIMARY-UNREADABLE", project="oauth-rotator",
+                summary=(
+                    "the daemon cannot read the PRIMARY live credential (keychain ACL) — "
+                    "identity steering degraded to the mirror; a keychain re-grant by the "
+                    "user is required"
+                ),
+                hint="/janitor-refresh-claude-logins",
+            )
+            _log(f"notify[OAUTH-PRIMARY-UNREADABLE]: {outcome}")
+    except Exception:  # noqa: BLE001 -- the probe is best-effort; never break the beat
+        pass
 
 
 def task_oauth_rotator_tick() -> None:
@@ -958,6 +994,28 @@ def task_github_config_audit() -> None:
         f"github-config audit: {audit.repos_scanned} repos scanned, {n} finding(s)"
         + (f" across {len({f.slug for f in audit.findings})} repo(s)" if n else ""),
     )
+    # Human push (TRDD-4649ZLE0 / ARCHITECTURE.md §5): a repo-config gap is exactly the
+    # "unattended repo compromised" class the channel exists for — most fleet repos have
+    # no live session for weeks. ONE digest line per distinct finding SET (the message
+    # embeds `findings_digest`, so notify's content-hash dedupe re-pushes only when the
+    # set CHANGES); per-repo detail stays in the per-session `fleet-github-config`
+    # surface + /janitor-github-config-fix.
+    if n:
+        try:
+            slugs = sorted({f.slug for f in audit.findings})
+            preview = ", ".join(slugs[:3]) + ("…" if len(slugs) > 3 else "")
+            digest = gca.findings_digest(audit.to_json())
+            outcome = notify.push(
+                sev="HIGH", code="GHCFG-FLEET", project=preview or "fleet",
+                summary=(
+                    f"{n} GitHub-config gap(s) across {len(slugs)} repo(s) "
+                    f"[set {digest}] — repos: {preview}"
+                ),
+                hint="/janitor-github-config-fix",
+            )
+            state.log_line("daemon", f"  notify[GHCFG-FLEET]: {outcome}")
+        except Exception:  # noqa: BLE001 -- the push must never break the audit beat
+            pass
 
 
 def task_session_liveness(fleet: list | None = None) -> None:
@@ -1351,6 +1409,29 @@ class Task:
             state.atomic_write(self.failcount_path, str(self._failcount() + 1))
             state.log_line("daemon", f"task '{self.name}' background spawn FAILED: {exc}")
 
+    @staticmethod
+    def _notify_quarantine(name: str, fails: int) -> None:
+        """Human push (TRDD-4649ZLE0 derived case a): a daemon task ENTERING quarantine
+        is a machine-level failure only a human can investigate, and the daemon has no
+        project session to surface it into. Fires exactly ONCE per failure streak (at
+        the quarantine threshold, not on every failure — later failures change the
+        message text, which would defeat notify's content-hash dedupe and buzz until
+        the daily cap). Best-effort, never breaks the reap/run path."""
+        if fails != _TASK_BACKOFF_AFTER_FAILS:
+            return
+        try:
+            outcome = notify.push(
+                sev="HIGH", code="TASK-QUARANTINE", project="janitor-daemon",
+                summary=(
+                    f"daemon task '{name}' failed {fails}x consecutively and entered "
+                    f"quarantine (exponential backoff) — inspect daemon.log"
+                ),
+                hint="/janitor-show-global-status",
+            )
+            state.log_line("daemon", f"  notify[TASK-QUARANTINE:{name}]: {outcome}")
+        except Exception:  # noqa: BLE001 -- the push must never break task bookkeeping
+            pass
+
     def poll_background(self) -> None:
         """Reap a finished detached child: stamp last-run + failcount exactly as a
         foreground run would. No-op while it is still running or when none exists.
@@ -1385,6 +1466,7 @@ class Task:
                 f"task '{self.name}' FAILED in {dt_s}s (background rc={rc}, "
                 f"consecutive={fails}){note}",
             )
+            self._notify_quarantine(self.name, fails)
         else:
             if self._failcount():
                 state.atomic_write(self.failcount_path, "0")
@@ -1422,6 +1504,7 @@ class Task:
                     "daemon",
                     f"task '{self.name}' FAILED in {dt}s (consecutive={fails}){note}",
                 )
+                self._notify_quarantine(self.name, fails)
             else:
                 if self._failcount():
                     state.atomic_write(self.failcount_path, "0")  # recovered → reset the streak
