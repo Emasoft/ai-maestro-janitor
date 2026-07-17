@@ -828,6 +828,24 @@ def rotate_log_if_big(name: str, max_bytes: int = 1_048_576) -> None:
         return
 
 
+def detached_uv_env() -> dict[str, str]:
+    """Environment for a DETACHED child that re-invokes a `uv run --script` shebang.
+
+    Strips `VIRTUAL_ENV`: uv exports it into every `uv run` child, pointing at the
+    PARENT script's environment — which can be an EPHEMERAL `builds-v0` temp env that
+    uv deletes when the parent exits. A detached worker that starts after that deletion
+    finds a dangling "active virtual environment" and uv refuses to run AT ALL
+    ("Failed to inspect Python interpreter from active virtual environment"), so the
+    worker dies before its first line. The worker must let ITS OWN uv resolve a fresh
+    script env instead of inheriting the parent's. Root-caused 2026-07-17: this WAS the
+    marketplace-refresh empty-worker-log flake (TRDD-UO93APWN) — worse under suite load
+    because load widens the window between parent-uv exit and worker-uv start.
+    """
+    env = dict(os.environ)
+    env.pop("VIRTUAL_ENV", None)
+    return env
+
+
 def run_subprocess(
     cmd: list[str],
     *,

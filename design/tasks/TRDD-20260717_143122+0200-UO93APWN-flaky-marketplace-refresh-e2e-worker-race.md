@@ -1,13 +1,47 @@
 ---
 trdd-id: UO93APWN
 title: Flaky e2e worker race in test_marketplace_refresh_scoped
-column: todo
+column: testing
 created: 2026-07-17T14:31:22+0200
-updated: 2026-07-17T16:27:00+0200
+updated: 2026-07-17T19:35:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 severity: low
+implementation-commits: []
 ---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
+
+**ROOT-CAUSED AND FIXED (2026-07-17, evening).** Neither of the earlier suspects: the
+smoking gun was CAPTURED in a failing run's preserved tmp dir
+(`project/.janitor/logs/marketplace-refresh.log`):
+
+```text
+spawned worker (pid 88315) — will run async
+error: Failed to inspect Python interpreter from active virtual environment at
+  `…/janitor-test-session-…/_home/.cache/uv/builds-v0/.tmpKtlgfB/bin/python3`
+  Caused by: Python interpreter not found at `…/.tmpKtlgfB/bin/python3`
+```
+
+**Mechanism:** `uv run` exports `VIRTUAL_ENV` into every child, pointing at the PARENT
+script's environment — which can be an EPHEMERAL `builds-v0` temp env uv deletes when
+the parent exits. The DETACHED worker (its own `uv run --script` shebang) starts after
+that deletion, finds a dangling "active virtual environment", and uv refuses to run at
+all — the worker dies before its first line ⇒ empty claude-call log. Load widens the
+window between parent-uv exit and worker-uv start, which is why it failed under the
+full suite and passed in isolation. The lru-cache lead was correctly ruled out
+(subprocess isolation); the poll-budget suspect was already eliminated by the
+exit-based `_wait_for_worker`.
+
+**Fix:** `state.detached_uv_env()` — strip `VIRTUAL_ENV` from the env of every detached
+child that re-invokes a uv-shebanged script — applied at all THREE spawn sites
+(marketplace-refresh, local-plugins-update, project-plugins-update). This is a
+PRODUCTION bug, not test-only: any parent with a stale/dangling `VIRTUAL_ENV` killed
+the workers the same way.
+
+**Verification:** the failing file went from ~1-failure-per-2-file-runs (that day) to
+12/12 green post-fix; the v0.51.0 publish full-suite run is the load test. Column
+`testing` until a few more full runs pass (the original criteria asked 20).
 
 ## Problem
 

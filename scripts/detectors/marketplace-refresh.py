@@ -266,6 +266,10 @@ def main() -> int:
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
+                # detached_uv_env: the worker's `uv run --script` shebang must not
+                # inherit this process's (possibly ephemeral) VIRTUAL_ENV — a dangling
+                # one kills the worker before its first line (TRDD-UO93APWN).
+                env=state.detached_uv_env(),
             )
         finally:
             logf.close()
