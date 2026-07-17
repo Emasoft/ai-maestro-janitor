@@ -233,7 +233,11 @@ def test_daemon_runs_marketplace_refresh_and_user_plugins_update(harness: dict) 
         return any("plugin marketplace update" in ln for ln in lines) and \
                any("plugin update test-plugin-a@mp --scope user" in ln for ln in lines)
 
-    assert _wait_for(saw_both, timeout=10.0), "daemon must run both tasks"
+    # 30 s: bulk tasks run via the background lane (one at a time) since the
+    # 2026-07-17 starvation fix, so user-plugins-update spawns only after the
+    # marketplace-refresh child is REAPED — up to two _BULK_RECHECK_SEC beats
+    # plus both child runtimes.
+    assert _wait_for(saw_both, timeout=30.0), "daemon must run both tasks"
 
     # Sanity: the local-scope plugin in the stub list must NOT have been
     # updated by the daemon (user-scope is the daemon's job, not local-scope).
@@ -310,7 +314,9 @@ def test_daemon_marks_last_run_after_task(harness: dict) -> None:
     mr_path = harness["state_dir"] / "marketplace-refresh.last-run.ts"
     up_path = harness["state_dir"] / "user-plugins-update.last-run.ts"
 
-    assert _wait_for(lambda: mr_path.is_file() and up_path.is_file(), timeout=10.0), \
+    # 30 s: since the background-lane fix a bulk task's stamp lands at child REAP
+    # time (serialized lane), not synchronously — see the saw_both timeout note.
+    assert _wait_for(lambda: mr_path.is_file() and up_path.is_file(), timeout=30.0), \
         "both task last-run files must be written"
     # Stamps must be sensible epoch seconds (within the last minute).
     now = int(time.time())
@@ -332,7 +338,9 @@ def test_daemon_writes_reload_flag_when_plugin_updated(harness: dict) -> None:
     harness["env"]["CLAUDE_STUB_FORCE_UPDATE"] = "1"
     harness["spawn"]()
     flag = harness["state_dir"] / "reload-needed.flag"
-    assert _wait_for(lambda: flag.is_file(), timeout=10.0), \
+    # 30 s: the flag is set by the user-plugins-update background child, which
+    # spawns only after marketplace-refresh clears the bulk lane.
+    assert _wait_for(lambda: flag.is_file(), timeout=30.0), \
         "reload-needed.flag must be written after a real plugin update"
     body = flag.read_text(encoding="utf-8")
     assert "test-plugin-a@mp" in body, \
@@ -352,7 +360,8 @@ def test_daemon_does_not_write_reload_flag_when_nothing_updated(harness: dict) -
     # Wait until at least one user-plugins-update completes so the daemon
     # has had its chance to set the flag.
     up_path = harness["state_dir"] / "user-plugins-update.last-run.ts"
-    assert _wait_for(lambda: up_path.is_file(), timeout=10.0)
+    # 30 s: stamp-at-reap through the serialized bulk lane (see saw_both note).
+    assert _wait_for(lambda: up_path.is_file(), timeout=30.0)
     # Now the flag must NOT exist.
     flag = harness["state_dir"] / "reload-needed.flag"
     assert not flag.is_file(), "reload flag must not be set when no plugin actually updated"
@@ -516,6 +525,23 @@ def test_oauth_rotator_tick_does_not_gate_on_lock(
 # and assert the call is bounded, returns None, and the child is reaped.
 
 
+def _isolate_project_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, daemon) -> None:
+    """Pin `state.log_line`'s target to tmp AND flush the process-lifetime lru caches.
+
+    WHY (2026-07-17 flake root-cause): `state.project_root` & friends memoise the
+    FIRST resolution for the whole pytest process. Without this, the kill-path tests
+    (a) write real log lines into the REPO's `.janitor/`, (b) spawn a
+    `git rev-parse` fallback INSIDE a patched-Popen window (breaking the
+    exactly-one-child assertion), and (c) pin the repo root so every LATER test's
+    monkeypatched CLAUDE_PROJECT_DIR is silently ignored — which made the
+    chore-coordination watchdog test dedupe against the REAL repo's seen-file."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
+    (tmp_path / "proj").mkdir(exist_ok=True)
+    for fn in (daemon.state.project_root, daemon.state.janitor_root,
+               daemon.state.state_dir, daemon.state.log_dir):
+        fn.cache_clear()
+
+
 def test_run_workload_kills_hung_child_and_returns_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -523,6 +549,7 @@ def test_run_workload_kills_hung_child_and_returns_none(
     daemon = _import_daemon_module()
     # Isolate global state so write_heartbeat() during the tick lands in tmp.
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    _isolate_project_paths(tmp_path, monkeypatch, daemon)
     daemon.gs.init_global_state()
 
     start = time.time()
@@ -545,6 +572,9 @@ def test_run_workload_kill_path_closes_pipe_fds(
     """
     daemon = _import_daemon_module()
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gstate"))
+    # MUST precede the Popen patch: an unpinned project root makes log_line's
+    # `git rev-parse` fallback a SECOND captured Popen (see _isolate_project_paths).
+    _isolate_project_paths(tmp_path, monkeypatch, daemon)
     daemon.gs.init_global_state()
 
     captured: list = []

@@ -3,7 +3,7 @@ trdd-id: UO93APWN
 title: Flaky e2e worker race in test_marketplace_refresh_scoped
 column: todo
 created: 2026-07-17T14:31:22+0200
-updated: 2026-07-17T14:31:22+0200
+updated: 2026-07-17T16:27:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 severity: low
@@ -27,6 +27,19 @@ occasionally slow/cold; (3) a lingering DETACHED worker process from the previou
 interacting with the spawn-skip ("prior worker still alive → skip cleanly") logic in a
 way the per-test tmp dirs do not actually isolate (worker PID tracking location —
 verify which dir it really lives in).
+
+## New lead (2026-07-17, from the TRDD-H7NVKSAX flake root-cause)
+
+A SIBLING flake in `test_chore_coordination.py` was root-caused the same day to
+**`state.project_root`/`janitor_root`/`state_dir`/`log_dir` being lru-cached for the
+process lifetime**: the first in-process caller pins the resolution, and every later
+test's monkeypatched `CLAUDE_PROJECT_DIR` is silently ignored — state then reads/writes
+the REAL repo's `.janitor/` (a seen-file there deduped the watchdog alarm to silence).
+Check suspect (3) against this exact mechanism first: if the detector/worker resolves
+its PID-tracking or state dir through those cached functions inside the pytest process,
+the "isolated tmp project" is an illusion and workers from different tests share one real
+dir. Fix pattern proven in `test_daemon.py::_isolate_project_paths` (env pin +
+`cache_clear` on all four, BEFORE any state-touching call).
 
 ## Fix criteria
 

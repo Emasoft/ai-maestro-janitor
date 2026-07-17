@@ -88,7 +88,15 @@ plugin updates auto-roll with NO re-arm) → `dispatch.py`:
 run each due `Task`; `_run_workload` runs subprocess with **1800s cap** +
 periodic heartbeat ticks. `Task.run()` stamps `<name>.last-run.ts`
 **unconditionally** in `finally` (so stale last-run = task not *running*, not
-failing-silently). Tasks: `marketplace-refresh` (1200s, bulk), `user-plugins-update`
+failing-silently). **Background bulk lane (TRDD-H7NVKSAX, 2026-07-17 oauth-starvation
+incident):** the BULK tasks (`marketplace-refresh`, `user-plugins-update`,
+`version-update`, `github-config-audit`) carry `background=True` and run in ONE detached
+child at a time (`daemon.py --run-task <name>`, parent reaps + stamps from the child rc)
+so a ~20-min bulk run can NEVER block the loop's 60s survival beats (oauth-rotator-tick
+above all — two back-to-back 1190s marketplace refreshes once blinded rotation while an
+account hit its 5h wall). One lane preserves the old bulk-chore serialization; file locks
+remain the backstop. Tasks: `marketplace-refresh` (3600s — was 1200s, which ≈ its own
+runtime and gave a 50% duty cycle; bulk), `user-plugins-update`
 (3600s, `--scope user`), `version-update` (21600s, self-update + sets reload-flag),
 `rules-cleanup` (3600s, TRDD-H9IBY95W — when the janitor is CONFIRMED uninstalled, removes
 provenance-marked orphaned rules from `~/.claude/rules/`; the only actor that can act after a

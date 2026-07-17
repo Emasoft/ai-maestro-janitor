@@ -3,7 +3,7 @@ trdd-id: 4649ZLE0
 title: Human-notification channel for daemon findings when no session is alive
 column: todo
 created: 2026-07-17T15:06:36+0200
-updated: 2026-07-17T15:06:36+0200
+updated: 2026-07-17T16:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -67,7 +67,11 @@ get the human to START the right Claude, per the directive — never to carry th
 threshold), not on every failure; (b) the ai-maestro server coordination — when the server
 owns the chores (PZLVT2RN B2), IT owns the notification for them too; janitor pushes only for
 chores it actually ran (add to the #100 contract enumeration); (c) tests: dedupe, severity
-gate, zero-session escalation, webhook never called without the opt-in URL.
+gate, zero-session escalation, webhook never called without the opt-in URL; (d) **the
+daemon-cannot-read-primary-keychain condition** (TRDD-H7NVKSAX F4): the rotator logged
+"primary live credential UNREADABLE" every minute for hours into rotator.log where nobody
+looks — a PERSISTENT security-degradation finding that must reach the human via this
+channel (the ACL re-grant needs the user; only they can fix it).
 
 ## Notes and lessons learned
 

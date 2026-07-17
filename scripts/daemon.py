@@ -46,6 +46,7 @@ Read-only output: nothing on stdout (it's a daemon). All progress goes to
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -107,11 +108,16 @@ _INTERVAL_KEEPALIVE_SELF_HEAL = _env_interval(
 # Default cadences. Each is overridable via the matching env var (the
 # per-session userConfig knobs in plugin.json end up here on spawn).
 _INTERVAL_MARKETPLACE_REFRESH = _env_interval(
-    "CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", 1200
-)  # 20 min — daemon is the only writer of GLOBAL marketplace refresh
+    "CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL", 3600
+)  # 1 h — daemon is the only writer of GLOBAL marketplace refresh
 #  (refreshes every configured marketplace in one CLI call). The per-session
-#  detector handles narrower local+project marketplaces at 5 min, so the
-#  daemon doesn't need to be aggressive here.
+#  detector handles narrower local+project marketplaces at 5 min, and the
+#  consumer of this refresh (user-plugins-update) runs hourly anyway, so a
+#  faster beat buys nothing. WHY not the old 1200: the bulk refresh takes
+#  ~1190 s at low priority, so a 1200 s cadence had the task running ~50% of
+#  wall-clock time — and (pre-background-lane) starving the 60 s survival
+#  beats for 20 min of every 40 (oauth-rotation starvation incident,
+#  2026-07-17: an account hit its 5 h wall inside such a blind window).
 _INTERVAL_USER_PLUGINS_UPDATE = _env_interval(
     "CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL", 3600
 )  # 1 h — full sweep takes ~7 min; hourly cadence keeps everything fresh.
@@ -178,6 +184,20 @@ _INTERVAL_GITHUB_CONFIG_AUDIT = _env_interval(
 # staleness threshold (DEFAULT_DAEMON_STALE_SECONDS = 1800 s) so the heartbeat
 # stays well within the alive window when no workload is running.
 _LOOP_CEILING_SEC = 60
+
+# Background bulk lane (oauth-rotation starvation incident, 2026-07-17). A due
+# background task deferred by a busy lane — or one whose detached child is still
+# running — re-checks on this beat instead of clamping the main-loop sleep to 1 s
+# (which would busy-spin for the whole ~20 min of a bulk run). 5 s, not 60: the
+# stamp lands at REAP time, so this beat bounds both a finished child's reap
+# latency and the gap before the next queued bulk task spawns — and a lane-busy
+# loop pass is just flag stats + one waitpid, so 5 s costs ~nothing.
+_BULK_RECHECK_SEC = 5
+
+# Grace added on top of _WORKLOAD_TIMEOUT_SEC before the parent hard-kills a
+# detached background child. The child's own _run_workload caps should end it
+# first; this is the belt for a child wedged OUTSIDE a workload subprocess.
+_BULK_CHILD_KILL_GRACE_SEC = 120
 
 # Wall-clock cap on a single workload subprocess. Generous: a slow marketplace
 # refresh on a flaky network can legitimately take many minutes. Beyond this
@@ -1254,10 +1274,21 @@ class Task:
     the soonest task is ready instead of busy-polling.
     """
 
-    def __init__(self, name: str, interval_s: int, fn: Callable[[], None]) -> None:
+    def __init__(
+        self, name: str, interval_s: int, fn: Callable[[], None], *, background: bool = False
+    ) -> None:
         self.name = name
         self.interval_s = interval_s
         self.fn = fn
+        # Background tasks run in ONE detached child at a time (the "bulk lane") so a
+        # 20-minute bulk workload can never block the main loop's 60 s survival beats.
+        # WHY: oauth-rotation starvation incident 2026-07-17 — two back-to-back ~1190 s
+        # marketplace-refresh runs blinded the loop while an account hit its 5 h wall;
+        # rotation that should have fired at ~15:46 never ran and the user had to
+        # switch accounts by hand.
+        self.background = background
+        self._child: Optional[subprocess.Popen[bytes]] = None
+        self._child_t0 = 0.0
         self.last_run_path = gs.global_state_dir() / f"{name}.last-run.ts"
         # Consecutive-failure streak (Pillar 1). Lives beside last-run.ts so a
         # quarantine SURVIVES daemon restarts — a broken task does not get a clean
@@ -1281,13 +1312,93 @@ class Task:
         return min(self.interval_s * (2 ** shift), _TASK_MAX_BACKOFF_SEC)
 
     def time_until_due(self) -> int:
+        if self._child is not None:
+            # An unreaped background run is in flight: never "due" (a due task would be
+            # respawned every loop) and never 0 (a 0 would clamp the main-loop sleep to
+            # 1 s and busy-spin for the whole bulk run). Re-evaluated after the reap.
+            return _BULK_RECHECK_SEC
         penalty = self._backoff_penalty(self._failcount())
         return max(0, self._last_run() + self.interval_s + penalty - int(time.time()))
 
     def is_due(self) -> bool:
         return self.time_until_due() == 0
 
+    def child_alive(self) -> bool:
+        """True iff this task's detached background child is still running."""
+        return self._child is not None and self._child.poll() is None
+
+    def spawn_background(self) -> None:
+        """Start this task's fn in a DETACHED child (`daemon.py --run-task <name>`).
+
+        The parent stamps last-run/failcount when the child is REAPED
+        (`poll_background`), mirroring the foreground bookkeeping. A spawn failure is
+        recorded as a failed run so the task retries on cadence, not every loop."""
+        try:
+            self._child = subprocess.Popen(
+                [sys.executable, os.path.abspath(__file__), "--run-task", self.name],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,  # own pgroup → killpg reaps its subprocesses too
+            )
+            self._child_t0 = time.time()
+            state.log_line(
+                "daemon", f"task '{self.name}' starting (background pid {self._child.pid})"
+            )
+        except Exception as exc:  # noqa: BLE001 - a spawn failure must not kill the loop
+            self._child = None
+            state.atomic_write(self.last_run_path, str(int(time.time())))
+            state.atomic_write(self.failcount_path, str(self._failcount() + 1))
+            state.log_line("daemon", f"task '{self.name}' background spawn FAILED: {exc}")
+
+    def poll_background(self) -> None:
+        """Reap a finished detached child: stamp last-run + failcount exactly as a
+        foreground run would. No-op while it is still running or when none exists.
+        A child running past the workload cap (+grace) is hard-killed — its own
+        internal `_run_workload` caps should have ended it, so past that it is wedged."""
+        if self._child is None:
+            return
+        rc = self._child.poll()
+        if rc is None:
+            if time.time() - self._child_t0 > _WORKLOAD_TIMEOUT_SEC + _BULK_CHILD_KILL_GRACE_SEC:
+                try:
+                    os.killpg(self._child.pid, signal.SIGKILL)
+                except Exception:  # noqa: BLE001 - pgroup may already be gone
+                    with contextlib.suppress(Exception):
+                        self._child.kill()
+                state.log_line(
+                    "daemon",
+                    f"task '{self.name}' background child pid {self._child.pid} "
+                    f"exceeded the workload cap — killed",
+                )
+            return
+        dt_s = int(time.time() - self._child_t0)
+        self._child = None
+        state.atomic_write(self.last_run_path, str(int(time.time())))
+        if rc != 0:
+            fails = self._failcount() + 1
+            state.atomic_write(self.failcount_path, str(fails))
+            penalty = self._backoff_penalty(fails)
+            note = f" — quarantined, next run +{penalty}s" if penalty else ""
+            state.log_line(
+                "daemon",
+                f"task '{self.name}' FAILED in {dt_s}s (background rc={rc}, "
+                f"consecutive={fails}){note}",
+            )
+        else:
+            if self._failcount():
+                state.atomic_write(self.failcount_path, "0")
+            state.log_line("daemon", f"task '{self.name}' done in {dt_s}s (background)")
+
     def run(self) -> None:
+        if self.child_alive():
+            # Belt for the cadence-bypass callers (_consume_version_update_request):
+            # a synchronous run while this task's background child is in flight would
+            # double-run the chore the background lane exists to serialize.
+            state.log_line(
+                "daemon", f"task '{self.name}' skipped — background run already in flight"
+            )
+            return
         state.log_line("daemon", f"task '{self.name}' starting")
         t0 = time.time()
         failed = False
@@ -1318,17 +1429,28 @@ class Task:
 
 
 def _build_tasks() -> list[Task]:
+    # background=True marks the BULK chores (long network/CLI sweeps — a
+    # marketplace refresh alone runs ~20 min at low priority). They execute in one
+    # detached child at a time (the bulk lane), so the 60 s survival beats below
+    # (oauth-rotator-tick above all) are never starved behind them — the
+    # oauth-rotation starvation incident, 2026-07-17. One lane (not N children)
+    # preserves the old single-loop serialization between the bulk chores
+    # themselves; the cross-process file locks stay as the backstop.
     return [
-        Task("marketplace-refresh", _INTERVAL_MARKETPLACE_REFRESH, task_marketplace_refresh),
-        Task("user-plugins-update", _INTERVAL_USER_PLUGINS_UPDATE, task_user_plugins_update),
-        Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update),
+        Task("marketplace-refresh", _INTERVAL_MARKETPLACE_REFRESH, task_marketplace_refresh,
+             background=True),
+        Task("user-plugins-update", _INTERVAL_USER_PLUGINS_UPDATE, task_user_plugins_update,
+             background=True),
+        Task("version-update", _INTERVAL_VERSION_UPDATE, task_version_update,
+             background=True),
         Task("oauth-rotator-supervisor", _INTERVAL_OAUTH_SUPERVISOR,
              task_oauth_rotator_supervisor),
         Task("oauth-rotator-tick", _INTERVAL_OAUTH_TICK, task_oauth_rotator_tick),
         Task("memory-guard", _INTERVAL_MEMORY_GUARD, task_memory_guard),
         Task("cache-prune", _INTERVAL_CACHE_PRUNE, task_cache_prune),
         Task("rules-cleanup", _INTERVAL_RULES_CLEANUP, task_rules_cleanup),
-        Task("github-config-audit", _INTERVAL_GITHUB_CONFIG_AUDIT, task_github_config_audit),
+        Task("github-config-audit", _INTERVAL_GITHUB_CONFIG_AUDIT, task_github_config_audit,
+             background=True),
         Task("session-liveness", _INTERVAL_SESSION_LIVENESS, task_session_liveness),
         Task("fleet-stop", _INTERVAL_FLEET_STOP, task_fleet_stop),
     ]
@@ -1376,6 +1498,68 @@ def _yielded_task_names(tasks: list[Task], owned: bool | None) -> set[str]:
     a due-but-yielded task left in `time_until_due` would clamp the sleep to ~1 s and
     busy-spin the daemon for as long as the server stays up."""
     return {t.name for t in tasks if _task_yielded_to_server(t.name, owned)}
+
+
+def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
+    """One due-pass over `tasks` (extracted from main() for testability after the
+    2026-07-17 oauth-rotation starvation incident).
+
+    Foreground tasks run synchronously as before. Background (bulk) tasks run in ONE
+    detached child at a time — the bulk lane: finished children are reaped first
+    (stamping last-run/failcount), then at most one due background task is spawned.
+    One lane (not N children) preserves the old single-loop serialization between
+    the bulk chores themselves. A due background task deferred by a busy lane stays
+    due and is retried on the next pass. Returns whether the bulk lane is busy AFTER
+    the pass, for the sleep computation."""
+    for task in tasks:
+        if task.background:
+            task.poll_background()  # reap even while yielded/paused — bookkeeping only
+    bulk_busy = any(t.child_alive() for t in tasks if t.background)
+    for task in tasks:
+        # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
+        # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause + maintenance
+        # join the kill-switch in the per-task gate so "immediately skip the chores"
+        # actually holds; the top-of-loop pause/maintenance branches then idle.
+        if (
+            not _running
+            or gs.kill_switch_present()
+            or gs.global_pause_present()
+            or gs.maintenance_mode_present()
+        ):
+            break
+        if task.name in yielded:
+            continue  # the active server owns this chore (Phase B2)
+        if not task.is_due():  # a task with a live child is never due (time_until_due)
+            continue
+        if task.background:
+            if bulk_busy:
+                continue  # one bulk lane: defer; the task stays due for the next pass
+            task.spawn_background()
+            bulk_busy = True
+            continue
+        task.run()
+    return any(t.child_alive() for t in tasks if t.background)
+
+
+def _sleep_seconds(tasks: list[Task], yielded: set[str], bulk_busy: bool) -> int:
+    """Seconds the main loop should sleep before the next due-pass.
+
+    Yielded tasks are excluded — a due-but-yielded task would report
+    time_until_due()==0 and clamp the sleep to 1 s, a busy-spin for as long as the
+    server stays up (Phase B2). A due background task deferred by a busy bulk lane
+    contributes the recheck beat instead of 0 for the same reason."""
+
+    def contribution(t: Task) -> int:
+        ttd = t.time_until_due()
+        if t.background and bulk_busy and ttd == 0:
+            return _BULK_RECHECK_SEC
+        return ttd
+
+    next_due = min(
+        (contribution(t) for t in tasks if t.name not in yielded),
+        default=_LOOP_CEILING_SEC,
+    )
+    return max(1, min(_LOOP_CEILING_SEC, next_due))
 
 
 def _run_maintenance_keepalive(tasks: list[Task]) -> None:
@@ -1785,22 +1969,7 @@ def main() -> int:
                 # the plugin-updates detector enqueued and run them as the single writer (#7).
                 _consume_plugin_update_requests()
 
-            for task in tasks:
-                # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
-                # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause + maintenance
-                # join the kill-switch in the per-task gate so "immediately skip the chores"
-                # actually holds; the top-of-loop pause/maintenance branches then idle.
-                if (
-                    not _running
-                    or gs.kill_switch_present()
-                    or gs.global_pause_present()
-                    or gs.maintenance_mode_present()
-                ):
-                    break
-                if task.name in yielded:
-                    continue  # the active server owns this chore (Phase B2)
-                if task.is_due():
-                    task.run()
+            bulk_busy = _run_due_tasks(tasks, yielded)
 
             gs.write_heartbeat()
 
@@ -1815,15 +1984,9 @@ def main() -> int:
                     break
 
             # Sleep precisely until the next task is due, but in 1-second
-            # increments so signals interrupt promptly.
-            # Yielded tasks are excluded here too: a due-but-yielded task would report
-            # time_until_due()==0 and clamp the sleep to 1 s — a busy-spin for as long
-            # as the server stays up (Phase B2).
-            next_due = min(
-                (t.time_until_due() for t in tasks if t.name not in yielded),
-                default=_LOOP_CEILING_SEC,
-            )
-            sleep_for = max(1, min(_LOOP_CEILING_SEC, next_due))
+            # increments so signals interrupt promptly. Yield + bulk-lane deferral
+            # exclusions live in _sleep_seconds (Phase B2; bulk-lane incident).
+            sleep_for = _sleep_seconds(tasks, yielded, bulk_busy)
             for _ in range(sleep_for):
                 if not _running or gs.kill_switch_present():
                     break
@@ -1843,5 +2006,34 @@ def main() -> int:
     return 0
 
 
+def _run_task_child(name: str) -> int:
+    """`daemon.py --run-task <name>` — the detached background-lane child.
+
+    Runs ONE task's fn to completion and exits; the PARENT daemon does all the
+    bookkeeping (last-run stamp, failcount) from the observed exit code, so this
+    deliberately calls `task.fn()` and NOT `task.run()`. No singleton flock, no pid
+    file, no signal handlers — this is a worker, not a daemon. The cross-process
+    file locks inside the fns (marketplace_lock etc.) remain the collision backstop.
+    `noop` (and any `noop-*`) exits 0 without touching anything — the smoke-test of
+    the child-exec path (also what the background-lane tests spawn so no real
+    workload ever runs; the `noop-*` prefix lets tests use DISTINCT task names,
+    since cadence stamps are keyed by name)."""
+    if name == "noop" or name.startswith("noop-"):
+        return 0
+    for task in _build_tasks():
+        if task.name == name:
+            try:
+                task.fn()
+            except Exception as exc:  # noqa: BLE001 - the rc IS the report channel
+                state.log_line("daemon", f"task '{name}' (background child) raised: {exc}")
+                return 1
+            return 0
+    state.log_line("daemon", f"--run-task: unknown task '{name}'")
+    return 3
+
+
 if __name__ == "__main__":
+    if "--run-task" in sys.argv:
+        idx = sys.argv.index("--run-task")
+        sys.exit(_run_task_child(sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""))
     sys.exit(main())

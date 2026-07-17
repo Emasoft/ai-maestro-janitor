@@ -103,4 +103,5 @@ def test_daemon_interval_knob_tolerates_garbage(monkeypatch) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
     sys.modules.pop("daemon", None)
     daemon = importlib.import_module("daemon")
-    assert daemon._INTERVAL_MARKETPLACE_REFRESH == 1200  # the documented default
+    # 3600 since TRDD-H7NVKSAX (was 1200 ≈ the task's own runtime → 50% duty cycle).
+    assert daemon._INTERVAL_MARKETPLACE_REFRESH == 3600  # the documented default

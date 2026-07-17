@@ -32,6 +32,7 @@ sys.path.insert(0, str(_ROOT / "scripts" / "lib"))
 import daemon  # type: ignore[import-not-found]  # noqa: E402
 import daemon_watchdog  # type: ignore[import-not-found]  # noqa: E402
 import harness_backend as hb  # type: ignore[import-not-found]  # noqa: E402
+import state as janitor_state  # type: ignore[import-not-found]  # noqa: E402
 
 _OVERRIDE_VARS = (hb.SERVER_CHORES_ENV, hb.SERVER_STATE_ENV)
 
@@ -45,8 +46,19 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     for var in _OVERRIDE_VARS:
         monkeypatch.delenv(var, raising=False)
     hb._chores_cache = None  # noqa: SLF001 -- reset the memo between tests
+    # Flush state's process-lifetime path caches (project_root & friends): an
+    # in-process test that ran EARLIER in the same pytest process may have pinned
+    # the REAL repo root, which would send the watchdog's emit_once seen-file to
+    # the repo's own .janitor/state — where a previous run's hour-key silences the
+    # alarm and flips the control test (root-caused 2026-07-17).
+    for fn in (janitor_state.project_root, janitor_state.janitor_root,
+               janitor_state.state_dir, janitor_state.log_dir):
+        fn.cache_clear()
     yield
     hb._chores_cache = None  # noqa: SLF001
+    for fn in (janitor_state.project_root, janitor_state.janitor_root,
+               janitor_state.state_dir, janitor_state.log_dir):
+        fn.cache_clear()
 
 
 # ---------- 1. the yield policy ----------
