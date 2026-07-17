@@ -1,15 +1,16 @@
 ---
 trdd-id: EQ792YPX
 title: Janitor ensures recommended Claude Code settings in ~/.claude/settings.json (two merge modes)
-column: dev
+column: published
 created: 2026-07-17T01:30:31+0200
-updated: 2026-07-17T01:30:31+0200
+updated: 2026-07-17T02:21:39+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 release-via: publish
 relevant-rules: [7]
-implementation-commits: []
+eht: [2C8XFOW9]
+implementation-commits: [523ec4a, 91bb4ec]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME — 2026-07-17
@@ -37,8 +38,19 @@ the USER-global `~/.claude/settings.json`, with TWO distinct merge modes:
 `settings_ensurer_lock()` in `scripts/lib/global_state.py` (mirrors `oauth_rotator_lock`);
 `tests/test_settings_ensurer.py` + a call in `tests/test_hooks_execute.py`.
 
-**NEXT ACTION:** implement the module, then wire the hook + plugin.json + lock, then tests, then
-`uv run python scripts/publish.py --minor` (dry-run first for the CPV `--strict` NIT gate).
+**SHIPPED v0.47.0** (2026-07-17). Code: `settings_ensurer.py` (+ `global_state.settings_ensurer_lock`,
+hook wiring, `ensure_settings_enabled` userConfig), commits 523ec4a (feat) + 91bb4ec (the SUPERSECURE
+verify-before-swap write: `_verified_atomic_write` writes tmp → re-reads it from disk → proves valid
+JSON + exact round-trip + only-intended-edits via the pure `_verify_invariants`, and swaps ONLY then;
+any failure leaves the live file untouched). 20 unit tests + 1 hook end-to-end; full suite green;
+isolation proof passed (real ~/.claude/settings.json untouched by the test run).
+
+**FOLLOW-UP (spun out): [[TRDD-2C8XFOW9]]** — restart sessions after a settings change so it actually
+applies (settings.json is read at CC startup). HIGH-BLAST-RADIUS; held for USER confirmation +
+blocked on ai-maestro#75 (server restart command + a settings.json-edit API for workdir-restricted
+agents). This is the EHT of this TRDD.
+
+**NEXT ACTION:** none here — shipped. The apply-on-restart work continues under TRDD-2C8XFOW9.
 
 **Load-bearing facts / gotchas:**
 - **Restart-to-apply:** `settings.json` (env block AND top-level) is read at Claude Code STARTUP,
