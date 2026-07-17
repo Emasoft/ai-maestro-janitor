@@ -190,6 +190,7 @@ def crash_loop_tripped(hard_attempts_in_window: int, max_in_window: int) -> bool
 # Per-instance janitor-health diagnoses, most-severe / most-actionable first.
 DIAGNOSES: tuple[str, ...] = (
     "unarmed",           # user opted out — NEVER touch
+    "server_owned",      # an ai-maestro harness agent a LIVE server owns — NEVER touch (TRDD-PZLVT2RN)
     "dead",              # process/pane gone — a keystroke can't reach it
     "frozen",            # rate-limited + no transcript progress — the freeze ladder
     "version_mismatch",  # loaded an older plugin version than cached — reload/update
@@ -200,6 +201,7 @@ DIAGNOSES: tuple[str, ...] = (
 # Diagnosis → the recovery the daemon applies. None = leave the instance alone.
 _DIAGNOSIS_RECOVERY: dict[str, str | None] = {
     "unarmed": None,
+    "server_owned": None,          # the ai-maestro server owns this agent's continuity — hands off
     "healthy": None,
     "frozen": "ladder",            # run recovery_action_for() (the 7-rung escalation)
     "version_mismatch": "reload",  # inject /reload-plugins (+ ensure update)
@@ -215,6 +217,7 @@ def diagnose_instance(
     transcript_stale: bool,
     rate_limited: bool,
     version_stale: bool,
+    server_owned: bool = False,
 ) -> str:
     """Classify ONE armed claude instance's janitor health from pre-gathered
     boolean facts (the daemon computes each from the instance's state-dir +
@@ -239,6 +242,15 @@ def diagnose_instance(
     """
     if deliberately_unarmed:
         return "unarmed"           # the user opted out — sacrosanct, never touch
+    if server_owned:
+        # An ai-maestro harness agent whose LIVE server owns Family-A continuity
+        # (TRDD-PZLVT2RN / janitor#100: "neither touches the other's agents"). Checked
+        # BEFORE dead/frozen on purpose: even a stuck harness agent is the SERVER's to
+        # recover — two principals actuating one pane is the corruption the split
+        # prevents. The decision of WHO is server-owned is
+        # harness_backend.instance_is_server_owned (override + tag + cache); this table
+        # only ranks it.
+        return "server_owned"
     if not pane_alive:
         return "dead"              # gone — keystroke recovery is impossible
     if not transcript_stale:

@@ -118,6 +118,16 @@ def select_stop_targets(
     for sess in sessions:
         pid = int(sess.get("pid", 0) or 0)
         cmd = str(sess.get("command", "") or "")
+        if sess.get("server_owned"):
+            # An ai-maestro harness agent a LIVE server owns (TRDD-PZLVT2RN): the
+            # machine-wide janitor stop is the STANDALONE fleet's stop — harness agents
+            # receive their global control from the SERVER (its in-process control ops),
+            # so injecting a /janitor-disarm here would have the wrong principal driving
+            # them AND mint a disarmed.flag the server's own control model knows nothing
+            # about. Skipped BEFORE is_injectable so no dedupe stamp is burned — if the
+            # server disappears for good, the operator's adoption override lets a LATER
+            # beat inject fresh.
+            continue
         if not is_injectable(
             pid=pid,
             command=cmd,

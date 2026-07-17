@@ -1218,7 +1218,17 @@ def task_fleet_stop() -> None:
         state.log_line("daemon", f"fleet-stop: fleet scan failed: {exc}")
         return
     by_pid = {i.pid: i for i in fleet}
-    sessions = [{"pid": i.pid, "command": i.command, "terminal": i.terminal} for i in fleet]
+    sessions = [
+        {
+            "pid": i.pid,
+            "command": i.command,
+            "terminal": i.terminal,
+            # Harness agents a live server owns get their global control from the
+            # SERVER, never from this daemon's injection (TRDD-PZLVT2RN).
+            "server_owned": i.diagnosis == "server_owned",
+        }
+        for i in fleet
+    ]
     plans = fleet_stop.select_stop_targets(
         sessions,
         flag_state=flag_state,

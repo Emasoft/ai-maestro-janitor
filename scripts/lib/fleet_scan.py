@@ -26,6 +26,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+import harness_backend
 import session_liveness
 import state
 import terminal_trigger
@@ -282,6 +283,7 @@ def diagnose_root(
     now: int,
     transcript_age: int | None,
     stale_s: int = STALE_S,
+    server_owned: bool = False,
 ) -> tuple[str, str | None, int | None]:
     """Read a project's ``.janitor`` state + the session's ``transcript_age`` and
     diagnose its janitor health. Returns ``(diagnosis, recovery, dispatch_age_s)``
@@ -307,6 +309,7 @@ def diagnose_root(
         transcript_stale=transcript_stale,
         rate_limited=rate_limited,
         version_stale=False,  # v1: cross-process version compare deferred (Group C)
+        server_owned=server_owned,  # a live ai-maestro server owns this agent (TRDD-PZLVT2RN)
     )
     dispatch_age = _age(os.path.join(ldir, "dispatch.log"), now)
     return diagnosis, session_liveness.recovery_for_diagnosis(diagnosis), dispatch_age
@@ -332,29 +335,35 @@ def _cwd_of(pid: int) -> str | None:
     return None
 
 
-def _aimaestro_agents(env: Mapping[str, str] | None = None) -> tuple[str | None, list]:
+def _aimaestro_agents(env: Mapping[str, str] | None = None) -> tuple[str | None, list, bool]:
     """Resolve the ai-maestro CLI and fetch its agent list ONCE per ``gather_fleet()``
     call — never per-instance, an N-instance scan must not shell out N times.
-    Best-effort: returns ``(None, [])`` on ANY failure (CLI absent, server down,
+    Best-effort: returns ``(None, [], False)`` on ANY failure (CLI absent, server down,
     malformed JSON) so a host without ai-maestro installed/running never breaks the
     fleet scan. Reuses ``terminal_trigger``'s resolver/runner — the SAME ones
     self-trigger's ``_try_ai_maestro_send`` uses — instead of re-implementing CLI
     discovery. (TRDD-ME8V2YJF follow-up)
+
+    The third element is ``list_ok`` — whether the server ANSWERED the list call
+    (parsed JSON, even an empty registry). It matters because the list is fetched off
+    the server's own HTTP API, so ``list_ok`` doubles as this scan's live-server proof
+    and its False is the trigger for the cached-roots exclusion fallback
+    (TRDD-PZLVT2RN — ``harness_backend.instance_is_server_owned``).
     """
     e = env if env is not None else os.environ
     cli = terminal_trigger._resolve_aimaestro_cli(e)
     if not cli:
-        return None, []
+        return None, [], False
     proc = terminal_trigger._run_aimaestro_cli(cli, ["list", "--json"], env=e, timeout=5.0)
     if proc is None or proc.returncode != 0 or not proc.stdout.strip():
-        return cli, []
+        return cli, [], False
     try:
         agents = json.loads(proc.stdout)
     except ValueError:
-        return cli, []
+        return cli, [], False
     if isinstance(agents, dict) and isinstance(agents.get("agents"), list):
         agents = agents["agents"]
-    return cli, (agents if isinstance(agents, list) else [])
+    return cli, (agents if isinstance(agents, list) else []), isinstance(agents, list)
 
 
 def tag_aimaestro_identity(
@@ -434,7 +443,18 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
     record_iterm_automation_state(
         iterm_automation_blocked(iterm_running=iterm_running, sessions=iterm_by_tty)
     )
-    aimaestro_cli, aimaestro_agents = _aimaestro_agents()
+    aimaestro_cli, aimaestro_agents, aimaestro_list_ok = _aimaestro_agents()
+    # The harness-exclusion inputs (TRDD-PZLVT2RN): a SUCCESSFUL list refreshes the
+    # last-known agent-roots cache; a FAILED one (server down OR hiccup — we cannot
+    # tell) falls back to that cache so the exclusion HOLDS instead of the daemon
+    # actuating on agents it merely lost sight of. The operator override can force
+    # adoption. All policy lives in harness_backend.instance_is_server_owned.
+    aimaestro_override = harness_backend.server_state_override()
+    if aimaestro_list_ok and aimaestro_agents:
+        harness_backend.remember_agent_roots(harness_backend.agent_workdirs(aimaestro_agents))
+    cached_agent_roots = (
+        harness_backend.recall_agent_roots() if (aimaestro_cli and not aimaestro_list_ok) else []
+    )
     linux_gui_channel = (
         terminal_trigger._resolve_linux_gui_channel(os.environ)
         if sys.platform.startswith("linux")
@@ -457,14 +477,25 @@ def gather_fleet(*, now: int, sweep_stale_rate_limit_s: int | None = None) -> li
                 f"session-liveness: swept stale rate-limited.flag in {root} "
                 f"(older than {sweep_stale_rate_limit_s}s) — restores cron_dead over frozen",
             )
-        diagnosis, recovery, dispatch_age = diagnose_root(
-            root, now=now, transcript_age=tr_age
-        )
         terminal = session_liveness.resolve_terminal_for_tty(
             tty, iterm_by_tty=iterm_by_tty, tmux_by_tty=tmux_by_tty
         )
+        # Tag BEFORE diagnosing (reordered by TRDD-PZLVT2RN): the diagnosis must be able
+        # to see whether a live server owns this instance, and the tag is that evidence.
         tag_aimaestro_identity(terminal, agents=aimaestro_agents, cli=aimaestro_cli, root=root)
         tag_linux_gui_identity(terminal, channel=linux_gui_channel)
+        server_owned = harness_backend.instance_is_server_owned(
+            tagged="aimaestro_session" in terminal,
+            root=root,
+            cli_present=aimaestro_cli is not None,
+            list_ok=aimaestro_list_ok,
+            cached_roots=cached_agent_roots,
+            override=aimaestro_override,
+            under_agents_home=harness_backend.root_under_agents_home(root),
+        )
+        diagnosis, recovery, dispatch_age = diagnose_root(
+            root, now=now, transcript_age=tr_age, server_owned=server_owned
+        )
         fleet.append(
             Instance(
                 pid=pid,

@@ -113,6 +113,140 @@ def server_owns_family_a(*, timeout: int = 10) -> bool | None:
     return True
 
 
+def server_state_override() -> bool | None:
+    """JUST the `$JANITOR_AIMAESTRO_SERVER_STATE` override rung: True/False when the
+    operator forced a state, None when unset (or "unknown" — both mean "no forced
+    answer"). The fleet scanner uses this alone, because its OWN successful agent-list
+    call already IS the live-server proof — running a second probe subprocess per scan
+    would be waste."""
+    override = os.environ.get(SERVER_STATE_ENV, "").strip().lower()
+    if override in _TRUE:
+        return True
+    if override in _FALSE:
+        return False
+    return None
+
+
+def agent_workdirs(agents: list) -> list[str]:
+    """The registered workingDirectory of every ai-maestro agent, deduped, order-kept.
+    Reuses terminal_trigger's field reader (the SAME one the tmux matcher uses) so the
+    two never disagree about where an agent lives."""
+    try:
+        import terminal_trigger  # noqa: PLC0415 -- lazy: keep this module import-light
+
+        reader = terminal_trigger._agent_working_dir  # noqa: SLF001 -- same package
+    except Exception:
+        return []
+    out: list[str] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        wd = reader(agent)
+        if wd and wd not in out:
+            out.append(wd)
+    return out
+
+
+_AGENT_ROOTS_CACHE = "aimaestro-agent-roots.json"
+
+
+def remember_agent_roots(roots: list[str]) -> None:
+    """Persist the last-known harness-agent workdirs (global-state, atomic, best-effort).
+
+    WHY a cache exists at all: when the server's agent-list call FAILS, the scanner
+    cannot see which instances are harness agents — and "cannot see" must not become
+    "free to actuate" (the doctrine tie-break). The cache lets the exclusion HOLD
+    through a server hiccup using the last truth the server itself published."""
+    try:
+        import global_state  # noqa: PLC0415 -- lazy sibling (daemon-side only)
+
+        target = global_state.global_state_dir() / _AGENT_ROOTS_CACHE
+        payload = json.dumps(sorted(roots))
+        try:
+            if target.read_text(encoding="utf-8").strip() == payload:
+                return  # unchanged — don't churn the file every scan
+        except OSError:
+            pass
+        state.atomic_write(target, payload)
+    except Exception:
+        pass  # a cache write failure must never break a fleet scan
+
+
+def recall_agent_roots() -> list[str]:
+    """The cached last-known harness-agent workdirs. Fail-open []."""
+    try:
+        import global_state  # noqa: PLC0415 -- lazy sibling
+
+        raw = (global_state.global_state_dir() / _AGENT_ROOTS_CACHE).read_text(encoding="utf-8")
+        data = json.loads(raw)
+        return [r for r in data if isinstance(r, str) and r] if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+AGENTS_HOME_ENV = "AIMAESTRO_AGENTS_HOME"
+
+
+def agents_home() -> str:
+    """The ai-maestro agents home (workdir root of registry agents), default `~/agents`.
+    Env-overridable; HOME resolved at CALL time (the frozen-constant trap)."""
+    override = os.environ.get(AGENTS_HOME_ENV, "").strip()
+    if override:
+        return override.rstrip("/")
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    return str(Path(home) / "agents")
+
+
+def root_under_agents_home(root: str | None) -> bool:
+    """True iff `root` sits inside the agents home — the REGISTRY-FREE harness signal."""
+    if not root:
+        return False
+    base = agents_home()
+    return root == base or root.startswith(base + "/")
+
+
+def instance_is_server_owned(
+    *,
+    tagged: bool,
+    root: str | None,
+    cli_present: bool,
+    list_ok: bool,
+    cached_roots: list[str],
+    override: bool | None,
+    under_agents_home: bool = False,
+) -> bool:
+    """PURE: is THIS scanned instance a harness agent a live server owns (⇒ the daemon
+    keeps its hands off)? The whole exclusion decision, in one testable table:
+
+    - operator override False (forced "down") ⇒ never owned — the adoption escape hatch.
+    - no ai-maestro CLI on the machine ⇒ never owned (the confident False).
+    - `tagged` (matched an agent from THIS scan's successful server list) ⇒ owned — the
+      tag doubles as the live-server proof, because the list came off the server's own
+      HTTP API this very scan.
+    - `under_agents_home` (the instance's root is inside `~/agents/`) ⇒ owned. This is
+      the REGISTRY-FREE signal, and it is LOAD-BEARING today: verified live 2026-07-17,
+      `aimaestro-agent.sh list` answers HTTP 401 to any caller without AID_AUTH — which
+      the daemon does not have (AM8JD9SG F6) — so from the daemon's context the list
+      ALWAYS fails, no instance is ever tagged, and the cache never fills. Without this
+      signal the exclusion would be structurally inert exactly where it matters.
+      Erring hands-off is the safe direction; #100 owes the auth-free canonical probe
+      that will supersede it. Adopted workdirs OUTSIDE ~/agents remain covered only by
+      tag/cache (a known gap until that probe lands).
+    - list FAILED but the instance's root matches a CACHED agent workdir ⇒ owned — a
+      down-or-hiccuping server is indistinguishable from a transient error, and the tie
+      breaks toward hands-off (see `remember_agent_roots`). Deliberate consequence: a
+      genuinely dead server keeps its agents excluded until the operator forces
+      adoption via the override — automatic adoption is a FOLLOW-UP TRDD, not a guess.
+    """
+    if override is False or not cli_present:
+        return False
+    if tagged or under_agents_home:
+        return True
+    if not list_ok and root:
+        return any(root == wd or root.startswith(wd.rstrip("/") + "/") for wd in cached_roots)
+    return False
+
+
 def continuity_cli() -> str | None:
     """Path of `aimaestro-continuity.sh` (the Family-A delegation surface: `status <self>`,
     `ensure-resume <self>`), or None when not installed. FEATURE-DETECT, never assume — the

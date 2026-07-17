@@ -149,14 +149,16 @@ def test_tag_linux_gui_identity_only_when_no_tmux_or_iterm() -> None:
 
 
 def test_aimaestro_agents_best_effort_on_missing_cli(monkeypatch) -> None:
-    """No CLI resolvable => (None, []) — never raises, never shells out further."""
+    """No CLI resolvable => (None, [], False) — never raises, never shells out further."""
     monkeypatch.setattr(fs.terminal_trigger, "_resolve_aimaestro_cli", lambda env: None)
-    assert fs._aimaestro_agents({}) == (None, [])
+    assert fs._aimaestro_agents({}) == (None, [], False)
 
 
 def test_aimaestro_agents_parses_json_list(monkeypatch) -> None:
-    """A successful `list --json` call is parsed into the agents list; both the bare
-    list and the {"agents": [...]} wrapper shapes are accepted."""
+    """A successful `list --json` call is parsed into the agents list (both the bare
+    list and the {"agents": [...]} wrapper shapes), and list_ok=True records that the
+    SERVER answered — the live-server proof the harness exclusion keys on
+    (TRDD-PZLVT2RN)."""
 
     class _Proc:
         def __init__(self, out):
@@ -168,21 +170,24 @@ def test_aimaestro_agents_parses_json_list(monkeypatch) -> None:
         fs.terminal_trigger, "_run_aimaestro_cli",
         lambda cli, args, *, env, timeout: _Proc('[{"workingDirectory": "/a"}]'),
     )
-    cli, agents = fs._aimaestro_agents({})
+    cli, agents, list_ok = fs._aimaestro_agents({})
     assert cli == "/bin/aimaestro-agent.sh"
     assert agents == [{"workingDirectory": "/a"}]
+    assert list_ok is True
 
     monkeypatch.setattr(
         fs.terminal_trigger, "_run_aimaestro_cli",
         lambda cli, args, *, env, timeout: _Proc('{"agents": [{"workingDirectory": "/b"}]}'),
     )
-    cli, agents = fs._aimaestro_agents({})
+    cli, agents, list_ok = fs._aimaestro_agents({})
     assert agents == [{"workingDirectory": "/b"}]
+    assert list_ok is True
 
 
 def test_aimaestro_agents_best_effort_on_bad_json(monkeypatch) -> None:
-    """A non-JSON response or a failed CLI call degrades to an empty agents list,
-    never raises — a broken ai-maestro install must never break the fleet scan."""
+    """A non-JSON response or a failed CLI call degrades to an empty agents list with
+    list_ok=False (the server did NOT provably answer), never raises — a broken
+    ai-maestro install must never break the fleet scan."""
 
     class _Proc:
         def __init__(self, out, rc=0):
@@ -194,13 +199,13 @@ def test_aimaestro_agents_best_effort_on_bad_json(monkeypatch) -> None:
         fs.terminal_trigger, "_run_aimaestro_cli",
         lambda cli, args, *, env, timeout: _Proc("not json"),
     )
-    assert fs._aimaestro_agents({}) == ("/bin/aimaestro-agent.sh", [])
+    assert fs._aimaestro_agents({}) == ("/bin/aimaestro-agent.sh", [], False)
 
     monkeypatch.setattr(
         fs.terminal_trigger, "_run_aimaestro_cli",
         lambda cli, args, *, env, timeout: None,
     )
-    assert fs._aimaestro_agents({}) == ("/bin/aimaestro-agent.sh", [])
+    assert fs._aimaestro_agents({}) == ("/bin/aimaestro-agent.sh", [], False)
 
 
 # ---------------------------------------------------------------------------
