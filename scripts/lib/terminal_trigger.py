@@ -382,17 +382,32 @@ def match_agent_tmux(agents: list, cwd_candidates: list[str]) -> str | None:
     return None if best_ambiguous else best_ts
 
 
-def _try_ai_maestro_send(commands: Sequence[str], *, dry_run: bool, env: Mapping[str, str]) -> str | None:
+def _try_ai_maestro_send(
+    commands: Sequence[str], *, dry_run: bool, env: Mapping[str, str], delay_s: float = 0.0
+) -> str | None:
     """Best-effort ai-maestro send via the shipped CLI (issue #42). Returns a status
     string on success, or None to fall through to the local terminal send.
 
     Repointed off the direct `/api/...` calls to `aimaestro-agent.sh` (the frozen
-    CLI interface). CLI absent / server down / unconfirmed → None → caller degrades
-    to the tmux keystroke send. A multi-command list (the soft-handoff case) is typed
-    one CLI call per command, in order. NOTE: the frozen CLI has no raw-ESC primitive,
-    so `esc_first` is not honored on this channel — typing a command into a mid-turn
+    CLI interface). CLI absent / server down / no cwd match → None → caller degrades
+    to the tmux keystroke send. NOTE: the frozen CLI has no raw-ESC primitive, so
+    `esc_first` is not honored on this channel — typing a command into a mid-turn
     agent ENQUEUES it (effectively soft) regardless of the requested mode; the local
     tmux/iTerm paths are the ones that honor a hard ESC interrupt.
+
+    AM8JD9SG F9 — the DELIVERY is DETACHED, matching every other channel: only the
+    RESOLUTION (one `list --json`, 5 s cap) runs synchronously; the per-command
+    `session command` POSTs (~6 s each — a multi-command soft-handoff used to cost
+    11-17 s inline, blowing the 5 s hooks.json budget of the calling hook) run in the
+    same detached child the tmux channel uses. Consequences, both deliberate:
+      * "FIRED:aimaestro" now means "resolved + delivery fired", not "delivery
+        confirmed" — identical semantics to "FIRED:tmux" (send-keys never confirmed
+        either); a failed POST in the child degrades to "the human notices nothing
+        happened", recoverable at the next fire.
+      * The F8 partial-delivery ambiguity is GONE structurally: the caller's fallback
+        decision now happens strictly BEFORE anything can be typed (resolution
+        failure ⇒ None ⇒ tmux fallback re-types safely; after FIRED there is no
+        fallback), so a partially-delivered list can never be double-typed.
     """
     cli = _resolve_aimaestro_cli(env)
     if not cli:
@@ -416,25 +431,13 @@ def _try_ai_maestro_send(commands: Sequence[str], *, dry_run: bool, env: Mapping
         return None
     if dry_run:
         return f"DRY_RUN:aimaestro:{tmux}:{'+'.join(commands)}"
-    # 2) Type each command into that agent's terminal via the CLI (frozen interface
-    #    over POST /api/sessions/<tmux>/command). `--newline` presses Enter;
-    #    requireIdle stays False (flag omitted). `--` guards a dash-leading command.
-    for i, command in enumerate(commands):
-        sent = _run_aimaestro_cli(
-            cli, ["session", "command", tmux, "--newline", "--", command],
-            env=env, timeout=6.0,
-        )
-        if sent is None or sent.returncode != 0:
-            if i == 0:
-                return None  # nothing delivered yet → safe to fall back and re-type all
-            # AM8JD9SG F8: PARTIAL delivery. Commands [0:i] already ran on the agent, so
-            # returning None (→ caller's tmux fallback re-types the WHOLE list) would
-            # double-run them — e.g. a soft-handoff ['/janitor-write-handoff', '/compact']
-            # would run the handoff twice and /compact on the already-compacted session.
-            # Report partial so the caller treats it as delivered and does NOT re-send;
-            # losing the undelivered tail (cmds[i:]) is recoverable at the next fire and
-            # strictly safer than the duplication.
-            return f"FIRED:aimaestro:partial:{i}/{len(commands)}"
+    # 2) Fire each command DETACHED via the CLI (frozen interface over
+    #    POST /api/sessions/<tmux>/command). `--newline` presses Enter; requireIdle
+    #    stays False (flag omitted); `--` guards a dash-leading command. The child
+    #    inherits this process's env, so AID_AUTH rides along exactly as it did on
+    #    the synchronous path. Each RUN step carries the child's own 10 s cap.
+    steps = [["RUN", cli, "session", "command", tmux, "--newline", "--", c] for c in commands]
+    _fire_detached_steps(delay_s, steps)
     return "FIRED:aimaestro"
 
 
@@ -548,7 +551,7 @@ def send_self_command(
     # unconfirmed POST) falls through to the local terminal send below; ai-maestro
     # agents run in tmux, so that fallback works too (TRDD-db169d9e R4).
     if state.in_ai_maestro_agent_env(e):
-        api = _try_ai_maestro_send(cmds, dry_run=dry_run, env=e)
+        api = _try_ai_maestro_send(cmds, dry_run=dry_run, env=e, delay_s=delay_s)
         if api is not None:
             return api
     kind = state.terminal_kind()

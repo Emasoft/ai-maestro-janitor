@@ -128,6 +128,22 @@ def select_stop_targets(
             # server disappears for good, the operator's adoption override lets a LATER
             # beat inject fresh.
             continue
+        terminal = sess.get("terminal", {}) or {}
+        has_esc_channel = bool(
+            str(terminal.get("tmux_pane", "")).strip()
+            or str(terminal.get("iterm_session_id", "")).strip()
+        )
+        if str(sess.get("diagnosis", "")) == "frozen" and not has_esc_channel:
+            # AM8JD9SG F2 — delivery honesty, NARROW case: a frozen target normally gets
+            # the stop HARD (ESC breaks the freeze, then the command runs — the
+            # test_frozen_target_is_hard contract). But when the ONLY reachable channel
+            # is the ai-maestro CLI (no tmux pane, no iTerm id), there is no ESC
+            # primitive: the send merely ENQUEUES into a queue that is, by definition,
+            # not draining — stamping that "delivered" would silence retries while the
+            # stop never takes effect. Skip WITHOUT burning the dedupe stamp; the
+            # liveness recovery owns unfreezing, and the first beat that sees the
+            # session un-frozen injects the stop for real.
+            continue
         if not is_injectable(
             pid=pid,
             command=cmd,

@@ -150,8 +150,8 @@ def build_command_plan(
     an already-chosen `command` into a fire-able plan, or None when no safe channel
     resolves. PURE — no resolution, no I/O; `fleet_scan` populated every key.
 
-    Fallback order — tmux -> iterm -> aimaestro -> linux-gui — is the order
-    `fleet_scan.tag_linux_gui_identity` documents, most-direct first. Plan shapes::
+    Fallback order — aimaestro (SOFT sends to a server-managed pane, AM8JD9SG F10) ->
+    tmux -> iterm -> aimaestro (hard-intent fall-through) -> linux-gui. Plan shapes::
 
         {'channel': 'tmux',     'command': ..., 'delay_s': ..., 'steps': [[argv], ...]}
         {'channel': 'iterm',    'command': ..., 'delay_s': ..., 'osascript': '<script>'}
@@ -172,6 +172,21 @@ def build_command_plan(
     iTerm UUID) — a malformed one declines that channel and falls through rather than
     smuggling a flag into `tmux send-keys` or AppleScript into `osascript`.
     """
+    session = terminal.get("aimaestro_session", "").strip()
+    cli = terminal.get("aimaestro_cli", "").strip()
+    if session and cli and not esc_first:
+        # AM8JD9SG F10 — a SERVER-MANAGED pane prefers the server's own channel over raw
+        # tmux send-keys typed behind the server's back: the CLI send goes through the
+        # server's queueing/session model, so the server SEES the command it is asked to
+        # deliver instead of finding foreign keystrokes in a pane it owns. SOFT only:
+        # this channel has no ESC primitive (typing into a mid-turn agent ENQUEUES
+        # regardless), so a HARD intent falls through to tmux/iterm below — the ESC is
+        # the point of a hard send and only the keystroke channels can deliver one.
+        return {
+            "channel": "aimaestro",
+            "command": command,
+            "argv": aimaestro_command_argv(cli, session, command),
+        }
     pane = terminal.get("tmux_pane", "").strip()
     if pane and terminal_trigger.valid_tmux_pane(pane):
         # esc_first MUST be honored here too (TRDD-0GPQROC1): a mid-turn Claude in a
@@ -192,12 +207,10 @@ def build_command_plan(
             "delay_s": delay_s,
             "osascript": iterm_osascript(sid, command, delay_s=delay_s, esc_first=esc_first),
         }
-    session = terminal.get("aimaestro_session", "").strip()
-    cli = terminal.get("aimaestro_cli", "").strip()
     if session and cli:
-        # No ESC primitive on this channel (see terminal_trigger._try_ai_maestro_send):
-        # typing into a mid-turn agent ENQUEUES regardless, so esc_first is unused. No
-        # delay_s either — the CLI is fired directly, not through the delayed step runner.
+        # HARD-intent fall-through for an aimaestro-only identity (no tmux pane, no
+        # iTerm id): an enqueue that ignores the requested ESC is still better than
+        # UNREACHABLE — the reachability parity this builder exists for (see WHY above).
         return {
             "channel": "aimaestro",
             "command": command,

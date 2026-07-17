@@ -1227,6 +1227,9 @@ def task_fleet_stop() -> None:
             # Harness agents a live server owns get their global control from the
             # SERVER, never from this daemon's injection (TRDD-PZLVT2RN).
             "server_owned": i.diagnosis == "server_owned",
+            # F2 delivery honesty: the selector refuses to enqueue a stop at a
+            # frozen session (a stalled queue never delivers it) — see fleet_stop.
+            "diagnosis": i.diagnosis,
         }
         for i in fleet
     ]

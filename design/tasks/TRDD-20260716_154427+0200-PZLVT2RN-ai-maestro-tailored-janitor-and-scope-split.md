@@ -3,7 +3,7 @@ trdd-id: PZLVT2RN
 title: ai-maestro-tailored janitor (#J) + normal-janitor scope-flip (#N) + shared-codebase two-backend split
 column: dev
 created: 2026-07-16T15:44:27+0200
-updated: 2026-07-17T14:20:00+0200
+updated: 2026-07-17T14:33:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
@@ -34,8 +34,24 @@ server half is ai-maestro's `TRDD-KCRMSNL7` (parent) + `TRDD-H24DF6ZC` (R16 toke
   oauth-rotator-tick} gated in due-loop + maintenance-keepalive + both consume paths +
   next-due sleep (busy-spin guard), `daemon_watchdog` suppression, tests in
   `tests/test_chore_coordination.py`.
-- **Phase D (#J delegation + self-trigger hardening: ensure-resume on stop-failure, F9/F10/F2)** — NEXT.
-- **Phase E (docs + v0.50.0 release on owner go + #100 update)** — pending.
+- **Phase D (#J delegation + self-trigger hardening)** — code done this session:
+  `on-stop-failure.py` fires `aimaestro-continuity.sh ensure-resume <self>` DETACHED,
+  best-effort, strictly after the critical flag write (feature-detected via
+  `harness_backend.continuity_cli` + new `self_agent_ref` = `$AMP_AGENT_ID`); F9 — the
+  ai-maestro self-send delivery is DETACHED (only the 5 s-capped `list` runs inline; the
+  F8 partial-delivery ambiguity is structurally gone); F10 — SOFT sends to a
+  server-managed pane prefer the `aimaestro` channel over raw tmux (HARD keeps tmux —
+  the CLI has no ESC primitive; aimaestro-only identities still get the hard-intent
+  fall-through for reachability parity); F2 (narrow) — fleet-stop refuses to enqueue at
+  a FROZEN target whose ONLY channel is the ESC-less CLI (no dedupe stamp burned;
+  frozen+tmux keeps the hard ESC-first stop per `test_frozen_target_is_hard`). Probe
+  functions hardened NEVER-RAISE (a sandboxed env proved the subprocess spawn can
+  throw). Related same-day fix: the PostCompact resume push self-cancels when nothing is
+  pending (`cbfd43c`, TRDD-8IZ8COQ8 — user-reported injection spam).
+- **Phase E (docs + repomap + full suite + v0.50.0 release on owner go + #100 update)** — NEXT.
+- **Known flaky (pre-existing, tracked):** `test_marketplace_refresh_scoped` e2e worker
+  race — TRDD-UO93APWN (proven pass/pass/fail on an identical tree; not a Phase B2/D
+  regression).
 
 **SECOND OWNER DIRECTIVE (2026-07-17, verbatim):** *"it is important that the ai-maestro server
 daemon-function will coordinate with the janitor daemon (non-aimaestro-version) to avoid doing the
@@ -69,10 +85,10 @@ the exclusion lifts.
 **Verified 2026-07-17:** `~/ai-maestro/scripts/aimaestro-continuity.sh` EXISTS beside
 `aimaestro-session.sh` (their DXJZM3BW shipped) — the Q3 contract surface `#J` consumes is real.
 
-**NEXT ACTION (one concrete step):** commit Phase B2, then Phase D per the approved plan:
-`on-stop-failure.py` fires `aimaestro-continuity.sh ensure-resume <self>` best-effort inside the
-harness (feature-detect via `harness_backend.continuity_cli`), plus the AM8JD9SG folds F9
-(detached ai-maestro self-send), F10 (channel priority), F2 (delivery honesty).
+**NEXT ACTION (one concrete step):** Phase E — CLAUDE.md architecture section (two-backend split +
+exclusion + chore coordination), README harness note, repomap regen, full pytest + ruff, then HOLD
+for the owner's go before publishing v0.50.0; close with the #100 comment (what shipped + the
+deviation note + the capability probe still owed).
 
 **Load-bearing facts / gotchas:**
 - The #7 machine-wide singleton is the `daemon.flock`, NOT install scope — so `#N`'s USER→LOCAL

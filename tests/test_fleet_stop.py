@@ -130,3 +130,51 @@ def test_select_targets_unknown_flag_is_empty() -> None:
         sessions, flag_state="bogus", self_pid=1, daemon_pid=2,
         already_injected=set(), user_active_pids=set(),
     ) == []
+
+
+# ---------------------------------------------------------------------------
+# AM8JD9SG F2 — delivery honesty for a FROZEN, ESC-less target.
+# ---------------------------------------------------------------------------
+
+_CLI_ONLY_TERMINAL = {
+    "aimaestro_session": "agent-x",
+    "aimaestro_cli": "/usr/bin/aimaestro-agent.sh",
+}
+
+
+def test_frozen_cli_only_target_is_skipped_without_burning_the_stamp() -> None:
+    """A frozen session reachable ONLY via the ESC-less ai-maestro channel: a typed stop
+    would merely ENQUEUE into a non-draining queue, yet the fire would stamp the dedupe
+    key and the stop would never be retried. The selector must skip it (no plan ⇒ no
+    stamp) so the first beat that sees it un-frozen delivers for real."""
+    sess = _sess(50, terminal=dict(_CLI_ONLY_TERMINAL))
+    sess["diagnosis"] = "frozen"
+    plans = fleet_stop.select_stop_targets(
+        [sess], flag_state="disarm", self_pid=1, daemon_pid=2,
+        already_injected=set(), user_active_pids=set(),
+    )
+    assert plans == []
+
+
+def test_frozen_tmux_target_is_still_selected() -> None:
+    """A frozen session WITH a tmux pane keeps its stop: the hard (ESC-first) injection
+    breaks the freeze and then the command runs — the test_frozen_target_is_hard
+    contract in the daemon suite. F2 must not widen into skipping these."""
+    sess = _sess(51)  # default terminal carries a tmux pane
+    sess["diagnosis"] = "frozen"
+    plans = fleet_stop.select_stop_targets(
+        [sess], flag_state="disarm", self_pid=1, daemon_pid=2,
+        already_injected=set(), user_active_pids=set(),
+    )
+    assert [p["pid"] for p in plans] == [51]
+
+
+def test_healthy_cli_only_target_is_still_selected() -> None:
+    """A NON-frozen server-reachable-only session drains its queue normally, so the
+    enqueued stop is a real delivery — it stays targeted."""
+    sess = _sess(52, terminal=dict(_CLI_ONLY_TERMINAL))
+    plans = fleet_stop.select_stop_targets(
+        [sess], flag_state="disarm", self_pid=1, daemon_pid=2,
+        already_injected=set(), user_active_pids=set(),
+    )
+    assert [p["pid"] for p in plans] == [52]

@@ -78,6 +78,36 @@ def main() -> int:
         )
     except Exception:  # noqa: BLE001 -- telemetry MUST NOT break the resume-cue capture
         pass
+
+    # #J delegation (TRDD-PZLVT2RN Phase D) — best-effort, STRICTLY AFTER the critical
+    # flag write. Inside an ai-maestro harness agent the SERVER owns Family-A resume, so
+    # also tell it this turn died on an API error: `aimaestro-continuity.sh ensure-resume
+    # <self>` (idempotent per the Q3 contract — a live agent is a no-op). Fired DETACHED
+    # (Popen, no wait): the CLI's own worst case (~11-13 s) exceeds the 5 s hooks.json
+    # budget, and a detached child costs this hook nothing (the F9 lesson). The janitor's
+    # own flag machinery above STAYS — belt and suspenders; the server merely gets the
+    # earlier, richer signal. Feature-detected: no CLI or no self id ⇒ silently skip.
+    try:
+        from lib import harness_backend  # noqa: E402  -- local package, not PyPI
+
+        if harness_backend.is_harness_session():
+            cli = harness_backend.continuity_cli()
+            ref = harness_backend.self_agent_ref()
+            if cli and ref:
+                import subprocess  # noqa: PLC0415 -- only needed on this rare path
+
+                subprocess.Popen(  # noqa: S603 -- fixed argv, feature-detected CLI
+                    [cli, "ensure-resume", ref],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                state.log_line(
+                    "stop-failure",
+                    f"harness: fired detached ensure-resume for agent {ref}",
+                )
+    except Exception:  # noqa: BLE001 -- delegation MUST NOT break the resume-cue capture
+        pass
     return 0
 
 

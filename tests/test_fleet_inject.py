@@ -367,3 +367,33 @@ def test_iterm_command_refuses_a_newline():
 def test_a_normal_command_is_unchanged():
     """The escaping must not perturb the fixed internal literals every caller passes today."""
     assert 'write text "/janitor-arm"' in fi.iterm_osascript(_UUID, "/janitor-arm", esc_first=False)
+
+
+# ---------------------------------------------------------------------------
+# AM8JD9SG F10 — SOFT sends to a server-managed pane go THROUGH the server.
+# ---------------------------------------------------------------------------
+
+
+def test_soft_send_prefers_aimaestro_channel_for_server_managed_pane() -> None:
+    """A pane that is BOTH tmux-reachable and server-managed: a SOFT send must use the
+    server's own channel (the server sees and queues the command) instead of raw
+    send-keys typed behind the server's back."""
+    both = {"tmux_pane": "%3", **_AIMAESTRO_TERMINAL}
+    plan = fi.build_command_plan(both, "/janitor-arm", esc_first=False)
+    assert plan is not None and plan["channel"] == "aimaestro"
+
+
+def test_hard_send_stays_on_tmux_even_for_server_managed_pane() -> None:
+    """The ai-maestro channel has no ESC primitive, so a HARD intent (the ESC is the
+    point — e.g. a frozen target) must keep the tmux keystroke channel."""
+    both = {"tmux_pane": "%3", **_AIMAESTRO_TERMINAL}
+    plan = fi.build_command_plan(both, "/janitor-arm", esc_first=True)
+    assert plan is not None and plan["channel"] == "tmux"
+    assert plan["steps"][0][:2] == ["RUN", "tmux"] or plan["steps"], "tmux steps expected"
+
+
+def test_hard_send_falls_through_to_aimaestro_when_cli_is_the_only_channel() -> None:
+    """Reachability parity survives F10: an aimaestro-ONLY identity still gets the CLI
+    channel for a hard intent (an ESC-less enqueue beats UNREACHABLE-then-escalate)."""
+    plan = fi.build_command_plan(dict(_AIMAESTRO_TERMINAL), "/janitor-arm", esc_first=True)
+    assert plan is not None and plan["channel"] == "aimaestro"

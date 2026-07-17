@@ -60,6 +60,22 @@ def _force(monkeypatch, kind: str) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
+def _wait_for_log(log, predicate, timeout_s: float = 5.0) -> str:
+    """Poll a spy-CLI log until `predicate(text)` holds (F9: delivery is detached, so
+    assertions on the log must wait for the child). Returns the final text either way —
+    the caller's assert then produces the real diff on timeout."""
+    import time as _time
+
+    deadline = _time.monotonic() + timeout_s
+    text = ""
+    while _time.monotonic() < deadline:
+        text = log.read_text() if log.exists() else ""
+        if predicate(text):
+            return text
+        _time.sleep(0.05)
+    return text
+
+
 def _spy_aimaestro_cli(tmp_path, agents_payload):
     """Write a spy `aimaestro-agent.sh` (issue #42 — the janitor now shells out to
     the CLI, not the HTTP API). `list --json` prints `agents_payload`; `session
@@ -342,9 +358,11 @@ def test_ai_maestro_cli_send_end_to_end(monkeypatch, tmp_path):
     monkeypatch.setenv("AIMAESTRO_AGENT", "1")
     monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)         # matches the listed workingDirectory
-    out = tt.send_self_command("/compact")
+    out = tt.send_self_command("/compact", delay_s=0.0)
     assert out == "FIRED:aimaestro"
-    assert "session command agent-sess-1 --newline -- /compact" in log.read_text()
+    # F9: delivery is DETACHED — poll the spy log for the child's send (≤5 s).
+    text = _wait_for_log(log, lambda t: "session command" in t)
+    assert "session command agent-sess-1 --newline -- /compact" in text
 
 
 def test_ai_maestro_cli_multi_command_types_each_in_order(monkeypatch, tmp_path):
@@ -357,18 +375,21 @@ def test_ai_maestro_cli_multi_command_types_each_in_order(monkeypatch, tmp_path)
     monkeypatch.setenv("AIMAESTRO_AGENT", "1")
     monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
-    out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False)
+    out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False, delay_s=0.0)
     assert out == "FIRED:aimaestro"
-    calls = log.read_text().splitlines()
+    # F9: both sends run in ONE detached child, in order — poll until both landed.
+    text = _wait_for_log(log, lambda t: t.count("session command") >= 2)
+    calls = text.splitlines()
     assert "session command sess-h --newline -- /janitor-write-handoff" in calls[0]
     assert "session command sess-h --newline -- /compact" in calls[1]
 
 
-def test_ai_maestro_cli_partial_delivery_reports_partial_not_none(monkeypatch, tmp_path):
-    """AM8JD9SG F8: command 1 delivered, command 2 fails → send returns a PARTIAL status,
-    NOT None. None would make send_self_command re-type the WHOLE list via the tmux
-    fallback, double-running the already-delivered command (a duplicate handoff, then a
-    /compact on the just-compacted session). The spy fails the SECOND `session command`."""
+def test_ai_maestro_cli_midlist_failure_never_falls_back_to_retype(monkeypatch, tmp_path):
+    """AM8JD9SG F8→F9: command 1 delivered, command 2 fails IN THE DETACHED CHILD. The
+    caller already returned FIRED:aimaestro at resolution time, so there is no fallback
+    path left that could re-type the whole list (the F8 double-run hazard is structurally
+    gone) — the delivered prefix is never duplicated, and the lost tail is recoverable at
+    the next fire. The spy fails the SECOND `session command`."""
     wd = str(tmp_path)
     agents = [{"workingDirectory": wd, "session": {"tmuxSessionName": "sess-p"}}]
     agents_file = tmp_path / "agents.json"
@@ -386,18 +407,53 @@ def test_ai_maestro_cli_partial_delivery_reports_partial_not_none(monkeypatch, t
         "exit 0\n"
     )
     cli.chmod(0o755)
-    # tmux kind + a valid pane: if the fix regressed to None, send_self_command would fall
-    # back to the tmux path and re-type BOTH commands — so a non-partial return proves the
-    # no-duplicate contract.
+    # tmux kind + a valid pane: if the channel regressed to returning None here, the
+    # caller would fall back and re-type BOTH commands via tmux — the return value is
+    # the no-duplicate proof.
     _force(monkeypatch, "tmux")
     monkeypatch.setenv("AIMAESTRO_AGENT", "1")
     monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
     monkeypatch.setenv("TMUX_PANE", "%9")
-    out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False)
-    assert out == "FIRED:aimaestro:partial:1/2"
-    # Only the FIRST command reached the CLI — the tail was not retried on this channel.
-    assert log.read_text().count("session command") == 1
+    out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False, delay_s=0.0)
+    assert out == "FIRED:aimaestro"
+    # Only the FIRST command lands (the second fails in-child, without a re-type). Wait
+    # for the child, then hold a beat to prove no second line ever arrives.
+    text = _wait_for_log(log, lambda t: t.count("session command") >= 1)
+    import time as _time
+
+    _time.sleep(0.3)
+    assert log.read_text().count("session command") == 1, text
+
+
+def test_ai_maestro_cli_send_is_detached_not_inline(monkeypatch, tmp_path):
+    """AM8JD9SG F9: the per-command CLI POSTs must NOT run inline — a multi-command send
+    used to cost 11-17 s synchronously, blowing the 5 s hooks.json budget of the calling
+    hook. With a spy whose `session command` SLEEPS 4 s, send_self_command must return
+    well before one send could complete (only the bounded `list` runs inline)."""
+    wd = str(tmp_path)
+    agents = [{"workingDirectory": wd, "session": {"tmuxSessionName": "sess-slow"}}]
+    agents_file = tmp_path / "agents.json"
+    agents_file.write_text(json.dumps(agents))
+    cli = tmp_path / "aimaestro-agent.sh"
+    cli.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = "list" ]; then cat "{agents_file}"; exit 0; fi\n'
+        'if [ "$1" = "session" ] && [ "$2" = "command" ]; then sleep 4; exit 0; fi\n'
+        "exit 0\n"
+    )
+    cli.chmod(0o755)
+    _force(monkeypatch, "iterm")
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")
+    monkeypatch.setenv("AIMAESTRO_CLI", str(cli))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", wd)
+    import time as _time
+
+    t0 = _time.monotonic()
+    out = tt.send_self_command(["/janitor-write-handoff", "/compact"], esc_first=False, delay_s=0.0)
+    elapsed = _time.monotonic() - t0
+    assert out == "FIRED:aimaestro"
+    assert elapsed < 3.0, f"send blocked {elapsed:.1f}s — the delivery is not detached"
 
 
 def test_ai_maestro_cli_dry_run_does_not_send(monkeypatch, tmp_path):

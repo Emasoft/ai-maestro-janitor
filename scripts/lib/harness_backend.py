@@ -99,22 +99,27 @@ def server_owns_family_a(*, timeout: int = 10) -> bool | None:
     if override == "unknown":
         return None
 
-    cli = _resolve_agent_cli()
-    if cli is None:
-        return False
-    proc = state.run_subprocess(
-        [cli, "list", "--json"],
-        timeout=timeout,
-        capture=True,
-        detector_name="harness-backend",
-    )
-    if proc is None or proc.returncode != 0:
-        return None
+    # NEVER-RAISE from here down: this probe runs inside the daemon main loop, the
+    # maintenance keepalive, and per-session watchdogs — an exception here (a sandboxed
+    # test env forbidding subprocess spawn, a broken PATH, anything) must degrade to
+    # None (unknown), never kill the caller. The pytest sandbox guard proved the
+    # subprocess spawn CAN raise in constrained environments.
     try:
+        cli = _resolve_agent_cli()
+        if cli is None:
+            return False
+        proc = state.run_subprocess(
+            [cli, "list", "--json"],
+            timeout=timeout,
+            capture=True,
+            detector_name="harness-backend",
+        )
+        if proc is None or proc.returncode != 0:
+            return None
         json.loads(proc.stdout or "")
-    except ValueError:
+        return True
+    except Exception:  # noqa: BLE001 -- unknown beats a crashed daemon loop
         return None
-    return True
 
 
 # server_owns_singleton_chores() memo: (monotonic_ts, value). The daemon calls this
@@ -306,6 +311,21 @@ def instance_is_server_owned(
     if not list_ok and root:
         return any(root == wd or root.startswith(wd.rstrip("/") + "/") for wd in cached_roots)
     return False
+
+
+def self_agent_ref(env: Optional[Mapping[str, str]] = None) -> str | None:
+    """THIS harness agent's own id for `<self>` CLI arguments (`aimaestro-continuity.sh
+    status|ensure-resume <self>`), or None when unknowable.
+
+    `$AMP_AGENT_ID` is the ai-maestro internal agent id the harness exports into the
+    agent's env (the same var the discriminator treats as an "internal id present"
+    signal). `AIMAESTRO_AGENT` / `THIS_IS_AIMAESTRO` are boolean FLAGS ("1"/"true"),
+    never an identity — do not fall back to them. R42 (self-only) makes a wrong guess
+    here an auth error server-side, so None (skip the call) beats a fabricated ref.
+    """
+    e = os.environ if env is None else env
+    ref = (e.get("AMP_AGENT_ID") or "").strip()
+    return ref or None
 
 
 def continuity_cli() -> str | None:
