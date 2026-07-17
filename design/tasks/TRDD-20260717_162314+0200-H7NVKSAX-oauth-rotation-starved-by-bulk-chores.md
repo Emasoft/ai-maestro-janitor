@@ -10,6 +10,7 @@ scope: project
 severity: critical
 related-trdd: [32ACD15F, PZLVT2RN, 4649ZLE0, UO93APWN, EDSFEQ5C]
 eht: [FQXBURNR]
+implementation-commits: [0bbd2ff]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
