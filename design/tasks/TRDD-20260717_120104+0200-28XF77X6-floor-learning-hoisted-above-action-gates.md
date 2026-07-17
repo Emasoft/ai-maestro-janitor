@@ -16,8 +16,9 @@ implementation-commits: [87c8b56]
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-17
 
 **NEXT ACTION:** publish (patch bump) on USER go — the janitor runs from the installed CACHE, so
-this fix is INERT until released + auto-deployed. Code LANDED in `87c8b56`: `floor_needs_learning`
-+ learn-first reorder at both call sites + the test fixes. All 4 new/updated regressions were
+this fix is INERT until released + auto-deployed. Code LANDED in `87c8b56`: the new
+`floor_needs_learning` plus the learn-first reorder at both call sites plus the test fixes. All
+4 new/updated regressions were
 proven to FAIL on the pre-fix code (stash → run → restore); 350 related tests + ruff green.
 
 ## The bug (found LIVE, 2026-07-17, this session — never reported by any test)
