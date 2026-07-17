@@ -1,9 +1,9 @@
 """harness_backend — the two-world discriminator + server probe (TRDD-PZLVT2RN Phase A).
 
 These pin the SSOT every branch point imports: the harness-session detection (env flags),
-the server_owns_family_a probe ladder with its FAIL-SAFE tie-breaking (None ⇒ hands off,
-False only when CONFIDENT), and the call-time (never import-frozen) continuity-CLI
-feature-detection.
+the BINARY server-liveness switch (TRDD-LU0C5KAR: fresh probe file ⇒ the server runs and
+owns all absorbed chores; absent/stale/malformed ⇒ the janitor keeps them — fail-safe),
+and the call-time (never import-frozen) continuity-CLI feature-detection.
 """
 
 from __future__ import annotations
@@ -67,10 +67,11 @@ def test_backend_reads_process_env_when_none_passed(monkeypatch: pytest.MonkeyPa
     assert hb.is_harness_session() is True
 
 
-# --- server_owns_family_a: the probe ladder --------------------------------------
-# Since TRDD-N9YAH5E7 the canonical signal is the auth-free probe FILE the server
-# rewrites every 30 s (`~/.aimaestro/server-liveness.json`, #100 §6.1); the legacy
-# `list --json` subprocess rung is gone (liveness is not capability).
+# --- server_is_alive / server_runs_chores: the binary liveness switch -------------
+# Since TRDD-LU0C5KAR (owner directive 2026-07-17) the signal is BINARY: a fresh
+# probe file (`~/.aimaestro/server-liveness.json`, rewritten every 30 s) means the
+# server is RUNNING and owns ALL absorbed chores; absent/stale/malformed means it is
+# not, and the janitor runs them all. The capability tokens are informational.
 
 
 def _write_liveness(path: Path, *, ts: float, caps: list) -> None:
@@ -80,45 +81,40 @@ def _write_liveness(path: Path, *, ts: float, caps: list) -> None:
 @pytest.mark.parametrize("value,expected", [
     ("up", True), ("true", True), ("1", True),
     ("down", False), ("false", False), ("0", False),
-    ("unknown", None),
 ])
-def test_server_probe_env_override_wins(monkeypatch: pytest.MonkeyPatch, value, expected) -> None:
-    """Rung 1: the operator/test override short-circuits everything (no file, no CLI)."""
+def test_server_chores_env_override_wins(
+    monkeypatch: pytest.MonkeyPatch, value, expected
+) -> None:
+    """The operator/test override short-circuits the probe read entirely."""
     monkeypatch.setenv(hb.SERVER_STATE_ENV, value)
-    monkeypatch.setattr(hb, "_resolve_agent_cli", lambda: pytest.fail("must not resolve the CLI"))
     monkeypatch.setattr(hb, "server_capabilities", lambda **_k: pytest.fail("must not read the file"))
-    assert hb.server_owns_family_a() is expected
+    assert hb.server_runs_chores() is expected
 
 
-def test_server_probe_no_cli_is_the_only_confident_false(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No fresh probe file AND no ai-maestro CLI on the machine ⇒ no server can own
-    anything ⇒ False (the only confident False without a fresh claim)."""
-    monkeypatch.setattr(hb, "_resolve_agent_cli", lambda: None)
-    assert hb.server_owns_family_a() is False
-
-
-def test_fresh_probe_file_with_token_is_confident_true(
+def test_unknown_override_falls_through_to_the_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Rung 2: a fresh file whose capabilities carry `family-a` ⇒ True — the server's
-    own self-report, no CLI needed (the whole point: auth-free, daemon-readable)."""
-    f = tmp_path / "liveness.json"
-    _write_liveness(f, ts=time.time(), caps=["family-a"])
-    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
-    monkeypatch.setattr(hb, "_resolve_agent_cli", lambda: pytest.fail("file rung must decide"))
-    assert hb.server_owns_family_a() is True
+    """An unrecognized override value is no answer — the probe decides (absent file ⇒
+    server not running ⇒ the janitor keeps the chores). The None tri-state died with
+    the per-class design."""
+    monkeypatch.setenv(hb.SERVER_STATE_ENV, "unknown")
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(tmp_path / "absent.json"))
+    assert hb.server_runs_chores() is False
 
 
-def test_fresh_probe_file_without_token_is_confident_false(
+def test_fresh_probe_file_means_alive_regardless_of_capabilities(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE #100 §6.2 RULE: a LIVE server that does not claim a class does not own it —
-    a fresh file without `family-a` is a CONFIDENT False (tokens are present ONLY while
-    the class is live and running), so the OAuth chores keep running."""
+    """THE binary rule: a fresh file ⇒ the server is RUNNING ⇒ it owns the chores —
+    even when it advertises NO capabilities. A running server that does not execute an
+    absorbed chore is a SERVER bug (owner: "any other event is a bug"), never a reason
+    for the janitor to keep it."""
     f = tmp_path / "liveness.json"
-    _write_liveness(f, ts=time.time(), caps=[])
     monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
-    assert hb.server_owns_family_a() is False
+    for caps in (["family-a"], []):
+        _write_liveness(f, ts=time.time(), caps=caps)
+        assert hb.server_is_alive() is True, caps
+        assert hb.server_runs_chores() is True, caps
 
 
 @pytest.mark.parametrize("content", [
@@ -127,39 +123,39 @@ def test_fresh_probe_file_without_token_is_confident_false(
     '{"ts": true, "capabilities": ["family-a"]}',          # bool masquerading as ts
     '{"ts": 1, "capabilities": "family-a"}',               # caps not a list
 ])
-def test_malformed_probe_file_is_no_claim(
+def test_malformed_probe_file_is_not_alive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
 ) -> None:
-    """A malformed file is NO CLAIM: with the CLI present the answer is None (a down or
-    pre-probe server — capability unknowable), never a guessed True/False."""
+    """A malformed file is NO liveness claim ⇒ the janitor keeps every chore (fail-safe:
+    a machine with no provable server must never lose its chores)."""
     f = tmp_path / "liveness.json"
     f.write_text(content, encoding="utf-8")
     monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
-    monkeypatch.setattr(hb, "_resolve_agent_cli", lambda: "/fake/aimaestro-agent.sh")
-    assert hb.server_owns_family_a() is None
+    assert hb.server_is_alive() is False
+    assert hb.server_runs_chores() is False
 
 
-def test_stale_probe_file_is_no_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """THE FAIL-SAFE: a file older than the 90 s staleness window is NO CLAIM — with
-    the CLI present the answer is None, keeping the daemon's harness-exclusion HELD
-    (a crashed server must not read as 'owns family-a' off its last stale beat) while
-    the chores' own None-policy keeps them RUNNING."""
+def test_stale_probe_file_means_the_server_exited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE HANDBACK: the server rewrites the file every 30 s, so one older than the
+    90 s staleness window means it exited/crashed — the janitor switches every absorbed
+    chore back ON (the owner's rule: only while it runs are they its responsibility)."""
     f = tmp_path / "liveness.json"
     _write_liveness(f, ts=time.time() - hb.LIVENESS_STALE_AFTER_S - 5, caps=["family-a"])
     monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
-    monkeypatch.setattr(hb, "_resolve_agent_cli", lambda: "/fake/aimaestro-agent.sh")
-    assert hb.server_owns_family_a() is None
+    assert hb.server_is_alive() is False
+    assert hb.server_runs_chores() is False
 
 
-def test_stale_probe_file_with_no_cli_is_false(
+def test_absent_probe_file_means_not_alive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Stale claim + no CLI anywhere ⇒ the machine has no live ai-maestro ⇒ False."""
-    f = tmp_path / "liveness.json"
-    _write_liveness(f, ts=time.time() - 10_000, caps=["family-a"])
-    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
-    monkeypatch.setattr(hb, "_resolve_agent_cli", lambda: None)
-    assert hb.server_owns_family_a() is False
+    """No file at all (no server ever started on this build, or none installed) ⇒ not
+    alive ⇒ the janitor runs everything."""
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(tmp_path / "absent.json"))
+    assert hb.server_is_alive() is False
+    assert hb.server_runs_chores() is False
 
 
 # --- continuity_cli: call-time feature detection ---------------------------------

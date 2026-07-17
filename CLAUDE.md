@@ -36,16 +36,18 @@ fallback `AMP_AGENT_ID`/`AID_AUTH`):
   agents.
 - **Actuation exclusion:** the #N daemon's fleet recovery/stop marks server-owned agents
   (`server_owned` diagnosis) and NEVER types into their panes — unknown ⇒ HANDS OFF.
-- **Chore coordination (Phase B2, PER-CLASS since TRDD-N9YAH5E7):** each absorbed chore
-  yields on its OWN capability token (`harness_backend.SERVER_ABSORBED_TASK_CLASS`): the
-  OAuth pair (`oauth-rotator-tick`/`-supervisor`) on `family-a`; the update trio
-  (marketplace-refresh, user-plugins-update, version-update) on `singleton-chores`
-  (never emitted today ⇒ the janitor keeps them). The signal is the auth-free probe file
+- **Chore coordination (Phase B2, BINARY since TRDD-LU0C5KAR — owner directive
+  2026-07-17):** responsibility follows server LIVENESS. A fresh auth-free probe file
   `~/.aimaestro/server-liveness.json` (`{ts,pid,capabilities}`, 30 s beat / 90 s
-  staleness — `server_capabilities()`); the legacy agent-list rung was REMOVED (liveness
-  ≠ capability; it also 401'd, F6). Same None-policy: a chore RUNS on unknown (file
-  locks are the collision backstop); yield needs a CONFIDENT fresh token. Ratified on
-  janitor#100 (`design/ARCHITECTURE.md` rev 3 — the canonical contract doc).
+  staleness) ⇒ the server is RUNNING ⇒ ALL absorbed chores
+  (`harness_backend.SERVER_ABSORBED_TASKS`: the OAuth pair + the update trio) yield;
+  absent/stale/malformed ⇒ the janitor runs them ALL. `server_is_alive()` /
+  `server_runs_chores()` are the switch (env overrides `JANITOR_AIMAESTRO_SERVER_CHORES`
+  / `_STATE` first); the `capabilities` content is informational — "a running server
+  that does not execute an absorbed chore is a server bug, never a janitor guard" (the
+  rev-3 per-class token gating, TRDD-N9YAH5E7, is retired). File locks remain the
+  collision backstop across the 90 s handoff window. `design/ARCHITECTURE.md` rev 4
+  (proposed on janitor#100) is the canonical contract doc.
 - **Per-project channeling invariant (TRDD-X92VBFNF, security):** any AUTOMATIC surface
   carries ONLY the firing project's data — never another project's findings, names, or
   aggregate counts. Fleet-wide views exist only behind explicit human commands. TOKEN
@@ -408,7 +410,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=be471ef4779d digest=c8ddf129e775 generated=2026-07-17T18:43:15+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=20fc1da797a2 digest=2a72bb2f2392 generated=2026-07-17T19:40:16+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -806,7 +808,10 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · record_iterm_automation_state(blocked) -> None — Persist (or clear) the TCC-denial condition for the heartbeat to surface.
   · parse_tmux_panes(text) -> dict[str, str] — ``{normalized_tty: pane_id}`` from
   · find_janitor_root(cwd) -> str | None — Walk up from ``cwd`` to the nearest dir containing ``.janitor/`` (the
-  · transcript_age(root, now) -> int | None — Seconds since this project's NEWEST session transcript was written, or
+  · stale_threshold_for(armed_cron, base_stale_s) -> int — The staleness window for a session armed at ``armed_cron`` — 3× its heartbeat
+  · substantive_age_from_tail(tail, *, now, fallback_age) -> tuple[int | None, int] — ``(substantive_age_s, trailing_enqueues)`` for a transcript tail.
+  · transcript_activity(root, now) -> tuple[int | None, int] — ``(substantive_age_s, trailing_enqueues)`` for this project's transcripts —
+  · transcript_age(root, now) -> int | None — Seconds since this project's newest SUBSTANTIVE transcript line, or ``None``
   · sweep_stale_rate_limit(root, *, now, max_age_s) -> bool — Delete `<root>/.janitor/state/rate-limited.flag` if it is stale. Returns True if swept.
   · diagnose_root(root, *, now, transcript_age, stale_s, server_owned) -> tuple[str, str | None, int | None] — Read a project's ``.janitor`` state + the session's ``transcript_age`` and
   · tag_aimaestro_identity(terminal, *, agents, cli, root) -> None — Extend a resolved ``terminal`` identity dict IN PLACE with the ai-maestro CLI
@@ -899,9 +904,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · is_harness_session(env) -> bool — True iff THIS process runs inside an ai-maestro harness agent.
   · backend(env) -> str — The actuation backend for THIS session: "aimaestro" (thin #J) or "standalone" (#N).
   · server_capabilities(*, now) -> frozenset[str] | None — The LIVE server's advertised capability tokens, or None when there is no fresh claim.
-  · server_owns_family_a(*, timeout) -> bool | None — Does a LIVE ai-maestro server own Family-A continuity for this machine's harness agents?
-  · server_owns_chore_class(capability) -> bool | None — Does a LIVE ai-maestro server own the chore CLASS gated by `capability`?
-  · server_owns_singleton_chores(*, timeout) -> bool | None — The `singleton-chores` class gate (marketplace-refresh / user-plugins-update /
+  · server_is_alive(*, now) -> bool — Binary: is an ai-maestro server RUNNING on this machine right now?
+  · server_runs_chores() -> bool — THE binary chore switch (TRDD-LU0C5KAR, owner directive 2026-07-17): must the
   · server_state_override() -> bool | None — JUST the `$JANITOR_AIMAESTRO_SERVER_STATE` override rung: True/False when the
   · agent_workdirs(agents) -> list[str] — The registered workingDirectory of every ai-maestro agent, deduped, order-kept.
   · remember_agent_roots(roots) -> None — Persist the last-known harness-agent workdirs (global-state, atomic, best-effort).
@@ -1320,6 +1324,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · file_mtime(path) -> int — Return file mtime in epoch seconds, or 0 on error.
   · log_line(name, message) -> None — Append one log line with a local-time timestamp + GMT offset.
   · rotate_log_if_big(name, max_bytes) -> None — Rotate <name>.log to <name>.log.1 when it exceeds `max_bytes`.
+  · detached_uv_env() -> dict[str, str] — Environment for a DETACHED child that re-invokes a `uv run --script` shebang.
   · run_subprocess(cmd, *, timeout, cwd, capture, detector_name) -> Optional[subprocess.CompletedProcess[str]] — Run a subprocess with a default timeout, never propagate exceptions.
   · sanitize_for_drift_line(text) -> str — Defang `[` `]` and strip control characters from untrusted text.
 `scripts/lib/suppression.py` — Shared suppression-file loader for janitor detectors.

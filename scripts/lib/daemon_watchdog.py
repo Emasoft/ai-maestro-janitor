@@ -58,18 +58,15 @@ def emit_if_daemon_stale(
       subject:           human phrase for what has not happened, e.g.
                          "global marketplaces last refreshed".
     """
-    # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server owns the machine-wide
-    # once-only chores, the daemon deliberately YIELDS them — so their completion stamps
-    # go stale BY DESIGN. Alarming on that would train users to ignore this watchdog.
-    # Only a CONFIDENT True suppresses (same policy as the daemon's own gate); a probe
-    # failure changes nothing about the alarm path. Per-class since TRDD-N9YAH5E7: this
-    # module's only callers are the two `singleton-chores`-class shims
-    # (marketplace-refresh, user-plugins-update), so the singleton-chores gate is the
-    # matching class here — an oauth-class (`family-a`) claim must NOT silence these.
+    # Phase B2 (TRDD-PZLVT2RN): while an ACTIVE ai-maestro server RUNS, the daemon
+    # deliberately YIELDS the absorbed chores — so their completion stamps go stale
+    # BY DESIGN. Alarming on that would train users to ignore this watchdog. BINARY
+    # since TRDD-LU0C5KAR (owner directive 2026-07-17): the same liveness switch the
+    # daemon's own gate uses; a probe failure changes nothing about the alarm path.
     try:
         import harness_backend  # noqa: PLC0415 -- lazy sibling; keep the hot path import-light
 
-        if harness_backend.server_owns_singleton_chores() is True:
+        if harness_backend.server_runs_chores():
             return
     except Exception:
         pass

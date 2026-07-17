@@ -18,8 +18,8 @@ implementation-commits: [db9c2f0]
 commands like /janitor-resume /janitor-arm /janitor-reload-plugins etc."* — the owner is
 watching their panes fill up with janitor-typed slash-commands, repeatedly, all day.
 
-**ROOT-CAUSED same evening (evidence in `global-state/daemon.log` + `recovery-audit.ndjson`
-+ the target sessions' transcripts). Three interacting defects in the `session-liveness`
+**ROOT-CAUSED same evening (evidence in `global-state/daemon.log`, `recovery-audit.ndjson`,
+and the target sessions' transcripts). Three interacting defects in the `session-liveness`
 beat (TRDD-324223a6 A2):**
 
 1. **The injection contaminates its own probe.** `fleet_scan.transcript_age` is the

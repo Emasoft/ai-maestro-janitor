@@ -1,14 +1,15 @@
 """Daemon singleton-chore coordination with the ai-maestro server (TRDD-PZLVT2RN Phase B2).
 
-Owner directive (2026-07-17): when the ai-maestro server is ACTIVE, the #N daemon must
-deactivate the machine-wide ONCE-ONLY chores (oauth rotation, marketplace/plugin updates,
-self-update) — "to avoid doing the same chores twice" — while the population-split ops
+Owner directive (2026-07-17, TRDD-LU0C5KAR — overrode the per-class design as "too
+complicated"): "by design, if the ai-maestro server is running, those chores are its
+responsibility. so the janitor daemon must switch off those chores. any other event is a
+bug." So the switch is BINARY on server LIVENESS: a fresh probe file ⇒ ALL absorbed
+chores yield; absent/stale ⇒ the janitor runs them ALL — while the population-split ops
 (session-liveness, fleet-stop) keep running on both sides, each for its own population.
 
 These tests pin the three load-bearing properties:
-  1. The yield policy fires ONLY on a CONFIDENT True — the None-policy here is the
-     OPPOSITE of the fleet-actuation exclusion (chores run on unknown; nobody doing the
-     chores breaks the machine, doing them twice is merely lock-backstopped waste).
+  1. The yield is binary and total: server alive ⇒ every absorbed chore yields
+     (capability content irrelevant — `[]` included); server gone ⇒ none do.
   2. The absorbed set names REAL tasks (typo guard) and NEVER includes a population-split
      or janitor-only Family-B task.
   3. The per-session daemon-staleness watchdog goes SILENT while the server owns the
@@ -47,7 +48,6 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     for var in _OVERRIDE_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(tmp_path / "absent-liveness.json"))
-    hb._chores_cache.clear()  # noqa: SLF001 -- reset the per-class memo between tests
     # Flush state's process-lifetime path caches (project_root & friends): an
     # in-process test that ran EARLIER in the same pytest process may have pinned
     # the REAL repo root, which would send the watchdog's emit_once seen-file to
@@ -57,7 +57,6 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
                janitor_state.state_dir, janitor_state.log_dir):
         fn.cache_clear()
     yield
-    hb._chores_cache.clear()  # noqa: SLF001
     for fn in (janitor_state.project_root, janitor_state.janitor_root,
                janitor_state.state_dir, janitor_state.log_dir):
         fn.cache_clear()
@@ -65,50 +64,41 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 # ---------- 1. the yield policy ----------
 
-_ALL_TRUE = {hb.CAP_FAMILY_A: True, hb.CAP_SINGLETON_CHORES: True}
-_ALL_NONE = {hb.CAP_FAMILY_A: None, hb.CAP_SINGLETON_CHORES: None}
-_ALL_FALSE = {hb.CAP_FAMILY_A: False, hb.CAP_SINGLETON_CHORES: False}
 
-
-def test_yield_only_on_confident_true() -> None:
-    """An absorbed chore yields IFF ITS OWN class ownership is CONFIDENTLY True — None
-    and False both keep the chore running (the machine must never lose its chores to a
-    probe hiccup)."""
+def test_yield_is_binary_on_server_liveness() -> None:
+    """An absorbed chore yields IFF the server is alive — no tri-state, no per-chore
+    verification (TRDD-LU0C5KAR)."""
     name = "marketplace-refresh"
-    assert daemon._task_yielded_to_server(name, _ALL_TRUE) is True
-    assert daemon._task_yielded_to_server(name, _ALL_NONE) is False
-    assert daemon._task_yielded_to_server(name, _ALL_FALSE) is False
+    assert daemon._task_yielded_to_server(name, True) is True
+    assert daemon._task_yielded_to_server(name, False) is False
 
 
 def test_non_absorbed_task_never_yields() -> None:
-    """A task outside the absorbed set runs even under a confirmed-active server."""
-    assert daemon._task_yielded_to_server("session-liveness", _ALL_TRUE) is False
+    """A task outside the absorbed set runs even under a running server."""
+    assert daemon._task_yielded_to_server("session-liveness", True) is False
 
 
-def test_per_class_gating_family_a_never_silences_singleton_chores() -> None:
-    """THE #100 ROUND-1 REGRESSION (TRDD-N9YAH5E7 §6.2): the USER flips the OAuth flag
-    ON ⇒ the server claims ONLY `family-a` ⇒ the OAuth pair yields, but the
-    marketplace/version trio — chores NOTHING is running server-side — must keep
-    running. One shared ownership bit failed exactly this."""
-    owned = {hb.CAP_FAMILY_A: True, hb.CAP_SINGLETON_CHORES: None}
-    assert daemon._task_yielded_to_server("oauth-rotator-tick", owned) is True
-    assert daemon._task_yielded_to_server("oauth-rotator-supervisor", owned) is True
-    assert daemon._task_yielded_to_server("marketplace-refresh", owned) is False
-    assert daemon._task_yielded_to_server("user-plugins-update", owned) is False
-    assert daemon._task_yielded_to_server("version-update", owned) is False
+def test_server_alive_silences_all_absorbed_chores() -> None:
+    """THE binary-rule pin (owner directive 2026-07-17): a RUNNING server owns EVERY
+    absorbed chore — OAuth pair AND the marketplace/version trio together, regardless
+    of what it advertises as live. (This deliberately INVERTS the retired per-class
+    regression: a server that runs without executing a chore is a server bug, not a
+    janitor guard.)"""
+    for name in daemon._SERVER_ABSORBED_TASK_NAMES:
+        assert daemon._task_yielded_to_server(name, True) is True, name
+        assert daemon._task_yielded_to_server(name, False) is False, name
 
 
-def test_absorbed_task_class_map_matches_the_ratified_contract() -> None:
-    """Pin the exact task→class assignment ratified on #100: the OAuth pair on
-    `family-a`, the update trio on `singleton-chores` — a drift here re-conflates the
-    classes the whole per-class rework exists to separate."""
-    assert hb.SERVER_ABSORBED_TASK_CLASS == {
-        "marketplace-refresh": hb.CAP_SINGLETON_CHORES,
-        "user-plugins-update": hb.CAP_SINGLETON_CHORES,
-        "version-update": hb.CAP_SINGLETON_CHORES,
-        "oauth-rotator-supervisor": hb.CAP_FAMILY_A,
-        "oauth-rotator-tick": hb.CAP_FAMILY_A,
-    }
+def test_absorbed_set_matches_the_contract() -> None:
+    """Pin the exact absorbed-chore set: the OAuth pair + the update trio — a drift
+    here silently changes which chores the handoff covers."""
+    assert hb.SERVER_ABSORBED_TASKS == frozenset({
+        "marketplace-refresh",
+        "user-plugins-update",
+        "version-update",
+        "oauth-rotator-supervisor",
+        "oauth-rotator-tick",
+    })
 
 
 def test_absorbed_set_names_real_tasks() -> None:
@@ -134,81 +124,69 @@ def test_population_split_and_family_b_tasks_stay_janitor() -> None:
     assert not overlap, f"population-split/Family-B tasks must never yield: {sorted(overlap)}"
 
 
-def test_yielded_names_cover_the_whole_absorbed_set_when_owned() -> None:
-    """With every class owned, exactly the absorbed subset of the built tasks yields —
-    and with every class None, nothing does. The same set drives the due-loop AND the
-    next-due sleep exclusion, so getting it wrong busy-spins the daemon at 1 s ticks."""
+def test_yielded_names_cover_the_whole_absorbed_set_when_alive() -> None:
+    """Server alive ⇒ exactly the absorbed subset of the built tasks yields; server
+    gone ⇒ nothing does. The same set drives the due-loop AND the next-due sleep
+    exclusion, so getting it wrong busy-spins the daemon at 1 s ticks."""
     tasks = daemon._build_tasks()
-    assert daemon._yielded_task_names(tasks, _ALL_TRUE) == daemon._SERVER_ABSORBED_TASK_NAMES
-    assert daemon._yielded_task_names(tasks, _ALL_NONE) == set()
-    assert daemon._yielded_task_names(tasks, _ALL_FALSE) == set()
+    assert daemon._yielded_task_names(tasks, True) == daemon._SERVER_ABSORBED_TASK_NAMES
+    assert daemon._yielded_task_names(tasks, False) == set()
 
 
-# ---------- 2. the ownership signal ----------
+# ---------- 2. the liveness signal ----------
 
 
 def test_chores_override_env_wins(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`$JANITOR_AIMAESTRO_SERVER_CHORES` is the chores-only operator knob."""
+    """`$JANITOR_AIMAESTRO_SERVER_CHORES` is the chores-only operator knob; an
+    unrecognized value falls through to the liveness probe (absent file here ⇒ False)."""
     monkeypatch.setenv(hb.SERVER_CHORES_ENV, "up")
-    assert hb.server_owns_singleton_chores() is True
+    assert hb.server_runs_chores() is True
     monkeypatch.setenv(hb.SERVER_CHORES_ENV, "down")
-    assert hb.server_owns_singleton_chores() is False
+    assert hb.server_runs_chores() is False
     monkeypatch.setenv(hb.SERVER_CHORES_ENV, "unknown")
-    assert hb.server_owns_singleton_chores() is None
+    assert hb.server_runs_chores() is False
 
 
-def test_chores_signal_honors_state_override_for_every_class(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Unset chores knob ⇒ the STATE override governs every chore class — forcing the
-    server "down" for adoption also resumes the chores, immediately (memo bypassed)."""
+def test_chores_signal_honors_state_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset chores knob ⇒ the STATE override governs — forcing the server "down" for
+    adoption also resumes the chores, immediately."""
     monkeypatch.setenv(hb.SERVER_STATE_ENV, "down")
-    assert hb.server_owns_singleton_chores() is False
-    assert hb.server_owns_chore_class(hb.CAP_FAMILY_A) is False
+    assert hb.server_runs_chores() is False
     monkeypatch.setenv(hb.SERVER_STATE_ENV, "up")
-    assert hb.server_owns_singleton_chores() is True
-    assert hb.server_owns_chore_class(hb.CAP_FAMILY_A) is True
+    assert hb.server_runs_chores() is True
 
 
-def test_chores_probe_result_is_memoized(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no overrides, the underlying capability read runs at most once per TTL per
-    class — the daemon calls this every 60 s tick and must not re-read the probe file
-    (and re-resolve the CLI) each time."""
-    calls = {"n": 0}
-
-    def fake_capability(cap: str):
-        calls["n"] += 1
-        return None
-
-    monkeypatch.setattr(hb, "_server_owns_capability", fake_capability)
-    assert hb.server_owns_singleton_chores() is None
-    assert hb.server_owns_singleton_chores() is None
-    assert calls["n"] == 1, "second call within the TTL must hit the memo"
-
-
-def test_probe_file_drives_per_class_yield_end_to_end(
+def test_probe_file_drives_the_binary_yield_end_to_end(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """END-TO-END through the REAL ladder (no monkeypatched internals): a fresh probe
-    file claiming ONLY `family-a` makes the OAuth class owned and the singleton-chores
-    class NOT owned — the exact per-class split the server's per-token file exists for."""
+    """END-TO-END through the REAL probe (no monkeypatched internals): a fresh liveness
+    file — even one advertising NO capabilities — means the server is RUNNING, so the
+    WHOLE absorbed set yields; a STALE file means it exited, so everything resumes.
+    This is the owner's rule verbatim: running ⇒ its responsibility; exited ⇒ ours."""
     import json as _json
     import time as _time
 
     f = tmp_path / "liveness.json"
+    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
+
     f.write_text(
-        _json.dumps({"ts": _time.time(), "pid": 1, "capabilities": ["family-a"]}),
+        _json.dumps({"ts": _time.time(), "pid": 1, "capabilities": []}),
         encoding="utf-8",
     )
-    monkeypatch.setenv(hb.LIVENESS_FILE_ENV, str(f))
-    assert hb.server_owns_chore_class(hb.CAP_FAMILY_A) is True
-    assert hb.server_owns_singleton_chores() is False  # live server, class not claimed
-    owned = daemon._owned_chore_classes()
+    assert hb.server_is_alive() is True
+    assert hb.server_runs_chores() is True
     tasks = daemon._build_tasks()
-    assert daemon._yielded_task_names(tasks, owned) == {
-        "oauth-rotator-tick",
-        "oauth-rotator-supervisor",
-    }
+    assert daemon._yielded_task_names(tasks, hb.server_runs_chores()) == (
+        daemon._SERVER_ABSORBED_TASK_NAMES
+    )
+
+    stale = _time.time() - (hb.LIVENESS_STALE_AFTER_S + 5)
+    f.write_text(
+        _json.dumps({"ts": stale, "pid": 1, "capabilities": []}), encoding="utf-8"
+    )
+    assert hb.server_is_alive() is False
+    assert hb.server_runs_chores() is False
+    assert daemon._yielded_task_names(tasks, hb.server_runs_chores()) == set()
 
 
 # ---------- 3. the watchdog goes silent while the server owns the chores ----------
@@ -240,7 +218,7 @@ def test_watchdog_silent_while_server_owns_chores(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A yielded chore's stamp goes stale BY DESIGN — the per-session watchdog must not
-    cry wolf about it while the server is confirmed active."""
+    cry wolf about it while the server is running."""
     project = tmp_path / "proj"
     (project / ".janitor" / "state").mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
@@ -249,7 +227,7 @@ def test_watchdog_silent_while_server_owns_chores(
     assert _run_watchdog() == ""
 
 
-def test_watchdog_still_alarms_when_server_not_confirmed(
+def test_watchdog_still_alarms_when_server_not_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """CONTROL for the suppression test: identical stale-stamp + dead-daemon state with

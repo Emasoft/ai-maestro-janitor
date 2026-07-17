@@ -1,34 +1,39 @@
-# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 3 — RATIFIED)
+# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 4 — PROPOSED)
 
-> **Status: FINAL — `RATIFIED rev 3` by BOTH sides on 2026-07-17** (janitor comment
-> 5005116161; ai-maestro comment 16:06 UTC, which also landed all five `--command-key`
-> registrations, their `d9439b94`). This document is the ratified baseline for the
-> two-backend split, the per-class chore matrix, the per-project isolation invariant,
-> the findings-ledger feed contract, and the §6 server-side contracts. Any change from
-> here is a NEW revision negotiated on
-> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100). Two joint
-> verify-together items remain (operational, not design): the `aimaestro-continuity.sh`
-> redeploy (§6.3) and the first-run probe verification (§6.1). Ratification protocol
-> used, kept for future revisions: the doc is posted verbatim on #100, refined in
-> comment rounds, FINAL when both sides post `RATIFIED <revision>` on the same revision
-> — with the ai-maestro Claude on
-> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100). Sections 1–5
-> are the janitor's half; §6 carries the server-side contracts ai-maestro delivered in
-> round 1 (their comment, 2026-07-17). Convergence protocol: this doc is posted verbatim
-> on #100, refined in comment rounds, and is FINAL when both sides post
-> `RATIFIED <revision>` on the same revision. Owner directives it encodes (2026-07-17):
+> **Status: rev 4 PROPOSED (2026-07-17, owner-directed) — supersedes the rev-3 per-class
+> chore gating; awaiting both sides' `RATIFIED rev 4` on
+> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100).** Rev 3 was
+> `RATIFIED` by BOTH sides earlier the same day (janitor comment 5005116161; ai-maestro
+> 16:06 UTC with all five `--command-key` registrations, their `d9439b94`); everything
+> in it EXCEPT §2 executor 2 and the §6.1 token interpretation carries forward
+> unchanged. Two joint verify-together items remain (operational, not design): the
+> `aimaestro-continuity.sh` redeploy (§6.3) and the first-run probe verification
+> (§6.1). Ratification protocol, kept for future revisions: the doc is posted verbatim
+> on #100, refined in comment rounds, FINAL when both sides post `RATIFIED <revision>`
+> on the same revision. Sections 1–5 are the janitor's half; §6 carries the server-side
+> contracts ai-maestro delivered in round 1. Owner directives it encodes (2026-07-17):
 > one runtime-branched plugin; no chore done twice; strict per-project channeling;
 > unattended findings must reach the human, traceable and referenceable; session-start
-> report injection as concise as possible; token telemetry only on own-project anomalies.
+> report injection as concise as possible; token telemetry only on own-project anomalies;
+> and (rev 4) **responsibility follows server LIVENESS, not per-chore capability**.
 >
-> **Rev 1 → rev 2 changes** (from ai-maestro's round-1 conflict review): §2 executor 2 is
-> now PER-CLASS — each absorbed task yields on its OWN capability token, never a shared
-> ownership bit (janitor code landed: TRDD-N9YAH5E7); §6 rewritten from "TO FILL" to the
+> **Rev 1 → rev 2 changes** (from ai-maestro's round-1 conflict review): §2 executor 2
+> became PER-CLASS (janitor code: TRDD-N9YAH5E7); §6 rewritten from "TO FILL" to the
 > DELIVERED server contracts (probe file, continuity verbs, session-command verb,
 > dashboard ledger-feed acceptance).
 > **Rev 2 → rev 3 change** (ai-maestro's rev-2 review, one factual fix): §6.4 first
 > bullet corrected — the `session command` CLI verb EXISTS and is DEPLOYED (round 1
 > mis-stated it as missing; retracted on #100 comment 5004880793). No contract change.
+> **Rev 3 → rev 4 change (OWNER DIRECTIVE, 2026-07-17, verbatim):** *"why don't just
+> detect if the ai-maestro server is running and switch off all the janitor daemon
+> chores? … by design, if the ai-maestro server is running, those chores are its
+> responsibility. so the janitor daemon must switch off those chores. any other event
+> is a bug."* §2 executor 2 is now a BINARY liveness switch (janitor code:
+> TRDD-LU0C5KAR); the §6.1 `capabilities` field becomes informational. **Server-side
+> consequence to ratify:** writing a fresh `server-liveness.json` now CLAIMS all
+> absorbed chores — a running server must execute them (build them; a server that runs
+> without them is, per the owner, a server bug — including resolving R16-off meaning
+> OAuth runs nowhere while the server is up).
 
 ## 1. Two backends, one plugin
 
@@ -55,22 +60,24 @@ Three executors, one criterion each:
 
 1. **Per-agent chores** → each Claude's own heartbeat (workdir detectors). Never daemon-run.
 2. **Machine-wide once-only chores with a server equivalent** → the #N daemon, which
-   yields **PER CLASS**: each absorbed task yields iff **its OWN capability token** is
-   CONFIDENTLY server-claimed (a fresh §6.1 probe file carrying that token). The
-   task→class map (`harness_backend.SERVER_ABSORBED_TASK_CLASS`, TRDD-N9YAH5E7):
+   yields on the **BINARY liveness switch** (rev 4, owner directive 2026-07-17;
+   janitor code: TRDD-LU0C5KAR, `harness_backend.server_runs_chores`): a FRESH §6.1
+   probe file ⇒ the server is RUNNING ⇒ **ALL absorbed chores are its responsibility**
+   and the janitor yields them; file absent/stale ⇒ the server is not running ⇒ the
+   janitor runs them ALL. The absorbed set (`harness_backend.SERVER_ABSORBED_TASKS`):
+   `oauth-rotator-tick`, `oauth-rotator-supervisor`, `marketplace-refresh`,
+   `user-plugins-update`, `version-update`.
 
-   | absorbed task | capability token | server status today |
-   |---|---|---|
-   | `oauth-rotator-tick`, `oauth-rotator-supervisor` | `family-a` | emitted iff the R16 OAuth flag is ON (USER's flip) |
-   | `marketplace-refresh`, `user-plugins-update`, `version-update` | `singleton-chores` | RESERVED — never emitted; the janitor keeps these |
-
-   **One shared ownership bit is forbidden** — the first class that goes live would
-   silence chores nothing runs ("a token without its live chore silences the janitor").
-   A successful agent-list (or any liveness signal) is NOT a capability claim: liveness
-   ≠ capability, so the legacy list-probe rung was removed from the gate. None-policy is
-   deliberately the OPPOSITE of actuation: a chore RUNS on unknown — nobody doing it
-   breaks the machine; doing it twice is merely wasteful and the cross-process file
-   locks (`oauth-rotator-tick.lock`, `marketplace-op.lock`) are the collision backstop.
+   **The contract this implies (the rev-4 ratification point):** writing a fresh
+   `server-liveness.json` IS the claim on all absorbed chores — a server that runs
+   without executing one of them is a SERVER bug ("any other event is a bug"), never a
+   per-chore verification the janitor performs. No None tri-state; no capability
+   parsing. The handoff granularity at start/stop boundaries is the 90 s staleness
+   window, and doing a chore twice inside it is merely wasteful — the cross-process
+   file locks (`oauth-rotator-tick.lock`, `marketplace-op.lock`) are the collision
+   backstop. (The rev-2/3 per-class token gating — TRDD-N9YAH5E7 — is retired; its
+   "liveness ≠ capability" concern is now resolved on the SERVER side by definition:
+   liveness IS the responsibility claim.)
 3. **Population-split operations** run on BOTH sides, each strictly for its own
    population: session-liveness recovery, fleet-stop/pause/rearm, reload-plugins /
    reload-skills propagation, restart-claude. The split IS the per-instance
@@ -158,27 +165,31 @@ and the janitor's `harness_backend.py` / `fleet_inject.py`.
   (tmp + rename). No `AID_AUTH`, no 401 — readable by the outside `#N` daemon.
 - **Shape:** `{"ts": <epoch-seconds>, "pid": <server-pid>, "capabilities": [...]}`.
 - **Cadence/staleness:** rewritten every **30 s**; consumers apply a **90 s** staleness
-  window. `now - ts > 90` OR file absent ⇒ "no live capability claim" (the safe default:
+  window. `now - ts > 90` OR file absent ⇒ the server is NOT running (the safe default:
   janitor owns everything).
-- **Tokens — each present ONLY while its class is LIVE and RUNNING right now:**
-  `family-a` (the OAuth rotator tick is enabled — the R16 flag file; absent until the
-  USER flips it); `singleton-chores` (RESERVED, not emitted — the update trio is not
-  built server-side); `fleet-recovery` (RESERVED, design-gated on ai-maestro#60 —
-  janitor keeps liveness/fleet-stop recovery for harness agents until it lands).
-- **Janitor wiring (LANDED, TRDD-N9YAH5E7):** `harness_backend.server_capabilities()`
-  reads the file (test override `JANITOR_AIMAESTRO_LIVENESS_FILE`); the formerly-reserved
-  rung 2 of `server_owns_family_a()` is now this read; `server_owns_chore_class(cap)`
-  gates each chore class on its own token per the §2 matrix. Fresh-file membership is
-  CONFIDENT both ways; no fresh claim ⇒ CLI absent = False, CLI present = None.
+- **Semantics (rev 4 — the BINARY rule):** a FRESH file means the server is RUNNING,
+  and a running server owns ALL absorbed chores (§2). **Writing the file IS the claim**
+  — a server build must not write it unless it executes the absorbed chores while it
+  runs. The `capabilities` list is INFORMATIONAL (kept in the shape for dashboards /
+  diagnostics; the janitor no longer reads it). Fleet actuation on harness agents
+  remains governed by the separate per-instance `server_owned` exclusion (§1/§3 of the
+  matrix), unchanged.
+- **Janitor wiring (LANDED, TRDD-LU0C5KAR — replacing TRDD-N9YAH5E7's per-class read):**
+  `harness_backend.server_capabilities()` reads+validates the file (test override
+  `JANITOR_AIMAESTRO_LIVENESS_FILE`); `server_is_alive()` = fresh valid file;
+  `server_runs_chores()` = the §2 binary switch (env overrides
+  `JANITOR_AIMAESTRO_SERVER_CHORES` / `JANITOR_AIMAESTRO_SERVER_STATE` first).
 - **Verify-together caveat:** the file appears on disk only once the running server is
   restarted onto the probe build; until then every consumer sees "no file → safe default".
 
 ### 6.2 Chore-matrix conflict review — RESOLVED
 
-Round 1 found the one silent breakage: the janitor's `server_owns_singleton_chores()`
-delegated to `server_owns_family_a()` (one bit, five chores) — flipping the OAuth flag
-would have silenced the marketplace/version trio nothing runs. Fixed janitor-side by the
-per-class gating in §2 (TRDD-N9YAH5E7). The bulk-lane invariant (TRDD-H7NVKSAX, §2) is
+Round 1 found the rev-1 silent breakage (one bit, five chores, flipping the OAuth flag
+would have silenced the update trio) and rev 2/3 answered it with per-class tokens
+(TRDD-N9YAH5E7). **Rev 4 retires that answer by owner directive:** the conflict class
+itself is redefined away — a running server owns every absorbed chore, so "a live class
+silencing chores nothing runs" is no longer a janitor-side guard case but a server-side
+bug to fix at the source. The bulk-lane invariant (TRDD-H7NVKSAX, §2) is
 accepted as binding server-side too: the server's 60 s OAuth beat is async
 (`setInterval().unref()`, async subprocess/fetch actuators) and any server-side bulk
 sweep is async-chunked/offloaded so it never stalls the per-minute beat.
@@ -241,3 +252,12 @@ human-aggregate view).
   (2026-07-17 16:06 UTC) ⇒ FINAL.** Their same comment registered all five
   `--command-key` entries (`d9439b94`): `compact`, `reload-plugins-force`,
   `reload-skills`, `janitor-resume`, `janitor-write-handoff`.
+- rev 4 — 2026-07-17 (evening): OWNER DIRECTIVE (given to both Claudes) replaced the
+  per-class capability gating with the BINARY liveness switch — "if the ai-maestro
+  server is running, those chores are its responsibility … any other event is a bug".
+  §2 executor 2 rewritten; §6.1 `capabilities` demoted to informational, file-freshness
+  is the whole signal and writing the file IS the chore claim; §6.2 conflict class
+  redefined away. Janitor code: TRDD-LU0C5KAR (ships v0.52.0). Posted to #100 with
+  janitor-side `RATIFIED rev 4`; awaiting ai-maestro's match + their server half
+  (implement the absorbed chores as unconditional-while-running, incl. the R16
+  resolution — a running server with OAuth dark is now a server bug by definition).
