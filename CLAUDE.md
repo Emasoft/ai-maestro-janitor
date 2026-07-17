@@ -324,7 +324,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=8e0e099cc75c digest=41abaca1106d generated=2026-07-16T20:53:11+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=fe05cd248232 digest=5baaa5b98670 generated=2026-07-17T02:54:14+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -767,6 +767,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · release_oauth_rotator_lock(fd) -> None — Release the oauth-rotator-tick flock and close the fd. Best-effort.
   · oauth_rotator_lock() -> Iterator[bool] — Serialise an OAuth-rotator tick against every other tick-class process.
   · oauth_rotator_lock_wait(timeout_s, poll_s) -> Iterator[bool] — Bounded-WAIT variant of `oauth_rotator_lock`, for a one-shot the caller must not drop.
+  · acquire_settings_ensurer_lock() -> Optional[int] — Non-blocking exclusive flock on settings-ensurer.lock.
+  · release_settings_ensurer_lock(fd) -> None — Release the settings-ensurer flock and close the fd. Best-effort.
+  · settings_ensurer_lock() -> Iterator[bool] — Serialise a settings-ensurer write against every other session's ensurer.
   · daemon_script_path() -> Path — Resolve scripts/daemon.py absolute path.
   · spawn_daemon_detached() -> Optional[int] — Spawn the daemon as a fully-detached child. Return child PID or None.
   · reload_generation() -> int — Return the reload generation (epoch the daemon last stamped after a
@@ -1153,6 +1156,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · recovery_for_diagnosis(diagnosis) -> str | None — The recovery action for a diagnosis, or None to leave the instance alone
   · normalize_tty(raw) -> str — Normalize a TTY name to a comparable key (the device basename, e.g.
   · resolve_terminal_for_tty(tty, *, iterm_by_tty, tmux_by_tty) -> dict[str, str] — Resolve a process's terminal-injection identity from its (normalized) TTY,
+`scripts/lib/settings_ensurer.py` — Ensure a fixed set of recommended Claude Code settings exist in ~/.claude/settings.json.
+  · enabled() -> bool — Master opt-out. Default ON. Set the userConfig `ensure_settings_enabled` false to disable.
+  · ensure_recommended_settings(*, home) -> dict[str, list[str]] — Ensure the recommended settings exist in ~/.claude/settings.json.
 `scripts/lib/state.py` — Shared state helpers for ai-maestro-janitor hooks and detectors —
   · set_project_dir_override(cwd) -> None — Record a fallback project dir used only when CLAUDE_PROJECT_DIR is unset.
   · project_root(cwd_override) -> Path
