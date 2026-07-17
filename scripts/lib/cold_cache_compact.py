@@ -36,6 +36,12 @@ ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED"
 MIN_CONTEXT_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS"
 MIN_IDLE_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_IDLE_SECONDS"
 COOLDOWN_ENV = "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_COOLDOWN_SECONDS"
+# TRDD-D3PROACT: the PREVENTIVE knob. The two gates above are REACTIVE — they shrink a large
+# context only AFTER a cold event already paid the 2× write (rate-limit resume, SessionStart).
+# This one shrinks a large context PROACTIVELY, during a cheap WARM idle heartbeat, so the
+# context is already small when the next cold event (a >1h working turn, a rate limit, a
+# restart) strikes — turning the "inevitable cold write" from ~600k into ~50k. Default ON.
+PROACTIVE_IDLE_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED"
 
 DEFAULT_MIN_CONTEXT_TOKENS = 270_000  # the user's number: compact a resumed context at/above this
 DEFAULT_MIN_IDLE_SECONDS = 3_600      # the 1h prompt-cache TTL — below this the cache is still warm
@@ -60,6 +66,13 @@ def cooldown_seconds() -> int:
     return state.coerce_int(os.environ.get(COOLDOWN_ENV), DEFAULT_COOLDOWN_SECONDS)
 
 
+def proactive_idle_enabled() -> bool:
+    """The preventive path is gated by BOTH the master cold-compact switch AND its own knob, so
+    disabling cold-compact wholesale (ENABLED_ENV=false) also disables prevention, and a user who
+    wants only the reactive backstops can turn prevention off alone."""
+    return enabled() and state.is_truthy_env(PROACTIVE_IDLE_ENABLED_ENV, True)
+
+
 # --- pure policy ------------------------------------------------------------
 
 def should_compact_on_resume(context_tokens: int | None, *, min_context_tokens: int) -> bool:
@@ -80,6 +93,37 @@ def should_compact_after_idle(
     wastes a write, and compacting a small context saves nothing."""
     return (
         idle_seconds >= min_idle_s
+        and context_tokens is not None
+        and context_tokens >= min_context_tokens
+    )
+
+
+def should_compact_proactively_idle(
+    context_tokens: int | None,
+    *,
+    user_present: bool,
+    active_waiting: bool,
+    min_context_tokens: int,
+) -> bool:
+    """PREVENTIVE gate (TRDD-D3PROACT): shrink a large context DURING a cheap warm idle
+    heartbeat, so a future cold event reads ~50k, not ~600k. PURE — the runtime facts
+    (`user_present`, `active_waiting`, `context_tokens`) are injected by the caller.
+
+    Deliberately NOT cold-aware: the whole point is to fire while the cache is still WARM
+    (the shrink turn is then cheap) so no cold event is ever expensive. All three must hold:
+
+      * NOT user_present  — the user has not typed in THIS pane recently (>= the 5-min idle
+        window). Compaction is lossy, so it must never fire out from under someone actively
+        working; an absent user is the safe case (they left a big context behind).
+      * NOT active_waiting — there is no pending resume, keep-going opt-in, resume directive,
+        or in-flight background agent. Nothing is mid-flight to interrupt, and the session
+        genuinely has nothing queued to "continue" this instant.
+      * context_tokens >= threshold — small contexts save nothing; only a large one is worth
+        the lossy compaction and is what makes a cold event expensive.
+    """
+    return (
+        not user_present
+        and not active_waiting
         and context_tokens is not None
         and context_tokens >= min_context_tokens
     )

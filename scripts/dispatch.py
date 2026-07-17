@@ -917,6 +917,89 @@ def _phase_compact_resume() -> bool:
     return True
 
 
+def _phase_proactive_idle_compact() -> bool:
+    """PREVENTIVE cold-compact (TRDD-D3PROACT). Returns True iff it fired a /compact (caller
+    then returns early, like the reactive cold paths). NEVER raises — a fault degrades to no
+    compact, never a broken heartbeat.
+
+    WHY (user 2026-07-17, "make this fail-proof"): the reactive paths cannot beat the burn — a
+    cron fire re-reads the whole transcript BEFORE dispatch runs, so a cold fire has already paid
+    the 2× cache-creation write by the time _phase_rate_limit_recovery/_phase_compact_resume can
+    queue a /compact. That write is only large when the CONTEXT is large. This phase removes the
+    root cause: when the session is genuinely idle and the context is large, it shrinks NOW during
+    a cheap WARM fire, so whatever cold event comes next (a >1h working turn — crons cannot fire
+    mid-query, so the fire after it is always cold; a rate limit; a restart) reads ~50k, not ~600k.
+    It is the only path that PREVENTS the burn rather than mitigating it after the fact.
+
+    Gates (all injected into the pure `should_compact_proactively_idle`): enabled + off-cooldown,
+    the user is ABSENT from this pane (never compact out from under active work — lossy), the
+    session is NOT active-waiting (no resume/keep-going/directive/pending agents to interrupt),
+    and the context is large. Self-limiting: after the compact the context is small, so the size
+    gate fails next fire, and the shared cooldown blocks a re-fire before the compact lands.
+
+    Placed BEFORE the maintenance early-return in main() ON PURPOSE: a long unattended
+    maintenance session is the PRIME target — it is exactly the one that sits idle for hours and
+    then eats a cold write. It runs AFTER the rate-limit/compact-resume early-returns (those own
+    the reactive cold case and would already have returned) and BEFORE the keep-going nudge, so a
+    fire that compacts does not also emit a now-pointless [janitor-resume] (the compact's own
+    directive re-anchors the resume on the next fire)."""
+    try:
+        import cold_cache_compact  # noqa: PLC0415 -- lazy: fail-open when the lib is absent
+        import user_intent  # noqa: PLC0415 -- lazy: only the idle path needs presence
+
+        sd = state.state_dir()
+        now = int(time.time())
+        if not cold_cache_compact.proactive_idle_enabled() or cold_cache_compact.in_cooldown(sd, now=now):
+            return False
+        # Cheap gates (no transcript I/O) first: presence + active-waiting are stat-only.
+        present = user_intent.user_is_present(now=now)
+        active = _cadence_active_waiting(sd, now)
+        if present or active:
+            return False
+        transcript = cold_cache_compact.newest_transcript(state.project_root())
+        ctx = cold_cache_compact.context_tokens_for(transcript)
+        if not cold_cache_compact.should_compact_proactively_idle(
+            ctx,
+            user_present=present,
+            active_waiting=active,
+            min_context_tokens=cold_cache_compact.min_context_tokens(),
+        ):
+            return False
+
+        compact_py = _HERE / "compact_trigger.py"
+        if not compact_py.is_file():
+            return False
+        directive = (
+            "proactive idle compaction: the session was idle with a large context, compacted "
+            "PRE-EMPTIVELY so the next cold resume is cheap — after this, continue your prior "
+            "pending task (read the newest in-flight TRDD's STATE block first)."
+        )
+        proc = state.run_subprocess(
+            [sys.executable, str(compact_py), "--directive", directive],
+            timeout=20,
+            capture=True,
+            detector_name="dispatch",
+        )
+        if not (proc and proc.returncode == 0 and "COMPACT_FIRED" in (proc.stdout or "")):
+            # Headless / NO_ITERM / trigger failed — no compaction happens, so DON'T stamp the
+            # cooldown (a stamp with no compact would suppress the SessionStart/rate-limit paths
+            # too — the three trigger points must agree on "fired", per the hook's own note).
+            return False
+        cold_cache_compact.mark_fired(sd, now=now)
+        # Informational NOTICE, NOT a [janitor-resume] marker: this turn must not begin resuming
+        # into a context that is about to be compacted (the real resume arrives post-compaction).
+        print(
+            f"[janitor] session idle with a large context (~{ctx} tokens) — a /compact was queued "
+            "and runs when this turn ends, PRE-EMPTIVELY shrinking it so the next cold resume "
+            "(long turn / rate limit / restart) is cheap. The session auto-resumes after it."
+        )
+        state.log_line("dispatch", f"proactive idle compact fired (context={ctx})")
+        return True
+    except Exception as exc:  # noqa: BLE001 -- degrade to no compact; never break the heartbeat
+        state.log_line("dispatch", f"proactive idle compact skipped: {exc}")
+        return False
+
+
 def _phase_plugin_reload() -> None:
     """Emit a bare `[janitor-reload]` marker once-per-session when the daemon's
     reload GENERATION advances past what THIS project's heartbeat has acked.
@@ -1688,6 +1771,16 @@ def main() -> int:
     # exactly once and return early — like rate-limit recovery — so the resume
     # gets clean attention with no detector noise this fire.
     if _phase_compact_resume():
+        return 0
+
+    # Phase 1.2: PREVENTIVE cold-compact (TRDD-D3PROACT). The reactive paths above shrink a
+    # large context only AFTER a cold fire already paid the 2× write; this one shrinks it
+    # PROACTIVELY during a cheap warm idle fire, so the next cold event is cheap. Gated on a
+    # genuinely-idle session (user absent, nothing pending) + a large context. Returns early
+    # like the resume phases so the fire stays minimal before the queued /compact runs. It sits
+    # AFTER the resume phases (they own the reactive cold case) and BEFORE the maintenance
+    # early-return below (a long unattended maintenance session is the prime target).
+    if _phase_proactive_idle_compact():
         return 0
 
     # Phase 1.5: heartbeat auto-renew (silent on v0.5.2+ crons).

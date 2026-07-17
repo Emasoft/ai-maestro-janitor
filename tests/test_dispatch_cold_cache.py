@@ -239,3 +239,86 @@ def test_phase_normal_resume_falls_through_on_no_iterm(iso, monkeypatch: pytest.
     assert ret is True
     assert out.startswith("[janitor-resume]"), "headless cold resume must fall through to the normal cue"
     assert "rate-limit cleared" in out
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-D3PROACT — _phase_proactive_idle_compact (the PREVENTIVE path)          #
+# --------------------------------------------------------------------------- #
+
+def _patch_idle(monkeypatch: pytest.MonkeyPatch, iso, *, present: bool, active: bool) -> None:
+    """Stub the two runtime idle signals the proactive phase reads."""
+    import user_intent
+    monkeypatch.setattr(user_intent, "user_is_present", lambda **_k: present)
+    monkeypatch.setattr(iso.dispatch, "_cadence_active_waiting", lambda *_a, **_k: active)
+
+
+def test_proactive_idle_fires_when_absent_idle_and_large(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The prevention: user absent + nothing pending + large context → queue /compact NOW during
+    a warm fire, emit a NON-marker notice (never [janitor-resume]), stamp the cooldown, spawn
+    compact_trigger. This is what keeps the context small so a future cold event is cheap."""
+    d, state, ccc = iso.dispatch, iso.state, iso.ccc
+    sd = state.state_dir()
+    _patch_idle(monkeypatch, iso, present=False, active=False)
+    _set_ctx(monkeypatch, iso, 500_000)
+    calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
+
+    out, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is True
+    assert "[janitor-resume]" not in out
+    assert "/compact" in out and "large context" in out
+    assert len(calls) == 1 and calls[0][1].endswith("compact_trigger.py")
+    assert ccc.in_cooldown(sd, now=int(time.time()) + 1) is True
+
+
+def test_proactive_idle_never_fires_when_user_present(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A present user vetoes — compaction must never fire out from under active work."""
+    d = iso.dispatch
+    _patch_idle(monkeypatch, iso, present=True, active=False)
+    _set_ctx(monkeypatch, iso, 500_000)
+    calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
+    out, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is False and out == "" and calls == []
+
+
+def test_proactive_idle_never_fires_when_active_waiting(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pending resume / keep-going / directive / agent vetoes — the session has queued work."""
+    d = iso.dispatch
+    _patch_idle(monkeypatch, iso, present=False, active=True)
+    _set_ctx(monkeypatch, iso, 500_000)
+    calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
+    _, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is False and calls == []
+
+
+def test_proactive_idle_never_fires_on_small_context(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A small context saves nothing and would be a pointless lossy compaction."""
+    d = iso.dispatch
+    _patch_idle(monkeypatch, iso, present=False, active=False)
+    _set_ctx(monkeypatch, iso, 50_000)
+    calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
+    _, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is False and calls == []
+
+
+def test_proactive_idle_no_cooldown_stamp_when_compact_cannot_fire(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """NO_ITERM / headless: the compact can't run, so DON'T stamp the cooldown — a stamp with no
+    compact would suppress the SessionStart + rate-limit paths too (the three must agree on fired)."""
+    d, state, ccc = iso.dispatch, iso.state, iso.ccc
+    sd = state.state_dir()
+    _patch_idle(monkeypatch, iso, present=False, active=False)
+    _set_ctx(monkeypatch, iso, 500_000)
+    _patch_run(monkeypatch, iso, "NO_ITERM\n")
+    _, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is False
+    assert ccc.in_cooldown(sd, now=int(time.time()) + 1) is False
+
+
+def test_proactive_idle_respects_opt_out(iso, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dedicated knob turns prevention off while leaving the reactive backstops alone."""
+    d = iso.dispatch
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED", "false")
+    _patch_idle(monkeypatch, iso, present=False, active=False)
+    _set_ctx(monkeypatch, iso, 500_000)
+    calls = _patch_run(monkeypatch, iso, "COMPACT_FIRED\n")
+    _, ret = _run_capturing(lambda: d._phase_proactive_idle_compact())
+    assert ret is False and calls == []

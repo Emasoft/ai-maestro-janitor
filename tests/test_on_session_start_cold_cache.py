@@ -189,3 +189,22 @@ def test_no_fire_when_compact_trigger_missing(harness, monkeypatch: pytest.Monke
     (empty_root / "scripts").mkdir(parents=True)
     assert hook._maybe_cold_compact_on_session_start(state, str(empty_root), "resume", "/x/s.jsonl") is False
     assert spawned == []
+
+
+def test_falls_back_to_newest_transcript_when_passed_path_unreadable(
+        harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """HARDENING (TRDD-D3PROACT): a resume can hand a STALE/rotated transcript path that yields
+    no size. Before the fix that silently meant 'no compact' and the large cold context paid the
+    full 2x write on turn one. Now the hook falls back to the project's NEWEST transcript, finds
+    the real (large) size, and fires — so the burn this hook exists to prevent is actually caught."""
+    hook, state, ccc, spawned, plugin_root = harness
+    newest = Path("/tmp/real-newest-session.jsonl")
+    monkeypatch.setattr(ccc, "newest_transcript", lambda _p: newest)
+    # The passed (stale) path yields None; only the newest transcript has a (large) size.
+    monkeypatch.setattr(
+        ccc, "context_tokens_for",
+        lambda p: 600_000 if p == newest else None,
+    )
+    fired = hook._maybe_cold_compact_on_session_start(state, plugin_root, "resume", "/x/stale.jsonl")
+    assert fired is True, "the newest-transcript fallback must recover the size and fire"
+    assert len(spawned) == 1 and spawned[0][1].endswith("compact_trigger.py")

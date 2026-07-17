@@ -153,6 +153,15 @@ def _maybe_cold_compact_on_session_start(
         ):
             return False
         ctx = cold_cache_compact.context_tokens_for(transcript_path)
+        # HARDENING (TRDD-D3PROACT): a resume can hand us a stale/rotated transcript path — if it
+        # yields no size, fall back to the project's NEWEST transcript before giving up. A silent
+        # None here used to mean "no compact" → the large cold context then paid the full 2× write
+        # on the first turn, the exact burn this hook exists to prevent. The fallback is the same
+        # reader dispatch's own paths use, so the two trigger points resolve the same context.
+        if ctx is None:
+            ctx = cold_cache_compact.context_tokens_for(
+                cold_cache_compact.newest_transcript(state.project_root())
+            )
         if not cold_cache_compact.should_compact_on_resume(
             ctx, min_context_tokens=cold_cache_compact.min_context_tokens()
         ):

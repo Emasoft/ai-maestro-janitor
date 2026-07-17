@@ -188,3 +188,48 @@ def test_newest_transcript_none_when_absent(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setenv("HOME", str(tmp_path))
     assert ccc.newest_transcript("/Users/x/Code/no-transcripts-here") is None
     assert ccc.newest_transcript(None) is None
+
+
+# --------------------------------------------------------------------------- #
+# TRDD-D3PROACT — the PREVENTIVE proactive-idle gate                           #
+# --------------------------------------------------------------------------- #
+
+def test_should_compact_proactively_idle_all_three_gates() -> None:
+    """PURE. Fires ONLY when the user is absent AND nothing is pending AND the context is large.
+    Each gate alone must veto — compaction is lossy, so a present user or pending work blocks it."""
+    import cold_cache_compact as ccc
+
+    MIN = 270_000
+    # The one firing case: absent + idle + large.
+    assert ccc.should_compact_proactively_idle(
+        300_000, user_present=False, active_waiting=False, min_context_tokens=MIN) is True
+
+    # Present user vetoes (never compact out from under active work).
+    assert ccc.should_compact_proactively_idle(
+        300_000, user_present=True, active_waiting=False, min_context_tokens=MIN) is False
+    # Active-waiting vetoes (a resume / keep-going / directive / agent is pending).
+    assert ccc.should_compact_proactively_idle(
+        300_000, user_present=False, active_waiting=True, min_context_tokens=MIN) is False
+    # Small context saves nothing (and would be a pointless lossy compaction).
+    assert ccc.should_compact_proactively_idle(
+        100_000, user_present=False, active_waiting=False, min_context_tokens=MIN) is False
+    # Unknown context size → never fire (can't prove it's worth it).
+    assert ccc.should_compact_proactively_idle(
+        None, user_present=False, active_waiting=False, min_context_tokens=MIN) is False
+
+
+def test_proactive_idle_enabled_requires_master_switch(monkeypatch) -> None:
+    """The preventive path is gated by BOTH the master cold-compact switch AND its own knob."""
+    import cold_cache_compact as ccc
+
+    for var in ("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED",
+                "CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED"):
+        monkeypatch.delenv(var, raising=False)
+    assert ccc.proactive_idle_enabled() is True                       # both default ON
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED", "false")
+    assert ccc.proactive_idle_enabled() is False                      # own knob off
+
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED", "false")
+    assert ccc.proactive_idle_enabled() is False                      # master off disables it too
