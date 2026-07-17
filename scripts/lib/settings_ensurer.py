@@ -193,6 +193,10 @@ def _verified_atomic_write(
     tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
     swapped = False
     try:
+        # "Create settings.json if missing" includes its PARENT: on a brand-new HOME
+        # ~/.claude does not exist yet and the same-dir tmp write ENOENTs (caught by
+        # the harness thin-mode control test). Idempotent on every real machine.
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(text, encoding="utf-8")
         # (1) valid JSON on disk + (2) exact round-trip — verify the ACTUAL bytes, not our string.
         reparsed = json.loads(tmp.read_text(encoding="utf-8"))

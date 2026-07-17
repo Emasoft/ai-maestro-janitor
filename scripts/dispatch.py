@@ -375,6 +375,35 @@ _DETECTORS: list[tuple[str, int, str]] = [
 # reach the model during a keep-warm idle.
 _MAINTENANCE_DETECTORS = frozenset({"token-usage-anomaly", "window-burn-rate"})
 
+# #J THIN MODE (TRDD-PZLVT2RN): detectors that must NOT run inside an ai-maestro
+# harness agent, because each one either mutates MACHINE-GLOBAL state (the shared
+# plugin cache / marketplace via `claude plugin ...`, the global-state request files)
+# or reads/surfaces the machine's OAuth/keychain posture — which the ai-maestro
+# SERVER owns for harness agents (janitor#100 Family-A/B split; `#J` writes only
+# `.janitor/state/`). Everything NOT listed here is workdir-scoped and keeps running
+# inside. window-burn-rate is here because its data source is the OAuth rotator
+# (OFF inside); it returns via the `aimaestro-continuity.sh status` 5-field contract
+# once that CLI ships to ~/.local/bin (follow-up, janitor#100).
+_NON_HARNESS_DETECTORS = frozenset({
+    "marketplace-refresh",
+    "user-plugins-update",
+    "local-plugins-update",
+    "project-plugins-update",
+    "version-update",
+    "plugin-updates",
+    "oauth-beacon-refresh",
+    "oauth-cookie-reminder",
+    "oauth-login-needed",
+    "keychain-health",
+    "window-burn-rate",
+    "fleet-github-config",
+})
+
+
+def _detector_runs_in_harness(name: str) -> bool:
+    """PURE: may `name` run inside a harness agent session? (The Phase-2 loop's gate.)"""
+    return name not in _NON_HARNESS_DETECTORS
+
 
 def _run_maintenance_detectors() -> None:
     """Run ONLY the token-monitoring detector subset (maintenance-mode fires).
@@ -1243,6 +1272,10 @@ def _phase_daemon_restart_if_stale() -> None:
     the new one from current cache).
     """
     try:
+        if state.in_ai_maestro_agent_env():
+            # #J thin mode (TRDD-PZLVT2RN): the outside world's daemon is not a harness
+            # agent's to SIGTERM — its restart is managed by the outside sessions.
+            return
         if gs.daemon_needs_restart():
             gs.request_daemon_restart()
     except Exception as exc:  # noqa: BLE001
@@ -1928,8 +1961,12 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         state.log_line("dispatch", f"ensure_daemon_running failed: {exc}")
 
-    # Phase 2: drift detectors.
+    # Phase 2: drift detectors. Inside a harness agent (#J thin mode) the roster is
+    # filtered to the workdir-scoped subset — see _NON_HARNESS_DETECTORS.
+    in_harness = state.in_ai_maestro_agent_env()
     for name, default_interval, env_var in _DETECTORS:
+        if in_harness and not _detector_runs_in_harness(name):
+            continue
         interval = state.coerce_int(os.environ.get(env_var), default_interval)
         _run_detector(name, interval)
 

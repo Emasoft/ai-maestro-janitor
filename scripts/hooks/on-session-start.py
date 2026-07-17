@@ -245,9 +245,19 @@ def main() -> int:
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
     sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
     from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
-    from lib import memory_scopes, rules_installer, settings_ensurer, state  # noqa: E402  -- local package, not PyPI
+    from lib import harness_backend, memory_scopes, rules_installer, settings_ensurer, state  # noqa: E402  -- local package, not PyPI
 
     state.init_state()
+
+    # #J THIN MODE (TRDD-PZLVT2RN): inside an ai-maestro harness agent this hook keeps
+    # only its self-scoped work (state init, breadcrumb, TRDD surfacing, arm nudge) and
+    # SKIPS every outside-world writer below — rules/settings/references (the settings
+    # write would collide with the server's own claude-settings-enforcer), the memory
+    # mirror, the lean-ctx allowlist, and the OAuth beacon/supervisor (the server owns
+    # Family-A + token surfaces for harness agents; janitor#100).
+    thin_harness = harness_backend.is_harness_session()
+    if thin_harness:
+        state.log_line("session-start", "harness thin mode (#J): outside-world writers skipped")
 
     # Seed this project's reload-ack to the CURRENT reload generation at a TRUE
     # session start: a fresh process has just loaded the current plugin versions,
@@ -345,7 +355,7 @@ def main() -> int:
             Path.home() / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "oauth-rotator",
             Path.home() / ".claude" / "account-rotator",
         ]
-        if any(c is not None and (c / "state.json").is_file() for c in _candidates):
+        if not thin_harness and any(c is not None and (c / "state.json").is_file() for c in _candidates):
             _rotator_py = Path(plugin_root) / "scripts" / "oauth_rotator" / "rotator.py"
             if _rotator_py.is_file():
                 subprocess.Popen(  # noqa: S603 -- fixed argv, no shell
@@ -367,7 +377,7 @@ def main() -> int:
     # who edited the rule keeps their version. Adding new rule files to
     # the plugin and shipping a release is enough to roll them out — no
     # explicit migration step required.
-    copied = rules_installer.install_rules(Path(plugin_root))
+    copied = [] if thin_harness else rules_installer.install_rules(Path(plugin_root))
     if copied:
         state.log_line(
             "session-start",
@@ -380,7 +390,11 @@ def main() -> int:
     # so a change here applies on the NEXT launch — the notice below says so. Best-effort: a
     # failure must never break session start.
     try:
-        changed = settings_ensurer.ensure_recommended_settings()
+        changed = (
+            {"env_added": [], "top_level_set": []}
+            if thin_harness  # the SERVER's claude-settings-enforcer owns settings.json for harness agents
+            else settings_ensurer.ensure_recommended_settings()
+        )
         n = len(changed["env_added"]) + len(changed["top_level_set"])
         if n:
             keys = ", ".join(changed["env_added"] + changed["top_level_set"])
@@ -399,7 +413,7 @@ def main() -> int:
     # machine-wide, so parking 87 KB of schemas/cheat-sheets/migration guides there made
     # every fan-out re-write them into cache. Here they cost ZERO tokens until an agent
     # actually reads one.
-    refs = rules_installer.install_references(Path(plugin_root))
+    refs = [] if thin_harness else rules_installer.install_references(Path(plugin_root))
     if refs:
         state.log_line(
             "session-start",
@@ -413,7 +427,7 @@ def main() -> int:
     # so a user's own rule and every MEMORY store are untouched. Full last-scope
     # uninstall can't self-heal from a hook (the plugin is gone) — the daemon's
     # cleanup_user_orphans_if_uninstalled + each rule's own inert-guard cover that.
-    removed = rules_installer.remove_orphaned_rules()
+    removed = [] if thin_harness else rules_installer.remove_orphaned_rules()
     if removed:
         state.log_line(
             "session-start",
@@ -425,7 +439,7 @@ def main() -> int:
     # uninstall` (which deletes the data dir) never loses memory — and on a fresh install
     # with an empty primary, RESTORE it from the mirror. Additive, best-effort, NEVER
     # deletes a note; a mirror hiccup can't break session start.
-    synced = memory_scopes.sync_user_memory_mirror()
+    synced = None if thin_harness else memory_scopes.sync_user_memory_mirror()
     if synced == "restored":
         state.log_line(
             "session-start",
@@ -444,7 +458,7 @@ def main() -> int:
     try:
         from lib import leanctx_allowlist  # noqa: E402  -- local package, not PyPI
 
-        allowed = leanctx_allowlist.ensure_janitor_allowed()
+        allowed = [] if thin_harness else leanctx_allowlist.ensure_janitor_allowed()
         if allowed:
             state.log_line(
                 "session-start",
@@ -466,8 +480,8 @@ def main() -> int:
         sys.path.insert(0, str(Path(plugin_root) / "scripts" / "oauth_rotator"))
         import supervisor as oauth_supervisor  # noqa: E402  -- local module, not PyPI
 
-        _facts = oauth_supervisor.gather_facts()
-        if _facts.opt_in:
+        _facts = None if thin_harness else oauth_supervisor.gather_facts()
+        if _facts is not None and _facts.opt_in:
             _findings = oauth_supervisor.diagnose(_facts)
             if _findings:
                 _res = oauth_supervisor.apply(

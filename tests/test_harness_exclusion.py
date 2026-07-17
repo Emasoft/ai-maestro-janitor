@@ -214,3 +214,108 @@ def test_fleet_stop_missing_key_is_not_owned() -> None:
         already_injected=set(), user_active_pids=set(),
     )
     assert [p["pid"] for p in plans] == [103]
+
+
+# --- Phase C: #J thin-mode gating --------------------------------------------------
+
+def test_ensure_daemon_running_refuses_inside_the_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE SPAWN CHOKE POINT: a harness agent must never spawn the machine-global
+    daemon (the SERVER is its daemon). Gated inside ensure_daemon_running so all four
+    callers are covered; a spawn attempt in this test is an instant failure."""
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs-c"))
+    sys.modules.pop("global_state", None)
+    import global_state as gs  # noqa: PLC0415
+
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")
+    monkeypatch.setattr(gs, "spawn_daemon_detached", lambda: pytest.fail("must never spawn inside the harness"))
+    monkeypatch.setattr(gs, "daemon_is_alive", lambda **_k: pytest.fail("must refuse before any liveness probe"))
+    assert gs.ensure_daemon_running() is False
+
+    # Outside the harness the normal ladder resumes (alive → True, no spawn).
+    monkeypatch.delenv("AIMAESTRO_AGENT", raising=False)
+    monkeypatch.setattr(gs, "daemon_is_alive", lambda **_k: True)
+    assert gs.ensure_daemon_running() is True
+
+
+def test_dispatch_detector_roster_is_filtered_in_harness() -> None:
+    """The thin-mode roster: machine-global mutators + OAuth surfaces are OFF inside;
+    workdir-scoped detectors keep running. Pinned by NAME so a future roster addition
+    that mutates global state must consciously join the set."""
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location(
+        "janitor_dispatch_harness", str(_ROOT / "scripts" / "dispatch.py")
+    )
+    assert spec is not None and spec.loader is not None
+    dispatch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dispatch)
+
+    for name in (
+        "marketplace-refresh", "user-plugins-update", "local-plugins-update",
+        "project-plugins-update", "version-update", "plugin-updates",
+        "oauth-beacon-refresh", "oauth-cookie-reminder", "oauth-login-needed",
+        "keychain-health", "window-burn-rate", "fleet-github-config",
+    ):
+        assert not dispatch._detector_runs_in_harness(name), name
+    for name in ("dirty-tree", "trdd-drift", "token-usage-anomaly", "supply-chain-fingerprints",
+                 "memory-maintenance", "screenshot-purge"):
+        assert dispatch._detector_runs_in_harness(name), name
+    # Every gated name must actually exist in the roster — a typo here would silently
+    # gate nothing.
+    roster = {n for n, _i, _e in dispatch._DETECTORS}
+    missing = dispatch._NON_HARNESS_DETECTORS - roster
+    assert not missing, f"gated names not in the roster: {missing}"
+
+
+def test_session_start_hook_writes_nothing_outside_the_project_in_harness_mode(
+    tmp_path: Path,
+) -> None:
+    """END-TO-END thin-mode proof: the REAL SessionStart hook, run inside a fake harness
+    env with a fully isolated HOME, must not create ~/.claude/rules, ~/.claude/settings.json,
+    the reference docs, or the memory mirror — #J writes only the project's .janitor/state.
+    The control run (same isolation, no harness flag) must install rules, proving the
+    isolation itself didn't mask a regression."""
+    import subprocess  # noqa: PLC0415
+
+    def _run_hook(*, harness: bool, home: Path, project: Path) -> None:
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "gs").mkdir(exist_ok=True)  # the settings-ensurer flock lives here
+        project.mkdir(parents=True, exist_ok=True)
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(home),
+            "CLAUDE_PROJECT_DIR": str(project),
+            "CLAUDE_PLUGIN_ROOT": str(_ROOT),
+            "JANITOR_GLOBAL_STATE_DIR": str(home / "gs"),
+        }
+        if harness:
+            env["AIMAESTRO_AGENT"] = "1"
+        proc = subprocess.run(
+            [sys.executable, str(_ROOT / "scripts" / "hooks" / "on-session-start.py")],
+            input='{"source": "startup"}',
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    thin_home = tmp_path / "thin-home"
+    _run_hook(harness=True, home=thin_home, project=tmp_path / "thin-proj")
+    assert not (thin_home / ".claude" / "rules").exists(), "thin mode must not install rules"
+    assert not (thin_home / ".claude" / "settings.json").exists(), "thin mode must not touch settings"
+    assert not (thin_home / ".claude" / "ai-maestro-janitor-memory").exists(), "no mirror sync"
+    assert not (thin_home / ".claude" / "plugins").exists(), "no DATA-dir reference docs"
+
+    ctrl_home = tmp_path / "ctrl-home"
+    _run_hook(harness=False, home=ctrl_home, project=tmp_path / "ctrl-proj")
+    # settings_ensurer CREATES settings.json when missing, unconditionally outside the
+    # harness — the one writer that needs no pre-seeded install state. (install_rules
+    # is no control here: it only targets scopes whose settings.json already enable
+    # the plugin, which a blank isolated HOME never does.)
+    assert (ctrl_home / ".claude" / "settings.json").is_file(), (
+        "the control run must write settings.json — otherwise the thin-mode assertions "
+        "above prove nothing (the isolation, not the gate, would explain the absence)"
+    )

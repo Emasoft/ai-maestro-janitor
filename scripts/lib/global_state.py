@@ -1675,6 +1675,14 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
     backoff that stops a die-on-start daemon from being re-spawned by every
     heartbeat fire of every session.
     """
+    if state.in_ai_maestro_agent_env():
+        # #J THIN MODE (TRDD-PZLVT2RN): a harness agent must never spawn (or adopt)
+        # the machine-global daemon — for harness agents the ai-maestro SERVER *is*
+        # the daemon, and the standalone daemon belongs to the OUTSIDE world's
+        # sessions. Gated HERE, at the single spawn choke point, so all four callers
+        # (dispatch's two phases + the marketplace/user-plugins shims) are covered
+        # at once. Same discriminator harness_backend.is_harness_session wraps.
+        return False
     if kill_switch_present():
         return False
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED", True):
