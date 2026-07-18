@@ -51,6 +51,15 @@ SETUP_REMIND_DAYS = 30
 # early enough to matter within a 5h window.
 TICK_STALL_ALERT_S = float(os.environ.get("ROTATOR_TICK_STALL_ALERT_S", "600"))
 
+# D3 (TRDD-WBYFTU2L): alert when an account has been unable to SELF-renew (no usable
+# refresh path — the cascade's human/browser-dependent RENEW_COOKIE / REAUTH legs) for
+# this long. The 2026-07-18 incident: ipazia sat in the renew-cookie leg 232 ticks
+# (all day) as a silent plan line — no actor executes that leg and nothing told the
+# human — so the fleet ran one account deep until the next deadlock forced a manual
+# login. 2h: long enough that a transient refresh flake self-heals first, short
+# enough that the human can act well before the fleet thins out.
+COOKIE_LEG_ALERT_S = float(os.environ.get("ROTATOR_COOKIE_LEG_ALERT_S", "7200"))
+
 
 _JANITOR_DATA_DIRNAME = "ai-maestro-janitor-ai-maestro-plugins"
 
@@ -96,6 +105,10 @@ class SlotFact:
     expires_days: float | None  # days until the token's expiresAt, or None
     refresh_failures: int = 0  # consecutive failed keepalive refreshes (TRDD-HJGR4I5W); a dead
     #                            present refresh token escalates to the REAUTH login nudge
+    cannot_self_renew_age_s: float | None = None  # D3 (TRDD-WBYFTU2L): seconds this slot has
+    #                            continuously lacked a USABLE refresh path (absent, or dead —
+    #                            refresh_failures ≥ the cascade's max) → it sits in a
+    #                            human/browser-dependent cascade leg. None = self-renewable.
 
 
 @dataclass(frozen=True)
@@ -177,6 +190,18 @@ def diagnose(facts: Facts) -> list[Finding]:
                 "setup-token-expiring",
                 f"{s.email} is a no-refresh setup-token expiring in {s.expires_days:.0f}d "
                 f"(< {SETUP_REMIND_DAYS}d) — re-capture a full OAuth login for it.",
+            ))
+        # D3 (TRDD-WBYFTU2L): the cascade's RENEW_COOKIE / REAUTH legs are human/browser
+        # driven BY DESIGN — no daemon actor executes them, so an account stuck there is
+        # invisible unless we ALERT. Every supervisor finding is notify-pushed by the
+        # daemon, so this line is what reaches the human BEFORE the fleet runs thin.
+        if s.cannot_self_renew_age_s is not None and s.cannot_self_renew_age_s > COOKIE_LEG_ALERT_S:
+            out.append(Finding(
+                "cookie-leg-stuck",
+                f"{s.email} has needed a one-time login for "
+                f"{s.cannot_self_renew_age_s / 3600.0:.1f}h (> {COOKIE_LEG_ALERT_S / 3600.0:.0f}h) "
+                f"— its refresh path is dead and only a human can renew it; run "
+                f"/janitor-refresh-claude-logins before the fleet runs out of accounts.",
             ))
     return out
 
@@ -262,7 +287,69 @@ def _slot_facts(root: Path, now: float) -> tuple[SlotFact, ...]:
         slot_meta = idx.get(email)
         rf = int(slot_meta.get("refresh_failures", 0)) if isinstance(slot_meta, dict) else 0
         out.append(SlotFact(email=email, has_refresh=has_refresh, expires_days=days, refresh_failures=rf))
-    return tuple(out)
+    return _track_cannot_self_renew(root, tuple(out), now)
+
+
+def _track_cannot_self_renew(root: Path, slots: tuple[SlotFact, ...], now: float) -> tuple[SlotFact, ...]:
+    """D3 (TRDD-WBYFTU2L): persist the FIRST-SEEN epoch of each slot's cannot-self-renew
+    state in `cookie-leg-since.json` and stamp each SlotFact with its continuous age.
+
+    "Cannot self-renew" = no usable refresh path — the refresh token is ABSENT, or present
+    but DEAD (refresh_failures ≥ the cascade's max, matching `cascade.classify`'s
+    RENEW_COOKIE/REAUTH boundary) — AND the access token is already dead or dies within a
+    day (expires_days None/< 1). The runway clause keeps a healthy ~1y no-refresh SETUP
+    token (which `setup-token-expiring` already covers at <30d) from tripping a login
+    alert it doesn't need. Those cascade legs are human/browser-driven by design, so the
+    DURATION in that state is the alert signal: a transient refresh flake clears in
+    minutes; ipazia's 2026-07-18 all-day limbo is what this exists to surface. The map is
+    pruned to the currently-known slots so retired accounts don't leave stale entries.
+    Best-effort I/O: an unreadable/unwritable sidecar degrades to age-unknown (None) —
+    never breaks fact gathering."""
+    # Sibling-module import, robust to being loaded by file path (the same reason
+    # _rotator_module exists): the daemon context has this dir on sys.path; the test
+    # harness may not. A missing cascade.py is a broken install — raising is correct.
+    try:
+        from cascade import DEFAULT_MAX_REFRESH_FAILURES
+    except ImportError:
+        import sys
+        here = str(Path(__file__).resolve().parent)
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        from cascade import DEFAULT_MAX_REFRESH_FAILURES
+    sidecar = root / "cookie-leg-since.json"
+    since: dict = {}
+    try:
+        if sidecar.is_file():
+            parsed = json.loads(sidecar.read_text())
+            if isinstance(parsed, dict):
+                since = parsed
+    except (json.JSONDecodeError, OSError):
+        since = {}
+    updated: dict[str, float] = {}
+    stamped: list[SlotFact] = []
+    for s in slots:
+        no_usable_refresh = (not s.has_refresh) or s.refresh_failures >= DEFAULT_MAX_REFRESH_FAILURES
+        dying = s.expires_days is None or s.expires_days < 1.0
+        cannot = no_usable_refresh and dying
+        if cannot:
+            first = since.get(s.email)
+            first_f = float(first) if isinstance(first, (int, float)) else now
+            updated[s.email] = first_f
+            stamped.append(SlotFact(
+                email=s.email, has_refresh=s.has_refresh, expires_days=s.expires_days,
+                refresh_failures=s.refresh_failures,
+                cannot_self_renew_age_s=max(0.0, now - first_f),
+            ))
+        else:
+            stamped.append(s)  # self-renewable → age stays None; any sidecar entry is dropped
+    if updated != since:
+        try:
+            tmp = sidecar.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(updated, indent=0, sort_keys=True))
+            tmp.replace(sidecar)
+        except OSError:
+            pass  # observability state only — never break fact gathering
+    return tuple(stamped)
 
 
 def _tick_completed_age_s(root: Path, now: float) -> float | None:

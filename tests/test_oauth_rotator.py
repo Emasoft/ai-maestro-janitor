@@ -935,20 +935,86 @@ def test_cmd_auto_excludes_locally_expired_alternate_when_refresh_fails(
     assert switches == []                                  # still-dead → excluded, no rotation
 
 
-def test_cmd_auto_does_not_refresh_maxed_429_alternate(
+def test_cmd_auto_first_429_alternate_is_degraded_not_maxed(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A 429 alternate is MAXED, not expired — refreshing cannot un-max it, so it must NOT trigger a
-    refresh grant; with no other candidate the rotator correctly stays put (genuinely all-maxed)."""
+    """THE ALT-429 DEBOUNCE (TRDD-WBYFTU2L D1, the 2026-07-18 deadlock): a SINGLE probe 429 on an
+    alternate is just as likely a transient usage-endpoint throttle as the live account's (which
+    gets LIVE_429_DEBOUNCE) — it must NOT be read as 'genuinely maxed'. First 429 → the alternate
+    stays a DEGRADED fallback (structurally valid), so the rotator escapes the dead live account
+    instead of logging all-maxed. A 429 still never triggers a refresh grant (refreshing cannot
+    un-max OR un-throttle a usage probe)."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    throttled_alt = _blob("ALT", expires_ms=_ms_in(80))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": throttled_alt},
+                           usage={"LIVE": (401, None), "ALT": (429, None)})
+    refreshed: list = []
+    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: refreshed.append(_tok(b)) or None)
+    rotator.cmd_auto()
+    assert refreshed == []                                 # 429 never triggers a wasted refresh
+    assert [s[0] for s in switches] == ["alt@x"]           # degraded rotate — NOT all-maxed
+    assert rotator.load_state()["slots"]["alt@x"]["alt_429_streak"] == 1  # streak persisted
+
+
+def test_cmd_auto_second_consecutive_429_alternate_is_dropped(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """At ALT_429_DEBOUNCE consecutive probe 429s the alternate IS genuinely maxed → dropped
+    (rotating onto a maxed account is useless), and the all-maxed line NAMES it with the streak
+    (TRDD-WBYFTU2L D2) so the next incident is diagnosable without a forensic log dig."""
     live = _blob("LIVE", expires_ms=_ms_in(50))
     maxed_alt = _blob("ALT", expires_ms=_ms_in(80))
     switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
                            slot_blobs={"alt@x": maxed_alt},
                            usage={"LIVE": (401, None), "ALT": (429, None)})
-    refreshed: list = []
-    monkeypatch.setattr(rotator, "refresh_oauth_token", lambda b: refreshed.append(_tok(b)) or None)
+    st = rotator.load_state()
+    st["slots"]["alt@x"]["alt_429_streak"] = 1             # one prior 429 already recorded
+    rotator.save_state(st)
+    decided: list[str] = []
+    monkeypatch.setattr(rotator, "_decide", lambda msg: decided.append(msg))
     rotator.cmd_auto()
-    assert refreshed == []                                 # 429 (maxed) never triggers a wasted refresh
     assert switches == []                                  # genuinely maxed → no rotation
+    assert any("maxed-429(x2)" in m and "alt@x" in m for m in decided)  # per-alternate verdict
+
+
+def test_cmd_auto_200_probe_resets_alt_429_streak(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 200 probe proves the endpoint answers for this alternate → its 429 streak resets, so an
+    old throttle blip can never accumulate toward a false 'maxed' verdict across hours."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    alt = _blob("ALT", expires_ms=_ms_in(80))
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"alt@x": alt},
+                           usage={"LIVE": (401, None), "ALT": (200, _usage_ok())})
+    st = rotator.load_state()
+    st["slots"]["alt@x"]["alt_429_streak"] = 1             # stale blip from an earlier tick
+    rotator.save_state(st)
+    rotator.cmd_auto()
+    assert [s[0] for s in switches] == ["alt@x"]           # healthy target → normal rotate
+    assert rotator.load_state()["slots"]["alt@x"]["alt_429_streak"] == 0
+
+
+def test_cmd_auto_all_maxed_line_names_every_alternate_verdict(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TRDD-WBYFTU2L D2: the all-maxed line carries one verdict clause PER examined alternate
+    (which account, why rejected) — the composite line without reasons cost a forensic dig on
+    2026-07-18. Here: one alternate at the 7d wall (util verdict) and one locally-expired with
+    no refresh token (unrenewable verdict)."""
+    live = _blob("LIVE", expires_ms=_ms_in(50))
+    walled = _blob("WALL", expires_ms=_ms_in(80))          # probe 200 but 7d at the wall
+    dead = _blob("DEAD", refresh=None, expires_ms=_ms_in(-5))   # expired, no refresh
+    switches = _setup_auto(monkeypatch, tmp_path, live_email="live@x", live_blob=live,
+                           slot_blobs={"wall@x": walled, "dead@x": dead},
+                           usage={"LIVE": (401, None),
+                                  "WALL": (200, {"five_hour": {"utilization": 99},
+                                                 "seven_day": {"utilization": 99}})})
+    decided: list[str] = []
+    monkeypatch.setattr(rotator, "_decide", lambda msg: decided.append(msg))
+    rotator.cmd_auto()
+    assert switches == []
+    stuck = [m for m in decided if "all paid accounts maxed" in m]
+    assert len(stuck) == 1
+    assert "wall@x:util(5h=99,7d=99)" in stuck[0]
+    assert "dead@x:locally-expired-no-refresh" in stuck[0]
 
 
 def test_cmd_auto_degraded_rotate_when_in_tick_refresh_fails(

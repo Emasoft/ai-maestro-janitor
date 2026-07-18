@@ -222,3 +222,56 @@ def test_gather_facts_populates_tick_liveness(tmp_path: Path, monkeypatch) -> No
     assert facts.tick_completed_age_s is not None
     assert facts.tick_completed_age_s > sup.TICK_STALL_ALERT_S
     assert "tick-stalled" in {x.code for x in sup.diagnose(facts)}
+
+
+def test_cookie_leg_stuck_alerts_only_past_threshold() -> None:
+    """D3 (TRDD-WBYFTU2L): a slot that has been unable to self-renew LONGER than
+    COOKIE_LEG_ALERT_S alerts (the human-only cascade legs have no daemon actor, so
+    the alert IS the actuation); at/below the threshold, or when self-renewable
+    (age None), it stays silent."""
+    stuck = sup.SlotFact(email="stuck@x.com", has_refresh=False, expires_days=0.1,
+                         cannot_self_renew_age_s=sup.COOKIE_LEG_ALERT_S + 10)
+    fresh = sup.SlotFact(email="fresh@x.com", has_refresh=False, expires_days=0.1,
+                         cannot_self_renew_age_s=sup.COOKIE_LEG_ALERT_S - 10)
+    healthy = sup.SlotFact(email="ok@x.com", has_refresh=True, expires_days=0.3,
+                           cannot_self_renew_age_s=None)
+    findings = [x for x in sup.diagnose(_facts(slots=(stuck, fresh, healthy)))
+                if x.code == "cookie-leg-stuck"]
+    assert len(findings) == 1
+    assert "stuck@x.com" in findings[0].message
+    assert "/janitor-refresh-claude-logins" in findings[0].message
+
+
+def test_track_cannot_self_renew_stamps_ages_and_clears(tmp_path: Path) -> None:
+    """The sidecar (cookie-leg-since.json) records the FIRST-SEEN epoch of each slot's
+    cannot-self-renew state: age grows across calls while the state persists, resets to
+    None (entry pruned) the moment the slot regains a usable refresh path, and a healthy
+    long-lived no-refresh SETUP token (300d runway) never enters the map at all — its
+    <30d case is setup-token-expiring's job, not a login alert's."""
+    now = 4_000_000.0
+    dead = sup.SlotFact(email="dead@x.com", has_refresh=False, expires_days=0.2)
+    setup = sup.SlotFact(email="setup@x.com", has_refresh=False, expires_days=300.0)
+    first = {s.email: s for s in sup._track_cannot_self_renew(tmp_path, (dead, setup), now)}
+    assert first["dead@x.com"].cannot_self_renew_age_s == 0.0
+    assert first["setup@x.com"].cannot_self_renew_age_s is None      # plenty of runway
+    assert json.loads((tmp_path / "cookie-leg-since.json").read_text()) == {"dead@x.com": now}
+    # An hour later, still dead → the age is measured from FIRST-SEEN, not per-call.
+    later = {s.email: s for s in sup._track_cannot_self_renew(tmp_path, (dead,), now + 3600)}
+    assert abs(later["dead@x.com"].cannot_self_renew_age_s - 3600.0) < 0.01
+    # The slot regains a working refresh → age None and the sidecar entry is pruned.
+    revived = sup.SlotFact(email="dead@x.com", has_refresh=True, expires_days=0.2)
+    cleared = {s.email: s for s in sup._track_cannot_self_renew(tmp_path, (revived,), now + 7200)}
+    assert cleared["dead@x.com"].cannot_self_renew_age_s is None
+    assert json.loads((tmp_path / "cookie-leg-since.json").read_text()) == {}
+
+
+def test_track_cannot_self_renew_dead_refresh_counts_as_unrenewable(tmp_path: Path) -> None:
+    """A refresh token that EXISTS but keeps failing (refresh_failures >= the cascade's max)
+    is DEAD — the slot sits in the human-driven leg exactly like a no-refresh one (the
+    2026-07-18 ipazia limbo), so it must enter the sidecar and accrue age."""
+    now = 5_000_000.0
+    dead_refresh = sup.SlotFact(email="dr@x.com", has_refresh=True, expires_days=0.2,
+                                refresh_failures=3)
+    facts = {s.email: s for s in sup._track_cannot_self_renew(tmp_path, (dead_refresh,), now)}
+    assert facts["dr@x.com"].cannot_self_renew_age_s == 0.0
+    assert "dr@x.com" in json.loads((tmp_path / "cookie-leg-since.json").read_text())

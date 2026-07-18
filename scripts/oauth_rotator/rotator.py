@@ -327,6 +327,12 @@ MAX_BOOTSTRAP_LAUNCHES = int(os.environ.get("ROTATOR_MAX_BOOTSTRAP_LAUNCHES", "3
 # the live-account 429 to persist across this many consecutive checks before
 # treating it as "exhausted" and rotating away — a debounce against false trips.
 LIVE_429_DEBOUNCE = int(os.environ.get("ROTATOR_LIVE_429_DEBOUNCE", "2"))
+# ALTERNATE-probe 429 debounce (TRDD-WBYFTU2L D1). The 2026-07-18 09:18 deadlock: an
+# alternate's single probe 429 was read as "genuinely MAXED" and hard-dropped, while the
+# SAME code debounces the live account's 429 as "likely a transient usage-endpoint
+# throttle" — both readings cannot be true, and one throttled tick against the only fresh
+# alternate deadlocked rotation on a usable fleet. Same default as the live debounce.
+ALT_429_DEBOUNCE = int(os.environ.get("ROTATOR_ALT_429_DEBOUNCE", str(LIVE_429_DEBOUNCE)))
 
 
 # --------------------------------------------------------------------------
@@ -1786,11 +1792,17 @@ def cmd_auto() -> int:
     candidates: list[tuple[str, dict, float, float]] = []
     degraded: list[tuple[str, dict, float]] = []  # (email, blob, expires_in_h) — no-usage path
     index_healed = False  # set when refresh-on-err re-mints a slot → index meta must be persisted
+    meta_dirty = False  # set when an alt_429_streak changes → index meta must be persisted
+    # Per-alternate VERDICTS (TRDD-WBYFTU2L D2): why each examined alternate was (not) usable
+    # this tick. Appended to the all-maxed line ONLY — the composite "no alternate is
+    # healthy…" verdict without per-account reasons cost a forensic log dig on 2026-07-18.
+    verdicts: list[str] = []
     for email in state.get("slots", {}):
         if email == live_email:
             continue
         b = read_slot(email)
         if not b:
+            verdicts.append("%s:no-slot" % email)
             continue
         if _blob_locally_expired(b):
             # RENEW-before-rotate (TRDD-1IKF0A6D, lesson [^2] of oauth-rotation-renew-reauth.md):
@@ -1805,9 +1817,11 @@ def cmd_auto() -> int:
             # a refreshed token STILL locally expired is excluded exactly as before — the guard's
             # invariant (never rotate ONTO a dead/dying token) is preserved.
             if not (network_up and _oauth(b).get("refreshToken")):
+                verdicts.append("%s:locally-expired-no-refresh" % email)
                 continue
             refreshed, healed = _refresh_and_heal_slot(email, b, state)
             if refreshed is None or _blob_locally_expired(refreshed):
+                verdicts.append("%s:refresh-failed" % email)
                 continue
             index_healed = index_healed or healed
             b = refreshed
@@ -1839,28 +1853,62 @@ def cmd_auto() -> int:
                     _eh = expires_in_h(b)
                     if _oauth(b).get("refreshToken") and _eh is not None and not _blob_locally_expired(b):
                         degraded.append((email, b, _eh))
+                        verdicts.append("%s:probe-%s-degraded" % (email, st2))
+                    else:
+                        verdicts.append("%s:probe-%s-unrenewable" % (email, st2))
                     continue
                 index_healed = index_healed or healed
                 b = refreshed
                 st2, d2 = usage_request(b)  # re-probe with the fresh token
             if st2 != 200:
                 # Not a usage-confirmed safe target. Distinguish WHY:
-                #  - 429 → the alternate is genuinely MAXED (no quota left);
-                #    rotating onto it is useless, so drop it.
+                #  - 429 → DEBOUNCED (TRDD-WBYFTU2L D1): a single probe 429 is just as
+                #    likely a transient usage-endpoint throttle for an ALTERNATE as it is
+                #    for the LIVE account (whose 429 gets LIVE_429_DEBOUNCE) — reading it
+                #    as "genuinely maxed" hard-dropped the only fresh alternate on
+                #    2026-07-18 and deadlocked rotation on a usable fleet. Below the
+                #    streak: UNKNOWN → keep as a DEGRADED fallback when structurally
+                #    valid. At/after the streak: genuinely MAXED → drop (rotating onto a
+                #    maxed account is useless).
                 #  - else (401/403/0 after a SUCCESSFUL refresh) → the usage probe
                 #    failed transiently while we hold a FRESH token; keep it as a
                 #    DEGRADED fallback so one bad probe can't pin the user to a dead
                 #    live account when a rescuable alternate is right there.
-                if st2 != 429:
+                if st2 == 429:
+                    meta = state.get("slots", {}).get(email)
+                    streak = 1
+                    if isinstance(meta, dict):
+                        streak = int(meta.get("alt_429_streak", 0) or 0) + 1
+                        meta["alt_429_streak"] = streak
+                        meta_dirty = True
+                    if streak < ALT_429_DEBOUNCE:
+                        _eh = expires_in_h(b)
+                        if _eh is not None and not _blob_locally_expired(b):
+                            degraded.append((email, b, _eh))
+                            verdicts.append("%s:probe-429(x%d,throttle?)-degraded" % (email, streak))
+                        else:
+                            verdicts.append("%s:probe-429(x%d,throttle?)-expired" % (email, streak))
+                    else:
+                        verdicts.append("%s:maxed-429(x%d)" % (email, streak))
+                else:
                     _eh = expires_in_h(b)
                     if _eh is not None and not _blob_locally_expired(b):
                         degraded.append((email, b, _eh))
+                        verdicts.append("%s:probe-%s-degraded" % (email, st2))
+                    else:
+                        verdicts.append("%s:probe-%s-expired" % (email, st2))
                 continue
+            meta = state.get("slots", {}).get(email)
+            if isinstance(meta, dict) and meta.get("alt_429_streak"):
+                meta["alt_429_streak"] = 0  # a 200 proves the endpoint answers → reset the streak
+                meta_dirty = True
             bfh = _util(d2, "five_hour")
             bsd = _util(d2, "seven_day")
             if bfh is None or bsd is None:
+                verdicts.append("%s:unknown-usage" % email)
                 continue  # unknown usage -> not a safe target
             if not is_safe_alternate(bfh, bsd):
+                verdicts.append("%s:util(5h=%.0f,7d=%.0f)" % (email, bfh, bsd))
                 continue  # itself near a limit -> skip
             candidates.append((email, b, bfh, bsd))
         else:
@@ -1868,7 +1916,7 @@ def cmd_auto() -> int:
             if eh is None:
                 continue  # cannot confirm validity offline -> not a safe degraded target
             degraded.append((email, b, eh))
-    if index_healed:
+    if index_healed or meta_dirty:
         save_state(state)  # before any _switch_blob (it re-loads state from disk)
     # 1) Best usage-confirmed safe target (DRAIN-FIRST), when the network is up.
     best = select_drain_first(candidates) if network_up else None
@@ -1893,9 +1941,11 @@ def cmd_auto() -> int:
         _switch_blob(target_email, target_blob, reason)
         _decide("auto: switched %s -> %s (degraded; target token valid ~%.1fh; %s)" % (live_email or "(live)", target_email, target_eh, reason))
         return 0
-    # 3) Genuinely stuck — nothing rotatable in either path.
+    # 3) Genuinely stuck — nothing rotatable in either path. Name EVERY alternate's verdict
+    # (TRDD-WBYFTU2L D2) so the next incident is diagnosable from this one line.
     if network_up:
-        _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe threshold and none is structurally renewable — all paid accounts maxed; waiting for a window to reset" % (live_email or "(live)", live_desc))
+        detail = ("; ".join(verdicts)) if verdicts else "no alternate slots"
+        _decide("auto: live %s exhausted (%s) but no alternate is healthy + below safe threshold and none is structurally renewable — all paid accounts maxed; waiting for a window to reset [%s]" % (live_email or "(live)", live_desc, detail))
     else:
         _decide("auto: live %s is LOCALLY EXPIRED and the API is unreachable, but no alternate with a known future expiry exists — cannot rotate; manual re-auth needed" % (live_email or "(live)"))
     return 0
