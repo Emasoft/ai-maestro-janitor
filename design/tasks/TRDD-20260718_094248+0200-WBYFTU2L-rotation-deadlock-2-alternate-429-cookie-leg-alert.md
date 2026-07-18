@@ -1,15 +1,15 @@
 ---
 trdd-id: WBYFTU2L
 title: Rotation deadlock 2 — undebounced alternate-probe 429 + silent per-alternate exclusion + cookie-leg limbo with no human alert
-column: dev
+column: published
 created: 2026-07-18T09:42:48+0200
-updated: 2026-07-18T09:42:48+0200
+updated: 2026-07-18T10:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 related-trdd: [P7WU40G9, 32acd15f, 7PYTX4E9, 1IKF0A6D]
-implementation-commits: []
+implementation-commits: [dcd9d4d, 546db1e]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-18
@@ -69,8 +69,9 @@ account label only (privacy: local-part prefix, existing `account_prefix`).
   leaves the leg.
 - Regression: existing rotator + supervisor suites stay green.
 
-**NEXT ACTION:** implement D1+D2 in `rotator.py::cmd_auto`, D3 in `supervisor.py` (+ notify
-wiring already existing), tests, publish patch release.
+**SHIPPED v0.55.0** (dcd9d4d + release 546db1e, 2026-07-18): D1+D2 in `rotator.py::cmd_auto`,
+D3 in `supervisor.py` (`cookie-leg-stuck` — notify-pushed by the daemon's existing
+every-supervisor-finding wiring). 121 rotator/supervisor tests green; full 14-gate publish passed.
 
 ## Notes and lessons learned
 
