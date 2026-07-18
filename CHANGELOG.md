@@ -2,13 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.55.0] - 2026-07-18
+## [0.56.0] - 2026-07-18
 
 ### Bug Fixes
 
-- Debounce alternate-probe 429 + per-alternate verdicts + cookie-leg human alert (TRDD-WBYFTU2L)
+- Real typing signal — HID idle probe gates every injection surface (TRDD-6Q0OYYYH)
 
 ### Documentation
 
-- Add TRDD-WBYFTU2L — rotation deadlock 2 (alternate-429 debounce, per-alternate verdict logging, cookie-leg alert)
+- WBYFTU2L shipped in v0.55.0 -> published
 
