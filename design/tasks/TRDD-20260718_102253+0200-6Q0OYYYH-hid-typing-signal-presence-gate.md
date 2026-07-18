@@ -1,15 +1,15 @@
 ---
 trdd-id: 6Q0OYYYH
 title: Real typing signal for the presence gate — HID idle probe gates EVERY injection surface
-column: dev
+column: published
 created: 2026-07-18T10:22:53+0200
-updated: 2026-07-18T10:22:53+0200
+updated: 2026-07-18T14:52:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 related-trdd: [P7WU40G9, WBYFTU2L, 0GPQROC1, ME8V2YJF]
-implementation-commits: []
+implementation-commits: [ee93553, 38d688f]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-18
@@ -51,7 +51,9 @@ window on REAL keystrokes — it blocks only while the human is literally typing
   breadcrumbs; falls back to breadcrumb rungs when the probe is None (monkeypatched).
 - Regression: existing user_intent/presence/fleet suites stay green.
 
-**NEXT ACTION:** tests + ruff + full-suite publish (v0.56.0).
+**SHIPPED v0.56.0** (ee93553 + release 38d688f, 2026-07-18): HID probe wired as RUNG 0 of
+user_is_present + post-compact push grace + daemon recovery beat + fleet-stop selector; window
+10s->20s; conftest pins the probe suite-wide (both module identities). Full 14-gate publish passed.
 
 ## Notes and lessons learned
 
