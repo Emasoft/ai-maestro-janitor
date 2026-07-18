@@ -837,3 +837,36 @@ def _presence_home(tmp: Path, *, present: bool) -> Path:
         encoding="utf-8",
     )
     return h
+
+
+@pytest.fixture(autouse=True)
+def _pin_hid_probe_unavailable(monkeypatch):
+    """Pin the machine-wide HID typing probe (TRDD-6Q0OYYYH) to 'unavailable' for EVERY test.
+
+    `user_intent.hid_idle_seconds` reads the REAL macOS IOHIDSystem idle time — the seconds
+    since the LIVE human's last keystroke. Left unpinned, any presence/injection test would
+    flip with whether a person happens to be typing while the suite runs (the
+    janitor-keepalive-test-isolation class of flake: real host state leaking into tests).
+    None = probe unavailable → every gate falls through to its deterministic breadcrumb
+    rungs, the pre-HID behavior the existing tests encode. Tests OF the HID rung override
+    this locally with explicit values.
+
+    Pins BOTH module identities of the same file — ``user_intent`` (bare lib import) AND
+    ``lib.user_intent`` (the hooks' ``from lib import user_intent``) — because Python gives
+    the two import paths distinct module objects and patching only one leaves the other
+    live (the dual-import trap: the first run of this fixture missed the hooks' copy and
+    the real ioreg probe leaked into a popen-capturing test).
+    """
+    import importlib
+    pinned = False
+    for name in ("user_intent", "lib.user_intent"):
+        try:
+            mod = importlib.import_module(name)
+        except ImportError:
+            continue
+        monkeypatch.setattr(mod, "hid_idle_seconds", lambda **_kw: None)
+        pinned = True
+    # A suite without scripts/lib on sys.path imports neither identity — nothing there
+    # consults the probe, so an unpinned run is safe (`pinned` kept for debuggability).
+    del pinned
+    yield

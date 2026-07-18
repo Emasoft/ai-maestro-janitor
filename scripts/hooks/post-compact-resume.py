@@ -250,12 +250,12 @@ def _record_resume_directive(state) -> bool:  # noqa: ANN001 - local module type
 # the durable fallback — headless / non-automatable panes just fall back to it.
 _PUSH_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED"
 _PUSH_GRACE_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S"
-# Attended-grace shrank 3 min → 10 s (owner directive 2026-07-17): a compacted session the user was
-# WATCHING sat visibly frozen because this grace (machine-global, submit-based) suppressed the
-# resume push while the user was nominally "recently active". Matched to the per-pane injection gate
-# (user_intent.USER_PRESENT_IDLE_S = 10) so both halves of the resume path use the same 10 s window:
-# push if no prompt was submitted in the last 10 s; otherwise the cron path still resumes.
-_PUSH_GRACE_DEFAULT_S = 10
+# Attended-grace shrank 3 min → 10 s (owner directive 2026-07-17), then 20 s on the REAL typing
+# signal (owner directive 2026-07-18): submit-based-only presence read a mid-typing user as
+# unattended, so the push landed under their fingers. Matched to the injection gate
+# (user_intent.USER_PRESENT_IDLE_S = 20), and _user_recently_active now consults
+# user_intent.hid_idle_seconds() FIRST — any keystroke in the last 20 s means attended.
+_PUSH_GRACE_DEFAULT_S = 20
 
 
 def _push_grace_s() -> int:
@@ -280,7 +280,20 @@ def _user_recently_active(state, now: int, grace_s: int) -> bool:  # noqa: ANN00
     is left alone (the cron still resumes them), so we never type into a live input
     line. Fail-safe: any read problem returns False (treat as unattended) — the push
     itself still degrades to NO_ITERM when there is no automatable pane.
+
+    RUNG 0 — the REAL typing signal (TRDD-6Q0OYYYH, owner directive 2026-07-18): the
+    breadcrumb below is stamped only at prompt SUBMIT, so a user mid-typing whose last
+    Enter is older than the grace read as unattended and got the push typed under their
+    fingers. HID idle (any keystroke/mouse event, machine-wide) within the grace ⇒
+    attended. Fail-open: an unavailable probe falls through to the breadcrumb.
     """
+    try:
+        from lib import user_intent  # noqa: PLC0415 - lazy: the hook's sys.path is set up in main()
+        hid = user_intent.hid_idle_seconds()
+        if hid is not None and hid <= grace_s:
+            return True
+    except Exception:  # noqa: BLE001 -- the probe must never break the push gate
+        pass
     try:
         data = json.loads(state.user_presence_path().read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, ValueError):

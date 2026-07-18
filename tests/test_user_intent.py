@@ -120,25 +120,59 @@ def test_intent_is_absent_by_default(sdir: Path) -> None:
 
 
 def test_recent_input_in_this_pane_means_present(tmp_path: Path) -> None:
-    """Submitted in THIS pane 5s ago (< the 10-second window) → present."""
+    """Submitted in THIS pane 5s ago (< the 20-second window) → present."""
     home = _pane_presence(tmp_path, NOW - 5)
     assert user_intent.user_is_present(home=home, now=NOW, env=PANE_A)
 
 
 def test_silence_past_window_in_this_pane_means_away(tmp_path: Path) -> None:
-    """Last submit in THIS pane was past the 10-second window → away."""
+    """Last submit in THIS pane was past the 20-second window → away."""
     home = _pane_presence(tmp_path, NOW - user_intent.USER_PRESENT_IDLE_S - 1)
     assert not user_intent.user_is_present(home=home, now=NOW, env=PANE_A)
 
 
-def test_window_is_ten_seconds(tmp_path: Path) -> None:
-    """The window is exactly 10 s (owner directive 2026-07-17): at the edge = present, one second
-    past = away."""
-    assert user_intent.USER_PRESENT_IDLE_S == 10
-    edge = _pane_presence(tmp_path, NOW - 10)
+def test_window_is_twenty_seconds(tmp_path: Path) -> None:
+    """The window is exactly 20 s (owner directive 2026-07-18, superseding 2026-07-17's 10 s):
+    at the edge = present, one second past = away."""
+    assert user_intent.USER_PRESENT_IDLE_S == 20
+    edge = _pane_presence(tmp_path, NOW - 20)
     assert user_intent.user_is_present(home=edge, now=NOW, env=PANE_A)
-    past = _pane_presence(tmp_path, NOW - 11)
+    past = _pane_presence(tmp_path, NOW - 21)
     assert not user_intent.user_is_present(home=past, now=NOW, env=PANE_A)
+
+
+# presence — RUNG 0: the REAL typing signal (TRDD-6Q0OYYYH, owner directive 2026-07-18)
+
+
+def test_hid_typing_within_window_means_present_despite_stale_breadcrumbs(
+        tmp_path: Path, monkeypatch) -> None:
+    """THE 2026-07-18 FIX: a user MID-TYPING (HID event 3 s ago) is PRESENT even though their
+    last SUBMIT is far outside the window — the submit-based breadcrumb alone read them as
+    absent and licensed injection under their fingers."""
+    monkeypatch.setattr(user_intent, "hid_idle_seconds", lambda **_kw: 3.0)
+    stale = _pane_presence(tmp_path, NOW - 300)            # last Enter 5 min ago
+    assert user_intent.user_is_present(home=stale, now=NOW, env=PANE_A)
+
+
+def test_hid_idle_past_window_falls_through_to_breadcrumbs(
+        tmp_path: Path, monkeypatch) -> None:
+    """HID idle ABOVE the window is NOT proof of absence — the breadcrumb rungs still decide
+    (probe granularity/skew safety): a recent submit keeps the pane present."""
+    monkeypatch.setattr(user_intent, "hid_idle_seconds", lambda **_kw: 500.0)
+    recent = _pane_presence(tmp_path, NOW - 5)
+    assert user_intent.user_is_present(home=recent, now=NOW, env=PANE_A)
+    stale = _pane_presence(tmp_path, NOW - 300)
+    assert not user_intent.user_is_present(home=stale, now=NOW, env=PANE_A)
+
+
+def test_hid_probe_unavailable_preserves_breadcrumb_behavior(
+        tmp_path: Path) -> None:
+    """Probe None (non-macOS / ioreg failure — and the suite-wide conftest pin) ⇒ the gate is
+    exactly the pre-HID breadcrumb logic. Fail-open on the PROBE, fail-closed on presence."""
+    recent = _pane_presence(tmp_path, NOW - 5)
+    assert user_intent.user_is_present(home=recent, now=NOW, env=PANE_A)
+    stale = _pane_presence(tmp_path, NOW - user_intent.USER_PRESENT_IDLE_S - 1)
+    assert not user_intent.user_is_present(home=stale, now=NOW, env=PANE_A)
 
 
 def test_never_typed_in_this_pane_means_away_despite_global(tmp_path: Path) -> None:

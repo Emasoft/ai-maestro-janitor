@@ -83,6 +83,7 @@ import rules_installer as ri  # noqa: E402  # post-uninstall orphaned-rule clean
 import session_liveness as sl  # noqa: E402  # diagnosis→recovery mapping (TRDD-324223a6)
 import state  # noqa: E402
 import supervisor as oauth_supervisor  # noqa: E402  # scripts/oauth_rotator/supervisor.py
+import user_intent  # noqa: E402  # hid_idle_seconds — the typing signal gating ALL injection (TRDD-6Q0OYYYH)
 import version_update_lib as vu  # noqa: E402
 
 # L0 OS-keepalive (TRDD-71ABD7V7): True iff this process was launched by the OS service
@@ -1094,6 +1095,21 @@ def task_session_liveness(fleet: list | None = None) -> None:
         except Exception:  # noqa: BLE001 -- an audit fault must NEVER crash the recovery beat
             pass
 
+    # THE TYPING GATE (TRDD-6Q0OYYYH, owner directive 2026-07-18: "the user is present if it
+    # was typing in the last 20 seconds"): any keyboard/mouse event within the presence
+    # window means a human is AT the machine RIGHT NOW — defer EVERY recovery injection this
+    # beat. The per-instance breadcrumbs can't see mid-typing (submit-stamped only), and a
+    # human watching a pane get ESC'd/typed-into while they work IS the disturbance this
+    # exists to prevent. Deferral is safe: the beat re-runs in ~2 min and a frozen session
+    # recovers the moment the human steps away. Fail-open: probe None ⇒ no gate.
+    hid = user_intent.hid_idle_seconds()
+    if hid is not None and hid <= user_intent.USER_PRESENT_IDLE_S:
+        state.log_line(
+            "daemon",
+            f"session-liveness: user typing (HID idle {hid:.0f}s) — recovery injections deferred this beat",
+        )
+        return
+
     for inst in fleet:
         if not inst.project_root:
             continue  # no .janitor project → nothing to re-arm; can't key state
@@ -1347,13 +1363,20 @@ def task_fleet_stop() -> None:
         }
         for i in fleet
     ]
+    # THE TYPING GATE (TRDD-6Q0OYYYH): while the human is at the keyboard (any HID event
+    # within the presence window) EVERY session counts user-active — the stop-flag is held,
+    # so deferring costs nothing (the next beat injects once they step away), while typing
+    # a stop command under a working human is exactly the disturbance the owner banned.
+    hid = user_intent.hid_idle_seconds()
+    typing_now = hid is not None and hid <= user_intent.USER_PRESENT_IDLE_S
     plans = fleet_stop.select_stop_targets(
         sessions,
         flag_state=flag_state,
         self_pid=os.getpid(),
         daemon_pid=gs.daemon_pid(),
         already_injected=gs.fleet_injections_seen(),
-        user_active_pids={i.pid for i in fleet if i.active},
+        user_active_pids={i.pid for i in fleet} if typing_now
+        else {i.pid for i in fleet if i.active},
     )
     for p in plans:
         _fire_fleet_stop(by_pid.get(p["pid"]), p, flag_state, now)

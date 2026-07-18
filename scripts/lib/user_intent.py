@@ -55,17 +55,19 @@ INTENT_TTL_S = 600  # 10 minutes
 # submitted reads as ABSENT once the window elapses. That is the risk a small window trades against
 # faster resume, and it is why the window can never coerce to 0s (below).
 #
-# The window shrank 5 min → 10 s (owner directive 2026-07-17): a compacted session the user was
-# WATCHING sat visibly frozen because the 5-min per-pane window (and the post-compact push's 3-min
-# machine-global grace) suppressed the resume injection while the user was nominally "present".
-# The owner's rule, verbatim: "reduce it to the last 10 seconds — so it will not catch the user
-# typing, but if the user did not type in the last 10 seconds, inject the command." 10 s is short
-# enough that a walked-away pane resumes almost immediately, and just long enough not to land on a
-# submit the user made a moment ago. Per-pane keying (user directive 2026-07-16) still holds: the
-# gate reads THIS pane's own breadcrumb, so activity in another session never blocks this pane.
-# Tunable via CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S; any value ≤0 coerces back to the
-# default so the gate can never be silently disabled to a 0-second window.
-USER_PRESENT_IDLE_S = 10  # 10 seconds (owner directive 2026-07-17)
+# The window shrank 5 min → 10 s (owner directive 2026-07-17), then moved to 20 s ON A REAL
+# TYPING SIGNAL (owner directive 2026-07-18): the breadcrumb is stamped only at prompt SUBMIT,
+# so a user MID-TYPING with their last Enter >10 s ago read as ABSENT and got commands injected
+# under their fingers — shrinking the window made that WORSE, not better. The owner's rule,
+# verbatim: "make sure the user is detected as present if it was typing in the last 20 seconds."
+# `hid_idle_seconds()` (macOS IOHIDSystem, nanoseconds since the last keyboard/mouse event) is
+# that typing signal, and `user_is_present` consults it FIRST — any keystroke anywhere in the
+# last 20 s means PRESENT, machine-wide, because a human at the keyboard must never have
+# commands typed under them no matter which pane the injector targets. The per-pane breadcrumb
+# (user directive 2026-07-16) remains the fallback for platforms without the HID probe.
+# Tunable via CLAUDE_PLUGIN_OPTION_SELF_TRIGGER_PRESENCE_IDLE_S; any value ≤0 coerces back to
+# the default so the gate can never be silently disabled to a 0-second window.
+USER_PRESENT_IDLE_S = 20  # 20 seconds (owner directive 2026-07-18)
 
 # The verbs whose authority we track. Keyed by verb → the slash-commands that mean it.
 _VERB_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -189,6 +191,37 @@ def _presence_epoch(path: Path) -> int | None:
         return None
 
 
+def hid_idle_seconds(*, timeout_s: float = 3.0) -> float | None:
+    """Seconds since the user's last REAL input event (keyboard or mouse), machine-wide,
+    or None when unknowable (non-macOS, ioreg failure, parse miss).
+
+    THE TYPING SIGNAL (TRDD-6Q0OYYYH, owner directive 2026-07-18): the presence breadcrumb
+    is stamped only at prompt SUBMIT, so a user mid-typing read as absent and had commands
+    injected under their fingers. macOS IOHIDSystem's HIDIdleTime is nanoseconds since the
+    last HID event — it moves on EVERY keystroke, which is exactly what "was typing in the
+    last 20 seconds" needs. Multiple registry matches → take the MINIMUM (the most recent
+    event across input devices). Fail-open: None lets the caller fall back to the
+    breadcrumb rungs rather than blocking or licensing an injection on a broken probe."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["ioreg", "-c", "IOHIDSystem", "-d", "4"],
+            capture_output=True, text=True, timeout=timeout_s, check=False,
+        )
+    except Exception:  # noqa: BLE001 - a presence probe must never raise into an injection gate
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    best_ns: int | None = None
+    for m in re.finditer(r'"HIDIdleTime"\s*=\s*(\d+)', proc.stdout):
+        ns = int(m.group(1))
+        if best_ns is None or ns < best_ns:
+            best_ns = ns
+    return None if best_ns is None else best_ns / 1e9
+
+
 def user_is_present(
     *,
     idle_s: int = USER_PRESENT_IDLE_S,
@@ -216,6 +249,15 @@ def user_is_present(
     Fails CLOSED: a corrupt/unreadable breadcrumb returns True (assume present), so a breadcrumb
     problem can never license typing into someone's pane.
     """
+    # RUNG 0 — the REAL typing signal (owner directive 2026-07-18): any keyboard/mouse
+    # event in the last `idle_s` seconds means the user is AT the machine RIGHT NOW —
+    # present, machine-wide, no matter which pane the injector targets. This is what the
+    # submit-based breadcrumb below cannot see: a user mid-typing whose last Enter is
+    # older than the window. HID-idle ABOVE the window is NOT proof of absence for the
+    # pane rungs (probe granularity, clock skew) — fall through to the breadcrumbs.
+    hid = hid_idle_seconds()
+    if hid is not None and hid <= idle_s:
+        return True
     current = int(time.time()) if now is None else int(now)
     pane_key = state.terminal_pane_key(env)
     if pane_key is not None:
