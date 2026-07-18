@@ -34,38 +34,50 @@ COOLDOWN_S = 900
 # situation auto-recovery must yield on.
 MAX_ATTEMPTS = 4
 
+# A frozen (rate-limited) session's GENTLE recovery is ESC-only at every attempt up to here;
+# only AFTER these attempts, and only with ``include_hard``, does it escalate ONE rung to a
+# hard restart. Matches the old ladder's length (3 gentle rungs → force_restart at attempt 3),
+# so the bounded-storm math (MAX_ATTEMPTS=4 → exactly one hard attempt at 3, crash-loop at 4)
+# is unchanged.
+_FROZEN_GENTLE_ATTEMPTS = 3
+
+
 def action_for(diagnosis: str, attempts: int, *, include_hard: bool = False) -> str | None:
     """The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
     or None when the diagnosis is not recoverable:
 
     - ``cron_dead``        → ``rearm``  (the in-session cron died → re-arm it)
     - ``version_mismatch`` → ``reload`` (running stale code → reload the new plugin)
-    - ``frozen``           → ``esc_nudge`` — ESC-ONLY, NO command typed (TRDD-P7WU40G9).
-      ``frozen`` means the session is RATE-LIMITED and sitting in Claude Code's
-      "Retrying in Xm" retry-watchdog state, which BLOCKS the input line. Typing a
-      slash-command there is the 2026-07-18 disaster: the retry-wait buffers the
+    - ``frozen``           → ``esc_nudge`` for the first ``_FROZEN_GENTLE_ATTEMPTS`` attempts —
+      ESC-ONLY, NO command typed (TRDD-P7WU40G9). ``frozen`` means the session is RATE-LIMITED
+      and sitting in Claude Code's "Retrying in Xm" retry-watchdog state, which BLOCKS the input
+      line. Typing a slash-command there is the 2026-07-18 disaster: the retry-wait buffers the
       keystrokes, the command TEXT accumulates on the one input line
-      (``/janitor-arm/janitor-arm/janitor-arm…``), and when the wait finally breaks the
-      buffer flushes into a flood that blocks the session and burns tokens. The ONLY
-      correct recovery is ESC (the unwedge) with NOTHING typed: ESC breaks the
-      retry-wait, and the session's OWN ``rate-limited.flag → [janitor-resume]`` path
-      resumes the work. No hard-restart escalation: killing a rate-limited process
-      would discard its in-flight work — the crash-loop guard pages a human instead.
+      (``/janitor-arm/janitor-arm/janitor-arm…``), and when the wait finally breaks the buffer
+      flushes into a flood that blocks the session and burns tokens. ESC breaks the retry-wait
+      and the session's OWN ``rate-limited.flag → [janitor-resume]`` resumes the work — with NO
+      command to accumulate. With ``include_hard`` and only AFTER the ESC attempts are exhausted,
+      it escalates ONE rung to ``force_restart`` (kill the wedged pid + ``claude --continue``,
+      which RESUMES from the transcript so no work is lost) — the DEFAULT-OFF last resort for a
+      session ESC could not free. The old command-typing ladder (rearm/reload/update) is gone;
+      the hard rung is unchanged.
     - ``healthy`` / ``unarmed`` → None  (never poke a working or opted-out session —
       ``include_hard`` NEVER changes this)
     - ``dead``             → ``relaunch`` with ``include_hard`` (no kill — type
       ``claude --continue`` into the surviving pane), else None (A5 unwired view)
 
-    ``include_hard`` (TRDD-56d24c02 increment 2) only names the ``dead``→``relaunch``
-    rung — the DAEMON gates execution on ``fleet_restart.hard_restart_enabled()``
-    (DEFAULT-OFF dry-run) + ``is_killable``, so this stays pure policy.
+    ``include_hard`` (TRDD-56d24c02 increment 2) only NAMES the hard rungs — the DAEMON gates
+    execution on ``fleet_restart.hard_restart_enabled()`` (DEFAULT-OFF dry-run) + ``is_killable``,
+    so this stays pure policy.
     """
     if diagnosis == "cron_dead":
         return "rearm"
     if diagnosis == "version_mismatch":
         return "reload"
     if diagnosis == "frozen":
-        return "esc_nudge"  # ESC-only; the flood-safe recovery for a rate-limited session
+        if include_hard and attempts >= _FROZEN_GENTLE_ATTEMPTS:
+            return "force_restart"  # DEFAULT-OFF last resort after ESC is exhausted
+        return "esc_nudge"          # ESC-only; the flood-safe recovery for a rate-limited session
     if diagnosis == "dead" and include_hard:
         return "relaunch"
     return None

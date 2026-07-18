@@ -72,8 +72,8 @@ def test_find_janitor_root(tmp_path: Path) -> None:
 
 def test_diagnose_root_health_progression(tmp_path: Path) -> None:
     """Transcript age drives the diagnosis: fresh = healthy (working OR heartbeat
-    firing); stale = cron_dead→rearm; +rate-limit = frozen→ladder; +disarm =
-    unarmed→leave alone (sacrosanct even though stale+rate-limited)."""
+    firing); stale = cron_dead→rearm; +rate-limit = frozen→esc_nudge (ESC-only,
+    TRDD-P7WU40G9); +disarm = unarmed→leave alone (sacrosanct even though stale+rate-limited)."""
     root = tmp_path / "p"
     sdir = root / ".janitor" / "state"
     sdir.mkdir(parents=True)
