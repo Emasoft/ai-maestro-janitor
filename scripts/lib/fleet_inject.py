@@ -28,10 +28,11 @@ adds the last two; iTerm/tmux are unchanged):
   no tmux/iTerm channel resolved.
 
 Everything here is PURE / dry-run-able: build the payload, inspect it, THEN fire.
-This module covers only the gentle, command-TYPING rungs (rearm/reload/update).
-``esc_nudge`` types no command (ESC only) and the hard-restart rungs
-(relaunch/force_restart/resurrect) kill/spawn processes — those live in the
-daemon task behind the crash-loop guard, not here.
+This module covers the gentle rungs: the command-TYPING rungs (rearm/reload/update)
+AND ``esc_nudge`` — an ESC-ONLY injection that types NO command (``build_esc_plan``,
+the flood-safe recovery for a rate-limited session, TRDD-P7WU40G9). The hard-restart
+rungs (relaunch/force_restart/resurrect) kill/spawn processes and live in the daemon
+task behind the crash-loop guard, not here.
 """
 
 from __future__ import annotations
@@ -73,6 +74,88 @@ def action_to_command(action: str) -> str | None:
     """The slash-command a command-typing recovery `action` injects, or None when
     the action types no command (esc_nudge = ESC only; hard-restart rungs = daemon)."""
     return _ACTION_COMMAND.get(action)
+
+
+# ESC-ONLY recovery actions — an injection that sends ESC and types NO command
+# (TRDD-P7WU40G9). `esc_nudge` is the recovery for a `frozen` (rate-limited) session:
+# ESC breaks Claude Code's retry-watchdog wait, and the session's own rate-limited.flag
+# → [janitor-resume] resumes the work. Typing a command there would BUFFER on the
+# retry-blocked input line and flood, so these actions carry no command at all.
+_ESC_ONLY_ACTIONS = frozenset({"esc_nudge"})
+
+
+def is_esc_only(action: str) -> bool:
+    """True iff `action` is an ESC-only recovery (sends ESC, types no command)."""
+    return action in _ESC_ONLY_ACTIONS
+
+
+def iterm_esc_only_osascript(session_id: str, *, delay_s: float = 2.0) -> str:
+    """AppleScript that targets ONLY the iTerm session whose id == `session_id` and sends
+    ESC (`HARD_INTERRUPT_ESC_COUNT` presses) with NO `write text` — the flood-safe recovery
+    for a rate-limited session. The caller MUST have validated `session_id` (`valid_session_id`).
+    Shares the ESC SSOT `terminal_trigger.iterm_esc_lines`, so the two-ESC rule matches the
+    command-typing path exactly; there is no command string to escape here."""
+    esc = "\n".join(terminal_trigger.iterm_esc_lines()) + "\n"
+    return (
+        f"delay {delay_s}\n"
+        'tell application "iTerm2"\n'
+        "  repeat with w in windows\n"
+        "    repeat with t in tabs of w\n"
+        "      repeat with s in sessions of t\n"
+        f'        if (id of s) is "{session_id}" then\n'
+        "          tell s\n"
+        f"{esc}"
+        "          end tell\n"
+        "        end if\n"
+        "      end repeat\n"
+        "    end repeat\n"
+        "  end repeat\n"
+        "end tell\n"
+    )
+
+
+def build_esc_plan(terminal: dict, *, delay_s: float = 2.0) -> dict | None:
+    """Build an ESC-ONLY injection plan (send ESC, type NO command) for a resolved `terminal`,
+    or None when no ESC-capable channel resolves. PURE. Mirrors `build_command_plan`'s channel
+    selection MINUS the ai-maestro CLI channel — that channel has no raw-ESC primitive (typing
+    into a managed agent only ENQUEUES), and an ai-maestro agent is `server_owned` and never
+    recovered by this daemon anyway. The plan shape matches the command plans (same `channel`
+    keys + `osascript` / `steps`+`delay_s`), so `fire()` handles it unchanged.
+
+    Every keystroke step is JUST the two ESCs: the tmux/wtype/xdotool builders return ESC-only
+    steps when passed an EMPTY command list with `esc_first=True`, and the iTerm branch uses the
+    dedicated `iterm_esc_only_osascript`.
+    """
+    pane = terminal.get("tmux_pane", "").strip()
+    if pane and terminal_trigger.valid_tmux_pane(pane):
+        return {
+            "channel": "tmux",
+            "command": "",
+            "delay_s": delay_s,
+            "steps": terminal_trigger.build_tmux_steps(pane, [], esc_first=True),
+        }
+    sid = terminal.get("iterm_session_id", "").strip().split(":")[-1].strip()
+    if sid and valid_session_id(sid):
+        return {
+            "channel": "iterm",
+            "command": "",
+            "delay_s": delay_s,
+            "osascript": iterm_esc_only_osascript(sid, delay_s=delay_s),
+        }
+    gui_channel = terminal.get("linux_gui_channel", "").strip()
+    if gui_channel in ("wtype", "xdotool"):
+        builder = (
+            terminal_trigger.build_wtype_steps
+            if gui_channel == "wtype"
+            else terminal_trigger.build_xdotool_steps
+        )
+        return {
+            "channel": gui_channel,
+            "command": "",
+            "delay_s": delay_s,
+            "steps": builder([], esc_first=True),
+        }
+    return None  # no ESC-capable channel resolved
 
 
 def valid_session_id(session_id: str) -> bool:
@@ -249,12 +332,19 @@ def build_injection(
     `esc_first` is the hard/soft switch (TRDD-0GPQROC1): the caller passes
     `fleet_recovery.injection_is_hard(diagnosis)` so a LIVE session (cron_dead /
     version_mismatch) gets a SOFT enqueue that preserves its in-flight turn, while a
-    FROZEN one keeps the ESC — its wedged turn never ends, so an enqueued command
+    FROZEN one keeps the ESC — its retry-blocked turn never ends, so an enqueued command
     would never run.
+
+    An ESC-ONLY action (`esc_nudge`, the `frozen`/rate-limited recovery — TRDD-P7WU40G9)
+    is routed to `build_esc_plan`: it sends ESC and types NO command, so nothing can
+    accumulate on the retry-blocked input line. `esc_first` is irrelevant there (the plan
+    IS the ESC).
     """
+    if is_esc_only(action):
+        return build_esc_plan(terminal, delay_s=delay_s)
     command = action_to_command(action)
     if command is None:
-        return None  # esc_nudge / hard-restart — not a command-typing injection
+        return None  # hard-restart rung — not a command-typing injection (daemon handles it)
     return build_command_plan(terminal, command, esc_first=esc_first, delay_s=delay_s)
 
 

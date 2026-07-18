@@ -1,15 +1,15 @@
 ---
 trdd-id: P7WU40G9
 title: Overnight-stall triad — rotation deadlock + janitor over-compaction + rate-limit recovery flood
-column: dev
+column: testing
 created: 2026-07-18T06:03:23+0200
-updated: 2026-07-18T06:03:23+0200
+updated: 2026-07-18T06:41:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 related-trdd: [32acd15f, 8DR0X08A, 324223A6, EUWIHP0G, D3PROACT, TKNSTP82]
-implementation-commits: []
+implementation-commits: [dd96db2, 6145a23]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-18
@@ -54,7 +54,7 @@ override wins → else `effective_compact_point + margin(50k)` (user: 716k) → 
 LIVE MITIGATION already applied this session: wrote `.janitor/state/cold-compact-fired.ts`
 = now+2h so the running 0.52.0 hook is suppressed until the release lands.
 
-### BUG 3 — rate-limit recovery flood (the `/janitor-arm` pile-up). NOT YET IMPLEMENTED — NEXT.
+### BUG 3 — rate-limit recovery flood (the `/janitor-arm` pile-up). IMPLEMENTED (v0.54.0).
 A rate-limited session sits in Claude Code's retry-watchdog "Retrying in Xm" state (blocks
 input). `session_liveness.diagnose_instance`: `transcript_stale AND rate_limited → "frozen"`
 → `fleet_recovery.action_for("frozen")` walks `_FROZEN_LADDER = (rearm, reload, update)` →
@@ -78,9 +78,22 @@ forced a credential re-read (jumped ipazia→fmuaddib, 5h 99%→3%); its own `ra
 4. Tests: a rate-limited peer is diagnosed `rate_limited`; its recovery is `esc`; the injection
    plan carries ESC and ZERO slash-command text (regression against the flood).
 
-## NEXT ACTION
-Ship BUG 1 + BUG 2 in v0.53.0 NOW (owner wants relief ASAP — they are actively getting hit).
-Then implement BUG 3 (the 4-step ESC-only fix above) with tests and ship v0.54.0.
+**BUG 3 IMPLEMENTED (2026-07-18 morning):** `fleet_recovery.action_for("frozen") → "esc_nudge"`
+at every attempt (the `_FROZEN_LADDER` command walk + the `include_hard` force_restart escalation
+REMOVED — a rate-limited process is never killed). `fleet_inject`: `is_esc_only`, the
+`_ESC_ONLY_ACTIONS` set, `iterm_esc_only_osascript`, and `build_esc_plan` (channel selection
+mirroring `build_command_plan` MINUS the ai-maestro CLI channel, which has no ESC primitive and
+whose agents are server_owned anyway); `build_injection` routes `esc_nudge` → `build_esc_plan`.
+NO daemon change needed: `esc_nudge` ∉ `HARD_RUNGS` so it takes the gentle path, and the ESC plan
+carries the standard channel shape `fire()` already handles. Verified end-to-end: the tmux ESC
+plan emits exactly two `send-keys Escape` steps and ZERO `-l <command>`/`Enter`; the iTerm plan
+has the ESC writes and no `write text "/…"`. Tests updated/added across test_fleet_recovery,
+test_fleet_inject, test_daemon_session_liveness (91 green in the fleet suites, ruff clean).
+
+## STATE — v0.53.0 shipped (BUG 1 + BUG 2). v0.54.0 pending (BUG 3).
+- v0.53.0 LIVE (release commit on `main`; rotation + compact fixes) — commits dd96db2, 6145a23.
+- BUG 3 committed locally; ships v0.54.0. NEXT ACTION: publish v0.54.0, then flip this TRDD to
+  published with the release SHA appended to implementation-commits.
 
 ## Notes and lessons learned
 

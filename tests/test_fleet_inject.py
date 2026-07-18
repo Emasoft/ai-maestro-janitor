@@ -108,14 +108,28 @@ def test_build_injection_iterm_fallback_strips_tty_prefix() -> None:
     assert 'write text "/reload-plugins --force"' in plan["osascript"]
 
 
-def test_build_injection_declines_unreachable_and_noncommand() -> None:
-    """No tmux pane + no valid UUID → no plan (don't fire blind). A non-typing
-    action → no plan even with a good terminal (esc_nudge/hard-restart aren't injected
-    as commands here)."""
+def test_build_injection_declines_unreachable_and_hard_rungs() -> None:
+    """No tmux pane + no valid UUID → no plan (don't fire blind). A hard-restart rung types no
+    command and is not ESC-only → no plan even with a good terminal (the daemon owns those)."""
     assert fi.build_injection({}, "rearm") is None
     assert fi.build_injection({"iterm_session_id": "not a uuid !!"}, "rearm") is None
-    assert fi.build_injection({"tmux_pane": "%9"}, "esc_nudge") is None
     assert fi.build_injection({"tmux_pane": "%9"}, "resurrect") is None
+    assert fi.build_injection({"tmux_pane": "%9"}, "force_restart") is None
+
+
+def test_build_injection_esc_nudge_builds_an_esc_only_plan() -> None:
+    """THE FLOOD FIX (TRDD-P7WU40G9): `esc_nudge` builds an ESC-ONLY plan on the resolved channel
+    — a real plan (NOT None), but one that types NO command (`command == ""`). This is how a
+    rate-limited session is recovered without a slash-command accumulating on its retry-blocked
+    input line. An unreachable terminal still declines."""
+    tmux = fi.build_injection({"tmux_pane": "%9"}, "esc_nudge")
+    assert tmux is not None and tmux["channel"] == "tmux" and tmux["command"] == ""
+    iterm = fi.build_injection({"iterm_session_id": "ttys3:4C4A-9B7"}, "esc_nudge")
+    assert iterm is not None and iterm["channel"] == "iterm" and iterm["command"] == ""
+    # ESC-only carries no slash-command anywhere in its payload — the regression that caused the
+    # /janitor-arm flood.
+    assert "/janitor-arm" not in iterm["osascript"] and "/reload-plugins" not in iterm["osascript"]
+    assert fi.build_injection({}, "esc_nudge") is None  # no channel → still declines
 
 
 def test_build_injection_rejects_malformed_tmux_pane() -> None:
@@ -304,11 +318,21 @@ def test_build_injection_still_none_when_no_channel() -> None:
     assert fi.build_injection({"linux_gui_channel": "bogus"}, "rearm") is None
 
 
-def test_build_injection_declines_non_typing_actions() -> None:
-    """esc_nudge and the hard rungs type no command -> still None, even with a live
-    channel resolved."""
-    assert fi.build_injection({"tmux_pane": "%3"}, "esc_nudge") is None
+def test_build_injection_declines_hard_rungs() -> None:
+    """The hard rungs type no command and are not ESC-only -> still None, even with a live
+    channel resolved (the daemon executes those behind its crash-loop guard)."""
     assert fi.build_injection(_AIMAESTRO_TERMINAL, "force_restart") is None
+    assert fi.build_injection(_AIMAESTRO_TERMINAL, "relaunch") is None
+
+
+def test_esc_only_plan_never_uses_the_aimaestro_channel() -> None:
+    """build_esc_plan mirrors build_command_plan MINUS the ai-maestro CLI channel — the CLI has
+    no raw-ESC primitive (a managed agent only ENQUEUES), and an ai-maestro agent is server_owned
+    and never recovered by this daemon. So an aimaestro-only terminal yields NO esc plan; a tmux
+    pane on the same terminal is used instead."""
+    assert fi.build_esc_plan(_AIMAESTRO_TERMINAL) is None
+    both = fi.build_esc_plan({**_AIMAESTRO_TERMINAL, "tmux_pane": "%7"})
+    assert both is not None and both["channel"] == "tmux" and both["command"] == ""
 
 
 def test_gentle_and_hard_paths_agree_on_every_terminal_shape() -> None:

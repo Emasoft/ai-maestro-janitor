@@ -81,19 +81,20 @@ def test_dry_run_detects_but_never_fires(tmp_path, monkeypatch) -> None:
     fired = _setup(monkeypatch, tmp_path, fleet, fire="0")
     daemon.task_session_liveness()
     assert fired == []                                   # dry-run fires nothing
-    assert "session-liveness:DRY would rearm" in _log(tmp_path)
+    # frozen (rate-limited) → ESC-only recovery since TRDD-P7WU40G9 (never a typed command).
+    assert "session-liveness:DRY would esc_nudge" in _log(tmp_path)
     assert "proj-a" in _log(tmp_path)
     persisted = list((tmp_path / "recovery").glob("*.json"))
     assert len(persisted) == 1                           # only the frozen one is decided
     st = json.loads(persisted[0].read_text(encoding="utf-8"))
     assert "attempts" not in st                          # no attempt consumed
-    assert st["last_ts"] and st["last_audit"] == "dry_run:rearm"
+    assert st["last_ts"] and st["last_audit"] == "dry_run:esc_nudge"
 
 
 def test_fire_recovers_reachable_skips_unreachable(tmp_path, monkeypatch) -> None:
-    """Firing ON: a frozen tmux session and a cron-dead iTerm session are recovered
-    on their own channels; a frozen session with no resolvable terminal is logged
-    UNREACHABLE and not fired."""
+    """Firing ON: a frozen (rate-limited) tmux session is recovered ESC-ONLY (no command) and a
+    cron-dead iTerm session is re-armed with /janitor-arm, each on its own channel; a frozen
+    session with no resolvable terminal is logged UNREACHABLE and not fired."""
     fleet = [
         _inst("frozen", "/p/proj-a", {"tmux_pane": "%5"}),
         _inst("cron_dead", "/p/proj-b", {"iterm_session_id": "ttys3:4C4A-9B7"}),
@@ -102,7 +103,9 @@ def test_fire_recovers_reachable_skips_unreachable(tmp_path, monkeypatch) -> Non
     fired = _setup(monkeypatch, tmp_path, fleet)
     daemon.task_session_liveness()
     assert sorted(p["channel"] for p in fired) == ["iterm", "tmux"]
-    assert sorted(p["command"] for p in fired) == ["/janitor-arm", "/janitor-arm"]
+    # The frozen tmux session fires ESC-only (command==""); only the cron_dead session types a
+    # command (TRDD-P7WU40G9 — a rate-limited session is NEVER typed at).
+    assert sorted(p["command"] for p in fired) == ["", "/janitor-arm"]
     assert "UNREACHABLE" in _log(tmp_path)
     # an immediate 2nd beat is blocked by the per-instance cooldown
     fired.clear()

@@ -29,15 +29,14 @@ def test_action_for_per_diagnosis() -> None:
     assert fr.action_for("nonsense", 0) is None
 
 
-def test_frozen_walks_the_ladder_then_clamps() -> None:
-    """A frozen session escalates rearm → reload → update across attempts and then
-    stays at the strongest gentle rung (never wraps to a weaker no-op)."""
-    assert fr.action_for("frozen", 0) == "rearm"
-    assert fr.action_for("frozen", 1) == "reload"
-    assert fr.action_for("frozen", 2) == "update"
-    assert fr.action_for("frozen", 3) == "update"   # clamps, doesn't wrap
-    assert fr.action_for("frozen", 99) == "update"
-    assert fr.action_for("frozen", -1) == "rearm"   # defensive lower clamp
+def test_frozen_is_esc_only_at_every_attempt() -> None:
+    """THE FLOOD FIX (TRDD-P7WU40G9): a frozen session is RATE-LIMITED and sitting in Claude
+    Code's retry-watchdog wait, which BUFFERS typed input. So the recovery is ESC-ONLY
+    (`esc_nudge`) at EVERY attempt — never a typed slash-command that would accumulate on the
+    retry-blocked input line and flood. No attempt-indexed ladder: ESC is the whole recovery,
+    and the session's own rate-limited.flag → [janitor-resume] resumes the work."""
+    for attempt in (-1, 0, 1, 2, 3, 99):
+        assert fr.action_for("frozen", attempt) == "esc_nudge", attempt
 
 
 def test_gate_ok_cooldown_crashloop() -> None:
@@ -57,14 +56,13 @@ def test_crash_loop_wins_over_cooldown() -> None:
     assert fr.gate(last_ts=now - fr.COOLDOWN_S - 100, attempts=fr.MAX_ATTEMPTS + 3, now=now) == "crash_loop"
 
 
-def test_include_hard_extends_the_ladders_but_never_the_untouchables() -> None:
-    """include_hard (TRDD-56d24c02 increment 2): frozen escalates past `update` into
-    force_restart and clamps there; dead maps to relaunch; healthy/unarmed stay None
-    at ANY attempt count — the hard rungs only extend ladders that already existed
-    for a genuinely-stuck diagnosis, never create one for a session we must not touch."""
-    assert fr.action_for("frozen", 2, include_hard=True) == "update"        # gentle part unchanged
-    assert fr.action_for("frozen", 3, include_hard=True) == "force_restart"
-    assert fr.action_for("frozen", 99, include_hard=True) == "force_restart"  # clamps, no wrap
+def test_include_hard_only_wires_dead_never_escalates_frozen() -> None:
+    """include_hard (TRDD-56d24c02 increment 2) wires `dead`→`relaunch`. It does NOT escalate a
+    frozen session: since TRDD-P7WU40G9 a rate-limited (frozen) session is ESC-ONLY at every
+    attempt and NEVER hard-restarts — killing a rate-limited process would discard its in-flight
+    work, so the crash-loop guard pages a human instead. healthy/unarmed stay None at ANY attempt."""
+    assert fr.action_for("frozen", 3, include_hard=True) == "esc_nudge"   # NO force_restart escalation
+    assert fr.action_for("frozen", 99, include_hard=True) == "esc_nudge"
     assert fr.action_for("dead", 0, include_hard=True) == "relaunch"
     assert fr.action_for("dead", 0) is None                    # unwired view preserved
     assert fr.action_for("healthy", 99, include_hard=True) is None
@@ -72,11 +70,15 @@ def test_include_hard_extends_the_ladders_but_never_the_untouchables() -> None:
     assert fr.action_for("nonsense", 0, include_hard=True) is None
 
 
-def test_hard_budget_allows_exactly_one_hard_attempt() -> None:
-    """Documentation-test of the bounded-storm math: the single hard attempt is
-    attempts=3 (force_restart); attempts=4 == MAX_ATTEMPTS trips the crash-loop
-    guard, so the guardian can never enter a kill/respawn storm."""
-    assert fr.action_for("frozen", fr.MAX_ATTEMPTS - 1, include_hard=True) == "force_restart"
+def test_frozen_never_reaches_a_hard_rung() -> None:
+    """A frozen (rate-limited) session's action is never a process-killing rung, at any attempt —
+    so the daemon's `is_hard_rung` branch never fires for it and its work is never discarded. When
+    ESC does not recover it within the budget, the crash-loop guard (attempts==MAX_ATTEMPTS) stops
+    poking and alerts a human."""
+    import session_liveness as sl
+    for attempt in range(fr.MAX_ATTEMPTS + 2):
+        action = fr.action_for("frozen", attempt, include_hard=True)
+        assert action is not None and not sl.is_hard_rung(action)
     assert fr.gate(last_ts=None, attempts=fr.MAX_ATTEMPTS, now=1_000_000) == "crash_loop"
 
 
