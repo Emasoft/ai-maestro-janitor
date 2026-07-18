@@ -2,10 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.54.0] - 2026-07-18
+## [0.54.1] - 2026-07-18
 
-### Bug Fixes
+### Documentation
 
-- ESC-only recovery for rate-limited sessions — kill the /janitor-arm flood (TRDD-P7WU40G9)
-- Keep the DEFAULT-OFF hard-restart rung for frozen — only the command-typing ladder is removed (TRDD-P7WU40G9)
+- P7WU40G9 all 3 fixes shipped (v0.53.0 + v0.54.0) -> published
+- Claude-code-continuity-engineering wiki topic — hub + 3 components + rotation-page correction (TRDD-P7WU40G9)
 
