@@ -43,9 +43,14 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for var in (
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED",
         "CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLED",
-        "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS",
     ):
         monkeypatch.delenv(var, raising=False)
+    # Pin the compact threshold EXPLICITLY — it is now HARNESS-RELATIVE (TRDD-P7WU40G9), so the
+    # default depends on the ambient CLAUDE_CODE_AUTO_COMPACT_WINDOW. 350000 is the historical
+    # default these context sizes (600k/700k = large; the 308k/312k/343k floor cases = small) were
+    # calibrated against, so pinning it keeps every fire/no-fire outcome unchanged.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS", "350000")
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
     for mod in ("state", "lib.state", "cold_cache_compact", "user_intent", "pending_agents"):
         sys.modules.pop(mod, None)
 

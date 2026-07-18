@@ -46,14 +46,18 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     project.mkdir()
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "gs"))
-    # Clean env: default-on, default thresholds.
+    # Clean env: default-on. Pin the compact threshold EXPLICITLY: it is now HARNESS-RELATIVE
+    # (TRDD-P7WU40G9), so the default would depend on the ambient CLAUDE_CODE_AUTO_COMPACT_WINDOW
+    # (700000 in a dev env → 716k threshold) and the 400k/600k "large" cases would stop firing.
+    # 350000 is the historical floor-relative default these sizes were calibrated against.
     for var in (
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED",
-        "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS",
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_IDLE_SECONDS",
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_COOLDOWN_SECONDS",
     ):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS", "350000")
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
 
     for mod in ("state", "cold_cache_compact", "lib.cold_cache_compact"):
         sys.modules.pop(mod, None)

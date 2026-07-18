@@ -61,11 +61,17 @@ def iso(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
     for var in (
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED",
-        "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS",
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_IDLE_SECONDS",
         "CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_COOLDOWN_SECONDS",
     ):
         monkeypatch.delenv(var, raising=False)
+    # Pin the compact threshold EXPLICITLY (these tests exercise the dispatch WIRING, not the
+    # threshold value). Since the threshold is now HARNESS-RELATIVE (TRDD-P7WU40G9), leaving it
+    # to the default would make it depend on the ambient CLAUDE_CODE_AUTO_COMPACT_WINDOW (700000
+    # in a dev env → 716k threshold), so the 500k "large" cases would no longer trip. An explicit
+    # override keeps the fixture deterministic: 500k > 350k = large; 50k / 312k < 350k = small.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS", "350000")
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
 
     for mod in ("dispatch", "state", "global_state", "cold_cache_compact", "heartbeat_cadence"):
         sys.modules.pop(mod, None)
