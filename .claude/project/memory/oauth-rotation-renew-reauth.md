@@ -55,14 +55,16 @@ never notice the token changed. This leg is **usage-driven** and lives in
 `rotator.cmd_auto` (it needs the `/api/oauth/usage` probe); the cascade does NOT
 re-implement it. ROTATE needs **≥2 valid tokens** in the stack to have somewhere to
 switch TO — its whole job depends on the RENEW leg keeping the alternate slots healthy.
-- Switch thresholds (env-overridable): rotate AWAY at 5h/7d utilization ≥ `SWITCH_AT_*`
-  (default **97%** — leaves headroom for the in-flight turn to finish on the old account
-  while the next heartbeat turn picks up the new one; at 99% the in-flight turn risks a
-  hard 429 before the swap propagates). A target alternate must be **below** `SAFE_*`
-  (default **90%**) on BOTH windows. Anti-thrash `MIN_DWELL_S` (default 60s) between
-  switches. Target selection is **DRAIN-FIRST** (`select_drain_first` — use the
-  most-consumed-but-still-safe alternate first, so accounts drain evenly and the
-  freshest stay in reserve; user decision 2026-05-29).
+- Switch thresholds are **WINDOW-ASYMMETRIC** (v0.53.0, TRDD-P7WU40G9 §BUG 1; env-overridable
+  `ROTATOR_SWITCH_AT_5H/7D`, `ROTATOR_SAFE_5H/7D`): rotate AWAY at `SWITCH_AT_5H=97` /
+  `SWITCH_AT_7D=99`; a target alternate must be below `SAFE_5H=97` / `SAFE_7D=99` on the
+  respective window. WHY asymmetric (owner 2026-07-18): the 7d window is precious — 10% ≈ a
+  full day of tokens — so a target is rejected only at the true wall (99); the 5h refills
+  every 5h, so it rejects a little earlier (97). Invariant: `SWITCH ≥ SAFE` per window, or
+  the rotator rotates away from an account it would re-accept (thrash).[^10] Anti-thrash
+  `MIN_DWELL_S` (default 60s) between switches. Target selection is **DRAIN-FIRST**
+  (`select_drain_first` — use the most-consumed-but-still-safe alternate first, so accounts
+  drain evenly and the freshest stay in reserve; user decision 2026-05-29).
 - A live-account **429** is debounced (`LIVE_429_DEBOUNCE`, default 2 consecutive checks)
   because a single 429 on `/api/oauth/usage` can be a transient endpoint throttle, not a
   real limit. A **401/403** is an authoritative dead-token signal (no debounce).
@@ -438,3 +440,14 @@ The documented past errors — each folded in so the symptom finds the fix:
   symptom): the rotator three-layer architecture, the keychain-architecture diagnostic
   entry points, the renew browser-transport solution, the CF-1010 User-Agent reference, the
   macOS keychain gotchas, the rotator design directives, and the rotator resume protocol.
+- Governed by [[claude-code-continuity-engineering]] (rotation is the PREVENTION layer of
+  the unattended-continuity stack).
+
+[^10]: [id:ATOM-ROTA-7DPX, status:valid, keywords:"rotation all accounts maxed deadlock 7d window precious safe threshold reject only at 99 fresh 5h high 7d usable overnight stall", ocd:2026-07-18, lmd:2026-07-18]
+  DO NOT gate a rotation-target's 7-day window on the same conservative SAFE margin as the
+  5-hour window (the pre-v0.53.0 symmetric `SAFE_*=90` did), BECAUSE 10% of the 7d window is
+  ~a full day of usable tokens — rejecting a fresh-5h/90%-7d account as "unsafe" pinned the
+  fleet to a dead live account for HOURS (2026-07-18 overnight stall; a manual login onto the
+  "unsafe" account worked instantly at 5h=3%). DO reject the 7d only at the true wall (99)
+  and the cheap 5h a little earlier (97), keeping `SWITCH ≥ SAFE` per window
+  (TRDD-P7WU40G9 §BUG 1).
