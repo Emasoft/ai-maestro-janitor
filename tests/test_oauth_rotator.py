@@ -71,14 +71,35 @@ def test_fingerprint_deterministic_and_distinct() -> None:
     assert rotator.fingerprint({}) == ""
 
 
-def test_switch_threshold_default_97() -> None:
-    """The 2026-05-29 decision: SWITCH_AT defaults to 97 on BOTH windows."""
+def test_switch_and_safe_thresholds_are_window_asymmetric() -> None:
+    """Owner directive 2026-07-18 (the overnight stall): the 7-DAY window is the scarce one
+    (1% ≈ hours, 10% ≈ most of a day), so an account is rejected on 7d ONLY at the true wall (99);
+    the 5-HOUR window is cheap (refills every 5h) so it rejects a little earlier (97). SWITCH_AT
+    sits AT-OR-ABOVE SAFE per window so we never rotate away from an account we'd re-accept."""
     assert rotator.SWITCH_AT_5H == float(os.environ.get("ROTATOR_SWITCH_AT_5H", "97"))
-    assert rotator.SWITCH_AT_7D == float(os.environ.get("ROTATOR_SWITCH_AT_7D", "97"))
-    if "ROTATOR_SWITCH_AT_5H" not in os.environ:
-        assert rotator.SWITCH_AT_5H == 97.0
+    assert rotator.SWITCH_AT_7D == float(os.environ.get("ROTATOR_SWITCH_AT_7D", "99"))
+    assert rotator.SAFE_5H == float(os.environ.get("ROTATOR_SAFE_5H", "97"))
+    assert rotator.SAFE_7D == float(os.environ.get("ROTATOR_SAFE_7D", "99"))
     if "ROTATOR_SWITCH_AT_7D" not in os.environ:
-        assert rotator.SWITCH_AT_7D == 97.0
+        assert rotator.SWITCH_AT_7D == 99.0
+    if "ROTATOR_SAFE_7D" not in os.environ:
+        assert rotator.SAFE_7D == 99.0
+    # SWITCH must never sit below SAFE on a window (else: accept-then-immediately-rotate thrash).
+    assert rotator.SWITCH_AT_5H >= rotator.SAFE_5H
+    assert rotator.SWITCH_AT_7D >= rotator.SAFE_7D
+
+
+def test_fresh_5h_high_7d_alternate_is_a_valid_target() -> None:
+    """THE 3am-deadlock regression (incident 2026-07-18): an account with a FRESH 5h window and a
+    high-but-not-maxed 7d (90%, 94%) MUST be an accepted rotation target — it has ~0.7 days of
+    usable budget. The old SAFE_7D=90 rejected exactly these, so the rotator sat on a
+    fully-exhausted live account for hours ('all paid accounts maxed') while a usable account
+    waited; a manual /login onto that 'unsafe' account worked instantly."""
+    assert rotator.is_safe_alternate(0.0, 90.0) is True   # fmuaddib overnight
+    assert rotator.is_safe_alternate(0.0, 94.0) is True   # emanuele overnight
+    assert rotator.is_safe_alternate(0.0, 98.9) is True   # still below the 99 wall
+    assert rotator.is_safe_alternate(0.0, 99.0) is False  # genuinely maxed 7d → skip
+    assert rotator.is_safe_alternate(97.0, 10.0) is False  # 5h at its (lower) wall → skip; cheap to wait
 
 
 def test_is_near_limit_fires_at_threshold_either_window(monkeypatch: pytest.MonkeyPatch) -> None:

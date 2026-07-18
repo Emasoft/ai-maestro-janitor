@@ -269,16 +269,29 @@ def _decide(msg: str) -> None:
 # account crosses SWITCH_AT on EITHER the 5-hour or the 7-day window —
 # proactively, BEFORE a hard 429 stalls a turn. It only switches onto an
 # alternate whose own usage is below SAFE on BOTH windows, so we never jump
-# to an account that is itself nearly exhausted. Switching at 97 (not 99/100)
-# leaves headroom for the in-flight turn to finish on the old account while
-# the next heartbeat turn picks up the new one (97 = the agreed middle between
-# the original 95 and the user's 99; at 99 the in-flight turn risks a hard 429
-# before the swap propagates). All overridable via env so a loop test can force
-# an immediate switch (e.g. ROTATOR_SWITCH_AT_5H=1).
+# to an account that is itself nearly exhausted.
+#
+# THE WINDOWS ARE NOT EQUALLY PRECIOUS (owner directive 2026-07-18, the overnight
+# stall). The 7-DAY window is the scarce one: 1% of it is hours of tokens, 10% is
+# most of a day — so an account at 90% 7d still has ~0.7 days of usable budget and
+# MUST NOT be rejected as a rotation target. The 5-HOUR window is cheap: it refills
+# every 5h, so being near its top costs at most minutes before it resets. Hence the
+# asymmetric thresholds — reject the 7d only at the true wall (99), reject the 5h a
+# little earlier (97). Before this, SAFE_5H=SAFE_7D=90 rejected a fresh-5h/90%-7d
+# alternate as "not safe", so the rotator sat on a fully-exhausted live account for
+# hours logging "all paid accounts maxed" while a usable account waited — the exact
+# 3am deadlock this fixes (a fresh /login onto that "unsafe" account worked instantly).
+#
+# SWITCH_AT must sit AT OR ABOVE SAFE on each window, or we would rotate AWAY from an
+# account we would immediately re-ACCEPT as a target (thrash). So SWITCH_AT_7D rises to
+# 99 with SAFE_7D; SWITCH_AT_5H stays 97 (headroom for the in-flight turn to finish on
+# the old account before the swap propagates — at 99 the 5h turn risks a hard 429
+# first). All overridable via env so a loop test can force an immediate switch
+# (e.g. ROTATOR_SWITCH_AT_5H=1).
 SWITCH_AT_5H = float(os.environ.get("ROTATOR_SWITCH_AT_5H", "97"))
-SWITCH_AT_7D = float(os.environ.get("ROTATOR_SWITCH_AT_7D", "97"))
-SAFE_5H = float(os.environ.get("ROTATOR_SAFE_5H", "90"))
-SAFE_7D = float(os.environ.get("ROTATOR_SAFE_7D", "90"))
+SWITCH_AT_7D = float(os.environ.get("ROTATOR_SWITCH_AT_7D", "99"))
+SAFE_5H = float(os.environ.get("ROTATOR_SAFE_5H", "97"))
+SAFE_7D = float(os.environ.get("ROTATOR_SAFE_7D", "99"))
 # Anti-thrash: minimum seconds between two auto-switches.
 MIN_DWELL_S = float(os.environ.get("ROTATOR_MIN_DWELL_S", "60"))
 # F2 expiry ladder (TRDD-7100178d, blocker 5): a token within this many hours of its LOCAL

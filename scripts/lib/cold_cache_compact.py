@@ -48,15 +48,28 @@ PROACTIVE_IDLE_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_ENABLE
 # cannot close on a heavy install, because the post-compaction floor sits ABOVE the threshold.
 MIN_GAIN_ENV = "CLAUDE_PLUGIN_OPTION_PROACTIVE_IDLE_COMPACT_MIN_GAIN_TOKENS"
 
-# 350k (user, 2026-07-17), raised from the original 270k. It MUST sit above this install's
-# POST-COMPACTION FLOOR — the context a compaction leaves behind (base: CLAUDE.md + ~10 plugins +
-# rules + skills + MCP schemas + the summary; measured 308,644 here on 2026-07-17). A threshold
-# BELOW the floor is a gate that can never close once compacted: the preventive path would re-fire
-# forever, and the reactive paths (SessionStart / rate-limit resume, which have no floor gate at
-# all) would each burn a lossy compaction that reclaims nothing. This is the reactive paths' ONLY
-# protection against that, which is why the number is deliberately floor-relative, not a round
-# fraction of the window. Re-measure it if the base grows (more plugins/MCP servers → higher floor).
+# The janitor's compact threshold is HARNESS-RELATIVE (owner directive 2026-07-18): it must NEVER
+# compete with Claude Code's own auto-compaction — it only backstops a harness compaction that
+# FAILED. The harness auto-compacts at `CLAUDE_CODE_AUTO_COMPACT_WINDOW - summary_overhead` (the
+# user's 700000 - 34000 = 666000), so the janitor fires only strictly ABOVE that point plus a
+# margin. See `min_context_tokens()`. The previous FIXED 350k default fired at 35% of a 1M window —
+# it compacted the user out from under a 488k (49%) context, well below the 666k the harness owns
+# (incident 2026-07-18). `DEFAULT_MIN_CONTEXT_TOKENS` survives only as the ABSOLUTE FLOOR the
+# harness-relative value can never drop below: it MUST sit above this install's POST-COMPACTION
+# FLOOR (base CLAUDE.md + plugins + rules + skills + MCP schemas + summary; measured 308,644 here
+# on 2026-07-17), so a pathologically small `CLAUDE_CODE_AUTO_COMPACT_WINDOW` can never make the
+# janitor compact a context with nothing above the floor to reclaim.
 DEFAULT_MIN_CONTEXT_TOKENS = 350_000
+# How far ABOVE the harness's own effective compact point the janitor waits before backstopping.
+# Keeps the two from racing at the exact boundary; a healthy session (which the harness holds under
+# its compact point) never reaches janitor+margin, so the janitor stays silent in normal operation.
+HARNESS_BACKSTOP_MARGIN_ENV = "CLAUDE_PLUGIN_OPTION_COMPACT_BACKSTOP_MARGIN_TOKENS"
+DEFAULT_HARNESS_BACKSTOP_MARGIN = 50_000
+# The context-window size, used ONLY when CLAUDE_CODE_AUTO_COMPACT_WINDOW is unset (the harness then
+# compacts near the full window minus its own buffer, so the janitor backstop sits just below it).
+# Shares the knob the context-watchdog hook reads, so both agree on the window.
+CONTEXT_WINDOW_ENV = "CLAUDE_PLUGIN_OPTION_CONTEXT_WINDOW_TOKENS"
+DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000
 DEFAULT_MIN_IDLE_SECONDS = 3_600      # the 1h prompt-cache TTL — below this the cache is still warm
 DEFAULT_COOLDOWN_SECONDS = 600        # don't re-fire within 10 min (before the compact lands)
 DEFAULT_MIN_GAIN_TOKENS = 150_000     # reclaimable tokens below which a lossy compact isn't worth it
@@ -71,7 +84,41 @@ def enabled() -> bool:
 
 
 def min_context_tokens() -> int:
-    return state.coerce_int(os.environ.get(MIN_CONTEXT_ENV), DEFAULT_MIN_CONTEXT_TOKENS)
+    """The context size at/above which the janitor may compact — HARNESS-RELATIVE so it never
+    competes with Claude Code's own auto-compaction (owner directive 2026-07-18).
+
+    Resolution order:
+      1. An explicit `CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_MIN_CONTEXT_TOKENS` override wins.
+      2. `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set → the harness's effective compact point
+         (`auto_window - summary_overhead`) + the backstop margin. The janitor fires ONLY if the
+         context climbs above where the harness already compacts — i.e. the harness demonstrably
+         failed. (User: 700000 → effective 666000 → threshold 716000.)
+      3. Env unset → the harness compacts near the full window; the janitor backstop sits just
+         below the window (`window - overhead + margin`), which the context can't exceed, so the
+         janitor effectively never proactively compacts and the harness owns it entirely.
+
+    The result is floored at `DEFAULT_MIN_CONTEXT_TOKENS` so a pathologically small auto-window can
+    never push the threshold below this install's post-compaction floor (nothing to reclaim there).
+    """
+    raw = os.environ.get(MIN_CONTEXT_ENV)
+    if raw is not None:
+        parsed = state.parse_nonneg_int(raw)
+        if parsed is not None:
+            return parsed  # explicit operator override — trust it verbatim
+    margin = state.coerce_int(
+        os.environ.get(HARNESS_BACKSTOP_MARGIN_ENV), DEFAULT_HARNESS_BACKSTOP_MARGIN
+    )
+    # predict_auto_compact(0) returns the used-independent geometry when the env var is set (the
+    # effective point is `auto_window - overhead`), and None when it is unset.
+    pred = token_meter.predict_auto_compact(0)
+    if pred is not None:
+        return max(pred.effective_compact_point + margin, DEFAULT_MIN_CONTEXT_TOKENS)
+    window = state.coerce_int(os.environ.get(CONTEXT_WINDOW_ENV), DEFAULT_CONTEXT_WINDOW_TOKENS)
+    overhead = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_COMPACT_SUMMARY_TOKENS"),
+        token_meter._DEFAULT_COMPACT_SUMMARY_OVERHEAD,
+    )
+    return max(window - overhead + margin, DEFAULT_MIN_CONTEXT_TOKENS)
 
 
 def min_idle_seconds() -> int:

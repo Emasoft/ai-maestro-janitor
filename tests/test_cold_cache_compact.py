@@ -101,11 +101,32 @@ def test_enabled_opt_out(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ccc.enabled() is False
 
 
-def test_min_context_default_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_min_context_is_harness_relative(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner directive 2026-07-18: the janitor NEVER competes with the harness auto-compact — it
+    fires only ABOVE the harness's own effective compact point (`CLAUDE_CODE_AUTO_COMPACT_WINDOW -
+    overhead`) plus the backstop margin. The old fixed 350k default compacted the user out from
+    under a 488k (49%) context, well below the 666k the harness owns."""
     monkeypatch.delenv(ccc.MIN_CONTEXT_ENV, raising=False)
-    assert ccc.min_context_tokens() == ccc.DEFAULT_MIN_CONTEXT_TOKENS == 350_000
+    monkeypatch.delenv(ccc.HARNESS_BACKSTOP_MARGIN_ENV, raising=False)
+    # 1) user's real setting: harness compacts at 700000-34000=666000 → janitor at 666000+50000.
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "700000")
+    assert ccc.min_context_tokens() == 716_000
+    # 2) env unset: harness compacts near the full window → janitor threshold sits just below it,
+    #    so the context can never reach it and the harness owns compaction entirely.
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.setenv(ccc.CONTEXT_WINDOW_ENV, "1000000")
+    assert ccc.min_context_tokens() == 1_016_000
+    # 3) an explicit operator override always wins verbatim.
     monkeypatch.setenv(ccc.MIN_CONTEXT_ENV, "500000")
     assert ccc.min_context_tokens() == 500_000
+
+
+def test_min_context_never_below_the_floor_on_a_tiny_auto_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pathologically small CLAUDE_CODE_AUTO_COMPACT_WINDOW must not push the threshold below the
+    post-compaction floor (nothing to reclaim there) — it clamps to DEFAULT_MIN_CONTEXT_TOKENS."""
+    monkeypatch.delenv(ccc.MIN_CONTEXT_ENV, raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "100000")  # effective 66k + 50k = 116k
+    assert ccc.min_context_tokens() == ccc.DEFAULT_MIN_CONTEXT_TOKENS == 350_000
 
 
 def test_default_threshold_sits_above_the_measured_post_compaction_floor() -> None:
