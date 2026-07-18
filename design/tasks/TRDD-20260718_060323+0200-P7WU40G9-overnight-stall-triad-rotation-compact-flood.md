@@ -1,15 +1,15 @@
 ---
 trdd-id: P7WU40G9
 title: Overnight-stall triad — rotation deadlock + janitor over-compaction + rate-limit recovery flood
-column: testing
+column: published
 created: 2026-07-18T06:03:23+0200
-updated: 2026-07-18T06:41:00+0200
+updated: 2026-07-18T07:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 severity: high
 related-trdd: [32acd15f, 8DR0X08A, 324223A6, EUWIHP0G, D3PROACT, TKNSTP82]
-implementation-commits: [dd96db2, 6145a23]
+implementation-commits: [dd96db2, 6145a23, 637e12e, 599dc26, 9f843a5]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-18
