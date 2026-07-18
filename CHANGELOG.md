@@ -2,19 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.52.0] - 2026-07-17
+## [0.53.0] - 2026-07-18
 
 ### Bug Fixes
 
-- Stop the fleet-recovery injection loop — substantive liveness + wedged short-circuit (TRDD-8DR0X08A)
+- Shrink the self-trigger presence window 5min/3min -> 10s (owner directive)
+- Window-asymmetric rotation thresholds + harness-relative compact (TRDD-P7WU40G9)
 
 ### Documentation
 
-- FENWWB4E + 4649ZLE0 + N9YAH5E7 shipped in v0.51.0 -> published
-- Add TRDD-8DR0X08A — fleet-recovery injection loop (self-refreshing probe)
-- 8DR0X08A implemented (db9c2f0) -> testing; F4 cadence-aware staleness added; ships v0.51.1
+- 8DR0X08A + LU0C5KAR shipped in v0.52.0 -> published; rev 4 + RATIFIED posted on #100
 
-### Refactor
+### Tests
 
-- Binary server-liveness switch — server running owns ALL absorbed chores (TRDD-LU0C5KAR)
+- Pin the compact threshold in the 3 cold-cache fixtures (TRDD-P7WU40G9)
 
