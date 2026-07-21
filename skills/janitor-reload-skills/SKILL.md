@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-skills
-description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect without the human typing it. /reload-plugins reloads ONLY plugin-bundled skills, so standalone ones (added at any scope) need /reload-skills. Invoke on a [janitor-reload-skills] heartbeat marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. Types /reload-skills at this session's own pane (iTerm/tmux); SOFT by default (no ESC — enqueues, runs after the current turn ends); --hard presses ESC first. Trigger with /janitor-reload-skills [--hard], or by asking to reload skills now.
+description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect without the human typing it. /reload-plugins reloads ONLY plugin-bundled skills, so standalone ones (added at any scope) need /reload-skills. Invoke on a [janitor-reload-skills] heartbeat marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. Types /reload-skills at this session's own pane (iTerm/tmux); SOFT by default (no ESC — enqueues, runs after the current turn ends); --hard presses ESC first. ⚠ Do NOT reload at high context (≥350k tokens used) — a reload breaks the prompt cache, so the WHOLE context is re-cached at full price on the next turn; shrink context first with /janitor-handoff-and-clear (or /janitor-compact-context) and reload after. Trigger with /janitor-reload-skills [--hard], or by asking to reload skills now.
 ---
 
 # Janitor reload-skills
@@ -35,6 +35,25 @@ definitions in place — so there is no resume directive and nothing is lost.
 - The user asks you to reload skills.
 
 Use `/janitor-reload-plugins` instead when the skill/command lives inside a plugin.
+
+## ⚠ Do NOT reload at high context (≥350k tokens used)
+
+`/reload-skills` swaps skill/command definitions in place but **breaks the
+prompt-cache prefix** — so the next turn cannot re-use the cached context and
+re-caches the ENTIRE conversation at full write price (~1.25× the cheap 0.1×
+cache-read). Negligible at a low context; a large, avoidable cost at ≥350k tokens.
+
+So when the reload is not urgent and context is already ≥350k:
+
+1. **Shrink context first** — run `/janitor-handoff-and-clear` (a link-only
+   handoff then `/clear`, the cheapest steady-state shrink) or, if live scratch
+   isn't yet durably on disk, `/janitor-compact-context`.
+2. **Then reload** from the small post-shrink context, where the re-cache is cheap.
+
+Reload immediately WITHOUT shrinking only when it is genuinely urgent (a
+`[janitor-reload-skills]` marker whose new definitions you must pick up right now).
+The reload never loses the conversation — this is purely a cost guard, not a safety
+one, so a truly-needed reload always wins.
 
 ## Instructions
 

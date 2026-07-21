@@ -1,6 +1,6 @@
 ---
 name: janitor-compact-context
-description: Self-compact the current Claude Code session's context, then auto-resume. Invoke when context usage is high (e.g. the watchdog warned at or above threshold) and you want to compact before the wall where /compact itself fails. Records a resume directive, then types /compact at this session's own iTerm/tmux pane. SOFT by default (enqueues, no work lost); --hard interrupts for emergencies; --handoff writes a rich handoff first; flags combine. Trigger with /janitor-compact-context [--hard] [--handoff], or by asking to compact now.
+description: Self-compact the current Claude Code session's context, then auto-resume. ⚠ PREFER /janitor-handoff-and-clear over this skill — when your state is durably captured (TRDD STATE blocks, git, .janitor/state handoffs, memory), a link-only handoff + /clear is cheaper AND less lossy than /compact's whole-context re-summary; use /compact (this skill) only as a last resort, when live scratch cannot be written to disk first. Invoke when context is high and you must compact before the wall where /compact itself fails. Records a resume directive, then types /compact at this session's own iTerm/tmux pane. SOFT by default (enqueues, no work lost); --hard interrupts for emergencies; --handoff writes a rich handoff first; flags combine. Trigger with /janitor-compact-context [--hard] [--handoff], or by asking to compact now.
 ---
 
 # Janitor compact-context
@@ -23,6 +23,29 @@ this skill → it records a resume directive and fires `/compact` → the
 `post-compact-resume` PostCompact hook reads the directive → the next heartbeat
 emits `[janitor-resume] …` → you continue exactly where you left off.
 
+## ⚠ Prefer `/janitor-handoff-and-clear` — this skill is the fallback
+
+Owner directive (2026-07-21): **do not reach for `/compact` first.** In steady-state
+work on a project whose state lives in durable artifacts (TRDD `## STATE` blocks,
+git, `.janitor/state/` handoffs, wikimem), the cheaper AND less-lossy shrink is
+`/janitor-handoff-and-clear`: it writes a **link-only** handoff (pointers, not prose)
+then `/clear`s, so the next turn re-grounds from disk in a near-empty context. That
+avoids `/compact`'s cost (the model re-reads the whole window to synthesize a
+summary) and its risk — that auto-summary is lossy and can carry a WRONG technical
+conclusion forward, exactly the failure a fresh re-ground from git-truth avoids.
+
+Decide:
+
+- **Default → `/janitor-handoff-and-clear`.** Your live state is durably on disk
+  already, or you write it there first. Cheapest, and re-grounds from truth.
+- **This skill (`/compact`) → last resort.** Use it ONLY when there is live,
+  un-capturable scratch that a `/clear` would destroy and no handoff can carry —
+  `/compact` keeps a summary + verbatim recent turns, so it preserves more than a
+  clear, at the price of a lossy summary. If the state CAN be written to a file
+  first, do that and use handoff-and-clear instead.
+
+Everything below documents `/compact` for that last-resort case.
+
 ## When to use
 
 - The watchdog injected `Context window: NN% … ⚠ At/above NN% — consider running
@@ -30,7 +53,9 @@ emits `[janitor-resume] …` → you continue exactly where you left off.
 - You're about to start a long stretch of work and want headroom first.
 - The user asks you to compact / free up context.
 
-Do NOT use it for trivial turns or when context is low — compaction is lossy.
+Do NOT use it for trivial turns or when context is low — compaction is lossy. And
+in each of the cases above, prefer `/janitor-handoff-and-clear` unless live scratch
+cannot be written to disk first (see the section above).
 
 ## Modes — soft (default), `--hard`, `--handoff`
 
@@ -127,6 +152,10 @@ any plugin config, does NOT disarm the heartbeat, does NOT compact other session
 
 ## Resources
 
+- `/janitor-handoff-and-clear` — **the preferred alternative** (see the section
+  above): a link-only handoff then `/clear`, cheaper AND less lossy than `/compact`
+  when your state is durably captured in TRDDs/wikimem/files. Reach for this skill
+  (`/compact`) only when it is not.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/compact_trigger.py` — backing script (records the
   directive, fires the detached send; soft/enqueue by default, `--hard` restores
   the ESC, `--handoff` prepends the handoff skill).
