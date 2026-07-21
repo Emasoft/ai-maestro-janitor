@@ -1,8 +1,8 @@
 ---
 name: janitor-keepalive-test-isolation-fsevents
-description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / MY COMMITTED WORK WAS SILENTLY REVERTED / the repo's scripts/ got overwritten with the released version / files reverted to an old release with the exec bit cleared / PermissionError running scripts/daemon.py in tests / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / how to stop a test writing outside its boundary / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / how to root-cause an fseventsd or mds RAM/CPU runaway"
+description: "a unit test wrote to the REAL ~/.claude/janitor-global-state or the real plugin DATA dir / a test polluted production state / MY COMMITTED WORK WAS SILENTLY REVERTED / the repo's scripts/ got overwritten with the released version / files reverted to an old release with the exec bit cleared / PermissionError running scripts/daemon.py in tests / the janitor drove fseventsd to 39GB and crashed the machine / how to isolate janitor global-state + DATA in tests / how to stop a test writing outside its boundary / a module-level Path.home() constant froze the dir at import so monkeypatch(HOME) never reached it / why the L0 keepalive restage churns the filesystem / JANITOR_GLOBAL_STATE_DIR + JANITOR_DATA_DIR isolation levers (NOT CLAUDE_PLUGIN_DATA) / a test wrote the LIVE control plane and JANITOR_GLOBAL_STATE_DIR did not move it / a kill-switch flag appeared from nowhere and disarmed the fleet / how to root-cause an fseventsd or mds RAM/CPU runaway"
 ocd: 2026-07-03
-lmd: 2026-07-11
+lmd: 2026-07-22
 metadata:
   node_type: memory
   type: project
@@ -126,6 +126,17 @@ fires rather than trusting its docstring):
   restage/respawn bugs that looked correct per-path but broke at the whole-surface
   seam.
 
+^control-dir-ignores-the-isolation-lever [desc: fixed_path_defeats_env_isolation, keywords: test wrote the live control plane JANITOR_GLOBAL_STATE_DIR did not move it kill-switch leaked from a test autouse _isolate_control_dir fixture, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
+`control_dir()` (the `~/.claude/janitor-control/` control plane, TRDD-QK7M2B0X) is
+deliberately a LITERAL fixed path with no resolution ladder — that is its whole purpose, so
+a foreign reader like the ai-maestro server can hardcode it. The consequence for tests is
+that it does **not** move when a test sets `JANITOR_GLOBAL_STATE_DIR`: the established
+isolation lever silently covers everything EXCEPT the flags with the widest blast radius.
+Three test files were writing the LIVE control plane before this was noticed; a leaked
+`kill-switch.flag` disarms the whole fleet. The fix is the **autouse `_isolate_control_dir`
+fixture in `tests/conftest.py`** — autouse, not per-file `setenv`, because the failure mode
+is a test nobody remembered to opt in. Do not remove it or "simplify" it back to per-file.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG07-0010, status:valid, keywords:"test_isolation_defect_corrupted_real_state frozen_path_home_vs_monkeypatch_setenv env_change_after_import_constant", ocd:2026-07-03, lmd:2026-07-03] The keepalive tests had polluted the real
@@ -160,3 +171,8 @@ fires rather than trusting its docstring):
   the suspect.** Reconstruct an incident from artifacts written AT THE TIME (the boot log and
   restage-stamp were sitting on disk the whole time; I asserted they were stale without opening
   them).
+[^4]: [id:ATOM-MG22-0001, status:valid, keywords:"env_isolation_lever_missed_a_fixed_path test_wrote_the_live_control_plane autouse_fixture_not_per_file_setenv", ocd:2026-07-22, lmd:2026-07-22]
+  DO NOT assume an established env isolation lever (`JANITOR_GLOBAL_STATE_DIR`) covers every
+  state path, BECAUSE `control_dir()` is fixed BY DESIGN and does not move — three test files
+  wrote the live control plane, where a leaked `kill-switch.flag` disarms the fleet. DO isolate
+  a fixed path with an AUTOUSE fixture (`_isolate_control_dir`), never per-file `setenv`.

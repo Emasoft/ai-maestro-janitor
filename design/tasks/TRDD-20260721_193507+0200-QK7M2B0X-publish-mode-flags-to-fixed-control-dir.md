@@ -1,23 +1,50 @@
 ---
 trdd-id: QK7M2B0X
 title: Publish the global mode flags to a fixed control dir any daemon can read
-column: backburner
+column: dev
 created: 2026-07-21T19:35:07+0200
-updated: 2026-07-21T19:35:07+0200
+updated: 2026-07-22T00:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
-implementation-commits: []
+implementation-commits: [9116b22, 627610b]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-21
 
-**NOT STARTED.** Contract written and committed (`design/ARCHITECTURE.md` §7.1, rev 5);
-no code moved yet. Sibling: TRDD-5ZVS1DDP (§7.2, one daemon per host) — independent, no
-ordering constraint between them.
+**PHASE A SHIPPED in v0.60.0. Phase B NOT STARTED.** Sibling TRDD-5ZVS1DDP (§7.2, one
+daemon per host) shipped v0.59.0 and is verified in production against a real server.
 
-**NEXT ACTION:** add `global_state.control_dir()` returning the literal
+**Phase A (done):** `global_state.control_dir()` → the literal `~/.claude/janitor-control/`
+(`$JANITOR_CONTROL_DIR` = tests only); the SIX mode flags moved there; readers dual-read
+new+old+legacy for the upgrade window; writers write only the new path; CLEAR unlinks all
+three. Flag bodies carry `{set_at, by, pid, reason}` while PRESENCE alone still decides, so
+a corrupt body can never swallow a kill-switch. Tests: `tests/test_control_dir_flags.py`.
+
+Two defects found while verifying phase A, both silent, both fixed:
+`on-session-start.py::_active_global_stop` was reading the flags at their OLD path (a real
+machine-wide stop would have stopped being reported at SessionStart); and three test files
+were writing the LIVE control plane, because `control_dir()` is fixed by design and does NOT
+move when a test sets `JANITOR_GLOBAL_STATE_DIR` — closed by the autouse
+`_isolate_control_dir` fixture in `conftest.py`, which must not be removed in favour of
+per-file setenv.
+
+**NEXT ACTION (phase B), in this exact order:** the three coordination LOCKS
+(`marketplace-op`, `oauth-rotator-tick`, `settings-ensurer`) → the `*.last-run.ts` stamps →
+**then, separately and last, the singleton** (`daemon.pid`, `daemon.flock`,
+`daemon.heartbeat.ts`) under TRDD-2U8AH82F's **flock-moves-LAST** invariant: take the NEW
+lock BEFORE retiring the OLD one. Ordering is not taste — a mode flag moved at a bad moment
+costs one duplicated chore; a flock moved at a bad moment costs a SECOND DAEMON, with a live
+ai-maestro server already on the host.
+
+Copy phase A's pattern verbatim (dual-read on read, single-write on write, clear from ALL
+locations). Chore migration (`cache-prune`, `rules-cleanup`, `github-config-audit`,
+`memory-guard` → per-repo heartbeat) is gated on the locks landing — moving a chore to the
+cron before its lock is shared IS the corruption case.
+
+**SUPERSEDED — do NOT carry forward** (phase A shipped it; kept only so a reader who
+remembers this directive knows it is done, not dropped): add `global_state.control_dir()` returning the literal
 `~/.claude/janitor-control/` (honoring `$JANITOR_CONTROL_DIR` for tests only), repoint the
 COORDINATION set at it (see the scope rule below — NOT just the six mode flags), and give
 each reader a transitional dual-read of the old location.

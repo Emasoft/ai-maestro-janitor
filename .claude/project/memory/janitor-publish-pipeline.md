@@ -1,8 +1,8 @@
 ---
 name: janitor-publish-pipeline
-description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, and the CPV-only validate policy"
+description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / publish exited 3 but every test passed / rc=3 with nothing failing — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, the write-guard, and the CPV-only validate policy"
 ocd: 2026-06-13
-lmd: 2026-07-16
+lmd: 2026-07-22
 metadata:
   node_type: memory
   type: project
@@ -125,6 +125,25 @@ name, never literal paths or secrets).
   succeeds, why the local cache can stay on the old version (the fast-updater can't
   accelerate its own first release; reload ≠ update).
 
+^rc3-with-every-test-passing-is-the-write-guard [desc: publish_blocked_but_tests_green, keywords: publish exited 3 but every test passed pytest rc=3 nothing failed write guard mutation list heartbeat wrote fleet-attribution mid-gate, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
+An `rc=3` from the test gate with **every test passing** is the suite's own write-guard
+(`tests/conftest.py`), not a test failure — READ ITS PRINTED MUTATION LIST before believing
+a leak. On a machine running the janitor for real, the guard's premise ("only the suite
+writes global state") is false: the daemon ticks, other sessions fire heartbeats, and memory
+agents write, all legitimately. Two consequences, both paid for:
+
+- The guard relaxes for those SHARED-STATE labels only. **SOURCE TREE and LAUNCHD stay hard
+  failures** — a test that rewrites the repo or registers an OS service is never acceptable.
+- A **local heartbeat firing mid-gate** writes `fleet-attribution.json` and trips it. The
+  papered workaround is to pause the beat around a publish
+  (`printf x > .janitor/state/paused`, remove after). This is a SEAM, not a fix: the real fix
+  is teaching the guard that sessions legitimately own some global-state files.
+
+Building the guard's own live-actor probe failed silently THREE times (a swallowed
+`ModuleNotFoundError`, then a sandboxed `HOME` that made it read the wrong home) — it now
+reads the liveness file from `_REAL_ENV["HOME"]` directly. A probe that fails silently
+degrades to "no other actor", i.e. it blames the suite.
+
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0011, status:valid, keywords:"pipeline_step_numbers_skip_preserve renumbering_breaks_log_greps removed_stage_keep_downstream_numbers", ocd:2026-06-13, lmd:2026-06-13] The step numbers intentionally skip 5 —
   the old "Step 5: CPV lint" was folded into the single Step 4 `plugin --strict`
@@ -157,3 +176,10 @@ name, never literal paths or secrets).
   BEFORE the commit that claims to fix it, not after. (c) The resolver twin tag
   was MISSING from every pre-0.45.0 release; publish.py Step 12/13 now emits it
   automatically (7b47f7c) — never hand-tag it, the pipeline owns it.
+[^4]: [id:ATOM-MG22-0002, status:valid, keywords:"guard_assumes_it_is_the_only_writer live_daemon_and_sessions_write_too silent_probe_failure_blames_the_suite", ocd:2026-07-22, lmd:2026-07-22]
+  DO NOT write a "did the suite touch anything outside its boundary" guard that assumes the
+  suite is the only writer, BECAUSE on a machine actually running the product the daemon,
+  other sessions and background agents write that same state legitimately — the guard then
+  blocks publishes with every test green. DO detect other live actors first, and make that
+  probe fail LOUDLY: mine failed silently three times and each failure degraded to "no other
+  actor", i.e. it blamed the suite.
