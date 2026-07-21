@@ -86,6 +86,38 @@ Why each addition beyond the mode flags:
   lock BEFORE retiring the old, or the upgrade opens a two-daemon window — the precise bug
   that migration was designed to avoid.
 
+### Flags MUST carry provenance (added 2026-07-21, from a live incident)
+
+Observed this session: `maintenance-mode.flag` was found SET, mtime 19:07:22, content the
+bare default `"maintenance"`. Local maintenance was absent, so every fire in this session
+was being suppressed machine-wide. **The writer could not be determined** — not from the
+content, not from any log, not from any audit record. The candidate tests were exonerated
+by an mtime probe (a run of all five maintenance-touching test files left the mtime
+untouched), which narrowed nothing, because there is no record to narrow toward.
+
+This is the mechanism behind the owner's original complaint earlier the same day: the
+plugin did not auto-update because the daemon's `version-update` task was idled by
+maintenance, while `daemon.heartbeat.ts` kept advancing — so the daemon looked alive and
+healthy. Daemon-alive is not daemon-running-chores, and nothing on screen said which.
+
+So the control plane's file format is not "presence, content advisory". Each flag MUST be
+written as one line of JSON carrying at minimum:
+
+```json
+{"set_at": 1784653642, "by": "global_control_cli.py maintenance", "pid": 54451, "reason": "<free text>"}
+```
+
+- **Readers still key on PRESENCE only** — a malformed or unparseable body must still mean
+  "flag is set" (fail-safe: never ignore a stop signal because its metadata is corrupt).
+  Provenance is for humans and diagnostics, never for the switching decision.
+- `/janitor-show-global-status` and the arm's `maintenance=global-on` line report `by` and
+  `set_at`, so "who put this host in maintenance and when" is answerable without forensics.
+- Applies to every flag in the vocabulary, not just maintenance — a `kill-switch.flag`
+  with no author is the same problem with a bigger blast radius.
+
+Backward compatibility: a legacy flag whose body is not JSON is still SET, reported with
+`by: unknown`. That is precisely today's state and must not crash a reader.
+
 TRDD-2U8AH82F moved STATE into DATA and was right to; this publishes CONTROL and does not
 touch that. The standing "prefer `${CLAUDE_PLUGIN_DATA}` over a custom `~/.claude/` folder"
 principle keeps governing state — its stated reasons (survives updates, backed up, cleanly

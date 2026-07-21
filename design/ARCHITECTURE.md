@@ -319,6 +319,15 @@ identity either side gets.
   drift; the janitor writes via `global_control_cli.py`, and a server that wants to
   raise a state writes the same file. **Atomic** (tmp + `os.replace`) so a reader never
   observes a half-written flag.
+- **Provenance is MANDATORY** (added rev 5 after a live incident — see TRDD-QK7M2B0X).
+  Each flag body is one line of JSON: `{"set_at": <epoch>, "by": "<actor>", "pid": <pid>,
+  "reason": "<free text>"}`. A flag was found set on this host with the bare content
+  `"maintenance"` and no way to determine who wrote it — which is how a fleet-wide
+  suppression became invisible while `daemon.heartbeat.ts` kept advancing and the daemon
+  looked healthy. **Readers still switch on PRESENCE alone**: a malformed or legacy body
+  means SET with `by: unknown`, never "ignore the flag". Provenance serves humans and
+  diagnostics; it must never gate the switching decision, or a corrupt body would swallow
+  a stop signal.
 - **Readers** — every daemon that is up, on its own chore tick. Absent ⇒ normal
   operation. **Fail-open:** an unreadable directory means "not set", never "block".
 
