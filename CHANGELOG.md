@@ -2,20 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.58.0] - 2026-07-21
+## [0.58.1] - 2026-07-21
 
 ### Bug Fixes
 
-- Widen the control plane to everything two daemons share
+- The maintenance nudge must name WHICH scope is suppressing
 
 ### Documentation
 
-- Close TRDD-UO93APWN — flaky e2e worker race verified fixed
-- Fix the control plane at ~/.claude/janitor-control/
-
-### Features
-
-- Clear LOCAL maintenance on arm, and REPORT the global flag
-- Split LOCAL and GLOBAL onto independent commands
-- Require provenance on every global control flag
+- Resolve TRDD-5ZVS1DDP's open question — chores split by capability
 
