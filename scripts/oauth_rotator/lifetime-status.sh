@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lifetime-status.sh — for EVERY rotator account, compare the claude.ai COOKIE
 # (session) lifetime against the OAuth-token lifetime and decide whether a login
-# refresh is due. The whole point: remind you to run /janitor-refresh-claude-logins
+# refresh is due. The whole point: remind you to run /janitor-refresh-cc-logins
 # BEFORE the cookie expires AND while OAuth is still healthy, so the two expiries
 # never coincide (a coincidence would leave no working account to run the
 # command from). Read-only — reads cookie metadata + slot/token metadata, never
@@ -131,7 +131,7 @@ for email in roster:
 
 print("-" * 112)
 if action:
-    print(f"\nACTION DUE → run  /janitor-refresh-claude-logins   (accounts: {', '.join(sorted(set(action)))})")
+    print(f"\nACTION DUE → run  /janitor-refresh-cc-logins   (accounts: {', '.join(sorted(set(action)))})")
     healthy = [e for e, (r, d) in oauth_cache.items() if r or (d or 0) > 1]
     if healthy:
         print(f"  Safe window: OAuth still healthy on {len(healthy)}/{len(roster)} account(s). Refreshing now resets the")
@@ -142,7 +142,7 @@ if action:
         # OAuth" — that was the C2 false-banner bug. A login is a fresh human sign-in
         # that does not need the old token anyway, so refreshing is always safe.
         print("  OAuth health unknown (rotator engine unavailable) — cannot confirm a safe window, but a")
-        print("  login is a fresh human sign-in that does not need the old token, so /janitor-refresh-claude-logins works.")
+        print("  login is a fresh human sign-in that does not need the old token, so /janitor-refresh-cc-logins works.")
     else:
         print("  ⚠ URGENT: no account has healthy OAuth right now — refresh immediately. (The login is a fresh")
         print("    human sign-in; it does NOT need the old cookie, so the command still works.)")

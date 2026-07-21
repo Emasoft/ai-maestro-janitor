@@ -27,7 +27,7 @@ The three cascade layers (USER's authoritative design):
 
 3. **REAUTHENTICATE** (fallback when RENEW can't — no refresh AND no live cookie,
    and the token is dead/near-dead) — the ONLY human step: the janitor NUDGES the
-   user to re-login (``/janitor-refresh-claude-logins``). ~Monthly. This is the
+   user to re-login (``/janitor-refresh-cc-logins``). ~Monthly. This is the
    ``REAUTH_NUDGE`` leg the detectors surface.
 
 ``WAIT_SETUP_TOKEN`` is the benign in-between: a setup-token slot (no refresh, no

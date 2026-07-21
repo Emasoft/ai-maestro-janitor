@@ -60,7 +60,7 @@ thing a machine can't: the human sign-in.
   account's Chrome profile), the daemon does **not** auto-open a browser by
   default (TRDD-5OJX3SCF - opening a visible window unprompted is a surprise, and
   on a dead account it re-launched every ~60s tick). Instead the
-  `[oauth-capture-stalled]` nudge points you at `/janitor-refresh-claude-logins`,
+  `[oauth-capture-stalled]` nudge points you at `/janitor-refresh-cc-logins`,
   which does the visible capture as a deliberate, user-initiated action. Power
   users who want the daemon to mint `slot_capture_browser.py` slots hands-free set
   `CLAUDE_ROTATOR_AUTO_BOOTSTRAP=1` (then it is per-slot launch-capped + announced
@@ -129,7 +129,7 @@ tick, and the stalled nudge tells you when to step in).
    # migrated machine (audit C2 class).
    VER="$(ls -d "$HOME"/.claude/plugins/cache/ai-maestro-plugins/ai-maestro-janitor/*/scripts/oauth_rotator/rotator.py 2>/dev/null | sort -V | tail -1 || true)"
    N=$( [ -n "$VER" ] && uv run "$VER" known-emails 2>/dev/null | grep -c . || echo 0 )
-   echo "Janitor OAuth rotator: ON (daemon oauth-rotator-tick every 60s, threshold 97%, drain-first). Known accounts: ${N:-0}. ${N:-0} < 2 ⇒ capture a 2nd account before rotation can fire (run /janitor-refresh-claude-logins — it seeds via open-login.sh then auto-bootstraps a refresh-bearing slot). Ensure /janitor-arm has armed the heartbeat so the daemon stays alive. Disable with /janitor-auto-manage-oauth-off."
+   echo "Janitor OAuth rotator: ON (daemon oauth-rotator-tick every 60s, threshold 97%, drain-first). Known accounts: ${N:-0}. ${N:-0} < 2 ⇒ capture a 2nd account before rotation can fire (run /janitor-refresh-cc-logins — it seeds via open-login.sh then auto-bootstraps a refresh-bearing slot). Ensure /janitor-arm has armed the heartbeat so the daemon stays alive. Disable with /janitor-auto-manage-oauth-off."
    ```
 
 ## Output
@@ -158,7 +158,7 @@ User: keep my overnight session alive across both my accounts
 ## Scope
 
 ONLY sets the opt-in flag. Does NOT capture accounts (that needs a human login —
-see `/janitor-refresh-claude-logins`, which seeds via `open-login.sh` then auto-bootstraps
+see `/janitor-refresh-cc-logins`, which seeds via `open-login.sh` then auto-bootstraps
 a refresh-bearing slot), does NOT arm the
 heartbeat cron (that is `/janitor-arm`, which the daemon needs to stay alive),
 and does NOT touch per-project state. To deactivate, run

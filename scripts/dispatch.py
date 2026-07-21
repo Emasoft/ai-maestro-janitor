@@ -221,7 +221,7 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # oauth-cookie-reminder is OPT-IN by presence: silent no-op unless a local
     # multi-account rotator home with a state.json exists (~/.claude/account-rotator
     # or $CLAUDE_PLUGIN_DATA/oauth-rotator). When present, it reminds the user to
-    # run /janitor-refresh-claude-logins BEFORE a per-account claude.ai session cookie
+    # run /janitor-refresh-cc-logins BEFORE a per-account claude.ai session cookie
     # expires AND while OAuth is still healthy, so the two expiries never coincide
     # (TRDD-32acd15f). 6h cadence; machine-scoped daily dedupe keeps it gentle.
     ("oauth-cookie-reminder", 21600, "CLAUDE_PLUGIN_OPTION_OAUTH_COOKIE_REMINDER_INTERVAL"),

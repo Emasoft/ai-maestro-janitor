@@ -3,10 +3,10 @@
 The `/refresh-claude-logins` wrapper + its `open-login.sh` / `check-login.sh` /
 `lifetime-status.sh` helpers were standalone USER-SCOPE artifacts that escaped the
 2026-05-31 rotator fold (TRDD-f892e109, which migrated only the engine). They are now
-shipped BY the plugin (the `janitor-refresh-claude-logins` command + the 3 helpers beside
+shipped BY the plugin (the `janitor-refresh-cc-logins` skill + the 3 helpers beside
 `rotator.py`). These tests pin the port's invariants: the scripts exist, parse, resolve
 the IN-PLUGIN sibling `rotator.py` (never the cache glob the pre-fold form used), and the
-command is present and drives the helpers.
+skill is present and drives the helpers.
 """
 from __future__ import annotations
 
@@ -64,19 +64,37 @@ def test_helper_no_legacy_home_default(name: str) -> None:
 
 
 def test_lifetime_status_points_at_janitor_command() -> None:
-    """lifetime-status.sh's action prompt points at the renamed /janitor-refresh-claude-logins
-    (the old un-prefixed name is gone — note /janitor-... does not contain the '/refresh-' stem)."""
+    """lifetime-status.sh's action prompt points at /janitor-refresh-cc-logins — the current
+    skill name. Neither the old un-prefixed /refresh-claude-logins nor the pre-rename
+    /janitor-refresh-claude-logins may remain (the name may not contain the reserved 'claude')."""
     text = (OAUTH_DIR / "lifetime-status.sh").read_text()
-    assert "/janitor-refresh-claude-logins" in text
+    assert "/janitor-refresh-cc-logins" in text
     assert "/refresh-claude-logins" not in text
+    assert "/janitor-refresh-claude-logins" not in text
 
 
-def test_refresh_logins_command_shipped() -> None:
-    """The janitor-refresh-claude-logins COMMAND exists and drives the IN-PLUGIN helpers. It is a
-    command (not a skill) because CPV's skill-name reserved-word check forbids 'claude'; commands
-    carry no such rule, so this keeps the user's exact requested name (TRDD-3T4DZWXA)."""
-    cmd = REPO / "commands" / "janitor-refresh-claude-logins.md"
-    assert cmd.is_file(), "janitor-refresh-claude-logins command was not created"
-    body = cmd.read_text()
-    assert body.startswith("---") and "description:" in body[:500], "command needs frontmatter with a description"
-    assert "$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator" in body, "command must drive the in-plugin helpers"
+def test_refresh_logins_skill_shipped() -> None:
+    """The janitor-refresh-cc-logins SKILL exists and drives the IN-PLUGIN helpers. It is a SKILL
+    (agent descriptions are surfaced to context; commands are not), and it is named `cc`-logins
+    NOT `claude`-logins because a skill name may not contain the reserved word 'claude' (CPV RC-59
+    / Claude Code) — the user-chosen rename that lets it ship as a discoverable skill (TRDD-EBVZJ6GU,
+    superseding the command-form of TRDD-3T4DZWXA)."""
+    skill = REPO / "skills" / "janitor-refresh-cc-logins" / "SKILL.md"
+    assert skill.is_file(), "janitor-refresh-cc-logins skill was not created"
+    body = skill.read_text()
+    assert body.startswith("---") and "description:" in body[:600], "skill needs frontmatter with a description"
+    assert "name: janitor-refresh-cc-logins" in body[:600], "skill name field must be janitor-refresh-cc-logins"
+    assert "claude" not in _skill_name_field(body), "skill NAME must not contain the reserved word 'claude'"
+    assert "$CLAUDE_PLUGIN_ROOT/scripts/oauth_rotator" in body, "skill must drive the in-plugin helpers"
+    # The pre-rename command form must be gone (one source of truth).
+    assert not (REPO / "commands" / "janitor-refresh-claude-logins.md").is_file(), (
+        "the pre-rename command must not coexist with the skill"
+    )
+
+
+def _skill_name_field(body: str) -> str:
+    """The value of the frontmatter `name:` line (lowercased), for the reserved-word assertion."""
+    for line in body.splitlines():
+        if line.startswith("name:"):
+            return line.split(":", 1)[1].strip().lower()
+    return ""

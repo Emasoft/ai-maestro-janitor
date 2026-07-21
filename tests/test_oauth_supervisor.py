@@ -239,7 +239,7 @@ def test_cookie_leg_stuck_alerts_only_past_threshold() -> None:
                 if x.code == "cookie-leg-stuck"]
     assert len(findings) == 1
     assert "stuck@x.com" in findings[0].message
-    assert "/janitor-refresh-claude-logins" in findings[0].message
+    assert "/janitor-refresh-cc-logins" in findings[0].message
 
 
 def test_track_cannot_self_renew_stamps_ages_and_clears(tmp_path: Path) -> None:

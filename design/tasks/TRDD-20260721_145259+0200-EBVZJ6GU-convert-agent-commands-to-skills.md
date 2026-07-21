@@ -3,7 +3,7 @@ trdd-id: EBVZJ6GU
 title: convert agent-relevant janitor commands to skills — commands are invisible to the agent, skills are not
 column: complete
 created: 2026-07-21T14:52:59+0200
-updated: 2026-07-21T15:10:00+0200
+updated: 2026-07-21T16:45:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
@@ -12,13 +12,32 @@ implementation-commits: [63637d9, 4d0e31c]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
 
-**SHIPPED (skills 63637d9, command removals 4d0e31c) — verified.** 7 commands converted to skills;
-only the 3 `janitor-memory-user-*` commands remain (privacy). Verification: all 7 skills carry valid
-`name:`+`description:` frontmatter; the `cross-scope-reference-drift` detector is CLEAN (every `/name`
-reference resolves to the new skill file — skills are user-slash-invocable, so `/janitor-findings`
-etc. still work); NO test references the removed command files (tests target the unchanged backing
-scripts); the privacy hook + 3 user-mem commands are byte-untouched. `.md`-only change → no Python
-logic affected. **NEXT ACTION:** none — COMPLETE.
+**RELEASE-DAY CORRECTION (2026-07-21, during the v0.57.0 publish).** Two facts below were WRONG and
+are fixed:
+1. **"NO test references the removed command files" was FALSE.** `tests/test_oauth_helper_scripts.py::
+   test_refresh_logins_command_shipped` asserted `commands/janitor-refresh-claude-logins.md` exists.
+   The publish test-gate caught it. Lesson: grepping `tests/` for `commands/<name>.md` must be done
+   PER name (the LOAD-BEARING-FACTS line even said "Verify none assert commands/<name>.md exists" —
+   it was not actually run for all 7).
+2. **`janitor-refresh-claude-logins` could NOT become a skill under that name.** CPV
+   `validate_skill_comprehensive.py` **rule N11 MAJORs any skill whose name contains "claude"**
+   (`if "claude" in name_lower` — an anti-impersonation guard; commands carry no such rule). This is
+   the SAME reason TRDD-3T4DZWXA shipped it as a command. **USER decision (2026-07-21): RENAME it
+   `janitor-refresh-cc-logins`** — drop "claude" so it ships as a DISCOVERABLE skill (the point of
+   this TRDD) while passing N11. So the final tally is **convert 6 as-named + 1 renamed (claude→cc);
+   keep 3**. The rename rippled to 12 code refs (daemon/detectors/rotator/supervisor/lifetime-status/
+   dispatch/cascade + auto-manage-oauth skill), 3 test files, and the `.integrity` manifest.
+
+**SHIPPED (skills 63637d9, command removals 4d0e31c; rename + fixes this release) — verified.** 7
+commands converted to skills (1 renamed per above); only the 3 `janitor-memory-user-*` commands
+remain (privacy). **NEXT ACTION:** none for the conversion — COMPLETE at v0.57.0.
+
+**FOLLOW-UP (non-blocking, deferred to the memory agent):** the PROJECT memory page
+`oauth-rotation-renew-reauth.md` still names `/janitor-refresh-claude-logins` and its `[^9]` lesson
+(ATOM-MG05-0009) still concludes "ships as a COMMAND, never a skill" — now SUPERSEDED (it is a skill
+renamed to drop 'claude'). The N11 rule fact stays valid; the command-vs-skill CONCLUSION must be
+demoted via the correction protocol. Hand to `janitor-memory-subconscious-agent` (transaction+verify
+gate) rather than a hasty hand-edit of a shared git-tracked page.
 
 **CAVEATS (not blockers):** (1) plugin file changes need a `/reload-plugins` (or a fresh session) to
 go live in a RUNNING session — the files are correct; discovery is on next load. (2) UNRELEASED —
@@ -37,7 +56,8 @@ skills are ALSO user-slash-invocable (`/name` keeps working — Skill tool: "Use
 **SCOPE — convert 7, KEEP 3 (owner chose "Convert 7, keep 3"):**
 - CONVERT → skills: `janitor-findings`, `janitor-show-global-status`, `janitor-token-report`,
   `janitor-token-attribution`, `janitor-identify-environment`, `janitor-memory-frequency`,
-  `janitor-refresh-claude-logins`.
+  `janitor-refresh-claude-logins` → **RENAMED to `janitor-refresh-cc-logins`** (CPV N11 forbids
+  "claude" in a skill name; see the RELEASE-DAY CORRECTION above).
 - KEEP as commands (HARD CONSTRAINT — privacy): `janitor-memory-user-{add,search,share}`. Their
   privacy IS the command+hook mechanism: `on-prompt-submit-user-mem.py` returns `decision:block` to
   ERASE the typed prompt so the private text NEVER reaches the model. A skill invocation ALWAYS

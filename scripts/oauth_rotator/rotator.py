@@ -2304,7 +2304,7 @@ def _bootstrap_seeded_slots() -> list[str]:
         if action == "noop":  # not eligible (zero counter), OR eligible but auto-launch opted OFF
             continue  # (the oauth-capture-stalled detector nudges the human in the OFF case)
         if action == "cap-announce":  # just hit the cap: announce ONCE, then never auto-launch it again
-            _log("auto-bootstrap: %s capped at %d launches without a refresh-bearing mint - STOPPING auto-launch; run /janitor-refresh-claude-logins to capture it manually" % (email, MAX_BOOTSTRAP_LAUNCHES))
+            _log("auto-bootstrap: %s capped at %d launches without a refresh-bearing mint - STOPPING auto-launch; run /janitor-refresh-cc-logins to capture it manually" % (email, MAX_BOOTSTRAP_LAUNCHES))
             if isinstance(meta, dict):
                 meta["bootstrap_attempts"] = attempts + 1  # bump past the cap so the log fires once
                 changed = True

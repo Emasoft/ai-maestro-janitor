@@ -7,7 +7,7 @@ supervisor (TRDD-32acd15f).
 
 When the local multi-account rotator is set up, this per-session detector
 compares each account's claude.ai SESSION-COOKIE lifetime against its
-OAuth-token lifetime and reminds the user to run /janitor-refresh-claude-logins BEFORE
+OAuth-token lifetime and reminds the user to run /janitor-refresh-cc-logins BEFORE
 a cookie expires AND while OAuth is still healthy — so the two expiries never
 coincide (which would leave no working account to run the refresh from).
 
@@ -148,9 +148,9 @@ def main() -> int:
     ).hexdigest()[:8]
     key = f"due-{int(now // 86400)}-{sig}"
     tail = (
-        " — run /janitor-refresh-claude-logins while OAuth is healthy (safe window)."
+        " — run /janitor-refresh-cc-logins while OAuth is healthy (safe window)."
         if any_healthy_oauth
-        else " — run /janitor-refresh-claude-logins NOW (no account has healthy OAuth; the login is a "
+        else " — run /janitor-refresh-cc-logins NOW (no account has healthy OAuth; the login is a "
         "fresh human sign-in, so the command still works)."
     )
     msg = (

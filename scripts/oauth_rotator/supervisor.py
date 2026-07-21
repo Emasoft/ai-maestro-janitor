@@ -201,7 +201,7 @@ def diagnose(facts: Facts) -> list[Finding]:
                 f"{s.email} has needed a one-time login for "
                 f"{s.cannot_self_renew_age_s / 3600.0:.1f}h (> {COOKIE_LEG_ALERT_S / 3600.0:.0f}h) "
                 f"— its refresh path is dead and only a human can renew it; run "
-                f"/janitor-refresh-claude-logins before the fleet runs out of accounts.",
+                f"/janitor-refresh-cc-logins before the fleet runs out of accounts.",
             ))
     return out
 

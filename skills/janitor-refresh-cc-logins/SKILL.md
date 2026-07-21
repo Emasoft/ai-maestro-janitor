@@ -1,9 +1,9 @@
 ---
-name: janitor-refresh-claude-logins
-description: Refresh the claude.ai login session (cookie) for each rotator account when one nears expiry — the ~monthly human REAUTHENTICATE step the rotator can't automate (claude.ai login needs an OS-level passkey / Google-2FA prompt). Opens Chrome per account (you log in), verifies the session, then mints fresh OAuth tokens via RENEW. Use on an oauth-login-needed / oauth-cookie-reminder nudge, or when "had to log in manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-claude-logins, "reauth my accounts".
+name: janitor-refresh-cc-logins
+description: Refresh the claude.ai login session (cookie) for each rotator account when one nears expiry — the ~monthly human REAUTHENTICATE step the rotator can't automate (claude.ai login needs an OS-level passkey / Google-2FA prompt). Opens Chrome per account (you log in), verifies the session, then mints fresh OAuth tokens via RENEW. Use on an oauth-login-needed / oauth-cookie-reminder nudge, or when "had to log in manually / accounts won't switch / cookie expired". Trigger with /janitor-refresh-cc-logins, "reauth my accounts". (Named cc-logins, not claude-logins — a skill name may not contain the reserved word "claude".)
 ---
 
-# Janitor refresh-claude-logins
+# Janitor refresh-cc-logins
 
 ## Overview
 

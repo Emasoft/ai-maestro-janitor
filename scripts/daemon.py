@@ -599,7 +599,7 @@ def task_oauth_rotator_supervisor() -> None:
                     "identity steering degraded to the mirror; a keychain re-grant by the "
                     "user is required"
                 ),
-                hint="/janitor-refresh-claude-logins",
+                hint="/janitor-refresh-cc-logins",
             )
             _log(f"notify[OAUTH-PRIMARY-UNREADABLE]: {outcome}")
     except Exception:  # noqa: BLE001 -- the probe is best-effort; never break the beat

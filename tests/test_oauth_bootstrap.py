@@ -421,7 +421,7 @@ def test_bootstrap_action_truth_table() -> None:
 def test_bootstrap_off_by_default_no_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Default (CLAUDE_ROTATOR_AUTO_BOOTSTRAP unset): an eligible seeded slot NEVER opens a
     browser. The daemon must not surprise the user; the slot is left for the human (the
-    oauth-capture-stalled detector nudges /janitor-refresh-claude-logins)."""
+    oauth-capture-stalled detector nudges /janitor-refresh-cc-logins)."""
     captured = _wire(tmp_path, monkeypatch, {"seeded@x.com": {"refresh": None, "session": 20.0}})
     monkeypatch.delenv("CLAUDE_ROTATOR_AUTO_BOOTSTRAP", raising=False)  # back to the default (OFF)
     done = rotator._bootstrap_seeded_slots()
