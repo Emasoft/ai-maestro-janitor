@@ -2,13 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.58.1] - 2026-07-21
+## [0.59.0] - 2026-07-21
 
 ### Bug Fixes
 
-- The maintenance nudge must name WHICH scope is suppressing
+- Write-guard must not call a daemon respawn a test leak
 
-### Documentation
+### Features
 
-- Resolve TRDD-5ZVS1DDP's open question — chores split by capability
+- ONE DAEMON PER HOST — exit while an ai-maestro server runs (TRDD-5ZVS1DDP)
 
