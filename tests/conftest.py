@@ -58,6 +58,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -168,8 +169,17 @@ def _other_janitor_actor_live() -> bool:
     motivated the whole guard actually happened. On a quiet host (no daemon, no server) the
     daemon-owned labels remain hard failures too, because then a mutation really is the tests.
     """
+    # `scripts/lib` is NOT on sys.path in conftest's context. The first cut of this function
+    # imported `harness_backend` bare and let `except Exception` swallow the resulting
+    # ModuleNotFoundError, so the probe silently answered False and the guard kept failing
+    # every publish while a server was demonstrably alive. A fail-open except clause around
+    # an import hides a broken probe as effectively as it hides a broken host, so the path is
+    # made explicit here and only the CALL is allowed to degrade.
+    lib = Path(__file__).resolve().parents[1] / "scripts" / "lib"
+    if str(lib) not in sys.path:
+        sys.path.insert(0, str(lib))
     try:
-        import harness_backend  # noqa: PLC0415 -- optional, resolved lazily like the daemon probe
+        import harness_backend  # noqa: PLC0415 -- resolved lazily, like the daemon probe
 
         if harness_backend.server_is_alive():
             return True
