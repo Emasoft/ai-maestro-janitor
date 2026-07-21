@@ -1,14 +1,14 @@
 ---
 trdd-id: GRHP2YHP
 title: resume-push must not surprise an attended-but-reading session after compaction
-column: todo
+column: testing
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T12:12:44+0200
+updated: 2026-07-21T12:50:30+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project
 related-trdd: [HI0BGQGJ, 6Q0OYYYH]
-implementation-commits: []
+implementation-commits: [b041ffd]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
@@ -17,8 +17,13 @@ implementation-commits: []
 owner's pane; they were PRESENT (reading a long reply) and had to delete the enqueued command with
 arrow-up. "You are already resumed from the handoff, why resume again?"
 
-**NEXT ACTION:** in `scripts/hooks/post-compact-resume.py`, decouple the resume-push attended-window
-from the injection gate and widen it to interactive cadence (see below).
+**SHIPPED (b041ffd, 2026-07-21):** decoupled — the HID 20 s grace stays as the "don't type under
+fingers" floor; a NEW attended-SESSION window `_push_prompt_window_s` (default 5 min, knob
+`CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_PROMPT_WINDOW_S`) reads the genuine-prompt breadcrumb.
+29 tests green (incl. the reproduced incident: last prompt 120 s ago → NO push; and its
+falsification: window collapsed to 20 s → would have fired), ruff clean.
+**NEXT ACTION:** none for code — awaiting end-of-run full-suite confirmation, then → `complete`.
+CAVEAT: a plugin-hook change needs a session restart to take effect.
 
 **ROOT CAUSE:** `_maybe_push_resume` (post-compact-resume.py:310) fires `/janitor-resume` via
 `resume_trigger.py` unless `_user_recently_active` (:273) is true. That gate uses a 20 s window
