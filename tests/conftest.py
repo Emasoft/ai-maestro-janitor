@@ -56,9 +56,9 @@ even created for them.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
-import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -175,13 +175,23 @@ def _other_janitor_actor_live() -> bool:
     # every publish while a server was demonstrably alive. A fail-open except clause around
     # an import hides a broken probe as effectively as it hides a broken host, so the path is
     # made explicit here and only the CALL is allowed to degrade.
-    lib = Path(__file__).resolve().parents[1] / "scripts" / "lib"
-    if str(lib) not in sys.path:
-        sys.path.insert(0, str(lib))
+    # Resolve the liveness file from the REAL home, never from os.environ. HOME is still
+    # redirected into a test sandbox when this runs at session finish — which is exactly why
+    # `_GUARDED`'s own roots are built from `_REAL_ENV["HOME"]` a few lines below. Calling
+    # `harness_backend.server_is_alive()` here instead read `$HOME/.aimaestro/...` inside the
+    # sandbox, found nothing, and answered "no server" while one was demonstrably running.
+    # That was the second silent failure of this probe in a row: first a swallowed import
+    # error, then a redirected env. Both looked identical from outside — "no other actor" —
+    # which is the hazard of a fail-open probe, so this reads the path directly and depends
+    # on no ambient state at all.
+    real_home = _REAL_ENV.get("HOME") or str(Path.home())
+    liveness = Path(real_home) / ".aimaestro" / "server-liveness.json"
     try:
-        import harness_backend  # noqa: PLC0415 -- resolved lazily, like the daemon probe
-
-        if harness_backend.server_is_alive():
+        payload = json.loads(liveness.read_text(encoding="utf-8"))
+        # Same 90s staleness window the janitor itself applies (ARCHITECTURE §6.1): a
+        # crashed server leaves its last file on disk forever, and a stale file must not
+        # excuse anything.
+        if int(time.time()) - int(payload.get("ts", 0)) <= 90:
             return True
     except Exception:
         pass
