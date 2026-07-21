@@ -2136,3 +2136,180 @@ fn user_mem_named_as_the_root_is_still_searchable() {
         "user-mem named as the ROOT must remain searchable:\n{o}"
     );
 }
+
+// ─────────────── WRITE verbs (TRDD-R02HTRUD): new-page / add-atom / add-lesson ───────────────
+
+/// Run memgrep with `input` piped to stdin — the write verbs read the element BODY from stdin.
+/// Asserts success; returns stdout.
+fn run_stdin(args: &[&str], input: &str) -> String {
+    use std::io::Write;
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let mut child = Command::new(bin)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn memgrep");
+    child
+        .stdin
+        .take()
+        .expect("stdin handle")
+        .write_all(input.as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait memgrep");
+    assert!(
+        out.status.success(),
+        "memgrep exited non-zero for {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Like `run_stdin` but expects a clean NON-zero exit (a refusal — missing page, empty body, …).
+fn run_stdin_fail(args: &[&str], input: &str) {
+    use std::io::Write;
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let mut child = Command::new(bin)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn memgrep");
+    child
+        .stdin
+        .take()
+        .expect("stdin handle")
+        .write_all(input.as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait memgrep");
+    assert!(!out.status.success(), "memgrep should have failed for {args:?}");
+    assert!(out.status.code().is_some(), "memgrep died from a signal on {args:?}");
+}
+
+#[test]
+fn new_page_scaffolds_a_valid_parseable_page() {
+    let d = TempDir::new("newpage");
+    let page = d.join("comp.md");
+    let out = run(&[
+        "new-page",
+        "--path",
+        page.to_str().unwrap(),
+        "--tier",
+        "component",
+        "--name",
+        "comp",
+        "--description",
+        "how does the widget resolve / where does the config live",
+        "--type",
+        "reference",
+    ]);
+    assert!(out.contains("comp.md"), "new-page prints the path: {out}");
+    let text = std::fs::read_to_string(&page).unwrap();
+    // Frontmatter recall surface + the mandatory landing zone are present.
+    assert!(text.contains("name: comp"));
+    assert!(text.contains("description: \""));
+    assert!(text.contains("## Notes and lessons learned"));
+    assert!(text.contains("node_type: memory") && text.contains("tier: component"));
+    // A second new-page onto the same path is refused — never clobber an existing page.
+    run_fail(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "comp", "--description", "x", "--type", "reference",
+    ]);
+}
+
+#[test]
+fn add_atom_round_trips_through_the_parser_and_index() {
+    let d = TempDir::new("addatom");
+    let page = d.join("p.md");
+    run(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "p", "--description", "the page recall surface", "--type", "reference",
+    ]);
+    // add-atom: body from stdin, a multi-word phrase keyword, a desc + type.
+    let out = run_stdin(
+        &[
+            "add-atom", "--page", page.to_str().unwrap(),
+            "--keywords", "rate limit, resume, 429 error",
+            "--desc", "a summary, with a comma",
+            "--type", "reference",
+        ],
+        "The window already closed — mint a fresh token.",
+    );
+    let id = out.split_whitespace().next().expect("printed id").to_string();
+    assert!(id.starts_with("ATOM-"), "printed a canonical id: {out}");
+
+    // The atom resolves through the FRESH index by id (proves the reindex ran).
+    let atom = run(&["atom", &id, d.as_str()]);
+    assert!(atom.contains("mint a fresh token"), "atom body round-trips: {atom}");
+
+    // …and by its keyword surface (phrase underscore-joined so `resume` is a whole token).
+    let found = run(&["find", "+resume", d.as_str()]);
+    assert!(found.contains(&id), "atom findable by keyword: {found}");
+
+    // The stored marker is the canonical `^id [desc:…, keywords:…, type:…, ocd:…, lmd:…]` shape.
+    let text = std::fs::read_to_string(&page).unwrap();
+    assert!(text.contains(&format!("^{id} [desc:\"a summary, with a comma\", keywords: rate_limit resume 429_error, type: reference, ocd:")));
+    // The atom landed BEFORE the notes section (its marker precedes the heading in the file).
+    let mpos = text.find(&format!("^{id}")).unwrap();
+    let npos = text.find("## Notes and lessons learned").unwrap();
+    assert!(mpos < npos, "atom inserted before the lessons section");
+}
+
+#[test]
+fn add_atom_refuses_a_missing_page_and_empty_body() {
+    let d = TempDir::new("addatom-refuse");
+    let missing = d.join("nope.md");
+    // No such page → refuse (never create the page implicitly).
+    run_stdin_fail(
+        &["add-atom", "--page", missing.to_str().unwrap(), "--keywords", "a,b"],
+        "body",
+    );
+    // Existing page but empty stdin body → refuse.
+    let page = d.join("p.md");
+    run(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "p", "--description", "d", "--type", "reference",
+    ]);
+    run_stdin_fail(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "a,b"],
+        "   \n  ",
+    );
+}
+
+#[test]
+fn add_lesson_anchors_from_an_atom_and_round_trips() {
+    let d = TempDir::new("addlesson");
+    let page = d.join("p.md");
+    run(&[
+        "new-page", "--path", page.to_str().unwrap(), "--tier", "component",
+        "--name", "p", "--description", "d", "--type", "reference",
+    ]);
+    let atom_out = run_stdin(
+        &["add-atom", "--page", page.to_str().unwrap(), "--keywords", "keychain creds"],
+        "Creds live in the macOS keychain, never plaintext.",
+    );
+    let atom_id = atom_out.split_whitespace().next().unwrap().to_string();
+
+    let lesson_out = run_stdin(
+        &[
+            "add-lesson", "--page", page.to_str().unwrap(), "--atom", &atom_id,
+            "--keywords", "retry cap guessed variable name, max_retries",
+        ],
+        "DO NOT read the cap off a guessed variable name, BECAUSE max_attempts does not exist. DO read the constant from the source instead.",
+    );
+    let lesson_id = lesson_out.split_whitespace().next().unwrap().to_string();
+    assert!(lesson_id.starts_with("ATOM-"), "fresh lesson id: {lesson_out}");
+
+    let text = std::fs::read_to_string(&page).unwrap();
+    // The `[^1]` anchor is on the atom's body, the canonical def is under the notes section.
+    assert!(text.contains("[^1]"), "atom body carries the [^1] anchor:\n{text}");
+    assert!(
+        text.contains(&format!("[^1]: [id:{lesson_id}, status:valid")),
+        "canonical lesson def form:\n{text}"
+    );
+    // The lesson resolves by its keyword surface (the recall promise for lessons).
+    let found = run(&["find", "+max_retries", d.as_str(), "--only-notes"]);
+    assert!(found.contains(&lesson_id), "lesson findable by keyword: {found}");
+}

@@ -1873,6 +1873,606 @@ pub fn cmd_atom_cli(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+// ─────────── `memgrep add-atom` / `new-page` / `add-lesson` — the WRITE verbs (TRDD-R02HTRUD) ───────────
+//
+// The read side (`recall`/`find`/`atom`) proved that a wikimem element is worthless the instant its
+// machine-parsed syntax is wrong: a `⟦…⟧`-bracketed atom, a keyword-less lesson, an atom whose id
+// collides with another's — each is silently invisible to the very consumer it was written for. The
+// safety model "trust the agent to hand-write the format" is therefore wrong: the format has ONE
+// authority (this crate's parser), so the SAFE way to author an element is to have the parser's OWN
+// crate SYNTHESISE it. These verbs take only content + keywords and generate everything else — the
+// corpus-unique id, the ISO dates, the exact `^id [k: v, …]` / frontmatter shape — so a malformed
+// atom is IMPOSSIBLE to emit. The emitter is provably the inverse of the parser above: an atom built
+// here, parsed back by `resolve_atoms_from_text`/`make_atom`, returns the same id + keywords (proven
+// by the round-trip test). All input is DATA, never executed.
+
+/// Today's date as `YYYY-MM-DD` — the atom/lesson `ocd`/`lmd` shape (date only, no time). Derived
+/// from `now_iso_utc()` (`YYYY-MM-DDTHH:MM:SSZ`), whose leading 10 chars are the ASCII date, so the
+/// slice never lands mid-UTF-8. Shares the crate's dependency-free civil-date math (no chrono).
+fn today_date() -> String {
+    now_iso_utc()[..10].to_string()
+}
+
+/// One SplitMix64 step — a tiny, well-distributed PRNG. The crate carries NO `rand`/`uuid` dep by
+/// design, and the task forbids adding one, so id randomness is seeded from the wall clock (see
+/// `seed_id_state`) and stepped here. Deterministic given a seed; only the seed is time-derived.
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Seed the id PRNG from `SystemTime` nanoseconds mixed with the pid — so two processes that start
+/// in the same nanosecond still diverge, and a single process's successive candidates never repeat
+/// (the caller threads one mutable state through the whole generation loop).
+fn seed_id_state() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    nanos ^ (std::process::id() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+}
+
+/// One `ATOM-XXXX-XXXX` candidate — the canonical corpus id shape: `ATOM-` + two 4-char base36
+/// (`0-9A-Z`) groups. base36 keeps every payload char `is_ascii_alphanumeric`, which is exactly what
+/// `atom_id_canonical8` accepts, so the id round-trips through the resolver. Steps `state` 8×.
+fn atom_id_candidate(state: &mut u64) -> String {
+    const B36: &[u8; 36] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let mut s = String::with_capacity(13);
+    s.push_str("ATOM-");
+    for i in 0..8 {
+        if i == 4 {
+            s.push('-');
+        }
+        s.push(B36[(splitmix64(state) % 36) as usize] as char);
+    }
+    s
+}
+
+/// Generate a corpus-unique `ATOM-XXXX-XXXX` id: draw candidates until `atom_id_hits` finds ZERO
+/// existing atoms OR lessons carrying it (the resolver canonicalises both sides, so this checks the
+/// whole id space — body atoms AND `[^N]` lessons — over the FRESH index when one exists and a live
+/// disk walk otherwise, exactly the correctness policy every id query in this crate follows). With a
+/// 36^8 space a collision is astronomically unlikely; the bounded loop fails loud rather than spin.
+fn generate_unique_atom_id(paths: &[PathBuf], hidden: bool) -> Result<String> {
+    let mut state = seed_id_state();
+    for _ in 0..100_000 {
+        let cand = atom_id_candidate(&mut state);
+        if atom_id_hits(&cand, paths, hidden).is_empty() {
+            return Ok(cand);
+        }
+    }
+    anyhow::bail!("could not generate a corpus-unique atom id after 100000 attempts — the corpus is impossibly dense or the id space is exhausted")
+}
+
+/// Normalise a `--keywords "a, b c, d"` value into the atom/lesson keyword ARRAY. Each COMMA item is
+/// ONE key-phrase; its internal whitespace collapses to a single `_` so a multi-word phrase survives
+/// as one keyword (the wikimem convention: `rate_limit`, not two keywords `rate` + `limit`) — which
+/// is also what makes the emitter the parser's exact inverse, since `parse_block_props` splits the
+/// emitted `keywords:` value on WHITESPACE. Empty items are dropped. Empty result ⇒ the caller bails
+/// (keywords are the RECALL SURFACE — an element without them is unfindable, i.e. does not exist).
+fn normalize_keywords(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|k| k.split_whitespace().collect::<Vec<_>>().join("_"))
+        .filter(|k| !k.is_empty())
+        .collect()
+}
+
+/// Sanitise a one-line prose value (`desc`) for a `"…"`-quoted block-prop slot: collapse all
+/// whitespace to single spaces (a summary is one line) and replace any embedded `"` with `'` — a
+/// literal double-quote would break the quote-tracking in `split_top_level_commas`, corrupting every
+/// later field. Capped at the spec's 200 chars via the shared `truncate_chars` (char-safe).
+fn sanitize_quoted_value(raw: &str) -> String {
+    let flat = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_chars(flat.replace('"', "'"), 200)
+}
+
+/// Build the atom marker line `^<id> [<props>]` in the field order the corpus uses: optional `desc`,
+/// then `keywords` (mandatory), optional `type`, then `ocd`/`lmd`. Every field is generated here —
+/// the caller never writes raw props — so the shape is provably parseable (round-trip test proves
+/// the inverse). `desc` is quoted-and-sanitised; `keywords` are space-joined; `type` is a bare
+/// single token (the enum values are single words); dates are today's `YYYY-MM-DD`.
+fn build_atom_marker(
+    id: &str,
+    keywords: &[String],
+    desc: Option<&str>,
+    atom_type: Option<&str>,
+    today: &str,
+) -> String {
+    let mut props: Vec<String> = Vec::new();
+    if let Some(d) = desc.map(str::trim).filter(|d| !d.is_empty()) {
+        props.push(format!("desc:\"{}\"", sanitize_quoted_value(d)));
+    }
+    props.push(format!("keywords: {}", keywords.join(" ")));
+    if let Some(t) = atom_type.map(str::trim).filter(|t| !t.is_empty()) {
+        // A `type` is a single-word enum in the corpus; guard anyway against a stray space breaking
+        // the value into an array (only its first element is read by `first_val`).
+        props.push(format!("type: {}", t.split_whitespace().collect::<Vec<_>>().join("_")));
+    }
+    props.push(format!("ocd: {today}"));
+    props.push(format!("lmd: {today}"));
+    format!("^{id} [{}]", props.join(", "))
+}
+
+/// The 0-based line index of the page's `## Notes and lessons learned` heading, fence-aware, or None.
+/// Mirrors the linter's detection (a heading whose lowercased text contains "notes and lessons
+/// learned" or "lessons learned"), skipping any such line inside a fenced code block. This is the
+/// insertion boundary: `add-atom` places a new atom BEFORE it (so the atom's body — which the parser
+/// ends at the next heading — never bleeds into the lessons section), and `add-lesson` appends its
+/// footnote def AFTER it (inside the section).
+fn notes_section_line(text: &str) -> Option<usize> {
+    let mut in_fence = false;
+    for (i, line) in text.lines().enumerate() {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if t.starts_with('#') {
+            let low = t.to_ascii_lowercase();
+            if low.contains("notes and lessons learned") || low.contains("lessons learned") {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Atomic page write (unique tmp in the SAME dir, then rename) — the tmp-then-rename discipline the
+/// index-markdown writer (memory.rs) and the SQLite ledger (index.rs) already use, so a concurrent
+/// `recall`/reader never observes a half-written page. The tmp name carries the pid so parallel test
+/// threads / concurrent writers never collide on it.
+fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
+    let tmp = dest.with_extension(format!("md.tmp{}", std::process::id()));
+    std::fs::write(&tmp, content).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::anyhow!("write {}: {e}", tmp.display())
+    })?;
+    std::fs::rename(&tmp, dest).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::anyhow!("rename into {}: {e}", dest.display())
+    })?;
+    Ok(())
+}
+
+/// Reindex the memory scope that owns `page` (its parent dir) after a write, so `recall`/`atom`
+/// resolve the new element from the FRESH index immediately. Incremental (`full=false`) — only the
+/// touched file is re-parsed. Best-effort in spirit but surfaced: a reindex failure is returned so
+/// the caller reports it (the live-walk fallback keeps recall correct regardless).
+fn reindex_owning_scope(page: &Path, hidden: bool) -> Result<()> {
+    let root = page
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let files = collect_md(std::slice::from_ref(&root), hidden);
+    crate::index::reindex(&root, &files, false)?;
+    Ok(())
+}
+
+/// Read the FULL body from stdin (the content of a new atom / lesson). Trailing whitespace is
+/// trimmed; an empty body is rejected (a memory element with a marker + keywords but no content is
+/// pointless and the fail-fast is friendlier than a silently empty atom).
+fn read_body_from_stdin() -> Result<String> {
+    use std::io::Read;
+    let mut body = String::new();
+    std::io::stdin().read_to_string(&mut body)?;
+    let body = body.trim_end().to_string();
+    if body.trim().is_empty() {
+        anyhow::bail!("empty body on stdin — pipe the atom's content, e.g. `echo 'the fact' | memgrep add-atom …`");
+    }
+    Ok(body)
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep add-atom",
+    about = "author a memory ATOM into a page (content from stdin; id/dates/syntax synthesised so a malformed atom is impossible)"
+)]
+struct AddAtomArgs {
+    /// The wikimem page (`.md`) to append the atom to — it must already exist (create one with
+    /// `memgrep new-page`). The atom is inserted before the trailing `## Notes and lessons learned`
+    /// section when present, else at EOF.
+    #[arg(long = "page")]
+    page: PathBuf,
+    /// The atom's RECALL SURFACE — a comma-separated key-phrase list (`"rate limit, resume, 429"`).
+    /// Each comma item is ONE phrase; internal spaces become `_`. Mandatory: no keywords ⇒ unfindable.
+    #[arg(long = "keywords")]
+    keywords: String,
+    /// Optional one-line prose summary (the LISTING triage surface); ≤200 chars, stored quoted.
+    #[arg(long = "desc")]
+    desc: Option<String>,
+    /// Optional atom `type` (a single-word class, e.g. `reference` / `feedback` / `project`).
+    #[arg(long = "type")]
+    atom_type: Option<String>,
+    /// Also descend into hidden files/dirs when checking id-uniqueness / reindexing (default off).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// `memgrep add-atom --page P --keywords "…" [--desc …] [--type …]` (body on stdin). Synthesise a
+/// corpus-unique id + today's dates, emit the exact `^id [desc:"…", keywords: …, type: …, ocd:…,
+/// lmd:…]` marker, append `\n<marker>\n\n<body>\n` into the page (before the lessons section if any),
+/// write atomically, reindex the scope. Prints `<id>\t<page>`.
+pub fn cmd_add_atom_cli(args: &[String]) -> Result<()> {
+    let a = AddAtomArgs::parse_from(
+        std::iter::once("add-atom".to_string()).chain(args.iter().cloned()),
+    );
+    let keywords = normalize_keywords(&a.keywords);
+    if keywords.is_empty() {
+        anyhow::bail!(
+            "no keywords parsed from `{}` — keywords are the atom's RECALL SURFACE (mandatory)",
+            a.keywords
+        );
+    }
+    let body = read_body_from_stdin()?;
+    let text = md::read_text(&a.page)
+        .ok_or_else(|| anyhow::anyhow!("page {} does not exist or is unreadable — create it first with `memgrep new-page`", a.page.display()))?;
+
+    // Uniqueness is checked across the WHOLE owning scope (the page's parent dir), not just this
+    // page — an atom id must be corpus-unique, and the scope is what `recall` walks.
+    let scope_root = a
+        .page
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let id = generate_unique_atom_id(&[scope_root], a.hidden)?;
+
+    let today = today_date();
+    let marker = build_atom_marker(&id, &keywords, a.desc.as_deref(), a.atom_type.as_deref(), &today);
+
+    let out = insert_atom_block(&text, &marker, &body);
+    atomic_write_page(&a.page, &out)?;
+    reindex_owning_scope(&a.page, a.hidden)?;
+    println!("{id}\t{}", rel(&a.page));
+    Ok(())
+}
+
+/// Splice one atom block into a page's text — the PURE core of `add-atom` (so the round-trip test
+/// exercises the real insertion, not a copy). Emits a blank separator, the marker, a blank line, then
+/// the body (task shape: "marker then a blank line then the body"); the leading blank keeps the marker
+/// off the previous paragraph and `resolve_atoms_from_text` trims it back off when rebuilding the
+/// body. Placed BEFORE the `## Notes …` heading when present (so the atom's body — which the parser
+/// ends at the next heading — is bounded and never bleeds into the lessons section), else at EOF. The
+/// result always ends in exactly one newline.
+fn insert_atom_block(text: &str, marker: &str, body: &str) -> String {
+    let mut atom_lines: Vec<String> = vec![String::new(), marker.to_string(), String::new()];
+    atom_lines.extend(body.lines().map(str::to_string));
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    match notes_section_line(text) {
+        Some(idx) => {
+            atom_lines.push(String::new()); // blank between the atom body and the notes heading
+            let tail = lines.split_off(idx);
+            lines.extend(atom_lines);
+            lines.extend(tail);
+        }
+        None => lines.extend(atom_lines),
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep new-page",
+    about = "scaffold a new wikimem page with valid frontmatter + the mandatory notes section (refuses to overwrite)"
+)]
+struct NewPageArgs {
+    /// Destination `.md` path. REFUSED if it already exists — a new page never clobbers an old one.
+    #[arg(long = "path")]
+    path: PathBuf,
+    /// Wiki tier: `hub` (one functionality's overview, carries `globs:`), `aspect` (a shared rule),
+    /// or `component` (one element's page).
+    #[arg(long = "tier")]
+    tier: String,
+    /// The page's kebab-slug `name:` (the `[[name]]` wikilink target).
+    #[arg(long = "name")]
+    name: String,
+    /// The page's `description:` — its RECALL SURFACE (the symptom words a future search will carry).
+    #[arg(long = "description")]
+    description: String,
+    /// The page `metadata.type` — `user` / `feedback` / `project` / `reference`.
+    #[arg(long = "type")]
+    page_type: String,
+    /// Optional comma-separated `metadata.globs` (the files a HUB owns). Always emitted (as `[]`) for
+    /// a hub; for a non-hub, emitted only when given.
+    #[arg(long = "globs")]
+    globs: Option<String>,
+    /// Optional `metadata.functionality` line (a hub's one-functionality summary).
+    #[arg(long = "functionality")]
+    functionality: Option<String>,
+}
+
+/// `memgrep new-page --path P --tier T --name N --description "…" --type …` — scaffold a VALID page:
+/// frontmatter (name, description, ocd=lmd=today, metadata.{node_type, type, tier[, functionality][,
+/// globs]}) + a `# <name>` heading + the mandatory `## Notes and lessons learned` landing zone.
+/// Refuses to overwrite. Writes atomically, reindexes. The generated page passes the syntax linter
+/// with zero findings by construction.
+pub fn cmd_new_page_cli(args: &[String]) -> Result<()> {
+    let a = NewPageArgs::parse_from(
+        std::iter::once("new-page".to_string()).chain(args.iter().cloned()),
+    );
+    let tier = a.tier.trim();
+    if !matches!(tier, "hub" | "aspect" | "component") {
+        anyhow::bail!("--tier must be one of hub|aspect|component (got `{}`)", a.tier);
+    }
+    let name = a.name.trim();
+    if name.is_empty() {
+        anyhow::bail!("--name must not be empty (it is the page's `[[name]]` wikilink slug)");
+    }
+    let description = a.description.trim();
+    if description.is_empty() {
+        anyhow::bail!("--description must not be empty — it is the PAGE recall surface memgrep ranks on");
+    }
+    let page_type = a.page_type.trim();
+    if page_type.is_empty() {
+        anyhow::bail!("--type must not be empty (metadata.type: user|feedback|project|reference)");
+    }
+    if a.path.exists() {
+        anyhow::bail!("{} already exists — new-page never overwrites an existing page", a.path.display());
+    }
+    if let Some(parent) = a.path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let today = today_date();
+    let mut fm = String::new();
+    fm.push_str("---\n");
+    fm.push_str(&format!("name: {name}\n"));
+    fm.push_str(&format!("description: \"{}\"\n", sanitize_quoted_value(description)));
+    fm.push_str(&format!("ocd: {today}\n"));
+    fm.push_str(&format!("lmd: {today}\n"));
+    fm.push_str("metadata:\n");
+    fm.push_str("  node_type: memory\n");
+    fm.push_str(&format!("  type: {page_type}\n"));
+    fm.push_str(&format!("  tier: {tier}\n"));
+    if let Some(func) = a.functionality.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        // functionality is metadata prose; collapse to one line so it can never break the block.
+        fm.push_str(&format!("  functionality: {}\n", func.split_whitespace().collect::<Vec<_>>().join(" ")));
+    }
+    // globs are a HUB field (the files it owns). Always present for a hub (empty list when none);
+    // for a non-hub, emit only when the author explicitly passed some.
+    let globs: Option<Vec<String>> = a.globs.as_deref().map(|g| {
+        g.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    });
+    if tier == "hub" {
+        let list = globs.unwrap_or_default();
+        fm.push_str(&format!("  globs: [{}]\n", list.join(", ")));
+    } else if let Some(list) = globs.filter(|l| !l.is_empty()) {
+        fm.push_str(&format!("  globs: [{}]\n", list.join(", ")));
+    }
+    fm.push_str("---\n\n");
+    fm.push_str(&format!("# {name}\n\n"));
+    fm.push_str("## Notes and lessons learned\n");
+
+    atomic_write_page(&a.path, &fm)?;
+    reindex_owning_scope(&a.path, false)?;
+    println!("wrote {}", rel(&a.path));
+    Ok(())
+}
+
+/// The next free NUMERIC footnote label on the page — `max(existing numeric labels) + 1`, or 1 when
+/// none. Considers BOTH `[^N]:` definitions and `[^N]` references (a label is taken if either uses
+/// it). Non-numeric labels are ignored for the counter (the corpus numbers its lessons); this only
+/// ever ALLOCATES a fresh number, so it can never collide with an existing label of any shape.
+fn next_footnote_label(text: &str) -> u32 {
+    let ctx = md::build_context(text, text.lines().count());
+    let mut max = 0u32;
+    for d in &ctx.footnote_defs {
+        if let Ok(n) = d.label.parse::<u32>() {
+            max = max.max(n);
+        }
+    }
+    for r in &ctx.footnote_refs {
+        if let Ok(n) = r.label.parse::<u32>() {
+            max = max.max(n);
+        }
+    }
+    // The raw scan catches unreferenced defs comrak drops (see `raw_footnote_defs`), so a label used
+    // only by an un-anchored def still counts as taken.
+    for label in raw_footnote_defs(&text.lines().collect::<Vec<_>>()).keys() {
+        if let Ok(n) = label.parse::<u32>() {
+            max = max.max(n);
+        }
+    }
+    max + 1
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep add-lesson",
+    about = "author a [^N] lesson (DO-NOT/BECAUSE/DO on stdin) and anchor it from an atom's body"
+)]
+struct AddLessonArgs {
+    /// The page carrying the target atom AND receiving the new lesson.
+    #[arg(long = "page")]
+    page: PathBuf,
+    /// The atom id (`^name`, `ATOM-XXXX-XXXX`, or its bare 8-char payload) the lesson annotates — its
+    /// body gets the `[^N]` anchor. Must be a BODY atom on this page, not a lesson.
+    #[arg(long = "atom")]
+    atom: String,
+    /// The lesson's RECALL SURFACE — a comma-separated key-phrase list (mandatory).
+    #[arg(long = "keywords")]
+    keywords: String,
+    /// Optional one-line context stored as a `desc:"…"` field in the lesson metadata.
+    #[arg(long = "desc")]
+    desc: Option<String>,
+    /// Also descend into hidden files/dirs when checking id-uniqueness / reindexing (default off).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// `memgrep add-lesson --page P --atom ID --keywords "…" [--desc …]` (lesson text on stdin). Allocate
+/// the next `[^N]` label + a fresh corpus-unique `ATOM-…` id, emit the ONE canonical lesson form
+/// `[^N]: [id:ATOM-…, status:valid, keywords:"…", ocd:…, lmd:…] <text>` appended under the notes
+/// section, and insert the `[^N]` anchor at the end of the named atom's body. Writes atomically,
+/// reindexes. Prints `<lesson-id>\t^N\t<page>`.
+pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
+    let a = AddLessonArgs::parse_from(
+        std::iter::once("add-lesson".to_string()).chain(args.iter().cloned()),
+    );
+    let keywords = normalize_keywords(&a.keywords);
+    if keywords.is_empty() {
+        anyhow::bail!(
+            "no keywords parsed from `{}` — a lesson's keywords are its RECALL SURFACE (mandatory)",
+            a.keywords
+        );
+    }
+    let lesson_text = read_body_from_stdin()?;
+    // The lesson text is one logical line (DO NOT … BECAUSE … DO … instead) — collapse any pasted
+    // newlines so the `[^N]:` definition stays a single, parser-clean line.
+    let lesson_text = lesson_text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let text = md::read_text(&a.page)
+        .ok_or_else(|| anyhow::anyhow!("page {} does not exist or is unreadable", a.page.display()))?;
+
+    // Resolve the target atom to its body extent ON THIS PAGE. `atom` accepts the `^name` sigil form.
+    let query = a.atom.strip_prefix('^').unwrap_or(&a.atom);
+    let atom_query_matches = |id: &str| atom_id_matches(id, query);
+    let (_marker_idx, body_last_idx) = locate_atom_body_matching(&text, &atom_query_matches)
+        .ok_or_else(|| anyhow::anyhow!(
+            "no BODY atom answering to `{}` on {} — add-lesson anchors a lesson from an existing atom's body",
+            a.atom, a.page.display()
+        ))?;
+
+    let scope_root = a
+        .page
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let lesson_id = generate_unique_atom_id(&[scope_root], a.hidden)?;
+    let label = next_footnote_label(&text);
+    let today = today_date();
+
+    // The ONE canonical lesson metadata form. `desc:"…"` is an OPTIONAL extra (unknown keys are
+    // ignored by the lesson parser) inserted only when given — the canonical fields are id/status/
+    // keywords/ocd/lmd.
+    let mut meta = format!("id:{lesson_id}, status:valid");
+    if let Some(d) = a.desc.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        meta.push_str(&format!(", desc:\"{}\"", sanitize_quoted_value(d)));
+    }
+    meta.push_str(&format!(
+        ", keywords:\"{}\", ocd:{today}, lmd:{today}",
+        keywords.join(" ")
+    ));
+    let def_line = format!("[^{label}]: [{meta}] {lesson_text}");
+
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+
+    // 1. Anchor the atom: append ` [^N]` to the end of the atom's last body line. When that line is
+    //    the marker line itself (empty-bodied atom), the ref lands right after the marker — still a
+    //    valid body-anchor the resolver picks up.
+    lines[body_last_idx] = format!("{} [^{label}]", lines[body_last_idx].trim_end());
+
+    // 2. Append the `[^N]:` definition inside the notes section. When the section exists, append at
+    //    its END (before the next heading, else EOF); with no section, create one at EOF (the
+    //    landing zone is mandatory anyway).
+    match notes_section_line(&text) {
+        Some(hidx) => {
+            // The section runs from its heading to the next heading (fence-aware) or EOF.
+            let mut end = lines.len();
+            let mut in_fence = false;
+            for (i, line) in lines.iter().enumerate().skip(hidx + 1) {
+                let t = line.trim_start();
+                if t.starts_with("```") || t.starts_with("~~~") {
+                    in_fence = !in_fence;
+                    continue;
+                }
+                if !in_fence && t.starts_with('#') {
+                    end = i;
+                    break;
+                }
+            }
+            // Drop trailing blank lines already inside the section so defs stack tidily.
+            let mut insert_at = end;
+            while insert_at > hidx + 1 && lines[insert_at - 1].trim().is_empty() {
+                insert_at -= 1;
+            }
+            let tail = lines.split_off(insert_at);
+            // A blank line before the first def under the heading; consecutive defs just stack.
+            if insert_at == hidx + 1 {
+                lines.push(String::new());
+            }
+            lines.push(def_line);
+            lines.extend(tail);
+        }
+        None => {
+            lines.push(String::new());
+            lines.push("## Notes and lessons learned".to_string());
+            lines.push(String::new());
+            lines.push(def_line);
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+
+    atomic_write_page(&a.page, &out)?;
+    reindex_owning_scope(&a.page, a.hidden)?;
+    println!("{lesson_id}\t^{label}\t{}", rel(&a.page));
+    Ok(())
+}
+
+/// `locate_atom_body` generalised to any id-matcher (so `add-lesson` can accept the canonical-8 /
+/// `^name` spellings via `atom_id_matches`). Returns `(marker_line_idx, last_nonblank_body_line_idx)`
+/// for the FIRST body atom whose id satisfies `is_match`, or None.
+fn locate_atom_body_matching(
+    text: &str,
+    is_match: &dyn Fn(&str) -> bool,
+) -> Option<(usize, usize)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut start = 0usize;
+    if lines.first().map(|l| l.trim_end()) == Some("---") {
+        start = 1;
+        while start < lines.len() && lines[start].trim_end() != "---" {
+            start += 1;
+        }
+        start = (start + 1).min(lines.len());
+    }
+    let mut in_fence = false;
+    let mut open: Option<(usize, usize, String)> = None;
+    let finish = |open: &Option<(usize, usize, String)>| -> Option<(usize, usize)> {
+        open.as_ref()
+            .and_then(|(m, last, id)| is_match(id).then_some((*m, *last)))
+    };
+    for (i, line) in lines.iter().enumerate().skip(start) {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            if let Some((_, last, _)) = open.as_mut() {
+                *last = i;
+            }
+            continue;
+        }
+        if !in_fence && t.starts_with('#') {
+            if let Some(hit) = finish(&open) {
+                return Some(hit);
+            }
+            open = None;
+            continue;
+        }
+        let marker = if in_fence { None } else { first_block_property_marker(line) };
+        if let Some((_s, _end, id, _props)) = marker {
+            if let Some(hit) = finish(&open) {
+                return Some(hit);
+            }
+            open = Some((i, i, id));
+        } else if let Some((_, last, _)) = open.as_mut()
+            && !line.trim().is_empty()
+        {
+            *last = i; // a non-blank body line advances the anchor point
+        }
+    }
+    finish(&open)
+}
+
 // ─────────────────────────── `memgrep lint` ───────────────────────────
 
 /// Scan ONE raw markdown line for footnote tokens, yielding `(label, is_def)` for each. A footnote
@@ -3946,5 +4546,170 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             has_violation(&v, "Notes and lessons learned"),
             "missing Notes section must be reported; got: {v:?}"
         );
+    }
+
+    // ─────────────── WRITE verbs (TRDD-R02HTRUD) ───────────────
+
+    #[test]
+    fn today_date_is_a_bare_iso_date() {
+        // ocd/lmd on atoms are DATE-only (`YYYY-MM-DD`), the leading 10 chars of the ISO-UTC stamp.
+        let d = today_date();
+        assert_eq!(d.len(), 10, "date is exactly YYYY-MM-DD");
+        let b = d.as_bytes();
+        assert!(b[4] == b'-' && b[7] == b'-', "hyphens at 4 and 7: {d}");
+        assert!(
+            d.chars().enumerate().all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() }),
+            "all-digit except the two hyphens: {d}"
+        );
+    }
+
+    #[test]
+    fn normalize_keywords_underscore_joins_phrases_and_drops_empties() {
+        // Each COMMA item is ONE key-phrase; internal spaces collapse to `_` so a multi-word phrase
+        // survives as a single keyword (the wikimem convention), and empty items are dropped — which
+        // is also what makes the emitter the whitespace-splitting parser's exact inverse.
+        assert_eq!(normalize_keywords("x,y"), vec!["x".to_string(), "y".to_string()]);
+        assert_eq!(
+            normalize_keywords("rate limit,  resume  , 429 error , ,"),
+            vec!["rate_limit".to_string(), "resume".to_string(), "429_error".to_string()],
+            "spaces→underscore, trimmed, empties dropped"
+        );
+        assert!(normalize_keywords("  ,  , ").is_empty(), "all-empty → no keywords");
+    }
+
+    #[test]
+    fn atom_id_candidate_is_a_valid_canonical8_id() {
+        // Every generated id is `ATOM-XXXX-XXXX` with base36 payload, which `atom_id_canonical8`
+        // accepts — so a synthesised id ALWAYS round-trips through the resolver.
+        let mut state = 0x1234_5678_9abc_def0u64;
+        for _ in 0..1000 {
+            let id = atom_id_candidate(&mut state);
+            assert!(id.starts_with("ATOM-"), "shape: {id}");
+            assert_eq!(id.len(), 14, "`ATOM-` (5) + 4 + `-` + 4 = 14: {id}");
+            let c8 = atom_id_canonical8(&id)
+                .unwrap_or_else(|| panic!("candidate must canonicalise: {id}"));
+            assert_eq!(c8.len(), 8);
+            assert!(c8.chars().all(|c| c.is_ascii_alphanumeric() && !c.is_ascii_lowercase()));
+        }
+    }
+
+    #[test]
+    fn build_atom_marker_emits_fields_in_corpus_order() {
+        let kw = vec!["alpha".to_string(), "beta".to_string()];
+        // Full form: desc, keywords, type, ocd, lmd — the exact order the corpus uses.
+        let full = build_atom_marker("ATOM-AAAA-BBBB", &kw, Some("a summary"), Some("reference"), "2026-07-21");
+        assert_eq!(
+            full,
+            "^ATOM-AAAA-BBBB [desc:\"a summary\", keywords: alpha beta, type: reference, ocd: 2026-07-21, lmd: 2026-07-21]"
+        );
+        // Minimal form: no desc, no type — still parseable, keywords + dates only.
+        let min = build_atom_marker("ATOM-CCCC-DDDD", &kw, None, None, "2026-07-21");
+        assert_eq!(
+            min,
+            "^ATOM-CCCC-DDDD [keywords: alpha beta, ocd: 2026-07-21, lmd: 2026-07-21]"
+        );
+        // A `"` inside desc would break quote-tracking — it is replaced with `'`.
+        let q = build_atom_marker("ATOM-EEEE-FFFF", &kw, Some("say \"hi\" now"), None, "2026-07-21");
+        assert!(q.contains("desc:\"say 'hi' now\""), "embedded quotes sanitised: {q}");
+    }
+
+    #[test]
+    fn add_atom_emitter_is_the_parsers_inverse() {
+        // THE round-trip proof: build an atom through the real emit + insert core, parse the result
+        // back with the crate's OWN resolver, and assert the id + keywords come back identical — the
+        // emitter is provably the inverse of `first_block_property_marker`/`make_atom`.
+        let page = "---\nname: p\ndescription: \"d\"\nocd: 2026-07-21\nlmd: 2026-07-21\n---\n\n# p\n\n## Notes and lessons learned\n";
+        let kw = normalize_keywords("rate limit, resume, 429");
+        let marker = build_atom_marker("ATOM-1234-5678", &kw, Some("a desc, with comma"), Some("reference"), "2026-07-21");
+        let out = insert_atom_block(page, &marker, "The window already closed — mint a fresh token.");
+
+        let atoms = resolve_atoms_from_text(&out);
+        assert_eq!(atoms.len(), 1, "exactly one atom parsed back");
+        let a = &atoms[0];
+        assert_eq!(a.id, "ATOM-1234-5678", "id survives the round-trip");
+        assert_eq!(
+            a.keywords,
+            vec!["rate_limit".to_string(), "resume".to_string(), "429".to_string()],
+            "keywords survive the round-trip (phrase underscore-joined)"
+        );
+        assert_eq!(a.atom_type.as_deref(), Some("reference"));
+        assert_eq!(a.ocd.as_deref(), Some("2026-07-21"));
+        assert_eq!(a.desc.as_deref(), Some("a desc, with comma"), "quoted desc with a comma survives");
+        assert!(a.body.contains("mint a fresh token"), "body survives: {:?}", a.body);
+        // The atom landed BEFORE the notes section, so its body never swallowed the heading.
+        assert!(!a.body.contains("Notes and lessons learned"));
+    }
+
+    #[test]
+    fn insert_atom_block_appends_at_eof_when_no_notes_section() {
+        let page = "---\nname: p\ndescription: \"d\"\n---\n\n# p\nsome prose\n";
+        let out = insert_atom_block(page, "^ATOM-9999-0000 [keywords: kw, ocd: 2026-07-21, lmd: 2026-07-21]", "the fact");
+        assert!(out.ends_with("the fact\n"), "atom appended at EOF: {out:?}");
+        let atoms = resolve_atoms_from_text(&out);
+        assert_eq!(atoms.len(), 1);
+        assert_eq!(atoms[0].id, "ATOM-9999-0000");
+    }
+
+    #[test]
+    fn generate_unique_atom_id_avoids_a_planted_collision() {
+        // The uniqueness guard is real: a planted atom is FOUND by `atom_id_hits` (so the loop would
+        // reject that id), and a freshly generated id is BOTH absent from the corpus AND different
+        // from the plant. Live-walk path (no index) — the correctness fallback the generator relies on.
+        let dir = std::env::temp_dir().join(format!("memgrep_idgen_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let page = dir.join("p.md");
+        std::fs::write(
+            &page,
+            "---\nname: p\ndescription: \"d\"\n---\n^ATOM-1111-2222 [keywords: planted, ocd: 2026-07-21, lmd: 2026-07-21]\nbody\n",
+        )
+        .expect("write");
+
+        // The plant is discoverable, so a duplicate id could never slip past the guard.
+        assert_eq!(
+            atom_id_hits("ATOM-1111-2222", std::slice::from_ref(&dir), false).len(),
+            1,
+            "planted id is found by the uniqueness check"
+        );
+        let fresh = generate_unique_atom_id(std::slice::from_ref(&dir), false).expect("id generated");
+        assert!(
+            atom_id_hits(&fresh, std::slice::from_ref(&dir), false).is_empty(),
+            "the generated id `{fresh}` is absent from the corpus"
+        );
+        assert_ne!(
+            atom_id_canonical8(&fresh),
+            atom_id_canonical8("ATOM-1111-2222"),
+            "generated id differs from the plant"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn notes_section_line_is_fence_aware() {
+        let text = "# p\n```\n## Notes and lessons learned\n```\n## Notes and lessons learned\ndone\n";
+        // The first (fenced) heading is code, not the section; the real heading is line index 4.
+        assert_eq!(notes_section_line(text), Some(4));
+        assert_eq!(notes_section_line("# p\nno section here\n"), None);
+    }
+
+    #[test]
+    fn next_footnote_label_is_max_numeric_plus_one() {
+        assert_eq!(next_footnote_label("no footnotes here\n"), 1);
+        let text = "body [^2] and [^5]\n## Notes and lessons learned\n[^2]: a\n[^5]: b\n[^named]: skip\n";
+        assert_eq!(next_footnote_label(text), 6, "max(2,5)+1, non-numeric ignored");
+    }
+
+    #[test]
+    fn locate_atom_body_matching_finds_marker_and_last_body_line() {
+        let text = "---\nname: p\n---\n^ATOM-AAAA-BBBB [keywords: kw]\nfirst body line\nsecond body line\n\n## Notes and lessons learned\n[^1]: x\n";
+        let m = |id: &str| atom_id_matches(id, "ATOM-AAAA-BBBB");
+        let (marker, last) = locate_atom_body_matching(text, &m).expect("atom located");
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[marker].starts_with("^ATOM-AAAA-BBBB"), "marker line: {}", lines[marker]);
+        assert_eq!(lines[last], "second body line", "last non-blank body line, not the blank or heading");
+        // Canonical-8 spelling of the same id resolves too.
+        assert!(locate_atom_body_matching(text, &|id: &str| atom_id_matches(id, "AAAABBBB")).is_some());
+        // An unknown id yields nothing.
+        assert!(locate_atom_body_matching(text, &|id: &str| atom_id_matches(id, "ATOM-ZZZZ-9999")).is_none());
     }
 }

@@ -369,7 +369,8 @@ fn main() -> Result<()> {
 
     // Memory-helper subcommands dispatch before grep parsing. To grep for a literal "index" /
     // "reindex" / "validate" / "links" / "lint" / "fact" / "recall" / "find" / "overview" /
-    // "find-claude-mem-ref" / "atom" / "atom-page" as the first word, use `memgrep -e index …`.
+    // "find-claude-mem-ref" / "atom" / "atom-page" / "add-atom" / "new-page" / "add-lesson" as the
+    // first word, use `memgrep -e index …`.
     let raw: Vec<String> = std::env::args().collect();
     match raw.get(1).map(|s| s.as_str()) {
         Some("index") => return memory::cmd_index_cli(&raw[2..]),
@@ -384,6 +385,11 @@ fn main() -> Result<()> {
         Some("atom") => return memory::cmd_atom_cli(&raw[2..]),
         Some("atom-page") => return memory::cmd_atom_page_cli(&raw[2..]),
         Some("overview") => return memory::cmd_overview_cli(&raw[2..]),
+        // WRITE verbs (TRDD-R02HTRUD) — the parser's own crate SYNTHESISES the element so a
+        // malformed atom/page/lesson is impossible; content + keywords in, valid syntax out.
+        Some("add-atom") => return memory::cmd_add_atom_cli(&raw[2..]),
+        Some("new-page") => return memory::cmd_new_page_cli(&raw[2..]),
+        Some("add-lesson") => return memory::cmd_add_lesson_cli(&raw[2..]),
         _ => {}
     }
 
