@@ -302,23 +302,26 @@ def resolve_context(project_dir: str, session_id: str, transcript: str, window_d
 
 
 # F1 reload-churn guard (TRDD-Z582IKIR): default context-token threshold above which
-# `/reload-plugins` is deferred (dispatch.py) / blocked (the UserPromptSubmit hook).
-# `/reload-plugins` breaks the prompt-cache prefix, forcing a full cache-CREATE
-# (~1.25x) of the WHOLE context on the next turn instead of a cheap cache-read
-# (~0.1x) — on a large session that single reload is a ~500k+ weighted-token tax.
+# `/reload-plugins` is deferred by dispatch.py's `_phase_plugin_reload` (the janitor's
+# OWN auto-emitted `[janitor-reload]`). A human-typed `/reload-plugins` cannot be guarded
+# at all — it fires NO hook of any kind (measured; see the `claude-code-hook-types` memory,
+# `^no-plugin-reload-hook`). `/reload-plugins` breaks the prompt-cache prefix, forcing a
+# full cache-CREATE (~1.25x) of the WHOLE context on the next turn instead of a cheap
+# cache-read (~0.1x) — on a large session that single reload is a ~500k+ weighted-token tax.
 RELOAD_GUARD_DEFAULT_THRESHOLD = 350_000
 
 
 def reload_guard_should_block(tokens: Optional[int], threshold: int) -> bool:
-    """True iff a `/reload-plugins` should be deferred/blocked right now.
+    """True iff the janitor's auto-emitted `[janitor-reload]` should be DEFERRED now.
 
-    Pure predicate shared by dispatch.py's `_phase_plugin_reload` (defer emitting the
-    `[janitor-reload]` marker) and `on-prompt-submit-reload-guard.py` (block the typed
-    `/reload-plugins` command itself) — ONE constant + ONE predicate so the two gates,
-    which independently read the same live context, can never disagree about the trip
-    point. Disagreement would either re-trigger the self-injected reload every fire only
-    to have it blocked (a wasted loop) or silently defer forever while the hook would
-    have allowed it (a stuck block) — sharing this function makes both impossible.
+    Pure predicate used by dispatch.py's `_phase_plugin_reload` to defer emitting the
+    `[janitor-reload]` marker while the context is large (so the janitor does not nudge a
+    costly reload at high context; the deferral resolves once the context shrinks). It was
+    ALSO meant to back a UserPromptSubmit `reload-guard` hook that blocked a human-typed
+    `/reload-plugins`, but that hook was REMOVED (TRDD-Z582IKIR follow-up): a built-in
+    `/reload-plugins` fires no hook, so it can never be intercepted — the auto-defer is the
+    only place the churn is actually prevented. (The function name is kept to avoid churning
+    the dispatch call site + tests; it now governs only the deferral.)
 
     FAILS OPEN (returns False = allow the reload) whenever the context size is unknown
     (`tokens` is not an int — a read error, a fresh session with no transcript yet, a

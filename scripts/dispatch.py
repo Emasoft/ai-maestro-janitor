@@ -1182,14 +1182,15 @@ def _phase_plugin_reload() -> None:
     Below the configured token threshold this phase is UNCHANGED. At/above it, DEFER:
     do NOT print the marker and do NOT advance the ack, so the deferred generation is
     re-checked (and, once the context shrinks — a compaction, `/clear`, a rate-limit
-    resume — reloaded) on a LATER fire rather than forced now. This intentionally does
-    NOT force-through after N deferred fires: the actual `/reload-plugins` command is
-    independently gated by `on-prompt-submit-reload-guard.py` using the SAME shared
-    predicate (`token_meter.reload_guard_should_block`), so a forced emission here
-    would just be typed into the pane and immediately blocked there — a wasted
-    self-trigger-then-block round trip on every subsequent fire, i.e. exactly the loop
-    this guard exists to prevent. Deferring here (rather than there) is what stops the
-    self-trigger from firing at all while the block would apply.
+    resume — reloaded) on a LATER fire rather than forced now. Deferring the janitor's
+    OWN auto-emitted `[janitor-reload]` here is the ONLY place the churn can be
+    prevented: a built-in `/reload-plugins` fires NO hook of any kind (MEASURED — see
+    the `claude-code-hook-types` memory, `^no-plugin-reload-hook`: an explicit
+    `/reload-plugins` emitted zero hook events of any kind), so NO hook can intercept a
+    human-typed reload. The earlier UserPromptSubmit "reload-guard" hook was therefore a
+    no-op (it could never fire on `/reload-plugins`) and was removed on that finding
+    (TRDD-Z582IKIR follow-up). This deferral intentionally never force-throughs: the
+    context shrinks on its own and the reload lands cheaply then.
     """
     gen = gs.reload_generation()
     if gen <= 0:
