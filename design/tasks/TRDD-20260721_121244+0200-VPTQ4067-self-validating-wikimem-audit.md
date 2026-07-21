@@ -1,20 +1,26 @@
 ---
 trdd-id: VPTQ4067
 title: self-validating wikimem audit — extend memgrep lint, add a pre-write gate, wire a detector
-column: todo
+column: testing
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T12:12:44+0200
+updated: 2026-07-21T13:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
-implementation-commits: []
+implementation-commits: [2077d2d]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
 
-**NEXT ACTION:** extend memgrep's EXISTING content linter `cmd_lint_cli` (memory.rs:1948 — already
-checks footnotes/link-law/frontmatter) with the missing checks, then (a) expose it as the pre-write
-gate the [[TRDD-R02HTRUD]] verbs call, and (b) WIRE a `wikimem-syntax` heartbeat detector.
+**SHIPPED (2077d2d, 2026-07-21) — the immediate self-validation is LIVE.** `wikimem_syntax_lint.py`
+gained corpus-wide `find_duplicate_atom_ids` (it caught 4 real cross-scope dup pages), and a new
+`scripts/detectors/wikimem-syntax.py` is WIRED into the dispatch roster (1h, CRITICAL-only, per-set
+dedupe, READ-ONLY, fail-open). 17 tests green. The heartbeat now surfaces a malformed memory page.
+
+**REMAINING (A1-dependent follow-up):** fold the Python linter's rules into memgrep's own `lint`
+(Rust, `cmd_lint_cli` memory.rs:1948) so the write verbs and the audit share ONE authority, and
+expose it as the pre-write gate the [[TRDD-R02HTRUD]] verbs call (refuse-malformed-by-construction).
+Do this once R02HTRUD lands. Until then the Python detector is the authority.
 
 **LOAD-BEARING FACTS:**
 - `scripts/wikimem_syntax_lint.py` was BUILT this session (ruff-clean, self-tested: caught 3/3
