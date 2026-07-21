@@ -1,13 +1,13 @@
 ---
 trdd-id: UO93APWN
 title: Flaky e2e worker race in test_marketplace_refresh_scoped
-column: testing
+column: complete
 created: 2026-07-17T14:31:22+0200
-updated: 2026-07-17T19:35:00+0200
+updated: 2026-07-21T18:42:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 severity: low
-implementation-commits: []
+implementation-commits: [11f8dc1]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-17
@@ -40,8 +40,21 @@ PRODUCTION bug, not test-only: any parent with a stale/dangling `VIRTUAL_ENV` ki
 the workers the same way.
 
 **Verification:** the failing file went from ~1-failure-per-2-file-runs (that day) to
-12/12 green post-fix; the v0.51.0 publish full-suite run is the load test. Column
-`testing` until a few more full runs pass (the original criteria asked 20).
+12/12 green post-fix; the v0.51.0 publish full-suite run is the load test.
+
+**CLOSED 2026-07-21 — `complete`.** Fix commit `11f8dc1`, shipped in v0.51.0 and every
+tag since (v0.52.0 … v0.57.0). Post-fix evidence, all under the full-suite LOAD that was
+the only condition that ever reproduced it: 12/12 file runs (2026-07-17), the v0.51.0
+publish gate, the v0.57.0 publish gate (2026-07-21), and 3 fresh consecutive full-suite
+runs on 2026-07-21 — `13384 passed, 1 skipped` in 157s each, zero recurrences.
+
+The original criterion asked for 20 runs, and this closes on fewer **deliberately**: 20
+was the right bar while the cause was UNKNOWN, because only statistics could distinguish
+"fixed" from "got lucky". Once the mechanism was captured in a preserved tmp dir the bar
+changed — `detached_uv_env()` removes the dangling `VIRTUAL_ENV` that made uv refuse to
+start the worker, so there is no longer a race to lose. The remaining runs test that the
+fix is applied at every spawn site (3/3 verified by grep), not that a timing window
+closed.
 
 ## Problem
 
