@@ -3,19 +3,23 @@ trdd-id: Z582IKIR
 title: Heartbeat continuity + burn reduction — reload-churn guard, giant-session pump-down, rotation-masks-burn escalation, cheap handoff+clear primitive
 column: backburner
 created: 2026-07-21T10:24:55+0200
-updated: 2026-07-21T10:24:55+0200
+updated: 2026-07-21T12:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
 severity: high
 relevant-rules: [6.1]
 related-trdd: [3KDN6O9Z, X92VBFNF, FENWWB4E, TKNSTP82, EUWIHP0G, D3PROACT]
+implementation-commits: [224da88, c3bde7d]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
 
-**DESIGN-ONLY. Nothing implemented. Do not code from this without a follow-up
-approval to move it out of `backburner`.**
+**PARTIALLY IMPLEMENTED (2026-07-21).** P1 (handoff+/clear primitive) shipped in `224da88`;
+F1 (reload-churn guard — block `/reload-plugins` above a context threshold) shipped in `c3bde7d`
+(now the standalone [[TRDD-GRHP2YHP]] resume-push fix is a sibling of the same continuity work).
+F0 (beacon age-trigger), F2 (giant-session pump-down), F3 (rotation-masks-burn escalation) remain
+DESIGN-ONLY — do not code those without a follow-up approval to move them out of `backburner`.
 
 **INCIDENT that motivates this TRDD:** a ~400k-token main session, kept alive
 by the janitor's 15-min heartbeat, burned all 3 of the owner's Claude accounts
