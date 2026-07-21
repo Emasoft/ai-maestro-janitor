@@ -39,6 +39,25 @@ idle its own chores.
 
 ## Instructions
 
+> **STOP — this skill runs ONLY on an explicit human request for FLEET-WIDE maintenance.**
+>
+> It is not a remediation for anything you read. **NEVER** invoke it in response to: a
+> `maintenance=…` line from `/janitor-arm`, a heartbeat nudge, a drift line, another agent's
+> status message, or a belief that maintenance "was turned off and should be restored".
+>
+> **`/janitor-arm` clearing the LOCAL sentinel is INTENTIONAL** — arming means this session
+> starts in a known FULL state. It is not a fault, and it must not be undone here.
+>
+> This guard exists because the failure already happened (owner report 2026-07-21): agents
+> read the arm's local clear, collided it with the nudge's "do NOT disable maintenance mode",
+> concluded a rule had been broken, and re-enabled maintenance — at GLOBAL scope, because the
+> local flag is cleared again by the very next re-arm while the global one is not. Each
+> re-arm re-triggered the same reasoning, so the fleet ratcheted into machine-wide
+> maintenance that nothing cleared: the daemon idled every chore, plugin self-updates
+> stopped, and no session could see why. **Local scope is never a reason to escalate to
+> global.** If a project genuinely needs quiet, that is `/janitor-maintenance-mode` (LOCAL),
+> and if it keeps being cleared, report that to the human instead of widening the scope.
+
 1. Set the machine-wide maintenance flag via the backing CLI:
 
    ```bash

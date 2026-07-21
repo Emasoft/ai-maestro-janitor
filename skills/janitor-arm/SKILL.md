@@ -40,12 +40,24 @@ maintenance=off            # global-on ⇒ fleet-wide maintenance is suppressing
   `CronList` and `CronDelete` **every** job whose prompt starts with `[janitor-heartbeat]`. This
   costs one extra call and is how a crashed arm heals: it can never leave two heartbeats firing.
 - **`sweep=no`** → skip `CronList` entirely. Go straight to step 2.
-- **`maintenance=global-on`** → fleet-wide maintenance is set, so even a freshly armed heartbeat
-  will fire cache-refresh-only (no chores, no daemon). Arming does NOT clear it — a project arm
-  must not undo a machine-wide decision, and `/janitor-arm` re-runs on every SessionStart, so
-  clearing it here would mean merely opening a session lifts fleet maintenance. **Say so in your
-  step-5 report** so the human knows why chores stay quiet; `/janitor-maintenance-mode off global`
-  is the lever. (`maintenance=off` needs no mention.)
+- **`maintenance=global-on`** (printed ONLY when fleet-wide maintenance is set; its absence
+  means nothing is suppressing this host) → even a freshly armed heartbeat will fire
+  cache-refresh-only (no chores, no daemon). Arming does NOT clear it — a project arm must not
+  undo a machine-wide decision, and `/janitor-arm` re-runs on every SessionStart, so clearing
+  it here would mean merely opening a session lifts fleet maintenance. **Say so in your step-5
+  report** so the human knows why chores stay quiet; `/janitor-global-maintenance-off` is the
+  lever.
+
+> **The arm clears this project's LOCAL maintenance sentinel, and that is INTENTIONAL** —
+> arming means the session starts in a known FULL state. **Do NOT re-enable maintenance in
+> response**, at either scope, and never treat it as a fault to repair. Owner report
+> 2026-07-21: agents collided this clear with the heartbeat nudge's "do NOT disable
+> maintenance mode", concluded a rule had been violated, and restored maintenance at GLOBAL
+> scope — where the next re-arm could not clear it. Every re-arm re-ran the same reasoning,
+> so the fleet ratcheted into machine-wide maintenance nothing lifted: chores idled, plugin
+> self-updates stopped, and no session could see the cause. If a project needs to stay quiet,
+> that is a human's `/janitor-maintenance-mode` call, and if it keeps being cleared, report it
+> rather than widening the scope.
 
 ## 2. Delete the old cron
 

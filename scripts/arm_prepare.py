@@ -193,7 +193,15 @@ def main() -> int:
     print(f"cron={cron}")
     print(f"prior-cron-id={prior}")
     print(f"sweep={'no' if prior else 'yes'}")
-    print(f"maintenance={'global-on' if gs.maintenance_mode_present() else 'off'}")
+    # Report the GLOBAL flag only when it is SET. Printing `maintenance=off` on every arm
+    # was actively harmful (owner report 2026-07-21): agents read it as "the arm just
+    # disabled maintenance", collided it with the heartbeat nudge's "do NOT disable
+    # maintenance mode", concluded a rule had been broken, and RE-ENABLED it — globally,
+    # because the local sentinel gets cleared again by the very next re-arm while the
+    # global flag does not. One ordinary status line drove a fleet-wide escalation loop.
+    # Silence is the correct signal for "nothing is suppressing this host".
+    if gs.maintenance_mode_present():
+        print("maintenance=global-on")
     return 0
 
 

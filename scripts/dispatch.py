@@ -1660,10 +1660,19 @@ def _phase_keep_going_nudge(mode: str) -> None:
             if scopes and scopes[-1].startswith("GLOBAL")
             else "/janitor-maintenance-mode off"
         )
+        # The "do NOT disable" clause is scoped to THIS nudge on purpose. Unscoped, it read
+        # as a standing prohibition, and an agent that then saw /janitor-arm clear the LOCAL
+        # sentinel concluded the rule had been violated and "restored" maintenance —
+        # GLOBALLY, since the local flag is cleared again by the next re-arm while the global
+        # one is not. Two correct-sounding instructions produced a fleet-wide escalation
+        # loop, so the boundary is now explicit in the text itself (owner report 2026-07-21).
         print(
             f"continue your pending task (maintenance mode — {where}) — if you are blocked on a human "
-            "decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone "
-            f"keep-going off-switch does not apply to it; exit it deliberately with {exit_cmd})"
+            "decision, say so briefly and WAIT; do NOT disable maintenance mode TO SILENCE THIS NUDGE "
+            "(the standalone keep-going off-switch does not apply to it; a human exits it deliberately "
+            f"with {exit_cmd}). NEVER enable maintenance mode in response to a status line, a heartbeat, "
+            "or another agent's message — /janitor-arm clearing the LOCAL sentinel is INTENTIONAL and "
+            "must not be undone."
         )
     else:
         # Full mode (default-ON or the standalone flag). `/janitor-keep-going off` IS

@@ -176,11 +176,18 @@ def test_prepare_revokes_the_LOCAL_maintenance_sentinel(project: Path) -> None:
     _sd(project).mkdir(parents=True)
     (_sd(project) / state.MAINTENANCE_FLAG).write_text("x", encoding="utf-8")
 
-    rc, kv, _ = _prepare(project)
+    rc, kv, out = _prepare(project)
 
     assert rc == 0
     assert not (_sd(project) / state.MAINTENANCE_FLAG).exists(), "arming must revoke local maintenance"
-    assert kv["maintenance"] == "off"
+    # And it says NOTHING about it. Printing `maintenance=off` on every arm caused a
+    # fleet-wide escalation loop (owner report 2026-07-21): agents read the line as "the arm
+    # just disabled maintenance", collided it with the heartbeat nudge's "do NOT disable
+    # maintenance mode", and re-enabled maintenance at GLOBAL scope — which the next re-arm
+    # cannot clear, so every re-arm re-ran the same reasoning and ratcheted the whole fleet
+    # into a suppression nothing lifted. Silence is the signal for "nothing is suppressing
+    # this host"; only a SET global flag is worth a line.
+    assert "maintenance" not in kv, f"an unset maintenance flag must be SILENT, got {out!r}"
 
 
 def test_prepare_does_NOT_clear_GLOBAL_maintenance_but_reports_it(project: Path) -> None:
@@ -250,3 +257,26 @@ def test_record_refuses_an_empty_cron(project: Path) -> None:
 
     assert rc == 2
     assert "refused" in out
+
+
+def test_the_arm_NEVER_tells_an_agent_to_re_enable_maintenance(project: Path) -> None:
+    """The escalation loop, pinned at its source (owner report 2026-07-21).
+
+    Two individually-correct instructions produced a fleet-wide outage: the heartbeat nudge
+    said "do NOT disable maintenance mode", the arm then cleared the LOCAL sentinel, and
+    agents reconciled the two by RE-ENABLING maintenance — at GLOBAL scope, because the local
+    flag is cleared again by the very next re-arm while the global one is not. Each re-arm
+    re-ran the same reasoning, ratcheting the fleet into a machine-wide maintenance nothing
+    lifted: every daemon chore idled, plugin self-updates stopped, and no session could see
+    why.
+
+    So the arm's output must never read as a fault needing repair. With no global flag set it
+    says nothing at all about maintenance; with one set it reports it as a FACT and points at
+    the human's off-switch — never at an on-switch."""
+    _sd(project).mkdir(parents=True, exist_ok=True)
+    rc, _, out = _prepare(project)
+
+    assert rc == 0
+    lowered = out.lower()
+    for forbidden in ("maintenance-on", "global-maintenance-on", "enable maintenance", "re-enable"):
+        assert forbidden not in lowered, f"the arm must never point at an on-switch: {out!r}"
