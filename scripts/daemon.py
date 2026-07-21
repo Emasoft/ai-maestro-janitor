@@ -2016,6 +2016,25 @@ def main() -> int:
                 exit_reason = "kill-switch"
                 break
 
+            # ONE DAEMON PER HOST (TRDD-5ZVS1DDP, ARCHITECTURE §7.2; owner 2026-07-21:
+            # "only one daemon can exist at the same time in the host ... otherwise they
+            # will conflict and write at the same time in the same files, corrupting
+            # them"). A FRESH ai-maestro server-liveness file means a server owns this
+            # host, so we get out of its way ENTIRELY — not the rev-4 per-chore yield,
+            # which left us running and contending on the same state.
+            #
+            # Checked SECOND, right after the kill-switch: a deliberate human stop still
+            # outranks it, but this must precede maintenance/pause so we never sit
+            # "idling" alongside a live server — idling still holds the singleton flock
+            # and keeps the OS keepalive armed, which is exactly the two-owner condition.
+            #
+            # Detection is by FILE only. The server is "wherever the user installs
+            # ai-maestro" and runs under pm2, so we can neither locate nor stop it; the
+            # liveness file is the whole handshake.
+            if harness_backend.server_is_alive():
+                exit_reason = "server-owns-host"
+                break
+
             # A global MAINTENANCE (TRDD-FPL60EKV) idles the daemon's expensive task
             # workloads WITHOUT tearing it down and — unlike pause/disarm — WITHOUT stopping
             # any session: the sessions are meant to KEEP firing cheap (cache-refresh-only) to
@@ -2123,11 +2142,19 @@ def main() -> int:
                     break
                 time.sleep(1)
     finally:
-        if exit_reason == "kill-switch":
-            # A machine-wide kill-switch (e.g. /janitor-global-disarm) is a deliberate stop —
-            # remove the OS keepalive so launchd/systemd does not immediately resurrect us
-            # (KeepAlive would otherwise fight the user's explicit disarm). NOT done on a
-            # plain signal/self-update exit, where a respawn is exactly what we want.
+        if exit_reason in ("kill-switch", "server-owns-host"):
+            # Both are DELIBERATE stops, so the OS keepalive must go — launchd
+            # `KeepAlive: true` / `ThrottleInterval: 30` and systemd `Restart=always`
+            # would otherwise relaunch us within 30 s, forever. For the kill-switch that
+            # fights the user's explicit disarm; for server-owns-host it would produce a
+            # permanent spawn→exit thrash AGAINST a live server, i.e. the two-owner
+            # condition §7.2 exists to prevent, plus a log full of 30-second restarts.
+            #
+            # Dropping the keepalive is safe because it is NOT our resurrection path: the
+            # per-session heartbeat calls `ensure_daemon_running()` every fire, so once
+            # the server's liveness goes stale (≤90 s) the next heartbeat spawns a fresh
+            # daemon, which re-installs the keepalive on startup. NOT done on a plain
+            # signal/self-update exit, where an immediate respawn is exactly what we want.
             _uninstall_os_keepalive()
         state.log_line("daemon", f"stopping ({exit_reason})")
         gs.remove_daemon_pid()

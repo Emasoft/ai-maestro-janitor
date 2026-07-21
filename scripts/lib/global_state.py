@@ -1647,6 +1647,29 @@ def _kill_wedged_daemon(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bo
     return gone
 
 
+def _server_owns_host() -> bool:
+    """True iff a live ai-maestro server owns this host (ARCHITECTURE §7.2).
+
+    Imported LAZILY on purpose. `harness_backend` is a sibling in this same lib dir and
+    today imports only `state`, but a module-level import here would make `global_state`
+    — which nearly everything imports — depend on it, and any future `harness_backend`
+    need for global state would become an import cycle that fails at startup rather than
+    somewhere testable. The call is a single stat of a small JSON file, so the lazy
+    import costs nothing on the hot path.
+
+    FAIL-OPEN: if the probe cannot be imported or raises, we report "no server", which
+    keeps the janitor daemon running. That is the safe default — the janitor covering a
+    host the server also covers is wasteful and guarded by file locks, whereas a host
+    with NO daemon because a probe threw is unguarded.
+    """
+    try:
+        import harness_backend  # noqa: PLC0415  -- see docstring
+
+        return harness_backend.server_is_alive()
+    except Exception:
+        return False
+
+
 def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> bool:
     """If the daemon is dead AND not kill-switched AND enabled, spawn it.
 
@@ -1684,6 +1707,20 @@ def ensure_daemon_running(max_silence_s: int = DEFAULT_DAEMON_STALE_SECONDS) -> 
         # at once. Same discriminator harness_backend.is_harness_session wraps.
         return False
     if kill_switch_present():
+        return False
+    if _server_owns_host():
+        # ONE DAEMON PER HOST (TRDD-5ZVS1DDP, ARCHITECTURE §7.2). A live ai-maestro
+        # server owns this host, so no session may spawn the standalone daemon —
+        # otherwise the daemon that just exited for exactly this reason would be
+        # resurrected by the very next heartbeat fire, and the two-owner condition
+        # (concurrent writers on one state dir, chores run twice) would reappear
+        # within seconds. Gated at the SAME choke point as the #J thin-mode guard
+        # above so every caller is covered once.
+        #
+        # Returning BEFORE the crash-loop breaker is deliberate: this is a normal,
+        # expected refusal, not evidence the daemon is failing to start. Counting it
+        # would trip the breaker during a server's lifetime and then suppress the
+        # legitimate spawn after the server stops.
         return False
     if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED", True):
         return False
