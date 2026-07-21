@@ -23,8 +23,8 @@ threshold) was a CONFIRMED NO-OP: a built-in `/reload-plugins` fires ZERO hook e
 PROSE only, and `/reload-plugins` is a CLI action that never expands into a prompt, so
 UserPromptExpansion doesn't apply either). The premise was refuted in the corpus the SAME DAY the
 guard shipped — a recall-before-building miss. **What SURVIVES from F1** = the dispatch auto-defer
-(`_phase_plugin_reload` defers the janitor's OWN `[janitor-reload]` at high context — needs no hook)
-+ the shared `reload_guard_should_block` predicate/threshold. A human-typed `/reload-plugins` is
+(`_phase_plugin_reload` defers the janitor's OWN `[janitor-reload]` at high context — needs no hook) +
+the shared `reload_guard_should_block` predicate/threshold. A human-typed `/reload-plugins` is
 simply NOT guardable (no hook sees it); the auto-defer is the only place the churn is prevented.
 **AGENT-side guard added (`28c1777`):** F1's INTENT — don't reload at high context — was moved to
 where the agent actually sees it. A skill's DESCRIPTION is always surfaced to the agent's context
@@ -238,8 +238,8 @@ session with un-harvested material state.
    session, a pending question for the user); (c) nothing else. Target: a
    few hundred bytes to low KB, not the tens-of-KB a compaction summary runs.
 3. Sequencing is `/janitor-write-handoff` → verify it landed → `/clear` →
-   the R1-verified re-arm nudge brings the cron back → the TRDD-STATE hook
-   + the handoff pointer bring the fresh session up to speed on its FIRST
+   the R1-verified re-arm nudge brings the cron back → the TRDD-STATE hook +
+   the handoff pointer bring the fresh session up to speed on its FIRST
    turn, cheaply.
 4. Secondary finding from R1 (see the verification report): `reload-acked.ts`
    / `skills-reload-acked.ts` are seeded only on `source in (startup,

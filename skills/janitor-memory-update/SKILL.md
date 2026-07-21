@@ -10,19 +10,19 @@ description: UPDATE — modify an existing memory WIKI page when something chang
 > the superseded statement to a dated `[^N]` lesson with its WHY). For COMPLEX re-editing —
 > merging same-subject pages, splitting oversized pages, resolving cross-page contradictions,
 > repairing page shape/metadata, deduplicating, redirecting `[[links]]`, harvesting stray
-> artifacts, or any multi-page reorganization — DO NOT do it yourself: the janitor's
-> **`janitor-memory-subconscious-agent`** (launched async in the background by the heartbeat)
-> owns ALL of it. Noticed such work is needed? Note it and move on; the `memory-maintenance`
-> scheduler dispatches the subconscious agent.
+> artifacts, or any multi-page reorganization — DO NOT do it yourself: the
+> **`janitor-memory-subconscious-agent`** (async, background, launched by the heartbeat)
+> owns ALL of it. Noticed such work is needed? Note it and move on — the `memory-maintenance`
+> scheduler dispatches that agent.
 
 ## Overview
 
 UPDATE is the MODIFY leg of the memory wiki — distinct from MEMORIZE (create a
 page) and RECALL (find one). It edits an existing wikimem page while keeping the
-wiki *consistent*: the See-also context web, the hub→parts map, and the
-lessons-learned trail all stay true after the change. Read [the wikimem
-model](../janitor-memory-write/references/wikimem-model.md) for tiers, See-also,
-and the expand/reduce shapes (own table of contents at its top).
+wiki *consistent*: the See-also web, the hub→parts map, and the lessons trail all
+stay true after the change. Read [the wikimem
+model](../janitor-memory-write/references/wikimem-model.md) once for tiers,
+See-also, and the expand/reduce shapes (own TOC at its top).
 
 Three kinds of update, below. Always: **find the page first**, then bump `lmd:`
 to today on any edit.
@@ -34,9 +34,8 @@ This is the MAINTAIN leg of THE PROACTIVE-USE CONTRACT (full text in
 flips, or a discovery contradicts a memory — **update the owning page as part of
 finishing the work, without being asked**, applying the non-destructive
 correction protocol (§2). Proactively keep each project's **PROJECT-scope**
-pages current as you touch the code — the architecture hub, key-solution
-component pages, the publish/deploy pipeline — so the knowledge stays git-tracked
-and shared with every dev rather than going stale.
+pages current as you touch the code — architecture hub, key-solution components,
+publish/deploy pipeline — so knowledge stays git-tracked and shared, not stale.
 
 ## THE UPDATE INVARIANT — a superseded memory is NEVER deleted; it becomes a lesson
 
@@ -45,10 +44,9 @@ Governs EVERY update, not just explicit corrections. Whenever an edit
 changed value, an abandoned approach — the old memory is never silently
 overwritten: the body is cleaned to the current truth, and the superseded
 statement is DEMOTED to a dated `[^N]` lesson carrying the WHY (mechanics in
-§2). This is RULE 0 + the Bug-Autopsy directive applied to memory — the fact
-moves forward clean, the history persists as a guardrail so the next session
-can't repeat the old mistake. §1 and §3 below MUST apply this same invariant
-whenever they replace prior content.
+§2). RULE 0 + the Bug-Autopsy directive applied to memory — the fact moves
+forward clean, the history persists as a guardrail against repeating the old
+mistake. §1 and §3 below MUST apply this same invariant when replacing content.
 
 ## 0. Find the page
 
@@ -112,19 +110,17 @@ guardrail):
 
 1. **Clean the fact in place.** Replace the wrong statement in the body with the
    correct one. The body is always the current truth — no "we used to think X"
-   clutter inline. (No memgrep verb rewrites a fact in place, renames a page, or
-   reshapes one yet — those supersede/rename/reshape verbs are future work,
-   TRDD-R02HTRUD follow-up; until they land, do the in-place clean here with the
-   Edit tool, and hand the heavier reshapes of §3 to the
-   `janitor-memory-subconscious-agent`.)
+   clutter inline. (No memgrep verb yet rewrites a fact in place, renames, or
+   reshapes a page — those verbs are future work, TRDD-R02HTRUD follow-up; until
+   they land, do the in-place clean with the Edit tool, and hand the heavier
+   reshapes of §3 to the `janitor-memory-subconscious-agent`.)
 2. **Demote the error to a dated lesson — the WHY is the point.** Add it with
    `memgrep add-lesson --page <page> --atom <atom-id> --keywords "<recall phrase>"`
    (the DO-NOT/BECAUSE/DO text on stdin) — the tool files the numbered entry under
-   `## Notes and lessons
-   learned`, anchors the corrected fact's atom to it with a `[^N]` footnote, and
-   guarantees the `[^N]: […]` grammar; you never hand-write it. The load-bearing
-   content is *why the previous statement was wrong / why the plan failed* — the
-   root cause. A lesson without a WHY cannot stop the next repeat.
+   `## Notes and lessons learned`, anchors the corrected fact's atom to it with a
+   `[^N]` footnote, and guarantees the grammar; you never hand-write it. The
+   load-bearing content is *why the previous statement was wrong* — the root
+   cause. A lesson without a WHY cannot stop the next repeat.
 
 ### THE LESSON FORM — mandatory metadata, then one terse shape
 
@@ -156,11 +152,8 @@ The widget retries 3× then fails.[^3] Tune via the `max_retries` config key.
   constant from the source instead.
 ```
 
-Lessons are first-class: a leading `[ocd:… lmd:…]` prefix carries the lesson's
-own dates (they survive the librarian later moving the lesson between pages, so
-they — not file mtime — are the authoritative age). memgrep strips the prefix in
-the default render and restores it under `--full-notes`; `--since/--until` read
-these dates. All of a subject's lessons thus collect in its own page, recallable
+memgrep strips the `[ocd:… lmd:…]` prefix in the default render and restores it
+under `--full-notes`. A subject's lessons collect in its own page, recallable
 with `memgrep find "<symptom>" "${ROOTS[@]}" --only-notes`.
 
 ## 3. RESHAPE — the page outgrew its tier (keep the pyramid honest)
@@ -189,14 +182,12 @@ move + relink, NOT a silent copy):
   ONLY after it is committed (RULE 0). Prefer handing large merges to the janitor
   librarian, which deduplicates corpus-wide.
 - **RENAME (inbound links FIRST):** renaming a page breaks EVERY inbound
-  `[[link]]` at once (simulation-verified: one component rename = one broken
-  link per governor + the hub). Order matters:
-  1. list who points at it: `memgrep links --from <old-name> <memdir>`;
-  2. repoint every inbound `[[old-name]]` → `[[new-name]]` on those pages;
-  3. rename the file AND its frontmatter `name:` (they must stay equal), then
-     `memgrep reindex <memdir>` (do NOT touch `MEMORY.md` — the index is memgrep's);
-  4. re-audit: `memgrep links --broken <memdir>` must show nothing new.
-  Never rename by just moving the file — that strands the whole inbound web.
+  `[[link]]` at once. Order: (1) list who points at it —
+  `memgrep links --from <old-name> <memdir>`; (2) repoint every inbound
+  `[[old-name]]` → `[[new-name]]` on those pages; (3) rename the file AND its
+  frontmatter `name:` (must stay equal), then `memgrep reindex <memdir>` (do NOT
+  touch `MEMORY.md`); (4) re-audit — `memgrep links --broken <memdir>` must show
+  nothing new. Never rename by just moving the file — that strands the inbound web.
 
 After any reshape: fix See-also on BOTH endpoints, update the hub's parts map,
 bump `lmd:` on every touched page, and re-run `memgrep links --broken` to confirm
@@ -232,20 +223,9 @@ non-destructive (fact cleaned, error demoted to a lesson) — never delete the W
 Each reference file below opens with its own table of contents.
 
 - [../janitor-memory-write/references/wikimem-model.md](../janitor-memory-write/references/wikimem-model.md)
-  — the wiki data model (tiers, expand/reduce, See-also, memgrep map).
-  - A wiki, not a pile — and collaborative like Wikipedia
-  - The editorial decision flow (run this on any change worth remembering)
-  - EXPAND and REDUCE — radiating suns vs receiving terminals
-  - The three tiers (a page's role in the pyramid)
-  - The edge model — EVERY link is bidirectional (the link law)
-  - Page anatomy
-  - Atoms — first-class body elements (block-properties)
+  > A wiki, not a pile — and collaborative like Wikipedia · The editorial decision flow (run this on any change worth remembering) · EXPAND and REDUCE — radiating suns vs receiving terminals · The three tiers (a page's role in the pyramid) · The edge model — EVERY link is bidirectional (the link law) · Page anatomy · Atoms — first-class body elements (block-properties)
 - [../janitor-memory-write/references/subject-routing.md](../janitor-memory-write/references/subject-routing.md)
-  — the CASE-fact vs METHODOLOGY-lesson decision (step 0), shared with `/janitor-memory-write`.
-  - The decision
-  - Why it matters — off-topic pollution
-  - Splitting an incident that yields both
-  - Cleaning up an existing violation
+  > The decision · Why it matters — off-topic pollution · Splitting an incident that yields both · Cleaning up an existing violation
 - `~/.claude/rules/markdown-memory-recall.md` — the recall law + lessons-learned
   conventions + dual-test method.
 - `/janitor-memory-write` — MEMORIZE (create a page); the shape rules for the new

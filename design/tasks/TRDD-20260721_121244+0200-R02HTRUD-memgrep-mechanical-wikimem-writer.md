@@ -80,8 +80,8 @@ syntax gate + audit is [[TRDD-VPTQ4067]]. Risky EDIT/SUPERSEDE/MIGRATE ops stay 
 
 ## Verification
 
-`cargo test` in `scripts/memgrep`; a shell round-trip (add-atom to a temp page → `wikimem_syntax_lint`
-+ `memgrep lint` both clean → `recall` finds it). Full `uv run pytest` + `ruff check` green for any
+`cargo test` in `scripts/memgrep`; a shell round-trip (add-atom to a temp page → `wikimem_syntax_lint` +
+`memgrep lint` both clean → `recall` finds it). Full `uv run pytest` + `ruff check` green for any
 Python touched. Commit, do not push, unless asked.
 
 ## Notes and lessons learned

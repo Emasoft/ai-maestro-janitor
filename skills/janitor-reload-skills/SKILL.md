@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-skills
-description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect without the human typing it. /reload-plugins reloads ONLY plugin-bundled skills, so standalone ones (added at any scope) need /reload-skills. Invoke on a [janitor-reload-skills] heartbeat marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. Types /reload-skills at this session's own pane (iTerm/tmux); SOFT by default (no ESC — enqueues, runs after the current turn ends); --hard presses ESC first. ⚠ Do NOT reload at high context (≥350k tokens used) — a reload breaks the prompt cache, so the WHOLE context is re-cached at full price on the next turn; shrink context first with /janitor-handoff-and-clear (or /janitor-compact-context) and reload after. Trigger with /janitor-reload-skills [--hard], or by asking to reload skills now.
+description: Run /reload-skills for this session so freshly installed STANDALONE (non-plugin) skills/commands take effect — /reload-plugins reloads ONLY plugin-bundled ones. Invoke on a [janitor-reload-skills] marker (from /janitor-global-reload-skills), or when a standalone skill changed on disk. SOFT by default (enqueues after the turn); --hard presses ESC first. ⚠ Do NOT reload at ≥350k context used — it breaks the prompt cache and re-bills the whole window next turn; shrink first via /janitor-handoff-and-clear, then reload. Trigger with /janitor-reload-skills [--hard].
 ---
 
 # Janitor reload-skills

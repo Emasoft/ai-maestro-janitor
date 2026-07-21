@@ -126,67 +126,18 @@ up to it instead (this is what keeps the pyramid from exploding). Honor
 
 **Never hand-write a wikimem `.md` again.** memgrep OWNS the syntax — the
 frontmatter, the `^id [keywords: …]` atom markers, and the `[^N]: […]` lesson
-grammar are all synthesised by the write verbs, so a mistyped block-property, a
-missing `ocd:`, or a malformed footnote is now impossible. Do NOT open the page
-with the Write/Edit tool and do NOT type `^id [...]` or `[^N]: [...]` yourself; the
-tool mints the id, the dates, and the canonical shape. The GRAMMAR is the tool's
-job — your job is the JUDGMENT (which fact, which keywords, which desc).
+grammar are all synthesised by the write verbs (`new-page`, `add-atom`,
+`add-lesson`), so a mistyped block-property, a missing `ocd:`, or a malformed
+footnote is now impossible. Do NOT open the page with the Write/Edit tool and do
+NOT type `^id [...]` or `[^N]: [...]` yourself. The GRAMMAR is the tool's job —
+your job is the JUDGMENT (which fact, which keywords, which desc; `--keywords` is
+always the SYMPTOM/recall surface, never the answer's jargon; `--desc` is a
+required ≤200-char prose summary, never a slug; THE LESSON FORM is ONE mistake,
+≤3 lines, `DO NOT`/`BECAUSE`/`DO … instead`).
 
-**Scaffold the page** with the tier / name / description / type you decided in
-steps 1 & 3 (hubs also carry `--globs`; a hub or component may carry
-`--functionality`). This emits valid frontmatter + the mandatory
-`## Notes and lessons learned` section, and REFUSES to clobber an existing page:
-
-```bash
-memgrep new-page --path "$MEMDIR/wikimem/<name>.md" \
-  --tier hub|aspect|component --name <name> \
-  --description "<the symptom words a future search will carry>" \
-  --type project|user|feedback|reference \
-  [--functionality <fn>] [--globs "src/frontend/**,..."]   # --globs: hubs only
-```
-
-**Add one atom per durable body fact** (`memgrep add-atom`, the fact on stdin).
-`--keywords` is the atom's RECALL SURFACE — comma-separated key-phrases carrying
-the SYMPTOM / the question a future session will search with, NOT the answer's
-jargon. `--desc` is REQUIRED: a ≤200-char PROSE summary of the body (memgrep LISTS
-hits by `desc`, not full body, so the reader triages by desc and opens only the one
-atom worth reading; a missing/weak desc makes the atom invisible-at-a-glance). A
-real summary, never a slug:
-
-```bash
-printf '%s' "<the durable fact, in full>" | memgrep add-atom \
-  --page "$MEMDIR/wikimem/<name>.md" \
-  --keywords "<symptom phrase A>, <symptom phrase B>" \
-  --desc "<≤200-char prose summary of this fact>" [--type <t>]
-```
-
-Full page schema, tier semantics, and atom grammar (to READ, never to hand-write):
-[references/atom-authoring.md](references/atom-authoring.md).
-
-The frontmatter `new-page` writes carries `name`, `description` (symptom-indexed),
-`ocd`, `lmd`, `metadata.{node_type: memory, type, tier}` (+ `functionality`; +
-`globs` on hubs). The tier's edge sections — `## Applies to` on hub/aspect
-(radiating), `## Governed by` on component (receiving); `## See also` optional on
-any tier — you add in step 5 when you WIRE the context. The standing
-`## Notes and lessons learned` section is always present (`new-page` emits it even
-when empty).
-
-**THE LESSON FORM.** A lesson is a first-class atom — a GUARDRAIL, not a story. Add
-it with `memgrep add-lesson` (the DO-NOT/BECAUSE/DO text on stdin), anchored to the
-atom it annotates; the tool emits the canonical
-`[^N]: [id:…, status:valid, keywords:…, ocd:…, lmd:…] <text>` and wires the atom's
-`[^N]` reference — you never type that grammar. The JUDGMENT is yours: `--keywords`
-= the recall surface (the SEARCH words, underscore-joined phrases, not your prose's
-own words); ONE lesson = ONE mistake, **≤3 lines / ~40 words**, all three prose
-parts mandatory — `DO NOT` names the act, `BECAUSE` is the WHY, `DO … instead` is
-the exit. Full grammar + WHY: [wikimem-model.md — THE LESSON
-FORM](references/wikimem-model.md#the-lesson-form--mandatory-metadata-then-one-terse-shape).
-
-```bash
-printf '%s' "DO NOT <X>, BECAUSE <why>. DO <Y> instead." | memgrep add-lesson \
-  --page "$MEMDIR/wikimem/<name>.md" --atom <atom-id> \
-  --keywords "<recall phrase>" [--desc "<≤200-char context>"]
-```
+See [references/write-examples.md](references/write-examples.md) for the full
+`new-page`/`add-atom`/`add-lesson` command reference and the exact frontmatter
+fields each verb guarantees.
 
 ### 5. WIRE the context — radiate or receive (this is what makes it a wiki)
 
@@ -255,12 +206,12 @@ algorithm" for full detail on each check):
 - [ ] Editorial decision made: new page vs UPDATE
 - [ ] New page's NAME is a broad TOPIC (step 3), never the memory's description — `agents-tracing`, not `implementation-of-duckdb-ingestion-of-otel-logs`
 - [ ] `description:` reads as the SYMPTOM/question a future session would search, not the answer
-- [ ] Page scaffolded with `memgrep new-page` (step 4) — memgrep guarantees the frontmatter (`name`, `description`, `ocd`, `lmd`, `node_type: memory`, `type`, `tier`, + `globs` on hubs); your job was choosing the right `--tier`/`--name`/`--description`/`--type`/`--globs` values
+- [ ] Page scaffolded with `memgrep new-page` (step 4) — memgrep guarantees the frontmatter; your job was choosing the right `--tier`/`--name`/`--description`/`--type`/`--globs` values
 - [ ] Page LEAN and one-component-one-page respected (step 3)
 - [ ] If a hub was created, its `globs` are precise and non-overlapping with other hubs
-- [ ] Each durable body fact added via `memgrep add-atom` — memgrep guarantees the `^id [keywords: …]` grammar; you supply the SYMPTOM keywords and a real `--desc` (≤200-char prose summary, the surface memgrep lists in results), never a slug
+- [ ] Each durable body fact added via `memgrep add-atom` — you supply the SYMPTOM `--keywords` and a real `--desc` (≤200-char prose summary), never a slug
 - [ ] Tier SHAPE correct: hub/aspect → `## Applies to`; component → `## Governed by` (NOT inverted) — inverting these is the most common authoring error
-- [ ] `## Notes and lessons learned` present (`new-page` emits it); every lesson added via `memgrep add-lesson` — memgrep guarantees the `[^N]: […]` grammar; you ensure THE LESSON FORM judgment (step 4) — one mistake per lesson, ≤3 lines, all three parts (`DO NOT`/`BECAUSE`/`DO … instead`)
+- [ ] `## Notes and lessons learned` present (`new-page` emits it); every lesson added via `memgrep add-lesson` per THE LESSON FORM (step 4) — one mistake per lesson, ≤3 lines, `DO NOT`/`BECAUSE`/`DO … instead`
 - [ ] Every `[[link]]` added on BOTH ends (step 5, the bidirectional link law — no one-sided link of any kind)
 - [ ] Every project concept an atom NAMES is a `[[wikilink]]` (missing page → create a stub; own-subject → self-link; a link ≥2 atoms share → pool as one `[^N]` See-also)
 - [ ] Index auto-refreshed by the write verbs (step 6) — the index is memgrep's; do NOT touch `MEMORY.md`
@@ -269,27 +220,14 @@ algorithm" for full detail on each check):
 
 Each reference file below opens with its own table of contents.
 
-- [references/wikimem-model.md](references/wikimem-model.md) — the wiki data
-  model (tiers, expand/reduce, See-also discipline, file→functionality, memgrep
-  map). The source of truth all three memory skills share.
-  - A wiki, not a pile — and collaborative like Wikipedia
-  - The editorial decision flow (run this on any change worth remembering)
-  - EXPAND and REDUCE — radiating suns vs receiving terminals
-  - The three tiers (a page's role in the pyramid)
-  - The edge model — EVERY link is bidirectional (the link law)
-  - Page anatomy
-  - Atoms — first-class body elements (block-properties)
+- [references/wikimem-model.md](references/wikimem-model.md)
+  > A wiki, not a pile — and collaborative like Wikipedia · The editorial decision flow (run this on any change worth remembering) · EXPAND and REDUCE — radiating suns vs receiving terminals · The three tiers (a page's role in the pyramid) · The edge model — EVERY link is bidirectional (the link law) · Page anatomy · Atoms — first-class body elements (block-properties)
 - [references/atom-authoring.md](references/atom-authoring.md) — full page schema
   (frontmatter fields, tier edge sections) and atom block-property grammar with examples.
-- [references/subject-routing.md](references/subject-routing.md) — the CASE-fact vs
-  METHODOLOGY-lesson decision (step 0), shared with `/janitor-memory-update`.
-  - The decision
-  - Why it matters — off-topic pollution
-  - Splitting an incident that yields both
-  - Cleaning up an existing violation
-- [references/write-examples.md](references/write-examples.md) — the three worked
-  routing/shape examples.
-  - Worked examples (aspect / component / user-feedback)
+- [references/subject-routing.md](references/subject-routing.md)
+  > The decision · Why it matters — off-topic pollution · Splitting an incident that yields both · Cleaning up an existing violation
+- [references/write-examples.md](references/write-examples.md)
+  > Worked examples (aspect / component / user-feedback) · WRITE-the-page: full memgrep verb reference
 - `~/.claude/rules/markdown-memory-recall.md` — the "index by the QUESTION" law +
   schema + dual-test method.
 - `/janitor-memory-update` — MODIFY a page / correct a memory (the 2-step

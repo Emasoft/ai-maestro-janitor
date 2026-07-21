@@ -1,6 +1,6 @@
 ---
 name: janitor-reload-plugins
-description: Run /reload-plugins --force for the current Claude Code session so freshly auto-updated plugin hooks and skills take effect, without the human typing the command. Invoke in response to a [janitor-reload] heartbeat marker (emitted after the daemon auto-updates the janitor plugin), or whenever plugin code changed on disk and the session must pick it up. Types /reload-plugins --force at this session's own iTerm/tmux pane. SOFT by default (enqueues after the current turn, no work interrupted); --hard interrupts to reload now. ⚠ Do NOT reload at high context (≥350k tokens used) — a reload breaks the prompt cache, so the WHOLE context is re-cached at full price on the next turn; shrink context first with /janitor-handoff-and-clear (or /janitor-compact-context) and reload after. Trigger with /janitor-reload-plugins [--hard], or by asking to reload plugins now.
+description: Run /reload-plugins --force for this Claude Code session so freshly auto-updated plugin hooks/skills take effect, without the human typing it. Invoke on a [janitor-reload] heartbeat marker, or when plugin code changed on disk and the session must pick it up. SOFT by default (enqueues after the turn); --hard interrupts now. ⚠ Do NOT reload at ≥350k context used — it breaks the prompt cache and re-bills the whole window next turn; shrink first via /janitor-handoff-and-clear, then reload. Trigger with /janitor-reload-plugins [--hard].
 ---
 
 # Janitor reload-plugins

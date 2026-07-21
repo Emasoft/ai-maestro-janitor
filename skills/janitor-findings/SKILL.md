@@ -1,6 +1,6 @@
 ---
 name: janitor-findings
-description: Browse THIS project's janitor findings ledger — the per-project mailbox where every janitor finding (drift, security, supply-chain) is indexed with a traceable ref (ticket/TRDD). Use when the user asks what the janitor found / to see janitor findings / to read a finding by its T- or TRDD- ref / to ack the inbox, or when you need the full body behind a finding ref the session-start injection only summarized. Verbs: list [N], show <ref>, ack.
+description: Browse THIS project's janitor findings ledger — the per-project mailbox where every janitor finding (drift, security, supply-chain) is indexed with a traceable ref (ticket/TRDD). Use when the user asks what the janitor found / to see janitor findings / to read a finding by its T- or TRDD- ref / to ack the inbox, or when you need the full body behind a finding ref the session-start injection only summarized. Verbs — list [N], show <ref>, ack.
 ---
 
 # Janitor findings

@@ -1,6 +1,6 @@
 ---
 name: janitor-compact-context
-description: Self-compact the current Claude Code session's context, then auto-resume. ⚠ PREFER /janitor-handoff-and-clear over this skill — when your state is durably captured (TRDD STATE blocks, git, .janitor/state handoffs, memory), a link-only handoff + /clear is cheaper AND less lossy than /compact's whole-context re-summary; use /compact (this skill) only as a last resort, when live scratch cannot be written to disk first. Invoke when context is high and you must compact before the wall where /compact itself fails. Records a resume directive, then types /compact at this session's own iTerm/tmux pane. SOFT by default (enqueues, no work lost); --hard interrupts for emergencies; --handoff writes a rich handoff first; flags combine. Trigger with /janitor-compact-context [--hard] [--handoff], or by asking to compact now.
+description: Self-compact the current Claude Code session's context, then auto-resume. ⚠ PREFER /janitor-handoff-and-clear over this skill — a link-only handoff + /clear is cheaper AND less lossy than /compact's whole-context re-summary when your state is durably captured (TRDDs, git, memory); use /compact only as a last resort for live scratch not yet on disk. Invoke when context is high, before the wall where /compact itself fails. SOFT by default; --hard interrupts for emergencies; --handoff writes a rich handoff first. Trigger with /janitor-compact-context [--hard] [--handoff].
 ---
 
 # Janitor compact-context
