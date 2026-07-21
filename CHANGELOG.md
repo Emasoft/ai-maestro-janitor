@@ -2,13 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.59.0] - 2026-07-21
+## [0.60.0] - 2026-07-21
 
 ### Bug Fixes
 
-- Write-guard must not call a daemon respawn a test leak
+- A daemon that EXITED mid-run is not a test leak
+
+### Documentation
+
+- TRDD-5ZVS1DDP shipped in v0.59.0 — column testing
 
 ### Features
 
-- ONE DAEMON PER HOST — exit while an ai-maestro server runs (TRDD-5ZVS1DDP)
+- Publish the six mode flags at a fixed ~/.claude/janitor-control/
 
