@@ -1,11 +1,9 @@
 ---
 trdd-id: 6RO0L3M0
 title: convert the 3 memory skills to memgrep-CLI-driven — mechanical to the tool, judgment stays prose
-column: blocked
-pre-block-column: todo
-blocked-by: [R02HTRUD]
+column: todo
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T12:12:44+0200
+updated: 2026-07-21T13:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
@@ -14,12 +12,14 @@ parent-trdd: R02HTRUD
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
 
-**BLOCKED on [[TRDD-R02HTRUD]]** — the memgrep write verbs must exist before the skills can call
-them. When A1 lands, restore `column: todo`.
+**UNBLOCKED — A1 shipped a133ff0** (`add-atom`/`new-page`/`add-lesson` verified live). Proceed.
 
 **NEXT ACTION:** rewrite `skills/janitor-memory-write/SKILL.md`, `janitor-memory-recall/SKILL.md`,
 `janitor-memory-update/SKILL.md` so every MECHANICAL step is a memgrep CLI call and only JUDGMENT
-prose remains. `-recall` is already memgrep-driven (least change).
+prose remains. `-recall` is already memgrep-driven (least change). The verb CLI surface is:
+`memgrep new-page --path --tier --name --description --type [--globs --functionality]`;
+`memgrep add-atom --page --keywords [--desc --type]` (body on stdin, prints `<id>\t<page>`);
+`memgrep add-lesson --page --atom --keywords [--desc]` (DO-NOT/BECAUSE/DO on stdin).
 
 ## Problem
 

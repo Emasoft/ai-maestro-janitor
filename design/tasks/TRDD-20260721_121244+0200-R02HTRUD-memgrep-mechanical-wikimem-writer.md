@@ -1,13 +1,14 @@
 ---
 trdd-id: R02HTRUD
 title: memgrep mechanical wikimem write verbs — add-atom add-lesson new-page, correct syntax by construction
-column: todo
+column: testing
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T12:12:44+0200
+updated: 2026-07-21T13:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
 eht: [6RO0L3M0, 5FNZ7ZKO]
+implementation-commits: [a133ff0]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
@@ -18,13 +19,15 @@ corpus-unique id, `ocd`/`lmd`, the canonical `^id [props]` block-prop formatting
 lesson form) so an atom is **written right by construction**. Every mechanically-enforceable rule
 lives in the tool; only judgment stays in the skills (that split is [[TRDD-6RO0L3M0]]).
 
-**NEXT ACTION:** in `scripts/memgrep/src/`, add the `add-atom` verb first (dispatch arm at
-`main.rs:~386`; `cmd_add_atom_cli` + args struct in `memory.rs`). Build the id GENERATOR
-(wrapping `atom_id_hits` memory.rs:1726 — live-walk when the index is stale, collision-retry over
-BOTH atoms and lessons) and the marker EMITTER (inverse of `first_block_property_marker`
-memory.rs:1339 / `parse_block_props` memory.rs:1314). Reuse the atomic temp+rename infra
-(`memory.rs:1150`, `index.rs:218`) and `index::reindex` (index.rs:1071). NO new crate — seed the
-id from `SystemTime` nanos (no `rand`/`uuid` in Cargo.toml today).
+**SHIPPED (a133ff0, 2026-07-21) — all 3 verbs, independently verified.** `add-atom`, `new-page`,
+`add-lesson` landed. cargo test 72 unit + 110 integration (was 62/106), 0 failed, clippy clean.
+INDEPENDENT round-trip (not just the agent's tests): each verb's output passes
+`wikimem_syntax_lint.py` with 0 findings AND is resolved by `memgrep recall`/`find`; the lesson
+uses the canonical 5-key form; id-uniqueness holds across repeats; errors exit 1, success exits 0;
+`new-page` refuses to overwrite. The emitter is the exact inverse of the parser (round-trip test).
+**NEXT ACTION:** none for code — install the binary (`cargo install --path scripts/memgrep`) so
+the verbs are live, then the EHTs [[TRDD-6RO0L3M0]] (skills → these verbs) and [[TRDD-5FNZ7ZKO]]
+(migrate the 153 lean lessons via `add-lesson`) can proceed. Awaiting end-of-run full-suite → `complete`.
 
 **LOAD-BEARING FACTS / GOTCHAS:**
 - memgrep is read-only today (verbs: index/reindex/validate/recall/find/find-claude-mem-ref/

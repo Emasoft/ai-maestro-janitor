@@ -1,11 +1,9 @@
 ---
 trdd-id: 5FNZ7ZKO
 title: reconcile the ONE canonical lesson-atom schema and migrate the 153 lean lessons
-column: blocked
-pre-block-column: todo
-blocked-by: [R02HTRUD]
+column: todo
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T12:12:44+0200
+updated: 2026-07-21T13:40:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
@@ -13,11 +11,18 @@ scope: project
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
 
-**BLOCKED on [[TRDD-R02HTRUD]]** — settle the canonical form the writer emits FIRST, then fix the
-docs to match it, then migrate. When A1 lands, restore `column: todo`.
+**UNBLOCKED — A1 shipped a133ff0.** RATIFIED (owner delegated authority 2026-07-21): the canonical
+form is the RULE's **5-key** `[id:ATOM-…, status:valid|superseded, keywords:"…", ocd:…, lmd:…]`
+— proven live: memgrep's `add-lesson` already emits exactly this, and `wikimem_syntax_lint` + recall
+pass on it. (`desc:` is NOT a lesson key — memgrep's note parser ignores it; the write skill's
+inclusion was superfluous.)
 
-**NEXT ACTION:** ratify ONE canonical lesson/atom schema, then (1) fix the 3 governing docs, (2)
-migrate the ~153 lean lessons to it via the verify-gated subconscious agent.
+**NEXT ACTION:** (1) fix the two skills' hand-written lesson-form examples to the 5-key form (folded
+into [[TRDD-6RO0L3M0]] — the skills stop hand-specifying the form and just call `add-lesson`); the
+RULE `markdown-memory-recall.md` already carries the 5-key form. (2) Migrate the ~153 lean lessons:
+dispatch `janitor-memory-subconscious-agent` to backfill `id`+`keywords` PRESERVING every word (its
+`memory_edit_verify` oracle proves no prose lost), then confirm `wikimem_syntax_lint` reports 0 lean
+lessons. Do the migration LAST (after the skills stop producing new lean lessons).
 
 ## Problem — three conflicting schemas produced corpus drift
 
