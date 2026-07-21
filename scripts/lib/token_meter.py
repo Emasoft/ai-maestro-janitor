@@ -301,6 +301,38 @@ def resolve_context(project_dir: str, session_id: str, transcript: str, window_d
     return None, None, None, False
 
 
+# F1 reload-churn guard (TRDD-Z582IKIR): default context-token threshold above which
+# `/reload-plugins` is deferred (dispatch.py) / blocked (the UserPromptSubmit hook).
+# `/reload-plugins` breaks the prompt-cache prefix, forcing a full cache-CREATE
+# (~1.25x) of the WHOLE context on the next turn instead of a cheap cache-read
+# (~0.1x) — on a large session that single reload is a ~500k+ weighted-token tax.
+RELOAD_GUARD_DEFAULT_THRESHOLD = 350_000
+
+
+def reload_guard_should_block(tokens: Optional[int], threshold: int) -> bool:
+    """True iff a `/reload-plugins` should be deferred/blocked right now.
+
+    Pure predicate shared by dispatch.py's `_phase_plugin_reload` (defer emitting the
+    `[janitor-reload]` marker) and `on-prompt-submit-reload-guard.py` (block the typed
+    `/reload-plugins` command itself) — ONE constant + ONE predicate so the two gates,
+    which independently read the same live context, can never disagree about the trip
+    point. Disagreement would either re-trigger the self-injected reload every fire only
+    to have it blocked (a wasted loop) or silently defer forever while the hook would
+    have allowed it (a stuck block) — sharing this function makes both impossible.
+
+    FAILS OPEN (returns False = allow the reload) whenever the context size is unknown
+    (`tokens` is not an int — a read error, a fresh session with no transcript yet, a
+    missing statusline snapshot, etc.) or the guard is disabled (`threshold <= 0`). A
+    reload's whole point is to pick up fresh code; an unreadable context must never turn
+    into a reload that can never happen.
+    """
+    if threshold <= 0:
+        return False
+    if not isinstance(tokens, int):
+        return False
+    return tokens >= threshold
+
+
 # The compact ROUTINE spends ~this many tokens writing its OWN summary, so the auto-compact
 # actually fires ~this far BEFORE CLAUDE_CODE_AUTO_COMPACT_WINDOW (user-measured, TRDD-TKNSTP82 C).
 _DEFAULT_COMPACT_SUMMARY_OVERHEAD = 34000

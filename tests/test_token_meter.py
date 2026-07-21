@@ -329,6 +329,33 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         self.assertTrue(any("cache-miss write 2500" in r for r in v.reasons))
 
 
+class TestReloadGuardShouldBlock(unittest.TestCase):
+    """F1 reload-churn guard (TRDD-Z582IKIR) — the shared predicate used by BOTH
+    dispatch.py's `_phase_plugin_reload` (defer) and the UserPromptSubmit hook
+    (block), so the two gates can never disagree about the trip point."""
+
+    def test_below_threshold_allows(self):
+        self.assertFalse(token_meter.reload_guard_should_block(100_000, 350_000))
+
+    def test_at_or_above_threshold_blocks(self):
+        self.assertTrue(token_meter.reload_guard_should_block(350_000, 350_000))
+        self.assertTrue(token_meter.reload_guard_should_block(999_999, 350_000))
+
+    def test_unknown_context_fails_open(self):
+        """None (unresolvable context) must never block — an unreadable context must
+        never turn a reload into a stuck block."""
+        self.assertFalse(token_meter.reload_guard_should_block(None, 350_000))
+
+    def test_disabled_threshold_fails_open(self):
+        """threshold <= 0 is the documented explicit opt-out — never blocks regardless
+        of context size."""
+        self.assertFalse(token_meter.reload_guard_should_block(999_999, 0))
+        self.assertFalse(token_meter.reload_guard_should_block(999_999, -1))
+
+    def test_default_threshold_constant(self):
+        self.assertEqual(token_meter.RELOAD_GUARD_DEFAULT_THRESHOLD, 350_000)
+
+
 class TestExhaustionLog(unittest.TestCase):
     """The window-exhaustion event log (TRDD-EDSFEQ5C) — best-effort, capped, never raises."""
 

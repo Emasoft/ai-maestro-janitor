@@ -47,6 +47,15 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/on-prompt-submit-reload-guard.py",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "Stop": [

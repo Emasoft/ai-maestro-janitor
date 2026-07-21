@@ -58,6 +58,7 @@ import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
 import heartbeat_cadence as hc  # noqa: E402  # TTL-aware cadence tiers (TRDD-0QQX9H0G, #83)
 import state  # noqa: E402
+import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
 import version_update_lib as vu  # noqa: E402  # C4 auto-rollback decision (TRDD-T198DT1W)
 
 # Detector roster: (name, default cadence in seconds, env-var override).
@@ -1165,6 +1166,22 @@ def _phase_plugin_reload() -> None:
     registered" failure a MANAGER-fleet session hit. A never-cleared generation
     plus a per-project ack lets every project's heartbeat reload exactly once per
     update, with no session starving another.
+
+    F1 reload-churn guard (TRDD-Z582IKIR): `/reload-plugins` breaks the prompt-cache
+    prefix, forcing a full cache-CREATE of the WHOLE context on the next turn instead
+    of a cheap cache-read — on a large session a single reload is a ~500k+ weighted-
+    token tax (the incident that motivated this TRDD burned 3 accounts in 2 days).
+    Below the configured token threshold this phase is UNCHANGED. At/above it, DEFER:
+    do NOT print the marker and do NOT advance the ack, so the deferred generation is
+    re-checked (and, once the context shrinks — a compaction, `/clear`, a rate-limit
+    resume — reloaded) on a LATER fire rather than forced now. This intentionally does
+    NOT force-through after N deferred fires: the actual `/reload-plugins` command is
+    independently gated by `on-prompt-submit-reload-guard.py` using the SAME shared
+    predicate (`token_meter.reload_guard_should_block`), so a forced emission here
+    would just be typed into the pane and immediately blocked there — a wasted
+    self-trigger-then-block round trip on every subsequent fire, i.e. exactly the loop
+    this guard exists to prevent. Deferring here (rather than there) is what stops the
+    self-trigger from firing at all while the block would apply.
     """
     gen = gs.reload_generation()
     if gen <= 0:
@@ -1181,6 +1198,31 @@ def _phase_plugin_reload() -> None:
     acked = state.read_int_state(acked_path, 0)
     if acked >= gen:
         return
+
+    threshold = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD"),
+        tm.RELOAD_GUARD_DEFAULT_THRESHOLD,
+        detector_name="dispatch",
+        var_name="CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD",
+    )
+    ctx: int | None = None
+    try:
+        import cold_cache_compact  # noqa: PLC0415 -- lazy: fail-open when the lib is absent
+
+        ctx = cold_cache_compact.context_tokens_for(
+            cold_cache_compact.newest_transcript(state.project_root())
+        )
+    except Exception as exc:  # noqa: BLE001 -- an unreadable context must never block the reload
+        state.log_line("dispatch", f"[reload-guard] context read failed, failing open: {exc}")
+        ctx = None
+    if tm.reload_guard_should_block(ctx, threshold):
+        state.log_line(
+            "dispatch",
+            f"[reload-guard] deferred [janitor-reload]: context={ctx} >= threshold={threshold} "
+            "(ack left unadvanced; re-checked on the next fire)",
+        )
+        return
+
     state.atomic_write(acked_path, str(gen))
     print("[janitor-reload]")
     state.log_line(

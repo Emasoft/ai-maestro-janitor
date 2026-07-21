@@ -279,6 +279,111 @@ def test_phase_plugin_reload_per_project_no_starvation(env_isolation: dict) -> N
     assert _capture_stdout(dispatch._phase_plugin_reload).strip() == "[janitor-reload]", "an un-acked project still reloads — the generation was never consumed by project A"
 
 
+# ---------- Phase 1.6: reload-churn guard (F1, TRDD-Z582IKIR) --------------
+
+
+def _patch_context_tokens(monkeypatch: pytest.MonkeyPatch, tokens) -> None:
+    """Force `cold_cache_compact.context_tokens_for(...)` to return `tokens` for this
+    test, regardless of whether a real transcript exists. `_phase_plugin_reload`
+    imports `cold_cache_compact` LAZILY (inside the function body), but that import
+    resolves via `sys.modules` — the same module object this helper patches — so the
+    patch takes effect on the next call to `_phase_plugin_reload` either way."""
+    import cold_cache_compact
+
+    monkeypatch.setattr(cold_cache_compact, "context_tokens_for", lambda *_a, **_k: tokens)
+    monkeypatch.setattr(cold_cache_compact, "newest_transcript", lambda *_a, **_k: "irrelevant.jsonl" if tokens is not None else None)
+
+
+def test_phase_plugin_reload_defers_above_threshold(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Context at/above the default 350000-token guard → NO marker, ack left
+    UNADVANCED (so the deferred generation is re-checked, not lost) — TRDD-Z582IKIR F1."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    gs.set_reload_flag("plugin@mp")
+    _patch_context_tokens(monkeypatch, 500_000)
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out == "", f"a large context must defer, not emit, got {out!r}"
+    acked_path = state.state_dir() / "reload-acked.ts"
+    assert not acked_path.is_file(), "a deferred fire must NOT advance the per-project ack"
+
+
+def test_phase_plugin_reload_proceeds_below_threshold(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Context below the guard threshold → unchanged behavior: marker emitted, ack advanced."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("plugin@mp")
+    _patch_context_tokens(monkeypatch, 100_000)
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out.strip() == "[janitor-reload]", f"a small context must reload as before, got {out!r}"
+
+
+def test_phase_plugin_reload_fails_open_on_unknown_context(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unresolvable context (no transcript yet, a read error) must NEVER block the
+    reload — fail-open per the guard's contract."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("plugin@mp")
+    _patch_context_tokens(monkeypatch, None)
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out.strip() == "[janitor-reload]", f"unknown context must fail OPEN (reload proceeds), got {out!r}"
+
+
+def test_phase_plugin_reload_defer_then_recovers(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deferred fire is re-checked on the NEXT fire: once context drops back below
+    the threshold (e.g. after a compaction), the SAME still-unacked generation reloads."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("plugin@mp")
+
+    _patch_context_tokens(monkeypatch, 900_000)
+    assert _capture_stdout(dispatch._phase_plugin_reload) == "", "first fire (huge context) must defer"
+
+    _patch_context_tokens(monkeypatch, 50_000)
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out.strip() == "[janitor-reload]", "second fire (context shrank) must reload the still-pending generation"
+
+
+def test_phase_plugin_reload_honors_custom_threshold_env(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD overrides the 350000 default."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("plugin@mp")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD", "50000")
+    _patch_context_tokens(monkeypatch, 60_000)  # below the DEFAULT but above this custom threshold
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out == "", f"a lowered threshold must defer at 60k, got {out!r}"
+
+
+def test_phase_plugin_reload_threshold_zero_disables_guard(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """threshold=0 is the documented explicit opt-out — always reload regardless of
+    context size, matching pre-guard behavior exactly."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_reload_flag("plugin@mp")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_RELOAD_CONTEXT_GUARD_THRESHOLD", "0")
+    _patch_context_tokens(monkeypatch, 999_999_999)
+
+    out = _capture_stdout(dispatch._phase_plugin_reload)
+    assert out.strip() == "[janitor-reload]", f"threshold=0 must disable the guard entirely, got {out!r}"
+
+
 # ---------- Phase 1.62: standalone-skills reload (TRDD-LQU7OXXV) ------------
 
 
