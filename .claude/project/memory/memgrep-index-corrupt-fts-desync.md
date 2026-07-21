@@ -53,7 +53,7 @@ See also [[feedback_memory_system_is_more_than_memgrep]].
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-14 lmd:2026-07-14] The first instinct — mine and the user's — was "a killed process
+[^1]: [id:ATOM-MG07-0015, status:valid, keywords:"disk_image_malformed_but_logical_fault read_second_clause_virtual_table_corrupt pragma_integrity_check_excludes_durability", ocd:2026-07-14, lmd:2026-07-14] The first instinct — mine and the user's — was "a killed process
   or a missing WAL tore the database." It was wrong, and it was wrong in an instructive way: the error
   string `database disk image is malformed` *names a file-level fault*, so it steers you toward
   durability (WAL, `synchronous`, fsync, concurrent writers) when the actual fault is **logical** and
@@ -62,7 +62,7 @@ See also [[feedback_memory_system_is_more_than_memgrep]].
   `PRAGMA integrity_check` early, because an `ok` there **excludes** the whole durability family of
   causes in one command and forces you to look where the bug actually is.
 
-[^2]: [ocd:2026-07-14 lmd:2026-07-14] The deeper defect was not the missing `'rebuild'` — it was that a
+[^2]: [id:ATOM-MG07-0016, status:valid, keywords:"migration_did_not_validate_its_output check_derived_structure_after_rewrite fail_fast_source_self_heal_derived", ocd:2026-07-14, lmd:2026-07-14] The deeper defect was not the missing `'rebuild'` — it was that a
   **migration rebuilt a derived structure and never validated its own output**, then handed it back to
   the caller as if it had succeeded. The one-line `'rebuild'` fixes *this* migration; the verify + heal
   in `open` fixes the *class*, so the next migration that gets it wrong is repaired instead of shipping

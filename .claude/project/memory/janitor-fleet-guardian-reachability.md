@@ -167,7 +167,7 @@ complete set of *harmful* cases — a flag in a dormant project is inert litter)
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-09 lmd:2026-07-09] SUPERSEDED, and it shipped: v0.35.5's code
+[^1]: [id:ATOM-MG05-0010, status:valid, keywords:"inferred_resolver_from_one_call_site false_missing_channel_alarm read_function_not_one_callsite", ocd:2026-07-09, lmd:2026-07-09] SUPERSEDED, and it shipped: v0.35.5's code
   comment, commit message, TRDD and a passing test all claimed the stripped launchd
   PATH disabled the ai-maestro channel "exactly as it disabled tmux". FALSE — that
   resolver checks `$AIMAESTRO_CLI` and an explicit `~/.local/bin` path before ever
@@ -180,7 +180,7 @@ complete set of *harmful* cases — a flag in a dormant project is inert litter)
   v0.35.6. Lesson: when the live evidence names ONE channel (`FIRED rearm → tmux`),
   claim ONE channel; do not decorate evidence with a mechanism you have not read to
   the bottom.
-[^2]: [ocd:2026-07-09 lmd:2026-07-09] `disarmed.flag` shipped with FOUR readers and
+[^2]: [id:ATOM-MG05-0011, status:valid, keywords:"four_readers_zero_writers_flag grep_the_write_not_the_prose test_constructs_own_precondition", ocd:2026-07-09, lmd:2026-07-09] `disarmed.flag` shipped with FOUR readers and
   ZERO writers, and nobody noticed for the flag's whole life. Two reasons, and both
   generalize. (1) `fleet_scan`'s docstring asserted "written by `/janitor-disarm`" —
   a sentence naming a writer, a reader and a filename, which reads exactly like
@@ -197,7 +197,7 @@ complete set of *harmful* cases — a flag in a dormant project is inert litter)
   boundary instead of sitting on one side of it. Same disease as `[^1]` and as the
   release-timeout and CPV-pin errors of the same day: a mechanism asserted in prose and
   never read to the bottom.
-[^3]: [ocd:2026-07-09 lmd:2026-07-09] The stub deletion in `/janitor-disarm` was
+[^3]: [id:ATOM-MG05-0012, status:valid, keywords:"inverse_of_shared_idempotent_install check_scope_before_writing_inverse project_command_deletes_machine_wide_file", ocd:2026-07-09, lmd:2026-07-09] The stub deletion in `/janitor-disarm` was
   justified in the skill itself as making disarm "a clean inverse of arm" — a symmetry
   argument, and it was wrong because arm's write is IDEMPOTENT and SHARED. The inverse
   of a shared idempotent install is nothing, not a delete. WHY it survived review: the

@@ -34,7 +34,7 @@ memory corpus). See [[project_janitor_publish_blocked_cpv_fps]] for the broader 
 publish-gate FP history and [[memory-system]] for why memory lives under `.claude/`.
 
 ## Notes and lessons learned
-[^1]: [ocd:2026-06-14 lmd:2026-06-14] the CPV publish gate has TWO separate skill-reference
+[^1]: [id:ATOM-MG05-0018, status:valid, keywords:"validate_skill_no_fence_exemption two_skill_reference_checks_differ broken_file_reference_markdown_link", ocd:2026-06-14, lmd:2026-06-14] the CPV publish gate has TWO separate skill-reference
   checks with DIFFERENT fence handling: `validate_skill.py:680` (`validate_supporting_files`)
   regex-flags ANY non-resolving `[text](path)` markdown link in SKILL.md with **no fence or
   placeholder exemption** (a `[architecture](architecture.md)` example inside a ```` ```markdown ````

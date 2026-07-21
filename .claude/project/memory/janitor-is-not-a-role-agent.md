@@ -58,7 +58,7 @@ See also [[memory-system]].
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-09 lmd:2026-07-09] Three role-plugin keys
+[^1]: [id:ATOM-MG06-0017, status:valid, keywords:"disabled_enabledplugins_key_not_harmless stale_key_drives_ui_remediation remove_key_not_set_false", ocd:2026-07-09, lmd:2026-07-09] Three role-plugin keys
   (`ai-maestro-autonomous-agent`, `-chief-of-staff`, `-maintainer-agent`) sat in
   user-scope `enabledPlugins` with value `false` and no install record for this repo.
   That alone made Claude Code list them as load errors and recommend a `--scope project`

@@ -66,7 +66,7 @@ integration shape.
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-12 lmd:2026-07-12] The GOLDEN-rule verification (probe the live CLI
+[^1]: [id:ATOM-MG05-0016, status:valid, keywords:"verify_what_tool_measures_not_command_names probe_live_cli_before_designing capacity_source_none_false_premise", ocd:2026-07-12, lmd:2026-07-12] The GOLDEN-rule verification (probe the live CLI
   before writing parsers) caught the false premise BEFORE the wrong integration was built:
   two of the three TRDDs (90B47EM9, HL8H3XCV) were written assuming a "switch" — switch
   window-burn to `get_window_budget`, and suppress a token-anomaly alarm the account view

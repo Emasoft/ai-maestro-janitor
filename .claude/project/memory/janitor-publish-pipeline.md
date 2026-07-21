@@ -126,14 +126,14 @@ name, never literal paths or secrets).
   accelerate its own first release; reload ≠ update).
 
 ## Notes and lessons learned
-[^1]: [ocd:2026-06-13 lmd:2026-06-13] The step numbers intentionally skip 5 —
+[^1]: [id:ATOM-MG06-0011, status:valid, keywords:"pipeline_step_numbers_skip_preserve renumbering_breaks_log_greps removed_stage_keep_downstream_numbers", ocd:2026-06-13, lmd:2026-06-13] The step numbers intentionally skip 5 —
   the old "Step 5: CPV lint" was folded into the single Step 4 `plugin --strict`
   pass when CPV retired its `lint` subcommand, but the later step numbers were
   kept on their original sequence (Step 6 follows Step 4) so log greps against
   any existing release-history line still hit. Lesson: when removing a pipeline
   stage, preserve downstream step numbering if logs are grepped by it, rather
   than renumbering and breaking historical log queries.
-[^2]: [ocd:2026-06-25 lmd:2026-06-25] Step-4 CPV `--strict` runs a markdownlint
+[^2]: [id:ATOM-MG06-0012, status:valid, keywords:"cpv_strict_lints_trdd_markdown wrapped_continuation_plus_marker_nit trailing_echo_masks_publish_exit", ocd:2026-06-25, lmd:2026-06-25] Step-4 CPV `--strict` runs a markdownlint
   that scans MORE files than Step-3's own pymarkdown — notably `design/tasks/*.md`
   (the TRDDs), which Step 3 does NOT scan. So a markdown formatting bug in a TRDD
   passes the local lint and only fails at the CPV gate (v0.24.6 hit this). The trap
@@ -145,7 +145,7 @@ name, never literal paths or secrets).
   publish.py's), MASKING a validate failure — drop the trailing echo, and ALWAYS
   recheck version+branch after a "successful" publish (a failed validate bumps
   nothing and pushes nothing).
-[^3]: [ocd:2026-07-16 lmd:2026-07-16] Three v0.45.0 release lessons. (a) TWO SIZE
+[^3]: [id:ATOM-MG06-0013, status:valid, keywords:"skill_body_5000_bpe_cap rules_corpus_52000_byte_cap size_gate_displace_bytes", ocd:2026-07-16, lmd:2026-07-16] Three v0.45.0 release lessons. (a) TWO SIZE
   gates exist and both bit: CPV `--strict` caps each SKILL.md body at **5000 BPE
   tokens** (janitor-memory-write ~5538 and consolidate ~5095 blocked as MAJORs
   after feature additions; fix = compress the body, push detail into

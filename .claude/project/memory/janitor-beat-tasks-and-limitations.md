@@ -151,7 +151,7 @@ user plugins EXCEPT the ai-maestro fleet").
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-12 lmd:2026-07-12] Verified the beat cadences against
+[^1]: [id:ATOM-MG06-0014, status:valid, keywords:"verify_cadence_against_source_constants staged_plan_is_not_what_runs interval_default_cron_source_of_truth", ocd:2026-07-12, lmd:2026-07-12] Verified the beat cadences against
   `scripts/daemon.py` `_INTERVAL_*` constants and the tier crons against
   `heartbeat_cadence.py` `_DEFAULT_CRON` at authoring time (0.41.0-dev). The plan file
   `staged-kindling-lynx.md` proposes a DIFFERENT `*/15`/`*/30`/`*/45` tier set plus an
@@ -159,7 +159,7 @@ user plugins EXCEPT the ai-maestro fleet").
   Lesson: verify cadence numbers against the `_INTERVAL_*`/`_DEFAULT_CRON` source, not a
   staged plan — a plan describes what MIGHT ship, not what runs.
 
-[^cron-session-scoped]: [ocd:2026-07-13 lmd:2026-07-13] This page previously called Clock A
+[^cron-session-scoped]: [id:ATOM-MG06-0015, status:valid, keywords:"durable_cron_parameter_does_not_exist session_scoped_cron_by_design inferred_platform_guarantee_from_param_name", ocd:2026-07-13, lmd:2026-07-13] This page previously called Clock A
   "a **durable** `CronCreate`", and the codebase (CLAUDE.md, the `/janitor-arm` skill,
   ai-maestro-janitor#23) treated every session-only cron as a BUILD BUG — "some Claude Code
   builds silently downgrade `durable: true` to session-only". That framing is WRONG. A

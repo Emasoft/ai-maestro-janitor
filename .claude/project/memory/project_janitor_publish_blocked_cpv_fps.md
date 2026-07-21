@@ -106,12 +106,12 @@ contradict this page's policy. Decision surfaced to USER; see TRDD-fe45babc
 STATE §1.[^2]
 
 ## Notes and lessons learned
-[^1]: [ocd:2026-06-11 lmd:2026-06-12] SUPERSEDED original note: "the publish is
+[^1]: [id:ATOM-MG06-0001, status:valid, keywords:"publish_blocked_claim_superseded cpv_major_fp_era_over dont_carry_blocked_forward", ocd:2026-06-11, lmd:2026-06-12] SUPERSEDED original note: "the publish is
   correctly BLOCKED until CPV #75 lands" — true 2026-06-11 morning; CPV's
   scanner-aware fixes + the session's devitalize/relocate batch cleared the gate
   the same evening. Kept as history: the 10-MAJOR-FP era is over; do not carry
   the "blocked" claim forward.
-[^2]: [ocd:2026-06-23 lmd:2026-06-23] A later session (the immortality work)
+[^2]: [id:ATOM-MG06-0002, status:valid, keywords:"recall_before_cpv_gate_workaround never_exempt_devitalize_or_separate exempt_list_created_new_criticals", ocd:2026-06-23, lmd:2026-06-23] A later session (the immortality work)
   RE-ADDED a `_intentional_validator_false_positives` exempt-list to plugin.json,
   NOT recalling the "exempt-lists dropped fleet-wide as exploitable" policy on
   THIS page — it cost a publish cycle. The array did NOT suppress the security
@@ -123,7 +123,7 @@ STATE §1.[^2]
   un-devitalizable load-bearing feature (e.g. launchd persistence) that trips the
   gate must be SEPARATED into its own release, not exempted and not "waited out"
   via a CPV exempt mechanism (#40).
-[^3]: [ocd:2026-07-09 lmd:2026-07-09] SUPERSEDED: "the release CI stall is the Rust
+[^3]: [id:ATOM-MG06-0003, status:valid, keywords:"dies_at_exact_timeout_is_hung_not_slow inferred_mechanism_from_duration grep_sibling_workflow_for_existing_fix", ocd:2026-07-09, lmd:2026-07-09] SUPERSEDED: "the release CI stall is the Rust
   cold compile" and, after that, "raise the release bound 15m→30m". Both wrong.
   Roughly half of one day's releases were CANCELLED — v0.35.3 at 15m18s, v0.35.6 at
   30m21s, v0.35.8 at 30m17s — each dying at exactly `timeout-minutes`, all in step 5
@@ -140,7 +140,7 @@ STATE §1.[^2]
   also closed a hole nobody was looking for: the old gate read
   `if [ $exit_code -ge 1 ] && [ $exit_code -le 4 ]`, so ANY exit outside 1..4 — a
   crash, exit 127, a missing binary — silently PASSED release validation.
-[^4]: [ocd:2026-07-09 lmd:2026-07-09] SUPERSEDED: "both `release.yml` and
+[^4]: [id:ATOM-MG06-0004, status:valid, keywords:"three_call_sites_one_unpinned search_for_the_thing_not_expected_places prove_pinned_everywhere_grep_invocation", ocd:2026-07-09, lmd:2026-07-09] SUPERSEDED: "both `release.yml` and
   `publish.py` are now pinned" — asserted in the commit message of `c7c4613` and
   publicly in ai-maestro-janitor#71. There were THREE call sites; `ci.yml:76` was
   still unpinned. It resolved CPV's default branch onto the `v2.153.2` regression and
@@ -152,7 +152,7 @@ STATE §1.[^2]
   'claude-plugins-validation'`), not for the places you expect it. Fixed in v0.35.8;
   all three sites now carry a BUMP PROTOCOL comment naming the other two, so a future
   bump cannot pin a subset.
-[^5]: [ocd:2026-07-16 lmd:2026-07-16] v0.45.0 occurrence of the recurring FP shape
+[^5]: [id:ATOM-MG06-0005, status:valid, keywords:"demoted_nit_still_blocks_strict scanner_reads_doc_comment_as_injection keep_backtick_and_execution_verb_apart", ocd:2026-07-16, lmd:2026-07-16] v0.45.0 occurrence of the recurring FP shape
   (a scanner reading prose as code): skillaudit read a memgrep Rust DOC COMMENT —
   a backtick-wrapped variable plus the phrase "the command exits non-zero" in one
   sentence — as CMD_INJECTION. It was a demoted NIT, and **demoted NITs still
@@ -161,7 +161,7 @@ STATE §1.[^2]
   policy. Lesson: scanner-prose devitalization applies to CODE COMMENTS too, not
   just markdown — in shipped prose, keep backtick-code tokens and execution verbs
   ("exits", "runs", "executes") out of the same sentence.
-[^6]: [ocd:2026-07-16 lmd:2026-07-16] WHY the "verify before bumping AND before closing"
+[^6]: [id:ATOM-MG06-0006, status:valid, keywords:"cpv_release_fixes_one_regresses_another test_vX_before_pinning_unseen maintainer_fixed_is_reason_to_test_not_pin", ocd:2026-07-16, lmd:2026-07-16] WHY the "verify before bumping AND before closing"
   discipline is repeated for CPV v2.159.0: `v2.153.2` already taught that a CPV point-release
   can FIX one thing and REGRESS another (it fixed nothing the janitor needed and raised 8
   CRITICAL on `rules/`). So even a release that fixes the janitor's OWN reported FP (#167/#168)

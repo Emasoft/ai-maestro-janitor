@@ -68,7 +68,7 @@ exactly that mistake.
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-14 lmd:2026-07-14] An optimizer whose control loop runs through the MODEL is
+[^1]: [id:ATOM-MG05-0013, status:valid, keywords:"optimizer_actuation_billed_at_model_rate price_the_actuation_not_steady_state hysteresis_or_negative_value", ocd:2026-07-14, lmd:2026-07-14] An optimizer whose control loop runs through the MODEL is
   itself billed at model rates. TRDD-0QQX9H0G's dynamic cadence modelled the steady state (fewer
   fires = less cost) and never modelled its own actuation — because in most systems changing a cron
   is a free config write. Here it is a Claude turn. An optimizer whose adjustments cost more than
@@ -77,7 +77,7 @@ exactly that mistake.
   state** — and if you cannot make the adjustment cheap, make it RARE (hysteresis) or the feature
   is negative-value in exactly the volatile conditions it was built for.
 
-[^3]: [ocd:2026-07-14 lmd:2026-07-14] This page first wrote the formula as
+[^3]: [id:ATOM-MG05-0014, status:valid, keywords:"grep_prose_not_what_code_does cache_creation_weight_1x_not_docstring read_the_expression_that_computes_it", ocd:2026-07-14, lmd:2026-07-14] This page first wrote the formula as
   `output + 1.25×cache_creation + 0.1×cache_read`. The code weights `cache_creation` at **1.0×**
   (`token_baseline.weighted_tokens`, `token_history.weighted`) — the `1.25` lives only in the
   surrounding DOCSTRINGS, and I asserted the arithmetic from a grep of the prose instead of reading
@@ -89,7 +89,7 @@ exactly that mistake.
   baseline is calibrated against it. Lesson: **a grep of prose tells you what the author BELIEVED,
   never what the code DOES.** To state what code does, read the expression that computes it.
 
-[^2]: [ocd:2026-07-14 lmd:2026-07-14] I first "measured" the arm's cost by joining the token meter's
+[^2]: [id:ATOM-MG05-0015, status:valid, keywords:"fuzzy_join_invented_relationship approximate_key_join_false_number law_in_raw_rows_not_summary_stat", ocd:2026-07-14, lmd:2026-07-14] I first "measured" the arm's cost by joining the token meter's
   records to arm timestamps with a ±4-minute window, and reported an arm costs 25× a quiet fire. It
   does not — the matched record had 39 tool calls and was an unrelated WORK turn. The number came
   from my own fuzzy join, not from the data. Lesson: a join on an approximate key INVENTS a

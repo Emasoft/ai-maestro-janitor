@@ -276,7 +276,7 @@ technical claim as UNVERIFIED until checked against the TRDD + the source header
 
 The documented past errors — each folded in so the symptom finds the fix:
 
-[^1]: [ocd:2026-06-09 lmd:2026-06-13] **CF-1010 / missing User-Agent (the token POST is
+[^1]: [id:ATOM-MG05-0001, status:valid, keywords:"cloudflare_1010_missing_user_agent urllib_default_user_agent_banned token_post_403_error_1010", ocd:2026-06-09, lmd:2026-06-13] **CF-1010 / missing User-Agent (the token POST is
   Cloudflare-banned).** Symptom: the rotator can't mint or renew a slot; the browser
   capture works up to clicking **Authorize** but then the token exchange (or the keepalive
   refresh) dies with **HTTP 403 `error code: 1010`** ("banned browser signature"), and the
@@ -294,7 +294,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   (CF block); any non-default UA → 400 `invalid_grant` / 429 (got past CF, so the UA is the
   fix). Regression guard: `tests/test_oauth_token_useragent.py`.
 
-[^2]: [ocd:2026-06-11 lmd:2026-06-13] **The 429 version-skew deadlock (a fix in SOURCE is
+[^2]: [id:ATOM-MG05-0002, status:valid, keywords:"429_version_skew_deadlock running_daemon_predates_fix source_fixed_not_production", ocd:2026-06-11, lmd:2026-06-13] **The 429 version-skew deadlock (a fix in SOURCE is
   not a fix in PRODUCTION).** Symptom: the rotator lets a 429 land instead of rotating; the
   user must rotate manually; `rotator.log` repeats *"no alternate is healthy + below safe
   threshold — all paid accounts maxed; waiting for a window to reset"* every 60s forever,
@@ -318,7 +318,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   incident record and the now-obsolete hotpatch. Residual: a slot excluded EARLIER by the
   locally-expired guard is not yet refresh-retried.
 
-[^3]: [ocd:2026-06-08 lmd:2026-06-24] **Playwright mock-keychain browser-transport bug
+[^3]: [id:ATOM-MG05-0003, status:valid, keywords:"playwright_launch_mock_keychain_login_page attach_cdp_real_chrome_not_launch renew_shows_login_not_authorize", ocd:2026-06-08, lmd:2026-06-24] **Playwright mock-keychain browser-transport bug
   (RENEW shows the LOGIN page) — attach over CDP to a REAL Chrome, never let Playwright
   LAUNCH it.** Symptom: the renew/capture shows the claude.ai LOGIN page instead of the
   **Authorize** button; cookies "can't be decrypted" → renew silently does nothing. Root
@@ -344,7 +344,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   automation-flagged / headless browsers are Cloudflare-blocked (verified). Detailed
   transport+protocol stack in the 51-project browser audit.
 
-[^4]: [ocd:2026-06-08 lmd:2026-06-13] **macOS `security` keychain gotchas (a stored secret
+[^4]: [id:ATOM-MG05-0004, status:valid, keywords:"security_stdin_128_byte_truncation find_generic_password_hex_dumps base64_wrap_keychain_secret", ocd:2026-06-08, lmd:2026-06-13] **macOS `security` keychain gotchas (a stored secret
   didn't round-trip) — put the value on argv AND base64-wrap it.** Two non-obvious
   `security` (macOS keychain CLI) behaviors silently corrupt a stored secret — both caught
   only by REAL round-trip tests (invisible to a mocked keychain). (a) **stdin form
@@ -360,7 +360,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   uniform across the Linux `secret-tool` / Windows DPAPI backends. Canonical impl:
   `scripts/oauth_rotator/safe_storage.py` (three-valued fail-closed `StoreResult`).
 
-[^5]: [ocd:2026-06-06 lmd:2026-06-13] **The keychain-storage design is re-derived every
+[^5]: [id:ATOM-MG05-0005, status:valid, keywords:"rotator_creds_in_os_keychain no_slots_dir_is_by_design stop_re_deriving_architecture", ocd:2026-06-06, lmd:2026-06-13] **The keychain-storage design is re-derived every
   session (the cost this page removes).** An `ls` of the data dir shows no `slots/` and no
   tokens, which repeatedly leads a fresh session to suspect "the rotator has no
   credentials" — wrong: they are in the OS keychain by design. Verified 2026-06-06 by
@@ -368,7 +368,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   from the symptom "rotator failed / where are the creds", land here, and read
   `oauth-health` for live state rather than re-deriving the architecture.
 
-[^6]: [ocd:2026-06-24 lmd:2026-06-24] **A shared SSOT that takes external inputs is only an SSOT
+[^6]: [id:ATOM-MG05-0006, status:valid, keywords:"divergent_input_path_second_source_of_truth rotator_home_resolver_order legacy_vs_canonical_state_file", ocd:2026-06-24, lmd:2026-06-24] **A shared SSOT that takes external inputs is only an SSOT
   if the INPUTS are resolved through one path too.** Symptom: the daemon logs
   `cascade: reauth-nudge=<acct>` every tick but the user-facing `oauth-login-needed` nudge is
   SILENT and its seen-file never appears — a dead account is never surfaced to the human, so
@@ -384,7 +384,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   delegate to it. Lesson: when two components "share a function," verify they also feed it the
   same source; a divergent input path is a hidden second source of truth.
 
-[^7]: [ocd:2026-06-24 lmd:2026-06-24] **The rotator's unit tests wrote into the PRODUCTION
+[^7]: [id:ATOM-MG05-0007, status:valid, keywords:"tests_wrote_production_rotator_log isolate_every_real_path_side_effect log_is_operational_state", ocd:2026-06-24, lmd:2026-06-24] **The rotator's unit tests wrote into the PRODUCTION
   rotator.log.** Symptom: the operational `rotator.log` interleaved with fake `live@x`/`alt@x`/
   `far@x` rotation lines (the test fixtures), burying the real ROTATE/RENEW/REAUTH history — the
   one durable trail used to diagnose a live failure. Cause (TRDD-14IY6MAD, fixed v0.18.2): the
@@ -395,7 +395,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   `_log` tests still assert on content). Lesson: isolate EVERY real-path side effect a test can
   trigger — state + keychain is not the whole surface; the log is operational state too.
 
-[^8]: [ocd:2026-06-24 lmd:2026-06-24] **A dead-but-present refresh + a LIVE cookie was nudged
+[^8]: [id:ATOM-MG05-0008, status:valid, keywords:"dead_refresh_skipped_cookie_rung reauth_is_last_resort manual_relogin_pain_auto_recover", ocd:2026-06-24, lmd:2026-06-24] **A dead-but-present refresh + a LIVE cookie was nudged
   for a manual human re-login instead of auto-recovering (the recurring "had to rotate the auth
   manually" pain).** Symptom: an alternate whose refresh token kept failing (`refresh_failures` ≥
   max) but whose claude.ai cookie was ALIVE was routed to `REAUTH_NUDGE` every tick, so the user
@@ -414,7 +414,7 @@ The documented past errors — each folded in so the symptom finds the fix:
   2026-06-24 (both the agent-browser and Playwright drivers drove the seeded Chrome hands-free),
   so the leg this fix routes TO is proven real.
 
-[^9]: [ocd:2026-06-24 lmd:2026-06-24] **`/janitor-refresh-claude-logins` ships as a COMMAND, not a
+[^9]: [id:ATOM-MG05-0009, status:valid, keywords:"claude_in_name_skill_major refresh_logins_command_not_skill reserved_word_impersonation_guard", ocd:2026-06-24, lmd:2026-06-24] **`/janitor-refresh-claude-logins` ships as a COMMAND, not a
   skill.** When the user-scope wrapper was folded into the plugin (TRDD-3T4DZWXA, v0.20.0),
   authoring it as a SKILL failed CPV `--strict`: `validate_skill_comprehensive.py` rule N11 MAJORs
   any skill whose name contains "anthropic"/"claude" (`if "claude" in name_lower …`) — an

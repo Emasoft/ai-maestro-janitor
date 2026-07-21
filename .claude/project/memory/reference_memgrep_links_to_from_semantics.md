@@ -28,7 +28,7 @@ reference: the wikimem-model memgrep table +
 tests). See also `[[memory-system]]`.
 
 ## Notes and lessons learned
-[^1]: [ocd:2026-06-10 lmd:2026-06-10] the first draft of the wikimem skills
+[^1]: [id:ATOM-MG06-0018, status:valid, keywords:"links_from_to_inverted verify_cli_flags_with_asymmetric_fixture symmetric_fixture_confirms_any_hypothesis", ocd:2026-06-10, lmd:2026-06-10] the first draft of the wikimem skills
   documented `links --from` as out-links and `--to` as inbound — exactly
   inverted. The error: writing tool docs from the preposition's English reading
   instead of probing the binary. A confounded probe (two pages linking each

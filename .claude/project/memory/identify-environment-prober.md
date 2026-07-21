@@ -40,7 +40,7 @@ path; `--json` prints the raw object to stdout; `--fast` skips tool-versions +
 listening-ports.
 
 ## Notes and lessons learned
-[^1]: [ocd:2026-07-13 lmd:2026-07-13] **The anchor a subprocess loses.** Terminal/TTY
+[^1]: [id:ATOM-MG07-0013, status:valid, keywords:"subprocess_no_controlling_terminal iterm_session_id_absent_on_resume read_identity_from_ancestor_not_self", ocd:2026-07-13, lmd:2026-07-13] **The anchor a subprocess loses.** Terminal/TTY
   detection first reported `headless`/`tty ??` and a false "background agent" INSIDE a
   fully interactive iTerm session. Root cause: Claude Code's Bash tool spawns the probe
   subprocess with NO controlling terminal, so `ps -o tty= -p <self>` is `??` — and the
@@ -54,7 +54,7 @@ listening-ports.
   a pane by TTY (via `osascript`/`tmux list-panes`), not by the session's own env — the
   self-trigger (`compact_trigger`/`reload_trigger`) should adopt the same TTY-anchored
   fallback when `$ITERM_SESSION_ID` is empty. Transferable → [[debugging-methodology]].
-[^2]: [ocd:2026-07-13 lmd:2026-07-13] **NAT fooled by CGNAT.** `classify_nat` first
+[^2]: [id:ATOM-MG07-0014, status:valid, keywords:"cgnat_100_64_not_private_range is_private_not_is_on_my_lan classify_nat_skip_tunnel_interfaces", ocd:2026-07-13, lmd:2026-07-13] **NAT fooled by CGNAT.** `classify_nat` first
   read a Tailscale `100.x` address as a public IP → "not behind NAT", because RFC 6598
   shared space (`100.64.0.0/10`) is not in Python's `ipaddress.is_private`. Fix: skip
   tunnel/VPN interfaces and treat CGNAT as non-routable. Lesson: `is_private` is not

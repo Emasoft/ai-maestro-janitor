@@ -40,7 +40,7 @@ for the release-gate half (CPV, pre-push hook, version/branch recheck).
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-13 lmd:2026-07-13] Found the day v0.42.0 shipped. I first told the user
+[^1]: [id:ATOM-MG07-0017, status:valid, keywords:"reload_marker_not_proof_of_new_cache verify_version_dont_infer_from_marker ls_cache_and_plugin_list_settles_it", ocd:2026-07-13, lmd:2026-07-13] Found the day v0.42.0 shipped. I first told the user
   "the session now runs the 0.42.0 hooks" right after a `[janitor-reload]` — WRONG: the cache
   was still 0.41.0 (`claude plugin list` = 0.41.0, newest cache dir = 0.41.0), so the reload
   reloaded 0.41.0 and the running hooks were unchanged. I had asserted a state change without

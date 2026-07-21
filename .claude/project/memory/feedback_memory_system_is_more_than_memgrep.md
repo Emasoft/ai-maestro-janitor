@@ -37,7 +37,7 @@ component page for this functionality).
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-06-08 lmd:2026-06-13] The engine path moved: it was `tools/memgrep/`
+[^1]: [id:ATOM-MG06-0016, status:valid, keywords:"path_in_memory_note_goes_stale memgrep_moved_tools_to_scripts cite_role_not_literal_path", ocd:2026-06-08, lmd:2026-06-13] The engine path moved: it was `tools/memgrep/`
   when this note was first written, relocated to `scripts/memgrep/` during the v0.7.0
   publish-unblock (CPV flagged `tools/` as a non-standard dir, RC-NONSTD-DIR-001).
   Lesson: a path in a memory note is the thing most likely to go stale — cite the

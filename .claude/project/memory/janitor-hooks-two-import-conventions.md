@@ -57,7 +57,7 @@ in the code says which convention a given module tolerates — a module that onl
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-11 lmd:2026-07-11] The omission was DELIBERATE and documented: a comment
+[^1]: [id:ATOM-MG05-0017, status:valid, keywords:"comment_explaining_absence_needs_consequence constraint_vs_preference_comment scripts_on_syspath_not_lib", ocd:2026-07-11, lmd:2026-07-11] The omission was DELIBERATE and documented: a comment
   said "Put scripts/ on sys.path (NOT scripts/lib/)" to satisfy the CPV hook validator. It read
   as a style choice, so nobody questioned it — but it was load-bearing in the opposite
   direction. Lesson: when a comment explains why something is ABSENT, it should also say what

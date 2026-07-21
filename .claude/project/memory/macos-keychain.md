@@ -203,7 +203,7 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-09 lmd:2026-07-09] 2026-07-09 flood incident. Lessons: (a) SIGSTOP a hung
+[^1]: [id:ATOM-MG06-0007, status:valid, keywords:"sigstop_does_not_stop_keychain_flood kill_by_pid_and_neutralize_respawner two_independent_flooders", ocd:2026-07-09, lmd:2026-07-09] 2026-07-09 flood incident. Lessons: (a) SIGSTOP a hung
   reader does NOT stop the flood — freezing a process leaves the SecurityAgent dialog backlog
   on screen AND a process manager (PM2/nodemon/heartbeat) respawns it; kill BY PID + neutralize
   the respawner + `killall SecurityAgent`. (b) The kill-switch stops the daemon SPAWN
@@ -217,7 +217,7 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   tick that a crashing one never did; so the headless read-path fix must ship together with the
   crash-loop fix, never after.
 
-[^2]: [ocd:2026-07-09 lmd:2026-07-09] 2026-07-09, the RECURRENCE. Symptom-to-remember: "I
+[^2]: [id:ATOM-MG06-0008, status:valid, keywords:"keepalive_staged_prefix_flooder restage_and_byte_verify_closure clearing_killswitch_revives_staged", ocd:2026-07-09, lmd:2026-07-09] 2026-07-09, the RECURRENCE. Symptom-to-remember: "I
   PUBLISHED the fix, updated the cache, cleared the kill-switch — and the flood STILL kept
   coming back over the next days." Root cause: the L0 OS-keepalive (launchd) runs a daemon
   closure it STAGES into `${DATA}/scripts/`, independent of the heartbeat and the cache. It had
@@ -235,7 +235,7 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   the `run_security` denied-latch is the belt, the opt-in-pause is the suspenders. See
   `[[janitor-keepalive-test-isolation-fsevents]]` for the staging internals.
 
-[^3]: [ocd:2026-07-09 lmd:2026-07-09] 2026-07-09, the THIRD flood — the one that finally
+[^3]: [id:ATOM-MG06-0009, status:valid, keywords:"locked_login_keychain_prompts_everything gate_all_callers_not_just_obvious system_agent_prompt_means_keychain_locked", ocd:2026-07-09, lmd:2026-07-09] 2026-07-09, the THIRD flood — the one that finally
   taught the real lesson. Symptoms-to-remember: "I PAUSED the rotator and the keychain prompts
   STILL come back"; "this time it's `security` AND `iCloudNotificationAgent` prompting"; "I typed
   my password / ran `security unlock-keychain` and it's NOT STICKING, it keeps asking." Two
@@ -258,7 +258,7 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
   in the Claude prompt silently never runs — the user must unlock in a REAL terminal or via the
   Keychain Access GUI. That is why an unlock "didn't stick": it never executed.
 
-[^5]: [ocd:2026-07-12 lmd:2026-07-12] 2026-07-12, the DEAD SECURITY SESSION (gotcha 4) — a
+[^5]: [id:ATOM-MG06-0010, status:valid, keywords:"dead_securityd_session_inherited keychain_search_list_per_security_session not_logged_in_below_every_hypothesis", ocd:2026-07-12, lmd:2026-07-12] 2026-07-12, the DEAD SECURITY SESSION (gotcha 4) — a
   fleet-wide `Not logged in` whose cause sat one layer below every hypothesis. KEYCHAIN FACTS
   this cost a day to learn: (a) The keychain search list is **PER-SECURITY-SESSION**. A
   long-lived process (here a 22h-old tmux server, ppid 1) can hold a securityd connection that

@@ -321,24 +321,24 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-06-13 lmd:2026-06-13] `memgrep links --to NOTE` returns NOTE's
+[^1]: [id:ATOM-MG07-0001, status:valid, keywords:"memgrep_links_to_from_inverted verify_directional_flags_asymmetric_fixture one_sided_link_defect", ocd:2026-06-13, lmd:2026-06-13] `memgrep links --to NOTE` returns NOTE's
   OUT-links and `--from NOTE` returns its BACKLINKS — the intuition inverts them
   (you'd expect `--from` to mean "links FROM this note"). Under THE LINK LAW the
   two sets agree, so a disagreement between `--to` and `--from` is a one-sided
   link defect to flag for the librarian. Lesson: verify directional CLI flags
   with an asymmetric fixture, not by name-intuition.
-[^2]: [ocd:2026-06-13 lmd:2026-06-13] `memgrep recall` ranks on
+[^2]: [id:ATOM-MG07-0002, status:valid, keywords:"recall_ranks_description_title_tags_only index_by_question_not_answer symptom_vocabulary_in_description", ocd:2026-06-13, lmd:2026-06-13] `memgrep recall` ranks on
   `description + title + tags` ONLY — `metadata.type` does NOT affect ranking.
   So a note found only by its answer's jargon is mis-authored: the symptom
   vocabulary (the user's words / the error text) MUST be in `description`, with
   the answer in the body. Index by the QUESTION, not the answer.
-[^3]: [ocd:2026-06-13 lmd:2026-06-13] PROJECT scope (`<repo-root>/memory/`) is the
+[^3]: [id:ATOM-MG07-0003, status:valid, keywords:"project_scope_only_pushed_can_leak unsure_local_safe_default memory_scope_leak_polices_project", ocd:2026-06-13, lmd:2026-06-13] PROJECT scope (`<repo-root>/memory/`) is the
   ONLY scope that leaves the machine (git-tracked + pushed), which is exactly why
   it is the one that can leak and the only one `memory-scope-leak` polices. LOCAL
   and USER live under `$HOME/.claude/` and are never pushed, so they are not
   scanned. Machine-private detail belongs in LOCAL; "UNSURE → LOCAL" is the safe
   default precisely because PROJECT is the pushed scope.
-[^4]: [ocd:2026-06-19 lmd:2026-06-19] The LOCAL/PROJECT/USER scope-dir resolvers
+[^4]: [id:ATOM-MG07-0004, status:valid, keywords:"extract_shared_resolver_before_third_copy test_heartbeat_detectors_as_subprocess lru_cache_leaks_first_test_root", ocd:2026-06-19, lmd:2026-06-19] The LOCAL/PROJECT/USER scope-dir resolvers
   were copy-pasted byte-identical into `memory-maintenance` + `memory-librarian`
   with an "IDENTICAL to ..." comment; adding a 3rd consumer (`memorize-nudge`)
   would have calcified a 3-way duplication that silently routes recall/write to the
@@ -350,7 +350,7 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
   `project_root`/`janitor_root` are process-lifetime `@lru_cache`d, so in-process
   repeated `main()` calls leak the first test's resolved root (the cache is correct
   in production, where every heartbeat is a fresh process).
-[^5]: [ocd:2026-06-20 lmd:2026-06-20] Pre-v0.13.0 this page said "`MEMORY.md` is the human
+[^5]: [id:ATOM-MG07-0005, status:valid, keywords:"memory_md_growing_index_was_the_bug never_put_growing_index_in_context search_engine_owns_unlimited_index", ocd:2026-06-20, lmd:2026-06-20] Pre-v0.13.0 this page said "`MEMORY.md` is the human
   index loaded each session and the canonical index." That model WAS the bug: the
   context-loaded MEMORY.md grew unbounded with the corpus, so agents hand-trimmed it to
   save context and LOST pointers / corrupted memories. v0.13.0 (TRDD-a5780c23) moved the

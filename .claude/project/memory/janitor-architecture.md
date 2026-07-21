@@ -297,14 +297,14 @@ must report a crash.[^3]
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-06-13 lmd:2026-06-13] This hub is the prose overlay of the
+[^1]: [id:ATOM-MG07-0006, status:valid, keywords:"hub_is_prose_overlay_not_second_copy auto_map_wins_structural_disagreement fix_prose_not_map", ocd:2026-06-13, lmd:2026-06-13] This hub is the prose overlay of the
   fenced `CLAUDE.md` repomap, not a second copy of it. The map enumerates files
   and symbols and is regenerated automatically; this page explains the *why* and
   the *flow* a contributor needs before reading the map. If the two ever
   disagree on a structural fact, the auto-generated map wins and this prose is
   the thing to fix.
 
-[^2]: [ocd:2026-06-13 lmd:2026-06-13] PRIVACY: a PROJECT/USER wikimem page is
+[^2]: [id:ATOM-MG07-0007, status:valid, keywords:"project_user_page_no_machine_private_data no_home_path_email_token_hostname memory_scope_leak_invariant", ocd:2026-06-13, lmd:2026-06-13] PRIVACY: a PROJECT/USER wikimem page is
   git-tracked and host-global, so it MUST NOT carry machine-private data — no
   `$HOME`-expanded absolute paths, no account emails, no OAuth tokens, no
   hostnames. The daemon's real global-state directory, the rotator's account
@@ -313,7 +313,7 @@ must report a crash.[^3]
   `<email>`. The janitor's own `memory-scope-leak` detector polices exactly this
   invariant on the PUSHED memory scope.
 
-[^3]: [ocd:2026-06-25 lmd:2026-06-25] A bad janitor self-update kept
+[^3]: [id:ATOM-MG07-0008, status:valid, keywords:"bad_self_update_resurrects_at_os_level quarantine_gate_every_acting_path keepalive_ignored_quarantine", ocd:2026-06-25, lmd:2026-06-25] A bad janitor self-update kept
   self-resurrecting at the OS level even though C4 had a rollback
   (TRDD-KEEPQRTN, fixed v0.24.1). Symptom: a bad-DAEMON version relaunched by
   launchd forever — "auto-rollback didn't work for the daemon." Cause: C4's
@@ -331,7 +331,7 @@ must report a crash.[^3]
   reviews because C4 (heartbeat) and the keepalive (OS path) each looked correct
   in isolation; only the whole-immortality-surface review caught the cross-group
   seam.
-[^4]: [ocd:2026-07-07 lmd:2026-07-07] This section previously said the daemon
+[^4]: [id:ATOM-MG07-0009, status:valid, keywords:"daemon_state_data_dir_canonical flock_path_is_singleton_guarantee staged_handover_no_two_daemons", ocd:2026-07-07, lmd:2026-07-07] This section previously said the daemon
   state lived in an UNOFFICIAL `$HOME/.claude/janitor-global-state/` folder with
   a standing migrate-to-DATA TODO. Superseded 2026-07-07 by TRDD-2U8AH82F
   (commit ba58ebb): the DATA dir is now canonical via a staged handover. The WHY

@@ -128,7 +128,7 @@ fires rather than trusting its docstring):
 
 ## Notes and lessons learned
 
-[^1]: [ocd:2026-07-03 lmd:2026-07-03] The keepalive tests had polluted the real
+[^1]: [id:ATOM-MG07-0010, status:valid, keywords:"test_isolation_defect_corrupted_real_state frozen_path_home_vs_monkeypatch_setenv env_change_after_import_constant", ocd:2026-07-03, lmd:2026-07-03] The keepalive tests had polluted the real
   boot log for weeks (pytest paths visible in the production
   `daemon-keepalive.boot.log`) before it cascaded into an OS crash — a
   test-isolation defect is not "just a test smell"; here it corrupted real staged
@@ -138,7 +138,7 @@ fires rather than trusting its docstring):
   proof: janitor suite `pytest tests/` = 12028 passed AND `find
   ~/.claude/janitor-global-state -newermt "25 minutes ago"` empty during the test
   run (real state untouched).
-[^2]: [ocd:2026-07-11 lmd:2026-07-11] **A self-heal is a WEAPON pointed at whatever directory it
+[^2]: [id:ATOM-MG07-0011, status:valid, keywords:"self_heal_weapon_wrong_directory verify_or_restage_source_checkout refuse_illegal_destinations_at_write", ocd:2026-07-11, lmd:2026-07-11] **A self-heal is a WEAPON pointed at whatever directory it
   is handed.** `verify_or_restage(_HERE)` was written to keep the DATA stage honest; nobody asked
   what it does when `_HERE` is a source checkout, and the `_repair` else-branch even carried a
   comment blessing that case ("keeps the gate self-consistent if ever invoked from a non-DATA
@@ -147,7 +147,7 @@ fires rather than trusting its docstring):
   destinations it can legally have and REFUSE the rest at the write — an authoritative source
   overwriting a "corrupt" target is indistinguishable from vandalism when the target is actually
   the newer thing.
-[^3]: [ocd:2026-07-11 lmd:2026-07-11] **Opt-in test isolation fails silently and forever.** THREE
+[^3]: [id:ATOM-MG07-0012, status:valid, keywords:"opt_in_test_isolation_fails_silently exclusion_hides_its_own_incident experiment_after_fix_proves_fix_not_innocence", ocd:2026-07-11, lmd:2026-07-11] **Opt-in test isolation fails silently and forever.** THREE
   layers here each claimed to stop tests touching real state (per-module `_isolate_janitor_state`
   fixtures, the S1a session-default env redirect, the S1b/S1c manifest guards) — and the REAL
   `daemon-keepalive.boot.log` still held 432 lines of which **296 name a pytest tmp dir** as the
