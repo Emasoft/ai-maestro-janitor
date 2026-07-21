@@ -36,9 +36,10 @@
 > OAuth runs nowhere while the server is up).
 > **Rev 4 → rev 5 change (OWNER DIRECTIVES, 2026-07-21):** adds §7, the fleet control
 > plane. (a) *"all global states must be shared via a file-flag. just write to it, and
-> whichever daemon is on will read it and switch the mode accordingly"* — §7.1 documents
-> the flag directory, its resolution ladder and its vocabulary as a PUBLIC contract any
-> chore owner reads. (b) *"when the ai-maestro server is running, the daemon process must
+> whichever daemon is on will read it and switch the mode accordingly"* + *"put it under
+> some standard janitor folder"* — §7.1 defines the PUBLIC control plane as a FIXED
+> directory, `~/.claude/janitor-control/`, with no resolution ladder, split by audience
+> from the private daemon state that stays in `<DATA>/global-state/`. (b) *"when the ai-maestro server is running, the daemon process must
 > stop, and resume only when the ai-maestro server is not running anymore. only one daemon
 > can exist at the same time in the host"* — §7.2 turns rev 4's chore-level yield into
 > process-level mutual exclusion. (c) *"the server is wherever the user installs
@@ -265,14 +266,26 @@ identity either side gets.
 
 ### 7.1 Global mode is a directory of flag files (the substrate)
 
-- **Directory** — the janitor's global-state dir, resolved by this ladder (a consumer
-  implements the same four rungs; they are four lines):
-  1. `$JANITOR_GLOBAL_STATE_DIR` if set (test/host escape hatch, absolute priority);
-  2. `$XDG_STATE_HOME/janitor/` if `XDG_STATE_HOME` is set (Linux);
-  3. `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/` —
-     the canonical location (TRDD-2U8AH82F), and the answer on any normal install;
-  4. legacy `~/.claude/janitor-global-state/` while a pre-migration install still has
-     one — read-fallback only, being retired.
+- **Directory — `~/.claude/janitor-control/`, FIXED.** No ladder, no resolution logic, no
+  environment lookup: an external chore owner stats a literal path. Owner directive
+  2026-07-21: *"put it under some standard janitor folder."*
+
+  This is a deliberate split by AUDIENCE, and it is **not** a reversal of TRDD-2U8AH82F
+  (which moved daemon state out of `~/.claude/janitor-global-state/` into the plugin DATA
+  dir). That migration was about STATE — pid, flock, heartbeat, last-run stamps,
+  injection stamps — which must survive plugin updates and be purged on uninstall, and
+  which stays in `<DATA>/global-state/` under the standing "prefer `${CLAUDE_PLUGIN_DATA}`
+  over a custom `~/.claude/` folder" principle. The control plane is the opposite kind of
+  thing: a handful of ephemeral MODE flags whose whole purpose is to be read by software
+  that knows nothing about this plugin's internals. Surviving an uninstall is not merely
+  unnecessary for them, it is wrong — an uninstalled janitor must leave no flag behind
+  claiming the host is in maintenance. The DATA dir's four-rung resolution ladder
+  (`$JANITOR_GLOBAL_STATE_DIR` → `$XDG_STATE_HOME/janitor/` → DATA → legacy) is exactly
+  what a foreign reader cannot safely reproduce: hardcoding rung 3 silently reads the
+  wrong file whenever rung 1 or 2 applies.
+
+  `$JANITOR_CONTROL_DIR` overrides the path for TESTS ONLY. Production is the literal
+  path — a consumer that honors the override is welcome to, but must not require it.
 - **Vocabulary** — PRESENCE is the whole signal; file content is advisory text only:
 
   | flag | meaning for every chore owner |
@@ -314,8 +327,11 @@ identity either side gets.
 - **Flap guard:** exiting because a server owns the host is a *clean* exit and must not
   count toward the daemon's crash-loop breaker, or a server restart cycle would trip it.
 
-Janitor-side implementation is tracked as its own TRDD; §7.1 is already true of the
-janitor today and needs only a reader on the server side.
+Janitor-side implementation is tracked per section: §7.1's move of the mode flags out of
+`<DATA>/global-state/` into the fixed `~/.claude/janitor-control/` is TRDD-QK7M2B0X, and
+§7.2's mutual exclusion is TRDD-5ZVS1DDP. Everything else in §7.1 — presence-is-signal,
+atomic writes, fail-open reads, the flag vocabulary — is already true of the janitor
+today and needs only a reader on the server side.
 
 ## Ratification log
 

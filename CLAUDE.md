@@ -96,6 +96,18 @@ fallback `AMP_AGENT_ID`/`AID_AUTH`):
 > preserved across plugin/marketplace/version changes, backed up by backup
 > tools, and cleanly purged on uninstall. Unofficial folders are lost by
 > backups AND left as orphan junk by purge.
+>
+> **THE ONE SANCTIONED EXCEPTION — `~/.claude/janitor-control/`** (owner, 2026-07-21:
+> *"this folder is an exception, introduced necessarily because of the shared flags with
+> the ai-maestro server"*). It holds ONLY the global MODE flags of the fleet control plane
+> (ARCHITECTURE.md §7.1; TRDD-QK7M2B0X), because an ai-maestro server must stat one
+> LITERAL path — `global_state_dir()`'s four-rung ladder is unreproducible by a foreign
+> reader, and guessing a rung fails silently as "flag absent", i.e. it ignores the control
+> plane while looking healthy. **Do NOT migrate this folder into the DATA dir**; the
+> principle's virtues (survives updates, backed up) are the exact properties a mode flag
+> must NOT have — an uninstalled janitor must leave nothing behind claiming the host is in
+> maintenance. Everything else — pid, flock, heartbeat, last-run stamps, injection stamps —
+> stays in `<DATA>/global-state/` and the principle governs it unchanged.
 
 ## Runtime / installed tree
 
