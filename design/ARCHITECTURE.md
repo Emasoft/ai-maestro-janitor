@@ -1,4 +1,4 @@
-# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 4 — PROPOSED)
+# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 5 — PROPOSED)
 
 > **Status: rev 4 PROPOSED (2026-07-17, owner-directed) — supersedes the rev-3 per-class
 > chore gating; awaiting both sides' `RATIFIED rev 4` on
@@ -34,6 +34,19 @@
 > absorbed chores — a running server must execute them (build them; a server that runs
 > without them is, per the owner, a server bug — including resolving R16-off meaning
 > OAuth runs nowhere while the server is up).
+> **Rev 4 → rev 5 change (OWNER DIRECTIVES, 2026-07-21):** adds §7, the fleet control
+> plane. (a) *"all global states must be shared via a file-flag. just write to it, and
+> whichever daemon is on will read it and switch the mode accordingly"* — §7.1 documents
+> the flag directory, its resolution ladder and its vocabulary as a PUBLIC contract any
+> chore owner reads. (b) *"when the ai-maestro server is running, the daemon process must
+> stop, and resume only when the ai-maestro server is not running anymore. only one daemon
+> can exist at the same time in the host"* — §7.2 turns rev 4's chore-level yield into
+> process-level mutual exclusion. (c) *"the server is wherever the user installs
+> ai-maestro, it's not defined… and it runs via pm2"* — neither side may key off a path or
+> a process name, so §6.1's liveness file is the whole discriminator, and the janitor
+> never stops the server (pm2 owns it; the server idles itself on a flag).
+> **Server-side consequence to ratify:** the janitor daemon's exit stops ALL its chores,
+> not only the five absorbed ones of §2.
 
 ## 1. Two backends, one plugin
 
@@ -237,6 +250,73 @@ read-only. Per-project channeling holds by construction on the server side (thei
 2026-07-17: point-to-point surfaces only; the dashboard is the ONE sanctioned
 human-aggregate view).
 
+## 7. The fleet control plane — REQUESTED of ai-maestro (round 2, 2026-07-21)
+
+Owner directives, 2026-07-21: *"all global states must be shared via a file-flag. just
+write to it, and whichever daemon is on will read it and switch the mode accordingly"*
+and *"when the ai-maestro server is running, the daemon process must stop, and resume
+only when the ai-maestro server is not running anymore. only one daemon can exist at the
+same time in the host."*
+
+Two rules, one substrate. Both are **detected, never assumed** — the server *"is wherever
+the user installs ai-maestro, it's not defined"* and is supervised by **pm2**, so neither
+side may key off a repo path, an install location, or a process name. A file is the only
+identity either side gets.
+
+### 7.1 Global mode is a directory of flag files (the substrate)
+
+- **Directory** — the janitor's global-state dir, resolved by this ladder (a consumer
+  implements the same four rungs; they are four lines):
+  1. `$JANITOR_GLOBAL_STATE_DIR` if set (test/host escape hatch, absolute priority);
+  2. `$XDG_STATE_HOME/janitor/` if `XDG_STATE_HOME` is set (Linux);
+  3. `~/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/global-state/` —
+     the canonical location (TRDD-2U8AH82F), and the answer on any normal install;
+  4. legacy `~/.claude/janitor-global-state/` while a pre-migration install still has
+     one — read-fallback only, being retired.
+- **Vocabulary** — PRESENCE is the whole signal; file content is advisory text only:
+
+  | flag | meaning for every chore owner |
+  |---|---|
+  | `maintenance-mode.flag` | idle all task workloads; stay alive. Sessions keep firing cache-refresh-only. |
+  | `kill-switch.flag` | machine-wide STOP — the janitor daemon exits and removes its OS keepalive. |
+  | `global-pause.flag` | idle task workloads but keep the process alive and ticking. |
+  | `reload-needed.flag` · `skills-reload-needed.flag` | a generation stamp sessions consume to reload plugins/skills. |
+  | `version-update-requested.flag` | run the self-update now rather than on the 6 h beat. |
+
+- **Writers** — anyone. One canonical file per state means there is no second copy to
+  drift; the janitor writes via `global_control_cli.py`, and a server that wants to
+  raise a state writes the same file. **Atomic** (tmp + `os.replace`) so a reader never
+  observes a half-written flag.
+- **Readers** — every daemon that is up, on its own chore tick. Absent ⇒ normal
+  operation. **Fail-open:** an unreadable directory means "not set", never "block".
+
+### 7.2 One daemon per host (the mutual exclusion)
+
+- **Discriminator** — the already-delivered `~/.aimaestro/server-liveness.json` (§6.1),
+  fresh within its 90 s window. A fresh file means a server is running *somewhere on this
+  host*; that is all either side needs to know about the other.
+- **Rule** — a fresh liveness file ⇒ the janitor daemon **exits**, and every session's
+  `ensure_daemon_running()` declines to spawn it. Stale or absent ⇒ the janitor daemon is
+  the host daemon again, spawned by the next heartbeat.
+- **Consequence the server must accept:** the janitor daemon exiting stops **all** of its
+  work, not only the five `SERVER_ABSORBED_TASKS` of §2 — memory-guard, cache-prune,
+  rules-cleanup, github-config-audit, the OAuth supervisor, and the fleet
+  liveness/recovery beats stop with it. A running server therefore owns the whole chore
+  set, which is the §6.1 binary rule taken to its conclusion: **running IS the claim.**
+- **Why an exit and not a yield:** two supervisors would otherwise fight. The janitor
+  daemon is kept alive by launchd `KeepAlive`/systemd `Restart=always`, so a bare exit is
+  relaunched every 30 s forever; the exit therefore removes the OS keepalive, exactly as
+  the existing kill-switch path already does (`daemon.py` `_uninstall_os_keepalive`).
+  Resurrection does not depend on that keepalive — the per-session heartbeat spawns the
+  daemon the moment the liveness file goes stale. Symmetrically the janitor never touches
+  the server: pm2 owns that process, so the server idles itself on a flag rather than
+  being stopped from outside.
+- **Flap guard:** exiting because a server owns the host is a *clean* exit and must not
+  count toward the daemon's crash-loop breaker, or a server restart cycle would trip it.
+
+Janitor-side implementation is tracked as its own TRDD; §7.1 is already true of the
+janitor today and needs only a reader on the server side.
+
 ## Ratification log
 
 - rev 1 — 2026-07-17, authored janitor-side; posted to #100 for round 1.
@@ -261,3 +341,14 @@ human-aggregate view).
   janitor-side `RATIFIED rev 4`; awaiting ai-maestro's match + their server half
   (implement the absorbed chores as unconditional-while-running, incl. the R16
   resolution — a running server with OAuth dark is now a server bug by definition).
+- rev 5 — 2026-07-21, owner directives (three, same session): global state travels as
+  FILE FLAGS only ("just write to it, and whichever daemon is on will read it and switch
+  the mode accordingly"); ONE daemon per host — a running ai-maestro server means the
+  janitor daemon stops and resumes only when the server is gone; and the server is
+  undefined by location ("wherever the user installs ai-maestro", run under pm2), so both
+  sides must detect each other by file, never by path or process. Added §7 (the fleet
+  control plane): §7.1 documents the flag directory + resolution ladder + vocabulary the
+  janitor already implements, and §7.2 specifies the mutual exclusion, including the
+  consequence a running server must accept — the janitor daemon's exit stops ALL of its
+  chores, not only the five absorbed ones. Janitor-side §7.2 implementation tracked
+  separately; §7.1 needs only a reader on the server side.

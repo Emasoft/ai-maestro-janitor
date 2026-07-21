@@ -1,6 +1,6 @@
 ---
 name: janitor-maintenance-mode
-description: Keep the janitor heartbeat ARMED but make every fire cache-refresh-only (no chores, no daemon spawn, no agents — only the token-burn monitors stay on), so the prompt cache stays warm at ~1/10 the cost of letting it die and rewriting — the cheap middle ground between a full heartbeat and disarm. Trigger with /janitor-maintenance-mode, "maintenance mode", "keep the cache warm cheaply", "cheap heartbeat"; add "off" to disable, or "global" to apply fleet-wide.
+description: Keep THIS project's janitor heartbeat ARMED but make every fire cache-refresh-only (no chores, no daemon spawn, no agents — only the token-burn monitors stay on), so the prompt cache stays warm at ~1/10 the cost of letting it die and rewriting — the cheap middle ground between a full heartbeat and disarm. LOCAL-only; see /janitor-global-maintenance-on for the fleet-wide equivalent. Trigger with /janitor-maintenance-mode, "maintenance mode", "keep the cache warm cheaply"; add "off" to disable.
 ---
 
 # Janitor maintenance-mode
@@ -28,11 +28,16 @@ REWRITE the whole context at the 1.0x rate — ~10x a cache read. So a maintenan
 Maintenance always carries the never-stop continue-nudge (see `/janitor-keep-going` for the
 standalone opt-in to the same nudge while staying in FULL mode with detectors/daemon active).
 
-Two scopes:
+This skill is **LOCAL-ONLY** — it writes `$CLAUDE_PROJECT_DIR/.janitor/state/maintenance-mode`
+and affects THIS session's heartbeat only. The machine-wide equivalent is
+`/janitor-global-maintenance-on` and `/janitor-global-maintenance-off` — two INDEPENDENT
+settings. Any combination is valid (local on + global off, local off + global on, both,
+neither); the EFFECT is OR-ed, so either flag being set makes THIS session's fires
+cache-refresh-only.
 
-- **local** (default) — THIS session only (`.janitor/state/maintenance-mode`).
-- **global** (say "global" / "fleet") — every armed session drops to cache-refresh-only
-  fires and the daemon idles its task workloads.
+`/janitor-arm` CLEARS this LOCAL sentinel (arming means the session starts in a known FULL
+state) but never the GLOBAL flag — so a local maintenance does not survive a re-arm and a
+global one does. The arm reports `maintenance=global-on` when the global flag is set.
 
 A session in maintenance keeps its cache warm WITHOUT spawning the daemon/fleet-recovery, so
 it stays warm even while the fleet is globally disarmed (maintenance wins over a stop).
@@ -46,11 +51,10 @@ it stays warm even while the fleet is globally disarmed (maintenance wins over a
 
 ## Instructions
 
-1. Parse the request into (scope, action):
+1. Parse the request into an action:
    - contains "off" / "stop" / "disable" → action = OFF; otherwise ON.
-   - contains "global" / "fleet" / "all projects" → scope = GLOBAL; otherwise LOCAL.
 
-2. **LOCAL ON** — write the sentinel atomically:
+2. **ON** — write the sentinel atomically:
 
    ```bash
    STATE_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state"
@@ -59,44 +63,34 @@ it stays warm even while the fleet is globally disarmed (maintenance wins over a
    mv -f "$STATE_DIR/maintenance-mode.tmp.$$" "$STATE_DIR/maintenance-mode"
    ```
 
-   **LOCAL OFF** — remove it:
+   **OFF** — remove it:
 
    ```bash
    rm -f "${CLAUDE_PROJECT_DIR:-$(pwd)}/.janitor/state/maintenance-mode"
    ```
 
-3. **GLOBAL ON / OFF** — go through the machine-wide CLI (the single source of truth for the
-   global flag):
-
-   ```bash
-   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/global_control_cli.py" maintenance
-   # to turn it off:
-   uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/global_control_cli.py" maintenance-off
-   ```
-
-4. Report one line:
-   - LOCAL ON → `Janitor maintenance-mode ON (local) — heartbeat stays armed; each fire refreshes the cache only (~1/10 of a cache-death rewrite).`
-   - GLOBAL ON → `Janitor maintenance-mode ON (global, fleet-wide) — every armed session fires cache-refresh-only; the daemon idles its tasks.`
-   - OFF → `Janitor maintenance-mode OFF (<scope>) — full fires resume.`
+3. Report one line:
+   - ON → `Janitor maintenance-mode ON (local) — heartbeat stays armed; each fire refreshes the cache only (~1/10 of a cache-death rewrite).`
+   - OFF → `Janitor maintenance-mode OFF (local) — full fires resume.`
    - If the heartbeat is not armed, append `Note: heartbeat not armed; run /janitor-arm to start the cheap keep-warm beat.`
 
 ## Output
 
-One line. Side effect: writes/removes `.janitor/state/maintenance-mode` (local) or sets/clears
-the machine-wide flag via `global_control_cli.py` (global). No cron change — arm/disarm is
-separate.
+One line. Side effect: writes/removes `.janitor/state/maintenance-mode` (this project only).
+No cron change — arm/disarm is separate. Does not touch the machine-wide flag; see
+`/janitor-global-maintenance-on` / `/janitor-global-maintenance-off` for that.
 
 ## Error handling
 
 - `$CLAUDE_PROJECT_DIR` unset → fall back to `$(pwd)` (dispatch resolves the same path).
 - Cannot create `$STATE_DIR` (permission denied) → report `Janitor maintenance-mode failed: <error>`.
-- Global CLI unavailable → report the error verbatim; the local flag path is unaffected.
 
 ## Scope
 
-ONLY sets/clears the maintenance flag (local or global). Does NOT arm/disarm the cron, run
-detectors, or change any other config. To STOP firing entirely, use `/janitor-disarm`; to arm,
-use `/janitor-arm`; for a temporary silence, `/janitor-pause`.
+ONLY sets/clears THIS project's LOCAL maintenance flag. Does NOT arm/disarm the cron, run
+detectors, change any other config, or touch the machine-wide flag. To STOP firing entirely,
+use `/janitor-disarm`; to arm, use `/janitor-arm`; for a temporary silence, `/janitor-pause`;
+for the fleet-wide equivalent, `/janitor-global-maintenance-on` / `/janitor-global-maintenance-off`.
 
 ## Resources
 
@@ -105,15 +99,14 @@ use `/janitor-arm`; for a temporary silence, `/janitor-pause`.
   `_phase_keep_going_nudge(mode)` emits the continue-nudge, and the fire returns before any
   detector/daemon phase.
 - `/janitor-keep-going` — the standalone opt-in for the same never-stop nudge in FULL mode.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/global_control_cli.py` — `maintenance` / `maintenance-off`
-  set/clear the machine-wide flag (and the daemon idles its tasks while it is set).
+- `/janitor-global-maintenance-on` / `/janitor-global-maintenance-off` — the machine-wide,
+  independent equivalent of this LOCAL flag.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/maintenance-mode` — the per-session sentinel.
 
 ## Checklist
 
 Copy this checklist and track your progress:
 
-- [ ] Parse (scope, action) from the request
-- [ ] LOCAL: atomically write / remove `.janitor/state/maintenance-mode`
-- [ ] GLOBAL: call `global_control_cli.py maintenance` / `maintenance-off`
+- [ ] Parse the action (ON/OFF) from the request
+- [ ] Atomically write / remove `.janitor/state/maintenance-mode`
 - [ ] Report one line (note if the heartbeat is not armed)
