@@ -588,7 +588,7 @@ def _maintenance_mode_active() -> bool:
     fire costs ~1/10 of a cache-death rewrite — the cheapest way to keep a session
     (and thus its whole project's cache) warm. It is the middle ground between FULL
     (fire + all due chores) and DISARM (stop firing, cache dies)."""
-    if (state.state_dir() / "maintenance-mode").is_file():
+    if (state.state_dir() / state.MAINTENANCE_FLAG).is_file():
         return True
     return gs.maintenance_mode_present()
 

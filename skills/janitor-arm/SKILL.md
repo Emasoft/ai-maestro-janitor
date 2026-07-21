@@ -30,6 +30,7 @@ scope=ok
 cron=*/15 * * * *
 prior-cron-id=ff020fd5     # empty ⇒ unknown
 sweep=no                   # yes ⇒ CronList and delete EVERY janitor heartbeat
+maintenance=off            # global-on ⇒ fleet-wide maintenance is suppressing chores
 ```
 
 - **`scope=refused` (exit 1)** → **STOP. Do not arm.** The janitor is installed at project/local
@@ -39,6 +40,12 @@ sweep=no                   # yes ⇒ CronList and delete EVERY janitor heartbeat
   `CronList` and `CronDelete` **every** job whose prompt starts with `[janitor-heartbeat]`. This
   costs one extra call and is how a crashed arm heals: it can never leave two heartbeats firing.
 - **`sweep=no`** → skip `CronList` entirely. Go straight to step 2.
+- **`maintenance=global-on`** → fleet-wide maintenance is set, so even a freshly armed heartbeat
+  will fire cache-refresh-only (no chores, no daemon). Arming does NOT clear it — a project arm
+  must not undo a machine-wide decision, and `/janitor-arm` re-runs on every SessionStart, so
+  clearing it here would mean merely opening a session lifts fleet maintenance. **Say so in your
+  step-5 report** so the human knows why chores stay quiet; `/janitor-maintenance-mode off global`
+  is the lever. (`maintenance=off` needs no mention.)
 
 ## 2. Delete the old cron
 
@@ -87,9 +94,17 @@ after a restart (ai-maestro-janitor#23).` Append `(replaced <N>)` if you deleted
 
 ## Scope
 
-ONLY installs the stub and arms the cron. Does NOT run detectors (`/janitor-audit`), install the
-plugin, or touch the machine-wide global kill-switch — a project arm must not silently undo a
-deliberate `/janitor-global-disarm`; use `/janitor-global-arm` for that. To stop: `/janitor-disarm`.
+ONLY installs the stub and arms the cron. Does NOT run detectors (`/janitor-audit`) or install the
+plugin.
+
+Arming puts THIS session into a known FULL state, so it clears this project's local opt-out
+(`disarmed.flag`) and its local maintenance sentinel — a sticky local flag otherwise kept every
+fire cache-refresh-only forever with nothing on screen saying so. It does NOT touch either
+machine-wide flag: neither the global kill-switch nor global maintenance, because a project arm
+must not silently undo a deliberate `/janitor-global-disarm` or `/janitor-maintenance-mode global`
+— and this skill re-runs on every SessionStart, so it would undo them constantly. Use
+`/janitor-global-arm` and `/janitor-maintenance-mode off global` for those. To stop:
+`/janitor-disarm`.
 
 ## Error handling
 
@@ -111,5 +126,7 @@ deliberate `/janitor-global-disarm`; use `/janitor-global-arm` for that. To stop
   - [Known limitations](references/janitor-architecture.md#known-limitations)
 - `${CLAUDE_PLUGIN_ROOT}/scripts/arm_prepare.py` · `arm_record.py` — steps 1 and 4.
 - `$CLAUDE_PROJECT_DIR/.janitor/state/` — reads `desired-cadence.cron`; writes
-  `armed-cadence.cron`, `heartbeat-cron-id.txt`, `heartbeat-armed-at.ts`; removes `disarmed.flag`
-  and `heartbeat-renew-seen.txt`.
+  `armed-cadence.cron`, `heartbeat-cron-id.txt`, `heartbeat-armed-at.ts`; removes `disarmed.flag`,
+  `maintenance-mode` and `heartbeat-renew-seen.txt`.
+- `/janitor-maintenance-mode` — sets the flags this skill reports. The LOCAL one is cleared by an
+  arm; the GLOBAL one survives it and is only reported.

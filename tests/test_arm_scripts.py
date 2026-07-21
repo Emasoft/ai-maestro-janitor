@@ -57,6 +57,9 @@ def _run(script: Path, project: Path, *args: str) -> tuple[int, dict[str, str], 
         "HOME": str(project / "home"),
         "CLAUDE_PROJECT_DIR": str(project),
         "CLAUDE_PLUGIN_DATA": str(project / "data"),
+        # Isolate the machine-wide flags too, so a test can set/inspect GLOBAL maintenance
+        # without ever touching the real fleet state.
+        "JANITOR_GLOBAL_STATE_DIR": str(project / "gs"),
     }
     proc = subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, env=env, cwd=project)
     kv = {}
@@ -164,6 +167,38 @@ def test_prepare_revokes_the_opt_out_and_installs_the_stub(project: Path) -> Non
     stub = project / "data" / "dispatcher-stub.py"
     assert stub.is_file(), "the cron fires the stub — it must exist before the cron does"
     assert stub.stat().st_mode & 0o111, "the stub must be executable"
+
+
+def test_prepare_revokes_the_LOCAL_maintenance_sentinel(project: Path) -> None:
+    """Arming means "this session starts in a KNOWN state". A stale LOCAL maintenance sentinel
+    would otherwise keep every fire cache-refresh-only forever with nothing on screen saying so —
+    you'd have to inspect each instance to find the suppressed ones (owner directive 2026-07-21)."""
+    _sd(project).mkdir(parents=True)
+    (_sd(project) / state.MAINTENANCE_FLAG).write_text("x", encoding="utf-8")
+
+    rc, kv, _ = _prepare(project)
+
+    assert rc == 0
+    assert not (_sd(project) / state.MAINTENANCE_FLAG).exists(), "arming must revoke local maintenance"
+    assert kv["maintenance"] == "off"
+
+
+def test_prepare_does_NOT_clear_GLOBAL_maintenance_but_reports_it(project: Path) -> None:
+    """The GLOBAL flag survives an arm, and the arm SAYS so. /janitor-arm runs automatically on
+    every SessionStart re-arm, so clearing it here would mean merely opening a new session silently
+    lifts fleet-wide maintenance — the mode could never stay on. Same rule the arm already applies
+    to the kill-switch: a project arm must not undo a deliberate machine-wide decision. Reporting
+    solves the visibility problem without the override."""
+    gs_dir = project / "gs"
+    gs_dir.mkdir(parents=True)
+    flag = gs_dir / "maintenance-mode.flag"
+    flag.write_text("fleet paused", encoding="utf-8")
+
+    rc, kv, _ = _prepare(project)
+
+    assert rc == 0
+    assert flag.exists(), "a project arm must NOT lift fleet-wide maintenance"
+    assert kv["maintenance"] == "global-on", "the arm must surface the suppression it did not clear"
 
 
 # --------------------------------------------------------------------------- #

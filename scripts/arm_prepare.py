@@ -43,6 +43,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE / "lib"))
 
+import global_state as gs  # noqa: E402
 import state  # noqa: E402
 
 DEFAULT_CRON = "*/5 * * * *"
@@ -168,6 +169,22 @@ def main() -> int:
     except OSError:
         pass
 
+    # Arming means "this session starts in a KNOWN state", so the LOCAL maintenance
+    # sentinel is revoked too (owner directive 2026-07-21). A sticky local flag made a
+    # session fire cache-refresh-only forever with nothing on screen saying so — you had
+    # to inspect every instance to learn which ones were suppressed.
+    #
+    # The GLOBAL flag is deliberately NOT cleared: /janitor-arm runs AUTOMATICALLY on
+    # every SessionStart re-arm, so clearing it here would mean merely opening a new
+    # Claude session silently lifts fleet-wide maintenance — the mode could never be
+    # kept on. Same rule the arm already applies to the machine-wide kill-switch: a
+    # project arm must not undo a deliberate machine-wide decision. Instead we REPORT
+    # it, which solves the visibility problem without the override.
+    try:
+        (sd / state.MAINTENANCE_FLAG).unlink()
+    except OSError:
+        pass
+
     install_stub(plugin_root, data_dir)
     cron = resolve_cron(sd)
     prior = take_prior_cron_id(sd)
@@ -176,6 +193,7 @@ def main() -> int:
     print(f"cron={cron}")
     print(f"prior-cron-id={prior}")
     print(f"sweep={'no' if prior else 'yes'}")
+    print(f"maintenance={'global-on' if gs.maintenance_mode_present() else 'off'}")
     return 0
 
 

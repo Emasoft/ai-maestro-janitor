@@ -29,6 +29,16 @@ from typing import Optional
 # it independently (TRDD-EFTQB9RR).
 DISARMED_FLAG = "disarmed.flag"
 
+# The LOCAL (this-project) maintenance sentinel: while present, dispatch drops the
+# fire to cache-refresh-only (no chores, no daemon). Written by
+# /janitor-maintenance-mode, read by dispatch._resolve_heartbeat_mode, and CLEARED BY
+# /janitor-arm — arming is the "start this session in a known FULL state" act, so a
+# stale local sentinel can no longer silently suppress every chore (owner directive
+# 2026-07-21: a sticky, invisible maintenance flag made it impossible to tell which
+# session was in maintenance without inspecting each one). The GLOBAL flag is
+# deliberately NOT cleared here — see arm_prepare.main.
+MAINTENANCE_FLAG = "maintenance-mode"
+
 # Written by the StopFailure hook on any turn-ending API error, cleared by
 # dispatch.py on the next fire. Read by fleet_scan to diagnose `frozen`.
 RATE_LIMITED_FLAG = "rate-limited.flag"
