@@ -3,7 +3,7 @@ trdd-id: QK7M2B0X
 title: Publish the global mode flags to a fixed control dir any daemon can read
 column: dev
 created: 2026-07-21T19:35:07+0200
-updated: 2026-07-22T00:20:00+0200
+updated: 2026-07-22T01:27:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
@@ -30,13 +30,33 @@ move when a test sets `JANITOR_GLOBAL_STATE_DIR` — closed by the autouse
 `_isolate_control_dir` fixture in `conftest.py`, which must not be removed in favour of
 per-file setenv.
 
-**NEXT ACTION (phase B), in this exact order:** the three coordination LOCKS
-(`marketplace-op`, `oauth-rotator-tick`, `settings-ensurer`) → the `*.last-run.ts` stamps →
-**then, separately and last, the singleton** (`daemon.pid`, `daemon.flock`,
-`daemon.heartbeat.ts`) under TRDD-2U8AH82F's **flock-moves-LAST** invariant: take the NEW
-lock BEFORE retiring the OLD one. Ordering is not taste — a mode flag moved at a bad moment
-costs one duplicated chore; a flock moved at a bad moment costs a SECOND DAEMON, with a live
-ai-maestro server already on the host.
+**Phase B step 1 — the three coordination LOCKS — SHIPPED.** `marketplace-op`,
+`oauth-rotator-tick` and `settings-ensurer` now resolve to `control_dir()`. The transition
+is a **dual-LOCK**, not the flags' dual-READ, and that distinction is the whole design: a
+flag is data (probe both paths, you cannot miss it), a flock is kernel state on an INODE —
+a new-code peer locking only the new path and a 0.60 peer locking only the old one BOTH
+win, which is the exact double-`marketplace update` issue #7 exists to prevent. So
+`_acquire_dual_flock` holds BOTH inodes for the same critical section, order fixed
+NEW-then-OLD, releasing the half it took if the other is contended. Public
+`acquire_*_lock()` now returns an OPAQUE handle (a tuple), never a bare fd. Tests:
+`tests/test_control_dir_locks.py`. `ticket-dispatch.lock` deliberately did NOT move — no
+second owner dispatches a janitor ticket, and the scope rule is AUDIENCE.
+
+**NEXT ACTION (phase B step 2):** the `*.last-run.ts` stamps → **then, separately and last,
+the singleton** (`daemon.pid`, `daemon.flock`, `daemon.heartbeat.ts`) under TRDD-2U8AH82F's
+**flock-moves-LAST** invariant: take the NEW lock BEFORE retiring the OLD one. Ordering is
+not taste — a mode flag moved at a bad moment costs one duplicated chore; a flock moved at a
+bad moment costs a SECOND DAEMON, with a live ai-maestro server already on the host. The
+singleton move CANNOT reuse `_acquire_dual_flock` as-is: that primitive releases both halves
+on partial failure, whereas the singleton must hold the new lock ACROSS the retirement of
+the old one.
+
+**Follow-up noticed while moving the locks (not done, deliberately out of step 1):**
+`_MIGRATION_SKIP` names only `marketplace-op.lock` and `oauth-rotator-tick.lock`, so
+TRDD-2U8AH82F's legacy→DATA copy still copies `settings-ensurer.lock` and
+`ticket-dispatch.lock` — harmless (an empty file conveys no kernel state) but contrary to
+that set's own stated invariant. Fold it into the singleton step, where migration code is
+already being touched; do not touch migration for cosmetics alone.
 
 Copy phase A's pattern verbatim (dual-read on read, single-write on write, clear from ALL
 locations). Chore migration (`cache-prune`, `rules-cleanup`, `github-config-audit`,
@@ -192,3 +212,10 @@ Steps:
   read a file that does not exist — which returns "flag absent", i.e. it silently ignores
   the control plane instead of failing loudly. DO give an external contract a literal
   fixed path, and keep ladder-resolved locations for state only this plugin reads.
+
+[^2]: [id:ATOM-QK7M-0002, status:valid, keywords:"lock_moved_to_new_path dual_lock_self_deadlock same_inode_opened_twice chore_skips_forever flock_across_open_descriptions", ocd:2026-07-22, lmd:2026-07-22]
+  DO NOT hold a migrating lock at BOTH its old and new path without first checking they
+  are the same file, BECAUSE flock(2) conflicts across independent open file descriptions
+  even inside ONE process, so when the two dirs coincide the second open denies you your
+  own lock and the chore skips FOREVER while logging as ordinary contention. DO compare
+  `os.path.realpath` of both paths first and lock a single inode once.

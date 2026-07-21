@@ -29,7 +29,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Tuple
 
 import state
 
@@ -429,20 +429,25 @@ def _skills_reload_flag_path() -> Path:
     return _control_path("skills-reload-needed.flag")
 
 
-def _marketplace_lock_path() -> Path:
-    return global_state_dir() / "marketplace-op.lock"
-
-
-def _oauth_rotator_lock_path() -> Path:
-    return global_state_dir() / "oauth-rotator-tick.lock"
+# The three COORDINATION locks live in control_dir() (ARCHITECTURE.md §7.1,
+# TRDD-QK7M2B0X phase B). They guard chores a SECOND owner also runs — the ai-maestro
+# server absorbs the OAuth pair and the update trio (harness_backend.SERVER_ABSORBED_TASKS)
+# — and flock(2) excludes only processes contending on the SAME file, so a lock the server
+# cannot find excludes nobody and the §2 collision backstop silently does nothing.
+# Each is a BARE FILENAME, not a path: the dual-lock primitive resolves it against BOTH
+# control_dir() and the old global_state_dir() for the transition window, so a per-lock
+# path helper would only ever name half the truth.
+_MARKETPLACE_LOCK = "marketplace-op.lock"
+_OAUTH_ROTATOR_LOCK = "oauth-rotator-tick.lock"
+_SETTINGS_ENSURER_LOCK = "settings-ensurer.lock"
 
 
 def _ticket_dispatch_lock_path() -> Path:
+    # NOT a coordination lock, so it deliberately stays in global_state_dir(): it
+    # serialises the janitor's own ticket select→stamp→emit across janitor SESSIONS.
+    # No second chore owner ever dispatches a janitor support ticket, and the scope rule
+    # for control_dir() is AUDIENCE — publish only what a foreign owner must contend on.
     return global_state_dir() / "ticket-dispatch.lock"
-
-
-def _settings_ensurer_lock_path() -> Path:
-    return global_state_dir() / "settings-ensurer.lock"
 
 
 def daemon_pid() -> Optional[int]:
@@ -924,6 +929,115 @@ def release_singleton_flock(fd: int) -> None:
         pass
 
 
+# ---------- transitional DUAL-LOCK primitive (TRDD-QK7M2B0X phase B) ------
+#
+# Moving a coordination lock is not the same problem as moving a flag, and the
+# difference is the whole reason this primitive exists.
+#
+# A flag is data: a reader that probes the new path AND the old one cannot miss it, so
+# `_flag_present_dual` is enough. A flock is not data — it is kernel state attached to an
+# INODE. During the upgrade window a 0.61 session locking only ~/.claude/janitor-control/
+# and a 0.60 session locking only global_state_dir() each acquire successfully and each
+# believes it is the machine's single writer. That is not a missed signal, it is the exact
+# concurrent `claude plugin marketplace update` / rotator double-tick these locks were
+# built to prevent (issue #7). "Dual-read" has no meaning here; the transition has to be a
+# dual-LOCK, held on BOTH inodes for the same critical section.
+#
+# Order is fixed NEW-then-OLD everywhere. With non-blocking acquisition that ordering
+# cannot deadlock (a loser releases what it holds and skips), and keeping it uniform means
+# two new-code peers always contend on the new inode first — so the old path can never
+# become the deciding lock between two processes that both understand the new one.
+#
+# Retire this with the rest of the transitional fallbacks two releases out (TRDD step 5):
+# drop the OLD half and the tuple collapses back to a single fd.
+
+LockHandle = Tuple[int, ...]
+
+
+def _try_flock(path: Path, *, log_channel: str) -> Optional[int]:
+    """Open `path` (creating it) and take a non-blocking exclusive flock.
+
+    Returns the fd on success, or None when the lock is unavailable — whether because
+    another process holds it (EAGAIN, the ordinary skip path) or because the file could
+    not be opened at all. An unopenable lock file is reported to the log and then treated
+    as HELD, never as free: a caller that cannot take the lock has no exclusion, and
+    running the chore anyway is the corruption this module exists to prevent.
+    """
+    try:
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        state.log_line(log_channel, f"cannot open lock file {path}: {exc} — treating as held")
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except (BlockingIOError, OSError) as exc:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
+            return None
+        # Unexpected — surface to logs but don't crash the caller.
+        state.log_line(log_channel, f"unexpected flock error on {path.name}: {exc}")
+        return None
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    """True iff both paths name the same file on disk, symlinks resolved. `realpath` (not
+    `samefile`) because it answers even when one side does not exist yet, and never
+    raises."""
+    return os.path.realpath(str(a)) == os.path.realpath(str(b))
+
+
+def _acquire_dual_flock(name: str, *, log_channel: str) -> Optional[LockHandle]:
+    """Take coordination lock `name` on BOTH the new control_dir() path and the old
+    global_state_dir() one, in that order. Returns an opaque handle to pass to
+    `_release_dual_flock`, or None when EITHER path is unavailable — a partial hold
+    excludes only half the fleet, so the half we could take is released immediately and
+    the caller skips this round exactly as it would for any other contended lock.
+    """
+    control = control_dir()
+    try:
+        control.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        state.log_line(log_channel, f"cannot create control dir {control}: {exc} — skipping {name}")
+        return None
+    init_global_state()
+    new_path = control / name
+    new_fd = _try_flock(new_path, log_channel=log_channel)
+    if new_fd is None:
+        return None
+    old_path = _old_global_state_path(name)
+    if _same_file(new_path, old_path):
+        # One inode, two names — a config (or a test harness) that points both dirs at the
+        # same place, or an old path symlinked forward. Opening it a second time would
+        # DENY US OUR OWN LOCK: flock(2) conflicts across independent open file
+        # descriptions even inside one process, so the "dual" hold would self-deadlock and
+        # the chore would skip forever while looking merely contended. One inode needs
+        # exactly one lock — and it already excludes both eras.
+        return (new_fd,)
+    old_fd = _try_flock(old_path, log_channel=log_channel)
+    if old_fd is None:
+        _release_dual_flock((new_fd,))
+        return None
+    return (new_fd, old_fd)
+
+
+def _release_dual_flock(handle: LockHandle) -> None:
+    """Release every fd in a handle from `_acquire_dual_flock`. Best-effort per fd: one
+    failing unlock must never leak the others (the kernel frees them on close anyway)."""
+    for fd in handle:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 # ---------- marketplace-operation lock -----------------------------------
 #
 # A SEPARATE cross-process flock (distinct from the singleton daemon flock)
@@ -941,41 +1055,21 @@ def release_singleton_flock(fd: int) -> None:
 # tripping the daemon's own workload timeout. Skip-and-retry is deadlock-proof.
 
 
-def acquire_marketplace_lock() -> Optional[int]:
+def acquire_marketplace_lock() -> Optional[LockHandle]:
     """Non-blocking exclusive flock on marketplace-op.lock.
 
-    Return the fd on success — the caller MUST release it via
-    release_marketplace_lock() once the marketplace operation finishes.
-    Return None when another process already holds it; the caller MUST then
-    SKIP the marketplace operation this round (never block on it).
+    Return an OPAQUE handle on success — the caller MUST pass it back to
+    release_marketplace_lock() once the marketplace operation finishes, and MUST NOT
+    interpret it (it is the dual-lock tuple for the control_dir() transition, not a bare
+    fd). Return None when another process already holds it; the caller MUST then SKIP the
+    marketplace operation this round (never block on it).
     """
-    init_global_state()
-    fd = os.open(str(_marketplace_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
-    except (BlockingIOError, OSError) as exc:
-        try:
-            os.close(fd)
-        finally:
-            pass
-        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
-            return None
-        # Unexpected — surface to logs but don't crash the caller.
-        state.log_line("daemon", f"unexpected marketplace-lock flock error: {exc}")
-        return None
+    return _acquire_dual_flock(_MARKETPLACE_LOCK, log_channel="daemon")
 
 
-def release_marketplace_lock(fd: int) -> None:
-    """Release the marketplace-op flock and close the fd. Best-effort."""
-    try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    except OSError:
-        pass
-    try:
-        os.close(fd)
-    except OSError:
-        pass
+def release_marketplace_lock(handle: LockHandle) -> None:
+    """Release the marketplace-op flock and close its fds. Best-effort."""
+    _release_dual_flock(handle)
 
 
 @contextlib.contextmanager
@@ -1032,12 +1126,12 @@ def marketplace_lock() -> Iterator[bool]:
                 ...
             # safe to run `claude plugin marketplace update ...`
     """
-    fd = acquire_marketplace_lock()
+    handle = acquire_marketplace_lock()
     try:
-        yield fd is not None
+        yield handle is not None
     finally:
-        if fd is not None:
-            release_marketplace_lock(fd)
+        if handle is not None:
+            release_marketplace_lock(handle)
 
 
 # ---------- oauth-rotator-tick lock --------------------------------------
@@ -1059,41 +1153,20 @@ def marketplace_lock() -> Iterator[bool]:
 # tripping the daemon's workload timeout. Skip-and-retry is deadlock-proof.
 
 
-def acquire_oauth_rotator_lock() -> Optional[int]:
+def acquire_oauth_rotator_lock() -> Optional[LockHandle]:
     """Non-blocking exclusive flock on oauth-rotator-tick.lock.
 
-    Return the fd on success — the caller MUST release it via
-    release_oauth_rotator_lock() once the rotator tick finishes. Return None when
-    another process already holds it; the caller MUST then SKIP the tick this round
-    (never block on it).
+    Return an OPAQUE handle on success — the caller MUST pass it back to
+    release_oauth_rotator_lock() once the rotator tick finishes, and MUST NOT interpret
+    it (see acquire_marketplace_lock). Return None when another process already holds it;
+    the caller MUST then SKIP the tick this round (never block on it).
     """
-    init_global_state()
-    fd = os.open(str(_oauth_rotator_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
-    except (BlockingIOError, OSError) as exc:
-        try:
-            os.close(fd)
-        finally:
-            pass
-        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
-            return None
-        # Unexpected — surface to logs but don't crash the caller.
-        state.log_line("daemon", f"unexpected oauth-rotator-lock flock error: {exc}")
-        return None
+    return _acquire_dual_flock(_OAUTH_ROTATOR_LOCK, log_channel="daemon")
 
 
-def release_oauth_rotator_lock(fd: int) -> None:
-    """Release the oauth-rotator-tick flock and close the fd. Best-effort."""
-    try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    except OSError:
-        pass
-    try:
-        os.close(fd)
-    except OSError:
-        pass
+def release_oauth_rotator_lock(handle: LockHandle) -> None:
+    """Release the oauth-rotator-tick flock and close its fds. Best-effort."""
+    _release_dual_flock(handle)
 
 
 @contextlib.contextmanager
@@ -1110,12 +1183,12 @@ def oauth_rotator_lock() -> Iterator[bool]:
                 ...
             # safe to run the rotator tick
     """
-    fd = acquire_oauth_rotator_lock()
+    handle = acquire_oauth_rotator_lock()
     try:
-        yield fd is not None
+        yield handle is not None
     finally:
-        if fd is not None:
-            release_oauth_rotator_lock(fd)
+        if handle is not None:
+            release_oauth_rotator_lock(handle)
 
 
 @contextlib.contextmanager
@@ -1138,15 +1211,15 @@ def oauth_rotator_lock_wait(timeout_s: float = 60.0, poll_s: float = 0.25) -> It
     inside `rotator.main()`'s locked commands) — flock conflicts across open descriptions
     even within one process, so it would wait out the full timeout and fail."""
     deadline = time.time() + max(0.0, timeout_s)
-    fd = acquire_oauth_rotator_lock()
-    while fd is None and time.time() < deadline:
+    handle = acquire_oauth_rotator_lock()
+    while handle is None and time.time() < deadline:
         time.sleep(poll_s)
-        fd = acquire_oauth_rotator_lock()
+        handle = acquire_oauth_rotator_lock()
     try:
-        yield fd is not None
+        yield handle is not None
     finally:
-        if fd is not None:
-            release_oauth_rotator_lock(fd)
+        if handle is not None:
+            release_oauth_rotator_lock(handle)
 
 
 # ---------- settings-ensurer lock ----------------------------------------
@@ -1163,38 +1236,20 @@ def oauth_rotator_lock_wait(timeout_s: float = 60.0, poll_s: float = 0.25) -> It
 # os.replace cover that (never a torn file).
 
 
-def acquire_settings_ensurer_lock() -> Optional[int]:
+def acquire_settings_ensurer_lock() -> Optional[LockHandle]:
     """Non-blocking exclusive flock on settings-ensurer.lock.
 
-    Return the fd on success (caller MUST release via release_settings_ensurer_lock),
-    or None when another process holds it — the caller MUST then SKIP (never block).
+    Return an OPAQUE handle on success (caller MUST pass it back to
+    release_settings_ensurer_lock and MUST NOT interpret it — see
+    acquire_marketplace_lock), or None when another process holds it — the caller MUST
+    then SKIP (never block).
     """
-    init_global_state()
-    fd = os.open(str(_settings_ensurer_lock_path()), os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
-    except (BlockingIOError, OSError) as exc:
-        try:
-            os.close(fd)
-        finally:
-            pass
-        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK):
-            return None
-        state.log_line("session-start", f"unexpected settings-ensurer-lock flock error: {exc}")
-        return None
+    return _acquire_dual_flock(_SETTINGS_ENSURER_LOCK, log_channel="session-start")
 
 
-def release_settings_ensurer_lock(fd: int) -> None:
-    """Release the settings-ensurer flock and close the fd. Best-effort."""
-    try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    except OSError:
-        pass
-    try:
-        os.close(fd)
-    except OSError:
-        pass
+def release_settings_ensurer_lock(handle: LockHandle) -> None:
+    """Release the settings-ensurer flock and close its fds. Best-effort."""
+    _release_dual_flock(handle)
 
 
 @contextlib.contextmanager
@@ -1204,12 +1259,12 @@ def settings_ensurer_lock() -> Iterator[bool]:
     Yields True when the lock was acquired (apply the settings), or False when another
     session holds it (SKIP — it is applying the identical settings). Releases on exit.
     """
-    fd = acquire_settings_ensurer_lock()
+    handle = acquire_settings_ensurer_lock()
     try:
-        yield fd is not None
+        yield handle is not None
     finally:
-        if fd is not None:
-            release_settings_ensurer_lock(fd)
+        if handle is not None:
+            release_settings_ensurer_lock(handle)
 
 
 # ---------- spawn ---------------------------------------------------------
