@@ -797,11 +797,16 @@ def _maybe_cold_compact_on_rate_limit(sd: Path, age: int, now: int) -> bool:
         # is about to be compacted). The real resume arrives after the compaction.
         cold_cache_compact.mark_fired(sd, now=now)
         _stamp_resume(sd, now)
+        # This branch returns True before the normal _phase_rate_limit_recovery cleanup
+        # runs, so it must clear ALL resume flags itself — including a pending post-clear
+        # one (TRDD-Z582IKIR) — else a redundant [janitor-resume] fires after the compact.
         for p in (
             sd / "rate-limited.flag",
             sd / "rate-limited-since.ts",
             sd / "resume-after-compact.flag",
             sd / "resume-after-compact.ts",
+            sd / "resume-after-clear.flag",
+            sd / "resume-after-clear.ts",
         ):
             try:
                 p.unlink()
@@ -860,16 +865,18 @@ def _phase_rate_limit_recovery() -> bool:
     for line in _pending_agent_directive_lines():
         print(line)
 
-    # Also clear any pending post-compact resume flag: a rate-limit resume cue
-    # already says "resume the pending task", which subsumes it. Clearing both
-    # here prevents a second, redundant [janitor-resume] on the next fire when a
-    # compaction and a rate-limit happened to overlap in the same window.
+    # Also clear any pending post-compact / post-clear resume flag: a rate-limit
+    # resume cue already says "resume the pending task", which subsumes both.
+    # Clearing them here prevents a second, redundant [janitor-resume] on a later
+    # fire when a compaction / clear and a rate-limit overlapped in the same window.
     sd = state.state_dir()
     for p in (
         flag,
         since_file,
         sd / "resume-after-compact.flag",
         sd / "resume-after-compact.ts",
+        sd / "resume-after-clear.flag",
+        sd / "resume-after-clear.ts",
     ):
         try:
             p.unlink()
@@ -934,6 +941,86 @@ def _phase_compact_resume() -> bool:
     for line in _pending_agent_directive_lines():
         print(line)
 
+    sd = state.state_dir()
+    # Also clear a pending post-CLEAR resume flag: a compact-resume cue subsumes it.
+    # Without this, a session carrying BOTH flags would emit [janitor-resume] here on
+    # one fire and AGAIN from _phase_clear_resume on the next (TRDD-Z582IKIR).
+    for p in (
+        flag,
+        since_file,
+        sd / "resume-after-clear.flag",
+        sd / "resume-after-clear.ts",
+    ):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+    # Same reason as in _phase_rate_limit_recovery: this fire returns early, so the
+    # cadence phase can only learn about the resume from this stamp. TRDD-0QQX9H0G.
+    _stamp_resume(sd, now)
+    state.log_line("dispatch", f"post-compact resume cue emitted (age {age}s)")
+    return True
+
+
+def _phase_clear_resume() -> bool:
+    """Return True if a [janitor-resume] line was emitted for a post-CLEAR resume.
+
+    The `/janitor-handoff-and-clear` primitive (TRDD-Z582IKIR P1) writes
+    `resume-after-clear.flag` (the link-only handoff directive) + a `.ts` sidecar
+    BEFORE firing `/clear`, then bootstraps the fresh session to re-arm the cron
+    `/clear` destroyed. The re-armed cron's FIRST fire is this phase: it reads the
+    flag, emits ONE `[janitor-resume]` cue carrying the directive (which points at
+    `.janitor/state/agent-handoff.md`), and clears the flag so the resume fires
+    exactly once.
+
+    This is the `/clear` analogue of `_phase_compact_resume`. The two differ only in
+    WHO wrote the flag — a PostCompact hook for compact, this script itself for clear
+    (there is no PostClear hook, and `/clear` is unrecoverable, so the marker must be
+    persisted before it runs). Everything downstream is identical: emit + clear +
+    return True so main() skips the drift detectors this fire and the resume cue gets
+    clean attention.
+
+    Placed AFTER `_phase_compact_resume` in main(): if a compaction and a clear ever
+    left both flags, compact-resume runs first and clears the clear flag too, so only
+    one [janitor-resume] is ever emitted.
+    """
+    flag = state.state_dir() / "resume-after-clear.flag"
+    if not flag.is_file():
+        return False
+
+    try:
+        directive = flag.read_text(encoding="utf-8")
+    except OSError:
+        directive = ""
+    # Defang against marker-mimicry (a handoff/directive embedding a fake
+    # `[janitor-…]` marker), collapse to a single bounded line.
+    directive = state.sanitize_for_drift_line(directive)
+    directive = " ".join(directive.split())
+    if len(directive) > 280:
+        directive = directive[:277] + "..."
+
+    since_file = state.state_dir() / "resume-after-clear.ts"
+    now = int(time.time())
+    age = max(0, now - state.read_int_state(since_file, now))
+
+    # F7 (wikimem audit): bare marker line + prose on line 2 — see
+    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract).
+    print("[janitor-resume]")
+    if directive:
+        print(f"Session was cleared {age}s ago — auto-resume. {directive}")
+    else:
+        # Flag present but empty/unreadable: still cue a generic resume so the fresh
+        # session doesn't stall idle after a /clear.
+        print(
+            f"Session was cleared {age}s ago — auto-resume. Read "
+            ".janitor/state/agent-handoff.md (link-only handoff) and resume your prior task."
+        )
+    # A /clear wipes the working memory of in-flight background agents from the fresh
+    # context — list them so the resumed turn re-attaches to each via SendMessage.
+    for line in _pending_agent_directive_lines():
+        print(line)
+
+    sd = state.state_dir()
     for p in (flag, since_file):
         try:
             p.unlink()
@@ -941,8 +1028,8 @@ def _phase_compact_resume() -> bool:
             pass
     # Same reason as in _phase_rate_limit_recovery: this fire returns early, so the
     # cadence phase can only learn about the resume from this stamp. TRDD-0QQX9H0G.
-    _stamp_resume(state.state_dir(), now)
-    state.log_line("dispatch", f"post-compact resume cue emitted (age {age}s)")
+    _stamp_resume(sd, now)
+    state.log_line("dispatch", f"post-clear resume cue emitted (age {age}s)")
     return True
 
 
@@ -1836,6 +1923,15 @@ def main() -> int:
     # exactly once and return early — like rate-limit recovery — so the resume
     # gets clean attention with no detector noise this fire.
     if _phase_compact_resume():
+        return 0
+
+    # Phase 1.15: post-CLEAR resume (TRDD-Z582IKIR P1). The `/janitor-handoff-and-clear`
+    # primitive persists resume-after-clear.flag before firing /clear, then bootstraps
+    # the fresh session to re-arm the destroyed cron. This — the re-armed cron's first
+    # fire — is the resume half: read the flag, emit ONE [janitor-resume] cue pointing
+    # at the link-only handoff, and return early so it gets clean attention. The /clear
+    # analogue of Phase 1.1; runs AFTER it so a session left with both flags resumes once.
+    if _phase_clear_resume():
         return 0
 
     # Phase 1.2: PREVENTIVE cold-compact (TRDD-D3PROACT). The reactive paths above shrink a
