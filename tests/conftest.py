@@ -124,9 +124,21 @@ def daemon_ticked(
     stale pid file whose process is alive but frozen has a heartbeat OLDER than the run, so
     it is still refused. Without `started_at` we cannot tell those apart, so the answer
     stays False — no clock, no credit.
+
+    A daemon that was alive at the START and is GONE at the end also counts. It wrote what
+    it wrote and then left — which is now a FIRST-CLASS event, not an anomaly: since
+    v0.59.0 the daemon deliberately exits the moment an ai-maestro server claims the host
+    (ARCHITECTURE §7.2), and that is exactly what happened the first time a real server came
+    up mid-suite. Refusing it would blame the departed daemon's writes on the tests and fail
+    every suite run that overlaps a server start — including `publish.py`'s own gate, which
+    is how it was found.
+
+    The one case that stays False is `before is None and after is None`: no daemon at either
+    end and no start-time evidence means nothing was running to credit, so any mutation of
+    the guarded dirs is a real test leak.
     """
     if after is None:
-        return False
+        return before is not None
     if before is None:
         return started_at is not None and after[1] >= started_at
     return after[1] > before[1]

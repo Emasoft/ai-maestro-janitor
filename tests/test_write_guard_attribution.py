@@ -31,10 +31,13 @@ def test_no_daemon_at_all_is_never_proof() -> None:
     assert daemon_ticked(None, None) is False
 
 
-def test_daemon_appearing_or_vanishing_midrun_is_not_proof() -> None:
-    """A daemon that only existed at one end did not demonstrably write across the run."""
+def test_a_daemon_APPEARING_midrun_without_a_start_time_is_not_proof() -> None:
+    """Half of the old `test_daemon_appearing_or_vanishing_midrun_is_not_proof`.
+
+    The VANISHING half was split out and reversed — see
+    `test_a_daemon_that_EXITED_during_the_run_is_still_credited`. Appearing with no
+    `started_at` stays False because a wedged daemon produces the identical shape."""
     assert daemon_ticked(None, (4242, 1_060)) is False
-    assert daemon_ticked((4242, 1_000), None) is False
 
 
 def test_a_RESPAWNED_daemon_still_counts_when_the_heartbeat_advanced() -> None:
@@ -130,3 +133,23 @@ def test_witness_survives_missing_and_garbage_state(tmp_path: Path) -> None:
     (gsd / "daemon.pid").write_text("not-a-pid", encoding="utf-8")
     (gsd / "daemon.heartbeat.ts").write_text("nonsense", encoding="utf-8")
     assert _daemon_witness(gsd) is None
+
+
+def test_a_daemon_that_EXITED_during_the_run_is_still_credited() -> None:
+    """Since v0.59.0 this is a FIRST-CLASS event, not an anomaly.
+
+    The daemon deliberately exits the moment an ai-maestro server claims the host
+    (ARCHITECTURE §7.2, one-daemon-per-host). The first time a real server came up it did
+    exactly that mid-suite — and the guard then blamed the departed daemon's earlier writes
+    on the tests, failing publish.py's own gate with all 13430 tests passing.
+
+    A daemon witnessed ALIVE at the start wrote whatever it wrote before leaving; that its
+    pid is gone by the end says nothing about who made those writes."""
+    assert daemon_ticked((4242, 1_000), None) is True
+
+
+def test_no_daemon_at_EITHER_end_is_still_a_real_leak_even_with_a_start_time() -> None:
+    """The negative the exit case must not swallow. `test_no_daemon_at_all_is_never_proof`
+    covers the plain form; this pins that supplying `started_at` does not soften it —
+    nothing was running to credit, so any mutation is exactly what the guard exists for."""
+    assert daemon_ticked(None, None, started_at=1_000) is False
