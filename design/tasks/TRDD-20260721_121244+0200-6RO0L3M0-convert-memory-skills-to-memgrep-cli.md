@@ -1,18 +1,24 @@
 ---
 trdd-id: 6RO0L3M0
 title: convert the 3 memory skills to memgrep-CLI-driven — mechanical to the tool, judgment stays prose
-column: todo
+column: testing
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T13:40:00+0200
+updated: 2026-07-21T14:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
 parent-trdd: R02HTRUD
+implementation-commits: [bc43f1b]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
 
-**UNBLOCKED — A1 shipped a133ff0** (`add-atom`/`new-page`/`add-lesson` verified live). Proceed.
+**SHIPPED (bc43f1b, 2026-07-21) — verified independently.** write=FULL (new-page/add-atom/
+add-lesson), update=PARTIAL (add + lesson-demotion via verbs; in-place fact-cleaning + reshape/
+rename LEFT hand-edit — no verb exists), recall=1-line pointer. All 13 judgment sections preserved;
+verb flags correct; the only "Write/Edit tool" mention is a "do NOT". FOLLOW-UP (a natural
+[[TRDD-R02HTRUD]] extension): add `supersede`/`rename`/`edit` verbs so the UPDATE reshape path is
+also tool-guaranteed. **NEXT ACTION:** none — awaiting end-of-run sweep → `complete`.
 
 **NEXT ACTION:** rewrite `skills/janitor-memory-write/SKILL.md`, `janitor-memory-recall/SKILL.md`,
 `janitor-memory-update/SKILL.md` so every MECHANICAL step is a memgrep CLI call and only JUDGMENT
