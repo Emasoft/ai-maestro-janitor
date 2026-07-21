@@ -85,11 +85,14 @@ The new decision belongs to an existing page's subject (it fits the element/aspe
 the page is about — the one-component-one-page invariant means it goes HERE, not
 in a new page):
 
-1. Add the decision to the body, in the right section. **If it SUPERSEDES a
-   statement already on the page** (replaces a value, reverses a prior choice),
-   this is not a plain add — apply THE UPDATE INVARIANT: clean the body to the
-   new truth AND demote the old statement to a `[^N]` lesson with the WHY (§2).
-   Only a genuinely NEW, additive fact skips the demotion.
+1. Add the decision to the body, in the right section. **A genuinely NEW,
+   additive fact** is authored with `memgrep add-atom --page <page> --keywords
+   "<symptom>" --desc "<≤200-char summary>"` (the fact on stdin) — memgrep
+   synthesises the `^id [keywords:…]` grammar, so never hand-write the atom marker.
+   **If instead it SUPERSEDES a statement already on the page** (replaces a value,
+   reverses a prior choice), this is not a plain add — apply THE UPDATE INVARIANT:
+   clean the body to the new truth AND demote the old statement to a `[^N]` lesson
+   with the WHY (§2). Only a genuinely NEW, additive fact skips the demotion.
 2. Update the edges if the change adds/removes a relation — and per THE LINK LAW
    (every link bidirectional, always), edit BOTH ends in the same pass: a
    component now obeying a new rule → the component's `## Governed by` AND that
@@ -109,12 +112,19 @@ guardrail):
 
 1. **Clean the fact in place.** Replace the wrong statement in the body with the
    correct one. The body is always the current truth — no "we used to think X"
-   clutter inline.
-2. **Demote the error to a dated lesson — the WHY is the point.** Add the error
-   as a numbered entry under `## Notes and lessons learned` and connect the
-   corrected fact to it with a markdown footnote `[^N]`. The load-bearing content
-   is *why the previous statement was wrong / why the plan failed* — the root
-   cause. A lesson without a WHY cannot stop the next repeat.
+   clutter inline. (No memgrep verb rewrites a fact in place, renames a page, or
+   reshapes one yet — those supersede/rename/reshape verbs are future work,
+   TRDD-R02HTRUD follow-up; until they land, do the in-place clean here with the
+   Edit tool, and hand the heavier reshapes of §3 to the
+   `janitor-memory-subconscious-agent`.)
+2. **Demote the error to a dated lesson — the WHY is the point.** Add it with
+   `memgrep add-lesson --page <page> --atom <atom-id> --keywords "<recall phrase>"`
+   (the DO-NOT/BECAUSE/DO text on stdin) — the tool files the numbered entry under
+   `## Notes and lessons
+   learned`, anchors the corrected fact's atom to it with a `[^N]` footnote, and
+   guarantees the `[^N]: […]` grammar; you never hand-write it. The load-bearing
+   content is *why the previous statement was wrong / why the plan failed* — the
+   root cause. A lesson without a WHY cannot stop the next repeat.
 
 ### THE LESSON FORM — mandatory metadata, then one terse shape
 
