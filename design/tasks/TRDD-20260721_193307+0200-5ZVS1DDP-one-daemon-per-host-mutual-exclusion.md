@@ -1,20 +1,51 @@
 ---
 trdd-id: 5ZVS1DDP
 title: One daemon per host — the janitor daemon exits while an ai-maestro server runs
-column: backburner
+column: testing
 created: 2026-07-21T19:33:07+0200
-updated: 2026-07-21T19:33:07+0200
+updated: 2026-07-21T21:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: medium
 relevant-rules: [1]
-implementation-commits: []
+implementation-commits: [419a470, 3edcf0c]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-21
 
-**NOT STARTED.** The contract is written and committed (`4237fcf`,
-`design/ARCHITECTURE.md` §7.2, rev 5); no janitor code has changed for it yet.
+**SHIPPED in v0.59.0 (`419a470`). Column `testing` — needs a real server to soak against.**
+
+All four parts landed, each closing a distinct way the exit gets silently undone:
+(1) loop exit on fresh liveness, ordered after kill-switch and BEFORE maintenance/pause;
+(2) OS keepalive dropped on that exit (shared branch with kill-switch), else launchd
+`KeepAlive`/`ThrottleInterval 30` + systemd `Restart=always` relaunch it every 30 s forever;
+(3) `ensure_daemon_running()` refuses while a server is live, else the next heartbeat from
+any armed session resurrects it in seconds and the exit is theatre; (4) that refusal returns
+BEFORE the crash-loop breaker, else a long server run trips the breaker through ordinary
+heartbeats and then suppresses the legitimate spawn after the server stops.
+`tests/test_one_daemon_per_host.py` — 10 tests, incl. STALE-liveness-is-not-running and the
+fail-open probe. Announced to ai-maestro on their #79.
+
+`3edcf0c` is a prerequisite that surfaced during the work, not part of the design: the
+suite's write-guard called a daemon SELF-UPDATE a test leak (pid changes on respawn), so the
+full suite exited 3 with every test passing — through `publish.py`'s G4 gate, i.e. precisely
+while publishing. v0.58.1 shipped only because the daemon happened not to respawn that
+minute. Without that fix this TRDD could not be released reliably.
+
+**REMAINING before this can leave `testing`:**
+
+1. **Soak against a REAL running server.** Everything here is verified against a synthetic
+   liveness file. Unverified in the wild: the ≤90 s handoff in both directions, and that a
+   pm2 restart cycle does not produce a spawn/exit flap.
+2. **Freeze recovery must land somewhere** — the ONE chore that structurally cannot move to
+   a per-repo cron (a frozen session's own cron is what has stopped). Asked of ai-maestro on
+   #79 item 1. Until they confirm, a live server means standalone `#N` sessions have NO
+   freeze recovery, silently. If they decline, keep a stopgap here rather than let it dark.
+3. The four movable chores (`cache-prune`, `rules-cleanup`, `github-config-audit`,
+   `memory-guard`) still live in the daemon — they need TRDD-QK7M2B0X's shared locks first.
+
+**SUPERSEDED — do NOT carry forward:** the "NOT STARTED / get an owner decision" text this
+block replaced, and rev 4's "the daemon keeps running and yields the absorbed chores".
 
 **THE OPEN QUESTION IS ANSWERED (owner, 2026-07-21).** One daemon per host is
 unconditional: *"of course there must be only one daemon running at any time.. otherwise
