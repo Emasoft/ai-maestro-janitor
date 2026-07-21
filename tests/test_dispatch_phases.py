@@ -33,6 +33,12 @@ def env_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(global_dir))
+    # The six mode flags (kill-switch, maintenance, pause, reload x2, version-update-
+    # request) now live at the FIXED control_dir() (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X),
+    # not global_state_dir() — without an isolated override here every test in this file
+    # would share the real process's $HOME/.claude/janitor-control, and one test's
+    # gs.set_maintenance_mode() would leak into the next test's assertions.
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "janitor-control"))
     # These tests exercise OTHER phases via dispatch.main(); the dynamic cadence
     # phase (TRDD-0QQX9H0G) is orthogonal noise for them (it would emit a one-time
     # [janitor-renew] and, in "auto" regime, shell out to agentlenspro). Turn it

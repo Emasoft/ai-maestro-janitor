@@ -31,6 +31,10 @@ def state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Isolated global state dir per test (no shared ~/.claude/ pollution)."""
     d = tmp_path / "janitor-global-state"
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(d))
+    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
+    # TRDD-QK7M2B0X), not global_state_dir() — isolate it too, or every test in this
+    # file would share the real process's $HOME/.claude/janitor-control.
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "janitor-control"))
     # Force a clean import so the lru-cache / module-state from a previous
     # test cannot leak — global_state itself reads env at call time so this
     # is mostly defensive.
@@ -232,17 +236,15 @@ def test_reload_flag_clear_idempotent(state_dir: Path) -> None:
 
 
 def test_reload_flag_stores_generation_and_reason(state_dir: Path) -> None:
-    """The flag body is `<epoch-generation>\\t<reason>`: the generation drives
-    per-session reload decisions, the reason is kept for diagnostic logs."""
+    """The flag body is provenance JSON (`set_at`/`by`/`pid`/`reason`, TRDD-QK7M2B0X):
+    `set_at` drives per-session reload decisions, `reason` is kept for diagnostic logs."""
     gs = _gs()
     gs.init_global_state()
     gs.set_reload_flag("plugin-a@mp,plugin-b@mp")
-    body = (state_dir / "reload-needed.flag").read_text(encoding="utf-8")
-    gen_str, _, reason = body.partition("\t")
-    assert gen_str.isdigit() and int(gen_str) > 0, \
-        f"body must start with an epoch generation, got {body!r}"
-    assert reason == "plugin-a@mp,plugin-b@mp"
-    assert gs.reload_generation() == int(gen_str)
+    prov = gs.read_flag_provenance("reload-needed.flag")
+    assert prov["set_at"] > 0, f"body must carry a positive set_at generation, got {prov!r}"
+    assert prov["reason"] == "plugin-a@mp,plugin-b@mp"
+    assert gs.reload_generation() == prov["set_at"]
 
 
 def test_reload_generation_absent_and_legacy(state_dir: Path) -> None:
@@ -274,16 +276,15 @@ def test_skills_reload_flag_round_trip(state_dir: Path) -> None:
 
 
 def test_skills_reload_flag_stores_generation_and_reason(state_dir: Path) -> None:
-    """Body is `<epoch-generation>\\t<reason>`, in its OWN flag file — distinct from
-    the plugin reload flag so a plugin update never forces a skills reload."""
+    """Body is provenance JSON, in its OWN flag file — distinct from the plugin
+    reload flag so a plugin update never forces a skills reload."""
     gs = _gs()
     gs.init_global_state()
     gs.set_skills_reload_flag("standalone-skill-x")
-    body = (state_dir / "skills-reload-needed.flag").read_text(encoding="utf-8")
-    gen_str, _, reason = body.partition("\t")
-    assert gen_str.isdigit() and int(gen_str) > 0, f"expected epoch generation, got {body!r}"
-    assert reason == "standalone-skill-x"
-    assert gs.skills_reload_generation() == int(gen_str)
+    prov = gs.read_flag_provenance("skills-reload-needed.flag")
+    assert prov["set_at"] > 0, f"expected a positive set_at generation, got {prov!r}"
+    assert prov["reason"] == "standalone-skill-x"
+    assert gs.skills_reload_generation() == prov["set_at"]
     # The two reload generations are independent files: stamping skills must NOT
     # create the plugin reload flag.
     assert gs.reload_generation() == 0

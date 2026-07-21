@@ -36,6 +36,10 @@ def _load_hook():
 def test_active_global_stop_reads_disarm_flag(monkeypatch, tmp_path) -> None:
     """A set kill-switch.flag is reported as (DISARMED, its reason, its mtime)."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
+    # TRDD-QK7M2B0X), not global_state_dir() — isolate it too, or every test in this
+    # file would share the real process's $HOME/.claude/janitor-control.
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     gs = importlib.import_module("global_state")
     gs.set_kill_switch("token burn test")
@@ -51,6 +55,10 @@ def test_active_global_stop_reads_disarm_flag(monkeypatch, tmp_path) -> None:
 def test_active_global_stop_none_when_running(monkeypatch, tmp_path) -> None:
     """No stop flag → None (the running state; the reminder is not shown)."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
+    # TRDD-QK7M2B0X), not global_state_dir() — isolate it too, or every test in this
+    # file would share the real process's $HOME/.claude/janitor-control.
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     gs = importlib.import_module("global_state")
     hook = _load_hook()
@@ -60,6 +68,10 @@ def test_active_global_stop_none_when_running(monkeypatch, tmp_path) -> None:
 def test_active_global_stop_disarm_dominates_pause(monkeypatch, tmp_path) -> None:
     """When BOTH flags are set, DISARMED (kill-switch) wins over PAUSED."""
     monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path))
+    # The six mode flags now live at the FIXED control_dir() (ARCHITECTURE.md §7.1,
+    # TRDD-QK7M2B0X), not global_state_dir() — isolate it too, or every test in this
+    # file would share the real process's $HOME/.claude/janitor-control.
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     gs = importlib.import_module("global_state")
     gs.set_global_pause("pause reason")

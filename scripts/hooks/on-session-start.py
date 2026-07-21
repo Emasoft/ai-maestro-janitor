@@ -19,28 +19,28 @@ from pathlib import Path
 def _active_global_stop(gs) -> tuple[str, str, int] | None:
     """(kind, reason, since_epoch) for the active machine-wide stop, or None.
 
-    Read STRAIGHT from the flag file so the SessionStart reminder can name WHEN the
-    stop was set and WHY. The bare "the janitor is stopped" line this replaces was
-    ignored for ~33 h once (the disarmed-and-forgotten failure): a temporary
-    /janitor-global-disarm for a token-burn fix was never re-armed, and nothing carried
-    the duration or reason that would have made it stick. Kill-switch (disarm) dominates
-    a pause when both are set. Pure read; a stat/read failure degrades to empty, never
-    raises — this must never break session start.
+    So the SessionStart reminder can name WHEN the stop was set and WHY. The bare
+    "the janitor is stopped" line this replaces was ignored for ~33 h once (the
+    disarmed-and-forgotten failure): a temporary /janitor-global-disarm for a
+    token-burn fix was never re-armed, and nothing carried the duration or reason
+    that would have made it stick. Kill-switch (disarm) dominates a pause when both
+    are set.
+
+    Uses the dual/triple-read `*_present()` + `read_flag_provenance()` helpers
+    (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X) rather than reading `global_state_dir()`
+    directly — the six mode flags now live at the fixed control_dir(), so a direct
+    read of the old location would silently stop seeing a set flag. Pure read; a
+    stat/read failure degrades to empty, never raises — this must never break
+    session start.
     """
-    gsd = gs.global_state_dir()
-    for kind, fname in (("DISARMED", "kill-switch.flag"), ("PAUSED", "global-pause.flag")):
-        p = gsd / fname
-        if not p.exists():
+    for kind, fname, present in (
+        ("DISARMED", "kill-switch.flag", gs.kill_switch_present),
+        ("PAUSED", "global-pause.flag", gs.global_pause_present),
+    ):
+        if not present():
             continue
-        try:
-            reason = p.read_text(encoding="utf-8", errors="replace").strip()
-        except OSError:
-            reason = ""
-        try:
-            since = int(p.stat().st_mtime)
-        except OSError:
-            since = 0
-        return (kind, reason, since)
+        prov = gs.read_flag_provenance(fname)
+        return (kind, prov.get("reason", ""), prov.get("set_at", 0))
     return None
 
 

@@ -646,6 +646,36 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_control_dir(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory,
+                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point `JANITOR_CONTROL_DIR` at a per-test tmp dir — for EVERY test, unconditionally.
+
+    The fleet control plane (ARCHITECTURE §7.1) lives at a FIXED literal path,
+    `~/.claude/janitor-control/`, precisely so a foreign program can stat it without
+    reproducing `global_state_dir()`'s resolution ladder. That same fixedness makes it the
+    most dangerous thing in the tree to leave unisolated: unlike the ladder, it does NOT
+    move when a test sets `JANITOR_GLOBAL_STATE_DIR`, so any test calling
+    `set_kill_switch()` / `set_global_pause()` / `set_maintenance_mode()` writes the REAL
+    machine's control plane. A leaked `kill-switch.flag` disarms the whole fleet; a leaked
+    `maintenance-mode.flag` silently idles every daemon chore — which is exactly the
+    invisible, hours-long suppression that prompted §7.1 in the first place.
+
+    It is done HERE rather than per-file because the failure is silent and the blast radius
+    is the user's machine. Three files (`test_daemon_fleet_stop`, `test_fleet_stop_state`,
+    `test_session_start_rearm_guard`) were already writing the live path, and the two
+    fleet-stop failures that surfaced it were not "a leak" in appearance at all — they read
+    as ordinary assertion errors, because a leftover REAL kill-switch outranks a pause and
+    quietly changed what the next test observed. Per-file isolation only protects the files
+    someone remembered; this protects the ones nobody has written yet.
+
+    A test that needs its own control dir simply sets the variable itself — monkeypatch
+    applies its value after this fixture, so an explicit setenv still wins.
+    """
+    del request  # kept for symmetry with the sibling autouse fixtures
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path_factory.mktemp("janitor-control")))
+
+
+@pytest.fixture(autouse=True)
 def _real_state_optout(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Restore the saved REAL env for tests explicitly marked ``real_state``."""
     if request.node.get_closest_marker("real_state") is None:

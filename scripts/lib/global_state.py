@@ -144,6 +144,178 @@ def init_global_state() -> Path:
     return d
 
 
+# ---------- fixed CONTROL-PLANE directory (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X) -----
+#
+# The six MODE flags below (kill-switch, maintenance, global-pause, the two reload
+# generations, version-update-request) must be readable by an EXTERNAL program that
+# knows nothing about this plugin's internals — the ai-maestro server, run under pm2,
+# with no fixed install location of its own ("wherever the user installs ai-maestro").
+# global_state_dir()'s 4-rung ladder (env override -> XDG -> DATA dir once migrated ->
+# legacy) is exactly what such a reader cannot reproduce: hardcoding any one rung reads
+# the WRONG file whenever a different rung actually applies, and the failure is SILENT
+# (a missing flag just reads as "not set", never an error). So these six flags move to
+# ONE fixed, un-resolved path any external consumer can hardcode and `stat()`.
+
+
+def control_dir() -> Path:
+    """Return the FIXED external control-plane directory: ~/.claude/janitor-control/.
+
+    No ladder, no environment lookup beyond the TEST-ONLY override below — see the
+    module comment above for why a foreign reader cannot be handed a resolution ladder.
+
+    Resolved at CALL TIME, never cached as a module-level constant: a frozen
+    ``Path.home()`` (or any value computed once at import time) keeps pointing at the
+    ORIGINAL $HOME even after a test — or a later re-exec — changes it. That exact bug
+    already hit this file once (TRDD-ZNN0UK5K): a cached home path silently kept writing
+    outside the redirected test sandbox. Read paths never create this directory; only
+    the write helpers below do (mkdir on write, never on read — see
+    `_write_flag_provenance`).
+    """
+    override = os.environ.get("JANITOR_CONTROL_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    return Path(home) / ".claude" / "janitor-control"
+
+
+def _control_path(name: str) -> Path:
+    return control_dir() / name
+
+
+def _old_global_state_path(name: str) -> Path:
+    """The pre-control-dir location of a now-relocated flag: `global_state_dir()`
+    itself. Kept as a dual-read fallback (TRDD-QK7M2B0X transition window) so a session
+    still running the previous release's code — which writes here, not to
+    control_dir() — is never silently ignored."""
+    return global_state_dir() / name
+
+
+def _flag_present_dual(name: str) -> bool:
+    """Presence check across all THREE locations a control-plane flag may live during
+    the migration to control_dir(): the NEW control_dir() (canonical), the OLD
+    global_state_dir() path (a not-yet-updated session's writer), and the pre-existing
+    janitor-global-state legacy dual-read (TRDD-2U8AH82F, itself already folded into
+    old global_state_dir() resolution — checked explicitly here too because
+    `_legacy_read_path` only fires while global_state_dir() has flipped past legacy).
+    Fail-open: an unreadable directory just reads as "absent", never "blocked"."""
+    if _control_path(name).is_file():
+        return True
+    if _old_global_state_path(name).is_file():
+        return True
+    legacy = _legacy_read_path(name)
+    return legacy is not None and legacy.is_file()
+
+
+def _flag_clear_dual(name: str) -> None:
+    """Remove a control-plane flag from ALL THREE possible locations. A clear that
+    only wipes the new path would appear to fail — the old copy still reads as SET via
+    `_flag_present_dual` — so every clear sweeps new + old + legacy. Best-effort per
+    path: one unwritable location must never stop the others from being cleared."""
+    for p in (_control_path(name), _old_global_state_path(name), _legacy_global_state_dir() / name):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
+def _write_flag_provenance(path: Path, reason: str) -> None:
+    """Write a control-plane flag's body as one line of provenance JSON:
+    ``{"set_at": <epoch>, "by": "<actor>", "pid": <pid>, "reason": "<text>"}``
+    (ARCHITECTURE.md §7.1, added after a live incident: a flag was found set on a real
+    host with the bare content "maintenance" and no way to determine who wrote it —
+    which is how a fleet-wide suppression stayed invisible while the daemon's own
+    heartbeat kept advancing). Readers key on PRESENCE ONLY — this body is diagnostic,
+    never load-bearing; a reader must never let a malformed body make a present flag
+    read back as absent. Atomic (tmp + os.replace) so a reader never observes a
+    half-written flag. Creates the parent dir on write (never on read)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    by = f"{os.path.basename(sys.argv[0]) or 'python'}:{os.getpid()}"
+    body = json.dumps({"set_at": int(time.time()), "by": by, "pid": os.getpid(), "reason": reason or ""})
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(body, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _parse_flag_provenance(path: Path) -> dict:
+    """Parse one control-plane flag's provenance body.
+
+    A malformed or legacy body — a pre-JSON bare string like "stopped" /
+    "maintenance", or the reload flags' old ``<epoch>\\t<reason>`` tab format — still
+    means the flag is SET. This function only degrades the human-readable
+    `by`/`set_at`; it must NEVER make a present flag read back as absent (that would
+    silently swallow a stop signal). Defaults: set_at=0, by="unknown", pid=0,
+    reason="" (or the raw body, best-effort, when nothing structured parses)."""
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        raw = ""
+    result: dict = {"set_at": 0, "by": "unknown", "pid": 0, "reason": ""}
+    if not raw:
+        return result
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        data = None
+    if isinstance(data, dict):
+        set_at = data.get("set_at")
+        result["set_at"] = int(set_at) if isinstance(set_at, (int, float)) and not isinstance(set_at, bool) else 0
+        by = data.get("by")
+        result["by"] = str(by) if by else "unknown"
+        pid = data.get("pid")
+        result["pid"] = int(pid) if isinstance(pid, (int, float)) and not isinstance(pid, bool) else 0
+        reason = data.get("reason")
+        result["reason"] = str(reason) if reason is not None else ""
+        return result
+    # Legacy `<epoch>\t<reason>` tab format (the reload flags, pre-provenance).
+    first_line = raw.splitlines()[0]
+    gen_tok, _, reason_tok = first_line.partition("\t")
+    gen_tok = gen_tok.strip()
+    if gen_tok.isdigit():
+        result["set_at"] = int(gen_tok)
+        result["reason"] = reason_tok.strip()
+        return result
+    # Legacy bare-text body ("stopped", "maintenance", ...) — still SET, just with no
+    # timestamp/actor a pre-provenance release ever recorded.
+    result["reason"] = raw
+    return result
+
+
+def read_flag_provenance(name: str) -> dict:
+    """Read one control-plane flag's provenance, checking the same THREE locations
+    `_flag_present_dual` checks, newest-canonical-location-first. Returns the
+    unknown-defaults dict (set_at=0, by="unknown", pid=0, reason="") when the flag is
+    absent everywhere — callers key on presence via the dedicated `*_present()`
+    functions; this is for diagnostics/CLI display only."""
+    for candidate in (_control_path(name), _old_global_state_path(name), _legacy_global_state_dir() / name):
+        if candidate.is_file():
+            return _parse_flag_provenance(candidate)
+    return {"set_at": 0, "by": "unknown", "pid": 0, "reason": ""}
+
+
+def _generation_from_flag(name: str) -> int:
+    """Generation number for one of the two reload flags, across all three
+    control-plane locations (max() wins — a stamp from ANY era/location still
+    triggers exactly one reload). Mirrors the old `_generation_from_file`'s
+    "any non-empty legacy body counts as generation 1" fallback, so a bare
+    boolean/string body from an even-older release still means "an update
+    happened at an unknown time" rather than "absent"."""
+    best = 0
+    for p in (_control_path(name), _old_global_state_path(name), _legacy_global_state_dir() / name):
+        if not p.is_file():
+            continue
+        prov = _parse_flag_provenance(p)
+        gen = prov["set_at"]
+        if gen <= 0:
+            try:
+                gen = 1 if p.read_text(encoding="utf-8").strip() else 0
+            except OSError:
+                gen = 0
+        best = max(best, gen)
+    return best
+
+
 # Files that must NOT be copied by the migration: the kernel locks are dir-bound
 # (copying a flock file copies nothing kernel-side, and a stray copy invites a
 # split-brain read), and the pid is re-published by the migrating daemon itself.
@@ -238,7 +410,7 @@ def _heartbeat_path() -> Path:
 
 
 def _killswitch_path() -> Path:
-    return global_state_dir() / "kill-switch.flag"
+    return _control_path("kill-switch.flag")
 
 
 def _spawn_marker_path() -> Path:
@@ -250,11 +422,11 @@ def _spawn_history_path() -> Path:
 
 
 def _reload_flag_path() -> Path:
-    return global_state_dir() / "reload-needed.flag"
+    return _control_path("reload-needed.flag")
 
 
 def _skills_reload_flag_path() -> Path:
-    return global_state_dir() / "skills-reload-needed.flag"
+    return _control_path("skills-reload-needed.flag")
 
 
 def _marketplace_lock_path() -> Path:
@@ -310,34 +482,32 @@ def read_heartbeat() -> int:
 
 
 def kill_switch_present() -> bool:
-    # Dual-read (TRDD-2U8AH82F): a fleet STOP set by an old-code session at the
-    # legacy path must still be honored after the migration flipped resolution.
-    if _killswitch_path().is_file():
-        return True
-    legacy = _legacy_read_path("kill-switch.flag")
-    return legacy is not None and legacy.is_file()
+    # Triple-read (TRDD-QK7M2B0X + TRDD-2U8AH82F): a fleet STOP set at control_dir()
+    # (canonical), the pre-control-dir global_state_dir() location, or the legacy
+    # janitor-global-state path must still be honored across every writer era.
+    return _flag_present_dual("kill-switch.flag")
 
 
 def set_kill_switch(reason: str = "") -> None:
     """Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
     The running daemon sees it on its next loop and exits, AND ``ensure_daemon_running``
     stops lazy-spawning it — so a deliberate stop is NOT resurrected by either path.
-    ``/janitor-global-arm`` clears it to revive. Written atomically; content is advisory."""
-    init_global_state()
-    path = _killswitch_path()
-    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-    tmp.write_text(reason or "stopped", encoding="utf-8")
-    os.replace(tmp, path)
+    ``/janitor-global-arm`` clears it to revive. Written atomically at control_dir()
+    (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X) with a provenance body; readers key on
+    presence, never on the body's content."""
+    _write_flag_provenance(_killswitch_path(), reason or "stopped")
 
 
 def clear_kill_switch() -> None:
-    """Remove the kill-switch flag so the daemon can be lazy-spawned again — the revive
-    half of the disarm/arm pair. Idempotent (a missing flag is fine)."""
-    _killswitch_path().unlink(missing_ok=True)
+    """Remove the kill-switch flag from every location it may live (control_dir(), the
+    pre-control-dir global_state_dir(), and the legacy dir) so the daemon can be
+    lazy-spawned again — the revive half of the disarm/arm pair. Idempotent (a missing
+    flag anywhere is fine)."""
+    _flag_clear_dual("kill-switch.flag")
 
 
 def _maintenance_path() -> Path:
-    return global_state_dir() / "maintenance-mode.flag"
+    return _control_path("maintenance-mode.flag")
 
 
 def maintenance_mode_present() -> bool:
@@ -348,32 +518,28 @@ def maintenance_mode_present() -> bool:
     the cache refresh (no detectors, no daemon tasks). It is the fleet-wide "keep every
     project's cache warm at the 0.1x cache-READ rate instead of letting it die and paying
     the 1.0x rewrite" control — ~1/10 the cost. The daemon idles its task workloads while it
-    is set (like a pause); `/janitor-global-maintenance` sets it, `-off` clears it."""
-    if _maintenance_path().is_file():
-        return True
-    legacy = _legacy_read_path("maintenance-mode.flag")  # dual-read, TRDD-2U8AH82F
-    return legacy is not None and legacy.is_file()
+    is set (like a pause); `/janitor-global-maintenance` sets it, `-off` clears it. Triple-read
+    across control_dir() / global_state_dir() / legacy (TRDD-QK7M2B0X + TRDD-2U8AH82F)."""
+    return _flag_present_dual("maintenance-mode.flag")
 
 
 def set_maintenance_mode(reason: str = "") -> None:
-    """Set the machine-wide MAINTENANCE flag — every session's heartbeat drops to
-    cache-refresh-only fires (no chores) and the daemon idles its task workloads, until
-    `clear_maintenance_mode`. Written atomically; content is advisory."""
-    init_global_state()
-    path = _maintenance_path()
-    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-    tmp.write_text(reason or "maintenance", encoding="utf-8")
-    os.replace(tmp, path)
+    """Set the machine-wide MAINTENANCE flag at control_dir() (ARCHITECTURE.md §7.1,
+    TRDD-QK7M2B0X) — every session's heartbeat drops to cache-refresh-only fires
+    (no chores) and the daemon idles its task workloads, until `clear_maintenance_mode`.
+    Written atomically with a provenance body; readers key on presence."""
+    _write_flag_provenance(_maintenance_path(), reason or "maintenance")
 
 
 def clear_maintenance_mode() -> None:
-    """Clear the machine-wide MAINTENANCE flag so heartbeats resume FULL fires (chores) and
-    the daemon resumes its task workloads. Idempotent (a missing flag is fine)."""
-    _maintenance_path().unlink(missing_ok=True)
+    """Clear the machine-wide MAINTENANCE flag from every location it may live so
+    heartbeats resume FULL fires (chores) and the daemon resumes its task workloads.
+    Idempotent (a missing flag anywhere is fine)."""
+    _flag_clear_dual("maintenance-mode.flag")
 
 
 def _global_pause_path() -> Path:
-    return global_state_dir() / "global-pause.flag"
+    return _control_path("global-pause.flag")
 
 
 def global_pause_present() -> bool:
@@ -381,28 +547,25 @@ def global_pause_present() -> bool:
     kill-switch: a PAUSE leaves the daemon ALIVE but idle (it skips all task workloads
     while this is present), and every session's heartbeat no-ops — a temporary,
     teardown-free silence. `/janitor-global-pause` sets it; `/janitor-global-unpause`
-    clears it. Contrast the kill-switch, which makes the daemon EXIT (the true stop)."""
-    if _global_pause_path().is_file():
-        return True
-    legacy = _legacy_read_path("global-pause.flag")  # dual-read, TRDD-2U8AH82F
-    return legacy is not None and legacy.is_file()
+    clears it. Contrast the kill-switch, which makes the daemon EXIT (the true stop).
+    Triple-read across control_dir() / global_state_dir() / legacy (TRDD-QK7M2B0X +
+    TRDD-2U8AH82F)."""
+    return _flag_present_dual("global-pause.flag")
 
 
 def set_global_pause(reason: str = "") -> None:
-    """Set the machine-wide PAUSE flag — the daemon idles (stays alive, keeps ticking
-    its heartbeat so it is not seen as wedged) and per-session heartbeats no-op, until
-    `clear_global_pause`. Written atomically; content is advisory."""
-    init_global_state()
-    path = _global_pause_path()
-    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-    tmp.write_text(reason or "paused", encoding="utf-8")
-    os.replace(tmp, path)
+    """Set the machine-wide PAUSE flag at control_dir() (ARCHITECTURE.md §7.1,
+    TRDD-QK7M2B0X) — the daemon idles (stays alive, keeps ticking its heartbeat so it is
+    not seen as wedged) and per-session heartbeats no-op, until `clear_global_pause`.
+    Written atomically with a provenance body; readers key on presence."""
+    _write_flag_provenance(_global_pause_path(), reason or "paused")
 
 
 def clear_global_pause() -> None:
-    """Clear the machine-wide PAUSE flag — the daemon resumes running due tasks on its
-    next loop and sessions resume emitting drift. Idempotent (a missing flag is fine)."""
-    _global_pause_path().unlink(missing_ok=True)
+    """Clear the machine-wide PAUSE flag from every location it may live — the daemon
+    resumes running due tasks on its next loop and sessions resume emitting drift.
+    Idempotent (a missing flag anywhere is fine)."""
+    _flag_clear_dual("global-pause.flag")
 
 
 # ---------- version-update REQUEST (release-triggered self-update, TRDD-Y9KM5RCJ) ----
@@ -415,40 +578,41 @@ def clear_global_pause() -> None:
 # clear-before-run by the daemon: a run that fails is re-signalled by the detector's next
 # ~5 min fire, never lost. NO legacy dual-read (unlike kill-switch/reload): this flag
 # exists only in code at or past this release, so both writer (detector) and reader
-# (daemon) are new — there is no version-skew writer at the legacy path to miss.
+# (daemon) are new — there is no version-skew writer at the legacy path to miss. It is
+# still ONE of the six flags moved to control_dir() (ARCHITECTURE.md §7.1,
+# TRDD-QK7M2B0X): the ai-maestro server, not only the daemon, may want to raise it.
 
 
 def _version_update_request_path() -> Path:
-    return global_state_dir() / "version-update-requested.flag"
+    return _control_path("version-update-requested.flag")
 
 
 def version_update_requested_present() -> bool:
-    """True iff a session detector has requested an immediate janitor self-update
-    (TRDD-Y9KM5RCJ). The daemon checks this each loop and, when set, runs the
-    version-update task NOW rather than waiting for the 6 h beat."""
-    return _version_update_request_path().is_file()
+    """True iff a session detector (or an external control-plane writer) has requested
+    an immediate janitor self-update (TRDD-Y9KM5RCJ). The daemon checks this each loop
+    and, when set, runs the version-update task NOW rather than waiting for the 6 h beat.
+    Dual-read across control_dir() and the pre-control-dir global_state_dir() location."""
+    return _flag_present_dual("version-update-requested.flag")
 
 
 def request_version_update(reason: str = "") -> None:
-    """Raise the release-triggered self-update request. Idempotent (re-writing the same
-    flag is harmless; the daemon clears it on consume). Written atomically; content is
-    advisory. Best-effort — a write failure just falls back to the 6 h beat (fail-open),
-    so this never crashes the read-only detector that calls it."""
+    """Raise the release-triggered self-update request at control_dir() (ARCHITECTURE.md
+    §7.1, TRDD-QK7M2B0X). Idempotent (re-writing the same flag is harmless; the daemon
+    clears it on consume). Written atomically with a provenance body. Best-effort — a
+    write failure just falls back to the 6 h beat (fail-open), so this never crashes the
+    read-only detector that calls it."""
     try:
-        init_global_state()
-        path = _version_update_request_path()
-        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-        tmp.write_text(reason or "requested", encoding="utf-8")
-        os.replace(tmp, path)
+        _write_flag_provenance(_version_update_request_path(), reason or "requested")
     except OSError:
         pass
 
 
 def clear_version_update_request() -> None:
-    """Clear the release-triggered self-update request. The daemon calls this BEFORE
-    running the update (clear-before-run: a run that fails is re-signalled by the
-    detector's next ~5 min fire, never lost to a clear-after-run crash). Idempotent."""
-    _version_update_request_path().unlink(missing_ok=True)
+    """Clear the release-triggered self-update request from every location it may live.
+    The daemon calls this BEFORE running the update (clear-before-run: a run that fails
+    is re-signalled by the detector's next ~5 min fire, never lost to a
+    clear-after-run crash). Idempotent."""
+    _flag_clear_dual("version-update-requested.flag")
 
 
 # ---------- per-plugin update QUEUE (universal auto-update, TRDD-YMTUPQER) -----------
@@ -1140,36 +1304,15 @@ def spawn_daemon_detached() -> Optional[int]:
 # is-present check during the one transition update that ships this code.
 
 
-def _generation_from_file(p: Path) -> int:
-    """Parse one generation-flag file: `<epoch>\\t<reason>` on the first line.
-    Shared by the reload + skills-reload readers (and their legacy dual-reads)."""
-    if not p.is_file():
-        return 0
-    try:
-        raw = p.read_text(encoding="utf-8")
-    except OSError:
-        return 0
-    # Take the token before the tab, NOT the whole line (never all-digits).
-    first_line = raw.splitlines()[0] if raw else ""
-    gen_tok = first_line.partition("\t")[0].strip()
-    if gen_tok.isdigit():
-        return int(gen_tok)
-    # Pre-generation content (a boolean "1" or a bare reason string) → treat as
-    # "an update happened at an unknown time" so a never-acked session still
-    # reloads once (1 is the smallest positive gen; any real epoch dwarfs it).
-    return 1 if raw.strip() else 0
-
-
 def reload_generation() -> int:
     """Return the reload generation (epoch the daemon last stamped after a
-    plugin changed on disk), or 0 if none. NEVER mutated by a reader.
-    Dual-reads the legacy dir during the migration window (TRDD-2U8AH82F) —
-    max() wins, so a stamp from either era still triggers exactly one reload."""
-    gen = _generation_from_file(_reload_flag_path())
-    legacy = _legacy_read_path("reload-needed.flag")
-    if legacy is not None:
-        gen = max(gen, _generation_from_file(legacy))
-    return gen
+    plugin changed on disk), or 0 if none. NEVER mutated by a reader. Reads the
+    provenance body's `set_at` (current JSON format) or the legacy
+    `<epoch>\\t<reason>` tab format (pre-provenance), across control_dir(), the
+    pre-control-dir global_state_dir() location, and the legacy dir
+    (TRDD-QK7M2B0X + TRDD-2U8AH82F) — max() wins, so a stamp from any era or
+    location still triggers exactly one reload."""
+    return _generation_from_flag("reload-needed.flag")
 
 
 def reload_flag_present() -> bool:
@@ -1177,23 +1320,20 @@ def reload_flag_present() -> bool:
 
 
 def set_reload_flag(reason: str = "") -> None:
-    """Stamp the reload generation (current epoch) after a plugin changed on
-    disk. Format `<epoch>\\t<reason>`; the epoch is the generation each session
-    compares against its per-project ack. Monotonic (wall-clock only advances)
-    and NEVER cleared by a reader — clearing is precisely what starved concurrent
-    sessions in the old single-flag design."""
-    state.atomic_write(_reload_flag_path(), f"{int(time.time())}\t{reason}")
+    """Stamp the reload generation (current epoch) at control_dir() (ARCHITECTURE.md
+    §7.1, TRDD-QK7M2B0X) after a plugin changed on disk. Body is the provenance JSON
+    (`set_at` carries the generation each session compares against its per-project
+    ack). Monotonic (wall-clock only advances) and NEVER cleared by a reader —
+    clearing is precisely what starved concurrent sessions in the old single-flag
+    design."""
+    _write_flag_provenance(_reload_flag_path(), reason)
 
 
 def clear_reload_flag() -> None:
-    """Reset the reload generation. Used only by the disarm / manual-reset path;
-    the normal heartbeat flow NEVER clears it (see set_reload_flag's WHY)."""
-    try:
-        _reload_flag_path().unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        pass
+    """Reset the reload generation from every location it may live. Used only by the
+    disarm / manual-reset path; the normal heartbeat flow NEVER clears it (see
+    set_reload_flag's WHY)."""
+    _flag_clear_dual("reload-needed.flag")
 
 
 # ---------- STANDALONE-skills reload generation (TRDD-LQU7OXXV follow-up) -----
@@ -1213,13 +1353,12 @@ def clear_reload_flag() -> None:
 def skills_reload_generation() -> int:
     """Return the standalone-skills reload generation (epoch of the last
     `/janitor-global-reload-skills`), or 0 if none. NEVER mutated by a reader.
-    Dual-reads the legacy dir during the migration window (TRDD-2U8AH82F) — an
-    old-code session's global_control_cli may still stamp the legacy path."""
-    gen = _generation_from_file(_skills_reload_flag_path())
-    legacy = _legacy_read_path("skills-reload-needed.flag")
-    if legacy is not None:
-        gen = max(gen, _generation_from_file(legacy))
-    return gen
+    Reads the provenance body's `set_at` (current JSON format) or the legacy
+    `<epoch>\\t<reason>` tab format, across control_dir(), the pre-control-dir
+    global_state_dir() location, and the legacy dir (TRDD-QK7M2B0X +
+    TRDD-2U8AH82F) — an old-code session's global_control_cli may still stamp
+    an older location."""
+    return _generation_from_flag("skills-reload-needed.flag")
 
 
 def skills_reload_flag_present() -> bool:
@@ -1227,22 +1366,18 @@ def skills_reload_flag_present() -> bool:
 
 
 def set_skills_reload_flag(reason: str = "") -> None:
-    """Stamp the standalone-skills reload generation (current epoch). Format
-    `<epoch>\\t<reason>`; each session compares the epoch against its per-project
-    ack. Monotonic (wall-clock only advances) and NEVER cleared by a reader —
-    clearing would starve concurrent sessions (see set_reload_flag's WHY)."""
-    state.atomic_write(_skills_reload_flag_path(), f"{int(time.time())}\t{reason}")
+    """Stamp the standalone-skills reload generation (current epoch) at control_dir()
+    (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X). Body is the provenance JSON; each session
+    compares `set_at` against its per-project ack. Monotonic (wall-clock only advances)
+    and NEVER cleared by a reader — clearing would starve concurrent sessions (see
+    set_reload_flag's WHY)."""
+    _write_flag_provenance(_skills_reload_flag_path(), reason)
 
 
 def clear_skills_reload_flag() -> None:
-    """Reset the standalone-skills reload generation. Used only by a manual-reset
-    path; the normal heartbeat flow NEVER clears it."""
-    try:
-        _skills_reload_flag_path().unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        pass
+    """Reset the standalone-skills reload generation from every location it may live.
+    Used only by a manual-reset path; the normal heartbeat flow NEVER clears it."""
+    _flag_clear_dual("skills-reload-needed.flag")
 
 
 # ---------- daemon-script staleness (self-restart on plugin upgrade) ---------

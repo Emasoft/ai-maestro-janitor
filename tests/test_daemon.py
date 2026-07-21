@@ -78,6 +78,12 @@ def harness(tmp_path: Path):
 
     base_env = os.environ.copy()
     base_env["JANITOR_GLOBAL_STATE_DIR"] = str(state_dir)
+    # The six mode flags (incl. reload-needed.flag) now live at the FIXED control_dir()
+    # (ARCHITECTURE.md §7.1, TRDD-QK7M2B0X), not global_state_dir() — pin it to the SAME
+    # isolated state_dir so this file's raw `harness["state_dir"] / "<flag>"` assertions
+    # still find what the daemon's set_reload_flag() writes, and so no daemon test here
+    # shares the real process's ~/.claude/janitor-control.
+    base_env["JANITOR_CONTROL_DIR"] = str(state_dir)
     base_env["PATH"] = f"{bin_dir}{os.pathsep}{base_env['PATH']}"
     base_env["CLAUDE_STUB_LOG"] = str(stub_log)
     # Isolate the OAuth-rotator root so the 60 s oauth-rotator-tick Task resolves
