@@ -3,14 +3,14 @@ trdd-id: Z582IKIR
 title: Heartbeat continuity + burn reduction — reload-churn guard, giant-session pump-down, rotation-masks-burn escalation, cheap handoff+clear primitive
 column: backburner
 created: 2026-07-21T10:24:55+0200
-updated: 2026-07-21T15:30:00+0200
+updated: 2026-07-21T16:20:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
 severity: high
 relevant-rules: [6.1]
 related-trdd: [3KDN6O9Z, X92VBFNF, FENWWB4E, TKNSTP82, EUWIHP0G, D3PROACT]
-implementation-commits: [224da88, c3bde7d, 75b2860]
+implementation-commits: [224da88, c3bde7d, 75b2860, 28c1777]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
@@ -26,6 +26,13 @@ guard shipped — a recall-before-building miss. **What SURVIVES from F1** = the
 (`_phase_plugin_reload` defers the janitor's OWN `[janitor-reload]` at high context — needs no hook)
 + the shared `reload_guard_should_block` predicate/threshold. A human-typed `/reload-plugins` is
 simply NOT guardable (no hook sees it); the auto-defer is the only place the churn is prevented.
+**AGENT-side guard added (`28c1777`):** F1's INTENT — don't reload at high context — was moved to
+where the agent actually sees it. A skill's DESCRIPTION is always surfaced to the agent's context
+(a hook or a plugin command is not), so `/janitor-reload-plugins` + `/janitor-reload-skills` now
+WARN (description + a dedicated body section) not to reload at ≥350k context used (shrink first via
+`/janitor-handoff-and-clear`, then reload — a broken cache re-bills the whole window at 1.25×), and
+`/janitor-compact-context` steers to PREFER `/janitor-handoff-and-clear` over `/compact`. This
+guards the AGENT; a HUMAN typing the raw built-in stays unguardable by design.
 The standalone [[TRDD-GRHP2YHP]] resume-push fix is a sibling of the same continuity work.
 F0 (beacon age-trigger), F2 (giant-session pump-down), F3 (rotation-masks-burn escalation) remain
 DESIGN-ONLY — do not code those without a follow-up approval to move them out of `backburner`.
