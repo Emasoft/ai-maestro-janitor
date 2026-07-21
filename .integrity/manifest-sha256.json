@@ -41,7 +41,7 @@
     "skills/janitor-global-pause/SKILL.md": "0711e8242c03126348cf1d645ee65f66bc472ecbdd10ee10ee8b981cf7c2dc2e",
     "skills/janitor-global-reload-skills/SKILL.md": "82d2ec46a31083d9915a0946d18697a529d0278487c74c7b1cd0833553e01904",
     "skills/janitor-global-unpause/SKILL.md": "3b18d3f4ec0df561c7cb2cf8209c3aa4cd269aa34e0a6fd1b140900effa0c713",
-    "skills/janitor-handoff-and-clear/SKILL.md": "66cb02addaf663a9e2a64e03b9e6832b40a8c5ebf7b2f9f398416e0bcc6b89fd",
+    "skills/janitor-handoff-and-clear/SKILL.md": "ce60921e09e6c917c9bfcf58dc521f19fbeba03dd471197d914f2efac4dca1f9",
     "skills/janitor-identify-environment/SKILL.md": "896d0c18a9a1530d3bcce51297a4e71aa6e38a6e8596365690c6c2b6cbdb84d3",
     "skills/janitor-issues-watch-off/SKILL.md": "1a163f12c46531b014de90f4e04c1fbe1d4b7c44c403955768f6479325b0f942",
     "skills/janitor-issues-watch-on/SKILL.md": "467bd5c74916188d9df48edf396d6b8a39a458e5649e1b88289276446b8f5751",
@@ -71,7 +71,7 @@
     "skills/janitor-support-open-ticket/SKILL.md": "23f8a8f1124f1c15ee1e4c483b8b6000421f3a0a6943067e846c53f65ffb0d97",
     "skills/janitor-support-tickets/SKILL.md": "808ada9c1ae0eff12d5a4f3b17d50c8eeb1ad6833016ab9ddc6fafaa4784b0e4",
     "skills/janitor-support-work-ticket/SKILL.md": "e69c2045835a84251c36e891f9f97b4a30c9ec2bf2dbac3895a7186e26fcf2d3",
-    "skills/janitor-token-attribution/SKILL.md": "bffc53a5c5b4ffac91eebf83208cee53ebd7ac4198ff317d82da24f628bcd81d",
+    "skills/janitor-token-attribution/SKILL.md": "f03a636b3938b16009522b0ec03c4d8b56012d70ec8c763340e4bcc710881ccf",
     "skills/janitor-token-report/SKILL.md": "b47e2d95dfbd386d4b41af373324c12082b9a0094f2a09cd999bfa76565f5847",
     "skills/janitor-unpause/SKILL.md": "1e5fb36b061692b506c9bd498a13654c9ba95f723ba2f5e03e07d26a9aaccb7c",
     "skills/janitor-write-handoff/SKILL.md": "a05615443d6067c87b3b9d46e508878d5f23b72b4606c34e365318acac8461e6"

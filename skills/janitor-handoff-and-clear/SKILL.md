@@ -151,8 +151,8 @@ stop. Do NOT do more work: the next thing that must run is `/clear`.
 
 ## Scope
 
-ONLY writes the resume state into THIS project's `.janitor/state/` and types `/clear`
-+ the re-arm/resume bootstrap into THIS session's own pane (matched by
+ONLY writes the resume state into THIS project's `.janitor/state/` and types `/clear` +
+the re-arm/resume bootstrap into THIS session's own pane (matched by
 `$ITERM_SESSION_ID` UUID in iTerm, or `$TMUX_PANE` in tmux — never other panes, so
 concurrent Claude instances are untouched). Does NOT change plugin config, does NOT
 disarm the heartbeat, does NOT clear other sessions.

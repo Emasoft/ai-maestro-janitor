@@ -49,8 +49,8 @@ uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/token_report.py" --window
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/token_report.py" --attribution --since "2026-07-02T14:40" --until "2026-07-02T19:40"
 ```
 
-`--graph` appends this project's unicode sparklines per category: per-bucket **rate** (the derivative)
-+ **cumulative** running sum, with a time axis (5-min bins for 5h, hourly for 7d). No live probe → the
+`--graph` appends this project's unicode sparklines per category: per-bucket **rate** (the derivative) +
+**cumulative** running sum, with a time axis (5-min bins for 5h, hourly for 7d). No live probe → the
 window degrades to a labeled TRAILING interval; bounds are never silently wrong.
 
 ### The burn-rate alarm (heartbeat) + knobs
