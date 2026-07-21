@@ -320,6 +320,14 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # set. 1h cadence — leaks should be caught quickly before a push, and the scan
     # is bounded + content-fingerprint deduped so unchanged fires are near-free.
     ("memory-scope-leak", 3600, "CLAUDE_PLUGIN_OPTION_MEMORY_SCOPE_LEAK_INTERVAL"),
+    # wikimem-syntax surfaces memory pages memgrep can no longer PARSE (TRDD-VPTQ4067):
+    # a `⟦`-bracket atom invisible to recall, an atom/page with no keywords/description,
+    # or a corpus-wide DUPLICATE atom id. Runs the `wikimem_syntax_lint.py` rules (ported
+    # from memgrep's memory.rs) over the 3 memory scopes; CRITICAL-only so the ~hundreds of
+    # WARN advisories stay in the on-demand CLI. READ-ONLY (an agent fixes via
+    # /janitor-memory-update). 1h cadence, per-SET content-hash dedupe (converges to silence
+    # once fixed), fail-open.
+    ("wikimem-syntax", 3600, "CLAUDE_PLUGIN_OPTION_WIKIMEM_SYNTAX_INTERVAL"),
     # project-memory-tracked guarantees the PROJECT memory scope
     # (<repo>/.claude/project/memory/) is git-TRACKED via a .gitignore EXCEPTION
     # (TRDD-3f7b6807, Phase 2) — that scope is shared with every contributor and
