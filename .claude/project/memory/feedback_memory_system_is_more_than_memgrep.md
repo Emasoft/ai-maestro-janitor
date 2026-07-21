@@ -35,6 +35,11 @@ the 13-repo ecosystem rollout is tracked in TRDD-ce195129. Distribution =
 degrade to plain `grep` when memgrep is absent. See also `[[memory-system]]` (the full
 component page for this functionality).
 
+
+^ATOM-9AWW-4NCO [desc:"authoring routes through memgrep write verbs not hand-written md", keywords: how_to_write_a_wikimem_memory never_hand-write_wikimem_md use_memgrep_add-atom_new-page_add-lesson_verbs canonical_5-key_lesson_form atom_correct_by_construction_pass_only_body_and_keywords, type: feedback, ocd: 2026-07-21, lmd: 2026-07-21]
+
+Authoring a wikimem memory routes through memgrep WRITE VERBS, never a hand-written `.md` (owner directive 2026-07-21, TRDD-R02HTRUD): `memgrep new-page` scaffolds a valid page; `add-atom --page P --keywords "…"` (body on stdin) appends a canonical `^ATOM-… [keywords:…, ocd, lmd]`; `add-lesson --page P --atom ID --keywords "…"` emits the ONE canonical 5-key lesson `[id:ATOM-…, status:valid, keywords:"…", ocd, lmd]`. The tool synthesizes the id, dates, and bracket formatting so an atom is correct BY CONSTRUCTION — the agent passes only (body, keywords). The 3 skills (janitor-memory-write/-update/-recall) now call these verbs; only JUDGMENT stays as prose (TRDD-6RO0L3M0). The `wikimem-syntax` heartbeat detector self-validates the corpus (TRDD-VPTQ4067). This is why the pre-2026-07-21 corpus had drifted (three conflicting hand-written lesson schemas → 153 lean lessons, since migrated to 5-key, TRDD-5FNZ7ZKO).
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG06-0016, status:valid, keywords:"path_in_memory_note_goes_stale memgrep_moved_tools_to_scripts cite_role_not_literal_path", ocd:2026-06-08, lmd:2026-06-13] The engine path moved: it was `tools/memgrep/`
