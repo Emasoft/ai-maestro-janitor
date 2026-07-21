@@ -144,6 +144,41 @@ def daemon_ticked(
     return after[1] > before[1]
 
 
+def _other_janitor_actor_live() -> bool:
+    """True iff something OTHER than this test process legitimately writes the janitor's
+    machine-global state right now.
+
+    The write-guard's premise — "only this suite and the local daemon touch these paths" —
+    was true when the janitor was the only actor on a host. It no longer is. An ai-maestro
+    server now claims the host and owns the absorbed chores (ARCHITECTURE §7.2); several
+    Claude sessions run heartbeats that write the shared attribution cache; the memory
+    subconscious agent edits USER-scope wiki pages that are shared across every project. All
+    of that is correct behaviour, and none of it is the suite.
+
+    So for the daemon-owned labels a mutation is no longer evidence of a test leak whenever
+    another actor is live. This mirrors the decision already made one section below for the
+    CREDENTIAL witness, for the same stated reason: a live Claude session rewrites its own
+    token on its own schedule, so failing on it "would cry wolf on the majority of real
+    runs — and a guard that cries wolf is a guard people learn to ignore, which is exactly
+    how the 2026-07-11 clobber hid in plain sight."
+
+    What is NOT softened: the SOURCE TREE (S1c) and LAUNCHD labels stay hard failures. No
+    other actor writes this repo's `scripts/` or registers an OS service mid-run, so there
+    the original inference still holds — and the source tree is where the incident that
+    motivated the whole guard actually happened. On a quiet host (no daemon, no server) the
+    daemon-owned labels remain hard failures too, because then a mutation really is the tests.
+    """
+    try:
+        import harness_backend  # noqa: PLC0415 -- optional, resolved lazily like the daemon probe
+
+        if harness_backend.server_is_alive():
+            return True
+    except Exception:
+        pass
+    roots = [root for _label, (root, _b, _s) in _GUARDED.items()]
+    return _daemon_witness(*roots) is not None
+
+
 def _daemon_witness(*roots: Path) -> tuple[int, int] | None:
     """Return `(pid, heartbeat_epoch)` of a RUNNING janitor daemon, or None.
 
@@ -753,7 +788,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
                 continue
             kind = "ADDED" if rel not in before else ("REMOVED" if rel not in after else "CHANGED")
             line = f"  [{label}] {kind}: {root / rel}"
-            if ticked and label in daemon_owned_labels:
+            if (ticked or _other_janitor_actor_live()) and label in daemon_owned_labels:
                 daemon_diffs.append(line)
             else:
                 diffs.append(line)
@@ -764,9 +799,12 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         pid = after_witness[0] if after_witness else "?"
         print(
             f"\n[write-guard] {len(daemon_diffs)} mutation(s) in the janitor's own state dir "
-            f"attributed to the LIVE daemon (pid {pid}, heartbeat advanced during the run) — "
-            f"not a test leak. Pause it (/janitor-global-pause) for a clean signal."
+            f"attributed to a LIVE janitor actor (daemon pid {pid}, and/or an ai-maestro server "
+            f"owning this host) — not a test leak. These paths are shared: the server, other "
+            f"sessions' heartbeats, and the memory agent all write them legitimately. The SOURCE "
+            f"TREE and LAUNCHD labels are still hard failures. Mutations:"
         )
+        print("\n".join(daemon_diffs))
 
     # ── S1i: the non-file witnesses ────────────────────────────────────────────────────────
     #
