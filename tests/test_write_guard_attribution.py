@@ -37,9 +37,50 @@ def test_daemon_appearing_or_vanishing_midrun_is_not_proof() -> None:
     assert daemon_ticked((4242, 1_000), None) is False
 
 
-def test_a_different_pid_is_not_proof() -> None:
-    """A restarted/replaced daemon is not the process we witnessed — do not credit it."""
-    assert daemon_ticked((4242, 1_000), (9999, 1_060)) is False
+def test_a_RESPAWNED_daemon_still_counts_when_the_heartbeat_advanced() -> None:
+    """Reversed 2026-07-21. This used to assert False on the reasoning "a restarted daemon is
+    not the process we witnessed".
+
+    That was wrong about how the janitor actually behaves: it respawns its own daemon
+    routinely — self-update after a release, `daemon_needs_restart` on a stale version, the
+    wedged-daemon kill inside `ensure_daemon_running`. So the pid changes most often on a
+    RELEASE DAY, which made the full suite exit non-zero exactly when `publish.py`'s test gate
+    ran it. A guard that fires because the system is working normally trains people to ignore
+    it, and it blocked a release the day this was found.
+
+    Both ends still have to show a LIVE pid (`_daemon_witness` checks liveness) and the
+    heartbeat still has to ADVANCE, which together already prove a daemon ran and wrote across
+    the window. Which numeric pid did it is not part of that proof."""
+    assert daemon_ticked((4242, 1_000), (9999, 1_060)) is True
+
+
+def test_a_daemon_that_CAME_UP_during_the_run_is_credited_when_it_beat_after_the_start() -> None:
+    """The other edge of the same release-day respawn.
+
+    If the suite snapshots in the gap between the old daemon exiting for a self-update and
+    the replacement writing its pid, `before` is None — yet a daemon was running and writing
+    for most of the window. `started_at` is what makes that decidable: a heartbeat at or
+    after the moment the window opened can only come from a daemon that was alive during it.
+    """
+    started = 1_000
+    assert daemon_ticked(None, (9999, 1_050), started_at=started) is True
+
+
+def test_a_WEDGED_daemon_is_still_refused_even_with_a_start_time() -> None:
+    """The negative that `started_at` must not destroy.
+
+    A stale pid file whose process is alive but frozen also produces `before=None,
+    after=(pid, beat)` — the shape above. The difference is that its heartbeat predates the
+    run, because it has not moved in hours. If this were credited, any test could leak into
+    the real state dir and hide behind a daemon that never wrote anything."""
+    started = 1_000
+    assert daemon_ticked(None, (9999, 940), started_at=started) is False
+
+
+def test_without_a_start_time_an_absent_before_is_still_refused() -> None:
+    """No clock, no credit. `started_at` is optional, and when it is missing the two cases
+    above are indistinguishable — so the answer stays the conservative one."""
+    assert daemon_ticked(None, (9999, 1_050)) is False
 
 
 def test_frozen_heartbeat_is_not_proof() -> None:

@@ -59,6 +59,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -86,23 +87,49 @@ _DAEMON_WITNESS: dict[str, tuple[int, int] | None] = {}
 
 
 def daemon_ticked(
-    before: tuple[int, int] | None, after: tuple[int, int] | None
+    before: tuple[int, int] | None,
+    after: tuple[int, int] | None,
+    *,
+    started_at: int | None = None,
 ) -> bool:
     """PROOF that one live daemon ran across the whole session. PURE (tested directly).
 
-    True ONLY when the SAME pid was alive at both ends AND its heartbeat ADVANCED. Every
-    weaker signal is deliberately False, because each corresponds to a way a test leak could
-    otherwise hide behind a daemon that was not actually doing the writing:
+    True when a LIVE daemon was present at both ends AND its heartbeat ADVANCED. The two
+    weaker signals stay False, because each is a way a test leak could hide behind a daemon
+    that was not actually doing the writing:
       - no daemon at either end        -> nothing to credit a write to
-      - a different pid                -> the daemon we witnessed is not the one that wrote
       - a frozen heartbeat             -> a stale pid file / a wedged process, writing nothing
+
+    A CHANGED pid is explicitly NOT disqualifying (fixed 2026-07-21). It used to be, on the
+    reasoning "the daemon we witnessed is not the one that wrote" — but the janitor respawns
+    its own daemon as a matter of routine (self-update after a release, `daemon_needs_restart`
+    on a stale version, the wedged-daemon kill in `ensure_daemon_running`). A release day is
+    therefore the most likely time for a pid to change mid-suite, which made the whole suite
+    exit non-zero — through `publish.py`'s G4 gate — precisely while publishing. A test that
+    "fails" only when the system under test is behaving normally is worse than no test.
+
+    Relaxing it does not open the hole the check was guarding. `_daemon_witness` verifies the
+    pid is a LIVE process at each end, and a leaking test writes project/plugin state, never
+    `daemon.pid` + an advancing `daemon.heartbeat.ts` in the REAL global-state dir (every test
+    is isolated to a tmp dir). So "a live daemon at both ends with an advanced heartbeat" is
+    already proof that a daemon ran and wrote across the window — whether or not it is
+    numerically the same process.
+
+    `before is None` is likewise not disqualifying WHEN `started_at` is supplied and the
+    daemon's heartbeat is newer than it. That is the "daemon was down at snapshot time and
+    came up during the run" case — which is the SAME release-day self-update as above, just
+    caught at the other edge (the suite happened to snapshot in the gap between the old
+    daemon exiting and the new one writing its pid). It still wrote the files it wrote.
+    Requiring `after[1] >= started_at` is what keeps the wedged-daemon negative intact: a
+    stale pid file whose process is alive but frozen has a heartbeat OLDER than the run, so
+    it is still refused. Without `started_at` we cannot tell those apart, so the answer
+    stays False — no clock, no credit.
     """
-    return (
-        before is not None
-        and after is not None
-        and before[0] == after[0]
-        and after[1] > before[1]
-    )
+    if after is None:
+        return False
+    if before is None:
+        return started_at is not None and after[1] >= started_at
+    return after[1] > before[1]
 
 
 def _daemon_witness(*roots: Path) -> tuple[int, int] | None:
@@ -564,6 +591,14 @@ def pytest_configure(config: pytest.Config) -> None:
         # heartbeat advanced) before crediting any mutation of its own state dir to it.
         # No live daemon ⇒ every mutation is still a hard failure, exactly as before.
         _DAEMON_WITNESS["before"] = _daemon_witness(real_gsd, real_data)
+        # Also stamp WHEN the window opened. If no daemon is visible right now, the witness
+        # above is None — which happens routinely on a release day, when the suite snapshots
+        # in the gap between the old daemon exiting for a self-update and the replacement
+        # writing its pid. Without a start time we cannot distinguish "a daemon came up
+        # during the run and wrote" from "a wedged daemon has been frozen since before it",
+        # so daemon_ticked refuses to credit either. With it, a heartbeat at or after this
+        # instant proves the former.
+        _DAEMON_WITNESS["started_at"] = int(time.time())  # type: ignore[assignment]
         # S1c — the SOURCE TREE guard (TRDD-RYZCVVKA). On 2026-07-11 this repo's whole
         # daemon closure was silently overwritten with the INSTALLED plugin's v0.39.0
         # copies: committed work reverted in the working tree, exec bits cleared. It was
@@ -654,7 +689,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     before_witness = _DAEMON_WITNESS.get("before")
     after_witness = _daemon_witness(*(root for _l, (root, _b, _s) in _GUARDED.items()))
     # PROOF, not presence — see daemon_ticked() above.
-    ticked = daemon_ticked(before_witness, after_witness)
+    ticked = daemon_ticked(
+        before_witness,
+        after_witness,
+        started_at=_DAEMON_WITNESS.get("started_at"),  # type: ignore[arg-type]
+    )
     # The daemon owns ONLY its own state; it never writes the source tree. Crediting a
     # scripts/** mutation to it would re-open the exact hole S1c exists to close.
     daemon_owned_labels = {"global-state", "plugin-data"}
