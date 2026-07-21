@@ -1641,7 +1641,30 @@ def _phase_keep_going_nudge(mode: str) -> None:
         # unilaterally exit it. This branch also covers "flag present AND
         # maintenance active" — the flag's off-lever cannot silence a
         # maintenance-driven nudge, so we never name it here.
-        print("continue your pending task (maintenance mode) — if you are blocked on a human decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone keep-going off-switch does not apply to it; maintenance is exited deliberately with /janitor-maintenance-mode off)")
+        # NAME THE SCOPE (2026-07-21 incident). This line used to say only
+        # "(maintenance mode)". A session cannot tell from that whether ITS OWN project
+        # is quiet or the whole machine is, so a LOCAL maintenance in one project got
+        # reported by its agent as "global maintenance is on" while the global flag was
+        # verifiably clear — and, the other way round, a genuinely fleet-wide suppression
+        # looked like a local choice and went unexamined for hours (it was idling the
+        # daemon's version-update the whole time). The exit command differs per scope
+        # too, so an unscoped message also sends the agent to the wrong lever.
+        scopes = []
+        if (state.state_dir() / state.MAINTENANCE_FLAG).is_file():
+            scopes.append("LOCAL (this project)")
+        if gs.maintenance_mode_present():
+            scopes.append("GLOBAL (machine-wide)")
+        where = " + ".join(scopes) if scopes else "unknown scope"
+        exit_cmd = (
+            "/janitor-global-maintenance-off"
+            if scopes and scopes[-1].startswith("GLOBAL")
+            else "/janitor-maintenance-mode off"
+        )
+        print(
+            f"continue your pending task (maintenance mode — {where}) — if you are blocked on a human "
+            "decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone "
+            f"keep-going off-switch does not apply to it; exit it deliberately with {exit_cmd})"
+        )
     else:
         # Full mode (default-ON or the standalone flag). `/janitor-keep-going off` IS
         # the correct lever — it writes the keep-going-off sentinel that silences the

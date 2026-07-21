@@ -964,7 +964,7 @@ def test_main_maintenance_fires_cheap_no_chores_but_ensures_daemon(env_isolation
 
     out = _capture_stdout(dispatch.main)
     assert "[janitor-self-disarm]" not in out, "maintenance must NOT self-disarm (that kills the warm cache)"
-    expected = "[janitor-resume]\n" + _MAINTENANCE_LINE
+    expected = "[janitor-resume]\n" + _maintenance_line()
     assert out.strip() == expected, f"a maintenance fire must emit ONLY the maintenance nudge, got {out!r}"
     # TRDD-8Q0OYVWM: the token-burn monitors are the ONE detector subset that
     # survives maintenance (user directive 2026-07-10) — nothing else runs.
@@ -1013,7 +1013,33 @@ _KEEP_GOING_LINE = "continue your pending task (keep-going mode) — if the work
 # issue #74: the maintenance-driven line. MUST NOT name `/janitor-keep-going off` — in
 # maintenance the flag is absent so that command is a NO-OP; maintenance is its own mode
 # exited via /janitor-maintenance-mode off, never from a per-fire nudge.
-_MAINTENANCE_LINE = "continue your pending task (maintenance mode) — if you are blocked on a human decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone keep-going off-switch does not apply to it; maintenance is exited deliberately with /janitor-maintenance-mode off)"
+def _maintenance_line(where: str = "LOCAL (this project)", exit_cmd: str = "/janitor-maintenance-mode off") -> str:
+    """The expected maintenance nudge, WITH its scope named (2026-07-21 incident).
+
+    The line used to be a fixed string. It now names which flag is suppressing the
+    session, because an unscoped "(maintenance mode)" is unreadable: one project's LOCAL
+    maintenance was reported by its agent as "global maintenance is on" while the global
+    flag was verifiably clear, and in the other direction a genuinely machine-wide
+    suppression looked like a local choice and idled the daemon's version-update for
+    hours before anyone questioned it. The exit lever differs per scope too.
+    """
+    return (
+        f"continue your pending task (maintenance mode — {where}) — if you are blocked on a human "
+        "decision, say so briefly and WAIT; do NOT disable maintenance mode (the standalone "
+        f"keep-going off-switch does not apply to it; exit it deliberately with {exit_cmd})"
+    )
+
+
+def _set_local_maintenance() -> None:
+    """Set the LOCAL sentinel so `_phase_keep_going_nudge` resolves a real scope.
+
+    In production `mode == "maintenance"` is DERIVED from these flags, so a test that
+    passes the mode without setting one asserts a state that cannot occur.
+    """
+    import state
+
+    state.init_state()
+    (state.state_dir() / state.MAINTENANCE_FLAG).write_text("x", encoding="utf-8")
 
 
 def test_phase_keep_going_nudge_default_on_full_mode_no_flag(env_isolation: dict) -> None:
@@ -1045,8 +1071,9 @@ def test_phase_keep_going_nudge_emits_in_maintenance_mode_no_flag(env_isolation:
     import state
 
     state.init_state()
+    _set_local_maintenance()
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE], f"unexpected nudge output: {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()], f"unexpected nudge output: {out!r}"
 
 
 def test_phase_keep_going_nudge_refires_every_call_absent_a_recent_resume(env_isolation: dict) -> None:
@@ -1076,10 +1103,11 @@ def test_phase_keep_going_nudge_maintenance_never_names_off_lever(env_isolation:
     import state
 
     state.init_state()
+    _set_local_maintenance()
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
     assert "/janitor-keep-going off" not in out, f"maintenance nudge must not name the no-op off-lever: {out!r}"
     assert "do NOT disable maintenance mode" in out, f"maintenance nudge must warn against self-disable: {out!r}"
-    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE]
+    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
 
 
 def test_phase_keep_going_nudge_full_with_flag_names_off_lever(env_isolation: dict) -> None:
@@ -1104,10 +1132,11 @@ def test_phase_keep_going_nudge_flag_and_maintenance_uses_maintenance_line(env_i
 
     state.init_state()
     (state.state_dir() / "keep-going").write_text("", encoding="utf-8")
+    _set_local_maintenance()
 
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
     assert "/janitor-keep-going off" not in out, f"maintenance-driven nudge must not name the off-lever: {out!r}"
-    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE]
+    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
 
 
 def test_phase_keep_going_nudge_full_silenced_by_off_sentinel(env_isolation: dict) -> None:
@@ -1130,8 +1159,50 @@ def test_phase_keep_going_nudge_maintenance_overrides_off_sentinel(env_isolation
 
     state.init_state()
     (state.state_dir() / "keep-going-off").write_text("", encoding="utf-8")
+    _set_local_maintenance()
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE], f"maintenance must ignore the opt-out, got {out!r}"
+    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()], f"maintenance must ignore the opt-out, got {out!r}"
+
+
+def test_maintenance_nudge_names_WHICH_scope_is_suppressing(env_isolation: dict) -> None:
+    """THE 2026-07-21 regression guard. The nudge used to say only "(maintenance mode)".
+
+    That one omission cost a day. One project's LOCAL sentinel made its agent report
+    "global maintenance is on" while the global flag was verifiably clear; in the other
+    direction a genuinely machine-wide flag (set by another session's pre-v0.58.0 skill,
+    which still parsed "global" from prose) read as a local choice and went unexamined
+    for hours while it idled the daemon's version-update — which is why a release sat
+    un-updated until the owner noticed. A session cannot act on a mode it cannot locate,
+    and the exit lever differs per scope, so an unscoped line also points at the wrong
+    command. Every scope combination must be distinguishable from the line alone."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    state.init_state()
+
+    # LOCAL only -> named LOCAL, exits via the local (now local-only) skill.
+    _set_local_maintenance()
+    local_out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert "LOCAL (this project)" in local_out, local_out
+    assert "GLOBAL" not in local_out, f"a local-only suppression must not claim to be fleet-wide: {local_out!r}"
+    assert "/janitor-maintenance-mode off" in local_out, local_out
+
+    # GLOBAL only -> named GLOBAL, and points at the GLOBAL off-switch. Pointing at the
+    # local command here would be the cruellest failure: it "succeeds", changes nothing,
+    # and the fleet stays suppressed.
+    (state.state_dir() / state.MAINTENANCE_FLAG).unlink()
+    gs.set_maintenance_mode("test")
+    global_out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert "GLOBAL (machine-wide)" in global_out, global_out
+    assert "LOCAL" not in global_out, f"a global suppression must not read as this project's own: {global_out!r}"
+    assert "/janitor-global-maintenance-off" in global_out, global_out
+
+    # BOTH -> both named, because clearing only one leaves the session still suppressed
+    # and the agent believing it acted.
+    _set_local_maintenance()
+    both_out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
+    assert "LOCAL (this project)" in both_out and "GLOBAL (machine-wide)" in both_out, both_out
 
 
 def test_phase_keep_going_nudge_knob_false_restores_opt_in(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1466,6 +1537,7 @@ def test_keep_going_dedupe_applies_in_maintenance_mode_too(env_isolation: dict) 
     import state
 
     state.init_state()
+    _set_local_maintenance()
     sd = state.state_dir()
     dispatch._stamp_resume(sd, int(time.time()))
     assert _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance")) == ""
@@ -1473,4 +1545,4 @@ def test_keep_going_dedupe_applies_in_maintenance_mode_too(env_isolation: dict) 
     # Next fire past the window: maintenance nudges again, unconditionally.
     dispatch._stamp_resume(sd, int(time.time()) - (dispatch._KEEP_GOING_RESUME_DEDUPE_S + 1))
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
-    assert out.splitlines() == ["[janitor-resume]", _MAINTENANCE_LINE]
+    assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
