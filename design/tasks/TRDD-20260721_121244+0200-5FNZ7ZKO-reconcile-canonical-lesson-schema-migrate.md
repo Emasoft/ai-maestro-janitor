@@ -1,28 +1,37 @@
 ---
 trdd-id: 5FNZ7ZKO
 title: reconcile the ONE canonical lesson-atom schema and migrate the 153 lean lessons
-column: todo
+column: complete
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T13:40:00+0200
+updated: 2026-07-21T14:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project
+implementation-commits: [6f9d818]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-21
 
-**UNBLOCKED — A1 shipped a133ff0.** RATIFIED (owner delegated authority 2026-07-21): the canonical
-form is the RULE's **5-key** `[id:ATOM-…, status:valid|superseded, keywords:"…", ocd:…, lmd:…]`
-— proven live: memgrep's `add-lesson` already emits exactly this, and `wikimem_syntax_lint` + recall
-pass on it. (`desc:` is NOT a lesson key — memgrep's note parser ignores it; the write skill's
-inclusion was superfluous.)
+**SHIPPED (6f9d818, 2026-07-21) — migration complete, prose independently verified LOSSLESS.**
+153 lean lessons → 0 across all 3 scopes (USER 70 / PROJECT 53 / LOCAL 30), backfilled to the
+ratified 5-key `[id:ATOM-…, status:valid, keywords:"…", ocd:…, lmd:…]`. Verified NOT by the
+agent's self-report but by my own line-diff oracle: across all 67 backed-up files the ONLY changed
+lines are `[^N]` lesson headers whose metadata bracket expanded — every prose/body/`^atom`/
+frontmatter line byte-identical; post-migration `wikimem_syntax_lint` = 0 lean lessons. Only the 19
+PROJECT files are git-tracked (this commit); USER (34) + LOCAL (14) migrated in place (not a repo).
+Schema-doc reconciliation (part 1) landed via [[TRDD-6RO0L3M0]] (skills now call `add-lesson`, which
+emits the 5-key form by construction) + the RULE already carried it. **NEXT ACTION:** none —
+awaiting end-of-run sweep → `complete`.
 
-**NEXT ACTION:** (1) fix the two skills' hand-written lesson-form examples to the 5-key form (folded
-into [[TRDD-6RO0L3M0]] — the skills stop hand-specifying the form and just call `add-lesson`); the
-RULE `markdown-memory-recall.md` already carries the 5-key form. (2) Migrate the ~153 lean lessons:
-dispatch `janitor-memory-subconscious-agent` to backfill `id`+`keywords` PRESERVING every word (its
-`memory_edit_verify` oracle proves no prose lost), then confirm `wikimem_syntax_lint` reports 0 lean
-lessons. Do the migration LAST (after the skills stop producing new lean lessons).
+**FOLLOW-UP (out of scope — NOT a regression):** 4 pre-existing `atom-dup-id` CRITICALs are
+cross-scope page mirrors (same feedback note in USER+LOCAL: `feedback_memory_dual_test_evaluation`,
+`feedback_security_act_dont_ask`, `feedback_head_tee_sigpipe`). Untouched by this migration (zero
+`^atom` line changes proven). Resolving them is a scope-routing dedup decision for a separate
+memory-curation pass, surfaced by [[TRDD-VPTQ4067]]'s detector.
+
+**SUPERSEDED — do NOT carry forward:** the earlier "confirm the schema with the owner before
+migrating" step — the owner delegated authority 2026-07-21 and ratified the 5-key form; migration is
+done.
 
 ## Problem — three conflicting schemas produced corpus drift
 

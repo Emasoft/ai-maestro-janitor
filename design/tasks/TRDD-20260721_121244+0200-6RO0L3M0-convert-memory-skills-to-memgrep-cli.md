@@ -1,9 +1,9 @@
 ---
 trdd-id: 6RO0L3M0
 title: convert the 3 memory skills to memgrep-CLI-driven — mechanical to the tool, judgment stays prose
-column: testing
+column: complete
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T14:05:00+0200
+updated: 2026-07-21T14:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 scope: project

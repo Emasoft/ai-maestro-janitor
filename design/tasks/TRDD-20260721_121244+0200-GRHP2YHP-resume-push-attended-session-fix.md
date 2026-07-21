@@ -1,9 +1,9 @@
 ---
 trdd-id: GRHP2YHP
 title: resume-push must not surprise an attended-but-reading session after compaction
-column: testing
+column: complete
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T12:50:30+0200
+updated: 2026-07-21T14:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: bugfix
 scope: project

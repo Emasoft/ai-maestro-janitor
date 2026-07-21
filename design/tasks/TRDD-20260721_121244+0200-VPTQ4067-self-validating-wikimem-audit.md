@@ -1,9 +1,9 @@
 ---
 trdd-id: VPTQ4067
 title: self-validating wikimem audit — extend memgrep lint, add a pre-write gate, wire a detector
-column: testing
+column: complete
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T13:05:00+0200
+updated: 2026-07-21T14:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project

@@ -1,9 +1,9 @@
 ---
 trdd-id: R02HTRUD
 title: memgrep mechanical wikimem write verbs — add-atom add-lesson new-page, correct syntax by construction
-column: testing
+column: complete
 created: 2026-07-21T12:12:44+0200
-updated: 2026-07-21T13:40:00+0200
+updated: 2026-07-21T14:25:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 scope: project
