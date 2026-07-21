@@ -257,6 +257,18 @@ _PUSH_GRACE_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_GRACE_S"
 # user_intent.hid_idle_seconds() FIRST — any keystroke in the last 20 s means attended.
 _PUSH_GRACE_DEFAULT_S = 20
 
+# The attended-SESSION window (TRDD-GRHP2YHP): DISTINCT from the HID grace above. A user READING a
+# long reply hasn't typed in >20 s (so the HID grace reads them as away) but submitted a prompt
+# minutes ago — they are STILL attended, and the post-compact push landing under them is exactly the
+# surprise the owner hit. So the push is ALSO suppressed when a genuine user PROMPT
+# (`last_user_input_epoch`, bumped ONLY on a real submit, never on a cron turn) landed within this
+# longer interactive window. The HID grace stays the "don't type under their fingers" floor; this
+# window is the "is this session attended at all?" signal. An unattended overnight session (no
+# genuine prompt for hours) still fires the push — the whole point of the post-compact resume
+# (TRDD-HI0BGQGJ). Default 5 min ≈ interactive prompt cadence.
+_PUSH_PROMPT_WINDOW_ENV = "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_PROMPT_WINDOW_S"
+_PUSH_PROMPT_WINDOW_DEFAULT_S = 300
+
 
 def _push_grace_s() -> int:
     """Attended-grace window in seconds (env-overridable, non-negative)."""
@@ -270,8 +282,25 @@ def _push_grace_s() -> int:
     return value if value >= 0 else _PUSH_GRACE_DEFAULT_S
 
 
-def _user_recently_active(state, now: int, grace_s: int) -> bool:  # noqa: ANN001
-    """True iff a GENUINE user prompt landed within `grace_s` seconds.
+def _push_prompt_window_s() -> int:
+    """Attended-SESSION window in seconds (env-overridable, non-negative) — TRDD-GRHP2YHP.
+
+    Longer than the HID grace: it answers "is this session attended?" from the last genuine user
+    PROMPT, so an attended-but-reading user (no keystroke for >20 s, but talking to us minutes ago)
+    is not misread as away and does not get the resume push typed under them.
+    """
+    raw = os.environ.get(_PUSH_PROMPT_WINDOW_ENV, "").strip()
+    if not raw:
+        return _PUSH_PROMPT_WINDOW_DEFAULT_S
+    try:
+        value = int(raw)
+    except ValueError:
+        return _PUSH_PROMPT_WINDOW_DEFAULT_S
+    return value if value >= 0 else _PUSH_PROMPT_WINDOW_DEFAULT_S
+
+
+def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -> bool:  # noqa: ANN001
+    """True iff the session is ATTENDED — a keystroke within `grace_s` OR a genuine prompt within `prompt_window_s`.
 
     Reads the cross-plugin user-presence breadcrumb's `last_user_input_epoch` — the
     SAME field dispatch.py's cadence reads — which the UserPromptSubmit hook bumps
@@ -304,7 +333,10 @@ def _user_recently_active(state, now: int, grace_s: int) -> bool:  # noqa: ANN00
     # bool is an int subclass — reject it so a stray `true` doesn't read as 1.
     if not isinstance(last, int) or isinstance(last, bool) or last <= 0:
         return False
-    return (now - last) < grace_s
+    # The attended-SESSION window (TRDD-GRHP2YHP): a genuine prompt within `prompt_window_s`
+    # (minutes, NOT the 20 s HID grace) means the user is here — reading the reply — even with no
+    # recent keystroke. This is the fix for the push landing under an attended-but-reading user.
+    return (now - last) < prompt_window_s
 
 
 def _maybe_push_resume(state) -> None:  # noqa: ANN001
@@ -318,7 +350,9 @@ def _maybe_push_resume(state) -> None:  # noqa: ANN001
     """
     if not state.is_truthy_env(_PUSH_ENABLED_ENV, default=True):
         return
-    if _user_recently_active(state, int(time.time()), _push_grace_s()):
+    if _user_recently_active(
+        state, int(time.time()), _push_grace_s(), _push_prompt_window_s()
+    ):
         state.log_line("post-compact-resume", "user recently active; skipping resume push")
         return
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT", "").strip()

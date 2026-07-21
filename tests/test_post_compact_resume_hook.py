@@ -274,6 +274,33 @@ def test_push_grace_invalid_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     assert hook._push_grace_s() == 20
 
 
+# ---------- _push_prompt_window_s (attended-SESSION window, TRDD-GRHP2YHP) --
+
+def test_push_prompt_window_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The attended-session window defaults to 5 min — longer than the 20 s HID grace."""
+    hook = _import_hook()
+    monkeypatch.delenv(
+        "CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_PROMPT_WINDOW_S", raising=False
+    )
+    assert hook._push_prompt_window_s() == 300
+
+
+def test_push_prompt_window_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The window is env-overridable, distinct from the HID grace knob."""
+    hook = _import_hook()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_PROMPT_WINDOW_S", "600")
+    assert hook._push_prompt_window_s() == 600
+
+
+def test_push_prompt_window_invalid_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-int or negative window reverts to the 5 min default (fail-safe)."""
+    hook = _import_hook()
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_PROMPT_WINDOW_S", "notanint")
+    assert hook._push_prompt_window_s() == 300
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ATTENDED_PROMPT_WINDOW_S", "-5")
+    assert hook._push_prompt_window_s() == 300
+
+
 # ---------- _user_recently_active (the attended detector) -----------------
 
 def _write_presence(home: Path, last_epoch: int) -> None:
@@ -299,7 +326,8 @@ def test_user_recently_active_true_when_recent(
     monkeypatch.setenv("HOME", str(home))
     now = int(time.time())
     _write_presence(home, now - 5)
-    assert hook._user_recently_active(state, now, 180) is True
+    # 4-arg (TRDD-GRHP2YHP): HID grace 20 (pinned None in tests), prompt-session window 180.
+    assert hook._user_recently_active(state, now, 20, 180) is True
 
 
 def test_user_recently_active_false_when_old(
@@ -312,7 +340,7 @@ def test_user_recently_active_false_when_old(
     monkeypatch.setenv("HOME", str(home))
     now = int(time.time())
     _write_presence(home, now - 10_000)
-    assert hook._user_recently_active(state, now, 180) is False
+    assert hook._user_recently_active(state, now, 20, 180) is False
 
 
 def test_user_recently_active_false_when_absent(
@@ -324,7 +352,41 @@ def test_user_recently_active_false_when_absent(
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    assert hook._user_recently_active(state, int(time.time()), 180) is False
+    assert hook._user_recently_active(state, int(time.time()), 20, 180) is False
+
+
+def test_user_recently_active_attended_by_prompt_beyond_hid_grace(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE FIX (TRDD-GRHP2YHP): a genuine prompt 2 min ago (no keystroke since) → ATTENDED.
+
+    HID is pinned None in tests, so this exercises the breadcrumb window: 120 s is well past the
+    20 s HID grace (the OLD code fired the push here) but inside the 300 s attended-session window.
+    """
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    now = int(time.time())
+    _write_presence(home, now - 120)  # last real prompt 2 min ago; reading since
+    assert hook._user_recently_active(state, now, 20, 300) is True
+    # Falsify the OLD behavior: with the window collapsed to the 20 s HID grace it read as away.
+    assert hook._user_recently_active(state, now, 20, 20) is False
+
+
+def test_user_recently_active_unattended_beyond_window(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No genuine prompt for longer than the window → UNATTENDED → the push still fires."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    now = int(time.time())
+    _write_presence(home, now - 600)  # last prompt 10 min ago
+    assert hook._user_recently_active(state, now, 20, 300) is False
 
 
 # ---------- _maybe_push_resume (the three gates; falsifiable) --------------
@@ -398,3 +460,24 @@ def test_push_skips_when_no_plugin_root(
     calls = _patch_popen(monkeypatch, hook)
     hook._maybe_push_resume(state)
     assert calls == [], "push cannot fire without CLAUDE_PLUGIN_ROOT to locate the trigger"
+
+
+def test_push_skips_when_attended_but_reading(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE FIX end-to-end (TRDD-GRHP2YHP): last prompt 2 min ago, no keystroke since → NO push.
+
+    Reproduces the owner incident — submitted a prompt, then read a long reply for >20 s. With HID
+    pinned None and the default 300 s window, 120 s reads as attended → the push is suppressed.
+    """
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    _write_presence(home, int(time.time()) - 120)  # attended-but-reading
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_POSTCOMPACT_PUSH_ENABLED", raising=False)
+    calls = _patch_popen(monkeypatch, hook)
+    hook._maybe_push_resume(state)
+    assert calls == [], "push must NOT fire for an attended-but-reading user (last prompt 2 min ago)"
