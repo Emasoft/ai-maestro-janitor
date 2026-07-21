@@ -16,10 +16,32 @@ implementation-commits: []
 **NOT STARTED.** The contract is written and committed (`4237fcf`,
 `design/ARCHITECTURE.md` §7.2, rev 5); no janitor code has changed for it yet.
 
-**NEXT ACTION:** get an owner decision on the coverage gap in "The consequence" below
-(it is the only open question), then implement §7.2 in this order — `daemon.py` main
-loop exit + `finally` keepalive drop, `global_state.ensure_daemon_running()` refusal,
-crash-loop-breaker exemption, tests.
+**THE OPEN QUESTION IS ANSWERED (owner, 2026-07-21).** One daemon per host is
+unconditional: *"of course there must be only one daemon running at any time.. otherwise
+they will conflict and write at the same time in the same files, corrupting them.. not to
+mention launching chores twice."* For the orphaned chores the owner offered two routes and
+delegated the choice — *"either let the ai-maestro server handle them too … or you can
+separate those chores from the daemon and make the chron of each repo handle them. you
+decide."*
+
+**DECIDED — split by STRUCTURAL CAPABILITY, not by preference.** The test is whether a
+per-repo cron is even able to perform the chore:
+
+| chore | route | why |
+|---|---|---|
+| `cache-prune`, `rules-cleanup`, `github-config-audit`, `memory-guard` | **per-repo heartbeat** | each is idempotent and machine-wide-safe once serialized, and §7.1 just supplied the serialization: the SHARED `*.lock` + SHARED `*.last-run.ts` in `~/.claude/janitor-control/`. N sessions contending on one lock run it at most once per period — precisely the double-chore/corruption the owner named. |
+| `session-liveness` / `fleet-stop` freeze recovery | **server only** | STRUCTURALLY impossible from a per-repo cron: a frozen session's own cron is exactly what has stopped, so a session cannot recover itself. This is why it was daemon work. |
+
+So there is no coverage gap for the first four. Freeze recovery for standalone sessions is
+covered while no server runs (the janitor daemon owns it, status quo) and needs the SERVER
+to own it while a server runs — the one item that genuinely transfers.
+
+**NEXT ACTION:** implement §7.2 in this order — `daemon.py` main loop exit + `finally`
+keepalive drop, `global_state.ensure_daemon_running()` refusal, crash-loop-breaker
+exemption, tests. Then the chore migration above as its own TRDD (it depends on
+TRDD-QK7M2B0X's shared locks landing first — that ordering is a real NPT, not a
+preference: moving a chore to the cron BEFORE its lock is shared would let N sessions run
+it concurrently, which is the corruption case).
 
 **Load-bearing facts, all verified 2026-07-21:**
 
