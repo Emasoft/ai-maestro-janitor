@@ -426,7 +426,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=20fc1da797a2 digest=2a72bb2f2392 generated=2026-07-17T19:40:16+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6ff77c130e38 digest=235d978f94e3 generated=2026-07-22T01:28:05+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -438,6 +438,10 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/arm_record.py` — Everything /janitor-arm must do AFTER the cron exists (TRDD-DLI76AUC).
   · valid_cron_id(value) -> bool
   · record(state_dir, *, cron, cron_id, now) -> None
+  · main() -> int
+`scripts/clear_trigger.py` — Backing script for /janitor-handoff-and-clear (TRDD-Z582IKIR P1).
+  · plan_clear() -> tuple[list[str], list[str]] — The two keystroke phases, in order: (phase-A `/clear`, phase-B bootstrap).
+  · check_handoff_concise(text, *, max_bytes, max_fence_lines) -> tuple[bool, list[str]] — Validate the link-only handoff against the concise-but-exhaustive contract.
   · main() -> int
 `scripts/commands/doctor.py` — /janitor-doctor backing script — Python port of doctor.sh.
   · main() -> int
@@ -586,6 +590,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · main() -> int
 `scripts/detectors/why-in-commits.py` — why-in-commits — nudge when recent substantive commits carry no WHY.
   · main() -> int
+`scripts/detectors/wikimem-syntax.py` — wikimem-syntax — surface memory pages memgrep can no longer PARSE (TRDD-VPTQ4067).
+  · main() -> int
 `scripts/detectors/window-burn-rate.py` — window-burn-rate — alarm when a subscription window outpaces its linear budget
   · main() -> int
 `scripts/detectors/workflow-security.py` — Workflow-security detector — heartbeat-cadenced GitHub Actions audit.
@@ -612,6 +618,13 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/global_control_cli.py` — Backing CLI for the MACHINE-WIDE janitor control flags (TRDD-a3fa4d5d).
   · main() -> int
 `scripts/guard/branch_protection_apply.py` — Tier 2 GUARDED AUTO-REMEDIATION — branch-protection baseline applier.
+  · main() -> int
+`scripts/handoff_clear_verify.py` — Cross-/clear verification harness for /janitor-handoff-and-clear (TRDD-Z582IKIR P1).
+  · extract_wikilinks(text) -> list[str] — Every distinct `[[wikilink]]` TARGET in `text`, order-preserving, deduped.
+  · compute_verdicts(before, after, *, collapse_ratio) -> dict — PASS/FAIL/SKIP for each assumption, from the before+after snapshots. PURE.
+  · render_report(before, after, verdicts) -> str — A PASS/FAIL table + the raw before/after snapshots, as markdown. Pure.
+  · gather_before(now) -> dict
+  · gather_after(before, now) -> dict
   · main() -> int
 `scripts/hooks/on-prompt-submit-autorecall.py` — UserPromptSubmit hook — automatic memory recall, ON by default (issues #16, #45).
   · main() -> int
@@ -709,7 +722,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
 `scripts/lib/cold_cache_compact.py` — Cold-cache auto-compact policy + readers (TRDD-EUWIHP0G).
   · enabled() -> bool
-  · min_context_tokens() -> int
+  · min_context_tokens() -> int — The context size at/above which the janitor may compact — HARNESS-RELATIVE so it never
   · min_idle_seconds() -> int
   · cooldown_seconds() -> int
   · min_gain_tokens() -> int
@@ -797,6 +810,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · surface_block(project_dir) -> str — The SessionStart injection: capped unread lines + ONE fold line, then the cursor
 `scripts/lib/fleet_inject.py` — Fleet recovery injector (TRDD-324223a6, GROUP A / A3) — the ACTUATION layer.
   · action_to_command(action) -> str | None — The slash-command a command-typing recovery `action` injects, or None when
+  · is_esc_only(action) -> bool — True iff `action` is an ESC-only recovery (sends ESC, types no command).
+  · iterm_esc_only_osascript(session_id, *, delay_s) -> str — AppleScript that targets ONLY the iTerm session whose id == `session_id` and sends
+  · build_esc_plan(terminal, *, delay_s) -> dict | None — Build an ESC-ONLY injection plan (send ESC, type NO command) for a resolved `terminal`,
   · valid_session_id(session_id) -> bool — True iff `session_id` is a bare iTerm UUID safe to interpolate into an
   · iterm_osascript(session_id, command, *, delay_s, esc_first) -> str — AppleScript that targets ONLY the iTerm session whose id == `session_id`,
   · aimaestro_command_argv(cli, session, command) -> list[str] — argv for ``<cli> session command <session> --newline -- <command>`` — the
@@ -805,7 +821,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · fire(plan) -> bool — Fire a built injection plan. Returns True iff the injection is believed DELIVERED,
 `scripts/lib/fleet_recovery.py` — Fleet recovery POLICY (TRDD-324223a6, GROUP A / A2) — the PURE decisions the
   · action_for(diagnosis, attempts, *, include_hard) -> str | None — The recovery action to inject for ``diagnosis`` at this ``attempts`` count,
-  · injection_is_hard(diagnosis) -> bool — Hard/soft policy for a gentle command-typing injection (TRDD-0GPQROC1). PURE.
+  · injection_is_hard(diagnosis) -> bool — Hard/soft policy for a gentle recovery injection (TRDD-0GPQROC1). PURE.
   · gate(*, last_ts, attempts, now) -> str — Decide whether to attempt recovery on an instance NOW. Returns:
 `scripts/lib/fleet_restart.py` — Hard-restart recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
   · hard_restart_enabled() -> bool — Master opt-in for the process-killing rungs. DEFAULT-OFF — these rungs kill and
@@ -861,6 +877,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/lib/global_state.py` — Shared contract for the GLOBAL janitor daemon — system-wide singleton that
   · global_state_dir() -> Path — Return the system-wide janitor state directory.
   · init_global_state() -> Path — Create the global state dir if missing. Idempotent. Return its path.
+  · control_dir() -> Path — Return the FIXED external control-plane directory: ~/.claude/janitor-control/.
+  · read_flag_provenance(name) -> dict — Read one control-plane flag's provenance, checking the same THREE locations
   · migrate_global_state_to_data_dir() -> Optional[int] — One-time staged migration legacy → plugin DATA dir (TRDD-2U8AH82F).
   · daemon_pid() -> Optional[int] — Read daemon.pid → int, or None if missing / malformed.
   · write_daemon_pid(pid) -> None
@@ -869,16 +887,16 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · read_heartbeat() -> int
   · kill_switch_present() -> bool
   · set_kill_switch(reason) -> None — Create the kill-switch flag — the machine-wide STOP (TRDD-56d24c02 follow-up).
-  · clear_kill_switch() -> None — Remove the kill-switch flag so the daemon can be lazy-spawned again — the revive
+  · clear_kill_switch() -> None — Remove the kill-switch flag from every location it may live (control_dir(), the
   · maintenance_mode_present() -> bool — True iff the machine-wide MAINTENANCE flag is set (/janitor-global-maintenance,
-  · set_maintenance_mode(reason) -> None — Set the machine-wide MAINTENANCE flag — every session's heartbeat drops to
-  · clear_maintenance_mode() -> None — Clear the machine-wide MAINTENANCE flag so heartbeats resume FULL fires (chores) and
+  · set_maintenance_mode(reason) -> None — Set the machine-wide MAINTENANCE flag at control_dir() (ARCHITECTURE.md §7.1,
+  · clear_maintenance_mode() -> None — Clear the machine-wide MAINTENANCE flag from every location it may live so
   · global_pause_present() -> bool — True iff the machine-wide PAUSE flag is set (TRDD-a3fa4d5d). Distinct from the
-  · set_global_pause(reason) -> None — Set the machine-wide PAUSE flag — the daemon idles (stays alive, keeps ticking
-  · clear_global_pause() -> None — Clear the machine-wide PAUSE flag — the daemon resumes running due tasks on its
-  · version_update_requested_present() -> bool — True iff a session detector has requested an immediate janitor self-update
-  · request_version_update(reason) -> None — Raise the release-triggered self-update request. Idempotent (re-writing the same
-  · clear_version_update_request() -> None — Clear the release-triggered self-update request. The daemon calls this BEFORE
+  · set_global_pause(reason) -> None — Set the machine-wide PAUSE flag at control_dir() (ARCHITECTURE.md §7.1,
+  · clear_global_pause() -> None — Clear the machine-wide PAUSE flag from every location it may live — the daemon
+  · version_update_requested_present() -> bool — True iff a session detector (or an external control-plane writer) has requested
+  · request_version_update(reason) -> None — Raise the release-triggered self-update request at control_dir() (ARCHITECTURE.md
+  · clear_version_update_request() -> None — Clear the release-triggered self-update request from every location it may live.
   · request_plugin_update(plugin_id, scope, reason) -> None — Enqueue a request for the daemon to update ``plugin_id`` at ``scope`` (TRDD-YMTUPQER).
   · plugin_update_requests() -> list[dict] — The queued per-plugin update requests (each ``{plugin_id, scope, reason}``). Fail-open
   · clear_plugin_update_request(plugin_id, scope) -> None — Remove one consumed request (``<plugin_id>|<scope>``). The daemon calls this BEFORE
@@ -889,27 +907,27 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · daemon_is_alive(max_silence_s) -> bool — True iff the daemon's PID is alive AND its heartbeat is recent.
   · acquire_singleton_flock(*, blocking) -> Optional[int] — Acquire the exclusive flock on daemon.flock.
   · release_singleton_flock(fd) -> None — Close the fd; the kernel releases the flock as a side effect.
-  · acquire_marketplace_lock() -> Optional[int] — Non-blocking exclusive flock on marketplace-op.lock.
-  · release_marketplace_lock(fd) -> None — Release the marketplace-op flock and close the fd. Best-effort.
+  · acquire_marketplace_lock() -> Optional[LockHandle] — Non-blocking exclusive flock on marketplace-op.lock.
+  · release_marketplace_lock(handle) -> None — Release the marketplace-op flock and close its fds. Best-effort.
   · ticket_dispatch_lock() -> Iterator[bool] — Serialise the support-ticket select→stamp→emit against every other session (TRDD-CGYMUKO6).
   · marketplace_lock() -> Iterator[bool] — Serialise a `claude plugin marketplace update` against every other process.
-  · acquire_oauth_rotator_lock() -> Optional[int] — Non-blocking exclusive flock on oauth-rotator-tick.lock.
-  · release_oauth_rotator_lock(fd) -> None — Release the oauth-rotator-tick flock and close the fd. Best-effort.
+  · acquire_oauth_rotator_lock() -> Optional[LockHandle] — Non-blocking exclusive flock on oauth-rotator-tick.lock.
+  · release_oauth_rotator_lock(handle) -> None — Release the oauth-rotator-tick flock and close its fds. Best-effort.
   · oauth_rotator_lock() -> Iterator[bool] — Serialise an OAuth-rotator tick against every other tick-class process.
   · oauth_rotator_lock_wait(timeout_s, poll_s) -> Iterator[bool] — Bounded-WAIT variant of `oauth_rotator_lock`, for a one-shot the caller must not drop.
-  · acquire_settings_ensurer_lock() -> Optional[int] — Non-blocking exclusive flock on settings-ensurer.lock.
-  · release_settings_ensurer_lock(fd) -> None — Release the settings-ensurer flock and close the fd. Best-effort.
+  · acquire_settings_ensurer_lock() -> Optional[LockHandle] — Non-blocking exclusive flock on settings-ensurer.lock.
+  · release_settings_ensurer_lock(handle) -> None — Release the settings-ensurer flock and close its fds. Best-effort.
   · settings_ensurer_lock() -> Iterator[bool] — Serialise a settings-ensurer write against every other session's ensurer.
   · daemon_script_path() -> Path — Resolve scripts/daemon.py absolute path.
   · spawn_daemon_detached() -> Optional[int] — Spawn the daemon as a fully-detached child. Return child PID or None.
   · reload_generation() -> int — Return the reload generation (epoch the daemon last stamped after a
   · reload_flag_present() -> bool
-  · set_reload_flag(reason) -> None — Stamp the reload generation (current epoch) after a plugin changed on
-  · clear_reload_flag() -> None — Reset the reload generation. Used only by the disarm / manual-reset path;
+  · set_reload_flag(reason) -> None — Stamp the reload generation (current epoch) at control_dir() (ARCHITECTURE.md
+  · clear_reload_flag() -> None — Reset the reload generation from every location it may live. Used only by the
   · skills_reload_generation() -> int — Return the standalone-skills reload generation (epoch of the last
   · skills_reload_flag_present() -> bool
-  · set_skills_reload_flag(reason) -> None — Stamp the standalone-skills reload generation (current epoch). Format
-  · clear_skills_reload_flag() -> None — Reset the standalone-skills reload generation. Used only by a manual-reset
+  · set_skills_reload_flag(reason) -> None — Stamp the standalone-skills reload generation (current epoch) at control_dir()
+  · clear_skills_reload_flag() -> None — Reset the standalone-skills reload generation from every location it may live.
   · daemon_needs_restart() -> bool — True iff the running daemon should be restarted from the current cache.
   · request_daemon_restart() -> bool — Send SIGTERM to a stale daemon so the next heartbeat lazy-spawns a new one.
   · crash_loop_active(now) -> bool — PUBLIC read-only: True iff the daemon spawn breaker is tripped (the
@@ -1441,6 +1459,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · latest_context_size(transcript_path) -> Optional[int] — Total INPUT context (input + cache_read + cache_creation tokens) the model
   · read_context_snapshot(project_dir, session_id) -> Optional[dict] — The statusline-written context snapshot dict for (project_dir, session_id), or
   · resolve_context(project_dir, session_id, transcript, window_default, *, now) -> tuple[Optional[int], Optional[int], Optional[int], bool] — Return (pct, tokens, window, stale) — the live context-window occupancy.
+  · reload_guard_should_block(tokens, threshold) -> bool — True iff the janitor's auto-emitted `[janitor-reload]` should be DEFERRED now.
   · CompactPrediction — Predicted auto-compact geometry from CLAUDE_CODE_AUTO_COMPACT_WINDOW (TRDD-TKNSTP82 C).
   · predict_auto_compact(used_tokens, *, env) -> Optional[CompactPrediction] — Predict the EXACT auto-compact point from the CLAUDE_CODE_AUTO_COMPACT_WINDOW env var.
   · append_log(log_path, turn_usage, now_epoch) -> None — Append one JSON line for a heartbeat turn's usage (append is atomic enough
@@ -1483,6 +1502,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · record_intent_from_prompt(prompt, *, state_dir, now) -> list[str] — Stamp an intent token for every verb the USER's raw prompt explicitly asks for.
   · intent_fresh(verb, *, ttl_s, state_dir, now) -> bool — True iff the USER asked for `verb` within the last `ttl_s` seconds.
   · consume_intent(verb, state_dir) -> None — Spend a recorded intent so ONE request authorizes exactly ONE action, not a standing licence.
+  · hid_idle_seconds(*, timeout_s) -> float | None — Seconds since the user's last REAL input event (keyboard or mouse), machine-wide,
   · user_is_present(*, idle_s, home, now, env) -> bool — True iff the user typed recently IN THIS PANE — i.e. they are AT this terminal right now.
   · injection_allowed(commands, *, state_dir, home, now, env) -> tuple[bool, str] — May we type `commands` into the user's own pane right now? Returns (allowed, why).
 `scripts/lib/user_mem_lib.py` — USER-MEMORY subsystem core (TRDD-4334aad0) — a PRIVATE, agent-invisible
@@ -1687,6 +1707,13 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/ticket_cli.py` — The janitor support-ticket CLI — the SINGLE mutation surface (TRDD-CGYMUKO6).
   · main() -> int
 `scripts/token_report.py` — Backing script for /janitor-token-report (TRDD-a4e41e89, Phase 1).
+  · main() -> int
+`scripts/wikimem_syntax_lint.py` — wikimem_syntax_lint — check that memory pages use the syntax memgrep can PARSE.
+  · Finding
+  · parse_block_props(props) -> dict[str, list[str]] — `key: value, key2: a b c` → {key: [value...]}. Port of memory.rs:1314.
+  · lint_page(path, text) -> list[Finding]
+  · extract_atom_ids(text) -> list[tuple[str, int]] — Every well-formed ASCII atom id in the page body, with its 1-based line.
+  · find_duplicate_atom_ids(pages) -> dict[str, list[str]] — Map each atom id appearing more than once across the corpus → its sorted `file:line`
   · main() -> int
 ### Convention groups
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]
