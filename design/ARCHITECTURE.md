@@ -286,6 +286,25 @@ identity either side gets.
 
   `$JANITOR_CONTROL_DIR` overrides the path for TESTS ONLY. Production is the literal
   path — a consumer that honors the override is welcome to, but must not require it.
+- **What lives here — the scope rule.** Owner directive 2026-07-21: *"make sure all global
+  flags written by the daemon are written in the same folder, so the ai-maestro server
+  daemon and the normal daemon process can both share it and always be in synch."* The
+  test is **audience, not kind**: if a SECOND chore owner must observe it or contend on
+  it, it belongs in the control dir. Splitting coordination data across two directories is
+  precisely how the two daemons desynchronise.
+
+  | goes in `~/.claude/janitor-control/` | why it must be shared |
+  |---|---|
+  | the six MODE flags (below) | either daemon must switch mode on them |
+  | the coordination LOCKS — `marketplace-op.lock`, `oauth-rotator-tick.lock`, `settings-ensurer.lock` | §2 names these the collision backstop for the 90 s handoff window. A lock only excludes processes contending on the SAME file — a server holding a lock in a directory the janitor never opens excludes nobody. |
+  | the per-chore `*.last-run.ts` stamps | so either owner can see a chore was just done and skip it, instead of both redoing it inside the handoff window |
+  | the daemon singleton — `daemon.pid`, `daemon.flock`, `daemon.heartbeat.ts` | makes "one daemon per host" (§7.2) enforceable by CONTENTION rather than only by polling liveness. Moving the flock carries TRDD-2U8AH82F's flock-moves-LAST invariant — take the new lock before retiring the old, or a two-daemon window opens during the upgrade. |
+
+  Stays PRIVATE in `<DATA>/global-state/` — janitor-internal, no second reader, and
+  durability is a virtue rather than a defect: `recovery-audit.ndjson`, the
+  token-attribution cache, `migrated-from-legacy.ts`, the fleet injection stamps, and the
+  `daemon.spawn-attempt.ts` crash-loop ring.
+
 - **Vocabulary** — PRESENCE is the whole signal; file content is advisory text only:
 
   | flag | meaning for every chore owner |

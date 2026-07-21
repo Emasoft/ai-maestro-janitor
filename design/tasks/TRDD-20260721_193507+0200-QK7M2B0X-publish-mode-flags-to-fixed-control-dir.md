@@ -19,8 +19,16 @@ ordering constraint between them.
 
 **NEXT ACTION:** add `global_state.control_dir()` returning the literal
 `~/.claude/janitor-control/` (honoring `$JANITOR_CONTROL_DIR` for tests only), repoint the
-SIX mode-flag path helpers at it, and give each reader a transitional dual-read of the old
-location.
+COORDINATION set at it (see the scope rule below — NOT just the six mode flags), and give
+each reader a transitional dual-read of the old location.
+
+**SCOPE CORRECTED 2026-07-21 (owner directive, after the first draft):** *"make sure all
+global flags written by the daemon are written in the same folder, so the ai-maestro
+server daemon and the normal daemon process can both share it and always be in synch."*
+The first draft moved only the six mode flags. That was too narrow and would have left the
+two daemons desynchronised on the very things §2 relies on — see "What moves" below. The
+LOCKS are the load-bearing addition: a lock excludes only processes contending on the SAME
+file, so a server locking a path the janitor never opens excludes nobody.
 
 **Load-bearing facts, verified 2026-07-21:**
 
@@ -55,10 +63,28 @@ see. A control plane whose miss-mode is "looks fine, ignores the flag" is worse 
 
 Split by audience, NOT a reversal of TRDD-2U8AH82F:
 
+**What moves — the scope rule is AUDIENCE, not kind:** if a SECOND chore owner must
+observe it or contend on it, it moves.
+
 | dir | holds | lifecycle |
 |---|---|---|
-| `~/.claude/janitor-control/` (new, FIXED) | the six MODE flags | ephemeral control; SHOULD vanish on uninstall — a removed janitor must not leave a flag claiming the host is in maintenance |
-| `<DATA>/global-state/` (unchanged) | pid, flock, heartbeat, last-run stamps, injection stamps, migration marker | private state; must survive plugin updates, purged on uninstall |
+| `~/.claude/janitor-control/` (new, FIXED) | the six MODE flags · the three coordination LOCKS (`marketplace-op`, `oauth-rotator-tick`, `settings-ensurer`) · the per-chore `*.last-run.ts` stamps · the daemon singleton (`daemon.pid`, `daemon.flock`, `daemon.heartbeat.ts`) | ephemeral control; SHOULD vanish on uninstall — a removed janitor must not leave a flag claiming the host is in maintenance, nor a lock nobody will release |
+| `<DATA>/global-state/` (unchanged) | `recovery-audit.ndjson`, token-attribution cache, `migrated-from-legacy.ts`, fleet injection stamps, `daemon.spawn-attempt.ts` | private state, no second reader; durability is a virtue here, so the DATA principle still governs |
+
+Why each addition beyond the mode flags:
+
+- **Locks** — §2 names them the collision backstop for the 90 s handoff window. `flock(2)`
+  excludes only processes holding the SAME file, so a lock the server cannot see excludes
+  nobody and the backstop silently does nothing. Cross-language is fine: `flock` is an OS
+  primitive, not a Python one.
+- **`*.last-run.ts`** — without a shared stamp neither owner can tell the other "already
+  done at T", so both redo the chore inside the handoff window. That is exactly the
+  duplicate work §2 exists to prevent.
+- **The singleton (`daemon.pid`/`daemon.flock`/`daemon.heartbeat.ts`)** — makes §7.2's
+  one-daemon-per-host enforceable by CONTENTION, not merely by polling a liveness file
+  with a 90 s window. **Carries TRDD-2U8AH82F's flock-moves-LAST invariant:** take the new
+  lock BEFORE retiring the old, or the upgrade opens a two-daemon window — the precise bug
+  that migration was designed to avoid.
 
 TRDD-2U8AH82F moved STATE into DATA and was right to; this publishes CONTROL and does not
 touch that. The standing "prefer `${CLAUDE_PLUGIN_DATA}` over a custom `~/.claude/` folder"
@@ -69,7 +95,11 @@ Steps:
 
 1. `global_state.control_dir()` — literal `~/.claude/janitor-control/`, `$JANITOR_CONTROL_DIR`
    override for tests only, created on demand.
-2. Repoint the six `_*_path()` helpers. Writes stay atomic (tmp + `os.replace`).
+2. Repoint the COORDINATION set (mode flags, locks, last-run stamps, singleton) at it.
+   Writes stay atomic (tmp + `os.replace`). Do the singleton LAST and flock-moves-LAST
+   within it, per TRDD-2U8AH82F — the mode flags and stamps are safe to move in any order
+   because a mis-timed read only costs one duplicated chore, whereas a mis-timed flock move
+   costs a second daemon.
 3. Transitional dual-read: each presence check falls back to the old
    `global_state_dir()/<name>` so a running daemon from the previous version and a session
    from the new one agree during the upgrade window. Writers write ONLY the new path.
@@ -85,7 +115,12 @@ Steps:
   writer never recreates the old path.
 - Unit: `control_dir()` ignores `$XDG_STATE_HOME` and `$JANITOR_GLOBAL_STATE_DIR` — the
   whole point is that it does not move.
-- Unit: state paths (pid, flock, heartbeat, last-run) are UNCHANGED and still ladder-resolved.
+- Unit: the PRIVATE set (`recovery-audit.ndjson`, token cache, migration marker, injection
+  stamps, spawn-attempt ring) is UNCHANGED and still ladder-resolved.
+- Concurrency: two processes contending on the moved `marketplace-op.lock` still serialise
+  — the lock must exclude across the new path, which is the entire reason it moved.
+- Upgrade window: an old-path holder and a new-path holder must NOT both believe they hold
+  the singleton. Test the flock-moves-LAST ordering explicitly, not just the end state.
 - Integration: set maintenance, stat the literal `~/.claude/janitor-control/maintenance-mode.flag`
   with no janitor code involved — that is the contract a foreign reader gets.
 - Full `uv run pytest` + `ruff check` green before any commit.

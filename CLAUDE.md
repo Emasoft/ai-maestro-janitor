@@ -99,8 +99,12 @@ fallback `AMP_AGENT_ID`/`AID_AUTH`):
 >
 > **THE ONE SANCTIONED EXCEPTION — `~/.claude/janitor-control/`** (owner, 2026-07-21:
 > *"this folder is an exception, introduced necessarily because of the shared flags with
-> the ai-maestro server"*). It holds ONLY the global MODE flags of the fleet control plane
-> (ARCHITECTURE.md §7.1; TRDD-QK7M2B0X), because an ai-maestro server must stat one
+> the ai-maestro server"*). It holds the fleet control plane (ARCHITECTURE.md §7.1;
+> TRDD-QK7M2B0X) — the global MODE flags, the coordination LOCKS, the per-chore last-run
+> stamps, and the daemon singleton: everything a SECOND chore owner must observe or
+> contend on. That scope rule is audience, not kind — splitting coordination data across
+> two directories is how two daemons desynchronise, and a `flock` the other daemon cannot
+> see excludes nobody. It is a fixed path because an ai-maestro server must stat one
 > LITERAL path — `global_state_dir()`'s four-rung ladder is unreproducible by a foreign
 > reader, and guessing a rung fails silently as "flag absent", i.e. it ignores the control
 > plane while looking healthy. **Do NOT migrate this folder into the DATA dir**; the
