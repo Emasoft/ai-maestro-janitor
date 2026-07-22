@@ -2,7 +2,7 @@
 name: janitor-architecture
 description: "how does the ai-maestro-janitor work / what runs the drift detectors / where does janitor state live / why a daemon AND a heartbeat / how does it survive a freeze or crash / what makes it immortal (the L0-L3 keepalive + watchdog layers) / what is the scope invariant / which detector finds X / where are the pattern libs — the architecture overview hub"
 ocd: 2026-06-13
-lmd: 2026-07-16
+lmd: 2026-07-22
 metadata:
   node_type: memory
   type: project
@@ -235,9 +235,12 @@ in the heartbeat's own exec path bricks the very lifeline it guards.
 | `<repo-root>/.janitor/state/` | per-project | per-project | per-session detector state (last-run stamps, seen-files, resume/rate-limit flags) |
 
 The **auto-rolling dispatcher stub** lives in `${CLAUDE_PLUGIN_DATA}` (correct —
-survives version bumps). The daemon's global state (PID/flock/heartbeat, the
-marketplace lock, per-task last-run stamps, kill-switch and reload flags) is
-CANONICALLY at `${CLAUDE_PLUGIN_DATA}/global-state/` since TRDD-2U8AH82F.[^4]
+survives version bumps). The daemon's **private** global state is CANONICALLY at
+`${CLAUDE_PLUGIN_DATA}/global-state/` since TRDD-2U8AH82F.[^4] Its
+**coordination** state — anything a SECOND chore owner must observe or contend
+on — instead lives at the fixed `~/.claude/janitor-control/`: see
+[[janitor-fleet-control-plane]] for the split, which is audience-based, not a
+reversal of the DATA-dir principle.[^11]
 Existing installs are migrated automatically by the daemon under its singleton
 flock (flock-moves-LAST: the NEW dir's flock is acquired before the
 `migrated-from-legacy.ts` marker flips resolution); control-flag readers
@@ -294,6 +297,14 @@ must report a crash.[^3]
   for tmux; no TCC Automation grant for iTerm). The counterpart to the
   Immortality section above: the OS-keepalive bought the guardian durability and
   cost it its injection channels.
+
+- [[janitor-fleet-control-plane]] — the fixed `~/.claude/janitor-control/`
+  directory: what moves there and why the scope rule is AUDIENCE, plus the
+  dual-LOCK (not dual-READ) migration a coordination lock requires.
+
+- [[three-pillars-rules-ownership]] — which repo owns each TRDD/PRRD/kanban
+  rule file, the pinned `aimaestro-*` overlay names, and the user-scope
+  orphans that make an agent read two generations of one rule.
 
 ## Notes and lessons learned
 
@@ -362,3 +373,14 @@ must report a crash.[^3]
   Inside ai-maestro the signal must come from the SERVER (`aimaestro-session.sh state`/user-idle, or
   `queue`/`--require-idle`), NOT the local breadcrumb — tracked on ai-maestro#73, wired under
   [[trdd-pzlvt2rn]] `#J`.
+
+[^11]: [id:ATOM-MG22-0003, status:valid, keywords:"marketplace_lock_path_moved last_run_stamps_not_in_data_dir control_state_vs_private_state DATA_dir_principle_exception", ocd:2026-07-22, lmd:2026-07-22, trdd:QK7M2B0X, commits:"78879d4"]
+  DO NOT read this page's older claim that the marketplace lock and the per-task
+  last-run stamps live in `${CLAUDE_PLUGIN_DATA}/global-state/` as current — the
+  locks moved to `~/.claude/janitor-control/` in `78879d4` and the stamps are
+  scheduled next, BECAUSE a lock only excludes processes contending on the SAME
+  inode, so once a second chore owner (an ai-maestro server) exists, a lock it
+  cannot find excludes nobody and the collision backstop silently does nothing.
+  DO route by AUDIENCE — private state stays in DATA, anything a second owner
+  must observe or contend on goes to the fixed control dir
+  ([[janitor-fleet-control-plane]]).
