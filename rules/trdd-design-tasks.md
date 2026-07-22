@@ -15,9 +15,9 @@
 
 > **Layering note.** This is the UNIVERSAL BASE (IND) of the 3-pillars design system — it
 > assumes nothing beyond a git repo and one Claude, who performs every duty named here with
-> the USER as sole approver. In a registered ai-maestro agent workdir the server installs an
-> overlay that EXPANDS this base with multi-agent transition authority, approval tiers and
-> title-based routing; the overlay never restates this base.
+> the USER as sole approver. In a registered ai-maestro agent workdir the server-installed
+> overlay `aimaestro-trdd-approval.md` EXPANDS this base with multi-agent transition
+> authority, approval tiers and title-based routing; it never restates this base.
 
 **Rule:** every non-trivial feature spec, backlog item, or deferred-work design note is
 saved as a **TRDD** — one `.md` file in a `design/tasks/` folder, with a grep-first YAML
