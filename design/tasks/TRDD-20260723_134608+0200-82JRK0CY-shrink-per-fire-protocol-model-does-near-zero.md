@@ -1,9 +1,9 @@
 ---
 trdd-id: 82JRK0CY
 title: Shrink the per-fire heartbeat protocol so the model does near-zero parsing and the quiet path is near-free
-column: proposal
+column: complete
 created: 2026-07-23T13:46:08+0200
-updated: 2026-07-23T14:02:00+0200
+updated: 2026-07-23T17:26:27+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 approval-tier: 2
@@ -12,13 +12,24 @@ task-type-detail: heartbeat-protocol-serialization
 parent-source: 2026-07-23 janitor-shortcomings critique in this session (improvement D5)
 npt: []
 eht: []
+implementation-commits: [0ae6256]
 ---
 
 # Shrink the per-fire heartbeat protocol so the model does near-zero parsing and the quiet path is near-free
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-23
 
-- **STATE.** Proposal REVISED to SOUND against the synthesis §3 D5 must-fix set (report `20260723_135211+0200-sequenced-implementation-plan.md`). `column: proposal`, awaiting Tier-2 (MANAGER) approval. No code written. Nothing committed by this task.
+- **STATE.** ✅ SHIPPED + COMPLETE — committed `0ae6256`, verified. Approved by the USER ("do all
+  the improvements") — solo project, so USER is the Tier-2 authority. `_emit_decision` funnel
+  (flush-at-decision, bare `[janitor-...]` tokens byte-identical, NO forgeable `ACTION:` keyword,
+  payload defanged via a non-owner name) + `[janitor-quiet]` idle token + `[janitor-quiet]`/`[janitor-ticket]`
+  added to the reserved set (ticket owner registered) + the rule rewritten to "act on EACH leading
+  bracket token". Verified by direct read + tests: the cardinal survival property holds (a spy test
+  proves every early-return still emits its EXACT bare marker; self-disarm routes through the funnel
+  at line 2246). Gate: pyright clean (only the pre-existing `import dispatch` test artifact), ruff
+  clean, NO `@pytest.mark.real_state` in the new tests (default sandbox — the isolation check),
+  full suite 13602 passed/1 skipped/0 failed, `~/.claude` isolation clean. Shipped-rule floor cap
+  raised 52000→52400 with a measured justification (corpus now 52275).
 - **SCOPE.** Standardize `dispatch.main()`'s scattered marker `print()`s into ONE **auto-flushed decision helper** keyed on the EXISTING bare `[janitor-...]` bracket tokens (NOT a new `ACTION:` keyword grammar), add an explicit `[janitor-quiet]` token for the idle path, extend the forgery guard to the `main()`-assembled payload path + the two currently-uncovered tokens (`[janitor-ticket]`, `[janitor-quiet]`), and rewrite `rules/janitor-heartbeat-protocol.md` from a 7-row parse-and-match table to "act on the ONE leading bracket token". A THIN serialization layer that lands immediately after D1.
 - **NEXT ACTION (one step).** Await MANAGER Tier-2 approval, then land D5 AFTER D1, sharing ONE joint heartbeat-protocol rule edit (+ SKILL.md fallback ONLY if D1's shape forces it) at the D1/D5 boundary. Per synthesis §2 the two are NOT merged into one TRDD. Do NOT start coding until D1's final phase / early-return structure is settled (D5's emission points depend on it).
 - **LOAD-BEARING FACTS / GOTCHAS (verified against `scripts/dispatch.py` this session).**
@@ -115,5 +126,16 @@ The single unifying guard: **a survival marker must NEVER be lost on an early-re
 - **Agent-marker producers (`tests/test_ticket_dispatch.py` + `tests/test_memory_maintenance.py`).** Assert `[janitor-memory-*]` (`memory-maintenance.py::_MARKERS` L100-107) and `[janitor-ticket]` (`ticket-dispatch.py` L133) remain BARE documented authorized channels (not folded into a buffered envelope), are now defang-covered, and that spawn authority still derives from ticket STATUS (`t.status == DISPATCHED`, validated `t.id`) / pending-maintenance state — never the marker line.
 - **Payload fidelity (`tests/test_resume_trigger.py` + `tests/test_post_compact_resume_hook.py` + `tests/test_pending_agents_manifest.py`).** Assert the resume-directive + pending-agent lines are carried VERBATIM in the PAYLOAD (defang is a no-op on non-marker text, so fidelity is preserved).
 - **Cadence unaffected (`tests/test_dispatch_cadence.py` + `tests/test_heartbeat_cadence.py`).** Confirm tier demotion/promotion still works when output shape changes — D5 must not perturb the cost lever (which is cadence/maintenance, not output shape).
+
+## Approval log
+
+- 2026-07-23T17:26:27+0200 — APPROVED by USER (tier 2). Solo project → the human owner is the
+  Tier-2 authority; the standing directive "do all the improvements … production quality" covers
+  this. Implemented in `0ae6256` and self-verified (pyright clean bar the pre-existing import
+  artifact / ruff / no `real_state` opt-out in the new tests / full suite 13602 pass / isolation
+  clean). The cardinal survival property confirmed by direct code read + the spy test (every
+  early-return still emits its exact bare marker; the funnel flushes at decision, never batched).
+  Promoted `proposal → complete`, `git mv` proposals/ → tasks/. Completes the 4-improvement set
+  (D4/D1/D2/D5) from the 2026-07-23 janitor-shortcomings critique.
 
 ## Notes and lessons learned
