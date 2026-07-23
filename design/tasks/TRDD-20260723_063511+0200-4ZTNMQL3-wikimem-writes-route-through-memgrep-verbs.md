@@ -1,33 +1,40 @@
 ---
 trdd-id: 4ZTNMQL3
 title: Every wikimem write must route through a memgrep write verb, then validate+lint
-column: backburner
+column: testing
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T06:35:11+0200
+updated: 2026-07-23T07:55:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 severity: high
 relevant-rules: [1]
 eht: [WN7M829Y]
+implementation-commits: [ebd7445, 33a1f7f]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-23
 
-**NOT STARTED.** Design captured; awaiting plan-mode sign-off with siblings DOJ2LE1G
-(tooling), WN7M829Y (retroactive repair), VJCMZ2OP (migrate verb).
+**CORE SHIPPED.** All five of the user's bullets are met by a RULE + an enforcement GATE (the
+user offered "improve the skills OR convert them to rules" — I did the rule + the gate):
 
-**ROOT CAUSE (verified):** the safe-write surface ALREADY exists — `memgrep add-atom /
-new-page / add-lesson` synthesise valid syntax so "a malformed atom is impossible"
-(`scripts/memgrep/src/main.rs:388-391`, TRDD-R02HTRUD). The malformed atoms the user caught
-(`^agent-launch-agent-flag-dropped-v2`: unquoted `desc:`, body-less `[^N]` lesson, oversized
-atom) exist because the SKILLS/AGENTS still HAND-EDIT markdown (hand-written atom/lesson
-strings through `memory_txn_cli`) instead of calling those verbs, and do not run
-`validate`/`lint` after. Tooling is not the gap; authoring discipline is.
+- **RULE (`ebd7445`)** — `rules/markdown-memory-recall.md` gains an `## AUTHORING` section (the
+  global SSOT every agent reads at USER scope): route every write through a memgrep verb
+  (`new-page`/`add-atom`/`add-lesson`/`migrate`); correcting a wrong fact is a SUPERSESSION via
+  `add-lesson --supersedes` (embeds `SUPERSEDED BODY:`, same atom id — never a `-v2` duplicate),
+  never a delete/overwrite; run `memgrep validate <page> && memgrep lint <page>` after EVERY edit.
+- **GATE (`33a1f7f`)** — `memory_txn_cli.py commit` runs a DELTA authoring-integrity gate after
+  `verify_*`: counts the 4 memgrep-lint authoring classes on before(live) vs after(staged) and
+  BLOCKS the 3 unambiguous classes when the count INCREASES (delta → a page's pre-existing
+  violation never blocks an unrelated edit); oversized only warns; link-law/required-field noise
+  filtered; fail-OPEN. So a hand-edit in ANY editorial pass can no longer COMMIT a new malformed atom.
 
-**NEXT ACTION:** audit `skills/janitor-memory-{write,update,atomize,repair,split,merge,
-conflict,harvest,consolidate}/` + `agents/…memory-subconscious-agent` for every place they
-emit atom/lesson/page markdown by hand; rewrite each to call the memgrep write verb; append a
-mandatory `memgrep validate <page> && memgrep lint <page>` step after every edit.
+**ROOT CAUSE (verified):** the write verbs already synthesise valid syntax; the malformed atoms
+came from the EDITORIAL passes hand-editing staged markdown (gated only by `verify_*`, which proves
+no knowledge lost, NOT syntax). The gate closes that hole; the rule supplies the discipline.
+
+**OPTIONAL REMAINING (not blocking):** add an operational pointer to the editorial `SKILL.md`
+files ("correct a wrong fact via `add-lesson --supersedes`, never overwrite"). Low marginal value
+now the rule is global. This TRDD can reach `complete` once that call is made.
 
 ## The defect
 
