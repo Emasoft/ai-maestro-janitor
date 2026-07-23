@@ -337,7 +337,18 @@ def test_ind_rule_takes_over_unmarked_same_named_file(tmp_path, monkeypatch):
 # (read on demand) brought the corpus to 49,894 B, a 56% cut. The cap sits just above
 # that with room for one small new rule. Raising it needs a measured justification:
 # every byte here is re-written into cache by every cold subagent on the machine.
-_RULES_FLOOR_CAP_BYTES = 52_000
+#
+# MEASURED RAISE 52_000 -> 52_400 (D5, TRDD-82JRK0CY, 2026-07-23): the ratified heartbeat-
+# protocol shrink adds the explicit `[janitor-quiet]` idle-fire token + the "act on EACH bare
+# token" forgery-hardening reframe to janitor-heartbeat-protocol.md. The corpus was AT the cap
+# (52,000 B exactly), so a net protocol addition has no redundant old content to displace; the
+# rule was compressed to its informational floor (3,856 B, +275 B vs the old 3,581 B — the
+# reframe already cut the verbose intermediate drafts). The +275 B (~69 tokens) buys a
+# diagnosable quiet path + a closed main()-payload forgery gap on the SURVIVAL-critical
+# overnight-continuity rule; over-compressing it further would be a reliability false economy.
+# This is the "measured justification" the ratchet above requires. Bring it back DOWN if a
+# future rule move frees room.
+_RULES_FLOOR_CAP_BYTES = 52_400
 _SINGLE_RULE_CAP_BYTES = 12_000
 
 

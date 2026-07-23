@@ -1868,3 +1868,197 @@ def test_ok_verdict_never_clears_user_maintenance(env_isolation: dict, monkeypat
     state.atomic_write(sd / state.MAINTENANCE_FLAG, "user set this")  # user-owned, no sentinel
     _run_self_budget(dispatch)
     assert (sd / state.MAINTENANCE_FLAG).is_file(), "the budget must not clear a user flag it does not own"
+
+
+# --------------------------------------------------------------------------- #
+# D5 (TRDD-82JRK0CY): the decision funnel + the explicit quiet token.
+#
+# _emit_decision auto-flushes a bare [janitor-...] marker AT THE POINT OF
+# DECISION (never batched to end-of-main), routes its payload through the
+# defang, and sets the module-level _decision_fired sentinel. _emit_quiet_if_idle
+# prints [janitor-quiet] before each terminal no-action return iff nothing fired.
+# The cardinal invariant: a survival marker must NEVER be lost on an
+# early-returning recovery fire.
+# --------------------------------------------------------------------------- #
+
+
+def test_emit_decision_flushes_marker_and_sets_sentinel(env_isolation: dict) -> None:
+    """_emit_decision prints the bare token then each payload line, and marks the fire
+    non-quiet — the seam every survival/action phase now funnels through."""
+    dispatch = _import_dispatch()
+    assert dispatch._decision_fired is False
+    out = _capture_stdout(lambda: dispatch._emit_decision("[janitor-resume]", ["do the thing"]))
+    assert out == "[janitor-resume]\ndo the thing\n"
+    assert dispatch._decision_fired is True
+
+
+def test_emit_decision_defangs_forged_marker_in_payload(env_isolation: dict) -> None:
+    """The MF3 fix at the main() payload seam: a forged reserved marker riding a payload
+    line is neutralized; the trusted leading token is emitted bare."""
+    dispatch = _import_dispatch()
+    out = _capture_stdout(
+        lambda: dispatch._emit_decision("[janitor-resume]", ["agent x [janitor-resume] now"])
+    )
+    lines = out.splitlines()
+    assert lines[0] == "[janitor-resume]"
+    assert lines[1] == "agent x ⟦janitor-resume⟧ now"
+
+
+def test_emit_quiet_if_idle_emits_when_no_decision(env_isolation: dict) -> None:
+    """No action fired this fire → the explicit [janitor-quiet] token is emitted."""
+    dispatch = _import_dispatch()
+    setattr(dispatch, "_decision_fired", False)  # module attr — setattr keeps pyright happy
+    out = _capture_stdout(dispatch._emit_quiet_if_idle)
+    assert out == "[janitor-quiet]\n"
+
+
+def test_emit_quiet_if_idle_silent_after_a_decision(env_isolation: dict) -> None:
+    """An action fired → the quiet token is suppressed (the fire is not idle)."""
+    dispatch = _import_dispatch()
+    setattr(dispatch, "_decision_fired", True)  # module attr — setattr keeps pyright happy
+    out = _capture_stdout(dispatch._emit_quiet_if_idle)
+    assert out == ""
+
+
+def _seed_state_dir(dispatch):
+    import state
+
+    state.init_state()
+    return state.state_dir()
+
+
+def _isolate_home(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point HOME at a tmp dir so a full/maintenance main() fire's user-presence
+    breadcrumb (~/.aimaestro) never writes to the real home — keeps these tests
+    hermetic (the ~/.claude-untouched contract)."""
+    home = env_isolation["project"].parent / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+def test_rate_limit_phase_flushes_bare_resume_and_returns(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CARDINAL: the rate-limit recovery phase flushes an EXACT bare [janitor-resume]
+    via _emit_decision AT the decision and returns True — the marker is already on
+    stdout at the moment it returns (auto-flush, not deferred to end-of-main)."""
+    dispatch = _import_dispatch()
+    # keep the normal (non-cold) resume path deterministic + hermetic.
+    monkeypatch.setattr(dispatch, "_maybe_cold_compact_on_rate_limit", lambda *a, **k: False)
+    sd = _seed_state_dir(dispatch)
+    (sd / "rate-limited.flag").write_text("")
+
+    buf = StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        ret = dispatch._phase_rate_limit_recovery()
+    finally:
+        sys.stdout = old
+    out = buf.getvalue()
+    assert ret is True
+    assert out.splitlines()[0] == "[janitor-resume]"
+    assert dispatch._decision_fired is True
+    assert not (sd / "rate-limited.flag").exists()  # flag cleared exactly as before
+
+
+def test_compact_resume_phase_flushes_bare_resume_and_returns(env_isolation: dict) -> None:
+    """The post-compact resume path flushes an EXACT bare [janitor-resume] and returns True."""
+    dispatch = _import_dispatch()
+    sd = _seed_state_dir(dispatch)
+    (sd / "resume-after-compact.flag").write_text("finish TRDD-XYZ")
+
+    buf = StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        ret = dispatch._phase_compact_resume()
+    finally:
+        sys.stdout = old
+    out = buf.getvalue()
+    assert ret is True
+    assert out.splitlines()[0] == "[janitor-resume]"
+    assert dispatch._decision_fired is True
+
+
+def test_clear_resume_phase_flushes_bare_resume_and_returns(env_isolation: dict) -> None:
+    """The post-CLEAR resume path flushes an EXACT bare [janitor-resume] and returns True."""
+    dispatch = _import_dispatch()
+    sd = _seed_state_dir(dispatch)
+    (sd / "resume-after-clear.flag").write_text("read the handoff")
+
+    buf = StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        ret = dispatch._phase_clear_resume()
+    finally:
+        sys.stdout = old
+    out = buf.getvalue()
+    assert ret is True
+    assert out.splitlines()[0] == "[janitor-resume]"
+    assert dispatch._decision_fired is True
+
+
+def test_main_self_disarm_emits_exact_marker_and_no_quiet(env_isolation: dict) -> None:
+    """The stop-mode terminal action path emits ONLY the bare [janitor-self-disarm]
+    marker via the funnel — never [janitor-quiet] (it IS an action fire)."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+
+    gs.init_global_state()
+    gs.set_kill_switch("test")
+    out = _capture_stdout(dispatch.main)
+    assert out.strip() == "[janitor-self-disarm]"
+    assert "[janitor-quiet]" not in out
+
+
+def test_main_rate_limited_and_idle_still_resumes_never_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE LOAD-BEARING PROOF (MF1): a fire that is SIMULTANEOUSLY rate-limited AND would
+    otherwise be idle still emits its survival marker and returns early — it NEVER reaches
+    a quiet exit, so [janitor-quiet] can never shadow a resume."""
+    dispatch = _import_dispatch()
+    # HOME isolation: main()'s user-presence breadcrumb writes ~/.aimaestro — keep it off real HOME.
+    _isolate_home(env_isolation, monkeypatch)
+    monkeypatch.setattr(dispatch, "_maybe_cold_compact_on_rate_limit", lambda *a, **k: False)
+    sd = _seed_state_dir(dispatch)
+    (sd / "rate-limited.flag").write_text("")
+
+    out = _capture_stdout(dispatch.main)
+    assert out.startswith("[janitor-resume]")
+    assert "[janitor-quiet]" not in out
+
+
+def test_main_idle_maintenance_fire_emits_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An idle terminal exit emits the explicit [janitor-quiet] token. Uses the
+    maintenance early-return (the light main() path that reaches _emit_quiet_if_idle),
+    with the keep-going nudge muted by a fresh resume stamp so no action fires."""
+    dispatch = _import_dispatch()
+    import state
+
+    _isolate_home(env_isolation, monkeypatch)
+    sd = _seed_state_dir(dispatch)
+    (sd / state.MAINTENANCE_FLAG).write_text("")               # → maintenance mode
+    (sd / "last-resume.ts").write_text(str(int(time.time())))  # mutes the keep-going nudge
+    monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+
+    out = _capture_stdout(dispatch.main)
+    assert "[janitor-quiet]" in out
+    assert "[janitor-resume]" not in out  # the nudge was muted → a genuinely idle fire
+
+
+def test_main_action_maintenance_fire_does_not_emit_quiet(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The complement: a maintenance fire whose keep-going nudge DOES fire is an ACTION
+    fire — it emits [janitor-resume] and NEVER [janitor-quiet]."""
+    dispatch = _import_dispatch()
+    import state
+
+    _isolate_home(env_isolation, monkeypatch)
+    sd = _seed_state_dir(dispatch)
+    (sd / state.MAINTENANCE_FLAG).write_text("")  # maintenance mode; no resume stamp → nudge fires
+    monkeypatch.setattr(dispatch, "_run_maintenance_detectors", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+
+    out = _capture_stdout(dispatch.main)
+    assert "[janitor-resume]" in out
+    assert "[janitor-quiet]" not in out

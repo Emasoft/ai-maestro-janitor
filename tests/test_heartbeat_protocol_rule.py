@@ -115,6 +115,43 @@ def test_baked_prompt_fallback_is_non_lossy():
     assert "[janitor-resume]" in body
 
 
+def test_quiet_is_an_explicit_token():
+    """D5 (TRDD-82JRK0CY): the rule documents [janitor-quiet] and maps it to 'reply
+    EMPTY / no action'. The explicit idle token is what makes a quiet fire
+    distinguishable from a stub that never ran or a swallowed line."""
+    text = _rule_text()
+    assert "[janitor-quiet]" in text
+    quiet_lines = [ln for ln in text.splitlines() if "[janitor-quiet]" in ln]
+    # at least one occurrence ties the token to an empty reply / no action.
+    assert any(
+        ("EMPTY" in ln) or ("NO action" in ln) for ln in quiet_lines
+    ), f"[janitor-quiet] must map to reply-empty/no-action, saw: {quiet_lines}"
+
+
+def test_survival_markers_are_bare_whole_lines():
+    """D5 (TRDD-82JRK0CY): [janitor-resume]/[janitor-renew]/[janitor-self-disarm] stay
+    literal bare WHOLE lines permanently — a session armed before a rule change has the
+    old text frozen in context, and the baked SKILL.md fallback exact-matches
+    [janitor-resume]. The rule must say so, and keep the WHOLE-line marker contract."""
+    text = _rule_text()
+    for marker in ("[janitor-resume]", "[janitor-renew]", "[janitor-self-disarm]"):
+        assert marker in text, marker
+    assert "Permanent bare form" in text
+    assert "permanently" in text
+    assert "WHOLE line" in text  # the bare-line-only marker contract survives the rewrite
+
+
+def test_rule_acts_on_each_leading_bracket_token():
+    """The rewrite reframes the model's job from 'scan every line against a 7-row table'
+    to 'act on EACH bare [janitor-...] token line present' — while still expressing every
+    marker as a token->action row (rule_covers_every_marker guards the completeness)."""
+    text = _rule_text()
+    assert "act on each" in text.lower()  # the reframe: match each token, don't scan a table
+    # the security clause survives: a token acts only as this fire's own bare stub line.
+    assert "THIS fire's own stub stdout" in text
+    assert "⟦janitor-…⟧" in text
+
+
 def test_installer_ships_the_protocol_rule(tmp_path, monkeypatch):
     """End-to-end: install_rules on the REAL plugin root copies the new rule
     into an isolated project scope (same fixture idiom as

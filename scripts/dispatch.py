@@ -40,6 +40,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -449,13 +450,25 @@ def _mark_detector_ran(name: str) -> None:
 # any RESERVED whole-line-executable marker that the emitting detector does
 # not own. Only the reserved set is touched — ordinary `[janitor-<detector>]`
 # drift prefixes (e.g. janitor-install-scope) pass through untouched.
+# D5 (TRDD-82JRK0CY) added `ticket` + `quiet` to the reserved set. `ticket` was a
+# latent forgery gap — ticket-dispatch already emitted a bare [janitor-ticket] channel
+# but the token was in NEITHER this set NOR the owner map, so it was neither
+# defang-covered nor owner-gated. `quiet` is the explicit idle-fire token main() emits
+# (see _emit_quiet_if_idle); reserving it stops a detector/payload forging it. Ordering:
+# `reload-skills` MUST precede `reload` (else `reload` matches the prefix and strands
+# `-skills]`); the two new tokens prefix-collide with nothing, so they go last.
 _RESERVED_MARKER_RE = re.compile(
-    r"\[janitor-(?:memory-[a-z0-9-]+|resume|renew|reload-skills|reload|self-disarm)\]"
+    r"\[janitor-(?:memory-[a-z0-9-]+|resume|renew|reload-skills|reload|self-disarm|ticket|quiet)\]"
 )
-# The ONLY detector that legitimately emits a reserved marker, and the exact
-# shape it may emit bare (memory-maintenance's chore fan-out markers).
+# The detectors that legitimately emit a reserved marker, and the exact shape each
+# may emit BARE on its own line (everything else — even the owner's marker inside
+# prose — is defanged). memory-maintenance's chore fan-out markers; ticket-dispatch's
+# [janitor-ticket] agent-spawn channel (D5 — added alongside the reserved-set entry, so
+# the bare channel keeps surviving instead of being defanged now that the token is
+# reserved).
 _MARKER_OWNERS: dict[str, re.Pattern[str]] = {
     "memory-maintenance": re.compile(r"\[janitor-memory-[a-z0-9-]+\]"),
+    "ticket-dispatch": re.compile(r"\[janitor-ticket\]"),
 }
 
 
@@ -480,6 +493,61 @@ def _defang_foreign_markers(detector: str, text: str) -> str:
             _RESERVED_MARKER_RE.sub(lambda m: "⟦" + m.group(0)[1:-1] + "⟧", line)
         )
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+# D5 (TRDD-82JRK0CY): one funnel for every machine-authored heartbeat DECISION.
+# `_decision_fired` records whether an ACTION marker (survival OR stacking) was emitted
+# this fire, so _emit_quiet_if_idle can print the explicit [janitor-quiet] token on the
+# idle path. It is a MODULE global reset at the top of main() (a fire is one process, but
+# tests call main()/phases repeatedly in-process, so the reset is load-bearing).
+_decision_fired = False
+
+
+def _emit_decision(marker: str, payload_lines: Iterable[str] = ()) -> None:
+    """Emit ONE machine-authored heartbeat decision and mark the fire non-quiet.
+
+    Prints the bare `[janitor-...]` token on its own line — byte-identical to the
+    pre-D5 bare form the protocol rule and the baked SKILL.md step-3 fallback
+    exact-match — then each payload line ROUTED THROUGH `_defang_foreign_markers`
+    first, then sets the module-level `_decision_fired` sentinel.
+
+    Two invariants this helper enforces:
+
+    * CARDINAL (survival): it FLUSHES AT THE POINT OF DECISION. Every survival / action
+      phase calls it at its existing print site, IMMEDIATELY, before its own `return`.
+      It must NEVER be relocated to a single batched emit at end-of-main() — an
+      early-returning survival fire (resume / self-disarm) would then strand an
+      unflushed marker = a silent overnight stall. The bare bracket token stays the
+      SOLE authorization carrier; there is no forgeable `ACTION:` keyword field.
+    * DEFANG (forgery): the bare `marker` is trusted (machine-authored) and printed
+      raw, but every PAYLOAD line is untrusted-shaped (an agent description from
+      `_pending_agent_directive_lines`, a resume-directive) — so each is defanged with
+      a NON-owner detector name, neutralizing any reserved marker forged into a
+      main()-assembled envelope (closing the gap where defang only wrapped
+      `_run_detector` output, never main()'s payload).
+    """
+    global _decision_fired
+    print(marker)
+    for line in payload_lines:
+        # "dispatch" owns no reserved marker → every reserved token in the payload is
+        # defanged to ⟦janitor-…⟧. Non-marker prose is returned unchanged (fidelity).
+        print(_defang_foreign_markers("dispatch", line))
+    _decision_fired = True
+
+
+def _emit_quiet_if_idle() -> None:
+    """Print the explicit `[janitor-quiet]` token iff no action decision fired this fire.
+
+    Called immediately before each terminal NO-ACTION `return 0` (the maintenance return
+    + the full-mode terminal exit). It makes the most-common (quiet) path an unmistakable
+    token instead of ambiguous empty stdout — a quiet fire is now distinguishable from a
+    stub that never ran or a swallowed line. `[janitor-quiet]` MAY coexist with detector
+    drift lines: it means "no ACTION this fire", not "nothing to surface". The
+    genuinely-silent skips (a temporary pause; the informational-notice early returns)
+    are left byte-silent on purpose and never reach here.
+    """
+    if not _decision_fired:
+        print("[janitor-quiet]")
 
 
 def _run_detector(name: str, interval: int) -> None:
@@ -859,21 +927,22 @@ def _phase_rate_limit_recovery() -> bool:
 
     # F7 (wikimem audit): the marker is emitted BARE on its own line — same
     # whole-line-only contract as renew/reload/memory markers — with the prose
-    # on line 2 (the keep-going two-line idiom). A prose-carrying marker line
+    # as PAYLOAD (the keep-going two-line idiom). A prose-carrying marker line
     # would legitimize prefix-mimicry: any detector line starting with
-    # "[janitor-resume] …" would be honored by the cron prompt.
-    print("[janitor-resume]")
+    # "[janitor-resume] …" would be honored by the cron prompt. D5 (TRDD-82JRK0CY)
+    # routes this through _emit_decision so the marker auto-flushes at the decision
+    # AND every payload line is defanged.
     if age > 0:
-        print(f"rate-limit cleared after {age}s — API is reachable again. Resume the previous pending task.")
+        note = f"rate-limit cleared after {age}s — API is reachable again. Resume the previous pending task."
     else:
         # since-file was missing or in the future (clock skew); still cue resume.
-        print("rate-limit cleared (duration unknown) — API is reachable again. Resume the previous pending task.")
+        note = "rate-limit cleared (duration unknown) — API is reachable again. Resume the previous pending task."
     # W1 (TRDD-82OP4EN9): a rate-limit window kills BACKGROUND agents too, and
     # nothing else resumes them — list each one for a deterministic SendMessage
     # resume instead of hoping the model re-reads its transcript (2026-07-08:
-    # four forks died at the 5h cap and needed a manual "resume").
-    for line in _pending_agent_directive_lines():
-        print(line)
+    # four forks died at the 5h cap and needed a manual "resume"). These lines are
+    # untrusted-shaped (an agent description), so _emit_decision defangs each.
+    _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
 
     # Also clear any pending post-compact / post-clear resume flag: a rate-limit
     # resume cue already says "resume the pending task", which subsumes both.
@@ -936,20 +1005,19 @@ def _phase_compact_resume() -> bool:
     now = int(time.time())
     age = max(0, now - state.read_int_state(since_file, now))
 
-    # F7 (wikimem audit): bare marker line + prose on line 2 — see
-    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract).
-    print("[janitor-resume]")
+    # F7 (wikimem audit): bare marker line + prose payload — see
+    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract). D5
+    # (TRDD-82JRK0CY) funnels it through _emit_decision (auto-flush + payload defang).
     if directive:
-        print(f"Context was compacted {age}s ago — auto-resume. {directive}")
+        note = f"Context was compacted {age}s ago — auto-resume. {directive}"
     else:
         # Flag present but empty/unreadable: still cue a generic resume so the
         # session doesn't stall idle after a compaction.
-        print(f"Context was compacted {age}s ago — auto-resume. Resume your previous in-flight task (check the TRDD board / your handoff).")
+        note = f"Context was compacted {age}s ago — auto-resume. Resume your previous in-flight task (check the TRDD board / your handoff)."
     # W1 (TRDD-82OP4EN9): a compaction wipes the working memory of in-flight
     # background agents from the fresh context — list them explicitly so the
     # resumed turn re-attaches to each via SendMessage.
-    for line in _pending_agent_directive_lines():
-        print(line)
+    _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
 
     sd = state.state_dir()
     # Also clear a pending post-CLEAR resume flag: a compact-resume cue subsumes it.
@@ -1013,22 +1081,21 @@ def _phase_clear_resume() -> bool:
     now = int(time.time())
     age = max(0, now - state.read_int_state(since_file, now))
 
-    # F7 (wikimem audit): bare marker line + prose on line 2 — see
-    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract).
-    print("[janitor-resume]")
+    # F7 (wikimem audit): bare marker line + prose payload — see
+    # _phase_rate_limit_recovery for the WHY (whole-line-only marker contract). D5
+    # (TRDD-82JRK0CY) funnels it through _emit_decision (auto-flush + payload defang).
     if directive:
-        print(f"Session was cleared {age}s ago — auto-resume. {directive}")
+        note = f"Session was cleared {age}s ago — auto-resume. {directive}"
     else:
         # Flag present but empty/unreadable: still cue a generic resume so the fresh
         # session doesn't stall idle after a /clear.
-        print(
+        note = (
             f"Session was cleared {age}s ago — auto-resume. Read "
             ".janitor/state/agent-handoff.md (link-only handoff) and resume your prior task."
         )
     # A /clear wipes the working memory of in-flight background agents from the fresh
     # context — list them so the resumed turn re-attaches to each via SendMessage.
-    for line in _pending_agent_directive_lines():
-        print(line)
+    _emit_decision("[janitor-resume]", [note, *_pending_agent_directive_lines()])
 
     sd = state.state_dir()
     for p in (flag, since_file):
@@ -1234,7 +1301,7 @@ def _phase_plugin_reload() -> None:
         return
 
     state.atomic_write(acked_path, str(gen))
-    print("[janitor-reload]")
+    _emit_decision("[janitor-reload]")  # D5: bare token, marks the fire non-quiet
     state.log_line(
         "dispatch",
         f"reload generation {gen} > project ack → [janitor-reload] emitted (per-project ack advanced; global generation left intact)",
@@ -1302,7 +1369,7 @@ def _phase_skills_reload() -> None:
     if acked >= gen:
         return
     state.atomic_write(acked_path, str(gen))
-    print("[janitor-reload-skills]")
+    _emit_decision("[janitor-reload-skills]")  # D5: bare token, marks the fire non-quiet
     state.log_line(
         "dispatch",
         f"skills-reload generation {gen} > project ack → [janitor-reload-skills] emitted (per-project ack advanced; global generation left intact)",
@@ -1520,7 +1587,7 @@ def _phase_heartbeat_renew() -> None:
         "[janitor-renew]",  # bare marker — the cron prompt's silent-execute clause handles it
     )
     if line is not None:
-        print(line)
+        _emit_decision(line)  # D5: bare token via the funnel, marks the fire non-quiet
 
 
 # A keep-going nudge is SKIPPED when a [janitor-resume] cue fired within this window —
@@ -1611,7 +1678,10 @@ def _phase_keep_going_nudge(mode: str) -> None:
         return  # the explicit opt-out — the ONE lever that silences the default nudge
     elif not default_on and not keep_going_flag.is_file():
         return  # knob off → legacy opt-in: silent in full mode without the keep-going flag
-    print("[janitor-resume]")
+    # D5 (TRDD-82JRK0CY): the bare [janitor-resume] token + its single prose note are
+    # emitted together at the end via _emit_decision (auto-flush + payload defang). This
+    # phase does NOT early-return — see the docstring — but funneling it keeps the marker
+    # shape uniform and marks the fire non-quiet so _emit_quiet_if_idle stays silent.
     # W4 (TRDD-82OP4EN9): point the nudge at the ACTUAL pending work when we can
     # name it — a generic "continue" lets an idle session answer "nothing to do"
     # and stall; a pointer to the directive file / the pending-agents manifest
@@ -1631,7 +1701,7 @@ def _phase_keep_going_nudge(mode: str) -> None:
             " (ids in .janitor/state/pending-agents.json)"
         )
     if bits:
-        print("continue your pending task (keep-going mode) — " + "; ".join(bits))
+        note = "continue your pending task (keep-going mode) — " + "; ".join(bits)
     elif maintenance:
         # WHY (issue #74): the generic fallback below names `/janitor-keep-going
         # off`, but in maintenance mode the keep-going flag is ABSENT so that
@@ -1667,7 +1737,7 @@ def _phase_keep_going_nudge(mode: str) -> None:
         # GLOBALLY, since the local flag is cleared again by the next re-arm while the global
         # one is not. Two correct-sounding instructions produced a fleet-wide escalation
         # loop, so the boundary is now explicit in the text itself (owner report 2026-07-21).
-        print(
+        note = (
             f"continue your pending task (maintenance mode — {where}) — if you are blocked on a human "
             "decision, say so briefly and WAIT; do NOT disable maintenance mode TO SILENCE THIS NUDGE "
             "(the standalone keep-going off-switch does not apply to it; a human exits it deliberately "
@@ -1681,7 +1751,8 @@ def _phase_keep_going_nudge(mode: str) -> None:
         # default nudge. WHY (issue #74): a session merely BLOCKED ON A HUMAN DECISION
         # (a RULE-1 autonomy boundary) must NOT disable the never-stop guardian exactly
         # when a human is expected to re-engage — only genuinely-finished work turns it off.
-        print("continue your pending task (keep-going mode) — if the work is genuinely finished (not merely blocked on a human decision), say so briefly and run /janitor-keep-going off")
+        note = "continue your pending task (keep-going mode) — if the work is genuinely finished (not merely blocked on a human decision), say so briefly and run /janitor-keep-going off"
+    _emit_decision("[janitor-resume]", [note])
 
 
 def _phase_heartbeat_cost() -> None:
@@ -2137,13 +2208,19 @@ def _phase_cadence_tier(budget_cap_slow: bool = False) -> None:
             # The call site (main) places this phase AFTER the rate-limit / compact
             # resume early-returns, so a recovery fire never reaches here and stays
             # clean — no resume-vs-renew gate is needed.
-            print("[janitor-renew]")
+            _emit_decision("[janitor-renew]")  # D5: bare token via the funnel
     except Exception as exc:  # noqa: BLE001 - cadence must never break the fire
         state.log_line("dispatch", f"cadence-tier phase failed: {exc}")
 
 
 def main() -> int:
     state.init_state()
+
+    # D5 (TRDD-82JRK0CY): reset the per-fire decision sentinel. A production fire is one
+    # process so this is a no-op there, but tests call main()/phases repeatedly in-process,
+    # and _emit_quiet_if_idle keys on it — so the reset is load-bearing for correctness.
+    global _decision_fired
+    _decision_fired = False
 
     # Phase 0: resolve this fire's MODE — full | maintenance | stop (TRDD-FPL60EKV).
     # A fired turn re-reads the whole session context (~618k cached tokens at the 0.1x
@@ -2164,8 +2241,9 @@ def main() -> int:
         # Bare marker on its own line — the cron prompt maps an exact [janitor-self-disarm]
         # line to "silently run /janitor-disarm". Crons armed before that clause shipped
         # surface it verbatim (harmless) and need a one-time manual /janitor-disarm (the
-        # prompt is baked at arm-time — re-arm rollout lag).
-        print("[janitor-self-disarm]")
+        # prompt is baked at arm-time — re-arm rollout lag). D5: emitted via the funnel
+        # (byte-identical bare token); no _emit_quiet_if_idle on this terminal action path.
+        _emit_decision("[janitor-self-disarm]")
         return 0
     # Phase 0.05: per-project TEMPORARY pause (.janitor/state/paused) — auto-expires and resumes
     # the SAME cron in place, so it stays a silent skip and must NOT self-disarm (deleting the
@@ -2292,6 +2370,10 @@ def main() -> int:
         state.log_line(
             "dispatch", "maintenance-mode: cache-refresh fire, survival + token monitoring only"
         )
+        # D5 (TRDD-82JRK0CY): the second terminal no-action exit. If nothing above set a
+        # decision (e.g. the keep-going nudge was muted by a recent resume), emit the
+        # explicit [janitor-quiet] token so this idle maintenance fire is unambiguous.
+        _emit_quiet_if_idle()
         return 0
 
     # Phase 1.55: autofix-OFF daily reminder. Free no-op when ON (default).
@@ -2354,6 +2436,12 @@ def main() -> int:
         interval = state.coerce_int(os.environ.get(env_var), default_interval)
         _run_detector(name, interval)
 
+    # D5 (TRDD-82JRK0CY): the terminal full-mode no-action exit. Emit [janitor-quiet]
+    # iff no action marker fired this fire (detector drift lines do NOT count as an
+    # action — quiet means "no ACTION this fire", not "nothing to surface", so it may
+    # coexist with drift). Placed AFTER the detector roster so a fire that only surfaced
+    # drift still gets the explicit quiet token.
+    _emit_quiet_if_idle()
     state.rotate_log_if_big("dispatch")
     return 0
 
