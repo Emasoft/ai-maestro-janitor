@@ -2859,9 +2859,9 @@ fn mask_inline_code(raw: &str) -> String {
     for ch in raw.chars() {
         if ch == '`' {
             in_code = !in_code;
-            out.extend(std::iter::repeat(' ').take(ch.len_utf8()));
+            out.extend(std::iter::repeat_n(' ', ch.len_utf8()));
         } else if in_code {
-            out.extend(std::iter::repeat(' ').take(ch.len_utf8()));
+            out.extend(std::iter::repeat_n(' ', ch.len_utf8()));
         } else {
             out.push(ch);
         }
