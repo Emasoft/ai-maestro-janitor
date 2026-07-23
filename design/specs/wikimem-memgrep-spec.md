@@ -1,9 +1,9 @@
 ---
 spec: wikimem-memgrep
-spec-version: 1.0.0
+spec-version: 1.1.0
 status: normative
 created: 2026-07-23T15:03:35+0200
-updated: 2026-07-23T15:03:35+0200
+updated: 2026-07-23T15:21:42+0200
 maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner request, 2026-07-23)
@@ -11,7 +11,9 @@ implementations:
   - "the recall + authoring RULE — ~/.claude/rules/markdown-memory-recall.md (teaching prose) + rules/references/markdown-memory-recall-full.md (on-demand detail) — canonical repo Emasoft/ai-maestro-janitor"
   - "memgrep — the Rust CLI + SQLite sidecar index — scripts/memgrep/src/{main.rs,memory.rs,index.rs} (this repo)"
   - "the editorial + safety layer — scripts/lib/{memory_txn,memory_edit_verify,memory_scopes,memory_settings}.py, scripts/memory_txn_cli.py, scripts/wikimem_syntax_lint.py, scripts/detectors/{wikimem-syntax,memory-maintenance,memory-librarian,memory-scope-leak}.py (this repo)"
-  - "the single curator agent + per-chore skills — agents/janitor-memory-subconscious-agent, skills/janitor-memory-{recall,write,update,atomize,repair,split,merge,consolidate,conflict,harvest} (this repo)"
+  - "the single curator agent + per-chore skills — agents/janitor-memory-subconscious-agent, skills/janitor-memory-{recall,write,update,bootstrap,record-recent,atomize,repair,split,merge,consolidate,conflict,harvest,frequency} (this repo)"
+  - "the PRIVATE user-memory subsystem — scripts/lib/user_mem_lib.py, scripts/hooks/on-prompt-submit-user-mem.py, commands/janitor-memory-user-{add,search,share}.md (this repo)"
+  - "the proactive surfaces + scheduler — scripts/hooks/{on-prompt-submit-autorecall,post-edit-memory-correction}.py, scripts/lib/{memory_breadcrumb,memory_settings,memory_content_precheck,memory_migrate}.py, scripts/{memory_settings_cli,migrate_memory_scope}.py, scripts/detectors/{memorize-nudge,memgrep-index-health}.py (this repo)"
 ---
 
 # The wikimem + memgrep conformance SPEC
@@ -33,7 +35,7 @@ This is a REFERENCE doc: every normative clause starts with a stable `` `WM-<FAM
 anchor and a bold key-phrase, so you grep to the clause instead of reading through.
 
 ```text
-WM-GREP  all clauses of a family:   grep 'WM-ATOM'   (SCOPE WIKI NOTE ATOM LES RCL AUTH CLI LINT MIG TXN SEP)
+WM-GREP  all clauses of a family:   grep 'WM-ATOM'   (SCOPE WIKI NOTE ATOM LES RCL AUTH CLI LINT MIG TXN SEP UMEM SURF SCHED HARV BOOT)
 WM-GREP  one clause by id:          grep 'WM-ATOM-03'
 WM-GREP  the authoritative verbs:   grep -A20 '@spec:memgrep-verbs'
 WM-GREP  the atom / lesson grammar: grep -A6  '@spec:atom-grammar'   /  '@spec:lesson-grammar'
@@ -41,7 +43,9 @@ WM-GREP  the version stamp:         grep '^spec-version:'
 WM-GREP  families: META=arbiter VER=versioning SCOPE=3-scope-model WIKI=wiki-layer
 WM-GREP            NOTE=page-format ATOM=atom-model LES=lesson+supersession RCL=recall
 WM-GREP            AUTH=authoring-contract CLI=memgrep-verbs LINT=lint-contract MIG=migrate
-WM-GREP            TXN=editor-safety SEP=separation-of-powers CHK=conformance MNT=maintenance
+WM-GREP            TXN=editor-safety SEP=separation-of-powers UMEM=private-user-memory
+WM-GREP            SURF=proactive-surfaces SCHED=maintenance-scheduler HARV=harvest/raw-buffer
+WM-GREP            BOOT=bootstrap+simple-skills CHK=conformance MNT=maintenance
 ```
 
 ## WM-META — the arbiter, and the anti-drift discipline
@@ -64,6 +68,22 @@ verb emits one shape while a skill hand-writes another, and recall quietly stops
 `WM-META-04` **the one law above all** — a memory is worthless if it cannot be FOUND from the
 symptom. Every other clause serves WM-RCL-01. When two clauses appear to conflict, the reading
 that preserves symptom-recall wins.
+
+`WM-META-05` **absence-is-a-gap-NOT-a-delete-license** — `MUST` (the safety invariant): a
+behavior, file, store, verb, flag, detector, hook, or clause that is PRESENT in the
+implementation but ABSENT from this spec is a spec GAP to be FILED (and the spec MINOR-bumped
+to cover it), NEVER a non-conformance to be removed. An agent `MUST NOT` delete, disable, or
+"clean up" any implemented behavior on the grounds that the spec does not mention it. The spec
+is authoritative for what the artefacts MUST do, not exhaustive for everything they MAY do; the
+implementation is the ground truth for what EXISTS. Conformance means the implementation
+satisfies every `MUST` here — not that it does ONLY what is written here.
+
+`WM-META-06` **deletion-needs-provenance-not-silence** — `MUST`: the only sanctioned removals
+are those WM-LES-06 already names (a page memgrep cannot PARSE → repair; a page whose atoms all
+migrated away → structural removal), and each is proven safe by the WM-TXN verify oracle. Any
+other removal of memory content or memory machinery requires an explicit human decision recorded
+in a TRDD — never an inference from this spec's silence. When in doubt, PRESERVE and file a gap
+(WM-META-05).
 
 ## WM-VER — versioning & conformance
 
@@ -118,7 +138,29 @@ LOCAL→PROJECT later is deliberate; a leaked machine-private note is already pu
 
 `WM-SCOPE-07` **user-root-is-fixed** — the USER root is the janitor plugin's DATA memory dir, a
 HARD-CODED path — never `${CLAUDE_PLUGIN_DATA}` of the *running* plugin, which is a different
-plugin's dir. A USER-memory backup MIRROR outside the DATA dir survives a plain uninstall.
+plugin's dir.
+
+`WM-SCOPE-08` **user-mirror** — `MUST`: the USER corpus has a backup MIRROR OUTSIDE the plugin
+DATA dir (`~/.claude/ai-maestro-janitor-memory/`) so it survives a plain plugin uninstall (the
+DATA dir is deleted on uninstall). SessionStart syncs primary→mirror and restores mirror→primary
+after a data-dir loss (`memory_scopes.{resolve_user_mirror_dir,sync_user_memory_mirror}`). The
+mirror is a memory STORE — never deleted as "junk".
+
+`WM-SCOPE-09` **project-memory-is-git-tracked** — `MUST`: `<repo>/.claude/project/memory/` is
+git-TRACKED and MUST NOT be gitignored (a gitignore-exception is enforced so PROJECT memory is
+pushed and shared); the `project-memory-tracked` detector polices this.
+
+`WM-SCOPE-10` **scope-migration-is-guarded** — re-scoping a LOCAL corpus to PROJECT
+(`migrate_memory_scope` / `memory_migrate`) is a two-phase, human-reviewed operation: a
+read-only privacy-scan classifier (`privacy_scan`/`classify_text`) proposes which notes are
+PROJECT-safe, and the apply is gated by an ownership guard (`check_ownership` — refuses unless
+running inside the repo it writes to) + a re-classify-now proof that the reviewed plan still
+matches reality. A privacy-flagged note is NEVER auto-promoted.
+
+`WM-SCOPE-11` **wiki-subnamespace-vs-raw-buffer** — each scope root has a CURATED
+`wiki/` sub-namespace (`resolve_wiki_dir`) distinct from RAW harness buffer notes at the root;
+`is_curated_wiki_page` is the discriminator that decides which editorial passes and which lint
+apply. Both are memory — neither is scratch to be cleared (see WM-HARV).
 
 ## WM-WIKI — the wiki layer
 
@@ -324,6 +366,11 @@ debounces ~500 ms behind writes — a consumer `MUST NOT` re-query in the same t
 `WM-CLI-06` **token-lean-output** — reads return greppable, capped output (`path — description`
 + resolved lessons); consumers read the top 1–3 hits, not the whole corpus.
 
+`WM-CLI-07` **find-DSL** — `memgrep find` takes a keyword DSL (`+must`, `-exclude`, `"exact
+phrase"`, wildcards), `--only-notes` to search the LESSONS, `--use-index` for the SQLite sidecar,
+and `--top N`. The DSL grammar lives in the Rust crate and is the search surface both the wiki and
+the private user-mem search build on.
+
 ## WM-LINT — the lint contract
 
 `WM-LINT-01` **deterministic-fp-free** — `MUST`: `memgrep lint` is deterministic and
@@ -417,6 +464,104 @@ machine/user-private data (WM-SCOPE-03/04) at WRITE time by the author and by a 
 `memory-scope-leak` sweep; a found leak is redacted-in-place (fact kept, private part relocated
 to LOCAL) with the WHY recorded as a dated lesson, never deleted.
 
+## WM-UMEM — the private, agent-invisible user-memory subsystem
+
+`WM-UMEM-01` **separate-private-store** — `MUST`: a DISTINCT store at
+`~/.claude/projects/<slug>/memory/user-mem/` holds USER-authored private memories — one markdown
+file per memory. It is a sibling of the agent corpus, NOT part of the wiki, and its search root
+is ONLY ever this dir. It is a memory STORE; it is never deleted or reorganised by any editorial
+pass.
+
+`WM-UMEM-02` **agent-invisible-by-construction** — `MUST`: the user-mem hooks use UserPromptSubmit
+`decision:block` so a save's text and a search's query NEVER reach the model; confirmations and
+results reach the USER only via `systemMessage`. The model learns a memory's content ONLY through
+the explicit share gate (WM-UMEM-04).
+
+`WM-UMEM-03` **monotonic-immutable-counter** — `MUST`: memory numbers come from a `.counter`
+(flock-guarded) that only ever moves FORWARD; a number is retired-never-reused. The number is the
+memory's stable id.
+
+`WM-UMEM-04` **share-is-the-only-injection-gate** — `MUST`: `/janitor-memory-user-share <N>` is
+the SOLE path that injects a user-mem memory into model context (via `additionalContext`).
+`/janitor-memory-user-add [text]` saves (bare → the previous user message from the transcript);
+`/janitor-memory-user-search <q>` searches ONLY this store. The deprecated aliases
+(`/to-user-mem`, `/search-user-mem`, `/share-user-mem`) MUST stay recognised-and-intercepted so a
+user who types one never leaks — an UNRECOGNISED form is not intercepted and the private text
+reaches the model.
+
+## WM-SURF — the proactive surfaces (recall is worthless if only used when asked)
+
+`WM-SURF-01` **auto-recall-default-on** — the UserPromptSubmit auto-recall hook
+(`on-prompt-submit-autorecall.py`) surfaces symptom-relevant notes on each prompt by default; it
+implements WM-RCL-03 without the agent having to remember to search.
+
+`WM-SURF-02` **session-start-breadcrumb** — SessionStart prints ONE breadcrumb naming the
+per-scope note COUNTS + the `memgrep overview <dir>` entry point (`memory_breadcrumb.py`), so a
+fresh session learns the 3-scope wikimem exists. It prints counts ONLY, never note content (it
+lands in the session prefix, and a PROJECT page is untrusted git input), and prints even while the
+heartbeat is disarmed (memory outlives the heartbeat).
+
+`WM-SURF-03` **memorize-nudge** — the `memorize-nudge` detector nudges the agent to WRITE when
+code has outrun the wiki (substantive commits since the last memory note), pointing at the WRITE
+skill + RECALL-first.
+
+`WM-SURF-04` **correction-advisory** — the PostToolUse `post-edit-memory-correction.py` advises
+the correction protocol (WM-LES-05) when an edit looks like it should supersede rather than
+overwrite. It ADVISES; it never mutates.
+
+`WM-SURF-05` **record-recent** — `/janitor-memory-record-recent` (skill) is the user-invoked
+harvest of recent changes into the wiki — the active counterpart of the passive nudge.
+
+## WM-SCHED — the maintenance scheduler (cadence, cost, and the curator dispatch)
+
+`WM-SCHED-01` **scheduler-not-doer** — the `memory-maintenance` detector is the SCHEDULE layer: it
+decides WHICH editorial chore is due for WHICH (scope, root) and dispatches the ONE curator agent
+(WM-SEP-02) via a bare `[janitor-memory-<chore>]` marker; it never edits the corpus itself.
+
+`WM-SCHED-02` **per-day-rate-keys** — each chore (consolidate / split / conflict / repair /
+harvest / atomize) has a per-day rate key in `memory_settings` that `interval_s` turns into a
+cadence (0 ⇒ OFF). The chores are OFF BY DEFAULT (USER cost decision 2026-06-30); a user opts in
+via `/janitor-memory-frequency`. A conformance reader MUST NOT treat "OFF by default" as "unused
+and removable".
+
+`WM-SCHED-03` **zero-LLM-precheck** — before dispatching an expensive agent, a stat-only
+`memory_content_precheck` decides whether the chore has actual work on the corpus (oversize for
+split, structural malformation for repair, free-prose for atomize, un-mirrored buffers for
+harvest, a real conflict for conflict) — so a due-but-empty chore costs no tokens.
+
+`WM-SCHED-04` **dispatch-fingerprint** — a corpus fingerprint recorded at dispatch time prevents
+re-dispatching an unchanged corpus to the same chore (bounded, no-churn — mirrors the general
+self-heal convergence rule).
+
+`WM-SCHED-05` **index-health-produces-work** — the `memgrep-index-health` detector surfaces a
+corrupt/stale SQLite sidecar as a support ticket (the repair curator's motivating producer); the
+index is regeneratable (`reindex`) but is repaired, never used as a reason to delete the corpus.
+
+## WM-HARV — harvest and the raw-buffer / curated-wiki coexistence
+
+`WM-HARV-01` **two-note-populations** — the corpus holds RAW harness buffer notes (written by the
+platform `# Memory` directive) AND CURATED wiki pages (authored via the verbs). Both are memory;
+`is_curated_wiki_page` discriminates them.
+
+`WM-HARV-02` **harvest-mirrors-never-moves** — `MUST`: the HARVEST pass MIRRORS a raw buffer note's
+knowledge INTO the curated wiki (coexistence), tracked by a per-(scope,root) harvest WATERMARK
+(`memory_settings.harvest_*`) so an unchanged buffer note is not re-harvested. Harvest preserves —
+it never deletes the raw note as a side effect (the `memory_edit_verify.harvest_preservation_ok`
+oracle proves every raw note was mirrored before any reduction).
+
+`WM-HARV-03` **MEMORY.md-is-a-deprecated-stub-not-the-index** — see WM-MNT-04; a harvest MUST NOT
+reduce `MEMORY.md` until every memory it pointed at is proven mirrored.
+
+## WM-BOOT — bootstrap and the simple agent-facing skills
+
+`WM-BOOT-01` **bootstrap-once** — `/janitor-memory-bootstrap` (skill) stands up a project's wikimem
+(the overview/hub scaffolding) ONCE; it is idempotent and never overwrites existing pages.
+
+`WM-BOOT-02` **simple-skills-are-the-main-agent-surface** — `/janitor-memory-{recall,write,update}`
+are the SIMPLE authoring skills a MAIN agent uses directly (create/update a page, recall by
+symptom); the heavier transaction-gated editorial chores (WM-SEP-01/02) are the curator's, not the
+main agent's. Both surfaces route through the verbs (WM-AUTH-01).
+
 ## WM-CHK — conformance checks (who verifies what)
 
 `WM-CHK-01` **memgrep-tests** — `scripts/memgrep`'s cargo suite asserts the write verbs
@@ -441,6 +586,18 @@ this spec from drifting from the CLI (janitor's to build, mirroring 3P-CHK-03).
 cap (bulky detail in `rules/references/`); a rule that balloons past the cap is a
 `test_rules_installer` failure. (WM-META-02 is why the detail belongs in the reference, not the
 rule.)
+
+`WM-CHK-06` **user-mem-privacy** — the user-mem test suite asserts WM-UMEM-02/04: a save/search
+prompt is `decision:block`-erased (never reaches the model), `/janitor-memory-user-share` is the
+only path using `additionalContext`, and every deprecated alias stays intercepted (no leak).
+
+`WM-CHK-07` **scope-migration-guards** — `migrate_memory_scope` tests assert WM-SCOPE-10: the
+privacy classifier flags private notes, the ownership guard refuses an out-of-repo write, and a
+plan stale against a re-classify is rejected.
+
+`WM-CHK-08` **completeness-is-maintained** — per WM-META-05, when a memory file/store/verb/detector
+is ADDED to the implementation, a clause `MUST` be added here (MINOR bump) rather than the code
+left un-specified. A code-vs-spec inventory drift is a gap to file, never a deletion to make.
 
 ## WM-MNT — maintenance
 
