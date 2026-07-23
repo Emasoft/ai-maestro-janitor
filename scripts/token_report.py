@@ -95,6 +95,42 @@ def _window_metrics(records: list[dict], now: int, util5h: float | None, util7d:
     return out
 
 
+def _price_per_mtok() -> float | None:
+    """Dollars per MILLION weighted tokens for the heartbeat-$ estimate, or None when the
+    knob is unset/junk/non-positive. There is no sane universal price, so the $ line is
+    opt-in (CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK) — absent it, the rollup shows
+    weighted tokens only (TRDD-ZCODD6YS, Deliverable 1)."""
+    raw = os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK", "").strip()
+    if not raw:
+        return None
+    try:
+        v = float(raw)
+    except ValueError:
+        return None
+    return v if v > 0 else None
+
+
+def _heartbeat_week_line(beat_7d_weighted: int, price_per_mtok: float | None) -> str:
+    """The heartbeat-ONLY weekly cost rollup line (TRDD-ZCODD6YS, Deliverable 1).
+
+    Dogfoods the janitor's own token forensics ON ITSELF: the trailing-7d WEIGHTED-token sum
+    of HEARTBEAT fires (the `beats` partition — interactive turns excluded), optionally
+    converted to a dollar ESTIMATE. The $ figure is a RELATIVE load index, not a bill:
+    `weighted` counts cache_creation at 1x though it bills ~2x, and cache_read at 1/10 — so
+    it UNDER-states the real cost, which is why it is labeled an estimate."""
+    if price_per_mtok is not None:
+        dollars = beat_7d_weighted / 1_000_000 * price_per_mtok
+        return (
+            f"  janitor heartbeat: ~${dollars:.2f} this week on quiet fires "
+            f"({_fmt_k(beat_7d_weighted)} weighted tokens, WEIGHTED est. — cache_creation "
+            f"counted 1x though it bills ~2x, cache_read at 1/10)"
+        )
+    return (
+        f"  janitor heartbeat: {_fmt_k(beat_7d_weighted)} weighted tokens this week on quiet "
+        f"fires (set CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK for a $ estimate)"
+    )
+
+
 def _project_dir() -> str:
     return os.environ.get("CLAUDE_PROJECT_DIR", "").strip() or os.getcwd()
 
@@ -479,11 +515,12 @@ def main() -> int:
             print(f"  (the on-stop-token-meter hook logs to {log_path} after each turn)")
         return 0
 
+    now = int(time.time())
     out_stats = token_meter.summarize(records, field="output")
     in_stats = token_meter.summarize(records, field="input")
     assert out_stats is not None and in_stats is not None
     events = token_meter.load_log(_state_dir() / "window-exhaustion.jsonl")
-    window = _window_metrics(records, int(time.time()), args.util5h, args.util7d, events)
+    window = _window_metrics(records, now, args.util5h, args.util7d, events)
 
     # Heartbeat partition, computed ONCE — both the spike threshold and the beat-mean advice
     # below need it (TRDD-DLI76AUC #4). A record with NO `heartbeat` key predates that change,
@@ -492,6 +529,14 @@ def main() -> int:
     n_beat = len(beats)
     n_user = len(records) - n_beat
     beat_stats = token_meter.summarize(beats, field="output")
+
+    # The heartbeat-ONLY weekly cost rollup (TRDD-ZCODD6YS, Deliverable 1) — the janitor
+    # dogfooding its own forensics on itself. Computed from `beats` ALONE (interactive turns
+    # never count), over the same rolling 7d the window view uses, so the figure is directly
+    # comparable and can never be inflated by the user's own expensive work.
+    beat_7d_weighted = tb.rolling_sum(beats, _7D, now)
+    price_per_mtok = _price_per_mtok()
+    beat_7d_usd = round(beat_7d_weighted / 1_000_000 * price_per_mtok, 2) if price_per_mtok is not None else None
 
     # A "spike" is a HEARTBEAT concept — "did a heartbeat fire's output blow up vs the heartbeat
     # baseline". The threshold MUST be the heartbeat p95, not the all-turns p95: since the meter
@@ -514,6 +559,8 @@ def main() -> int:
                     "spike_threshold": spike_threshold,
                     "spikes": len(spikes),
                     "window": window,
+                    "heartbeat_7d_weighted": beat_7d_weighted,
+                    "heartbeat_7d_usd": beat_7d_usd,
                     "log": str(log_path),
                 },
                 separators=(",", ":"),
@@ -527,6 +574,7 @@ def main() -> int:
     print(f"  input  tokens/turn   mean {in_stats['mean']:.0f}  ·  p95 {in_stats['p95']}  ·  max {in_stats['max']}")
     print()
     _render_window(window)
+    print(_heartbeat_week_line(beat_7d_weighted, price_per_mtok))
     print()
     print(f"  {'when':<12} {'kind':<5} {'output':>7} {'input':>7} {'cache_rd':>9} {'cache_cr':>8} {'tools':>5}")
     print(f"  {'-' * 12} {'-' * 5} {'-' * 7} {'-' * 7} {'-' * 9} {'-' * 8} {'-' * 5}")

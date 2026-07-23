@@ -21,10 +21,22 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+# token_meter is imported BOTH as top-level `token_meter` (most callers put scripts/lib on the
+# path) AND as `lib.token_meter` (e.g. on-stop-failure.py puts only scripts/ on the path). Add
+# this file's OWN dir to sys.path so the sibling `token_baseline` resolves in EITHER context —
+# mirrors harness_backend.py. Without it, `import token_baseline` raises under the `lib.token_meter`
+# import and silently disables the StopFailure hook's exhaustion-log path (regression 2026-07-23).
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+import token_baseline  # noqa: E402  -- sibling lib: weighted-cost + rolling-window primitives
 
 _HEARTBEAT_MARKER = "[janitor-heartbeat]"
 # 512 KB tail comfortably covers one heartbeat turn (a few short messages). If a
@@ -534,6 +546,88 @@ def evaluate_turn_budget(
     if reasons_advisory:
         return BudgetVerdict(tier="advisory", reasons=reasons_advisory)
     return BudgetVerdict(tier="ok", reasons=[])
+
+
+# The janitor's OWN heartbeat self-budget verdict tiers (TRDD-ZCODD6YS). There are EXACTLY
+# three, and `disarm` is deliberately NOT one of them: the ceiling is LOCAL maintenance,
+# which keeps the survival cron + the resume path alive at ~0.1x cost. An automatic budget
+# must never delete a survival cron (that needs a manual /janitor-arm), so there is no
+# disarm rung by construction — see the actuator in dispatch._phase_self_budget and [^1].
+SELF_BUDGET_OK = "ok"
+SELF_BUDGET_SLOW = "slow"
+SELF_BUDGET_MAINTENANCE = "maintenance"
+
+# The rolling window the budget is measured over: the janitor's own weekly heartbeat cost.
+SELF_BUDGET_WINDOW_S = 7 * 86400
+
+
+@dataclass(frozen=True)
+class SelfBudgetVerdict:
+    """The self-budget escalation verdict for THIS project's heartbeat cost (TRDD-ZCODD6YS).
+
+    `tier` is one of ``ok`` | ``slow`` | ``maintenance`` — NEVER ``disarm`` (that verdict
+    does not exist; the ceiling is maintenance). `cost` is the rolling-7d WEIGHTED heartbeat
+    cost the tier was decided from, `budget` the ceiling it was compared against — both kept
+    for the caller's log line so a throttle is always explainable.
+    """
+
+    tier: str
+    cost: int
+    budget: int
+
+
+def evaluate_self_budget(
+    records: list[dict],
+    *,
+    budget: int,
+    now: int,
+    cap_frac: float,
+    maintenance_frac: float,
+    release_frac: float,
+    in_maintenance: bool,
+) -> SelfBudgetVerdict:
+    """Decide how hard to throttle the janitor's OWN heartbeat against a weekly cost budget.
+
+    PURE — no I/O; the caller (dispatch._phase_self_budget) reads the log and the flag and
+    passes the values in, so this is fully unit-testable. The escalation ladder has exactly
+    two rungs above ``ok``: ``slow`` (cap the cadence at the SLOW floor) and ``maintenance``
+    (drop to the cheap keep-warm path). There is NO ``disarm`` rung — deleting a survival
+    cron is never a safe automatic reaction to cost (TRDD-ZCODD6YS [^1]).
+
+    HEARTBEAT-ONLY: only ``heartbeat == True`` records count (a record MISSING the key is a
+    heartbeat, same rule as ``beats`` in token_report.py). Summing interactive turns would
+    silence the janitor during the USER's own expensive work — the backwards mistake logged
+    twice before. Cost is the rolling-7d WEIGHTED sum via token_baseline.rolling_sum.
+
+    Thresholds are fractions of ``budget`` (ordered ``release_frac < cap_frac <
+    maintenance_frac``):
+      * fresh (``not in_maintenance``): cost >= maintenance_frac·budget → maintenance;
+        cost >= cap_frac·budget → slow; else ok.
+      * already in maintenance (``in_maintenance``): a STATELESS Schmitt trigger — hold
+        ``maintenance`` until cost falls BELOW the lower ``release_frac·budget`` dead-band,
+        then ``ok``. The dead-band (analogue of commit_tier's demote_fires) prevents flag
+        flap when cost hovers at the trip point, and self-corrects: maintenance fires are
+        cheap, so the rolling-7d cost naturally decays below the release band over days.
+
+    ``budget <= 0`` disables the mechanism → always ``ok``. An empty/garbage record list →
+    ``ok`` (rolling_sum of nothing is 0)."""
+    if budget <= 0:
+        return SelfBudgetVerdict(tier=SELF_BUDGET_OK, cost=0, budget=budget)
+    # `isinstance(r, dict)` keeps the pure layer fail-open too: load_log only yields dicts,
+    # but a stray non-dict must be skipped, not raise (a garbage log → ok, never a crash).
+    beats = [r for r in records if isinstance(r, dict) and r.get("heartbeat", True)]
+    cost = token_baseline.rolling_sum(beats, SELF_BUDGET_WINDOW_S, now)
+    if in_maintenance:
+        # Schmitt-trigger RELEASE: stay in maintenance until cost drains below the dead-band.
+        tier = SELF_BUDGET_OK if cost < release_frac * budget else SELF_BUDGET_MAINTENANCE
+        return SelfBudgetVerdict(tier=tier, cost=cost, budget=budget)
+    if cost >= maintenance_frac * budget:
+        tier = SELF_BUDGET_MAINTENANCE
+    elif cost >= cap_frac * budget:
+        tier = SELF_BUDGET_SLOW
+    else:
+        tier = SELF_BUDGET_OK
+    return SelfBudgetVerdict(tier=tier, cost=cost, budget=budget)
 
 
 def summarize(records: list[dict], *, field: str = "output") -> Optional[dict]:

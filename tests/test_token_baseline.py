@@ -130,6 +130,19 @@ def test_rolling_sum_window_filter():
     assert tb.rolling_sum(recs, 1000, 5900) == 120
 
 
+def test_rolling_sum_7d_window_boundary():
+    """The 7d-window boundary case the self-budget relies on (TRDD-ZCODD6YS): a record
+    EXACTLY 7d old is included (inclusive `lo <= ts`), one just past 7d is excluded."""
+    week = 7 * 86400
+    now = 10_000_000
+    recs = [
+        _rec(now - week - 1, output=999),  # just OUTSIDE the window → excluded
+        _rec(now - week, output=10),  # exactly at the lower bound → included
+        _rec(now, output=5),  # at now → included
+    ]
+    assert tb.rolling_sum(recs, week, now) == 15
+
+
 def test_per_minute():
     assert tb.per_minute(600, 300) == 120.0  # 600 tokens over 5 min = 120/min
 

@@ -101,6 +101,41 @@
       "default": "",
       "sensitive": false
     },
+    "heartbeat_self_budget": {
+      "title": "Heartbeat self-budget (rolling-7d weighted-token ceiling)",
+      "description": "The janitor's OWN weekly heartbeat cost ceiling (TRDD-ZCODD6YS). When THIS project's rolling-7d WEIGHTED heartbeat cost (heartbeat fires only, from token-meter.jsonl) crosses this budget, the dispatcher self-throttles: cap the cadence at the SLOW floor (>= cap_frac), then auto-enter LOCAL maintenance (>= maintenance_frac). MAINTENANCE IS THE CEILING — it keeps the survival cron + resume path alive at ~0.1x cost and NEVER self-disarms. Default 0 = the mechanism is DISABLED (opt-in). Set a generous ceiling to bound idle heartbeat spend without regressing recovery (an actively-waiting / resuming session is never throttled).",
+      "type": "number",
+      "default": 0,
+      "sensitive": false
+    },
+    "heartbeat_self_budget_cap_frac": {
+      "title": "Self-budget cadence-cap trip fraction",
+      "description": "Fraction of heartbeat_self_budget at which the cadence is capped to the SLOW floor (TRDD-ZCODD6YS). Default 0.6. Ordered release_frac < cap_frac < maintenance_frac so the cadence cap always trips before maintenance.",
+      "type": "number",
+      "default": 0.6,
+      "sensitive": false
+    },
+    "heartbeat_self_budget_maintenance_frac": {
+      "title": "Self-budget maintenance trip fraction",
+      "description": "Fraction of heartbeat_self_budget at which the session auto-enters LOCAL maintenance (TRDD-ZCODD6YS). Default 0.9. Maintenance is the ceiling — the automatic self-budget never self-disarms.",
+      "type": "number",
+      "default": 0.9,
+      "sensitive": false
+    },
+    "heartbeat_self_budget_release_frac": {
+      "title": "Self-budget release (anti-flap) fraction",
+      "description": "Lower dead-band for the Schmitt-trigger release (TRDD-ZCODD6YS): once in budget-maintenance, the flag clears only when the rolling-7d cost falls BELOW this fraction of heartbeat_self_budget, preventing flag flap at the trip point. Default 0.4 (must be < cap_frac).",
+      "type": "number",
+      "default": 0.4,
+      "sensitive": false
+    },
+    "token_price_per_mtok": {
+      "title": "Token price per million weighted tokens ($)",
+      "description": "Dollars per MILLION weighted tokens, used ONLY to render the /janitor-token-report weekly heartbeat-$ estimate (TRDD-ZCODD6YS, Deliverable 1). There is no sane universal price, so this is opt-in: unset = the report shows weighted tokens only. The $ figure is a RELATIVE load index, not a bill (weighted counts cache_creation 1x though it bills ~2x, cache_read at 1/10).",
+      "type": "number",
+      "default": 0,
+      "sensitive": false
+    },
     "issues_watch_interval": {
       "title": "GitHub issues-watch cadence (seconds)",
       "description": "Minimum seconds between GitHub issue-tracker checks, when the watcher is enabled for a project via /janitor-issues-watch-on. The watcher is OFF by default and costs nothing until enabled. Default: 1800 (30 min) \u2014 issues do not churn every 5 minutes and each due fire costs one `gh` call.",

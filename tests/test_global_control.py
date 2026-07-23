@@ -323,3 +323,56 @@ def test_cli_status_maintenance_wins_over_disarm(tmp_path, monkeypatch, capsys) 
     monkeypatch.setattr(cli.sys, "argv", ["x", "status"])
     cli.main()
     assert "MAINTENANCE" in capsys.readouterr().out
+
+
+# ---------- Boundary: the self-budget path never writes GLOBAL flags (TRDD-ZCODD6YS) ----------
+
+
+def _import_dispatch_gc():
+    import importlib.util as _u
+
+    spec = _u.spec_from_file_location("dispatch_gc_ut", str(_PROJECT_ROOT / "scripts" / "dispatch.py"))
+    assert spec is not None and spec.loader is not None
+    mod = _u.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_self_budget_never_calls_global_setters(tmp_path, monkeypatch) -> None:
+    """The self-budget actuator must NEVER call set_maintenance_mode / set_kill_switch (the
+    per-project channeling invariant, TRDD-X92VBFNF): a per-project budget can only ever set
+    the LOCAL maintenance flag, never stop the fleet. Both global setters are patched to fail
+    the test if they are ever reached while the phase drives an over-budget maintenance
+    verdict."""
+    import json
+    import time as _time
+
+    project = tmp_path / "project"
+    (project / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "global"))
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "control"))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
+    # Pop state/global_state so this test gets FRESH modules whose @lru_cache'd state_dir()
+    # resolves under THIS env — a shared, already-populated cache from an earlier test file
+    # would otherwise point the phase at the wrong project (the exact multi-file batch flake).
+    for m in ("dispatch_gc_ut", "state", "global_state"):
+        sys.modules.pop(m, None)
+
+    dispatch = _import_dispatch_gc()
+    _st = dispatch.state
+    _gs = dispatch.gs
+    _gs.init_global_state()
+    _st.init_state()
+    sd = _st.state_dir()
+    (sd / "token-meter.jsonl").write_text(
+        json.dumps({"ts": int(_time.time()), "heartbeat": True, "output": 5000}) + "\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(_gs, "set_maintenance_mode", lambda *a, **k: pytest.fail("self-budget must NEVER set the GLOBAL maintenance flag"))
+    monkeypatch.setattr(_gs, "set_kill_switch", lambda *a, **k: pytest.fail("self-budget must NEVER set the kill-switch"))
+
+    assert dispatch._phase_self_budget() is True  # maintenance verdict
+    assert (sd / _st.MAINTENANCE_FLAG).is_file(), "only the LOCAL flag is written"
+    assert _gs.maintenance_mode_present() is False
+    assert _gs.kill_switch_present() is False

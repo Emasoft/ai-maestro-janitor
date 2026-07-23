@@ -57,6 +57,59 @@ def test_run_maintenance_detectors_runs_only_the_subset(monkeypatch) -> None:
         assert interval == roster[name], f"{name} ran at {interval}, roster says {roster[name]}"
 
 
+def test_self_budget_escalation_and_hysteresis_release(tmp_path, monkeypatch) -> None:
+    """The self-budget maintenance ladder end-to-end (TRDD-ZCODD6YS): a crossed
+    maintenance-tier budget writes the LOCAL MAINTENANCE_FLAG (never the global flag) so the
+    NEXT fire's _resolve_heartbeat_mode returns 'maintenance'; a dead-band HOLD keeps it while
+    cost hovers; and once cost decays below release_frac a subsequent (maintenance-mode) fire
+    CLEARS the flag and the following fire resolves 'full' again — proving the throttle
+    RELEASES, never pins the session cheap forever."""
+    import json
+    import time as _time
+
+    project = tmp_path / "project"
+    (project / ".janitor" / "state").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    monkeypatch.setenv("JANITOR_GLOBAL_STATE_DIR", str(tmp_path / "global"))
+    monkeypatch.setenv("JANITOR_CONTROL_DIR", str(tmp_path / "control"))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
+    for m in ("dispatch_tmm", "dispatch", "state", "global_state"):
+        sys.modules.pop(m, None)
+
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    sd = state.state_dir()
+
+    def seed(weighted: int) -> None:
+        (sd / "token-meter.jsonl").write_text(
+            json.dumps({"ts": int(_time.time()), "heartbeat": True, "output": weighted}) + "\n",
+            encoding="utf-8",
+        )
+
+    # ENTER: 7d heartbeat cost over 0.9*budget → LOCAL maintenance flag; never the global one.
+    seed(5000)
+    assert dispatch._phase_self_budget() is True
+    assert (sd / state.MAINTENANCE_FLAG).is_file(), "over the maintenance fraction → LOCAL flag written"
+    assert gs.maintenance_mode_present() is False, "a per-project budget must never set the global flag"
+    assert dispatch._resolve_heartbeat_mode() == "maintenance", "the NEXT fire resolves maintenance"
+
+    # DEAD-BAND HOLD: cost drops to 0.5*budget (below cap/maint but ABOVE release 0.4) → the
+    # Schmitt trigger holds maintenance so the flag does not flap.
+    seed(500)
+    assert dispatch._phase_self_budget() is True
+    assert (sd / state.MAINTENANCE_FLAG).is_file(), "dead-band holds maintenance above the release band"
+
+    # RELEASE: cost falls below release_frac*budget → flag cleared, the next fire is full again.
+    seed(300)
+    assert dispatch._phase_self_budget() is False
+    assert not (sd / state.MAINTENANCE_FLAG).is_file(), "released once cost drained below the dead-band"
+    assert dispatch._resolve_heartbeat_mode() == "full", "the session returns to full monitoring"
+
+
 def test_main_runs_token_monitoring_inside_the_maintenance_branch() -> None:
     """Source-order guard (same technique as the heartbeat-cost phase test): the
     _run_maintenance_detectors() call must sit BETWEEN the maintenance branch entry

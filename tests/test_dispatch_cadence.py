@@ -43,12 +43,12 @@ def _import_dispatch():
     return mod
 
 
-def _run_phase(dispatch) -> str:
+def _run_phase(dispatch, *, budget_cap_slow: bool = False) -> str:
     buf = StringIO()
     old = sys.stdout
     sys.stdout = buf
     try:
-        dispatch._phase_cadence_tier()
+        dispatch._phase_cadence_tier(budget_cap_slow=budget_cap_slow)
     finally:
         sys.stdout = old
     return buf.getvalue()
@@ -494,3 +494,48 @@ def test_daemon_feature_on_does_not_disable_cron_resume_fallback(
     out = _run_main(dispatch)
     assert out.count("[janitor-resume]") == 1, "exactly one resume — never lost, never doubled"
     assert not (_state(proj) / "rate-limited.flag").exists(), "single-consumer flag cleared by the cron"
+
+
+# --------------------------------------------------------------------------- #
+# Self-budget SLOW cap (TRDD-ZCODD6YS). `_phase_cadence_tier(budget_cap_slow=True)` clamps
+# the committed tier to the SLOW floor even when live signals ask for FAST.
+# --------------------------------------------------------------------------- #
+
+
+def test_budget_cap_slow_pins_slow_even_with_fast_signal(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fresh last-resume.ts stamp would normally promote to FAST (*/5); with
+    budget_cap_slow=True the committed tier is clamped to SLOW (*/30) — the self-budget
+    throttle wins over the live promote signal for this fire."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    (_state(proj) / "last-resume.ts").write_text(str(int(time.time())))  # active-waiting → FAST signal
+    dispatch = _import_dispatch()
+    _run_phase(dispatch, budget_cap_slow=True)
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
+    import json
+
+    assert json.loads((_state(proj) / "cadence-state.json").read_text())["committed_tier"] == "slow"
+
+
+def test_budget_cap_slow_false_leaves_fast(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Control: the SAME fresh resume stamp WITHOUT the cap promotes to FAST as before —
+    proving the cap, not some side effect, is what pins SLOW above."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    (_state(proj) / "last-resume.ts").write_text(str(int(time.time())))
+    dispatch = _import_dispatch()
+    _run_phase(dispatch, budget_cap_slow=False)
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/5 * * * *"
+
+
+def test_budget_cap_slow_noop_when_dynamic_off(proj: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With heartbeat_cadence_dynamic OFF the whole phase is a no-op, so the SLOW cap is
+    inert (writes nothing, never errors) — documenting that maintenance is then the only
+    effective throttle."""
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DYNAMIC", "false")
+    dispatch = _import_dispatch()
+    out = _run_phase(dispatch, budget_cap_slow=True)
+    assert out == ""
+    assert not (_state(proj) / "desired-cadence.cron").exists()

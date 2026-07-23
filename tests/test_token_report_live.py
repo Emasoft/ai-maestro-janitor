@@ -350,6 +350,82 @@ def test_context_hook_prepare_fires_in_zone(tmp_path: Path) -> None:
     assert "PREPARE for auto-compact" in ctx
 
 
+# ---------- Deliverable 1: the weekly heartbeat-cost rollup (TRDD-ZCODD6YS) --------
+
+
+def _seed_meter(proj: Path, records: list[dict]) -> None:
+    sd = proj / ".janitor" / "state"
+    sd.mkdir(parents=True, exist_ok=True)
+    (sd / "token-meter.jsonl").write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+
+def test_report_heartbeat_week_line_weighted_only(tmp_path: Path) -> None:
+    """The historical report prints a heartbeat-ONLY weekly rollup computed from `beats`
+    alone; with no price knob it shows weighted tokens only (no $), and a big interactive
+    turn never inflates it."""
+    import time as _time
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    now = int(_time.time())
+    _seed_meter(
+        proj,
+        [
+            {"ts": now, "heartbeat": True, "output": 1000},
+            {"ts": now, "heartbeat": True, "output": 500},
+            {"ts": now, "heartbeat": False, "output": 999_999},  # interactive turn — must NOT count
+        ],
+    )
+    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK": ""})
+    assert r.returncode == 0
+    assert "janitor heartbeat:" in r.stdout
+    assert "1.5k weighted tokens this week" in r.stdout, "beats only (1000+500), interactive 999999 excluded"
+    assert "~$" not in r.stdout, "no dollar estimate without the price knob"
+
+
+def test_report_heartbeat_week_line_with_price(tmp_path: Path) -> None:
+    """With the price knob set the rollup shows a $ ESTIMATE, labeled WEIGHTED est."""
+    import time as _time
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    now = int(_time.time())
+    _seed_meter(
+        proj,
+        [
+            {"ts": now, "heartbeat": True, "output": 1_000_000},
+            {"ts": now, "heartbeat": True, "output": 1_000_000},
+        ],
+    )  # 2.0M weighted beats
+    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK": "15"})
+    assert r.returncode == 0
+    assert "~$30.00 this week on quiet fires" in r.stdout  # 2.0M / 1e6 * 15
+    assert "WEIGHTED est." in r.stdout, "the $ figure must be labeled an estimate"
+    assert "2.0M weighted" in r.stdout
+
+
+def test_report_heartbeat_week_json_fields(tmp_path: Path) -> None:
+    """The JSON report carries heartbeat_7d_weighted (beats only) + heartbeat_7d_usd
+    (None without the price knob)."""
+    import time as _time
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    now = int(_time.time())
+    _seed_meter(
+        proj,
+        [
+            {"ts": now, "heartbeat": True, "output": 1000},
+            {"ts": now, "heartbeat": False, "output": 500_000},  # excluded
+        ],
+    )
+    r = _run_report({"HOME": str(tmp_path / "home"), "CLAUDE_PROJECT_DIR": str(proj), "CLAUDE_PLUGIN_OPTION_TOKEN_PRICE_PER_MTOK": ""}, "--json")
+    assert r.returncode == 0
+    data = json.loads(r.stdout)
+    assert data["heartbeat_7d_weighted"] == 1000, "beats only"
+    assert data["heartbeat_7d_usd"] is None
+
+
 def test_context_hook_prepare_silent_out_of_zone(tmp_path: Path) -> None:
     """Well before the auto-compact point (and below the % advisory band), no PREPARE alert."""
     proj = tmp_path / "proj"

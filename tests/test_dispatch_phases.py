@@ -1560,3 +1560,311 @@ def test_keep_going_dedupe_applies_in_maintenance_mode_too(env_isolation: dict) 
     dispatch._stamp_resume(sd, int(time.time()) - (dispatch._KEEP_GOING_RESUME_DEDUPE_S + 1))
     out = _capture_stdout(lambda: dispatch._phase_keep_going_nudge("maintenance"))
     assert out.splitlines() == ["[janitor-resume]", _maintenance_line()]
+
+
+# ---------- Phase 1.5a2b: the self-budget throttle (TRDD-ZCODD6YS) ----------
+#
+# The janitor meters its OWN heartbeat cost and self-throttles: cap the cadence at SLOW,
+# then auto-enter LOCAL maintenance. MAINTENANCE IS THE CEILING — this path NEVER emits
+# [janitor-self-disarm], NEVER routes through _resolve_heartbeat_mode, and NEVER touches
+# global_state (a per-project budget must never stop the fleet).
+
+
+def _seed_heartbeat_cost(state, weighted: int) -> None:
+    """Write ONE heartbeat token-meter record with the given WEIGHTED cost (output counts
+    1:1 in weighted_tokens), timestamped now (inside the 7d window)."""
+    import json as _json
+
+    state.init_state()
+    sd = state.state_dir()
+    rec = {"ts": int(time.time()), "heartbeat": True, "output": int(weighted)}
+    (sd / "token-meter.jsonl").write_text(_json.dumps(rec) + "\n", encoding="utf-8")
+
+
+def _run_self_budget(dispatch):
+    """Run _phase_self_budget() capturing stdout; return (return_value, stdout)."""
+    buf = StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        rv = dispatch._phase_self_budget()
+    finally:
+        sys.stdout = old
+    return rv, buf.getvalue()
+
+
+def _budget_1000(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", "1000")
+
+
+# --- THE CARDINAL SURVIVAL TEST (combined resume + budget) -------------------
+
+
+def test_cardinal_ratelimit_and_over_budget_resumes_never_disarms(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A session BOTH budget-maintenance-eligible AND rate-limited MUST still emit
+    [janitor-resume], MUST NEVER emit [janitor-self-disarm], leaves the cron/cadence
+    unchanged, and _phase_self_budget is NEVER reached on that fire. Direct proof that a
+    recovery fire is untouched by D2 — the recovery early-return fires before the phase."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    sd = state.state_dir()
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)  # >> 0.9 * budget → would be maintenance IF reached
+    state.atomic_write(sd / "rate-limited.flag", "1")
+    state.atomic_write(sd / "rate-limited-since.ts", str(int(time.time()) - 30))
+
+    calls: list[str] = []
+    monkeypatch.setattr(dispatch, "_phase_self_budget", lambda: calls.append("reached") or False)
+
+    out = _capture_stdout(dispatch.main)
+    assert "[janitor-resume]" in out, "a rate-limited fire must still resume"
+    assert "[janitor-self-disarm]" not in out, "the self-budget path must NEVER self-disarm"
+    assert calls == [], "self-budget phase must NEVER be reached on a recovery fire"
+    assert not (sd / state.MAINTENANCE_FLAG).is_file(), "no maintenance flag written on a recovery fire"
+    assert not (sd / "desired-cadence.cron").exists(), "cron/cadence unchanged on a recovery fire"
+
+
+def test_cardinal_postcompact_and_over_budget_resumes_never_disarms(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same cardinal property with a POST-COMPACT recovery flag instead of a rate limit."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    sd = state.state_dir()
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
+    _arm_compact_flag(state, "continue TRDD-ZCODD6YS")
+
+    calls: list[str] = []
+    monkeypatch.setattr(dispatch, "_phase_self_budget", lambda: calls.append("reached") or False)
+
+    out = _capture_stdout(dispatch.main)
+    assert "[janitor-resume]" in out
+    assert "[janitor-self-disarm]" not in out
+    assert calls == [], "self-budget phase must NEVER be reached on a post-compact recovery fire"
+    assert not (sd / state.MAINTENANCE_FLAG).is_file()
+
+
+# --- never-disarm invariant across every verdict -----------------------------
+
+
+def test_self_budget_phase_prints_nothing_any_verdict(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drive _phase_self_budget through ok/slow/maintenance — it prints NOTHING (no
+    [janitor-self-disarm], no [janitor-resume]); the only actuators are the flag + the
+    return value. The sole legitimate emitter of the disarm marker is Phase 0, untouched."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    state.init_state()
+    for weighted, expect_rv in ((100, False), (700, True), (5000, True)):
+        # A fresh log each iteration; clear any budget flag the prior iteration set.
+        dispatch._clear_budget_maintenance(state.state_dir())
+        _seed_heartbeat_cost(state, weighted)
+        rv, out = _run_self_budget(dispatch)
+        assert out == "", f"the self-budget phase must print nothing (weighted={weighted}), got {out!r}"
+        assert "[janitor-self-disarm]" not in out
+        assert rv is expect_rv, f"weighted={weighted} → expected return {expect_rv}, got {rv}"
+
+
+# --- verdict actuation (LOCAL flag only, never global) -----------------------
+
+
+def test_verdict_ok_writes_no_flag_returns_false(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 100)  # < 0.6 * budget
+    rv, _ = _run_self_budget(dispatch)
+    assert rv is False
+    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file()
+
+
+def test_verdict_slow_caps_but_writes_no_maintenance_flag(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 700)  # >= 0.6*budget, < 0.9*budget → slow
+    rv, _ = _run_self_budget(dispatch)
+    assert rv is True, "the SLOW cap returns True"
+    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file(), "slow does NOT enter maintenance"
+
+
+def test_verdict_maintenance_writes_local_flag_and_sentinel_never_global(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)  # >= 0.9 * budget → maintenance
+    rv, _ = _run_self_budget(dispatch)
+    sd = state.state_dir()
+    assert rv is True
+    assert (sd / state.MAINTENANCE_FLAG).is_file(), "budget-maintenance writes the LOCAL flag"
+    assert (sd / dispatch._SELF_BUDGET_SENTINEL).is_file(), "and its ownership sentinel"
+    # NEVER the machine-wide flags — a per-project budget must not stop the fleet.
+    assert gs.maintenance_mode_present() is False
+    assert gs.kill_switch_present() is False
+    # The NEXT fire's mode resolution now returns maintenance from the LOCAL flag.
+    assert dispatch._resolve_heartbeat_mode() == "maintenance"
+
+
+# --- actively-waiting suppression --------------------------------------------
+
+
+def test_active_waiting_suppresses_throttle_and_clears_budget_flag(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An over-budget session that is actively waiting (fresh last-resume.ts) is NOT throttled:
+    no cap (returns False) AND any budget-owned maintenance flag is cleared."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
+    sd = state.state_dir()
+    # Pre-existing budget-owned maintenance (flag + sentinel) from a prior over-budget fire.
+    state.atomic_write(sd / state.MAINTENANCE_FLAG, "self-budget")
+    state.atomic_write(sd / dispatch._SELF_BUDGET_SENTINEL, str(int(time.time())))
+    # Now the session resumes work → active-waiting.
+    state.atomic_write(sd / "last-resume.ts", str(int(time.time())))
+
+    rv, _ = _run_self_budget(dispatch)
+    assert rv is False, "an actively-waiting session is never throttled"
+    assert not (sd / state.MAINTENANCE_FLAG).is_file(), "the budget-owned flag is cleared on resume"
+    assert not (sd / dispatch._SELF_BUDGET_SENTINEL).is_file()
+
+
+def test_active_waiting_via_keep_going_and_directive(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """keep-going and a non-empty resume-directive.txt each count as active-waiting → no cap."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
+    sd = state.state_dir()
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+
+    state.atomic_write(sd / "keep-going", "")
+    assert _run_self_budget(dispatch)[0] is False
+    (sd / "keep-going").unlink()
+
+    state.atomic_write(sd / "resume-directive.txt", "continue TRDD-ZCODD6YS")
+    assert _run_self_budget(dispatch)[0] is False
+
+
+# --- harness gate ------------------------------------------------------------
+
+
+def test_harness_session_no_actuation(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inside an ai-maestro agent (#J thin mode) the self-budget NEVER actuates: no flag
+    write, budget_cap_slow False — server-delegated continuity must not be broken."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)  # would be maintenance in standalone mode
+    monkeypatch.setenv("AIMAESTRO_AGENT", "1")  # → is_harness_session True
+    rv, _ = _run_self_budget(dispatch)
+    assert rv is False
+    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file()
+
+
+# --- fail-open (NORMATIVE) ---------------------------------------------------
+
+
+def test_fail_open_when_evaluator_raises(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An evaluate_self_budget that raises leaves the phase unaffected — returns False,
+    nothing thrown, no flag written (fail-open contract)."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 5000)
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated metering failure")
+
+    monkeypatch.setattr(dispatch.tm, "evaluate_self_budget", _boom)
+    rv, out = _run_self_budget(dispatch)  # must not raise
+    assert rv is False
+    assert out == ""
+    assert not (state.state_dir() / state.MAINTENANCE_FLAG).is_file()
+
+
+def test_fail_open_when_load_log_raises(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A load_log that raises is caught by the phase's try/except → False, no throw."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    state.init_state()
+
+    def _boom(*a, **k):
+        raise OSError("simulated read failure")
+
+    monkeypatch.setattr(dispatch.tm, "load_log", _boom)
+    rv, _ = _run_self_budget(dispatch)
+    assert rv is False
+
+
+def test_main_call_site_fail_open_second_layer(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The call site in main() wraps _phase_self_budget in its own try/except (second
+    fail-open layer): even a phase that RAISES (bypassing its own guard) cannot break the
+    fire — main() completes and never emits a disarm marker."""
+    dispatch = _import_dispatch()
+    import global_state as gs
+    import state
+
+    gs.init_global_state()
+    state.init_state()
+    monkeypatch.setattr(dispatch, "_run_detector", lambda name, interval: None)
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+
+    def _raise() -> bool:
+        raise RuntimeError("phase blew past its own guard")
+
+    monkeypatch.setattr(dispatch, "_phase_self_budget", _raise)
+    out = _capture_stdout(dispatch.main)  # must not raise
+    assert "[janitor-self-disarm]" not in out
+
+
+# --- ownership safety: never clobber a user/global maintenance flag ----------
+
+
+def test_disabled_mechanism_never_clears_user_maintenance(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mechanism OFF (budget=0, default) must NOT clear a human's manual maintenance flag
+    — only a flag the budget itself owns (sentinel present) is ever cleared."""
+    dispatch = _import_dispatch()
+    import state
+
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET", raising=False)  # disabled
+    state.init_state()
+    sd = state.state_dir()
+    state.atomic_write(sd / state.MAINTENANCE_FLAG, "user set this")  # user-owned, NO sentinel
+    rv, _ = _run_self_budget(dispatch)
+    assert rv is False
+    assert (sd / state.MAINTENANCE_FLAG).is_file(), "a user's manual maintenance flag must survive"
+
+
+def test_ok_verdict_never_clears_user_maintenance(env_isolation: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Even with the mechanism ON and an ok verdict, a user-owned maintenance flag (no
+    sentinel) is preserved — the budget clears only flags it created."""
+    dispatch = _import_dispatch()
+    import state
+
+    _budget_1000(monkeypatch)
+    _seed_heartbeat_cost(state, 100)  # ok verdict
+    sd = state.state_dir()
+    state.atomic_write(sd / state.MAINTENANCE_FLAG, "user set this")  # user-owned, no sentinel
+    _run_self_budget(dispatch)
+    assert (sd / state.MAINTENANCE_FLAG).is_file(), "the budget must not clear a user flag it does not own"

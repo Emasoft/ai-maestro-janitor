@@ -56,6 +56,7 @@ _PLUGIN_CACHE_PARENT = Path(os.environ.get("JANITOR_CACHE_PARENT") or str(_HERE.
 
 import dedupe  # noqa: E402
 import global_state as gs  # noqa: E402
+import harness_backend  # noqa: E402  # #J-vs-#N discriminator — self-budget gates on it (TRDD-ZCODD6YS)
 import heartbeat_cadence as hc  # noqa: E402  # TTL-aware cadence tiers (TRDD-0QQX9H0G, #83)
 import state  # noqa: E402
 import token_meter as tm  # noqa: E402  # F1 reload-churn guard shared predicate (TRDD-Z582IKIR)
@@ -1735,6 +1736,143 @@ def _phase_heartbeat_cost() -> None:
         state.log_line("heartbeat-cost", line[0].strip())
 
 
+# The sentinel that records the SELF-BUDGET owns the LOCAL maintenance flag (TRDD-ZCODD6YS).
+# `.flag` suffix ON PURPOSE: _phase_log_retention never sweeps control flags, only *.txt/*.ts
+# stamps. Ownership by a dedicated file (not by the maintenance flag's content, which
+# /janitor-maintenance-mode owns) is what lets the budget clear ONLY a flag it created and
+# never a human's deliberate maintenance choice.
+_SELF_BUDGET_SENTINEL = "self-budget-maintenance.flag"
+
+
+def _coerce_frac(raw: str | None, default: float) -> float:
+    """Best-effort positive float from an env value; junk / absent / non-positive → default.
+
+    A typo in a fraction knob must never crash a survival-critical fire — fail-open to the
+    generous default, exactly as coerce_int does for the integer knobs."""
+    if not raw:
+        return default
+    try:
+        v = float(raw.strip())
+    except (ValueError, AttributeError):
+        return default
+    return v if v > 0 else default
+
+
+def _clear_budget_maintenance(sd: Path) -> None:
+    """Clear a maintenance flag the SELF-BUDGET owns — and ONLY one it owns.
+
+    Ownership is the sentinel file: the budget writes it alongside the LOCAL MAINTENANCE_FLAG
+    whenever IT enters maintenance, so a user's manual /janitor-maintenance-mode (no sentinel)
+    or a machine-wide /janitor-global-maintenance is NEVER cleared here. Removing a
+    maintenance flag we did not create would silently undo a human's deliberate keep-warm
+    choice — the invisible cross-actor clobber the per-project channeling invariant
+    (TRDD-X92VBFNF) forbids. Best-effort; never raises."""
+    sentinel = sd / _SELF_BUDGET_SENTINEL
+    if not sentinel.is_file():
+        return  # not budget-owned → leave any user/global maintenance flag untouched
+    for p in (sd / state.MAINTENANCE_FLAG, sentinel):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _phase_self_budget() -> bool:
+    """Self-throttle the janitor's OWN heartbeat against a weekly cost budget (TRDD-ZCODD6YS).
+
+    The janitor is a token-forensics tool that bounds OTHER sessions' cost but never its own.
+    A cron fire re-reads the whole cached transcript, so an idle session pinned at FAST can
+    spend for a week with nothing capping the total. This phase wires the EXISTING per-turn
+    meter (token-meter.jsonl) back into the EXISTING throttle: when THIS project's rolling-7d
+    HEARTBEAT weighted cost crosses a user-set budget, escalate a TWO-rung throttle — cap the
+    cadence at the SLOW floor, then auto-enter LOCAL maintenance.
+
+    MAINTENANCE IS THE CEILING. This path NEVER emits [janitor-self-disarm] and NEVER routes
+    through _resolve_heartbeat_mode (Phase 0): maintenance already yields ~0.1x cost while
+    KEEPING the survival cron + the resume path alive, whereas disarm deletes the cron and
+    needs a manual /janitor-arm — deleting a survival cron is never a safe automatic reaction
+    to cost. Placed strictly AFTER every resume/compact early-return, so a rate-limited /
+    post-compact / post-clear recovery fire NEVER reaches this phase and can never be
+    throttled (the cardinal survival property — [^1]).
+
+    Actuates ONLY the LOCAL state.MAINTENANCE_FLAG + the returned SLOW cadence cap — NEVER
+    global_state maintenance/kill-switch (a per-project budget must never stop the fleet,
+    TRDD-X92VBFNF). The flag takes effect on the NEXT fire's Phase-0 _resolve_heartbeat_mode;
+    the current fire's already-resolved mode is untouched, so this phase never reorders the
+    current fire's survival logic. Because the phase still runs on maintenance fires (before
+    the maintenance early-return), it is ALSO the RELEASE point — a Schmitt-trigger dead-band
+    (evaluate_self_budget) holds maintenance until the rolling cost decays below release_frac,
+    then clears the flag and the next fire resolves full again.
+
+    Returns ``budget_cap_slow`` (clamp the cron to SLOW this fire). FAIL-OPEN is NORMATIVE:
+    ANY exception → return False and touch nothing (a metering bug breaking survival is the
+    cardinal sin)."""
+    try:
+        sd = state.state_dir()
+        flag = sd / state.MAINTENANCE_FLAG
+
+        # 1. Enable gate — OFF unless a non-zero weekly budget is set (default 0 = disabled).
+        #    This is survival-critical code, so an automatic drop-to-maintenance is opt-in,
+        #    never on by default. When off, also clear any flag the budget itself owns.
+        budget = state.coerce_int(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET"), 0)
+        if budget <= 0:
+            _clear_budget_maintenance(sd)
+            return False
+
+        # 2. Harness gate — inside an ai-maestro agent (#J thin mode) the daemon is not
+        #    spawned and Family-A continuity is SERVER-delegated (D4); an auto-maintenance
+        #    here would break server-owned continuity. NEVER actuate in harness.
+        if harness_backend.is_harness_session(os.environ):
+            return False
+
+        now = int(time.time())
+
+        # 3. Actively-waiting suppression — a working/resuming session is NEVER throttled.
+        #    The fire that ACTUALLY resumes returned early (rate-limit/compact/clear); the
+        #    fire after it reaches here, and the fresh last-resume.ts stamp protects it. Clear
+        #    any budget-owned flag too, so a session that resumes real work is un-throttled.
+        if _cadence_active_waiting(sd, now):
+            _clear_budget_maintenance(sd)
+            return False
+
+        # 4. Read THIS project's heartbeat cost + the current flag state → verdict (PURE).
+        records = tm.load_log(sd / "token-meter.jsonl")
+        cap_frac = _coerce_frac(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET_CAP_FRAC"), 0.6)
+        maintenance_frac = _coerce_frac(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET_MAINTENANCE_FRAC"), 0.9)
+        release_frac = _coerce_frac(os.environ.get("CLAUDE_PLUGIN_OPTION_HEARTBEAT_SELF_BUDGET_RELEASE_FRAC"), 0.4)
+        verdict = tm.evaluate_self_budget(
+            records,
+            budget=budget,
+            now=now,
+            cap_frac=cap_frac,
+            maintenance_frac=maintenance_frac,
+            release_frac=release_frac,
+            in_maintenance=flag.is_file(),
+        )
+
+        # 5. Actuate. The flag is the ONLY maintenance actuator; the SLOW cap is the return.
+        if verdict.tier == tm.SELF_BUDGET_MAINTENANCE:
+            sentinel = sd / _SELF_BUDGET_SENTINEL
+            if not flag.is_file() or sentinel.is_file():
+                # We are the owner — a fresh entry (no flag yet), or we already own it → (re)assert
+                # atomically. If the flag EXISTS but the sentinel does NOT, a HUMAN (or a global
+                # maintenance) owns it: ride along (return True) but never adopt or overwrite it.
+                state.atomic_write(sentinel, str(now))
+                state.atomic_write(flag, "self-budget")
+            state.log_line("dispatch", f"self-budget: maintenance (7d heartbeat cost {verdict.cost} >= {maintenance_frac}*{budget})")
+            return True
+        if verdict.tier == tm.SELF_BUDGET_SLOW:
+            _clear_budget_maintenance(sd)
+            state.log_line("dispatch", f"self-budget: cadence-cap SLOW (7d heartbeat cost {verdict.cost} >= {cap_frac}*{budget})")
+            return True
+        # ok — below every band (or the Schmitt release fired): drop any budget-owned flag.
+        _clear_budget_maintenance(sd)
+        return False
+    except Exception as exc:  # noqa: BLE001 — FAIL-OPEN normative: a metering bug must never throttle survival
+        state.log_line("dispatch", f"self-budget phase failed: {exc}")
+        return False
+
+
 def _phase_user_presence_breadcrumb() -> None:
     """Refresh the cross-plugin user-presence breadcrumb's liveness stamp.
 
@@ -1876,8 +2014,14 @@ def _cadence_recent_activity(now: int) -> bool:
     return int(last) > 0 and (now - int(last)) < _RECENT_ACTIVITY_WINDOW_S
 
 
-def _phase_cadence_tier() -> None:
+def _phase_cadence_tier(budget_cap_slow: bool = False) -> None:
     """Dynamic TTL-aware heartbeat cadence (TRDD-0QQX9H0G, issue #83).
+
+    ``budget_cap_slow`` (TRDD-ZCODD6YS): when True, the janitor's OWN weekly heartbeat cost
+    tripped the cadence-cap tier of the self-budget throttle, so the committed tier is
+    clamped to the SLOW floor (`hc.cap_tier`) right after `commit_tier` — the live signals
+    can no longer promote the cron above SLOW this fire. Default False = unchanged behavior;
+    a no-op when dynamic cadence is off (this whole phase is a no-op then).
 
     Picks a cadence tier from live state each fire — FAST when actively waiting,
     MID on recent user activity, SLOW when idle — and applies a tier change by
@@ -1940,6 +2084,12 @@ def _phase_cadence_tier() -> None:
         )
         prev = hc.state_from_dict(_read_json_file(sd / _CADENCE_STATE_FILE))
         committed = hc.commit_tier(raw, prev, demote_fires)
+
+        # 3b. self-budget cadence cap (TRDD-ZCODD6YS): the janitor's own weekly heartbeat
+        # cost tripped the SLOW-cap rung → clamp the committed tier to the SLOW floor before
+        # it maps to a cron, so live signals cannot promote the cron above SLOW this fire.
+        if budget_cap_slow:
+            committed = hc.cap_tier(committed, hc.SLOW)
 
         # 4. tier → desired cron.
         overrides = {
@@ -2085,14 +2235,31 @@ def main() -> int:
     # phase's docstring carries the why.
     _phase_heartbeat_cost()
 
+    # Phase 1.5a2b: the janitor's OWN heartbeat self-budget throttle (TRDD-ZCODD6YS).
+    # Placed strictly AFTER all four resume/compact early-returns (rate-limit / post-compact /
+    # post-clear / proactive-idle-compact) — so a RECOVERY fire NEVER reaches it and can never
+    # be throttled — and BEFORE the cadence phase + the maintenance early-return, so its SLOW
+    # cap threads into the cadence and its maintenance flag takes effect on the NEXT fire's
+    # Phase-0 mode resolution. It NEVER routes through _resolve_heartbeat_mode and NEVER emits
+    # [janitor-self-disarm]: the ceiling is LOCAL maintenance (cron + resume preserved). The
+    # call site is a SECOND fail-open layer around the phase's own try/except — a self-budget
+    # bug must never break a fire.
+    budget_cap_slow = False
+    try:
+        budget_cap_slow = _phase_self_budget()
+    except Exception as exc:  # noqa: BLE001 — belt-and-suspenders: survival is best-effort
+        state.log_line("dispatch", f"self-budget call failed: {exc}")
+        budget_cap_slow = False
+
     # Phase 1.5a3: dynamic TTL-aware cadence tier (TRDD-0QQX9H0G, #83). Placed
     # AFTER the rate-limit / compact resume early-returns (so a recovery fire
     # never emits a re-arm marker and stays clean) and AFTER the keep-going nudge
     # (so the nudge still leads that fire's output), but BEFORE the maintenance
     # early-return so a maintenance (idle) session demotes to SLOW and gets even
     # cheaper. It re-uses [janitor-renew] to re-arm the cron at the chosen tier; a
-    # total no-op when heartbeat_cadence_dynamic is off.
-    _phase_cadence_tier()
+    # total no-op when heartbeat_cadence_dynamic is off. `budget_cap_slow` (from the
+    # self-budget phase above) clamps the committed tier to SLOW when over budget.
+    _phase_cadence_tier(budget_cap_slow=budget_cap_slow)
 
     # Phase 1.5b: MAINTENANCE early-return (TRDD-FPL60EKV). The fire already refreshed the
     # prompt cache (the turn re-read the context at the 0.1x cache-READ rate, resetting the

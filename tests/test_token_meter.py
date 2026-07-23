@@ -329,6 +329,116 @@ class TestEvaluateTurnBudget(unittest.TestCase):
         self.assertTrue(any("cache-miss write 2500" in r for r in v.reasons))
 
 
+class TestEvaluateSelfBudget(unittest.TestCase):
+    """The pure self-budget escalation evaluator (TRDD-ZCODD6YS).
+
+    Heartbeat-only, three tiers (ok / slow / maintenance) — NEVER a `disarm` value (that
+    verdict does not exist; the ceiling is maintenance) — with a Schmitt-trigger release
+    dead-band. Real records, no mocks; `weighted_tokens` counts `output` 1:1, so an
+    `output`-only record's weighted cost equals its `output`."""
+
+    _FR = dict(cap_frac=0.6, maintenance_frac=0.9, release_frac=0.4)
+
+    @staticmethod
+    def _beat(ts: int, weighted: int, heartbeat: "bool | None" = True) -> dict:
+        r: dict = {"ts": ts, "output": weighted}
+        if heartbeat is not None:
+            r["heartbeat"] = heartbeat
+        return r
+
+    def _eval(self, records, *, budget=1000, now=1_000_000, in_maintenance=False):
+        return token_meter.evaluate_self_budget(records, budget=budget, now=now, in_maintenance=in_maintenance, **self._FR)
+
+    def test_ok_below_cap(self):
+        self.assertEqual(self._eval([self._beat(1_000_000, 500)]).tier, "ok")
+
+    def test_slow_at_cap_fraction(self):
+        v = self._eval([self._beat(1_000_000, 600)])  # 600 >= 0.6 * 1000
+        self.assertEqual(v.tier, "slow")
+        self.assertEqual(v.cost, 600)
+
+    def test_maintenance_at_maintenance_fraction(self):
+        self.assertEqual(self._eval([self._beat(1_000_000, 900)]).tier, "maintenance")
+
+    def test_never_returns_disarm_at_any_cost(self):
+        """No cost, however large, produces anything above maintenance — `disarm` is not a
+        possible verdict (the whole lost-survival-marker failure class is removed)."""
+        v = self._eval([self._beat(1_000_000, 10_000_000)])
+        self.assertEqual(v.tier, "maintenance")
+        self.assertNotIn(
+            "disarm",
+            (token_meter.SELF_BUDGET_OK, token_meter.SELF_BUDGET_SLOW, token_meter.SELF_BUDGET_MAINTENANCE),
+        )
+
+    def test_heartbeat_filter_drops_interactive_missing_counts_true(self):
+        """heartbeat:false never counts; a record MISSING the key counts as True (the `beats`
+        rule). Summing interactive turns would silence the janitor during the user's own work."""
+        recs = [
+            self._beat(1_000_000, 100, heartbeat=True),
+            self._beat(1_000_000, 10_000, heartbeat=False),  # huge interactive turn — must NOT count
+            self._beat(1_000_000, 100, heartbeat=None),  # missing key → counts as heartbeat
+        ]
+        v = self._eval(recs)
+        self.assertEqual(v.cost, 200)  # only the two heartbeat records
+        self.assertEqual(v.tier, "ok")
+
+    def test_budget_zero_disables(self):
+        self.assertEqual(self._eval([self._beat(1_000_000, 10_000_000)], budget=0).tier, "ok")
+
+    def test_negative_budget_disables(self):
+        self.assertEqual(self._eval([self._beat(1_000_000, 10_000_000)], budget=-5).tier, "ok")
+
+    def test_empty_log_is_ok(self):
+        self.assertEqual(self._eval([]).tier, "ok")
+
+    def test_garbage_records_fail_open_ok(self):
+        """Malformed dicts + a stray non-dict never raise (fail-open); cost is 0 → ok."""
+        garbage = [{"nope": 1}, {"ts": "bad", "output": 5}, "not-a-dict", 42]
+        v = self._eval(garbage)
+        self.assertEqual(v.tier, "ok")
+        self.assertEqual(v.cost, 0)
+
+    def test_only_counts_last_7d(self):
+        now = 10_000_000
+        old = now - token_meter.SELF_BUDGET_WINDOW_S - 1  # just OUTSIDE the 7d window
+        recs = [self._beat(old, 10_000), self._beat(now, 100)]
+        self.assertEqual(self._eval(recs, now=now).cost, 100)
+
+    def test_in_maintenance_holds_above_release_band(self):
+        """Schmitt: already in maintenance, cost between release(0.4) and cap(0.6) → HOLD
+        maintenance (the anti-flap dead-band)."""
+        v = self._eval([self._beat(1_000_000, 500)], in_maintenance=True)  # 0.5 * budget
+        self.assertEqual(v.tier, "maintenance")
+
+    def test_in_maintenance_releases_below_release_band(self):
+        """Schmitt: already in maintenance, cost falls BELOW release(0.4) → ok (release)."""
+        v = self._eval([self._beat(1_000_000, 300)], in_maintenance=True)  # 0.3 * budget
+        self.assertEqual(v.tier, "ok")
+
+    def test_in_maintenance_is_binary_never_slow(self):
+        """The in-maintenance branch yields only ok or maintenance — never slow — at any cost."""
+        for w in (0, 399, 400, 500, 899, 900, 5000):
+            v = self._eval([self._beat(1_000_000, w)], in_maintenance=True)
+            self.assertIn(v.tier, ("ok", "maintenance"))
+            self.assertNotEqual(v.tier, "slow")
+
+    def test_verdict_carries_cost_and_budget(self):
+        v = self._eval([self._beat(1_000_000, 700)])
+        self.assertEqual((v.cost, v.budget), (700, 1000))
+
+
+class TestSelfBudgetRecordSchemaUnchanged(unittest.TestCase):
+    """Regression (TRDD-ZCODD6YS): D2 adds a READER only — the token-meter.jsonl record
+    schema (`as_record`) must be byte-identical, so every sibling consumer parses unchanged."""
+
+    def test_as_record_keys_unchanged(self):
+        rec = _usage(output=1).as_record(123)
+        self.assertEqual(
+            set(rec.keys()),
+            {"ts", "heartbeat", "input", "output", "cache_read", "cache_creation", "assistant_msgs", "tool_calls"},
+        )
+
+
 class TestReloadGuardShouldBlock(unittest.TestCase):
     """F1 reload-churn guard (TRDD-Z582IKIR) — the shared predicate used by BOTH
     dispatch.py's `_phase_plugin_reload` (defer) and the UserPromptSubmit hook
