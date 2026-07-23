@@ -549,6 +549,53 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 -- advisory only; never break session start
         state.log_line("session-start", f"findings inbox skipped: {exc}")
 
+    # Harness self-test (TRDD-B0SABNP8): the janitor is coupled to Claude Code harness
+    # internals, and several CC releases have BROKEN that coupling SILENTLY (2.1.207
+    # dropped plugin-option DELIVERY; 2.1.208 reset the context window → a destructive
+    # /compact on a bogus number; 2.1.211 changed accepted int spellings). This fast,
+    # fail-open self-test SHOUTS (a drift line + a findings-ledger entry) when the harness
+    # moved under us, instead of degrading with no error.
+    #
+    # PLACEMENT IS PINNED (ATOM-B0SA-PLCE): HERE — after the findings surface_block, BEFORE
+    # the _active_global_stop check — so it runs even on a stopped machine (a harness break
+    # is something even a disarmed session must be told), the same pre-stop-return slot the
+    # breadcrumb and findings inbox use. It is its OWN try/except and MUST NEVER return or
+    # raise, so the arm-nudge / stop-reminder survival emissions below are never stranded
+    # (D4's form of the D1/D2/D5 unifying invariant: an actuation block must never strand a
+    # survival emission on an early return). Skips thin #J harness sessions — the ai-maestro
+    # server owns harness compat there. DEDUPES on a content-hash of the failure set so an
+    # unchanged break shouts ONCE (protecting the ~1 KB SessionStart surface budget); a
+    # CHANGED set re-shouts, and a CC fix that empties the set clears the stamp.
+    try:
+        if not thin_harness:
+            from lib import harness_selftest  # noqa: E402  -- local package, not PyPI
+
+            if harness_selftest.selftest_enabled():
+                _failures = harness_selftest.run_selftest()
+                _seen = state.state_dir() / "harness-selftest-seen"
+                if _failures:
+                    _digest = harness_selftest.failure_digest(_failures)
+                    try:
+                        _prev = _seen.read_text(encoding="utf-8").strip()
+                    except OSError:
+                        _prev = ""
+                    if _digest != _prev:
+                        print(harness_selftest.format_drift_line(_failures))
+                        from lib import findings_ledger as _fl  # noqa: E402  -- local package
+
+                        for _code, _sev, _msg in _failures:
+                            _fl.record(sev=_sev, code=_code, src=harness_selftest.SRC, msg=_msg)
+                        state.atomic_write(_seen, _digest)
+                elif _seen.is_file():
+                    # A CC upgrade fixed the break: the set emptied → clear the stamp so the
+                    # NEXT distinct break shouts again (ATOM-B0SA-DDUP self-clear).
+                    try:
+                        _seen.unlink()
+                    except OSError:
+                        pass
+    except Exception as exc:  # noqa: BLE001 -- MUST NOT strand the survival emissions below
+        state.log_line("session-start", f"harness self-test skipped: {exc}")
+
     stop = _active_global_stop(gs)
     if stop is not None:
         # MAINTENANCE WINS OVER A GLOBAL STOP (TRDD-FPL60EKV): maintenance-mode exists

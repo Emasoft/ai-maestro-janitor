@@ -204,3 +204,82 @@ def test_on_session_start_ensures_recommended_settings(tmp_path: Path) -> None:
         assert data.get("env", {}).get(key) == val, f"env key {key} not ensured by the hook"
     for key, val in se.TOP_LEVEL_ENFORCE.items():
         assert data.get(key) == val, f"top-level {key} not enforced by the hook"
+
+
+def test_harness_selftest_block_never_strands_the_stop_reminder(tmp_path: Path) -> None:
+    """Placement / survival regression (TRDD-B0SABNP8, ATOM-B0SA-PLCE).
+
+    The harness self-test block sits BEFORE the `_active_global_stop` early return. With a
+    machine-wide stop set AND a probe forced RED, prove BOTH happened in one run:
+      * the self-test RAN before the stop return — a HARNESS-DRIFT entry is in the project
+        findings ledger, and its drift line is on stdout;
+      * the survival emission that FOLLOWS the block still fired — the global-stop reminder
+        printed and the hook returned cleanly.
+    Both present ⇒ the block neither returned nor raised ⇒ it never stranded the survival
+    emission below it (D4's form of the unifying invariant). Fully sandboxed.
+    """
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    # A user-scope pluginConfigs declaring a janitor knob whose CLAUDE_PLUGIN_OPTION_* we
+    # deliberately withhold below → probe_option_delivery goes RED (the 2.1.207 shape).
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {"ai-maestro-janitor@ai-maestro-plugins": True},
+                "pluginConfigs": {"ai-maestro-janitor@ai-maestro-plugins": {"github_repo": "o/r"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    control = tmp_path / "control"
+    control.mkdir()
+    (control / "kill-switch.flag").write_text("set_at=1 by=test reason=placement-regression\n", encoding="utf-8")
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "CLAUDE_PLUGIN_ROOT": str(REPO),
+        "CLAUDE_PROJECT_DIR": str(project),
+        "JANITOR_GLOBAL_STATE_DIR": str(tmp_path / "global-state"),
+        "JANITOR_CONTROL_DIR": str(control),  # machine-wide stop lives here (test override)
+        "CLAUDE_PLUGIN_OPTION_DAEMON_ENABLED": "false",
+        "CLAUDE_PLUGIN_OPTION_OS_KEEPALIVE_ENABLED": "false",
+    }
+    # Guarantee the RED condition + standalone (#N) mode regardless of the dev's real env:
+    # the withheld option must be absent, and no harness flag may flip the hook to thin mode.
+    for k in (
+        "CLAUDE_PLUGIN_OPTION_GITHUB_REPO",
+        "AIMAESTRO_AGENT",
+        "THIS_IS_AIMAESTRO",
+        "AMP_AGENT_ID",
+        "AID_AUTH",
+    ):
+        env.pop(k, None)
+
+    proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        [sys.executable, str(HOOKS_DIR / "on-session-start.py")],
+        input=json.dumps(_EVENT),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(project),
+    )
+
+    # The survival emission below the block still fired.
+    assert "globally DISARMED" in proc.stdout, (
+        f"the global-stop reminder (the survival emission after the self-test block) did NOT "
+        f"print — the block may have returned/raised and stranded it:\n{proc.stdout[:2000]}"
+    )
+    # The self-test ran BEFORE that return: its loud drift line is on stdout ...
+    assert "harness self-test" in proc.stdout, (
+        f"the harness self-test drift line is missing — the block did not run before the stop "
+        f"return:\n{proc.stdout[:2000]}"
+    )
+    # ... and it routed the finding into THIS project's ledger.
+    ledger = project / ".janitor" / "state" / "findings-ledger.ndjsonl"
+    assert ledger.is_file() and "HARNESS-DRIFT" in ledger.read_text(encoding="utf-8"), (
+        "the self-test failure was not recorded into the project findings ledger"
+    )
