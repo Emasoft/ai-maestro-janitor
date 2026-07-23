@@ -8,12 +8,12 @@ maintainer: ai-maestro-janitor
 project-id: ai-maestro-janitor
 requested-by: Emasoft (owner request, 2026-07-23)
 implementations:
-  - "the recall + authoring RULE — ~/.claude/rules/markdown-memory-recall.md (teaching prose) + rules/references/markdown-memory-recall-full.md (on-demand detail) — canonical repo Emasoft/ai-maestro-janitor"
-  - "memgrep — the Rust CLI + SQLite sidecar index — scripts/memgrep/src/{main.rs,memory.rs,index.rs} (this repo)"
-  - "the editorial + safety layer — scripts/lib/{memory_txn,memory_edit_verify,memory_scopes,memory_settings}.py, scripts/memory_txn_cli.py, scripts/wikimem_syntax_lint.py, scripts/detectors/{wikimem-syntax,memory-maintenance,memory-librarian,memory-scope-leak}.py (this repo)"
-  - "the single curator agent + per-chore skills — agents/janitor-memory-subconscious-agent, skills/janitor-memory-{recall,write,update,bootstrap,record-recent,atomize,repair,split,merge,consolidate,conflict,harvest,frequency} (this repo)"
-  - "the PRIVATE user-memory subsystem — scripts/lib/user_mem_lib.py, scripts/hooks/on-prompt-submit-user-mem.py, commands/janitor-memory-user-{add,search,share}.md (this repo)"
-  - "the proactive surfaces + scheduler — scripts/hooks/{on-prompt-submit-autorecall,post-edit-memory-correction}.py, scripts/lib/{memory_breadcrumb,memory_settings,memory_content_precheck,memory_migrate}.py, scripts/{memory_settings_cli,migrate_memory_scope}.py, scripts/detectors/{memorize-nudge,memgrep-index-health}.py (this repo)"
+- "the recall + authoring RULE — ~/.claude/rules/markdown-memory-recall.md (teaching prose) + rules/references/markdown-memory-recall-full.md (on-demand detail) — canonical repo Emasoft/ai-maestro-janitor"
+- "memgrep — the Rust CLI + SQLite sidecar index — scripts/memgrep/src/{main.rs,memory.rs,index.rs} (this repo)"
+- "the editorial + safety layer — scripts/lib/{memory_txn,memory_edit_verify,memory_scopes,memory_settings}.py, scripts/memory_txn_cli.py, scripts/wikimem_syntax_lint.py, scripts/detectors/{wikimem-syntax,memory-maintenance,memory-librarian,memory-scope-leak}.py (this repo)"
+- "the single curator agent + per-chore skills — agents/janitor-memory-subconscious-agent, skills/janitor-memory-{recall,write,update,bootstrap,record-recent,atomize,repair,split,merge,consolidate,conflict,harvest,frequency} (this repo)"
+- "the PRIVATE user-memory subsystem — scripts/lib/user_mem_lib.py, scripts/hooks/on-prompt-submit-user-mem.py, commands/janitor-memory-user-{add,search,share}.md (this repo)"
+- "the proactive surfaces + scheduler — scripts/hooks/{on-prompt-submit-autorecall,post-edit-memory-correction}.py, scripts/lib/{memory_breadcrumb,memory_settings,memory_content_precheck,memory_migrate}.py, scripts/{memory_settings_cli,migrate_memory_scope}.py, scripts/detectors/{memorize-nudge,memgrep-index-health}.py (this repo)"
 ---
 
 # The wikimem + memgrep conformance SPEC
@@ -111,6 +111,7 @@ block never overrides the block.
 the ROOT decides its git fate:
 
 <!-- @spec:scope-roots v1 — authoritative; the conformance test extracts the block below verbatim -->
+
 ```text
 LOCAL    ~/.claude/projects/<slug>/memory/            outside any repo, never pushed        machine-private
 PROJECT  <git-root>/.claude/project/memory/           git-tracked AND pushed to every clone  machine-agnostic
@@ -214,6 +215,7 @@ WM-LINT `oversized-atom` defect and a decomposition (WM-MIG / atomize) candidate
 `WM-ATOM-02` **grammar** — an atom marker is:
 
 <!-- @spec:atom-grammar v1 — authoritative -->
+
 ```text
 ^<name> [desc:"<quoted prose ≤200 chars>", keywords:"<key_phrase> …", ocd:<date>, lmd:<date>, status:<valid|superseded>, superseded-by:<lesson-id>]
 ```
@@ -243,6 +245,7 @@ reference.
 block is the lesson's ADDRESS, followed by prose in the mandatory three-part form:
 
 <!-- @spec:lesson-grammar v1 — authoritative -->
+
 ```text
 [^N]: [id:ATOM-xxxx-xxxx, status:valid|superseded, superseded-by:ATOM-xxxx-xxxx, keywords:"<key_phrase> …", ocd:<date>, lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
 ```
@@ -326,6 +329,7 @@ USER scope), not scattered into a case page.
 `WM-CLI-01` **verbs** — `memgrep` dispatches EXACTLY these verbs (main.rs), these spellings:
 
 <!-- @spec:memgrep-verbs v1 — authoritative; the conformance test extracts the block below verbatim -->
+
 ```text
 index
 reindex
@@ -363,8 +367,7 @@ atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>
 `index`/`reindex` build/refresh it; `validate` checks index/page health. The file watcher
 debounces ~500 ms behind writes — a consumer `MUST NOT` re-query in the same turn it wrote.
 
-`WM-CLI-06` **token-lean-output** — reads return greppable, capped output (`path — description`
-+ resolved lessons); consumers read the top 1–3 hits, not the whole corpus.
+`WM-CLI-06` **token-lean-output** — reads return greppable, capped output (`path — description` + resolved lessons); consumers read the top 1–3 hits, not the whole corpus.
 
 `WM-CLI-07` **find-DSL** — `memgrep find` takes a keyword DSL (`+must`, `-exclude`, `"exact
 phrase"`, wildcards), `--only-notes` to search the LESSONS, `--use-index` for the SQLite sidecar,
