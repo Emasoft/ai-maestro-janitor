@@ -8,6 +8,7 @@ current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: high
 relevant-rules: [1]
+implementation-commits: [f469f07]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-23
@@ -31,8 +32,10 @@ All changes in `scripts/memgrep/src/memory.rs`; 110 cargo tests green (8 new).
   half the corpus incl. well-authored pages; 1500 flags only the ~6% bloated tail (36
   corpus-wide) — the real decomposition candidates. My own contract page now lints clean.
 
-**NEXT ACTION:** rebuild+install the memgrep binary (`cargo install --path scripts/memgrep`)
-at the END of all phases so the checks go live for the skills/detector; then Phase 2 (migrate).
+**BINARY INSTALLED + LIVE** (`cargo install --path scripts/memgrep` run 2026-07-23 → replaced
+`~/.cargo/bin/memgrep`). The four checks, `add-lesson --supersedes/--retire-atom`, and the
+`migrate` verb are now usable by every skill/detector/agent that shells `memgrep`. Rebuild+
+reinstall again after any further memgrep source change (the release publish also rebuilds it).
 
 **DEFERRED (moved to the phase that owns them):**
 - 1d — the py mirror in `wikimem_syntax_lint.py`: fold into **WN7M829Y** (the detector surface).
