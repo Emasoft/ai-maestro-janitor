@@ -33,11 +33,9 @@ commitments, for every agent, in every project:
    the entire reason a memory exists.
 2. **WRITE / UPDATE AFTER SOLVING.** After solving a non-trivial problem, or making a decision
    not derivable from the code, capture it into the page that OWNS the subject (RECALL first, so
-   you update rather than duplicate). When a new fact supersedes an old one, use the **correction
-   protocol** (`memgrep add-lesson --supersedes` — see AUTHORING): clean the body to the current
-   truth AND demote the old statement to a dated `[^N]` lesson carrying the WHY + the verbatim
-   `SUPERSEDED BODY:`. The fact moves forward clean; the error becomes a guardrail.
-   **Never delete knowledge — relocate it.**
+   you update rather than duplicate). A new fact that supersedes an old one uses the **correction
+   protocol** (see AUTHORING — supersede, never overwrite; the old statement becomes a dated
+   `[^N]` guardrail). **Never delete knowledge — relocate it.**
 3. **MAINTAIN THE PROJECT WIKIMEM.** Keep PROJECT-scope pages current (architecture hub,
    key components, the publish/deploy pipeline) so knowledge is git-tracked and shared, not
    stranded in one session's head.
@@ -119,36 +117,18 @@ they are and *what not to repeat*. FREE: `memgrep recall`/`find` auto-resolve an
 
 ## The note format
 
-```yaml
----
-name: <kebab-slug>            # == filename stem
-description: "<symptom surface — the load-bearing recall field>"
-ocd: <YYYY-MM-DD>             # Original Creation Date — set once
-lmd: <YYYY-MM-DD>             # Last Modified Date — bump on every edit
-metadata:
-  node_type: memory
-  type: user | feedback | project | reference
-  tier: hub | aspect | component      # wiki layer (see below)
----
-<body: the one fact; for feedback/project add **Why:** and **How to apply:** lines>
-
-## Notes and lessons learned
-[^3]: [id:ATOM-234P-U35Q, status:valid, keywords:"retry_cap guessed_variable_name", ocd:2026-06-09, lmd:2026-06-09]
-  DO NOT read a constant off a guessed variable name, BECAUSE `max_attempts` does not exist and
-  the real cap is `max_retries` = 3, not 5. DO read the constant from the source instead.
-```
-
-`## Notes and lessons learned` is **MANDATORY on every page, even when empty** — it is the
-standing landing zone for a correction lesson.
+Frontmatter (the write verbs emit it — you rarely type it): `name` == filename stem ·
+`description:` **QUOTED** (the load-bearing recall field) · `ocd`/`lmd` dates ·
+`metadata: {node_type: memory, type, tier}`. Body = the one fact (feedback/project add
+`**Why:**` / `**How to apply:**`). `## Notes and lessons learned` is **MANDATORY on every page,
+even when empty** — the standing landing zone for a correction lesson. Full frontmatter grammar +
+a worked atom/lesson example: the FULL REFERENCE above.
 
 ### THE LESSON FORM — a lesson is an ATOM, and a GUARDRAIL, not a story
 
-```
-[^N]: [id:ATOM-xxxx-xxxx, status:valid|superseded, superseded-by:ATOM-xxxx-xxxx, keywords:"<key_phrase> …", ocd:<date>, lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
-```
-
-**The metadata block is the lesson's ADDRESS.** `id`, `status`, `keywords`, `ocd`, `lmd`
-REQUIRED; `superseded-by` when superseded.
+A `[^N]:` footnote whose bracketed metadata block is the lesson's ADDRESS —
+`id`/`status`/`keywords`/`ocd`/`lmd` REQUIRED (`superseded-by` when superseded) — followed by the
+prose `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` Exact field layout: the FULL REFERENCE above.
 
 - **`keywords:` is the RECALL SURFACE** — the phrases a future session SEARCHES with (the
   symptom), usually NOT the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not
@@ -163,29 +143,14 @@ REQUIRED; `superseded-by` when superseded.
 
 Full grammar + supersession: the FULL REFERENCE above.
 
-## AUTHORING — route every write through a memgrep verb, then validate
+## AUTHORING — route writes through a memgrep verb, then validate
 
-A HAND-WRITTEN atom is where malformed memories come from — an unquoted `desc:` that breaks
-grep, a `[^N]` lesson with metadata but no body that `find --only-notes` can't see, an atom too
-long to be one fact. So **do not hand-author wikimem markdown**: the memgrep write verbs
-synthesise valid syntax by construction.
-
-- new page → `memgrep new-page --path P --tier hub|aspect|component --name N --description "…" --type …`
-- new fact → `memgrep add-atom --page P --keywords "symptom phrases" --desc "quoted ≤200-char prose"` (body on stdin)
-- new lesson → `memgrep add-lesson --page P --atom ID --keywords "…"` (DO-NOT/BECAUSE/DO on stdin)
-- move an atom → `memgrep migrate <atom> --from A --to B` (NEVER hand-move — it drops lessons and collides footnote numbers)
-
-**Correcting a wrong fact is a SUPERSESSION, never a delete or an overwrite.** Run
-`memgrep add-lesson --supersedes --atom <id>` FIRST — it embeds the atom's current body verbatim
-as `SUPERSEDED BODY: <old>` (the never-delete rule, enforced) and records the WHY as a dated
-lesson — THEN clean the atom's body to the new truth, keeping the SAME id (a `-v2` duplicate is
-the anti-pattern). An atom's dated superseded-lessons ARE its changelog and TRAVEL with it on a
-`migrate`. Only a pure typo / formatting slip is edited in place.
-
-**After EVERY edit, prove it:** `memgrep validate <page> && memgrep lint <page>`. `lint` is
-deterministic + FP-free — it catches an unquoted desc, a body-less lesson, an oversized atom, a
-supersession missing its `SUPERSEDED BODY:`, a dangling footnote, and a one-sided `[[link]]`. A
-non-zero exit is a defect to fix NOW, before moving on.
+Do NOT hand-author wikimem markdown (the source of unquoted `desc:`, body-less `[^N]`, oversized
+atoms) — use the write verbs (`new-page`/`add-atom`/`add-lesson`/`migrate`). Correct a wrong fact
+by SUPERSESSION, never a delete/overwrite: `add-lesson --supersedes` embeds the verbatim
+`SUPERSEDED BODY:` and keeps the SAME id (a `-v2` duplicate is the anti-pattern). Run
+`memgrep validate <page> && memgrep lint <page>` after EVERY edit. Verb flags + the
+supersession/travel protocol: the FULL REFERENCE above.
 
 ## The wiki layer (wikimem)
 

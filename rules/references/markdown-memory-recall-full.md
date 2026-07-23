@@ -516,3 +516,27 @@ across all projects, whereas the case facts that taught it usually are not.
 **When you MOVE a lesson out of a case page, leave the case page a link, not a hole** — the
 link law still applies (`[[debugging-methodology]]` ↔ `See also`), and no knowledge is
 deleted, only relocated to its rightful owner.
+
+## AUTHORING — route every write through a memgrep verb, then validate (full)
+
+A HAND-WRITTEN atom is where malformed memories come from — an unquoted `desc:` that breaks
+grep, a `[^N]` lesson with metadata but no body that `find --only-notes` can't see, an atom too
+long to be one fact. So **do not hand-author wikimem markdown**: the memgrep write verbs
+synthesise valid syntax by construction.
+
+- new page → `memgrep new-page --path P --tier hub|aspect|component --name N --description "…" --type …`
+- new fact → `memgrep add-atom --page P --keywords "symptom phrases" --desc "quoted ≤200-char prose"` (body on stdin)
+- new lesson → `memgrep add-lesson --page P --atom ID --keywords "…"` (DO-NOT/BECAUSE/DO on stdin)
+- move an atom → `memgrep migrate <atom> --from A --to B` (NEVER hand-move — it drops lessons and collides footnote numbers)
+
+**Correcting a wrong fact is a SUPERSESSION, never a delete or an overwrite.** Run
+`memgrep add-lesson --supersedes --atom <id>` FIRST — it embeds the atom's current body verbatim
+as `SUPERSEDED BODY: <old>` (the never-delete rule, enforced) and records the WHY as a dated
+lesson — THEN clean the atom's body to the new truth, keeping the SAME id (a `-v2` duplicate is
+the anti-pattern). An atom's dated superseded-lessons ARE its changelog and TRAVEL with it on a
+`migrate`. Only a pure typo / formatting slip is edited in place.
+
+**After EVERY edit, prove it:** `memgrep validate <page> && memgrep lint <page>`. `lint` is
+deterministic + FP-free — it catches an unquoted desc, a body-less lesson, an oversized atom, a
+supersession missing its `SUPERSEDED BODY:`, a dangling footnote, and a one-sided `[[link]]`. A
+non-zero exit is a defect to fix NOW, before moving on.
