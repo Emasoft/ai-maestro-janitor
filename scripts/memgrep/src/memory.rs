@@ -2304,6 +2304,19 @@ struct AddLessonArgs {
     /// Optional one-line context stored as a `desc:"…"` field in the lesson metadata.
     #[arg(long = "desc")]
     desc: Option<String>,
+    /// SUPERSESSION mode: this lesson CORRECTS `--atom` — embed that atom's CURRENT verbatim body as
+    /// a trailing `SUPERSEDED BODY: <old body>` so the correction is non-destructive (the old fact
+    /// becomes the atom's dated changelog, never deleted). A `supersedes:<atom-id>` metadata field is
+    /// recorded so `memgrep lint` can enforce the embedded body. Run this BEFORE cleaning the atom's
+    /// body to the new truth, so the tool captures the pre-correction body.
+    #[arg(long = "supersedes")]
+    supersedes: bool,
+    /// With `--supersedes`: also RETIRE the atom — mark its marker `status: superseded` +
+    /// `superseded-by:<this-lesson-id>`. Default off (correct-in-place: the atom keeps its id and
+    /// stays valid, its body cleaned to truth by a follow-up edit). Use only when the atom's subject
+    /// is genuinely replaced, NEVER to make a `-v2` duplicate.
+    #[arg(long = "retire-atom", requires = "supersedes")]
+    retire_atom: bool,
     /// Also descend into hidden files/dirs when checking id-uniqueness / reindexing (default off).
     #[arg(long = "hidden")]
     hidden: bool,
@@ -2328,7 +2341,7 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     let lesson_text = read_body_from_stdin()?;
     // The lesson text is one logical line (DO NOT … BECAUSE … DO … instead) — collapse any pasted
     // newlines so the `[^N]:` definition stays a single, parser-clean line.
-    let lesson_text = lesson_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut lesson_text = lesson_text.split_whitespace().collect::<Vec<_>>().join(" ");
 
     let text = md::read_text(&a.page)
         .ok_or_else(|| anyhow::anyhow!("page {} does not exist or is unreadable", a.page.display()))?;
@@ -2336,11 +2349,22 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     // Resolve the target atom to its body extent ON THIS PAGE. `atom` accepts the `^name` sigil form.
     let query = a.atom.strip_prefix('^').unwrap_or(&a.atom);
     let atom_query_matches = |id: &str| atom_id_matches(id, query);
-    let (_marker_idx, body_last_idx) = locate_atom_body_matching(&text, &atom_query_matches)
+    let (marker_idx, body_last_idx) = locate_atom_body_matching(&text, &atom_query_matches)
         .ok_or_else(|| anyhow::anyhow!(
             "no BODY atom answering to `{}` on {} — add-lesson anchors a lesson from an existing atom's body",
             a.atom, a.page.display()
         ))?;
+
+    // SUPERSESSION (TRDD-DOJ2LE1G): embed the atom's CURRENT verbatim body as `SUPERSEDED BODY: …`
+    // so the correction is NON-DESTRUCTIVE — the old fact survives as this dated lesson (the atom's
+    // changelog), honouring the never-delete rule. Read the body NOW, before any follow-up edit
+    // cleans the atom to the new truth. `[^N]` anchors of PRIOR lessons are pointers, not content,
+    // so they are stripped from the captured body.
+    if a.supersedes {
+        let old_body = atom_verbatim_body(&text, marker_idx, body_last_idx);
+        let old_body = if old_body.is_empty() { "(empty)".to_string() } else { old_body };
+        lesson_text.push_str(&format!(" SUPERSEDED BODY: {old_body}"));
+    }
 
     let scope_root = a
         .page
@@ -2354,8 +2378,12 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
 
     // The ONE canonical lesson metadata form. `desc:"…"` is an OPTIONAL extra (unknown keys are
     // ignored by the lesson parser) inserted only when given — the canonical fields are id/status/
-    // keywords/ocd/lmd.
+    // keywords/ocd/lmd. Under --supersedes a `supersedes:<atom>` field records WHICH atom this lesson
+    // corrects, so `memgrep lint` can enforce the embedded SUPERSEDED BODY (superseded-without-body).
     let mut meta = format!("id:{lesson_id}, status:valid");
+    if a.supersedes {
+        meta.push_str(&format!(", supersedes:{query}"));
+    }
     if let Some(d) = a.desc.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         meta.push_str(&format!(", desc:\"{}\"", sanitize_quoted_value(d)));
     }
@@ -2371,6 +2399,21 @@ pub fn cmd_add_lesson_cli(args: &[String]) -> Result<()> {
     //    the marker line itself (empty-bodied atom), the ref lands right after the marker — still a
     //    valid body-anchor the resolver picks up.
     lines[body_last_idx] = format!("{} [^{label}]", lines[body_last_idx].trim_end());
+
+    // 1b. RETIRE the atom under --retire-atom: mark its marker `status: superseded` +
+    //     `superseded-by:<this lesson>` so the retirement is greppable at the atom level. Idempotent:
+    //     skip if a `status:` prop is already present. `end` is one-past the props `]`, so `end - 1`
+    //     is the `]`'s byte index — inject just before it. Fields are Copy/owned (no live borrow into
+    //     the line), so the following mutable `insert_str` is sound.
+    if a.retire_atom
+        && let Some((_s, end, _id, props_raw)) = first_block_property_marker(&lines[marker_idx])
+        && !props_raw.contains("status:")
+    {
+        lines[marker_idx].insert_str(
+            end - 1,
+            &format!(", status: superseded, superseded-by:{lesson_id}"),
+        );
+    }
 
     // 2. Append the `[^N]:` definition inside the notes section. When the section exists, append at
     //    its END (before the next heading, else EOF); with no section, create one at EOF (the
@@ -2473,7 +2516,145 @@ fn locate_atom_body_matching(
     finish(&open)
 }
 
+/// Collapse `s` to one line with `[^N]` footnote ANCHORS stripped (they are pointers, not content)
+/// and internal whitespace normalised. Shared by `atom_verbatim_body` (SUPERSEDED BODY capture) and
+/// the `oversized-atom` lint (which measures body SIZE, not its anchors).
+fn collapse_strip_anchors(s: &str) -> String {
+    static ANCHOR_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = ANCHOR_RE.get_or_init(|| Regex::new(r"\[\^[^\]\s]+\]").expect("static regex"));
+    re.replace_all(s, " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The CURRENT verbatim body of the atom spanning `[marker_idx+1 ..= body_last_idx]` (0-based line
+/// indices as returned by `locate_atom_body_matching`), collapsed to one line with `[^N]` lesson
+/// ANCHORS stripped. Empty when the atom has no body. Used by `add-lesson --supersedes` to embed the
+/// pre-correction body as a non-destructive `SUPERSEDED BODY:`.
+fn atom_verbatim_body(text: &str, marker_idx: usize, body_last_idx: usize) -> String {
+    if body_last_idx <= marker_idx {
+        return String::new();
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let joined = lines
+        .get(marker_idx + 1..=body_last_idx)
+        .map(|s| s.join(" "))
+        .unwrap_or_default();
+    collapse_strip_anchors(&joined)
+}
+
 // ─────────────────────────── `memgrep lint` ───────────────────────────
+
+/// Replace every backtick-delimited INLINE-code span in `raw` with same-length spaces, so a literal
+/// `` `[^N]` `` token in example prose is not mistaken for a footnote reference (the fenced-code case
+/// is already handled by `ctx.in_code`; this covers the inline case). Length-preserving so any
+/// byte-offset logic downstream stays valid.
+fn mask_inline_code(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_code = false;
+    for ch in raw.chars() {
+        if ch == '`' {
+            in_code = !in_code;
+            out.extend(std::iter::repeat(' ').take(ch.len_utf8()));
+        } else if in_code {
+            out.extend(std::iter::repeat(' ').take(ch.len_utf8()));
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// True iff a raw block-props / lesson-meta string carries a `desc:` value that is UNQUOTED and would
+/// break the comma-split / a `desc:"…"` grep — i.e. an unquoted value that is not a clean legacy
+/// snake_case slug (`^[a-z0-9_]+$`, the grandfathered TRDD-056384eb form). A quoted value or a clean
+/// slug is fine; anything else unquoted (whitespace, commas, hyphens, dots, mixed case, punctuation)
+/// is the defect the write verbs prevent by always quoting.
+fn desc_unquoted_prose(props_raw: &str) -> bool {
+    for item in split_top_level_commas(props_raw) {
+        let item = item.trim();
+        let Some(val) = item.strip_prefix("desc:").map(str::trim) else {
+            continue;
+        };
+        if val.is_empty() || val.starts_with('"') {
+            return false; // absent-value or properly quoted — not a defect
+        }
+        // Unquoted: OK only if it is a clean legacy slug; otherwise it breaks grep / the parser.
+        return !val
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    }
+    false
+}
+
+/// Per-atom facts the linter needs: `(1-based marker line, raw props string, body char count)`.
+/// Mirrors `resolve_atoms_from_text`'s segmentation (frontmatter-skip, fence-aware, heading / next
+/// marker / EOF body boundary) but keeps the marker LINE number and the RAW props (quotes intact)
+/// that the resolver discards. Body size is measured with `[^N]` anchors stripped (`collapse_strip_anchors`).
+fn atoms_for_lint(text: &str) -> Vec<(usize, String, usize)> {
+    let mut out: Vec<(usize, String, usize)> = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut start = 0usize;
+    if lines.first().map(|l| l.trim_end()) == Some("---") {
+        start = 1;
+        while start < lines.len() && lines[start].trim_end() != "---" {
+            start += 1;
+        }
+        start = (start + 1).min(lines.len());
+    }
+    let mut in_fence = false;
+    // (1-based marker line, raw props, accumulated body text)
+    let mut open: Option<(usize, String, String)> = None;
+    let flush = |out: &mut Vec<(usize, String, usize)>, o: Option<(usize, String, String)>| {
+        if let Some((ml, props, body)) = o {
+            out.push((ml, props, collapse_strip_anchors(&body).chars().count()));
+        }
+    };
+    for (i, line) in lines.iter().enumerate().skip(start) {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            if let Some((_, _, body)) = open.as_mut() {
+                body.push(' ');
+                body.push_str(line);
+            }
+            continue;
+        }
+        if !in_fence && t.starts_with('#') {
+            flush(&mut out, open.take());
+            continue;
+        }
+        let marker = if in_fence {
+            None
+        } else {
+            first_block_property_marker(line)
+        };
+        if let Some((_s, end, _id, props)) = marker {
+            flush(&mut out, open.take());
+            let trailing = line[end..].trim();
+            open = Some((i + 1, props, trailing.to_string()));
+        } else if let Some((_, _, body)) = open.as_mut() {
+            body.push(' ');
+            body.push_str(line);
+        }
+    }
+    flush(&mut out, open.take());
+    out
+}
+
+/// The atom-body char budget for the `oversized-atom` lint. Env-tunable via `MEMGREP_ATOM_MAX_CHARS`
+/// (default 1500); 0 disables the check. An atom past this should be DECOMPOSED into smaller atoms.
+/// 1500 was chosen from the live corpus distribution (median 559, p90 1241, p95 1624): it flags only
+/// the genuinely-bloated ~6% tail — the decomposition candidates the user meant — while a normal
+/// dense single-fact atom passes. A lower value turns half the corpus into violations, making the
+/// hard-gate unusable; the retroactive-repair sweep (TRDD-WN7M829Y) may use a lower advisory bar.
+fn atom_max_chars() -> usize {
+    std::env::var("MEMGREP_ATOM_MAX_CHARS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(1500)
+}
 
 /// Scan ONE raw markdown line for footnote tokens, yielding `(label, is_def)` for each. A footnote
 /// DEFINITION is the line-leading `[^LABEL]:` (optional leading whitespace) — at most one per line.
@@ -2638,7 +2819,8 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
             if *ctx.in_code.get(i).unwrap_or(&false) {
                 continue; // inside a fenced code block — not real footnote syntax
             }
-            for (label, is_def) in scan_footnotes(raw) {
+            // Mask INLINE-code spans too, so a literal `[^N]` in example prose is not a false ref.
+            for (label, is_def) in scan_footnotes(&mask_inline_code(raw)) {
                 let table = if is_def {
                     &mut def_lines
                 } else {
@@ -2664,6 +2846,70 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
                     p.clone(),
                     line,
                     format!("footnote definition `[^{label}]:` is never referenced"),
+                ));
+            }
+        }
+
+        // ── Checks 4-7 (TRDD-DOJ2LE1G) — atom/lesson AUTHORING integrity, deterministic + FP-free. ──
+        // Atom-level: an unquoted-prose `desc:` (breaks grep / the in-body filter) and an oversized
+        // body (must be decomposed). `atoms_for_lint` segments exactly as the recall resolver does.
+        let atom_budget = atom_max_chars();
+        for (marker_line, props_raw, body_chars) in atoms_for_lint(&text) {
+            if desc_unquoted_prose(&props_raw) {
+                violations.push((
+                    p.clone(),
+                    marker_line,
+                    "atom `desc:` value is unquoted prose — quote it (`desc:\"…\"`) or grep and the \
+                     in-body filter break"
+                        .into(),
+                ));
+            }
+            if atom_budget > 0 && body_chars > atom_budget {
+                violations.push((
+                    p.clone(),
+                    marker_line,
+                    format!(
+                        "atom body is {body_chars} chars (> {atom_budget}) — decompose it into \
+                         smaller atoms (one fact each)"
+                    ),
+                ));
+            }
+        }
+        // Lesson-level: a body-less lesson (invisible to `find --only-notes`), a supersession missing
+        // its `SUPERSEDED BODY:` (the never-delete violation), and an unquoted-prose `desc:`. Only
+        // BALANCED (referenced) footnotes reach `ctx.footnote_defs` — an unreferenced def is already
+        // flagged above — so this stays FP-free.
+        for d in &ctx.footnote_defs {
+            let body = footnote_def_text(&lines, &d.label, d.start, d.end);
+            let (meta, rest) = split_note_metadata(&body);
+            let Some(meta) = meta else { continue }; // no `[…]` metadata head → a plain footnote, not a lesson
+            if rest.trim().is_empty() {
+                violations.push((
+                    p.clone(),
+                    d.start,
+                    format!(
+                        "lesson `[^{}]` has metadata but no body — a body-less lesson is invisible to \
+                         `find --only-notes`; add the DO-NOT/BECAUSE/DO text",
+                        d.label
+                    ),
+                ));
+            }
+            if meta.contains("supersedes:") && !rest.contains("SUPERSEDED BODY:") {
+                violations.push((
+                    p.clone(),
+                    d.start,
+                    format!(
+                        "lesson `[^{}]` supersedes an atom but omits `SUPERSEDED BODY: <old body>` — \
+                         the never-delete rule requires embedding the original",
+                        d.label
+                    ),
+                ));
+            }
+            if desc_unquoted_prose(&meta) {
+                violations.push((
+                    p.clone(),
+                    d.start,
+                    format!("lesson `[^{}]` `desc:` value is unquoted prose — quote it", d.label),
                 ));
             }
         }
@@ -4545,6 +4791,138 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(
             has_violation(&v, "Notes and lessons learned"),
             "missing Notes section must be reported; got: {v:?}"
+        );
+    }
+
+    // ─────────────── authoring-integrity checks (TRDD-DOJ2LE1G) ───────────────
+
+    #[test]
+    fn desc_unquoted_prose_flags_only_the_real_defect() {
+        // Quoted prose and a clean legacy snake_case slug are fine; unquoted prose (spaces, hyphens,
+        // dots, mixed case — the write-verbs-would-have-quoted-it shape) is the flagged defect.
+        assert!(!desc_unquoted_prose("desc:\"a real prose summary, with a comma\", keywords: k"));
+        assert!(!desc_unquoted_prose("desc: clean_legacy_slug, keywords: k"));
+        assert!(!desc_unquoted_prose("keywords: k")); // no desc at all
+        assert!(desc_unquoted_prose(
+            "desc: only_the_FRESH-CREATE_path.dropped, keywords: k"
+        ));
+    }
+
+    #[test]
+    fn mask_inline_code_blanks_a_footnote_inside_backticks() {
+        // A literal `[^N]` in inline code must not read as a footnote reference.
+        let masked = mask_inline_code("prose then `[^99]` then more");
+        assert!(!masked.contains("[^99]"), "inline `[^99]` must be masked: {masked}");
+        assert!(masked.contains("prose then"), "text outside code survives: {masked}");
+    }
+
+    #[test]
+    fn collapse_strip_anchors_removes_footnote_anchors_and_collapses_ws() {
+        assert_eq!(collapse_strip_anchors("some   fact [^3] more"), "some fact more");
+    }
+
+    #[test]
+    fn atom_verbatim_body_reads_the_body_between_marker_and_last_line() {
+        // locate_atom_body_matching → atom_verbatim_body must return the collapsed body sans anchors.
+        let text = "---\nname: p\n---\n^foo [keywords: k]\nfirst line [^2] and second.\n\n\
+                    ## Notes and lessons learned\n[^2]: prior lesson.\n";
+        let matcher = |id: &str| atom_id_matches(id, "foo");
+        let (m, last) = locate_atom_body_matching(text, &matcher).unwrap();
+        assert_eq!(atom_verbatim_body(text, m, last), "first line and second.");
+    }
+
+    #[test]
+    fn lint_unquoted_desc_is_reported() {
+        let dir = lint_tmpdir("unquoted_desc");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^bad [desc: some-Unquoted.Prose, keywords: k]\nbody.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(has_violation(&v, "unquoted prose"), "got: {v:?}");
+    }
+
+    #[test]
+    fn lint_empty_lesson_body_is_reported() {
+        let dir = lint_tmpdir("empty_lesson");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             body cites a lesson.[^1]\n\n## Notes and lessons learned\n\
+             [^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01]\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(has_violation(&v, "no body"), "got: {v:?}");
+    }
+
+    #[test]
+    fn lint_superseded_without_body_is_reported_and_clean_passes() {
+        let dir = lint_tmpdir("superseded_body");
+        // Missing SUPERSEDED BODY → flagged.
+        std::fs::write(
+            dir.join("bad.md"),
+            "---\nname: bad\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             body.[^1]\n\n## Notes and lessons learned\n\
+             [^1]: [id:ATOM-AAAA-BBBB, status:valid, supersedes:^foo, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] LESSON LEARNED: don't X. Do Y.\n",
+        )
+        .unwrap();
+        // WITH SUPERSEDED BODY → clean of this check.
+        std::fs::write(
+            dir.join("ok.md"),
+            "---\nname: ok\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             body.[^1]\n\n## Notes and lessons learned\n\
+             [^1]: [id:ATOM-CCCC-DDDD, status:valid, supersedes:^foo, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] LESSON LEARNED: don't X. Do Y. SUPERSEDED BODY: the old fact.\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            v.iter().any(|(p, _, m)| p.contains("bad.md") && m.contains("SUPERSEDED BODY")),
+            "missing SUPERSEDED BODY must be reported on bad.md; got: {v:?}"
+        );
+        assert!(
+            !v.iter().any(|(p, _, m)| p.contains("ok.md") && m.contains("SUPERSEDED BODY")),
+            "the well-formed supersession must not be flagged; got: {v:?}"
+        );
+    }
+
+    #[test]
+    fn lint_oversized_atom_is_reported() {
+        let dir = lint_tmpdir("oversized");
+        let big_body = "word ".repeat(400); // ~2000 chars collapsed > 1500 default budget
+        std::fs::write(
+            dir.join("n.md"),
+            format!(
+                "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                 ^big [keywords: k]\n{big_body}\n\n## Notes and lessons learned\n"
+            ),
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(has_violation(&v, "decompose it into"), "got: {v:?}");
+    }
+
+    #[test]
+    fn lint_inline_code_footnote_is_not_a_false_dangling_ref() {
+        // The FP that bit this session: a `[^99]` INSIDE inline code must not read as a dangling ref.
+        let dir = lint_tmpdir("inline_fp");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             example prose mentioning `[^99]` as a literal token.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !has_violation(&v, "[^99]"),
+            "inline-code [^99] must not be a dangling-ref violation; got: {v:?}"
         );
     }
 

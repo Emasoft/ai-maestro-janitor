@@ -1,9 +1,9 @@
 ---
 trdd-id: DOJ2LE1G
 title: memgrep add-lesson gains --supersedes with SUPERSEDED BODY, and lint gains four checks
-column: backburner
+column: dev
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T06:35:11+0200
+updated: 2026-07-23T07:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: high
@@ -12,14 +12,40 @@ relevant-rules: [1]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-23
 
-**NOT STARTED.** Design captured; awaiting plan-mode sign-off. This is the NPT that
-WN7M829Y (retroactive repair) depends on — the repair chore cannot supersede-correctly until
-`add-lesson --supersedes` exists and `lint` can flag the four defects.
+**MEMGREP CORE SHIPPED (Phase 1a/1b/1c). Plan approved; implementing across the 4 TRDDs.**
+All changes in `scripts/memgrep/src/memory.rs`; 110 cargo tests green (8 new).
 
-**NEXT ACTION:** implement `--supersedes <atom-id>` in `memory::cmd_add_lesson_cli`
-(`scripts/memgrep/src/memory.rs`): read the target atom's verbatim body, demote it to
-`status: superseded`, and emit the lesson with the mandatory body shape. Then add the four
-lint rules in `memory::cmd_lint_cli`.
+**DONE:**
+- `add-lesson --supersedes` — captures the `--atom`'s CURRENT verbatim body (via
+  `atom_verbatim_body`, `[^N]` anchors stripped), appends ` SUPERSEDED BODY: <old>` to the
+  lesson text, and records a `supersedes:<atom>` metadata field. Run BEFORE cleaning the atom.
+- `add-lesson --retire-atom` (requires `--supersedes`) — injects `status: superseded,
+  superseded-by:<lesson-id>` into the atom marker (idempotent). DEFAULT is correct-in-place
+  (same atom id, stays valid) — never a `-v2` duplicate.
+- FOUR new `lint` checks (deterministic, FP-free): `unquoted-desc` (unquoted prose desc — a
+  clean legacy snake_case slug is grandfathered), `empty-lesson-body`, `oversized-atom`,
+  `superseded-without-body` (a `supersedes:` lesson lacking `SUPERSEDED BODY:`). Plus the
+  inline-code `[^N]` FP fix (`mask_inline_code`).
+- **oversized-atom default = 1500 chars** (`MEMGREP_ATOM_MAX_CHARS`, 0=off). Chosen from the
+  LIVE corpus distribution (558 atoms: median 559, p90 1241, p95 1624, max 3271). 600 flagged
+  half the corpus incl. well-authored pages; 1500 flags only the ~6% bloated tail (36
+  corpus-wide) — the real decomposition candidates. My own contract page now lints clean.
+
+**NEXT ACTION:** rebuild+install the memgrep binary (`cargo install --path scripts/memgrep`)
+at the END of all phases so the checks go live for the skills/detector; then Phase 2 (migrate).
+
+**DEFERRED (moved to the phase that owns them):**
+- 1d — the py mirror in `wikimem_syntax_lint.py`: fold into **WN7M829Y** (the detector surface).
+  Prefer the detector SHELL OUT to `memgrep lint` over re-implementing the 1500 threshold in
+  Python (avoid a second drifting copy — the 3-pillars anti-pattern).
+- 1e — atom↔lesson travel in `memory_edit_verify.py`: fold into **VJCMZ2OP** (migrate), where
+  the travel semantics are concretely defined and self-verified by the migrate transaction.
+
+**GATE CAVEAT for Phase 3 (found while linting the real corpus):** the corpus ALREADY carries
+many pre-existing footnote/link violations (USER: 74 `never-referenced` + 33 one-sided; PROJ:
+47+14; LOCAL: 8+30). So the txn-commit gate MUST be a DELTA gate (block only on violations the
+edit INTRODUCES), NOT "block on any lint violation" — else every edit to a page with a
+pre-existing violation is rejected for an unrelated reason.
 
 ## Part 1 — the lesson contract (the supersession protocol, enforced)
 
