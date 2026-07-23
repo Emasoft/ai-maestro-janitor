@@ -1,9 +1,9 @@
 ---
 trdd-id: WN7M829Y
 title: The janitor background chore retroactively repairs malformed atoms via supersession
-column: backburner
+column: todo
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T06:35:11+0200
+updated: 2026-07-23T08:05:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: medium
@@ -13,15 +13,29 @@ npt: [DOJ2LE1G]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-23
 
-**NOT STARTED. BLOCKED on NPT DOJ2LE1G** — the chore repairs by superseding, which needs
-`add-lesson --supersedes` + the four `lint` checks to exist first. Moving this past `dev`
-before DOJ2LE1G lands would ship a chore that "repairs" by hand-editing, re-introducing the
-very defect it is meant to remove.
+**NPT DOJ2LE1G is DONE + LIVE** (add-lesson --supersedes + the 4 lint checks + binary
+installed), so the retroactive repair is now UNBLOCKED and TOOLING-READY. This is the only
+remaining piece of the wikimem-authoring plan; Phases 1/2/3 shipped.
 
-**NEXT ACTION (after DOJ2LE1G):** extend the `wikimem-syntax` detector /
-`scripts/wikimem_syntax_lint.py` to surface the four new defect classes, and add a
-subconscious-agent REPAIR pass that, for each flagged atom, applies the supersession protocol
-through the CLI. Retroactive sweep over all three scopes.
+**Scope corrected while implementing (do NOT hack the scheduler):** the four defect classes do
+NOT map cleanly onto the existing repair/atomize passes, so `repair_has_work` must NOT be
+extended to flag them — that would dispatch repair passes that cannot fix them (churn):
+- `unquoted-desc` — mechanically fixable (quote the value). REPAIR-class.
+- `oversized-atom` (36 corpus-wide) — DECOMPOSITION, judgment-heavy; not a repair fix. Needs the
+  atomize pass OR `memgrep migrate` to split one atom into several — a NEW editorial capability.
+- `empty-lesson-body` / `superseded-without-body` — may be UNRECOVERABLE (the old body/why can be
+  gone). Where recoverable, supersede; where not, the honest fix is to flag for a human, not invent.
+
+**So the retroactive sweep is genuine EDITORIAL-AGENT work with real shared-corpus blast radius,
+not more scheduler code.** The corpus currently carries **36 oversized + 4 unquoted-desc** (0
+empty-lesson-body, 0 superseded-without-body — the new gate keeps it that way going forward).
+
+**NEXT ACTION (run deliberately, ideally with the user aware — shared memory):** dispatch the
+`janitor-memory-subconscious-agent` on a bounded scope with a per-class policy —
+unquoted-desc → in-place repair (quote); oversized → decompose via atomize/`migrate` (judgment);
+empty/superseded-without-body → supersede if the old fact is recoverable, else flag. Surface
+progress; never delete an atom. This is the piece to do with the USER in the loop, not a silent
+autonomous batch. Detection is already available (`memgrep lint <scope>` flags all four).
 
 ## The ask
 
