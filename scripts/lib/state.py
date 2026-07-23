@@ -43,6 +43,24 @@ MAINTENANCE_FLAG = "maintenance-mode"
 # dispatch.py on the next fire. Read by fleet_scan to diagnose `frozen`.
 RATE_LIMITED_FLAG = "rate-limited.flag"
 
+# The rate-limit window START stamp, written by the StopFailure hook alongside
+# RATE_LIMITED_FLAG. Used by the daemon's resume-wake dedupe as the per-window key
+# (a NEW limit writes a NEW value → a new window → a legitimately-repeated resume is
+# not swallowed) — TRDD-X07E7HTN, D1 v1.
+RATE_LIMITED_SINCE_FILE = "rate-limited-since.ts"
+
+# Daemon-owned rate-limit RESUME wake (TRDD-X07E7HTN, D1 v1). The name lives HERE
+# (SSOT) because it is a CONTRACT spanning two processes: the DAEMON (writer,
+# daemon._resume_wake_pass) stamps DAEMON_WAKE_COVERED_FILE = now each beat it is
+# covering an injectable, rate-limited pane's resume; dispatch (reader,
+# _daemon_wake_covered_fresh) reads it as the MF4 handshake proof that the pane's
+# resume is daemon-covered, so the rate-limit window may demote off the FAST cron.
+# ABSENT/STALE ⇒ un-injectable / never-scanned / #J / feature-off ⇒ the cron stays the
+# trigger (the safe default). DAEMON_RESUME_WAKE_FILE is the daemon's own once-per-window
+# inject dedupe (never read by dispatch).
+DAEMON_WAKE_COVERED_FILE = "daemon-wake-covered.ts"
+DAEMON_RESUME_WAKE_FILE = "daemon-resume-wake.ts"
+
 # --- path resolution -------------------------------------------------------
 
 # CPV-skillaudit: avoid reserved-env mutation. A caller (e.g. the PostCompact

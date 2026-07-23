@@ -252,9 +252,14 @@ def test_dry_run_warns_when_handoff_missing(tmp_path: Path) -> None:
     assert "HANDOFF_MISSING" in proc.stderr
 
 
-def test_present_user_is_never_typed_at_but_state_IS_recorded(tmp_path: Path) -> None:
-    """The presence gate: a user at the keyboard is never typed at (it would clobber
-    their input AND wipe their session), but the resume state is still recorded."""
+def test_present_user_is_never_typed_at_and_no_resume_flag_written(tmp_path: Path) -> None:
+    """The presence gate (issue #105 fix): a user at the keyboard is never typed at (it would
+    clobber their input AND wipe their session), AND — the fix — NO resume state is written.
+
+    Previously the flag was recorded even on USER_PRESENT, but /clear never fired, so the next
+    heartbeat consumed `resume-after-clear.flag`, emitted a spurious [janitor-resume], and
+    cleared it — silently disarming a later MANUAL /clear's auto-resume. The gate now runs
+    BEFORE the writes, so a refused clear leaves nothing behind for a heartbeat to consume."""
     p = tmp_path / "proj"
     p.mkdir()
     pane = "w0t0p0:11111111-2222-3333-4444-555555555555"
@@ -267,7 +272,12 @@ def test_present_user_is_never_typed_at_but_state_IS_recorded(tmp_path: Path) ->
     assert proc.returncode == 0
     assert "USER_PRESENT" in proc.stdout
     assert "CLEAR_FIRED" not in proc.stdout, "must NOT clear a session the user is using"
-    assert (_state_dir(p) / "resume-after-clear.flag").is_file()
+    # The fix: with /clear refused, the resume flag/marker/directive are NOT written, so no
+    # heartbeat can consume them and disarm a later manual /clear (issue #105).
+    assert not (_state_dir(p) / "resume-after-clear.flag").exists()
+    assert not (_state_dir(p) / "resume-after-clear.ts").exists()
+    assert not (_state_dir(p) / "resume-directive.txt").exists()
+    assert "CLEAR_MARKER_WRITTEN" not in proc.stdout
 
 
 def test_no_iterm_reports_and_still_records_state(tmp_path: Path) -> None:

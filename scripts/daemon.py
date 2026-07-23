@@ -1262,6 +1262,122 @@ def task_session_liveness(fleet: list | None = None) -> None:
         )
         _audit(inst, "fired" if ok else "fire_failed", action, str(plan["channel"]))
 
+    # The FREE half of the rate-limit recovery (TRDD-X07E7HTN, D1 v1). Same scanned fleet,
+    # same beat — so it inherits the SESSION_LIVENESS_ENABLED gate above AND the typing gate
+    # (the whole beat already returned if the user is at the keyboard). DEFAULT-OFF.
+    _resume_wake_pass(fleet, now, fire=fire)
+
+
+# Daemon-owned rate-limit RESUME wake (TRDD-X07E7HTN, D1 v1) — env knob + window key.
+_RATELIMIT_WAKE_ENABLED_ENV = "CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED"
+
+
+def _rate_limit_window_key(sd: Path, flag: Path) -> int:
+    """A STABLE per-rate-limit-window key for the resume-wake dedupe (TRDD-X07E7HTN).
+
+    Prefer `rate-limited-since.ts` (written by on-stop-failure alongside the flag); fall back
+    to the flag's own mtime when the since-file is absent/0 (clock skew). A NEW limit writes a
+    NEW value → a new window → a legitimately-repeated resume is NOT swallowed. Returns 0 only
+    when neither is readable — the caller treats that as "cannot key this window" and stamps
+    nothing (fail-open toward the cron fallback)."""
+    since = state.read_int_state(sd / state.RATE_LIMITED_SINCE_FILE, 0)
+    if since > 0:
+        return since
+    try:
+        return int(flag.stat().st_mtime)
+    except OSError:
+        return 0
+
+
+def _resume_wake_pass(fleet: list, now: int, *, fire: bool) -> None:
+    """Daemon-owned rate-limit RESUME wake (TRDD-X07E7HTN, D1 v1) — the FREE half of the
+    rate-limit recovery, so an injectable rate-limited session's cron can leave the paid
+    FAST poll.
+
+    The FAST `*/5` cron a rate-limited session sits in exists only to catch the moment the
+    API clears and emit [janitor-resume] — dozens of ~$0.76 quiet model turns across a
+    multi-hour limit. This pass does that half with NO model attached: for every non-frozen,
+    injectable, rate-limited instance it types the `/janitor-resume` SLASH COMMAND (soft
+    enqueue) into the pane and stamps `daemon-wake-covered.ts`, so that session's cron may
+    demote off FAST (the arm handshake, MF4). The cron stays armed as the fail-open fallback,
+    and the single-consumer `rate-limited.flag` (only dispatch clears it) means the daemon
+    inject and a cron fire can never double-resume — whichever runs `/janitor-resume` first
+    clears the flag; the other no-ops.
+
+    DEFAULT-OFF (`CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED`): until opted in the
+    cron is the only trigger, exactly as today. Fail-open throughout.
+
+    MF1 — reconciled with esc_nudge: a `frozen` pane is handled ONLY by the recovery loop's
+    ESC-only esc_nudge (typing a command into a frozen pane buffers on the retry-blocked input
+    line and floods, TRDD-P7WU40G9). This pass therefore targets ONLY `healthy` instances —
+    the one non-frozen state a rate-limited pane reaches (`server_owned`/`unarmed`/`dead` are
+    hands-off; `version_mismatch`/`cron_dead` are owned by the recovery loop above and never
+    coincide with a rate-limit flag) — so it can never double-actuate an instance the recovery
+    loop is already driving, and it fires only once the diagnosis has flipped off `frozen`.
+    MF2 — actuation is the `/janitor-resume` COMMAND, never the bare [janitor-resume] marker
+    (a typed marker is defanged content — dispatch._defang_foreign_markers). The command turn
+    is self-verifying for reachability (it completes only when the API is reachable).
+    MF3 — the wake-dedupe + coverage-stamp writes take the per-project `detector.lock`; this
+    pass runs NO detector and touches NO `last-run-*.ts` / seen-file, so no dedupe can corrupt.
+    """
+    if not state.is_truthy_env(_RATELIMIT_WAKE_ENABLED_ENV, False):
+        return
+    for inst in fleet:
+        root = inst.project_root
+        if not root:
+            continue
+        # ONLY `healthy` — see MF1 in the docstring. Excludes frozen (esc_nudge owns it),
+        # server_owned/unarmed/dead (hands-off), and version_mismatch/cron_dead (recovery-loop
+        # owned + never rate-limited). This is the disjointness guarantee with the loop above.
+        if inst.diagnosis != "healthy":
+            continue
+        sd = Path(root) / ".janitor" / "state"
+        flag = sd / state.RATE_LIMITED_FLAG
+        if not flag.is_file():
+            continue  # not rate-limited → nothing to wake
+        # A queued-but-unexecuted command at the pane's tail means a soft inject would only
+        # pile up (the "janitor keeps printing commands" wedge, TRDD-8DR0X08A). Skip entirely —
+        # NO coverage stamp — so dispatch keeps FAST and the cron stays the trigger.
+        if getattr(inst, "trailing_enqueues", 0) >= 1:
+            continue
+        # Build the resume injection (soft enqueue). None ⇒ un-injectable pane (plain / VS Code
+        # / ssh — no resolvable terminal): we CANNOT prove a wake, so stamp NO coverage and
+        # dispatch keeps this session FAST (MF4 fail-open — the cron is its only trigger).
+        plan = fleet_inject.build_injection(inst.terminal, "resume", esc_first=False)
+        if plan is None:
+            continue
+        with gs.detector_lock(sd) as held:
+            if not held:
+                continue  # the cron (or a concurrent beat) holds this project's writer lock
+            since = _rate_limit_window_key(sd, flag)
+            if since <= 0:
+                continue  # cannot key this window (no since, unreadable mtime) — fail-open
+            dedupe = sd / state.DAEMON_RESUME_WAKE_FILE
+            covered = sd / state.DAEMON_WAKE_COVERED_FILE
+            label = os.path.basename(root)
+            if state.read_int_state(dedupe, 0) != since:
+                # A NEW rate-limit window (or the first inject) — deliver ONE /janitor-resume.
+                if not fire:
+                    state.log_line(
+                        "daemon",
+                        f"resume-wake:DRY would /janitor-resume → {plan['channel']} for {label}",
+                    )
+                    continue
+                if fleet_inject.fire(plan):
+                    state.atomic_write(dedupe, str(since))  # dedupe: injected for THIS window
+                    state.atomic_write(covered, str(now))   # coverage PROVEN → dispatch may demote
+                    state.log_line(
+                        "daemon", f"resume-wake: FIRED /janitor-resume → {plan['channel']} for {label}"
+                    )
+                else:
+                    state.log_line("daemon", f"resume-wake: FIRE-FAILED /janitor-resume for {label}")
+            else:
+                # Already injected /janitor-resume for THIS window; the enqueued command is the
+                # armed wake. Re-stamp coverage EVERY beat so the session's cron stays demoted
+                # while the daemon keeps covering it (dispatch requires a FRESH stamp). Overwrite,
+                # not append — the file just holds the latest ts, so it stays bounded (S3/S4).
+                state.atomic_write(covered, str(now))
+
 
 def _fire_fleet_stop(inst, plan: dict, flag_state: str, now: int) -> None:
     """Fire ONE fleet-stop injection through the validated tmux/iTerm channel, stamp on

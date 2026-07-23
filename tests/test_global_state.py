@@ -119,6 +119,35 @@ def test_singleton_flock_blocking_waits_then_takes_over(state_dir: Path) -> None
     gs.release_singleton_flock(result["fd"])  # type: ignore[arg-type]
 
 
+def test_detector_lock_is_single_writer(state_dir: Path, tmp_path: Path) -> None:
+    """The per-project `detector.lock` (MF3, TRDD-X07E7HTN) serialises the daemon-vs-cron
+    writer: while one holder has it, a second acquire on the SAME project state dir SKIPS
+    (held=False), and once released a fresh acquire succeeds. flock is per-open-file-
+    description, so two `os.open`s in this one process genuinely conflict — the same property
+    the singleton-flock tests rely on."""
+    gs = _gs()
+    sd = tmp_path / "proj" / ".janitor" / "state"
+    with gs.detector_lock(sd) as held1:
+        assert held1 is True, "first acquire must hold the lock"
+        assert (sd / "detector.lock").is_file(), "the lock file is created in the project state dir"
+        with gs.detector_lock(sd) as held2:
+            assert held2 is False, "the second writer must SKIP while the first holds it"
+    with gs.detector_lock(sd) as held3:
+        assert held3 is True, "released → a subsequent acquire succeeds"
+
+
+def test_detector_lock_is_per_project_not_global(state_dir: Path, tmp_path: Path) -> None:
+    """The lock is PER-PROJECT: holding it for one project's state dir never blocks another
+    project's — so the daemon covering project A cannot starve the cron of project B."""
+    gs = _gs()
+    sd_a = tmp_path / "a" / ".janitor" / "state"
+    sd_b = tmp_path / "b" / ".janitor" / "state"
+    with gs.detector_lock(sd_a) as held_a:
+        assert held_a is True
+        with gs.detector_lock(sd_b) as held_b:
+            assert held_b is True, "a different project's lock must be independently acquirable"
+
+
 def test_daemon_is_alive_no_pid_file(state_dir: Path) -> None:
     """A missing pid file means definitely-not-alive."""
     gs = _gs()

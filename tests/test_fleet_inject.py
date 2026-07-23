@@ -41,6 +41,30 @@ def test_action_to_command_only_typing_rungs() -> None:
     assert fi.action_to_command("nonsense") is None
 
 
+def test_resume_action_types_the_slash_command_soft_never_the_marker() -> None:
+    """The daemon-owned rate-limit wake (TRDD-X07E7HTN, D1 v1): the `resume` action maps to the
+    `/janitor-resume` SLASH COMMAND, builds a SOFT (no-ESC) enqueue plan, and NEVER emits the
+    bare `[janitor-resume]` marker (a typed marker is defanged content — dispatch owns that)."""
+    assert fi.action_to_command("resume") == "/janitor-resume"
+    # tmux: soft enqueue (no ESC), types the command, carries no bracketed marker anywhere.
+    tmux = fi.build_injection({"tmux_pane": "%5"}, "resume", esc_first=False)
+    assert tmux is not None and tmux["channel"] == "tmux"
+    assert tmux["command"] == "/janitor-resume"
+    assert not any("Escape" in step for step in tmux["steps"]), "resume wake must be SOFT (no ESC)"
+    assert ["RUN", "tmux", "send-keys", "-t", "%5", "-l", "/janitor-resume"] in tmux["steps"]
+    assert not any("[janitor-resume]" in str(step) for step in tmux["steps"]), (
+        "the wake types the /janitor-resume COMMAND, never the bare marker"
+    )
+    # iTerm: same contract on the AppleScript channel.
+    iterm = fi.build_injection({"iterm_session_id": "ttys3:4C4A-9B7"}, "resume", esc_first=False)
+    assert iterm is not None and iterm["channel"] == "iterm"
+    assert 'write text "/janitor-resume"' in iterm["osascript"]
+    assert "[janitor-resume]" not in iterm["osascript"]
+    assert "character id 27" not in iterm["osascript"], "resume wake is SOFT — no ESC on iTerm either"
+    # Un-injectable pane still declines (no coverage can be proven → dispatch keeps FAST).
+    assert fi.build_injection({}, "resume", esc_first=False) is None
+
+
 def test_valid_session_id_gates_injection() -> None:
     """A bare hex UUID is accepted; anything that could smuggle AppleScript into the
     osascript string is rejected — the daemon must never build a poisoned script."""

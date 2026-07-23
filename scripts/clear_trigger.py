@@ -363,22 +363,36 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    # 1. PERSIST THE RESUME STATE FIRST — before firing anything. /clear is
-    #    unrecoverable, so the marker + directive MUST be on disk before it runs.
-    #    A missing --directive falls back to a pointer at the link-only handoff, so
-    #    the post-clear cron always has a resume target (there is no PostClear hook
-    #    to synthesise one, unlike the compact path).
+    # 1. Resolve the resume directive. A missing --directive falls back to a pointer at the
+    #    link-only handoff, so the post-clear cron always has a resume target (there is no
+    #    PostClear hook to synthesise one, unlike the compact path).
     directive = args.directive.strip() or (
         "read .janitor/state/agent-handoff.md FIRST (link-only handoff — follow its "
         "wikimem/TRDD links via memgrep recall on demand), then resume your prior "
         "in-flight task."
     )
+
+    # 2. Presence gate ONCE, up front — BEFORE writing any resume state (issue #105, the
+    #    silent-disarm class). Typing into a pane whose user is mid-sentence clobbers what
+    #    they were writing; /clear would additionally wipe their session. If they are present
+    #    they will drive the session themselves (the SessionStart re-arm nudge covers them) —
+    #    so refuse AND write NOTHING. Recording resume-after-clear.flag here (as this used to,
+    #    with the gate placed AFTER the writes) was a silent disarm: /clear never fires, yet
+    #    the next heartbeat consumes the flag, emits a spurious [janitor-resume], and clears it
+    #    — so a later MANUAL /clear no longer auto-resumes. The flag must exist ONLY when /clear
+    #    is actually about to run, which is exactly the invariant this ordering restores.
+    if not args.dry_run and _user_present():
+        print("USER_PRESENT")
+        return 0
+
+    # 3. PERSIST THE RESUME STATE — before firing anything. /clear is unrecoverable, so the
+    #    marker + directive MUST be on disk before it runs.
     dpath = _write_directive(directive)
     mpath = _write_clear_marker(directive)
     print(f"DIRECTIVE_WRITTEN {dpath}")
     print(f"CLEAR_MARKER_WRITTEN {mpath}")
 
-    # 2. Validate the handoff against the concise-but-exhaustive contract (WARN-only;
+    # 4. Validate the handoff against the concise-but-exhaustive contract (WARN-only;
     #    /clear still proceeds). A missing handoff on an unrecoverable /clear is worth
     #    a loud stderr line; a bloated one defeats the point of preferring /clear.
     handoff = _read_handoff()
@@ -393,15 +407,7 @@ def main() -> int:
         if not ok:
             print(f"HANDOFF_NOT_CONCISE {','.join(reasons)}", file=sys.stderr)
 
-    # 3. Presence gate ONCE, up front. Typing into a pane whose user is mid-sentence
-    #    clobbers what they were writing; /clear would additionally wipe their session.
-    #    If they are present they will drive the session themselves (the SessionStart
-    #    re-arm nudge covers them) — so refuse, but the resume state is already recorded.
-    if not args.dry_run and _user_present():
-        print("USER_PRESENT")
-        return 0
-
-    # 4. Fire the two phases. Phase A: /clear. Phase B: bootstrap (re-arm + resume),
+    # 5. Fire the two phases. Phase A: /clear. Phase B: bootstrap (re-arm + resume),
     #    delayed by --clear-settle so the fresh session is up first. Both soft (no ESC):
     #    the invoking skill ends its turn right after this, so the enqueued /clear runs
     #    at the turn boundary and the bootstrap lands on the fresh idle prompt.

@@ -440,6 +440,10 @@ def _skills_reload_flag_path() -> Path:
 _MARKETPLACE_LOCK = "marketplace-op.lock"
 _OAUTH_ROTATOR_LOCK = "oauth-rotator-tick.lock"
 _SETTINGS_ENSURER_LOCK = "settings-ensurer.lock"
+# PER-PROJECT (not global): the flock filename `detector_lock` places inside a caller's
+# `<project>/.janitor/state/` — the single-writer discipline for the daemon-vs-cron race
+# (MF3, TRDD-X07E7HTN). Named here beside the other lock filenames for discoverability.
+_DETECTOR_LOCK = "detector.lock"
 
 
 def _ticket_dispatch_lock_path() -> Path:
@@ -1265,6 +1269,62 @@ def settings_ensurer_lock() -> Iterator[bool]:
     finally:
         if handle is not None:
             release_settings_ensurer_lock(handle)
+
+
+# ---------- per-project detector single-writer lock ----------------------
+#
+# A PER-PROJECT flock (`<project>/.janitor/state/detector.lock`) that serialises any
+# `.janitor/state` mutation the daemon and the fallback cron could BOTH perform, so the
+# two never race / double-write / corrupt dedupe (MF3, TRDD-X07E7HTN). Unlike every lock
+# above — which is machine-global, in `global_state_dir()` / `control_dir()` — this one is
+# scoped to ONE project, so its path is a caller-supplied state dir, and it is a SINGLE
+# flock (there is no legacy-migration second mouth to hold, unlike the control-dir locks).
+#
+# In v1 the daemon writes ONLY the resume wake-dedupe + coverage stamps under it, runs NO
+# detector, and touches NO `last-run-*.ts` / seen-file — the lock is specified now purely so
+# the future full-roster scope (a daemon that runs detectors) is single-writer-safe from day
+# one. Non-blocking BY DESIGN: a loser SKIPS this round. The daemon re-fires every liveness
+# interval and the cron on its own cadence, so a skip is always safe and never wedges a
+# heartbeat turn behind the other writer.
+
+
+@contextlib.contextmanager
+def detector_lock(state_dir: Path) -> Iterator[bool]:
+    """Serialise a per-PROJECT `.janitor/state` mutation against the other writer (MF3).
+
+    Yields True when the flock on `<state_dir>/detector.lock` was acquired (safe to write),
+    or False when the other writer (daemon or cron) holds it (SKIP this round). Releases on
+    exit iff held. Never raises — a mkdir/open failure degrades to "not held" (skip), so a
+    lock fault can never crash the beat that consulted it.
+
+        with gs.detector_lock(sd) as held:
+            if not held:
+                return   # the other writer holds it this round
+    """
+    fd: Optional[int] = None
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(state_dir / _DETECTOR_LOCK), os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            fd = None
+    try:
+        yield fd is not None
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 # ---------- spawn ---------------------------------------------------------

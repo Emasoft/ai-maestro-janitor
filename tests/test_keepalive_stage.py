@@ -57,6 +57,25 @@ def test_closure_is_bounded_and_excludes_pattern_libs() -> None:
     assert not leaked, f"pattern libs leaked into the closure: {leaked}"
 
 
+def test_closure_excludes_detectors_and_reuses_wake_modules() -> None:
+    """D1 v1 balloon guard (TRDD-X07E7HTN, MF5): the daemon-owned rate-limit wake reuses ONLY
+    modules already in the L0 daemon closure (fleet_inject / fleet_scan / global_state / state)
+    — so the closure MUST contain ZERO `detectors/` paths and ZERO `*_patterns.py`, and stay
+    small. If the wake work ever imports a detector or a pattern lib into the L0 daemon, this
+    FAILS the build instead of letting the daemon crash-loop on a bloated stage exactly in the
+    all-sessions-down scenario the keepalive exists for."""
+    closure = keepalive_stage.daemon_closure(SCRIPTS)
+    assert 0 < len(closure) <= 50, f"closure unexpectedly large: {len(closure)}"
+    detectors = [str(p) for p in closure if "detectors" in p.parts]
+    assert not detectors, f"detector modules leaked into the L0 daemon closure: {detectors}"
+    assert not [p.name for p in closure if p.name.endswith("_patterns.py")]
+    # The wake's actuation modules are already staged (it adds NO new import), so their
+    # presence proves the reuse rather than a new dependency edge.
+    names = {p.name for p in closure}
+    for required in ("fleet_inject.py", "fleet_scan.py", "global_state.py", "state.py"):
+        assert required in names, f"{required} must already be in the closure (wake reuses it)"
+
+
 def test_closure_includes_entry_and_daemon() -> None:
     """The launched entry and the daemon it imports are both in the stage list."""
     names = {p.name for p in keepalive_stage.daemon_closure(SCRIPTS)}

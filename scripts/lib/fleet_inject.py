@@ -67,6 +67,17 @@ _ACTION_COMMAND = {
     # sender of /reload-plugins forces.
     "reload": "/reload-plugins --force",
     "update": "/janitor-arm",
+    # The daemon-owned rate-limit RESUME wake (TRDD-X07E7HTN, D1 v1). Fired ONLY
+    # into a NON-frozen, rate-limited pane (a `frozen` pane gets esc_nudge, never a
+    # typed command — TRDD-P7WU40G9), soft-enqueue (esc_first=False): the enqueued
+    # `/janitor-resume` runs the dispatcher stub, which is the single-consumer of
+    # rate-limited.flag, so this is the free daemon analogue of resume_trigger.py's
+    # self-send. NEVER the bare `[janitor-resume]` MARKER — a typed marker is untrusted
+    # content (dispatch._defang_foreign_markers neutralizes it); a typed marker would be
+    # inert, so the slash command is the only working channel, and routing through it
+    # makes reachability self-verifying (the command turn completes only when the API is
+    # reachable).
+    "resume": "/janitor-resume",
 }
 
 

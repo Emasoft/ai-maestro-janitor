@@ -350,3 +350,147 @@ def test_dwell_state_persists_across_two_suppressed_fires(proj: Path, monkeypatc
     assert out2 == ""
     data2 = json.loads((_state(proj) / "cadence-state.json").read_text())
     assert data2["last_rearm_ts"] == now - 100  # still unchanged on the second silent fire
+
+
+# --------------------------------------------------------------------------- #
+# MF4 — the daemon-injectability handshake (TRDD-X07E7HTN, D1 v1). A rate-limit
+# resume may DEMOTE off FAST ONLY when the daemon has stamped daemon-wake-covered.ts
+# (it injected /janitor-resume into this pane for free). The coverage stamp — not
+# active_waiting itself — is the SOLE demotion authority, and it demotes ONLY the
+# rate-limit/resume reason. DEFAULT-OFF: absent the opt-in a stamp is ignored.
+# --------------------------------------------------------------------------- #
+
+
+def _fresh_cover(proj: Path) -> None:
+    import time
+
+    (_state(proj) / "daemon-wake-covered.ts").write_text(str(int(time.time())))
+
+
+def test_active_waiting_non_ratelimit_reasons_stay_fast_without_coverage(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE NEGATIVE TEST (MF4): a session active-waiting for a NON-rate-limit reason —
+    keep-going, a resume directive, or pending background agents — stays FAST with NO fresh
+    daemon-wake-covered.ts. This proves the coverage stamp, NOT active_waiting, authorizes
+    demotion: the stamp demotes ONLY the rate-limit/resume reason, never these."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
+    dispatch = _import_dispatch()
+    sd = _state(proj)
+    now = int(time.time())
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+
+    (sd / "keep-going").write_text("")
+    assert dispatch._cadence_active_waiting(sd, now) is True
+    (sd / "keep-going").unlink()
+
+    (sd / "resume-directive.txt").write_text("continue TRDD-X07E7HTN")
+    assert dispatch._cadence_active_waiting(sd, now) is True
+    (sd / "resume-directive.txt").unlink()
+
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 1)
+    assert dispatch._cadence_active_waiting(sd, now) is True
+
+
+def test_coverage_stamp_never_demotes_a_non_ratelimit_reason(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Even a FRESH coverage stamp must NOT demote a keep-going session: the stamp suppresses
+    ONLY the rate-limit/resume reason. keep-going is an independent FAST signal, so a covered
+    keep-going session is still FAST — this is why the demotion keys on the reason, not on
+    active_waiting as a whole."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
+    dispatch = _import_dispatch()
+    sd = _state(proj)
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    (sd / "keep-going").write_text("")
+    _fresh_cover(proj)
+    assert dispatch._cadence_active_waiting(sd, int(time.time())) is True
+
+
+def test_ratelimit_resume_demotes_only_with_fresh_coverage(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SOLE demotion condition: a recent resume stamp forces FAST UNLESS a FRESH
+    daemon-wake-covered.ts proves the daemon owns the wake for free. Stale/absent coverage
+    keeps FAST (the cron stays the trigger)."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
+    dispatch = _import_dispatch()
+    sd = _state(proj)
+    now = int(time.time())
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    (sd / "last-resume.ts").write_text(str(now))
+
+    assert dispatch._cadence_active_waiting(sd, now) is True  # no coverage → FAST
+
+    (sd / "daemon-wake-covered.ts").write_text(str(now))
+    assert dispatch._cadence_active_waiting(sd, now) is False  # fresh coverage → demote
+
+    (sd / "daemon-wake-covered.ts").write_text(str(now - 100_000))
+    assert dispatch._cadence_active_waiting(sd, now) is True  # stale coverage → FAST again
+
+
+def test_coverage_ignored_when_feature_disabled(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DEFAULT-OFF preserves today's behavior: a fresh coverage stamp is IGNORED unless the
+    opt-in is set, so a rate-limited session stays FAST exactly as before D1 — a stray stamp
+    can never silently demote (and under-cover) a session while the feature is disabled."""
+    import time
+
+    monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", raising=False)
+    dispatch = _import_dispatch()
+    sd = _state(proj)
+    now = int(time.time())
+    monkeypatch.setattr(dispatch, "_pending_external_agent_count", lambda: 0)
+    (sd / "last-resume.ts").write_text(str(now))
+    _fresh_cover(proj)
+    assert dispatch._cadence_active_waiting(sd, now) is True
+
+
+def test_phase_demotes_ratelimit_window_with_fresh_coverage(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """END-TO-END: a rate-limited (recent-resume) session with FRESH daemon coverage demotes
+    the cron off FAST to the survival floor — the paid FAST poll is redundant because the
+    daemon owns the wake. Contrast test_recent_resume_promotes_to_fast (no coverage → FAST)."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_TTL_REGIME", "subscription")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_HEARTBEAT_CADENCE_DEMOTE_FIRES", "1")
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
+    now = int(time.time())
+    (_state(proj) / "last-resume.ts").write_text(str(now))
+    (_state(proj) / "daemon-wake-covered.ts").write_text(str(now))
+    dispatch = _import_dispatch()
+    _run_phase(dispatch)
+    assert (_state(proj) / "desired-cadence.cron").read_text().strip() == "*/30 * * * *"
+
+
+def test_daemon_feature_on_does_not_disable_cron_resume_fallback(
+    proj: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """COMBINED resume+action (TRDD-X07E7HTN, the survival invariant): with the daemon wake
+    feature ON and even a fresh coverage stamp present, a rate-limited cron fire STILL emits
+    the bare [janitor-resume] and clears the flag. The single-consumer flag means EXACTLY ONE
+    resume reaches the model — never lost, never doubled — so the cron fallback is never
+    disabled by the daemon path."""
+    import time
+
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", "1")
+    dispatch = _import_dispatch()
+    import state as st
+
+    st.init_state()
+    monkeypatch.setattr(dispatch.gs, "ensure_daemon_running", lambda *a, **k: None)
+    (_state(proj) / "rate-limited.flag").write_text("")
+    (_state(proj) / "daemon-wake-covered.ts").write_text(str(int(time.time())))  # daemon covering
+    out = _run_main(dispatch)
+    assert out.count("[janitor-resume]") == 1, "exactly one resume — never lost, never doubled"
+    assert not (_state(proj) / "rate-limited.flag").exists(), "single-consumer flag cleared by the cron"

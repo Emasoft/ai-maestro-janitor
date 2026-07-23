@@ -1783,6 +1783,36 @@ def _read_json_file(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _daemon_wake_coverage_window_s() -> int:
+    """How fresh `daemon-wake-covered.ts` must be to authorize a rate-limit demotion (MF4).
+
+    The daemon re-stamps it EVERY liveness beat while it is covering an injectable, rate-limited
+    pane's resume, so freshness must track that beat period: 3× tolerates two missed daemon
+    beats before a covered session falls back to FAST. Reads the SAME knob the daemon's beat
+    period uses, so the reader (this cadence phase) and the writer (the daemon) can never
+    disagree about how long a stamp stays 'fresh'."""
+    interval = state.coerce_int(
+        os.environ.get("CLAUDE_PLUGIN_OPTION_DAEMON_SESSION_LIVENESS_INTERVAL"), 120
+    )
+    return max(60, 3 * interval)
+
+
+def _daemon_wake_covered_fresh(sd: Path, now: int) -> bool:
+    """True iff the daemon recently PROVED it can wake THIS pane's rate-limit resume for free
+    (MF4, TRDD-X07E7HTN, D1 v1). A fresh `daemon-wake-covered.ts` means the daemon injected
+    `/janitor-resume` into this pane within the coverage window, so the paid FAST poll is
+    redundant and the rate-limit window may demote. STALE/ABSENT ⇒ un-injectable / never-scanned
+    / #J harness / feature-off ⇒ keep FAST (the cron stays the trigger — the safe default).
+
+    Gated on the SAME DEFAULT-OFF opt-in the daemon writes the stamp under, so a leftover stamp
+    can never demote a session while the feature is disabled: the default strictly preserves
+    today's cron-owned FAST-poll behavior."""
+    if not state.is_truthy_env("CLAUDE_PLUGIN_OPTION_DAEMON_RATELIMIT_WAKE_ENABLED", False):
+        return False
+    covered = state.read_int_state(sd / state.DAEMON_WAKE_COVERED_FILE, 0)
+    return covered > 0 and 0 <= now - covered < _daemon_wake_coverage_window_s()
+
+
 def _cadence_active_waiting(sd: Path, now: int) -> bool:
     """True iff this session is waiting on something time-sensitive (→ FAST tier):
     a RECENT resume cue (rate-limit or post-compact), a pending directive resume, an
@@ -1794,10 +1824,18 @@ def _cadence_active_waiting(sd: Path, now: int) -> bool:
     then early-returns from main() BEFORE this phase runs, so testing them here would
     always read False. The stamp survives the flag, so the fire AFTER a resume cue
     promotes to FAST and the recovery retry loop runs at the fast cadence.
+
+    MF4 handshake (TRDD-X07E7HTN, D1 v1): a fresh `daemon-wake-covered.ts` is the SOLE
+    condition that lets a rate-limit resume DEMOTE off FAST — the daemon owns the wake for
+    free, so the paid FAST poll is redundant. It suppresses ONLY the resume-stamp reason: the
+    coverage stamp (not `active_waiting` itself) is what authorizes leaving FAST, and the
+    keep-going / directive / pending-agents reasons below still hold FAST on their own. Absent
+    the feature (or its stamp) this collapses to the exact pre-existing behavior.
     """
     try:
         last_resume = state.read_int_state(sd / _LAST_RESUME_FILE, 0)
-        if last_resume > 0 and 0 <= now - last_resume < _RESUME_RECENCY_WINDOW_S:
+        resume_recent = last_resume > 0 and 0 <= now - last_resume < _RESUME_RECENCY_WINDOW_S
+        if resume_recent and not _daemon_wake_covered_fresh(sd, now):
             return True
         if (sd / "keep-going").is_file():
             return True
