@@ -2544,6 +2544,309 @@ fn atom_verbatim_body(text: &str, marker_idx: usize, body_last_idx: usize) -> St
     collapse_strip_anchors(&joined)
 }
 
+// ─────────────────────────── `memgrep migrate` ───────────────────────────
+
+/// The 0-based half-open segment `[marker_idx, end)` covering the WHOLE atom opened at `marker_idx`:
+/// its marker line plus every body line up to (not including) the next marker / heading / EOF, with
+/// trailing blank lines trimmed. Fence-aware. `migrate` lifts exactly this segment.
+fn atom_segment_end(lines: &[&str], marker_idx: usize) -> usize {
+    let mut in_fence = false;
+    let mut end = lines.len();
+    for (i, line) in lines.iter().enumerate().skip(marker_idx + 1) {
+        let t = line.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence && (t.starts_with('#') || first_block_property_marker(line).is_some()) {
+            end = i;
+            break;
+        }
+    }
+    while end > marker_idx + 1 && lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+    end
+}
+
+/// The footnote-integrity problems of a SINGLE page text — the `lint` subset that governs migration
+/// correctness (a dangling reference or an unreferenced definition). `migrate` uses it BOTH as a
+/// pre-flight gate on the two pages and as a post-build proof that the move introduced no dangling
+/// footnote — the guard against the "migrating across a malformed page corrupts both" failure.
+fn footnote_integrity_violations(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let ctx = md::build_context(text, lines.len());
+    let mut refs: BTreeSet<String> = BTreeSet::new();
+    let mut defs: BTreeSet<String> = BTreeSet::new();
+    for (i, raw) in lines.iter().enumerate() {
+        if *ctx.in_code.get(i).unwrap_or(&false) {
+            continue;
+        }
+        for (label, is_def) in scan_footnotes(&mask_inline_code(raw)) {
+            if is_def {
+                defs.insert(label);
+            } else {
+                refs.insert(label);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for r in &refs {
+        if !defs.contains(r) {
+            out.push(format!("dangling footnote reference [^{r}]"));
+        }
+    }
+    for d in &defs {
+        if !refs.contains(d) {
+            out.push(format!("unreferenced footnote definition [^{d}]"));
+        }
+    }
+    out
+}
+
+/// Rewrite every `[^label]` token (reference AND definition marker — the `:` after a def is outside
+/// the match, so it survives) to `[^map[label]]` when the label is in `map`, else leave it. Used by
+/// `migrate` to renumber the moved footnotes to labels that are free on the destination page.
+fn rewrite_footnote_labels(text: &str, map: &BTreeMap<String, String>) -> String {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\]").expect("static regex"));
+    re.replace_all(text, |caps: &regex::Captures| match map.get(&caps[1]) {
+        Some(new_label) => format!("[^{new_label}]"),
+        None => caps[0].to_string(),
+    })
+    .into_owned()
+}
+
+/// Append each `[^N]:` definition line in `defs` under the page's `## Notes and lessons learned`
+/// section (creating it at EOF when absent), mirroring `add-lesson`'s placement. Returns the new page
+/// text (always ending in one newline). Used by `migrate` to land the moved lessons on the dest.
+fn append_footnote_defs(text: &str, defs: &[String]) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    match notes_section_line(text) {
+        Some(hidx) => {
+            let mut end = lines.len();
+            let mut in_fence = false;
+            for (i, line) in lines.iter().enumerate().skip(hidx + 1) {
+                let t = line.trim_start();
+                if t.starts_with("```") || t.starts_with("~~~") {
+                    in_fence = !in_fence;
+                    continue;
+                }
+                if !in_fence && t.starts_with('#') {
+                    end = i;
+                    break;
+                }
+            }
+            let mut insert_at = end;
+            while insert_at > hidx + 1 && lines[insert_at - 1].trim().is_empty() {
+                insert_at -= 1;
+            }
+            let tail = lines.split_off(insert_at);
+            if insert_at == hidx + 1 {
+                lines.push(String::new());
+            }
+            for d in defs {
+                lines.push(d.clone());
+            }
+            lines.extend(tail);
+        }
+        None => {
+            lines.push(String::new());
+            lines.push("## Notes and lessons learned".to_string());
+            lines.push(String::new());
+            for d in defs {
+                lines.push(d.clone());
+            }
+        }
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+#[derive(Parser)]
+#[command(
+    name = "memgrep migrate",
+    about = "move an atom AND its baggage (lessons, refs) between wikimem pages, renumbering footnotes"
+)]
+struct MigrateArgs {
+    /// The atom to move: `^name`, its canonical `ATOM-XXXX-XXXX`, or the bare 8-char payload.
+    atom: String,
+    /// Source page the atom currently lives on.
+    #[arg(long = "from")]
+    from: PathBuf,
+    /// Destination page the atom moves to.
+    #[arg(long = "to")]
+    to: PathBuf,
+    /// Also descend into hidden files/dirs when reindexing (default off).
+    #[arg(long = "hidden")]
+    hidden: bool,
+}
+
+/// The pure result of a migration: the two rewritten page texts + the moved/shared footnote counts.
+#[derive(Debug)]
+struct MigrateResult {
+    dest_text: String,
+    source_text: String,
+    moved: usize,
+    shared: usize,
+}
+
+/// The PURE core of `migrate` (no IO / no reindex) — computes both rewritten page texts or fails.
+/// See `cmd_migrate_cli` for the contract. Split out so the whole move logic is unit-testable on
+/// in-memory strings without touching the filesystem or the SQLite index.
+fn migrate_compute(from_text: &str, to_text: &str, atom: &str) -> Result<MigrateResult> {
+    // Pre-flight (contract 4): BOTH pages must be footnote-clean, or the renumber arithmetic is unsafe.
+    for (label, text) in [("--from", from_text), ("--to", to_text)] {
+        let v = footnote_integrity_violations(text);
+        if !v.is_empty() {
+            anyhow::bail!(
+                "{label} page has footnote-integrity problems — run `memgrep lint` + repair it FIRST \
+                 (migrating across a malformed page corrupts both): {}",
+                v.join("; ")
+            );
+        }
+    }
+
+    // Locate the migrating atom on --from and lift its whole segment.
+    let query = atom.strip_prefix('^').unwrap_or(atom).to_string();
+    let matcher = |id: &str| atom_id_matches(id, &query);
+    let (marker_idx, _body_last) = locate_atom_body_matching(from_text, &matcher)
+        .ok_or_else(|| anyhow::anyhow!("no atom answering `{atom}` on the --from page"))?;
+    let from_lines: Vec<&str> = from_text.lines().collect();
+    let seg_end = atom_segment_end(&from_lines, marker_idx);
+    let atom_block = from_lines[marker_idx..seg_end].join("\n");
+    let atom_body = from_lines
+        .get(marker_idx + 1..seg_end)
+        .map(|s| s.join("\n"))
+        .unwrap_or_default();
+
+    // Which footnotes does the migrating atom reference, and which are SHARED with other atoms on A?
+    let mig_labels = atom_referenced_labels(&atom_body);
+    let mut other_labels: BTreeSet<String> = BTreeSet::new();
+    for at in resolve_atoms_from_text(from_text) {
+        if atom_id_matches(&at.id, &query) {
+            continue; // the migrating atom itself
+        }
+        for l in atom_referenced_labels(&at.body) {
+            other_labels.insert(l);
+        }
+    }
+
+    // Map each referenced label → its def's 1-based line range on A.
+    let ctx = md::build_context(from_text, from_lines.len());
+    let mut def_range: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for d in &ctx.footnote_defs {
+        def_range.entry(d.label.clone()).or_insert((d.start, d.end));
+    }
+
+    // Allocate fresh labels on B and decide movable-vs-shared. Build the full label map FIRST so a
+    // lesson that cross-references another moved label is rewritten consistently.
+    let mut label_map: BTreeMap<String, String> = BTreeMap::new();
+    let mut movable: Vec<String> = Vec::new(); // labels whose DEF is removed from A (used only here)
+    let mut next = next_footnote_label(to_text);
+    for lbl in &mig_labels {
+        if !def_range.contains_key(lbl) {
+            continue; // a ref with no def — pre-flight would have already refused
+        }
+        label_map.insert(lbl.clone(), next.to_string());
+        next += 1;
+        if !other_labels.contains(lbl) {
+            movable.push(lbl.clone());
+        }
+    }
+
+    // Build the moved def lines (renumbered), and the renumbered atom block, for the destination.
+    let mut moved_defs: Vec<String> = Vec::new();
+    for lbl in &mig_labels {
+        let Some(&(s, e)) = def_range.get(lbl) else { continue };
+        let raw_def = from_lines[s - 1..=(e - 1).min(from_lines.len() - 1)].join("\n");
+        moved_defs.push(rewrite_footnote_labels(&raw_def, &label_map));
+    }
+    let dest_block = rewrite_footnote_labels(&atom_block, &label_map);
+    let (dest_marker, dest_body) = dest_block.split_once('\n').unwrap_or((dest_block.as_str(), ""));
+
+    // Destination: splice the atom in (before its notes section) then append the moved defs.
+    let dest_text = append_footnote_defs(&insert_atom_block(to_text, dest_marker, dest_body), &moved_defs);
+
+    // Source: delete the atom segment + the MOVABLE def line ranges (shared defs stay for their other user).
+    let mut drop: BTreeSet<usize> = (marker_idx..seg_end).collect();
+    for lbl in &movable {
+        if let Some(&(s, e)) = def_range.get(lbl) {
+            for i in (s - 1)..=(e - 1).min(from_lines.len() - 1) {
+                drop.insert(i);
+            }
+        }
+    }
+    let kept: Vec<&str> = from_lines
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !drop.contains(i))
+        .map(|(_, l)| *l)
+        .collect();
+    let mut source_text = kept.join("\n");
+    source_text.push('\n');
+
+    // Post-build proof (contract 4): neither page may carry a footnote-integrity problem now.
+    for (label, text) in [("destination", &dest_text), ("source", &source_text)] {
+        let v = footnote_integrity_violations(text);
+        if !v.is_empty() {
+            anyhow::bail!(
+                "aborting migration — it would leave the {label} page with a dangling footnote (nothing \
+                 written): {}. This usually means a moved lesson cross-references a footnote left behind.",
+                v.join("; ")
+            );
+        }
+    }
+
+    let shared = label_map.len() - movable.len();
+    Ok(MigrateResult {
+        dest_text,
+        source_text,
+        moved: movable.len(),
+        shared,
+    })
+}
+
+/// `memgrep migrate <atom> --from A --to B` — move an atom and all its baggage between wikimem pages.
+///
+/// Contract (TRDD-VJCMZ2OP): (1) the atom + its `[^N]` lessons/refs travel; (2) a footnote used by
+/// ANOTHER atom on A STAYS on A (its other user still resolves) but is COPIED to B so the moved atom
+/// resolves too; a footnote used only by the migrating atom MOVES (removed from A); (3) every moved
+/// footnote is RENUMBERED to a label free on B; (4) both pages are footnote-clean BEFORE the move
+/// (else refused — migrating across a malformed page corrupts both) AND re-proved clean after the
+/// build (else nothing is written); (5) B is written BEFORE A, so a crash between the two atomic
+/// writes leaves a recoverable DUPLICATE, never a loss.
+pub fn cmd_migrate_cli(args: &[String]) -> Result<()> {
+    let a = MigrateArgs::parse_from(
+        std::iter::once("migrate".to_string()).chain(args.iter().cloned()),
+    );
+    if a.from == a.to {
+        anyhow::bail!("--from and --to are the same page — nothing to migrate");
+    }
+    let from_text = md::read_text(&a.from)
+        .ok_or_else(|| anyhow::anyhow!("--from page {} does not exist or is unreadable", a.from.display()))?;
+    let to_text = md::read_text(&a.to)
+        .ok_or_else(|| anyhow::anyhow!("--to page {} does not exist or is unreadable", a.to.display()))?;
+
+    let r = migrate_compute(&from_text, &to_text, &a.atom)?;
+
+    // Write B FIRST, then A (contract 5): a crash between leaves a recoverable duplicate, never a loss.
+    atomic_write_page(&a.to, &r.dest_text)?;
+    atomic_write_page(&a.from, &r.source_text)?;
+    reindex_owning_scope(&a.to, a.hidden)?;
+    reindex_owning_scope(&a.from, a.hidden)?;
+    println!(
+        "migrated {} from {} to {} ({} footnote(s) moved, {} shared/copied)",
+        a.atom,
+        rel(&a.from),
+        rel(&a.to),
+        r.moved,
+        r.shared
+    );
+    Ok(())
+}
+
 // ─────────────────────────── `memgrep lint` ───────────────────────────
 
 /// Replace every backtick-delimited INLINE-code span in `raw` with same-length spaces, so a literal
@@ -4923,6 +5226,77 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(
             !has_violation(&v, "[^99]"),
             "inline-code [^99] must not be a dangling-ref violation; got: {v:?}"
+        );
+    }
+
+    // ─────────────── migrate (TRDD-VJCMZ2OP) ───────────────
+
+    fn page(name: &str, body: &str) -> String {
+        format!(
+            "---\nname: {name}\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"{name}\"\n---\n{body}"
+        )
+    }
+
+    #[test]
+    fn migrate_moves_atom_and_its_lesson_removing_both_from_source() {
+        let from = page(
+            "from",
+            "^foo [keywords: k]\nthe foo fact.[^1]\n\n## Notes and lessons learned\n[^1]: the foo lesson.\n",
+        );
+        let to = page("to", "unrelated body.\n\n## Notes and lessons learned\n");
+        let r = migrate_compute(&from, &to, "foo").unwrap();
+        assert!(r.dest_text.contains("^foo"), "atom lands on dest: {}", r.dest_text);
+        assert!(r.dest_text.contains("the foo lesson."), "lesson lands on dest: {}", r.dest_text);
+        assert!(!r.source_text.contains("^foo"), "atom gone from source: {}", r.source_text);
+        assert!(!r.source_text.contains("the foo lesson."), "lesson gone from source: {}", r.source_text);
+        assert_eq!((r.moved, r.shared), (1, 0));
+        assert!(footnote_integrity_violations(&r.dest_text).is_empty());
+        assert!(footnote_integrity_violations(&r.source_text).is_empty());
+    }
+
+    #[test]
+    fn migrate_renumbers_footnote_to_avoid_a_collision_on_dest() {
+        let from = page(
+            "from",
+            "^foo [keywords: k]\nfoo fact.[^1]\n\n## Notes and lessons learned\n[^1]: foo lesson.\n",
+        );
+        // Dest ALREADY uses [^1] — the moved footnote must be renumbered to [^2].
+        let to = page("to", "existing.[^1]\n\n## Notes and lessons learned\n[^1]: existing lesson.\n");
+        let r = migrate_compute(&from, &to, "foo").unwrap();
+        assert!(r.dest_text.contains("[^2]: foo lesson."), "moved lesson renumbered to [^2]: {}", r.dest_text);
+        assert!(r.dest_text.contains("[^1]: existing lesson."), "dest's own [^1] untouched: {}", r.dest_text);
+        assert!(r.dest_text.contains("foo fact.[^2]"), "atom body ref renumbered: {}", r.dest_text);
+        assert!(footnote_integrity_violations(&r.dest_text).is_empty());
+    }
+
+    #[test]
+    fn migrate_keeps_a_shared_footnote_on_source_and_copies_it_to_dest() {
+        // Both ^foo and ^bar cite [^1]. Migrating ^foo must LEAVE [^1] on source (bar still needs it)
+        // AND copy it to dest so ^foo resolves there too.
+        let from = page(
+            "from",
+            "^foo [keywords: k]\nfoo cites.[^1]\n\n^bar [keywords: k]\nbar cites.[^1]\n\n\
+             ## Notes and lessons learned\n[^1]: shared lesson.\n",
+        );
+        let to = page("to", "body.\n\n## Notes and lessons learned\n");
+        let r = migrate_compute(&from, &to, "foo").unwrap();
+        assert_eq!((r.moved, r.shared), (0, 1), "the footnote is shared, not moved");
+        assert!(r.source_text.contains("^bar"), "bar stays: {}", r.source_text);
+        assert!(r.source_text.contains("[^1]: shared lesson."), "shared def stays on source: {}", r.source_text);
+        assert!(r.dest_text.contains("shared lesson."), "shared def copied to dest: {}", r.dest_text);
+        assert!(!r.source_text.contains("^foo"), "foo left source: {}", r.source_text);
+        assert!(footnote_integrity_violations(&r.source_text).is_empty(), "source clean: {}", r.source_text);
+        assert!(footnote_integrity_violations(&r.dest_text).is_empty(), "dest clean: {}", r.dest_text);
+    }
+
+    #[test]
+    fn migrate_refuses_a_footnote_broken_source_and_writes_nothing() {
+        let from = page("from", "^foo [keywords: k]\nfoo fact.[^9]\n\n## Notes and lessons learned\n");
+        let to = page("to", "body.\n\n## Notes and lessons learned\n");
+        let err = migrate_compute(&from, &to, "foo").unwrap_err();
+        assert!(
+            err.to_string().contains("footnote-integrity"),
+            "malformed source must be refused pre-flight: {err}"
         );
     }
 

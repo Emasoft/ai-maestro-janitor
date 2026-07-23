@@ -1,9 +1,9 @@
 ---
 trdd-id: VJCMZ2OP
 title: memgrep migrate — move an atom and all its baggage between wikimem pages
-column: backburner
+column: testing
 created: 2026-07-23T06:35:11+0200
-updated: 2026-07-23T06:35:11+0200
+updated: 2026-07-23T07:35:00+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 severity: high
@@ -12,14 +12,33 @@ relevant-rules: [1]
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative) — 2026-07-23
 
-**NOT STARTED.** New verb requested by the USER this session. Does NOT exist — the write
-surface is `add-atom / new-page / add-lesson` only (`scripts/memgrep/src/main.rs:388-391`,
-re-verified 2026-07-23). Building it is the ONLY safe way to honour the atom-travels-with-its-
-baggage rule: a hand-move drops lessons and collides footnote numbers.
+**SHIPPED + TESTED.** `memgrep migrate <atom> --from A --to B` exists and works end-to-end
+(4 pure-core unit tests + a CLI e2e smoke test: atom+lesson moved, footnote renumbered on a
+dest collision, source cleaned, both pages lint clean). All in `scripts/memgrep/src/memory.rs`
++ the dispatch line in `main.rs`.
 
-**NEXT ACTION:** add `Some("migrate") => memory::cmd_migrate_cli(&raw[2..])` to the dispatch
-match and implement `cmd_migrate_cli` in `scripts/memgrep/src/memory.rs` per the contract
-below. Wire it through `memory_txn` so both pages are edited in ONE crash-safe transaction.
+**Design decisions made (veto-able) — differ from the pre-build sketch:**
+- **Rust-native verb, NOT the Python `memory_txn`.** `memory_txn` is Python; a Rust verb can't
+  ride it. Atomicity is instead: `migrate_compute` builds BOTH new page texts in memory and
+  proves them footnote-clean BEFORE any write; then writes **dest FIRST, source second**. A
+  crash between the two atomic writes leaves a recoverable DUPLICATE (never a loss). A
+  pre/post-validation FAILURE writes nothing → "both pages unchanged" holds for every refusal.
+- **Shared footnote → COPY to dest, keep on source.** A footnote used ONLY by the migrating
+  atom MOVES (removed from source). A footnote also cited by another atom on source STAYS on
+  source (its other user resolves) AND is COPIED to dest (renumbered) so the moved atom
+  resolves too. This is the only dangling-free reading of "keep the refs used by other atoms".
+- **Guard = footnote-integrity (not full lint).** Pre-flight refuses if EITHER page has a
+  dangling/unreferenced footnote (that breaks the renumber arithmetic → corrupts both, exactly
+  the failure the user named); post-build re-proves both clean or writes nothing. Full lint
+  (one-sided links, oversized) does NOT block a migrate.
+
+**Pure core:** `migrate_compute(from_text, to_text, atom) -> MigrateResult` (no IO/reindex) is
+the unit-tested seam; `cmd_migrate_cli` is the read → compute → write-dest → write-source shell.
+
+**NEXT ACTION:** none for the verb itself. Fold 1e here — add an atom↔lesson-travel assertion
+to `memory_edit_verify.py` as the SAFETY NET for HAND-moves (migrate is self-verified). Rebuild
++ install the binary at the end of all phases. Minor cosmetic: dest gains a double blank line
+before the spliced atom (lint-clean, harmless) — tidy if convenient.
 
 ## The command (USER, verbatim intent)
 

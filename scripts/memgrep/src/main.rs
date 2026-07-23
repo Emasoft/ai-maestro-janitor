@@ -390,6 +390,9 @@ fn main() -> Result<()> {
         Some("add-atom") => return memory::cmd_add_atom_cli(&raw[2..]),
         Some("new-page") => return memory::cmd_new_page_cli(&raw[2..]),
         Some("add-lesson") => return memory::cmd_add_lesson_cli(&raw[2..]),
+        // MOVE verb (TRDD-VJCMZ2OP) — relocate an atom + its baggage between pages, renumbering
+        // footnotes and validating BOTH pages, so the move can never corrupt either.
+        Some("migrate") => return memory::cmd_migrate_cli(&raw[2..]),
         _ => {}
     }
 
