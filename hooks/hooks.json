@@ -121,6 +121,11 @@
             "type": "command",
             "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-bash-safety.py",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "uv run --script --quiet ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/pre-tool-agent-generator-guard.py",
+            "timeout": 3
           }
         ]
       },
