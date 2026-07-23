@@ -1,23 +1,31 @@
 ---
 trdd-id: X07E7HTN
 title: Daemon owns rate-limit wake so the FAST polling window costs zero model turns
-column: proposal
+column: complete
 created: 2026-07-23T13:46:19+0200
-updated: 2026-07-23T14:00:55+0200
+updated: 2026-07-23T15:37:08+0200
 current-owner: claude-ai-maestro-janitor
 task-type: refactor
 approval-tier: 2
 relevant-rules: [1]
 task-type-detail: architectural change to the heartbeat cost model; standalone-only; survival-critical paths in scope; v1 scoped to the rate-limit polling window only
 impacts: [heartbeat-cost-model, survival-resume, fleet-daemon]
+implementation-commits: [3c18208]
 release-via: publish
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-23
 
-- **What this is:** a PROPOSAL (Tier 2, MANAGER approval) to let the machine-wide
-  OS-keepalive daemon own the **rate-limit wake** so the FAST `*/5` polling window a
-  rate-limited session sits in costs ZERO model turns. Not yet approved; no code written.
+- **✅ SHIPPED (v1) + COMPLETE — committed `3c18208`, verified.** Approved by the USER
+  ("do all the improvements") — solo project, so USER is the Tier-2 authority. Let the
+  machine-wide OS-keepalive daemon own the **rate-limit wake** so the FAST `*/5` polling
+  window a rate-limited session sits in costs ZERO model turns. v1 = rate-limit wake ONLY;
+  the general-detector-roster relocation is a later TRDD. Gate green at commit: pyright
+  0/0/0, ruff clean, full suite 13508 passed, `~/.claude` isolation verified. Actuation
+  confirmed by direct read: `fleet_inject` "resume" = the `/janitor-resume` SLASH command
+  (never the defanged bare marker), frozen pane → `esc_nudge` only, single-consumer
+  `rate-limited.flag` prevents double-resume, and `dispatch.py` still emits the bare
+  `[janitor-resume]` cron fallback. Issue #105 (no resume-after-clear under USER_PRESENT) folded.
 - **SCOPE (v1, deliberately narrow — the review's §1/§4 recommendation):** ONLY the
   rate-limit polling window. This is the biggest sink: while `rate-limited.flag` is set,
   `heartbeat_cadence.Signals.active_waiting` is True → `raw_tier` returns `FAST` → the cron
@@ -266,6 +274,13 @@ off/unavailable the cron heartbeat is the only trigger. Reuses existing
 - **Deferred to a follow-up TRDD:** relocating the GENERAL detector roster off the cron turn
   (the first revision's items 3/6/8/9). That inherits v1's `detector.lock` + closure test but is
   out of scope here.
+
+## Approval log
+
+- 2026-07-23T15:37:08+0200 — APPROVED by USER (tier 2). Solo project → the human owner is the
+  Tier-2 authority; the standing directive "do all the improvements … production quality" covers
+  this. v1 (rate-limit wake) implemented in `3c18208` and self-verified (pyright 0/ruff/13508
+  suite pass/isolation). Promoted `proposal → complete`, `git mv` proposals/ → tasks/.
 
 ## Notes and lessons learned
 
