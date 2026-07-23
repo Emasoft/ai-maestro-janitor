@@ -821,7 +821,15 @@ def language_lint_step(info: ProjectInfo) -> None:
     #                                   it would force wiki notes to bend to doc-markdown
     #                                   conventions, and the MD023 hits are a front-matter
     #                                   parser mismatch on the richer YAML, not real heading bugs.
+    #   (d) design/specs/**            — machine-readable CONFORMANCE SPECS: pages whose
+    #                                   `<!-- @spec:… -->` markers must sit DIRECTLY on their
+    #                                   ```text fences (the conformance tests extract the fenced
+    #                                   block verbatim). A prose linter (MD031 blanks-around-
+    #                                   fences / MD007 list-indent) would demand a reflow that
+    #                                   inserts a blank line between marker and fence and BREAKS
+    #                                   the extraction — the exact mangling that must never happen.
     _design_log_dirs = {"tasks", "archived", "proposals", "refused"}
+    _design_content_dirs = {"specs"}
 
     def _doc_lint_excluded(p: Path) -> bool:
         parts = p.parts
@@ -829,7 +837,7 @@ def language_lint_step(info: ProjectInfo) -> None:
             return True
         if "design" in parts:
             i = parts.index("design")
-            if i + 1 < len(parts) and parts[i + 1] in _design_log_dirs:
+            if i + 1 < len(parts) and parts[i + 1] in (_design_log_dirs | _design_content_dirs):
                 return True
         if ".claude" in parts and "project" in parts and "memory" in parts:
             return True
