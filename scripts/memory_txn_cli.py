@@ -41,7 +41,10 @@ commit / abort / resume exits 0.
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -115,6 +118,77 @@ def _live_pages_excluding(scope_root: Path, exclude: set[str]) -> dict[str, str]
             continue
         out[rel] = p.read_text(encoding="utf-8")
     return out
+
+
+# The four memgrep-lint authoring classes this gate reasons about, keyed to a stable message
+# substring of the Rust check (TRDD-DOJ2LE1G). Only the first three BLOCK (near-zero pre-existing
+# in the corpus + unambiguous defects); `oversized` only WARNS (a judgment call, 36 pre-existing).
+_AUTHORING_CLASSES = {
+    "unquoted-desc": "unquoted prose",
+    "empty-lesson-body": "but no body",
+    "superseded-without-body": "SUPERSEDED BODY",
+    "oversized-atom": "decompose it into",
+}
+_AUTHORING_BLOCKING = ("unquoted-desc", "empty-lesson-body", "superseded-without-body")
+
+
+def _authoring_class_counts(memgrep: str, texts: dict[str, str]) -> dict[str, int] | None:
+    """Total occurrences of each authoring class across `texts`, via one `memgrep lint` over a temp
+    dir. Counts are ORDER-INDEPENDENT (we compare totals, never per-file), so flat filenames are
+    fine; other lint noise (link-law, required-field) is ignored by the substring filter. Returns
+    None on any infra failure (→ the caller fails OPEN)."""
+    counts = {name: 0 for name in _AUTHORING_CLASSES}
+    if not texts:
+        return counts
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            for i, text in enumerate(texts.values()):
+                (Path(td) / f"p{i}.md").write_text(text, encoding="utf-8")
+            out = subprocess.run(
+                [memgrep, "lint", td], capture_output=True, text=True, timeout=30
+            ).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        for name, needle in _AUTHORING_CLASSES.items():
+            if needle in line:
+                counts[name] += 1
+                break
+    return counts
+
+
+def _authoring_gate(txn: MemoryTxn, writes: dict[str, str]) -> tuple[bool, list[str], list[str]]:
+    """DELTA authoring-integrity gate (TRDD-4ZTNMQL3): refuse a commit that INTRODUCES a malformed
+    atom/lesson. Compares each authoring class's count on the BEFORE (live) vs AFTER (staged) texts
+    and blocks the three unambiguous classes when the count INCREASES (a DELTA, so a page's
+    pre-existing violation never blocks an unrelated edit); `oversized-atom` only warns. Fail-OPEN:
+    no memgrep / any error skips the gate — it must never break a valid commit."""
+    memgrep = shutil.which("memgrep")
+    if not memgrep or not writes:
+        return True, [], []
+    before = {
+        rel: (txn.scope_root / rel).read_text(encoding="utf-8")
+        if (txn.scope_root / rel).exists()
+        else ""
+        for rel in writes
+    }
+    b = _authoring_class_counts(memgrep, before)
+    a = _authoring_class_counts(memgrep, writes)
+    if b is None or a is None:
+        return True, [], []  # fail-open on any lint-infra problem
+    reasons, warnings = [], []
+    for name in _AUTHORING_BLOCKING:
+        if a[name] > b[name]:
+            reasons.append(
+                f"{name}: this edit introduces {a[name] - b[name]} new occurrence(s) — "
+                f"fix them (run `memgrep lint`) before committing"
+            )
+    if a["oversized-atom"] > b["oversized-atom"]:
+        warnings.append(
+            f"oversized-atom: {a['oversized-atom'] - b['oversized-atom']} new atom(s) exceed the "
+            f"size budget — consider decomposing (non-blocking)"
+        )
+    return (not reasons), reasons, warnings
 
 
 def _load_txn(scope_root: Path, txn_id: str) -> MemoryTxn:
@@ -378,6 +452,19 @@ def cmd_commit(args) -> int:
         txn.abort()
         print(f"verify FAILED ({args.op}); transaction aborted:", file=sys.stderr)
         for r in reasons:
+            print(f"  - {r}", file=sys.stderr)
+        return 1
+
+    # Authoring-integrity DELTA gate (TRDD-4ZTNMQL3): verify_* proves no KNOWLEDGE was lost; this
+    # proves the hand-edit did not INTRODUCE malformed SYNTAX (unquoted desc, body-less lesson,
+    # supersession missing its SUPERSEDED BODY). Fail-open — never breaks a valid commit.
+    a_ok, a_reasons, a_warnings = _authoring_gate(txn, writes)
+    for w in a_warnings:
+        print(f"  warning: {w}", file=sys.stderr)
+    if not a_ok:
+        txn.abort()
+        print(f"authoring-integrity gate FAILED ({args.op}); transaction aborted:", file=sys.stderr)
+        for r in a_reasons:
             print(f"  - {r}", file=sys.stderr)
         return 1
 

@@ -524,3 +524,51 @@ def test_conflict_verdict_that_corrupts_the_survivor_is_still_refused(tmp_path):
     assert rc != 0
     assert (scope / "obsolete.md").exists()                  # nothing applied
     assert "session key" in (scope / "current.md").read_text(encoding="utf-8")
+
+
+# ─────────────── authoring-integrity DELTA gate (TRDD-4ZTNMQL3) ───────────────
+
+def test_authoring_gate_blocks_a_newly_introduced_body_less_lesson(tmp_path):
+    """A hand-edit that INTRODUCES a body-less lesson must be refused by the delta gate."""
+    import shutil
+    import types
+
+    if shutil.which("memgrep") is None:
+        pytest.skip("memgrep not installed")
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    rel = "n.md"
+    good = (
+        '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\n'
+        "body.[^1]\n\n## Notes and lessons learned\n[^1]: a real lesson body.\n"
+    )
+    (scope / rel).write_text(good, encoding="utf-8")
+    bad = (
+        '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\n'
+        "body.[^1]\n\n## Notes and lessons learned\n"
+        '[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
+    )
+    ok, reasons, _ = cli._authoring_gate(types.SimpleNamespace(scope_root=scope), {rel: bad})
+    assert not ok
+    assert any("empty-lesson-body" in r for r in reasons), reasons
+
+
+def test_authoring_gate_ignores_a_preexisting_violation_carried_forward(tmp_path):
+    """A pre-existing body-less lesson the edit does NOT touch must not block (delta = 0)."""
+    import shutil
+    import types
+
+    if shutil.which("memgrep") is None:
+        pytest.skip("memgrep not installed")
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    rel = "n.md"
+    bad = (
+        '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\n'
+        "body.[^1]\n\n## Notes and lessons learned\n"
+        '[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
+    )
+    (scope / rel).write_text(bad, encoding="utf-8")
+    after = bad.replace("body.[^1]", "body edited.[^1]")  # same pre-existing bad lesson; count unchanged
+    ok, reasons, _ = cli._authoring_gate(types.SimpleNamespace(scope_root=scope), {rel: after})
+    assert ok, reasons  # delta is 0 → not blocked
