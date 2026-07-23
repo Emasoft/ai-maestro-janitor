@@ -1729,6 +1729,17 @@ _MAINTENANCE_KEEPALIVE_TASK_NAMES = frozenset({"oauth-rotator-tick"})
 # the `server_owned` diagnosis) and the janitor-only Family-B chores (memory-guard,
 # cache-prune, rules-cleanup, github-config-audit). The set is the SSOT in
 # harness_backend.
+#
+# PORT NOTE (ordering — read main() alongside this): a REAL fresh server-liveness file
+# triggers the ONE-DAEMON-PER-HOST binary EXIT in main() (the `server_is_alive()` break,
+# TRDD-5ZVS1DDP) BEFORE this per-chore yield is ever evaluated — so with a genuine live
+# server the daemon STOPS ENTIRELY and even the Family-B chores pause (the "keeps running
+# regardless" clause above holds only when the daemon is still looping). This absorbed-set
+# yield therefore governs the SECONDARY cases only: the env-override path
+# (`server_runs_chores()` forced True via JANITOR_AIMAESTRO_SERVER_CHORES without a
+# live-file exit) and the maintenance keepalive. In normal operation without that override,
+# `server_runs_chores() == server_is_alive()`, so the break at line 2150 wins and this
+# yield yields nothing.
 _SERVER_ABSORBED_TASK_NAMES = harness_backend.SERVER_ABSORBED_TASKS
 
 
