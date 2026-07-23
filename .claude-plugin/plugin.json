@@ -780,6 +780,13 @@
       "default": false,
       "sensitive": false
     },
+    "agent_generator_guard_enabled": {
+      "title": "Agent-Generator Guard Enabled",
+      "description": "ON by default. The `pre-tool-agent-generator-guard` PreToolUse hook fires on every Bash tool call and DENIES a dependency CLI that writes agent-context files WITHOUT confirmation \u2014 today `playwright init-agents`, which transcribes agent definitions into `.claude/agents/*.md`, `.mcp.json`, and even `.github/workflows/copilot-setup-steps.yml`, a dependency-driven prompt-injection vector (janitor#110, reported by AgentlensPro). It binds the tool layer so an AGENT cannot silently run the command (a human typing it is deliberate). Table-driven (the next offender is a data row); matches on shell TOKENS not substrings (so `git add scripts/...deny-playwright-init-agents.js` and a commit message quoting the command stay allowed), and fails OPEN on an unreadable payload. Defaults ON because the vector reaches every project on the machine, not just repos you clone. Opt a project out with `touch .janitor/state/allow-agent-generators`; set this false to disable machine-wide.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
+    },
     "memory_guard_enabled": {
       "title": "Tier-1 OOM Memory-Guard Enabled",
       "description": "When true (default), the global daemon's `memory-guard` task checks system free memory every memory_guard_interval seconds; under real pressure (free below memory_guard_min_free_mb) it snapshots the process table to a file and kills the single largest-RSS JANITOR-OWNED runaway (a stuck `claude plugin marketplace update`, an orphaned rotator/reauth/capture subprocess older than the runaway age gate). Tier-1 only: an explicit signature allowlist plus a hard claude-session rejection means interactive `claude` sessions, the daemon itself, and every system process are never candidates by construction; at most one kill per beat; every kill is logged with full cmdline, RSS, age, and the triggering free-memory reading. Tier 2 (killing non-janitor processes) is deliberately NOT implemented. Part of the resilient-daemon design (TRDD-7100178d Pillar 4, Decision 1).",
