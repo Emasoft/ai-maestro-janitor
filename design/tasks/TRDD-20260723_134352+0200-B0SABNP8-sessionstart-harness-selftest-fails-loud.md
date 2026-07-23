@@ -1,15 +1,16 @@
 ---
 trdd-id: B0SABNP8
 title: SessionStart harness self-test that fails loud when Claude Code changed under the janitor
-column: proposal
+column: complete
 created: 2026-07-23T13:43:52+0200
-updated: 2026-07-23T14:00:48+0200
+updated: 2026-07-23T14:50:30+0200
 current-owner: claude-ai-maestro-janitor
 task-type: infra
 approval-tier: 1
 relevant-rules: [1]
 test-requirements: [tests/test_harness_selftest.py, tests/test_hooks_execute.py]
 impacts: [scripts/hooks/on-session-start.py]
+implementation-commits: [959a1e2]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-23
@@ -325,9 +326,16 @@ snapshot changes land concurrently (extend probe 2 in lockstep).
   files. Prove it by injecting `snapshot_path` / `settings_paths` as arguments and
   asserting in the test that `run_selftest()` opens ONLY those injected paths (no
   subprocess spawned, no socket, no transcript `*.jsonl` opened) — the reconciled
-  form of the "no expensive I/O" constraint. Placement AFTER the survival writers
-  (rate-limit resume, post-compact resume, renew, rule install all precede it)
-  means even a slow or faulty probe cannot delay a survival emission.
+  form of the "no expensive I/O" constraint. The self-test lives in
+  `on-session-start.py`; its placement is AFTER that hook's own outside-world writers
+  (the cron-liveness nudge, rule/settings/reference install, the memory mirror, the
+  findings inbox) and BEFORE that hook's arm-nudge / stop-reminder — so even a slow or
+  faulty probe cannot delay `on-session-start.py`'s own survival emission. NOTE (fixes
+  the residual conflation): the rate-limit-resume / post-compact-resume / `[janitor-renew]`
+  survival MARKERS are `dispatch.py` CRON-FIRE emissions in a SEPARATE entry point — the
+  self-test is not on their code path at all and cannot affect them; only the
+  `on-session-start.py` arm-nudge / stop-reminder that follow this block are the survival
+  emissions it must never strand.
 
 ## Notes and lessons learned
 
