@@ -1,20 +1,29 @@
 ---
 trdd-id: ZCODD6YS
 title: The janitor meters its OWN heartbeat cost and self-throttles against a user budget
-column: proposal
+column: complete
 created: 2026-07-23T13:44:58+0200
-updated: 2026-07-23T14:07:30+0200
+updated: 2026-07-23T16:30:10+0200
 current-owner: claude-ai-maestro-janitor
 task-type: feature
 approval-tier: 2
 relevant-rules: [1]
 external-refs: [janitor#78]
+implementation-commits: [efb2781]
 ---
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-23
 
-- STATUS: PROPOSAL, awaiting Tier-2 (MANAGER) approval. No code written. Do NOT git add/commit here
-  (a later sequential step commits; parallel git writes corrupt the index).
+- STATUS: ✅ SHIPPED + COMPLETE — committed `efb2781`, verified. Approved by the USER ("do all the
+  improvements") — solo project, so USER is the Tier-2 authority. Both deliverables landed: the
+  report weekly-$ rollup (Deliverable 1) and the fail-open `_phase_self_budget` throttle
+  (Deliverable 2, SLOW cap → LOCAL maintenance, ceiling=MAINTENANCE, NEVER `[janitor-self-disarm]`,
+  default 0 = opt-in). Verified by direct read + tests: `_phase_self_budget` placed strictly AFTER
+  every resume/compact early-return and before cadence (cardinal survival property, spy-proven);
+  harness-gated; active-waiting-suppressed; fail-open at phase body AND call site; actuates ONLY the
+  LOCAL flag via an OWNERSHIP SENTINEL (never clobbers a human/global maintenance flag). Gate: pyright
+  0/0/0 on all 4 source files (the 7 test errors are pre-existing `**self._TH` in TestEvaluateTurnBudget,
+  not D2), ruff clean, full suite 13583 passed/1 skipped/0 failed, `~/.claude` untouched.
 - WHAT: Dogfood the janitor's own token-forensics ON ITSELF. Two deliverables:
   1. REPORT (ship-ready, ISOLATED — land first, in parallel with D4/D1) — a heartbeat-only weekly
      rollup ("$N this week on quiet fires") in `/janitor-token-report`.
@@ -297,6 +306,16 @@ critique (this session), and the required ordering:
   from `beats` only, and is labeled an estimate; absent price knob → weighted-token-only line.
 - **Regression** — `tests/test_token_usage_anomaly_detector.py`: the sibling `token-meter.jsonl`
   consumer still parses unchanged (D2 adds no record fields).
+
+## Approval log
+
+- 2026-07-23T16:30:10+0200 — APPROVED by USER (tier 2). Solo project → the human owner is the
+  Tier-2 authority; the standing directive "do all the improvements … production quality" covers
+  this. Implemented in `efb2781` and self-verified (pyright 0 on source / the 7 test errors proven
+  pre-existing / ruff / full suite 13583 pass / isolation). Both deliverables landed; the
+  survival invariants (late-phase actuation, ceiling=MAINTENANCE, never disarm, fail-open, LOCAL
+  flag + ownership sentinel) confirmed by direct code read + the cardinal spy test. Promoted
+  `proposal → complete`, `git mv` proposals/ → tasks/.
 
 ## Notes and lessons learned
 
