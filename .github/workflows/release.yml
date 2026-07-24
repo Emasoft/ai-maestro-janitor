@@ -65,14 +65,13 @@ jobs:
         # CI on v0.35.7: unpinned, it resolved CPV's default branch onto the
         # v2.153.2 regression.) Never bump without running the candidate ref
         # against the tree locally first.
-        # PINNED AT v3.11.0 as of the 2026-07-24 canonical-pipeline update
-        # (bumped from v3.5.0): scripts/publish.py was regenerated from the v3.11.0
-        # canonical template and emits this exact ref, so all three
+        # PINNED AT v3.16.0 as of the 2026-07-25 canonical-pipeline update
+        # (bumped from v3.11.0): scripts/publish.py was regenerated from the
+        # v3.16.0 canonical template and emits this exact ref, so all three
         # sites are byte-identical by construction.
-        # At v3.11.0 the tree is CRITICAL=0 MAJOR=0 (commit 791fbc2 cleared the last
-        # two by rewording agents/janitor-repair-agent.md:23, without weakening it).
-        # Staying on v2.153.1 is no longer clean either: it raises its own MAJOR on
-        # the canonical .cspell.json the migration provisions.
+        # Verified locally against this tree BEFORE the bump: v3.16.0 and the
+        # outgoing v3.11.0 pin produce an identical severity profile and the same
+        # exit code on this commit, so the bump is behaviour-neutral here.
         # Do NOT keep a running scanner-finding narrative here: tracked content is
         # scanned content, so a commentary naming finding codes becomes a finding
         # itself. Per-finding history belongs in the TRDD / .janitor handoff.
@@ -92,7 +91,7 @@ jobs:
         # real 1..4 severity exit: fail fast, no pointless retry.
         run: |
           run_cpv() {
-            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.11.0 \
+            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.16.0 \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the

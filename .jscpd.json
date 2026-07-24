@@ -28,6 +28,8 @@
     "**/testdata/**",
     "**/fixtures/**",
     "**/node_modules/**",
+    "**/target/**",
+    "**/.trashcan/**",
     "**/.git/**"
   ]
 }
