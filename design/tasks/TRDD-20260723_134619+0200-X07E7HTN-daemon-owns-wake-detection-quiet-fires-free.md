@@ -90,8 +90,7 @@ release-via: publish
   broad relocation is a follow-up TRDD, not this one.
 - **Durable artifacts to read before acting:** the review synthesis
   `reports/janitor-improvements/20260723_135211+0200-sequenced-implementation-plan.md` §3
-  (D1 must-fixes) + §1/§4 (scoping); `design/ARCHITECTURE.md` §3/§7; CLAUDE.md "Control flow"
-  + "Two runtime backends"; `~/.claude/rules/janitor-heartbeat-protocol.md` (marker contract).
+  (D1 must-fixes) + §1/§4 (scoping); `design/ARCHITECTURE.md` §3/§7; CLAUDE.md "Control flow" + "Two runtime backends"; `~/.claude/rules/janitor-heartbeat-protocol.md` (marker contract).
 
 ## The problem
 
@@ -108,8 +107,7 @@ job is "am I still limited? cleared → `[janitor-resume]`". The TTL cadence tie
 the cron IS the trigger.
 
 The daemon already does half the job for free. `daemon.py::task_session_liveness` runs every
-120s with NO model attached: `fleet_scan.gather_fleet` enumerates every live claude `Instance`
-+ its resolved terminal-injection identity + `diagnosis`; a rate-limited pane is diagnosed
+120s with NO model attached: `fleet_scan.gather_fleet` enumerates every live claude `Instance` + its resolved terminal-injection identity + `diagnosis`; a rate-limited pane is diagnosed
 `frozen`; `fleet_recovery.action_for("frozen", …)` returns `esc_nudge`; and `fleet_inject.fire`
 sends the ESC that breaks the retry-watchdog wait — zero model cost. What is missing is the
 second half: after ESC frees the pane, the RESUME still rides a paid cron turn instead of a
@@ -118,8 +116,7 @@ free daemon inject, so the cron must keep polling FAST.
 ## The fix (this TRDD's v1 scope — rate-limit wake only)
 
 Add the resume half of the rate-limit recovery to the daemon so an injectable, rate-limited
-session's cadence can leave FAST, and keep the cron as the fail-open fallback. Concrete files
-+ functions, grounded in the current code:
+session's cadence can leave FAST, and keep the cron as the fail-open fallback. Concrete files + functions, grounded in the current code:
 
 ### 1. `scripts/lib/fleet_inject.py` — the one NEW actuation (PRIMARY change)
 Add a command-typing action `resume`:

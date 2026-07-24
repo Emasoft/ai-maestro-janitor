@@ -269,8 +269,7 @@ Shared surfaces with the other three janitor-shortcomings improvements (the
   `[janitor-memory-*]`/`[janitor-ticket]` marker→Agent-spawn contract. A CC
   change to subagent semantics (2.1.212 mode-deprecation, spawn cap) is exactly
   what probe (4) should catch and D2 must respect.
-- **D1 (daemon-owns-wake)** — SHARES `on-session-start.py`'s cron-liveness nudge
-  + `dispatch.py` resume/renew phases + `global_state`/`harness_backend` thin
+- **D1 (daemon-owns-wake)** — SHARES `on-session-start.py`'s cron-liveness nudge + `dispatch.py` resume/renew phases + `global_state`/`harness_backend` thin
   mode. The self-test must run AFTER and NEVER perturb the survival-marker
   emissions D1 rearms; both gate on `harness_backend.is_harness_session()`.
 - **ALL** — SHARE `findings_ledger.record` (the ONE choke point) as the
@@ -298,8 +297,7 @@ snapshot changes land concurrently (extend probe 2 in lockstep).
   - `probe_int_spellings` — passes on the healthy `parse_nonneg_int`; FAILS on a
     monkeypatched parser that stops accepting `64_000`/`1e6` (the self-regression
     it guards).
-  - `probe_marker_path` — passes on the real `_MARKERS` + literal `[janitor-ticket]`
-    + real `sanitize_for_drift_line`; FAILS on a mutated vocabulary or a sanitize
+  - `probe_marker_path` — passes on the real `_MARKERS` + literal `[janitor-ticket]` + real `sanitize_for_drift_line`; FAILS on a mutated vocabulary or a sanitize
     that stops defanging.
   - `run_selftest()` returns `[]` on all-green and the expected
     `(code, severity, msg)` tuples on each simulated break.

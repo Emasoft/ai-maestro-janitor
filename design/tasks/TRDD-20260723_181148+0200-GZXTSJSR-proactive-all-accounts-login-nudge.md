@@ -40,8 +40,7 @@ eht: []
 - **NEXT ACTION:** implement Phase 1 (widen window + real daemon notification + escalation) — see
   the plan below. Delegate the multi-file build to ONE bounded agent; keep the orchestrator thin.
 - **LOAD-BEARING FACTS:** `notify.py` is the DAEMON-ONLY human channel (Tier-1 desktop
-  notification default-on, Tier-2 opt-in webhook; gates: sev≥HIGH + content-hash dedupe + 24h cap
-  + one-per-day digest). Cardinal survival invariant: NEVER add actuation to an early-returning
+  notification default-on, Tier-2 opt-in webhook; gates: sev≥HIGH + content-hash dedupe + 24h cap + one-per-day digest). Cardinal survival invariant: NEVER add actuation to an early-returning
   heartbeat phase — a login-nudge phase must be LATE and fail-open, like `_phase_self_budget`.
 - **SUPERSEDED — do NOT carry forward:** nothing yet.
 - **ARTIFACTS TO READ BEFORE ACTING:** `scripts/detectors/oauth-login-needed.py`,

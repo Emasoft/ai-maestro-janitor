@@ -15,8 +15,7 @@ implementation-commits: [d9ef41f]
 
 **SHIPPED + TESTED.** `memgrep migrate <atom> --from A --to B` exists and works end-to-end
 (4 pure-core unit tests + a CLI e2e smoke test: atom+lesson moved, footnote renumbered on a
-dest collision, source cleaned, both pages lint clean). All in `scripts/memgrep/src/memory.rs`
-+ the dispatch line in `main.rs`.
+dest collision, source cleaned, both pages lint clean). All in `scripts/memgrep/src/memory.rs` + the dispatch line in `main.rs`.
 
 **Design decisions made (veto-able) — differ from the pre-build sketch:**
 - **Rust-native verb, NOT the Python `memory_txn`.** `memory_txn` is Python; a Rust verb can't
@@ -37,8 +36,7 @@ dest collision, source cleaned, both pages lint clean). All in `scripts/memgrep/
 the unit-tested seam; `cmd_migrate_cli` is the read → compute → write-dest → write-source shell.
 
 **NEXT ACTION:** none for the verb itself. Fold 1e here — add an atom↔lesson-travel assertion
-to `memory_edit_verify.py` as the SAFETY NET for HAND-moves (migrate is self-verified). Rebuild
-+ install the binary at the end of all phases. Minor cosmetic: dest gains a double blank line
+to `memory_edit_verify.py` as the SAFETY NET for HAND-moves (migrate is self-verified). Rebuild + install the binary at the end of all phases. Minor cosmetic: dest gains a double blank line
 before the spliced atom (lint-clean, harmless) — tidy if convenient.
 
 ## The command (USER, verbatim intent)
