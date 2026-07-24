@@ -1,0 +1,131 @@
+---
+trdd-id: 6WM4BFKF
+title: gitignore-coverage chore — prove the ignore file covers every private class BEFORE a secret can be tracked
+column: planned
+created: 2026-07-24T03:08:22+0200
+updated: 2026-07-24T03:08:22+0200
+current-owner: main-session
+task-type: security
+scope: project
+severity: high
+relevant-rules: []
+npt: []
+eht: []
+---
+
+## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-24
+
+- **WHY THIS EXISTS:** on Claude Code a plugin ships its **whole tracked repo** — there is no
+  packaging-exclusion field in `plugin.json` and none in the plugin spec. Verified empirically:
+  the installed cache of this plugin carries `design/` (191 files) and `.claude/project/memory/`
+  (33 files). Therefore **TRACKED == SHIPPED == PUBLIC**, and a single missing `.gitignore`
+  pattern is not untidiness — it is a publication of private data to every installer.
+- **THE GAP (verified by survey, not assumed):** the janitor already ships three adjacent
+  detectors, and **all three presuppose a correct `.gitignore` already exists**:
+  - `tracked-ignored` — fires only when a rule EXISTS and a file is tracked against it (the
+    "rule added after the commit" case). A **missing** rule fires nothing.
+  - `memory-scope-leak` — content-level scan INSIDE the memory corpus only.
+  - `project-memory-tracked` — guards the opposite direction (keeps PROJECT memory tracked via
+    a negation line).
+  No detector asks the prior question: **does `.gitignore` cover the private classes at all?**
+- **CURRENT AUDIT OF THIS REPO (2026-07-24) — CLEAN, zero tracked in every class:**
+  `.env` 0 · `*_dev/` 0 · `.venv/` 0 · `node_modules/` 0 · `.DS_Store` 0 · `reports/` 0 ·
+  `*.log` 0 · `settings.local.json` 0 · `*.pem` 0 · `*.key` 0 · nested `.git/` 0 ·
+  `.trashcan/` exactly `.gitkeep` + `README.txt`. This chore is PREVENTIVE, not remedial.
+- **NEXT ACTION:** implement the detector per the design below, starting with the pure
+  classifier + its table-driven class list, then wire the heartbeat entry.
+- **LOAD-BEARING FACTS:** a `.gitignore` rule does NOT untrack an already-tracked file (git
+  keeps existing index entries by design) — so detection must check BOTH "is the class
+  covered" AND "is anything in the class already tracked", and the remedy for the latter is
+  `git rm --cached` (never a working-tree delete). PROJECT-scope paths that MUST stay tracked
+  (`design/**`, `.claude/project/memory/**`) are protected by negation lines and must never be
+  proposed for ignoring — a false positive here would destroy the shared kanban and the shared
+  memory corpus.
+- **SUPERSEDED — do NOT carry forward:** an earlier reading of this session that `.venv` /
+  `.DS_Store` / `.in_use` / `.orphaned_at` were being SHIPPED. They are `tracked=0`; they are
+  runtime debris created inside the plugin CACHE dir by `uv run` and the cache system. Nothing
+  leaked.
+- **ARTIFACTS TO READ BEFORE ACTING:** `scripts/detectors/tracked-ignored.py`,
+  `scripts/detectors/memory-scope-leak.py`, `scripts/detectors/project-memory-tracked.py`,
+  `scripts/lib/project_memory_tracked.py`, this repo's `.gitignore` (its negation block for
+  `.claude/project/memory/**` is the reference pattern).
+
+## Problem
+
+A missing `.gitignore` pattern is silent. Git does not warn, the commit succeeds, the push
+succeeds, and — because Claude Code publishes the tracked tree verbatim — the file is then
+downloaded by every user who installs the plugin. The existing detectors cannot catch this
+because each of them starts from the assumption that the ignore file is already right.
+
+The blast radius is not limited to this repo: the janitor runs in every project on the machine,
+so the same missing-pattern class applies to every repo it watches.
+
+## Design
+
+**D1 — a table-driven class list, not a regex pile.** One table of PRIVATE CLASSES, each with
+its canonical ignore pattern, a matcher, and a short WHY. Initial classes:
+
+- secrets and credentials — `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa*`, `credentials`,
+  `secrets.{json,yaml,yml,txt}`
+- local scope — `.claude/settings.local.json`, LOCAL-scope artifacts
+- dev-only trees — `*_dev/` (`docs_dev`, `scripts_dev`, `reports_dev`, …) and `reports/`
+- build and dependency output — `.venv/`, `node_modules/`, `__pycache__/`, `dist/`, `build/`,
+  `target/`, `*.pyc`
+- OS and editor debris — `.DS_Store`, `Thumbs.db`, `*.swp`, `*~`, `*.bak`, `*.tmp`, `*.log`
+- janitor runtime state — `.janitor/state/`, `.janitor/logs/`, `.trashcan/` (minus its two
+  tracked markers)
+- nested VCS — a nested `.git/` inside the tree
+
+**D2 — two independent checks per class, because they fail differently.**
+
+- COVERAGE: does `.gitignore` (or an ancestor ignore file) actually cover the class? Ask git
+  itself with `git check-ignore` against a synthetic probe path — never by parsing the ignore
+  file, whose precedence and negation semantics are subtle and would be re-implemented wrong.
+- CONTAMINATION: is anything in the class ALREADY tracked? `git ls-files` against the class
+  matcher. This is the case a coverage-only check misses, since adding a rule later does not
+  untrack.
+
+**D3 — the protected-path allowlist is load-bearing.** `design/**` and
+`.claude/project/memory/**` are DELIBERATELY tracked and pushed. They must be exempt from every
+contamination check and must never be proposed for ignoring. Encode them as an explicit
+allowlist with the reason attached, so a future contributor cannot "tidy" them away.
+
+**D4 — SURFACE, never mutate.** The detector reports; it does not edit `.gitignore` and does
+not run `git rm --cached`. Remedy belongs to a user-invoked command (see D5) because untracking
+a file changes what every other clone receives.
+
+**D5 — a `/janitor-gitignore-fix` command** that shows the proposed diff, requires
+confirmation, appends only the MISSING patterns (never reorders or rewrites existing lines,
+never touches a negation line), and for contamination emits the exact `git rm --cached`
+invocations for the user to approve.
+
+**D6 — cadence and noise budget.** Cheap (a handful of git calls), so a slow cadence with
+seen-file dedupe. A finding on a secrets class is HIGH severity and routes to the findings
+ledger; a debris class is informational.
+
+## Acceptance criteria
+
+1. On a repo whose `.gitignore` lacks `.env`, the detector reports the missing class with its
+   canonical pattern — verified on a seeded temp repo, not on a live one.
+2. On a repo where a `.env` is ALREADY tracked, the detector reports contamination separately
+   from coverage, and names `git rm --cached` as the remedy.
+3. `design/**` and `.claude/project/memory/**` are never flagged and never proposed for
+   ignoring, even though they would match a naive "internal docs" heuristic.
+4. Running against THIS repo today reports zero findings (it is currently clean — criterion 3
+   plus a clean run is the regression guard).
+5. The detector only reads; a run leaves `.gitignore` and the git index byte-identical.
+6. pyright 0 new errors, ruff clean, full `pytest tests/` green.
+
+## Notes and lessons learned
+
+[^1]: [id:ATOM-6WM4-BF01, status:valid, keywords:"tracked_equals_shipped plugin_ships_whole_repo gitignore_missing_pattern private_file_published", ocd:2026-07-24, lmd:2026-07-24]
+  DO NOT assume a Claude Code plugin ships only its declared component dirs, BECAUSE
+  `plugin.json` has no files/exclude field and the installed cache was verified to carry the
+  entire tracked tree — so TRACKED == SHIPPED and one missing ignore pattern publishes a
+  private file to every installer. DO treat `.gitignore` coverage as a publication gate.
+
+[^2]: [id:ATOM-6WM4-BF02, status:valid, keywords:"gitignore_rule_does_not_untrack already_tracked_file git_rm_cached", ocd:2026-07-24, lmd:2026-07-24]
+  DO NOT believe that adding a `.gitignore` rule removes an already-committed file, BECAUSE git
+  keeps existing index entries by design and the file keeps shipping. DO check coverage AND
+  contamination as two separate conditions, and remedy contamination with `git rm --cached`
+  (which preserves the working-tree copy) instead of a delete.
