@@ -73,6 +73,7 @@ import tempfile
 import time
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import TextIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
@@ -271,7 +272,7 @@ class _GenLock:
 
     def __init__(self, root: Path):
         self._dir = root / ".janitor" / "state"
-        self._fh = None
+        self._fh: TextIO | None = None
 
     def acquire(self) -> bool:
         try:

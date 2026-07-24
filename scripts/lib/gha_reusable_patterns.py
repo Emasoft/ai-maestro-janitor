@@ -761,11 +761,11 @@ def check_step_output_injection_via_github_output(wf: Workflow) -> list[Finding]
                 sink_re = sink_re_cache[cache_key]
                 if not sink_re.search(run):
                     continue
-                line = wf.line_of(re.escape(t_key) + r"\s*=") or 0
+                line_no = wf.line_of(re.escape(t_key) + r"\s*=") or 0
                 findings.append(_make_finding(
                     rule_id="step-output-injection-via-github-output",
                     severity=SEV_HIGH,
-                    line=line,
+                    line=line_no,
                     matched_text=f"steps.{t_step}.outputs.{t_key}",
                     description=(
                         f"Job `{job_id}` writes an untrusted context into "

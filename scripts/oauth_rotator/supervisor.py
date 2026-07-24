@@ -366,19 +366,20 @@ def _daemon_alive() -> bool:
     scripts/lib/global_state (the daemon context already has scripts/ on the path;
     the test harness may not — fail to False, which silences the tick-stalled
     alert rather than false-alarming in unknown contexts)."""
+    import importlib
     import sys
     try:
-        from lib import global_state  # type: ignore[import-not-found]
+        gs = importlib.import_module("lib.global_state")
     except ImportError:
         lib_dir = str(Path(__file__).resolve().parent.parent / "lib")
         if lib_dir not in sys.path:
             sys.path.insert(0, lib_dir)
         try:
-            import global_state  # type: ignore[import-not-found]
+            gs = importlib.import_module("global_state")
         except ImportError:
             return False
     try:
-        return bool(global_state.daemon_is_alive())
+        return bool(gs.daemon_is_alive())
     except Exception:  # noqa: BLE001 -- observability probe; never crash the supervisor
         return False
 

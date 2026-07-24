@@ -307,9 +307,11 @@ def _drive_browser(email: str, url: str, state: str, headless: bool) -> str | No
                     frag = href[hash_idx + 1:] if hash_idx >= 0 else ""
                     qs = urllib.parse.urlparse(base).query
                     params = urllib.parse.parse_qs(qs)
-                    code = (params.get("code") or [None])[0]
+                    code_values = params.get("code")
+                    code = code_values[0] if code_values else None
                     if code:
-                        url_state = (params.get("state") or [None])[0]
+                        state_values = params.get("state")
+                        url_state = state_values[0] if state_values else None
                         raw_code = f"{code}#{url_state or frag or state}"
                 return raw_code
             finally:

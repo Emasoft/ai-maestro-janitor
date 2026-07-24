@@ -806,8 +806,10 @@ def _fmt_list(items: list[str], empty: str = "none") -> str:
 def _ago(ts: object) -> str:
     """A compact 'Nm/Nh/Nd ago' for an epoch-seconds timestamp, or '?' if unparseable."""
     import time
+    if not isinstance(ts, (int, float, str)):
+        return "?"
     try:
-        delta = int(time.time()) - int(ts)  # type: ignore[arg-type]
+        delta = int(time.time()) - int(ts)
     except (ValueError, TypeError):
         return "?"
     if delta < 0:

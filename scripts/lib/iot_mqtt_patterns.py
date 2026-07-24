@@ -515,9 +515,9 @@ def scan_text(text: str) -> list[Finding]:
     has_public_bind = _file_contains(text, _NATS_PUBLIC_BIND)
     if has_public_bind and not has_auth_block:
         # Anchor the finding on the FIRST listen/port/host directive.
-        m = _NATS_LISTEN_DIRECTIVE.search(text)
-        if m is not None:
-            _emit(rule_p4, m.start(), m.group(0))
+        m2 = _NATS_LISTEN_DIRECTIVE.search(text)
+        if m2 is not None:
+            _emit(rule_p4, m2.start(), m2.group(0))
 
     # ---- P5 : iot-mqtt-retain-poison-publish ----
     rule_p5 = rule_by_id["iot-mqtt-retain-poison-publish"]

@@ -709,8 +709,8 @@ def _content_signature(project_root: Path) -> str:
     for p in _go_scan_targets(project_root):
         try:
             st = p.stat()
-            rel = p.relative_to(project_root)
-            h.update(f"go|{rel}|{st.st_mtime_ns}|{st.st_size}\n".encode())
+            rel_path = p.relative_to(project_root)
+            h.update(f"go|{rel_path}|{st.st_mtime_ns}|{st.st_size}\n".encode())
         except OSError:
             pass
 
@@ -741,8 +741,8 @@ def _content_signature(project_root: Path) -> str:
             continue
         try:
             st = p.stat()
-            rel = p.relative_to(project_root)
-            h.update(f"setup|{rel}|{st.st_mtime_ns}|{st.st_size}\n".encode())
+            rel_path = p.relative_to(project_root)
+            h.update(f"setup|{rel_path}|{st.st_mtime_ns}|{st.st_size}\n".encode())
         except OSError:
             pass
 

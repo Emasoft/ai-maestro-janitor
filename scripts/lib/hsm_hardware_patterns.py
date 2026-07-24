@@ -972,10 +972,10 @@ def scan_text(text: str, *, filename: str = "") -> list[Finding]:
         )
         if has_interpolated_dpapi and has_powershell_spawn:
             # Anchor the finding at the interpolated-DPAPI assignment.
-            m = _DPAPI_INTERPOLATED_PAYLOAD_RE.search(text)
-            if m is not None:
-                line, col = _line_col(text, m.start())
-                _add(rule_2, m, line, col)
+            dpapi_m = _DPAPI_INTERPOLATED_PAYLOAD_RE.search(text)
+            if dpapi_m is not None:
+                line, col = _line_col(text, dpapi_m.start())
+                _add(rule_2, dpapi_m, line, col)
 
     findings.sort(key=lambda f: (f.line, f.column, f.rule_id))
     return findings

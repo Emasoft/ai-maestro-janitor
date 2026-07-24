@@ -346,11 +346,11 @@ def scan_text(text: str) -> list[Finding]:
 
     for rule in RULES:
         for m in rule.pattern.finditer(text):
-            ln, col = _linecol(m.start())
+            line_no, col = _linecol(m.start())
             findings.append(
                 Finding(
                     rule_id=rule.id,
-                    line=ln,
+                    line=line_no,
                     column=col,
                     matched_text=m.group(0)[:120],
                     severity=rule.severity,

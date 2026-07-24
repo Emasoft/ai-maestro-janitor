@@ -422,14 +422,14 @@ def parse_interfaces(iface_text: str, *, system: str) -> list[dict]:
     # `ifconfig` blocks: "en0: flags=...\n\tinet 192.168.1.5 netmask ..."
     cur = ""
     for line in text.splitlines():
-        m = re.match(r"^([A-Za-z0-9]+):\s+flags=", line)
-        if m:
-            cur = m.group(1)
+        m_flag = re.match(r"^([A-Za-z0-9]+):\s+flags=", line)
+        if m_flag:
+            cur = m_flag.group(1)
             ifaces.setdefault(cur, [])
             continue
-        m = re.search(r"^\s+inet6?\s+([0-9a-fA-F:.]+)", line)
-        if m and cur:
-            ifaces[cur].append(m.group(1))
+        m_addr = re.search(r"^\s+inet6?\s+([0-9a-fA-F:.]+)", line)
+        if m_addr and cur:
+            ifaces[cur].append(m_addr.group(1))
     return [{"name": n, "addrs": a} for n, a in ifaces.items() if n]
 
 
@@ -534,7 +534,12 @@ def parse_dns_servers(dns_text: str) -> list[str]:
         servers.append(m.group(1))
     # dedupe, preserve order
     seen: set[str] = set()
-    return [s for s in servers if not (s in seen or seen.add(s))]
+    deduped: list[str] = []
+    for s in servers:
+        if s not in seen:
+            seen.add(s)
+            deduped.append(s)
+    return deduped
 
 
 def parse_firewall_state(text: str, *, kind: str) -> str:

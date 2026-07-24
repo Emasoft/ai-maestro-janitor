@@ -654,9 +654,9 @@ def scan_text(text: str) -> list[Finding]:
     if has_verify_call and not has_inresponseto and not has_unsolicited:
         # Emit at the first SAMLResponse anchor so the finding has a
         # concrete file:line target.
-        m = _SAML_RESPONSE_VERIFY_TRIGGER.search(text)
-        if m is not None:
-            _emit(rule_s2, m.start(), m.group(0))
+        m2 = _SAML_RESPONSE_VERIFY_TRIGGER.search(text)
+        if m2 is not None:
+            _emit(rule_s2, m2.start(), m2.group(0))
 
     # ---- S3 : oidc-discovery-not-pinned ----
     rule_s3 = rule_by_id["oidc-discovery-not-pinned"]

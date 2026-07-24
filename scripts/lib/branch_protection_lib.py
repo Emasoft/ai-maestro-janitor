@@ -43,6 +43,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 # NOTE (TRDD-157OH2D7): `yaml` is imported LAZILY inside detect_required_status_checks (the ONLY
 # function that parses workflow YAML), NOT at module top. This lets lightweight importers of this
@@ -171,7 +172,7 @@ def baseline_ruleset_payloads(
             # baseline must drop it too — tracked as a cross-repo sync.
         ],
     }
-    pr_and_checks = {
+    pr_and_checks: dict[str, Any] = {
         "name": PR_CHECKS_RULESET_NAME,
         "target": "branch",
         "enforcement": "active",

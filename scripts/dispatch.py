@@ -586,9 +586,12 @@ def _run_detector(name: str, interval: int) -> None:
         # With a PIPE the partial output is on the exception — print it (defanged)
         # so a slow detector's already-produced findings aren't silently dropped
         # (they used to stream live under capture_output=False).
-        partial = exc.stdout
-        if isinstance(partial, bytes):
-            partial = partial.decode("utf-8", "replace")
+        partial_raw = exc.stdout
+        partial: str | None
+        if isinstance(partial_raw, bytes):
+            partial = partial_raw.decode("utf-8", "replace")
+        else:
+            partial = partial_raw
         if partial:
             sys.stdout.write(_defang_foreign_markers(name, partial))
             sys.stdout.flush()

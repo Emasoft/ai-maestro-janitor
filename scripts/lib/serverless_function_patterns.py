@@ -1515,8 +1515,8 @@ def scan_text(text: str, *, filename: str | None = None) -> list[Finding]:
     )
     _rule_by_id = {r.id: r for r in RULES}
     for tf_rule_id, tf_pattern in _tf_second_pass:
-        rule = _rule_by_id.get(tf_rule_id)
-        if rule is None:
+        tf_rule = _rule_by_id.get(tf_rule_id)
+        if tf_rule is None:
             continue
         for m in tf_pattern.finditer(text):
             line, col = _line_col(text, m.start())
@@ -1574,9 +1574,9 @@ def scan_text(text: str, *, filename: str | None = None) -> list[Finding]:
                 line=line,
                 column=col,
                 matched_text=matched,
-                severity=rule.severity,
-                description=rule.description,
-                owasp_asi=rule.owasp_asi,
+                severity=tf_rule.severity,
+                description=tf_rule.description,
+                owasp_asi=tf_rule.owasp_asi,
             ))
 
     # --- Pass 4: file-level corroborating context (post-emission) -------

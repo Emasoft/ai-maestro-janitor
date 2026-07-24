@@ -186,7 +186,7 @@ def main() -> int:
 
     if args.cmd == "stats":
         live = tickets.load_all()
-        by = {}
+        by: dict[str, int] = {}
         for t in live:
             by[t.status] = by.get(t.status, 0) + 1
         left = tickets.budget_left(tickets.read_ledger(), now=now, per_day=int(tickets.config("TICKETS_PER_DAY")))

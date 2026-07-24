@@ -695,12 +695,12 @@ def _scan_compose_service(  # noqa: PLR0912 - linear branch per rule, intentiona
         src = _volume_source(entry)
         if _is_runtime_socket(src):
             continue  # already covered by rule 3
-        sev = _classify_hostpath(src)
-        if sev is not None:
+        hostpath_sev = _classify_hostpath(src)
+        if hostpath_sev is not None:
             findings.append(Finding(
                 rule_id=rule5.id, line=line_hint, column=1,
                 matched_text=_trunc(f"{svc_name}: {src}"),
-                severity=sev, description=rule5.description,
+                severity=hostpath_sev, description=rule5.description,
                 owasp_asi=rule5.owasp_asi,
             ))
 

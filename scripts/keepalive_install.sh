@@ -38,9 +38,9 @@ UNIT="$UNIT_DIR/$LABEL.service"
 
 detect_platform() {
   case "$(uname -s)" in
-    Darwin) echo macos ;;
-    Linux) echo linux ;;
-    *) echo other ;;
+  Darwin) echo macos ;;
+  Linux) echo linux ;;
+  *) echo other ;;
   esac
 }
 
@@ -107,7 +107,7 @@ plist_bake_interpreter() {
     }
     inarr && /<string>/ { next }   # drop any stale interpreter <string> already present
     { print }
-  ' "$plist" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+  ' "$plist" >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
     mv -f "$tmp" "$plist" 2>/dev/null || rm -f "$tmp"
   else
     rm -f "$tmp"
@@ -150,7 +150,7 @@ execstart_bake_interpreter() {
       }
     }
     { print }
-  ' "$unit" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+  ' "$unit" >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
     mv -f "$tmp" "$unit" 2>/dev/null || rm -f "$tmp"
   else
     rm -f "$tmp"
@@ -171,7 +171,7 @@ install_macos() {
   # and requires it in-tree). D-α's absolute interpreter is therefore NOT baked here — it
   # is prepended to the WRITTEN-OUT plist by plist_bake_interpreter() AFTER this heredoc,
   # editing the on-disk runtime file (which CPV does not resolve as a persistence body).
-  cat > "$HOME/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist" <<EOF
+  cat >"$HOME/Library/LaunchAgents/com.ai-maestro-janitor.daemon.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -202,8 +202,8 @@ EOF
   # Clear any stale instance first so bootstrap never collides; both are best-effort —
   # a load failure must not abort the installer (the daemon's caller treats it best-effort).
   launchctl bootout "gui/$uid/$LABEL" 2>/dev/null || true
-  launchctl bootstrap "gui/$uid" "$PLIST" 2>/dev/null \
-    || launchctl load -w "$PLIST" 2>/dev/null || true
+  launchctl bootstrap "gui/$uid" "$PLIST" 2>/dev/null ||
+    launchctl load -w "$PLIST" 2>/dev/null || true
 }
 
 install_linux() {
@@ -217,7 +217,7 @@ install_linux() {
   # heredoc body MUST stay the in-tree inert entry. D-α's absolute interpreter is prepended
   # to the WRITTEN-OUT unit by execstart_bake_interpreter() AFTER this heredoc — editing the
   # on-disk runtime file, which CPV does not resolve as a persistence body.
-  cat > "$UNIT_DIR/com.ai-maestro-janitor.daemon.service" <<EOF
+  cat >"$UNIT_DIR/com.ai-maestro-janitor.daemon.service" <<EOF
 [Unit]
 Description=ai-maestro-janitor global daemon (OS keepalive)
 After=default.target
@@ -258,37 +258,45 @@ uninstall_linux() {
 # (so launchd_keepalive.py stays free of the tokens that would trip the discriminator).
 status_state() {
   case "$plat" in
-    macos) [ -f "$PLIST" ] ;;
-    linux) [ -f "$UNIT" ] ;;
-    *) return 1 ;;
+  macos) [ -f "$PLIST" ] ;;
+  linux) [ -f "$UNIT" ] ;;
+  *) return 1 ;;
   esac
 }
 
 cmd="${1:-install}"
 plat="$(detect_platform)"
 case "$cmd" in
-  install)
-    case "$plat" in
-      macos) install_macos ;;
-      linux) install_linux ;;
-      *) echo "keepalive: no OS keepalive for platform $plat" >&2; exit 0 ;;
-    esac
-    echo "keepalive: installed ($plat) → $ENTRY"
-    ;;
-  uninstall)
-    case "$plat" in
-      macos) uninstall_macos ;;
-      linux) uninstall_linux ;;
-      *) : ;;
-    esac
-    echo "keepalive: uninstalled ($plat)"
-    ;;
-  status)
-    if status_state; then echo "keepalive: installed ($plat)"; exit 0;
-    else echo "keepalive: not installed ($plat)"; exit 1; fi
-    ;;
+install)
+  case "$plat" in
+  macos) install_macos ;;
+  linux) install_linux ;;
   *)
-    echo "usage: keepalive_install.sh [install|uninstall|status]" >&2
-    exit 2
+    echo "keepalive: no OS keepalive for platform $plat" >&2
+    exit 0
     ;;
+  esac
+  echo "keepalive: installed ($plat) → $ENTRY"
+  ;;
+uninstall)
+  case "$plat" in
+  macos) uninstall_macos ;;
+  linux) uninstall_linux ;;
+  *) : ;;
+  esac
+  echo "keepalive: uninstalled ($plat)"
+  ;;
+status)
+  if status_state; then
+    echo "keepalive: installed ($plat)"
+    exit 0
+  else
+    echo "keepalive: not installed ($plat)"
+    exit 1
+  fi
+  ;;
+*)
+  echo "usage: keepalive_install.sh [install|uninstall|status]" >&2
+  exit 2
+  ;;
 esac

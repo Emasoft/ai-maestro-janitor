@@ -327,11 +327,11 @@ def scan_text(text: str) -> list[Finding]:
             if app_check_present:
                 continue
             for m in rule.pattern.finditer(text):
-                ln, col = _line_col(m.start())
+                line_no, col = _line_col(m.start())
                 findings.append(
                     Finding(
                         rule_id=rule.id,
-                        line=ln,
+                        line=line_no,
                         column=col,
                         matched_text=m.group()[:120],
                         severity=rule.severity,
@@ -341,11 +341,11 @@ def scan_text(text: str) -> list[Finding]:
                 )
         else:
             for m in rule.pattern.finditer(text):
-                ln, col = _line_col(m.start())
+                line_no, col = _line_col(m.start())
                 findings.append(
                     Finding(
                         rule_id=rule.id,
-                        line=ln,
+                        line=line_no,
                         column=col,
                         matched_text=m.group()[:120],
                         severity=rule.severity,
