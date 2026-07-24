@@ -1,4 +1,4 @@
-# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 5 — PROPOSED)
+# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 6 — PROPOSED)
 
 > **Status: rev 4 PROPOSED (2026-07-17, owner-directed) — supersedes the rev-3 per-class
 > chore gating; awaiting both sides' `RATIFIED rev 4` on
@@ -361,6 +361,62 @@ Janitor-side implementation is tracked per section: §7.1's move of the mode fla
 atomic writes, fail-open reads, the flag vocabulary — is already true of the janitor
 today and needs only a reader on the server side.
 
+## 8. Retry-wedge recovery — REQUESTED of ai-maestro (round 3, 2026-07-24)
+
+Owner directive 2026-07-24: a session that hits a usage/throttle limit enters CC's
+retry-watchdog loop (`429 Rate limited · Retrying in 0s · attempt N/300`, up to 300×). The
+turn stays **alive and spinning**, so it never ends — no `on-stop-failure`, no
+`rate-limited.flag`, no idle cron. The whole existing freeze-recovery ladder is gated on that
+flag (`session_liveness.diagnose_instance` returns `frozen` only when `rate_limited` is set),
+so it never engages. The session wedges until a human presses ESC. An EXTERNAL actor pressing
+ESC is the only break; **inside a harness agent that actor is the SERVER** (it owns the PTY and
+Family-A continuity; the janitor is THIN and HANDS OFF a `server_owned` pane per §1/§3). Janitor
+tracking: **TRDD-WKTD5JTC** (the standalone `#N` iTerm/tmux path is janitor Python code; this §8
+is the harness `#J` half the server owns). The `is_retry_wedge` matcher SHOULD be shared
+byte-for-byte across the standalone Python and the server TS so both agree on "wedged".
+
+**8.1 What to DETECT (server, on each registry agent's PTY it supervises).**
+- **Surface:** the agent's **PTY output stream** (the `claude` TUI the server already spawns/reads
+  under pm2) — not the transcript, which does not advance during the wedge.
+- **Signature (the wedge line):** the retry-watchdog status line. Match, case-insensitively, a
+  view containing `Retrying` together with an `attempt <n>/<m>` counter, and/or the
+  `429`/`Rate limited` token. Reference regex (share with the janitor's `is_retry_wedge`):
+  `/(?:429|rate\s*limit).*retry|retrying\s+in\b.*\battempt\s+\d+\s*\/\s*\d+/i`.
+- **Gate (avoid false positives — load-bearing):** fire ONLY when the agent is genuinely
+  wedged, not merely showing the words in scrollback: require (a) the signature on the LIVE tail,
+  (b) `attempt` counter ≥ 2 (past the first transient), AND (c) NO transcript progress since the
+  signature appeared (the same "no progress after the signal" safety clause the janitor's
+  `is_session_frozen` uses). Debounce ≥ one supervision tick.
+
+**8.2 What to INJECT (server, into that agent's PTY stdin).**
+- **Exactly one raw `ESC` byte — `0x1B`.** NOT a command, NOT a newline, NOT `Ctrl-C`. ESC is what
+  the CC retry-watchdog treats as "abort the retry and return control." A trailing newline or a
+  typed command would queue behind the wedge and mis-fire when it breaks.
+- **After ESC:** do nothing else — the abort ends the turn, which fires the janitor's in-agent
+  `on-stop-failure` → writes `rate-limited.flag` → the agent's normal resume path (or the server's
+  `ensure-resume <self>`, §6.3) takes over. The server's ONLY job is to break the wedge with ESC;
+  recovery is already wired on both sides.
+
+**8.3 Guardrails (must hold, mirror the janitor's).**
+- **Only the server's own registry agents** (per-agent isolation, §3) — never another host's, never
+  a non-agent pane.
+- **Never inject into a PROGRESSING agent** — the "no transcript progress" gate is the single
+  safety clause; a false ESC discards real work.
+- **ESC only, never a kill** — a rate-limited agent is not a crashed process; the hard/restart rungs
+  do not apply to this state.
+- **Cooldown** — at most one ESC per agent per window (mirror `recovery_cooldown_ok`); if the wedge
+  persists across cooldowns the account is genuinely exhausted → rotate (server's OAuth path) or
+  surface, do not ESC-storm.
+- **Fail-open** — an agent whose PTY tail cannot be read is simply not wedge-detected; degrade to
+  today's behavior, never to a wrong action.
+
+**8.4 Division of labor.** Standalone `#N`: the janitor daemon detects+injects via Python
+(osascript `contents of session` + `write text (character id 27)`; `tmux capture-pane` +
+`send-keys Escape`) — TRDD-WKTD5JTC. Harness `#J`: the SERVER implements §8.1–§8.3 on the PTY it
+owns. No new janitor↔server *file* contract is needed — this rides the PTY the server already
+holds; §8 is a behavior request, and the shared `is_retry_wedge` regex is the only artifact both
+sides must keep identical.
+
 ## Ratification log
 
 - rev 1 — 2026-07-17, authored janitor-side; posted to #100 for round 1.
@@ -396,3 +452,11 @@ today and needs only a reader on the server side.
   consequence a running server must accept — the janitor daemon's exit stops ALL of its
   chores, not only the five absorbed ones. Janitor-side §7.2 implementation tracked
   separately; §7.1 needs only a reader on the server side.
+- rev 6 — 2026-07-24, owner directive: the CC retry-watchdog wedge
+  (`429 · Retrying · attempt N/300`) keeps a turn alive so the flag-gated freeze ladder never
+  engages; a session sits wedged until a human presses ESC. Added §8 (retry-wedge recovery,
+  REQUESTED round 3): the standalone `#N` janitor detects+injects ESC via Python
+  (TRDD-WKTD5JTC); the harness `#J` server detects the PTY wedge signature and injects one raw
+  `ESC` (`0x1B`) into the agent PTY, then lets the existing `on-stop-failure`/`ensure-resume`
+  recovery run. Shared artifact: the `is_retry_wedge` regex, kept identical both sides. To post
+  to #100 for ai-maestro's match.

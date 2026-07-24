@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T13:39:02+0200
+updated: 2026-07-24T13:47:26+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -28,16 +28,30 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
   `session_liveness.diagnose_instance` (`frozen` only `if rate_limited:`), and the module docstring
   (lines 20-27) which explicitly DEFERS the retry-wedge to CC's own watchdog — that deferral is the
   bug, because CC's watchdog retries but never surrenders the interactive UI.
-- **NEXT ACTION:** consult `fable-advisor:advisor` on the design below (this is a >3-file daemon
-  change touching detection + actuation), then implement Phase 1. Do NOT start implementation on a
-  rate-limited window — this is pure daemon/Python work (zero model tokens at runtime) but authoring
-  it still costs session tokens.
+- **TWO BACKENDS (owner directive 2026-07-24) — split on `harness_backend.backend(env)`:**
+  - **Standalone `#N` (iTerm/tmux):** the JANITOR daemon detects AND injects, **via Python** — it
+    reads the iTerm session `contents` / `tmux capture-pane` from Python (osascript-from-Python, the
+    `fleet_inject`/`fleet_scan` pattern) and injects a raw ESC from Python
+    (`write text (character id 27)` / `tmux send-keys Escape`). This is the implementable janitor code.
+  - **Harness `#J` (ai-maestro dashboard):** the ai-maestro SERVER owns the agent PTY and Family-A
+    continuity, so the SERVER detects AND injects; the janitor **HANDS OFF** (the §1/§3 `server_owned`
+    exclusion — two owners actuating one pane is the corruption the split prevents) and contributes
+    ONLY the spec. That spec is written into `design/ARCHITECTURE.md` §8 this session — the sanctioned
+    channel to the server (the TS port is built from that doc).
+- **NEXT ACTION:** implement the STANDALONE (`#N`) Python path (Phase 1 below); consult
+  `fable-advisor:advisor` first (>3-file daemon change: detection + diagnosis + actuation + tests).
+  The harness (`#J`) path is the SERVER's to build from the ARCHITECTURE.md §8 contract — NOT janitor
+  code. Do NOT start implementation on a rate-limited window; it is pure Python (zero model tokens at
+  runtime) but authoring still costs session tokens.
 - **Load-bearing facts:** the wedged session CANNOT self-recover (no hook fires mid-turn, no cron
-  fires — the REPL is busy, not idle). The daemon is the ONLY actor that can break it. The daemon
-  already resolves pane identity (`fleet_scan.parse_iterm_sessions`, `capture_terminal_identity`,
-  `resolve_terminal_for_tty`) and already injects keystrokes (`fleet_inject`, the `esc_nudge` rung).
-  What is MISSING is a detection signal that does not depend on the flag: **reading pane CONTENT**.
-- **SUPERSEDED — do NOT carry forward:** nothing yet (first revision).
+  fires — the REPL is busy, not idle). An EXTERNAL actor is the ONLY one that can break it — the
+  janitor daemon (standalone) or the ai-maestro server (harness). The janitor already resolves pane
+  identity (`fleet_scan.parse_iterm_sessions`, `capture_terminal_identity`, `resolve_terminal_for_tty`)
+  and already injects keystrokes (`fleet_inject`, the `esc_nudge` rung). What is MISSING is a detection
+  signal that does not depend on the flag: **reading pane CONTENT**.
+- **SUPERSEDED — do NOT carry forward:** the "daemon-only, single-backend" framing of the first
+  revision — this is now explicitly two backends (standalone janitor Python vs ai-maestro server),
+  per the 2026-07-24 owner directive.
 - **Durable artifacts to read before acting:** `scripts/lib/session_liveness.py`,
   `scripts/lib/fleet_scan.py` (`gather_fleet`, `diagnose_root`), `scripts/lib/fleet_recovery.py`,
   `scripts/lib/fleet_inject.py`, `scripts/daemon.py::task_session_liveness`.
@@ -93,6 +107,37 @@ account's live 5h/7d utilization (`rotator_usage`, `token_burn`). When the live 
 right follow-up is rotate-then-resume, not just ESC. Wire the wedge detector to prefer a rotation
 when a safe alternate account exists.
 
+## Two-backend actuation (owner directive 2026-07-24) — WHO detects + injects
+
+The wedged session cannot act on itself; an EXTERNAL actor must. WHO that actor is branches on
+`harness_backend.backend(env)`, exactly like every other actuation in the plugin:
+
+### Standalone `#N` (iTerm / tmux) — the JANITOR daemon, via Python
+
+Pure Python, reusing the existing osascript/tmux plumbing:
+- **Detect:** read pane CONTENT from Python —
+  - iTerm: `osascript … contents of session id "<sid>"` (subprocess from Python; the `sid` already
+    resolves via `fleet_scan.parse_iterm_sessions` / `ITERM_SESSION_ID`),
+  - tmux: `tmux capture-pane -p -t <pane>`.
+  Match `is_retry_wedge(text)` (the pure matcher) AND require `transcript_stale`.
+- **Inject:** a single raw ESC from Python —
+  - iTerm: `osascript … tell session id "<sid>" to write text (character id 27) newline no`,
+  - tmux: `tmux send-keys -t <pane> Escape`.
+  This is ladder rung 1 (`esc_nudge`), reused verbatim.
+
+### Harness `#J` (ai-maestro dashboard) — the ai-maestro SERVER
+
+Inside a harness agent the janitor runs THIN and MUST NOT actuate a server-owned pane (§1/§3
+`server_owned` exclusion — "unknown ⇒ HANDS OFF"; two owners typing into one PTY is the corruption
+this split exists to prevent). The server owns the agent PTY and Family-A continuity, so the SERVER
+detects and injects. The janitor's whole contribution here is the **spec** — written into
+`design/ARCHITECTURE.md` §8 this session (the sanctioned janitor↔server contract channel; the TS
+port is built from that doc). See §8 for the exact detect-string and inject-byte the server must
+implement; the summary is: scan the agent PTY output for the retry-wedge signature, and on a
+genuinely-wedged agent write ONE raw `ESC` (`0x1B`) to the PTY — never a command, never a newline.
+Everything downstream (turn aborts → `on-stop-failure` → `rate-limited.flag` → `ensure-resume`) is
+already wired on both sides.
+
 ## Guardrails (must hold)
 
 - **Never ESC a healthy/working session.** Gate on `transcript_stale` + live-pane + the pane-text
@@ -118,6 +163,10 @@ when a safe alternate account exists.
 - `scripts/daemon.py::task_session_liveness` — pass the new fact through.
 - `tests/` — `is_retry_wedge` truth table (matches the real `429 · Retrying · attempt N/300` line;
   rejects scrollback-only / progressed sessions); `diagnose_instance` precedence with the new state.
+- **Harness `#J`: NO janitor files.** The ai-maestro server implements detection + injection from
+  `design/ARCHITECTURE.md` §8; the janitor ships only the §8 contract and this TRDD. The pure
+  `is_retry_wedge` matcher SHOULD be shared verbatim (same regex both sides) so the standalone Python
+  and the server TS agree byte-for-byte on what counts as wedged.
 
 ## Verification
 
