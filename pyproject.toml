@@ -30,8 +30,25 @@ ignore = ["E501"]
 
 [tool.mypy]
 ignore_missing_imports = true
+# The hooks/detectors put `scripts/` on sys.path at runtime and import the
+# in-repo package as `from lib import <submodule>` (scripts/lib/*.py). mypy,
+# run as `mypy scripts/`, otherwise has no such path and misreads each
+# `from lib import X` as an attribute of lib/__init__.py → "Module 'lib' has no
+# attribute X". Point mypy at scripts/ (as pyright does via extraPaths) so `lib`
+# resolves as the package and `lib.<submodule>` as a submodule. Kept in sync with
+# pyrightconfig.json's extraPaths.
+mypy_path = "scripts"
+explicit_package_bases = true
+namespace_packages = true
 
 # Pyright config lives in pyrightconfig.json (canonical location). When
 # both files declare [tool.pyright]/pyrightconfig.json, pyright IGNORES
 # pyproject.toml — so any [tool.pyright] block here would be dead config.
 # Keep all pyright settings in pyrightconfig.json for a single source of truth.
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+]
