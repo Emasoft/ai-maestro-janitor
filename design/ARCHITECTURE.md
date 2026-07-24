@@ -1,4 +1,4 @@
-# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 6 — PROPOSED)
+# ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 7 — PROPOSED)
 
 > **Status: rev 4 PROPOSED (2026-07-17, owner-directed) — supersedes the rev-3 per-class
 > chore gating; awaiting both sides' `RATIFIED rev 4` on
@@ -375,23 +375,34 @@ tracking: **TRDD-WKTD5JTC** (the standalone `#N` iTerm/tmux path is janitor Pyth
 is the harness `#J` half the server owns). The `is_retry_wedge` matcher SHOULD be shared
 byte-for-byte across the standalone Python and the server TS so both agree on "wedged".
 
-**8.1 What to DETECT (server, on each registry agent's PTY it supervises).**
-- **Surface:** the agent's **PTY output stream** (the `claude` TUI the server already spawns/reads
-  under pm2) — not the transcript, which does not advance during the wedge.
-- **Signature (the wedge line):** the retry-watchdog status line. Match, case-insensitively, a
-  view containing `Retrying` together with an `attempt <n>/<m>` counter, and/or the
-  `429`/`Rate limited` token. Reference regex (share with the janitor's `is_retry_wedge`):
-  `/(?:429|rate\s*limit).*retry|retrying\s+in\b.*\battempt\s+\d+\s*\/\s*\d+/i`.
-- **Gate (avoid false positives — load-bearing):** fire ONLY when the agent is genuinely
-  wedged, not merely showing the words in scrollback: require (a) the signature on the LIVE tail,
-  (b) `attempt` counter ≥ 2 (past the first transient), AND (c) NO transcript progress since the
-  signature appeared (the same "no progress after the signal" safety clause the janitor's
-  `is_session_frozen` uses). Debounce ≥ one supervision tick.
+**8.1 What to DETECT (server, on each registry agent it supervises).**
+- **Surface — the RENDERED alt-screen frame, NOT the raw PTY bytes (load-bearing).** CC is a
+  full-screen TUI on the ALTERNATE screen buffer (`\e[?1049h`): it has **no scrollback**, and the raw
+  PTY stream is escape-code redraw noise — the retry status line is drawn and REWRITTEN in place as
+  `attempt N` increments, never a clean appended line. So a byte-grep of the PTY stream FAILS. The
+  server MUST interpret the PTY through a **headless terminal emulator** (a vt / `@xterm/headless` — the
+  server almost certainly already runs one to render the dashboard's live agent view) and read the
+  CURRENT RENDERED GRID. Poll the grid each supervision tick; there is no output log to tail. This is
+  NOT the transcript (the transcript does not advance during the wedge — it is the independent progress
+  signal used by the gate below).
+- **Signature (the wedge line, matched on the rendered grid):** the retry-watchdog status line. Match,
+  case-insensitively, a rendered view containing `Retrying` together with an `attempt <n>/<m>` counter,
+  and/or the `429`/`Rate limited` token. Reference regex (share byte-for-byte with the janitor's
+  `is_retry_wedge`): `/(?:429|rate\s*limit).*retry|retrying\s+in\b.*\battempt\s+\d+\s*\/\s*\d+/i`.
+- **Gate (avoid false positives — load-bearing):** fire ONLY when genuinely wedged: (a) the signature
+  on the CURRENT rendered grid, (b) `attempt` counter ≥ 2 (past the first transient) — and the counter
+  ADVANCING across successive polls while nothing else on the grid changes is itself the positive
+  wedge signal (the frame redraws, but only the retry counter moves = not real progress), AND (c) NO
+  transcript progress since the signature appeared (the "no progress after the signal" clause the
+  janitor's `is_session_frozen` uses). Debounce ≥ one supervision tick.
 
 **8.2 What to INJECT (server, into that agent's PTY stdin).**
-- **Exactly one raw `ESC` byte — `0x1B`.** NOT a command, NOT a newline, NOT `Ctrl-C`. ESC is what
-  the CC retry-watchdog treats as "abort the retry and return control." A trailing newline or a
-  typed command would queue behind the wedge and mis-fire when it breaks.
+- **Raw `ESC` byte(s) — `0x1B`.** Send ONE to abort the retrying turn; a SECOND only if the wedge
+  signature persists past the cooldown. NEVER a command, NEVER a newline / `Enter`, NEVER `Ctrl-C`
+  (a 2nd `Ctrl-C` exits CC). ESC is what the retry-watchdog treats as "abort the retry and return
+  control." The real danger is a stray `Enter`: a 2nd ESC on an empty input can surface CC's rewind
+  overlay, which destroys nothing UNLESS an `Enter` confirms a selection — so the server must never
+  send `Enter`. A typed command would queue behind the wedge and mis-fire when it breaks.
 - **After ESC:** do nothing else — the abort ends the turn, which fires the janitor's in-agent
   `on-stop-failure` → writes `rate-limited.flag` → the agent's normal resume path (or the server's
   `ensure-resume <self>`, §6.3) takes over. The server's ONLY job is to break the wedge with ESC;
@@ -460,3 +471,10 @@ sides must keep identical.
   `ESC` (`0x1B`) into the agent PTY, then lets the existing `on-stop-failure`/`ensure-resume`
   recovery run. Shared artifact: the `is_retry_wedge` regex, kept identical both sides. To post
   to #100 for ai-maestro's match.
+- rev 7 — 2026-07-24, owner correction: CC's TUI runs on the ALTERNATE screen buffer → NO
+  scrollback, so §8 detection cannot byte-grep the raw PTY stream — the server MUST render the PTY
+  through a headless vt emulator and match the RENDERED FRAME (the retry line is redraw noise,
+  rewritten in place as `attempt N` ticks). §8.1 surface + gate rewritten (poll the rendered grid;
+  the advancing counter is itself the positive signal); §8.2 injection aligned to the ESC-input
+  semantics (1–2 ESC, no text, never `Enter`, never `Ctrl-C`). Standalone reads the frame via tmux
+  `capture-pane` / iTerm `contents` (the terminal is the emulator). To post to #100.

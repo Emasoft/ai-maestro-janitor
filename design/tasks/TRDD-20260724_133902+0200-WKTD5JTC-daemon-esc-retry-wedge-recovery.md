@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T13:47:26+0200
+updated: 2026-07-24T13:55:23+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -49,6 +49,16 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
   identity (`fleet_scan.parse_iterm_sessions`, `capture_terminal_identity`, `resolve_terminal_for_tty`)
   and already injects keystrokes (`fleet_inject`, the `esc_nudge` rung). What is MISSING is a detection
   signal that does not depend on the flag: **reading pane CONTENT**.
+- **ALT-SCREEN CONSTRAINT (owner, 2026-07-24) — load-bearing for detection:** CC is a full-screen TUI
+  on the ALTERNATE screen buffer (`\e[?1049h`) → **no scrollback history**. Detection can read only the
+  CURRENT RENDERED FRAME, and only through a terminal EMULATOR. Standalone gets the emulator for free —
+  tmux `capture-pane` / iTerm `contents` render the alt-screen frame. The server owns the RAW PTY and
+  MUST feed it through a headless vt (it likely already runs one for the dashboard's xterm.js view);
+  grepping raw PTY bytes FAILS (the retry line is redraw noise, rewritten in place as `attempt N`
+  increments). The `attempt` counter advancing across polls while nothing else changes is itself the
+  positive wedge signal. Injection is ESC-only per `[[claude-code-esc-input-semantics]]`: 1–2 ESC, no
+  text, **NEVER Enter** (a stray Enter on the rewind overlay is the real danger), **NEVER Ctrl+C** (2nd
+  press exits CC).
 - **SUPERSEDED — do NOT carry forward:** the "daemon-only, single-backend" framing of the first
   revision — this is now explicitly two backends (standalone janitor Python vs ai-maestro server),
   per the 2026-07-24 owner directive.
@@ -78,15 +88,16 @@ Add a flag-independent wedge detector to the daemon's fleet-guardian and route i
 ESC rung.
 
 **1. Detect (new signal — pane CONTENT, not identity).** In `fleet_scan` (the daemon-side, runs
-outside every session), for each live claude pane the daemon can drive, capture the last N lines of
-pane text:
-- tmux: `tmux capture-pane -p -t <pane>` (already have the pane id).
-- iTerm: osascript `contents of session id "<sid>"` (already resolve the sid).
+outside every session), for each live claude pane, capture the CURRENT RENDERED FRAME — CC runs on the
+ALTERNATE screen buffer, so there is no scrollback; the terminal emulator renders the visible frame:
+- tmux: `tmux capture-pane -p -t <pane>` — tmux IS the emulator; renders the current alt-screen frame.
+- iTerm: osascript `contents of session id "<sid>"` — iTerm IS the emulator; returns the visible frame.
 Match a retry-wedge signature — `Retrying in` on the same view as `attempt <n>/<m>` (and/or the
-`429`/`Rate limited` token). Keep the matcher a small, tested pure function (`is_retry_wedge(text)`)
-so it is FP-safe: a session merely SHOWING the words in scrollback that has since progressed
-(transcript advanced) must NOT match — combine the pane match with `transcript_stale` exactly as the
-frozen gate does.
+`429`/`Rate limited` token) via the pure `is_retry_wedge(text)`. Poll the frame each tick (no output
+log exists to scan). FP guard: require `transcript_stale` (the on-disk transcript is independent of the
+TUI and has not advanced), and treat the `attempt` counter ADVANCING across polls while nothing else
+changes as the positive wedge signal (the frame redraws, but only the retry counter moves = not real
+progress).
 
 **2. Diagnose.** Add a `retry_wedged` diagnosis to `session_liveness.DIAGNOSES`, ranked just above
 `frozen`. `diagnose_instance` gains a `retry_wedged: bool` fact and returns `retry_wedged` when the
@@ -119,8 +130,11 @@ Pure Python, reusing the existing osascript/tmux plumbing:
   - iTerm: `osascript … contents of session id "<sid>"` (subprocess from Python; the `sid` already
     resolves via `fleet_scan.parse_iterm_sessions` / `ITERM_SESSION_ID`),
   - tmux: `tmux capture-pane -p -t <pane>`.
-  Match `is_retry_wedge(text)` (the pure matcher) AND require `transcript_stale`.
-- **Inject:** a single raw ESC from Python —
+  Both read the RENDERED alt-screen frame via the terminal emulator (no scrollback exists); poll the
+  frame each tick. Match `is_retry_wedge(text)` AND require `transcript_stale`.
+- **Inject:** ESC key(s) from Python — 1 to abort the retrying turn; a 2nd only if the wedge persists
+  (per `[[claude-code-esc-input-semantics]]`: ESC-only, no text, **NEVER Enter**, **NEVER Ctrl+C** —
+  2nd Ctrl+C exits CC; a 2nd ESC on empty input may surface the rewind overlay, harmless unless Enter) —
   - iTerm: `osascript … tell session id "<sid>" to write text (character id 27) newline no`,
   - tmux: `tmux send-keys -t <pane> Escape`.
   This is ladder rung 1 (`esc_nudge`), reused verbatim.
