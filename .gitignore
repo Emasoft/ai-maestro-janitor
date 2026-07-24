@@ -82,3 +82,7 @@ llm_externalizer_output/
 /.trashcan/*
 !/.trashcan/.gitkeep
 !/.trashcan/README.txt
+
+# Added by CPV standardize
+*_dev/
+.ruff_cache/
