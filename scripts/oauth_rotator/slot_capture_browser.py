@@ -154,7 +154,7 @@ def _wait_for_cdp(port: int, timeout: float = 30.0) -> bool:
     probe = f"http://127.0.0.1:{port}/json/version"
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(probe, timeout=2) as r:
+            with urllib.request.urlopen(probe, timeout=2) as r:  # nosec B310 -- localhost CDP readiness probe; hardcoded scheme
                 if r.status == 200:
                     return True
         except (urllib.error.URLError, OSError):
@@ -356,7 +356,7 @@ def _exchange(code: str, verifier: str, state: str) -> dict:
         TOKEN_URL, data=body, method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
         return json.loads(r.read().decode())
 
 

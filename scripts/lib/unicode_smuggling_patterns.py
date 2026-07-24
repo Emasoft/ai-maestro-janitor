@@ -113,7 +113,7 @@ def _line_col(text: str, offset: int) -> tuple[int, int]:
 #   U+2067 RLI  Right-to-Left Isolate
 #   U+2068 FSI  First-Strong Isolate
 #   U+2069 PDI  Pop Directional Isolate
-_BIDI_CHARS = "‪‫‬‭‮⁦⁧⁨⁩"
+_BIDI_CHARS = "‪‫‬‭‮⁦⁧⁨⁩"  # nosec B613 -- this detector carries bidi control chars as its detection data
 
 # Zero-width + word-joiner family — the broad "invisible" mask.
 #   U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+200E LRM, U+200F RLM
@@ -464,7 +464,7 @@ def find_duplicate_key_confusables(
             _construct_mapping,
         )
         try:
-            tree = yaml.load(raw_text, Loader=_DupLoader)
+            tree = yaml.load(raw_text, Loader=_DupLoader)  # nosec B506 -- _DupLoader subclasses yaml.SafeLoader (line ~453); cannot instantiate arbitrary objects
         except yaml.YAMLError:
             return []
         # `tree` is now a pairs list (or a list of pairs at the root).

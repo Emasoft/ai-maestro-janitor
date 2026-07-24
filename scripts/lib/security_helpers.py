@@ -448,7 +448,7 @@ def owasp_id_label(asi_id: str) -> str:
 # sentinel-ai-o-main claudemd_scanner.py.
 _INVISIBLE_UNICODE = frozenset(
     # Zero-width set
-    "​‌‍‎‏⁠⁡⁢⁣⁤"
+    "​‌‍‎‏⁠⁡⁢⁣⁤"  # nosec B613 -- this scanner carries invisible/bidi chars as its detection data
     "⁦⁧⁨⁩‪‫‬‭‮﻿"
     "­"  # soft hyphen
 )

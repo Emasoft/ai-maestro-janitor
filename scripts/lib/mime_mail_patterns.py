@@ -242,7 +242,7 @@ _MIME_FILENAME_BIDI_LITERAL = _re(
     # Optional closing quote on the key (`"filename":`) before the
     # delimiter — covers JSON/dict shapes as well as MIME header forms.
     r"filename['\"]?\s*[=:]\s*['\"][^'\"\r\n]{0,300}"
-    r"[‪‫‬‭‮⁦⁧⁨⁩‎‏]"
+    r"[‪‫‬‭‮⁦⁧⁨⁩‎‏]"  # nosec B613 -- this pattern carries bidi control chars as its detection data
     r"[^'\"\r\n]{0,300}['\"]"
 )
 

@@ -115,8 +115,8 @@ _RAT_IOC_BY_PLATFORM: dict[str, list[str]] = {
         "~/Library/LaunchAgents/com.apple.softwareupdated.plist",
     ],
     "linux": [
-        "/tmp/ld.py",
-        "/tmp/.npm-cache/",
+        "/tmp/ld.py",  # nosec B108 -- known-malware path signature scanned FOR, not a temp file created
+        "/tmp/.npm-cache/",  # nosec B108 -- known-malware path signature scanned FOR, not a temp file created
         "/etc/cron.d/.dotsync",           # CanisterWorm
         "/var/run/setup_bun.js",          # Shai-Hulud 2.0
         "/var/run/bun_environment.js",    # Shai-Hulud 2.0

@@ -123,7 +123,7 @@ def _stage_installer(source_scripts_dir: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(f"{dest.name}.tmp.{os.getpid()}")
     shutil.copyfile(src, tmp)  # byte-identical copy of the CPV-scanned installer
-    os.chmod(tmp, 0o755)
+    os.chmod(tmp, 0o755)  # nosec B103 -- staged installer must be executable (launchd/systemd exec via shebang); 0o755 intended
     os.replace(tmp, dest)
     return dest
 

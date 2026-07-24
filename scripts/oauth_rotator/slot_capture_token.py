@@ -122,7 +122,7 @@ def _account_status(tok: str) -> tuple[str, str]:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=20) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
             data = json.loads(r.read().decode("utf-8", "replace"))
         fh = rotator._util(data, "five_hour")
         return "ok", ("usage 5h=%.0f%%" % fh) if fh is not None else "usage 200"

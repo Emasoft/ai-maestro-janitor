@@ -616,7 +616,7 @@ def _addr_is_exposed(addr: str) -> bool:
     a = addr.strip("[]")
     if a in ("127.0.0.1", "::1", "localhost"):
         return False
-    if a in ("0.0.0.0", "::", "*"):
+    if a in ("0.0.0.0", "::", "*"):  # nosec B104 -- classifies an address as bind-all; does not bind
         return True
     priv = _is_private_ip(a)
     # A specific LAN/any address is 'exposed' relative to loopback; unknown → treat as exposed.

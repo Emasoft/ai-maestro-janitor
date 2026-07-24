@@ -153,7 +153,7 @@ def _deliver(
         req = urllib.request.Request(
             url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
         )
-        urllib.request.urlopen(req, timeout=10)  # noqa: S310 -- the user supplied the URL
+        urllib.request.urlopen(req, timeout=10)  # noqa: S310 -- user-supplied webhook URL  # nosec B310 -- user-configured webhook, not attacker input
 
     run = runner or _default_runner
     open_ = opener or _default_opener

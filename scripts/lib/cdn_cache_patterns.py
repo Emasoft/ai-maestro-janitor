@@ -703,7 +703,7 @@ SSRF_FORBIDDEN_HOSTS: frozenset[str] = frozenset({
     "fd00:ec2::254",              # AWS metadata IPv6
     "metadata.google.internal",   # GCP DNS metadata
     "metadata.azure.com",         # Azure DNS metadata
-    "localhost", "127.0.0.1", "::1", "0.0.0.0",
+    "localhost", "127.0.0.1", "::1", "0.0.0.0",  # nosec B104 -- SSRF host-signature literals (data), not a socket bind
 })
 
 # RFC-1918 + link-local + loopback CIDR string-prefixes — stage-2 uses

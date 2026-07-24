@@ -352,7 +352,7 @@ RULES: tuple[Rule, ...] = (
 # resolution.
 
 LOOPBACK_HOSTS: frozenset[str] = frozenset({
-    "127.0.0.1", "::1", "localhost", "0.0.0.0",
+    "127.0.0.1", "::1", "localhost", "0.0.0.0",  # nosec B104 -- loopback-host signature literals (data), not a bind
 })
 
 MQTT_BROKER_ALLOWLIST: frozenset[str] = frozenset({
@@ -376,7 +376,7 @@ SMTP_RELAY_WILDCARDS: tuple[str, ...] = (
 )
 
 WS_HOST_ALLOWLIST: frozenset[str] = frozenset({
-    "localhost", "127.0.0.1", "::1", "0.0.0.0",
+    "localhost", "127.0.0.1", "::1", "0.0.0.0",  # nosec B104 -- websocket host allowlist literals (data), not a bind
 })
 
 WS_HOST_WILDCARDS: tuple[str, ...] = (

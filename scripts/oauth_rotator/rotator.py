@@ -1215,7 +1215,7 @@ def account_email(blob: dict) -> str | None:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=20) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
             data = json.loads(r.read().decode("utf-8", "replace"))
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return None
@@ -1252,7 +1252,7 @@ def usage_request(blob: dict) -> tuple[int, dict | None]:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=20) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
             return (getattr(r, "status", 200), json.loads(r.read().decode("utf-8", "replace")))
     except urllib.error.HTTPError as e:  # MUST precede URLError (subclass)
         return (e.code, None)
@@ -1298,7 +1298,7 @@ def refresh_oauth_token(blob: dict) -> dict | None:
         headers={"Content-Type": "application/json", "User-Agent": "claude-account-rotator"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310 -- hardcoded https OAuth token endpoint; scheme not attacker-controlled
             tok = json.loads(r.read().decode("utf-8", "replace"))
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError):
         return None

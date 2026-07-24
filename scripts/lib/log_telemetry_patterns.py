@@ -67,7 +67,7 @@ def _re(pattern: str) -> re.Pattern:
 
 # Rule 2 — OpenTelemetry exporter hosts
 _OTEL_ENDPOINT_ALLOWLIST: frozenset[str] = frozenset({
-    "localhost", "127.0.0.1", "::1", "0.0.0.0",
+    "localhost", "127.0.0.1", "::1", "0.0.0.0",  # nosec B104 -- OTEL endpoint allowlist literals (data), not a bind
     "otel-collector",
     "otel-collector.default",
     "otel-collector.observability",
@@ -382,7 +382,7 @@ def _syslog_is_tcp(matched: str) -> bool:
 
 def _syslog_host_is_loopback(host: str) -> bool:
     """Loopback hosts are skipped by Rule 7."""
-    return host.lower() in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+    return host.lower() in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}  # nosec B104 -- loopback-host membership test (data), not a bind
 
 
 # ---- Rule 8: logging.Filter subclass that silently drops security logs --

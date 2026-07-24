@@ -136,7 +136,7 @@ def stage_closure(scripts_dir: Path, dest_scripts_dir: Path) -> list[Path]:
         tmp = dst.with_name(f"{dst.name}.tmp.{os.getpid()}")
         shutil.copyfile(src, tmp)  # byte-identical copy of the CPV-scanned file
         if src.name == "daemon_keepalive_entry.py":
-            os.chmod(tmp, 0o755)  # launchd/systemd exec it directly via its shebang
+            os.chmod(tmp, 0o755)  # nosec B103 -- launchd/systemd exec this staged script directly via its shebang; 0o755 is intended
         os.replace(tmp, dst)
         staged.append(dst)
     return staged

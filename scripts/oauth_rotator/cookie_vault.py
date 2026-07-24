@@ -84,7 +84,7 @@ def extract_jar(cookies_db: Path | str, *, host_filter: str = "%claude.ai") -> C
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
         cur = con.execute(
-            f"SELECT {cols} FROM cookies WHERE host_key LIKE ? ORDER BY name, path",
+            f"SELECT {cols} FROM cookies WHERE host_key LIKE ? ORDER BY name, path",  # nosec B608 -- {cols} is the fixed COOKIE_COLUMNS constant; the user value host_filter is parameterized (?)
             (host_filter,),
         )
         rows: list[dict] = []

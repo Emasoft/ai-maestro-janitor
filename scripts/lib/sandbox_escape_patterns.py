@@ -188,7 +188,7 @@ _RUNTIME_SOCKET_SUFFIXES: tuple[str, ...] = (
 # guard recognises these as membership-test prefixes (never opened),
 # not an fs sink; the function-local form was conservatively kept MINOR.
 _CONTAINER_HOOK_DANGER_PREFIXES: tuple[str, ...] = (
-    "/tmp/", "/var/tmp/", "/dev/shm/", "/run/user/",
+    "/tmp/", "/var/tmp/", "/dev/shm/", "/run/user/",  # nosec B108 -- container-escape path-prefix signatures (data), not temp-file creation
 )
 
 
