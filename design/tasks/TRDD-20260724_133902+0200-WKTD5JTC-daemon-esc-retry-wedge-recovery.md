@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T14:22:35+0200
+updated: 2026-07-24T14:26:19+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -109,6 +109,11 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
   revision — this is now explicitly two backends (standalone janitor Python vs ai-maestro server),
   per the 2026-07-24 owner directive. Also SUPERSEDED: any `429`/`rate-limit`-KEYED signature — the
   regex is now the cause-agnostic `Retrying in … attempt N/M` (session-limit wedges proved it).
+- **SERVER NOTIFIED (2026-07-24):** the `#J` half was explained to the ai-maestro Claude in
+  **ai-maestro#90** (https://github.com/Emasoft/ai-maestro/issues/90) — a self-contained copy of the
+  §8 contract. Caveat recorded there: the ARCHITECTURE.md §8 rev-7 content is in 55 unpushed janitor
+  commits, so the GitHub design-doc link 404s until pushed; the issue body carries the full spec so the
+  server can act regardless. Once pushed, ratify §8 rev 7 on janitor#100 as usual.
 - **Durable artifacts to read before acting:** `scripts/lib/session_liveness.py`,
   `scripts/lib/fleet_scan.py` (`gather_fleet`, `diagnose_root`), `scripts/lib/fleet_recovery.py`,
   `scripts/lib/fleet_inject.py`, `scripts/daemon.py::task_session_liveness`.
