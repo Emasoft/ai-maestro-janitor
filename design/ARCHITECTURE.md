@@ -386,8 +386,15 @@ byte-for-byte across the standalone Python and the server TS so both agree on "w
   `Terminal`, because the browser tab is usually CLOSED for an unattended agent, which is exactly when
   the wedge bites; a server-side headless emulator is always present. Read the ALTERNATE buffer:
   `term.buffer.active` (its `.type` is `'alternate'` during the TUI), joining
-  `getLine(viewportY + y).translateToString(true)` for `y` in `0..rows`. Because it is the SAME
-  xterm.js parse the dashboard shows a human, the detector sees exactly the visible frame. Poll the
+  `getLine(viewportY + y).translateToString(true)` for `y` in `0..rows`, and run the shared
+  `is_retry_wedge` regex over the joined rows. Do NOT use `@xterm/addon-search` (`findNext`) for this:
+  that addon is for interactive UI — it mutates the terminal selection/viewport and wants the DOM
+  renderer, whereas a direct buffer read is side-effect-free, works in `@xterm/headless`, and keeps
+  the matcher byte-for-byte identical to the standalone side. Because it is the SAME xterm.js parse the
+  dashboard shows a human, the detector sees exactly the visible frame. (The
+  `buffer.active.type`/`viewportY`/`getLine`/`translateToString` API and the `addon-search` shape are
+  VERIFIED against the `xtermjs/xterm.js` typings, 2026-07-24; `onDidChangeResults` fires only when
+  decorations are enabled — another reason the headless detector reads the buffer directly.) Poll the
   grid each supervision tick; there is no output log to tail. This is NOT the transcript (which does
   not advance during the wedge — it is the independent progress signal used by the gate below).
 - **Signature (the wedge line, matched on the rendered grid):** the retry-watchdog status line. Match,
