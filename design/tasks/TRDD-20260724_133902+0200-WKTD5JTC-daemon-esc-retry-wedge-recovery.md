@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T14:15:55+0200
+updated: 2026-07-24T14:22:35+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -38,11 +38,37 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
     exclusion — two owners actuating one pane is the corruption the split prevents) and contributes
     ONLY the spec. That spec is written into `design/ARCHITECTURE.md` §8 this session — the sanctioned
     channel to the server (the TS port is built from that doc).
-- **NEXT ACTION:** implement the STANDALONE (`#N`) Python path (Phase 1 below); consult
-  `fable-advisor:advisor` first (>3-file daemon change: detection + diagnosis + actuation + tests).
-  The harness (`#J`) path is the SERVER's to build from the ARCHITECTURE.md §8 contract — NOT janitor
-  code. Do NOT start implementation on a rate-limited window; it is pure Python (zero model tokens at
-  runtime) but authoring still costs session tokens.
+- **NEXT ACTION (REVISED after advisor review — see `## Advisor review` below):** do NOT write code
+  yet. FIRST empirically verify the two load-bearing assumptions on a REAL wedge (cheapest possible
+  signal; if either fails, the design changes shape):
+  - **(1a)** During the `Retrying … attempt N/300` loop, does CC append records to the session
+    `.jsonl`? If YES, `transcript_stale` NEVER trips and the whole flag-independent detection is dead
+    — the gate must switch to "signature present + attempt-number advanced", NOT transcript-stale.
+    Check: tail the session `.jsonl` mtime/lines across the wedge.
+  - **(1b)** Does injecting ESC end the turn via `on-stop-failure` (API-error path, writes
+    `rate-limited.flag`) or via plain `Stop` (user-cancel path, NO flag)? If plain `Stop`, the
+    `[janitor-resume]` chain never fires — so the DAEMON must write `rate-limited.flag` itself right
+    before the ESC (precedent: `fleet_scan.sweep_stale_rate_limit` already writes/removes that flag).
+  THEN implement the corrected Phase 1 (below). The harness (`#J`) path is the SERVER's to build from
+  ARCHITECTURE.md §8. Advisor consult DONE (Fable 5, approve-with-changes). Do NOT implement on a
+  rate-limited window.
+- **ADVISOR CORRECTIONS (Fable 5, 2026-07-24) — MUST hold in the implementation:**
+  - **`retry_wedged` gets its OWN esc-only recovery, NOT `"ladder"`.** `daemon.py` calls
+    `action_for(..., include_hard=True)`, so `"ladder"` returns `force_restart` (a KILL) at attempts≥3
+    when hard-restart is enabled — a retry-wedge must NEVER kill. Add a dedicated `_DIAGNOSIS_RECOVERY`
+    value that is esc-only at every attempt; exhaustion → crash-loop human alert / rotate, never a kill.
+  - **`injection_is_hard(retry_wedged)` must return True**, else the `trailing_enqueues` short-circuit
+    in `daemon.py` declines the ESC and pages a human instead of injecting.
+  - **The "nothing else on the frame changes" heuristic is impossible** — the countdown / spinner /
+    statusline clock change every poll. EXTRACT the `attempt N` number via a capture group in
+    `is_retry_wedge` and compare against PERSISTED episode state (first-seen attempt): advance = wedged,
+    a DECREASE = new episode, clear state when the signature vanishes. Backoffs (2m50s) exceed the
+    ~120s beat so adjacent polls can TIE on the same attempt — a tie is not progress, keep polling.
+    The advance requirement stays: it is the ONLY guard against a pane STATICALLY displaying the string
+    (this very TRDD contains it verbatim → a naive substring match self-triggers).
+  - **iTerm capture AND inject both ride osascript** → the launchd daemon's TCC denial
+    (TRDD-VQ4LX7ND, observed 0/254 beats) silently kills both, and `fire()` reports "spawned" as
+    "delivered". DECLINE early when `iterm-automation-blocked.flag` is set instead of burning attempts.
 - **Load-bearing facts:** the wedged session CANNOT self-recover (no hook fires mid-turn, no cron
   fires — the REPL is busy, not idle). An EXTERNAL actor is the ONLY one that can break it — the
   janitor daemon (standalone) or the ai-maestro server (harness). The janitor already resolves pane
@@ -122,16 +148,20 @@ progress).
 
 **2. Diagnose.** Add a `retry_wedged` diagnosis to `session_liveness.DIAGNOSES`, ranked just above
 `frozen`. `diagnose_instance` gains a `retry_wedged: bool` fact and returns `retry_wedged` when the
-pane shows the signature AND the transcript is stale AND the pane is alive AND it is not
-server-owned/unarmed. Map `retry_wedged` → the ESC ladder (same actuation as `frozen`, rung 1 =
-`esc_nudge`).
+pane shows the signature AND (per §1a) the attempt-number has ADVANCED across polls AND the pane is
+alive AND it is not server-owned/unarmed. **Map `retry_wedged` to its OWN esc-only recovery, NOT the
+`"ladder"`** (advisor: `"ladder"` returns `force_restart`/kill at attempts≥3 under
+`include_hard=True`). A retry-wedge is esc-only at EVERY attempt; sustained failure → crash-loop human
+alert / rotate, never a kill.
 
-**3. Actuate (reuse existing).** `fleet_recovery` / `fleet_inject` already send ESC to a `frozen`
-target; `retry_wedged` uses the identical gentle path (ESC only — never a hard/kill rung for a
-merely-rate-limited session). ESC aborts the wedged turn → `on-stop-failure` fires → writes
-`rate-limited.flag` → the EXISTING frozen-ladder + `[janitor-resume]` + OAuth-rotator recovery all
-proceed as designed. So this change is purely "get the turn to END"; everything downstream already
-works.
+**3. Actuate (reuse ESC injection, NOT the frozen recovery mapping).** `fleet_inject` already sends
+ESC; `retry_wedged` reuses that gentle path (ESC only). **`injection_is_hard(retry_wedged)` MUST
+return True** so the `trailing_enqueues` short-circuit in `daemon.py` does not decline the ESC and page
+a human. **Decline early when `iterm-automation-blocked.flag` is set** (iTerm capture+inject both ride
+osascript, TCC-denied on the launchd daemon; `fire()` falsely reports "delivered"). ESC ends the turn
+→ **(per §1b) if that fires plain `Stop` not `on-stop-failure`, the daemon writes `rate-limited.flag`
+itself BEFORE the ESC** → then the EXISTING `[janitor-resume]` + OAuth-rotator recovery proceed. NOTE:
+"everything downstream already works" is CONDITIONAL on §1b — verify first.
 
 **4. Corroborate with the rotator (optional, Phase 2).** The OAuth rotator already knows an
 account's live 5h/7d utilization (`rotator_usage`, `token_burn`). When the live account is at/near
@@ -216,7 +246,27 @@ already wired on both sides.
    then writes `rate-limited.flag`; the next heartbeat emits `[janitor-resume]` (and, if the rotator
    is opted-in and a safe alternate exists, rotates first).
 
+## Advisor review (Fable 5, 2026-07-24) — APPROVE-WITH-CHANGES
+
+Verdict: detection SURFACE is right, but two unverified empirical assumptions are load-bearing and the
+`retry_wedged → "ladder"` mapping violates the never-kill guardrail. Ranked concerns (all folded into
+the STATE block + Design above):
+1. **Verify 1a/1b on a real wedge BEFORE writing code** — cheapest possible signal. (1a) if CC appends
+   to the `.jsonl` during the retry loop, `transcript_stale` never trips → detection dead; switch the
+   gate to signature+attempt-advance. (1b) ESC may fire plain `Stop` (user-cancel), not
+   `on-stop-failure` (API-error) → no flag → no resume; fallback = daemon writes the flag before ESC.
+2. **`retry_wedged` needs its own esc-only `_DIAGNOSIS_RECOVERY` + `injection_is_hard=True`** —
+   `"ladder"` kills at attempts≥3 under `include_hard=True`; and without `injection_is_hard` the
+   `trailing_enqueues` short-circuit declines the ESC.
+3. **Extract the `attempt N` number (capture group) + persist episode state** — "nothing else changes"
+   is impossible (countdown/spinner/clock move every poll); a static display of the string
+   self-triggers (this TRDD contains it); ties on long backoffs are not progress.
+4. **Stale-gate the capture** (≈0 captures/beat on a healthy host) and **decline on
+   `iterm-automation-blocked.flag`** (osascript TCC denial silently no-ops capture AND inject).
+
 ## Approval log
 
 - 2026-07-24T13:39:02+0200 — Authored as `todo` (Tier 0: in-scope janitor feature, explicitly
   requested by the owner). Advisor consult required before implementation (>3-file daemon change).
+- 2026-07-24T14:22:35+0200 — Advisor (Fable 5) reviewed: APPROVE-WITH-CHANGES. Four corrections folded into
+  STATE + Design; NEXT ACTION revised to "verify 1a/1b empirically first". Still `todo`, unimplemented.
