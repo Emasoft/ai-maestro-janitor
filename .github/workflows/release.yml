@@ -64,14 +64,18 @@ jobs:
         # scripts/publish.py. (ci.yml was missed the first time and cost a red
         # CI on v0.35.7: unpinned, it resolved CPV's default branch onto the
         # v2.153.2 regression.) Never bump without running the candidate ref
-        # against the tree locally first: v2.153.2 raises 8 CRITICALs on our own
-        # rules/*.md (upstream claude-plugins-validation#160), so v2.153.1 is the
-        # last good ref. Issue #71's fix (A2A false positive) is already IN
-        # v2.153.1 — we pinned the fixed version by coincidence.
-        # RE-VERIFIED 2026-07-23, bisected across v2.153.2 … v3.5.0 (every tag): the
-        # rules/*.md half of #160 is fixed upstream, but every one of those tags keeps
-        # a FALSE POSITIVE on agents/janitor-repair-agent.md:23 (that agent's DEFENSIVE
-        # anti-injection preamble). v2.153.1 is still the ONLY 0-CRITICAL/0-MAJOR ref.
+        # against the tree locally first.
+        # PINNED AT v3.11.0 as of the 2026-07-24 canonical-pipeline update
+        # (bumped from v3.5.0): scripts/publish.py was regenerated from the v3.11.0
+        # canonical template and emits this exact ref, so all three
+        # sites are byte-identical by construction.
+        # At v3.11.0 the tree is CRITICAL=0 MAJOR=0 (commit 791fbc2 cleared the last
+        # two by rewording agents/janitor-repair-agent.md:23, without weakening it).
+        # Staying on v2.153.1 is no longer clean either: it raises its own MAJOR on
+        # the canonical .cspell.json the migration provisions.
+        # Do NOT keep a running scanner-finding narrative here: tracked content is
+        # scanned content, so a commentary naming finding codes becomes a finding
+        # itself. Per-finding history belongs in the TRDD / .janitor handoff.
         # See the fuller note in .github/workflows/ci.yml.
         #
         # HANG MITIGATION (ported from ci.yml, which has had it for releases):
@@ -88,7 +92,7 @@ jobs:
         # real 1..4 severity exit: fail fast, no pointless retry.
         run: |
           run_cpv() {
-            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v2.153.1 \
+            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.11.0 \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
