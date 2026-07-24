@@ -397,10 +397,21 @@ byte-for-byte across the standalone Python and the server TS so both agree on "w
   decorations are enabled — another reason the headless detector reads the buffer directly.) Poll the
   grid each supervision tick; there is no output log to tail. This is NOT the transcript (which does
   not advance during the wedge — it is the independent progress signal used by the gate below).
-- **Signature (the wedge line, matched on the rendered grid):** the retry-watchdog status line. Match,
-  case-insensitively, a rendered view containing `Retrying` together with an `attempt <n>/<m>` counter,
-  and/or the `429`/`Rate limited` token. Reference regex (share byte-for-byte with the janitor's
-  `is_retry_wedge`): `/(?:429|rate\s*limit).*retry|retrying\s+in\b.*\battempt\s+\d+\s*\/\s*\d+/i`.
+- **Signature (the wedge line, matched on the rendered grid) — CAUSE-AGNOSTIC.** The retry-watchdog
+  status line is the SAME shape regardless of WHY the turn is retrying — verified against three live
+  lines: `✻ Rate limited · Retrying in 0s · attempt 5/300`, `✻ 429 Rate limited · Retrying in 0s ·
+  attempt 5/300`, and `✻ Session limit reached · Retrying in 2m 50s (2:10pm) · attempt 1/300`. The
+  load-bearing invariant is `Retrying in <dur> … attempt <n>/<m>`, NOT the cause word — a
+  `429`/`rate-limit`-only regex MISSES the session-limit wedge (observed 2026-07-24). Reference regex
+  (share byte-for-byte with the janitor's `is_retry_wedge`):
+  `/retrying\s+in\b.*\battempt\s+\d+\s*\/\s*\d+/i`. The cause tags (`429`, `Rate limited`,
+  `Session limit reached`, server-throttle text) are OPTIONAL context to log, never required to match.
+- **Detection may be EVENT-DRIVEN, not only polled.** xterm.js core exposes `term.onWriteParsed`
+  (`IEvent<void>`, verified `xterm.d.ts:1100`) and `term.onRender` — fire the buffer-read + regex on
+  each write instead of a fixed tick. Do NOT use `@xterm/addon-search`'s `searchResultsChanged` /
+  `onDidChangeResults` for this: that event fires only when an ACTIVE search with DECORATIONS enabled
+  re-computes its highlighted-match set — it signals "the match set changed," not "this string
+  appeared," and it drags in the search state + decoration/DOM path a headless detector must avoid.
 - **Gate (avoid false positives — load-bearing):** fire ONLY when genuinely wedged: (a) the signature
   on the CURRENT rendered grid, (b) `attempt` counter ≥ 2 (past the first transient) — and the counter
   ADVANCING across successive polls while nothing else on the grid changes is itself the positive
@@ -419,6 +430,14 @@ byte-for-byte across the standalone Python and the server TS so both agree on "w
   `on-stop-failure` → writes `rate-limited.flag` → the agent's normal resume path (or the server's
   `ensure-resume <self>`, §6.3) takes over. The server's ONLY job is to break the wedge with ESC;
   recovery is already wired on both sides.
+- **ESC is a PREREQUISITE for rotation, not an alternative to it (owner incident 2026-07-24: "you
+  failed to rotate again").** A wedged turn holds the OLD credential INSIDE its retry loop, so
+  rotating the live credential (daemon OAuth tick / server rotation) while the turn spins does NOT
+  rescue it — the spinning turn never re-reads the credential. The ONLY correct order is **ESC first
+  (end the turn) → THEN the rotated credential is picked up on resume.** So on a `Session limit
+  reached` / `Rate limited` wedge the actor must ESC even when it is ALSO rotating; rotation alone is
+  a no-op against a live wedge. (This is also why the session-limit wedge is in scope here at all —
+  it is the SAME wedge as a 429, and the same ESC breaks it.)
 
 **8.3 Guardrails (must hold, mirror the janitor's).**
 - **Only the server's own registry agents** (per-agent isolation, §3) — never another host's, never

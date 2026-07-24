@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T13:58:24+0200
+updated: 2026-07-24T14:14:09+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -60,9 +60,24 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
   positive wedge signal. Injection is ESC-only per `[[claude-code-esc-input-semantics]]`: 1–2 ESC, no
   text, **NEVER Enter** (a stray Enter on the rewind overlay is the real danger), **NEVER Ctrl+C** (2nd
   press exits CC).
+- **CAUSE-AGNOSTIC signature (owner incident 2026-07-24):** the wedge fires for MORE than a 429 —
+  observed live as `✻ Session limit reached · Retrying in 2m 50s (2:10pm) · attempt 1/300`. Same wedge,
+  different cause. `is_retry_wedge` MUST key on the invariant `Retrying in … attempt N/M`
+  (`/retrying\s+in\b.*\battempt\s+\d+\s*\/\s*\d+/i`), NOT on `429`/`rate limit` — a cause-specific
+  regex misses the session-limit wedge. Cause words are optional context to log.
+- **ESC BEFORE ROTATION (owner: "you failed to rotate again"):** a wedged turn holds the OLD credential
+  inside its retry loop, so daemon/server rotation while it spins is a NO-OP — the turn never re-reads
+  the credential. Order is ESC-first (end the turn) → rotated credential picked up on resume. So even
+  when rotating, the actor MUST ESC to break the wedge; rotation alone cannot rescue a live wedge.
+- **xterm.js detection (source-verified 2026-07-24):** event-driven via core `term.onWriteParsed`
+  (`xterm.d.ts:1100`) or `onRender` — fire the buffer-read + regex per write; NOT the search addon's
+  `searchResultsChanged`/`onDidChangeResults` (fires only for an active search with decorations = "match
+  set changed", not "string appeared"; drags in the DOM path). `SearchResultTracker.ts` at the cited
+  raw URL 404s on master (moved) — do not chase it.
 - **SUPERSEDED — do NOT carry forward:** the "daemon-only, single-backend" framing of the first
   revision — this is now explicitly two backends (standalone janitor Python vs ai-maestro server),
-  per the 2026-07-24 owner directive.
+  per the 2026-07-24 owner directive. Also SUPERSEDED: any `429`/`rate-limit`-KEYED signature — the
+  regex is now the cause-agnostic `Retrying in … attempt N/M` (session-limit wedges proved it).
 - **Durable artifacts to read before acting:** `scripts/lib/session_liveness.py`,
   `scripts/lib/fleet_scan.py` (`gather_fleet`, `diagnose_root`), `scripts/lib/fleet_recovery.py`,
   `scripts/lib/fleet_inject.py`, `scripts/daemon.py::task_session_liveness`.
