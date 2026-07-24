@@ -40,9 +40,7 @@ The atom engine (a–f below) was built with a model the USER then corrected in 
 directives. The CORRECT model — memorized at USER scope in [[wikimem-atom-block-properties]] +
 [[wikimem-single-memory-agent]] (recall them) — is:
 
-1. **EVERY element carries a LEADING metadata block.** A wikimem page is `frontmatter → TOC →
-   ## chapter/### subsection headings (each holding memory ATOMS) → # Notes → # Lessons Learned →
-   # See also`. The FOUR element kinds — **atom, note, lesson-learned, see-also** — EACH begin with
+1. **EVERY element carries a LEADING metadata block.** A wikimem page is `frontmatter → TOC → ## chapter/### subsection headings (each holding memory ATOMS) → # Notes → # Lessons Learned → # See also`. The FOUR element kinds — **atom, note, lesson-learned, see-also** — EACH begin with
    a block-properties metadata block `^memory-<id> [keywords: …, …]` on its OWN line, with the
    element's content BELOW it (LEADING, not trailing — the USER's examples always put the marker on
    top). The metadata block OPENS the element; its content runs until the next block / heading.
