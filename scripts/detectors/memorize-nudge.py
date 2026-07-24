@@ -90,7 +90,7 @@ def _session_key() -> str:
         return sid
     host = socket.gethostname().split(".")[0]
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    return hashlib.sha1(f"{host}@{today}".encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(f"{host}@{today}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
 
 def _note_files(scope_dir: Path) -> list[Path]:

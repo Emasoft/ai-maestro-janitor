@@ -75,7 +75,7 @@ def _session_key() -> str:
         return sid
     host = socket.gethostname().split(".")[0]
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    return hashlib.sha1(f"{host}@{today}".encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(f"{host}@{today}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
 
 def _contained(child: Path, root: Path) -> bool:
@@ -179,7 +179,7 @@ def main() -> int:
     # Tick-bucket dedupe keyed by the SET of unconverted reports — a NEW
     # decision report produces a fresh key (fresh reminder); an unchanged set
     # reminds at most once per interval. Sort so directory order is irrelevant.
-    sig = hashlib.sha1(",".join(sorted(unconverted)).encode("utf-8")).hexdigest()[:8]
+    sig = hashlib.sha1(",".join(sorted(unconverted)).encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
     # max(1, …): interval=0 is a legal knob value (coerce_int only clamps negatives) and
     # must mean "every fire", never ZeroDivisionError — same guard as memorize-nudge.
     tick_key = f"tick-{now // max(1, interval)}-{sig}"

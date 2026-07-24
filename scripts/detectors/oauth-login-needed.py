@@ -178,7 +178,7 @@ def main() -> int:
     if needing:
         needing = sorted(needing)
         seen = home / ".oauth-login-needed-seen.txt"
-        sig = hashlib.sha1(",".join(needing).encode("utf-8")).hexdigest()[:8]
+        sig = hashlib.sha1(",".join(needing).encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         emails = ", ".join(needing)
         msg = (
             f"[oauth-login-needed] {len(needing)} account(s) need a one-time login: "
@@ -198,7 +198,7 @@ def main() -> int:
     if stalled:
         stalled = sorted(stalled)
         seen2 = home / ".oauth-capture-stalled-seen.txt"
-        sig2 = hashlib.sha1(",".join(stalled).encode("utf-8")).hexdigest()[:8]
+        sig2 = hashlib.sha1(",".join(stalled).encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         emails2 = ", ".join(stalled)
         msg2 = (
             f"[oauth-capture-stalled] {len(stalled)} account(s) are logged in but their OAuth "

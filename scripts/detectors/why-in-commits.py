@@ -68,7 +68,7 @@ def _session_key() -> str:
         return sid
     host = socket.gethostname().split(".")[0]
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    return hashlib.sha1(f"{host}@{today}".encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(f"{host}@{today}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
 
 def _deficient_commits(root: Path, secs: int) -> list[str]:
@@ -147,7 +147,7 @@ def main() -> int:
     # Dedupe on the SET of deficient shas: a new deficient commit yields a fresh key
     # (fresh nudge), but the same un-amendable old commits are not re-nagged every
     # interval. Per-session so a fresh session is reminded once.
-    sig = hashlib.sha1(",".join(sorted(deficient)).encode("utf-8")).hexdigest()[:8]
+    sig = hashlib.sha1(",".join(sorted(deficient)).encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
     seen = state.state_dir() / f"why-in-commits-session-{_session_key()}.txt"
     line = dedupe.emit_once(seen, f"set-{sig}", msg)
     if line is not None:

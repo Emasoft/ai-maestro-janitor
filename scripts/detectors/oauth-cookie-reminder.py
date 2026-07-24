@@ -144,7 +144,8 @@ def main() -> int:
     # so one reminder/day regardless of how many projects/sessions fire heartbeats.
     seen = home / ".oauth-cookie-reminder-seen.txt"
     sig = hashlib.sha1(
-        ",".join(sorted(a.split(" ", 1)[0] for a in at_risk)).encode("utf-8")
+        ",".join(sorted(a.split(" ", 1)[0] for a in at_risk)).encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()[:8]
     key = f"due-{int(now // 86400)}-{sig}"
     tail = (

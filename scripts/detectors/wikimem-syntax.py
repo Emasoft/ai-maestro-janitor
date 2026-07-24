@@ -81,7 +81,7 @@ def main() -> int:
         )
         # Per-SET dedupe: the key is a hash of the whole critical set, so the line re-emits
         # ONLY when the set changes (a new break, or one fixed) — never on an unchanged corpus.
-        key = "critset-" + hashlib.sha1("\n".join(sigs).encode("utf-8")).hexdigest()[:16]
+        key = "critset-" + hashlib.sha1("\n".join(sigs).encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
         seen = state.state_dir() / "wikimem-syntax-seen.txt"
         line = dedupe.emit_once(seen, key, msg)
         if line is not None:

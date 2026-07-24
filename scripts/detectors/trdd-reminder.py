@@ -149,7 +149,7 @@ def _session_key() -> str:
         return sid
     host = socket.gethostname().split(".")[0]
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    digest = hashlib.sha1(f"{host}@{today}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha1(f"{host}@{today}".encode("utf-8"), usedforsecurity=False).hexdigest()
     return digest[:12]
 
 
@@ -227,7 +227,7 @@ def main() -> int:
     # purpose of the time bucket. Sort first so the order TRDDs appear
     # in the directory listing doesn't change the hash.
     entries_signature = ",".join(sorted(e.split(" ", 1)[0] for e in entries))
-    entries_hash = hashlib.sha1(entries_signature.encode("utf-8")).hexdigest()[:8]
+    entries_hash = hashlib.sha1(entries_signature.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
     # max(1, …): interval=0 is a legal knob value (coerce_int only clamps negatives) and
     # must mean "every fire", never ZeroDivisionError — same guard as memorize-nudge.
     tick_key = f"tick-{now // max(1, interval)}-{entries_hash}"
