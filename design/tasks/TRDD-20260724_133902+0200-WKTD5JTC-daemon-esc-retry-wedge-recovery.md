@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T13:55:23+0200
+updated: 2026-07-24T13:58:24+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -53,7 +53,8 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
   on the ALTERNATE screen buffer (`\e[?1049h`) → **no scrollback history**. Detection can read only the
   CURRENT RENDERED FRAME, and only through a terminal EMULATOR. Standalone gets the emulator for free —
   tmux `capture-pane` / iTerm `contents` render the alt-screen frame. The server owns the RAW PTY and
-  MUST feed it through a headless vt (it likely already runs one for the dashboard's xterm.js view);
+  reads the grid from the dashboard's own xterm.js — a SERVER-SIDE `@xterm/headless` over the same PTY
+  (`term.buffer.active`, the alt buffer), NOT the browser `Terminal` (closed for unattended agents);
   grepping raw PTY bytes FAILS (the retry line is redraw noise, rewritten in place as `attempt N`
   increments). The `attempt` counter advancing across polls while nothing else changes is itself the
   positive wedge signal. Injection is ESC-only per `[[claude-code-esc-input-semantics]]`: 1–2 ESC, no
@@ -147,8 +148,10 @@ this split exists to prevent). The server owns the agent PTY and Family-A contin
 detects and injects. The janitor's whole contribution here is the **spec** — written into
 `design/ARCHITECTURE.md` §8 this session (the sanctioned janitor↔server contract channel; the TS
 port is built from that doc). See §8 for the exact detect-string and inject-byte the server must
-implement; the summary is: scan the agent PTY output for the retry-wedge signature, and on a
-genuinely-wedged agent write ONE raw `ESC` (`0x1B`) to the PTY — never a command, never a newline.
+implement; the summary is: match the retry-wedge signature on the RENDERED xterm.js grid (the
+dashboard already renders each agent with xterm.js — read a SERVER-SIDE `@xterm/headless` buffer, since
+the alt-screen has no scrollback and raw PTY bytes are redraw noise), and on a genuinely-wedged agent
+write 1–2 raw `ESC` (`0x1B`) to the PTY — never a command, never Enter, never Ctrl-C.
 Everything downstream (turn aborts → `on-stop-failure` → `rate-limited.flag` → `ensure-resume`) is
 already wired on both sides.
 

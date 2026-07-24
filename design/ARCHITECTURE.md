@@ -376,15 +376,20 @@ is the harness `#J` half the server owns). The `is_retry_wedge` matcher SHOULD b
 byte-for-byte across the standalone Python and the server TS so both agree on "wedged".
 
 **8.1 What to DETECT (server, on each registry agent it supervises).**
-- **Surface — the RENDERED alt-screen frame, NOT the raw PTY bytes (load-bearing).** CC is a
-  full-screen TUI on the ALTERNATE screen buffer (`\e[?1049h`): it has **no scrollback**, and the raw
-  PTY stream is escape-code redraw noise — the retry status line is drawn and REWRITTEN in place as
-  `attempt N` increments, never a clean appended line. So a byte-grep of the PTY stream FAILS. The
-  server MUST interpret the PTY through a **headless terminal emulator** (a vt / `@xterm/headless` — the
-  server almost certainly already runs one to render the dashboard's live agent view) and read the
-  CURRENT RENDERED GRID. Poll the grid each supervision tick; there is no output log to tail. This is
-  NOT the transcript (the transcript does not advance during the wedge — it is the independent progress
-  signal used by the gate below).
+- **Surface — the RENDERED alt-screen frame, read from the dashboard's own xterm.js, NOT the raw PTY
+  bytes (load-bearing).** CC is a full-screen TUI on the ALTERNATE screen buffer (`\e[?1049h`): it has
+  **no scrollback**, and the raw PTY stream is escape-code redraw noise — the retry status line is
+  REWRITTEN in place as `attempt N` increments, never a clean appended line — so a byte-grep of the
+  stream FAILS. The dashboard ALREADY renders each agent's terminal with an **xterm.js** component, so
+  the emulator exists; the detector just reads its grid. Read it from a **server-side
+  `@xterm/headless` instance fed the same PTY stream** the dashboard consumes — NOT the browser's
+  `Terminal`, because the browser tab is usually CLOSED for an unattended agent, which is exactly when
+  the wedge bites; a server-side headless emulator is always present. Read the ALTERNATE buffer:
+  `term.buffer.active` (its `.type` is `'alternate'` during the TUI), joining
+  `getLine(viewportY + y).translateToString(true)` for `y` in `0..rows`. Because it is the SAME
+  xterm.js parse the dashboard shows a human, the detector sees exactly the visible frame. Poll the
+  grid each supervision tick; there is no output log to tail. This is NOT the transcript (which does
+  not advance during the wedge — it is the independent progress signal used by the gate below).
 - **Signature (the wedge line, matched on the rendered grid):** the retry-watchdog status line. Match,
   case-insensitively, a rendered view containing `Retrying` together with an `attempt <n>/<m>` counter,
   and/or the `429`/`Rate limited` token. Reference regex (share byte-for-byte with the janitor's
@@ -477,4 +482,8 @@ sides must keep identical.
   rewritten in place as `attempt N` ticks). §8.1 surface + gate rewritten (poll the rendered grid;
   the advancing counter is itself the positive signal); §8.2 injection aligned to the ESC-input
   semantics (1–2 ESC, no text, never `Enter`, never `Ctrl-C`). Standalone reads the frame via tmux
-  `capture-pane` / iTerm `contents` (the terminal is the emulator). To post to #100.
+  `capture-pane` / iTerm `contents` (the terminal is the emulator). Refined same session (rev 7 not
+  yet posted): the dashboard already renders each agent with **xterm.js**, so the server reads the
+  grid from a **server-side `@xterm/headless`** fed the same PTY (`term.buffer.active`, the alt
+  buffer) — not the browser `Terminal`, which is closed for unattended agents, exactly when the wedge
+  bites. To post to #100.
