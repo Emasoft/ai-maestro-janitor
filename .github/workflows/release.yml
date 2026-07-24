@@ -68,6 +68,11 @@ jobs:
         # rules/*.md (upstream claude-plugins-validation#160), so v2.153.1 is the
         # last good ref. Issue #71's fix (A2A false positive) is already IN
         # v2.153.1 — we pinned the fixed version by coincidence.
+        # RE-VERIFIED 2026-07-23, bisected across v2.153.2 … v3.5.0 (every tag): the
+        # rules/*.md half of #160 is fixed upstream, but every one of those tags keeps
+        # a FALSE POSITIVE on agents/janitor-repair-agent.md:23 (that agent's DEFENSIVE
+        # anti-injection preamble). v2.153.1 is still the ONLY 0-CRITICAL/0-MAJOR ref.
+        # See the fuller note in .github/workflows/ci.yml.
         #
         # HANG MITIGATION (ported from ci.yml, which has had it for releases):
         # `cpv-remote-validate` intermittently hangs with no progress while the

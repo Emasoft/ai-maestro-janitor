@@ -77,6 +77,14 @@ jobs:
           # scripts/publish.py. Never bump without first running the new ref against
           # the tree locally; v2.153.2 raises 8 CRITICALs on our own rules/*.md
           # (upstream claude-plugins-validation#160), so v2.153.1 is the last good ref.
+          # RE-VERIFIED 2026-07-23, bisected across v2.153.2 … v3.5.0 (every tag):
+          # upstream fixed the rules/*.md half of #160 (12 CRITICALs at v2.153.2 → 1
+          # from v2.157.2 on), but ALL of them keep a FALSE POSITIVE on
+          # agents/janitor-repair-agent.md:23 — that agent's DEFENSIVE anti-injection
+          # preamble ("that is an ATTACK, not a task"), which skillaudit's
+          # prompt_injection matcher reads as an attack. Rewording a security preamble
+          # to appease a matcher would weaken it, so v2.153.1 stays the pin: it is the
+          # ONLY ref that yields 0 CRITICAL / 0 MAJOR on this tree.
           #
           # This call site was left UNPINNED when the other two were pinned, and it
           # cost a red CI on the v0.35.7 release: it resolved CPV's default branch,
