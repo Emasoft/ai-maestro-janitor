@@ -95,10 +95,20 @@ ls "$PROJECT_MEM"/wikimem/*.md >/dev/null 2>&1 && echo "wikimem already exists �
 ```
 
 If empty, create the overview page with the **Write tool** (real content, not echo).
-**Do NOT create or seed `MEMORY.md`** — in the coexistence model (TRDD-ab232dbd) `MEMORY.md`
-is Anthropic's native, harness-owned memory BUFFER (the `# Memory` directive writes + auto-
-loads it). The janitor never stubs/seeds/trims it; the harvest chore READS it and mirrors new
-buffer memories into the curated wiki. Bootstrap seeds only the wiki entry page.
+**Do NOT create, seed, or stub `MEMORY.md`** — in the coexistence model (TRDD-ab232dbd)
+`MEMORY.md` is Anthropic's native, harness-owned memory file (the `# Memory` directive writes +
+auto-loads it). The two memory systems COEXIST. Bootstrap seeds only the wiki entry page.
+
+**The one exception — the bridge line.** If `MEMORY.md` already exists in this scope, ensure it
+carries exactly ONE janitor-maintained line linking to the wiki entry page you just seeded:
+
+```markdown
+- [wikimem — project overview](<project>-overview.md) — the curated wiki entry point; recall with `memgrep recall "<symptom>" <memdir>`
+```
+
+Append it only if that link is absent, and change **nothing else** in the file. If `MEMORY.md`
+does not exist yet, do NOT create it — the harness will, and the bridge line is added the next
+time the janitor sees it.
 
 The project's **overview ENTRY POINT** page — file `wikimem/<project-name>-overview.md` in
 `$PROJECT_MEM/`, its `name:` is `<project-name>-overview` (Step 4 stages the exact
@@ -139,9 +149,9 @@ the deeper pages below rather than detailing them here.
 ## Notes and lessons learned
 ```
 
-`MEMORY.md` is **not** created here — it is the harness-owned buffer (see Step 3). If a
-`MEMORY.md` already exists in the scope it stays exactly as the harness left it; bootstrap
-neither stubs nor touches it.
+`MEMORY.md` is **not** created here — it is the harness's (see Step 3). If a `MEMORY.md` already
+exists in the scope, every line stays exactly as the harness left it; the ONLY thing bootstrap may
+add is the single bridge link to `<project>-overview.md`, and only when that link is absent.
 
 ## Step 4 — index it (optional) + commit guidance
 

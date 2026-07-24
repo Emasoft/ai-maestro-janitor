@@ -96,8 +96,9 @@ _MEM_RECENT_WINDOW_S = 86_400  # a memory page counts as "recently updated" with
 _MEM_MAX_FILES = 8             # cap the recent-memory section
 _MEM_ATOMS_COLLAPSE = 5        # > this many atoms in one file → list the FILE, not the atoms
 
-# Detector artifacts that live under a memory dir but are NOT memories — never list them
-# (the librarian's reorg/index files regenerate constantly, and MEMORY.md is a dead stub).
+# Files under a memory dir that are NOT wiki notes — never list them here (the librarian's
+# reorg/index files regenerate constantly, and MEMORY.md is the HARNESS's own file, a
+# coexisting system the janitor only bridges to, never a wiki note to summarize).
 _MEM_EXCLUDE_NAMES = frozenset({"MEMORY.md", "memory-reorg-proposed.md", "memory-index.md"})
 
 # An atom's LEADING block-property marker `^<id> [<props>]` (TRDD-3b9b2040): group 1 = the atom

@@ -196,9 +196,11 @@ staging that is new or differs from its live copy becomes a write:
   `"$STAGING/<holder-rel>"` (read the live holder, replace its `[[source-slug]]`
   references with the right sub-page slug). The commit treats it as a write that
   overwrites the live holder — no need to declare it a begin source.
-- Do NOT touch `MEMORY.md` (it is the harness-owned buffer, not the wiki index — the
-  wiki's index is memgrep's). After the commit, the new sub-pages are picked up by
-  `memgrep reindex`; there is no human index to update.
+- Do NOT touch `MEMORY.md` — it is the harness's, the two memory systems COEXIST, and the
+  wiki's index is memgrep's. A split adds NO line there: the janitor maintains exactly ONE
+  line in that file, the bridge link to `<project>-overview.md`, and a split does not change
+  it. After the commit, the new sub-pages are picked up by `memgrep reindex`; there is no
+  human index to update.
 
 Then commit — this is the gate:
 

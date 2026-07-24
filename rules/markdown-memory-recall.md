@@ -164,11 +164,12 @@ elements (it RADIATES an `## Applies to` list down). A **component** is ONE elem
 ↔ `Governed by` across tiers, `See also` ↔ `See also` laterally. Wire both ends in the same
 edit.
 
-## MEMORY.md is a DEPRECATED STUB
+## MEMORY.md — the two systems COEXIST; the janitor maintains ONE line
 
-The index is memgrep's and ONLY memgrep's (agent-invisible, unlimited SQLite). Do **NOT** add
-pointers to the stub, load it as an index, or **hand-trim it** — agents who trimmed the old
-ever-growing index lost pointers and corrupted the corpus. That is why the index moved to memgrep.
+`MEMORY.md` is the **harness's** and **not deprecated**. The janitor maintains **exactly ONE line**
+in it: a link to the project's main wikimem page (`<project>-overview.md`) — the bridge between the
+two systems. VERIFY it is there, RE-ADD if deleted, **touch nothing else**. *"Recall runs through
+memgrep"* = where SEARCH happens, NOT a licence to empty or stub it.
 
 ## Separation of powers
 

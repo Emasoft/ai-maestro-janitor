@@ -99,7 +99,8 @@ in a new page):
    `## See also` on BOTH pages. Remove dead edges on both ends too.
 3. Bump `lmd:`. If the title or `description` changed, refresh the search index
    (`memgrep reindex` — optional, recall falls back to a live walk when the index is stale); do NOT touch `MEMORY.md`
-   (the index is memgrep's, agent-invisible).
+   (the wiki index is memgrep's; `MEMORY.md` is the harness's — the janitor maintains only the
+   one bridge line there, and an update never changes it).
 
 ## 2. CORRECT a memory — the 2-step NON-DESTRUCTIVE protocol
 

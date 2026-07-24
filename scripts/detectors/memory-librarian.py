@@ -961,11 +961,13 @@ def _collect_memory_sync_findings(_memdir: Path) -> list[str]:
 
     MEMORY.md used to be the authoritative human index, so a note on disk that
     it did not list (or an index line pointing at a deleted note) was a real
-    drift. That ended when recall moved 100% into memgrep's SQLite index:
-    MEMORY.md is now a tiny DEPRECATED STUB the write protocol must NOT add
-    pointers to (see `markdown-memory-recall.md`). Diffing the stub against the
-    corpus therefore flagged EVERY note as "missing from MEMORY.md" — pure
-    false-positive noise. The check is retired to a no-op rather than deleted so
+    drift. That ended when recall moved 100% into memgrep's SQLite index.
+    MEMORY.md is the HARNESS's file and the two memory systems COEXIST: it lists
+    what the harness wrote, not the wiki corpus, and the janitor maintains exactly
+    ONE line in it — the bridge link to `<project>-overview.md` (see
+    `markdown-memory-recall.md`). Diffing it against the wiki corpus therefore
+    flagged EVERY note as "missing from MEMORY.md" — comparing two different
+    systems' contents, pure false-positive noise. Retired to a no-op, not deleted, so
     its callers (`_collect_link_findings`, the rank-4 renderer) stay wired and a
     future index mechanism can re-home here if one is ever reintroduced.
 
