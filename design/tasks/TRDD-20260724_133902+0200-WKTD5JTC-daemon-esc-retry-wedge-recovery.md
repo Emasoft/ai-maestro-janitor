@@ -3,7 +3,7 @@ trdd-id: WKTD5JTC
 title: Daemon detects the CC 429-retry-watchdog wedge and injects ESC to break it
 column: todo
 created: 2026-07-24T13:39:02+0200
-updated: 2026-07-24T14:14:09+0200
+updated: 2026-07-24T14:15:55+0200
 current-owner: main
 task-type: feature
 scope: project
@@ -69,6 +69,11 @@ external-refs: [dccb0b8a, 324223a6, 32acd15f]
   inside its retry loop, so daemon/server rotation while it spins is a NO-OP — the turn never re-reads
   the credential. Order is ESC-first (end the turn) → rotated credential picked up on resume. So even
   when rotating, the actor MUST ESC to break the wedge; rotation alone cannot rescue a live wedge.
+- **STATUSLINE % IS A LAGGING INDICATOR — never a detection gate (owner, 2026-07-24):** the meter
+  read `5h 98%` while the session had ALREADY hit `Session limit reached` (true window = 100%). The
+  statusline refreshes on its own slow cadence, so gating detection on a usage-% threshold would MISS
+  real wedges. The wedge LINE on the rendered frame is authoritative; the % is decorative. (Rotation
+  reads LIVE `/api/oauth/usage` via `rotator_usage`, not the statusline — unaffected.)
 - **xterm.js detection (source-verified 2026-07-24):** event-driven via core `term.onWriteParsed`
   (`xterm.d.ts:1100`) or `onRender` — fire the buffer-read + regex per write; NOT the search addon's
   `searchResultsChanged`/`onDidChangeResults` (fires only for an active search with decorations = "match

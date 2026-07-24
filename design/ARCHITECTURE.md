@@ -418,6 +418,12 @@ byte-for-byte across the standalone Python and the server TS so both agree on "w
   wedge signal (the frame redraws, but only the retry counter moves = not real progress), AND (c) NO
   transcript progress since the signature appeared (the "no progress after the signal" clause the
   janitor's `is_session_frozen` uses). Debounce ≥ one supervision tick.
+- **Do NOT gate on the statusline usage %.** The statusline (`5h … 98% @2:10pm`, `7d …`) is a LAGGING
+  indicator — it refreshes on its own slow cadence, so at the moment `Session limit reached` renders
+  the meter can still read 98% when the true window is 100% (owner observation 2026-07-24). A
+  detector that required "5h ≥ 99%" before treating a wedge as real would MISS real wedges. The wedge
+  LINE is the authoritative live signal; the % is decorative. (Rotation decisions are unaffected —
+  the OAuth rotator reads LIVE `/api/oauth/usage` via `rotator_usage`, never the statusline.)
 
 **8.2 What to INJECT (server, into that agent's PTY stdin).**
 - **Raw `ESC` byte(s) — `0x1B`.** Send ONE to abort the retrying turn; a SECOND only if the wedge
