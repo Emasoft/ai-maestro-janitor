@@ -95,7 +95,10 @@ try:  # pragma: no cover — import guard
     import yaml as _yaml  # type: ignore[import-untyped]
     _HAVE_YAML = True
 except ImportError:  # pragma: no cover — import guard
-    _yaml = None
+    # `# type: ignore[assignment]`: mypy binds `_yaml` to the module type from the
+    # `import` above, so the None fallback is a type error even though it is the
+    # whole point of the guard — `_HAVE_YAML` is what callers branch on.
+    _yaml = None  # type: ignore[assignment]
     _HAVE_YAML = False
 
 

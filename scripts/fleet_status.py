@@ -296,7 +296,12 @@ def _render_markdown(body: str) -> str:
     escaped <pre> if the markdown lib is somehow unavailable, so the dashboard never
     breaks on a rendering hiccup."""
     try:
-        import markdown  # noqa: PLC0415 - declared in the script's inline deps
+        # `type: ignore[import-untyped]`: markdown ships no stubs, and it IS installed
+        # (declared in this script's inline deps) — so mypy reports "stubs not
+        # installed" rather than a missing import, which `--ignore-missing-imports`
+        # does not cover. Adding types-Markdown would put a dev-only stub package in
+        # the runtime dep set of a stdlib-only plugin.
+        import markdown  # type: ignore[import-untyped]  # noqa: PLC0415 - declared in the script's inline deps
         return markdown.markdown(
             body, extensions=["tables", "fenced_code", "sane_lists"], output_format="html"
         )
