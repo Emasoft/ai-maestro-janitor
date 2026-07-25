@@ -100,13 +100,18 @@ If empty, create the overview page with the **Write tool** (real content, not ec
 auto-loads it). The two memory systems COEXIST. Bootstrap seeds only the wiki entry page.
 
 **The one exception — the bridge line.** If `MEMORY.md` already exists in this scope, ensure it
-carries exactly ONE janitor-maintained line linking to the wiki entry page you just seeded:
+carries exactly ONE janitor-maintained line: a markdown link whose target is the scope's
+`*-overview.md` entry page (the one you just seeded), plus a short hook naming `memgrep recall`.
 
-```markdown
-- [wikimem — project overview](<project>-overview.md) — the curated wiki entry point; recall with `memgrep recall "<symptom>" <memdir>`
+You do not compose that line by hand — `scripts/lib/memory_bridge.py` is its single source of
+truth (`ensure_bridge_line`), so the wording can never drift between this doc and the code:
+
+```bash
+uv run python -c "import sys; sys.path.insert(0,'scripts/lib'); import memory_bridge; print(memory_bridge.ensure_bridge_line('$PROJECT_MEM'))"
+# -> added | present | no-overview | no-memory-md
 ```
 
-Append it only if that link is absent, and change **nothing else** in the file. If `MEMORY.md`
+It appends only when the link is absent and changes **nothing else** in the file. If `MEMORY.md`
 does not exist yet, do NOT create it — the harness will, and the bridge line is added the next
 time the janitor sees it.
 

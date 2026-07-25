@@ -48,7 +48,7 @@ OUTCOME_ADDED = "added"                 # the line was missing/deleted → one l
 OUTCOME_ERROR = "error"                 # unreadable/unwritable → fail OPEN, never raise
 
 
-def find_overview_page(scope_root: Path) -> Path | None:
+def find_overview_page(scope_root: Path | str) -> Path | None:
     """The scope's single `*-overview.md` wiki entry page, or None.
 
     Mirrors memgrep's `find_overview_page` (suffix match, case-insensitive) so the
@@ -63,7 +63,7 @@ def find_overview_page(scope_root: Path) -> Path | None:
     try:
         hits = [
             p
-            for p in scope_root.rglob("*.md")
+            for p in Path(scope_root).rglob("*.md")
             if p.is_file() and p.name.lower().endswith(_OVERVIEW_SUFFIX)
         ]
     except OSError:
@@ -101,7 +101,7 @@ def has_bridge(text: str, overview: Path) -> bool:
     return overview.name in text
 
 
-def ensure_bridge_line(scope_root: Path) -> str:
+def ensure_bridge_line(scope_root: Path | str) -> str:
     """VERIFY the bridge line is present in this scope's MEMORY.md; RE-ADD if absent.
 
     Returns one of the OUTCOME_* constants. Never raises: this runs on the
@@ -112,6 +112,9 @@ def ensure_bridge_line(scope_root: Path) -> str:
     MEMORY.md. Nothing else in the file is read for meaning, rewritten, reordered,
     or removed.
     """
+    # Coerce: the documented shell one-liner (and the bootstrap skill) pass a plain
+    # string, and a TypeError there would be a crash in the middle of a chore.
+    scope_root = Path(scope_root)
     memory_md = scope_root / MEMORY_MD
     if not memory_md.is_file():
         return OUTCOME_NO_MEMORY_MD  # the harness owns creation — never do it for it

@@ -175,6 +175,14 @@ def test_link_is_relative_not_absolute(tmp_path: Path) -> None:
     assert str(tmp_path) not in text
 
 
+def test_accepts_a_string_scope_root(tmp_path: Path) -> None:
+    """The documented shell one-liner (and the bootstrap skill) pass a plain STRING.
+    Requiring Path made that crash with TypeError mid-chore — regression guard."""
+    root = _scope(tmp_path)
+    assert mbr.ensure_bridge_line(str(root)) == mbr.OUTCOME_ADDED
+    assert mbr.find_overview_page(str(root)) is not None
+
+
 def test_never_raises_on_unreadable_scope(tmp_path: Path) -> None:
     """Runs on the SessionStart path — it must fail OPEN, never cost a session."""
     assert mbr.ensure_bridge_line(tmp_path / "does-not-exist") == mbr.OUTCOME_NO_MEMORY_MD
