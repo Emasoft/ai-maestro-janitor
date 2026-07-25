@@ -29,7 +29,19 @@ const MD_EXTS: &[&str] = &[
 /// memgrep — markdown-aware grep. Every matcher value is a regex (like grep); flags that exist in
 /// grep/rg keep their name and meaning; different flags AND-narrow, comma-lists OR-widen.
 #[derive(Parser, Debug)]
-#[command(name = "memgrep", version, about = "markdown-AST-aware grep")]
+#[command(
+    name = "memgrep",
+    version,
+    about = "markdown-AST-aware grep + wikimem memory toolkit",
+    after_help = "Memory verbs (dispatched before grep parsing — run `memgrep <verb> --help`):\n  \
+        add-atom add-lesson atom atom-page fact find find-claude-mem-ref index links lint migrate \
+        new-page overview recall reindex validate\nTo grep for one of those words as a literal \
+        pattern instead, use `memgrep -e <word> ...`.\n\nMemory model: MEMORY.md belongs to the \
+        Claude Code harness and is NOT deprecated — it and this wiki corpus are two systems that \
+        COEXIST. memgrep indexes and searches the wiki (`memgrep overview`/`recall`/`find`); the \
+        janitor maintains exactly one bridge line in MEMORY.md pointing at the wiki's \
+        <project>-overview.md, and touches nothing else in that file."
+)]
 struct Cli {
     /// Regex to match (omit when querying by structure alone, e.g. just `--heading`).
     pattern: Option<String>,

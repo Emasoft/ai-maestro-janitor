@@ -1069,7 +1069,8 @@ fn find_overview_page(files: &[PathBuf]) -> Option<PathBuf> {
 
 /// `memgrep overview [PATH]` — print the project's `*-overview.md` entry-point page (the
 /// Wikipedia-style overview that links out to the deeper wikimem pages). This is the navigation
-/// ENTRY POINT the recall protocol points the agent at; the MEMORY.md stub carries this exact
+/// ENTRY POINT the recall protocol points the agent at; the harness's own `MEMORY.md` (a
+/// separate, coexisting system this tool does not own) carries one bridge line naming this exact
 /// command. Bails with guidance when no overview page exists.
 pub fn cmd_overview_cli(args: &[String]) -> Result<()> {
     let a = OverviewArgs::parse_from(
@@ -3023,7 +3024,8 @@ struct LintArgs {
 ///      `lmd` has an fs-mtime fallback that would mask a genuinely missing `lmd:` field).
 ///
 /// (No "MEMORY.md index coverage" check: the per-note index has been RETIRED into memgrep's own
-/// agent-invisible SQLite index — MEMORY.md is a deprecation stub now — so there is nothing to
+/// agent-invisible SQLite index. MEMORY.md belongs to the Claude Code harness — a separate system
+/// that COEXISTS with the wiki, not something memgrep indexes — so there is nothing to
 /// cross-check. This omission is intentional, per issue #47.)
 ///
 /// Output is one `path:line — <what is wrong>` line per violation (line 0 when a line number is not
@@ -4955,6 +4957,28 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
             Some(Path::new("/m/ai-maestro-janitor-overview.md"))
         );
         assert!(find_overview_page(&[PathBuf::from("/m/feedback_x.md")]).is_none());
+    }
+
+    #[test]
+    fn overview_cli_errs_when_no_overview_page_exists() {
+        // `memgrep overview` on a dir with no `*-overview.md` MUST return Err (not print-and-Ok) —
+        // a caller only checking the exit code must see failure, not a false "0 = success".
+        let dir = std::env::temp_dir().join(format!(
+            "memgrep_overview_missing_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("reference_y.md"), "# not an overview\n").unwrap();
+        let result = cmd_overview_cli(&[dir.display().to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            result.is_err(),
+            "cmd_overview_cli must return Err when no overview page is found"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("no <project>-overview.md under"));
+        assert!(msg.contains("/janitor-memory-bootstrap"));
     }
 
     // ─────────────────────── `memgrep lint` (issue #47) ───────────────────────
