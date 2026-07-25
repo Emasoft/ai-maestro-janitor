@@ -76,9 +76,9 @@ jobs:
           # together, in one commit — this file, .github/workflows/release.yml, and
           # scripts/publish.py. Never bump without first running the new ref against
           # the tree locally.
-          # PINNED AT v3.16.0 as of the 2026-07-25 canonical-pipeline update
-          # (bumped from v3.11.0): scripts/publish.py was regenerated from the
-          # v3.16.0 canonical template and emits this exact ref, so the three
+          # PINNED AT v3.19.0 as of the 2026-07-25 canonical-pipeline update
+          # (bumped from v3.16.0): scripts/publish.py was regenerated from the
+          # v3.19.0 canonical template and emits this exact ref, so the three
           # sites are byte-identical by construction. Do not hand-edit one of them.
           #
           # Verified locally against this tree BEFORE the bump, per the BUMP
@@ -98,7 +98,7 @@ jobs:
           # An unpinned resolve in a job is also a supply-chain hole: CI executes
           # whatever is on that branch.
           run_cpv() {
-            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.16.0 \
+            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0 \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
