@@ -96,6 +96,16 @@ def harness(tmp_path: Path):
     # this dev-checkout path never does), but pin the opt-out explicitly so no test
     # can ever register a real ~/Library/LaunchAgents plist on the dev machine.
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_OS_KEEPALIVE"] = "0"
+    # Pin the CHORE-OWNERSHIP signal. `server_runs_chores()` resolves
+    # $JANITOR_AIMAESTRO_SERVER_CHORES -> $JANITOR_AIMAESTRO_SERVER_STATE -> a LIVE
+    # probe of ~/.aimaestro/server-liveness.json. Unpinned, these tests read that REAL
+    # machine-wide file: if an ai-maestro server happens to be running on the dev box
+    # (or in CI), the daemon CORRECTLY yields every SERVER_ABSORBED_TASK — which
+    # includes both marketplace-refresh and user-plugins-update — and the assertions
+    # below fail on a daemon that did exactly the right thing. Observed for real: the
+    # suite passed, a server came up, and the same commit then failed the publish gate.
+    # "0" = the server does NOT own the chores, so the daemon runs them deterministically.
+    base_env["JANITOR_AIMAESTRO_SERVER_CHORES"] = "0"
     # Fire tasks every second during tests so the assertion window is short.
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL"] = "1"
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL"] = "1"
