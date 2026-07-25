@@ -446,6 +446,25 @@ def main() -> int:
             "restored USER memory from the uninstall-safe mirror (primary was empty)",
         )
 
+    # MEMORY.md ↔ wikimem BRIDGE (owner directive 2026-07-25). MEMORY.md is the
+    # HARNESS's file and the two memory systems COEXIST; the janitor maintains
+    # EXACTLY ONE line in it — a link to the scope's `<project>-overview.md` — and
+    # interferes with nothing else. Verified once per session and re-added if the
+    # line was deleted. Append-only by construction (see lib/memory_bridge.py), so
+    # it can never repeat the old "stub it" regression that ate harness pointers.
+    try:
+        from lib import memory_bridge  # noqa: E402  -- local package, not PyPI
+
+        for _scope_name, _scope_root in memory_scopes.resolve_scope_dirs():
+            outcome = memory_bridge.ensure_bridge_line(_scope_root)
+            if outcome == memory_bridge.OUTCOME_ADDED:
+                state.log_line(
+                    "session-start",
+                    f"re-added the wikimem bridge line to {_scope_name} MEMORY.md",
+                )
+    except Exception as exc:  # noqa: BLE001 -- fail OPEN; an index line never costs a session
+        state.log_line("session-start", f"memory bridge skipped: {exc}")
+
     # Self-heal the lean-ctx shell allowlist (TRDD-ZGLCGC6A). On a machine that
     # runs the lean-ctx Bash-allowlist wrapper, the heartbeat cron's bare
     # `dispatcher-stub.py` invocation is BLOCKED until the allowlist permits it,

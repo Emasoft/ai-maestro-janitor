@@ -776,6 +776,16 @@ orphaned cache for ~7 days). Opt out with
 `CLAUDE_PLUGIN_OPTION_RULES_CLEANUP_ENABLED=0`; tune the daemon cadence with
 `CLAUDE_PLUGIN_OPTION_DAEMON_RULES_CLEANUP_INTERVAL` (default 3600 s).
 
+### Wikimem and MEMORY.md — two memory systems that coexist
+
+The janitor's curated **Wikimem** (`memory/wikimem/`, memgrep-indexed) and Claude
+Code's own harness-owned `MEMORY.md` are separate, cooperating systems — `MEMORY.md`
+is **not deprecated**. The janitor maintains exactly **one line** in it: a link to
+the scope's main wikimem overview page — the bridge between the two. It verifies
+that line is present, re-adds it if deleted, and otherwise never touches the file.
+The `janitor-memory-harvest` chore mirrors newly-written `MEMORY.md` entries into
+the wiki, additively, on its own cadence.
+
 ### Uninstalling — your memories are safe
 
 The **USER-scope memory corpus** lives inside the plugin's persistent data dir

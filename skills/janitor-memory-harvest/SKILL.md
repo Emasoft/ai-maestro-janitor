@@ -32,10 +32,11 @@ ADDITIVE — it only ever creates/updates wiki pages. When unsure, mirror nothin
 buffer intact, and surface a finding. A missed mirror is recoverable next run.
 
 > **DORMANT today:** every existing top-level `memory/*.md` already carries full wikimem
-> frontmatter (it was curated in-place under the old model), and `MEMORY.md` is the legacy
-> deprecation stub. So on the CURRENT corpus the discriminator finds ZERO raw buffer notes
-> and harvest is a clean no-op. It ACTIVATES the moment the harness next writes a
-> minimal-frontmatter note. No bulk move is needed.
+> frontmatter (it was curated in-place under the old model), and `MEMORY.md` carries only the
+> harness's content plus the janitor's one bridge line to the wiki overview. So on the CURRENT
+> corpus the discriminator finds ZERO raw buffer notes and harvest is a clean no-op. It
+> ACTIVATES the moment the harness next writes a minimal-frontmatter note. No bulk move is
+> needed.
 
 ## Preconditions (cheap gate, run first)
 
