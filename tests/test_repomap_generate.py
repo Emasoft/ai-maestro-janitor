@@ -33,11 +33,7 @@ import pytest
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT = _PROJECT_ROOT / "scripts" / "repomap_generate.py"
 
-_NARRATIVE = (
-    "# My project\n\n"
-    "Human-authored architecture notes the janitor must NEVER touch.\n"
-    "- gotcha one\n- gotcha two\n"
-)
+_NARRATIVE = "# My project\n\nHuman-authored architecture notes the janitor must NEVER touch.\n- gotcha one\n- gotcha two\n"
 
 
 def _load_module():
@@ -52,17 +48,8 @@ def _load_module():
 
 def _make_project(root: Path, *, with_claude_md: bool = True) -> None:
     (root / "pkg").mkdir(parents=True)
-    (root / "pkg" / "alpha.py").write_text(
-        '"""Alpha module — does alpha things."""\n\n'
-        "def alpha_fn(x: int) -> int:\n"
-        '    """Return x doubled — never negative input."""\n'
-        "    return x * 2\n"
-    )
-    (root / "pkg" / "beta.py").write_text(
-        '"""Beta module — does beta things."""\n\n'
-        "def beta_fn() -> None:\n"
-        '    """Fire the beta path exactly once."""\n'
-    )
+    (root / "pkg" / "alpha.py").write_text('"""Alpha module — does alpha things."""\n\ndef alpha_fn(x: int) -> int:\n    """Return x doubled — never negative input."""\n    return x * 2\n')
+    (root / "pkg" / "beta.py").write_text('"""Beta module — does beta things."""\n\ndef beta_fn() -> None:\n    """Fire the beta path exactly once."""\n')
     if with_claude_md:
         (root / "CLAUDE.md").write_text(_NARRATIVE)
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -72,10 +59,13 @@ def _make_project(root: Path, *, with_claude_md: bool = True) -> None:
     subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
 
 
-def _run(root: Path, *args: str) -> tuple[int, str]:
+def _run(root: Path, *args: str, env: dict[str, str] | None = None) -> tuple[int, str]:
     res = subprocess.run(
         [sys.executable, str(_SCRIPT), "--root", str(root), *args],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, **(env or {})},
     )
     return res.returncode, res.stdout + res.stderr
 
@@ -98,7 +88,9 @@ def test_insert_preserves_narrative_and_check_is_fresh():
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
-        rc, out = _run(root, )
+        rc, out = _run(
+            root,
+        )
         assert rc == 0 and "wrote" in out, out
         text = (root / "CLAUDE.md").read_text()
         assert text.startswith(_NARRATIVE.rstrip("\n")), "narrative must lead, untouched"
@@ -130,7 +122,7 @@ def test_check_codes_stale_and_noblock():
         assert _run(root)[0] == 0
         # add a public symbol → structure changes
         with open(root / "pkg" / "alpha.py", "a") as f:
-            f.write("\ndef gamma_fn() -> None:\n    \"\"\"New public symbol.\"\"\"\n")
+            f.write('\ndef gamma_fn() -> None:\n    """New public symbol."""\n')
         rc, out = _run(root, "--check")
         assert rc == 1 and "STALE" in out, out
         assert _run(root)[0] == 0  # refresh
@@ -172,9 +164,7 @@ def test_malformed_fence_bails_without_touching_file():
         _make_project(root)
         assert _run(root)[0] == 0
         path = root / "CLAUDE.md"
-        broken = path.read_text().replace(
-            "<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>", "<oops-the-end-fence-is-gone>"
-        )
+        broken = path.read_text().replace("<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>", "<oops-the-end-fence-is-gone>")
         path.write_text(broken)
         rc, out = _run(root)
         assert rc == 3 and "refusing" in out.lower() or "malformed" in out.lower(), out
@@ -184,6 +174,7 @@ def test_malformed_fence_bails_without_touching_file():
 def test_held_lock_skips_safely():
     """A held generator flock → exit 3 skip, file untouched."""
     import fcntl
+
     with TemporaryDirectory() as d:
         root = Path(d)
         _make_project(root)
@@ -214,17 +205,74 @@ def test_excludes_are_persisted_and_honored():
         root = Path(d)
         _make_project(root)
         (root / "tests").mkdir()
-        (root / "tests" / "test_alpha.py").write_text(
-            '"""Alpha tests."""\n\ndef test_alpha():\n    pass\n'
-        )
+        (root / "tests" / "test_alpha.py").write_text('"""Alpha tests."""\n\ndef test_alpha():\n    pass\n')
         subprocess.run(["git", "add", "-A"], cwd=root, check=True)
         subprocess.run(["git", "commit", "-qm", "tests"], cwd=root, check=True)
         assert _run(root, "--exclude", "tests/*")[0] == 0
         text = (root / "CLAUDE.md").read_text()
         assert "test_alpha" not in text, "excluded tree must not appear in the map"
-        assert (root / ".janitor" / "state" / "repomap-excludes.txt").read_text() == "tests/*\n"
+        # TRACKED location: the map is committed and rides every turn's context, so what
+        # it contains must not depend on gitignored state (2026-07-26 balloon).
+        assert (root / ".repomapignore").read_text().endswith("tests/*\n")
+        assert not (root / ".janitor" / "state" / "repomap-excludes.txt").exists()
         # --check (no --exclude flag) must reuse the persisted set → fresh.
         assert _run(root, "--check")[0] == 0
+
+
+def test_legacy_exclude_file_is_still_read():
+    """An existing checkout keeps its list until a save migrates it to the tracked file."""
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        (root / "tests").mkdir()
+        (root / "tests" / "test_alpha.py").write_text('"""Alpha tests."""\n\ndef test_alpha():\n    pass\n')
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", "tests"], cwd=root, check=True)
+        legacy = root / ".janitor" / "state" / "repomap-excludes.txt"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text("tests/*\n")
+        assert _run(root)[0] == 0  # no --exclude: must fall back to the legacy list
+        assert "test_alpha" not in (root / "CLAUDE.md").read_text()
+
+
+def test_oversized_map_is_refused_and_names_the_contributors():
+    """A map that would balloon CLAUDE.md is REFUSED, not written.
+
+    CLAUDE.md is committed AND injected into every turn of every session, so an
+    oversized map is a permanent per-turn tax that nothing else would catch: on
+    2026-07-26 a lost exclude list silently took it 1720 -> 6032 lines and no gate
+    complained. The cap is the cause-independent backstop.
+    """
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        before = (root / "CLAUDE.md").read_text()
+        rc, out = _run(root, env={"CLAUDE_PLUGIN_OPTION_REPOMAP_MAX_BLOCK_BYTES": "100"})
+        assert rc == 3, out
+        assert "REFUSING to write" in out, out
+        assert "Top contributors" in out, "a refusal must name what to exclude, or it gets --forced"
+        assert (root / "CLAUDE.md").read_text() == before, "refused run must not touch CLAUDE.md"
+
+
+def test_a_refused_run_does_not_mutate_the_persisted_excludes():
+    """The refusal must not corrupt the state it exists to protect.
+
+    Persisting the CLI excludes before the size check would leave the next run reading
+    the very globs that caused the refusal — so the guard would poison the recovery.
+    """
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        assert _run(root, "--exclude", "vendor/*")[0] == 0
+        good = (root / ".repomapignore").read_text()
+        rc, _out = _run(
+            root,
+            "--exclude",
+            "something-else/*",
+            env={"CLAUDE_PLUGIN_OPTION_REPOMAP_MAX_BLOCK_BYTES": "100"},
+        )
+        assert rc == 3
+        assert (root / ".repomapignore").read_text() == good, "refused run rewrote the exclude list"
 
 
 def test_splice_survives_a_writer_caught_between_truncate_and_write():
@@ -246,8 +294,7 @@ def test_splice_survives_a_writer_caught_between_truncate_and_write():
         root = Path(d)
         _make_project(root)
         claude_md = root / "CLAUDE.md"
-        block = ("<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=x digest=y generated=z\n"
-                 "body\n<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>\n")
+        block = "<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=x digest=y generated=z\nbody\n<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>\n"
 
         def torn_writer() -> None:
             # Truncate, hold the window open, THEN write — the exact shape of a
@@ -263,9 +310,7 @@ def test_splice_survives_a_writer_caught_between_truncate_and_write():
         t.join()
 
         final = claude_md.read_text()
-        assert _NARRATIVE.strip().splitlines()[0] in final, (
-            f"the human narrative was destroyed by a splice over a torn read:\n{final!r}"
-        )
+        assert _NARRATIVE.strip().splitlines()[0] in final, f"the human narrative was destroyed by a splice over a torn read:\n{final!r}"
         assert final.count("<+-+-JANITOR-REPO-MAP-START-") <= 1, "torn/duplicated fences"
 
 
@@ -309,9 +354,7 @@ def test_concurrent_editor_never_corrupts_and_their_edit_survives():
 
         final = claude_md.read_text()
         assert final.count("<+-+-JANITOR-REPO-MAP-START-") <= 1, "torn/duplicated fences"
-        assert final.count("<+-+-JANITOR-REPO-MAP-END-") == final.count(
-            "<+-+-JANITOR-REPO-MAP-START-"
-        )
+        assert final.count("<+-+-JANITOR-REPO-MAP-END-") == final.count("<+-+-JANITOR-REPO-MAP-START-")
         narrative = _narrative_of(final).rstrip("\n") + "\n"
         valid = {v.rstrip("\n") + "\n" for v in versions} | {_NARRATIVE.rstrip("\n") + "\n"}
         assert narrative in valid, f"narrative corrupted/interleaved:\n{narrative!r}"
@@ -326,8 +369,12 @@ def test_detector_nudges_only_when_opted_in_and_stale():
         env = dict(os.environ)
         env["CLAUDE_PROJECT_DIR"] = str(root)
         res = subprocess.run(
-            [sys.executable, str(detector)], capture_output=True, text=True,
-            timeout=120, env=env, cwd=root,
+            [sys.executable, str(detector)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+            cwd=root,
         )
         assert res.returncode == 0, res.stderr
         return res.stdout

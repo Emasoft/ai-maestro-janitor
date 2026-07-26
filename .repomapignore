@@ -1,0 +1,4 @@
+# Exclude globs for the CLAUDE.md project map (scripts/repomap_generate.py).
+# TRACKED on purpose: the map is committed and rides every turn's context, so
+# what it contains must not depend on machine-local state. See _excludes_file().
+tests/**

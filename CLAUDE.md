@@ -427,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=159571e2a83f digest=d9d6f0b0fc8e generated=2026-07-26T11:02:03+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e12abb70c76e digest=a21f332cbb02 generated=2026-07-26T11:03:49+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1744,7 +1744,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · main() -> int
 `scripts/repomap_generate.py` — repomap_generate — generate/refresh the fenced project map in CLAUDE.md.
   · load_excludes(root) -> list[str] — The persisted exclude globs (one per line, `#` comments). Persisting
-  · save_excludes(root, globs) -> None
+  · save_excludes(root, globs) -> None — Persist to the TRACKED file. Never writes the legacy path back.
+  · max_block_bytes() -> int
+  · oversize_report(block, maps, root) -> str | None — None when the block fits; otherwise a message naming the top directories.
   · discover_sources(root, excludes) -> list[Path] — Tracked `*.py` files via git (gitignore-respecting); bounded rglob
   · repo_digest(root) -> str — Cheap repo-change digest: git HEAD + a hash of the porcelain status
   · extract_all(root, excludes) -> list[FileMap] — Extract every supported source file. Today the adapter registry holds

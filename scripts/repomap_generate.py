@@ -93,12 +93,30 @@ from repomap.markers import _fence_span  # noqa: E402  (invariant check needs th
 
 # rglob fallback exclusions (non-git roots only; git discovery needs none of
 # this because tracked-files-only already excludes them via .gitignore).
-_EXCLUDE_DIRS = frozenset({
-    ".git", ".venv", "venv", "node_modules", "__pycache__", ".trashcan",
-    "reports", "reports_dev", "docs_dev", "scripts_dev", "samples_dev",
-    "examples_dev", "tests_dev", "downloads_dev", "libs_dev", "builds_dev",
-    "INPUT_DEV", "target", "build", "dist",
-})
+_EXCLUDE_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".trashcan",
+        "reports",
+        "reports_dev",
+        "docs_dev",
+        "scripts_dev",
+        "samples_dev",
+        "examples_dev",
+        "tests_dev",
+        "downloads_dev",
+        "libs_dev",
+        "builds_dev",
+        "INPUT_DEV",
+        "target",
+        "build",
+        "dist",
+    }
+)
 
 # Lost-update guard: how many read→splice→verify→replace attempts before the
 # generator gives up (someone is actively editing CLAUDE.md — let them win).
@@ -124,7 +142,11 @@ def _git(root: Path, *args: str) -> str | None:
     """Run a git command in `root`; None on any failure (non-repo, no git)."""
     try:
         res = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True, timeout=30,
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -132,25 +154,100 @@ def _git(root: Path, *args: str) -> str | None:
 
 
 def _excludes_file(root: Path) -> Path:
+    """The exclude list — a TRACKED root dotfile, matching the `.tldrignore` precedent.
+
+    It MUST be tracked. The map it governs is spliced into CLAUDE.md, which is committed
+    AND injected into every turn of every session, so the committed file's content cannot
+    be allowed to depend on machine-local state. It previously lived in
+    `.janitor/state/`, which is gitignored and purgeable: on 2026-07-26 that list was
+    absent, a plain regenerate silently pulled all 450 tracked test files into the map,
+    and CLAUDE.md went 1720 -> 6032 lines (180KB -> 724KB). Nothing failed; it was caught
+    by eyeballing a line count. A fresh clone hit the same thing, and `--check` reported a
+    phantom STALE forever because it extracted a different file set than the generate did.
+    """
+    return root / ".repomapignore"
+
+
+def _legacy_excludes_file(root: Path) -> Path:
+    """Pre-2026-07-26 location (gitignored). Read-only fallback, migrated on first save."""
     return root / ".janitor" / "state" / "repomap-excludes.txt"
+
+
+def _parse_excludes(text: str) -> list[str]:
+    return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
 
 
 def load_excludes(root: Path) -> list[str]:
     """The persisted exclude globs (one per line, `#` comments). Persisting
     them keeps `--check` and the drift detector consistent with what was
     actually generated — otherwise a check without the generate-time excludes
-    would extract a different file set and report a phantom STALE forever."""
-    try:
-        lines = _excludes_file(root).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    return [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
+    would extract a different file set and report a phantom STALE forever.
+
+    Tracked file first, then the legacy gitignored one so an existing checkout keeps its
+    list until the next save migrates it.
+    """
+    for path in (_excludes_file(root), _legacy_excludes_file(root)):
+        try:
+            return _parse_excludes(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return []
 
 
 def save_excludes(root: Path, globs: list[str]) -> None:
+    """Persist to the TRACKED file. Never writes the legacy path back."""
     f = _excludes_file(root)
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text("".join(g + "\n" for g in globs), encoding="utf-8")
+    f.write_text(
+        "# Exclude globs for the CLAUDE.md project map (scripts/repomap_generate.py).\n# TRACKED on purpose: the map is committed and rides every turn's context, so\n# what it contains must not depend on machine-local state. See _excludes_file().\n" + "".join(g + "\n" for g in globs),
+        encoding="utf-8",
+    )
+
+
+# Absolute ceiling on the spliced map block. This is the backstop that does NOT depend on
+# knowing the cause: the excludes file is one way the map can balloon, but any future
+# change (a new tracked language, a vendored tree, a bad glob) is another, and the failure
+# mode is identical and silent — CLAUDE.md is committed and re-read on every turn of every
+# session, so a 4x map is a permanent 4x tax nobody notices until the bill arrives. The
+# current map is ~130KB; 256KB leaves real headroom while still catching a balloon.
+MAX_BLOCK_BYTES_ENV = "CLAUDE_PLUGIN_OPTION_REPOMAP_MAX_BLOCK_BYTES"
+_MAX_BLOCK_BYTES_DEFAULT = 256 * 1024
+
+
+def max_block_bytes() -> int:
+    raw = os.environ.get(MAX_BLOCK_BYTES_ENV, "")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _MAX_BLOCK_BYTES_DEFAULT
+    return value if value > 0 else _MAX_BLOCK_BYTES_DEFAULT
+
+
+def oversize_report(block: str, maps: list[FileMap], root: Path) -> str | None:
+    """None when the block fits; otherwise a message naming the top directories.
+
+    Naming the contributors is the difference between an error someone can act on and one
+    they work around with --force.
+    """
+    cap = max_block_bytes()
+    size = len(block.encode("utf-8"))
+    if size <= cap:
+        return None
+    tally: dict[str, int] = {}
+    for fm in maps:
+        try:
+            rel = Path(fm.path).resolve().relative_to(root.resolve()).as_posix()
+        except (ValueError, OSError):
+            rel = str(fm.path)
+        tally[rel.split("/", 1)[0]] = tally.get(rel.split("/", 1)[0], 0) + 1
+    top = ", ".join(f"{d}/ ({n} files)" for d, n in sorted(tally.items(), key=lambda kv: -kv[1])[:5])
+    return (
+        f"repomap: REFUSING to write — the map block is {size // 1024}KB, over the "
+        f"{cap // 1024}KB cap, and CLAUDE.md is injected into every turn of every session.\n"
+        f"  Top contributors: {top}\n"
+        f"  Fix the file set, e.g. `--exclude 'tests/**'` (persisted to .repomapignore),\n"
+        f"  or raise {MAX_BLOCK_BYTES_ENV} deliberately if the map really must be this big."
+    )
 
 
 def discover_sources(root: Path, excludes: list[str] | None = None) -> list[Path]:
@@ -168,10 +265,7 @@ def discover_sources(root: Path, excludes: list[str] | None = None) -> list[Path
                 continue
             paths.append(p)
     if excludes:
-        paths = [
-            p for p in paths
-            if not any(fnmatch(str(p.relative_to(root)), g) for g in excludes)
-        ]
+        paths = [p for p in paths if not any(fnmatch(str(p.relative_to(root)), g) for g in excludes)]
     return paths
 
 
@@ -188,10 +282,7 @@ def repo_digest(root: Path) -> str:
     head = _git(root, "rev-parse", "HEAD")
     if head is not None:
         status = _git(root, "status", "--porcelain") or ""
-        kept = [
-            ln for ln in status.splitlines()
-            if ln[3:] not in ("CLAUDE.md",) and not ln[3:].startswith(".janitor/")
-        ]
+        kept = [ln for ln in status.splitlines() if ln[3:] not in ("CLAUDE.md",) and not ln[3:].startswith(".janitor/")]
         mix = head.strip() + "\n" + "\n".join(kept)
         return hashlib.sha256(mix.encode("utf-8")).hexdigest()[:12]
     latest = 0
@@ -257,12 +348,8 @@ def _verified_candidate(current: str, block: str) -> str:
     """Splice `block` into `current` and PROVE the result is safe to write:
     exactly one fence pair, and the narrative byte-identical to `current`'s.
     Raises MalformedFences on any violation (caller aborts the write)."""
-    candidate = (
-        replace_map_block(current, block) if has_map_block(current) else insert_map_block(current, block)
-    )
-    if candidate.count("<+-+-JANITOR-REPO-MAP-START-") != 1 or candidate.count(
-        "<+-+-JANITOR-REPO-MAP-END-"
-    ) != 1:
+    candidate = replace_map_block(current, block) if has_map_block(current) else insert_map_block(current, block)
+    if candidate.count("<+-+-JANITOR-REPO-MAP-START-") != 1 or candidate.count("<+-+-JANITOR-REPO-MAP-END-") != 1:
         raise MalformedFences("candidate does not contain exactly one fence pair")
     # The insert path adds separator newlines to the narrative's tail; compare
     # modulo trailing whitespace, byte-strict everywhere else.
@@ -405,11 +492,13 @@ def cmd_remove(root: Path) -> int:
 
 
 def cmd_generate(root: Path, *, to_stdout: bool, excludes: list[str] | None = None) -> int:
-    # CLI excludes win and are PERSISTED (so later --check / the drift
-    # detector compare the same file set); absent → reuse the persisted set.
-    if excludes is not None:
-        save_excludes(root, excludes)
-    else:
+    # CLI excludes win and are PERSISTED (so later --check / the drift detector compare
+    # the same file set); absent → reuse the persisted set. Persistence is DEFERRED until
+    # the block passes the size guard below: a refused run that has already rewritten the
+    # exclude list leaves the next run reading the very globs that caused the refusal —
+    # the refusal would corrupt the state it exists to protect.
+    cli_excludes = excludes
+    if excludes is None:
         excludes = load_excludes(root)
     maps = extract_all(root, excludes)
     if not maps:
@@ -417,6 +506,14 @@ def cmd_generate(root: Path, *, to_stdout: bool, excludes: list[str] | None = No
         return 3
     generated = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     block = render_block(maps, generated_iso=generated, digest=repo_digest(root))
+    # Check the cap BEFORE --stdout returns too: a caller piping the block somewhere is
+    # just as capable of committing an oversized map as the splice path is.
+    oversize = oversize_report(block, maps, root)
+    if oversize is not None:
+        print(oversize)
+        return 3
+    if cli_excludes is not None:
+        save_excludes(root, cli_excludes)
     if to_stdout:
         sys.stdout.write(block)
         return 0
@@ -447,9 +544,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Generate/refresh the fenced CLAUDE.md project map")
     ap.add_argument("--root", help="project root (default: $CLAUDE_PROJECT_DIR or cwd)")
     ap.add_argument(
-        "--exclude", action="append", metavar="GLOB",
-        help="exclude root-relative paths matching GLOB (repeatable; persisted "
-             "to .janitor/state/repomap-excludes.txt so --check stays consistent)",
+        "--exclude",
+        action="append",
+        metavar="GLOB",
+        help="exclude root-relative paths matching GLOB (repeatable; persisted to the TRACKED .repomapignore so --check stays consistent)",
     )
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="freshness probe only (no write)")
