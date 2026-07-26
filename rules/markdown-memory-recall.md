@@ -66,6 +66,21 @@ the user's words, the error text, the symptom — NOT the jargon of the fix.
 Recall is two-hop: a symptom query lands you on the note; the note's BODY gives the answer.
 `memgrep recall` ranks on `description + title + tags` ONLY.
 
+**COROLLARY — when you APPEND to an existing page, EXTEND its `description:` too.** Ranking
+ignores the body, so a fact or `[^N]` lesson added under a description that never mentions its
+symptom is **unfindable** — you have written it, and recall will still miss it. Observed
+2026-07-26: correct lessons about rotation failure were added to a page whose description covered
+only "how do I read my usage %", and a symptom query for the rotation failure ranked a different
+page first. Adding the new symptom words to `description:` fixed it. **The description must
+describe the whole page, not the page it was when it was created.**
+
+**COROLLARY — a lesson that constrains CODE lands with an executable check.** A note explains a
+guard; it is not the guard. Same day, same corpus: a page already carried "DO NOT call this
+endpoint with a generic User-Agent" while the project's own code had been sending exactly that on
+a 60 s beat for weeks. The note was right, recallable, and changed nothing, because no code path
+consulted it. When a lesson says "never do X in code", land a test / lint rule / gate that fails
+when X happens, in the SAME change that records the lesson.
+
 ## Recall BEFORE acting — the protocol
 
 ```bash
