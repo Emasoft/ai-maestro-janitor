@@ -1769,6 +1769,33 @@ def _yielded_task_names(tasks: list[Task], server_runs_chores: bool) -> set[str]
     return {t.name for t in tasks if _task_yielded_to_server(t.name, server_runs_chores)}
 
 
+def _next_bulk_task(tasks: list[Task], yielded: set[str]) -> Task | None:
+    """The due background task that gets the single bulk lane this pass — the
+    LEAST-RECENTLY-RUN one, NOT the first in list order.
+
+    Fixed list order starves. Every bulk task reads last-run 0 on a fresh state dir,
+    so all four are due at once and the head of the list takes the lane on every
+    pass. It then re-stamps its own last-run, and if its cadence is shorter than its
+    runtime plus the reap beat it is due AGAIN by the time the lane frees — so the
+    tasks queued behind it never run at all. That is the same starvation the bulk
+    lane itself was built to cure (oauth-rotation incident, 2026-07-17), one level
+    down: the lane stopped the bulk chores starving the 60 s survival beats, but
+    nothing stopped a bulk chore starving its bulk siblings.
+
+    It is not only a test artifact. In production `marketplace-refresh` heads the
+    list at a 3600 s cadence and runs ~20 min, so it normally yields the lane — but
+    a refresh that stalls past its own cadence (a slow network is exactly what the
+    1800 s workload cap exists for) makes it perpetually due, and `version-update`
+    and `github-config-audit` then never run again while it keeps stalling.
+
+    Oldest-last-run-first is starvation-free by construction: a task that just ran
+    sorts last, so every due task reaches the lane within one round regardless of
+    cadence. Ties — notably the all-zero fresh-install case — fall back to list
+    order, which is `min`'s documented first-minimal-wins stability."""
+    due = [t for t in tasks if t.background and t.name not in yielded and t.is_due()]
+    return min(due, key=lambda t: t._last_run()) if due else None
+
+
 def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
     """One due-pass over `tasks` (extracted from main() for testability after the
     2026-07-17 oauth-rotation starvation incident).
@@ -1784,6 +1811,9 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
         if task.background:
             task.poll_background()  # reap even while yielded/paused — bookkeeping only
     bulk_busy = any(t.child_alive() for t in tasks if t.background)
+    # Decided ONCE, before the loop, so the choice cannot depend on where we are in
+    # list order — that dependence is exactly the starvation `_next_bulk_task` cures.
+    bulk_next = None if bulk_busy else _next_bulk_task(tasks, yielded)
     for task in tasks:
         # A flag set mid-loop skips the REMAINING tasks NOW, not after the current
         # (up to 1800s) task finishes — TRDD-ME8V2YJF component B. Pause + maintenance
@@ -1801,7 +1831,7 @@ def _run_due_tasks(tasks: list[Task], yielded: set[str]) -> bool:
         if not task.is_due():  # a task with a live child is never due (time_until_due)
             continue
         if task.background:
-            if bulk_busy:
+            if bulk_busy or task is not bulk_next:
                 continue  # one bulk lane: defer; the task stays due for the next pass
             task.spawn_background()
             bulk_busy = True

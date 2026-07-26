@@ -719,6 +719,73 @@ def test_task_failure_increments_streak_without_killing_daemon(
     assert t._failcount() == 3
 
 
+def _stamp_last_run(task, when: int) -> None:
+    """Force a task's last-run stamp (what `_next_bulk_task` orders on)."""
+    task.last_run_path.write_text(str(when), encoding="utf-8")
+
+
+def test_bulk_lane_picks_the_least_recently_run_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The single bulk lane goes to the OLDEST-last-run due task, not the list head."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    now = int(time.time())
+    head = daemon.Task("head", 1, lambda: None, background=True)
+    tail = daemon.Task("tail", 1, lambda: None, background=True)
+    _stamp_last_run(head, now - 2)   # ran recently, but its 1 s cadence makes it due again
+    _stamp_last_run(tail, now - 600)  # has been waiting far longer
+    assert head.is_due() and tail.is_due(), "both must be due for this to test fairness"
+
+    # List order would hand the lane to `head` forever; fairness hands it to `tail`.
+    assert daemon._next_bulk_task([head, tail], set()) is tail
+
+
+def test_bulk_lane_does_not_starve_a_sibling_across_rounds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every due bulk task reaches the lane within one round — the starvation invariant.
+
+    Reproduces the real shape: all tasks read last-run 0 on a fresh state dir, and the
+    head's cadence is shorter than the time the lane takes to free up, so under fixed
+    list order the head would win every single round and the siblings would never run.
+    """
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    tasks = [daemon.Task(n, 1, lambda: None, background=True)
+             for n in ("marketplace-refresh", "user-plugins-update", "version-update")]
+
+    served: list[str] = []
+    clock = int(time.time())
+    for _ in range(len(tasks)):          # exactly one round: N passes for N tasks
+        pick = daemon._next_bulk_task(tasks, set())
+        assert pick is not None, "a due task must always get the lane"
+        served.append(pick.name)
+        clock += 2                        # the lane frees later than the 1 s cadence
+        _stamp_last_run(pick, clock)      # the winner re-stamps and becomes due again
+
+    assert sorted(served) == sorted(t.name for t in tasks), \
+        f"every bulk task must run within one round, got {served}"
+
+
+def test_bulk_lane_skips_tasks_yielded_to_the_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chore yielded to a live ai-maestro server never takes the lane, however old."""
+    daemon = _daemon_isolated(tmp_path, monkeypatch)
+    now = int(time.time())
+    yielded_task = daemon.Task("marketplace-refresh", 1, lambda: None, background=True)
+    other = daemon.Task("github-config-audit", 1, lambda: None, background=True)
+    _stamp_last_run(yielded_task, now - 9999)  # by age alone it would win outright
+    _stamp_last_run(other, now - 5)
+
+    assert daemon._next_bulk_task(
+        [yielded_task, other], {"marketplace-refresh"}
+    ) is other
+    # With every candidate yielded there is simply nothing to spawn.
+    assert daemon._next_bulk_task(
+        [yielded_task], {"marketplace-refresh"}
+    ) is None
+
+
 def test_task_backoff_penalty_math(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Quarantine backoff is 0 below K, then interval * 2**(fails-K), capped at the ceiling."""
     daemon = _daemon_isolated(tmp_path, monkeypatch)
