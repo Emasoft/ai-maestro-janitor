@@ -37,9 +37,9 @@ cp "$BIN" "dist/${ASSET}"
 chmod +x "dist/${ASSET}"
 cd dist
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "${ASSET}" > "${ASSET}.sha256"
+  sha256sum "${ASSET}" >"${ASSET}.sha256"
 else
-  shasum -a 256 "${ASSET}" > "${ASSET}.sha256"   # macOS ships shasum, not sha256sum
+  shasum -a 256 "${ASSET}" >"${ASSET}.sha256" # macOS ships shasum, not sha256sum
 fi
 echo "Built ${ASSET}:"
 cat "${ASSET}.sha256"
