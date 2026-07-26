@@ -3061,6 +3061,61 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
 /// Separated from `cmd_lint_cli` (which prints + `process::exit`s) so the unit tests can assert on
 /// the findings directly — a non-empty return is exactly the "exit non-zero" condition, an empty
 /// return is "exit 0, clean". See `cmd_lint_cli` for the three checks and the FP-freeness rationale.
+/// One of the three memory SCOPE layers, and its rank in the strictly-upward reference order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct ScopeLayer {
+    name: &'static str,
+    /// LOCAL 0 < PROJECT 1 < USER 2. A reference may only go to an EQUAL or HIGHER rank.
+    rank: u8,
+}
+
+const SCOPE_LOCAL: ScopeLayer = ScopeLayer { name: "LOCAL", rank: 0 };
+const SCOPE_PROJECT: ScopeLayer = ScopeLayer { name: "PROJECT", rank: 1 };
+const SCOPE_USER: ScopeLayer = ScopeLayer { name: "USER", rank: 2 };
+
+/// Which memory scope a page lives in, or `None` when the path is not one of the three known roots
+/// (a scratch dir, a test fixture). `None` deliberately DISABLES the scope rule for that edge rather
+/// than guessing — a wrong guess here would either invent a violation or hide a real leak.
+///
+/// The discriminator is the path itself, and the one subtle part is that `.claude/projects/`
+/// (PLURAL) is the per-project LOCAL root while `.claude/project/` (SINGULAR) is the in-repo,
+/// git-tracked PROJECT root. They differ by one character and mean opposite things about privacy,
+/// so USER is tested first and the plural form before the singular.
+fn scope_layer(path: &Path) -> Option<ScopeLayer> {
+    let s = path.to_string_lossy().replace('\\', "/");
+    if s.contains("/.claude/plugins/data/") && s.contains("/memory") {
+        return Some(SCOPE_USER); // the canonical USER store, inside the plugin DATA dir
+    }
+    if s.contains("/.claude/ai-maestro-janitor-memory") {
+        return Some(SCOPE_USER); // the uninstall-surviving USER mirror
+    }
+    if s.contains("/.claude/projects/") && s.contains("/memory") {
+        return Some(SCOPE_LOCAL);
+    }
+    if s.contains("/.claude/project/memory") {
+        return Some(SCOPE_PROJECT);
+    }
+    None
+}
+
+/// WHY a downward edge is forbidden. The two reasons are different and must not be conflated — one
+/// is a privacy breach, the other a portability breach, and they call for different fixes.
+///
+/// Only the TARGET layer decides it: anything pointing DOWN at LOCAL leaks machine-private data,
+/// and the sole remaining downward case (USER → PROJECT) is the portability one. Taking the source
+/// too would imply a distinction that does not exist.
+fn downward_reason(to: ScopeLayer) -> &'static str {
+    if to == SCOPE_LOCAL {
+        // A page NAME and topic are disclosure even when the body is not, and PROJECT memory is
+        // pushed to GitHub — so this leaks machine-private information to every future cloner.
+        "PRIVACY: LOCAL pages are machine-private, and naming one from a shared scope publishes it"
+    } else {
+        // USER → PROJECT. USER memory is inherited by every project on the machine, so it must hold
+        // only universal knowledge; projects get deleted, moved and renamed, and the link dangles.
+        "PORTABILITY: USER memory is global, but a project can be deleted, moved or renamed"
+    }
+}
+
 fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
     let mut violations: Vec<(String, usize, String)> = Vec::new();
 
@@ -3254,6 +3309,31 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         let to_c = canon(target);
         if from_c == to_c {
             continue; // a self-link is trivially reciprocal
+        }
+
+        // ── Check 4 — CROSS-SCOPE edges. The LINK LAW is a WITHIN-LAYER law; across layers
+        // references go strictly UPWARD (LOCAL → PROJECT → USER) and downward links are FORBIDDEN.
+        // So a cross-layer edge can never be reciprocated, and running the reciprocity test on one
+        // reports every LEGAL upward link as a violation — the lint punishing exactly the behaviour
+        // the model requires. Classify first, and let the scope rule own these edges entirely.
+        if let (Some(from_s), Some(to_s)) = (scope_layer(&from_c), scope_layer(&to_c))
+            && from_s != to_s
+        {
+            if to_s.rank < from_s.rank {
+                violations.push((
+                    rel(&e.from),
+                    e.line,
+                    format!(
+                        "downward cross-scope link: {} page `{}` links DOWN to {} page `{}` — {}",
+                        from_s.name,
+                        rel(&e.from),
+                        to_s.name,
+                        rel(target),
+                        downward_reason(to_s),
+                    ),
+                ));
+            }
+            continue; // legal upward edge: unreciprocatable by design, never a LINK-LAW candidate
         }
         // The edge in hand proves A→B; reciprocal ⟺ B→A also exists, i.e. (to_c, from_c) ∈ directed.
         let reciprocal = directed.contains(&(to_c.clone(), from_c.clone()));
@@ -4641,6 +4721,62 @@ mod tests {
         assert!(!contains_contiguous(&hay, &gapped));
         assert!(!contains_contiguous(&hay, &too_long));
         assert!(!contains_contiguous(&hay, &[]));
+    }
+
+    // ── scope layering (WM-SCOPE): the three roots and the strictly-upward reference rule ──────
+
+    #[test]
+    fn scope_layer_distinguishes_the_singular_and_plural_claude_dirs() {
+        // `.claude/projects/` (PLURAL) is the machine-private LOCAL root; `.claude/project/`
+        // (SINGULAR) is the git-tracked, PUSHED PROJECT root. They differ by ONE character and mean
+        // opposite things about privacy, so getting this backwards would classify every private
+        // page as shared — the exact leak the rule exists to prevent.
+        assert_eq!(
+            scope_layer(Path::new("/Users/x/.claude/projects/-Users-x-repo/memory/a.md")).unwrap(),
+            SCOPE_LOCAL
+        );
+        assert_eq!(
+            scope_layer(Path::new("/Users/x/repo/.claude/project/memory/a.md")).unwrap(),
+            SCOPE_PROJECT
+        );
+    }
+
+    #[test]
+    fn scope_layer_recognises_both_user_stores() {
+        assert_eq!(
+            scope_layer(Path::new(
+                "/Users/x/.claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory/a.md"
+            ))
+            .unwrap(),
+            SCOPE_USER
+        );
+        // The uninstall-surviving MIRROR is the same scope; missing it would make every mirror page
+        // look unclassified and silently disable the rule for it.
+        assert_eq!(
+            scope_layer(Path::new("/Users/x/.claude/ai-maestro-janitor-memory/a.md")).unwrap(),
+            SCOPE_USER
+        );
+    }
+
+    #[test]
+    fn an_unknown_path_disables_the_rule_rather_than_guessing() {
+        // A wrong guess would either invent a violation or hide a real leak, so None means "this
+        // edge is not subject to the scope rule" — never a default layer.
+        assert!(scope_layer(Path::new("/tmp/scratch/notes/a.md")).is_none());
+    }
+
+    #[test]
+    fn scope_ranks_encode_the_upward_only_order() {
+        assert!(SCOPE_LOCAL.rank < SCOPE_PROJECT.rank);
+        assert!(SCOPE_PROJECT.rank < SCOPE_USER.rank);
+    }
+
+    #[test]
+    fn downward_reason_distinguishes_privacy_from_portability() {
+        // The two reasons call for DIFFERENT fixes — redact/relocate vs genericise — so conflating
+        // them would send the reader after the wrong repair.
+        assert!(downward_reason(SCOPE_LOCAL).starts_with("PRIVACY"));
+        assert!(downward_reason(SCOPE_PROJECT).starts_with("PORTABILITY"));
     }
 
     #[test]

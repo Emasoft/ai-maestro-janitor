@@ -48,6 +48,18 @@ fn run(args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// Run memgrep and return stdout WHATEVER the exit code. For verbs whose non-zero exit is a
+/// RESULT rather than an error — `lint` exits non-zero precisely when it finds violations, so
+/// `run` (which asserts success) can never inspect the findings it is meant to test.
+fn run_any(args: &[&str]) -> String {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 /// Run memgrep expecting a NON-zero exit (a usage/parse error). Returns nothing — only the failure
 /// is asserted.
 fn run_fail(args: &[&str]) {
@@ -1632,6 +1644,92 @@ const ATOM_CORPUS: &str = "---\nname: oauth-hub\ndescription: oauth rotation ove
 // A fixture whose atom has a `desc:` DISTINCT from its body, so a test can tell the layers apart:
 // with desc == body-prefix (the ATOM_CORPUS case) "medium printed the body" is unfalsifiable.
 const LAYER_CORPUS: &str = "---\nname: layer-hub\ndescription: layered output fixture\ntags: [layers]\nocd: 2026-01-01\nlmd: 2026-06-02\n---\n# Layer hub\n\n^zqxlayer-atom [desc: \"a one line summary\", keywords: zqxlayerkw phrase_two, ocd: 2026-01-01, lmd: 2026-06-02]\nThe zqxbody sentence only medium and full may print.[^1]\n\n## Notes and lessons learned\n[^1]: zqxlayerlesson — only full or an explicit --with-notes may print this.\n";
+
+// ── cross-scope reference rules (WM-SCOPE) ────────────────────────────────────────────────────
+//
+// Builds a temp tree whose paths carry the REAL scope shapes, so the classifier is exercised the
+// way it runs in production rather than through an injected override.
+
+/// Write `body` as a memory page at `rel` under `d`, creating parents. Returns the page's dir.
+fn write_scoped(d: &TempDir, rel: &str, name: &str, body: &str) -> String {
+    let p = d.join(rel).join(format!("{name}.md"));
+    std::fs::create_dir_all(p.parent().unwrap()).expect("create scope dir");
+    let text = format!(
+        "---\nname: {name}\ndescription: zqxscope fixture\nocd: 2026-01-01\nlmd: 2026-01-01\n---\n\n{body}\n\n## Notes and lessons learned\n"
+    );
+    std::fs::write(&p, text).expect("write scoped page");
+    d.join(rel).to_str().unwrap().to_string()
+}
+
+const PROJECT_REL: &str = "repo/.claude/project/memory";
+const LOCAL_REL: &str = ".claude/projects/-Users-x-repo/memory";
+
+#[test]
+fn a_downward_link_to_LOCAL_is_flagged_as_a_PRIVACY_violation() {
+    // The leak the rule exists to stop: PROJECT memory is git-tracked and PUSHED, so naming a
+    // machine-private page from it publishes that name to every future cloner. A name and topic are
+    // disclosure even when the body is not.
+    let d = TempDir::new("scope-down-privacy");
+    let proj = write_scoped(&d, PROJECT_REL, "shared-page", "see [[private-page]] for details.");
+    let local = write_scoped(&d, LOCAL_REL, "private-page", "machine-private notes.");
+    let o = run_any(&["lint", &proj, &local]);
+    assert!(
+        o.contains("downward cross-scope link") && o.contains("PRIVACY"),
+        "a PROJECT -> LOCAL link must be flagged as a privacy violation:\n{o}"
+    );
+}
+
+#[test]
+fn a_downward_link_to_PROJECT_from_USER_is_flagged_as_PORTABILITY() {
+    let d = TempDir::new("scope-down-portability");
+    let user = write_scoped(
+        &d,
+        ".claude/plugins/data/ai-maestro-janitor-ai-maestro-plugins/memory",
+        "global-page",
+        "see [[repo-page]] for details.",
+    );
+    let proj = write_scoped(&d, PROJECT_REL, "repo-page", "project knowledge.");
+    let o = run_any(&["lint", &user, &proj]);
+    assert!(
+        o.contains("downward cross-scope link") && o.contains("PORTABILITY"),
+        "a USER -> PROJECT link must be flagged as a portability violation:\n{o}"
+    );
+}
+
+#[test]
+fn a_legal_UPWARD_link_is_neither_a_violation_nor_a_one_sided_link() {
+    // THE false positive this fixes. The LINK LAW is a WITHIN-LAYER law, but it was applied to every
+    // edge — and a cross-layer edge can NEVER be reciprocated (the reply would be a forbidden
+    // downward link). So every LEGAL upward link was reported as one-sided: the lint punishing
+    // exactly the behaviour the model requires. Measured on the live corpus, removing this dropped
+    // one-sided-link reports from 76 to 58 — 18 pure false positives.
+    let d = TempDir::new("scope-up-legal");
+    let local = write_scoped(&d, LOCAL_REL, "local-page", "see [[shared-page]] for the rule.");
+    let proj = write_scoped(&d, PROJECT_REL, "shared-page", "the shared rule.");
+    let o = run_any(&["lint", &local, &proj]);
+    assert!(
+        !o.contains("downward cross-scope link"),
+        "an upward LOCAL -> PROJECT link is legal:\n{o}"
+    );
+    assert!(
+        !o.contains("one-sided link"),
+        "an upward link is unreciprocatable BY DESIGN and must not be a LINK-LAW candidate:\n{o}"
+    );
+}
+
+#[test]
+fn the_LINK_LAW_still_applies_WITHIN_a_layer() {
+    // The complement of the test above: relaxing the law across layers must not relax it inside one,
+    // or the fix would have quietly disabled the check it was scoping.
+    let d = TempDir::new("scope-same-layer");
+    let dir = write_scoped(&d, PROJECT_REL, "page-a", "see [[page-b]].");
+    write_scoped(&d, PROJECT_REL, "page-b", "no link back.");
+    let o = run_any(&["lint", &dir]);
+    assert!(
+        o.contains("one-sided link"),
+        "a one-sided link between two PROJECT pages is still a violation:\n{o}"
+    );
+}
 
 #[test]
 fn equal_scores_are_broken_by_RECENCY_not_alphabetical_path_order() {

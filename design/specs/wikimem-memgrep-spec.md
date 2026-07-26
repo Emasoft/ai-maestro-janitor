@@ -180,6 +180,19 @@ to cover two subjects is a WM-MIG / split candidate.
 to A — `Applies to` ↔ `Governed by` across tiers, `See also` ↔ `See also` laterally. Both ends
 are wired in the SAME edit. A one-sided link is a WM-LINT defect.
 
+`WM-WIKI-04a` **the-link-law-is-a-WITHIN-LAYER-law** — `MUST`: the reciprocity requirement
+applies ONLY between pages in the SAME scope. A cross-scope edge is legal in one direction only
+(WM-SCOPE), so it can NEVER be reciprocated — the reply would itself be a forbidden downward
+link. Applying the LINK LAW across layers therefore reports every LEGAL upward link as a
+violation, which is the lint punishing exactly the behaviour the model requires. Measured on the
+live corpus when the scoping was added: one-sided-link reports fell **76 → 58**, i.e. 18 were
+pure false positives.
+
+**Generalisable:** when two rules constrain the same edge set, check that they cannot contradict
+each other on any edge. Here "links are symmetric" and "cross-layer links are one-way" are
+individually correct and jointly unsatisfiable for a cross-layer edge — so one must be scoped.
+A lint that fires on correct behaviour trains people to ignore the lint.
+
 `WM-WIKI-05` **relocate-never-delete-a-link** — when a lesson or fact MOVES to its rightful
 owner page, the source keeps a `[[link]]`, never a hole; no knowledge is deleted, only
 relocated (this is WM-LES-06 applied to structure).
@@ -664,7 +677,26 @@ footnote).
 
 `WM-LINT-02` **the-checks** — `lint` fires on, at minimum: `unquoted-desc` (WM-ATOM-03),
 `empty-lesson-body` (WM-LES-04), `oversized-atom` (WM-ATOM-01), `superseded-without-body`
-(WM-LES-07), a dangling / unreferenced footnote, and a one-sided `[[link]]` (WM-WIKI-04).
+(WM-LES-07), `atom-dropped-props` (WM-ATOM-07), a dangling / unreferenced footnote, a one-sided
+same-scope `[[link]]` (WM-WIKI-04 / WM-WIKI-04a), the required frontmatter fields (`ocd`/`lmd`/
+`description`, legacy aliases `created`/`updated`/`summary` accepted) plus the mandatory
+`## Notes and lessons learned` section, and a **downward cross-scope link** (WM-LINT-05).
+
+`WM-LINT-05` **downward-cross-scope-link** — a link from a page in one scope DOWN to a page in a
+lower one (LOCAL < PROJECT < USER) is a violation, and the message names WHICH of the two reasons
+applies, because they call for different repairs:
+
+| target | reason | the fix |
+|---|---|---|
+| → LOCAL (from PROJECT or USER) | **PRIVACY** — a page NAME and topic are disclosure even when the body is not, and PROJECT memory is PUSHED | relocate the fact, or genericise the reference; never publish the name |
+| USER → PROJECT | **PORTABILITY** — USER memory is inherited by every project, but a project can be deleted, moved or renamed | move the project-specific fact down into PROJECT scope |
+
+Scope is derived from the PATH. The one subtle discriminator is that `.claude/projects/`
+(**plural**) is the machine-private LOCAL root while `.claude/project/` (**singular**) is the
+git-tracked PROJECT root — one character apart, opposite meanings for privacy. A path matching no
+known root yields NO scope and DISABLES the rule for that edge: a wrong guess would either invent
+a violation or hide a real leak, and neither is acceptable in a check whose whole job is
+preventing disclosure.
 
 `WM-LINT-03` **oversized-budget** — the `oversized-atom` budget is corpus-tuned (default 1500
 chars, env `MEMGREP_ATOM_MAX_CHARS`, `0` disables) — set from the live atom-size distribution to
