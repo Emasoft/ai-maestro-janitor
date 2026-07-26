@@ -367,11 +367,24 @@ and **default to `basic`**.
 |---|---|---|---|
 | `basic` (default) | ONE row: `<lmd>⇥<locator>⇥<description>`, TAB-separated fixed columns. The locator is the bare ATOM ID for an atom hit (a memory path costs ~25 tokens — most of what the layer saves) and the PATH for a page hit. An absent date prints `-`, never empty, so a column never shifts | no | no |
 | `medium` | that row + the atom's BODY. A page hit has no body of its own, so medium equals basic there | no | no |
-| `full` | the rich record: `<path>#<atom-id> — <description>`, body, lessons, see-also | yes | yes |
+| `full` | the rich record: `<path>#<atom-id> — <description>`, the SCORE, body, lessons, see-also | yes | yes |
 
 `--with-keywords` / `--with-notes` add ONE dimension without leaving the lean layer, and an
 explicit flag always overrides the layer's default. `full` is a DEBUGGING layer, not a
 richer default.
+
+`WM-RCL-06a` **the-score-is-observable-on-full** — `MUST`: `full` prints each hit's numeric score
+(`⇥score: <n>`), and the lean layers `MUST NOT`. A ranking nobody can see cannot be debugged:
+two results printed in order are identical on screen whether the first WON on score or merely
+arrived first and survived the tie-break. That ambiguity is not hypothetical — it produced a
+wrong conclusion in this project, where a probe read as "the keyphrase ranks higher" was in fact
+scoring EQUAL and being ordered by the tie-break, concealing the inert-migration bug (WM-SCORE-04)
+for a whole pass. It also makes WM-SCORE-05's tiers falsifiable from the CLI: an exact-keyword hit
+must print ~1000, a loose-word one single digits.
+
+The lean prohibition is equally load-bearing: their row shape is a promised parse contract
+(WM-RCL-06), so an extra line there breaks every `cut -f2` consumer to help nobody — an agent
+choosing a hop target reads the description, not the arithmetic behind it.
 
 `WM-RCL-07` **exact-id-second-hop** — `MUST`: `memgrep recall <ATOM-ID>` is an EXACT lookup
 returning that one atom in full. A whitespace-free query is tried as an id first; when no atom
@@ -428,14 +441,46 @@ matching `concatenate` is a false hit that a substring scorer cannot distinguish
 `WM-SCORE-07` **rarity-weighting** — a distinctive phrase outranks a common word rather than
 counting the same.
 
-`WM-SCORE-08` **tie-breaks** — `score desc → upward cross-layer in-degree desc → tier rank →
-lmd desc → path`. `path` is retained LAST purely for determinism; dateless elements sort last.
+`WM-SCORE-08` **tie-breaks** — `score desc → lmd desc → path`. `path` is retained LAST purely for
+determinism; dateless elements sort last. `--order asc` flips the SCORE only: "least relevant
+first" must not also mean "oldest first", or the two keys fight.
 
-Order matters and is not arbitrary. `lmd` is day-granular and ANY edit bumps it, so ranking it
-early lets a typo fix permanently promote a page — the signal is corruptible by activity
-unrelated to importance (which is why WM-MIG-07 forbids a mechanical repair from touching it).
-`tier:` is DECLARED rather than derived, is present on ~98% of pages, and cannot be inflated by
-editing.
+Anything is better here than falling through to path order. A stable sort with no second key
+orders equal scores ALPHABETICALLY, which is the least meaningful ordering available for
+memories — and it is what decided the probe that made a corpus-wide phrase migration look
+effective when it was inert (WM-SCORE-04).
+
+`WM-SCORE-08a` **the-deferred-keys, and why they stay deferred** — an earlier revision of -08
+specified `score desc → upward cross-layer in-degree desc → tier rank → lmd desc → path`. The two
+extra keys are **NOT implemented**, and the reason is measured rather than pragmatic: **a tiered
+scorer does not produce rank-1 ties**, so a key placed after `score` has almost nothing left to
+decide.
+
+Measured over four corpora (the conformant fixture + all three live scopes), one query per
+declared keyphrase, which is how a symptom query is actually shaped:
+
+| query form | queries | rank-1 ties |
+|---|---|---|
+| the exact declared keyphrase | 203 | **0** |
+| the keyphrase minus one word (a half-remembered symptom) | 201 | **1** |
+
+The exact-keyword tier (`W_EXACT_KEYWORD`) is claimed by exactly ONE atom, so it decides rank 1
+outright; ties survive only in the TAIL, where 74–100% of queries do have them and where the
+two-hop contract (WM-RCL) means nobody looks — the agent hops on rank 1. So the in-degree key
+would need a links table the index does not have (WM-IDX stores files/memories/notes/atoms), i.e.
+a schema migration and a per-reindex graph build, to change the answer for ~0.5% of queries.
+
+**Trigger to revisit** (do not build it before one of these is TRUE): rank-1 ties exceed ~5% of
+on-topic queries, or the scorer stops being tiered, or a links table lands for another reason
+(WM-LINT's LINK LAW check computes the same edges today and would make the key nearly free).
+
+`WM-SCORE-08b` **the-authority-signal, if it is ever needed** — the honest one is *upward
+cross-layer in-links*: the only structurally unreciprocatable edge (WM-SCORE-09 measures why raw
+in-degree is not), with declared `tier:` as the dense fallback — sparse-but-strong first, dense
+second. `lmd` must never rank ahead of either: it is day-granular and ANY edit bumps it, so a typo
+fix would permanently promote a page — the signal is corruptible by activity unrelated to
+importance (which is why WM-MIG-07 forbids a mechanical repair from touching it). `tier:` is
+DECLARED rather than derived, is present on ~98% of pages, and cannot be inflated by editing.
 
 `WM-SCORE-09` **do-NOT-use-pagerank-or-raw-in-degree** — `MUST NOT`. This is a MEASURED refusal,
 not a preference, and it follows from the corpus's own laws rather than from any defect in it.

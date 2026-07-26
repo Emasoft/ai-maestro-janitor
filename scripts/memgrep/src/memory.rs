@@ -3925,7 +3925,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         }
     }
 
-    for (_score, path, summary, pathbuf, _ocd, lmd, atom_id, atom_desc) in
+    for (score, path, summary, pathbuf, _ocd, lmd, atom_id, atom_desc) in
         scored.into_iter().take(a.top)
     {
         let s = summary.trim();
@@ -3996,6 +3996,15 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
                 } else {
                     println!("{path}#{aid} — {line_summary}");
                 }
+                // The SCORE, on `full` only. Without it the ranking is unobservable, and an
+                // unobservable ranking cannot be debugged: two results printed in order look
+                // identical whether the first WON on score or merely arrived first and was kept
+                // by a tie-break. That ambiguity produced a real wrong conclusion here — a probe
+                // read as "the keyphrase ranks higher" was in fact scoring EQUAL and being
+                // ordered by the tie-break, which hid the inert-migration bug for a whole pass.
+                // Printed as its own tab-prefixed line so `full`'s locator line keeps the exact
+                // shape the lean layers' consumers already parse.
+                println!("\tscore: {score}");
                 // `full` always exposes the recall surface (it is a DEBUGGING layer — "why did this
                 // rank?" is unanswerable without it). Skipped only when the locator line already IS
                 // the keyword surface, i.e. an atom with neither desc nor body fell back to it.
@@ -4014,6 +4023,10 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
                 } else {
                     println!("{path} — {shown}");
                 }
+                // Same reason as the atom branch: a PAGE row ranks against atoms in the SAME
+                // ordering, so leaving it scoreless would make exactly the page-vs-atom
+                // comparisons unreadable — the ones most likely to be an unintended tie.
+                println!("\tscore: {score}");
                 if want_notes {
                     let block = render_notes(&resolve_notes(&pathbuf), a.full_notes);
                     if !block.is_empty() {

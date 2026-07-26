@@ -1815,6 +1815,28 @@ fn recall_full_prints_the_rich_record_including_keywords() {
         o.contains("phrase_two"),
         "full always prints the keyword surface:\n{o}"
     );
+    assert!(
+        o.contains("\tscore: "),
+        "full prints the SCORE — without it a result's rank is unobservable, so winning on \
+         score and merely surviving a tie-break look identical:\n{o}"
+    );
+}
+
+/// The score belongs to the DEBUGGING layer alone. The lean layers' row shape
+/// (`<lmd>\t<locator>\t<description>`) is a promised parse contract — `cut -f2` on it must stay
+/// exact — so an extra line there would break every consumer to help nobody: an agent picking a
+/// hop target reads the description, not the arithmetic behind it.
+#[test]
+fn recall_lean_layers_never_print_the_score() {
+    let d = TempDir::new("layer-score");
+    d.write("layer-hub.md", LAYER_CORPUS);
+    for layer in ["basic", "medium"] {
+        let o = run(&["recall", "zqxlayerkw", d.as_str(), "--output", layer]);
+        assert!(
+            !o.contains("score:"),
+            "`--output {layer}` must not print the score:\n{o}"
+        );
+    }
 }
 
 #[test]
