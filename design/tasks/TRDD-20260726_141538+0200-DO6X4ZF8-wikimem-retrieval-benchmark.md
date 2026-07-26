@@ -1,9 +1,9 @@
 ---
 trdd-id: DO6X4ZF8
 title: Wikimem retrieval benchmark — accuracy and end-to-end token cost, with a committed baseline
-column: dev
+column: testing
 created: 2026-07-26T14:15:38+0200
-updated: 2026-07-26T14:15:38+0200
+updated: 2026-07-26T17:06:00+0200
 current-owner: 2f5bc976
 task-type: infra
 approval-tier: 0
@@ -11,23 +11,39 @@ scope: project
 release-via: publish
 impacts: [memgrep, wikimem]
 relevant-rules: []
-external-refs: []
+external-refs: [https://github.com/Emasoft/ai-maestro/issues/96]
+implementation-commits: [11d476b, 9ef241d, 873f11e, 5b03519, 83fac1d, 5f98788, cf3f67a, de1a89f, d6f271f, 0dff13e, 3409ae2, ff4625a]
 ---
 
 # Wikimem retrieval benchmark — accuracy and end-to-end token cost
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-26
 
-- **Component state:** benchmark not yet written. `memgrep recall` currently has NO output
-  layers, `--with-notes` defaults ON, and there is no `recall <atom-id>` second hop.
-- **NEXT ACTION:** build `scripts/wikimem_bench.py` + the frozen fixture corpus + `queries.json`,
-  then capture `baseline.json` **against the CURRENT implementation** before any output change.
-- **Load-bearing facts:** the metric is END-TO-END (search output + the `recall <id>` hop), not
-  per-call — a per-call metric flatters both a thin list that hides its second hop and a fat
-  one-shot that needs none. Atom-level retrieval ALREADY exists (`index::recall_atom_candidates`,
-  `AtomCandidate{atom_id,desc,body,keywords,ocd,lmd}`); `finalize_recall` discards `_ocd`/`_lmd`
-  at the print site, so the basic layer needs no new data, only a different render.
-- **SUPERSEDED — do NOT carry forward:** nothing yet.
+- **Component state — SHIPPED, gating in CI.** `scripts/wikimem_bench.py` + **two** frozen
+  corpora, each with a committed baseline: `tests/fixtures/wikimem-bench-conformant/`
+  (**PRIMARY** — hit@1 **100%**, MRR **1.0**, 283.7 tok/query) and `tests/fixtures/wikimem-bench/`
+  (**LEGACY**, pre-migration form — 21.7% / 0.3891 / 185.4). Output layers, the `recall <ATOM-ID>`
+  second hop, the tiered keyphrase scorer, the recency tie-break and the cross-scope lint are all
+  landed and tested.
+- **NEXT ACTION:** run `uv run scripts/wikimem_bench.py --check` **and** the `--corpus
+  tests/fixtures/wikimem-bench-conformant --baseline tests/wikimem_bench/baseline-conformant.json`
+  variant; both must be green, then move to `ai_review`. Nothing is known-broken.
+- **Load-bearing facts:**
+  - cost is **END-TO-END** (search output + the hop it forces) — a per-call metric flatters a thin
+    list that hides its hop and a fat one-shot that needs none;
+  - the harness **MUST** measure the binary under test (`MEMGREP_BIN`), or every run silently
+    scores whatever is on `PATH` and reports the old build's numbers as the new one's win;
+  - token counts were **path-length dependent** until `corpus_arg()` normalised the corpus to a
+    repo-relative path with cwd pinned — an absolute path cost 318.1 vs 283.7 for the SAME corpus,
+    so a committed baseline would have encoded the capturing machine's home-directory length;
+  - the migration and the scorer are **one change**: measured alone, the tiered scorer LOOKS like a
+    regression (hit@10 65.2→60.9 on the legacy fixture) because substring matching had been scoring
+    accidental hits there (`list` inside `listing`). Always read the **2×2**.
+- **SUPERSEDED — do NOT carry forward:**
+  - "benchmark not yet written / no output layers / no second hop" — all three shipped;
+  - "`baseline.json` is THE baseline" — there are now TWO, and the **conformant** one is primary;
+    the legacy baseline was deliberately re-captured to record a documented trade (see
+    `tests/wikimem_bench/README.md`), which is the ONLY reason a baseline may move down.
 
 ## 1. Why
 
