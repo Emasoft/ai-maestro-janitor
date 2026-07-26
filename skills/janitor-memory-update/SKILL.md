@@ -97,14 +97,9 @@ in a new page):
    rule's `## Applies to`; a general rule covering a new element → its
    `## Applies to` AND the element's `## Governed by`; a new lateral relation →
    `## See also` on BOTH pages. Remove dead edges on both ends too.
-3. **EXTEND `description:` with the new content's SYMPTOM words.** Recall ranks on
-   `description + title + tags` ONLY — never the body — so a fact or lesson added
-   under a description that does not mention its symptom is **unfindable**: you
-   wrote it and recall will still miss it. (Observed 2026-07-26: correct lessons
-   about a rotation failure were appended to a page described only as "how do I
-   read my usage %"; a symptom query for the rotation failure ranked a DIFFERENT
-   page first until the description carried the new words.) The description must
-   describe the whole page as it is NOW, not as it was when created.
+3. **EXTEND `description:` with the new content's SYMPTOM words** — recall ranks on
+   `description + title + tags`, never the body, so an added fact whose symptom the
+   description lacks is **unfindable**. It must describe the page as it is NOW.
 4. Bump `lmd:`. If the title or `description` changed, refresh the search index
    (`memgrep reindex` — optional, recall falls back to a live walk when the index is stale); do NOT touch `MEMORY.md`
    (the wiki index is memgrep's; `MEMORY.md` is the harness's — the janitor maintains only the
@@ -214,15 +209,10 @@ you left no dangling edge.
 - `memgrep links --broken` over the scope shows no new dangling `[[link]]` you
   introduced (an intentional link to a yet-to-write page is fine; note it).
 - One-component-one-page still holds (you didn't fragment an element).
-- **`memgrep lint <page>` is CLEAN for everything you touched** — and it is not a
-  formality: on 2026-07-26 it caught three real defects in a single hand-written
-  update (an unquoted `desc:` that breaks grep and the in-body filter, and two
-  `[^N]` lessons defined but never referenced, i.e. invisible to a reader of the
-  prose). Fix YOUR violations. Pre-existing ones on the same page are the memory
-  agent's editorial backlog — report them, don't silently expand scope into them.
-- **RE-RECALL what you just wrote**, with the symptom words a future session would
-  actually use. If your own addition does not come back, the description gate above
-  failed and the write is not yet real.
+- **`memgrep lint <page>` CLEAN** for every page touched. Fix YOURS; leave
+  pre-existing ones to the memory agent's backlog.
+- **RE-RECALL what you wrote** with a future session's symptom words. No hit ⇒ the
+  description gate failed; not real yet.
 
 ## Output
 

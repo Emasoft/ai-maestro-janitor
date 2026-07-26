@@ -184,21 +184,14 @@ MEMORIZE-specific ones: the page stays LEAN (no governing rule re-copied that
 should be a link up instead), and a new hub's `globs` are precise and
 non-overlapping with other hubs (one file → one functionality).
 
-Then two proofs, because a page that merely EXISTS is not yet a memory:
+Then two proofs — a page that merely EXISTS is not yet a memory:
 
-- **`memgrep lint <page>` must be CLEAN.** It catches what prose review misses —
-  an unquoted `desc:` (breaks grep and the in-body filter), a `[^N]` lesson defined
-  but never referenced (invisible to anyone reading the prose), an oversized atom.
-  On 2026-07-26 it caught three such defects in one hand-written page edit.
-- **RE-RECALL it** with the symptom words a future session would actually use. If
-  your own page does not come back, its `description:` is indexed by the answer
-  instead of the question and the write is not real yet.
+- **`memgrep lint <page>` CLEAN** — unquoted `desc:`, unreferenced `[^N]`, oversized atoms.
+- **RE-RECALL it** with a future session's symptom words. No hit ⇒ indexed by the
+  answer, not the question; not real yet.
 
-**If the memory says "never do X in code", land the executable check in this same
-change** — a test, a lint rule, a gate that fails when X happens. A note explains a
-guard; it is not the guard. This corpus already carried "DO NOT send a generic
-User-Agent to that endpoint" while this project's own code did exactly that on a
-60 s beat for weeks: right, recallable, and completely inert.
+**A memory saying "never do X in code" ships its executable check in the SAME change**
+— a note explains a guard, it is not the guard.
 
 ## Output
 
