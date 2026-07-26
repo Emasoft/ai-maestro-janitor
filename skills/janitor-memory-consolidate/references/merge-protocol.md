@@ -51,11 +51,30 @@ error (editor disabled, lock contention, vanished/stale source, "nothing staged"
 prints `error:`/the reason and exits 2.
 
 **Merge shape the CLI expects:** exactly **one** surviving write (the merged page
-`C`, written at A's path) and one-or-more deletes (B's copy removed). Two writes
-for a merge is an error (`merge expects exactly ONE surviving page`). Backlink-
-holder pages you also copied into staging and edited count as *additional* writes —
-that is fine and expected (only the *merge sources* are constrained to one
-survivor + the retired source(s); holder rewrites are ordinary writes).
+`C`, written at A's path) and one-or-more deletes (B's copy removed). The check is
+`len(writes) != 1` over EVERY staged write, with no exemption for any of them.
+
+**So a backlink holder canNOT ride along in the merge transaction.** Copying holder
+page `D` into staging to repoint its `[[B]]` makes two writes and the CLI refuses
+with `merge expects exactly ONE surviving page, found 2 write(s)`. (An earlier
+revision of this paragraph claimed holder rewrites were "fine and expected"; that
+was never true of the code, and a CONSOLIDATE pass hit the refusal in practice.)
+
+**Do it as TWO transactions, holder FIRST:**
+
+1. `--op repair` on `D` alone — an in-place edit whose single source is `D`, so it
+   passes `verify_repair` trivially. Redirect `[[B]]` → `[[C]]`'s slug. Commit.
+2. `--op merge` with ONLY the merge sources. Commit.
+
+The ORDER is not a preference. `verify_merge` runs `no_dangling_refs` and REFUSES a
+merge while any live page still links a retired slug — so holder-first is the only
+sequence that can commit at all, and it also means the corpus is never left, even
+between the two commits, with a link pointing at a page that no longer exists.
+
+Keeping the one-write rule is deliberate rather than a limitation to route around:
+`verify_merge` proves knowledge preservation between the SOURCES and the SURVIVOR.
+It says nothing about an unrelated holder edit, so allowing that write into the
+same transaction would let an UNVERIFIED edit ride inside a verified one.
 
 ## What `is_legal_merge` checks (YOUR pre-flight, not the CLI's)
 

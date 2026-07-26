@@ -33,10 +33,31 @@ def _isolate_global_state(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_PLUGIN_OPTION_WIKIMEM_EDITOR_ENABLED", raising=False)
 
 
+def _run_err(*argv) -> tuple[int, str]:
+    """`_run`, but also returning stderr.
+
+    A bare `rc != 0` assertion passes when the CLI refuses for ANY reason, so a test written that
+    way keeps passing after the refusal it was written to pin has been replaced by a different one
+    — the vacuous-test failure mode. Use this whenever WHICH refusal fired is the point.
+    """
+    import contextlib
+    import io
+
+    saved = sys.argv
+    sys.argv = ["memory_txn_cli", *map(str, argv)]
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            return cli.main(), err.getvalue()
+    finally:
+        sys.argv = saved
+
+
 def _run(*argv) -> int:
     """Invoke the CLI's main() with a synthetic argv (sys.argv[0] is the prog)."""
     import contextlib
     import io
+
     saved = sys.argv
     sys.argv = ["memory_txn_cli", *map(str, argv)]
     try:
@@ -48,13 +69,8 @@ def _run(*argv) -> int:
         sys.argv = saved
 
 
-def _note(name, *, ocd="2026-06-01", lmd="2026-06-01", tier="component",
-          typ="project", body="A fact.", lessons="") -> str:
-    return (
-        f"---\nname: {name}\ndescription: \"d\"\nocd: {ocd}\nlmd: {lmd}\n"
-        f"metadata:\n  node_type: memory\n  type: {typ}\n  tier: {tier}\n---\n\n"
-        f"{body}\n\n## Notes and lessons learned\n{lessons}\n"
-    )
+def _note(name, *, ocd="2026-06-01", lmd="2026-06-01", tier="component", typ="project", body="A fact.", lessons="") -> str:
+    return f'---\nname: {name}\ndescription: "d"\nocd: {ocd}\nlmd: {lmd}\nmetadata:\n  node_type: memory\n  type: {typ}\n  tier: {tier}\n---\n\n{body}\n\n## Notes and lessons learned\n{lessons}\n'
 
 
 def _txn_id_from_begin(scope: Path, op: str, *sources: str) -> str:
@@ -73,15 +89,14 @@ def _staging(scope: Path, txn_id: str) -> Path:
 # begin → edit staging → commit  (the happy path: merge applies)
 # --------------------------------------------------------------------------- #
 
+
 def test_begin_edit_staging_commit_applies_merge(tmp_path):
     """A clean merge: begin copies A+B into staging; the agent removes the copies
     and adds C; commit reconstructs (write C, delete A+B), verifies, and applies."""
     scope = tmp_path / "memory"
     scope.mkdir()
-    a = _note("a", ocd="2026-05-01", lmd="2026-05-10",
-              body="Auth uses JWT.", lessons="[^1]: cap is 3, verified against source.\n")
-    b = _note("b", ocd="2026-06-01", lmd="2026-06-09",
-              body="Tokens expire in 30s.", lessons="[^1]: 30s timeout per config.\n")
+    a = _note("a", ocd="2026-05-01", lmd="2026-05-10", body="Auth uses JWT.", lessons="[^1]: cap is 3, verified against source.\n")
+    b = _note("b", ocd="2026-06-01", lmd="2026-06-09", body="Tokens expire in 30s.", lessons="[^1]: 30s timeout per config.\n")
     (scope / "a.md").write_text(a, encoding="utf-8")
     (scope / "b.md").write_text(b, encoding="utf-8")
 
@@ -91,10 +106,7 @@ def test_begin_edit_staging_commit_applies_merge(tmp_path):
     # write the merged survivor (lessons preserved, ocd=min, no dups).
     (staging / "a.md").unlink()
     (staging / "b.md").unlink()
-    merged = _note("merged", ocd="2026-05-01", lmd="2026-06-18",
-                   body="Auth uses JWT. Tokens expire in 30s.", lessons=(
-                       "[^1]: cap is 3, verified against source.\n"
-                       "[^2]: 30s timeout per config.\n"))
+    merged = _note("merged", ocd="2026-05-01", lmd="2026-06-18", body="Auth uses JWT. Tokens expire in 30s.", lessons=("[^1]: cap is 3, verified against source.\n[^2]: 30s timeout per config.\n"))
     (staging / "merged.md").write_text(merged, encoding="utf-8")
 
     rc = _run("commit", scope, txn_id, "--op", "merge")
@@ -112,15 +124,13 @@ def test_begin_edit_staging_commit_applies_repair(tmp_path):
     PLACE; commit reconstructs (1 write at the same path, 0 deletes) and applies."""
     scope = tmp_path / "memory"
     scope.mkdir()
-    bad = ("---\nname: foo\ndescription: \"d\"\nmetadata:\n  type: project\n---\n\n"
-           "A fact.\n[^1]: the cap is 3.\n")
+    bad = '---\nname: foo\ndescription: "d"\nmetadata:\n  type: project\n---\n\nA fact.\n[^1]: the cap is 3.\n'
     (scope / "foo.md").write_text(bad, encoding="utf-8")
 
     txn_id = _txn_id_from_begin(scope, "repair", "foo.md")
     staging = _staging(scope, txn_id)
     (staging / "foo.md").write_text(
-        _note("foo", ocd="2026-06-19", lmd="2026-06-19", body="A fact.",
-              lessons="[^1]: the cap is 3.\n"),
+        _note("foo", ocd="2026-06-19", lmd="2026-06-19", body="A fact.", lessons="[^1]: the cap is 3.\n"),
         encoding="utf-8",
     )
 
@@ -169,12 +179,7 @@ def test_begin_edit_staging_commit_applies_split(tmp_path):
     scope = tmp_path / "memory"
     scope.mkdir()
     glist = '["src/a/**", "src/b/**"]'
-    hub = (
-        "---\nname: plat\ndescription: \"d\"\nocd: 2026-06-01\nlmd: 2026-06-01\n"
-        f"metadata:\n  node_type: memory\n  type: project\n  tier: hub\n  globs: {glist}\n---\n\n"
-        "## Frontend\nUI bits.\n## Backend\nServer bits.\n\n"
-        "## Notes and lessons learned\n[^1]: the build flag is --release.\n"
-    )
+    hub = f'---\nname: plat\ndescription: "d"\nocd: 2026-06-01\nlmd: 2026-06-01\nmetadata:\n  node_type: memory\n  type: project\n  tier: hub\n  globs: {glist}\n---\n\n## Frontend\nUI bits.\n## Backend\nServer bits.\n\n## Notes and lessons learned\n[^1]: the build flag is --release.\n'
     (scope / "plat.md").write_text(hub, encoding="utf-8")
 
     txn_id = _txn_id_from_begin(scope, "split", "plat.md")
@@ -182,20 +187,14 @@ def test_begin_edit_staging_commit_applies_split(tmp_path):
 
     def _page(name, globs, body, lessons=""):
         gl = "[" + ", ".join(f'"{g}"' for g in globs) + "]"
-        return (
-            f"---\nname: {name}\ndescription: \"d\"\nocd: 2026-06-01\nlmd: 2026-06-18\n"
-            f"metadata:\n  node_type: memory\n  type: project\n  tier: hub\n  globs: {gl}\n---\n\n"
-            f"{body}\n\n## Notes and lessons learned\n{lessons}\n"
-        )
+        return f'---\nname: {name}\ndescription: "d"\nocd: 2026-06-01\nlmd: 2026-06-18\nmetadata:\n  node_type: memory\n  type: project\n  tier: hub\n  globs: {gl}\n---\n\n{body}\n\n## Notes and lessons learned\n{lessons}\n'
 
-    overview = _page("plat", ["src/a/**", "src/b/**"],
-                     "Overview: see [[plat-frontend]] and [[plat-backend]].")
-    sub1 = _page("plat-frontend", ["src/a/**"], "UI bits.",
-                 lessons="[^1]: the build flag is --release.\n")
+    overview = _page("plat", ["src/a/**", "src/b/**"], "Overview: see [[plat-frontend]] and [[plat-backend]].")
+    sub1 = _page("plat-frontend", ["src/a/**"], "UI bits.", lessons="[^1]: the build flag is --release.\n")
     sub2 = _page("plat-backend", ["src/b/**"], "Server bits.")
-    (staging / "plat.md").write_text(overview, encoding="utf-8")          # overwrite source -> overview
-    (staging / "plat-frontend.md").write_text(sub1, encoding="utf-8")     # new sub-page
-    (staging / "plat-backend.md").write_text(sub2, encoding="utf-8")      # new sub-page
+    (staging / "plat.md").write_text(overview, encoding="utf-8")  # overwrite source -> overview
+    (staging / "plat-frontend.md").write_text(sub1, encoding="utf-8")  # new sub-page
+    (staging / "plat-backend.md").write_text(sub2, encoding="utf-8")  # new sub-page
 
     rc = _run("commit", scope, txn_id, "--op", "split")
     assert rc == 0
@@ -208,15 +207,14 @@ def test_begin_edit_staging_commit_applies_split(tmp_path):
 # verify-fail aborts and leaves the live tree intact
 # --------------------------------------------------------------------------- #
 
+
 def test_verify_fail_aborts_and_leaves_live_tree_intact(tmp_path):
     """A merge that DROPS a source lesson fails verify → commit returns non-zero,
     aborts the txn, and the live A/B pages are untouched (no C created)."""
     scope = tmp_path / "memory"
     scope.mkdir()
-    a = _note("a", ocd="2026-05-01", lmd="2026-05-10",
-              lessons="[^1]: cap is 3, verified against source.\n")
-    b = _note("b", ocd="2026-06-01", lmd="2026-06-09",
-              lessons="[^1]: 30s timeout per config.\n")
+    a = _note("a", ocd="2026-05-01", lmd="2026-05-10", lessons="[^1]: cap is 3, verified against source.\n")
+    b = _note("b", ocd="2026-06-01", lmd="2026-06-09", lessons="[^1]: 30s timeout per config.\n")
     (scope / "a.md").write_text(a, encoding="utf-8")
     (scope / "b.md").write_text(b, encoding="utf-8")
 
@@ -225,22 +223,22 @@ def test_verify_fail_aborts_and_leaves_live_tree_intact(tmp_path):
     (staging / "a.md").unlink()
     (staging / "b.md").unlink()
     # The merged page silently DROPS a's lesson — verify must catch it.
-    bad = _note("merged", ocd="2026-05-01", lmd="2026-06-18",
-                lessons="[^1]: 30s timeout per config.\n")
+    bad = _note("merged", ocd="2026-05-01", lmd="2026-06-18", lessons="[^1]: 30s timeout per config.\n")
     (staging / "merged.md").write_text(bad, encoding="utf-8")
 
     rc = _run("commit", scope, txn_id, "--op", "merge")
-    assert rc == 1                                   # verify-fail exit code
-    assert (scope / "a.md").read_text(encoding="utf-8") == a   # live tree untouched
+    assert rc == 1  # verify-fail exit code
+    assert (scope / "a.md").read_text(encoding="utf-8") == a  # live tree untouched
     assert (scope / "b.md").read_text(encoding="utf-8") == b
-    assert not (scope / "merged.md").exists()        # the merge did NOT apply
-    assert not staging.exists()                      # txn aborted, staging discarded
+    assert not (scope / "merged.md").exists()  # the merge did NOT apply
+    assert not staging.exists()  # txn aborted, staging discarded
     assert not list(MemoryTxn._staging_root(scope).glob("*.json"))
 
 
 # --------------------------------------------------------------------------- #
 # resume rolls a crashed (committing-phase) transaction forward
 # --------------------------------------------------------------------------- #
+
 
 def test_resume_rolls_forward_a_crashed_commit(tmp_path):
     """A txn that crashed AFTER the source re-hash passed (phase=committing) is
@@ -254,7 +252,7 @@ def test_resume_rolls_forward_a_crashed_commit(tmp_path):
     txn.stage_write("c.md", "---\nname: c\n---\n\nMERGED.\n")
     txn.stage_delete("a.md")
     txn.stage_delete("b.md")
-    txn.phase = "committing"   # the crash window: guard passed, swap not yet done
+    txn.phase = "committing"  # the crash window: guard passed, swap not yet done
     txn._persist()
 
     rc = _run("resume", scope)
@@ -284,6 +282,7 @@ def test_cli_begin_creates_staging_with_source_copies(tmp_path):
     fresh staging dir (the agent then edits those copies)."""
     import contextlib
     import io
+
     scope = tmp_path / "memory"
     scope.mkdir()
     (scope / "a.md").write_text(_note("a"), encoding="utf-8")
@@ -323,15 +322,14 @@ def test_commit_with_no_staged_changes_errors(tmp_path):
 # (overwrite a.md, delete b.md) must feed the SURVIVOR's begin-time content to
 # the verifier too — dropping the survivor's own lesson used to commit clean.
 
+
 def _survivor_merge_txn(tmp_path, survivor_text: str):
     """Build the merge-into-survivor shape: a.md is overwritten with
     `survivor_text`, b.md is deleted. Returns (scope, txn_id)."""
     scope = tmp_path / "memory"
     scope.mkdir()
-    a = _note("a", ocd="2026-05-01", lmd="2026-05-10",
-              body="Auth uses JWT.", lessons="[^1]: cap is 3, verified against source.\n")
-    b = _note("b", ocd="2026-06-01", lmd="2026-06-09",
-              body="Tokens expire in 30s.", lessons="[^1]: 30s timeout per config.\n")
+    a = _note("a", ocd="2026-05-01", lmd="2026-05-10", body="Auth uses JWT.", lessons="[^1]: cap is 3, verified against source.\n")
+    b = _note("b", ocd="2026-06-01", lmd="2026-06-09", body="Tokens expire in 30s.", lessons="[^1]: 30s timeout per config.\n")
     (scope / "a.md").write_text(a, encoding="utf-8")
     (scope / "b.md").write_text(b, encoding="utf-8")
     txn_id = _txn_id_from_begin(scope, "merge", "a.md", "b.md")
@@ -341,12 +339,47 @@ def _survivor_merge_txn(tmp_path, survivor_text: str):
     return scope, txn_id
 
 
+def test_merge_refuses_a_second_write_even_for_a_backlink_holder(tmp_path):
+    """A backlink HOLDER cannot ride along in the merge transaction.
+
+    The consolidate skill's reference doc claimed holder rewrites were "fine and expected" as
+    additional writes. They never were — `len(writes) != 1` counts every staged write with no
+    exemption — and a real CONSOLIDATE pass hit the refusal. Nothing exercised the path, so the
+    doc and the code drifted unnoticed; this pins the behaviour so the doc can only be wrong
+    loudly. (The doc now prescribes two transactions, holder-repair FIRST.)
+
+    The one-write rule is deliberate, not a limitation: `verify_merge` proves knowledge
+    preservation between the SOURCES and the SURVIVOR and says nothing about an unrelated holder
+    edit, so admitting that write would let an UNVERIFIED edit ride inside a verified transaction.
+    """
+    scope, txn_id = _survivor_merge_txn(
+        tmp_path,
+        _note(
+            "a",
+            ocd="2026-05-01",
+            lmd="2026-06-18",
+            body="Auth uses JWT.\nTokens expire in 30s.",
+            lessons="[^1]: cap is 3, verified against source.\n[^2]: 30s timeout per config.\n",
+        ),
+    )
+    # A third page that links the retiring slug, edited IN THE SAME staging dir — the shape the
+    # doc used to bless.
+    (_staging(scope, txn_id) / "holder.md").write_text(
+        _note("holder", ocd="2026-05-01", lmd="2026-06-18", body="See [[a]] for the details."),
+        encoding="utf-8",
+    )
+    rc, err = _run_err("commit", scope, txn_id, "--op", "merge")
+    assert rc != 0, "a merge carrying a holder write must be refused, not silently accepted"
+    assert "exactly ONE surviving page" in err, f"…and refused by the WRITE-COUNT rule specifically, not incidentally: {err!r}"
+    # And the live tree is untouched — a refused transaction changes nothing.
+    assert (scope / "b.md").exists(), "the refused merge must not have applied its delete"
+    assert not (scope / "holder.md").exists(), "nor written the holder into the live tree"
+
+
 def test_merge_into_survivor_dropping_survivors_lesson_fails(tmp_path):
     """The exact H-1 hole: the survivor keeps B's content but LOSES its own
     lesson + fact — the verifier must now refuse (it used to pass)."""
-    bad = _note("a", ocd="2026-05-01", lmd="2026-06-18",
-                body="Tokens expire in 30s.",
-                lessons="[^1]: 30s timeout per config.\n")  # A's lesson + fact GONE
+    bad = _note("a", ocd="2026-05-01", lmd="2026-06-18", body="Tokens expire in 30s.", lessons="[^1]: 30s timeout per config.\n")  # A's lesson + fact GONE
     scope, txn_id = _survivor_merge_txn(tmp_path, bad)
     rc = _run("commit", scope, txn_id, "--op", "merge")
     assert rc != 0, "a merge that loses the survivor's own lesson must not commit"
@@ -359,27 +392,22 @@ def test_merge_into_survivor_dropping_survivors_lesson_fails(tmp_path):
 # enforcement. A txn begun with op "conflict" is the ONE sanctioned exemption
 # (the conflict pass's loss-preserving pair-retirement is legal across tiers).
 
+
 def _pair_merge_txn(tmp_path, *, begin_op: str, a_extra: dict, b_extra: dict):
     """Build a delete-both-write-merged merge shape with per-page tier/type
     overrides. The merged result preserves BOTH pages' facts + lessons and keeps
     ocd=min, so ONLY the legality gate can refuse it."""
     scope = tmp_path / "memory"
     scope.mkdir()
-    a = _note("a", ocd="2026-05-01", lmd="2026-05-10", body="Auth uses JWT.",
-              lessons="[^1]: cap is 3, verified against source.\n", **a_extra)
-    b = _note("b", ocd="2026-06-01", lmd="2026-06-09", body="Tokens expire in 30s.",
-              lessons="[^1]: 30s timeout per config.\n", **b_extra)
+    a = _note("a", ocd="2026-05-01", lmd="2026-05-10", body="Auth uses JWT.", lessons="[^1]: cap is 3, verified against source.\n", **a_extra)
+    b = _note("b", ocd="2026-06-01", lmd="2026-06-09", body="Tokens expire in 30s.", lessons="[^1]: 30s timeout per config.\n", **b_extra)
     (scope / "a.md").write_text(a, encoding="utf-8")
     (scope / "b.md").write_text(b, encoding="utf-8")
     txn_id = _txn_id_from_begin(scope, begin_op, "a.md", "b.md")
     staging = _staging(scope, txn_id)
     (staging / "a.md").unlink()
     (staging / "b.md").unlink()
-    merged = _note("merged", ocd="2026-05-01", lmd="2026-06-18",
-                   tier=a_extra.get("tier", "component"), typ=a_extra.get("typ", "project"),
-                   body="Auth uses JWT.\n\nTokens expire in 30s.", lessons=(
-                       "[^1]: cap is 3, verified against source.\n"
-                       "[^2]: 30s timeout per config.\n"))
+    merged = _note("merged", ocd="2026-05-01", lmd="2026-06-18", tier=a_extra.get("tier", "component"), typ=a_extra.get("typ", "project"), body="Auth uses JWT.\n\nTokens expire in 30s.", lessons=("[^1]: cap is 3, verified against source.\n[^2]: 30s timeout per config.\n"))
     (staging / "merged.md").write_text(merged, encoding="utf-8")
     return scope, txn_id
 
@@ -387,9 +415,7 @@ def _pair_merge_txn(tmp_path, *, begin_op: str, a_extra: dict, b_extra: dict):
 def test_cross_type_merge_refused_at_commit(tmp_path):
     """A merge of a `project` page with a `reference` page must be refused by the
     commit gate even when it loses nothing — cross-type is structurally illegal."""
-    scope, txn_id = _pair_merge_txn(
-        tmp_path, begin_op="merge",
-        a_extra={"typ": "project"}, b_extra={"typ": "reference"})
+    scope, txn_id = _pair_merge_txn(tmp_path, begin_op="merge", a_extra={"typ": "project"}, b_extra={"typ": "reference"})
     rc = _run("commit", scope, txn_id, "--op", "merge")
     assert rc == 1, "cross-type merge must fail commit-time legality"
     assert (scope / "a.md").exists() and (scope / "b.md").exists()  # live intact
@@ -400,9 +426,7 @@ def test_cross_tier_merge_refused_at_commit(tmp_path):
     """A merge of an `aspect` page with a `component` page must be refused by the
     commit gate — cross-tier is structurally illegal (never mix a radiating rule
     with a terminal element)."""
-    scope, txn_id = _pair_merge_txn(
-        tmp_path, begin_op="merge",
-        a_extra={"tier": "aspect"}, b_extra={"tier": "component"})
+    scope, txn_id = _pair_merge_txn(tmp_path, begin_op="merge", a_extra={"tier": "aspect"}, b_extra={"tier": "component"})
     rc = _run("commit", scope, txn_id, "--op", "merge")
     assert rc == 1
     assert (scope / "a.md").exists() and (scope / "b.md").exists()
@@ -413,9 +437,7 @@ def test_conflict_op_txn_exempt_from_merge_legality(tmp_path):
     """A txn begun with op `conflict` (the conflict pass's pair-retirement) rides
     `commit --op merge` across tiers WITHOUT the legality screen — the sanctioned
     exemption (conflict-protocol.md): the demoted fact survives as a lesson."""
-    scope, txn_id = _pair_merge_txn(
-        tmp_path, begin_op="conflict",
-        a_extra={"tier": "aspect"}, b_extra={"tier": "component"})
+    scope, txn_id = _pair_merge_txn(tmp_path, begin_op="conflict", a_extra={"tier": "aspect"}, b_extra={"tier": "component"})
     rc = _run("commit", scope, txn_id, "--op", "merge")
     assert rc == 0, "the conflict pass's cross-tier pair-retirement must stay legal"
     assert (scope / "merged.md").exists()
@@ -427,19 +449,13 @@ def test_component_split_refused_at_commit(tmp_path):
     a component is never fragmented, no matter how well the sub-pages preserve it."""
     scope = tmp_path / "memory"
     scope.mkdir()
-    comp = _note("comp", body="## First\nFact one.\n## Second\nFact two.",
-                 lessons="[^1]: the cap is 3.\n")
+    comp = _note("comp", body="## First\nFact one.\n## Second\nFact two.", lessons="[^1]: the cap is 3.\n")
     (scope / "comp.md").write_text(comp, encoding="utf-8")
     txn_id = _txn_id_from_begin(scope, "split", "comp.md")
     staging = _staging(scope, txn_id)
-    (staging / "comp.md").write_text(
-        _note("comp", lmd="2026-06-18", body="Overview: see [[comp-first]] and [[comp-second]]."),
-        encoding="utf-8")
-    (staging / "comp-first.md").write_text(
-        _note("comp-first", body="## First\nFact one.", lessons="[^1]: the cap is 3.\n"),
-        encoding="utf-8")
-    (staging / "comp-second.md").write_text(
-        _note("comp-second", body="## Second\nFact two."), encoding="utf-8")
+    (staging / "comp.md").write_text(_note("comp", lmd="2026-06-18", body="Overview: see [[comp-first]] and [[comp-second]]."), encoding="utf-8")
+    (staging / "comp-first.md").write_text(_note("comp-first", body="## First\nFact one.", lessons="[^1]: the cap is 3.\n"), encoding="utf-8")
+    (staging / "comp-second.md").write_text(_note("comp-second", body="## Second\nFact two."), encoding="utf-8")
 
     rc = _run("commit", scope, txn_id, "--op", "split")
     assert rc == 1, "a component split must fail commit-time legality"
@@ -451,10 +467,7 @@ def test_merge_into_survivor_preserving_everything_commits(tmp_path):
     """The correct merge-into-survivor: both pages' lessons + facts survive and
     the survivor keeps its own OLDER ocd — must pass (the pre-fix gate perversely
     REJECTED the older ocd because it only saw the deleted page's sources)."""
-    good = _note("a", ocd="2026-05-01", lmd="2026-06-18",
-                 body="Auth uses JWT. Tokens expire in 30s.", lessons=(
-                     "[^1]: cap is 3, verified against source.\n"
-                     "[^2]: 30s timeout per config.\n"))
+    good = _note("a", ocd="2026-05-01", lmd="2026-06-18", body="Auth uses JWT. Tokens expire in 30s.", lessons=("[^1]: cap is 3, verified against source.\n[^2]: 30s timeout per config.\n"))
     scope, txn_id = _survivor_merge_txn(tmp_path, good)
     rc = _run("commit", scope, txn_id, "--op", "merge")
     assert rc == 0
@@ -467,6 +480,7 @@ def test_merge_into_survivor_preserving_everything_commits(tmp_path):
 # F2 (audit 2026-07-13) — a CONFLICT verdict must be COMMITTABLE
 # --------------------------------------------------------------------------- #
 
+
 def test_conflict_demote_verdict_commits(tmp_path):
     """END-TO-END F2: the conflict pass's DEMOTE verdict — retire the obsolete page, keep
     the survivor's body at the CURRENT truth, demote the superseded claim to a `[^N]`
@@ -476,30 +490,29 @@ def test_conflict_demote_verdict_commits(tmp_path):
     cadence threw its whole adversarial fan-out away at this gate."""
     scope = tmp_path / "memory"
     scope.mkdir()
-    obsolete = _note("obsolete", ocd="2026-05-01", lmd="2026-05-02",
-                     body="The rotator retries a failed refresh up to five times before failing over.")
-    current = _note("current", ocd="2026-04-01", lmd="2026-06-01",
-                    body="The rotator retries a failed refresh three times before failing over.")
+    obsolete = _note("obsolete", ocd="2026-05-01", lmd="2026-05-02", body="The rotator retries a failed refresh up to five times before failing over.")
+    current = _note("current", ocd="2026-04-01", lmd="2026-06-01", body="The rotator retries a failed refresh three times before failing over.")
     (scope / "obsolete.md").write_text(obsolete, encoding="utf-8")
     (scope / "current.md").write_text(current, encoding="utf-8")
 
     txn_id = _txn_id_from_begin(scope, "conflict", "obsolete.md", "current.md")
     staging = _staging(scope, txn_id)
-    (staging / "obsolete.md").unlink()                       # retire the obsolete page
+    (staging / "obsolete.md").unlink()  # retire the obsolete page
     resolved = _note(
-        "current", ocd="2026-04-01", lmd="2026-07-13",
+        "current",
+        ocd="2026-04-01",
+        lmd="2026-07-13",
         body="The rotator retries a failed refresh three times before failing over.",
-        lessons="[^1]: DO NOT assert the rotator retries 5x, as page obsolete did, BECAUSE "
-                "8f960ed capped it at 3. DO use 3 instead.\n",
+        lessons="[^1]: DO NOT assert the rotator retries 5x, as page obsolete did, BECAUSE 8f960ed capped it at 3. DO use 3 instead.\n",
     )
     (staging / "current.md").write_text(resolved, encoding="utf-8")
 
-    rc = _run("commit", scope, txn_id, "--op", "merge")      # conflict commits AS a merge
+    rc = _run("commit", scope, txn_id, "--op", "merge")  # conflict commits AS a merge
     assert rc == 0
-    assert not (scope / "obsolete.md").exists()              # the contradiction is gone
+    assert not (scope / "obsolete.md").exists()  # the contradiction is gone
     live = (scope / "current.md").read_text(encoding="utf-8")
     assert "three times" in live
-    assert "DO NOT assert the rotator retries 5x" in live    # the WHY survives as a lesson
+    assert "DO NOT assert the rotator retries 5x" in live  # the WHY survives as a lesson
 
 
 def test_conflict_verdict_that_corrupts_the_survivor_is_still_refused(tmp_path):
@@ -516,17 +529,22 @@ def test_conflict_verdict_that_corrupts_the_survivor_is_still_refused(tmp_path):
     staging = _staging(scope, txn_id)
     (staging / "obsolete.md").unlink()
     (staging / "current.md").write_text(
-        _note("current", body="The rotator refreshes tokens.",   # the survivor's own fact: GONE
-              lessons="[^1]: DO NOT assert 5x, BECAUSE it is 3. DO use 3 instead.\n"),
-        encoding="utf-8")
+        _note(
+            "current",
+            body="The rotator refreshes tokens.",  # the survivor's own fact: GONE
+            lessons="[^1]: DO NOT assert 5x, BECAUSE it is 3. DO use 3 instead.\n",
+        ),
+        encoding="utf-8",
+    )
 
     rc = _run("commit", scope, txn_id, "--op", "merge")
     assert rc != 0
-    assert (scope / "obsolete.md").exists()                  # nothing applied
+    assert (scope / "obsolete.md").exists()  # nothing applied
     assert "session key" in (scope / "current.md").read_text(encoding="utf-8")
 
 
 # ─────────────── authoring-integrity DELTA gate (TRDD-4ZTNMQL3) ───────────────
+
 
 def test_authoring_gate_blocks_a_newly_introduced_body_less_lesson(tmp_path):
     """A hand-edit that INTRODUCES a body-less lesson must be refused by the delta gate."""
@@ -538,16 +556,9 @@ def test_authoring_gate_blocks_a_newly_introduced_body_less_lesson(tmp_path):
     scope = tmp_path / "scope"
     scope.mkdir()
     rel = "n.md"
-    good = (
-        '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\n'
-        "body.[^1]\n\n## Notes and lessons learned\n[^1]: a real lesson body.\n"
-    )
+    good = '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\nbody.[^1]\n\n## Notes and lessons learned\n[^1]: a real lesson body.\n'
     (scope / rel).write_text(good, encoding="utf-8")
-    bad = (
-        '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\n'
-        "body.[^1]\n\n## Notes and lessons learned\n"
-        '[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
-    )
+    bad = '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\nbody.[^1]\n\n## Notes and lessons learned\n[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
     ok, reasons, _ = cli._authoring_gate(types.SimpleNamespace(scope_root=scope), {rel: bad})
     assert not ok
     assert any("empty-lesson-body" in r for r in reasons), reasons
@@ -563,11 +574,7 @@ def test_authoring_gate_ignores_a_preexisting_violation_carried_forward(tmp_path
     scope = tmp_path / "scope"
     scope.mkdir()
     rel = "n.md"
-    bad = (
-        '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\n'
-        "body.[^1]\n\n## Notes and lessons learned\n"
-        '[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
-    )
+    bad = '---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: "d"\n---\nbody.[^1]\n\n## Notes and lessons learned\n[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"k", ocd:2026-01-01, lmd:2026-01-01]\n'
     (scope / rel).write_text(bad, encoding="utf-8")
     after = bad.replace("body.[^1]", "body edited.[^1]")  # same pre-existing bad lesson; count unchanged
     ok, reasons, _ = cli._authoring_gate(types.SimpleNamespace(scope_root=scope), {rel: after})
