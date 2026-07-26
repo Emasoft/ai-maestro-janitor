@@ -59,7 +59,13 @@ The `window-burn-rate` detector fires on the ~15-min heartbeat. A fixed-reset wi
 100% exactly at its reset if spent evenly, so `burn_ratio = utilization% ÷ (100 × elapsed-fraction)`.
 It reads each account's live utilization% + reset boundary **READ-ONLY** via the OAuth rotator (never
 writes/rotates/mutates a credential) and emits one drift line per account+window when
-`burn_ratio ≥ RATIO`, with projected exhaustion + the top-consuming project. Knobs:
+`burn_ratio ≥ RATIO`, with projected exhaustion + the top-consuming project.
+
+That read is served by the throttled `usage_probe` (TRDD-WEBA1RMF): a 10-min per-account cache with
+`Retry-After`-aware back-off, so this 15-min detector and the rotator's 60 s beat share one request
+budget instead of competing for it. A stale readout is reported as stale rather than rendered as
+live — a cached `resets_at` may describe a window that has already reset, so showing its countdown
+would be worse than showing nothing. Knobs:
 - `CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED` (default `true`) — opt out entirely.
 - `CLAUDE_PLUGIN_OPTION_WINDOW_BURN_RATIO` (default `1.5`) — the pace multiple that trips it.
 - `CLAUDE_PLUGIN_OPTION_WINDOW_BURN_MIN_UTIL` (default `10.0`) — floor so a fresh window never alarms early.

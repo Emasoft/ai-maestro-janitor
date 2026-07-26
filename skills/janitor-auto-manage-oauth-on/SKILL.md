@@ -24,6 +24,17 @@ Task (TRDD-f892e109) runs the rotator's `tick --only-if-claude-running`:
   swaps in the *drain-first* alternate (the usable account closest to its own
   limit, so fresh accounts stay in reserve).
 
+That usage read goes through `scripts/lib/usage_probe.py` (TRDD-WEBA1RMF), which
+caches per account for 10 min and honours the endpoint's back-off, so the 60 s
+beat costs at most one request per account per 10 min. This is load-bearing for
+rotation, not just courtesy: a probe 429 is read here as *"the account is
+MAXED"*, so an endpoint throttle would make the live account and every alternate
+look unusable at the same time and rotation would stall precisely when it is
+needed. The probe also sends a `claude-code/*` User-Agent, which that endpoint
+requires — note the token host `platform.claude.com` needs the **opposite**
+(`claude-account-rotator`, or Cloudflare answers 1010); the two must not be
+unified.
+
 There is **no launchd agent** — the rotation rides the same always-on daemon
 that already refreshes marketplaces and self-updates the janitor. That daemon
 is lazy-spawned and kept alive by the heartbeat, so the rotator works whenever

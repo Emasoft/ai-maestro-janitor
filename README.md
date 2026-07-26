@@ -1081,6 +1081,28 @@ any plugin-side change — staying on a recent CC build is recommended:
   is silent), opt-out `CLAUDE_PLUGIN_OPTION_WINDOW_BURN_ENABLED=false` (also
   `…_RATIO`, `…_MIN_UTIL`).
 
+- **Throttled usage probe** (`scripts/lib/usage_probe.py`, TRDD-WEBA1RMF) — every
+  read of `/api/oauth/usage` (the rotator's rotation decisions, `window-burn-rate`,
+  `/janitor-token-report --live`) goes through **one throttled writer**. That
+  endpoint requires a `claude-code/*` User-Agent — anything else lands in an
+  aggressive rate-limit bucket that 429s persistently — and its 429s *worsen*
+  under retry, because knocking again re-arms the server-side lockout instead of
+  letting the token's usage bucket drain. That matters beyond politeness: the
+  rotator reads a probe 429 as *"this account is MAXED"*, so a throttle makes the
+  live account **and** every alternate look unusable at once and rotation stalls
+  exactly when it is needed. The probe therefore sends the installed CLI's
+  version as its UA, caches per account (the cache file's mtime **is** the TTL
+  clock), honours `Retry-After` / `anthropic-ratelimit-*-reset` and otherwise
+  backs off exponentially, and serialises concurrent refreshes with a
+  non-blocking lock so the loser serves cache rather than firing a duplicate.
+  It never raises and never resolves a credential itself — the rotator's
+  cross-platform ladder (macOS Keychain → `.credentials.json` → GNOME Keyring)
+  keeps owning that, so a telemetry probe can never raise a keychain dialog.
+  Throttling design adapted from [ccgauge](https://github.com/pizzimenti/ccgauge)
+  (MIT). Knobs: `CLAUDE_PLUGIN_OPTION_USAGE_PROBE_TTL_SECONDS` (600),
+  `…_BACKOFF_BASE_SECONDS` (600), `…_BACKOFF_CAP_SECONDS` (7200),
+  `…_STALE_SECONDS` (1800), `…_TIMEOUT_SECONDS` (6).
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).

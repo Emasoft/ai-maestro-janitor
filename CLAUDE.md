@@ -193,6 +193,7 @@ clear-before-run, then `version-update` Task `.run()` NOW (≤~60s). Single-writ
 - `dedupe.py` — `emit_once` (content-hash dedupe → unchanged findings stay silent).
 - `version_update_lib.py` — janitor self-update helpers (`attempt_auto_update`, `do_auto_update_if_needed`, `detect_install_scopes`); daemon-only caller.
 - `rules_installer.py` — `install_rules` copies plugin `rules/*.md` into the active scope's `.claude/rules/` (atomic tmp+replace; content-exact idempotency). Called by `on-session-start`. **Rules lifecycle (TRDD-H9IBY95W):** each shipped rule carries a leading inert-guard + `PROVENANCE_MARKER` comment (`ai-maestro-janitor:installed-rule`) → the rule self-disables when the janitor is DISARMED (kill-switch flag) and flags itself INERT + never-delete-memory when UNINSTALLED (data dir absent). `remove_orphaned_rules` (per-session, called by on-session-start after install) strips marker-bearing rules from any scope that's no longer an install target (partial uninstall / redundant project mirror); `cleanup_user_orphans_if_uninstalled` (daemon `rules-cleanup` task) removes user-scope orphans once `janitor_uninstalled()` (no settings scope AND no data dir). ALL removal is marker-gated `*.md`-only → never a user's own rule, never a memory store. Ships 8 rules; the set is AUTO-DISCOVERED by globbing `rules/*.md` (no hardcoded list). Includes the 3 IND governance rules `trdd-design-tasks`/`prrd-design-rules`/`universal-kanban` (issue #73, the ai-maestro-independent half of the 3-pillars split). INSTALL compares BYTES not markers, so it OVERWRITES an existing unmarked same-named user rule → the content-based overwrite is the one-shot takeover of the user's old hand-placed globals (marker-gating protects only the REMOVAL path, never the install).
+- `usage_probe.py` — the ONE throttled reader of `/api/oauth/usage` (TRDD-WEBA1RMF). Single writer, N readers: `rotator.usage_request` → this, so the rotator's 60 s beat and `window-burn-rate`'s 15 min share one budget. Sends `claude-code/<version>` (derived from `claude --version`) because that endpoint drops any other UA into an aggressive bucket that 429s persistently — and a probe 429 is read by the rotator as "account MAXED", so a throttle makes live AND every alternate look unusable at once and rotation stalls (the 2026-07-18 deadlock, TRDD-WBYFTU2L). **Two hosts, two OPPOSITE correct UAs:** `platform.claude.com/v1/oauth/token` still needs `claude-account-rotator` (urllib's default → Cloudflare 1010); pinned by `tests/test_oauth_token_useragent.py`. Per-account cache keyed by a salted token digest (mtime IS the TTL clock, 600 s), `Retry-After`/`anthropic-ratelimit-*-reset` honoured else exponential 600→7200 s, non-blocking flock with a post-acquire re-check (TOCTOU) and a `_NO_LOCK` sentinel for lock-less homes, `outcome["reason"]` so staleness names its true cause. **Resolves NO credential** — it is handed a token; `rotator._read_live_primary()` keeps the cross-platform ladder (macOS Keychain → `.credentials.json` → `secret-tool`), so a telemetry probe can never raise a keychain dialog. Throttling design adapted from ccgauge (MIT).
 - others: `branch_protection_lib`, `git_utils`, `git_ops_patterns`, `posture`/`posture_modes`, `suppression`, `output_formats`, `security_helpers`, `ioc_taxonomy`, `janitor_self_integrity`, `zizmor_classifier`/`zizmor_patterns*`, `sentinel/` (workflow-doctor rule engine: `model`, `rules_absence/context/injection/extra/repo`).
 
 ## Conventions (breadth — list, don't per-symbol-dump)
@@ -426,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=6ff77c130e38 digest=235d978f94e3 generated=2026-07-22T01:28:05+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=159571e2a83f digest=d9d6f0b0fc8e generated=2026-07-26T11:02:03+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -448,6 +449,12 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/compact_trigger.py` — Backing script for /janitor-compact-context (TRDD-31095269).
   · plan_compact(*, soft, handoff) -> tuple[list[str], bool] — Map the resolved (soft, handoff) mode to the (commands, esc_first) send plan.
   · main() -> int
+`scripts/cpv_network_resilience.py` — Network-resilience helpers for CPV.
+  · is_transient_subprocess_error(stderr, returncode) -> bool — True iff the subprocess failure looks like a transient network glitch.
+  · is_transient_http_error(exc) -> bool — True iff `exc` is a network error that may clear up on retry.
+  · run_with_retry(cmd, *, cwd, env, check, capture_output, text, timeout, max_attempts, backoff, transient_check, on_retry, print_cmd) -> subprocess.CompletedProcess[str] — Run a subprocess command with bounded retries on transient failures.
+  · gh_with_retry(cmd, *, cwd, env, check, capture_output, timeout, max_attempts, backoff, print_cmd) -> subprocess.CompletedProcess[str] — gh CLI invocation with retry. Auto-sets GH_HTTP_TIMEOUT for slow-link
+  · git_with_retry(cmd, *, cwd, env, check, capture_output, timeout, max_attempts, backoff, print_cmd) -> subprocess.CompletedProcess[str] — git invocation with retry + slow-transfer config injected.
 `scripts/daemon.py` — Global janitor daemon — single-instance owner of machine-global auto-update tasks.
   · task_marketplace_refresh() -> None — Run `claude plugin marketplace update` (bulk → all marketplaces).
   · task_user_plugins_update() -> None — Enumerate user-scope plugins and update each sequentially.
@@ -662,6 +669,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · main() -> int
 `scripts/hooks/pre-compact-handoff.py` — PreCompact hook — write a FILESYSTEM-GROUNDED handoff before each compaction.
   · main() -> int
+`scripts/hooks/pre-tool-agent-generator-guard.py` — PreToolUse hook — deny a dependency CLI that writes agent-context files without consent.
+  · main() -> int
 `scripts/hooks/pre-tool-context-usage.py` — PreToolUse hook — context-size runaway guard (TRDD-31095269, TRDD-SMZFJVZ3).
   · main() -> int
 `scripts/hooks/pre-tool-pkg-guard.py` — PreToolUse guard against package-manager safety-knob bypasses.
@@ -683,6 +692,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · render() -> str
   · main() -> int
 `scripts/lib/__init__.py` — Marker file. Makes scripts/lib/ an importable Python package so hooks
+`scripts/lib/agent_context_writers.py` — Table-driven detector: a dependency CLI that writes agent-context files without consent.
+  · AgentContextWriter — One known offender: the binary + the subcommand that triggers the write, plus the
+  · command_invokes_agent_writer(command) -> Optional[AgentContextWriter] — The ``AgentContextWriter`` a shell COMMAND invokes, or ``None``.
 `scripts/lib/agentlens_probe.py` — Shared agentlensPro probe — config-gated, bounded, fail-open (TRDD-WUUR2DFX).
   · probe_json(command, *, timeout) -> dict | None — Run ``command`` and return its parsed-JSON stdout as a dict, else None.
   · BurnStatus — The slice of ``get_burn_status`` the janitor trusts (verified authoritative).
@@ -918,6 +930,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · acquire_settings_ensurer_lock() -> Optional[LockHandle] — Non-blocking exclusive flock on settings-ensurer.lock.
   · release_settings_ensurer_lock(handle) -> None — Release the settings-ensurer flock and close its fds. Best-effort.
   · settings_ensurer_lock() -> Iterator[bool] — Serialise a settings-ensurer write against every other session's ensurer.
+  · detector_lock(state_dir) -> Iterator[bool] — Serialise a per-PROJECT `.janitor/state` mutation against the other writer (MF3).
   · daemon_script_path() -> Path — Resolve scripts/daemon.py absolute path.
   · spawn_daemon_detached() -> Optional[int] — Spawn the daemon as a fully-detached child. Return child PID or None.
   · reload_generation() -> int — Return the reload generation (epoch the daemon last stamped after a
@@ -949,11 +962,21 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · instance_is_server_owned(*, tagged, root, cli_present, list_ok, cached_roots, override, under_agents_home) -> bool — PURE: is THIS scanned instance a harness agent a live server owns (⇒ the daemon
   · self_agent_ref(env) -> str | None — THIS harness agent's own id for `<self>` CLI arguments (
   · continuity_cli() -> str | None — Path of `aimaestro-continuity.sh` (the Family-A delegation surface: `status <self>`,
+`scripts/lib/harness_selftest.py` — SessionStart harness self-test (TRDD-B0SABNP8) — fail LOUD when Claude Code changed under us.
+  · selftest_enabled() -> bool — Master opt-out (NEW knob, default true).
+  · probe_option_delivery(settings_paths, env, *, known_keys) -> ProbeResult — REAL-ARTIFACT probe (ATOM-B0SA-2207) — did CC still DELIVER the janitor's options?
+  · probe_context_snapshot_schema(snapshot_path) -> ProbeResult — REAL-ARTIFACT probe (the CC 2.1.208-class breakage) — is the on-disk context
+  · probe_int_spellings() -> ProbeResult — SELF-CONSISTENCY guard — honest per ATOM-B0SA-EFCY: this catches a JANITOR
+  · probe_marker_path(*, memory_maintenance_path, ticket_dispatch_path, env) -> ProbeResult — CONTRACT-SHAPE guard (ATOM-B0SA-MRKR) — honest per ATOM-B0SA-EFCY: it asserts the
+  · run_selftest(*, snapshot_path, settings_paths, env, now) -> list[tuple[str, str, str]] — Run every probe (resolving the default paths when not injected) and return the list
+  · format_drift_line(failures) -> str — The one-line stdout drift string for a non-empty failure set. Empty on all-green.
+  · failure_digest(failures) -> str — A stable content-hash of the failure SET (ATOM-B0SA-DDUP): sha256 over the sorted
 `scripts/lib/heartbeat_cadence.py` — TTL-aware heartbeat cadence tiers (TRDD-0QQX9H0G, issue #83).
   · Signals — The two booleans the dispatcher resolves from state files each fire.
   · CadenceState — Persisted (``.janitor/state/cadence-state.json``) hysteresis state.
   · raw_tier(signals) -> str — The un-smoothed tier this fire's signals ask for. Pure.
   · commit_tier(raw, prev, demote_fires) -> CadenceState — Apply hysteresis: promote to a faster tier IMMEDIATELY, demote to a slower
+  · cap_tier(state, ceiling) -> CadenceState — Return `state` with `committed_tier` clamped to AT MOST `ceiling` (by `_TIER_RANK`).
   · should_emit_renew(*, desired_differs, committed, prev, now, dwell_s) -> bool — Decide whether THIS fire may emit ``[janitor-renew]`` (issue #89 half 2).
   · stamp_rearm(state, now) -> CadenceState — Return `state` with `last_rearm_ts` set to `now`.
   · tier_to_cron(tier, ttl_minutes, overrides) -> str — Map (tier, real cache-TTL) -> a 5-field cron. Pure.
@@ -1036,6 +1059,11 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · count_notes(root) -> int — How many real memory NOTES live under ``root``.
   · format_breadcrumb(counts, overview_dir) -> str | None — The one-line breadcrumb, or None when there is nothing to say. PURE.
   · breadcrumb() -> str | None — Resolve every existing memory scope, count its notes, and render the line.
+`scripts/lib/memory_bridge.py` — MEMORY.md ↔ wikimem bridge line (owner directive 2026-07-25).
+  · find_overview_page(scope_root) -> Path | None — The scope's single `*-overview.md` wiki entry page, or None.
+  · bridge_line(scope_root, overview) -> str — The canonical one-line bridge, as it is written into MEMORY.md.
+  · has_bridge(text, overview) -> bool — True iff `text` already links to the overview page. PURE.
+  · ensure_bridge_line(scope_root) -> str — VERIFY the bridge line is present in this scope's MEMORY.md; RE-ADD if absent.
 `scripts/lib/memory_content_precheck.py` — Cheap, zero-LLM filesystem prechecks for the memory-maintenance SCHEDULER
   · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
   · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
@@ -1468,6 +1496,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · load_log(log_path) -> list[dict]
   · BudgetVerdict — The budget-tier decision for the IN-PROGRESS turn (TRDD-KI24GR5Z).
   · evaluate_turn_budget(usage, *, output_advisory, output_hard, cache_creation_advisory, cache_creation_hard, ignore_cache_creation) -> BudgetVerdict — Classify the in-progress turn's cost into ok / advisory / hard from TWO signals:
+  · SelfBudgetVerdict — The self-budget escalation verdict for THIS project's heartbeat cost (TRDD-ZCODD6YS).
+  · evaluate_self_budget(records, *, budget, now, cap_frac, maintenance_frac, release_frac, in_maintenance) -> SelfBudgetVerdict — Decide how hard to throttle the janitor's OWN heartbeat against a weekly cost budget.
   · summarize(records, *, field) -> Optional[dict] — Distribution stats for `field` over the per-heartbeat records.
 `scripts/lib/trdd_common.py` — Shared TRDD-parsing helpers + the state-reconciliation checks (stdlib-only).
   · project_tasks_dir(project_dir) -> Path | None — The PROJECT tasks dir, honoring `CLAUDE_PLUGIN_OPTION_TRDD_PATH`.
@@ -1496,6 +1526,27 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · ReconcileVerdict — The reconciliation outcome for ONE TRDD — which checks fired + the label.
   · ReconcileVerdict.fires(self) -> bool
   · reconcile(record, commit_in_released_tag, column_of) -> ReconcileVerdict — Run all four checks on one record; return the consolidated verdict.
+`scripts/lib/usage_probe.py` — Throttled single-writer probe for Anthropic's `/api/oauth/usage` (TRDD-WEBA1RMF).
+  · ttl_seconds() -> int
+  · stale_seconds() -> int
+  · probe_dir() -> Path — Where this module's per-account cache/cooldown/lock files live.
+  · account_key(token) -> str — A stable, non-secret per-account filename key.
+  · user_agent() -> str — `claude-code/<installed version>`, or the pinned fallback. Cached per process.
+  · reset_ua_cache() -> None — Test seam: forget the per-process UA so a fresh derivation can be observed.
+  · read_cache(key) -> dict | None — The last payload cached for this account, or None. Never raises.
+  · cache_age(key, *, now) -> float | None — Seconds since this account's cache was written, or None when there is none.
+  · write_cache(key, payload) -> bool — Persist a fetched payload atomically. Returns True iff the write landed.
+  · read_cooldown(key) -> tuple[float, int] — `(until_epoch, consecutive_429_count)`; `(0.0, 0)` when absent or unreadable.
+  · in_cooldown(key, *, now) -> bool
+  · backoff_delay(consecutive, retry_after) -> int — PURE: how long to wait after a 429.
+  · set_cooldown(key, retry_after, *, now) -> int — Arm this account's 429 back-off; return the chosen delay in seconds.
+  · clear_cooldown(key) -> None
+  · retry_after_seconds(headers, *, now) -> int | None — PURE: back-off seconds parsed from a 429's headers, or None.
+  · http_get(token) -> tuple[int, dict | None, int | None] — `(status, payload, retry_after)`. status 0 == no HTTP response at all.
+  · token_from_blob(blob) -> tuple[str | None, float | None] — `(access_token, expires_at_epoch_seconds)` from a credential blob.
+  · probe(token, expires_at, *, force, outcome, getter, now) -> tuple[int, dict | None] — Return `(status, payload)` for ONE account, fetching only when allowed.
+  · is_stale(key, *, now) -> bool — True when this account's cached readout must NOT be presented as live.
+  · stale_cause(reason, key, *, now) -> str — A human cause for a stale readout, named from `probe`'s own outcome.
 `scripts/lib/user_intent.py` — User-intent provenance — the one place that can tell "the USER asked" from "an agent decided".
   · intent_path(verb, state_dir) -> Path — Where a recorded intent for `verb` lives (per project, alongside the other janitor state).
   · verbs_for_commands(commands) -> set[str] — Which verbs the given slash-commands correspond to. Unknown commands map to nothing.
@@ -1656,34 +1707,36 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · gather_facts(root, *, now) -> Facts — Collect every observable fact `diagnose` needs. The ONLY I/O entry point.
   · SupervisorResult — What `apply` did — alert codes recorded + logged (no heals: the daemon
   · apply(findings, *, log) -> SupervisorResult — Record + log every alert finding. The supervisor heals nothing now that
-`scripts/publish.py` — Strict publish pipeline: auto-detect → test → lint → validate → consistency → bump → commit → push.
-  · ensure_pre_push_hook(git_root) -> None — Install / refresh the pre-push hook and activate core.hooksPath.
-  · detect_git_root() -> Path — Find the git repository root (handles subfolder plugins).
-  · detect_plugin_root() -> Path — Find the plugin root by walking up from this script to find .claude-plugin/plugin.json.
-  · detect_plugin_info(plugin_root) -> dict — Read plugin metadata from .claude-plugin/plugin.json.
-  · detect_marketplace(git_root) -> dict — Auto-detect marketplace info from git remote and plugin structure.
-  · detect_default_branch(git_root) -> str — Detect the default branch (main or master).
-  · ProjectKind
-  · ProjectInfo — Auto-detected project metadata. `kind` is the primary language/ecosystem;
-  · ProjectInfo.all_kinds(self) -> list[ProjectKind] — Primary + secondary kinds, deduplicated.
-  · ProjectInfo.has_kind(self, kind) -> bool
-  · detect_project(root) -> ProjectInfo — Auto-detect project type and metadata from root config files.
-  · language_test_step(info) -> None — Run every applicable language's test suite. Mandatory — any failure
-  · language_lint_step(info) -> None — Run every linter that has matching files in the tree.
-  · language_bump_version(info, new_version) -> list[tuple[bool, str]] — Bump version in every applicable config file for the detected kinds.
-  · ensure_git_cliff_available() -> None — Fail fast if git-cliff is not on PATH.
-  · ensure_cliff_config(root) -> None — Create a default cliff.toml if the repo doesn't have one.
-  · run_git_cliff(root, new_version) -> str — Run git-cliff to (re)generate CHANGELOG.md and extract release notes.
-  · ensure_cliff_gitignore(root) -> None — Add the release-notes scratch file to .gitignore if not already there.
-  · run(cmd, cwd, *, check) -> subprocess.CompletedProcess[str] — Run a command, print it, stream output, and fail fast on error.
-  · parse_semver(version) -> tuple[int, int, int] | None — Parse 'X.Y.Z' into (major, minor, patch), or None if invalid.
-  · bump_semver(current, bump_type) -> str | None — Bump version by type ('major', 'minor', 'patch'). Returns new version or None.
-  · get_current_version(plugin_root) -> str | None — Read current version from .claude-plugin/plugin.json.
-  · update_plugin_json(plugin_root, new_version) -> tuple[bool, str] — Update version field in plugin.json.
-  · update_pyproject_toml(plugin_root, new_version) -> tuple[bool, str] — Update version field in pyproject.toml.
-  · update_python_versions(plugin_root, new_version) -> list[tuple[bool, str]] — Update __version__ = 'X.Y.Z' in all Python files.
-  · check_version_consistency(plugin_root) -> tuple[bool, str] — Check all version sources match. Returns (ok, message).
-  · do_bump(plugin_root, new_version, dry_run) -> bool — Bump version across all files. Returns True on success.
+`scripts/publish.py` — Unified publish pipeline: bypass-guard -> lint -> validate (remote CPV) -> test -> bump -> badge -> changelog -> commit -> push -> release.
+  · cprint(msg) -> None
+  · run(cmd, cwd, *, check, capture, timeout) -> subprocess.CompletedProcess[str] — Run a command, stream output, fail-fast on error.
+  · get_repo_root() -> Path
+  · parse_semver(version) -> tuple[int, int, int] | None — Parse 'X.Y.Z' into (major, minor, patch).
+  · bump_semver(current, bump_type) -> str | None — Bump version by major/minor/patch. Returns new version string or None.
+  · get_current_version(plugin_root) -> str | None — Read version from .claude-plugin/plugin.json.
+  · update_plugin_json(root, new_ver) -> tuple[bool, str] — Write version to .claude-plugin/plugin.json.
+  · update_self_marketplace_json(root, new_ver) -> tuple[bool, str] — Write version to .claude-plugin/marketplace.json (Layout C — both metadata and self-entry).
+  · update_pyproject_toml(root, new_ver) -> tuple[bool, str] — Write version to pyproject.toml.
+  · update_python_versions(root, new_ver) -> list[tuple[bool, str]] — Update __version__ = '...' in all .py files under scripts/.
+  · check_version_consistency(root) -> tuple[bool, str] — Verify all version sources match. Includes marketplace.json metadata
+  · do_bump(root, new_ver, dry_run) -> bool — Orchestrate all version updates. Detects Layout C (marketplace.json at repo root)
+  · install_hook(root) -> int — Copy git-hooks/pre-push to .git/hooks/pre-push and set core.hooksPath.
+  · install_branch_rules(root) -> int — Apply the cpv-branch-rules ruleset to the repo's GitHub origin.
+  · run_gate(root) -> int — Pre-push gate: blocks on any quality issue. Returns 0 if clean.
+  · stage_bypass_guard() -> None — Step 0: Reject any env var that could bypass a check. No exceptions.
+  · stage_check_clean(root) -> None — Step 1: Working tree must be clean.
+  · stage_lint(root) -> None — Step 2: Lint + typecheck (ruff + mypy). MANDATORY — no skip.
+  · stage_tests(root) -> None — Step 3: Run pytest. MANDATORY — no skip, no exceptions.
+  · stage_validate(root) -> None — Step 4: Validate plugin via REMOTE CPV validator. MANDATORY — no skip.
+  · stage_ci_preflight(root) -> None — Step 4b: CI-parity preflight via REMOTE CPV. MANDATORY — no skip.
+  · stage_marketplace_registration(root) -> None — Step 5: Verify the plugin is wired to its marketplace for auto-updates.
+  · stage_consistency(root) -> None — Step 6: Check version consistency.
+  · stage_bump(root, new_ver, dry_run) -> None — Step 7: Bump version. Idempotent — skips when local already matches target.
+  · stage_update_badges(root, old_ver, new_ver, dry_run) -> None — Step 8: Replace version badge in README.md.
+  · detect_bump_type(root) -> str — Auto-detect the next bump type from conventional commits via git-cliff.
+  · stage_changelog(root, new_ver, dry_run) -> None — Step 9: Generate CHANGELOG.md with git-cliff using the bumped tag.
+  · stage_commit_and_push(root, new_ver, dry_run) -> None — Step 10: Commit, tag, push. Idempotent on commit + tag.
+  · stage_gh_release(root, new_ver, dry_run) -> None — Step 11: Create GitHub release via gh CLI.
   · main() -> int
 `scripts/reload_skills_trigger.py` — Backing script for /janitor-reload-skills (analogue of reload_trigger.py).
   · main() -> int
