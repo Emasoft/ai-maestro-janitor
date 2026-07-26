@@ -45,8 +45,8 @@ if [ -n "$ROTATOR_PY" ]; then
   case "$_oh" in "{"*) OAUTH_HEALTH_JSON="$_oh" ;; esac
 fi
 
-REMIND_DAYS="${CLAUDE_ROTATOR_COOKIE_REMIND_DAYS:-7}"        # remind this long before cookie expiry
-SETUP_REMIND_DAYS="${CLAUDE_ROTATOR_SETUP_REMIND_DAYS:-30}"  # re-capture setup-tokens this long before their ~1y expiry
+REMIND_DAYS="${CLAUDE_ROTATOR_COOKIE_REMIND_DAYS:-7}"       # remind this long before cookie expiry
+SETUP_REMIND_DAYS="${CLAUDE_ROTATOR_SETUP_REMIND_DAYS:-30}" # re-capture setup-tokens this long before their ~1y expiry
 
 python3 - "$ROT" "$PROFILE_ROOT" "$REMIND_DAYS" "$SETUP_REMIND_DAYS" "$OAUTH_HEALTH_JSON" <<'PY'
 import json, os, sqlite3, sys, time

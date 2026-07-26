@@ -30,7 +30,10 @@ mkdir -p "$PROFILE"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CANARY="/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"
 [ -x "$CANARY" ] && CHROME="$CANARY"
-[ -x "$CHROME" ] || { echo "Chrome not found at: $CHROME" >&2; exit 1; }
+[ -x "$CHROME" ] || {
+  echo "Chrome not found at: $CHROME" >&2
+  exit 1
+}
 
 echo "Opening Chrome for: $EMAIL"
 echo "Profile: $PROFILE"
