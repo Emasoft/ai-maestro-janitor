@@ -22,6 +22,11 @@ import pytest
 _REPO = Path(__file__).resolve().parent.parent
 _BENCH = _REPO / "scripts" / "wikimem_bench.py"
 _BASELINE = _REPO / "tests" / "wikimem_bench" / "baseline.json"
+# The PRIMARY corpus: the same pages in the `underscore_joined` form the spec MANDATES. The legacy
+# corpus above encodes a keyword form `atom-dropped-props` now rates CRITICAL, so gating only on it
+# would mean tuning retrieval for input the system no longer accepts.
+_CONFORMANT_CORPUS = _REPO / "tests" / "fixtures" / "wikimem-bench-conformant"
+_CONFORMANT_BASELINE = _REPO / "tests" / "wikimem_bench" / "baseline-conformant.json"
 
 # The benchmark drives the real Rust binary. When it is not installed the honest outcome is SKIP
 # with a reason a human can act on — not a pass (which would hide a real regression behind a
@@ -44,6 +49,53 @@ def test_retrieval_has_not_regressed():
         "wikimem retrieval regressed against tests/wikimem_bench/baseline.json:\n"
         f"{proc.stdout}\n{proc.stderr}"
     )
+
+
+@requires_memgrep
+def test_conformant_retrieval_has_not_regressed():
+    """🐌 The PRIMARY (spec-conformant) corpus still meets its committed baseline."""
+    proc = subprocess.run(
+        [
+            sys.executable, str(_BENCH), "--check",
+            "--corpus", str(_CONFORMANT_CORPUS),
+            "--baseline", str(_CONFORMANT_BASELINE),
+        ],
+        capture_output=True, text=True, timeout=600, cwd=str(_REPO),
+    )
+    assert proc.returncode == 0, (
+        "wikimem retrieval regressed against the CONFORMANT baseline "
+        f"{_CONFORMANT_BASELINE.name}:\n{proc.stdout}\n{proc.stderr}"
+    )
+
+
+@requires_memgrep
+def test_conformant_corpus_retrieves_every_query_at_rank_one():
+    """On a spec-conformant corpus retrieval is PERFECT — and this pins it there.
+
+    A plain baseline comparison would happily accept 0.99 as "no regression beyond tolerance". The
+    conformant corpus is the shape the spec mandates and the tiered scorer resolves every symptom
+    query to rank 1 on it, so anything less is a real defect rather than a rounding difference.
+    """
+    baseline = json.loads(_CONFORMANT_BASELINE.read_text(encoding="utf-8"))["summary"]
+    assert baseline["hit_at_1"] == 1.0, "conformant hit@1 must be perfect"
+    assert baseline["mrr"] == 1.0, "conformant MRR must be perfect"
+
+
+def test_the_two_corpora_differ_only_in_keyword_FORM():
+    """The conformant corpus is the legacy one REPAIRED — same pages, same facts, same atom ids.
+
+    If they drifted into two different corpora the 2×2 comparison in the README would be measuring
+    two unrelated things while looking like a controlled experiment. Pure filesystem check.
+    """
+    legacy = sorted(p.name for p in (_REPO / "tests" / "fixtures" / "wikimem-bench").glob("*.md"))
+    conformant = sorted(p.name for p in _CONFORMANT_CORPUS.glob("*.md"))
+    assert legacy == conformant, "the two benchmark corpora must hold the same pages"
+    for name in legacy:
+        a = (_REPO / "tests" / "fixtures" / "wikimem-bench" / name).read_text(encoding="utf-8")
+        b = (_CONFORMANT_CORPUS / name).read_text(encoding="utf-8")
+        ids_a = [ln.split()[0] for ln in a.splitlines() if ln.startswith("^")]
+        ids_b = [ln.split()[0] for ln in b.splitlines() if ln.startswith("^")]
+        assert ids_a == ids_b, f"{name}: atom ids diverged between the corpora"
 
 
 @requires_memgrep

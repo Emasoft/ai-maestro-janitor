@@ -14,7 +14,7 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use ignore::WalkBuilder;
 use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 const MD_EXTS: &[&str] = &[
@@ -3475,21 +3475,14 @@ struct CandidateMeta {
 /// None when neither the surface nor the body matched (the note doesn't rank). Shared by the walk
 /// (body read lazily) and the index (body already loaded) so both rank identically.
 fn score_candidate(
-    terms: &[String],
+    q: &RecallQuery,
     m: CandidateMeta,
     body_text: impl FnOnce() -> Option<String>,
 ) -> Option<RecallScored> {
-    let surface = format!("{} {} {}", m.title, m.summary, m.tags_joined).to_lowercase();
-    let surface_hits = terms
-        .iter()
-        .filter(|t| surface.contains(t.as_str()))
-        .count() as i64;
+    let surface_hits = q.score_surface(&m.title, &m.summary, &m.tags_joined);
     // Body match: only consulted when the symptom SURFACE missed for this note.
-    let body_only = surface_hits == 0
-        && body_text().is_some_and(|t| {
-            let lo = t.to_lowercase();
-            terms.iter().any(|x| lo.contains(x.as_str()))
-        });
+    let body_only =
+        surface_hits == 0 && body_text().is_some_and(|t| q.matches_body(&t));
     if surface_hits > 0 || body_only {
         Some((
             surface_hits,
@@ -3541,7 +3534,7 @@ fn atom_meta(
 /// `resolve_atoms` for its body ATOMS). The page body is read lazily (only on a surface miss),
 /// preserving the walk's I/O profile; atoms add one `resolve_atoms` parse per page. Pages and atoms
 /// land in ONE list so `finalize_recall` interleaves them by score.
-fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<RecallScored> {
+fn gather_from_walk(paths: &[PathBuf], hidden: bool, q: &RecallQuery) -> Vec<RecallScored> {
     let mut all = Vec::new();
     for path in collect_md(paths, hidden) {
         if is_index_file(&path) {
@@ -3564,7 +3557,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
             atom_id: None,
             atom_desc: None,
         };
-        if let Some(row) = score_candidate(terms, meta, || md::read_text(&p)) {
+        if let Some(row) = score_candidate(q, meta, || md::read_text(&p)) {
             all.push(row);
         }
         // Body ATOMS: each ranks by its own keyword surface; the page's date is the fallback. A page
@@ -3582,7 +3575,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
                 atom.desc,
                 &atom.body,
             );
-            if let Some(row) = score_candidate(terms, meta, || Some(body)) {
+            if let Some(row) = score_candidate(q, meta, || Some(body)) {
                 all.push(row);
             }
         }
@@ -3593,7 +3586,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, terms: &[String]) -> Vec<Re
 /// Gather scored candidates from the SQLite index (`memories` rows). The body is the stored text, so
 /// the surface/body matching is byte-identical to `gather_from_walk` — guaranteeing an index-backed
 /// recall returns the SAME results as the walk.
-fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Vec<RecallScored>> {
+fn gather_from_index(conn: &rusqlite::Connection, q: &RecallQuery) -> Result<Vec<RecallScored>> {
     let mut all = Vec::new();
     for c in crate::index::recall_candidates(conn)? {
         let body = c.body;
@@ -3608,7 +3601,7 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
             atom_id: None,
             atom_desc: None,
         };
-        if let Some(row) = score_candidate(terms, meta, || Some(body)) {
+        if let Some(row) = score_candidate(q, meta, || Some(body)) {
             all.push(row);
         }
     }
@@ -3628,7 +3621,7 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
             &c.body,
         );
         let body = c.body;
-        if let Some(row) = score_candidate(terms, meta, || Some(body)) {
+        if let Some(row) = score_candidate(q, meta, || Some(body)) {
             all.push(row);
         }
     }
@@ -3637,19 +3630,109 @@ fn gather_from_index(conn: &rusqlite::Connection, terms: &[String]) -> Result<Ve
 
 /// Tokenize the recall phrase: lowercase, split on non-alphanumerics, drop sub-2-char tokens and
 /// stopwords. Errors when nothing discriminating remains (a query of only stopwords).
-fn recall_terms(query: &str) -> Result<Vec<String>> {
-    let terms: Vec<String> = query
-        .to_lowercase()
+/// Lowercase CONTENT WORDS of `text`, IN ORDER, with sub-2-char tokens and stopwords dropped.
+///
+/// `_` is a separator here exactly as it is in a query, so a stored `lossless_migration` key-phrase
+/// and a typed `"lossless migration"` normalise to the SAME word sequence — which is the only reason
+/// the phrase tiers can compare them at all. Both sides are stopword-filtered so a filler word
+/// present in one and absent from the other cannot break contiguity.
+fn content_words(text: &str) -> Vec<String> {
+    text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.len() >= 2 && !STOPWORDS.contains(t))
         .map(|t| t.to_string())
-        .collect();
-    if terms.is_empty() {
-        anyhow::bail!(
-            "recall needs at least one content term (stopwords like 'to'/'how' don't count)"
-        );
+        .collect()
+}
+
+/// A parsed recall query — the content words AND the order they were typed in.
+///
+/// Keeping the ORDER is the whole of WM-SCORE-04. Scoring on an unordered bag of words makes
+/// `"lossless migration"` and `lossless` + `migration` indistinguishable, so an atom that declares
+/// the phrase and one that declares the loose words score identically and the winner falls through
+/// to whatever the stable sort's input order happens to be (path order). Measured: that is what made
+/// a corpus-wide phrase migration INERT — storing phrases atomically buys nothing until the scorer
+/// stops throwing the query's phrase structure away.
+struct RecallQuery {
+    /// The content words — the flat tiers rank on these.
+    words: Vec<String>,
+    /// The same words in typed order — the exact / contiguous-phrase tiers rank on this. A one-word
+    /// query has a 1-element phrase, which correctly makes tier 1 an exact keyword-token match.
+    phrase: Vec<String>,
+}
+
+// Tier weights (WM-SCORE-05). The gaps are wide enough that a single higher-tier hit always
+// dominates any number of lower-tier ones — that dominance IS the tiering. A flat hit count gives a
+// phrase and its shredded words the same score, which is WM-SCORE-04's failure written as arithmetic.
+const W_EXACT_KEYWORD: i64 = 1000; // the query IS this key-phrase
+const W_PHRASE_IN_KEYWORD: i64 = 100; // the query appears contiguously inside a key-phrase
+const W_ALL_WORDS: i64 = 10; // every query word is present somewhere on the surface
+const W_WORD: i64 = 1; // per individual word present
+
+impl RecallQuery {
+    fn parse(query: &str) -> Result<Self> {
+        let phrase = content_words(query);
+        if phrase.is_empty() {
+            anyhow::bail!(
+                "recall needs at least one content term (stopwords like 'to'/'how' don't count)"
+            );
+        }
+        let mut words = phrase.clone();
+        words.sort();
+        words.dedup();
+        Ok(Self { words, phrase })
     }
-    Ok(terms)
+
+    /// The TIERED score of one candidate's symptom surface. 0 ⇒ no surface match at all, which is
+    /// what the precision-first gate and the body-only fallback both test.
+    fn score_surface(&self, title: &str, summary: &str, keywords: &str) -> i64 {
+        let mut score = 0;
+
+        // Tiers 1+2 — per KEY-PHRASE. `keywords` is whitespace-separated key-phrases, each
+        // internally `underscore_joined`, so the token split must be on WHITESPACE: splitting it
+        // into loose words here would destroy exactly the structure these tiers exist to read.
+        for kw in keywords.split_whitespace() {
+            let kw_words = content_words(kw);
+            if kw_words.is_empty() {
+                continue;
+            }
+            if kw_words == self.phrase {
+                score += W_EXACT_KEYWORD;
+            } else if contains_contiguous(&kw_words, &self.phrase) {
+                score += W_PHRASE_IN_KEYWORD;
+            }
+        }
+
+        // Tiers 3+4 — the flat word tier over the whole surface. TOKEN-aware (WM-SCORE-06): a raw
+        // substring test makes `cat` match `concatenate`, and a scorer cannot tell that false hit
+        // from a real one.
+        let surface: HashSet<String> = content_words(title)
+            .into_iter()
+            .chain(content_words(summary))
+            .chain(content_words(keywords))
+            .collect();
+        let hits = self.words.iter().filter(|w| surface.contains(*w)).count();
+        score += hits as i64 * W_WORD;
+        if hits == self.words.len() {
+            score += W_ALL_WORDS;
+        }
+        score
+    }
+
+    /// Does the BODY carry any query word? The last-resort fallback surface — token-aware for the
+    /// same reason the surface tiers are.
+    fn matches_body(&self, body: &str) -> bool {
+        let words: HashSet<String> = content_words(body).into_iter().collect();
+        self.words.iter().any(|w| words.contains(w))
+    }
+}
+
+/// Does `hay` contain `needle` as a CONTIGUOUS run? An empty needle never matches (a query with no
+/// content words is rejected upstream, so this is a guard, not a case).
+fn contains_contiguous(hay: &[String], needle: &[String]) -> bool {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return false;
+    }
+    hay.windows(needle.len()).any(|w| w == needle)
 }
 
 /// The shared finalize knobs — the subset of `recall`/`find` flags the ranking/printing step reads.
@@ -3925,7 +4008,7 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let terms = recall_terms(&a.query)?;
+    let terms = RecallQuery::parse(&a.query)?;
 
     // SOURCE SELECTION: with `--use-index`, use the persistent index when it EXISTS (else fall back
     // to the walk so a missing index is never wrong). Without the flag, auto-use a FRESH index (one
@@ -4445,6 +4528,107 @@ pub fn cmd_fact_cli(args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── the tiered, keyphrase-aware scorer (WM-SCORE-04/05/06) ──────────────────────────────
+    //
+    // These pin the property that a flat hit count CANNOT express and that made a corpus-wide
+    // phrase migration inert: a key-phrase and its shredded words must NOT score the same.
+
+    fn score(query: &str, keywords: &str) -> i64 {
+        RecallQuery::parse(query)
+            .expect("query has content words")
+            .score_surface("", "", keywords)
+    }
+
+    #[test]
+    fn a_keyphrase_outranks_the_same_words_loose() {
+        // THE regression this whole change exists for. Before tiering, both sides scored 2 and the
+        // winner fell through to alphabetical path order — so storing phrases atomically bought
+        // exactly nothing.
+        let phrase = score("lossless migration", "lossless_migration");
+        let loose = score("lossless migration", "lossless migration");
+        assert!(
+            phrase > loose,
+            "an exact key-phrase must outrank the same words stored loose: {phrase} vs {loose}"
+        );
+    }
+
+    #[test]
+    fn an_exact_keyphrase_outranks_a_phrase_merely_contained_in_one() {
+        let exact = score("cache miss", "cache_miss");
+        let contained = score("cache miss", "a_cache_miss_on_resume");
+        assert!(exact > contained, "{exact} vs {contained}");
+        assert!(contained > 0, "a contained phrase still matches");
+    }
+
+    #[test]
+    fn word_order_is_significant() {
+        // If order did not matter this would be a contiguous hit; the phrase tier must not fire.
+        let forward = score("read after write", "read_after_write_is_strong");
+        let reversed = score("write after read", "read_after_write_is_strong");
+        assert!(
+            forward > reversed,
+            "a contiguous phrase must beat the same words in another order: {forward} vs {reversed}"
+        );
+    }
+
+    #[test]
+    fn matching_is_token_aware_not_substring() {
+        // The false positive that made a BROKEN corpus look better than it was: `list` matched
+        // inside `listing`, scoring a symptom the atom never declared (WM-SCORE-06).
+        assert_eq!(score("list", "listing_does_not_show_the_object"), 0);
+        assert!(score("listing", "listing_does_not_show_the_object") > 0);
+        assert_eq!(score("cat", "concatenate_the_parts"), 0);
+    }
+
+    #[test]
+    fn all_words_present_outranks_only_some() {
+        let all = score("pool exhausted", "pool exhausted retry");
+        let some = score("pool exhausted", "pool retry");
+        assert!(all > some, "{all} vs {some}");
+    }
+
+    #[test]
+    fn a_query_matching_nothing_scores_zero() {
+        // 0 is load-bearing: it is exactly what the precision-first gate and the body-only
+        // fallback both test, so a "harmless" nonzero floor would silently return the whole corpus.
+        assert_eq!(score("zqxnothing", "pool_exhausted retry_cap"), 0);
+    }
+
+    #[test]
+    fn stopwords_are_dropped_from_both_sides_so_the_exact_tier_can_fire() {
+        // A stored key-phrase carries filler words (`..._is_stale`) that the query drops. Filtering
+        // BOTH sides identically is what lets them normalise to the SAME sequence and hit the exact
+        // tier; filtering only the query would demote every phrase containing an article to a
+        // near-miss. This is the real benchmark query for `listing-still-lags`.
+        assert_eq!(
+            content_words("list after put is stale"),
+            content_words("list_after_put_is_stale"),
+            "query and stored phrase must normalise identically"
+        );
+        assert!(
+            score("list after put is stale", "list_after_put_is_stale") >= W_EXACT_KEYWORD,
+            "…and therefore score on the EXACT tier, not merely as contained words"
+        );
+    }
+
+    #[test]
+    fn a_stopword_only_query_is_refused_not_silently_empty() {
+        // An empty term list would match everything; refusing is the honest outcome.
+        assert!(RecallQuery::parse("the a to of").is_err());
+    }
+
+    #[test]
+    fn contains_contiguous_requires_adjacency() {
+        let hay: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        let adjacent: Vec<String> = ["b", "c"].iter().map(|s| s.to_string()).collect();
+        let gapped: Vec<String> = ["b", "d"].iter().map(|s| s.to_string()).collect();
+        let too_long: Vec<String> = ["a", "b", "c", "d", "e"].iter().map(|s| s.to_string()).collect();
+        assert!(contains_contiguous(&hay, &adjacent));
+        assert!(!contains_contiguous(&hay, &gapped));
+        assert!(!contains_contiguous(&hay, &too_long));
+        assert!(!contains_contiguous(&hay, &[]));
+    }
 
     #[test]
     fn meta_dates_parse_ocd_and_lmd_from_prefix() {

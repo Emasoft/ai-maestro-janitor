@@ -101,10 +101,28 @@ def estimate_tokens(text: str) -> int:
     return math.ceil(len(text) / 4)
 
 
+def corpus_arg(corpus: Path) -> str:
+    """The corpus path to hand memgrep — RELATIVE to the repo whenever it lives inside it.
+
+    A PAGE result row prints its path, so the corpus's own path length is billed on every such row:
+    the identical corpus measured at `/Users/<someone>/very/long/checkout/tests/fixtures/x` costs
+    measurably more per query than at `tests/fixtures/x` (observed: 318.1 vs 283.7). Left as-is, a
+    committed baseline would encode the *capturing machine's* home-directory length and fail for
+    everyone else — a benchmark that is not portable is not a regression gate.
+
+    Normalising to a repo-relative path (with cwd pinned to the repo, below) makes the number depend
+    only on the corpus, which is the thing under measurement.
+    """
+    try:
+        return str(corpus.resolve().relative_to(REPO))
+    except ValueError:
+        return str(corpus)  # genuinely outside the repo (a --live spot check): nothing to normalise
+
+
 def run_recall(query: str, corpus: Path, extra: list[str], top: int) -> str:
     """Run `memgrep recall` and return its stdout (stderr folded in, so a failure is visible)."""
-    cmd = [MEMGREP, "recall", query, str(corpus), "--top", str(top), *extra]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    cmd = [MEMGREP, "recall", query, corpus_arg(corpus), "--top", str(top), *extra]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=REPO)
     return proc.stdout + proc.stderr
 
 
@@ -165,8 +183,8 @@ def run_hop(expect: str, corpus: Path) -> str:
     """
     _, _, atom_id = expect.partition("#")
     proc = subprocess.run(
-        [MEMGREP, "recall", atom_id, str(corpus), "--top", "1"],
-        capture_output=True, text=True, timeout=120,
+        [MEMGREP, "recall", atom_id, corpus_arg(corpus), "--top", "1"],
+        capture_output=True, text=True, timeout=120, cwd=REPO,
     )
     return proc.stdout + proc.stderr
 
