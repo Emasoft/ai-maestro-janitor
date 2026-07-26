@@ -427,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e12abb70c76e digest=a21f332cbb02 generated=2026-07-26T11:03:49+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=d37eb3da52b9 digest=eafbceeef7c8 generated=2026-07-26T15:02:59+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1511,6 +1511,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · norm_state(value) -> str — Normalise a status/column token to lowercase kebab-case.
   · parse_trdd_state(path) -> tuple[str, str] — Return (status, column) for a TRDD, both normalised kebab-case or ''.
   · parse_state_text(head) -> tuple[str, str] — Pure variant of parse_trdd_state over already-read text (the file head).
+  · frontmatter_defect(head) -> str | None — Why this TRDD's frontmatter is unreadable, or None when it parses.
+  · frontmatter_defect_for(path) -> str | None — File-reading wrapper around `frontmatter_defect`. None on a read error.
   · extract_trdd_refs(text) -> list[str] — Return every `TRDD-<id8>` id referenced in `text` (order-preserving, deduped).
   · parse_flow_list(raw) -> list[str] — Parse a YAML flow-style list value into its raw element strings.
   · blocked_by_ids(raw) -> list[str] — Extract the blocker TRDD ids from a `blocked-by:` flow-list value.
@@ -1762,6 +1764,22 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/ticket_cli.py` — The janitor support-ticket CLI — the SINGLE mutation surface (TRDD-CGYMUKO6).
   · main() -> int
 `scripts/token_report.py` — Backing script for /janitor-token-report (TRDD-a4e41e89, Phase 1).
+  · main() -> int
+`scripts/wikimem_bench.py` — wikimem retrieval benchmark — accuracy and END-TO-END token cost (TRDD-DO6X4ZF8).
+  · estimate_tokens(text) -> int — A deterministic, offline token estimate.
+  · run_recall(query, corpus, extra, top) -> str — Run `memgrep recall` and return its stdout (stderr folded in, so a failure is visible).
+  · parse_results(out) -> list[str] — Ordered result ids: `page-stem#atom-id` for an atom row, `page-stem` for a page row.
+  · atom_body_present(out, expect, corpus) -> bool — True iff the search output already contains the expected atom's BODY.
+  · run_hop(expect, corpus) -> str — The second hop: obtain the full atom once its id is known.
+  · score(queries, corpus, extra, top) -> dict
+  · render(res) -> str
+  · compare(cur, base, tol_tokens) -> tuple[bool, list[str]] — Regression gate. Accuracy may never drop; tokens may not rise beyond tolerance.
+  · main() -> int
+`scripts/wikimem_migrate_keywords.py` — Recover keyword phrases the atom-props parser silently drops (plan Phase 1.3).
+  · split_top_level_commas(props) -> list[str] — Split on commas that are NOT inside double quotes — mirrors the Rust splitter.
+  · Refused — A props block has orphans under a key with no defined repair. Nothing is rewritten.
+  · repair_props(props) -> tuple[str, int] — Return (repaired props, number of recovered orphan segments).
+  · repair_text(text) -> tuple[str, int, list[str]] — Repair every atom marker in a page. Returns (new text, recovered count, refusals).
   · main() -> int
 `scripts/wikimem_syntax_lint.py` — wikimem_syntax_lint — check that memory pages use the syntax memgrep can PARSE.
   · Finding
