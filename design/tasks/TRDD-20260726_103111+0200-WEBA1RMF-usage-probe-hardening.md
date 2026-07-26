@@ -1,27 +1,35 @@
-# Harden the 5h/7d usage probe — one throttled writer, correct UA, honest staleness
-
 ---
 trdd-id: WEBA1RMF
 title: Harden the 5h 7d usage probe — one throttled writer, correct UA, honest staleness
-column: dev
+column: complete
 created: 2026-07-26T10:31:11+0200
-updated: 2026-07-26T10:31:11+0200
+updated: 2026-07-26T13:58:25+0200
 current-owner: 2f5bc976
 task-type: bugfix
 approval-tier: 0
 scope: project
 release-via: publish
 impacts: [oauth-rotator, window-burn-rate, token-report]
+implementation-commits: [b9d9c75]
 relevant-rules: []
 external-refs: [https://github.com/pizzimenti/ccgauge]
 ---
 
+# Harden the 5h/7d usage probe — one throttled writer, correct UA, honest staleness
+
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-26
 
-- **Component state:** `scripts/lib/usage_probe.py` NOT yet written. Nothing wired.
-  `rotator.usage_request` still sends the wrong UA and still has no throttle.
-- **NEXT ACTION:** write `scripts/lib/usage_probe.py` (contract in §4), then
-  `tests/test_usage_probe.py`, then route `rotator.usage_request` through it.
+- **Component state:** DONE, landed in `b9d9c75`. `scripts/lib/usage_probe.py` is the single
+  throttled writer (TTL cache, exponential backoff honouring `Retry-After` floored at 60 s,
+  salted per-account key, flock); `tests/test_usage_probe.py` covers it with 30 real tests
+  (the only injected seam is the HTTP getter). `rotator.usage_request` is now a 4-line
+  delegation that preserves its `(status, data)` contract exactly.
+- **NEXT ACTION:** none for the code — this TRDD awaits the release only. The publish was
+  blocked by THIS FILE's own frontmatter defect: the `#` title sat ABOVE the frontmatter, so
+  `trdd_common.parse_trdd_state` returned `('', '')` (invisible to `trdd-drift` and
+  `trdd-state-reconciliation`) and markdownlint reported it as an MD003 setext heading.
+  Fixed 2026-07-26; a line-1-must-be-`---` guard is being added to `trdd-drift.py` so a
+  hand-authored TRDD cannot silently fall off the board again.
 - **Load-bearing facts:** the probe endpoint is rate-limited HARD and 429s *worsen*
   under retry; `/api/oauth/usage` is the ONLY source of utilization% + resets_at;
   agentlensPro cannot supply either (§2).

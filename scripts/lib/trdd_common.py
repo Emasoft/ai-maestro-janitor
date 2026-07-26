@@ -312,6 +312,54 @@ def parse_state_text(head: str) -> tuple[str, str]:
     return (status, column)
 
 
+# A UTF-8 BOM, spelled as a code point on purpose. A literal BOM in this source
+# would itself be invisible to anyone reading it — precisely the fault the
+# function below exists to name. Never replace this with the character itself.
+BOM = chr(0xFEFF)
+
+
+def frontmatter_defect(head: str) -> str | None:
+    """Why this TRDD's frontmatter is unreadable, or None when it parses.
+
+    `FRONTMATTER_RE` is `\\A`-anchored, so the YAML block MUST open on byte 0.
+    A single line above it — a stray `# title`, a leading blank, a UTF-8 BOM —
+    makes EVERY machine field invisible at once: `parse_trdd_state` returns
+    ('', ''), so the card silently drops off the board and out of every column
+    filter, while `grep '^column:'` still finds the line and reports the file as
+    healthy. That divergence is why the defect survives: the greppable view and
+    the parsed view disagree, and only the parsed view drives the detectors.
+
+    Learned from TRDD-WEBA1RMF (2026-07-26), authored by hand with its `#` title
+    above the frontmatter. Nothing in the pipeline noticed until markdownlint
+    reported the closing `---` as an MD003 setext heading and blocked a release
+    — an incidental style rule catching a structural fault by luck.
+    """
+    if FRONTMATTER_RE.match(head):
+        return None
+    if not head.strip():
+        return "file is empty"
+    first = head.split("\n", 1)[0].rstrip("\r")
+    if first.startswith(BOM):
+        return "a UTF-8 BOM precedes the frontmatter"
+    if first.strip() == "---":
+        return "frontmatter opens on line 1 but never closes"
+    return f"frontmatter does not open on line 1 (line 1 is {first[:48]!r})"
+
+
+def frontmatter_defect_for(path: Path) -> str | None:
+    """File-reading wrapper around `frontmatter_defect`. None on a read error.
+
+    A file we cannot read is not evidence of a malformed TRDD, so it stays
+    silent here rather than emitting a defect the author cannot act on.
+    """
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            head = f.read(HEAD_BYTES)
+    except (FileNotFoundError, OSError):
+        return None
+    return frontmatter_defect(head)
+
+
 # ── TRDD id references in free text ──────────────────────────────────────────
 #
 # The STATE prose names blocker TRDDs as `TRDD-<id8>` (e.g. "publish BLOCKED on

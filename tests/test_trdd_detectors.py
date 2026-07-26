@@ -156,6 +156,30 @@ class TestTrddDetectors(unittest.TestCase):
             # Title-case body value normalised to kebab-case for display.
             self.assertIn("in-progress", out)
 
+    def test_drift_malformed_frontmatter_is_surfaced(self):
+        """A `# title` ABOVE the frontmatter makes column:/status: unparseable, so
+        the file is invisible to every column query while `grep '^column:'` still
+        shows its line. The detector must NAME that instead of skipping it —
+        TRDD-WEBA1RMF fell off the board and blocked a release this way."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp)
+            _write(root / "design/tasks", "BADFM001", "# Heading first\n\n" + _fm(column="dev"))
+            out = _run(DRIFT, root)
+            self.assertIn("TRDD-BADFM001", out)
+            self.assertIn("unreadable frontmatter", out)
+
+    def test_drift_defect_check_does_not_shadow_legacy_body_form(self):
+        """The defect check must NOT hijack the legacy body-only form, which carries
+        no frontmatter BY DESIGN and still parses via the fallback. Regression:
+        asking the defect question BEFORE parsing suppressed that form's real drift
+        line, turning a working detector into a silent one."""
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp)
+            _write(root / "design/tasks", "12345678", _legacy_body("In progress"))
+            out = _run(DRIFT, root)
+            self.assertNotIn("unreadable frontmatter", out)
+            self.assertIn("in-progress", out)
+
     def test_drift_legacy_uuid_filename_flagged(self):
         """A legacy `TRDD-<full-uuid>-...` filename is matched (not just the
         current `<timestamp>-<uid8>` shape)."""

@@ -80,6 +80,33 @@ def main() -> int:
 
     for scope, f in trdds:
         status, column = _parse_trdd_state(f)
+
+        # A TRDD that parsed to NOTHING is invisible to every column query while
+        # `grep '^column:'` still shows its line — so ask WHY before the filter
+        # below silently drops the file most in need of a nudge (TRDD-WEBA1RMF
+        # fell off the board and blocked a release exactly this way).
+        #
+        # Gated on `not status and not column`, NOT on "has no frontmatter": the
+        # LEGACY body-only `**Status:** In progress` form carries no frontmatter
+        # BY DESIGN and still parses via parse_state_text's fallback. Asking the
+        # defect question first suppressed that form's real drift line — caught
+        # by test_drift_legacy_status_body_flagged. Parse first, diagnose second.
+        if not status and not column:
+            defect = trdd_common.frontmatter_defect_for(f)
+            uid = trdd_common.extract_uid(f.name)
+            if defect is not None and uid is not None:
+                tag = " (local)" if scope == trdd_common.LOCAL else ""
+                # `defect` embeds a slice of line 1 — author-controlled text.
+                line = dedupe.emit_once(
+                    seen,
+                    f"frontmatter@{uid}",
+                    f"[trdd-drift] TRDD-{uid[:8]}{tag} unreadable frontmatter: "
+                    f"{state.sanitize_for_drift_line(defect)} — its column:/status: are "
+                    f"invisible to the board. Move the YAML block to line 1.",
+                )
+                if line is not None:
+                    print(line)
+            continue
         # A TRDD is drift-eligible when its v1 status is not-started/in-progress
         # OR its v2 column is one of the actively-in-flight columns. The column
         # set is broader on purpose — a `backburner`/`todo` TRDD that hasn't

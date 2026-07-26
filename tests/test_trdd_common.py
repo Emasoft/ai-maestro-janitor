@@ -86,6 +86,77 @@ def test_terminal_and_active_column_sets():
         assert not tc.is_terminal_column(c)
 
 
+# ── frontmatter defect detection (the invisible-TRDD guard) ──────────────────
+
+
+def test_frontmatter_defect_none_for_wellformed():
+    """A TRDD whose YAML block opens on byte 0 reports no defect."""
+    head = "---\ntrdd-id: ABCD1234\ncolumn: dev\n---\n\n# Title\n"
+    assert tc.frontmatter_defect(head) is None
+
+
+def test_frontmatter_defect_heading_above_frontmatter():
+    """The TRDD-WEBA1RMF defect: a `# title` ABOVE the frontmatter makes every
+    machine field invisible. Asserts the invisibility first, so the test fails
+    loudly if parse_state_text ever starts tolerating it and the guard silently
+    becomes dead code."""
+    head = "# Some title\n\n---\ntrdd-id: ABCD1234\ncolumn: dev\n---\n"
+    assert tc.parse_state_text(head) == ("", "")
+    defect = tc.frontmatter_defect(head)
+    assert defect is not None
+    assert "line 1" in defect
+    assert "# Some title" in defect
+
+
+def test_frontmatter_defect_blank_first_line():
+    """A single leading blank line is enough to break the \\A anchor."""
+    head = "\n---\ntrdd-id: ABCD1234\ncolumn: dev\n---\n"
+    assert tc.parse_state_text(head) == ("", "")
+    assert tc.frontmatter_defect(head) is not None
+
+
+def test_frontmatter_defect_bom_is_named_specifically():
+    """A UTF-8 BOM is invisible in an editor, so the message must NAME it — a
+    generic 'line 1 is ---' would send the author hunting a fault they cannot
+    see, which is worse than no message."""
+    # chr(0xFEFF), not tc.BOM — an independent oracle. Reusing the module's own
+    # constant would make this test pass even if that constant were wrong.
+    head = chr(0xFEFF) + "---\ntrdd-id: ABCD1234\ncolumn: dev\n---\n"
+    defect = tc.frontmatter_defect(head)
+    assert defect is not None
+    assert "BOM" in defect
+
+
+def test_frontmatter_defect_unclosed_block():
+    """Opens on line 1 but never closes — a distinct message from 'does not
+    open', because the two need opposite fixes."""
+    head = "---\ntrdd-id: ABCD1234\ncolumn: dev\n"
+    defect = tc.frontmatter_defect(head)
+    assert defect is not None
+    assert "never closes" in defect
+
+
+def test_frontmatter_defect_empty_file():
+    """An empty file is reported as empty, not as a missing-frontmatter riddle."""
+    assert tc.frontmatter_defect("   \n") == "file is empty"
+
+
+def test_frontmatter_defect_for_unreadable_file_is_silent(tmp_path):
+    """A file we cannot read is not evidence of a malformed TRDD — staying
+    silent beats emitting a defect the author has no way to act on."""
+    assert tc.frontmatter_defect_for(tmp_path / "nope.md") is None
+
+
+def test_frontmatter_defect_for_reads_real_files(tmp_path):
+    """End-to-end over real files on disk — no mocks."""
+    good = tmp_path / "good.md"
+    good.write_text("---\ncolumn: dev\n---\n", encoding="utf-8")
+    bad = tmp_path / "bad.md"
+    bad.write_text("# T\n\n---\ncolumn: dev\n---\n", encoding="utf-8")
+    assert tc.frontmatter_defect_for(good) is None
+    assert tc.frontmatter_defect_for(bad) is not None
+
+
 # ── flow-list / ref parsing ──────────────────────────────────────────────────
 
 
