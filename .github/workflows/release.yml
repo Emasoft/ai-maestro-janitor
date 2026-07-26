@@ -83,15 +83,32 @@ jobs:
         # Unwrapped, this step simply ran until `timeout-minutes` killed the job —
         # v0.35.3 died at the old 15m bound, v0.35.6 and v0.35.8 at the 30m one.
         # Raising the bound was never a fix; it doubled the stall. Successes take
-        # ~3.5 min, so a 300 s per-attempt cap is generous, and three attempts
+        # ~3.5 min of VALIDATION, so a 420 s per-attempt cap — now covering validation
+        # ONLY, with the uvx build hoisted out below — is generous, and three attempts
         # self-heal the hang (v0.24.4 hit it on the first attempt AND the retry, so
         # retry-once was empirically insufficient).
         #
         # `timeout` exits 124 on a hang — retry that. Any other non-zero is CPV's
         # real 1..4 severity exit: fail fast, no pointless retry.
         run: |
+          # THE 300s WAS NEVER 300s OF VALIDATION (fixed 2026-07-26, v0.61.1 failure).
+          # `timeout` wrapped the WHOLE `uvx` call, which clones + builds CPV from git
+          # first: measured 142s (v0.61.1) and 159s (v0.61.0) on a cold runner. So CPV's
+          # own work only ever got ~150s of the budget, while the note above calibrated
+          # 300s against "successes take ~3.5 min" of VALIDATION — i.e. the cap has been
+          # short by ~60s since it was written. v0.61.0 passed only because REPO LINT beat
+          # its documented ~198s that run; v0.61.1 added ~1800 lines and the luck ran out,
+          # producing three identical 124s and a red release on a plugin that is fine.
+          #
+          # Warm uv's cache in a separate, UNTIMED step so the cap measures validation
+          # alone. `|| true` and a discarded stdout: this step must never be able to fail
+          # the release — even if the probe subcommand errors, uvx has already BUILT and
+          # cached the package, which is the only thing being bought here.
+          uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0 \
+            --with pyyaml cpv-remote-validate --help >/dev/null 2>&1 || true
+
           run_cpv() {
-            timeout 300 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0 \
+            timeout 420 uvx --from git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0 \
               --with pyyaml cpv-remote-validate plugin . --strict
           }
           # `run_cpv && { … }; rc=$?` (NOT `if run_cpv; then …; fi; rc=$?`): the
@@ -104,7 +121,7 @@ jobs:
             run_cpv && { echo "Validation passed (attempt $attempt)"; exit 0; }
             rc=$?
             if [ "$rc" -ne 124 ]; then break; fi   # real validation failure → fail fast, no retry
-            echo "::warning::CPV validation hung (timed out at 300s) — attempt $attempt/3"
+            echo "::warning::CPV validation hung (timed out at 420s) — attempt $attempt/3"
           done
           echo "::error::Validation failed (exit code $rc)"
           exit "$rc"
