@@ -9,7 +9,7 @@ metadata:
   tier: component
 ---
 
-^tool-call-cost-law [desc: every_tool_round_trip_rereads_the_whole_context_and_is_billed_for_it, keywords: how much does one tool call cost in a claude code turn, cost equals tool_calls times context times 0.1, why is a six step skill expensive, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^tool-call-cost-law [desc: every_tool_round_trip_rereads_the_whole_context_and_is_billed_for_it, keywords: how_much_does_one_tool_call_cost_in_a_claude_code_turn cost_equals_tool_calls_times_context_times_0.1 why_is_a_six_step_skill_expensive, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Every tool round-trip re-reads the ENTIRE conversation at the 0.1× cache-read rate.** So the
 cost of a turn is driven by its TOOL-CALL COUNT, not by how much work each call does:
 
@@ -29,7 +29,7 @@ The practical consequence: **a skill's step count is its price tag.** Folding fo
 one script is not cosmetic — it removes three full context re-reads. This is why `/janitor-arm` runs
 `arm_prepare.py` + `arm_record.py` instead of six inline bash blocks (TRDD-DLI76AUC).
 
-^cadence-actuation-is-billed [desc: the_dynamic_cadence_control_loop_runs_through_the_model_so_its_actuation_is_billed, keywords: dynamic cadence re-arms and that costs a full model turn, dispatch cannot call CronCreate only the model can, optimizer whose adjustments cost more than they save, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^cadence-actuation-is-billed [desc: the_dynamic_cadence_control_loop_runs_through_the_model_so_its_actuation_is_billed, keywords: dynamic_cadence_re-arms_and_that_costs_a_full_model_turn dispatch_cannot_call_CronCreate_only_the_model_can optimizer_whose_adjustments_cost_more_than_they_save, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **The dynamic cadence's control loop runs through the MODEL, so its actuation is billed at model
 rates.** `dispatch.py` CANNOT call `CronCreate` — only the model can — so a tier change is not a
 config write, it is a **full Claude turn**: the dispatcher emits `[janitor-renew]`, the session runs
@@ -52,7 +52,7 @@ janitor commits a demotion ~4.5× sooner than it can pay for it, and any activit
 ~620k weighted, saving nothing. There is **no re-arm cooldown** anywhere. Raising the hysteresis to
 match the payback is the open fix (deferred, not yet approved — see TRDD-DLI76AUC §Deferred).
 
-^arming-is-not-the-cost [desc: killing_the_churn_never_means_disarming_the_cron_always_exists, keywords: do not disarm to save tokens the heartbeat is a cache keepalive, a renew is delete plus create the janitor stays armed throughout, always on always armed, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
+^arming-is-not-the-cost [desc: killing_the_churn_never_means_disarming_the_cron_always_exists, keywords: do_not_disarm_to_save_tokens_the_heartbeat_is_a_cache_keepalive a_renew_is_delete_plus_create_the_janitor_stays_armed_throughout always_on_always_armed, type: project, ocd: 2026-07-14, lmd: 2026-07-14]
 **Killing the churn NEVER means disarming.** A renew is a `CronDelete` immediately followed by a
 `CronCreate` — the cron never ceases to exist and the janitor is armed throughout. What churns is
 how often the cron's PERIOD is rewritten, not whether it exists. Disarming to save tokens is the

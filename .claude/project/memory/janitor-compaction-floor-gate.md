@@ -21,7 +21,7 @@ pre-publish batch, so no release ever shipped the size-only gate.
   in three places, measured in none; a gate reused at a new trigger point without re-deriving
   termination).
 
-^compaction-does-not-shrink-the-base [desc: a_compaction_only_removes_the_transcript_never_the_base_that_reloads_after_it, keywords: compacting barely shrank anything, context still huge right after compacting, why is my context 300k on a fresh compact, compaction only freed 10 percent, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
+^compaction-does-not-shrink-the-base [desc: a_compaction_only_removes_the_transcript_never_the_base_that_reloads_after_it, keywords: compacting_barely_shrank_anything context_still_huge_right_after_compacting why_is_my_context_300k_on_a_fresh_compact compaction_only_freed_10_percent, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
 **A compaction cannot shrink the BASE — only the transcript above it.** After every compaction the
 harness reloads CLAUDE.md, every enabled plugin's skills/agents/hooks, `~/.claude/rules/*`, the MCP
 tool schemas, and the freshly-written summary. That floor is a property of the INSTALL, not of the
@@ -35,7 +35,7 @@ The floor is per-machine and GROWS as plugins/MCP servers are added — so any t
 relative to it must be re-measured, never assumed. Read it live with
 `token_meter.latest_context_size` on the first turn after a compaction.
 
-^size-only-gate-cannot-terminate [desc: a_repeating_compact_trigger_gated_on_size_alone_loops_forever_because_the_floor_exceeds_the_threshold, keywords: janitor compacted my context over and over, compacts every 10 minutes forever, infinite compact loop, auto compact fires again and again, cooldown did not stop it, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
+^size-only-gate-cannot-terminate [desc: a_repeating_compact_trigger_gated_on_size_alone_loops_forever_because_the_floor_exceeds_the_threshold, keywords: janitor_compacted_my_context_over_and_over compacts_every_10_minutes_forever infinite_compact_loop auto_compact_fires_again_and_again cooldown_did_not_stop_it, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
 **A REPEATING auto-compact trigger gated on context size alone CANNOT terminate when the
 post-compaction floor sits above the threshold.** With floor 308,644 > threshold 270,000: compact →
 land at the floor → still over → cooldown expires → compact again → forever, destroying context
@@ -50,7 +50,7 @@ are RARE — SessionStart fires once per session, the rate-limit path once per l
 loop the instant it was reused at Stop, which fires every turn. Nothing about the gate changed; its
 trigger frequency did. See [[debugging-methodology]] `^debug-re-derive-termination-on-reuse`.
 
-^floor-gate-is-the-stop [desc: gate_on_reclaimable_tokens_above_the_learned_floor_not_on_context_size, keywords: how do I stop the compact loop, what gate makes auto compact terminate, exclude the compaction case, min gain tokens, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
+^floor-gate-is-the-stop [desc: gate_on_reclaimable_tokens_above_the_learned_floor_not_on_context_size, keywords: how_do_I_stop_the_compact_loop what_gate_makes_auto_compact_terminate exclude_the_compaction_case min_gain_tokens, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
 **Gate on RECLAIMABLE tokens, not on size:** fire only when `ctx − floor ≥ min_gain` (default
 150k, `..._PROACTIVE_IDLE_COMPACT_MIN_GAIN_TOKENS`). This asks the only question that matters —
 *would compacting actually free anything?* At the floor the answer is 0, so the trigger goes silent
@@ -76,7 +76,7 @@ shipped with the floor gate inert, saved only by the 350k threshold sitting abov
 could let a compaction go unobserved, and an unobserved compaction is one whose floor is never
 learned, which silently re-opens the loop.
 
-^threshold-must-exceed-the-floor [desc: the_min_context_threshold_is_floor_relative_and_is_the_reactive_paths_only_protection, keywords: what should the auto compact threshold be, why 350k not 270k, cold_cache_compact_min_context_tokens, lower the threshold to save more, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
+^threshold-must-exceed-the-floor [desc: the_min_context_threshold_is_floor_relative_and_is_the_reactive_paths_only_protection, keywords: what_should_the_auto_compact_threshold_be why_350k_not_270k cold_cache_compact_min_context_tokens lower_the_threshold_to_save_more, type: project, ocd: 2026-07-17, lmd: 2026-07-17]
 **`cold_cache_compact_min_context_tokens` (350k since 2026-07-17, was 270k) MUST sit ABOVE this
 install's post-compaction floor.** It is not a round fraction of the window — it is floor-relative.
 
