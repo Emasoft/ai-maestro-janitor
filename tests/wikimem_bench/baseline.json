@@ -1,0 +1,270 @@
+{
+  "summary": {
+    "queries": 23,
+    "hit_at_1": 0.2174,
+    "hit_at_3": 0.5217,
+    "hit_at_10": 0.6522,
+    "mrr": 0.3964,
+    "mean_total_tokens": 443.5,
+    "total_tokens": 10201,
+    "total_bytes": 40777,
+    "hops_used": 0
+  },
+  "rows": [
+    {
+      "q": "pool size never recovers",
+      "expect": "pool-exhaustion#pool-leak-on-early-return",
+      "kw_pos": 3,
+      "rank": 0,
+      "find_tokens": 381,
+      "hop_tokens": 0,
+      "total_tokens": 381,
+      "bytes": 1523,
+      "hop_used": false
+    },
+    {
+      "q": "connections leak on error path",
+      "expect": "pool-exhaustion#pool-leak-on-early-return",
+      "kw_pos": 4,
+      "rank": 4,
+      "find_tokens": 783,
+      "hop_tokens": 0,
+      "total_tokens": 783,
+      "bytes": 3131,
+      "hop_used": false
+    },
+    {
+      "q": "pool exhausted but no leak",
+      "expect": "pool-exhaustion#slow-query-holds-the-pool",
+      "kw_pos": 3,
+      "rank": 0,
+      "find_tokens": 246,
+      "hop_tokens": 0,
+      "total_tokens": 246,
+      "bytes": 983,
+      "hop_used": false
+    },
+    {
+      "q": "we just increased the pool size",
+      "expect": "pool-exhaustion#pool-size-is-not-the-fix",
+      "kw_pos": 1,
+      "rank": 1,
+      "find_tokens": 246,
+      "hop_tokens": 0,
+      "total_tokens": 246,
+      "bytes": 983,
+      "hop_used": false
+    },
+    {
+      "q": "bigger pool still exhausted",
+      "expect": "pool-exhaustion#pool-size-is-not-the-fix",
+      "kw_pos": 3,
+      "rank": 2,
+      "find_tokens": 246,
+      "hop_tokens": 0,
+      "total_tokens": 246,
+      "bytes": 983,
+      "hop_used": false
+    },
+    {
+      "q": "works on my laptop but not in CI",
+      "expect": "tls-chain-order#browsers-repair-a-broken-chain",
+      "kw_pos": 4,
+      "rank": 6,
+      "find_tokens": 813,
+      "hop_tokens": 0,
+      "total_tokens": 813,
+      "bytes": 3250,
+      "hop_used": false
+    },
+    {
+      "q": "chain order wrong",
+      "expect": "tls-chain-order#chain-must-be-leaf-first",
+      "kw_pos": 1,
+      "rank": 1,
+      "find_tokens": 250,
+      "hop_tokens": 0,
+      "total_tokens": 250,
+      "bytes": 1000,
+      "hop_used": false
+    },
+    {
+      "q": "openssl verify fails but cert is valid",
+      "expect": "tls-chain-order#chain-must-be-leaf-first",
+      "kw_pos": 3,
+      "rank": 0,
+      "find_tokens": 271,
+      "hop_tokens": 0,
+      "total_tokens": 271,
+      "bytes": 1083,
+      "hop_used": false
+    },
+    {
+      "q": "duplicate rows from the nightly batch",
+      "expect": "cron-timezone-drift#dst-duplicates-and-skips-an-hour",
+      "kw_pos": 5,
+      "rank": 2,
+      "find_tokens": 526,
+      "hop_tokens": 0,
+      "total_tokens": 526,
+      "bytes": 2103,
+      "hop_used": false
+    },
+    {
+      "q": "we moved cron to UTC",
+      "expect": "cron-timezone-drift#utc-is-not-a-free-fix",
+      "kw_pos": 1,
+      "rank": 1,
+      "find_tokens": 261,
+      "hop_tokens": 0,
+      "total_tokens": 261,
+      "bytes": 1043,
+      "hop_used": false
+    },
+    {
+      "q": "why did the report arrive at 3am",
+      "expect": "cron-timezone-drift#utc-is-not-a-free-fix",
+      "kw_pos": 2,
+      "rank": 2,
+      "find_tokens": 773,
+      "hop_tokens": 0,
+      "total_tokens": 773,
+      "bytes": 3090,
+      "hop_used": false
+    },
+    {
+      "q": "how do I stop double processing",
+      "expect": "cron-timezone-drift#idempotency-beats-scheduling",
+      "kw_pos": 1,
+      "rank": 1,
+      "find_tokens": 109,
+      "hop_tokens": 0,
+      "total_tokens": 109,
+      "bytes": 436,
+      "hop_used": false
+    },
+    {
+      "q": "make the batch idempotent",
+      "expect": "cron-timezone-drift#idempotency-beats-scheduling",
+      "kw_pos": 3,
+      "rank": 0,
+      "find_tokens": 556,
+      "hop_tokens": 0,
+      "total_tokens": 556,
+      "bytes": 2221,
+      "hop_used": false
+    },
+    {
+      "q": "npm install runs on every build",
+      "expect": "docker-cache-invalidation#copy-before-install-busts-everything",
+      "kw_pos": 4,
+      "rank": 2,
+      "find_tokens": 812,
+      "hop_tokens": 0,
+      "total_tokens": 812,
+      "bytes": 3246,
+      "hop_used": false
+    },
+    {
+      "q": "does touch invalidate the docker cache",
+      "expect": "docker-cache-invalidation#mtime-is-not-in-the-cache-key",
+      "kw_pos": 2,
+      "rank": 0,
+      "find_tokens": 402,
+      "hop_tokens": 0,
+      "total_tokens": 402,
+      "bytes": 1608,
+      "hop_used": false
+    },
+    {
+      "q": "cache misses even though nothing changed",
+      "expect": "docker-cache-invalidation#dockerignore-is-part-of-the-key",
+      "kw_pos": 1,
+      "rank": 1,
+      "find_tokens": 254,
+      "hop_tokens": 0,
+      "total_tokens": 254,
+      "bytes": 1015,
+      "hop_used": false
+    },
+    {
+      "q": "node_modules in the build context",
+      "expect": "docker-cache-invalidation#dockerignore-is-part-of-the-key",
+      "kw_pos": 2,
+      "rank": 0,
+      "find_tokens": 407,
+      "hop_tokens": 0,
+      "total_tokens": 407,
+      "bytes": 1628,
+      "hop_used": false
+    },
+    {
+      "q": "we added retries and the failures went away",
+      "expect": "flaky-test-retries#retry-converts-a-bug-into-silence",
+      "kw_pos": 4,
+      "rank": 0,
+      "find_tokens": 131,
+      "hop_tokens": 0,
+      "total_tokens": 131,
+      "bytes": 522,
+      "hop_used": false
+    },
+    {
+      "q": "test only fails when run with others",
+      "expect": "flaky-test-retries#order-dependence-looks-like-flakiness",
+      "kw_pos": 2,
+      "rank": 0,
+      "find_tokens": 653,
+      "hop_tokens": 0,
+      "total_tokens": 653,
+      "bytes": 2609,
+      "hop_used": false
+    },
+    {
+      "q": "passes in isolation",
+      "expect": "flaky-test-retries#order-dependence-looks-like-flakiness",
+      "kw_pos": 3,
+      "rank": 2,
+      "find_tokens": 259,
+      "hop_tokens": 0,
+      "total_tokens": 259,
+      "bytes": 1034,
+      "hop_used": false
+    },
+    {
+      "q": "do I need to retry after upload",
+      "expect": "object-store-consistency#read-after-write-is-strong-now",
+      "kw_pos": 3,
+      "rank": 2,
+      "find_tokens": 824,
+      "hop_tokens": 0,
+      "total_tokens": 824,
+      "bytes": 3294,
+      "hop_used": false
+    },
+    {
+      "q": "object exists but is missing from the listing",
+      "expect": "object-store-consistency#listing-still-lags",
+      "kw_pos": 2,
+      "rank": 2,
+      "find_tokens": 303,
+      "hop_tokens": 0,
+      "total_tokens": 303,
+      "bytes": 1212,
+      "hop_used": false
+    },
+    {
+      "q": "list after put is stale",
+      "expect": "object-store-consistency#listing-still-lags",
+      "kw_pos": 3,
+      "rank": 5,
+      "find_tokens": 695,
+      "hop_tokens": 0,
+      "total_tokens": 695,
+      "bytes": 2780,
+      "hop_used": false
+    }
+  ],
+  "corpus": "tests/fixtures/wikimem-bench",
+  "recall_args": ""
+}

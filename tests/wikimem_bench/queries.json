@@ -1,0 +1,34 @@
+{
+  "corpus": "tests/fixtures/wikimem-bench",
+  "note": "Ground truth for the wikimem retrieval benchmark (TRDD-DO6X4ZF8). Each query is a symptom phrase declared in the target atom's OWN `keywords:` list. Phrases that also appear in the page's `description:` were deliberately AVOIDED: a description hit resolves the PAGE, which would mask whether atom-level keyword recall works at all. `kw_pos` is the phrase's 1-based position in its atom's keyword list — the parser drops everything after the first comma, so a baseline where only kw_pos==1 succeeds is the expected shape of the Phase 1.3 defect, not a bug in this file.",
+  "queries": [
+    {"q": "pool size never recovers", "expect": "pool-exhaustion#pool-leak-on-early-return", "kw_pos": 3},
+    {"q": "connections leak on error path", "expect": "pool-exhaustion#pool-leak-on-early-return", "kw_pos": 4},
+    {"q": "pool exhausted but no leak", "expect": "pool-exhaustion#slow-query-holds-the-pool", "kw_pos": 3},
+    {"q": "we just increased the pool size", "expect": "pool-exhaustion#pool-size-is-not-the-fix", "kw_pos": 1},
+    {"q": "bigger pool still exhausted", "expect": "pool-exhaustion#pool-size-is-not-the-fix", "kw_pos": 3},
+
+    {"q": "works on my laptop but not in CI", "expect": "tls-chain-order#browsers-repair-a-broken-chain", "kw_pos": 4},
+    {"q": "chain order wrong", "expect": "tls-chain-order#chain-must-be-leaf-first", "kw_pos": 1},
+    {"q": "openssl verify fails but cert is valid", "expect": "tls-chain-order#chain-must-be-leaf-first", "kw_pos": 3},
+
+    {"q": "duplicate rows from the nightly batch", "expect": "cron-timezone-drift#dst-duplicates-and-skips-an-hour", "kw_pos": 5},
+    {"q": "we moved cron to UTC", "expect": "cron-timezone-drift#utc-is-not-a-free-fix", "kw_pos": 1},
+    {"q": "why did the report arrive at 3am", "expect": "cron-timezone-drift#utc-is-not-a-free-fix", "kw_pos": 2},
+    {"q": "how do I stop double processing", "expect": "cron-timezone-drift#idempotency-beats-scheduling", "kw_pos": 1},
+    {"q": "make the batch idempotent", "expect": "cron-timezone-drift#idempotency-beats-scheduling", "kw_pos": 3},
+
+    {"q": "npm install runs on every build", "expect": "docker-cache-invalidation#copy-before-install-busts-everything", "kw_pos": 4},
+    {"q": "does touch invalidate the docker cache", "expect": "docker-cache-invalidation#mtime-is-not-in-the-cache-key", "kw_pos": 2},
+    {"q": "cache misses even though nothing changed", "expect": "docker-cache-invalidation#dockerignore-is-part-of-the-key", "kw_pos": 1},
+    {"q": "node_modules in the build context", "expect": "docker-cache-invalidation#dockerignore-is-part-of-the-key", "kw_pos": 2},
+
+    {"q": "we added retries and the failures went away", "expect": "flaky-test-retries#retry-converts-a-bug-into-silence", "kw_pos": 4},
+    {"q": "test only fails when run with others", "expect": "flaky-test-retries#order-dependence-looks-like-flakiness", "kw_pos": 2},
+    {"q": "passes in isolation", "expect": "flaky-test-retries#order-dependence-looks-like-flakiness", "kw_pos": 3},
+
+    {"q": "do I need to retry after upload", "expect": "object-store-consistency#read-after-write-is-strong-now", "kw_pos": 3},
+    {"q": "object exists but is missing from the listing", "expect": "object-store-consistency#listing-still-lags", "kw_pos": 2},
+    {"q": "list after put is stale", "expect": "object-store-consistency#listing-still-lags", "kw_pos": 3}
+  ]
+}
