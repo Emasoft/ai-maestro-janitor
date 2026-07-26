@@ -2056,14 +2056,44 @@ fn atomic_write_page(dest: &Path, content: &str) -> Result<()> {
 /// touched file is re-parsed. Best-effort in spirit but surfaced: a reindex failure is returned so
 /// the caller reports it (the live-walk fallback keeps recall correct regardless).
 fn reindex_owning_scope(page: &Path, hidden: bool) -> Result<()> {
-    let root = page
+    let root = owning_scope_root(page);
+    let files = collect_md(std::slice::from_ref(&root), hidden);
+    crate::index::reindex(&root, &files, false)?;
+    Ok(())
+}
+
+/// The SCOPE ROOT that owns `page`: the nearest ancestor already carrying a `.memgrep/` sidecar,
+/// else the page's own directory.
+///
+/// The naive `page.parent()` is wrong for any page NOT sitting at the top of its scope — the wiki
+/// model puts curated pages under `<root>/wiki/`, so a write there reindexed `<root>/wiki/` and
+/// left the SCOPE index (the one every recall actually reads) stale, while creating a second,
+/// competing sidecar nobody queries. Silent: the write succeeds, lint passes, and the new atom is
+/// simply not findable until something else triggers a full reindex.
+///
+/// Two properties this deliberately keeps:
+/// - it walks the path AS GIVEN and never canonicalizes. A page reached through a published
+///   symlink must resolve the root of the VIEW it was reached through; canonicalizing first would
+///   land in the project's real directory and pull that whole scope — private pages included —
+///   into the index being refreshed.
+/// - the FIRST `.memgrep/` ancestor wins, so a nested scope beats an enclosing one. That is the
+///   more specific owner, matching how the three-scope model resolves everything else.
+fn owning_scope_root(page: &Path) -> PathBuf {
+    let start = page
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let files = collect_md(std::slice::from_ref(&root), hidden);
-    crate::index::reindex(&root, &files, false)?;
-    Ok(())
+    let mut cur: Option<&Path> = Some(start.as_path());
+    while let Some(dir) = cur {
+        if dir.join(".memgrep").is_dir() {
+            return dir.to_path_buf();
+        }
+        cur = dir.parent().filter(|p| !p.as_os_str().is_empty());
+    }
+    // No sidecar anywhere above: this is a fresh corpus, and the page's own directory is the only
+    // root we can honestly infer. Same behaviour as before the fix, so nothing regresses.
+    start
 }
 
 /// Read the FULL body from stdin (the content of a new atom / lesson). Trailing whitespace is
@@ -5795,6 +5825,41 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn severity_orders_error_above_warn_above_info() {
         assert!(Severity::Error > Severity::Warn);
         assert!(Severity::Warn > Severity::Info);
+    }
+
+    /// A write to `<root>/wiki/page.md` must refresh the SCOPE's index, not the `wiki/` subdir's.
+    ///
+    /// The wiki model puts curated pages one level down, so `page.parent()` reindexed a directory
+    /// nobody queries and left the real index stale — a write that succeeds, lints clean, and is
+    /// then simply not findable.
+    #[test]
+    fn owning_scope_root_walks_up_to_the_sidecar_not_the_page_dir() {
+        let dir = lint_tmpdir("scope_root");
+        let wiki = dir.join("wiki");
+        std::fs::create_dir_all(&wiki).unwrap();
+        std::fs::create_dir_all(dir.join(".memgrep")).unwrap();
+        let page = wiki.join("p.md");
+        std::fs::write(&page, "x").unwrap();
+
+        let got = owning_scope_root(&page);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            got, dir,
+            "a page under <root>/wiki/ is owned by <root> (where the sidecar lives), not by wiki/"
+        );
+    }
+
+    /// With no sidecar anywhere above, the page's own directory is the only root that can honestly
+    /// be inferred — the pre-fix behaviour, so a fresh corpus does not regress.
+    #[test]
+    fn owning_scope_root_falls_back_to_the_page_dir_when_no_sidecar_exists() {
+        let dir = lint_tmpdir("scope_root_fresh");
+        let page = dir.join("p.md");
+        std::fs::write(&page, "x").unwrap();
+
+        let got = owning_scope_root(&page);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(got, dir, "no sidecar above ⇒ the page's own directory");
     }
 
     #[test]
