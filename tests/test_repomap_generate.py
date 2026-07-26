@@ -227,6 +227,48 @@ def test_excludes_are_persisted_and_honored():
         assert _run(root, "--check")[0] == 0
 
 
+def test_splice_survives_a_writer_caught_between_truncate_and_write():
+    """The torn-read race that made the concurrency test flaky (and is real data loss).
+
+    `Path.write_text` — what Claude's Edit tool and most editors do — truncates
+    first and writes after. A read landing in that window sees 0 bytes while the
+    stat signature stays STABLE (the writer has not written yet), so the collision
+    check cannot see it. Splicing that would persist a block-only CLAUDE.md,
+    destroying the human narrative the fences exist to protect — and the writer
+    would lose its own write too, because our atomic rename swaps the inode out
+    from under its open fd.
+
+    The window here (5 ms) is an order of magnitude under the settle delay, so the
+    assertion is about correctness, not about winning a timing race.
+    """
+    mod = _load_module()
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        _make_project(root)
+        claude_md = root / "CLAUDE.md"
+        block = ("<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=x digest=y generated=z\n"
+                 "body\n<+-+-JANITOR-REPO-MAP-END-(do-not-modify)-+-+>\n")
+
+        def torn_writer() -> None:
+            # Truncate, hold the window open, THEN write — the exact shape of a
+            # read-modify-write save, slowed down enough to be landed on.
+            with open(claude_md, "w", encoding="utf-8") as fh:
+                time.sleep(0.005)
+                fh.write(_NARRATIVE)
+
+        t = threading.Thread(target=torn_writer)
+        t.start()
+        time.sleep(0.001)  # land INSIDE the truncate window
+        mod.splice_with_verify(claude_md, block, attempts=3)
+        t.join()
+
+        final = claude_md.read_text()
+        assert _NARRATIVE.strip().splitlines()[0] in final, (
+            f"the human narrative was destroyed by a splice over a torn read:\n{final!r}"
+        )
+        assert final.count("<+-+-JANITOR-REPO-MAP-START-") <= 1, "torn/duplicated fences"
+
+
 def test_concurrent_editor_never_corrupts_and_their_edit_survives():
     """THE race test (the user's corruption worry): a hostile editor rewrites
     the narrative in a tight loop while splice_with_verify runs repeatedly.

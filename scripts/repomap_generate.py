@@ -104,6 +104,12 @@ _EXCLUDE_DIRS = frozenset({
 # generator gives up (someone is actively editing CLAUDE.md — let them win).
 _SPLICE_ATTEMPTS = 5
 
+# Settle delay for the splice retry loop. Sized to comfortably outlast a writer's
+# truncate-to-write window (sub-millisecond for the read-modify-write an editor
+# does), while staying far below any cadence this generator runs on. It is what
+# makes a torn read DETECTABLE — see the long note in splice_with_verify.
+_SPLICE_SETTLE_S = 0.05
+
 
 def _resolve_root(arg: str | None) -> Path:
     if arg:
@@ -316,9 +322,34 @@ def splice_with_verify(claude_md: Path, block: str, attempts: int = _SPLICE_ATTE
     against THEIR latest text — their narrative always survives; only the
     fenced block is replaced. Returns False after `attempts` collisions (an
     active editor wins; the generator retires gracefully)."""
-    for _ in range(attempts):
+    for attempt in range(attempts):
+        if attempt:
+            # Back off between attempts. Without this the retries spin instantly
+            # and ALL of them can land inside the SAME writer's truncate window,
+            # so the collision check re-samples an identical torn state every
+            # time and "3 attempts" buys no independence at all.
+            time.sleep(_SPLICE_SETTLE_S)
         sig_before = _stat_sig(claude_md)
         current = claude_md.read_text(encoding="utf-8") if sig_before is not None else ""
+        if sig_before is not None and not current.strip():
+            # TORN READ. `Path.write_text` — what Claude's Edit tool and most
+            # editors do — truncates first and writes after, so a read landing in
+            # that window sees 0 bytes. The stat signature is STABLE across it
+            # (the writer has not written yet), so the check below cannot catch
+            # it, and splicing this would persist a block-only CLAUDE.md,
+            # DESTROYING the human narrative the fences exist to protect. The
+            # writer then loses its own write too: our atomic rename swaps the
+            # inode under its open fd.
+            #
+            # A truncate window is sub-millisecond, so sleeping past it and
+            # re-reading distinguishes torn from genuinely-empty EMPIRICALLY
+            # instead of by assumption — and it makes the race observable to the
+            # stat check below, which then does its job. A file that is still
+            # empty after settling really is empty, and splicing it destroys
+            # nothing, so we fall through rather than refuse (an empty CLAUDE.md
+            # must still be able to receive its first map).
+            time.sleep(_SPLICE_SETTLE_S)
+            current = claude_md.read_text(encoding="utf-8")
         candidate = _verified_candidate(current, block)
         if _stat_sig(claude_md) != sig_before:
             continue  # changed while we spliced (ms window) — re-read their text
