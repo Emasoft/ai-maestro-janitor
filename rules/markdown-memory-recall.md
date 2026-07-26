@@ -92,22 +92,16 @@ Other commands: `memgrep find "+must -exclude \"exact phrase\"" <dir>` (keyword 
 `--only-notes` searches the lessons), `memgrep overview <dir>` (the project's entry-point
 page), `memgrep reindex <dir>` (refresh the SQLite sidecar).
 
-### Recall is TWO HOPS — that is what makes it cheap
-
-`recall`/`find` print a lean triage list by default: one **`<lmd>⇥<id-or-path>⇥<description>`**
-row per hit (tab-separated fixed columns, so `cut -f2` and `awk -F'\t'` are exact). The
-description is a triage surface, **not the answer**. Scan the list, pick ONE, then take the
-second hop:
+**Recall is TWO HOPS.** Hop 1 prints a lean triage row per hit —
+`<lmd>⇥<id-or-path>⇥<description>`, TAB columns so `cut -f2` is exact. The description is a
+triage surface, **not the answer**: pick ONE, then hop:
 
 ```bash
-memgrep recall <ATOM-ID> <dir>     # exact-id lookup: that ONE atom, in full, with its lessons
+memgrep recall <ATOM-ID> <dir>     # that ONE atom in full, with its lessons
 ```
 
-Measured end-to-end on the frozen benchmark, this costs **247 tokens/query against 441** for
-the old always-rich output, at **identical** accuracy — because you pay the full body once
-instead of N times. `--output medium` adds each hit's body; `--output full` is the rich
-debugging view (body + lessons + see-also + keywords). `--with-keywords` / `--with-notes` add
-one dimension without leaving the lean layer.
+Measured 247 tokens/query vs 441 always-rich, same accuracy. `--output medium|full` and
+`--with-keywords`/`--with-notes` widen it (details: the FULL REFERENCE).
 
 ## Memory scopes — pick by what the note CONTAINS
 
@@ -128,12 +122,9 @@ cross-linked. **UNSURE → LOCAL.**
 
 ## Read-the-notes rule — a memory's lessons ARE part of the memory
 
-Reading ANY memory means also reading its `[^N]` lessons — they are *why* the facts are what
-they are and *what not to repeat*. They arrive with the **second hop** (`memgrep recall
-<ATOM-ID>`), which resolves and appends them. They are NOT free and are no longer attached to
-every search hit: paying for every hit's lessons on every query is exactly the cost the lean
-default removes. So "read the notes" means *take the hop on the note you chose*, not *skim
-whatever the search happened to dump*.
+Reading ANY memory means also reading its `[^N]` lessons — *why* the facts are what they are and
+*what not to repeat*. They arrive with the SECOND HOP, not with every search hit: "read the
+notes" means take the hop on the note you chose, not skim whatever the search dumped.
 
 ## The note format
 
@@ -146,22 +137,16 @@ a worked atom/lesson example: the FULL REFERENCE above.
 
 ### THE LESSON FORM — a lesson is an ATOM, and a GUARDRAIL, not a story
 
-A `[^N]:` footnote whose bracketed metadata block is the lesson's ADDRESS —
-`id`/`status`/`keywords`/`ocd`/`lmd` REQUIRED (`superseded-by` when superseded) — followed by the
-prose `DO NOT <X>, BECAUSE <why>. DO <Y> instead.` Exact field layout: the FULL REFERENCE above.
+A `[^N]:` footnote whose bracketed block is the lesson's ADDRESS
+(`id`/`status`/`keywords`/`ocd`/`lmd` REQUIRED), then `DO NOT <X>, BECAUSE <why>. DO <Y>
+instead.` ONE lesson = ONE mistake, ≤3 lines, all three parts.
 
-- **`keywords:` is the RECALL SURFACE** — the phrases a future session SEARCHES with (the
-  symptom), usually NOT the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not
-  exist.** A **comma** splits FIELDS, **quotes** delimit the keywords VALUE, a **space** splits the
-  KEYWORDS in it — so each is a KEY-PHRASE, `underscore_joined`, never shredded.
-- **`status:`** `valid` (holds) | `superseded` (history — NEVER apply; follow `superseded-by`).
-  **`id:`** is stable and corpus-wide; `[^N]` is page-local and renumbers, so only `id` is a
-  durable reference.
-- **Prose:** ONE lesson = ONE mistake · ≤3 lines / ~40 words · all three parts (`DO NOT` = the
-  act about to be repeated; `BECAUSE` = the WHY, without which it cannot stop the repeat;
-  `DO … instead` = the exit). Chronology/evidence go in the page BODY or a TRDD.
+**`keywords:` is the RECALL SURFACE** — the SYMPTOM phrases a future session will search with,
+not the words the prose uses. **No keywords ⇒ no recall ⇒ the memory does not exist.** A comma
+splits FIELDS, a space splits the KEY-PHRASES, so each phrase is `underscore_joined` — written
+`a phrase, another phrase` everything after the first comma is silently DROPPED.
 
-Full grammar + supersession: the FULL REFERENCE above.
+Full field grammar + supersession: the FULL REFERENCE above.
 
 ## AUTHORING — route writes through a memgrep verb, then validate
 

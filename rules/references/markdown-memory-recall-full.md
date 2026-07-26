@@ -391,6 +391,34 @@ The executable protocol is the three janitor skills — `/janitor-memory-write`
 `references/wikimem-model.md`. Existing flat notes stay valid (no `tier` ⇒
 `component`); the wiki emerges incrementally as pages are touched.
 
+## THE LESSON FORM — the full field grammar (moved off the rule floor, 2026-07-26)
+
+The shipped rule carries only the one-line shape and the recall law. The complete grammar is
+here, because it is reference material and the rule floor is re-written into cache by every
+cold subagent on the machine.
+
+```text
+[^N]: [id:ATOM-xxxx-xxxx, status:valid|superseded, superseded-by:ATOM-xxxx-xxxx, keywords:"<key_phrase> …", ocd:<date>, lmd:<date>] DO NOT <X>, BECAUSE <why>. DO <Y> instead.
+```
+
+The bracketed metadata block is the lesson's **ADDRESS**. `id`, `status`, `keywords`, `ocd`,
+`lmd` are REQUIRED; `superseded-by` is required once superseded.
+
+- **`keywords:` is the RECALL SURFACE** — the phrases a future session SEARCHES with (the
+  symptom), usually NOT the words the lesson's prose uses. **No keywords ⇒ no recall ⇒ the
+  memory does not exist.** A **comma** splits FIELDS, **quotes** delimit the keywords VALUE, a
+  **space** splits the KEY-PHRASES inside it — so each is `underscore_joined`, never shredded.
+  A phrase written `a phrase, another phrase` loses everything after the first comma, silently:
+  the parser drops the segment and the page still looks correct.
+- **`status:`** `valid` (holds) | `superseded` (history — NEVER apply it; follow
+  `superseded-by`). **`id:`** is stable and unique corpus-wide; `[^N]` is page-local and
+  renumbers, so only `id` is a durable reference — and corpus-uniqueness is what makes a bare
+  id a sufficient retrieval key for the second hop.
+- **Prose:** ONE lesson = ONE mistake · ≤3 lines / ~40 words · all three parts. `DO NOT` names
+  the act about to be repeated; `BECAUSE` carries the WHY, without which the lesson cannot stop
+  the repeat; `DO … instead` is the exit. Chronology and evidence belong in the page BODY or a
+  TRDD, never in the lesson.
+
 ## Lessons-learned conventions (footnotes + per-element dates)
 
 Memory pages grow a bottom `## Notes and lessons learned` section. The format is

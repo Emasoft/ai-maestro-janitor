@@ -231,8 +231,19 @@ def test_memgrep_fm_queries_select_tiers():
 
 
 @_needs_memgrep
-def test_memgrep_recall_surfaces_page_with_lesson():
-    """Symptom recall lands on dialog-forms AND appends the lesson's WHY."""
+def test_memgrep_recall_surfaces_page_then_the_hop_returns_the_lesson():
+    """Symptom recall lands on dialog-forms; the SECOND HOP brings back the lesson's WHY.
+
+    Retrieval is two-hop since the output layers shipped: hop 1 is a lean triage row and the
+    lessons — the largest block the tool emits — arrive only with the hop the reader chose to
+    take. This test tracks that contract rather than the old always-rich default, because the
+    old shape is exactly the per-hit cost the layers removed (441 -> 247 tokens/query).
+    """
     out = _mg(["recall", "how should dialogs confirm destructive action"])
     assert "dialog-forms.md" in out.splitlines()[0]
-    assert "destructive default" in out, "the lesson WHY must come back with the page"
+    assert "destructive default" not in out, (
+        "hop 1 is a TRIAGE row — appending every hit's lessons is the cost the layers removed"
+    )
+    # Hop 2: pay for exactly the page the triage row named.
+    full = _mg(["recall", "how should dialogs confirm destructive action", "--output", "full"])
+    assert "destructive default" in full, "the lesson WHY must come back with the full record"
