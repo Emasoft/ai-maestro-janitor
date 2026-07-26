@@ -97,10 +97,11 @@ machine-private) — see step 1.
    (services), per `release-via: publish|deploy|none`.
    Orthogonal/terminal: `blocked` (whenever `blocked-by:` is non-empty — record
    `pre-block-column:` and restore to it when it clears), `failed`, `superseded`.
-7. **BUMP `updated:` on EVERY edit** — not just column changes. The board sorts on it.
-8. **`implementation-commits:`** accumulates the SHAs that landed this TRDD's code. This is
-   the backtracking field: it is how a bug found later is traced to the TRDD that
-   introduced it. Append as code lands.
+7. **BUMP `updated:` on every edit that CHANGES WHAT THE TRDD ASSERTS** — not just column
+   changes. The board sorts on it, so a MECHANICAL repair (a format/syntax pass that changes
+   no fact) must NOT bump it, or the repair silently reorders the whole board.
+8. **`implementation-commits:`** accumulates the SHAs that landed this TRDD's code — the
+   backtracking field: how a bug found later is traced to the TRDD that introduced it.
 9. **NPT vs EHT.** `npt:` = Necessary Prerequisite Tasks — must finish BEFORE the parent
    proceeds past `dev`. `eht:` = Effects Handling Tasks — handle the CONSEQUENCES of the
    parent's work; the parent may land its code but **cannot reach `complete` until every
@@ -109,20 +110,16 @@ machine-private) — see step 1.
    `created-by:` is set once; refusals archive `approved: false`. (Full: the reference.)
 10. **STATE head block — MANDATORY once a TRDD spans more than one session.** A TRDD grows
     append-only, so a reader (or a compaction summary) hits the OLDEST, often SUPERSEDED
-    facts first. Immediately after the title, before the first body section:
-
-    ```markdown
-    ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — <date>
-    ```
+    facts first. Immediately after the title, before the first body section, add a heading:
+    `## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — <date>`.
 
     It is the single source of truth and is kept current on every edit. It carries: the
     current state of each component; the **NEXT ACTION** (one concrete step, runnable as
     written); the load-bearing facts/gotchas; an explicit **SUPERSEDED — do NOT carry
     forward** list; and paths to the durable artifacts to read before acting.
 11. **Reports are evidence; decisions become TRDDs.** A report (audit, benchmark) presents
-    DATA and lives in gitignored `reports/`. The moment it leads to a DECISION, that
-    decision is written into a TRDD — a new one, or by extending an existing TRDD's STATE
-    block.
+    DATA and lives in gitignored `reports/`. The moment it leads to a DECISION, that decision
+    goes into a TRDD — a new one, or an existing TRDD's STATE block.
 12. **Terminal columns are frozen.** Do not edit the body of a `complete` / `failed` /
     `superseded` / `published` / `live` TRDD. New work = new TRDD. (Only `updated:` and,
     when superseding, `superseded-by:` may change.)
@@ -131,9 +128,9 @@ machine-private) — see step 1.
 14. **One kanban board, `scope` as a badge — not a second board.** Columns and transitions
     are identical; tools scan BOTH roots by default.
 15. **A LOCAL TRDD needs no approval** — it is a chore on the user's own machine and there is
-    no MANAGER for that. Sole exception, the one that always applies: if it is **destructive
-    or irreversible on the user's machine** (rotating a credential, deleting a store, purging
-    history) it needs **USER** approval and waits in the local `proposals/`.
+    no MANAGER for it. Sole exception: if it is **destructive or irreversible on the user's
+    machine** (rotating a credential, deleting a store, purging history) it needs **USER**
+    approval and waits in the local `proposals/`.
 
 ## Authoring, in short
 
@@ -141,16 +138,16 @@ Route the scope (step 1) → generate the id + timestamps (step 2) → write the
 minimal frontmatter → `column: backburner` (or `live_auditing` for an audit TRDD) → same ISO
 datetime in BOTH `created:` and `updated:` → write the prose → create a TaskCreate entry
 naming the id. A **PROJECT** TRDD is then `git add`-ed **by name** and committed (`docs: add
-TRDD-<id8> — <summary>`); tell the user the id and the commit. A **LOCAL** TRDD is in no repo
-— nothing to commit; tell the user the id and the path.
+TRDD-<id8> — <summary>`); report the id + commit. A **LOCAL** TRDD is in no repo — report the
+id + path.
 
 Resuming later: look the id up in BOTH roots with `find` (never an `ls` glob — step 2):
 `find design ~/.claude/projects/<slug>/design -name 'TRDD-*-<id8>-*.md'` → read the **STATE
-block first**. If it disagrees with the frontmatter, the STATE block wins (hand-edits beat
-stale fields) — then fix the frontmatter.
+block first**. On disagreement the STATE block wins (hand-edits beat stale fields) — then fix
+the frontmatter.
 
 ## Does NOT apply to
 
-Session handoffs (`docs_dev/`), scenario tests, proposal reports, inline `TODO:` comments,
-or trivial tasks you will finish this session (use TaskCreate). TRDDs are for **non-trivial
-design tasks that must survive as tracked artifacts of the project**.
+Session handoffs (`docs_dev/`), scenario tests, proposal reports, inline `TODO:` comments, or
+trivial tasks you finish this session (use TaskCreate). TRDDs are for **non-trivial design tasks
+that must survive as tracked project artifacts**.

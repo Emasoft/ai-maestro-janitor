@@ -35,7 +35,7 @@ This is a REFERENCE doc: every normative clause starts with a stable `` `WM-<FAM
 anchor and a bold key-phrase, so you grep to the clause instead of reading through.
 
 ```text
-WM-GREP  all clauses of a family:   grep 'WM-ATOM'   (SCOPE WIKI NOTE ATOM LES RCL SCORE IDX BENCH AUTH CLI LINT MIG TXN SEP UMEM SURF SCHED HARV BOOT)
+WM-GREP  all clauses of a family:   grep 'WM-ATOM'   (SCOPE WIKI NOTE ATOM LES RCL SCORE IDX BENCH AUTH CLI BASE FACT LINT MIG TXN SEP UMEM SURF SCHED HARV BOOT)
 WM-GREP  one clause by id:          grep 'WM-ATOM-03'
 WM-GREP  the authoritative verbs:   grep -A20 '@spec:memgrep-verbs'
 WM-GREP  the atom / lesson grammar: grep -A6  '@spec:atom-grammar'   /  '@spec:lesson-grammar'
@@ -43,7 +43,8 @@ WM-GREP  the version stamp:         grep '^spec-version:'
 WM-GREP  families: META=arbiter VER=versioning SCOPE=3-scope-model WIKI=wiki-layer
 WM-GREP            NOTE=page-format ATOM=atom-model LES=lesson+supersession RCL=recall
 WM-GREP            SCORE=ranking IDX=index+freshness BENCH=retrieval-benchmark
-WM-GREP            AUTH=authoring-contract CLI=memgrep-verbs LINT=lint-contract MIG=migrate
+WM-GREP            AUTH=authoring-contract CLI=memgrep-verbs BASE=base-grep-mode FACT=fact-lines
+WM-GREP            LINT=lint-contract MIG=migrate
 WM-GREP            TXN=editor-safety SEP=separation-of-powers UMEM=private-user-memory
 WM-GREP            SURF=proactive-surfaces SCHED=maintenance-scheduler HARV=harvest/raw-buffer
 WM-GREP            BOOT=bootstrap+simple-skills CHK=conformance MNT=maintenance
@@ -213,7 +214,18 @@ For `feedback`/`project` the body `MUST` carry `**Why:**` and `**How to apply:**
 `## Notes and lessons learned` section, even when empty — it is the standing landing zone for
 a correction lesson.
 
-`WM-NOTE-04` **dates-bump** — `MUST` bump `lmd:` on every edit; `ocd:` is write-once.
+`WM-NOTE-04` **dates-bump** — `MUST` bump `lmd:` on every edit that changes what the page
+ASSERTS; `ocd:` is write-once. A MECHANICAL repair that changes no fact `MUST NOT` bump it — see
+WM-MIG-07 for why (ranking tie-breaks on `lmd`, so a format pass would silently reorder the whole
+corpus) and for the free audit it buys ("no `lmd` changed" proves the repair really was
+mechanical).
+
+`WM-NOTE-06` **footnotes-are-POOLED-under-three-sections** — a page's `[^N]` definitions live
+under `# Notes`, `# Lessons Learned` and `# See also` (or `##` equivalents), and the render GROUPS
+an atom's cited footnotes by WHICH section defines each. So a footnote's meaning comes from its
+defining section, not from its number: the same `[^3]` is a lesson or a relation depending on where
+it is defined. `WM-NOTE-03`'s mandatory `## Notes and lessons learned` is the always-present
+landing zone; the other two are optional.
 
 `WM-NOTE-05` **curated-vs-raw** — a CURATED wiki page (authored via the verbs) is distinct from
 a RAW harness buffer note; the corpus discriminator (`is_curated_wiki_page`) decides which
@@ -562,6 +574,28 @@ but it `MUST NOT` be presented as the thing that makes the system safe. Any agen
 verbs with a raw edit tool, so a background repair chore is the safety net, and **correctness may
 never DEPEND on the safety net.**
 
+`WM-SCORE-10` **the-ordering-and-date-flags** — `recall`/`find` also carry `--sort score|ocd|lmd`
+(default `score`), `--order asc|desc` (default `desc`), and `--since`/`--until` over
+`--date-field ocd|lmd` (default `lmd`). Two null-handling rules, both deliberate:
+
+- an element with NO date in the chosen field sorts **LAST** under `--sort ocd|lmd`, in BOTH
+  directions — a dateless element has no place on a timeline, so `--order asc` must not promote it
+  to first;
+- when EITHER range bound is set, an element with no date in that field is **EXCLUDED** — a
+  missing date cannot be proven in-range, and silently keeping it would make `--since` mean
+  "since, plus anything undated".
+
+`WM-SCORE-11` **`find` and `recall` are DIFFERENT scorers, on purpose** — `find` rows have already
+passed the `+`/`-` gate, so: there is NO precision-first suppression (a `+mandatory`-only query
+legitimately scores zero OPTIONAL hits and is still a real result), and its searchable surface is
+`title + summary + tags + body` TOGETHER rather than recall's surface-then-body-fallback. Stating
+this because the two verbs look interchangeable and are not: a query moved from one to the other
+can legitimately return a different set, and that is not a bug in either.
+
+`WM-SCORE-12` **stopwords-are-a-fixed-English-list** — the query tokenizer drops a hardcoded
+English stopword list. A non-English symptom query gets no stopword benefit, and a query made
+ENTIRELY of stopwords is REFUSED rather than silently matching everything.
+
 ## WM-BENCH — retrieval is MEASURED, not asserted
 
 `WM-BENCH-01` **frozen-fixture-corpus** — the benchmark runs against a COMMITTED fixture corpus,
@@ -660,13 +694,112 @@ atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>
 `index`/`reindex` build/refresh it; `validate` checks index/page health. The file watcher
 debounces ~500 ms behind writes — a consumer `MUST NOT` re-query in the same turn it wrote.
 
-`WM-CLI-06` **token-lean-output** — reads return greppable, capped output (`path — description`
-+ resolved lessons); consumers read the top 1–3 hits, not the whole corpus.
+`WM-CLI-06` **token-lean-output** — reads return greppable, capped output; consumers read the top
+1–3 hits, not the whole corpus. The exact shape is WM-RCL-06's layer table (the lean triage row by
+default), and the cost model is WM-BENCH-04.
+
+`WM-CLI-08` **write-verb-placement-and-uniqueness** — the rules that make a synthesised write
+land correctly:
+
+- an `add-atom` block is inserted immediately BEFORE the `## Notes and lessons learned` heading
+  when present, else at EOF. Not cosmetic: the atom parser terminates a body at the next heading,
+  so appending at EOF past that heading would put the new atom's body inside the lessons section
+  and truncate it to nothing;
+- atom-id uniqueness is checked across the WHOLE OWNING SCOPE, not just the target page, because
+  recall walks the scope and WM-ATOM-06 requires corpus-unique ids;
+- a new footnote label is allocated as `max(existing numeric labels) + 1` over BOTH the parsed
+  tree AND a raw scan — see WM-ATOM-08 for why the parsed maximum alone is a collision;
+- `new-page` REFUSES an unknown `--tier`, an empty `--name`/`--description`/`--type` after trim,
+  or an existing destination; it creates parent directories.
+
+`WM-CLI-09` **atom-ids-are-accepted-in-three-spellings, and ambiguity is REPORTED** — `atom` /
+`atom-page` accept `^marker`, the canonical `ATOM-XXXX-XXXX`, or the bare 8-char payload,
+case-insensitively. When an id matches MORE than one atom the tool prints EVERY `path#id` match
+and exits non-zero. Returning an arbitrary one of them would be the worst option available: the
+caller cannot tell a unique hit from a coin flip.
+
+`WM-CLI-10` **write-then-reindex-is-synchronous** — every write verb writes via tmp-file + atomic
+rename and then reindexes the OWNING SCOPE immediately, in-process. The freshness check
+(WM-IDX-02) is what makes correctness independent of this; the synchronous reindex is the
+LATENCY half (WM-IDX-08), and it is a different mechanism from an external file watcher.
 
 `WM-CLI-07` **find-DSL** — `memgrep find` takes a keyword DSL (`+must`, `-exclude`, `"exact
 phrase"`, wildcards), `--only-notes` to search the LESSONS, `--use-index` for the SQLite sidecar,
 and `--top N`. The DSL grammar lives in the Rust crate and is the search surface both the wiki and
 the private user-mem search build on.
+
+## WM-BASE — the base markdown-AST grep mode
+
+`WM-BASE-01` **the-default-mode-is-a-grep** — with NO subcommand, `memgrep` is a
+markdown-AST-aware `grep`: `memgrep [OPTIONS] [PATTERN] [PATHS]...`. This is the tool's ORIGINAL
+purpose and its default behaviour; the memory verbs (WM-CLI) are a layer ON TOP of it, not a
+replacement for it.
+
+This clause exists because the mode was **entirely absent from this spec** while being fully
+implemented — and WM-META's authority rule says unspecced behaviour is presumed an error to be
+fixed. A large, working, load-bearing CLI surface was therefore one cleanup pass away from
+deletion. **A spec that covers only the newest layer is not a partial spec; it is an active
+hazard.** Whenever a tool grows a subsystem, the older one needs a clause more urgently than the
+new one, precisely because nobody is thinking about it.
+
+`WM-BASE-02` **grep-compatible-core** — the familiar switches keep their `grep` meanings:
+`-e/--regexp` (explicit pattern — needed to search for a word that is also a subcommand name),
+`-i` (ignore case), `-w` (whole word), `-l` (paths only), `-c` (count per file), plus `--json`
+(one object per match) and `--hidden`. A user who knows `grep` must not have to learn a dialect
+for the parts `grep` already defines.
+
+`WM-BASE-03` **structure-is-a-first-class-filter** — the pattern is OPTIONAL, because a query may
+be purely structural (`--heading` alone is a valid search). The AST filters:
+
+| group | flags |
+|---|---|
+| code | `--no-code`, `--code`, `--code-lang <langs>` (implies `--code`) |
+| sections | `--in <heading-regex>` (that section INCLUDING sub-sections), `--heading`, `--level <n\|2..3\|>=2>`, `--num <1.2\|1.2.*\|>=1.2,<3.5>`, `--depth <n>` |
+| frontmatter | `--fm KEY=REGEX` (repeatable, AND) |
+| inline emphasis | `--bold`, `--italic`, `--code-span`, `--strike` (each takes the REGEX to match inside that span type) |
+| bracketed spans | `--class` (OR), `--class-all` (AND), `--span-class` |
+| lists | `--list`, `--no-list` |
+| GFM nodes | `--node`/`--no-node` over `table,quote,math,url,image,html,svg,footnote`, plus one sugar flag per kind |
+
+`WM-BASE-04` **`--where` is the composable form and SUPERSEDES the flags** — a boolean DSL
+(`path`, `name`, `fm.KEY`, `links-to`/`linked-from` semijoins, with `and`/`or`/`not` and
+grouping) e.g. `--where '(path "**/memory/*.md" or path "**/archive/*.md") and not code and
+fm.column "dev"'`. `MUST NOT` be combined with the individual filter flags: the flags are an
+implicit AND-chain and mixing the two makes precedence ambiguous, so the tool rejects the
+combination rather than guessing.
+
+`WM-BASE-05` **a-pipe-must-not-panic** — the binary resets `SIGPIPE` to its default disposition
+at startup so `memgrep … | head` exits quietly instead of dying on `EPIPE`. Below the usual
+abstraction level of this spec, and stated anyway: it is invisible until a shell pipeline breaks,
+and then it looks like a crash in the tool rather than a missing two-line startup call.
+
+## WM-FACT — the one-fact-per-line format
+
+`WM-FACT-01` **a-second-memory-shape** — `memgrep fact` queries a representation DISTINCT from the
+page/atom/lesson model the rest of this spec describes: an append-only log of one fact per LINE.
+It is not a degraded page and pages are not a degraded log; the two coexist and no rule from one
+governs the other.
+
+`WM-FACT-02` **the-line-grammar** —
+
+<!-- @spec:fact-grammar v1 — authoritative -->
+```text
+<ISO-timestamp> <tag> <tag> … :: <fact text>
+```
+
+The separator is a space-padded ` :: `. Tags are whitespace-separated tokens in the middle field:
+`#<category>` · `@<component>` · `sess:<id>` · `kind:<k>`. A line lacking the timestamp or the
+`::` separator is not a fact and is skipped.
+
+`WM-FACT-03` **the-query-surface** — `--cat` (repeatable / comma list, OR over `#<cat>`),
+`--comp` (OR over `@<comp>`), `--session` (`sess:<id>`), `--kind` (`kind:<k>`), `--since`/`--until`
+(compared LEXICOGRAPHICALLY against the leading ISO timestamp, which is exactly why the timestamp
+leads the line), and an optional positional regex matched against the fact TEXT only — never
+against the tags, so a category name in the prose cannot masquerade as a tag.
+
+`WM-FACT-04` **notes-are-OFF-here** — `--with-notes` defaults to OFF for `fact` (unlike its
+historical default elsewhere), because a fact line is already the atomic unit: appending a whole
+file's lessons to each matched LINE would return the same block once per hit.
 
 ## WM-LINT — the lint contract
 
