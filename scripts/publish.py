@@ -151,8 +151,20 @@ NC     = "\033[0m" if _C else ""
 def cprint(msg: str) -> None:
     print(msg, flush=True)
 
+# Wall-clock bound for the FULL test suite. The generic 300 s below is sized for
+# a lint/scan invocation and cannot fit a real suite: this plugin ships 13,618
+# tests, which reached only 47% in 300 s (~16 tests/s ⇒ ~850 s for a clean run).
+# A cap the suite cannot finish inside does not make the gate stricter — it makes
+# it UNSATISFIABLE, and a timeout is indistinguishable from a hang, so it asserts
+# nothing about the code. The gate itself is unchanged: every test must still
+# pass. 1800 s is headroom (~2x the measured clean run), and still bounds a truly
+# wedged suite an order of magnitude below anything a human would wait out.
+_TEST_SUITE_TIMEOUT_SEC = 1800
+
+
 def run(
     cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False,
+    timeout: int = 300,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command, stream output, fail-fast on error."""
     cprint(f"  {BLUE}$ {' '.join(cmd)}{NC}")
@@ -161,9 +173,9 @@ def run(
     # every other failure path uses. Catch it and exit 1.
     try:
         result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
-                                capture_output=capture, timeout=300)
+                                capture_output=capture, timeout=timeout)
     except subprocess.TimeoutExpired:
-        cprint(f"  {RED}Command timed out after 300s: {' '.join(cmd)}{NC}")
+        cprint(f"  {RED}Command timed out after {timeout}s: {' '.join(cmd)}{NC}")
         sys.exit(1)
     if check and result.returncode != 0:
         cprint(f"  {RED}Command failed (exit {result.returncode}){NC}")
@@ -1023,9 +1035,9 @@ def run_gate(root: Path) -> int:
     try:
         te = subprocess.run(
             ["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"],
-            cwd=str(root), timeout=300).returncode
+            cwd=str(root), timeout=_TEST_SUITE_TIMEOUT_SEC).returncode
     except subprocess.TimeoutExpired:
-        cprint(f"  {RED}BLOCKED: Tests timed out after 300s.{NC}")
+        cprint(f"  {RED}BLOCKED: Tests timed out after {_TEST_SUITE_TIMEOUT_SEC}s.{NC}")
         return 1
     if te == 5:
         cprint(f"  {RED}BLOCKED: pytest collected 0 tests.{NC}")
@@ -1213,7 +1225,8 @@ def stage_tests(root: Path) -> None:
         sys.exit(1)
     baseline_browser_pids = _snapshot_browser_pids()
     try:
-        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False)
+        r = run(["uv", "run", "pytest", "tests/", "-x", "-q", "--tb=short"], cwd=root, check=False,
+                timeout=_TEST_SUITE_TIMEOUT_SEC)
     finally:
         killed = _cleanup_browser_orphans(baseline_browser_pids)
         if killed:
