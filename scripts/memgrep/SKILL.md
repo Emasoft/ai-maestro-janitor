@@ -15,7 +15,8 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 
 | Subcommand | What it does |
 |---|---|
-| `recall "SYMPTOM" <memdir>` | rank notes by symptom match → `path — description`, best first; each note's `[^N]` lessons appended (default-on). Also surfaces matching body **ATOMS** as `path#atom-id — <keywords>` (ranked by the atom's keyword surface), interleaved with pages by score. Query the QUESTION's words, not the answer's |
+| `recall "SYMPTOM" <memdir>` | rank notes AND body **ATOMS** by symptom match, best first → one lean TAB row each: `<lmd>⇥<locator>⇥<description>` (locator = the bare atom id for an atom, the path for a page). A TRIAGE list — no bodies, no lessons. Query the QUESTION's words, not the answer's |
+| `recall <ATOM-ID> <memdir>` | the **second hop**: exact-id lookup returning that ONE atom in full (body + its `[^N]` lessons + see-also). This is what makes the lean listing cheap — scan ids, then pay for exactly one atom. A whitespace-free query that matches no atom id falls through to an ordinary symptom search |
 | `find "<query>" <memdir>` | note-level `+`/`-`/wildcard/phrase keyword search (see below); `--only-notes` searches the lessons instead of pages |
 | `find-claude-mem-ref <buffer.md> <wikidir>` | list every wiki ATOM harvested FROM a Claude-memory buffer file → `path#atom-id\t<source-hash>` (the harvest provenance back-reference; see Atoms below) |
 | `index <memdir>` / `reindex <memdir>` | build the persistent SQLite query index `.memgrep/index.db` (gitignored, git-incremental — re-parses only changed files); `--full` rebuilds from scratch. Indexes pages, `[^N]` lessons, AND body atoms |
@@ -26,7 +27,7 @@ Each `--flag v` above is the predicate `flag "v"` (negatives via `not`); compose
 
 ### `recall` / `find` shared flags
 
-`--with-notes` (default ON — resolve+append `[^N]` lessons) · `--no-notes` (body only) · `--full-notes` (keep each lesson's leading `[…]` metadata prefix; default stripped — URLs/images always kept) · `--sort score|ocd|lmd` (default `score`=relevance) · `--order asc|desc` (default `desc`) · `--since <ISO>` / `--until <ISO>` over `--date-field ocd|lmd` (default `lmd`) · `--top N` (default 10) · `--use-index` (force the SQLite sidecar; auto-used when fresh, else the live walk — results always correct).
+`--output basic|medium|full` (**default `basic`** — `basic` is one `<lmd>⇥<locator>⇥<description>` row per hit and nothing else; `medium` adds the atom's body; `full` is the rich record — body + lessons + see-also + keywords — a DEBUGGING layer, not a richer default. Measured end-to-end on the frozen benchmark, `basic` + one hop costs **247 tokens/query against 441** for the old always-rich output, at identical accuracy) · `--with-keywords` (print the recall surface; implied by `full`) · `--with-notes` (append `[^N]` lessons — default ON for `full`, OFF for the lean layers, and an explicit flag always wins) · `--no-notes` (body only) · `--full-notes` (keep each lesson's leading `[…]` metadata prefix; default stripped — URLs/images always kept) · `--sort score|ocd|lmd` (default `score`=relevance) · `--order asc|desc` (default `desc`) · `--since <ISO>` / `--until <ISO>` over `--date-field ocd|lmd` (default `lmd`) · `--top N` (default 10) · `--use-index` (force the SQLite sidecar; auto-used when fresh, else the live walk — results always correct).
 
 Render is token-economical: an inline footnote ref shows as a bare `[9]`; after the body memgrep appends `[9] - <lesson WHY>.` (the on-disk `[^9]`/`[^9]:` form does not leak). OCD/LMD are read from frontmatter `ocd`/`lmd` (aliases `created`/`updated`) or a lesson's `[ocd:… lmd:…]` prefix.
 

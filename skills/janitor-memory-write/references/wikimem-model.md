@@ -398,9 +398,11 @@ path#atom-id — <keywords>          # the locator + the atom's metadata surface
 also see: [[related-memory]], …    # the [[wikilinks]] in its body
 ```
 
-(`--no-notes` keeps the body, drops the lessons + see-also.) A PAGE hit, by contrast, stays
-a one-line `path — description` with the page's lessons appended — the page is a navigation
-surface, the atom is the granular memory returned in full.
+That is the shape of the SECOND HOP (`memgrep recall <ATOM-ID>`, or any `--output full`
+search). A plain search returns the lean triage row instead — `<lmd>⇥<locator>⇥<description>`,
+no body, no lessons — because paying for every hit's full record is the cost the two-hop
+design removes. A PAGE hit's locator is its path: the page is a navigation surface, while the
+atom is the granular memory the hop returns in full.
 
 **Authoring discipline:** give each durable fact its own `^id [keywords: …]` marker so it is
 findable on its own, and attach its history/relations AS the fact's own `[^N]` references +

@@ -96,7 +96,9 @@ answer's jargon (its author indexed `description` by the question):
 ```bash
 SYMPTOM="the symptom in the user's / the error's words"
 if command -v memgrep >/dev/null 2>&1; then
-  memgrep recall "$SYMPTOM" "${ROOTS[@]}"          # pages ranked best-first: path — description
+  memgrep recall "$SYMPTOM" "${ROOTS[@]}"          # HOP 1 — triage rows: <lmd> <id-or-path> <desc>
+  # HOP 2 — pay for exactly the one you picked:
+  #   memgrep recall <ATOM-ID> "${ROOTS[@]}"        # that atom in full, with its lessons
 else
   grep -rliE "$SYMPTOM" "${ROOTS[@]}" 2>/dev/null  # fallback: degrade, never break
 fi
@@ -129,8 +131,8 @@ hits by score. A hit is one of two shapes:
   `lessons learned:` group (`# Lessons Learned`), and a `see also:` group (`# See also`
   — each def links out to a related memory). Only non-empty groups print. You get
   the whole fact WITH its history + relations; no need to skim the page.
-- a plain `path — description` is the WHOLE page (a navigation surface), with the
-  page's `[^N]` lessons appended.
+- a row whose locator is a PATH (not an atom id) is the WHOLE page — a navigation
+  surface. Open it, or hop on the atom you actually want.
 
 notes/lessons/see-also are **per-ATOM** (tied to the atom by its inline `[^N]` footnote
 references — the atom's see-also is a footnote whose def sits under the page's `# See also`
@@ -197,9 +199,11 @@ into radiating pages instead of copying them into each element.
 
 ## Output
 
-A short ranked list of `path — description` (memgrep) or paths (grep), plus the
-hub you landed on for a file-anchored recall. Read the few you need; do NOT dump
-full page bodies into the conversation — open the one the task requires.
+A short ranked list of `<lmd>⇥<id-or-path>⇥<description>` triage rows (memgrep) or
+paths (grep), plus the hub you landed on for a file-anchored recall. The description
+is a triage surface, not the answer: pick ONE and take the second hop
+(`memgrep recall <ATOM-ID>`). Do NOT dump full page bodies into the conversation —
+that is precisely the cost the two-hop shape exists to avoid.
 
 ## Examples
 
