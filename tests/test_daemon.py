@@ -109,6 +109,15 @@ def harness(tmp_path: Path):
     # Fire tasks every second during tests so the assertion window is short.
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_MARKETPLACE_REFRESH_INTERVAL"] = "1"
     base_env["CLAUDE_PLUGIN_OPTION_DAEMON_USER_PLUGINS_UPDATE_INTERVAL"] = "1"
+    # Forcing the cadences to 1 s is not enough on its own: the two bulk tasks
+    # share ONE serial lane, so the second spawns only after the first child is
+    # REAPED — and a reap happens on the _BULK_RECHECK_SEC beat. At the 5 s
+    # default that is up to 10 s of pure poll latency inside the 30 s wait,
+    # leaving too little headroom for two cold `uv run` child boots on a loaded
+    # machine (observed: passing at load ~5, failing at load ~40-74). Shrinking
+    # the beat removes the latency the test does not mean to measure; the
+    # assertion — that BOTH tasks actually ran — is unchanged.
+    base_env["CLAUDE_PLUGIN_OPTION_DAEMON_BULK_RECHECK_INTERVAL"] = "1"
 
     spawned: list[subprocess.Popen[bytes]] = []
 

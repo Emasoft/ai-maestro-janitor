@@ -194,7 +194,18 @@ _LOOP_CEILING_SEC = 60
 # stamp lands at REAP time, so this beat bounds both a finished child's reap
 # latency and the gap before the next queued bulk task spawns — and a lane-busy
 # loop pass is just flag stats + one waitpid, so 5 s costs ~nothing.
-_BULK_RECHECK_SEC = 5
+#
+# Env-tunable like every sibling cadence above. It was the ONE lane knob left
+# hardcoded, and that made it unobservable from outside: a caller waiting on N
+# queued bulk tasks pays this beat N times as pure latency with no way to shorten
+# it, so a wait bound sized for the tasks' real work still goes red on the poll
+# granularity alone (this flaked tests/test_daemon.py's 30 s two-task wait).
+# max(1, …) is load-bearing: a 0 would clamp the main-loop sleep to a busy-spin
+# for the whole ~20 min of a bulk run — the exact starvation this constant exists
+# to prevent (oauth-rotation incident, 2026-07-17).
+_BULK_RECHECK_SEC = max(
+    1, _env_interval("CLAUDE_PLUGIN_OPTION_DAEMON_BULK_RECHECK_INTERVAL", 5)
+)
 
 # Grace added on top of _WORKLOAD_TIMEOUT_SEC before the parent hard-kills a
 # detached background child. The child's own _run_workload caps should end it
