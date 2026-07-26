@@ -540,3 +540,46 @@ the anti-pattern). An atom's dated superseded-lessons ARE its changelog and TRAV
 deterministic + FP-free — it catches an unquoted desc, a body-less lesson, an oversized atom, a
 supersession missing its `SUPERSEDED BODY:`, a dangling footnote, and a one-sided `[[link]]`. A
 non-zero exit is a defect to fix NOW, before moving on.
+
+## THE RECALL LAW — illustration + the two corollaries (moved out of the rule, 2026-07-26)
+
+The rule states the law and both corollaries normatively. The worked example and the incidents
+that produced the corollaries live here, because the rule ships in every session's context floor
+and that floor is capped.
+
+### Indexing by the question — the worked example
+
+- WRONG: "OAuth creds live in the macOS keychain services." (Findable only if you already know
+  the answer is "keychain".)
+- RIGHT: "rotator failed, had to log in manually — where are the creds / why did the swap fail"
+  — with the keychain fact in the BODY.
+
+### Corollary 1 — appending to a page must extend its `description:`
+
+`memgrep recall` ranks on `description + title + tags` and NEVER the body. So a fact or `[^N]`
+lesson appended under a description that does not mention its symptom is **unfindable** — you
+wrote it, and recall still misses it.
+
+**Incident, 2026-07-26.** Correct lessons about an OAuth *rotation failure* were appended to the
+page `claude-subscription-usage-endpoint`, whose description covered only "how do I read my 5h/7d
+usage %". A symptom query for the rotation failure ranked a DIFFERENT page first; the new lessons
+did not surface at all. Adding the rotation symptoms ("account rotation stopped finding a safe
+target", "every account looks maxed at the same time") to `description:` fixed it immediately.
+
+The description must describe the page **as it is now**, not as it was when created. A page that
+grows new subjects and keeps its birth description silently loses them.
+
+### Corollary 2 — a lesson that constrains CODE ships with an executable check
+
+A note explains a guard; it is not the guard.
+
+**Incident, same day, same corpus.** That same page already carried the lesson "DO NOT call this
+endpoint with a default or generic `User-Agent` — it requires `claude-code/*` and drops anything
+else into an aggressive rate-limit bucket." Meanwhile `ai-maestro-janitor`'s own rotator had been
+sending `User-Agent: claude-account-rotator` to that exact endpoint on a 60 s beat for weeks. The
+lesson was correct, well-indexed, and recalled correctly — and changed nothing, because no code
+path consulted it. The bug was found by auditing the code, not by reading the memory.
+
+So when a lesson says "never do X in code", land the thing that FAILS when X happens — a test, a
+lint rule, a publish gate — in the SAME change that records the lesson. The lesson then explains
+*why* the check exists, which is the job prose is actually good at.
