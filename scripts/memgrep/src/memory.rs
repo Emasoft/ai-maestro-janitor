@@ -799,8 +799,18 @@ fn render_atom_record(path: &Path, atom_id: &str, full_notes: bool, with_notes: 
     if !with_notes {
         return out;
     }
+    out.push_str(&render_atom_notes(path, &atom.body, full_notes));
+    out
+}
+
+/// The grouped `[^N]` footnote block an atom's body references, WITHOUT the body itself — the half
+/// of `render_atom_record` the lean output layers need on their own (an explicit `--with-notes` on
+/// `--output basic` wants the lessons, not a second copy of the body). Returns the empty string when
+/// the atom cites no footnotes, so the caller never has to test for an empty block.
+fn render_atom_notes(path: &Path, atom_body: &str, full_notes: bool) -> String {
+    let mut out = String::new();
     // The footnotes THIS atom's body references inline, resolved in body-reference order.
-    let labels = atom_referenced_labels(&atom.body);
+    let labels = atom_referenced_labels(atom_body);
     if labels.is_empty() {
         return out;
     }
@@ -3285,6 +3295,23 @@ enum SortKey {
     Lmd,
 }
 
+/// How much to print per result — the token-saving core of the memory system.
+///
+/// Retrieval cost is END-TO-END: what the search prints PLUS the follow-up read it forces. So the
+/// default is deliberately the leanest one, because `cost(basic) = N × one_line + 1 × full_atom`
+/// beats `cost(full) = N × everything` for every N > 1, and the gap widens with N. `Basic` is only
+/// cheap because `memgrep recall <atom-id>` exists as the second hop: scan a dense id list, then
+/// pay for exactly the ONE atom you wanted.
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
+enum OutputLayer {
+    /// One `<lmd>\t<locator>\t<description>` line per result. No body, no lessons, no keywords.
+    Basic,
+    /// The basic line, then the atom's BODY. No lessons, no see-also, no keywords.
+    Medium,
+    /// Everything: the rich record — body, lessons, see-also, keywords. A DEBUGGING mode.
+    Full,
+}
+
 /// Ascending or descending sort direction (default descending: newest / highest first).
 #[derive(Clone, Copy, PartialEq, ValueEnum)]
 enum Order {
@@ -3306,9 +3333,18 @@ enum DateField {
 )]
 struct RecallArgs {
     /// The symptom / question phrase (quote it): the words you HAVE, not the answer's jargon.
+    /// A bare, whitespace-free ATOM ID instead performs the exact-lookup SECOND HOP: that one
+    /// atom, in full. Falls back to a normal symptom search when no atom carries the id.
     query: String,
     /// Memory dir(s) to search (default: current dir).
     paths: Vec<PathBuf>,
+    /// How much to print per result: `basic` (default), `medium` (+ the atom body), `full`
+    /// (everything — a debugging mode). See `OutputLayer`.
+    #[arg(long = "output", value_enum, default_value_t = OutputLayer::Basic)]
+    output: OutputLayer,
+    /// Also print each result's keyword surface. Off in basic/medium; always on in `full`.
+    #[arg(long = "with-keywords")]
+    with_keywords: bool,
     /// Show at most this many notes.
     #[arg(long = "top", default_value_t = 10)]
     top: usize,
@@ -3620,7 +3656,13 @@ fn recall_terms(query: &str) -> Result<Vec<String>> {
 /// Both `RecallArgs` and `FindArgs` build one (`as_finalize`), so `finalize_recall` is the SINGLE
 /// date-filter + sort + print path for both commands (no duplicated logic, identical output rules).
 struct FinalizeOpts {
-    no_notes: bool,
+    /// Append each result's resolved `[^N]` lessons? RESOLVED by the caller from `--output` plus the
+    /// explicit `--with-notes`/`--no-notes`, so this is the single boolean the printer obeys — the
+    /// layer decides the DEFAULT (off below `full`, since the lesson append is the single largest
+    /// block the tool emits), an explicit flag still overrides it.
+    want_notes: bool,
+    layer: OutputLayer,
+    with_keywords: bool,
     full_notes: bool,
     sort: SortKey,
     order: Order,
@@ -3639,7 +3681,7 @@ struct FinalizeOpts {
 /// chosen sort, and print the top results (with resolved lessons appended when wanted). Shared by the
 /// walk and index paths AND by both `recall` and `find` so the output is identical across source/command.
 fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
-    let want_notes = !a.no_notes;
+    let want_notes = a.want_notes;
     // PRECISION-FIRST (recall only): if ANY note matched the symptom surface (description/title/tags),
     // return only those, ranked by hit count; fall back to body-only matches ONLY when nothing matched
     // the surface. For `find` this is OFF — its rows already passed the +/- gate, so even a zero-
@@ -3707,7 +3749,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         }
     }
 
-    for (_score, path, summary, pathbuf, _ocd, _lmd, atom_id, atom_desc) in
+    for (_score, path, summary, pathbuf, _ocd, lmd, atom_id, atom_desc) in
         scored.into_iter().take(a.top)
     {
         let s = summary.trim();
@@ -3716,6 +3758,47 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         } else {
             s.to_string()
         };
+        // ── LAYERED OUTPUT (basic / medium) ──────────────────────────────────────────────
+        // One TAB-separated row of FIXED columns — `<lmd>\t<locator>\t<description>` — so
+        // `cut -f2` and `awk -F'\t'` are exact rather than approximate. Greppability is a
+        // promised property of this output, not an accident of it, which is why the columns
+        // are tab-delimited and why an absent date prints `-`: an empty first field would
+        // silently shift every later column for exactly the rows a search most often returns.
+        // The locator is the ATOM ID (the key `recall <id>` takes) and deliberately NOT the
+        // path — a memory path runs ~25 tokens, so printing it on every row would spend more
+        // than the whole atom the agent is hunting for. `full` still prints `path#id`.
+        if a.layer != OutputLayer::Full {
+            let label: &str = match (&atom_id, atom_desc.as_deref()) {
+                (Some(_), Some(d)) if !d.is_empty() => d,
+                _ => shown.as_str(),
+            };
+            let date = lmd.as_deref().unwrap_or("-");
+            let locator = atom_id.as_deref().unwrap_or(path.as_str());
+            println!("{date}\t{locator}\t{label}");
+            if a.with_keywords && !shown.is_empty() {
+                println!("\tkeywords: {shown}");
+            }
+            // MEDIUM escalates to the atom's BODY only — never its lessons/see-also, which is
+            // what separates it from `full`. A PAGE row has no body of its own, so medium is
+            // identical to basic there rather than inventing one.
+            if a.layer == OutputLayer::Medium
+                && let Some(aid) = &atom_id
+            {
+                let body = render_atom_record(&pathbuf, aid, a.full_notes, false);
+                if !body.trim().is_empty() {
+                    print!("{body}");
+                }
+            }
+            // An EXPLICIT `--with-notes` still wins over the layer's default-off — and it appends
+            // the lessons ALONE, never a second copy of the body medium already printed.
+            if want_notes
+                && let Some(aid) = &atom_id
+                && let Some(atom) = resolve_atoms(&pathbuf).into_iter().find(|x| x.id == *aid)
+            {
+                print!("{}", render_atom_notes(&pathbuf, &atom.body, a.full_notes));
+            }
+            continue;
+        }
         // An ATOM result prints the locator `path#atom-id — <keywords>` then its FULL aggregated record
         // (the main content + ITS OWN referenced `[^N]` footnotes, GROUPED by their defining pooled
         // section: notes / lessons learned / see also). A PAGE result prints `path — <summary>` and
@@ -3736,6 +3819,12 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
                     println!("{path}#{aid}");
                 } else {
                     println!("{path}#{aid} — {line_summary}");
+                }
+                // `full` always exposes the recall surface (it is a DEBUGGING layer — "why did this
+                // rank?" is unanswerable without it). Skipped only when the locator line already IS
+                // the keyword surface, i.e. an atom with neither desc nor body fell back to it.
+                if a.with_keywords && !shown.is_empty() && line_summary != shown.as_str() {
+                    println!("\tkeywords: {shown}");
                 }
                 // The body always prints (it IS the memory); `--no-notes` suppresses only lessons+see-also.
                 print!(
@@ -3765,7 +3854,15 @@ impl RecallArgs {
     /// Project the recall flags onto the shared `FinalizeOpts` (the date-filter + sort + print knobs).
     fn as_finalize(&self) -> FinalizeOpts {
         FinalizeOpts {
-            no_notes: self.no_notes,
+            // `full` keeps the historic default-ON append; the lean layers require an EXPLICIT
+            // `--with-notes`, because lessons are the biggest block recall prints and paying for
+            // them on every hit is exactly the cost `basic` exists to remove.
+            want_notes: match self.output {
+                OutputLayer::Full => !self.no_notes,
+                _ => self.with_notes,
+            },
+            layer: self.output,
+            with_keywords: self.with_keywords || self.output == OutputLayer::Full,
             full_notes: self.full_notes,
             sort: self.sort,
             order: self.order,
@@ -3778,9 +3875,56 @@ impl RecallArgs {
     }
 }
 
+/// A bare, whitespace-free query is a candidate ATOM ID for the exact-lookup second hop. A
+/// multi-word phrase never is — that is unambiguously a symptom search.
+fn atom_id_query(query: &str) -> Option<&str> {
+    let q = query.trim();
+    (q.len() >= 2 && !q.chars().any(char::is_whitespace)).then_some(q)
+}
+
+/// The `memgrep recall <ATOM-ID>` SECOND HOP: print that one atom in full (the layered `basic`
+/// listing is only cheap because this exists — scan a dense id list, then pay for exactly one atom).
+///
+/// Returns false when NO atom carries the id, and the caller then falls through to the ordinary
+/// symptom search. That fall-through is load-bearing: a one-word symptom query (`recall cache`) is
+/// indistinguishable from an id by shape alone, so the shortcut must never be able to swallow one.
+fn recall_one_atom(paths: &[PathBuf], hidden: bool, id: &str, full_notes: bool) -> bool {
+    let want = id.to_lowercase();
+    let mut found = false;
+    for p in collect_md(paths, hidden) {
+        for atom in resolve_atoms(&p) {
+            if !atom.id.eq_ignore_ascii_case(&want) {
+                continue;
+            }
+            found = true;
+            let disp = p.display();
+            match atom.desc.as_deref() {
+                Some(d) if !d.is_empty() => println!("{disp}#{} — {d}", atom.id),
+                _ => println!("{disp}#{}", atom.id),
+            }
+            let kw = atom.keywords.join(" ");
+            if !kw.is_empty() {
+                println!("\tkeywords: {kw}");
+            }
+            print!("{}", render_atom_record(&p, &atom.id, full_notes, true));
+        }
+    }
+    found
+}
+
 pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
     let a =
         RecallArgs::parse_from(std::iter::once("recall".to_string()).chain(args.iter().cloned()));
+
+    // SECOND HOP first: an exact atom-id match is the strongest signal a query can carry, so it
+    // outranks any symptom scoring. Deliberately walk-only — the id is exact, so there is nothing
+    // for the index to rank, and correctness must not depend on the index being fresh.
+    if let Some(id) = atom_id_query(&a.query)
+        && recall_one_atom(&a.paths, a.hidden, id, a.full_notes)
+    {
+        return Ok(());
+    }
+
     let terms = recall_terms(&a.query)?;
 
     // SOURCE SELECTION: with `--use-index`, use the persistent index when it EXISTS (else fall back
@@ -3834,6 +3978,13 @@ struct FindArgs {
     /// lesson's text and return the matching `[N] - …` lessons, NOT the memory pages.
     #[arg(long = "only-notes")]
     only_notes: bool,
+    /// How much to print per result: `basic` (default), `medium` (+ the atom body), `full`
+    /// (everything — a debugging mode). See `OutputLayer`.
+    #[arg(long = "output", value_enum, default_value_t = OutputLayer::Basic)]
+    output: OutputLayer,
+    /// Also print each result's keyword surface. Off in basic/medium; always on in `full`.
+    #[arg(long = "with-keywords")]
+    with_keywords: bool,
     /// Show at most this many results.
     #[arg(long = "top", default_value_t = 10)]
     top: usize,
@@ -3875,7 +4026,13 @@ impl FindArgs {
     /// page-lessons append is meaningless when the result IS lessons) so finalize never double-appends.
     fn as_finalize(&self) -> FinalizeOpts {
         FinalizeOpts {
-            no_notes: self.no_notes || self.only_notes,
+            want_notes: !self.only_notes
+                && match self.output {
+                    OutputLayer::Full => !self.no_notes,
+                    _ => self.with_notes,
+                },
+            layer: self.output,
+            with_keywords: self.with_keywords || self.output == OutputLayer::Full,
             full_notes: self.full_notes,
             sort: self.sort,
             order: self.order,

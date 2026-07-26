@@ -288,8 +288,10 @@ def _format_context(recall_out: str) -> str | None:
         return None
     body = "\n".join(lines)[:_MAX_CHARS]
     return (
-        "[janitor-memory] Possibly-relevant notes from your memory corpus "
-        "(recall before acting; read a note's body for the answer):\n" + body
+        "[janitor-memory] Possibly-relevant notes from your memory corpus, as "
+        "`<date>  <id-or-path>  <description>` rows — the description is a TRIAGE "
+        "surface, not the answer. Run `memgrep recall <id-or-path>` on the one you "
+        "want to get its full body and lessons:\n" + body
     )
 
 

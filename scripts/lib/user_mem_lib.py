@@ -332,12 +332,29 @@ class UserMemStore:
 _EM_DASH = "—"
 
 
-def _split_hit_line(line: str) -> tuple[Optional[str], str]:
-    """Split a memgrep find hit `<path> — <summary>` into (path, summary).
+# The date column is whatever the note's `lmd:` holds — a bare `2026-07-26` in the wiki corpus, a
+# full `2026-07-26T13:38:44Z` timestamp in user-mem — so it is anchored on a DATE PREFIX plus any
+# non-space tail rather than on a fixed width. `\S*` cannot cross the tab, so the column stays exact.
+_LAYERED_HIT_RE = re.compile(r"^(?P<date>-|\d{4}-\d{2}-\d{2}\S*)\t(?P<loc>[^\t]+)\t(?P<label>.*)$")
 
-    Returns (None, "") when the line has no em-dash separator (defensive: an
-    unexpected line shape is skipped rather than mis-parsed).
+
+def _split_hit_line(line: str) -> tuple[Optional[str], str]:
+    """Split a memgrep find hit into (path, summary), across BOTH output formats.
+
+    The LAYERED row (`--output basic|medium`, memgrep's default since the
+    output-layers change) is `<lmd>\\t<locator>\\t<description>` — fixed,
+    tab-delimited columns, which is a strictly better contract than splitting on
+    an em-dash a summary may itself contain. A user-mem note is a PAGE, so its
+    locator IS the path. The RICH row (`--output full`) keeps the historic
+    `<path> — <summary>` shape, and is still parsed so a user running an older
+    memgrep — or an explicit `--output full` — is never silently returned zero
+    results.
+
+    Returns (None, "") when the line matches neither shape (defensive: an
+    unexpected line is skipped rather than mis-parsed).
     """
+    if m := _LAYERED_HIT_RE.match(line):
+        return m.group("loc").strip(), m.group("label").strip()
     sep = f" {_EM_DASH} "
     idx = line.find(sep)
     if idx < 0:

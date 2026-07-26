@@ -92,6 +92,23 @@ Other commands: `memgrep find "+must -exclude \"exact phrase\"" <dir>` (keyword 
 `--only-notes` searches the lessons), `memgrep overview <dir>` (the project's entry-point
 page), `memgrep reindex <dir>` (refresh the SQLite sidecar).
 
+### Recall is TWO HOPS — that is what makes it cheap
+
+`recall`/`find` print a lean triage list by default: one **`<lmd>⇥<id-or-path>⇥<description>`**
+row per hit (tab-separated fixed columns, so `cut -f2` and `awk -F'\t'` are exact). The
+description is a triage surface, **not the answer**. Scan the list, pick ONE, then take the
+second hop:
+
+```bash
+memgrep recall <ATOM-ID> <dir>     # exact-id lookup: that ONE atom, in full, with its lessons
+```
+
+Measured end-to-end on the frozen benchmark, this costs **247 tokens/query against 441** for
+the old always-rich output, at **identical** accuracy — because you pay the full body once
+instead of N times. `--output medium` adds each hit's body; `--output full` is the rich
+debugging view (body + lessons + see-also + keywords). `--with-keywords` / `--with-notes` add
+one dimension without leaving the lean layer.
+
 ## Memory scopes — pick by what the note CONTAINS
 
 | Scope | Root | Git | Put here |
@@ -112,7 +129,11 @@ cross-linked. **UNSURE → LOCAL.**
 ## Read-the-notes rule — a memory's lessons ARE part of the memory
 
 Reading ANY memory means also reading its `[^N]` lessons — they are *why* the facts are what
-they are and *what not to repeat*. FREE: `memgrep recall`/`find` auto-resolve and append them.
+they are and *what not to repeat*. They arrive with the **second hop** (`memgrep recall
+<ATOM-ID>`), which resolves and appends them. They are NOT free and are no longer attached to
+every search hit: paying for every hit's lessons on every query is exactly the cost the lean
+default removes. So "read the notes" means *take the hop on the note you chose*, not *skim
+whatever the search happened to dump*.
 
 ## The note format
 

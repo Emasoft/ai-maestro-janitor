@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -46,9 +47,43 @@ REPO = Path(__file__).resolve().parent.parent
 DEFAULT_QUERIES = REPO / "tests" / "wikimem_bench" / "queries.json"
 DEFAULT_BASELINE = REPO / "tests" / "wikimem_bench" / "baseline.json"
 
-# A recall result line: an absolute .md path, optionally `#atom-id`, optionally ` — summary`.
-# Anchored on the path so prose in an atom body can never be mistaken for a result row.
+# The binary under test. Overridable so a freshly-built `target/release/memgrep` can be measured
+# BEFORE it is installed — otherwise every measurement silently scores whatever is on PATH, which
+# is the one mistake that would make this instrument report the old build's numbers as the new
+# build's improvement.
+MEMGREP = os.environ.get("MEMGREP_BIN", "memgrep")
+
+# A RICH result line (`--output full`): an absolute .md path, optionally `#atom-id`, optionally
+# ` — summary`. Anchored on the path so prose in an atom body can never be mistaken for a row.
 _RESULT_RE = re.compile(r"^(?P<path>/\S+?\.md)(?:#(?P<atom>\S+))?(?:\s+—\s+(?P<summary>.*))?$")
+
+# A LAYERED result row (`--output basic|medium`, the default): `<lmd>\t<locator>\t<description>`.
+# The date column is anchored on `-` or an ISO date PREFIX rather than "anything before a tab", so a
+# body line that happens to contain a tab can never be counted as a result. The tail is `\S*` because
+# `lmd:` is a bare date in the wiki corpus but a full `…T13:38:44Z` timestamp elsewhere — and `\S*`
+# cannot cross the tab, so the column stays exact either way.
+_LAYERED_RE = re.compile(r"^(?P<date>-|\d{4}-\d{2}-\d{2}\S*)\t(?P<loc>[^\t]+)\t(?P<label>.*)$")
+
+
+def result_key(locator: str) -> str:
+    """Normalize a row's locator to the id the benchmark matches on.
+
+    The layered layers print the ATOM ID alone (a memory path costs ~25 tokens, which is most of
+    what `basic` exists to save) while the rich layer prints `path#atom-id`. Both name the same
+    atom, and atom ids are corpus-unique (the linter's `atom-dup-id` is CRITICAL), so reducing both
+    to the bare id compares formats on WHAT THEY FOUND rather than on how they spell it — which is
+    the only way a format change can be measured instead of merely detected.
+    """
+    page, _, atom = locator.partition("#")
+    if atom:
+        return atom
+    return Path(page).stem if ("/" in page or page.endswith(".md")) else page
+
+
+def expect_key(expect: str) -> str:
+    """The same normalization applied to a query's expected `page#atom` (or bare `page`)."""
+    _, _, atom = expect.partition("#")
+    return atom or expect
 
 
 def estimate_tokens(text: str) -> int:
@@ -68,25 +103,27 @@ def estimate_tokens(text: str) -> int:
 
 def run_recall(query: str, corpus: Path, extra: list[str], top: int) -> str:
     """Run `memgrep recall` and return its stdout (stderr folded in, so a failure is visible)."""
-    cmd = ["memgrep", "recall", query, str(corpus), "--top", str(top), *extra]
+    cmd = [MEMGREP, "recall", query, str(corpus), "--top", str(top), *extra]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     return proc.stdout + proc.stderr
 
 
 def parse_results(out: str) -> list[str]:
-    """Ordered result ids: `page-stem#atom-id` for an atom row, `page-stem` for a page row.
+    """Ordered result ids (normalized by `result_key`), across BOTH output formats.
 
-    Only lines that match the anchored result pattern count, so an atom's body text — which is
-    interleaved with the rows in the current output format — can never be counted as a hit.
+    Only lines matching an anchored result pattern count, so an atom's body text — which is
+    interleaved with the rows in the rich format — can never be counted as a hit.
     """
     ids: list[str] = []
     for line in out.splitlines():
-        m = _RESULT_RE.match(line.rstrip())
-        if not m:
+        line = line.rstrip()
+        if m := _LAYERED_RE.match(line):
+            ids.append(result_key(m.group("loc")))
             continue
-        stem = Path(m.group("path")).stem
-        atom = m.group("atom")
-        ids.append(f"{stem}#{atom}" if atom else stem)
+        if m := _RESULT_RE.match(line):
+            stem = Path(m.group("path")).stem
+            atom = m.group("atom")
+            ids.append(result_key(f"{stem}#{atom}" if atom else stem))
     return ids
 
 
@@ -122,14 +159,13 @@ def atom_body_present(out: str, expect: str, corpus: Path) -> bool:
 def run_hop(expect: str, corpus: Path) -> str:
     """The second hop: obtain the full atom once its id is known.
 
-    `memgrep recall <ATOM-ID>` (the exact-id lookup) does not exist yet, so the hop is priced as
-    the cheapest thing that yields the same content today — the atom's own record from its page.
-    Pricing it as a full symptom search would overstate the hop and unfairly penalise any layered
-    design, which is the opposite of the error worth risking here.
+    `memgrep recall <ATOM-ID>` is the exact-id lookup, and passing a bare id is exactly what an
+    agent does after scanning a `basic` listing — so the hop is priced as the real thing the agent
+    would run, not as a proxy for it.
     """
     _, _, atom_id = expect.partition("#")
     proc = subprocess.run(
-        ["memgrep", "recall", atom_id, str(corpus), "--top", "1"],
+        [MEMGREP, "recall", atom_id, str(corpus), "--top", "1"],
         capture_output=True, text=True, timeout=120,
     )
     return proc.stdout + proc.stderr
@@ -141,7 +177,8 @@ def score(queries: list[dict], corpus: Path, extra: list[str], top: int) -> dict
         out = run_recall(q["q"], corpus, extra, top)
         ids = parse_results(out)
         expect = q["expect"]
-        rank = ids.index(expect) + 1 if expect in ids else 0
+        key = expect_key(expect)
+        rank = ids.index(key) + 1 if key in ids else 0
 
         find_tokens = estimate_tokens(out)
         find_bytes = len(out)

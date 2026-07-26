@@ -296,8 +296,36 @@ decision, or acting on a recurring alert, an agent RECALLS first ("have we hit t
 across the three scope roots, most-specific first.
 
 `WM-RCL-04` **lessons-are-part-of-the-memory** — reading any memory means also reading its
-`[^N]` lessons; `memgrep recall`/`find` auto-resolve and append them. A recalled note without
-its guardrails is half a memory.
+`[^N]` lessons. A recalled note without its guardrails is half a memory. They arrive with the
+SECOND HOP (`WM-RCL-07`), which resolves and appends them; they are NOT attached to every
+search hit. "Read the notes" therefore means *take the hop on the note you chose*, not *skim
+whatever the search dumped*.
+
+`WM-RCL-06` **layered-output** — `MUST`: `recall`/`find` accept `--output basic|medium|full`
+and **default to `basic`**.
+
+| layer | prints per hit | lessons | keywords |
+|---|---|---|---|
+| `basic` (default) | ONE row: `<lmd>⇥<locator>⇥<description>`, TAB-separated fixed columns. The locator is the bare ATOM ID for an atom hit (a memory path costs ~25 tokens — most of what the layer saves) and the PATH for a page hit. An absent date prints `-`, never empty, so a column never shifts | no | no |
+| `medium` | that row + the atom's BODY. A page hit has no body of its own, so medium equals basic there | no | no |
+| `full` | the rich record: `<path>#<atom-id> — <description>`, body, lessons, see-also | yes | yes |
+
+`--with-keywords` / `--with-notes` add ONE dimension without leaving the lean layer, and an
+explicit flag always overrides the layer's default. `full` is a DEBUGGING layer, not a
+richer default.
+
+`WM-RCL-07` **exact-id-second-hop** — `MUST`: `memgrep recall <ATOM-ID>` is an EXACT lookup
+returning that one atom in full. A whitespace-free query is tried as an id first; when no atom
+carries it, the query `MUST` fall through to the ordinary symptom search — a one-word symptom
+query is indistinguishable from an id by shape alone, so the shortcut may never swallow one.
+
+`WM-RCL-08` **retrieval-cost-is-end-to-end** — cost is `tokens(search output) + tokens(the hop
+it forces)`. `cost(basic) = N × row + 1 × atom` beats `cost(full) = N × everything` for every
+`N > 1`, and the gap widens with `N`. A per-call measure would flatter `basic` and hide the hop,
+so conformance is measured END-TO-END by `scripts/wikimem_bench.py` against a FROZEN fixture
+corpus and a committed baseline (`tests/wikimem_bench/baseline.json`). A change `MUST NOT`
+reduce accuracy or raise token cost beyond tolerance. Measured at the layer's introduction:
+**441.4 → 247.0 mean tokens/query (−44%) at identical hit@1/hit@3/hit@10/MRR.**
 
 `WM-RCL-05` **write-after-solving** — after solving a non-trivial problem or making a decision
 not derivable from the code, capture it into the page that OWNS the subject (RECALL first, so
@@ -348,6 +376,9 @@ migrate
 `WM-CLI-02` **read-verbs** — `recall` (rank by symptom), `find` (keyword DSL: `+must`,
 `-exclude`, `"exact phrase"`, wildcards; `--only-notes` searches the lessons), `fact`, `atom`,
 `atom-page`, `links`, `overview`, `find-claude-mem-ref`. Reads are free of side effects.
+`recall` and `find` carry the layered-output surface — `--output basic|medium|full` (default
+`basic`), `--with-keywords`, `--with-notes`/`--no-notes` — and `recall <ATOM-ID>` is the exact
+second hop. See WM-RCL-06/07/08, which own the contract.
 
 `WM-CLI-03` **write-verbs-synthesise-syntax** — `new-page` (valid frontmatter + mandatory Notes
 section; refuses to overwrite), `add-atom` (`--desc` stored QUOTED ≤200 chars; id/dates/syntax
@@ -416,6 +447,22 @@ unchanged" holds for every refusal).
 
 `WM-MIG-06` **repoint-wikilinks** — a move that removes a slug repoints every `[[wikilink]]` to
 it per WM-WIKI-04 so nothing dangles.
+
+`WM-MIG-07` **a-mechanical-repair-must-not-manufacture-recency** — `MUST NOT`: a MECHANICAL
+repair — a lossless syntax/format migration that changes no FACT (re-joining keyword phrases,
+quoting a `desc:`, normalising a date, fixing a bracket) — bumps `lmd:`. Only a change to WHAT
+the page ASSERTS bumps it.
+
+The reason is that `lmd` is not decoration: ranking uses recency as a tie-break, so a
+mechanical touch would silently promote every repaired page above genuinely-updated ones. A
+corpus-wide repair would then reorder the WHOLE corpus's priority without changing a single
+fact — and the damage is invisible, because nothing about the output says the ordering came
+from a formatting pass. A repair tool that has to rewrite 1,000 pages must leave the corpus
+ranking EXACTLY as it found it.
+
+Corollary for verification: "no `lmd` changed" is a cheap, mechanical proof that a migration
+was in fact mechanical. A migration that bumped dates cannot make that claim, so it cannot be
+audited as lossless after the fact.
 
 ## WM-TXN — the editorial transaction + the verify oracle
 

@@ -378,6 +378,24 @@ def test_search_is_scoped_to_user_mem_dir_only(tmp_path):
 
 
 @_needs_memgrep
+def test_split_hit_line_parses_both_memgrep_output_formats():
+    """`_split_hit_line` reads memgrep's layered TAB row and its legacy em-dash row alike."""
+    # LAYERED (memgrep's default since the output-layers change). user-mem stores `lmd:` as a full
+    # ISO TIMESTAMP, not a bare date — anchoring the column on a bare date silently returned ZERO
+    # results for every user-mem search, which is what this case pins.
+    path, summary = user_mem_lib._split_hit_line(
+        "2026-07-26T13:38:44Z\t/tmp/user-mem/000001.md\tthe deployment script needs a keychain check"
+    )
+    assert path == "/tmp/user-mem/000001.md"
+    assert summary == "the deployment script needs a keychain check"
+    # A note with no date still occupies the column, so the later columns never shift.
+    assert user_mem_lib._split_hit_line("-\t/tmp/user-mem/000002.md\tno date")[0] == "/tmp/user-mem/000002.md"
+    # LEGACY em-dash row (`--output full`, or an older memgrep) must keep working.
+    assert user_mem_lib._split_hit_line("/tmp/user-mem/000003.md — a summary")[0] == "/tmp/user-mem/000003.md"
+    # An unexpected shape is SKIPPED, never mis-parsed into a bogus path.
+    assert user_mem_lib._split_hit_line("just some prose with no separator") == (None, "")
+
+
 def test_search_results_are_prefixed_with_immutable_number(tmp_path, memgrep_env):
     """Live search via memgrep (query on STDIN — F13) returns hits annotated with each memory's immutable number."""
     store = user_mem_lib.UserMemStore(tmp_path / "user-mem")

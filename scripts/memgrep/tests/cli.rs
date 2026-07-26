@@ -743,7 +743,7 @@ const NOTES_DIR: &str = "tests/fixtures/notes";
 fn recall_with_notes_appends_resolved_lessons_by_default() {
     // recall is --with-notes by default: after the ranked note it appends its resolved [^N]
     // lessons as a token-economical `[N] - <WHY>` list, so one recall yields facts + every WHY.
-    let o = run(&["recall", "widget retry cap", NOTES_DIR]);
+    let o = run(&["recall", "widget retry cap", NOTES_DIR, "--output", "full"]);
     assert!(o.contains("note_plain.md"), "the note must rank:\n{o}");
     // The two lessons appear as bare-number list entries (NOT the on-disk `[^N]:` form).
     assert!(
@@ -779,7 +779,7 @@ fn recall_no_notes_returns_body_only() {
 fn recall_strips_note_metadata_prefix_by_default() {
     // A lesson's leading `[...]` metadata prefix is recognized + stripped by default — the agent
     // gets the WHY, not the bookkeeping (ocd/lmd/class/...).
-    let o = run(&["recall", "rotator keychain", NOTES_DIR]);
+    let o = run(&["recall", "rotator keychain", NOTES_DIR, "--output", "full"]);
     assert!(o.contains("note_meta.md"), "the note must rank:\n{o}");
     assert!(
         o.contains("[9] - ") && o.contains("OS keychain"),
@@ -794,7 +794,14 @@ fn recall_strips_note_metadata_prefix_by_default() {
 #[test]
 fn recall_full_notes_restores_metadata_prefix() {
     // --full-notes restores the full form `[N] - [metadata...] <text>` for when the agent wants it.
-    let o = run(&["recall", "rotator keychain", NOTES_DIR, "--full-notes"]);
+    let o = run(&[
+        "recall",
+        "rotator keychain",
+        NOTES_DIR,
+        "--full-notes",
+        "--output",
+        "full",
+    ]);
     assert!(
         o.contains("ocd:2026-06-01") && o.contains("lmd:2026-06-09"),
         "--full-notes must restore the metadata prefix:\n{o}"
@@ -809,7 +816,7 @@ fn recall_full_notes_restores_metadata_prefix() {
 fn recall_keeps_urls_and_images_in_minimal_notes() {
     // URLs / markdown links / image links are load-bearing and ALWAYS survive — even in the
     // default minimal render; only the `[...]` metadata prefix is strippable, never resources.
-    let o = run(&["recall", "build cache lockfile", NOTES_DIR]);
+    let o = run(&["recall", "build cache lockfile", NOTES_DIR, "--output", "full"]);
     assert!(o.contains("note_link.md"), "the note must rank:\n{o}");
     assert!(
         o.contains("https://example.com/cache-bug"),
@@ -1621,6 +1628,137 @@ fn walk_and_dedups_overlapping_positional_paths() {
 /// appear nowhere in the page surface, plus a page-level `[^1]` lesson sentinel.
 const ATOM_CORPUS: &str = "---\nname: oauth-hub\ndescription: oauth rotation overview notes\ntags: [oauth]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator, type: reference, claude_mem_ref: feedback_oauth.md, claude_mem_hash: abcd1234]\nThe rotator drains the live account first when near a limit.\n^keychain [keywords: zqxkeychain creds]\nCredentials live in the macOS keychain, never a slots dir.\n\n## Notes and lessons learned\n[^1]: page-level lesson sentinel zqxlesson.\n";
 
+// ── OUTPUT LAYERS + the exact-id second hop ────────────────────────────────────────────────
+// A fixture whose atom has a `desc:` DISTINCT from its body, so a test can tell the layers apart:
+// with desc == body-prefix (the ATOM_CORPUS case) "medium printed the body" is unfalsifiable.
+const LAYER_CORPUS: &str = "---\nname: layer-hub\ndescription: layered output fixture\ntags: [layers]\nocd: 2026-01-01\nlmd: 2026-06-02\n---\n# Layer hub\n\n^zqxlayer-atom [desc: \"a one line summary\", keywords: zqxlayerkw phrase_two, ocd: 2026-01-01, lmd: 2026-06-02]\nThe zqxbody sentence only medium and full may print.[^1]\n\n## Notes and lessons learned\n[^1]: zqxlayerlesson — only full or an explicit --with-notes may print this.\n";
+
+#[test]
+fn recall_basic_is_the_default_and_prints_one_lean_row() {
+    // The DEFAULT must be the lean layer. Measured on the frozen benchmark this is what takes the
+    // END-TO-END cost from 441.4 to 247.0 tokens/query at IDENTICAL accuracy — so a regression that
+    // quietly restores the rich default would nearly double retrieval cost with nothing failing.
+    let d = TempDir::new("layer-basic");
+    d.write("layer-hub.md", LAYER_CORPUS);
+    let o = run(&["recall", "zqxlayerkw", d.as_str()]);
+    assert!(
+        o.contains("2026-06-02\tzqxlayer-atom\ta one line summary"),
+        "basic must print `<lmd>\\t<atom-id>\\t<description>`:\n{o}"
+    );
+    assert!(
+        !o.contains("layer-hub.md"),
+        "basic must NOT print the page path on an atom row — a memory path is ~25 tokens, which is \
+         most of what this layer exists to save:\n{o}"
+    );
+    assert!(!o.contains("zqxbody"), "basic must not print the body:\n{o}");
+    assert!(
+        !o.contains("zqxlayerlesson"),
+        "basic must not append lessons:\n{o}"
+    );
+    assert!(
+        !o.contains("phrase_two"),
+        "basic must not print the keyword surface:\n{o}"
+    );
+}
+
+#[test]
+fn recall_medium_adds_the_body_but_never_the_lessons() {
+    let d = TempDir::new("layer-medium");
+    d.write("layer-hub.md", LAYER_CORPUS);
+    let o = run(&["recall", "zqxlayerkw", d.as_str(), "--output", "medium"]);
+    assert!(
+        o.contains("\tzqxlayer-atom\t"),
+        "medium keeps the basic row:\n{o}"
+    );
+    assert!(o.contains("zqxbody"), "medium must print the BODY:\n{o}");
+    assert!(
+        !o.contains("zqxlayerlesson"),
+        "the lessons are what separate medium from full:\n{o}"
+    );
+}
+
+#[test]
+fn recall_full_prints_the_rich_record_including_keywords() {
+    let d = TempDir::new("layer-full");
+    d.write("layer-hub.md", LAYER_CORPUS);
+    let o = run(&["recall", "zqxlayerkw", d.as_str(), "--output", "full"]);
+    assert!(
+        o.contains("layer-hub.md#zqxlayer-atom — a one line summary"),
+        "full keeps the `path#atom-id — desc` locator (the path an editor needs):\n{o}"
+    );
+    assert!(o.contains("zqxbody"), "full prints the body:\n{o}");
+    assert!(
+        o.contains("zqxlayerlesson"),
+        "full appends the lessons:\n{o}"
+    );
+    assert!(
+        o.contains("phrase_two"),
+        "full always prints the keyword surface:\n{o}"
+    );
+}
+
+#[test]
+fn recall_lean_layers_honour_explicit_note_and_keyword_flags() {
+    // The layer sets the DEFAULT; an explicit flag still wins. And `--with-notes` on a lean layer
+    // must append the lessons ALONE — never a second copy of a body the layer already decided
+    // not to print.
+    let d = TempDir::new("layer-flags");
+    d.write("layer-hub.md", LAYER_CORPUS);
+    let kw = run(&["recall", "zqxlayerkw", d.as_str(), "--with-keywords"]);
+    assert!(
+        kw.contains("keywords: ") && kw.contains("phrase_two"),
+        "--with-keywords must print the keyword surface in basic:\n{kw}"
+    );
+    assert!(
+        !kw.contains("zqxbody"),
+        "--with-keywords must not escalate to the body:\n{kw}"
+    );
+    let wn = run(&["recall", "zqxlayerkw", d.as_str(), "--with-notes"]);
+    assert!(
+        wn.contains("zqxlayerlesson"),
+        "an explicit --with-notes overrides the lean layer's default-off:\n{wn}"
+    );
+    assert!(
+        !wn.contains("zqxbody"),
+        "--with-notes appends the lessons ALONE, not the body:\n{wn}"
+    );
+}
+
+#[test]
+fn recall_by_atom_id_is_the_exact_second_hop() {
+    // The hop that makes `basic` cheap: scan a dense id list, then pay for exactly ONE atom.
+    let d = TempDir::new("layer-hop");
+    d.write("layer-hub.md", LAYER_CORPUS);
+    let o = run(&["recall", "zqxlayer-atom", d.as_str()]);
+    assert!(
+        o.contains("layer-hub.md#zqxlayer-atom — a one line summary"),
+        "the hop returns the atom in FULL, with the path an editor needs:\n{o}"
+    );
+    assert!(o.contains("zqxbody"), "the hop returns the body:\n{o}");
+    assert!(
+        o.contains("zqxlayerlesson"),
+        "the hop returns the atom's lessons:\n{o}"
+    );
+}
+
+#[test]
+fn recall_unknown_id_falls_through_to_the_symptom_search() {
+    // LOAD-BEARING: a one-word symptom query is indistinguishable from an atom id by SHAPE alone,
+    // so the exact-id shortcut must never be able to swallow one. `zqxlayerkw` is a keyword, not an
+    // id — it has to keep behaving as an ordinary search.
+    let d = TempDir::new("layer-fallthrough");
+    d.write("layer-hub.md", LAYER_CORPUS);
+    let o = run(&["recall", "zqxlayerkw", d.as_str()]);
+    assert!(
+        o.contains("\tzqxlayer-atom\t"),
+        "a non-id single word must still run the symptom search:\n{o}"
+    );
+    assert!(
+        !o.contains("zqxbody"),
+        "and it must stay on the lean default, not fall into the hop's full render:\n{o}"
+    );
+}
+
 #[test]
 fn recall_surfaces_atom_by_unique_keyword() {
     // The whole point of the redesign: a single fact is findable by ITS OWN keyword. Querying an
@@ -1628,7 +1766,7 @@ fn recall_surfaces_atom_by_unique_keyword() {
     // with NO page-lesson append (an atom has no `[^N]` lessons of its own).
     let d = TempDir::new("atom-recall");
     d.write("oauth-hub.md", ATOM_CORPUS);
-    let o = run(&["recall", "zqxdrain", d.as_str()]); // no index yet → walk path
+    let o = run(&["recall", "zqxdrain", d.as_str(), "--output", "full"]); // no index yet → walk path
     // The locator's summary is the atom's LISTING summary (TRDD-AP2X9A0H item c): this atom has no
     // `desc:`, so the ~120-char body prefix shows — never the raw keyword array (keywords are the
     // recall surface, not something a reader can triage by).
@@ -1667,7 +1805,7 @@ fn recall_atom_aggregates_its_own_notes_and_see_also() {
         "oauth-hub.md",
         "---\nname: oauth-hub\ndescription: oauth overview\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# OAuth hub\n\n^rotate-drain [keywords: zqxdrain rotator]\nThe rotator drains the live (near-limit) account first.[^1] It changed.[^2] See [[token-rotation]].[^3]\n\n# Lessons Learned\n[^1]: earlier this drained the alternate first; reversed — the live account hits the cap sooner.\n# Notes\n[^2]: the near-limit threshold is the 5h window, not the 7d one.\n# See also\n[^3]: token-rotation — the sibling keepalive flow.\n",
     );
-    let o = run(&["recall", "zqxdrain", d.as_str()]);
+    let o = run(&["recall", "zqxdrain", d.as_str(), "--output", "full"]);
     assert!(
         o.contains("oauth-hub.md#rotate-drain"),
         "locator line:\n{o}"
@@ -1689,7 +1827,14 @@ fn recall_atom_aggregates_its_own_notes_and_see_also() {
         "the atom's see-also is aggregated under the see also group:\n{o}"
     );
     // --no-notes keeps the body but drops every section group.
-    let nn = run(&["recall", "zqxdrain", d.as_str(), "--no-notes"]);
+    let nn = run(&[
+        "recall",
+        "zqxdrain",
+        d.as_str(),
+        "--no-notes",
+        "--output",
+        "full",
+    ]);
     assert!(
         nn.contains("The rotator drains the live"),
         "body still shows with --no-notes:\n{nn}"
@@ -1708,9 +1853,16 @@ fn recall_atom_walk_matches_index() {
     // AFTER reindex with --use-index (the atoms table) byte-for-byte.
     let d = TempDir::new("atom-parity");
     d.write("oauth-hub.md", ATOM_CORPUS);
-    let walk = run(&["recall", "zqxdrain", d.as_str()]); // no .memgrep yet → walk
+    let walk = run(&["recall", "zqxdrain", d.as_str(), "--output", "full"]); // no .memgrep yet → walk
     run(&["reindex", d.as_str()]);
-    let indexed = run(&["recall", "zqxdrain", d.as_str(), "--use-index"]);
+    let indexed = run(&[
+        "recall",
+        "zqxdrain",
+        d.as_str(),
+        "--use-index",
+        "--output",
+        "full",
+    ]);
     assert!(
         walk.contains("#rotate-drain"),
         "walk recall must surface the atom:\n{walk}"
@@ -1733,7 +1885,7 @@ fn recall_atom_renders_desc_slug_as_spaced_phrase() {
     // the agent can pick WITHOUT opening the atom. The STORED slug (with underscores) must NOT appear.
     let d = TempDir::new("atom-desc-show");
     d.write("handoff-hub.md", DESC_CORPUS);
-    let o = run(&["recall", "zqxdesc", d.as_str()]); // no index → walk
+    let o = run(&["recall", "zqxdesc", d.as_str(), "--output", "full"]); // no index → walk
     assert!(
         o.contains("handoff-hub.md#new-handoff — new handoff carries recent turns"),
         "the atom locator shows the desc as a spaced phrase:\n{o}"
@@ -1750,7 +1902,7 @@ fn recall_atom_without_desc_falls_back_to_body_prefix() {
     // reader can actually triage by — not by its raw keyword array (the recall surface).
     let d = TempDir::new("atom-desc-none");
     d.write("handoff-hub.md", DESC_CORPUS);
-    let o = run(&["recall", "zqxplain", d.as_str()]);
+    let o = run(&["recall", "zqxplain", d.as_str(), "--output", "full"]);
     assert!(
         o.contains("handoff-hub.md#plain — This atom carries no desc slug."),
         "a desc-less atom falls back to its body prefix:\n{o}"
@@ -1771,14 +1923,21 @@ fn recall_atom_shows_quoted_prose_desc_verbatim() {
         "trap-hub.md",
         "---\nname: trap-hub\ndescription: keepalive traps\ntags: [keepalive]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# Trap hub\n\n^l0-trap [desc:\"L0 keepalive trap: staged closure, cache vs repo\", keywords: zqxtrap keepalive]\nThe staged closure under DATA is what launchd runs, not the repo checkout.\n",
     );
-    let o = run(&["recall", "zqxtrap", d.as_str()]); // no index → walk
+    let o = run(&["recall", "zqxtrap", d.as_str(), "--output", "full"]); // no index → walk
     assert!(
         o.contains("trap-hub.md#l0-trap — L0 keepalive trap: staged closure, cache vs repo"),
         "the quoted prose desc shows whole and verbatim:\n{o}"
     );
     // Walk/index parity for the prose form (the stored atoms.desc column must round-trip it).
     run(&["reindex", d.as_str()]);
-    let indexed = run(&["recall", "zqxtrap", d.as_str(), "--use-index"]);
+    let indexed = run(&[
+        "recall",
+        "zqxtrap",
+        d.as_str(),
+        "--use-index",
+        "--output",
+        "full",
+    ]);
     assert_eq!(
         o, indexed,
         "index-backed prose-desc display must match the walk byte-for-byte:\nwalk:\n{o}\nindex:\n{indexed}"
@@ -1797,7 +1956,14 @@ fn recall_atom_body_prefix_is_truncated_to_one_line() {
             "---\nname: long-hub\ndescription: long body\ntags: [long]\nocd: 2026-01-01\nlmd: 2026-06-01\n---\n# Long hub\n\n^longbody [keywords: zqxlong verbose]\n{long_body}\n"
         ),
     );
-    let o = run(&["recall", "zqxlong", d.as_str(), "--no-notes"]);
+    let o = run(&[
+        "recall",
+        "zqxlong",
+        d.as_str(),
+        "--no-notes",
+        "--output",
+        "full",
+    ]);
     let locator = o
         .lines()
         .find(|l| l.contains("#longbody"))
@@ -1818,13 +1984,20 @@ fn find_lists_atoms_by_their_desc_summary() {
     // (here the legacy slug, rendered `_`→space), exactly like recall — and the index path agrees.
     let d = TempDir::new("find-atom-desc");
     d.write("handoff-hub.md", DESC_CORPUS);
-    let walk = run(&["find", "+zqxdesc", d.as_str()]);
+    let walk = run(&["find", "+zqxdesc", d.as_str(), "--output", "full"]);
     assert!(
         walk.contains("handoff-hub.md#new-handoff — new handoff carries recent turns"),
         "find must list the atom by its rendered desc:\n{walk}"
     );
     run(&["reindex", d.as_str()]);
-    let indexed = run(&["find", "+zqxdesc", d.as_str(), "--use-index"]);
+    let indexed = run(&[
+        "find",
+        "+zqxdesc",
+        d.as_str(),
+        "--use-index",
+        "--output",
+        "full",
+    ]);
     assert_eq!(
         walk, indexed,
         "index-backed find atom listing must match the walk byte-for-byte:\nwalk:\n{walk}\nindex:\n{indexed}"
@@ -1838,9 +2011,16 @@ fn recall_atom_desc_walk_matches_index() {
     // exercises the v2→v3 schema bump (the reindex rebuilds with the new desc column).
     let d = TempDir::new("atom-desc-parity");
     d.write("handoff-hub.md", DESC_CORPUS);
-    let walk = run(&["recall", "zqxdesc", d.as_str()]); // no .memgrep yet → walk
+    let walk = run(&["recall", "zqxdesc", d.as_str(), "--output", "full"]); // no .memgrep yet → walk
     run(&["reindex", d.as_str()]);
-    let indexed = run(&["recall", "zqxdesc", d.as_str(), "--use-index"]);
+    let indexed = run(&[
+        "recall",
+        "zqxdesc",
+        d.as_str(),
+        "--use-index",
+        "--output",
+        "full",
+    ]);
     assert!(
         walk.contains("— new handoff carries recent turns"),
         "walk recall must render the desc phrase:\n{walk}"
