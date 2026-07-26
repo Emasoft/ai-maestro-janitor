@@ -1,9 +1,9 @@
 ---
 trdd-id: YBOZW3ES
 title: A page result's locator is an absolute path — the single most expensive field recall prints
-column: todo
+column: ai_review
 created: 2026-07-26T20:18:53+0200
-updated: 2026-07-26T20:18:53+0200
+updated: 2026-07-26T20:40:08+0200
 current-owner: 2f5bc976
 task-type: refactor
 approval-tier: 0
@@ -11,24 +11,31 @@ scope: project
 release-via: publish
 impacts: [memgrep, wikimem]
 relevant-rules: []
-implementation-commits: []
+implementation-commits: [5ed8155]
 ---
 
 # A page result's locator is an absolute path
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-26
 
-- **Component state — MEASURED, NOT STARTED.** No code written. The measurement below is the
-  expensive part and is done; do not re-derive it.
-- **NEXT ACTION:** decide the locator identity (see "The open decision"), then implement in
-  `memory.rs`: thread the page `name:` into `CandidateMeta`/`RecallRanked` on BOTH gather paths
-  (walk AND index — they must rank and print identically), print it as the lean-layer page
-  locator, and add the exact page-name hop beside `atom_id_query`/`recall_one_atom`. Then
-  re-capture BOTH benchmark baselines: token cost will FALL, and a baseline may only move on a
-  documented trade (`tests/wikimem_bench/README.md`).
-- **Load-bearing facts:** the lean layer already prints the bare ATOM ID for an atom hit precisely
-  because a memory path is the costliest field on the row — a PAGE hit was simply never given the
-  same treatment, so the cheap layer still pays full price on a third of its rows.
+- **Component state — SHIPPED (`5ed8155`), gating green.** The page locator is the page's `name:`;
+  `recall <page-name>` is an exact hop; walk and index verified byte-identical. Gate: cargo 225
+  passed, pytest 13706 passed / 1 skipped, ruff + mypy clean, both benchmark baselines re-captured
+  and re-verified `no change`.
+- **NEXT ACTION:** none — the TRDD is in `ai_review`. Nothing is known-broken.
+- **Load-bearing facts:**
+  - **the fixture UNDERSTATES the saving ~8×.** The benchmark corpora sit at a SHORT repo-relative
+    path, so the change reads as 283.7 → 272.0 tok/query there, while the measured live-corpus
+    saving is ~80–110 tok/query. The fixture's own path length is a hidden parameter of every
+    token number it prints — never quote it as the real-world cost;
+  - the identity is `name:`, never the file stem: they disagree on ~3% of pages, and on exactly
+    those the stem is the identity the wiki does NOT link by;
+  - the index needed NO schema change — it already wrote `topic` and simply never read it back;
+  - a locator that is not a KEY is worse than a path, which is why the exact page hop shipped in
+    the same change rather than after it.
+- **SUPERSEDED — do NOT carry forward:** "MEASURED, NOT STARTED / no code written"; the "open
+  decision" in §2 below is DECIDED (`name:`, with the exact hop) — §2 is kept as the record of the
+  alternatives and why they lost, not as a live question.
 
 ## 1. The measurement
 
