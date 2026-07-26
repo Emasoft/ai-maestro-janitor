@@ -57,8 +57,9 @@ match the payback is the open fix (deferred, not yet approved — see TRDD-DLI76
 `CronCreate` — the cron never ceases to exist and the janitor is armed throughout. What churns is
 how often the cron's PERIOD is rewritten, not whether it exists. Disarming to save tokens is the
 recurring misdiagnosis and it BACKFIRES (it kills the cache keep-alive and forces full-price
-rebuilds) — see [[reference_heartbeat_token_baseline]], whose `[^1]` records a session that made
-exactly that mistake.
+rebuilds) — a LOCAL-scope note records a session that made exactly that mistake. It is deliberately
+NOT linked: this page is PROJECT scope and therefore pushed, so naming a machine-private page would
+publish that name to every cloner. Downward references exist for precisely this reason.
 
 ## See also
 

@@ -195,7 +195,9 @@ after one denial, headless skips the `-w` primary, zero login-keychain access (a
 
 ## Applies to
 
-- `[[reference_oauth_rotator_keychain_architecture]]` — the rotator's slot/mirror keychain layout.
+- The rotator's slot/mirror keychain layout is covered by a LOCAL-scope note, deliberately NOT
+  linked from here: this page is pushed, so naming a machine-private page would publish that name.
+  The relationship belongs on that note's own `## Governed by`, which may legally point UP.
 - `[[oauth-rotation-renew-reauth]]` — the ROTATE→RENEW→REAUTH component that reads these items.
 - `[[reference_macos_security_keychain_gotchas]]` — the storage-corruption sibling (gotchas 1 & 2).
 - `[[janitor-keepalive-test-isolation-fsevents]]` — the OS-keepalive staging mechanism whose STALE
