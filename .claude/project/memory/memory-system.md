@@ -318,6 +318,9 @@ the agent memory wiki recalled by `/janitor-memory-recall`.
 - `[[janitor-is-not-a-role-agent]]` — why PROJECT scope is the ONLY memory that
   survives a maintainer-agent takeover (it clones the repo; everything uncommitted
   is lost), and why the janitor carries no role plugin.
+- `[[wikimem-retrieval-engine]]` — how recall actually RANKS and PRINTS: the
+  two-hop contract, the tiered scorer, why a locator is an identity rather than a
+  path, and the lint severity model.
 
 ## Notes and lessons learned
 
