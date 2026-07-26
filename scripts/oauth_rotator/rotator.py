@@ -68,6 +68,7 @@ import cascade  # noqa: E402  # scripts/oauth_rotator/cascade.py (ROTATE→RENEW
 import global_state as gs  # noqa: E402  # scripts/lib/global_state.py (rotator-tick single-writer flock, audit §3.4)
 import janitor_integrity as integrity  # noqa: E402  # scripts/lib/janitor_integrity.py
 import safe_storage  # noqa: E402  # scripts/oauth_rotator/safe_storage.py — keychain_scope_args() lever (TRDD-K3WQ7XM9 FIX B)
+import usage_probe  # noqa: E402  # scripts/lib/usage_probe.py (throttled /api/oauth/usage, TRDD-WEBA1RMF)
 
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 # Per-account slot tokens are stored in the OS keychain too — ENCRYPTED at rest,
@@ -1238,26 +1239,26 @@ def usage_request(blob: dict) -> tuple[int, dict | None]:
              a safe target".
       401/403/0 -> bad token / network error -> "unknown, don't act".
     `status == 0` means a network/parse failure (no HTTP response).
+
+    The request itself lives in `usage_probe` (TRDD-WEBA1RMF), which caches per account,
+    honors the endpoint's back-off, and — load-bearing — sends a `claude-code/*`
+    User-Agent. This function used to build the request inline with
+    `User-Agent: claude-account-rotator` and no throttle at all, on a 60 s beat. That is
+    an aggressive-rate-limit bucket by construction, and the 429 it earns is
+    indistinguishable here from a genuinely maxed account: the live account looks maxed
+    AND every alternate looks unsafe, so rotation stalls exactly when it is needed (the
+    2026-07-18 deadlock, TRDD-WBYFTU2L). The status vocabulary above is unchanged, so the
+    LIVE_429_DEBOUNCE / ALT_429_DEBOUNCE logic keeps working as written — a persistently
+    maxed account still 429s on every tick, now from the local cooldown at zero request
+    cost instead of by re-provoking the endpoint.
+
+    Passing `expires_at` through is a second small win the inline version could not get:
+    a credential inside its last 30 s no longer spends a request to learn it is dead.
     """
-    tok = _oauth(blob).get("accessToken")
+    tok, exp_s = usage_probe.token_from_blob(blob)
     if not tok:
         return (0, None)
-    req = urllib.request.Request(
-        USAGE_URL,
-        headers={
-            "Authorization": "Bearer " + tok,
-            "Content-Type": "application/json",
-            "anthropic-beta": OAUTH_BETA,
-            "User-Agent": "claude-account-rotator",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:  # nosec B310 -- hardcoded https Anthropic API endpoint; scheme not attacker-controlled
-            return (getattr(r, "status", 200), json.loads(r.read().decode("utf-8", "replace")))
-    except urllib.error.HTTPError as e:  # MUST precede URLError (subclass)
-        return (e.code, None)
-    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, ValueError):
-        return (0, None)
+    return usage_probe.probe(tok, exp_s)
 
 
 def account_usage(blob: dict) -> dict | None:
