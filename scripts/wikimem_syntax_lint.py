@@ -164,6 +164,31 @@ def _check_atom(path: Path, lineno: int, line: str, findings: list[Finding]) -> 
                     f"atom `^{m['id']}` block-props `[` is never closed on this line — unparseable.")
         )
         return
+    # DROPPED TEXT — mirrors `parse_block_props`'s two silent `continue`s (no `:`, or an
+    # empty key) EXACTLY, so this flags precisely what the parser discards and nothing else.
+    # The usual cause is `keywords: a phrase, another phrase`: the author means comma to
+    # separate KEY-PHRASES, but comma separates FIELDS and space separates KEYWORDS, so every
+    # phrase after the first is deleted outright and the first is shredded into loose words.
+    # Since `keywords` IS the recall surface, the atom silently stops being findable by most
+    # of its own symptoms — measured on the benchmark corpus as hit@1 21.7% vs 95.7% repaired.
+    dropped: list[str] = []
+    for item in _split_top_level_commas(span[0]):
+        if not item.strip():
+            continue  # a trailing comma, not lost content
+        if ":" not in item or not item.split(":", 1)[0].strip():
+            dropped.append(item.strip())
+    if dropped:
+        shown = ", ".join(repr(d[:32]) for d in dropped[:3])
+        more = ", …" if len(dropped) > 3 else ""
+        findings.append(
+            Finding(path, lineno, "CRITICAL", "atom-dropped-props",
+                    f"atom `^{m['id']}`: {len(dropped)} comma-segment(s) are DISCARDED by the "
+                    f"parser ({shown}{more}) — a comma separates FIELDS, a space separates "
+                    "KEYWORDS. Join each key-phrase with `_` and separate phrases with spaces "
+                    "(`keywords: a_phrase another_phrase`); "
+                    "`scripts/wikimem_migrate_keywords.py` recovers them losslessly.")
+        )
+
     props = parse_block_props(span[0])
     kw = props.get("keywords")
     if not kw:

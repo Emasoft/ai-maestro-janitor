@@ -92,6 +92,57 @@ def test_atom_missing_dates_is_warn_not_critical():
     assert {"atom-no-ocd", "atom-no-lmd"} <= _codes(findings)
 
 
+# ── atom-dropped-props (silently discarded keyword phrases) ───────────────────────
+#
+# The highest-value structural check on an atom: `keywords` IS the recall surface, and the
+# natural hand-authored `keywords: a phrase, another phrase` deletes every phrase after the
+# first (comma separates FIELDS, space separates KEYWORDS). Measured on the benchmark corpus:
+# repairing it moved hit@1 from 21.7% to 95.7%. These tests pin the rule to `parse_block_props`'s
+# OWN two silent `continue`s, so the linter can never flag more or less than the parser drops.
+
+
+def test_dropped_props_flags_comma_separated_phrases():
+    """The live-corpus defect: phrases after the first comma are discarded."""
+    t = "^a1 [keywords: alpha one, beta two, gamma three, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n"
+    f = lint.lint_page(Path("x.md"), t)
+    assert "atom-dropped-props" in _crit(f)
+
+
+def test_dropped_props_silent_on_underscore_joined_phrases():
+    """The correct form must NOT fire, or the check would punish the fix it recommends."""
+    t = "^a1 [keywords: alpha_one beta_two gamma_three, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n"
+    assert "atom-dropped-props" not in _codes(lint.lint_page(Path("x.md"), t))
+
+
+def test_dropped_props_silent_on_quoted_value_containing_commas():
+    """A quoted value may legitimately contain commas (TRDD-AP2X9A0H prose desc). Splitting it
+    would false-positive on exactly the pages already using the sanctioned grammar."""
+    t = '^a1 [desc: "a summary, with commas", keywords: x_y, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n'
+    assert "atom-dropped-props" not in _codes(lint.lint_page(Path("x.md"), t))
+
+
+def test_dropped_props_silent_on_trailing_comma():
+    """A trailing comma yields an empty segment — punctuation, not lost content."""
+    t = "^a1 [keywords: alpha_one, ocd: 2026-07-20, lmd: 2026-07-20,]\nbody\n"
+    assert "atom-dropped-props" not in _codes(lint.lint_page(Path("x.md"), t))
+
+
+def test_dropped_props_flags_empty_key_segment():
+    """`parse_block_props` also drops a segment whose key is empty — mirror that branch too."""
+    t = "^a1 [keywords: alpha_one, : orphaned, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n"
+    assert "atom-dropped-props" in _crit(lint.lint_page(Path("x.md"), t))
+
+
+def test_dropped_props_matches_what_the_parser_actually_loses():
+    """The oracle: whatever the linter flags must be text `parse_block_props` cannot see."""
+    props = "keywords: alpha one, beta two, ocd: 2026-07-20"
+    parsed = lint.parse_block_props(props)
+    assert parsed["keywords"] == ["alpha", "one"]      # shredded
+    assert "beta two" not in str(parsed)               # and the rest is simply gone
+    t = f"^a1 [{props}, lmd: 2026-07-20]\nbody\n"
+    assert "atom-dropped-props" in _crit(lint.lint_page(Path("x.md"), t))
+
+
 # ── lint_page: the lesson taxonomy (the 3-schema drift the corpus carries) ─────────
 def test_lean_lesson_flags_no_keywords_and_no_id():
     text = _page("^a [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.[^1]") + \
