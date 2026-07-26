@@ -28,14 +28,35 @@ _BASELINE = _REPO / "tests" / "wikimem_bench" / "baseline.json"
 _CONFORMANT_CORPUS = _REPO / "tests" / "fixtures" / "wikimem-bench-conformant"
 _CONFORMANT_BASELINE = _REPO / "tests" / "wikimem_bench" / "baseline-conformant.json"
 
-# The benchmark drives the real Rust binary. When it is not installed the honest outcome is SKIP
-# with a reason a human can act on — not a pass (which would hide a real regression behind a
-# missing tool) and not a failure (the code under test is fine; the environment lacks a binary).
-_memgrep = shutil.which("memgrep")
+# The benchmark drives the real Rust binary — and it MUST be the binary built from THIS tree.
+#
+# Without pinning it, the harness resolves `memgrep` from PATH, i.e. whatever is INSTALLED. That is
+# not a theoretical hazard: it fired here. A change to the page-row locator landed in the tree, the
+# baselines were re-captured from the tree build, and the suite then failed — because it had
+# measured the stale installed binary against the new baselines. The mirror-image failure is the
+# dangerous one: measure a stale binary against stale baselines and every run passes while the code
+# under test is never exercised at all.
+#
+# `find_or_build_memgrep` prefers this tree's target/ and builds it when absent, so the pin is also
+# what makes the gate meaningful on a machine with no `cargo install`ed copy.
+from conftest import MEMGREP_BIN_PATH  # noqa: E402
+
+_memgrep = MEMGREP_BIN_PATH or shutil.which("memgrep")
 requires_memgrep = pytest.mark.skipif(
     _memgrep is None,
-    reason="memgrep not on PATH — install it: cargo install --path scripts/memgrep",
+    reason="memgrep could not be found or built from this tree",
 )
+
+
+def _bench_env() -> dict[str, str]:
+    """The environment every benchmark subprocess runs under: `MEMGREP_BIN` pinned to the binary
+    under test, so the harness can never silently score a different build."""
+    import os
+
+    env = dict(os.environ)
+    if _memgrep:
+        env["MEMGREP_BIN"] = _memgrep
+    return env
 
 
 @requires_memgrep
@@ -43,12 +64,13 @@ def test_retrieval_has_not_regressed():
     """🐌 The frozen benchmark still meets the committed baseline for accuracy and token cost."""
     proc = subprocess.run(
         [sys.executable, str(_BENCH), "--check"],
-        capture_output=True, text=True, timeout=600, cwd=str(_REPO),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        cwd=str(_REPO),
+        env=_bench_env(),
     )
-    assert proc.returncode == 0, (
-        "wikimem retrieval regressed against tests/wikimem_bench/baseline.json:\n"
-        f"{proc.stdout}\n{proc.stderr}"
-    )
+    assert proc.returncode == 0, f"wikimem retrieval regressed against tests/wikimem_bench/baseline.json:\n{proc.stdout}\n{proc.stderr}"
 
 
 @requires_memgrep
@@ -56,16 +78,21 @@ def test_conformant_retrieval_has_not_regressed():
     """🐌 The PRIMARY (spec-conformant) corpus still meets its committed baseline."""
     proc = subprocess.run(
         [
-            sys.executable, str(_BENCH), "--check",
-            "--corpus", str(_CONFORMANT_CORPUS),
-            "--baseline", str(_CONFORMANT_BASELINE),
+            sys.executable,
+            str(_BENCH),
+            "--check",
+            "--corpus",
+            str(_CONFORMANT_CORPUS),
+            "--baseline",
+            str(_CONFORMANT_BASELINE),
         ],
-        capture_output=True, text=True, timeout=600, cwd=str(_REPO),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        cwd=str(_REPO),
+        env=_bench_env(),
     )
-    assert proc.returncode == 0, (
-        "wikimem retrieval regressed against the CONFORMANT baseline "
-        f"{_CONFORMANT_BASELINE.name}:\n{proc.stdout}\n{proc.stderr}"
-    )
+    assert proc.returncode == 0, f"wikimem retrieval regressed against the CONFORMANT baseline {_CONFORMANT_BASELINE.name}:\n{proc.stdout}\n{proc.stderr}"
 
 
 @requires_memgrep
