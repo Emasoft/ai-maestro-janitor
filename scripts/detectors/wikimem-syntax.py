@@ -4,25 +4,29 @@
 # ///
 """wikimem-syntax — surface memory pages memgrep can no longer PARSE (TRDD-VPTQ4067).
 
-The 3 memory-authoring skills disagreed on the lesson schema and the corpus drifted; the
-`wikimem_syntax_lint.py` rules (ported 1:1 from memgrep's `memory.rs` parser) catch the
-CRITICAL breakages — an atom whose `⟦`-bracket makes it invisible to recall, an atom with no
-`keywords:` (un-findable → "the memory does not exist"), a page with no `description:`, and
-corpus-wide DUPLICATE atom ids (which make a cross-scope `recall` on that id ambiguous). Until
-now that linter was wired into NOTHING; this detector is the wiring — the heartbeat surfaces a
-CRITICAL the moment any page goes malformed, and goes silent again the moment it is fixed.
+The 3 memory-authoring skills disagreed on the lesson schema and the corpus drifted; `memgrep
+lint` catches the ERROR-class breakages — an atom whose `⟦`-bracket makes it invisible to
+recall, an atom with no `keywords:` (un-findable → "the memory does not exist"), props segments
+the parser silently DISCARDS, a page with no `description:`, and corpus-wide DUPLICATE atom ids
+(which make a `recall` on that id ambiguous). Until now that linter was wired into NOTHING; this
+detector is the wiring — the heartbeat surfaces an ERROR the moment any page goes malformed, and
+goes silent again the moment it is fixed.
 
-Only CRITICAL is surfaced (a broken/invisible element). The ~hundreds of WARN-level advisories
-(lean lessons, missing ocd/lmd, orphan sections) stay for the on-demand
+The checks live in memgrep, not here (plan Phase 1b): the write gate and this heartbeat MUST
+enforce the same rule set, and two implementations of one grammar drift apart — they already had.
+
+Only ERROR is surfaced (a broken or invisible element). The hundreds of WARN/INFO advisories
+(lean lessons, missing ocd/lmd, one-sided links) stay for the on-demand
 `uv run scripts/wikimem_syntax_lint.py`, so the heartbeat line is never noise.
 
 Scope: the SAME three memory roots recall reads — LOCAL (this project's), PROJECT (this repo's),
-USER (the user's own global). These are all the USER's own memory; no other project's data is
-touched, so the per-project channeling invariant holds. READ-ONLY: it never mutates a page (RULE
-0 + separation of powers — the janitor surfaces, an agent fixes via /janitor-memory-update).
-Fail-open: any error → silent exit 0, never breaks the heartbeat. Per-set content-hash dedupe:
-re-emits only when the set of CRITICALs CHANGES (bounded — fix the corpus and it converges to
-silence).
+USER (the user's own global) — in ONE invocation, because atom-id uniqueness is corpus-wide and a
+per-scope run cannot see a cross-scope collision. These are all the USER's own memory; no other
+project's data is touched, so the per-project channeling invariant holds. READ-ONLY: it never
+mutates a page (RULE 0 + separation of powers — the janitor surfaces, an agent fixes via
+/janitor-memory-update). Fail-open: any error → silent exit 0, never breaks the heartbeat.
+Per-set content-hash dedupe: re-emits only when the set of ERRORs CHANGES (bounded — fix the
+corpus and it converges to silence).
 """
 
 from __future__ import annotations
@@ -36,50 +40,43 @@ sys.path.insert(0, str(_SCRIPTS / "lib"))
 sys.path.insert(0, str(_SCRIPTS))  # for the top-level linter module
 
 import dedupe  # noqa: E402
-import memory_scopes  # noqa: E402
 import state  # noqa: E402
 import wikimem_syntax_lint as lint  # noqa: E402
 
 
-def _critical_signatures() -> list[str]:
-    """Every CRITICAL finding across the 3 memory scopes, as short stable signatures.
+def _error_signatures() -> list[str]:
+    """Every ERROR finding across the 3 memory scopes, as short stable signatures.
 
-    A signature is `<code>@<relpath>:<line>` — stable across runs so the dedupe hash only
-    changes when the actual defect set changes. Cross-scope duplicate atom ids are appended as
-    one signature per colliding id.
+    A signature is `<basename>:<line>:<msg-hash>` — stable across runs, so the dedupe hash only
+    changes when the actual defect set changes. The message is HASHED rather than carried: it can
+    embed absolute paths (the duplicate-id report names every colliding location), and a drift
+    signature must never be a channel for one.
     """
-    sigs: list[str] = []
-    pages: dict[Path, str] = {}
-    for _label, root in memory_scopes.resolve_scope_dirs():
-        for note in memory_scopes.iter_note_files(root):
-            try:
-                text = note.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            pages[note] = text
-            for fd in lint.lint_page(note, text):
-                if fd.sev == "CRITICAL":
-                    sigs.append(f"{fd.code}@{note.name}:{fd.line}")
-    for aid in lint.find_duplicate_atom_ids(pages):
-        sigs.append(f"atom-dup-id@{aid}")
-    return sorted(set(sigs))
+    _code, _stdout, findings = lint.run_lint()
+    sigs = {
+        f"{Path(f.path).name}:{f.line}:"
+        + hashlib.sha1(f.msg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+        for f in findings
+        if f.sev == "ERROR"
+    }
+    return sorted(sigs)
 
 
 def main() -> int:
     try:
         state.init_state()
-        sigs = _critical_signatures()
+        sigs = _error_signatures()
         if not sigs:
             return 0
         example = state.sanitize_for_drift_line(sigs[0])
         n = len(sigs)
         msg = (
-            f"[wikimem-syntax] {n} memory element(s) memgrep CANNOT parse (CRITICAL — "
+            f"[wikimem-syntax] {n} memory element(s) memgrep CANNOT parse (ERROR — "
             f"recall-invisible or ambiguous). e.g. {example}. Run "
             f"`uv run scripts/wikimem_syntax_lint.py` for the full list; fix via "
             f"/janitor-memory-update (never hand-edit the .md)."
         )
-        # Per-SET dedupe: the key is a hash of the whole critical set, so the line re-emits
+        # Per-SET dedupe: the key is a hash of the whole ERROR set, so the line re-emits
         # ONLY when the set changes (a new break, or one fixed) — never on an unchanged corpus.
         key = "critset-" + hashlib.sha1("\n".join(sigs).encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
         seen = state.state_dir() / "wikimem-syntax-seen.txt"

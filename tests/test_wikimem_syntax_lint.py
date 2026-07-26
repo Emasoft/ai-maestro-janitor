@@ -1,10 +1,16 @@
-"""Tests for the wikimem syntax linter + its heartbeat detector (TRDD-VPTQ4067).
+"""Tests for the wikimem lint WRAPPER + its heartbeat detector (TRDD-VPTQ4067).
 
-The linter's rules are ported 1:1 from memgrep's `memory.rs` parser, so these tests pin the
-exact CRITICAL/WARN taxonomy an authoring path must satisfy: an atom memgrep cannot index (a
-`⟦`-bracket, no `keywords:`) or a corpus-wide duplicate atom id is CRITICAL (recall-invisible or
-ambiguous); a lean lesson / missing date is WARN. The detector is the wiring that surfaces the
-CRITICALs on the heartbeat, deduped per finding-set.
+The checks themselves are Rust now (`memgrep::memory::lint_paths`) and are unit-tested there —
+this file pins the two things that live on the Python side and nowhere else:
+
+  1. the WRAPPER contract — binary resolution, the default roots, parsing `memgrep lint`'s
+     `SEV path:line — msg` output, and the exit codes (notably: a missing binary must exit 2,
+     never 0, because a gate that passes when the checker could not run is worse than none);
+  2. the DETECTOR wiring — an ERROR-class finding reaches the heartbeat once, then dedupes.
+
+The end-to-end cases run the REAL binary built from this tree (conftest's `MEMGREP_BIN_PATH`),
+so the wrapper is proven against the same executable the write gate calls — an unpinned binary
+would score whatever `cargo install` last left on PATH.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import MEMGREP_BIN_PATH
 
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 
@@ -30,184 +37,152 @@ def _load(path: Path, name: str):
 
 
 lint = _load(_SCRIPTS / "wikimem_syntax_lint.py", "wikimem_syntax_lint")
+det = _load(_SCRIPTS / "detectors" / "wikimem-syntax.py", "wikimem_syntax_detector")
+
+needs_memgrep = pytest.mark.skipif(MEMGREP_BIN_PATH is None, reason="memgrep binary unavailable")
 
 
-def _codes(findings) -> set[str]:
-    return {f.code for f in findings}
+def _page(body: str, *, name: str = "n") -> str:
+    return (
+        f"---\nname: {name}\nocd: 2026-07-21\nlmd: 2026-07-21\ndescription: \"a page\"\n---\n"
+        f"{body}\n\n## Notes and lessons learned\n"
+    )
 
 
-def _crit(findings) -> set[str]:
-    return {f.code for f in findings if f.sev == "CRITICAL"}
+def _corpus(root: Path, files: dict[str, str]) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    for name, content in files.items():
+        (root / name).write_text(content, encoding="utf-8")
+    return root
 
 
-# ── parse_block_props (the props grammar, ported from memory.rs:1314) ─────────────
-def test_parse_block_props_basic():
-    p = lint.parse_block_props("keywords: a b c, ocd: 2026-07-21, lmd: 2026-07-21")
-    assert p["keywords"] == ["a", "b", "c"]
-    assert p["ocd"] == ["2026-07-21"]
+def _msgs(findings, sev: str | None = None) -> str:
+    return "\n".join(f.msg for f in findings if sev is None or f.sev == sev)
 
 
-def test_parse_block_props_quoted_desc_protects_comma():
-    """A comma inside a "…"-quoted value must NOT split the property list (memory.rs:150)."""
-    p = lint.parse_block_props('desc:"first, second", keywords: x y')
-    assert p["keywords"] == ["x", "y"]
-    assert "desc" in p  # the quoted value survived as one property
+# ── the output contract: `SEV path:line — msg` ────────────────────────────────────
+def test_parse_findings_reads_every_severity():
+    out = (
+        "ERROR /m/a.md:12 — atom `^x` has no `keywords:`\n"
+        "WARN /m/a.md:12 — atom `^x` has no `ocd:` date\n"
+        "INFO /m/b.md:3 — page-level lesson `[^1]:`\n"
+    )
+    f = lint.parse_findings(out)
+    assert [x.sev for x in f] == ["ERROR", "WARN", "INFO"]
+    assert (f[0].path, f[0].line) == ("/m/a.md", 12)
+    assert f[2].msg.startswith("page-level lesson")
 
 
-def test_split_top_level_commas_protects_wikilink_bracket():
-    parts = lint._split_top_level_commas("keywords: a b, see: [[one, two]], ocd: 2026-07-21")
-    # the comma inside [[one, two]] does not split → 3 top-level items, not 4
-    assert len(parts) == 3
+def test_parse_findings_ignores_non_finding_lines():
+    # memgrep prints its count to stderr, but a caller may merge streams; nothing that is not a
+    # finding line may be mistaken for one, or the detector's count is wrong.
+    assert lint.parse_findings("memgrep lint: 8 finding(s), 5 at or above ERROR\n\n") == []
 
 
-# ── lint_page: the CRITICAL taxonomy ──────────────────────────────────────────────
-def _page(body: str, *, description: str = "a real page") -> str:
-    return f"---\nname: p\ndescription: {description}\nocd: 2026-07-21\nlmd: 2026-07-21\n---\n\n{body}\n\n## Notes and lessons learned\n"
+def test_find_memgrep_prefers_the_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # MEMGREP_BIN is how a test or a bisect pins the binary UNDER TEST; if the override lost to
+    # PATH, every measurement would silently describe some other build.
+    fake = tmp_path / "memgrep"
+    fake.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setenv("MEMGREP_BIN", str(fake))
+    assert lint.find_memgrep() == str(fake)
 
 
-def test_clean_page_has_no_findings():
-    text = _page("^good [keywords: recall me, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.")
-    assert lint.lint_page(Path("p.md"), text) == []
+def test_find_memgrep_ignores_an_override_that_does_not_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MEMGREP_BIN", str(tmp_path / "nope"))
+    assert lint.find_memgrep() != str(tmp_path / "nope")
 
 
-def test_mangled_bracket_atom_is_critical():
-    text = _page("^bad ⟦keywords: x, ocd: 2026-07-21⟧\nbody.")
-    assert "atom-bad-bracket" in _crit(lint.lint_page(Path("p.md"), text))
+def test_default_roots_are_the_resolved_memory_scopes(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        lint.memory_scopes, "resolve_scope_dirs", lambda: [("LOCAL", Path("/l")), ("USER", Path("/u"))]
+    )
+    assert lint.default_roots() == [Path("/l"), Path("/u")]
 
 
-def test_atom_without_keywords_is_critical():
-    text = _page("^nokw [desc: has_no_keywords, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.")
-    assert "atom-no-keywords" in _crit(lint.lint_page(Path("p.md"), text))
+def test_missing_binary_exits_2_never_0(monkeypatch: pytest.MonkeyPatch, capsys):
+    # The failure mode this guards: a linter that cannot run silently reports "clean".
+    monkeypatch.setattr(lint, "find_memgrep", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["wikimem_syntax_lint.py", "."])
+    assert lint.main() == 2
+    assert "memgrep not found" in capsys.readouterr().err
 
 
-def test_page_without_description_is_critical():
-    text = "---\nname: p\nocd: 2026-07-21\nlmd: 2026-07-21\n---\n\n## Notes and lessons learned\n"
-    assert "page-no-description" in _crit(lint.lint_page(Path("p.md"), text))
+# ── end-to-end through the real binary: the checks ported in plan Phase 1b ────────
+@needs_memgrep
+def test_ported_checks_reach_the_wrapper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MEMGREP_BIN", str(MEMGREP_BIN_PATH))
+    root = _corpus(
+        tmp_path / "mem",
+        {
+            "a.md": _page(
+                "^ATOM-AAAA-BBBB [keywords: shared id, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.\n\n"
+                "^ATOM-CCCC-DDDD ⟦keywords: mangled, ocd: 2026-07-21⟧\nbody.\n\n"
+                "^ATOM-EEEE-FFFF [ocd: 2026-07-21, lmd: 21/07/2026]\nbody.\n\n"
+                "^ATOM-GGGG-HHHH [keywords: first phrase, second phrase, ocd: 2026-07-21, lmd: 2026-07-21]\nbody."
+            ),
+            "b.md": _page("^ATOM-AAAA-BBBB [keywords: shared id, ocd: 2026-07-21, lmd: 2026-07-21]\nbody."),
+        },
+    )
+    code, _stdout, findings = lint.run_lint([root])
+    errors, warns = _msgs(findings, "ERROR"), _msgs(findings, "WARN")
+
+    assert "not ASCII `[`" in errors, errors  # atom-bad-bracket
+    assert "RECALL SURFACE" in errors, errors  # atom-no-keywords
+    assert "DISCARDED by the parser" in errors, errors  # atom-dropped-props
+    assert "not corpus-unique" in errors, errors  # atom-dup-id
+    assert "is not ISO" in warns, warns  # date-format
+    assert code == 1  # ERRORs present ⇒ the gate fails
 
 
-def test_atom_missing_dates_is_warn_not_critical():
-    text = _page("^d [keywords: x]\nbody.")
-    findings = lint.lint_page(Path("p.md"), text)
-    assert _crit(findings) == set()
-    assert {"atom-no-ocd", "atom-no-lmd"} <= _codes(findings)
+@needs_memgrep
+def test_lesson_without_a_stable_id_is_a_warn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # UNCITED on purpose: the model makes a page-level lesson the normal case, and those were the
+    # ones the old parsed-footnote scan skipped entirely.
+    monkeypatch.setenv("MEMGREP_BIN", str(MEMGREP_BIN_PATH))
+    root = _corpus(
+        tmp_path / "mem",
+        {"a.md": _page("body.") + '[^1]: [status:valid, keywords:"k", ocd:2026-07-21, lmd:2026-07-21] DO NOT x.\n'},
+    )
+    _code, _stdout, findings = lint.run_lint([root])
+    assert "no `id:ATOM-…`" in _msgs(findings, "WARN"), findings
 
 
-# ── atom-dropped-props (silently discarded keyword phrases) ───────────────────────
-#
-# The highest-value structural check on an atom: `keywords` IS the recall surface, and the
-# natural hand-authored `keywords: a phrase, another phrase` deletes every phrase after the
-# first (comma separates FIELDS, space separates KEYWORDS). Measured on the benchmark corpus:
-# repairing it moved hit@1 from 21.7% to 95.7%. These tests pin the rule to `parse_block_props`'s
-# OWN two silent `continue`s, so the linter can never flag more or less than the parser drops.
-
-
-def test_dropped_props_flags_comma_separated_phrases():
-    """The live-corpus defect: phrases after the first comma are discarded."""
-    t = "^a1 [keywords: alpha one, beta two, gamma three, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n"
-    f = lint.lint_page(Path("x.md"), t)
-    assert "atom-dropped-props" in _crit(f)
-
-
-def test_dropped_props_silent_on_underscore_joined_phrases():
-    """The correct form must NOT fire, or the check would punish the fix it recommends."""
-    t = "^a1 [keywords: alpha_one beta_two gamma_three, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n"
-    assert "atom-dropped-props" not in _codes(lint.lint_page(Path("x.md"), t))
-
-
-def test_dropped_props_silent_on_quoted_value_containing_commas():
-    """A quoted value may legitimately contain commas (TRDD-AP2X9A0H prose desc). Splitting it
-    would false-positive on exactly the pages already using the sanctioned grammar."""
-    t = '^a1 [desc: "a summary, with commas", keywords: x_y, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n'
-    assert "atom-dropped-props" not in _codes(lint.lint_page(Path("x.md"), t))
-
-
-def test_dropped_props_silent_on_trailing_comma():
-    """A trailing comma yields an empty segment — punctuation, not lost content."""
-    t = "^a1 [keywords: alpha_one, ocd: 2026-07-20, lmd: 2026-07-20,]\nbody\n"
-    assert "atom-dropped-props" not in _codes(lint.lint_page(Path("x.md"), t))
-
-
-def test_dropped_props_flags_empty_key_segment():
-    """`parse_block_props` also drops a segment whose key is empty — mirror that branch too."""
-    t = "^a1 [keywords: alpha_one, : orphaned, ocd: 2026-07-20, lmd: 2026-07-20]\nbody\n"
-    assert "atom-dropped-props" in _crit(lint.lint_page(Path("x.md"), t))
-
-
-def test_dropped_props_matches_what_the_parser_actually_loses():
-    """The oracle: whatever the linter flags must be text `parse_block_props` cannot see."""
-    props = "keywords: alpha one, beta two, ocd: 2026-07-20"
-    parsed = lint.parse_block_props(props)
-    assert parsed["keywords"] == ["alpha", "one"]      # shredded
-    assert "beta two" not in str(parsed)               # and the rest is simply gone
-    t = f"^a1 [{props}, lmd: 2026-07-20]\nbody\n"
-    assert "atom-dropped-props" in _crit(lint.lint_page(Path("x.md"), t))
-
-
-# ── lint_page: the lesson taxonomy (the 3-schema drift the corpus carries) ─────────
-def test_lean_lesson_flags_no_keywords_and_no_id():
-    text = _page("^a [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.[^1]") + \
-        "[^1]: [ocd:2026-07-21 lmd:2026-07-21] DO NOT x BECAUSE y DO z.\n"
-    codes = _codes(lint.lint_page(Path("p.md"), text))
-    assert {"lesson-no-keywords", "lesson-no-id"} <= codes
-
-
-def test_rich_lesson_is_clean():
-    text = _page("^a [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.[^1]") + \
-        '[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"foo bar", ocd:2026-07-21, lmd:2026-07-21] DO NOT x BECAUSE y DO z.\n'
-    codes = _codes(lint.lint_page(Path("p.md"), text))
-    assert not {"lesson-no-keywords", "lesson-no-id", "lesson-no-meta"} & codes
-
-
-def test_superseded_lesson_without_pointer_is_warn():
-    text = _page("^a [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.[^1]") + \
-        '[^1]: [id:ATOM-A, status:superseded, keywords:"k", ocd:2026-07-21, lmd:2026-07-21] DO NOT x BECAUSE y DO z.\n'
-    assert "lesson-superseded-no-pointer" in _codes(lint.lint_page(Path("p.md"), text))
-
-
-# ── extract_atom_ids + find_duplicate_atom_ids (the corpus-wide dup check) ─────────
-def test_extract_atom_ids_skips_code_fences():
-    text = _page("^real [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nb\n```\n^fake [keywords: x]\n```")
-    ids = [aid for aid, _ln in lint.extract_atom_ids(text)]
-    assert "real" in ids and "fake" not in ids
-
-
-def test_find_duplicate_atom_ids_flags_cross_page_collision():
-    a = _page("^SHARED [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody a.")
-    b = _page("^SHARED [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody b.")
-    dups = lint.find_duplicate_atom_ids({Path("a.md"): a, Path("b.md"): b})
-    assert "SHARED" in dups and len(dups["SHARED"]) == 2
-
-
-def test_find_duplicate_atom_ids_empty_when_unique():
-    a = _page("^ONE [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.")
-    b = _page("^TWO [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.")
-    assert lint.find_duplicate_atom_ids({Path("a.md"): a, Path("b.md"): b}) == {}
+@needs_memgrep
+def test_well_formed_corpus_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MEMGREP_BIN", str(MEMGREP_BIN_PATH))
+    root = _corpus(
+        tmp_path / "mem",
+        {"a.md": _page("^ATOM-AAAA-BBBB [keywords: alpha_beta gamma, ocd: 2026-07-21, lmd: 2026-07-21]\nbody.")},
+    )
+    code, _stdout, findings = lint.run_lint([root])
+    assert findings == [], findings
+    assert code == 0
 
 
 # ── the detector (the heartbeat wiring) ───────────────────────────────────────────
-det = _load(_SCRIPTS / "detectors" / "wikimem-syntax.py", "wikimem_syntax_detector")
-
-
-def _scope_with(tmp_path: Path, monkeypatch, files: dict[str, str]):
-    """Point the detector's scope resolution at a single temp memory root holding `files`."""
-    root = tmp_path / "memory"
-    root.mkdir()
-    for name, content in files.items():
-        (root / name).write_text(content, encoding="utf-8")
-    monkeypatch.setattr(det.memory_scopes, "resolve_scope_dirs", lambda: [("TEST", root)])
+def _scope_with(tmp_path: Path, monkeypatch, files: dict[str, str]) -> Path:
+    """Point the wrapper's default roots at a single temp memory root holding `files`."""
+    root = _corpus(tmp_path / "memory", files)
+    monkeypatch.setenv("MEMGREP_BIN", str(MEMGREP_BIN_PATH))
+    monkeypatch.setattr(lint, "default_roots", lambda: [root])
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     return root
 
 
+@needs_memgrep
 def test_detector_signatures_flag_broken_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _scope_with(tmp_path, monkeypatch, {
         "clean.md": _page("^ok [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nb."),
         "broken.md": _page("^bad ⟦keywords: x⟧\nb."),
     })
-    sigs = det._critical_signatures()
-    assert any(s.startswith("atom-bad-bracket@") for s in sigs)
+    sigs = det._error_signatures()
+    assert any(s.startswith("broken.md:") for s in sigs), sigs
+    # The signature must not carry the message itself: it can embed absolute paths.
+    assert not any("/" in s for s in sigs), sigs
 
 
+@needs_memgrep
 def test_detector_silent_on_clean_corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     _scope_with(tmp_path, monkeypatch, {
         "clean.md": _page("^ok [keywords: k, ocd: 2026-07-21, lmd: 2026-07-21]\nb."),
@@ -216,13 +191,25 @@ def test_detector_silent_on_clean_corpus(tmp_path: Path, monkeypatch: pytest.Mon
     assert capsys.readouterr().out == ""
 
 
+@needs_memgrep
 def test_detector_emits_then_dedupes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     _scope_with(tmp_path, monkeypatch, {
         "broken.md": _page("^bad ⟦keywords: x⟧\nb."),
     })
     assert det.main() == 0
     first = capsys.readouterr().out
-    assert "[wikimem-syntax]" in first and "CRITICAL" in first
+    assert "[wikimem-syntax]" in first and "ERROR" in first
     # second run on the UNCHANGED set → per-set dedupe → silent
+    assert det.main() == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_detector_fails_open_when_memgrep_is_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    # The CLI must exit 2 on a missing binary; the HEARTBEAT must stay silent and exit 0 — it is
+    # not a gate, and a detector that breaks the heartbeat is worse than one that misses a finding.
+    _corpus(tmp_path / "memory", {"broken.md": _page("^bad ⟦keywords: x⟧\nb.")})
+    monkeypatch.setattr(lint, "find_memgrep", lambda: None)
+    monkeypatch.setattr(lint, "default_roots", lambda: [tmp_path / "memory"])
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     assert det.main() == 0
     assert capsys.readouterr().out == ""

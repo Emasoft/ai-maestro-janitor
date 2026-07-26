@@ -3,38 +3,23 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""wikimem_syntax_lint — check that memory pages use the syntax memgrep can PARSE.
+"""wikimem_syntax_lint — the wikimem page linter, as a thin shell-out to `memgrep lint`.
 
-WHY this exists (owner directive 2026-07-21): "can I trust you are following the
-right syntax every time you wrote an atom? otherwise you should create some script
-that does it for you." Trusting an agent to hand-write a machine-parsed format is
-the wrong safety model — the format has a CONSUMER (memgrep) whose parser is the
-ONLY authority on what is and is not a valid element. This linter encodes THAT
-parser's rules verbatim, so a page that would be silently invisible to recall is
-caught mechanically instead of trusted.
+WHY this is a SHELL-OUT and no longer an implementation (plan Phase 1b): this file used to
+carry its own port of memgrep's parser rules, "ported 1:1 from memory.rs". Two copies of one
+grammar cannot stay in step — and they did not: the Python side grew `atom-bad-bracket`,
+`atom-no-keywords`, `atom-dup-id`, the date checks and the lesson-metadata checks that Rust
+never had, while Rust grew the severity model, the link law and the cross-scope rule that
+Python never had. So the heartbeat detector and the write gate enforced DIFFERENT rule sets,
+and which defects you saw depended on which tool happened to run. Every check now lives in
+`scripts/memgrep/src/memory.rs::lint_paths` — the same code the write gate calls — and this
+file only chooses the default roots, runs it, and parses its output.
 
-The rules are ported 1:1 from `scripts/memgrep/src/memory.rs` (the ground truth):
+The lint is READ-ONLY: it surfaces, an agent fixes (RULE 0 / separation of powers).
 
-  * ATOM marker (`first_block_property_marker`, memory.rs:1346): an atom is
-    recognised ONLY as `^<id> [<props>]` with an ASCII caret `^`, id charset
-    `[A-Za-z0-9_-]+`, and ASCII square brackets `[` `]`. The recall display escapes
-    `[`/`]` to `⟦`/`⟧` to avoid markdown-link parsing — so an atom hand-copied FROM
-    recall output (using `⟦⟧`) is structurally invisible: memgrep's byte scan for
-    `b'['` (0x5B) never matches `⟦` (U+27E6). This is the #1 failure mode.
-  * `keywords:` is the atom's RECALL SURFACE (memory.rs:1398). No keywords ⇒ the
-    atom is un-findable ⇒ "the memory does not exist." CRITICAL.
-  * LESSON footnote (`[^N]:`, memory.rs:1887): its leading `[...]` metadata carries
-    `keywords:` (recall surface), `status:` (`valid`/`superseded`), and — when
-    superseded — `superseded-by:` (the forward pointer, memory.rs:337).
-  * PAGE frontmatter (memory.rs:980 reads element_type/ocd/lmd/topic/title/
-    description/tags): `description:` is the page recall surface.
-
-It is LENIENT exactly where memgrep is lenient (both `desc:"…"` and `desc: "…"`;
-comma-phrase AND quoted keyword lists; the `superseeded` misspelling) — it flags
-ONLY what would actually break recall or lose lifecycle semantics, never style.
-
-Exit status: 0 when no CRITICAL findings, 1 when any CRITICAL. READ-ONLY — it never
-edits a page (RULE 0 / separation of powers: the linter surfaces, an agent fixes).
+Exit status mirrors `memgrep lint`: 0 when nothing is at or above the gating severity (default
+ERROR), 1 when something is. A MISSING binary exits 2 — never 0: a gate that passes because the
+checker could not run is worse than no gate at all.
 """
 
 from __future__ import annotations
@@ -42,377 +27,117 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# ── the exact recognizers memgrep uses ──────────────────────────────────────────
-# Atom id charset is [A-Za-z0-9_-] (memory.rs:1353). We anchor at line start (after
-# optional indent) because authored atoms are LEADING; a trailing block-ref is rare
-# and not something we author, so anchoring keeps false positives out.
-_ATOM_ASCII = re.compile(r"^(?P<indent>\s*)\^(?P<id>[A-Za-z0-9_-]+)\s*\[")
-# The display-escaped / wrong-bracket forms memgrep will NOT recognise as an atom.
-_ATOM_MANGLED = re.compile(r"^\s*\^(?P<id>[A-Za-z0-9_-]+)\s*(?P<bad>[⟦【〔「])")
-# Footnote definition (memory.rs:1887 — `^\s*\[\^([^\]\s]+)\]:`).
-_FN_DEF = re.compile(r"^(?P<indent>\s*)\[\^(?P<label>[^\]\s]+)\]:\s*(?P<rest>.*)$")
-_HEADING = re.compile(r"^#{1,6}\s")
+_SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPTS / "lib"))
 
-SEVERITIES = ("CRITICAL", "WARN")
+import memory_scopes  # noqa: E402
+
+# `SEVERITY path:line — message` — the output contract memgrep's lint prints (WM-LINT-06: the
+# severity LEADS the line so `| grep '^ERROR'` is exact). The em-dash separator is memgrep's.
+_LINE_RE = re.compile(r"^(?P<sev>ERROR|WARN|INFO)\s+(?P<path>.+?):(?P<line>\d+)\s+—\s+(?P<msg>.*)$")
+
+SEVERITIES = ("ERROR", "WARN", "INFO")
 
 
-@dataclass
+@dataclass(frozen=True)
 class Finding:
-    path: Path
-    line: int
     sev: str
-    code: str
+    path: str
+    line: int
     msg: str
 
 
-# ── port of memgrep's block-prop parser (memory.rs:158/1314) ─────────────────────
-def _split_top_level_commas(s: str) -> list[str]:
-    """Split on commas that are NOT inside `[...]` brackets or `"..."` quotes.
+class MemgrepMissing(RuntimeError):
+    """No `memgrep` binary could be resolved, so nothing was checked."""
 
-    Mirrors memory.rs:158 — a comma inside a `[[wikilink]]` value or a quoted
-    `desc:"…, …"` value must not split the property list.
+
+def find_memgrep() -> str | None:
+    """Resolve the memgrep binary: `MEMGREP_BIN` → PATH → the cargo bin dir.
+
+    `MEMGREP_BIN` is first because a test (or a bisect) MUST be able to pin the binary under
+    test; without it the check silently scores whatever `cargo install` last left on PATH.
     """
-    out: list[str] = []
-    depth = 0
-    in_quote = False
-    start = 0
-    for i, ch in enumerate(s):
-        if ch == '"':
-            in_quote = not in_quote
-        elif not in_quote and ch == "[":
-            depth += 1
-        elif not in_quote and ch == "]":
-            depth = max(0, depth - 1)
-        elif ch == "," and depth == 0 and not in_quote:
-            out.append(s[start:i])
-            start = i + 1
-    out.append(s[start:])
-    return out
+    override = os.environ.get("MEMGREP_BIN")
+    if override and Path(override).is_file():
+        return override
+    found = shutil.which("memgrep")
+    if found:
+        return found
+    cargo_bin = Path(os.path.expanduser("~")) / ".cargo" / "bin" / "memgrep"
+    return str(cargo_bin) if cargo_bin.is_file() else None
 
 
-def parse_block_props(props: str) -> dict[str, list[str]]:
-    """`key: value, key2: a b c` → {key: [value...]}. Port of memory.rs:1314.
+def default_roots() -> list[Path]:
+    """The three memory scopes recall reads — LOCAL, PROJECT, USER — in that order.
 
-    Split on top-level commas → items; split each item on its FIRST `:`; shed a
-    value's delimiting quotes; whitespace-split the value into its array.
+    Passed to ONE memgrep invocation rather than three, because atom-id uniqueness is
+    corpus-wide: a collision between a LOCAL and a USER page is invisible to a per-scope run.
     """
-    out: dict[str, list[str]] = {}
-    for item in _split_top_level_commas(props):
-        if ":" not in item:
-            continue
-        key, val = item.split(":", 1)
-        key = key.strip()
-        if not key:
-            continue
-        val = val.strip()
-        if val.startswith('"'):
-            val = val[1:].rstrip('"') if val.endswith('"') else val[1:]
-        out[key] = val.split()
-    return out
+    return [root for _label, root in memory_scopes.resolve_scope_dirs()]
 
 
-def _extract_bracket_span(s: str, open_idx: int) -> tuple[str, int] | None:
-    """From the `[` at `open_idx`, return (inner_props, index_one_past_close).
-
-    Bracket-DEPTH tracked so a `[[wikilink]]` inside props cannot close it early
-    (memory.rs:1362). None when the bracket is never closed on this line.
-    """
-    depth = 0
-    for m in range(open_idx, len(s)):
-        if s[m] == "[":
-            depth += 1
-        elif s[m] == "]":
-            depth -= 1
-            if depth == 0:
-                return s[open_idx + 1 : m], m + 1
-    return None
-
-
-def _is_iso_date(v: str) -> bool:
-    return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", v))
-
-
-# ── per-element checks ───────────────────────────────────────────────────────────
-def _check_atom(path: Path, lineno: int, line: str, findings: list[Finding]) -> None:
-    mangled = _ATOM_MANGLED.match(line)
-    if mangled:
-        findings.append(
-            Finding(
-                path,
-                lineno,
-                "CRITICAL",
-                "atom-bad-bracket",
-                f"atom `^{mangled['id']}` opens with `{mangled['bad']}` not ASCII `[` — "
-                "memgrep scans for byte `[` (0x5B) and will NOT index this atom; it is "
-                "invisible to recall. Use `^id [key: value, …]`.",
-            )
-        )
-        return
-
-    m = _ATOM_ASCII.match(line)
-    if not m:
-        return
-    open_idx = line.index("[", m.end() - 1)
-    span = _extract_bracket_span(line, open_idx)
-    if span is None:
-        findings.append(
-            Finding(path, lineno, "CRITICAL", "atom-unclosed",
-                    f"atom `^{m['id']}` block-props `[` is never closed on this line — unparseable.")
-        )
-        return
-    # DROPPED TEXT — mirrors `parse_block_props`'s two silent `continue`s (no `:`, or an
-    # empty key) EXACTLY, so this flags precisely what the parser discards and nothing else.
-    # The usual cause is `keywords: a phrase, another phrase`: the author means comma to
-    # separate KEY-PHRASES, but comma separates FIELDS and space separates KEYWORDS, so every
-    # phrase after the first is deleted outright and the first is shredded into loose words.
-    # Since `keywords` IS the recall surface, the atom silently stops being findable by most
-    # of its own symptoms — measured on the benchmark corpus as hit@1 21.7% vs 95.7% repaired.
-    dropped: list[str] = []
-    for item in _split_top_level_commas(span[0]):
-        if not item.strip():
-            continue  # a trailing comma, not lost content
-        if ":" not in item or not item.split(":", 1)[0].strip():
-            dropped.append(item.strip())
-    if dropped:
-        shown = ", ".join(repr(d[:32]) for d in dropped[:3])
-        more = ", …" if len(dropped) > 3 else ""
-        findings.append(
-            Finding(path, lineno, "CRITICAL", "atom-dropped-props",
-                    f"atom `^{m['id']}`: {len(dropped)} comma-segment(s) are DISCARDED by the "
-                    f"parser ({shown}{more}) — a comma separates FIELDS, a space separates "
-                    "KEYWORDS. Join each key-phrase with `_` and separate phrases with spaces "
-                    "(`keywords: a_phrase another_phrase`); "
-                    "`scripts/wikimem_migrate_keywords.py` recovers them losslessly.")
-        )
-
-    props = parse_block_props(span[0])
-    kw = props.get("keywords")
-    if not kw:
-        findings.append(
-            Finding(path, lineno, "CRITICAL", "atom-no-keywords",
-                    f"atom `^{m['id']}` has no `keywords:` — it is the RECALL SURFACE; "
-                    "without it the atom is un-findable by symptom (the memory does not exist).")
-        )
-    for datekey in ("ocd", "lmd"):
-        val = props.get(datekey)
-        if not val:
-            findings.append(Finding(path, lineno, "WARN", f"atom-no-{datekey}",
-                                    f"atom `^{m['id']}` has no `{datekey}:` date."))
-        elif not _is_iso_date(val[0]):
-            findings.append(Finding(path, lineno, "WARN", f"atom-bad-{datekey}",
-                                    f"atom `^{m['id']}` `{datekey}:` = `{val[0]}` is not ISO YYYY-MM-DD."))
-
-
-def _check_footnote(path: Path, lineno: int, rest: str, label: str, findings: list[Finding]) -> None:
-    stripped = rest.lstrip()
-    # The lesson metadata is a LEADING `[...]` block right after `[^N]:`.
-    if "⟦" in rest and not stripped.startswith("["):
-        findings.append(
-            Finding(path, lineno, "CRITICAL", "lesson-bad-bracket",
-                    f"lesson `[^{label}]` metadata uses `⟦…⟧` not ASCII `[…]` — memgrep cannot "
-                    "parse its keywords/status; recall + supersession break. Use `[id:… keywords:…]`.")
-        )
-        return
-    if not stripped.startswith("["):
-        findings.append(
-            Finding(path, lineno, "WARN", "lesson-no-meta",
-                    f"lesson `[^{label}]` has no leading `[id:… status:… keywords:… ocd:… lmd:…]` "
-                    "metadata block — it carries no recall keywords and no stable id.")
-        )
-        return
-    span = _extract_bracket_span(stripped, 0)
-    if span is None:
-        findings.append(Finding(path, lineno, "WARN", "lesson-unclosed-meta",
-                                f"lesson `[^{label}]` metadata `[` never closes."))
-        return
-    props = parse_block_props(span[0])
-    if not props.get("keywords"):
-        findings.append(Finding(path, lineno, "WARN", "lesson-no-keywords",
-                                f"lesson `[^{label}]` metadata has no `keywords:` — not recallable by symptom."))
-    if not props.get("id"):
-        findings.append(Finding(path, lineno, "WARN", "lesson-no-id",
-                                f"lesson `[^{label}]` has no `id:ATOM-…` — the `[^N]` label renumbers; "
-                                "only the stable id survives edits."))
-    status = (props.get("status") or ["valid"])[0]
-    if status in ("superseded", "superseeded") and not props.get("superseded-by") and not props.get("superseeded-by"):
-        findings.append(Finding(path, lineno, "WARN", "lesson-superseded-no-pointer",
-                                f"lesson `[^{label}]` is `status:superseded` but has no `superseded-by:ATOM-…` "
-                                "forward pointer."))
-
-
-def _parse_frontmatter(text: str) -> dict[str, str] | None:
-    """Flat `key: value` scan of a leading `---`…`---` block (memory.rs:572 is equally lenient)."""
-    if not text.startswith("---"):
-        return None
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return None
-    fm: dict[str, str] = {}
-    for ln in lines[1:]:
-        if ln.strip() == "---":
-            return fm
-        m = re.match(r"^(\w[\w-]*):\s?(.*)$", ln)
+def parse_findings(stdout: str) -> list[Finding]:
+    """Parse `memgrep lint` stdout into findings, ignoring anything that is not a finding line."""
+    out: list[Finding] = []
+    for raw in stdout.splitlines():
+        m = _LINE_RE.match(raw)
         if m:
-            fm[m.group(1)] = m.group(2).strip()
-    return None  # no closing fence
-
-
-def lint_page(path: Path, text: str) -> list[Finding]:
-    findings: list[Finding] = []
-    fm = _parse_frontmatter(text)
-    if fm is None:
-        findings.append(Finding(path, 1, "WARN", "page-no-frontmatter",
-                                "page has no closed `---` frontmatter block."))
-    else:
-        if not fm.get("description"):
-            findings.append(Finding(path, 1, "CRITICAL", "page-no-description",
-                                    "frontmatter has no `description:` — the PAGE recall surface "
-                                    "memgrep ranks on; without it the page barely surfaces."))
-        for k in ("name", "ocd", "lmd"):
-            if not fm.get(k):
-                findings.append(Finding(path, 1, "WARN", f"page-no-{k}", f"frontmatter has no `{k}:`."))
-
-    in_code = False
-    has_notes_section = False
-    for i, line in enumerate(text.splitlines(), start=1):
-        fence = line.lstrip()
-        if fence.startswith("```") or fence.startswith("~~~"):
-            in_code = not in_code
-            continue
-        if in_code:
-            continue
-        if _HEADING.match(line):
-            low = line.lower()
-            if "notes and lessons learned" in low or "lessons learned" in low:
-                has_notes_section = True
-            continue
-        _check_atom(path, i, line, findings)
-        fn = _FN_DEF.match(line)
-        if fn:
-            _check_footnote(path, i, fn["rest"], fn["label"], findings)
-        elif "⟦" in line and _ATOM_MANGLED.match(line) is None:
-            # A stray display-escaped bracket anywhere else is worth a nudge.
-            findings.append(Finding(path, i, "WARN", "stray-display-bracket",
-                                    "line contains `⟦`/`⟧` (memgrep's recall DISPLAY escaping) — "
-                                    "in a source page these should be literal `[`/`]`."))
-
-    if not has_notes_section:
-        findings.append(Finding(path, 1, "WARN", "page-no-notes-section",
-                                "no `## Notes and lessons learned` section (mandatory landing zone "
-                                "for correction lessons, even when empty)."))
-    return findings
-
-
-def extract_atom_ids(text: str) -> list[tuple[str, int]]:
-    """Every well-formed ASCII atom id in the page body, with its 1-based line.
-
-    Feeds the corpus-wide duplicate-id check: memgrep requires atom ids be corpus-unique
-    (memory.rs — "atom ids must be corpus-unique … corpus corruption to repair"), and a
-    collision makes `recall` on that id ambiguous. A mangled `⟦`-bracket atom is NOT
-    collected (memgrep does not see it as an atom; `_check_atom` flags it separately).
-    """
-    out: list[tuple[str, int]] = []
-    in_code = False
-    for i, line in enumerate(text.splitlines(), start=1):
-        fence = line.lstrip()
-        if fence.startswith("```") or fence.startswith("~~~"):
-            in_code = not in_code
-            continue
-        if in_code:
-            continue
-        m = _ATOM_ASCII.match(line)
-        if m:
-            out.append((m["id"], i))
+            out.append(Finding(m["sev"], m["path"], int(m["line"]), m["msg"]))
     return out
 
 
-def find_duplicate_atom_ids(pages: dict[Path, str]) -> dict[str, list[str]]:
-    """Map each atom id appearing more than once across the corpus → its sorted `file:line`
-    locations. Empty when every id is unique. PURE over the given pages — this is the one
-    check that CANNOT be done per-file (a collision spans two pages)."""
-    locs: dict[str, list[str]] = {}
-    for path, text in pages.items():
-        for aid, line in extract_atom_ids(text):
-            locs.setdefault(aid, []).append(f"{path}:{line}")
-    return {aid: sorted(where) for aid, where in locs.items() if len(where) > 1}
+def run_lint(paths: list[Path] | None = None, *, extra_args: list[str] | None = None) -> tuple[int, str, list[Finding]]:
+    """Run `memgrep lint` over `paths` (default: the three scopes) → (exit code, stdout, findings).
 
-
-# ── file walking + CLI ───────────────────────────────────────────────────────────
-def _iter_md(target: Path) -> list[Path]:
-    if target.is_file():
-        return [target] if target.suffix == ".md" else []
-    out: list[Path] = []
-    for root, _, files in os.walk(target):
-        for f in files:
-            if f.endswith(".md") and f != "MEMORY.md":
-                out.append(Path(root) / f)
-    return sorted(out)
-
-
-def _default_roots() -> list[Path]:
-    home = Path.home()
-    roots: list[Path] = []
-    user = home / ".claude" / "plugins" / "data" / "ai-maestro-janitor-ai-maestro-plugins" / "memory"
-    if user.is_dir():
-        roots.append(user)
-    cwd = Path.cwd()
-    proj = cwd / ".claude" / "project" / "memory"
-    if proj.is_dir():
-        roots.append(proj)
-    slug = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
-    local = home / ".claude" / "projects" / slug / "memory"
-    if local.is_dir():
-        roots.append(local)
-    return roots
+    Raises `MemgrepMissing` when the binary cannot be resolved — callers decide whether that is
+    fatal (the CLI) or fail-open (the heartbeat detector).
+    """
+    binary = find_memgrep()
+    if binary is None:
+        raise MemgrepMissing("memgrep not found (set MEMGREP_BIN, or `cargo install --path scripts/memgrep`)")
+    targets = [str(p) for p in (paths if paths is not None else default_roots())]
+    cmd = [binary, "lint", *(extra_args or []), *targets]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    return proc.returncode, proc.stdout, parse_findings(proc.stdout)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Lint wikimem pages against memgrep's parser rules.")
+    ap = argparse.ArgumentParser(
+        description="Lint wikimem pages (thin wrapper around `memgrep lint` — the one linter).",
+    )
     ap.add_argument("paths", nargs="*", help="Pages or dirs to lint (default: the 3 memory scopes).")
-    ap.add_argument("--quiet-ok", action="store_true", help="Print nothing when a file is clean.")
+    ap.add_argument(
+        "--min-severity",
+        choices=[s.lower() for s in SEVERITIES],
+        help="Exit non-zero only at or above this severity (memgrep's default: error).",
+    )
     args = ap.parse_args()
 
-    targets = [Path(p) for p in args.paths] if args.paths else _default_roots()
-    files: list[Path] = []
-    for t in targets:
-        files.extend(_iter_md(t))
-    if not files:
-        print("wikimem-lint: no .md pages found.", file=sys.stderr)
-        return 0
+    extra = ["--min-severity", args.min_severity] if args.min_severity else []
+    try:
+        code, stdout, findings = run_lint([Path(p) for p in args.paths] or None, extra_args=extra)
+    except MemgrepMissing as e:
+        print(f"wikimem-lint: {e}", file=sys.stderr)
+        return 2
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"wikimem-lint: memgrep failed to run ({e})", file=sys.stderr)
+        return 2
 
-    total = {s: 0 for s in SEVERITIES}
-    pages: dict[Path, str] = {}
-    for f in sorted(set(files)):
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
-            print(f"{f}: unreadable ({e})", file=sys.stderr)
-            continue
-        pages[f] = text
-        findings = lint_page(f, text)
-        if not findings:
-            if not args.quiet_ok:
-                print(f"✓ {f}")
-            continue
-        print(f"\n{f}")
-        for fd in sorted(findings, key=lambda x: (SEVERITIES.index(x.sev), x.line)):
-            total[fd.sev] += 1
-            print(f"  {fd.sev:8} L{fd.line:<4} [{fd.code}] {fd.msg}")
-
-    dups = find_duplicate_atom_ids(pages)
-    if dups:
-        print("\n── corpus-wide duplicate atom ids (memgrep requires them unique) ──")
-        for aid, where in sorted(dups.items()):
-            total["CRITICAL"] += 1
-            print(f"  CRITICAL      [atom-dup-id] `^{aid}` appears {len(where)}× — {', '.join(where)}")
-
-    print(f"\nwikimem-lint: {len(set(files))} pages, "
-          f"{total['CRITICAL']} CRITICAL, {total['WARN']} WARN")
-    return 1 if total["CRITICAL"] else 0
+    print(stdout, end="")
+    counts = {s: sum(1 for f in findings if f.sev == s) for s in SEVERITIES}
+    print(
+        f"wikimem-lint: {counts['ERROR']} ERROR, {counts['WARN']} WARN, {counts['INFO']} INFO",
+        file=sys.stderr,
+    )
+    return code
 
 
 if __name__ == "__main__":

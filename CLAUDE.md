@@ -427,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=d5a7be08e53f digest=c427792cc412 generated=2026-07-26T21:22:00+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=54aa76a31858 digest=1a2e8529f7a8 generated=2026-07-26T22:32:55+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1784,12 +1784,13 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · repair_props(props) -> tuple[str, int] — Return (repaired props, number of recovered orphan segments).
   · repair_text(text) -> tuple[str, int, list[str]] — Repair every atom marker in a page. Returns (new text, recovered count, refusals).
   · main() -> int
-`scripts/wikimem_syntax_lint.py` — wikimem_syntax_lint — check that memory pages use the syntax memgrep can PARSE.
+`scripts/wikimem_syntax_lint.py` — wikimem_syntax_lint — the wikimem page linter, as a thin shell-out to `memgrep lint`.
   · Finding
-  · parse_block_props(props) -> dict[str, list[str]] — `key: value, key2: a b c` → {key: [value...]}. Port of memory.rs:1314.
-  · lint_page(path, text) -> list[Finding]
-  · extract_atom_ids(text) -> list[tuple[str, int]] — Every well-formed ASCII atom id in the page body, with its 1-based line.
-  · find_duplicate_atom_ids(pages) -> dict[str, list[str]] — Map each atom id appearing more than once across the corpus → its sorted `file:line`
+  · MemgrepMissing — No `memgrep` binary could be resolved, so nothing was checked.
+  · find_memgrep() -> str | None — Resolve the memgrep binary: `MEMGREP_BIN` → PATH → the cargo bin dir.
+  · default_roots() -> list[Path] — The three memory scopes recall reads — LOCAL, PROJECT, USER — in that order.
+  · parse_findings(stdout) -> list[Finding] — Parse `memgrep lint` stdout into findings, ignoring anything that is not a finding line.
+  · run_lint(paths, *, extra_args) -> tuple[int, str, list[Finding]] — Run `memgrep lint` over `paths` (default: the three scopes) → (exit code, stdout, findings).
   · main() -> int
 ### Convention groups
 `scripts/lib/*_patterns.py` (×223) [ad_ldap, agent_config, ai_agent_runtime, ai_jailbreak, api_gateway, apns_fcm_push, apple_privacy_manifest, archive_extraction, argocd_fluxcd, artifact_storage_creds, … +213 more]

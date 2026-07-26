@@ -934,8 +934,8 @@ would trade one unusable report (all-noise) for another (silently incomplete).
 
 | severity | meaning | checks |
 |---|---|---|
-| `ERROR` | corruption or invisibility — it does not parse, resolve, or rank | dangling `[^N]` reference · unquoted `desc:` (atom or lesson) · body-less lesson · supersession without `SUPERSEDED BODY:` · missing `ocd`/`lmd`/`description` · missing Notes section · downward cross-scope link |
-| `WARN` | real, but nothing is lost and the fix is not mechanical | one-sided link (WM-WIKI-04a) · oversized atom (WM-LINT-03) |
+| `ERROR` | corruption or invisibility — it does not parse, resolve, or rank | dangling `[^N]` reference · unquoted `desc:` (atom or lesson) · body-less lesson · supersession without `SUPERSEDED BODY:` · missing `ocd`/`lmd`/`description` · missing Notes section · downward cross-scope link · non-ASCII `⟦` atom marker · unclosed atom props · atom without `keywords:` · dropped props segment · duplicate atom id · `⟦` lesson metadata |
+| `WARN` | real, but nothing is lost and the fix is not mechanical | one-sided link (WM-WIKI-04a) · oversized atom (WM-LINT-03) · missing or non-ISO atom `ocd`/`lmd` · lesson without metadata / without `id:` / without `keywords:` · superseded lesson with no forward pointer |
 | `INFO` | the model BLESSES this shape; a pointer, not a defect | uncited page-level lesson |
 
 The split is measured, not stylistic. Over the three live scopes (164 notes) the corpus held 262
@@ -956,7 +956,32 @@ author may not be positioned to do.
 (WM-LES-07), `atom-dropped-props` (WM-ATOM-07), a dangling / unreferenced footnote, a one-sided
 same-scope `[[link]]` (WM-WIKI-04 / WM-WIKI-04a), the required frontmatter fields (`ocd`/`lmd`/
 `description`, legacy aliases `created`/`updated`/`summary` accepted) plus the mandatory
-`## Notes and lessons learned` section, and a **downward cross-scope link** (WM-LINT-05).
+`## Notes and lessons learned` section, a **downward cross-scope link** (WM-LINT-05), and the
+INVISIBILITY class — an atom marker opened with a non-ASCII bracket (`⟦`/`【`/`〔`/`「`, the shape
+a marker acquires when it is pasted back from recall's DISPLAY output), an atom whose props `[`
+never closes, an atom with no `keywords:` (WM-ATOM-04 — no recall surface means no memory), a
+lesson whose metadata head uses `⟦…⟧`, a lesson with no `id:` / no `keywords:` / no metadata at
+all, a `status:superseded` lesson with no `superseded-by:` pointer, a non-ISO `ocd`/`lmd`, and a
+**duplicate atom id**.
+
+`WM-LINT-07` **one-linter-one-grammar** — `MUST`: every check lives in `memgrep lint` and nowhere
+else. `scripts/wikimem_syntax_lint.py` is a THIN WRAPPER that picks the default roots, shells out,
+and parses the output; the heartbeat detector calls that wrapper. Two implementations of one
+grammar drift, and these two did: each side grew checks the other never had, so which defects an
+author saw depended on which tool happened to run. A wrapper that cannot resolve the binary
+`MUST` exit non-zero — a gate that passes because the checker did not run is worse than no gate.
+
+Three properties this contract requires of the implementation, each of which was a live bug:
+
+- **Lessons are scanned from the RAW definitions**, not from the parsed footnote list: the markdown
+  parser only materializes a footnote node for a BALANCED ref+def pair, so linting the parsed list
+  silently skipped every UNCITED page-level lesson — which the model makes the NORMAL case.
+- **Atom-marker SHAPE checks read the raw line.** An atom the props parser cannot see is exactly
+  what a parser-driven scan can never report; fenced and inline code are masked so prose that
+  DOCUMENTS the broken form is not a finding.
+- **File identity is the canonical path.** One file reachable by two paths (a `publish-globally`
+  symlink, a symlinked root) is linted ONCE, or the corpus-unique check reports every atom as a
+  duplicate of itself. A byte COPY is not the same file and its ids genuinely do collide.
 
 `WM-LINT-05` **downward-cross-scope-link** — a link from a page in one scope DOWN to a page in a
 lower one (LOCAL < PROJECT < USER) is a violation, and the message names WHICH of the two reasons
