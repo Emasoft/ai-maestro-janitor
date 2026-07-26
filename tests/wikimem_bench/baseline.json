@@ -5,9 +5,9 @@
     "hit_at_3": 0.5217,
     "hit_at_10": 0.6522,
     "mrr": 0.3964,
-    "mean_total_tokens": 443.5,
-    "total_tokens": 10201,
-    "total_bytes": 40777,
+    "mean_total_tokens": 441.4,
+    "total_tokens": 10153,
+    "total_bytes": 40588,
     "hops_used": 0
   },
   "rows": [
@@ -148,10 +148,10 @@
       "expect": "cron-timezone-drift#idempotency-beats-scheduling",
       "kw_pos": 3,
       "rank": 0,
-      "find_tokens": 556,
+      "find_tokens": 508,
       "hop_tokens": 0,
-      "total_tokens": 556,
-      "bytes": 2221,
+      "total_tokens": 508,
+      "bytes": 2032,
       "hop_used": false
     },
     {
