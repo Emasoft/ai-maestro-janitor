@@ -3807,9 +3807,22 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     // place on a timeline). Default direction is desc (newest / highest first); --order asc flips.
     let asc = a.order == Order::Asc;
     match a.sort {
+        // Score, then RECENCY as the tie-break (WM-SCORE-08). `sort_by` is stable, so without an
+        // explicit second key equal scores fall through to input order — which is PATH order, i.e.
+        // alphabetical. That is the least meaningful ordering available for memories, and it is
+        // what decided the `lossless_migration` probe before the scorer was tiered. A newer element
+        // wins; one with no date sorts last in both directions (it has no place on a timeline).
+        // `--order asc` flips the SCORE only: "least relevant first" should not also mean "oldest
+        // first", or the two keys would fight.
         SortKey::Score => scored.sort_by(|x, y| {
             let o = x.0.cmp(&y.0); // ascending by score
-            if asc { o } else { o.reverse() }
+            let by_score = if asc { o } else { o.reverse() };
+            by_score.then_with(|| match (&x.5, &y.5) {
+                (Some(a), Some(b)) => b.cmp(a), // ISO-8601 compares lexicographically; newest first
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
         }),
         SortKey::Ocd | SortKey::Lmd => {
             let key = |t: &RecallRanked| match a.sort {

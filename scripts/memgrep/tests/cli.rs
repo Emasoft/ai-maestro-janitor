@@ -1634,6 +1634,28 @@ const ATOM_CORPUS: &str = "---\nname: oauth-hub\ndescription: oauth rotation ove
 const LAYER_CORPUS: &str = "---\nname: layer-hub\ndescription: layered output fixture\ntags: [layers]\nocd: 2026-01-01\nlmd: 2026-06-02\n---\n# Layer hub\n\n^zqxlayer-atom [desc: \"a one line summary\", keywords: zqxlayerkw phrase_two, ocd: 2026-01-01, lmd: 2026-06-02]\nThe zqxbody sentence only medium and full may print.[^1]\n\n## Notes and lessons learned\n[^1]: zqxlayerlesson — only full or an explicit --with-notes may print this.\n";
 
 #[test]
+fn equal_scores_are_broken_by_RECENCY_not_alphabetical_path_order() {
+    // `sort_by` is stable, so with no explicit second key equal scores fall through to INPUT order,
+    // which is path order — alphabetical, the least meaningful ordering available for memories, and
+    // what silently decided results before the scorer was tiered. The two pages here are authored to
+    // score IDENTICALLY on the query, so ONLY the tie-break can order them; `zzz-newer` is named to
+    // sort LAST alphabetically, so seeing it first proves recency won rather than the filename.
+    let d = TempDir::new("tiebreak-recency");
+    let page = |name: &str, lmd: &str| {
+        format!("---\nname: {name}\ndescription: zqxtie shared surface\nocd: 2026-01-01\nlmd: {lmd}\n---\n\n## Notes and lessons learned\n")
+    };
+    d.write("aaa-older.md", &page("aaa-older", "2026-01-05"));
+    d.write("zzz-newer.md", &page("zzz-newer", "2026-06-30"));
+    let o = run(&["recall", "zqxtie", d.as_str()]);
+    let newer = o.find("zzz-newer").expect("the newer page is present");
+    let older = o.find("aaa-older").expect("the older page is present");
+    assert!(
+        newer < older,
+        "equal scores must order NEWEST first, not alphabetically:\n{o}"
+    );
+}
+
+#[test]
 fn recall_basic_is_the_default_and_prints_one_lean_row() {
     // The DEFAULT must be the lean layer. Measured on the frozen benchmark this is what takes the
     // END-TO-END cost from 441.4 to 247.0 tokens/query at IDENTICAL accuracy — so a regression that
