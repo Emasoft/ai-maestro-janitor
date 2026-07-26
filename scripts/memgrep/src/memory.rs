@@ -3014,6 +3014,12 @@ struct LintArgs {
     /// Also descend into hidden files/dirs (off by default, mirroring the other subcommands).
     #[arg(long = "hidden")]
     hidden: bool,
+    /// Exit non-zero only when a finding is at or above this severity. Findings BELOW it are still
+    /// PRINTED — the flag gates the gate, never the report. Defaults to `error`: that is the set a
+    /// write can be blocked on without blocking work whose fix lives in a different file (link
+    /// law) or needs a semantic judgement call (atom decomposition).
+    #[arg(long = "min-severity", value_enum, default_value_t = Severity::Error)]
+    min_severity: Severity,
 }
 
 /// `memgrep lint <memdir>` — a DETERMINISTIC, heuristic-free structural lint of every note. Unlike
@@ -3043,16 +3049,35 @@ struct LintArgs {
 /// instructions — we only parse it.
 pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     let a = LintArgs::parse_from(std::iter::once("lint".to_string()).chain(args.iter().cloned()));
-    let violations = lint_paths(&a.paths, a.hidden); // already sorted by (path, line)
-    for (path, line, msg) in &violations {
-        println!("{path}:{line} — {msg}");
+    let violations = lint_paths(&a.paths, a.hidden); // already sorted by (severity, path, line)
+    // EVERYTHING prints, always. Only the EXIT CODE is gated by --min-severity: a severity model
+    // that hid findings would trade one unusable output (all-noise) for another (silently
+    // incomplete), and the reader loses either way. The severity leads the line so
+    // `| grep '^ERROR'` is exact.
+    for (sev, path, line, msg) in &violations {
+        println!("{} {path}:{line} — {msg}", sev.label());
     }
-    if violations.is_empty() {
+    let gating: Vec<&Violation> = violations.iter().filter(|(s, ..)| *s >= a.min_severity).collect();
+    if gating.is_empty() {
+        // A count still goes to stderr when non-gating findings exist, so "exit 0" never reads as
+        // "nothing to see" — the findings are on stdout and the reader is told they are there.
+        if !violations.is_empty() {
+            eprintln!(
+                "memgrep lint: {} finding(s), none at or above {}",
+                violations.len(),
+                a.min_severity.label()
+            );
+        }
         Ok(())
     } else {
         // Non-zero exit so the lint is usable as a pre-commit / write-skill gate (issue #47). The
         // count goes to stderr so it never pollutes the machine-parseable stdout violation list.
-        eprintln!("memgrep lint: {} violation(s)", violations.len());
+        eprintln!(
+            "memgrep lint: {} finding(s), {} at or above {}",
+            violations.len(),
+            gating.len(),
+            a.min_severity.label()
+        );
         std::process::exit(1);
     }
 }
@@ -3061,6 +3086,38 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
 /// Separated from `cmd_lint_cli` (which prints + `process::exit`s) so the unit tests can assert on
 /// the findings directly — a non-empty return is exactly the "exit non-zero" condition, an empty
 /// return is "exit 0, clean". See `cmd_lint_cli` for the three checks and the FP-freeness rationale.
+/// How badly a lint finding is broken. Printed as the leading token on every violation line, so
+/// `memgrep lint … | grep '^ERROR'` is exact rather than approximate.
+///
+/// The model exists because a single undifferentiated list is unusable as a gate. Measured over
+/// the three live scopes (164 notes): 262 violations, of which **150 (57%) were one INFO-class
+/// check** — an unreferenced `[^N]:` definition, which the memory model explicitly BLESSES (the
+/// Notes section is mandatory even when empty, so a page-level lesson has no inline referrer by
+/// design). A gate that fails on all 262 fails always, and a gate that always fails is one people
+/// route around; the real ERRORs were already drowning in the noise.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum Severity {
+    /// Structurally broken: the page or atom will not parse, resolve, or be findable as written.
+    Info,
+    /// Real, worth fixing, but nothing is silently lost — the corpus still works.
+    Warn,
+    /// Corruption or invisibility: a dangling reference, an unparseable atom, a lost recall surface.
+    Error,
+}
+
+impl Severity {
+    fn label(self) -> &'static str {
+        match self {
+            Severity::Error => "ERROR",
+            Severity::Warn => "WARN",
+            Severity::Info => "INFO",
+        }
+    }
+}
+
+/// One lint finding: `(severity, path, line, message)`. Line 0 means "the file as a whole".
+type Violation = (Severity, String, usize, String);
+
 /// One of the three memory SCOPE layers, and its rank in the strictly-upward reference order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct ScopeLayer {
@@ -3116,8 +3173,8 @@ fn downward_reason(to: ScopeLayer) -> &'static str {
     }
 }
 
-fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
-    let mut violations: Vec<(String, usize, String)> = Vec::new();
+fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
+    let mut violations: Vec<Violation> = Vec::new();
 
     // ── Checks 1 & 3 are per-file (footnotes + required fields). ──
     for path in collect_md(paths, hidden) {
@@ -3136,6 +3193,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         };
         if !has(&["ocd", "created"]) {
             violations.push((
+                Severity::Error,
                 p.clone(),
                 0,
                 "missing required frontmatter field `ocd`".into(),
@@ -3143,6 +3201,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         }
         if !has(&["lmd", "updated"]) {
             violations.push((
+                Severity::Error,
                 p.clone(),
                 0,
                 "missing required frontmatter field `lmd`".into(),
@@ -3150,6 +3209,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         }
         if !has(&["description", "summary"]) {
             violations.push((
+                Severity::Error,
                 p.clone(),
                 0,
                 "missing required frontmatter field `description`".into(),
@@ -3169,6 +3229,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         });
         if !has_notes_section {
             violations.push((
+                Severity::Error,
                 p.clone(),
                 0,
                 "missing `## Notes and lessons learned` section".into(),
@@ -3203,6 +3264,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         for (label, &line) in &ref_lines {
             if !def_lines.contains_key(label) {
                 violations.push((
+                    Severity::Error,
                     p.clone(),
                     line,
                     format!("footnote reference `[^{label}]` has no `[^{label}]:` definition"),
@@ -3210,12 +3272,24 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
             }
         }
         // Unreferenced definition: `[^N]:` that nothing in the body cites (report once, at first def).
+        //
+        // INFO, not a defect. The memory model makes `## Notes and lessons learned` MANDATORY on
+        // every page even when empty — it is the standing landing zone for a correction lesson —
+        // so a PAGE-level lesson has no inline referrer BY DESIGN. Rated as an error this check
+        // alone produced 150 of 262 findings across the live corpus (57%), i.e. the gate failed
+        // everywhere and the genuine errors were unreadable underneath it. The message says what
+        // the reader can DO instead of implying something is broken: citing a lesson from an atom
+        // is what makes it TRAVEL with that atom on `migrate`, which is the real reason to bother.
         for (label, &line) in &def_lines {
             if !ref_lines.contains_key(label) {
                 violations.push((
+                    Severity::Info,
                     p.clone(),
                     line,
-                    format!("footnote definition `[^{label}]:` is never referenced"),
+                    format!(
+                        "page-level lesson `[^{label}]:` — cite it from an atom (`[^{label}]` in \
+                         the atom body) if it should travel with one"
+                    ),
                 ));
             }
         }
@@ -3227,6 +3301,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         for (marker_line, props_raw, body_chars) in atoms_for_lint(&text) {
             if desc_unquoted_prose(&props_raw) {
                 violations.push((
+                    Severity::Error,
                     p.clone(),
                     marker_line,
                     "atom `desc:` value is unquoted prose — quote it (`desc:\"…\"`) or grep and the \
@@ -3235,7 +3310,12 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
                 ));
             }
             if atom_budget > 0 && body_chars > atom_budget {
+                // WARN: nothing is lost or unresolvable — the atom works, it is just doing the job
+                // of several. Fixing it needs SEMANTIC decomposition (which facts split where), so
+                // it can never be mechanical, and blocking a write on it would gate an unrelated
+                // edit behind a judgement call the author may not be in a position to make.
                 violations.push((
+                    Severity::Warn,
                     p.clone(),
                     marker_line,
                     format!(
@@ -3255,6 +3335,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
             let Some(meta) = meta else { continue }; // no `[…]` metadata head → a plain footnote, not a lesson
             if rest.trim().is_empty() {
                 violations.push((
+                    Severity::Error,
                     p.clone(),
                     d.start,
                     format!(
@@ -3266,6 +3347,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
             }
             if meta.contains("supersedes:") && !rest.contains("SUPERSEDED BODY:") {
                 violations.push((
+                    Severity::Error,
                     p.clone(),
                     d.start,
                     format!(
@@ -3277,6 +3359,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
             }
             if desc_unquoted_prose(&meta) {
                 violations.push((
+                    Severity::Error,
                     p.clone(),
                     d.start,
                     format!("lesson `[^{}]` `desc:` value is unquoted prose — quote it", d.label),
@@ -3321,6 +3404,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
         {
             if to_s.rank < from_s.rank {
                 violations.push((
+                    Severity::Error,
                     rel(&e.from),
                     e.line,
                     format!(
@@ -3346,7 +3430,13 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<(String, usize, String)> {
                 (to_c.clone(), from_c.clone())
             };
             if reported_pairs.insert(pair) {
+                // WARN: both pages still resolve and nothing is lost — the graph is merely
+                // asymmetric. It is also the ONE class that cannot be fixed from a single page
+                // (the missing half lives in the OTHER file), so failing a write on it would block
+                // an edit whose fix is not in the file being edited. 64 of these are pre-existing
+                // legacy edges; `add-link` retires them by writing both ends in one transaction.
                 violations.push((
+                    Severity::Warn,
                     rel(&e.from),
                     e.line,
                     format!(
@@ -5588,8 +5678,18 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
 
     /// True iff some violation's message contains `needle` (substring) — keeps the assertions robust
     /// to the exact wording while still pinning the right CLASS of violation.
-    fn has_violation(violations: &[(String, usize, String)], needle: &str) -> bool {
-        violations.iter().any(|(_, _, msg)| msg.contains(needle))
+    fn has_violation(violations: &[Violation], needle: &str) -> bool {
+        violations.iter().any(|(_, _, _, msg)| msg.contains(needle))
+    }
+
+    /// The severity a `needle`-matching finding was reported at, or None when nothing matched.
+    /// Severity is part of the lint's contract — a check silently demoted to INFO would stop
+    /// gating writes while every message-only assertion above still passed.
+    fn severity_of(violations: &[Violation], needle: &str) -> Option<Severity> {
+        violations
+            .iter()
+            .find(|(_, _, _, msg)| msg.contains(needle))
+            .map(|(s, ..)| *s)
     }
 
     #[test]
@@ -5654,9 +5754,47 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
-            has_violation(&v, "`[^9]:` is never referenced"),
-            "unreferenced [^9]: definition must be reported; got: {v:?}"
+            has_violation(&v, "page-level lesson `[^9]:`"),
+            "unreferenced [^9]: definition must still be REPORTED; got: {v:?}"
         );
+        // …but at INFO, and that is the load-bearing half. The memory model makes the Notes section
+        // mandatory even when empty, so a page-level lesson has no inline referrer BY DESIGN; rated
+        // as an error this one check was 57% of every finding in the corpus and the gate failed
+        // everywhere. Demoting it is what makes `memgrep lint` usable as a gate at all.
+        assert_eq!(
+            severity_of(&v, "page-level lesson `[^9]:`"),
+            Some(Severity::Info),
+            "an uncited page-level lesson is INFO, never a gate failure; got: {v:?}"
+        );
+    }
+
+    /// Severity is a CONTRACT, not a display hint: these three classes decide whether a write is
+    /// blocked. Pinned together so a demotion cannot slip through — a check quietly moved to INFO
+    /// would stop gating while every message-only assertion in this module still passed.
+    #[test]
+    fn lint_severities_are_pinned_per_class() {
+        let dir = lint_tmpdir("severity_classes");
+        std::fs::write(
+            dir.join("a.md"),
+            "---\nname: a\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             Body cites [^1] which does not exist.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            severity_of(&v, "has no `[^1]:` definition"),
+            Some(Severity::Error),
+            "a DANGLING reference is corruption — the lesson it points at is unreachable: {v:?}"
+        );
+    }
+
+    /// `Ord` on `Severity` IS the gate: `--min-severity` filters with `>=`, so a wrong derive order
+    /// would silently invert which findings block a write.
+    #[test]
+    fn severity_orders_error_above_warn_above_info() {
+        assert!(Severity::Error > Severity::Warn);
+        assert!(Severity::Warn > Severity::Info);
     }
 
     #[test]
@@ -5803,11 +5941,11 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
-            v.iter().any(|(p, _, m)| p.contains("bad.md") && m.contains("SUPERSEDED BODY")),
+            v.iter().any(|(_, p, _, m)| p.contains("bad.md") && m.contains("SUPERSEDED BODY")),
             "missing SUPERSEDED BODY must be reported on bad.md; got: {v:?}"
         );
         assert!(
-            !v.iter().any(|(p, _, m)| p.contains("ok.md") && m.contains("SUPERSEDED BODY")),
+            !v.iter().any(|(_, p, _, m)| p.contains("ok.md") && m.contains("SUPERSEDED BODY")),
             "the well-formed supersession must not be flagged; got: {v:?}"
         );
     }

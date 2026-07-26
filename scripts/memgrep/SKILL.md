@@ -94,6 +94,7 @@ memgrep find "+max_retries" <memdir> --only-notes                # search ONLY t
 memgrep find-claude-mem-ref feedback_oauth.md <memdir>           # atoms harvested from a buffer file
 memgrep reindex <memdir>                                         # refresh the SQLite query index (pages+lessons+atoms)
 memgrep index --markdown --write <memdir>                        # regenerate memory-index.md
-memgrep lint <memdir>                                            # structural integrity gate (exit≠0 on any violation)
+memgrep lint <memdir>                                            # structural integrity gate (prints ERROR/WARN/INFO; exit≠0 on ERROR)
+memgrep lint <memdir> --min-severity warn                        # …raise the bar: also gate on WARN (link law, oversized atoms)
 memgrep overview <memdir>                                        # print the <project>-overview.md navigation entry page
 ```

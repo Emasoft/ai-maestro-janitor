@@ -60,6 +60,21 @@ fn run_any(args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// Run memgrep and return BOTH stdout and the exit code. `lint`'s severity model makes the exit
+/// code a first-class result — "printed but did not gate" and "printed and gated" differ ONLY in
+/// that number, so a helper returning stdout alone cannot tell the two apart.
+fn run_with_code(args: &[&str]) -> (String, i32) {
+    let bin = env!("CARGO_BIN_EXE_memgrep");
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .expect("failed to run memgrep");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
 /// Run memgrep expecting a NON-zero exit (a usage/parse error). Returns nothing — only the failure
 /// is asserted.
 fn run_fail(args: &[&str]) {
@@ -1820,6 +1835,45 @@ fn recall_full_prints_the_rich_record_including_keywords() {
         "full prints the SCORE — without it a result's rank is unobservable, so winning on \
          score and merely surviving a tie-break look identical:\n{o}"
     );
+}
+
+/// `--min-severity` gates the EXIT CODE and never the report.
+///
+/// A page carrying only an uncited page-level lesson is INFO-only: it must still be PRINTED (the
+/// reader is never left guessing) while `lint` exits 0, because that shape is what the memory model
+/// prescribes — the Notes section is mandatory even when empty. Before the severity model this one
+/// class was 57% of every finding in the live corpus, so the gate failed on every corpus and the
+/// real errors were unreadable underneath it.
+#[test]
+fn lint_min_severity_gates_the_exit_code_not_the_report() {
+    let d = TempDir::new("lint-severity");
+    d.write(
+        "info_only.md",
+        "---\nname: info-only\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\nBody.\n\n## Notes and lessons learned\n[^1]: an uncited page-level lesson.\n",
+    );
+    let (o, code) = run_with_code(&["lint", d.as_str()]);
+    assert_eq!(code, 0, "INFO-only findings must NOT fail the gate:\n{o}");
+    assert!(
+        o.contains("INFO") && o.contains("page-level lesson"),
+        "the finding must still be reported, with its severity:\n{o}"
+    );
+
+    // …and raising the bar makes the SAME corpus fail, which is what proves the gate is real.
+    let (o2, code2) = run_with_code(&["lint", d.as_str(), "--min-severity", "info"]);
+    assert_eq!(code2, 1, "--min-severity info must gate on it:\n{o2}");
+}
+
+/// A dangling footnote reference is ERROR: it fails the DEFAULT gate with no flags.
+#[test]
+fn lint_dangling_reference_fails_the_default_gate() {
+    let d = TempDir::new("lint-error");
+    d.write(
+        "dangling.md",
+        "---\nname: dangling\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\nBody cites [^7].\n\n## Notes and lessons learned\n",
+    );
+    let (o, code) = run_with_code(&["lint", d.as_str()]);
+    assert_eq!(code, 1, "a dangling reference must fail the gate:\n{o}");
+    assert!(o.contains("ERROR"), "and be reported as ERROR:\n{o}");
 }
 
 /// A PAGE row's locator is the page's `name:` identity, never its path.

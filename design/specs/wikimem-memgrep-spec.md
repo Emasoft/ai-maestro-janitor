@@ -927,6 +927,30 @@ false-positive-free; every check it fires is a real defect an author must fix. E
 inside backtick inline spans or fenced code is masked (a `[^N]` token in inline code is not a
 footnote).
 
+`WM-LINT-06` **severity-model** — `MUST`: every finding carries a severity, printed as the LEADING
+token (`ERROR` / `WARN` / `INFO`) so `| grep '^ERROR'` is exact. `--min-severity` (default `error`)
+gates the EXIT CODE only — every finding `MUST` still print regardless. A model that hid findings
+would trade one unusable report (all-noise) for another (silently incomplete).
+
+| severity | meaning | checks |
+|---|---|---|
+| `ERROR` | corruption or invisibility — it does not parse, resolve, or rank | dangling `[^N]` reference · unquoted `desc:` (atom or lesson) · body-less lesson · supersession without `SUPERSEDED BODY:` · missing `ocd`/`lmd`/`description` · missing Notes section · downward cross-scope link |
+| `WARN` | real, but nothing is lost and the fix is not mechanical | one-sided link (WM-WIKI-04a) · oversized atom (WM-LINT-03) |
+| `INFO` | the model BLESSES this shape; a pointer, not a defect | uncited page-level lesson |
+
+The split is measured, not stylistic. Over the three live scopes (164 notes) the corpus held 262
+findings of which **150 (57%) were the single INFO check** — an uncited `[^N]:`, which the model
+explicitly permits because the Notes section is mandatory even when empty, so a page-level lesson
+has no inline referrer BY DESIGN. Rated as errors, the gate failed on every corpus, and a gate that
+always fails is one people route around; the genuine errors were unreadable underneath it. After
+the split the USER scope reports 161 findings and **8 ERRORs** — a list an author can actually act
+on.
+
+The two `WARN`s are warnings for a reason that outlives this corpus: a one-sided link cannot be
+fixed from the page being edited (the missing half lives in the OTHER file), and an oversized atom
+needs a semantic decomposition. Blocking a write on either gates an unrelated edit behind work its
+author may not be positioned to do.
+
 `WM-LINT-02` **the-checks** — `lint` fires on, at minimum: `unquoted-desc` (WM-ATOM-03),
 `empty-lesson-body` (WM-LES-04), `oversized-atom` (WM-ATOM-01), `superseded-without-body`
 (WM-LES-07), `atom-dropped-props` (WM-ATOM-07), a dangling / unreferenced footnote, a one-sided
