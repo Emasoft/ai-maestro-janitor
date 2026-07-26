@@ -3496,6 +3496,7 @@ type RecallScored = (
     Option<String>,
     Option<String>,
     Option<String>,
+    String,
 );
 
 /// The rank row AFTER the precision-first filter: `(score, display_path, summary, pathbuf, ocd,
@@ -3511,6 +3512,7 @@ type RecallRanked = (
     Option<String>,
     Option<String>,
     Option<String>,
+    String,
 );
 
 /// Is `path` a NON-NOTE file — one of the index MAPS (`MEMORY.md` / `memory-index.md`) or a
@@ -3548,6 +3550,15 @@ struct CandidateMeta {
     /// `atom_listing_summary` at gather time so the print step never re-parses a page. `None` for a
     /// page candidate, and for an atom with neither desc nor body (keyword-surface fallback).
     atom_desc: Option<String>,
+    /// The page's CANONICAL wiki identity — frontmatter `name:` (alias `topic:`), else the file
+    /// stem. Never empty for a page candidate; empty for an atom, whose locator is its own id.
+    ///
+    /// CARRIED, not derived from `pathbuf` at print time, because `name:` and the file STEM are
+    /// different identities and disagree on ~3% of the live corpus (the harness writes
+    /// `feedback_head_tee_sigpipe.md` for a page declaring `name: feedback-head-tee-sigpipe`).
+    /// Wikilinks resolve through `name:`, so printing the stem would hand exactly those pages a
+    /// SECOND address the wiki itself never uses.
+    page_name: String,
 }
 
 /// Score one note's symptom surface (title + summary + tags) against the query terms, plus the
@@ -3574,6 +3585,7 @@ fn score_candidate(
             m.lmd,
             m.atom_id,
             m.atom_desc,
+            m.page_name,
         ))
     } else {
         None
@@ -3607,7 +3619,29 @@ fn atom_meta(
         lmd,
         atom_id: Some(atom_id),
         atom_desc: atom_listing_summary(desc.as_deref(), body),
+        // An atom's locator is its OWN id, which is corpus-unique (WM-ATOM-06) and already the
+        // exact second-hop key — it never needs its page's name to be addressable.
+        page_name: String::new(),
     }
+}
+
+/// The page identity `page_name` carries: frontmatter `name:`/`topic:`, else the file stem.
+///
+/// This MUST stay byte-identical to `index::topic_of`, which resolves the same thing when writing
+/// the `memories.topic` column. The walk and the index are required to rank and print identically
+/// (an index-backed recall is defined as equal to the walk), so two resolvers that disagree would
+/// make a page's printed locator depend on whether an index happened to be fresh — the hardest
+/// class of bug to see, because both outputs look right in isolation.
+fn page_identity(name: Option<&str>, path: &Path) -> String {
+    name.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string()
+        })
 }
 
 /// Gather scored candidates from the LIVE tree-walk (`collect_md` → `read_note` for the PAGE, then
@@ -3626,6 +3660,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, q: &RecallQuery) -> Vec<Rec
         let p = path.clone();
         // Keep the page's dates for the atom fallback BEFORE the page meta moves them.
         let (page_ocd, page_lmd) = (note.ocd.clone(), note.lmd.clone());
+        let page_name = page_identity(note.name.as_deref(), &path);
         let meta = CandidateMeta {
             display_path: rel(&path),
             title: note.title,
@@ -3636,6 +3671,7 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, q: &RecallQuery) -> Vec<Rec
             lmd: note.lmd,
             atom_id: None,
             atom_desc: None,
+            page_name,
         };
         if let Some(row) = score_candidate(q, meta, || md::read_text(&p)) {
             all.push(row);
@@ -3680,6 +3716,7 @@ fn gather_from_index(conn: &rusqlite::Connection, q: &RecallQuery) -> Result<Vec
             lmd: c.lmd,
             atom_id: None,
             atom_desc: None,
+            page_name: c.topic,
         };
         if let Some(row) = score_candidate(q, meta, || Some(body)) {
             all.push(row);
@@ -3853,7 +3890,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     let mut scored: Vec<RecallRanked> = all
         .into_iter()
         .filter(|(h, body_only, ..)| !a.precision_first || *h > 0 || (!any_surface && *body_only))
-        .map(|(h, _, p, s, pb, ocd, lmd, aid, desc)| (h, p, s, pb, ocd, lmd, aid, desc))
+        .map(|(h, _, p, s, pb, ocd, lmd, aid, desc, name)| (h, p, s, pb, ocd, lmd, aid, desc, name))
         .collect();
 
     // Date-range filter (`--since`/`--until` on the `--date-field` date). A note with NO date in the
@@ -3861,7 +3898,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
     // so it falls out (documented in `recall_missing_date_excluded_from_range_filter`). ISO-8601
     // strings compare lexicographically via the shared `Cmp` comparator (one comparator with --num).
     if a.since.is_some() || a.until.is_some() {
-        scored.retain(|(_, _, _, _, ocd, lmd, _, _)| {
+        scored.retain(|(_, _, _, _, ocd, lmd, _, _, _)| {
             let date = match a.date_field {
                 DateField::Ocd => ocd,
                 DateField::Lmd => lmd,
@@ -3925,7 +3962,7 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
         }
     }
 
-    for (score, path, summary, pathbuf, _ocd, lmd, atom_id, atom_desc) in
+    for (score, path, summary, pathbuf, _ocd, lmd, atom_id, atom_desc, page_name) in
         scored.into_iter().take(a.top)
     {
         let s = summary.trim();
@@ -3949,7 +3986,19 @@ fn finalize_recall(all: Vec<RecallScored>, a: &FinalizeOpts) -> Result<()> {
                 _ => shown.as_str(),
             };
             let date = lmd.as_deref().unwrap_or("-");
-            let locator = atom_id.as_deref().unwrap_or(path.as_str());
+            // A PAGE row's locator is its `name:` identity, NOT its path. Measured on the two live
+            // corpora (40 on-topic queries each): page rows are 35-39% of ALL result rows and their
+            // paths cost ~90 tokens apiece — ~80-110 tokens per query, comparable to the entire
+            // per-query budget the benchmark reports. The lean layer already prints the bare atom id
+            // for an atom hit for exactly this reason; a page hit was simply never given the same
+            // treatment, so the cheap layer kept paying full price on a third of its rows.
+            // `page_name` is empty only for an atom (which uses its id) — the path stays the
+            // last-resort fallback so a row can never print an empty locator and shift its columns.
+            let locator = match (&atom_id, page_name.as_str()) {
+                (Some(id), _) => id.as_str(),
+                (None, n) if !n.is_empty() => n,
+                _ => path.as_str(),
+            };
             println!("{date}\t{locator}\t{label}");
             if a.with_keywords && !shown.is_empty() {
                 println!("\tkeywords: {shown}");
@@ -4101,6 +4150,39 @@ fn recall_one_atom(paths: &[PathBuf], hidden: bool, id: &str, full_notes: bool) 
     found
 }
 
+/// The `memgrep recall <page-name>` SECOND HOP for a PAGE: print that one page in full.
+///
+/// The lean layer prints a page's `name:` as its locator, and a locator has to be a KEY or the
+/// listing is lying about what it hands you. Without this, an atom locator would be an EXACT
+/// lookup while a page locator in the SAME column was merely a search string that usually ranks
+/// its own page first — two different promises rendered identically, which is the kind of
+/// near-truth that costs a debugging session rather than a token.
+///
+/// Matches `page_identity` (`name:`/`topic:`, else the file stem), so EVERY printed locator is
+/// resolvable, including the ~3% of pages whose declared name differs from their filename.
+/// Returns false when nothing carries the name, and the caller falls through to the symptom
+/// search — a one-word symptom is indistinguishable from a name by shape alone.
+fn recall_one_page(paths: &[PathBuf], hidden: bool, name: &str, full_notes: bool) -> bool {
+    let mut found = false;
+    for p in collect_md(paths, hidden) {
+        if is_index_file(&p) {
+            continue;
+        }
+        let Some(note) = read_note(&p) else { continue };
+        if !page_identity(note.name.as_deref(), &p).eq_ignore_ascii_case(name) {
+            continue;
+        }
+        found = true;
+        let disp = p.display();
+        match note.summary.trim() {
+            "" => println!("{disp}"),
+            s => println!("{disp} — {s}"),
+        }
+        print!("{}", render_notes(&resolve_notes(&p), full_notes));
+    }
+    found
+}
+
 pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
     let a =
         RecallArgs::parse_from(std::iter::once("recall".to_string()).chain(args.iter().cloned()));
@@ -4108,8 +4190,13 @@ pub fn cmd_recall_cli(args: &[String]) -> Result<()> {
     // SECOND HOP first: an exact atom-id match is the strongest signal a query can carry, so it
     // outranks any symptom scoring. Deliberately walk-only — the id is exact, so there is nothing
     // for the index to rank, and correctness must not depend on the index being fresh.
+    //
+    // ATOM before PAGE: an atom id is corpus-unique by construction (WM-ATOM-06) while a page name
+    // is only unique within a scope, so the stronger key is tried first. Both fall through to the
+    // symptom search when nothing matches.
     if let Some(id) = atom_id_query(&a.query)
-        && recall_one_atom(&a.paths, a.hidden, id, a.full_notes)
+        && (recall_one_atom(&a.paths, a.hidden, id, a.full_notes)
+            || recall_one_page(&a.paths, a.hidden, id, a.full_notes))
     {
         return Ok(());
     }
@@ -4260,6 +4347,7 @@ fn find_score_note(q: &query_dsl::Query, m: CandidateMeta, body: &str) -> Option
         m.lmd,
         m.atom_id,
         m.atom_desc,
+        m.page_name,
     ))
 }
 
@@ -4278,6 +4366,7 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
         let body = md::read_text(&path).unwrap_or_default();
         let p = path.clone();
         let (page_ocd, page_lmd) = (note.ocd.clone(), note.lmd.clone());
+        let page_name = page_identity(note.name.as_deref(), &path);
         let meta = CandidateMeta {
             display_path: rel(&path),
             title: note.title,
@@ -4288,6 +4377,7 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
             lmd: note.lmd,
             atom_id: None,
             atom_desc: None,
+            page_name,
         };
         if let Some(row) = find_score_note(q, meta, &body) {
             all.push(row);
@@ -4335,6 +4425,7 @@ fn find_gather_index(
             lmd: c.lmd,
             atom_id: None,
             atom_desc: None,
+            page_name: c.topic,
         };
         if let Some(row) = find_score_note(q, meta, &body) {
             all.push(row);

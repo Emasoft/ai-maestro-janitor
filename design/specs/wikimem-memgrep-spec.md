@@ -365,7 +365,7 @@ and **default to `basic`**.
 
 | layer | prints per hit | lessons | keywords |
 |---|---|---|---|
-| `basic` (default) | ONE row: `<lmd>⇥<locator>⇥<description>`, TAB-separated fixed columns. The locator is the bare ATOM ID for an atom hit (a memory path costs ~25 tokens — most of what the layer saves) and the PATH for a page hit. An absent date prints `-`, never empty, so a column never shifts | no | no |
+| `basic` (default) | ONE row: `<lmd>⇥<locator>⇥<description>`, TAB-separated fixed columns. The locator is the bare ATOM ID for an atom hit and the page's `name:` IDENTITY for a page hit — never a path (WM-RCL-06b). An absent date prints `-`, never empty, so a column never shifts | no | no |
 | `medium` | that row + the atom's BODY. A page hit has no body of its own, so medium equals basic there | no | no |
 | `full` | the rich record: `<path>#<atom-id> — <description>`, the SCORE, body, lessons, see-also | yes | yes |
 
@@ -386,10 +386,42 @@ The lean prohibition is equally load-bearing: their row shape is a promised pars
 (WM-RCL-06), so an extra line there breaks every `cut -f2` consumer to help nobody — an agent
 choosing a hop target reads the description, not the arithmetic behind it.
 
+`WM-RCL-06b` **no-locator-is-ever-a-path** — `MUST`: a lean row's locator is an identity (atom id,
+or a page's `name:`), never a filesystem path. A path is the single most expensive field the layer
+can print, and it is the field the layer exists to remove.
+
+Measured on both live corpora, 40 on-topic queries each: PAGE rows are **35–39% of all result
+rows** and their absolute paths cost **~90 tokens apiece** — ~80–110 tokens per query, comparable
+to the entire per-query budget WM-BENCH reports. The atom row was given a bare id for exactly this
+reason; the page row was simply never given the same treatment, so the cheap layer went on paying
+full price for a third of its output.
+
+The identity is the page's declared `name:` (alias `topic:`), NOT the file stem. They disagree on
+~3% of the live corpus, and on precisely those pages the stem is the identity the wiki does NOT
+link by (WM-WIKI resolves `[[name]]` through `name:`) — printing it would hand those pages a
+SECOND address. The stem remains the fallback when no `name:` is declared, and the path the last
+resort, so a row can never print an empty locator and shift its own columns.
+
+The walk and the index `MUST` resolve this identity identically (the walk via `page_identity`, the
+index via the `topic` column `topic_of` already wrote). Two resolvers that disagree would make a
+page's printed address depend on whether an index happened to be fresh — a divergence invisible in
+either output alone.
+
 `WM-RCL-07` **exact-id-second-hop** — `MUST`: `memgrep recall <ATOM-ID>` is an EXACT lookup
 returning that one atom in full. A whitespace-free query is tried as an id first; when no atom
 carries it, the query `MUST` fall through to the ordinary symptom search — a one-word symptom
 query is indistinguishable from an id by shape alone, so the shortcut may never swallow one.
+
+`WM-RCL-07a` **every-printed-locator-is-a-key** — `MUST`: whatever a lean row prints as its
+locator has to RETRIEVE the thing it names. So `recall <page-name>` is an exact page lookup too,
+tried after the atom id (an atom id is corpus-unique by construction, a page name only unique
+within a scope, so the stronger key goes first) and falling through to the symptom search on a
+miss, exactly as -07 requires.
+
+Without this the two locator kinds would print in the SAME column with DIFFERENT meanings — one an
+exact lookup, the other a search string that usually ranks its own page first. Indistinguishable on
+screen, they would silently teach an agent to trust a key that works until the day it does not,
+which is a worse failure than the path this layer removed.
 
 `WM-RCL-08` **retrieval-cost-is-end-to-end** — cost is `tokens(search output) + tokens(the hop
 it forces)`. `cost(basic) = N × row + 1 × atom` beats `cost(full) = N × everything` for every

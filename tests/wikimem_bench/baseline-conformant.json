@@ -5,9 +5,9 @@
     "hit_at_3": 1.0,
     "hit_at_10": 1.0,
     "mrr": 1.0,
-    "mean_total_tokens": 283.7,
-    "total_tokens": 6525,
-    "total_bytes": 26028,
+    "mean_total_tokens": 272.0,
+    "total_tokens": 6257,
+    "total_bytes": 24953,
     "hops_used": 23
   },
   "rows": [
@@ -16,10 +16,10 @@
       "expect": "pool-exhaustion#pool-leak-on-early-return",
       "kw_pos": 3,
       "rank": 1,
-      "find_tokens": 218,
+      "find_tokens": 197,
       "hop_tokens": 172,
-      "total_tokens": 390,
-      "bytes": 1559,
+      "total_tokens": 369,
+      "bytes": 1473,
       "hop_used": true
     },
     {
@@ -38,10 +38,10 @@
       "expect": "pool-exhaustion#slow-query-holds-the-pool",
       "kw_pos": 3,
       "rank": 1,
-      "find_tokens": 131,
+      "find_tokens": 121,
       "hop_tokens": 165,
-      "total_tokens": 296,
-      "bytes": 1184,
+      "total_tokens": 286,
+      "bytes": 1141,
       "hop_used": true
     },
     {
@@ -49,10 +49,10 @@
       "expect": "pool-exhaustion#pool-size-is-not-the-fix",
       "kw_pos": 1,
       "rank": 1,
-      "find_tokens": 131,
+      "find_tokens": 121,
       "hop_tokens": 121,
-      "total_tokens": 252,
-      "bytes": 1006,
+      "total_tokens": 242,
+      "bytes": 963,
       "hop_used": true
     },
     {
@@ -60,10 +60,10 @@
       "expect": "pool-exhaustion#pool-size-is-not-the-fix",
       "kw_pos": 3,
       "rank": 1,
-      "find_tokens": 131,
+      "find_tokens": 121,
       "hop_tokens": 121,
-      "total_tokens": 252,
-      "bytes": 1006,
+      "total_tokens": 242,
+      "bytes": 963,
       "hop_used": true
     },
     {
@@ -71,10 +71,10 @@
       "expect": "tls-chain-order#browsers-repair-a-broken-chain",
       "kw_pos": 4,
       "rank": 1,
-      "find_tokens": 277,
+      "find_tokens": 244,
       "hop_tokens": 167,
-      "total_tokens": 444,
-      "bytes": 1770,
+      "total_tokens": 411,
+      "bytes": 1641,
       "hop_used": true
     },
     {
@@ -82,10 +82,10 @@
       "expect": "tls-chain-order#chain-must-be-leaf-first",
       "kw_pos": 1,
       "rank": 1,
-      "find_tokens": 106,
+      "find_tokens": 96,
       "hop_tokens": 133,
-      "total_tokens": 239,
-      "bytes": 956,
+      "total_tokens": 229,
+      "bytes": 913,
       "hop_used": true
     },
     {
@@ -93,10 +93,10 @@
       "expect": "tls-chain-order#chain-must-be-leaf-first",
       "kw_pos": 3,
       "rank": 1,
-      "find_tokens": 134,
+      "find_tokens": 123,
       "hop_tokens": 133,
-      "total_tokens": 267,
-      "bytes": 1065,
+      "total_tokens": 256,
+      "bytes": 1022,
       "hop_used": true
     },
     {
@@ -104,10 +104,10 @@
       "expect": "cron-timezone-drift#dst-duplicates-and-skips-an-hour",
       "kw_pos": 5,
       "rank": 1,
-      "find_tokens": 110,
+      "find_tokens": 99,
       "hop_tokens": 158,
-      "total_tokens": 268,
-      "bytes": 1066,
+      "total_tokens": 257,
+      "bytes": 1023,
       "hop_used": true
     },
     {
@@ -115,10 +115,10 @@
       "expect": "cron-timezone-drift#utc-is-not-a-free-fix",
       "kw_pos": 1,
       "rank": 1,
-      "find_tokens": 108,
+      "find_tokens": 97,
       "hop_tokens": 145,
-      "total_tokens": 253,
-      "bytes": 1007,
+      "total_tokens": 242,
+      "bytes": 964,
       "hop_used": true
     },
     {
@@ -159,10 +159,10 @@
       "expect": "docker-cache-invalidation#copy-before-install-busts-everything",
       "kw_pos": 4,
       "rank": 1,
-      "find_tokens": 258,
+      "find_tokens": 236,
       "hop_tokens": 176,
-      "total_tokens": 434,
-      "bytes": 1733,
+      "total_tokens": 412,
+      "bytes": 1647,
       "hop_used": true
     },
     {
@@ -170,10 +170,10 @@
       "expect": "docker-cache-invalidation#mtime-is-not-in-the-cache-key",
       "kw_pos": 2,
       "rank": 1,
-      "find_tokens": 148,
+      "find_tokens": 137,
       "hop_tokens": 138,
-      "total_tokens": 286,
-      "bytes": 1139,
+      "total_tokens": 275,
+      "bytes": 1096,
       "hop_used": true
     },
     {
@@ -181,10 +181,10 @@
       "expect": "docker-cache-invalidation#dockerignore-is-part-of-the-key",
       "kw_pos": 1,
       "rank": 1,
-      "find_tokens": 148,
+      "find_tokens": 137,
       "hop_tokens": 132,
-      "total_tokens": 280,
-      "bytes": 1116,
+      "total_tokens": 269,
+      "bytes": 1073,
       "hop_used": true
     },
     {
@@ -192,10 +192,10 @@
       "expect": "docker-cache-invalidation#dockerignore-is-part-of-the-key",
       "kw_pos": 2,
       "rank": 1,
-      "find_tokens": 148,
+      "find_tokens": 137,
       "hop_tokens": 132,
-      "total_tokens": 280,
-      "bytes": 1116,
+      "total_tokens": 269,
+      "bytes": 1073,
       "hop_used": true
     },
     {
@@ -214,10 +214,10 @@
       "expect": "flaky-test-retries#order-dependence-looks-like-flakiness",
       "kw_pos": 2,
       "rank": 1,
-      "find_tokens": 243,
+      "find_tokens": 222,
       "hop_tokens": 146,
-      "total_tokens": 389,
-      "bytes": 1555,
+      "total_tokens": 368,
+      "bytes": 1469,
       "hop_used": true
     },
     {
@@ -236,10 +236,10 @@
       "expect": "object-store-consistency#read-after-write-is-strong-now",
       "kw_pos": 3,
       "rank": 1,
-      "find_tokens": 304,
+      "find_tokens": 272,
       "hop_tokens": 152,
-      "total_tokens": 456,
-      "bytes": 1823,
+      "total_tokens": 424,
+      "bytes": 1694,
       "hop_used": true
     },
     {
@@ -247,10 +247,10 @@
       "expect": "object-store-consistency#listing-still-lags",
       "kw_pos": 2,
       "rank": 1,
-      "find_tokens": 108,
+      "find_tokens": 97,
       "hop_tokens": 141,
-      "total_tokens": 249,
-      "bytes": 991,
+      "total_tokens": 238,
+      "bytes": 948,
       "hop_used": true
     },
     {
@@ -258,10 +258,10 @@
       "expect": "object-store-consistency#listing-still-lags",
       "kw_pos": 3,
       "rank": 1,
-      "find_tokens": 223,
+      "find_tokens": 201,
       "hop_tokens": 141,
-      "total_tokens": 364,
-      "bytes": 1451,
+      "total_tokens": 342,
+      "bytes": 1365,
       "hop_used": true
     }
   ],

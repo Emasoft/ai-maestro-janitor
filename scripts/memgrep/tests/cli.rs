@@ -452,11 +452,11 @@ fn recall_ranks_by_symptom_surface() {
     let o = run(&["recall", "oauth rotation failed", dir]);
     let first = o.lines().next().unwrap_or("");
     assert!(
-        first.contains("recall_a.md"),
+        first.contains("recall_a"),
         "oauth note should rank first:\n{o}"
     );
     assert!(
-        !o.contains("recall_b.md"),
+        !o.contains("recall_b"),
         "the unrelated tables note must not surface:\n{o}"
     );
     // the printed line carries the note's description (so the agent picks without opening it).
@@ -479,7 +479,7 @@ fn recall_excludes_index_files() {
         "the index file MEMORY.md must not be ranked as a note:\n{o}"
     );
     assert!(
-        o.contains("recall_a.md"),
+        o.contains("recall_a"),
         "the real note must still surface:\n{o}"
     );
 }
@@ -778,7 +778,7 @@ fn recall_no_notes_returns_body_only() {
     // --no-notes is the escape hatch: resolution off, the ranked note prints without its lessons.
     let o = run(&["recall", "widget retry cap", NOTES_DIR, "--no-notes"]);
     assert!(
-        o.contains("note_plain.md"),
+        o.contains("note_plain"),
         "the note must still rank:\n{o}"
     );
     assert!(
@@ -887,7 +887,7 @@ fn recall_with_notes_does_not_break_undescribed_corpus() {
     // there — body-only output, no crash, all 42 existing recall expectations intact.
     let o = run(&["recall", "oauth rotation failed", "tests/fixtures/recall"]);
     assert!(
-        o.contains("recall_a.md"),
+        o.contains("recall_a"),
         "existing recall still works:\n{o}"
     );
     assert!(
@@ -923,12 +923,12 @@ fn recall_sort_lmd_orders_newest_first_by_default() {
             .unwrap_or_else(|| panic!("{needle} missing from recall:\n{o}"))
     };
     assert!(
-        pos("date_new.md") < pos("date_mid.md") && pos("date_mid.md") < pos("date_old.md"),
+        pos("date_new") < pos("date_mid") && pos("date_mid") < pos("date_old"),
         "newest LMD must rank first under --sort lmd (desc default):\n{o}"
     );
     // The alias-dated note (lmd 2023-06-01) is the oldest of all, so it sorts last among the four.
     assert!(
-        pos("date_old.md") < pos("date_alias.md"),
+        pos("date_old") < pos("date_alias"),
         "the 2023 alias-dated note is oldest, sorts after 2024:\n{o}"
     );
 }
@@ -948,9 +948,9 @@ fn recall_sort_lmd_asc_orders_oldest_first() {
     let order = note_order(&o);
     let pos = |needle: &str| order.iter().position(|p| p.contains(needle)).unwrap();
     assert!(
-        pos("date_alias.md") < pos("date_old.md")
-            && pos("date_old.md") < pos("date_mid.md")
-            && pos("date_mid.md") < pos("date_new.md"),
+        pos("date_alias") < pos("date_old")
+            && pos("date_old") < pos("date_mid")
+            && pos("date_mid") < pos("date_new"),
         "--order asc must rank oldest LMD first:\n{o}"
     );
 }
@@ -971,9 +971,9 @@ fn recall_sort_ocd_uses_creation_date_and_aliases() {
     let order = note_order(&o);
     let pos = |needle: &str| order.iter().position(|p| p.contains(needle)).unwrap();
     assert!(
-        pos("date_alias.md") < pos("date_old.md")
-            && pos("date_old.md") < pos("date_mid.md")
-            && pos("date_mid.md") < pos("date_new.md"),
+        pos("date_alias") < pos("date_old")
+            && pos("date_old") < pos("date_mid")
+            && pos("date_mid") < pos("date_new"),
         "ocd asc with the `created:` alias must rank the 2023 note first:\n{o}"
     );
 }
@@ -990,11 +990,11 @@ fn recall_since_filters_by_lmd() {
         "2025-01-01",
     ]);
     assert!(
-        o.contains("date_mid.md") && o.contains("date_new.md"),
+        o.contains("date_mid") && o.contains("date_new"),
         "notes with LMD ≥ since must remain:\n{o}"
     );
     assert!(
-        !o.contains("date_old.md") && !o.contains("date_alias.md"),
+        !o.contains("date_old") && !o.contains("date_alias"),
         "notes with LMD < since must be filtered out:\n{o}"
     );
 }
@@ -1011,11 +1011,11 @@ fn recall_until_filters_by_lmd() {
         "2024-12-31",
     ]);
     assert!(
-        o.contains("date_old.md") && o.contains("date_alias.md"),
+        o.contains("date_old") && o.contains("date_alias"),
         "notes with LMD ≤ until must remain:\n{o}"
     );
     assert!(
-        !o.contains("date_mid.md") && !o.contains("date_new.md"),
+        !o.contains("date_mid") && !o.contains("date_new"),
         "notes with LMD > until must be filtered out:\n{o}"
     );
 }
@@ -1034,11 +1034,11 @@ fn recall_since_until_window_filters_by_lmd() {
         "2025-12-31",
     ]);
     assert!(
-        o.contains("date_mid.md"),
+        o.contains("date_mid"),
         "the in-window note must remain:\n{o}"
     );
     assert!(
-        !o.contains("date_new.md") && !o.contains("date_old.md") && !o.contains("date_alias.md"),
+        !o.contains("date_new") && !o.contains("date_old") && !o.contains("date_alias"),
         "out-of-window notes must be filtered:\n{o}"
     );
 }
@@ -1056,9 +1056,9 @@ fn recall_date_field_ocd_switches_the_filtered_field() {
         "--date-field",
         "ocd",
     ]);
-    assert!(o.contains("date_new.md"), "ocd ≥ since must remain:\n{o}");
+    assert!(o.contains("date_new"), "ocd ≥ since must remain:\n{o}");
     assert!(
-        !o.contains("date_mid.md") && !o.contains("date_old.md") && !o.contains("date_alias.md"),
+        !o.contains("date_mid") && !o.contains("date_old") && !o.contains("date_alias"),
         "earlier-ocd notes must drop under --date-field ocd:\n{o}"
     );
 }
@@ -1078,12 +1078,12 @@ fn recall_missing_date_excluded_from_range_filter() {
     ]);
     // date_nodate.md has no ocd ⟹ excluded even by a very permissive since bound.
     assert!(
-        !o.contains("date_nodate.md"),
+        !o.contains("date_nodate"),
         "a note missing OCD must be excluded from an OCD range filter:\n{o}"
     );
     // …while the dated notes still pass the permissive bound.
     assert!(
-        o.contains("date_new.md"),
+        o.contains("date_new"),
         "dated notes still pass a permissive since:\n{o}"
     );
 }
@@ -1103,7 +1103,7 @@ fn recall_missing_date_sorts_last() {
     ]);
     let order = note_order(&o);
     assert!(
-        order.last().is_some_and(|p| p.contains("date_nodate.md")),
+        order.last().is_some_and(|p| p.contains("date_nodate")),
         "the OCD-less note must sort last:\n{o}"
     );
     assert!(
@@ -1121,7 +1121,7 @@ fn recall_default_sort_is_score_unchanged() {
     let o = run(&["recall", "freshest ledger", DATES_DIR]);
     let order = note_order(&o);
     assert!(
-        order.first().is_some_and(|p| p.contains("date_new.md")),
+        order.first().is_some_and(|p| p.contains("date_new")),
         "default sort stays score-based (the uniquely-matching note ranks first):\n{o}"
     );
 }
@@ -1229,7 +1229,7 @@ fn reindex_then_recall_via_index_matches_walk() {
     let walk = run(&["recall", "keychain credentials", d.as_str()]);
     let indexed = run(&["recall", "keychain credentials", d.as_str(), "--use-index"]);
     assert!(
-        walk.contains("alpha.md"),
+        walk.contains("alpha"),
         "walk recall must find alpha:\n{walk}"
     );
     assert_eq!(
@@ -1286,7 +1286,7 @@ fn reindex_prunes_deleted_file() {
     );
     let r = run(&["recall", "widget retry", d.as_str(), "--use-index"]);
     assert!(
-        !r.contains("beta.md"),
+        !r.contains("beta"),
         "a pruned file must not surface via the index:\n{r}"
     );
 }
@@ -1303,7 +1303,7 @@ fn recall_use_index_fts_text_match() {
     run(&["reindex", d.as_str()]);
     let o = run(&["recall", "quibblefrobnicator", d.as_str(), "--use-index"]);
     assert!(
-        o.contains("doc.md"),
+        o.contains("doc"),
         "FTS body match must surface the note via the index:\n{o}"
     );
 }
@@ -1324,7 +1324,7 @@ fn recall_use_index_date_range_filter() {
         "2025-01-01",
     ]);
     assert!(
-        o.contains("beta.md") && !o.contains("alpha.md"),
+        o.contains("beta") && !o.contains("alpha"),
         "only the note with LMD ≥ since must remain via the index:\n{o}"
     );
 }
@@ -1342,7 +1342,7 @@ fn recall_index_absent_falls_back_to_walk() {
         "the absent-index test must not have a DB"
     );
     assert!(
-        o.contains("alpha.md"),
+        o.contains("alpha"),
         "recall --use-index must fall back to the walk when no index exists:\n{o}"
     );
 }
@@ -1362,7 +1362,7 @@ fn recall_auto_uses_fresh_index_else_walks() {
     );
     let o = run(&["recall", "keychain credentials", d.as_str()]);
     assert!(
-        o.contains("gamma.md"),
+        o.contains("gamma"),
         "a corpus newer than the ledger must force the walk so new notes still surface:\n{o}"
     );
 }
@@ -1379,7 +1379,7 @@ fn reindex_edit_replaces_indexed_body() {
     );
     run(&["reindex", d.as_str()]);
     assert!(
-        run(&["recall", "originalbodyterm", d.as_str(), "--use-index"]).contains("doc.md"),
+        run(&["recall", "originalbodyterm", d.as_str(), "--use-index"]).contains("doc"),
         "the index must initially match the original body term"
     );
     // Replace the body term; reindex incrementally.
@@ -1394,12 +1394,12 @@ fn reindex_edit_replaces_indexed_body() {
     );
     let old = run(&["recall", "originalbodyterm", d.as_str(), "--use-index"]);
     assert!(
-        !old.contains("doc.md"),
+        !old.contains("doc"),
         "the stale body term must be gone from the index after the edit:\n{old}"
     );
     let new = run(&["recall", "replacedbodyterm", d.as_str(), "--use-index"]);
     assert!(
-        new.contains("doc.md"),
+        new.contains("doc"),
         "the new body term must be present after the incremental re-parse:\n{new}"
     );
 }
@@ -1415,11 +1415,11 @@ fn find_plus_term_is_mandatory() {
     // keeps the production note and drops the logistic-regression / old-approach notes that lack it.
     let o = run(&["find", "+production", FIND_DIR]);
     assert!(
-        o.contains("prod_debug.md"),
+        o.contains("prod_debug"),
         "mandatory +production must keep prod_debug:\n{o}"
     );
     assert!(
-        !o.contains("db_logistics.md") && !o.contains("old_approach.md"),
+        !o.contains("db_logistics") && !o.contains("old_approach"),
         "notes missing the mandatory term must be dropped:\n{o}"
     );
 }
@@ -1431,7 +1431,7 @@ fn find_minus_term_excludes() {
     // but `-logistic` removes it — so db_logistics is dropped despite the optional hit.
     let o = run(&["find", "regression -logistic", FIND_DIR]);
     assert!(
-        !o.contains("db_logistics.md"),
+        !o.contains("db_logistics"),
         "a note containing the -excluded term must be dropped even if an optional term matched:\n{o}"
     );
 }
@@ -1442,8 +1442,8 @@ fn find_optional_terms_rank_by_match_count() {
     // `oauth rotation tables` — recall_a matches two (oauth, rotation), recall_b matches one (tables),
     // so recall_a ranks ABOVE recall_b (more optional hits first).
     let o = run(&["find", "oauth rotation tables", RECALL_DIR]);
-    let a = o.find("recall_a.md").expect("recall_a must appear");
-    let b = o.find("recall_b.md").expect("recall_b must appear");
+    let a = o.find("recall_a").expect("recall_a must appear");
+    let b = o.find("recall_b").expect("recall_b must appear");
     assert!(
         a < b,
         "the note matching MORE optional terms must rank first:\n{o}"
@@ -1456,11 +1456,11 @@ fn find_wildcard_word_matches_any_run() {
     // (non-wildcard) note without that stem does not.
     let o = run(&["find", "+regress*", FIND_DIR]);
     assert!(
-        o.contains("db_logistics.md"),
+        o.contains("db_logistics"),
         "wildcard regress* must match regression:\n{o}"
     );
     assert!(
-        !o.contains("old_approach.md"),
+        !o.contains("old_approach"),
         "a non-matching note must not surface:\n{o}"
     );
 }
@@ -1473,7 +1473,7 @@ fn find_embedded_hyphen_is_literal_not_operator() {
     // wrongly dropped; instead it must surface.
     let o = run(&["find", "+pro*-debug*", FIND_DIR]);
     assert!(
-        o.contains("prod_debug.md"),
+        o.contains("prod_debug"),
         "embedded-hyphen wildcard must be one term matching prod-debugger, not an exclude:\n{o}"
     );
 }
@@ -1484,11 +1484,11 @@ fn find_quoted_phrase_matches_with_spaces() {
     // whose surface contains the exact run `logistic regression failure` survives the mandatory phrase.
     let o = run(&["find", "+\"logistic regression failure\"", FIND_DIR]);
     assert!(
-        o.contains("db_logistics.md"),
+        o.contains("db_logistics"),
         "the phrase note must match:\n{o}"
     );
     assert!(
-        !o.contains("prod_debug.md") && !o.contains("old_approach.md"),
+        !o.contains("prod_debug") && !o.contains("old_approach"),
         "notes without the exact phrase must be dropped:\n{o}"
     );
 }
@@ -1500,7 +1500,7 @@ fn find_prefixed_phrase_excludes() {
     // (a phrase is a keyword WITH spaces, so it too can be `-`-prefixed).
     let o = run(&["find", "retry -\"old approach\"", FIND_DIR]);
     assert!(
-        !o.contains("old_approach.md"),
+        !o.contains("old_approach"),
         "the prefixed-phrase exclusion must drop the note containing the exact phrase:\n{o}"
     );
 }
@@ -1539,11 +1539,11 @@ fn find_index_equals_walk() {
         "--use-index",
     ]);
     assert!(
-        walk.contains("alpha.md"),
+        walk.contains("alpha"),
         "walk find must surface alpha:\n{walk}"
     );
     assert!(
-        !walk.contains("beta.md"),
+        !walk.contains("beta"),
         "the -widget exclusion must drop beta:\n{walk}"
     );
     assert_eq!(
@@ -1564,11 +1564,11 @@ fn find_only_minus_returns_non_excluded() {
     // the recall corpus, `-tables` drops recall_b and keeps recall_a (which lacks `tables`).
     let o = run(&["find", "-tables", RECALL_DIR]);
     assert!(
-        o.contains("recall_a.md"),
+        o.contains("recall_a"),
         "a non-excluded note must remain:\n{o}"
     );
     assert!(
-        !o.contains("recall_b.md"),
+        !o.contains("recall_b"),
         "the note containing the -excluded term must be dropped:\n{o}"
     );
 }
@@ -1819,6 +1819,67 @@ fn recall_full_prints_the_rich_record_including_keywords() {
         o.contains("\tscore: "),
         "full prints the SCORE — without it a result's rank is unobservable, so winning on \
          score and merely surviving a tie-break look identical:\n{o}"
+    );
+}
+
+/// A PAGE row's locator is the page's `name:` identity, never its path.
+///
+/// Measured on the two live corpora: page rows are 35-39% of ALL result rows and their paths cost
+/// ~90 tokens apiece — ~80-110 tokens per query, comparable to the whole per-query budget. The
+/// `name:` is used rather than the file stem because wikilinks resolve through `name:`; printing
+/// the stem would give the ~3% of pages whose filename differs a SECOND address the wiki never
+/// uses. This fixture is exactly that case.
+#[test]
+fn page_row_locator_is_the_name_identity_not_the_path() {
+    let d = TempDir::new("page-locator");
+    d.write(
+        "zqx_page_underscored.md",
+        "---\nname: zqx-page-hyphenated\ndescription: zqxpagekw a page whose file and name differ\n---\nBody.\n",
+    );
+    let o = run(&["recall", "zqxpagekw", d.as_str()]);
+    let row = o.lines().find(|l| l.contains("zqxpagekw")).unwrap_or("");
+    let locator = row.split('\t').nth(1).unwrap_or("");
+    assert_eq!(
+        locator, "zqx-page-hyphenated",
+        "the lean page row must print the `name:` identity:\n{o}"
+    );
+    assert!(
+        !row.contains(".md"),
+        "the lean page row must not carry a path — that is the cost this layer exists to remove:\n{o}"
+    );
+}
+
+/// ...and that printed locator must be a REAL key, or the listing lies about what it hands you.
+/// An atom locator is an exact lookup; a page locator sits in the SAME column and must behave the
+/// same way, including for a page whose filename differs from its declared name.
+#[test]
+fn page_name_is_an_exact_second_hop() {
+    let d = TempDir::new("page-hop");
+    d.write(
+        "zqx_hop_underscored.md",
+        "---\nname: zqx-hop-hyphenated\ndescription: an unrelated surface line\n---\nZqxhopbody.\n",
+    );
+    let o = run(&["recall", "zqx-hop-hyphenated", d.as_str()]);
+    assert!(
+        o.contains("zqx_hop_underscored.md"),
+        "the page hop resolves to the page, printing the PATH an editor needs:\n{o}"
+    );
+    assert!(o.contains("Zqxhopbody") || o.contains("unrelated surface"), "the hop prints the page record:\n{o}");
+}
+
+/// The hop must never SWALLOW a symptom search: a one-word query is indistinguishable from a name
+/// by shape alone, so a query matching no page name has to fall through to ranking.
+#[test]
+fn a_query_matching_no_page_name_falls_through_to_search() {
+    let d = TempDir::new("page-hop-fallthrough");
+    d.write(
+        "zqx_fall.md",
+        "---\nname: zqx-fall\ndescription: zqxfallkw the searchable surface\n---\nBody.\n",
+    );
+    let o = run(&["recall", "zqxfallkw", d.as_str()]);
+    assert!(
+        o.contains("zqx-fall"),
+        "a non-name query must still rank normally:\n{o}"
     );
 }
 
@@ -2454,7 +2515,7 @@ fn user_mem_named_as_the_root_is_still_searchable() {
     let root = d.join("user-mem");
     let o = run(&["find", "+espresso", root.to_str().expect("utf-8")]);
     assert!(
-        o.contains("00001-private.md"),
+        o.contains("00001-private"),
         "user-mem named as the ROOT must remain searchable:\n{o}"
     );
 }

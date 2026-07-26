@@ -1164,6 +1164,11 @@ pub struct IndexCandidate {
     pub body: String,
     pub ocd: Option<String>,
     pub lmd: Option<String>,
+    /// The page's canonical wiki identity, as `topic_of` resolved it at index time (`name:`,
+    /// else `topic:`, else the file stem). This is the locator a PAGE result prints, so the walk
+    /// resolves the same thing via `memory::page_identity` — the two MUST agree, or a page's
+    /// printed address would depend on whether an index happened to be fresh.
+    pub topic: String,
 }
 
 /// Load every memory row from the index as recall candidates. The recall scorer (in `memory`)
@@ -1172,7 +1177,7 @@ pub struct IndexCandidate {
 /// stored as memory rows, so no extra filtering is needed here.
 pub fn recall_candidates(conn: &Connection) -> Result<Vec<IndexCandidate>> {
     let mut stmt = conn.prepare(
-        "SELECT path, title, description, tags, body, ocd, lmd
+        "SELECT path, title, description, tags, body, ocd, lmd, topic
          FROM memories WHERE element_type = 'memory' ORDER BY path",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -1184,6 +1189,9 @@ pub fn recall_candidates(conn: &Connection) -> Result<Vec<IndexCandidate>> {
             body: r.get(4)?,
             ocd: r.get::<_, Option<String>>(5)?,
             lmd: r.get::<_, Option<String>>(6)?,
+            // `topic` predates this read by several schema versions (it has its own B-tree index),
+            // so no migration is needed — it was written all along and simply never read back.
+            topic: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
