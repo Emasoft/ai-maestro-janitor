@@ -35,13 +35,14 @@ This is a REFERENCE doc: every normative clause starts with a stable `` `WM-<FAM
 anchor and a bold key-phrase, so you grep to the clause instead of reading through.
 
 ```text
-WM-GREP  all clauses of a family:   grep 'WM-ATOM'   (SCOPE WIKI NOTE ATOM LES RCL AUTH CLI LINT MIG TXN SEP UMEM SURF SCHED HARV BOOT)
+WM-GREP  all clauses of a family:   grep 'WM-ATOM'   (SCOPE WIKI NOTE ATOM LES RCL SCORE IDX BENCH AUTH CLI LINT MIG TXN SEP UMEM SURF SCHED HARV BOOT)
 WM-GREP  one clause by id:          grep 'WM-ATOM-03'
 WM-GREP  the authoritative verbs:   grep -A20 '@spec:memgrep-verbs'
 WM-GREP  the atom / lesson grammar: grep -A6  '@spec:atom-grammar'   /  '@spec:lesson-grammar'
 WM-GREP  the version stamp:         grep '^spec-version:'
 WM-GREP  families: META=arbiter VER=versioning SCOPE=3-scope-model WIKI=wiki-layer
 WM-GREP            NOTE=page-format ATOM=atom-model LES=lesson+supersession RCL=recall
+WM-GREP            SCORE=ranking IDX=index+freshness BENCH=retrieval-benchmark
 WM-GREP            AUTH=authoring-contract CLI=memgrep-verbs LINT=lint-contract MIG=migrate
 WM-GREP            TXN=editor-safety SEP=separation-of-powers UMEM=private-user-memory
 WM-GREP            SURF=proactive-surfaces SCHED=maintenance-scheduler HARV=harvest/raw-buffer
@@ -235,7 +236,26 @@ pages parse unchanged).
 
 `WM-ATOM-06` **id-is-stable-corpus-wide** — an atom's `^name` / lesson `id:` is stable and
 unique corpus-wide; page-local `[^N]` footnote numbers renumber, so only the `id` is a durable
-reference.
+reference. Corpus-uniqueness is what makes a BARE id a sufficient retrieval key (WM-RCL-07), so
+a duplicate id is a WM-LINT **CRITICAL**, not a nit.
+
+`WM-ATOM-07` **the-parser-drops-silently-so-lint-MUST-mirror-its-drop-branches** — `MUST`: for
+every branch on which the props parser DISCARDS input, the linter carries a check that fires on
+exactly that input — no more, no less.
+
+The props parser skips a comma-segment that has no `:` and one whose key is empty. Both are
+silent: nothing warns, and the page still looks well-formed. The natural hand-authored
+`keywords: a phrase, another phrase` therefore keeps `['a','phrase']` and **deletes every phrase
+after the first comma** — i.e. it deletes most of the recall surface (WM-ATOM-04) while the page
+reads as correct. Measured on the frozen benchmark corpus, repairing exactly this moved hit@1
+from **21.7% to 95.7%**.
+
+The generalisable rule: **a parser with a silent `continue` is a data-loss engine, and the only
+FP-free detector of that loss is the parser's own drop condition.** A lint written from the
+FORMAT's prose instead ("keywords should be underscore-joined") is a style opinion that both
+misses real losses and fires on legitimate input; a lint written from the PARSER's branches is a
+proof. So the check is derived from the code that drops, and a test pins the two together
+(`test_dropped_props_matches_what_the_parser_actually_loses`).
 
 ## WM-LES — the lesson form + the supersession protocol
 
@@ -330,6 +350,165 @@ reduce accuracy or raise token cost beyond tolerance. Measured at the layer's in
 `WM-RCL-05` **write-after-solving** — after solving a non-trivial problem or making a decision
 not derivable from the code, capture it into the page that OWNS the subject (RECALL first, so
 you UPDATE rather than duplicate).
+
+## WM-SCORE — the ranking contract
+
+`WM-SCORE-01` **rank-atoms-alongside-pages** — the ranked unit is the ATOM, interleaved with
+PAGE hits by score. A page is a navigation surface; an atom is the fact. Ranking only pages
+forces the reader to re-find the fact inside the page they were handed.
+
+`WM-SCORE-02` **surface-is-the-symptom-fields** — ranking reads `description + title + tags`
+(page) and `keywords` (atom) — the fields WM-RCL-01 requires to carry the symptom. The body is a
+FALLBACK surface only.
+
+`WM-SCORE-03` **precision-first** — if ANY candidate matched the symptom surface, ONLY
+surface-matchers are returned; body-only matches surface exclusively when nothing matched the
+surface. (This applies to symptom `recall`; a `find` row has already passed the `+`/`-` gate and
+is kept unconditionally — a `+mandatory`-only query legitimately scores zero optional hits.)
+
+`WM-SCORE-04` **keyphrases-are-atomic** — `MUST`: a multi-word key-phrase is ONE token, in the
+stored surface AND in the query. Searching `"lossless migration"` is a DIFFERENT query from
+searching `lossless` + `migration`, and the engine `MUST` be able to tell them apart.
+
+This is violated by the obvious tokenizer. Splitting a query on `!c.is_alphanumeric()` makes `_`
+a separator, so an `underscore_joined` phrase is shredded back into loose words *before scoring
+begins* — after which an atom declaring `lossless_migration` and one declaring `lossless
+migration` are indistinguishable, and the winner falls through to whatever the stable sort's
+input order happens to be (alphabetical path order). Storing phrases atomically is therefore
+necessary but **not sufficient**: a corpus-wide phrase migration is INERT until the scorer stops
+destroying the query's phrase structure. Both halves ship together or neither is real.
+
+`WM-SCORE-05` **tiered-match** — the score is TIERED, not a flat hit count: exact keyword-token
+match ≫ contiguous phrase inside a keyword ≫ all query words present ≫ some present. A flat
+"how many query words appear anywhere in the concatenated surface" gives a phrase and its
+shredded words the identical score, which is WM-SCORE-04's failure expressed as arithmetic.
+
+`WM-SCORE-06` **token-aware-matching** — `MUST NOT` rank on raw substring containment: `cat`
+matching `concatenate` is a false hit that a substring scorer cannot distinguish from a real one.
+
+`WM-SCORE-07` **rarity-weighting** — a distinctive phrase outranks a common word rather than
+counting the same.
+
+`WM-SCORE-08` **tie-breaks** — `score desc → upward cross-layer in-degree desc → tier rank →
+lmd desc → path`. `path` is retained LAST purely for determinism; dateless elements sort last.
+
+Order matters and is not arbitrary. `lmd` is day-granular and ANY edit bumps it, so ranking it
+early lets a typo fix permanently promote a page — the signal is corruptible by activity
+unrelated to importance (which is why WM-MIG-07 forbids a mechanical repair from touching it).
+`tier:` is DECLARED rather than derived, is present on ~98% of pages, and cannot be inflated by
+editing.
+
+`WM-SCORE-09` **do-NOT-use-pagerank-or-raw-in-degree** — `MUST NOT`. This is a MEASURED refusal,
+not a preference, and it follows from the corpus's own laws rather than from any defect in it.
+
+The LINK LAW (WM-WIKI) makes every within-layer link bidirectional, and WM-SCOPE forbids
+downward links, so a cross-layer edge can never be reciprocated. The result is a graph that is
+*almost entirely undirected*:
+
+| corpus | reciprocated edges | corr(out-degree, in-degree) |
+|---|---|---|
+| PROJECT (34 pages) | 56/65 — 86% | **+0.88** |
+| USER (88 pages) | 170/193 — 88% | **+0.95** |
+
+Mean in-degree equals mean out-degree exactly. So a page that links OUT to twenty pages receives
+twenty links BACK: **in-degree measures chattiness, not importance.** And PageRank over an
+undirected graph is provably proportional to degree — so classic PageRank would reproduce the
+same wrong signal at far greater cost.
+
+The honest link-authority signal is therefore the *unreciprocatable* edge: **cross-layer UPWARD
+in-links** (22 in the measured corpus — sparse, so it fires rarely, but it means something when
+it does), with declared `tier:` as the dense fallback. Sparse-but-strong first, dense second.
+
+**Transferable form of this law:** in any corpus whose links are made symmetric by a rule,
+link-count centrality is degenerate. Before adopting a graph-centrality ranking, MEASURE
+reciprocity and the out/in correlation; if reciprocity is high, the metric is measuring how much
+each node TALKS, and you need a signal the symmetry rule cannot manufacture.
+
+## WM-IDX — the index contract
+
+`WM-IDX-01` **the-index-is-an-accelerator-never-an-authority** — `MUST`: index-backed results
+are byte-identical to walk-backed results, and when the index is not FRESH the engine walks.
+Correctness never depends on the index being up to date; only speed does. (A test pins the
+equality: `reindex_then_recall_via_index_matches_walk`.)
+
+`WM-IDX-02` **freshness-is-a-path-SET-plus-a-per-file-signature** — the index is fresh iff the
+on-disk path set equals the ledger's AND every file's `(size, mtime_ns)` matches. The SET half
+catches an ADD or a REMOVE (including a symlink appearing or disappearing — WM-PUB); the
+per-file half catches an EDIT. A coarse "is the DB newer than the directory" timestamp catches
+neither reliably.
+
+`WM-IDX-03` **stat-MUST-follow-symlinks** — `MUST NOT` compute the per-file signature with a
+non-following stat. A following stat records the TARGET's size/mtime, so editing a published
+page invalidates every view that links to it. Switching to `symlink_metadata` would freeze each
+published page's signature at the LINK's own mtime, and the index would then serve stale content
+forever **with nothing reporting it** — the worst failure class available, because it is
+indistinguishable from correct operation.
+
+`WM-IDX-04` **walkers-MUST-accept-a-symlinked-FILE** — a directory walker filtering on
+`entry.file_type().is_file()` sees the LINK's own type, so a symlinked page is SILENTLY SKIPPED:
+present on disk, absent from every search. Accept an entry whose FOLLOWING `metadata()` reports a
+file. `MUST NOT` reach for the walker's `follow_links(true)` instead — that also traverses
+DIRECTORY symlinks, inviting cycles and silent recursion into unrelated trees, to buy something
+not needed.
+
+`WM-IDX-05` **reindex-the-scope-ROOT-not-the-file's-parent** — an incremental reindex triggered
+by a write resolves the SCOPE ROOT the page was reached through, not `path.parent()`. A page in a
+subdirectory of a root otherwise never refreshes that root's index.
+
+`WM-IDX-06` **the-view-IS-the-boundary** — `MUST`: indexing, link resolution and lint operate on
+the search ROOTS AS GIVEN, never on a resolved target's neighbourhood. Any code that derives a
+page set from a file's own location — `parent()`, or `canonicalize()` then scan siblings — lands
+in the target's real directory and sees everything there, which silently converts a scoped view
+into full disclosure. Cross-root dedupe therefore keys the visited set on the canonical path but
+PASSES THE RAW PATH to the visitor, so the view survives the deduplication.
+
+`WM-IDX-07` **schema-version-and-forward-migration** — the index carries a schema version;
+migrations are ADDITIVE (`ALTER TABLE … ADD COLUMN`) and every query TOLERATES a pre-migration DB
+by returning empty rather than erroring. A hard failure on an old index turns a cache into a
+liability.
+
+`WM-IDX-08` **routing-writes-through-the-tool-buys-LATENCY-not-CORRECTNESS** — the freshness
+check (WM-IDX-02) is what makes correctness independent of the writer. Routing a mutation through
+the tool buys an immediate targeted reindex instead of waiting for the next query's freshness
+check — a real gain, since that check runs per-query and a full reindex is the expensive path —
+but it `MUST NOT` be presented as the thing that makes the system safe. Any agent can bypass the
+verbs with a raw edit tool, so a background repair chore is the safety net, and **correctness may
+never DEPEND on the safety net.**
+
+## WM-BENCH — retrieval is MEASURED, not asserted
+
+`WM-BENCH-01` **frozen-fixture-corpus** — the benchmark runs against a COMMITTED fixture corpus,
+never the live one. A live corpus changes weekly, so every run would be incomparable to the last
+— the opposite of a regression instrument. A `--live` mode may exist for spot checks, never for
+the gate.
+
+`WM-BENCH-02` **queries-written-from-the-SYMPTOM-side** — each case is `(symptom query → expected
+element id)`, phrased in the words a future session would actually have. Reporting `hit@1`,
+`hit@3`, `hit@10` and MRR.
+
+`WM-BENCH-03` **deterministic-offline-estimator** — the token estimator is stable, hermetic and
+monotone in output size, and is documented as a RELATIVE instrument; raw bytes are reported
+alongside so every number stays auditable. A bias identical on both sides of a comparison cancels
+in the delta.
+
+`WM-BENCH-04` **cost-is-END-TO-END** — `MUST`: the metric is `tokens(search output) + tokens(the
+follow-up read it forces)`. A per-call metric flatters a lean listing (tiny output) while hiding
+the hop it forces, and equally flatters a fat one-shot that needs none. Only the total answers
+the real question — *what does it cost to hold this fact?*
+
+`WM-BENCH-05` **committed-baseline-and-a-regression-gate** — the baseline JSON is committed and
+the run FAILS if accuracy drops or token cost rises beyond tolerance, wired into the test suite so
+a regression cannot ship quietly.
+
+`WM-BENCH-06` **a-baseline-captured-on-a-broken-fixture-stays-broken** — the fixture is not
+"corpus that should be fixed", it IS the baseline. Re-capturing it casually destroys the ability
+to compare against every prior version. Re-capture only when the DEFAULT behaviour legitimately
+changed, and record the before/after numbers in the commit that does it.
+
+`WM-BENCH-07` **measure-the-binary-under-test** — `MUST`: the harness runs the build being
+evaluated, not whatever is on `PATH`. Otherwise every measurement silently scores the INSTALLED
+build and reports the old numbers as the new build's improvement — a self-confirming result that
+looks like a successful experiment.
 
 ## WM-AUTH — the authoring contract
 
