@@ -1,9 +1,9 @@
 ---
 trdd-id: DO6X4ZF8
 title: Wikimem retrieval benchmark — accuracy and end-to-end token cost, with a committed baseline
-column: testing
+column: ai_review
 created: 2026-07-26T14:15:38+0200
-updated: 2026-07-26T17:06:00+0200
+updated: 2026-07-26T19:49:48+0200
 current-owner: 2f5bc976
 task-type: infra
 approval-tier: 0
@@ -25,9 +25,12 @@ implementation-commits: [11d476b, 9ef241d, 873f11e, 5b03519, 83fac1d, 5f98788, c
   (**LEGACY**, pre-migration form — 21.7% / 0.3891 / 185.4). Output layers, the `recall <ATOM-ID>`
   second hop, the tiered keyphrase scorer, the recency tie-break and the cross-scope lint are all
   landed and tested.
-- **NEXT ACTION:** run `uv run scripts/wikimem_bench.py --check` **and** the `--corpus
-  tests/fixtures/wikimem-bench-conformant --baseline tests/wikimem_bench/baseline-conformant.json`
-  variant; both must be green, then move to `ai_review`. Nothing is known-broken.
+- **NEXT ACTION:** none for this TRDD — it is in `ai_review`. Full gate captured 2026-07-26T19:49
+  at HEAD `c8d29cc`, all green: both benchmark corpora `no change` (conformant 100% / 1.0 / 283.7,
+  legacy 21.7% / 0.3891 / 185.4), `ruff` 0, `mypy` 0 over 434 files, `pytest` 13687 passed /
+  1 skipped, `cargo test --release` 221 passed. The follow-ups (#25 page-row hop key, #29
+  WM-SCORE-08 remainder, #31 spec-drift check) are **separate TRDDs' work**, not this one's — this
+  TRDD delivered the instrument, and gating it on its own future improvements would never close it.
 - **Load-bearing facts:**
   - cost is **END-TO-END** (search output + the hop it forces) — a per-call metric flatters a thin
     list that hides its hop and a fat one-shot that needs none;
