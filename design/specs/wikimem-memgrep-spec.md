@@ -645,8 +645,10 @@ ENTIRELY of stopwords is REFUSED rather than silently matching everything.
 
 `WM-BENCH-01` **frozen-fixture-corpus** — the benchmark runs against a COMMITTED fixture corpus,
 never the live one. A live corpus changes weekly, so every run would be incomparable to the last
-— the opposite of a regression instrument. A `--live` mode may exist for spot checks, never for
-the gate.
+— the opposite of a regression instrument. Pointing the harness at a live corpus (`--corpus
+<path>`) is legitimate for a SPOT CHECK and never for the gate; no separate live-mode flag exists,
+and none should be added — a dedicated flag would make the unrepeatable run look like a supported
+mode of the instrument rather than an off-label use of it.
 
 `WM-BENCH-02` **queries-written-from-the-SYMPTOM-side** — each case is `(symptom query → expected
 element id)`, phrased in the words a future session would actually have. Reporting `hit@1`,
@@ -730,6 +732,23 @@ section; refuses to overwrite), `add-atom` (`--desc` stored QUOTED ≤200 chars;
 synthesised so a malformed atom is impossible), `add-lesson` (anchors `[^N]` from the atom
 body; DO-NOT/BECAUSE/DO on stdin).
 
+Their flags, which WM-CLI-10 holds them to:
+
+- `add-atom --page <PAGE> --keywords <LIST>` — both MANDATORY, and each for a reason the verb
+  exists to enforce. `--page` must ALREADY exist (the verb appends; it never creates a page, so a
+  typo cannot silently mint an orphan). `--keywords` is the RECALL SURFACE: a comma-separated
+  key-phrase list whose internal spaces become `_`, i.e. the verb applies WM-ATOM's phrase grammar
+  for the author. Omitting it is unrepresentable because an atom with no keywords is
+  unfindable (WM-RCL-01) — a write that succeeds into invisibility is the worst outcome available.
+  Optional: `--desc`, `--type`, `--hidden`.
+- `add-lesson --page <PAGE> --keywords <LIST>` — same two mandatory flags, same reasons: a lesson
+  is recalled by symptom exactly as an atom is.
+- `new-page --path <PATH> --tier <T> --name --description --type`, plus `--globs` (a `hub`'s file
+  ownership, per WM-WIKI) and `--functionality` (the hub's subject). `--path` is separate from
+  `--name` because the FILE name and the `name:` slug are different identities — wikilinks resolve
+  through `name:`, so conflating them would break `[[link]]` resolution for every page whose file
+  is named differently from its slug.
+
 `WM-CLI-04` **add-lesson-supersedes** — `add-lesson --supersedes --atom <id>` `MUST` embed the
 atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>`; the optional
 `--retire-atom` sets the atom marker `status: superseded, superseded-by:<lesson-id>`
@@ -738,6 +757,29 @@ atom's current verbatim body as `SUPERSEDED BODY:` and record `supersedes:<atom>
 `WM-CLI-05` **index-sidecar** — the corpus is indexed into a SQLite sidecar (`.memgrep/`);
 `index`/`reindex` build/refresh it; `validate` checks index/page health. The file watcher
 debounces ~500 ms behind writes — a consumer `MUST NOT` re-query in the same turn it wrote.
+
+`index`/`reindex` share three flags:
+
+- `--full` — ignore the change-detection ledger and rebuild the SQLite index from scratch. It is
+  the escape hatch for WM-IDX's freshness model: that model is an OPTIMISATION, so there must be a
+  way to distrust it, or a bug in change-detection becomes unrecoverable from the CLI.
+- `--markdown` — build the LEGACY markdown doc-generator (`memory-index.md`) instead of the SQLite
+  index. Legacy is the operative word: `memory-index.md` is a non-note the walk deliberately
+  excludes from ranking (WM-RCL), so this output is for humans, never a retrieval surface.
+- `--write` — `--markdown` ONLY: write to `<root>/memory-index.md` instead of stdout. Defaulting to
+  stdout is what keeps a doc-generator from silently rewriting a corpus file that a reader merely
+  wanted to look at.
+
+`links` carries `--broken` (targets that do not exist), `--orphans` (files with no inbound links),
+`--to <NOTE>` (that note's out-links) and `--from <NOTE>` (its backlinks). They are REPORTS, not
+lints: a broken link may be a legitimate forward reference — WM-WIKI explicitly permits authoring
+`[[name]]` before the page exists — so failing on one would punish the authoring order the model
+allows.
+
+`fact`/`recall`/`find`/`atom` carry `--full-notes`: keep each lesson's leading `[...]` metadata
+prefix, which is STRIPPED by default. The prefix carries the lesson's address (`id`, `status`,
+`keywords`, dates — WM-LES), so this is the flag to reach for when the question is *which* lesson
+this is or whether it is still `valid`, rather than what it says.
 
 `WM-CLI-06` **token-lean-output** — reads return greppable, capped output; consumers read the top
 1–3 hits, not the whole corpus. The exact shape is WM-RCL-06's layer table (the lean triage row by
