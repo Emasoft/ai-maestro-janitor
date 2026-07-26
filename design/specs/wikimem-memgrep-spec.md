@@ -257,6 +257,20 @@ misses real losses and fires on legitimate input; a lint written from the PARSER
 proof. So the check is derived from the code that drops, and a test pins the two together
 (`test_dropped_props_matches_what_the_parser_actually_loses`).
 
+`WM-ATOM-08` **allocate-identifiers-against-the-RAW-text, not the parsed tree** — `MUST`: when
+allocating a new page-local label (the next `[^N]`), take the maximum over labels found by BOTH
+the parsed tree AND a raw scan of the source.
+
+Same law as WM-ATOM-07 seen from the WRITE side. A markdown parser materialises a footnote node
+only for a BALANCED ref+def pair, so an unbalanced label — precisely the defect the linter exists
+to catch — is INVISIBLE to the parsed tree. Allocating from the parsed maximum therefore hands out
+a label that already exists in the file, silently merging a new lesson into a broken one. The
+integrity check has the same blind spot for the same reason, which is why it re-scans the raw text
+rather than reading the parser's output.
+
+**Generalisable form: wherever a tool both READS through a parser and WRITES new identifiers, the
+parser's blind spots become the writer's collision domain.** Allocate against the raw source.
+
 ## WM-LES — the lesson form + the supersession protocol
 
 `WM-LES-01` **lesson-is-an-atom-and-a-guardrail** — a `[^N]:` footnote whose bracketed metadata
@@ -431,11 +445,71 @@ are byte-identical to walk-backed results, and when the index is not FRESH the e
 Correctness never depends on the index being up to date; only speed does. (A test pins the
 equality: `reindex_then_recall_via_index_matches_walk`.)
 
-`WM-IDX-02` **freshness-is-a-path-SET-plus-a-per-file-signature** — the index is fresh iff the
-on-disk path set equals the ledger's AND every file's `(size, mtime_ns)` matches. The SET half
-catches an ADD or a REMOVE (including a symlink appearing or disappearing — WM-PUB); the
-per-file half catches an EDIT. A coarse "is the DB newer than the directory" timestamp catches
-neither reliably.
+`WM-IDX-02` **freshness-is-a-path-SET-plus-a-per-file-identity** — the index is fresh iff ALL
+hold: the DB opens; its schema version is current (WM-IDX-09); the ledger is non-empty; EVERY
+live file's identity is UNCHANGED against its ledger row; and the on-disk path SET is EXACTLY
+EQUAL to the ledger's. The SET half catches an ADD or a REMOVE (a new untracked file, a deleted
+one still recorded, a symlink appearing or disappearing); the identity half catches an EDIT. A
+coarse "is the DB newer than the directory" timestamp catches neither reliably.
+
+`WM-IDX-02a` **file-identity-prefers-a-content-hash-over-mtime** — inside a git work tree the
+identity is the **git blob sha** (`git hash-object`); elsewhere it falls back to
+`(size, mtime_ns)`. Two reasons, both load-bearing:
+
+- a content hash is **move-invariant**, so a file that is `git mv`-ed between lifecycle folders is
+  recognised as the same content at a new path — the SET half reports the move, the identity half
+  correctly reports "unchanged", and only the moved entry is re-parsed instead of the corpus;
+- the mtime fallback is **nanosecond**, never second-precision, because two writes inside one
+  second are ordinary and a second-granular stamp silently misses the second one.
+
+`WM-IDX-09` **freshness-MUST-be-schema-version-gated** — a DB at an OLDER schema is ALWAYS stale,
+irrespective of its ledger.
+
+This is not tidiness, it is a correctness gate. A pre-migration DB is perfectly consistent *with
+respect to its own ledger*, so an unversioned freshness check calls it fresh — and it then answers
+queries from tables that do not yet have the newer columns, silently returning ZERO results for a
+whole class of element until someone happens to reindex. Version-gating converts that silent wrong
+answer into a walk, which is merely slower.
+
+`WM-IDX-10` **migrations-are-forward-only-transactional-and-validated-before-commit** — the schema
+carries a version; migrations are ADDITIVE and APPEND-ONLY; each step runs inside a single
+`BEGIN IMMEDIATE` transaction, is validated IN FULL before it commits, and rolls back on any
+failure. A DB stamped with a version NEWER than the running binary understands is REFUSED, never
+migrated backwards. Where a structure cannot be altered in place (an FTS column set), the
+migration drops, recreates, rebuilds it, and CLEARS the file ledger so the corpus is force-reparsed
+to backfill — i.e. it pays a full reparse rather than leaving a half-populated column.
+
+`WM-IDX-11` **validate-then-repair-then-nuke, in that order** — the index is a PURE DERIVED CACHE,
+which is what makes destroying it a legitimate repair. On any validation failure: first attempt the
+cheap in-place repair (rebuild every derived/FTS structure from its content table, which is ground
+truth); only if that still fails, delete the DB and its sidecars and rebuild from scratch.
+
+Validation is a fixed set of independent checks — file-level integrity, base-table column shape,
+derived-table column shape, derived-vs-content parity, referential integrity (no child row pointing
+at a vanished parent), and the version stamp — and each failure carries a **stable issue code** so
+an external monitor can act on a specific defect rather than on a string.
+
+`WM-IDX-12` **a-self-healing-component-MUST-log-the-repair-EVENT** — `MUST`: every self-heal
+appends one capped line (`<epoch> <stage> <why>`) to a ledger a monitor can read.
+
+The reason is the whole point and generalises far beyond an index: **a component that silently
+repairs itself makes the broken STATE unobservable.** If corruption recurs daily and open() fixes
+it every time, no snapshot of the system is ever wrong, so nothing can ever detect the recurrence
+— the only observable is the *event* of repair. A self-healing component without a repair log is
+therefore strictly less debuggable than one that simply fails.
+
+`WM-IDX-13` **the-tool's-own-outputs-are-NOT-corpus** — generated index/report artefacts that live
+in the corpus directory (a generated index doc, a detector's `*-proposed.md` report) `MUST` be
+excluded from ranking, not merely un-indexed as elements. Observed while dogfooding: the
+librarian's own reorganisation REPORT outranked every real note for a reorganisation-symptom query,
+because a report about a topic is lexically the densest document about that topic. A tool that
+ranks its own output will always rank it first.
+
+`WM-IDX-14` **concurrency-is-assumed, not exceptional** — the index is opened concurrently by a
+prompt-time hook, a background detector, and an agent mid-reindex. It therefore runs in WAL mode
+with a bounded busy-timeout, so contention degrades to a wait instead of a spurious failure. The
+sidecar directory writes its own ignore-file on first use, so a derived cache can never be
+committed by someone who did not know it existed.
 
 `WM-IDX-03` **stat-MUST-follow-symlinks** — `MUST NOT` compute the per-file signature with a
 non-following stat. A following stat records the TARGET's size/mtime, so editing a published
