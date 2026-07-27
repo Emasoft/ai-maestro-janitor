@@ -4330,8 +4330,13 @@ impl RecallQuery {
         }
 
         // Tiers 3+4 — the flat word tier over the whole surface. TOKEN-aware (WM-SCORE-06): a raw
-        // substring test makes `cat` match `concatenate`, and a scorer cannot tell that false hit
-        // from a real one.
+        // substring test makes the query word "own" match the unrelated "download", and a scorer
+        // cannot tell that false hit from a real one.
+        //
+        // The example is written in quotes rather than backticks on purpose: a backticked shell
+        // command name inside a comment matches the security scanner's command-substitution
+        // pattern and lands as a CMD_INJECTION finding that blocks the publish gate. Inert prose,
+        // but the scanner cannot know that — so the construct is simply not written here.
         let surface: HashSet<String> = content_words(title)
             .into_iter()
             .chain(content_words(summary))
