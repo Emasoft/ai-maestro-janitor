@@ -1170,6 +1170,33 @@ pub fn reindex(root: &Path, files: &[PathBuf], full: bool) -> Result<ReindexSumm
             conn.execute("DELETE FROM files WHERE path = ?1", params![path_s])?;
             deleted += 1;
         }
+
+        // …then prune CONTENT rows the ledger could not account for. The two prunes are not
+        // redundant: the loop above is driven by `files`, so it can only remove what the ledger
+        // still remembers — and an `ADD COLUMN` migration EMPTIES the ledger on purpose
+        // (WM-IDX-07a). A reindex whose path SPELLING differs from the previous run's (absolute vs
+        // relative — `path_s` is the caller's spelling, not a canonical identity) then writes a
+        // SECOND full set of `memories` rows beside the first, with nothing left able to delete
+        // them. Measured on this repo's PROJECT scope: 70 memory rows for 35 files, so every
+        // index-backed recall returned every element TWICE — silently halving `--top N` and
+        // doubling the token cost of the system's primary read path, while `is_fresh` (which
+        // compares the ledger, and the ledger was correct) reported the index healthy.
+        //
+        // `files` is the complete on-disk set for this root — the ledger prune above already
+        // depends on that — so a `memories` row outside it is unreachable by definition.
+        let orphan_paths: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT DISTINCT path FROM memories")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<String>>>()?
+                .into_iter()
+                .filter(|p| !on_disk.contains(p))
+                .collect()
+        };
+        for path_s in &orphan_paths {
+            delete_rows_for_path(&conn, path_s)?;
+            conn.execute("DELETE FROM files WHERE path = ?1", params![path_s])?;
+            deleted += 1;
+        }
         Ok((on_disk.len(), changed, skipped, deleted))
     })();
 
@@ -1587,6 +1614,60 @@ mod tests {
 
     /// A page carrying one LIVE and one RETIRED atom — the plan-1d round-trip fixture.
     const RETIRED_ATOM_PAGE: &str = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n^ATOM-LIVE-0001 [keywords: rotator failover handoff]\nThe rotator hands over to a backup.\n^ATOM-DEAD-0002 [keywords: rotator legacy handoff, status: superseded, superseded-by:ATOM-LIVE-0001]\nThe old claim that it never hands over.\n";
+
+    #[test]
+    fn a_respelled_path_after_a_ledger_reset_does_not_duplicate_the_corpus() {
+        // The live bug: 70 `memories` rows for 35 files on this repo's PROJECT scope, so every
+        // index-backed recall returned every element TWICE. Two ingredients, both normal:
+        //   1. `path` is the CALLER'S SPELLING (relative vs absolute), not a canonical identity, so
+        //      one file can hold two keys;
+        //   2. an ADD COLUMN migration EMPTIES the ledger by design (WM-IDX-07a), and the prune was
+        //      driven off the ledger — so after a reset there was nothing left able to delete the
+        //      previous spelling's rows.
+        // Neither is a mistake on its own, which is why this survived. `is_fresh` compares the
+        // LEDGER, and the ledger was correct — the duplication was invisible to the health check.
+        let d = tmp("respell");
+        write(&d, "p.md", ATOM_PAGE);
+
+        // Pass 1: index by ABSOLUTE path.
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        // Simulate the migration's ledger reset (`DELETE FROM files`) — content rows stay.
+        {
+            let conn = open_existing(&d).unwrap();
+            conn.execute_batch("DELETE FROM files").unwrap();
+        }
+        // Pass 2: the SAME file under a different SPELLING (`…/./p.md`). Before the content-side
+        // prune this appended a second full row-set instead of replacing the first.
+        //
+        // The respelling is a redundant `.` component rather than a relative path on purpose: the
+        // obvious way to write this test is `set_current_dir` + a relative arg, but the CWD is
+        // PROCESS-global while cargo runs tests in parallel THREADS — so that version breaks
+        // whichever unrelated test happens to resolve a relative path at the same moment. It did:
+        // `resolved_lesson_carries_its_prefix_dates` failed, in another module, with nothing to do
+        // with this change. A test must never mutate state its neighbours share.
+        reindex(&d, &[d.join(".").join("p.md")], false).unwrap();
+
+        let conn = open_existing(&d).unwrap();
+        let pages: i64 = conn
+            .query_row("SELECT count(*) FROM memories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(pages, 1, "one file must yield exactly one memory row");
+        let atoms: i64 = conn
+            .query_row("SELECT count(*) FROM atoms", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(atoms, 2, "its two atoms, once each — not four");
+        // The FTS shadow must be pruned with them, or recall still returns the ghosts.
+        let fts: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM atoms_fts WHERE atoms_fts MATCH 'rotator'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts, 1, "no orphan FTS rows left behind by the respelling");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn atom_retirement_round_trips_through_the_index() {

@@ -668,6 +668,16 @@ already had real values. The test for such a migration `MUST` assert the re-pars
 happened (a non-zero changed count on an unchanged corpus), not merely that the value is present:
 on a DB that never lost the value, the value-only assertion passes without the migration working.
 
+`WM-IDX-07c` **prune-the-CONTENT-rows-too-not-only-the-LEDGER** — `MUST`: a reindex deletes every
+`memories` row whose path is not in the on-disk set for that root, not merely the ledger entries
+it can still account for. `path` is the CALLER'S SPELLING (absolute vs relative vs `…/./x.md`),
+not a canonical identity, so one file can hold two keys — and WM-IDX-07a's ledger reset leaves the
+ledger-driven prune with nothing to match, so the previous spelling's rows become unreachable and
+permanent. Measured on this repo's PROJECT scope: **70 memory rows for 35 files**, so every
+index-backed recall returned every element TWICE — halving `--top N` and doubling the token cost
+of the primary read path. `is_fresh` compares the LEDGER (which was correct), so the health check
+reported the index healthy throughout: an index can be duplicated and fresh at the same time.
+
 `WM-IDX-07b` **a-shipped-schema-version-is-IMMUTABLE** — `MUST NOT` edit or renumber a shipped
 migration step; new work is a NEW version. A DB that already recorded version N skips an amended
 step N forever, so the change reaches exactly the corpora that never needed it and never reaches
