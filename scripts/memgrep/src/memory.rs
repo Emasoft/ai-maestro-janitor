@@ -3146,10 +3146,13 @@ fn scan_footnotes(raw: &str) -> Vec<(String, bool)> {
     static REF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     // Definition: leading whitespace, then `[^label]:`.
     let def_re = DEF_RE.get_or_init(|| Regex::new(r"^\s*\[\^([^\]\s]+)\]:").expect("static regex"));
-    // Reference: `[^label]` whose `]` is NOT immediately followed by `:` (so a def's own leading
-    // marker is not double-counted as a reference).
-    let ref_re =
-        REF_RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\](?:[^:]|$)").expect("static regex"));
+    // Reference: a bare `[^label]`. The "not followed by `:`" test is done by INSPECTING the next
+    // byte rather than matching it, because a matched trailing char is CONSUMED — and `captures_iter`
+    // does not overlap, so `[^1][^2]` had its `[` eaten by the first match and the second citation
+    // was never seen. Adjacent citations are ordinary authoring ("the fact.[^1][^2]"), so that
+    // silently under-counted references and reported the second lesson as UNCITED. Found by the
+    // lint benchmark's own fixture corpus, which is exactly what a labelled corpus is for.
+    let ref_re = REF_RE.get_or_init(|| Regex::new(r"\[\^([^\]\s]+)\]").expect("static regex"));
     let mut out: Vec<(String, bool)> = Vec::new();
     let mut def_span_end: Option<usize> = None;
     if let Some(c) = def_re.captures(raw) {
@@ -3157,11 +3160,17 @@ fn scan_footnotes(raw: &str) -> Vec<(String, bool)> {
         def_span_end = c.get(0).map(|m| m.end());
     }
     for c in ref_re.captures_iter(raw) {
+        let m = c.get(0).expect("group 0 always present");
         // Skip the reference that overlaps the line-leading definition marker (it IS the def, not a
         // citation of it). Everything after the def's `:` is fair game (a lesson may cite `[^M]`).
         if let Some(end) = def_span_end
-            && c.get(0).map(|m| m.start()).unwrap_or(usize::MAX) < end
+            && m.start() < end
         {
+            continue;
+        }
+        // A `]` immediately followed by `:` is a DEFINITION marker, not a citation — tested by
+        // peeking, so nothing is consumed and the next `[^…]` on the line is still matchable.
+        if raw[m.end()..].starts_with(':') {
             continue;
         }
         out.push((c[1].to_string(), false));
@@ -3220,8 +3229,11 @@ pub fn cmd_lint_cli(args: &[String]) -> Result<()> {
     // that hid findings would trade one unusable output (all-noise) for another (silently
     // incomplete), and the reader loses either way. The severity leads the line so
     // `| grep '^ERROR'` is exact.
-    for (sev, path, line, msg) in &violations {
-        println!("{} {path}:{line} — {msg}", sev.label());
+    for (sev, path, line, msg, code) in &violations {
+        // `SEV path:line [code] — msg`. Severity stays the LEADING token (WM-LINT-06), so
+        // `| grep '^ERROR'` is unchanged; the code sits before the em-dash so `[atom-no-keywords]`
+        // is greppable on its own and a consumer can key on the CHECK rather than on its prose.
+        println!("{} {path}:{line} [{code}] — {msg}", sev.label());
     }
     let gating: Vec<&Violation> = violations.iter().filter(|(s, ..)| *s >= a.min_severity).collect();
     if gating.is_empty() {
@@ -3281,8 +3293,15 @@ impl Severity {
     }
 }
 
-/// One lint finding: `(severity, path, line, message)`. Line 0 means "the file as a whole".
-type Violation = (Severity, String, usize, String);
+/// One lint finding: `(severity, path, line, message, code)`. Line 0 means "the file as a whole".
+///
+/// The CODE is a stable kebab-case identity for the CHECK, and it is tagged at each check's own
+/// push site rather than derived from the message. Deriving it would mean the identity of a finding
+/// changes whenever someone improves its wording — which punishes improving wording, and silently
+/// re-labels a finding for every machine consumer (the FP/FN benchmark, the heartbeat detector's
+/// dedupe, a suppression file). It is LAST in the tuple so the existing `(severity, path, line)`
+/// sort order is unchanged.
+type Violation = (Severity, String, usize, String, &'static str);
 
 /// One of the three memory SCOPE layers, and its rank in the strictly-upward reference order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -3380,6 +3399,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 p.clone(),
                 0,
                 "missing required frontmatter field `ocd`".into(),
+                "page-no-ocd",
             ));
         }
         if !has(&["lmd", "updated"]) {
@@ -3388,6 +3408,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 p.clone(),
                 0,
                 "missing required frontmatter field `lmd`".into(),
+                "page-no-lmd",
             ));
         }
         if !has(&["description", "summary"]) {
@@ -3396,6 +3417,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 p.clone(),
                 0,
                 "missing required frontmatter field `description`".into(),
+                "page-no-description",
             ));
         }
 
@@ -3416,6 +3438,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                 p.clone(),
                 0,
                 "missing `## Notes and lessons learned` section".into(),
+                "page-no-notes-section",
             ));
         }
 
@@ -3451,6 +3474,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                     p.clone(),
                     line,
                     format!("footnote reference `[^{label}]` has no `[^{label}]:` definition"),
+                    "footnote-dangling-ref",
                 ));
             }
         }
@@ -3473,6 +3497,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "page-level lesson `[^{label}]:` — cite it from an atom (`[^{label}]` in \
                          the atom body) if it should travel with one"
                     ),
+                    "lesson-uncited",
                 ));
             }
         }
@@ -3498,6 +3523,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                          for the byte `[` (0x5B), so this is not an atom at all and is INVISIBLE to \
                          recall"
                     ),
+                    "atom-bad-bracket",
                 ));
             } else if let Some(id) = unclosed_atom_marker(&masked) {
                 violations.push((
@@ -3508,6 +3534,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "atom `^{id}` props `[` is never closed on its line — unparseable, so the \
                          atom does not exist"
                     ),
+                    "atom-unclosed-props",
                 ));
             } else if masked.contains('⟦') || masked.contains('⟧') {
                 // INFO: in PROSE these are harmless (and this corpus documents the escaping), but
@@ -3520,6 +3547,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                     "line carries `⟦`/`⟧` — recall's DISPLAY escaping of `[`/`]`; a SOURCE page \
                      holds the literal brackets"
                         .into(),
+                    "stray-display-bracket",
                 ));
             }
         }
@@ -3541,6 +3569,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                     "atom `desc:` value is unquoted prose — quote it (`desc:\"…\"`) or grep and the \
                      in-body filter break"
                         .into(),
+                    "atom-unquoted-desc",
                 ));
             }
             let dropped = dropped_prop_segments(&a.props_raw);
@@ -3563,6 +3592,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         a.id,
                         dropped.len()
                     ),
+                    "atom-dropped-props",
                 ));
             }
             let props = parse_block_props(&a.props_raw);
@@ -3577,6 +3607,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                          atom is un-findable by symptom, i.e. the memory does not exist",
                         a.id
                     ),
+                    "atom-no-keywords",
                 ));
             }
             for key in ["ocd", "lmd"] {
@@ -3588,12 +3619,14 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         p.clone(),
                         a.line,
                         format!("atom `^{}` has no `{key}:` date", a.id),
+                        if key == "ocd" { "atom-no-ocd" } else { "atom-no-lmd" },
                     )),
                     Some(v) if !is_iso_date(v) => violations.push((
                         Severity::Warn,
                         p.clone(),
                         a.line,
                         format!("atom `^{}` `{key}:` = `{v}` is not ISO `YYYY-MM-DD`", a.id),
+                        if key == "ocd" { "atom-bad-ocd" } else { "atom-bad-lmd" },
                     )),
                     Some(_) => {}
                 }
@@ -3612,6 +3645,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "atom body is {body_chars} chars (> {atom_budget}) — decompose it into \
                          smaller atoms (one fact each)"
                     ),
+                    "atom-oversized",
                 ));
             }
         }
@@ -3642,6 +3676,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                              `keywords:` and `status:` cannot be parsed, so recall and supersession \
                              both break"
                         ),
+                        "lesson-bad-bracket",
                     ));
                 } else {
                     // WARN: a plain markdown footnote is legal markdown, and a lesson without
@@ -3655,6 +3690,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                             "lesson `[^{label}]` has no leading `[id:… status:… keywords:… ocd:… \
                              lmd:…]` metadata — no recall keywords and no stable id"
                         ),
+                        "lesson-no-meta",
                     ));
                 }
                 continue;
@@ -3668,6 +3704,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "lesson `[^{label}]` has metadata but no body — a body-less lesson is \
                          invisible to `find --only-notes`; add the DO-NOT/BECAUSE/DO text"
                     ),
+                    "lesson-empty-body",
                 ));
             }
             if meta.contains("supersedes:") && !rest.contains("SUPERSEDED BODY:") {
@@ -3679,6 +3716,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "lesson `[^{label}]` supersedes an atom but omits `SUPERSEDED BODY: <old \
                          body>` — the never-delete rule requires embedding the original"
                     ),
+                    "lesson-superseded-no-body",
                 ));
             }
             if desc_unquoted_prose(&meta) {
@@ -3687,6 +3725,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                     p.clone(),
                     def_line,
                     format!("lesson `[^{label}]` `desc:` value is unquoted prose — quote it"),
+                    "lesson-unquoted-desc",
                 ));
             }
             let lesson_props = parse_block_props(&meta);
@@ -3704,6 +3743,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                     format!(
                         "lesson `[^{label}]` metadata has no `keywords:` — not recallable by symptom"
                     ),
+                    "lesson-no-keywords",
                 ));
             }
             if lesson_missing("id") {
@@ -3718,6 +3758,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "lesson `[^{label}]` has no `id:ATOM-…` — the `[^N]` label renumbers, so only \
                          a stable id survives an edit"
                     ),
+                    "lesson-no-id",
                 ));
             }
             // The `superseeded` misspelling is accepted on BOTH the status and the pointer because
@@ -3739,6 +3780,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         "lesson `[^{label}]` is `status:superseded` but carries no \
                          `superseded-by:ATOM-…` forward pointer — the chain dead-ends"
                     ),
+                    "lesson-superseded-no-pointer",
                 ));
             }
         }
@@ -3768,6 +3810,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                     "atom id `^{id}` is not corpus-unique ({n}× — {locations}) — `recall {id}` \
                      cannot resolve which one you meant"
                 ),
+                "atom-dup-id",
             ));
         }
     }
@@ -3819,6 +3862,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         rel(target),
                         downward_reason(to_s),
                     ),
+                    "link-downward-cross-scope",
                 ));
             }
             continue; // legal upward edge: unreciprocatable by design, never a LINK-LAW candidate
@@ -3848,6 +3892,7 @@ fn lint_paths(paths: &[PathBuf], hidden: bool) -> Vec<Violation> {
                         rel(&e.from),
                         rel(target)
                     ),
+                    "link-one-sided",
                 ));
             }
         }
@@ -6100,7 +6145,13 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     /// True iff some violation's message contains `needle` (substring) — keeps the assertions robust
     /// to the exact wording while still pinning the right CLASS of violation.
     fn has_violation(violations: &[Violation], needle: &str) -> bool {
-        violations.iter().any(|(_, _, _, msg)| msg.contains(needle))
+        violations.iter().any(|(_, _, _, msg, _)| msg.contains(needle))
+    }
+
+    /// True iff some violation carries `code` — the EXACT-identity form of `has_violation`. Prefer
+    /// this: a message substring can drift when the wording improves, a code cannot.
+    fn has_code(violations: &[Violation], code: &str) -> bool {
+        violations.iter().any(|(.., c)| *c == code)
     }
 
     /// The severity a `needle`-matching finding was reported at, or None when nothing matched.
@@ -6109,7 +6160,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
     fn severity_of(violations: &[Violation], needle: &str) -> Option<Severity> {
         violations
             .iter()
-            .find(|(_, _, _, msg)| msg.contains(needle))
+            .find(|(_, _, _, msg, _)| msg.contains(needle))
             .map(|(s, ..)| *s)
     }
 
@@ -6403,11 +6454,11 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
-            v.iter().any(|(_, p, _, m)| p.contains("bad.md") && m.contains("SUPERSEDED BODY")),
+            v.iter().any(|(_, p, _, _, c)| p.contains("bad.md") && *c == "lesson-superseded-no-body"),
             "missing SUPERSEDED BODY must be reported on bad.md; got: {v:?}"
         );
         assert!(
-            !v.iter().any(|(_, p, _, m)| p.contains("ok.md") && m.contains("SUPERSEDED BODY")),
+            !v.iter().any(|(_, p, _, _, c)| p.contains("ok.md") && *c == "lesson-superseded-no-body"),
             "the well-formed supersession must not be flagged; got: {v:?}"
         );
     }
@@ -6427,6 +6478,57 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let v = lint_paths(std::slice::from_ref(&dir), false);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(has_violation(&v, "decompose it into"), "got: {v:?}");
+    }
+
+    #[test]
+    fn adjacent_footnote_citations_are_both_seen() {
+        // `[^1][^2]` is ordinary authoring. The old reference regex matched a trailing char to
+        // prove it was not a `:`, and `captures_iter` does not overlap — so the first match ATE the
+        // second citation's `[`, the second lesson looked UNCITED, and the page was reported for a
+        // defect it did not have. Found by the lint benchmark's fixture corpus.
+        let dir = lint_tmpdir("adjacent_refs");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             body cites both.[^1][^2]\n\n## Notes and lessons learned\n\
+             [^1]: [id:ATOM-AAAA-0001, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] DO NOT x.\n\
+             [^2]: [id:ATOM-AAAA-0002, status:valid, keywords:\"k\", ocd:2026-01-01, lmd:2026-01-01] DO NOT y.\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !has_code(&v, "lesson-uncited"),
+            "both citations are real, so neither lesson is uncited; got: {v:?}"
+        );
+        assert!(!has_code(&v, "footnote-dangling-ref"), "got: {v:?}");
+    }
+
+    #[test]
+    fn every_lint_code_is_kebab_case_and_the_output_line_carries_it() {
+        // The code is the finding's IDENTITY for every machine consumer (the FP/FN benchmark, the
+        // heartbeat dedupe, a future suppression file). Two properties keep that usable: the shape
+        // is greppable, and it actually reaches the printed line.
+        let dir = lint_tmpdir("code_shape");
+        std::fs::write(
+            dir.join("n.md"),
+            "---\nname: n\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-AAAA-BBBB [ocd: 2026-01-01, lmd: 2026-01-01]\nbody.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let v = lint_paths(std::slice::from_ref(&dir), false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(has_code(&v, "atom-no-keywords"), "got: {v:?}");
+        for (_, _, _, _, code) in &v {
+            assert!(
+                !code.is_empty()
+                    && code
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "lint code {code:?} must be non-empty kebab-case"
+            );
+        }
     }
 
     #[test]
@@ -6549,7 +6651,7 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         let _ = std::fs::remove_dir_all(&dir);
         let dups: Vec<&Violation> = v
             .iter()
-            .filter(|(_, _, _, m)| m.contains("not corpus-unique"))
+            .filter(|(.., c)| *c == "atom-dup-id")
             .collect();
         assert_eq!(dups.len(), 2, "one per declaring page; got: {v:?}");
         assert!(dups.iter().all(|(s, ..)| *s == Severity::Error));

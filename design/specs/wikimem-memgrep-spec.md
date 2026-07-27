@@ -714,6 +714,74 @@ can legitimately return a different set, and that is not a bug in either.
 English stopword list. A non-English symptom query gets no stopword benefit, and a query made
 ENTIRELY of stopwords is REFUSED rather than silently matching everything.
 
+## WM-BENCH — the tools are MEASURED, not asserted
+
+`WM-BENCH-00` **FOUR numbers steer this system** — `MUST`: development of the wikimem tools is
+guided by four measured quantities, not by opinion about them. Two describe RETRIEVAL (what it
+costs an agent to find a fact) and two describe the WRITE GATE (whether the linter can be
+trusted). Every one has a committed baseline and a regression gate; a change that moves any of
+them the wrong way is a regression whether or not it was intended.
+
+| # | number | question it answers | instrument |
+|---|---|---|---|
+| 1 | **accuracy** | does the agent get the EXACT element it was looking for, and at what rank? (`hit@1/3/10`, MRR) | `scripts/wikimem_bench.py` |
+| 2 | **end-to-end tokens** | what does it COST to find that element *and obtain it* — search output **plus** the follow-up read it forces | `scripts/wikimem_bench.py` |
+| 3 | **lint false positives** | how often does the gate block a page that is CORRECT? | `scripts/wikimem_lint_bench.py` |
+| 4 | **lint false negatives** | how often does the gate pass a page that is BROKEN? | `scripts/wikimem_lint_bench.py` |
+
+They are four because they trade against each other and a single number hides the trade. Accuracy
+alone is bought by printing more; token cost alone is bought by printing less; an FP-free linter is
+bought by checking nothing; an FN-free one by flagging everything. **Only the four together
+describe the system**, and each pair is measured on ONE instrument so the trade inside it is
+visible in a single run.
+
+`WM-BENCH-08` **what 0% FP and 0% FN can HONESTLY mean** — `MUST NOT` claim either without
+naming what it is relative to:
+
+- **0% false positives is achievable in the ABSOLUTE**, and is already required by WM-LINT-01.
+  It holds because every check is derived from the PARSER's own drop / failure branches
+  (WM-ATOM-07): the check fires exactly when the consumer discards or fails on the input. That is
+  an observation of the consumer's behaviour, not an inference about the author's intent, so there
+  is nothing for it to be wrong about. A check that cannot be stated that way does not belong at
+  `ERROR`.
+- **0% false negatives is NOT achievable in the absolute, and a tool claiming it is lying.** A
+  false negative is "a real defect the linter did not catch", and the set of all real defects is
+  not enumerable — it includes a page that parses perfectly and is simply FALSE. No structural
+  linter bounds that.
+- **What IS achievable: 0 FN RELATIVE to a labelled corpus.** The fixture corpus IS the definition
+  of what the linter promises to catch. `FN = 0` means "every defect we committed to catching is
+  caught". That converts an unprovable claim into a regression instrument, and the corpus **GROWS
+  every time a real defect escapes in the wild** — so the promise ratchets upward and can never
+  silently shrink.
+
+`WM-BENCH-09` **the labelled corpus carries BOTH populations** — `MUST`: the lint corpus holds
+`defects/` (one page per check, labelled with the codes it must produce — the FN surface) **and**
+`clean/` (conformant pages plus deliberate NEAR-MISSES — the FP surface). The near-misses are the
+half that keeps the gate honest, because every one of them is a shape a naive check would flag:
+prose documenting the broken forms inside inline code and fences, a quoted comma inside `desc:`, a
+trailing comma, the grandfathered legacy-slug `desc:`, a reciprocal link pair, an atom just under
+the size budget. A corpus of only defects measures nothing about false positives.
+
+An unlabelled page expects NOTHING, so adding a fixture without declaring it surfaces as a false
+positive rather than silently weakening the corpus.
+
+`WM-BENCH-10` **match on the CHECK CODE, never on message text** — `MUST`: every lint finding
+carries a stable kebab-case code, tagged at its own check site (`SEV path:line [code] — msg`), and
+the benchmark scores the `(file, code)` multiset. Deriving the identity from the message would mean
+a finding is re-labelled whenever someone improves its wording — which punishes improving wording
+and silently breaks every machine consumer (this benchmark, the heartbeat dedupe, a suppression
+file). Line numbers are deliberately NOT part of the match: a line-exact label makes the corpus
+painful to extend, and a corpus people avoid extending stops growing, which is the one thing
+WM-BENCH-08 depends on.
+
+`WM-BENCH-11` **gate the COVERAGE, not just the score** — `MUST`: the lint gate fails when FP or
+FN rises **and** when the number of covered check codes or labelled findings SHRINKS. The cheapest
+way to make a failing benchmark green is to delete the label that was failing; without this the
+instrument certifies its own erosion. A check that genuinely cannot be exercised in a fixture
+(e.g. `link-downward-cross-scope`, whose rule is disabled outside a real scope path by design)
+`MUST` be recorded as such in the cases file with where it IS covered — an uncovered check nobody
+wrote down is indistinguishable from one nobody noticed.
+
 ## WM-BENCH — retrieval is MEASURED, not asserted
 
 `WM-BENCH-01` **frozen-fixture-corpus** — the benchmark runs against a COMMITTED fixture corpus,
@@ -967,6 +1035,14 @@ file's lessons to each matched LINE would return the same block once per hit.
 false-positive-free; every check it fires is a real defect an author must fix. Example prose
 inside backtick inline spans or fenced code is masked (a `[^N]` token in inline code is not a
 footnote).
+
+`WM-LINT-08` **every-finding-carries-a-stable-CODE** — `MUST`: the printed line is
+`SEV path:line [code] — message`, where `code` is a kebab-case identity for the CHECK, tagged at
+that check's own push site. Severity stays the leading token, so `| grep '^ERROR'` is unaffected,
+and `[atom-no-keywords]` is greppable on its own. The code — not the prose — is what every machine
+consumer keys on (WM-BENCH-10). A parser reading this format `MUST` treat the `[code]` as OPTIONAL,
+so output from a binary predating codes still parses: a strict parser would report ZERO findings
+against an older binary, which is the worst available way to be wrong about a lint.
 
 `WM-LINT-06` **severity-model** — `MUST`: every finding carries a severity, printed as the LEADING
 token (`ERROR` / `WARN` / `INFO`) so `| grep '^ERROR'` is exact. `--min-severity` (default `error`)

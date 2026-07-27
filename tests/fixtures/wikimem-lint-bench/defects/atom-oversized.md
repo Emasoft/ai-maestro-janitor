@@ -1,0 +1,10 @@
+---
+name: atom-oversized
+description: "a labelled lint-benchmark page"
+ocd: 2026-01-01
+lmd: 2026-01-02
+---
+^ATOM-OVER-0001 [keywords: bloated_atom_body, ocd: 2026-01-01, lmd: 2026-01-01]
+this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed. this atom is doing the job of several and must be decomposed.
+
+## Notes and lessons learned

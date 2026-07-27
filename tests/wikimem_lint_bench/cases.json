@@ -1,0 +1,37 @@
+{
+  "corpus": "tests/fixtures/wikimem-lint-bench",
+  "note": "GROUND TRUTH for the lint FP/FN benchmark. Each key is a corpus-relative page; the value is the exact multiset of check CODES that page MUST produce. A page absent from this map is expected to produce NOTHING — that is what makes clean/ the false-positive surface, and it is why adding an unlabelled fixture shows up as an FP until someone declares what it is for. Match is on (file, code), never on message text (so improving a message is not a regression) and never on line numbers (so extending a page is not one either). Grows every time a real defect escapes in the wild.",
+  "expect": {
+    "defects/page-no-ocd.md": ["page-no-ocd"],
+    "defects/page-no-lmd.md": ["page-no-lmd"],
+    "defects/page-no-description.md": ["page-no-description"],
+    "defects/page-no-notes-section.md": ["page-no-notes-section"],
+
+    "defects/footnote-dangling-ref.md": ["footnote-dangling-ref"],
+    "defects/lesson-uncited.md": ["lesson-uncited"],
+
+    "defects/atom-bad-bracket.md": ["atom-bad-bracket"],
+    "defects/atom-unclosed-props.md": ["atom-unclosed-props"],
+    "defects/stray-display-bracket.md": ["stray-display-bracket"],
+
+    "defects/atom-unquoted-desc.md": ["atom-unquoted-desc"],
+    "defects/atom-dropped-props.md": ["atom-dropped-props"],
+    "defects/atom-no-keywords.md": ["atom-no-keywords"],
+    "defects/atom-dates.md": ["atom-no-ocd", "atom-no-lmd", "atom-bad-ocd", "atom-bad-lmd"],
+    "defects/atom-oversized.md": ["atom-oversized"],
+
+    "defects/lesson-bad-bracket.md": ["lesson-bad-bracket", "stray-display-bracket"],
+    "defects/lesson-no-meta.md": ["lesson-no-meta"],
+    "defects/lesson-empty-body.md": ["lesson-empty-body"],
+    "defects/lesson-superseded-no-body.md": ["lesson-superseded-no-body"],
+    "defects/lesson-unquoted-desc.md": ["lesson-unquoted-desc"],
+    "defects/lesson-metadata-gaps.md": ["lesson-no-id", "lesson-no-keywords", "lesson-superseded-no-pointer"],
+
+    "defects/atom-dup-id-a.md": ["atom-dup-id"],
+    "defects/atom-dup-id-b.md": ["atom-dup-id"],
+    "defects/link-one-sided-a.md": ["link-one-sided"]
+  },
+  "not_measurable_here": {
+    "link-downward-cross-scope": "Scope is derived from the PATH (`.claude/plugins/data/…/memory` = USER, `.claude/projects/…/memory` = LOCAL, `.claude/project/memory` = PROJECT). A fixture under tests/ resolves to NO scope, which DISABLES the rule by design — a wrong guess would either invent a violation or hide a real leak. Covered instead by the Rust unit tests `a_downward_link_to_LOCAL_is_flagged_as_a_PRIVACY_violation` and `a_downward_link_to_PROJECT_from_USER_is_flagged_as_PORTABILITY`. Recorded here rather than silently omitted: an uncovered check that nobody wrote down is indistinguishable from one nobody noticed."
+  }
+}

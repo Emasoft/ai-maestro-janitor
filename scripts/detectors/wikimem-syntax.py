@@ -47,15 +47,23 @@ import wikimem_syntax_lint as lint  # noqa: E402
 def _error_signatures() -> list[str]:
     """Every ERROR finding across the 3 memory scopes, as short stable signatures.
 
-    A signature is `<basename>:<line>:<msg-hash>` — stable across runs, so the dedupe hash only
-    changes when the actual defect set changes. The message is HASHED rather than carried: it can
-    embed absolute paths (the duplicate-id report names every colliding location), and a drift
-    signature must never be a channel for one.
+    A signature is `<basename>:<line>:<check-code>` — the check's stable IDENTITY, so the dedupe
+    hash changes when the defect SET changes and not when someone improves a message's wording.
+    (It used to hash the message, which made every reworded message look like a new defect.)
+    Neither the message nor the path is carried: a duplicate-id report names every colliding
+    absolute location, and a drift signature must never be a channel for one.
+
+    A binary predating codes yields an empty `code`; fall back to a message hash there, so an old
+    memgrep degrades to the previous behaviour instead of collapsing every finding on a line into
+    one signature.
     """
     _code, _stdout, findings = lint.run_lint()
     sigs = {
         f"{Path(f.path).name}:{f.line}:"
-        + hashlib.sha1(f.msg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+        + (
+            f.code
+            or hashlib.sha1(f.msg.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+        )
         for f in findings
         if f.sev == "ERROR"
     }
