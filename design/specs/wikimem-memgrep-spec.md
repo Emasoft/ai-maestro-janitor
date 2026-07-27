@@ -259,6 +259,23 @@ retired; a `superseded` atom carries `superseded-by:<lesson-id>` and is history 
 follow the pointer. `status:` is emitted only when not the default (backward-compatible; old
 pages parse unchanged).
 
+`WM-ATOM-05a` **a-retirement-MUST-be-READ-BACK-and-MARKED** — `MUST`: `status:`/`superseded-by:`
+are parsed into the atom, stored in the index (`atoms.status`, `atoms.superseded_by`), and shown
+on **every surface an agent reads before acting** — the ranked listing row AND the `recall <id>`
+second hop — as `[SUPERSEDED → <id>]` (or `[SUPERSEDED]` with no pointer). One renderer serves
+lessons and atoms, because a retired element that prints like a live one gets applied as current
+knowledge, which is the single failure `status:` exists to prevent.
+
+Two defaults are SAFETY properties, not tidiness: an absent or unrecognised `status:` reads
+`valid` (so one typo cannot retire a live fact), and the `superseeded` / `superseeded-by`
+misspellings are ACCEPTED on read (so one doubled `e` cannot resurrect a retired one as
+guidance). Write only the canonical spelling.
+
+A retired atom `MUST` stay findable — that is why it is retired rather than deleted — so `status`
+is deliberately absent from `atoms_fts`. Until this rule, `--retire-atom` WROTE both fields and
+nothing ever read them: the retirement was invisible and "show me the retired atoms" had no
+answer. A field with a writer and no reader is indistinguishable from an unimplemented one.
+
 `WM-ATOM-06` **id-is-stable-corpus-wide** — an atom's `^name` / lesson `id:` is stable and
 unique corpus-wide; page-local `[^N]` footnote numbers renumber, so only the `id` is a durable
 reference. Corpus-uniqueness is what makes a BARE id a sufficient retrieval key (WM-RCL-07), so
@@ -642,6 +659,20 @@ PASSES THE RAW PATH to the visitor, so the view survives the deduplication.
 migrations are ADDITIVE (`ALTER TABLE … ADD COLUMN`) and every query TOLERATES a pre-migration DB
 by returning empty rather than erroring. A hard failure on an old index turns a cache into a
 liability.
+
+`WM-IDX-07a` **a-migration-that-adds-a-column-MUST-clear-the-LEDGER** — `MUST`: an `ADD COLUMN`
+step ends by emptying the change-detection ledger. The column arrives EMPTY and only a re-parse
+can fill it, but every source file is byte-identical, so an incremental reindex skips them all and
+the column stays NULL forever — the field then reads as its default on exactly the corpora that
+already had real values. The test for such a migration `MUST` assert the re-parse actually
+happened (a non-zero changed count on an unchanged corpus), not merely that the value is present:
+on a DB that never lost the value, the value-only assertion passes without the migration working.
+
+`WM-IDX-07b` **a-shipped-schema-version-is-IMMUTABLE** — `MUST NOT` edit or renumber a shipped
+migration step; new work is a NEW version. A DB that already recorded version N skips an amended
+step N forever, so the change reaches exactly the corpora that never needed it and never reaches
+the ones that did — and rebuilding the binary does not help, because the version says "already
+migrated".
 
 `WM-IDX-08` **routing-writes-through-the-tool-buys-LATENCY-not-CORRECTNESS** — the freshness
 check (WM-IDX-02) is what makes correctness independent of the writer. Routing a mutation through

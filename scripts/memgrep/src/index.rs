@@ -331,7 +331,11 @@ pub fn cmd_validate_cli(args: &[String]) -> Result<()> {
 /// could never appear, and a lesson's `id:` / `status:` / `superseded-by:` silently never
 /// indexed, on exactly the corpora that were being actively used. Rebuilding the binary did not
 /// help: the version said "already migrated". Adding a column ALWAYS needs a NEW version number.
-const SCHEMA_VERSION: i64 = 5;
+///
+/// v6 (plan Phase 1d) adds `atoms.status` + `atoms.superseded_by` — the atom-level counterpart of
+/// the v5 note columns, which `--retire-atom` had been writing into the markdown with no column to
+/// land in.
+const SCHEMA_VERSION: i64 = 6;
 
 /// Create every table + virtual table + B-tree index, idempotently (`IF NOT EXISTS`). Exactly the
 /// schema the spec pins:
@@ -404,6 +408,8 @@ CREATE TABLE IF NOT EXISTS atoms (
     claude_mem_ref  TEXT,
     claude_mem_hash TEXT,
     desc            TEXT,
+    status          TEXT,
+    superseded_by   TEXT,
     body            TEXT
 );
 
@@ -463,11 +469,18 @@ struct Migration {
 /// [`SCHEMA_VERSION`]): every DB that already recorded that version skips the amended step FOREVER,
 /// so the change reaches exactly the corpora that never needed it and never reaches the ones that
 /// did. New work = a new step with a new number.
-const MIGRATIONS: &[Migration] = &[Migration {
-    to: 5,
-    name: "atoms.desc + notes.{atom_id,keywords,status,superseded_by} + notes_fts keywords column",
-    run: migrate_v5,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        to: 5,
+        name: "atoms.desc + notes.{atom_id,keywords,status,superseded_by} + notes_fts keywords column",
+        run: migrate_v5,
+    },
+    Migration {
+        to: 6,
+        name: "atoms.{status,superseded_by} — the retirement fields, previously write-only",
+        run: migrate_v6,
+    },
+];
 
 /// Add a column, treating "it is already there" as success.
 ///
@@ -529,6 +542,27 @@ fn migrate_v5(conn: &Connection) -> Result<()> {
     .context("rebuilding notes_fts with the keywords column")?;
     conn.execute_batch("DELETE FROM files")
         .context("clearing ledger for schema migration")?;
+    Ok(())
+}
+
+/// v6 — `atoms.status` + `atoms.superseded_by` (plan Phase 1d). `--retire-atom` has always WRITTEN
+/// `status: superseded` into the marker, but the index had nowhere to put it, so the retirement was
+/// invisible to every query — "which atoms are retired?" had no answer.
+///
+/// Purely additive: two nullable columns, no FTS change (status is lifecycle metadata, never a
+/// recall surface — an atom must stay findable AFTER it is retired, that is the point of keeping
+/// it). The ledger reset is what makes it take effect: the columns arrive empty and only a re-parse
+/// of each page can fill them, so without it every EXISTING atom would read back as `valid` forever
+/// — the same write-only silence one layer down.
+fn migrate_v6(conn: &Connection) -> Result<()> {
+    for ddl in [
+        "ALTER TABLE atoms ADD COLUMN status TEXT",
+        "ALTER TABLE atoms ADD COLUMN superseded_by TEXT",
+    ] {
+        add_column(conn, ddl)?;
+    }
+    conn.execute_batch("DELETE FROM files")
+        .context("clearing ledger so the re-parse fills the new atom columns")?;
     Ok(())
 }
 
@@ -650,6 +684,8 @@ const EXPECTED_TABLES: &[(&str, &[&str])] = &[
             "claude_mem_ref",
             "claude_mem_hash",
             "desc",
+            "status",
+            "superseded_by",
             "body",
         ],
     ),
@@ -1021,8 +1057,8 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
     for atom in crate::memory::resolve_atoms_public(path) {
         let keywords_joined = atom.keywords.join(" ");
         conn.execute(
-            "INSERT INTO atoms(memory_id, atom_id, keywords, ocd, lmd, atom_type, claude_mem_ref, claude_mem_hash, desc, body)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO atoms(memory_id, atom_id, keywords, ocd, lmd, atom_type, claude_mem_ref, claude_mem_hash, desc, status, superseded_by, body)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 mem_id,
                 atom.id,
@@ -1033,6 +1069,8 @@ fn insert_file(conn: &Connection, path: &Path) -> Result<()> {
                 atom.claude_mem_ref,
                 atom.claude_mem_hash,
                 atom.desc, // the one-line summary — slug or ≤200-char prose (display-only, NEVER FTS-indexed)
+                atom.status, // lifecycle only — deliberately NOT in atoms_fts: a retired atom must stay findable
+                atom.superseded_by,
                 atom.body
             ],
         )?;
@@ -1212,6 +1250,12 @@ pub struct AtomCandidate {
     /// read back from the `atoms.desc` column so the index round-trips it. DISPLAY-only — the
     /// recall scorer never ranks on it, and it is deliberately absent from `atoms_fts`.
     pub desc: Option<String>,
+    /// Lifecycle status, read back from `atoms.status`. A pre-v6 row (or an atom authored before the
+    /// field existed) has NULL here and reads as `valid` — the same fail-safe default the markdown
+    /// parser applies, so the index and the walk can never disagree about whether an atom is live.
+    pub status: String,
+    /// The id that REPLACED this atom, from `atoms.superseded_by`; empty when absent.
+    pub superseded_by: String,
 }
 
 /// Load every atom row (joined to its page for the display path + date fallback) as recall candidates.
@@ -1233,8 +1277,13 @@ pub fn recall_atom_candidates(conn: &Connection) -> Result<Vec<AtomCandidate>> {
         return Ok(Vec::new());
     }
     let mut stmt = conn.prepare(
+        // `status`/`superseded_by` are COALESCEd to their fail-safe defaults so a row written before
+        // v6 (NULL) reads exactly as the markdown parser reads a marker with no `status:` — `valid`.
+        // Without that, an un-reindexed row would come back with an empty status and no atom would
+        // ever mark itself retired, which is the write-only silence v6 exists to end.
         "SELECT m.path, a.atom_id, a.keywords, a.body,
-                COALESCE(a.ocd, m.ocd), COALESCE(a.lmd, m.lmd), a.desc
+                COALESCE(a.ocd, m.ocd), COALESCE(a.lmd, m.lmd), a.desc,
+                COALESCE(a.status, 'valid'), COALESCE(a.superseded_by, '')
          FROM atoms a JOIN memories m ON a.memory_id = m.id
          WHERE m.element_type = 'memory' ORDER BY m.path, a.id",
     )?;
@@ -1247,6 +1296,8 @@ pub fn recall_atom_candidates(conn: &Connection) -> Result<Vec<AtomCandidate>> {
             ocd: r.get::<_, Option<String>>(4)?,
             lmd: r.get::<_, Option<String>>(5)?,
             desc: r.get::<_, Option<String>>(6)?,
+            status: r.get(7)?,
+            superseded_by: r.get(8)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -1531,6 +1582,90 @@ mod tests {
         let (total, fts) = atom_counts(&d, "rotator");
         assert_eq!(total, 0, "atoms pruned with the file");
         assert_eq!(fts, 0, "atoms_fts shadow pruned too (no orphan FTS rows)");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A page carrying one LIVE and one RETIRED atom — the plan-1d round-trip fixture.
+    const RETIRED_ATOM_PAGE: &str = "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n^ATOM-LIVE-0001 [keywords: rotator failover handoff]\nThe rotator hands over to a backup.\n^ATOM-DEAD-0002 [keywords: rotator legacy handoff, status: superseded, superseded-by:ATOM-LIVE-0001]\nThe old claim that it never hands over.\n";
+
+    #[test]
+    fn atom_retirement_round_trips_through_the_index() {
+        // Plan 1d. `--retire-atom` wrote `status: superseded` into the marker and the index had
+        // nowhere to put it, so "which atoms are retired?" had no answer. Prove the column now
+        // carries it AND that the recall readback (what the scorer actually consumes) agrees.
+        let d = tmp("atom_status");
+        write(&d, "p.md", RETIRED_ATOM_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        let conn = open_existing(&d).unwrap();
+
+        let dead: (String, String) = conn
+            .query_row(
+                "SELECT status, superseded_by FROM atoms WHERE atom_id = 'ATOM-DEAD-0002'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(dead, ("superseded".into(), "ATOM-LIVE-0001".into()));
+
+        let cands = recall_atom_candidates(&conn).unwrap();
+        let live = cands.iter().find(|c| c.atom_id == "ATOM-LIVE-0001").unwrap();
+        let retired = cands.iter().find(|c| c.atom_id == "ATOM-DEAD-0002").unwrap();
+        assert_eq!(live.status, "valid", "an unmarked atom reads as valid");
+        assert_eq!(live.superseded_by, "");
+        assert_eq!(retired.status, "superseded");
+        assert_eq!(retired.superseded_by, "ATOM-LIVE-0001");
+
+        // A retired atom stays FINDABLE — keeping it searchable is the entire reason it is retired
+        // rather than deleted, which is why `status` is deliberately absent from `atoms_fts`.
+        let hits: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM atoms_fts WHERE atoms_fts MATCH 'legacy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1, "the retired atom is still searchable");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn v6_migration_fills_the_new_atom_columns_on_an_unchanged_corpus() {
+        // The half a migration usually gets wrong: an ALTER adds the columns EMPTY, and without the
+        // ledger reset no file looks changed, so every existing atom would read back `valid`
+        // forever — the same write-only silence v6 exists to end, now hiding behind a column that
+        // exists. Simulate a v5 DB by blanking the columns and rewinding user_version.
+        let d = tmp("migrate_v6");
+        write(&d, "p.md", RETIRED_ATOM_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        {
+            let conn = open_existing(&d).unwrap();
+            conn.execute_batch(
+                "UPDATE atoms SET status = NULL, superseded_by = NULL; PRAGMA user_version = 5;",
+            )
+            .unwrap();
+        }
+        // The file on disk is byte-identical, so an incremental reindex would normally SKIP it —
+        // the migration's ledger reset is the only reason it is re-parsed. `changed == 1` is what
+        // proves that reset happened; without it the assertion below would pass on a DB that simply
+        // never lost the values.
+        let summary = reindex(&d, &[d.join("p.md")], false).unwrap();
+        assert_eq!(summary.changed, 1, "the migration forced a re-parse of the unchanged file");
+
+        let conn = open_existing(&d).unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(),
+            6
+        );
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM atoms WHERE atom_id = 'ATOM-DEAD-0002'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "superseded", "the v6 migration re-parsed and filled the column");
+        drop(conn);
         let _ = std::fs::remove_dir_all(&d);
     }
 

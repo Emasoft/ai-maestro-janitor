@@ -302,7 +302,16 @@ fn parse_note_keywords(meta: &str) -> String {
 /// than the two legal ones is normalised to `valid` for the same reason: an unparseable status must
 /// never silently DEMOTE a live guardrail into invisibility.
 fn parse_note_status(meta: &str) -> String {
-    match parse_note_props(meta)
+    status_from_props(&parse_note_props(meta))
+}
+
+/// The status normalizer, over an ALREADY-PARSED property map — shared by lessons (whose props come
+/// from `parse_note_props`) and ATOMS (whose props come from `parse_block_props`). The two grammars
+/// differ but both yield `key → value-array`, so the SAFETY property below can be stated once
+/// instead of re-derived per element type. It was originally lesson-only, which is why an atom's
+/// `status:` was written and never read (plan Phase 1d).
+fn status_from_props(props: &BTreeMap<String, Vec<String>>) -> String {
+    match props
         .get("status")
         .and_then(|v| v.first())
         .map(|s| s.trim().to_ascii_lowercase())
@@ -314,6 +323,35 @@ fn parse_note_status(meta: &str) -> String {
         // guidance. Read both spellings; write only the canonical one.
         Some("superseded" | "superseeded") => "superseded".to_string(),
         _ => "valid".to_string(),
+    }
+}
+
+/// The forward pointer, over an ALREADY-PARSED property map — the atom-side counterpart of
+/// `parse_note_superseded_by`, accepting the same `superseeded-by` misspelling for the same reason.
+fn superseded_by_from_props(props: &BTreeMap<String, Vec<String>>) -> String {
+    props
+        .get("superseded-by")
+        .or_else(|| props.get("superseeded-by"))
+        .and_then(|v| v.first())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The inline `[SUPERSEDED …]` marker for a retired element — empty for a live one, so a caller can
+/// concatenate it unconditionally. ONE renderer for lessons and atoms: a retired element that
+/// printed like a live one would be re-applied as current guidance, which is the single failure
+/// `status:` exists to prevent, and two renderers would eventually disagree about it.
+///
+/// The pointer is shown when present so the reader can go straight to what DID replace it; a
+/// retirement with no forward pointer still marks itself rather than staying silent.
+fn superseded_tag(status: &str, superseded_by: &str) -> String {
+    if status != "superseded" {
+        return String::new();
+    }
+    if superseded_by.is_empty() {
+        " [SUPERSEDED]".to_string()
+    } else {
+        format!(" [SUPERSEDED → {superseded_by}]")
     }
 }
 
@@ -335,17 +373,11 @@ fn parse_note_id(meta: &str) -> String {
 /// retired guardrail to the one that now holds — the link that makes supersession navigable instead
 /// of merely a dead end.
 fn parse_note_superseded_by(meta: &str) -> String {
-    let props = parse_note_props(meta);
-    // Accept the `superseeded-by` misspelling for the same fail-safe reason the status parser does:
-    // an unrecognised KEY is silently dropped, so a single doubled `e` would erase the forward
+    // The `superseeded-by` misspelling is accepted for the same fail-safe reason the status parser
+    // has: an unrecognised KEY is silently dropped, so a single doubled `e` would erase the forward
     // pointer and leave a retired lesson pointing nowhere — the reader would see [SUPERSEDED] with
     // no way to reach the rule that replaced it. Read both; write only the canonical spelling.
-    props
-        .get("superseded-by")
-        .or_else(|| props.get("superseeded-by"))
-        .and_then(|v| v.first())
-        .cloned()
-        .unwrap_or_default()
+    superseded_by_from_props(&parse_note_props(meta))
 }
 
 fn parse_tags(raw: &str) -> Vec<String> {
@@ -791,6 +823,14 @@ fn render_atom_record(path: &Path, atom_id: &str, full_notes: bool, with_notes: 
         return String::new();
     };
     let mut out = String::new();
+    // A retired atom announces itself BEFORE its body, on its own line. The second hop is where an
+    // agent actually READS the fact and acts on it, so this is the moment a superseded one must not
+    // pass for current — and a marker printed after the body is one the reader has already acted on.
+    let tag = superseded_tag(&atom.status, &atom.superseded_by);
+    if !tag.is_empty() {
+        out.push_str(tag.trim_start());
+        out.push('\n');
+    }
     let body = atom.body.trim();
     if !body.is_empty() {
         out.push_str(body);
@@ -1419,6 +1459,15 @@ pub struct Atom {
     /// single snake_case slug, displayed `_`→space. DISPLAY-only: it is NOT a recall surface
     /// (`keywords` stays what FTS ranks on). Absent → `None`.
     pub desc: Option<String>,
+    /// Lifecycle status — `valid` (the fact still holds) or `superseded` (overtaken; kept for
+    /// history, never applied as current knowledge). Normalised by `status_from_props`, so an
+    /// absent or unparseable `status:` reads as `valid` and a typo can never silently retire a live
+    /// atom. `--retire-atom` writes this; before plan Phase 1d NOTHING read it back, which made the
+    /// field write-only and "show me the retired atoms" unanswerable.
+    pub status: String,
+    /// The id of the lesson/atom that REPLACED this one, empty when absent — the forward pointer
+    /// that makes a retirement navigable instead of a dead end.
+    pub superseded_by: String,
     /// The atom's content (everything BELOW its opening marker, up to the next marker / heading / EOF).
     pub body: String,
 }
@@ -1509,6 +1558,8 @@ fn make_atom(id: String, p: BTreeMap<String, Vec<String>>, acc: &[String]) -> At
             .map(|v| v.join(" "))
             .filter(|s| !s.is_empty())
             .map(|s| truncate_chars(s, 200)),
+        status: status_from_props(&p),
+        superseded_by: superseded_by_from_props(&p),
         body: acc.join("\n").trim().to_string(),
         id,
     }
@@ -4050,6 +4101,8 @@ fn atom_meta(
     ocd: Option<String>,
     lmd: Option<String>,
     desc: Option<String>,
+    status: &str,
+    superseded_by: &str,
     body: &str,
 ) -> CandidateMeta {
     CandidateMeta {
@@ -4061,7 +4114,17 @@ fn atom_meta(
         ocd,
         lmd,
         atom_id: Some(atom_id),
-        atom_desc: atom_listing_summary(desc.as_deref(), body),
+        // A RETIRED atom is marked here, at gather time, because this is the one place BOTH the
+        // lean listing row and `full`'s locator line read (they share `atom_desc`) — so the marker
+        // cannot reach one layer and miss the other. Prefixed, not appended: the summary is
+        // truncated prose, and a tag at the end is the part a reader's eye skips. The row still has
+        // exactly three tab-separated fields, so the `cut -f2` locator contract is untouched.
+        atom_desc: atom_listing_summary(desc.as_deref(), body).map(|s| {
+            match superseded_tag(status, superseded_by) {
+                t if t.is_empty() => s,
+                t => format!("{} {s}", t.trim_start()),
+            }
+        }),
         // An atom's locator is its OWN id, which is corpus-unique (WM-ATOM-06) and already the
         // exact second-hop key — it never needs its page's name to be addressable.
         page_name: String::new(),
@@ -4132,6 +4195,8 @@ fn gather_from_walk(paths: &[PathBuf], hidden: bool, q: &RecallQuery) -> Vec<Rec
                 atom.ocd.or_else(|| page_ocd.clone()),
                 atom.lmd.or_else(|| page_lmd.clone()),
                 atom.desc,
+                &atom.status,
+                &atom.superseded_by,
                 &atom.body,
             );
             if let Some(row) = score_candidate(q, meta, || Some(body)) {
@@ -4178,6 +4243,8 @@ fn gather_from_index(conn: &rusqlite::Connection, q: &RecallQuery) -> Result<Vec
             c.ocd,
             c.lmd,
             c.desc,
+            &c.status,
+            &c.superseded_by,
             &c.body,
         );
         let body = c.body;
@@ -4838,6 +4905,8 @@ fn find_gather_walk(paths: &[PathBuf], hidden: bool, q: &query_dsl::Query) -> Ve
                 atom.ocd.or_else(|| page_ocd.clone()),
                 atom.lmd.or_else(|| page_lmd.clone()),
                 atom.desc,
+                &atom.status,
+                &atom.superseded_by,
                 &atom.body,
             );
             if let Some(row) = find_score_note(q, meta, &atom.body) {
@@ -4885,6 +4954,8 @@ fn find_gather_index(
             c.ocd,
             c.lmd,
             c.desc,
+            &c.status,
+            &c.superseded_by,
             &c.body,
         );
         if let Some(row) = find_score_note(q, meta, &c.body) {
@@ -4905,15 +4976,7 @@ fn find_gather_index(
 /// re-applied as current: the exact failure `status:` exists to prevent. The STABLE `id:` is
 /// preferred over the `[^N]` label, which is page-local and renumbers on every edit.
 fn render_lesson_line(ln: &ResolvedNote, full_notes: bool) -> String {
-    let tag = if ln.status == "superseded" {
-        if ln.superseded_by.is_empty() {
-            " [SUPERSEDED]".to_string()
-        } else {
-            format!(" [SUPERSEDED → {}]", ln.superseded_by)
-        }
-    } else {
-        String::new()
-    };
+    let tag = superseded_tag(&ln.status, &ln.superseded_by);
     let label = if ln.id.is_empty() { &ln.num } else { &ln.id };
     match (&ln.meta, full_notes) {
         (Some(meta), true) => format!("[{}]{} - [{}] {}", label, tag, meta, ln.text),
@@ -6732,6 +6795,125 @@ The fact.[^1] It evolved.[^2] Compare.[^3]
         assert!(a.body.contains("mint a fresh token"), "body survives: {:?}", a.body);
         // The atom landed BEFORE the notes section, so its body never swallowed the heading.
         assert!(!a.body.contains("Notes and lessons learned"));
+    }
+
+    #[test]
+    fn atom_status_defaults_to_valid_and_reads_both_spellings() {
+        // Plan 1d. `--retire-atom` has always WRITTEN these props; nothing read them, so an atom's
+        // retirement was invisible. The defaults are a SAFETY property, not tidiness: an absent or
+        // garbled status must read `valid`, because the opposite default would let one typo retire
+        // a live fact — and `superseeded` must be accepted, because an unrecognised value falls
+        // back to `valid` and would silently RESURRECT a retired one as current guidance.
+        let page = |props: &str| {
+            format!(
+                "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+                 ^ATOM-AAAA-BBBB [{props}]\nthe fact.\n"
+            )
+        };
+        let atom = |props: &str| resolve_atoms_from_text(&page(props)).remove(0);
+
+        let live = atom("keywords: k");
+        assert_eq!(live.status, "valid", "no `status:` ⇒ valid");
+        assert_eq!(live.superseded_by, "");
+
+        let dead = atom("keywords: k, status: superseded, superseded-by:ATOM-CCCC-DDDD");
+        assert_eq!(dead.status, "superseded");
+        assert_eq!(dead.superseded_by, "ATOM-CCCC-DDDD");
+
+        // The doubled-`e` spellings, on BOTH the status and the pointer.
+        let typo = atom("keywords: k, status: superseeded, superseeded-by:ATOM-CCCC-DDDD");
+        assert_eq!(typo.status, "superseded", "the common misspelling must not read as valid");
+        assert_eq!(typo.superseded_by, "ATOM-CCCC-DDDD");
+
+        assert_eq!(atom("keywords: k, status: garbage").status, "valid");
+    }
+
+    #[test]
+    fn superseded_tag_marks_only_retired_elements() {
+        assert_eq!(superseded_tag("valid", ""), "");
+        assert_eq!(superseded_tag("valid", "ATOM-X"), "", "a pointer alone never retires");
+        assert_eq!(superseded_tag("superseded", ""), " [SUPERSEDED]");
+        assert_eq!(superseded_tag("superseded", "ATOM-X"), " [SUPERSEDED → ATOM-X]");
+    }
+
+    #[test]
+    fn a_retired_atom_marks_itself_in_the_listing_and_on_the_second_hop() {
+        // The two surfaces an agent reads before ACTING on a fact. A retired atom that printed like
+        // a live one would be applied as current knowledge — the one failure `status:` exists to
+        // prevent — so both must mark it, and the marker must lead (a tag after the body is one the
+        // reader has already acted on).
+        let dir = lint_tmpdir("retired_atom");
+        let page = dir.join("p.md");
+        std::fs::write(
+            &page,
+            "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-DEAD-0002 [keywords: k, desc:\"the retired fact\", ocd: 2026-01-01, \
+             lmd: 2026-01-01, status: superseded, superseded-by:ATOM-LIVE-0001]\nthe old claim.\n\n\
+             ## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let atom = resolve_atoms(&page).remove(0);
+
+        // 1. The LISTING row — the marker rides in `atom_desc`, the one field both the lean layer
+        //    and `full`'s locator line print, so it can never reach one layer and miss the other.
+        let meta = atom_meta(
+            "p.md".into(),
+            page.clone(),
+            atom.id.clone(),
+            atom.keywords.join(" "),
+            atom.ocd.clone(),
+            atom.lmd.clone(),
+            atom.desc.clone(),
+            &atom.status,
+            &atom.superseded_by,
+            &atom.body,
+        );
+        assert_eq!(
+            meta.atom_desc.as_deref(),
+            Some("[SUPERSEDED → ATOM-LIVE-0001] the retired fact"),
+            "the listing row marks the retirement and keeps the summary"
+        );
+
+        // 2. The SECOND HOP — `recall <ATOM-ID>`, where the fact is actually read.
+        let record = render_atom_record(&page, "ATOM-DEAD-0002", false, false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            record.starts_with("[SUPERSEDED → ATOM-LIVE-0001]\n"),
+            "the marker leads the record: {record:?}"
+        );
+        assert!(record.contains("the old claim."), "the body still prints: {record:?}");
+    }
+
+    #[test]
+    fn a_live_atom_gains_no_marker_anywhere() {
+        // The other half: `valid` is the overwhelming majority, so a marker leaking onto a live atom
+        // would corrupt every listing row and cost tokens on every query.
+        let dir = lint_tmpdir("live_atom");
+        let page = dir.join("p.md");
+        std::fs::write(
+            &page,
+            "---\nname: p\nocd: 2026-01-01\nlmd: 2026-01-02\ndescription: \"d\"\n---\n\
+             ^ATOM-LIVE-0001 [keywords: k, desc:\"the live fact\", ocd: 2026-01-01, lmd: 2026-01-01]\n\
+             the claim.\n\n## Notes and lessons learned\n",
+        )
+        .unwrap();
+        let atom = resolve_atoms(&page).remove(0);
+        let meta = atom_meta(
+            "p.md".into(),
+            page.clone(),
+            atom.id.clone(),
+            atom.keywords.join(" "),
+            atom.ocd.clone(),
+            atom.lmd.clone(),
+            atom.desc.clone(),
+            &atom.status,
+            &atom.superseded_by,
+            &atom.body,
+        );
+        let record = render_atom_record(&page, "ATOM-LIVE-0001", false, false);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(meta.atom_desc.as_deref(), Some("the live fact"));
+        assert!(!record.contains("SUPERSEDED"), "no marker on a live atom: {record:?}");
     }
 
     #[test]
