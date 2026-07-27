@@ -51,6 +51,57 @@ deterministically — it was never a race.**
 
 See also [[feedback_memory_system_is_more_than_memgrep]].
 
+
+^ATOM-SJ2Q-5XV2 [desc:"an ADD COLUMN migration must clear the change-detection ledger, or the incremental reindex skips every unchanged file and the column stays NULL forever", keywords: I_added_a_column_to_the_index_and_every_row_still_reads_the_default the_migration_ran_but_changed_nothing ALTER_TABLE_ADD_COLUMN_stayed_NULL_forever reindex_skipped_every_file_because_nothing_changed_on_disk my_migration_test_passes_but_the_migration_does_not_work schema_version_says_already_migrated, type: project, ocd: 2026-07-27, lmd: 2026-07-27]
+
+**The second way a memgrep index migration fails silently** (the first was the v5
+FTS desync above — that one at least CRASHED).
+
+`ALTER TABLE atoms ADD COLUMN status TEXT` lands the column EMPTY. Only a re-parse
+can fill it, but every source file is byte-identical, so the incremental reindex
+skips them all and the column stays NULL forever — reading back as its default on
+exactly the corpora that already had real values. Nothing errors.
+
+Fix: end the migration with `DELETE FROM files` (the ledger), so the next reindex
+sees every file as new. `migrate_v5` and `migrate_v6` both do.
+
+**The test is the easy part to get wrong.** Asserting the value is PRESENT passes
+on a DB that never lost it, certifying nothing; assert the RE-PARSE HAPPENED —
+`summary.changed == 1` on an untouched corpus, which is zero unless the ledger was
+cleared. Same vacuous-pass shape as [[feedback-a-selector-silently-drops-inputs]].
+
+Two consequences worth knowing before you write one: that ledger reset is also
+what strands duplicate rows when the path spelling changes (see the next atom),
+and a SHIPPED schema version is immutable — a DB that recorded version N skips an
+amended step N forever, which is why v5 exists (v4 was extended after shipping)
+and why the retirement columns became v6.
+
+
+^ATOM-IWOE-VF59 [desc:"one file can hold two index keys because path is the caller's spelling — after a ledger reset the old spelling's rows become permanent duplicates", keywords: recall_returns_every_result_twice duplicate_rows_in_memory_search_results the_same_atom_appears_twice_in_recall top_10_only_shows_5_real_results index_has_more_memory_rows_than_files_on_disk memgrep_index_looks_fresh_but_is_duplicated, type: project, ocd: 2026-07-27, lmd: 2026-07-27]
+
+Found live: **70 `memories` rows for 35 files** in this repo's PROJECT scope, so
+every index-backed recall returned every element TWICE — halving `--top N` and
+doubling the token cost of the primary read path.
+
+Two individually-reasonable things combine:
+
+1. `memories.path` is the **caller's spelling** (`/abs/x.md` vs `x.md` vs
+   `/abs/./x.md`), not a canonical identity — so one file can hold two keys.
+2. The prune was driven off the LEDGER, and an `ADD COLUMN` migration empties the
+   ledger on purpose. After a reset the ledger-driven prune has nothing to match,
+   so the previous spelling's rows are unreachable and permanent.
+
+**`is_fresh` compares the LEDGER, and the ledger was correct — so the health check
+reported the index healthy throughout.** An index can be duplicated and fresh at
+the same time; freshness is not integrity, and neither implies the other.
+
+Fixed by pruning CONTENT rows too: after the ledger prune, delete every `memories`
+row whose path is not in the on-disk set (`files` is already required to be the
+complete set, so a row outside it is unreachable by definition). Repairs existing
+DBs on the next reindex. Deliberately NOT fixed by canonicalizing the path —
+`display_path` IS that string, and resolving it would print a symlinked published
+page's real project location, which is the disclosure the view boundary forbids.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG07-0015, status:valid, keywords:"disk_image_malformed_but_logical_fault read_second_clause_virtual_table_corrupt pragma_integrity_check_excludes_durability", ocd:2026-07-14, lmd:2026-07-14] The first instinct — mine and the user's — was "a killed process
