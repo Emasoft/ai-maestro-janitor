@@ -162,6 +162,24 @@ Diagnose it in one step rather than guessing — `/usr/bin/sample <pid> 4` shows
 parked in `_queue_SimpleQueue_get`, and `ps` shows a `multiprocessing.resource_tracker` child with
 ZERO workers beside it. The remedy is to RETRY the publish; there is no `--jobs`/serial flag to pass. [^5]
 
+
+^ATOM-0GXI-QA1C [desc:"the tree is frozen for the whole publish — an edit mid-run fails it and the message blames the tests", keywords: publish_exited_3_but_every_test_passed REAL-STATE_WRITE_GUARD_FAILED a_test_escaped_isolation_but_no_test_failed working_tree_is_dirty_commit_or_stash_first publish_keeps_failing_while_I_edit, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
+
+The publish pipeline treats the working tree as FROZEN for its whole run, and enforces that in two
+places: gate 1 refuses a dirty tree, and the test gate's REAL-STATE WRITE GUARD fails the run (rc=3,
+with every test passing) if any guarded path changed while pytest was executing. Editing a source file
+during the ~12 minutes a publish takes therefore kills it — and the guard reports it as
+"a test escaped isolation", which points at the suite rather than at the actual writer. It names the
+exact path, so read that first: `[source-tree] CHANGED: <file>` is almost always an editor, not a test.
+A `[plugin-data] CHANGED:` line is tolerated separately ("attributed to the LIVE daemon"). Cost two
+runs on 2026-07-28: once at gate 1 (uncommitted memory pages) and once at gate 3 (a docstring edited
+mid-run). Commit everything first, then start the publish, then keep hands off until EXIT is printed. [^6]
+
+Pairs with `^rc3-with-every-test-passing-is-the-write-guard`, which describes the SAME rc=3 signature
+from a different writer — the heartbeat/daemon mutating state mid-gate rather than an agent editing
+source. Both surface on the same symptom query, and that is intended: read the guard's `[source-tree]`
+vs `[plugin-data]` prefix to tell which one you are looking at.
+
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0011, status:valid, keywords:"pipeline_step_numbers_skip_preserve renumbering_breaks_log_greps removed_stage_keep_downstream_numbers", ocd:2026-06-13, lmd:2026-06-13] The step numbers intentionally skip 5 —
   the old "Step 5: CPV lint" was folded into the single Step 4 `plugin --strict`
@@ -202,3 +220,4 @@ ZERO workers beside it. The remedy is to RETRY the publish; there is no `--jobs`
   probe fail LOUDLY: mine failed silently three times and each failure degraded to "no other
   actor", i.e. it blamed the suite.
 [^5]: [id:ATOM-RHYL-686X, status:valid, desc:"the cap was doing its job — measure the hang before touching the number", keywords:"raise_the_timeout_because_it_timed_out timeout_is_indistinguishable_from_a_hang sample_the_stuck_process_before_changing_the_cap cpu_time_flatlined_means_hang_not_slow", ocd:2026-07-28, lmd:2026-07-28] DO NOT raise a gate timeout because the gate timed out, BECAUSE a timeout is indistinguishable from a hang until you look, and the cap is often the only thing converting an unbounded hang into a bounded failure — raising it turns a 5-minute red into a wedged release. DO sample the stuck process first (`/usr/bin/sample <pid> 4`, `ps` for CPU-time growth, `lsof -a -i` for a socket) and let the stack name the cause.
+[^6]: [id:ATOM-BTNN-2OX0, status:valid, desc:"the publish freezes the tree; my own edit failed two runs and the message pointed at the suite", keywords:"edited_a_file_while_the_publish_was_running write_guard_blamed_the_tests_but_it_was_me tree_is_frozen_for_the_whole_publish commit_before_publishing_then_hands_off", ocd:2026-07-28, lmd:2026-07-28] DO NOT edit the working tree while a publish is running, BECAUSE the pipeline froze that tree at gate 1 and re-validates it at the test gate and again at the commit gate — so an edit twelve minutes in fails the run, and the write guard blames "a test escaped isolation" rather than the editor, which sends you hunting through a suite that is fine. DO commit everything first, start the publish, and keep hands off until EXIT prints.
