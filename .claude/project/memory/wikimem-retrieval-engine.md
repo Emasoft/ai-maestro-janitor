@@ -50,7 +50,7 @@ queries and 1 in 201 half-remembered ones. Tie-breaks after `score` therefore al
 page-level lesson, which was 57% of all findings when it was rated an error, so the gate failed on
 every corpus. WARN is real but not fixable from the page being edited (one-sided link) or needs a
 semantic judgement (oversized atom). ERROR is corruption or invisibility. On the live USER scope:
-161 findings, 8 ERRORs.
+161 findings, 8 ERRORs. [^1]
 
 ## See also
 
@@ -58,3 +58,5 @@ semantic judgement (oversized atom). ERROR is corruption or invisibility. On the
   memories live, and the recall-before-acting protocol.
 
 ## Notes and lessons learned
+
+[^1]: [id:ATOM-I4FM-82K6, status:valid, desc:"the lint was right and the parser was wrong — documenting the grammar declared atoms", keywords:"lint_flags_my_own_documentation_page prose_example_became_a_real_atom duplicate_atom_id_I_never_wrote is_this_lint_finding_a_false_positive documenting_a_syntax_is_not_using_it", ocd:2026-07-28, lmd:2026-07-28] DO NOT dismiss a lint finding that fires on a page DOCUMENTING the syntax as a false positive, BECAUSE the atom parser scanned the whole line, so `^id [k: v]` written inside backticks declared 13 REAL atoms — four sharing one id, a collision no author wrote. DO fix the parser (anchor the marker at line start) instead: the lint was right and the defect was one layer deeper, in the code that feeds the index.
