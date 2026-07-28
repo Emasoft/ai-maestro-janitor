@@ -12,8 +12,10 @@ actively-in-flight set — that have not been touched for too long.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
@@ -32,6 +34,40 @@ _ACTIVE_COLUMNS = trdd_common.ACTIVE_COLUMNS
 
 # Status values (v1 frontmatter / legacy body) that warrant a drift nudge.
 _DRIFT_ACTIVE_STATUSES = frozenset({"not-started", "in-progress"})
+
+# `review-after: YYYY-MM-DD` — a DELIBERATE park, honoured until that date.
+_REVIEW_AFTER_RE = re.compile(r"^review-after:\s*(\d{4})-(\d{2})-(\d{2})\s*$", re.MULTILINE)
+
+
+def review_after_epoch(head: str) -> int | None:
+    """The epoch of a TRDD's `review-after:` date, or None when it declares none. PURE.
+
+    A `backburner` TRDD is drift-eligible on purpose — most of them ARE forgotten work. But
+    some are parked for a stated reason (TRDD-de731408 is shelved pending an upstream Claude
+    Code change), and nagging those every sweep is a false positive that trains a reader to
+    ignore the detector. The alternative — bumping `updated:` to quiet it — is worse: it
+    would assert the file changed when nothing did.
+
+    This is a SNOOZE, not a mute, and the distinction is the whole design. A bare
+    "shelved" label would silence the TRDD forever, which is exactly the failure the
+    janitor already learned the hard way: a temporary global disarm went unnoticed for ~33h
+    because nothing carried its duration or reason. A DATE expires by itself, so a park a
+    human forgets re-surfaces on its own.
+
+    Parses only a well-formed date at column 0. Anything else returns None and the TRDD is
+    checked normally — a malformed snooze must never silence a TRDD by accident.
+    """
+    m = _REVIEW_AFTER_RE.search(head or "")
+    if m is None:
+        return None
+    try:
+        return int(
+            datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            .astimezone()
+            .timestamp()
+        )
+    except ValueError:
+        return None  # e.g. 2026-02-31 — a nonsense date is not a valid snooze
 
 
 def _last_touched_epoch(path: Path, project_root: Path) -> int:
@@ -112,6 +148,14 @@ def main() -> int:
         # set is broader on purpose — a `backburner`/`todo` TRDD that hasn't
         # moved in weeks is exactly the staleness we want to surface.
         if status not in _DRIFT_ACTIVE_STATUSES and column not in _ACTIVE_COLUMNS:
+            continue
+
+        # A stated park is honoured until its own date, then expires on its own.
+        try:
+            review_after = review_after_epoch(f.read_text(encoding="utf-8")[:4096])
+        except OSError:
+            review_after = None
+        if review_after is not None and now < review_after:
             continue
         # Prefer the explicit status for the drift line; fall back to the
         # column label when only v2 frontmatter is present.

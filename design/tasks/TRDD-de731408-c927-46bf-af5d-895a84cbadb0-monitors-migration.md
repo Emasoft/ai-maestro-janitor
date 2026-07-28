@@ -10,6 +10,7 @@ priority: 6
 severity: LOW
 effort: XL
 labels: [heartbeat, monitors, bootstrap, shelved-pending-upstream]
+review-after: 2026-10-01
 task-type: refactor
 parent-trdd: null
 relevant-rules: []
