@@ -45,6 +45,7 @@ import os
 import shutil
 import sys
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Optional
 
@@ -189,6 +190,92 @@ def _has_installable_deps(pjson: Any) -> bool:
     return False
 
 
+# ---- which package manager actually installs here (janitor#130) ----------
+#
+# `.npmrc`'s policy knobs (minimum-release-age / trust-policy /
+# block-exotic-subdeps) are npm's. Yarn Classic reads `.npmrc` for registry,
+# auth and proxy ONLY — it ignores these — so proposing them on a yarn repo
+# writes a file that LOOKS like an enforced supply-chain policy and enforces
+# nothing. That is worse than the gap it closes: the next auditor sees
+# `minimum-release-age` set and concludes the cooldown is active. Reported by
+# the ai-maestro Claude (janitor#130) after the detector proposed exactly that
+# on a repo pinned to yarn@1.22.22.
+_MANAGERS_HONOURING_NPMRC_POLICY = frozenset({"npm"})
+
+_LOCKFILE_MANAGER = {
+    "package-lock.json": "npm",
+    "npm-shrinkwrap.json": "npm",
+    "pnpm-lock.yaml": "pnpm",
+    "bun.lockb": "bun",
+    "bun.lock": "bun",
+    "yarn.lock": "yarn",
+}
+
+
+def resolve_package_manager(
+    *,
+    package_manager_field: str = "",
+    lockfiles: Iterable[str] = (),
+    has_yarnrc_yml: bool = False,
+) -> str:
+    """Which manager installs this project: npm | yarn-classic | yarn-berry | pnpm | bun |
+    ambiguous | unknown. PURE — all evidence is injected, so it tests without a filesystem.
+
+    Evidence order is deliberate:
+
+    1. **`package.json#packageManager`** (the Corepack pin, e.g. `yarn@1.22.22`) — an explicit
+       declaration by the project beats anything inferred, and it is the only signal that
+       distinguishes Yarn Classic from Berry by version rather than by side effect.
+    2. **Lockfiles** — a lockfile only exists because that manager actually ran. `yarn.lock`
+       alone cannot tell Classic from Berry, so `.yarnrc.yml` (a Berry-only file) breaks the tie;
+       absent it, Classic is the safer read, because Classic is the one that silently ignores
+       npm's knobs and is therefore the case worth being right about.
+    3. **Nothing** → `unknown`, which callers may treat as npm: npm is Node's default, and every
+       other manager leaves evidence we just looked for. This is an inference, not a guess.
+
+    Two or more DIFFERENT managers' lockfiles → `ambiguous`. Never silently pick one: a repo
+    with both `yarn.lock` and `package-lock.json` has a real problem, and choosing a winner would
+    hide it behind whichever knob set we then proposed.
+    """
+    field = (package_manager_field or "").strip().lower()
+    if field:
+        name, _, version = field.partition("@")
+        name = name.strip()
+        if name == "yarn":
+            major = version.strip().split(".", 1)[0]
+            return "yarn-classic" if major == "1" else "yarn-berry"
+        if name in ("npm", "pnpm", "bun"):
+            return name
+
+    found = {_LOCKFILE_MANAGER[f] for f in lockfiles if f in _LOCKFILE_MANAGER}
+    if len(found) > 1:
+        return "ambiguous"
+    if not found:
+        return "unknown"
+    only = found.pop()
+    if only == "yarn":
+        return "yarn-berry" if has_yarnrc_yml else "yarn-classic"
+    return only
+
+
+def detect_package_manager(root: Path) -> str:
+    """Filesystem wrapper around `resolve_package_manager`. Never raises."""
+    field = ""
+    pj = root / "package.json"
+    if pj.is_file():
+        j = _parse_json(_read_text(pj))
+        if isinstance(j, dict):
+            raw = j.get("packageManager")
+            if isinstance(raw, str):
+                field = raw
+    lockfiles = [name for name in _LOCKFILE_MANAGER if (root / name).is_file()]
+    return resolve_package_manager(
+        package_manager_field=field,
+        lockfiles=lockfiles,
+        has_yarnrc_yml=(root / ".yarnrc.yml").is_file() or (root / ".yarnrc.yaml").is_file(),
+    )
+
+
 def _is_node_project(root: Path) -> bool:
     """True iff the project actually installs npm packages.
 
@@ -229,7 +316,21 @@ def _is_node_project(root: Path) -> bool:
 
 # ---- the per-knob policy walker -----------------------------------------
 
-def _audit_npmrc(root: Path, threshold: int, issues: list[str]) -> None:
+def _audit_npmrc(root: Path, threshold: int, issues: list[str], manager: str = "npm") -> None:
+    """Audit npm's `.npmrc` policy knobs — ONLY when npm is what installs here (janitor#130).
+
+    `unknown` counts as npm: npm is Node's default and `detect_package_manager` has already
+    looked for every other manager's evidence. `ambiguous` does NOT — a repo with two managers'
+    lockfiles gets its own finding rather than a knob set chosen by coin-flip.
+
+    A manager that ignores these keys is NOT left unguarded by this return: the install-time
+    malware firewall (`_audit_install_firewall`) is manager-agnostic — Socket Firewall and
+    Aikido safe-chain shim `npm`/`yarn`/`pnpm` alike — runs unconditionally, and is the honest
+    remedy for a repo whose manager cannot express a release cooldown. Going quiet here removes
+    a false positive without creating a false negative.
+    """
+    if manager not in _MANAGERS_HONOURING_NPMRC_POLICY and manager != "unknown":
+        return
     p = root / ".npmrc"
     if not p.is_file():
         # No .npmrc at all → flag all the missing safety knobs at once.
@@ -441,7 +542,15 @@ def main() -> int:
 
     threshold = _threshold_minutes()
     issues: list[str] = []
-    _audit_npmrc(project_root, threshold, issues)
+    # Resolve WHO installs here before auditing manager-specific config (janitor#130): an
+    # `.npmrc` policy proposal on a yarn repo enforces nothing while reading as enforcement.
+    manager = detect_package_manager(project_root)
+    if manager == "ambiguous":
+        issues.append(
+            "two package managers' lockfiles are present — the install path is undecidable, "
+            "so no supply-chain policy can be verified. Keep one lockfile."
+        )
+    _audit_npmrc(project_root, threshold, issues, manager)
     _audit_pjson_pnpm(project_root, threshold, issues)
     _audit_pnpm_workspace(project_root, threshold, issues)
     _audit_yarnrc(project_root, threshold, issues)
