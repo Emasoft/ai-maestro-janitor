@@ -1,9 +1,9 @@
 ---
 trdd-id: CGYMUKO6
 title: Janitor support-ticket system — incident management with heartbeat-scheduled repair agents
-column: testing
+column: complete
 created: 2026-07-14T14:42:33+0200
-updated: 2026-07-14T20:34:00+0200
+updated: 2026-07-28T21:04:30+0200
 current-owner: janitor-session
 task-type: feature
 scope: project
@@ -14,6 +14,36 @@ implementation-commits: [9b66a98, cf18e8d, fc1cffa, b8f17f7, d7706e3, 10de6e0, 8
 ---
 
 # Janitor support-ticket system
+
+## ⏵ CLOSED — `testing → complete`, 2026-07-28 (this is the last permitted write)
+
+The condition this TRDD set for itself was explicit: *"move `testing → complete` unless the live
+agent leg is to be exercised first."* The live agent leg has now been exercised — in production, on
+real incidents, four times end to end:
+
+- **Tickets opened by a real producer.** `memgrep-index-health` raised `T-FATU6QPI` (MEMGREP-004)
+  and `T-DMGDWWE0` (MEMGREP-006) against the live PROJECT index.
+- **Dispatched and worked, not merely filed.** `.janitor/state/tickets/dispatch-ledger.jsonl` holds
+  4 dispatches and all 4 tickets are in `tickets/closed/` (`T-BR3M3IUU`, `T-DMGDWWE0`,
+  `T-DTTXJGC7`, `T-FATU6QPI`) — the loop closes, which was the whole point (a finding that recurs
+  forever was the gap this TRDD opened against).
+- **The repair agent produced real code.** `06a5b46` ("a database BEHIND the ladder is not a
+  database that is broken") came out of that dispatch — the MEMGREP-011 `STALE` classification that
+  stopped a version-stamp lag from being reported as a critical corruption whose "repair" would
+  rebuild a healthy database on a loop.
+
+Shipped in **v0.44.0** (`ebe487f`) and running in every release since; latest green release at
+closing is **v0.63.3** (all 5 CI runs `success`).
+
+**Why this sat at `testing` for 14 days:** nothing was left to do — both `NEXT ACTION` lines below
+were already satisfied ("none" and "publish, then watch CI") — but no one moved the column, so the
+board claimed work in flight that had in fact shipped. That is board drift, not project drift, and
+the `trdd-drift` detector is what surfaced it. Recorded here because the lesson is about the board:
+a TRDD whose NEXT ACTION reads "none" is a TRDD waiting for a column move, and leaving it is how a
+kanban stops describing reality.
+
+Everything below is the historical record, preserved verbatim. Per the TRDD rules a terminal TRDD is
+frozen: new work is a new TRDD, not an edit here.
 
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-14
 
