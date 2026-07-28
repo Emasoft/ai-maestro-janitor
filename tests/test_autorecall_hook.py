@@ -150,7 +150,7 @@ def test_on_by_default_injects_with_corpus(tmp_path):
     assert rc == 0
     assert out.strip() != ""
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "zarvox.md" in ctx
+    assert "zarvox" in ctx
 
 
 def test_explicit_false_opts_out(tmp_path):
@@ -247,8 +247,13 @@ def test_on_hit_injects_additional_context(tmp_path):
     hso = obj.get("hookSpecificOutput", {})
     assert hso.get("hookEventName") == "UserPromptSubmit"
     ctx = hso.get("additionalContext", "")
-    # The recalled note's path/description must be present in the injected context.
-    assert "zarvox.md" in ctx
+    # The recalled note's LOCATOR and description must be present in the injected context. The
+    # locator is the page's `name:` — an identity and an exact recall key — NOT its filename
+    # (TRDD-YBOZW3ES). Every assertion in this module said `<name>.md` until 2026-07-28, which
+    # means they could only pass against a binary OLDER than the contract they claim to track; the
+    # column check below is deliberate, so a silent drift back to paths fails here rather than
+    # passing on a substring that both shapes happen to contain.
+    assert any(row.split("\t")[1] == "zarvox" for row in ctx.splitlines() if "\t" in row), ctx
     assert "flux compensator" in ctx
 
 
@@ -265,10 +270,10 @@ def test_on_privacy_user_mem_note_never_surfaced(tmp_path):
     if out.strip():
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
         assert "SECRETMEMO" not in ctx  # the private note's unique content never leaks
-        assert "private.md" not in ctx  # nor its file (NOT a "user-mem" substring check —
+        assert "private" not in ctx  # nor its file (NOT a "user-mem" substring check —
         # pytest derives tmp_path from the test name, so "user-mem" is in the fixture path
         # itself and would collide with the surfaced public note's legitimate path)
-        assert "agentnote.md" in ctx
+        assert "agentnote" in ctx
 
 
 @_needs_memgrep
@@ -291,7 +296,7 @@ def test_f15_local_proposal_and_index_files_never_recalled(tmp_path):
     assert rc == 0
     assert out.strip(), "the real note must still be recalled"
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "realnote.md" in ctx
+    assert "realnote" in ctx
     assert "memory-reorg-proposed" not in ctx
     assert "PROPOSALGLOSS" not in ctx and "STUBGLOSS" not in ctx
 
@@ -330,7 +335,7 @@ def test_on_no_matching_note_injects_invite_only(tmp_path):
     assert out.strip() != ""
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "memgrep recall" in ctx  # the invite
-    assert "n1.md" not in ctx  # no memory named — the agent searches itself
+    assert "n1" not in ctx  # no memory named — the agent searches itself
     assert "Possibly-relevant notes" not in ctx  # no fake hit block on a miss
 
 
@@ -343,8 +348,8 @@ def test_on_hit_appends_invite_after_notes(tmp_path):
     rc, out, _err = _run_hook(_prompt("the zarvox flux compensator failed again"), _ON, tmp_path / "proj", tmp_path / "home")
     assert rc == 0
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "zarvox.md" in ctx and "memgrep recall" in ctx
-    assert ctx.index("zarvox.md") < ctx.index("Invite:")  # notes first, invite last
+    assert "zarvox" in ctx and "memgrep recall" in ctx
+    assert ctx.index("zarvox") < ctx.index("Invite:")  # notes first, invite last
 
 
 @_needs_memgrep
@@ -459,7 +464,7 @@ def test_user_scope_note_is_recalled(tmp_path):
     assert rc == 0
     assert out.strip() != ""
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "userpref.md" in ctx
+    assert "userpref" in ctx
     assert "calibration" in ctx
 
 
@@ -480,7 +485,7 @@ def test_project_scope_note_is_recalled(tmp_path):
     assert rc == 0
     assert out.strip() != ""
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "projarch.md" in ctx
+    assert "projarch" in ctx
     assert "pipeline" in ctx
 
 
@@ -506,4 +511,4 @@ def test_all_three_scopes_compose_and_user_mem_excluded(tmp_path):
     assert "user-mem" not in ctx
     # At least the three scope notes are reachable (recall ranks; --top caps at 3,
     # so assert the private one is absent and the public ones are the source).
-    assert any(tok in ctx for tok in ("localnote.md", "projnote.md", "usernote.md"))
+    assert any(tok in ctx for tok in ("localnote", "projnote", "usernote"))

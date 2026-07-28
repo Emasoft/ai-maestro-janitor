@@ -240,7 +240,11 @@ def test_memgrep_recall_surfaces_page_then_the_hop_returns_the_lesson():
     old shape is exactly the per-hit cost the layers removed (441 -> 247 tokens/query).
     """
     out = _mg(["recall", "how should dialogs confirm destructive action"])
-    assert "dialog-forms.md" in out.splitlines()[0]
+    # The locator is the page's `name:` — an IDENTITY and an exact recall key — NOT its filename
+    # (TRDD-YBOZW3ES). Asserting `dialog-forms.md` here was asserting the pre-locator-change shape,
+    # so this test could only pass against a binary older than the contract it claims to track.
+    locator = out.splitlines()[0].split("\t")[1]
+    assert locator == "dialog-forms", f"hop-1 locator must be the page name, got {locator!r}"
     assert "destructive default" not in out, (
         "hop 1 is a TRIAGE row — appending every hit's lessons is the cost the layers removed"
     )
