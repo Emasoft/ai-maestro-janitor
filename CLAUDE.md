@@ -427,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=54aa76a31858 digest=1a2e8529f7a8 generated=2026-07-26T22:32:55+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=62e16d97f14d digest=afbcdb33c175 generated=2026-07-28T15:55:58+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1777,6 +1777,12 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · score(queries, corpus, extra, top) -> dict
   · render(res) -> str
   · compare(cur, base, tol_tokens) -> tuple[bool, list[str]] — Regression gate. Accuracy may never drop; tokens may not rise beyond tolerance.
+  · main() -> int
+`scripts/wikimem_lint_bench.py` — wikimem_lint_bench — measure the linter's FALSE POSITIVES and FALSE NEGATIVES.
+  · observed_codes(corpus) -> tuple[Counter[tuple[str, str]], list[str]] — Run the linter over `corpus` → (multiset of (relative-file, code), raw finding lines).
+  · score(corpus, cases) -> dict — Compare observed findings against the labels. Returns the full result record.
+  · render(res) -> str
+  · compare(cur, base) -> tuple[bool, list[str]] — Regression gate. FP and FN may never RISE, and coverage may never SHRINK.
   · main() -> int
 `scripts/wikimem_migrate_keywords.py` — Recover keyword phrases the atom-props parser silently drops (plan Phase 1.3).
   · split_top_level_commas(props) -> list[str] — Split on commas that are NOT inside double quotes — mirrors the Rust splitter.
