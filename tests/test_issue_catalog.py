@@ -168,7 +168,9 @@ def test_a_missing_placeholder_does_not_crash_the_heartbeat(project: Path) -> No
     r = issue_catalog.raise_issue("MEMGREP-004", scope="user", now=NOW)  # no {table}, no {column}
     assert r.ok
     t = tickets.load(r.ticket_id)
-    assert t is not None and "<?>" in t.title
+    # The marker NAMES the absent key, so the reader learns WHICH field the detector forgot without
+    # going back to the catalog template to work it out.
+    assert t is not None and "<?table?>" in t.title
 
 
 def test_the_same_finding_every_five_minutes_is_ONE_ticket(project: Path) -> None:
@@ -416,3 +418,77 @@ def test_a_reraise_adds_no_second_ledger_entry(project: Path) -> None:
     issue_catalog.raise_issue("MEMGREP-001", scope="local", now=NOW)
     issue_catalog.raise_issue("MEMGREP-001", scope="local", now=NOW + 300)
     assert len(_ledger_entries(project)) == 2, "one entry per finding, not per raise"
+
+
+# --------------------------------------------------------------------------- #
+# janitor#116 — a proposal TRDD whose frontmatter does not parse
+# --------------------------------------------------------------------------- #
+
+
+def _yaml_load_frontmatter(path: Path) -> dict:
+    """Parse the TRDD's frontmatter with a REAL YAML parser — the consumer's view, not ours.
+
+    `ticket_proposal._frontmatter` is a line-splitter and would happily "read" a block that PyYAML
+    rejects outright, so testing against it would have passed while ai-maestro's gate went red. The
+    bug was only ever visible to a real parser.
+    """
+    yaml = pytest.importorskip("yaml")
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    return yaml.safe_load(text.split("---\n", 2)[1])
+
+
+def test_a_catalog_title_containing_a_colon_still_yields_PARSEABLE_frontmatter(project: Path) -> None:
+    """janitor#116: 14 shipped templates hardcode `": "`, and a plain YAML scalar containing it is a
+    SYNTAX ERROR — the whole block fails to load, so every field reads as missing even though it is
+    plainly present. The colon is OURS, not attacker input, so marker-defanging never touched it."""
+    r = issue_catalog.raise_issue(
+        "PKGPOL-001", path="package-manager config", detail="1 gap(s)", now=NOW
+    )
+    assert r.ok and r.trdd
+    found = ticket_proposal.find_proposal(r.trdd)
+    assert found is not None
+    fm = _yaml_load_frontmatter(found[1])
+    assert fm["column"] == "proposal"
+    assert fm["trdd-id"] == r.trdd
+    assert ": " not in fm["title"], f"title still carries a mapping indicator: {fm['title']!r}"
+
+
+def test_every_catalog_template_survives_the_frontmatter_emitter(project: Path) -> None:
+    """One template proving it is not enough — the defect was a CLASS (14 templates), so the gate has
+    to be the class. Renders every code's title through the emitter's sanitizer and asserts a real
+    YAML parser accepts the result."""
+    yaml = pytest.importorskip("yaml")
+    bad = []
+    for code in sorted(issue_catalog.ISSUE_CATALOG):
+        rendered = ticket_proposal._yaml_plain(issue_catalog.ISSUE_CATALOG[code].title)
+        try:
+            loaded = yaml.safe_load(f"title: {rendered}\ncolumn: proposal\n")
+        except yaml.YAMLError:
+            bad.append(code)
+            continue
+        if not isinstance(loaded, dict) or loaded.get("column") != "proposal":
+            bad.append(code)
+    assert not bad, f"templates whose rendered title breaks the frontmatter: {bad}"
+
+
+def test_the_dedupe_key_is_canonicalised_ONCE_so_propose_and_retract_still_agree(
+    project: Path,
+) -> None:
+    """The key is WRITTEN into frontmatter and later COMPARED against it. Sanitizing on only one side
+    silently breaks both directions: propose() re-authors every 5 minutes, or retract() can never find
+    what it must withdraw. A colon-bearing title is exactly what drives them apart."""
+    first = issue_catalog.raise_issue(
+        "PKGPOL-001", path="package-manager config", detail="1 gap(s)", now=NOW
+    )
+    second = issue_catalog.raise_issue(
+        "PKGPOL-001", path="package-manager config", detail="1 gap(s)", now=NOW + 300
+    )
+    assert first.trdd == second.trdd, "a re-raise authored a SECOND proposal — dedupe broke"
+
+    # Clear with the SAME fields the raise used — with no explicit `where`, the key is derived from
+    # the RENDERED TITLE, which is exactly the colon-bearing string that drove the two sides apart.
+    withdrawn = issue_catalog.clear_issue(
+        "PKGPOL-001", path="package-manager config", detail="1 gap(s)"
+    )
+    assert withdrawn == first.trdd, "retract() could not find the proposal propose() wrote"

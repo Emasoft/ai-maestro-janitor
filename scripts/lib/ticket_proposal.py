@@ -40,6 +40,45 @@ import trdd_common  # noqa: E402
 
 _ID_RE = re.compile(r"^(?:TRDD-)?([A-Z0-9]{8})$", re.IGNORECASE)
 
+# A YAML PLAIN (unquoted) scalar cannot contain `": "` — it reads as a nested mapping and the WHOLE
+# frontmatter block fails to load, so every field reports MISSING even though it is plainly there
+# (janitor#116: an ai-maestro TRDD lint gate went red with COLUMN-MISSING/TITLE-MISSING for a file
+# whose `column:` and `title:` were both present). The colon came from OUR OWN catalog templates —
+# 14 of them contain `": "` — not from attacker input, so no amount of defanging untrusted text
+# would have caught it.
+#
+# We sanitize rather than QUOTE because `trdd-design-tasks.md` §4 makes the frontmatter grep-first:
+# `title:` is read with a plain `grep`/`cut`, and "titles contain no colons" is the rule that makes
+# that work. Quoting would fix the parse and break every consumer that greps. This helper is
+# therefore the emitter-side enforcement of a rule the templates were violating.
+_YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
+
+
+def _yaml_plain(value: str, *, comma_safe: bool = False) -> str:
+    """Make `value` safe to emit as a YAML PLAIN scalar on a `key: <value>` line.
+
+    `comma_safe=True` additionally makes it safe INSIDE a `[a, b]` flow sequence, where a bare comma
+    would split one element into two.
+    """
+    out = " ".join(str(value or "").split())  # newlines/tabs would end the scalar early
+    out = out.replace(": ", " — ")  # the mapping-value indicator; keep the semantic break
+    out = re.sub(r":+$", "", out)  # a trailing colon is the same indicator at end-of-scalar
+    out = out.replace(" #", " ")  # ` #` opens a comment, truncating the value
+    if comma_safe:
+        out = out.replace(",", ";")
+    return out.lstrip(_YAML_INDICATORS).strip()
+
+
+def _dedupe_key(raw: str) -> str:
+    """THE canonical form of a dedupe key — the one function every site must go through.
+
+    The key is WRITTEN into frontmatter and later COMPARED against what was written. Any site that
+    canonicalises differently silently stops matching, and the two failure modes are opposite and
+    both bad: `propose()` re-authoring the same proposal every 5 minutes, or `retract()` never
+    finding the proposal it is meant to withdraw so the board fills with dead findings.
+    """
+    return _yaml_plain(tickets._clean(raw, 200))
+
 
 def parse_trdd_ref(ref: str) -> str | None:
     """Accept `TRDD-35AC8I8D` or a bare `35AC8I8D`; return the canonical UPPERCASE id, else None."""
@@ -123,7 +162,11 @@ def propose(
     if spec is None or spec.domain != tickets.PROJECT:
         return None
 
-    key = tickets._clean(dedupe_key or f"{kind}:{title}", 200)
+    # CANONICALISE ONCE, here — the dedupe key is both COMPARED against what is on disk (below) and
+    # WRITTEN into the frontmatter. Transform it at only one of those two points and the next fire's
+    # comparison misses, so the same finding authors a fresh proposal every 5 minutes — precisely the
+    # 288-a-day failure this module exists to prevent.
+    key = _dedupe_key(dedupe_key or f"{kind}:{title}")
 
     # Already proposed? (an open proposal, or an already-approved ticket) → say nothing new.
     for _scope, path in trdd_common.trdd_files("proposals", project_dir):
@@ -143,9 +186,13 @@ def propose(
     iso = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ts))
     uid = _new_trdd_id(project_dir)
 
-    clean_title = tickets._clean(title, tickets.TITLE_CAP)
-    clean_detail = tickets._clean(detail, tickets.DETAIL_CAP)
+    # Two DISTINCT sanitizers, both needed: `_clean` defends the MODEL (defangs `[janitor-…]` marker
+    # mimicry in untrusted text); `_yaml_plain` defends the PARSER (a `": "` breaks the frontmatter
+    # block). A string can be marker-safe and still unparseable — janitor#116 was exactly that.
+    clean_title = _yaml_plain(tickets._clean(title, tickets.TITLE_CAP))
+    clean_detail = tickets._clean(detail, tickets.DETAIL_CAP)  # body prose — not a YAML scalar
     ev = [tickets._clean(e, 200) for e in (evidence or [])][: tickets.EVIDENCE_CAP]
+    ev_yaml = [_yaml_plain(e, comma_safe=True) for e in ev]
     sev = severity if severity in tickets.SEVERITY_RANK else spec.severity
 
     slug = re.sub(r"[^a-z0-9]+", "-", clean_title.lower()).strip("-")[:48] or "finding"
@@ -160,9 +207,9 @@ task-type: {"security" if "security" in kind or "credential" in kind else "bugfi
 severity: {sev}
 ticket-kind: {kind}
 ticket-severity: {sev}
-ticket-evidence: [{", ".join(ev)}]
+ticket-evidence: [{", ".join(ev_yaml)}]
 ticket-dedupe-key: {key}
-ticket-origin: {tickets._clean(origin, 80)}
+ticket-origin: {_yaml_plain(tickets._clean(origin, 80))}
 ---
 
 # {clean_title}
@@ -333,7 +380,7 @@ def retract(dedupe_key: str, project_dir: str | None = None, now: int | None = N
     the agent working it may close it — a detector deciding a ticket is moot mid-repair would race the
     agent doing the repair.
     """
-    key = tickets._clean(dedupe_key, 200)
+    key = _dedupe_key(dedupe_key)
     if not key:
         return None
     found = None

@@ -385,11 +385,14 @@ class _SafeDict(dict):
     """Missing placeholder → a visible marker, never a KeyError.
 
     A detector that forgets one `{key}` must not crash the heartbeat: the finding is worth more than
-    the formatting. `<?>` is loud enough to be caught in review and harmless in a ticket.
+    the formatting. The marker NAMES the absent key (`<?table?>`) rather than being a bare `<?>`:
+    both are loud enough to catch in review, but only the named one tells the reader WHICH field the
+    detector forgot — and the alternative is reading the catalog template to work it out. It stays
+    harmless inside a ticket either way.
     """
 
     def __missing__(self, key: str) -> str:  # pragma: no cover - exercised via _render
-        return "<?>"
+        return f"<?{key}?>"
 
 
 def _render(template: str, data: dict[str, str]) -> str:
