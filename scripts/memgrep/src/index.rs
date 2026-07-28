@@ -589,9 +589,12 @@ fn user_version(conn: &Connection) -> i64 {
 fn migrate(conn: &Connection) -> Result<()> {
     let ver = user_version(conn);
     if ver > SCHEMA_VERSION {
+        // Same condition, same ISSUE CODE as check 0 of `validate_db` — this message is what the
+        // self-heal ledger records, and a stale binary is one incident whichever door it comes
+        // through, so it must be greppable under one code.
         anyhow::bail!(
-            "index was built by a NEWER memgrep (schema v{ver} > v{SCHEMA_VERSION} understood here) \
-             — refusing to migrate it backwards"
+            "[MEMGREP-010] index was built by a NEWER memgrep (schema v{ver} > v{SCHEMA_VERSION} \
+             understood here) — refusing to migrate it backwards"
         );
     }
     for m in MIGRATIONS.iter().filter(|m| m.to > ver) {
@@ -715,9 +718,15 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(cols)
 }
 
-/// Prove the database is USABLE — not merely openable. Six independent checks, in cheapest-first
+/// Prove the database is USABLE — not merely openable. Seven independent checks, in cheapest-first
 /// order so a cheap failure short-circuits the expensive ones:
 ///
+/// 0. **Downgrade guard** — the DB is stamped NEWER than this binary understands. Checked FIRST,
+///    because every check below judges the DB against OUR schema and a newer DB is not ours to judge:
+///    reporting "your table is the wrong shape" about a shape a later version defines is a confident
+///    lie, and it names the database as the fault when the fault is the BINARY. See [`MEMGREP-010`
+///    in `docs/ISSUE-CODES.md`] — its prescribed repair is "update memgrep, touch nothing", the exact
+///    opposite of MEMGREP-006's "rebuild and re-run the ladder".
 /// 1. **File integrity** (`PRAGMA integrity_check`) — the b-tree pages themselves. This is the ONLY
 ///    check most people run, and it is the one that had nothing to say about the 2026-07-14
 ///    corruption: it returns `ok` for a database whose FTS index is completely desynced.
@@ -742,6 +751,23 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
 /// is why the wording here is free to change and the code is not: a detector that had to pattern-match
 /// English would break the moment someone improved a sentence.
 fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
+    // 0. downgrade guard — a DB from a NEWER memgrep. This MUST be answered before any shape check
+    // and it MUST NOT wear MEMGREP-006's code: the janitor routes on the code, and MEMGREP-006's
+    // prescribed repair ("rebuild from the notes and re-run the ladder") applied here rebuilds the
+    // index at the OLDER schema — which the current binary then upgrades again, which re-raises the
+    // ticket, forever. The observed loop (2026-07-28): a v5 `~/.cargo/bin/memgrep` nuke-rebuilt a v6
+    // PROJECT index, the v6 build rebuilt it, and the health detector ticketed the DATABASE every
+    // heartbeat while the actual defect was a stale BINARY. Same condition `migrate` already refuses;
+    // the observer channel simply had no way to say so.
+    let ver = user_version(conn);
+    if ver > expect_version {
+        anyhow::bail!(
+            "[MEMGREP-010] this memgrep is OLDER than the index it opened (schema v{ver} on disk > \
+             v{expect_version} understood here) — the database is not the fault and must not be \
+             migrated, rebuilt, or downgraded; update the binary"
+        );
+    }
+
     // 1. file-level integrity
     let integrity: String = conn
         .query_row("PRAGMA integrity_check", [], |r| r.get(0))
@@ -806,8 +832,8 @@ fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
         }
     }
 
-    // 6. version stamp
-    let ver = user_version(conn);
+    // 6. version stamp. `ver > expect_version` is already gone (check 0), so what remains here is
+    // strictly the UNDER-stamped case: a stamp the migration ladder never earned.
     if ver != expect_version {
         anyhow::bail!(
             "[MEMGREP-006] schema validation: user_version is {ver}, expected {expect_version}"
@@ -1940,6 +1966,44 @@ mod tests {
         let conn = open(&d).expect("open rebuilds a future-schema index at our own version");
         assert_eq!(user_version(&conn), SCHEMA_VERSION);
         validate_db(&conn, SCHEMA_VERSION).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_newer_index_blames_the_binary_not_the_database() {
+        // REGRESSION (janitor ticket T-DMGDWWE0, 2026-07-28). `validate` — the janitor's NON-healing
+        // observer — reported a v6 index opened by a v5 binary as MEMGREP-006, "the schema version
+        // stamp disagrees with the database's actual shape". That code's catalogued repair is
+        // "rebuild from the notes and re-run the ladder", so the janitor dispatched an unattended
+        // agent to rebuild a database that was CORRECT, at the OLDER schema, which the current binary
+        // then upgraded again — a loop the prescribed fix could never end, because the defect was a
+        // stale BINARY. A newer-than-us index gets its own code, whose repair is "update memgrep".
+        let d = tmp("newer_blames_binary");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        let conn = open_existing(&d).unwrap();
+        conn.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 1))
+            .unwrap();
+
+        let err = validate_db(&conn, SCHEMA_VERSION).unwrap_err().to_string();
+        assert!(
+            err.contains("[MEMGREP-010]"),
+            "a newer-than-us index must carry the stale-BINARY code: {err}"
+        );
+        assert!(
+            !err.contains("[MEMGREP-006]"),
+            "it must NOT wear the migration-failure code — that code's repair rebuilds the DB: {err}"
+        );
+
+        // And the UNDER-stamped case — the one MEMGREP-006 actually describes — still reports 006,
+        // so this fix narrows the code rather than retiring it.
+        conn.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION - 1))
+            .unwrap();
+        let err = validate_db(&conn, SCHEMA_VERSION).unwrap_err().to_string();
+        assert!(
+            err.contains("[MEMGREP-006]"),
+            "an unearned (too-low) stamp is still MEMGREP-006: {err}"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 

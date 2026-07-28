@@ -156,6 +156,15 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="This is the signal the original incident had no way to produce. The self-heal RACES any observer and wins: every process that opens the index (the autorecall hook on every prompt, the librarian, a memory agent) repairs it in passing, so a probe that inspects the DATABASE always finds it pristine. A corruption re-manufactured daily is invisible to state inspection — and that is exactly how the 2026-07-14 migration bug hid for days. The repair EVENT is the only durable evidence.",
         fix="Do NOT just rebuild it again — that is what has been happening. Read `.memgrep/self-heal.log` for what failed and when, then find the WRITER that keeps corrupting it (a migration step, a schema change, a concurrent writer without the busy timeout). The index is the victim; the code that breaks it is the defect.",
     ),
+    "MEMGREP-010": Issue(
+        scanner="memgrep-validate",
+        kind="migration-failure",
+        severity="high",
+        title="the memgrep binary is OLDER than the index it opened in {scope}",
+        what="The database is stamped at a schema version this build does not know. The DATABASE is not the fault — the binary on PATH is stale.",
+        why="Reported as MEMGREP-006 (which is what happened before this code existed), the prescribed repair rebuilds the index at the OLDER schema; the current binary then upgrades it again and the ticket returns on the next heartbeat. The loop cannot be broken by touching the database, because the database was never wrong. Meanwhile the older schema silently drops whatever the newer columns index.",
+        fix="Do NOT migrate, rebuild, or downgrade the index — it is correct and NEWER. Find the stale binary (`which memgrep`) and reinstall it from this repo: `cargo install --path scripts/memgrep`. Then re-run `memgrep validate <root>` to confirm.",
+    ),
     "DAEMON-001": Issue(
         scanner="daemon-supervisor",
         kind="daemon-crash-loop",
