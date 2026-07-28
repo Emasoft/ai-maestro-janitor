@@ -3,7 +3,7 @@ trdd-id: DLI76AUC
 title: The heartbeat re-arm is a model turn, so the dynamic cadence can cost more than it saves
 column: dev
 created: 2026-07-14T21:34:32+0200
-updated: 2026-07-14T23:46:37+0200
+updated: 2026-07-29T00:32:41+0200
 current-owner: janitor-session
 task-type: refactor
 scope: project
@@ -18,8 +18,23 @@ parent-trdd: 0QQX9H0G
 ## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — 2026-07-14
 
 **NEXT ACTION:** Items 2, 3, 4 are DONE (commits `ea6a3b9`, `48523ca`, `a66c7a5`, `1959abc`).
-The only open work is §Deferred item #1 (the demote hysteresis / re-arm cooldown) — the lever that
-actually kills the churn — and it is **awaiting the USER's decision**. Do not start it unprompted.
+The only open work is §Deferred item #1 — still **awaiting the USER's decision**. Do not start it
+unprompted.
+
+**BUT item #1 is now HALF DONE, by another route (recorded 2026-07-29).** Item #1 was written as
+two things: (a) retune `demote_fires` from the payback, and (b) add "a hard re-arm cooldown".
+**(b) SHIPPED** as issue #89 half 2 via TRDD-CI6ZTNB9 — `heartbeat_cadence.should_emit_renew(...,
+dwell_s)`, gating `[janitor-renew]` on the last ACTUAL re-arm being at least `dwell_s` old, with a
+tier PROMOTION as the deliberate bypass. Its own docstring names the split this TRDD anticipated:
+`demote_fires` decides WHICH tier wins, the dwell decides how OFTEN the winning tier may pay for a
+re-arm, and "neither alone stops a controller that flips its committed tier every
+`demote_fires`-th fire from re-arming every time it does."
+
+So the ONLY thing left in item #1 is **(a)**, the `demote_fires` retune (2 → ~9 at `*/5`). Recorded
+because this STATE block otherwise reads as "item 1 is entirely unimplemented", which would send the
+next session to rebuild a cooldown that already exists — the failure this project keeps meeting from
+the other side (a check that exists, runs, and is assumed absent). Nothing here changes
+`heartbeat_cadence_demote_fires`; the constraint below still stands.
 
 **Scope approved by the USER (2026-07-14):** items **2, 3, 4** below. Item **1** (the demote
 hysteresis) is DISCUSSED but NOT approved — do not change `heartbeat_cadence_demote_fires`.
@@ -64,7 +79,11 @@ session. That is the load-bearing insight of this TRDD.
 `heartbeat_cadence_demote_fires` defaults to **2**, which at `*/5` is **10 minutes**. The janitor
 therefore commits a demotion 4.5× sooner than it can pay for it, and any activity inside the next
 35 minutes re-promotes it. Observed live 2026-07-14: `*/15 → */5 → */15` in **25 minutes** — two
-renews, ~620k weighted, saving nothing. There is also **no re-arm cooldown** anywhere.
+renews, ~620k weighted, saving nothing. ~~There is also **no re-arm cooldown** anywhere.~~
+**No longer true as of TRDD-CI6ZTNB9 / issue #89 half 2** — `should_emit_renew(..., dwell_s)` is
+that cooldown. Struck rather than deleted: the measurement above was taken when it was true, and
+removing the sentence would make the 25-minute observation look like it happened under a cooldown
+that did not yet exist. See the STATE block.
 
 ## The work (USER-approved scope: 2, 3, 4)
 
