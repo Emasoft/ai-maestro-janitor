@@ -122,7 +122,14 @@ def test_cmd_oauth_health_already_latched_marks_all_latched_and_skips_live_read(
     monkeypatch.setattr(rotator.safe_storage, "keychain_denied_latched", lambda: True)
     monkeypatch.setattr(rotator, "read_slot", lambda _e: None)  # real read_slot short-circuits while latched
     live_calls: list[int] = []
-    monkeypatch.setattr(rotator, "read_live_blob", lambda: live_calls.append(1) or None)
+
+    def _record_live() -> None:
+        # A named function, not `lambda: live_calls.append(1) or None`: `append` returns None,
+        # so the `or` was reading a value-less call's result — harmless at runtime, but mypy
+        # rejects it (func-returns-value) and gate 2 of publish.py runs mypy.
+        live_calls.append(1)
+
+    monkeypatch.setattr(rotator, "read_live_blob", _record_live)
 
     assert rotator.cmd_oauth_health(True) == 0
     out = json.loads(capsys.readouterr().out)
@@ -186,13 +193,21 @@ def _run_lifetime_status(tmp_path: Path, health: dict) -> subprocess.CompletedPr
     ))
     rot_home = tmp_path / "rot"
     rot_home.mkdir()
+    # Run a COPY inside tmp_path, never the in-tree script. `tests/sandbox_guard.py` refuses
+    # to spawn a real shell script from the repo, and it is right to: the script's own children
+    # (`security`, `launchctl`, …) are invisible to the guard, so an in-tree run would silently
+    # escape the sandbox this suite relies on. The copy is byte-identical, so the LOGIC under
+    # test is still the shipped one — and the script resolves `rotator.py` from `$0` only as a
+    # default, which CLAUDE_ROTATOR_PY overrides here, so relocating it changes nothing.
+    script = tmp_path / "lifetime-status.sh"
+    script.write_bytes(_LIFETIME_STATUS.read_bytes())
     env = dict(os.environ)
     env.pop("CLAUDE_ROTATOR_PROFILES", None)   # hermetic: don't let a real profiles dir leak in
     env.pop("CLAUDE_PLUGIN_DATA", None)
     env["CLAUDE_ROTATOR_HOME"] = str(rot_home)
     env["CLAUDE_ROTATOR_PY"] = str(stub)
     return subprocess.run(
-        ["bash", str(_LIFETIME_STATUS)], capture_output=True, text=True, env=env,
+        ["bash", str(script)], capture_output=True, text=True, env=env,
     )
 
 

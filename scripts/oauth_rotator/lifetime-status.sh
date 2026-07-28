@@ -151,7 +151,7 @@ if action:
         # human re-grants keychain access); a login is a fresh sign-in that needs no old token.
         print(f"  OAuth health UNKNOWN on {len(latched)}/{len(roster)} account(s): the keychain denied-latch is set, so")
         print("  `security` reads are suppressed. Re-grant keychain access, then run  rotator.py clear-keychain-latch .")
-        print("  A login is a fresh human sign-in that needs no old token, so /janitor-refresh-claude-logins still works.")
+        print("  A login is a fresh human sign-in that needs no old token, so /janitor-refresh-cc-logins still works.")
     elif not health_known:
         # The engine could not report OAuth health (older cached rotator without the
         # oauth-health subcommand, or no cached plugin). Do NOT assert "no healthy
