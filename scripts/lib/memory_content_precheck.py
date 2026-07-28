@@ -79,6 +79,50 @@ def _candidate_pages(root: Path) -> list[Path]:
     return memory_scopes.iter_note_files(root)
 
 
+_TIER_RE = re.compile(r"^\s*tier:\s*([A-Za-z_-]+)\s*$", re.MULTILINE)
+
+# The tiers a split can actually operate on. `component` is the one the split skill REFUSES:
+# "one element = one page", so a component over the cap is not too big to split, it is
+# MIS-TIERED — too big to be one element. That is a real finding and a cheap one.
+_SPLITTABLE_TIERS = frozenset({"hub", "aspect"})
+
+
+def _page_tier(path: Path) -> str:
+    """The page's declared `tier:`, or "" when absent/unreadable. Reads the frontmatter only."""
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            head = fh.read(2048)
+    except OSError:
+        return ""
+    m = _TIER_RE.search(head)
+    return m.group(1).lower() if m else ""
+
+
+def oversized_mistiered_pages(root: Path, *, max_bytes: int) -> list[tuple[Path, str]]:
+    """Over-cap pages the split skill MUST refuse — `(path, tier)`, cheapest possible check.
+
+    A page over the split cap whose tier is not splittable cannot be fragmented; the correct
+    action is to RE-TIER it, which is a human/curator judgement rather than a split. Surfacing
+    that from the scheduler costs a `stat` plus 2 KB of frontmatter, instead of the full agent
+    context a dispatch spends only to reach the same refusal (issue #114).
+
+    An UNREADABLE tier is deliberately NOT reported as mis-tiered: unknown is not refusable, and
+    treating it as such would suppress a page that may well be splittable. It falls through to
+    the normal dispatch path — the fail-open direction.
+    """
+    out: list[tuple[Path, str]] = []
+    for p in _candidate_pages(root):
+        try:
+            if p.stat().st_size <= max_bytes:
+                continue
+        except OSError:
+            continue  # unreadable size — handled fail-open by the caller, not here
+        tier = _page_tier(p)
+        if tier and tier not in _SPLITTABLE_TIERS:
+            out.append((p, tier))
+    return out
+
+
 def split_has_work(root: Path, *, max_bytes: int) -> bool:
     """True iff some committed page in `root` is strictly larger than `max_bytes`
     (the split cap). Mirrors the split skill's `find -size +<cap>c` size gate with
@@ -95,8 +139,20 @@ def split_has_work(root: Path, *, max_bytes: int) -> bool:
     forever). So "over-cap" already implies "the agent has work", and narrowing further
     would silently drop mis-tier reports on the floor.
 
+    MEASURED CORRECTION 2026-07-28 (issue #114). The paragraph above is right that a mis-tier
+    must not be dropped — and wrong that the AGENT is the only thing that can report it. An
+    over-cap `tier: component` page is the ONE case the split skill must refuse, so every
+    dispatch for it spends a full agent context (~260k tokens, twice in one session) to
+    re-derive the same refusal, and nothing ever re-tiers the page, so it recurs forever. The
+    report is not dropped — it MOVES to a channel that costs a `stat` and a frontmatter read
+    (`oversized_mistiered_pages`, surfaced by the memory-maintenance detector). The agent is
+    reserved for pages it can actually split.
+
     The caller guarantees max_bytes > 0 (see content_has_work fail-open)."""
+    mistiered = {p for p, _t in oversized_mistiered_pages(root, max_bytes=max_bytes)}
     for p in _candidate_pages(root):
+        if p in mistiered:
+            continue  # refusable by construction — surfaced cheaply, never dispatched
         try:
             if p.stat().st_size > max_bytes:
                 return True

@@ -86,6 +86,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 
+import dedupe  # noqa: E402
 import global_state  # noqa: E402
 import memory_content_precheck  # noqa: E402
 import memory_scopes  # noqa: E402
@@ -305,6 +306,37 @@ def main() -> int:
         return 0
 
 
+def _surface_mistiered(scopes: list[tuple[str, Path]], split_cap: int) -> None:
+    """Print one drift line per over-cap MIS-TIERED page — the cheap half of issue #114.
+
+    Best-effort and never raises: this is a report, and a fault in it must not cost the
+    maintenance pass it rides on. A zero cap means the setting is unreadable, in which case
+    every page would look over-cap, so we say nothing rather than report the whole corpus.
+    """
+    if split_cap <= 0:
+        return
+    try:
+        seen = state.state_dir() / "memory-mistier.seen"
+        for scope, root in scopes:
+            for path, tier in memory_content_precheck.oversized_mistiered_pages(
+                Path(root), max_bytes=split_cap
+            ):
+                size = path.stat().st_size
+                msg = (
+                    f"[memory-mistier] {scope}/{path.name} is {size}B (cap {split_cap}) but "
+                    f"`tier: {tier}` — a split MUST refuse it; too big to be ONE element, so "
+                    f"RE-TIER it (hub/aspect) or decompose it by hand."
+                )
+                line = dedupe.emit_once(seen, f"{scope}|{path.name}|{tier}|{size}", msg)
+                if line:
+                    print(line, flush=True)
+    except Exception as exc:  # noqa: BLE001 — a report must never break the pass it rides on
+        try:
+            state.log_line("memory-maintenance", f"mis-tier surface skipped: {exc}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _run() -> int:
     # `--one-shot` is the dispatch.py contract; we accept it (and ignore other args)
     # so the detector is a drop-in roster member.
@@ -319,6 +351,14 @@ def _run() -> int:
         return 0
 
     now = int(time.time())
+
+    # The MIS-TIER surface (issue #114). An over-cap page whose tier is not splittable is the
+    # one case the split skill must refuse, so dispatching the agent for it spends a full
+    # context (~260k tokens, twice in one session) to re-derive the same refusal — and since
+    # nothing re-tiers the page, it recurs forever. The finding is real, so it is not dropped;
+    # it is reported HERE, for a `stat` plus 2 KB of frontmatter. Deduped by the standard
+    # seen-file so it is said once per page, not every fire.
+    _surface_mistiered(scopes, _split_max_bytes())
 
     # Cheap pre-check OUTSIDE the lock: is anything due at all? Avoids taking the
     # flock on the overwhelmingly-common idle fire. (The authoritative check is

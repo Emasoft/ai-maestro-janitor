@@ -644,3 +644,54 @@ def test_content_has_work_threads_the_stamp_through(tmp_path: Path) -> None:
         "consolidate", tmp_path, split_max_bytes=_CAP, last_fingerprint=fp, stamp_age_s=60.0
     ) is False
     assert mcp.content_has_work("consolidate", tmp_path, split_max_bytes=_CAP) is True
+
+
+# --------------------------------------------------------------------------- #
+# issue #114 — the dispatch that could only ever refuse
+# --------------------------------------------------------------------------- #
+
+
+def _tiered_page(root: Path, name: str, tier: str, size: int) -> Path:
+    p = root / name
+    p.write_text(
+        f"---\nname: {name[:-3]}\ndescription: \"d\"\nocd: 2026-01-01\nlmd: 2026-01-02\n"
+        f"metadata:\n  node_type: memory\n  tier: {tier}\n---\n" + ("x" * size) + "\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def test_an_oversized_COMPONENT_is_surfaced_not_dispatched(tmp_path: Path) -> None:
+    """The split skill MUST refuse an over-cap `tier: component` — one element, one page — so
+    dispatching the agent for it spends a full context (~260k tokens, twice in one session)
+    reaching the same refusal, and nothing re-tiers the page, so it recurs forever. The finding is
+    NOT dropped: it moves to `oversized_mistiered_pages`, which costs a stat + 2 KB."""
+    _tiered_page(tmp_path, "big-component.md", "component", 5000)
+    assert mcp.split_has_work(tmp_path, max_bytes=1000) is False, "must not dispatch a refusal"
+    found = mcp.oversized_mistiered_pages(tmp_path, max_bytes=1000)
+    assert [p.name for p, _t in found] == ["big-component.md"]
+    assert found[0][1] == "component"
+
+
+def test_an_oversized_HUB_still_dispatches(tmp_path: Path) -> None:
+    """The narrowing must not suppress REAL work — a hub/aspect over the cap is splittable (the
+    splitter synthesizes seams), and that is the case the chore exists for."""
+    _tiered_page(tmp_path, "big-hub.md", "hub", 5000)
+    assert mcp.split_has_work(tmp_path, max_bytes=1000) is True
+    assert mcp.oversized_mistiered_pages(tmp_path, max_bytes=1000) == []
+
+
+def test_an_oversized_page_with_NO_readable_tier_still_dispatches(tmp_path: Path) -> None:
+    """Unknown is not refusable. A page whose tier cannot be read may well be splittable, so it
+    falls through to the normal dispatch path — the fail-open direction."""
+    (tmp_path / "untiered.md").write_text(
+        "---\nname: untiered\ndescription: \"d\"\n---\n" + ("x" * 5000), encoding="utf-8"
+    )
+    assert mcp.split_has_work(tmp_path, max_bytes=1000) is True
+    assert mcp.oversized_mistiered_pages(tmp_path, max_bytes=1000) == []
+
+
+def test_a_component_UNDER_the_cap_is_not_a_mistier(tmp_path: Path) -> None:
+    """Being a component is fine; being a component that outgrew one element is the finding."""
+    _tiered_page(tmp_path, "small-component.md", "component", 10)
+    assert mcp.oversized_mistiered_pages(tmp_path, max_bytes=1000) == []
