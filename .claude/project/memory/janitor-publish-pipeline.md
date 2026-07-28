@@ -144,6 +144,19 @@ Building the guard's own live-actor probe failed silently THREE times (a swallow
 reads the liveness file from `_REAL_ENV["HOME"]` directly. A probe that fails silently
 degrades to "no other actor", i.e. it blames the suite.
 
+
+^ATOM-UHO6-Q99D [desc:"gate 4 timing out is CPV's worker-pool startup race, not a too-tight cap — retry, do not raise it", keywords: publish_hangs_at_gate_4_validating_plugin_remote_CPV Command_timed_out_after_300s publish_fails_but_every_test_passed REPO_LINT_never_finishes cpv-remote-validate_stuck, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
+
+Gate 4 (`stage_validate`, remote CPV) can HANG, and its 300s cap is the thing that catches it — do
+not read a timeout there as "the cap is too tight". CPV`s `[REPO LINT]` stage fans out a worker pool;
+when the ~15 workers spawn it finishes in ~60s, but when they fail to spawn the parent blocks on a
+lock forever instead of raising `BrokenProcessPool`. It is a startup RACE, so it is intermittent: two
+consecutive publishes died at 300s and the very next run passed clean (EXIT=0, 0 blocking issues).
+Diagnose it in one step rather than guessing — `/usr/bin/sample <pid> 4` shows the main thread at
+3317/3317 samples in `lock_PyThread_acquire_lock -> acquire_timed -> __psynch_cvwait` with threads
+parked in `_queue_SimpleQueue_get`, and `ps` shows a `multiprocessing.resource_tracker` child with
+ZERO workers beside it. The remedy is to RETRY the publish; there is no `--jobs`/serial flag to pass. [^5]
+
 ## Notes and lessons learned
 [^1]: [id:ATOM-MG06-0011, status:valid, keywords:"pipeline_step_numbers_skip_preserve renumbering_breaks_log_greps removed_stage_keep_downstream_numbers", ocd:2026-06-13, lmd:2026-06-13] The step numbers intentionally skip 5 —
   the old "Step 5: CPV lint" was folded into the single Step 4 `plugin --strict`
@@ -183,3 +196,4 @@ degrades to "no other actor", i.e. it blames the suite.
   blocks publishes with every test green. DO detect other live actors first, and make that
   probe fail LOUDLY: mine failed silently three times and each failure degraded to "no other
   actor", i.e. it blamed the suite.
+[^5]: [id:ATOM-RHYL-686X, status:valid, desc:"the cap was doing its job — measure the hang before touching the number", keywords:"raise_the_timeout_because_it_timed_out timeout_is_indistinguishable_from_a_hang sample_the_stuck_process_before_changing_the_cap cpu_time_flatlined_means_hang_not_slow", ocd:2026-07-28, lmd:2026-07-28] DO NOT raise a gate timeout because the gate timed out, BECAUSE a timeout is indistinguishable from a hang until you look, and the cap is often the only thing converting an unbounded hang into a bounded failure — raising it turns a 5-minute red into a wedged release. DO sample the stuck process first (`/usr/bin/sample <pid> 4`, `ps` for CPU-time growth, `lsof -a -i` for a socket) and let the stack name the cause.
