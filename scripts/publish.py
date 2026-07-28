@@ -1681,7 +1681,12 @@ def _release_paths(root: Path) -> tuple[list[str], list[str]]:
     """
     try:
         r = subprocess.run(
-            ["git", "status", "--porcelain"],
+            # `--untracked-files=all` is load-bearing: by default git COLLAPSES a wholly
+            # untracked directory to a single "?? .integrity/" entry, so the manifest
+            # written on a first release would be classified as a stray directory and
+            # refuse the publish. Expanding to real paths also makes the refusal message
+            # name the offending files rather than a folder.
+            ["git", "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -1916,6 +1921,27 @@ def stage_changelog(root: Path, new_ver: str, dry_run: bool) -> None:
     )
     cprint(f"  {GREEN}CHANGELOG.md updated with {tag}.{NC}")
 
+def _refresh_integrity_manifest(root: Path) -> None:
+    """Rewrite `.integrity/manifest-sha256.json` so a release ships its OWN baseline.
+
+    The `janitor-self-integrity` detector attests the installed tree against this file,
+    so a manifest that predates the release attests nothing: every legitimately changed
+    skill/command/rule reads as tampering, and real tampering hides among them. It went
+    unnoticed because nothing regenerated it — TRDD-fe45babc describes a "Step 10.5" that
+    was never implemented, and by v0.63.3 the manifest was three releases stale (CLAUDE.md
+    hashed 83a3e39c live vs fed37541 recorded).
+
+    Placement is load-bearing: AFTER the bump, the README badge and the changelog have
+    rewritten files the manifest covers, and BEFORE the commit that ships it.
+    """
+    gen = root / "scripts" / "generate_integrity_manifest.py"
+    if not gen.is_file():
+        cprint(f"  {YELLOW}WARNING: {gen.name} is missing — shipping the previous "
+               f"integrity manifest. The self-integrity detector will be stale.{NC}")
+        return
+    run(["uv", "run", str(gen), "--root", str(root)], cwd=root)
+
+
 def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     """Step 10: Commit, tag, push. Idempotent on commit + tag.
 
@@ -1929,6 +1955,10 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
     perm — instead of an opaque git push failure mid-pipeline.
     """
     cprint(f"\n{BOLD}[10/11] Committing and pushing...{NC}")
+    # Before the tree is inspected: a regenerated manifest must count as dirty here, or
+    # it would sit uncommitted and the next publish would refuse it as a stray file.
+    if not dry_run:
+        _refresh_integrity_manifest(root)
     tag = f"v{new_ver}"
     # The DEPENDENCY-RESOLUTION tag. Since Claude Code 2.1.110 a version-constrained
     # dependency ({"name": "<plugin>", "version": ">=1.2"}) is resolved by listing this

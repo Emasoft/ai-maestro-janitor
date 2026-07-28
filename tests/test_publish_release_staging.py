@@ -97,6 +97,23 @@ def test_an_untracked_file_that_appeared_mid_run_is_refused(repo: Path) -> None:
     assert unexpected == ["report-with-absolute-paths.md"]
 
 
+def test_a_stray_untracked_DIRECTORY_is_expanded_into_the_files_it_holds(repo: Path) -> None:
+    """git collapses a wholly-untracked dir to "?? dir/" unless asked for every file.
+
+    That default nearly reintroduced the bug from the other side: a first release writes
+    `.integrity/` fresh, git would report the FOLDER, and the manifest — a legitimate
+    artifact — would be refused as a stray. The refusal must also name real files, since
+    "reports/" tells a human nothing about what almost shipped.
+    """
+    (repo / "reports").mkdir()
+    (repo / "reports" / "audit.md").write_text("/Users/someone/private\n", encoding="utf-8")
+    (repo / "reports" / "scan.md").write_text("token=abc\n", encoding="utf-8")
+
+    _artifacts, unexpected = publish._release_paths(repo)
+
+    assert sorted(unexpected) == ["reports/audit.md", "reports/scan.md"]
+
+
 def test_a_version_only_python_rewrite_is_a_release_artifact(repo: Path) -> None:
     """update_python_versions rewrites __version__ across scripts/ — that IS part of a bump."""
     (repo / "scripts" / "tool.py").write_text('__version__ = "1.1.0"\n\nX = 1\n', encoding="utf-8")
@@ -154,3 +171,77 @@ def test_every_staged_path_is_one_git_can_actually_add(repo: Path) -> None:
 def test_a_non_repo_directory_yields_empty_lists_so_the_caller_refuses(tmp_path: Path) -> None:
     """An unreadable status must never degrade into "stage everything"."""
     assert publish._release_paths(tmp_path) == ([], [])
+
+
+# --- the integrity manifest a release must ship (found stale by three releases) -------
+
+
+def test_the_integrity_manifest_is_a_release_artifact(repo: Path) -> None:
+    """It is regenerated at step 10, so it MUST be in the staging list.
+
+    Left out, the refreshed manifest would sit uncommitted, the release would ship the
+    stale one anyway, and the NEXT publish would refuse it as a stray file — the defect
+    would come back wearing a different hat.
+    """
+    assert ".integrity/manifest-sha256.json" in publish._RELEASE_ARTIFACTS
+
+    (repo / ".integrity").mkdir()
+    (repo / ".integrity" / "manifest-sha256.json").write_text("{}\n", encoding="utf-8")
+
+    artifacts, unexpected = publish._release_paths(repo)
+
+    assert artifacts == [".integrity/manifest-sha256.json"]
+    assert unexpected == []
+
+
+def test_refreshing_the_manifest_makes_it_agree_with_the_tree(tmp_path: Path) -> None:
+    """The contract the stale manifest broke: after a refresh, every hash matches.
+
+    Real generator, real files, real hashes — the point is precisely that the recorded
+    digests equal the digests of the shipped bytes, which a mock could not demonstrate.
+    """
+    import hashlib
+    import json
+    import shutil
+
+    scripts_src = Path(__file__).resolve().parent.parent / "scripts"
+    root = tmp_path / "plugin"
+    (root / "scripts" / "lib").mkdir(parents=True)
+    (root / "rules").mkdir()
+    shutil.copy2(
+        scripts_src / "generate_integrity_manifest.py",
+        root / "scripts" / "generate_integrity_manifest.py",
+    )
+    # The generator imports this from its sibling lib/ — a stdlib-only module, so the
+    # copy is the whole dependency and the test still exercises the REAL hashing code.
+    shutil.copy2(
+        scripts_src / "lib" / "janitor_self_integrity.py",
+        root / "scripts" / "lib" / "janitor_self_integrity.py",
+    )
+    (root / "README.md").write_text("# readme\n", encoding="utf-8")
+    (root / "CLAUDE.md").write_text("# claude\n", encoding="utf-8")
+    (root / "rules" / "a-rule.md").write_text("rule body\n", encoding="utf-8")
+
+    publish._refresh_integrity_manifest(root)
+
+    files = json.loads(
+        (root / ".integrity" / "manifest-sha256.json").read_text(encoding="utf-8"),
+    )["files"]
+    assert set(files) >= {"README.md", "CLAUDE.md", "rules/a-rule.md"}
+    for rel, recorded in files.items():
+        assert hashlib.sha256((root / rel).read_bytes()).hexdigest() == recorded
+
+    # And a later edit must now be VISIBLE as drift — that is the whole detector.
+    (root / "rules" / "a-rule.md").write_text("tampered\n", encoding="utf-8")
+    live = hashlib.sha256((root / "rules" / "a-rule.md").read_bytes()).hexdigest()
+    assert live != files["rules/a-rule.md"]
+
+
+def test_a_missing_generator_warns_instead_of_blocking_the_release(tmp_path: Path) -> None:
+    """A degraded detector is not worth failing a release over — but it must be audible."""
+    root = tmp_path / "plugin"
+    (root / "scripts").mkdir(parents=True)
+
+    publish._refresh_integrity_manifest(root)  # must not raise
+
+    assert not (root / ".integrity").exists()
