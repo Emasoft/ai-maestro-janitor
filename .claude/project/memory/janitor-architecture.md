@@ -215,7 +215,10 @@ outside could re-fire it. Four layers, each resurrecting the one below:
   attempts it pauses and alerts a human — the one place recovery yields).
 - **L2 — session hooks**: SessionStart re-arms the cron, publishes the session
   registry, and captures the terminal identity; PostCompact records a resume
-  directive so a compaction can't strand an unattended session.
+  directive, and pushes the nudge that consumes it whenever THIS pane is
+  unattended (see ^ATOM-DUXK-QD2D — recording alone did not stop a compaction
+  from stranding a session; the push is the half that matters, and it must read
+  per-pane presence).
 - **L3 — in-session cron**: the ~5-min heartbeat self-trigger. Session-only is
   acceptable here precisely because L2 re-arms it every new session.
 
@@ -306,6 +309,19 @@ must report a crash.[^3]
   rule file, the pinned `aimaestro-*` overlay names, and the user-scope
   orphans that make an agent read two generations of one rule.
 
+
+^ATOM-DUXK-QD2D [desc:"why unattended sessions were stranded after a compaction — the resume push read machine-global presence", keywords: dead_claude_sessions_I_have_to_wake_by_hand session_stranded_after_compaction resume-after-compact_flag_never_consumed post-compact_resume_did_not_fire per-pane_user_presence, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
+
+The post-compact resume PUSH is gated on PER-PANE user presence, never on a machine-global one. A
+resume directive is recorded on every compaction, but the nudge that makes an UNATTENDED session
+actually continue is suppressed while the user is judged present — and that presence breadcrumb used
+to be a single machine-wide file. So one pane the user happened to be typing in marked EVERY pane on
+the host "attended", and every other session sat on an unconsumed `resume-after-compact.flag` until a
+human woke it by hand. Measured at the fix: five projects holding flags, two of them 4.3 days old.
+`state.terminal_pane_key()` + `state.per_pane_presence_path()` are the per-pane breadcrumb;
+`user_intent.user_is_present()` is its reader; the global file is the fallback only when the pane key
+cannot be resolved. Fixed in eb52843 (v0.63.2). [^12]
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-MG07-0006, status:valid, keywords:"hub_is_prose_overlay_not_second_copy auto_map_wins_structural_disagreement fix_prose_not_map", ocd:2026-06-13, lmd:2026-06-13] This hub is the prose overlay of the
@@ -384,3 +400,4 @@ must report a crash.[^3]
   DO route by AUDIENCE — private state stays in DATA, anything a second owner
   must observe or contend on goes to the fixed control dir
   ([[janitor-fleet-control-plane]]).
+[^12]: [id:ATOM-VYSD-YCS4, status:valid, desc:"the scope mismatch that stranded every unattended session on the host", keywords:"machine_global_signal_gating_a_per_session_action one_busy_pane_marked_every_pane_attended gate_scope_must_match_action_scope feature_never_fires_no_error_anywhere", ocd:2026-07-28, lmd:2026-07-28] DO NOT gate a PER-SESSION action on a MACHINE-GLOBAL signal, BECAUSE one active session then speaks for every session on the host and the other N-1 are silently starved — and the symptom reads as "the feature never fires", not as "a gate said no", so nobody looks at the gate. DO give every gate a signal at the SAME scope as the thing it gates.
