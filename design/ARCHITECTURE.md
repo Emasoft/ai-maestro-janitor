@@ -1,8 +1,12 @@
 # ai-maestro-janitor — two-harness architecture (v0.50.0 baseline, revision 7 — PROPOSED)
 
-> **Status: rev 4 PROPOSED (2026-07-17, owner-directed) — supersedes the rev-3 per-class
-> chore gating; awaiting both sides' `RATIFIED rev 4` on
-> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100).** Rev 3 was
+> **Status: rev 7 PROPOSED (2026-07-24) — revs 5–7 are authored janitor-side and rev 7 is
+> not yet posted; and rev 4 still carries only the JANITOR's `RATIFIED` on
+> [janitor#100](https://github.com/Emasoft/ai-maestro-janitor/issues/100) — ai-maestro's
+> match is outstanding.** (This status line said "rev 4 PROPOSED" while the title said
+> revision 7: the header was not updated as revs 5–7 were appended to the log below. A
+> ratification contract whose own status line disagrees with its title is worse than an
+> unfinished one — each side reads whichever half it happens to look at.) Rev 3 was
 > `RATIFIED` by BOTH sides earlier the same day (janitor comment 5005116161; ai-maestro
 > 16:06 UTC with all five `--command-key` registrations, their `d9439b94`); everything
 > in it EXCEPT §2 executor 2 and the §6.1 token interpretation carries forward
