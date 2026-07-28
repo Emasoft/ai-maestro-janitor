@@ -49,23 +49,22 @@ machine-private) — see step 1.
    nothing is written inside the repo, so a repo the tooling merely visits is not mutated.
 
    **Scope routing — decide BEFORE authoring.** Ask: *"would this task be TRUE and USEFUL for
-   a contributor who clones this repo on a DIFFERENT machine?"*
-   - **No → LOCAL.** Each of these forces local: an absolute `$HOME` path, a hostname, a
-     username, a credential/token, "on THIS machine", a specific install/cache state.
-   - **Yes → PROJECT.** **UNSURE → LOCAL** — the safe scope: promoting local→project later is
-     deliberate, whereas a leaked machine-private TRDD is already pushed.
-   - A task may SPLIT: machine-agnostic work as a PROJECT TRDD, per-machine state as a LOCAL
-     one, cross-linked.
-
-   A `scope: project | local` field may appear (absent = `project`), but the **path is
-   authoritative** — it is what decides whether the file is git-tracked — so on any
-   disagreement the path wins and the field is a lint target.
+   a contributor who clones this repo on a DIFFERENT machine?"* **No → LOCAL** (an absolute
+   `$HOME` path, a hostname, a username, a credential, "on THIS machine", an install state
+   each force it). **Yes → PROJECT. UNSURE → LOCAL** — a leaked machine-private TRDD is
+   already pushed, whereas promoting local→project later is deliberate. A task may SPLIT,
+   cross-linked. A `scope:` field may appear (absent = `project`) but the **path is
+   authoritative** — it decides git-tracking — so on disagreement the path wins and the field
+   is a lint target.
 
 2. **Filename.** `TRDD-<YYYYMMDD_HHMMSS±HHMM>-<id8>-<slug>.md`. `<id8>` is an **8-char
    UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id (no UUID), unique across
    **BOTH roots** (the collision check scans both). Test for a taken id with
-   `find … | grep -q .`, **never** `ls <glob>` — an unmatched glob can make `ls` list the
-   cwd and exit 0 → an infinite regenerate loop. Id/timestamp recipe: the reference.
+   `find … -iname … | grep -q .`, **never** `ls <glob>` — an unmatched glob can make `ls`
+   list the cwd and exit 0 → an infinite regenerate loop. **`-iname`, NOT `-name`:** a
+   case-SENSITIVE collision check calls a case-folding id FREE, and the write then lands on
+   the existing card's path on a case-insensitive filesystem — a silent overwrite of an audit
+   artifact. Id/timestamp recipe: the reference.
 3. **Reference a TRDD as `TRDD-<id8>`** (or `#<id8>` casually). Lookups are
    case-insensitive; the id is always WRITTEN uppercase. Put it in the commit subject of
    every commit that implements it, and in any TaskCreate entry that tracks it.
@@ -112,17 +111,22 @@ machine-private) — see step 1.
     append-only, so a reader (or a compaction summary) hits the OLDEST, often SUPERSEDED
     facts first. Immediately after the title, before the first body section, add a heading:
     `## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — <date>`.
-
-    It is the single source of truth and is kept current on every edit. It carries: the
-    current state of each component; the **NEXT ACTION** (one concrete step, runnable as
-    written); the load-bearing facts/gotchas; an explicit **SUPERSEDED — do NOT carry
-    forward** list; and paths to the durable artifacts to read before acting.
+    It is the single source of truth, kept current on every edit; it carries each component's
+    state, the **NEXT ACTION** (one step, runnable as written), the load-bearing gotchas, an
+    explicit **SUPERSEDED — do NOT carry forward** list, and the artifacts to read first.
 11. **Reports are evidence; decisions become TRDDs.** A report (audit, benchmark) presents
     DATA and lives in gitignored `reports/`. The moment it leads to a DECISION, that decision
     goes into a TRDD — a new one, or an existing TRDD's STATE block.
-12. **Terminal columns are frozen.** Do not edit the body of a `complete` / `failed` /
-    `superseded` / `published` / `live` TRDD. New work = new TRDD. (Only `updated:` and,
-    when superseding, `superseded-by:` may change.)
+12. **Terminal columns are frozen — AFTER the transition that made them terminal.** Do not
+    edit the body of a `complete` / `failed` / `superseded` / `published` / `live` TRDD. New
+    work = new TRDD. (Only `updated:` and, when superseding, `superseded-by:` may change.)
+    Three clauses, without which the rule forbids the very edit that closes a card:
+    the closing edit is the LAST permitted write, not the first forbidden one; `## Approval
+    log` is an append-only ledger and is EXEMPT (an audit trail that cannot be appended to
+    cannot record the act of closing); and `published`/`live` archive AS THEMSELVES —
+    rewriting `published → completed` destroys the fact that it shipped, so the
+    archive-eligible set is `completed|cancelled|superseded|published|live`, and an absent
+    `release-via:` defaults to `none` (terminal `complete`). Rationale: the reference.
 13. **One atomic task per TRDD.** If you catch yourself writing "and also do X", X is an
     NPT, an EHT, or its own TRDD.
 14. **One kanban board, `scope` as a badge — not a second board.** Columns and transitions
@@ -134,16 +138,18 @@ machine-private) — see step 1.
 
 ## Authoring, in short
 
-Route the scope (step 1) → generate the id + timestamps (step 2) → write the file with the
-minimal frontmatter → `column: backburner` (or `live_auditing` for an audit TRDD) → same ISO
-datetime in BOTH `created:` and `updated:` → write the prose → create a TaskCreate entry
-naming the id. A **PROJECT** TRDD is then `git add`-ed **by name** and committed (`docs: add
-TRDD-<id8> — <summary>`); report the id + commit. A **LOCAL** TRDD is in no repo — report the
-id + path.
+Route the scope (1) → mint id + timestamps (2) → minimal frontmatter → `column: backburner`
+(`live_auditing` for an audit TRDD) → the same ISO datetime in BOTH `created:` and `updated:`
+→ the prose → a TaskCreate entry naming the id. A **PROJECT** TRDD is then `git add`-ed **by
+name** and committed (`docs: add TRDD-<id8> — <summary>`); report the id + commit. A **LOCAL**
+one is in no repo — report the id + path.
 
 Resuming later: look the id up in BOTH roots with `find` (never an `ls` glob — step 2):
-`find design ~/.claude/projects/<slug>/design -name 'TRDD-*-<id8>-*.md'` → read the **STATE
-block first**. On disagreement the STATE block wins (hand-edits beat stale fields) — then fix
+`find design ~/.claude/projects/<slug>/design -iname 'TRDD-*-<id8>-*.md'` → read the **STATE
+block first**. (**`-iname`, NOT `-name`** — legacy LOWERCASE ids are permanently valid: they
+are cited in immutable commit subjects and cannot be renamed without destroying that
+provenance. Load-bearing indefinitely, not a migration aid; measured, 76% of one live board.)
+On disagreement the STATE block wins (hand-edits beat stale fields) — then fix
 the frontmatter.
 
 ## Does NOT apply to

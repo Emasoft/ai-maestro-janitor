@@ -348,7 +348,24 @@ def test_ind_rule_takes_over_unmarked_same_named_file(tmp_path, monkeypatch):
 # overnight-continuity rule; over-compressing it further would be a reliability false economy.
 # This is the "measured justification" the ratchet above requires. Bring it back DOWN if a
 # future rule move frees room.
-_RULES_FLOOR_CAP_BYTES = 52_400
+#
+# MEASURED RAISE 52_400 -> 53_300 (janitor#104 + janitor#116/#93, 2026-07-28): two FIELD-REPORTED
+# defects in `trdd-design-tasks.md`, both reported by other fleet members against the shipped rule.
+# (1) The rule said lookups are case-insensitive and then shipped a case-SENSITIVE `find -name`;
+# agents paste the command, so the documented resume lookup failed on the 76% of one live board's
+# ids that are legacy lowercase — and the same flag in the COLLISION check calls a case-folding id
+# free, so the write silently overwrites an existing card on a case-insensitive filesystem. (2) §12
+# "terminal columns are frozen" forbade, as written, the very edit that CLOSES a card, so the
+# archival protocol was unimplementable and `published → completed` destroyed the shipped fact;
+# ai-maestro#93 is open on that contradiction. Both fixes are normative rule TEXT — there is no
+# reference-material equivalent to displace, and the corpus was at 52,395 B (5 B of headroom), so
+# nothing redundant existed to trade against.
+# Paid for as far as honestly possible first: the additions were +967 B raw and the same file was
+# compressed by ~125 B (scope-routing prose, the STATE-block checklist, the authoring recipe) for a
+# net +842 B (~210 tokens). Compressing further would have deleted normative content to satisfy a
+# byte budget — the false economy this comment block already warns about. Bring it back DOWN when a
+# rule move frees room.
+_RULES_FLOOR_CAP_BYTES = 53_300
 _SINGLE_RULE_CAP_BYTES = 12_000
 
 
