@@ -11,7 +11,7 @@
 [![version](https://img.shields.io/badge/version-0.63.0-blue)](https://github.com/Emasoft/ai-maestro-janitor/releases/latest)
 [![CI](https://github.com/Emasoft/ai-maestro-janitor/actions/workflows/ci.yml/badge.svg)](https://github.com/Emasoft/ai-maestro-janitor/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#)
+![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 <!--BADGES-END-->
 
 Session-scoped janitor plugin for Claude Code. Reconciles drift between what
