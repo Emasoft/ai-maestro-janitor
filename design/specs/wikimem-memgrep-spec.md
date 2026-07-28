@@ -831,6 +831,17 @@ evaluated, not whatever is on `PATH`. Otherwise every measurement silently score
 build and reports the old numbers as the new build's improvement — a self-confirming result that
 looks like a successful experiment.
 
+`WM-BENCH-07a` **the-binary-pin-binds-EVERY-shelling-test, not only the benchmarks** — `MUST`:
+any test that invokes the tool as a subprocess pins the build under test exactly as WM-BENCH-07
+requires of the harness. A resolution ladder that falls through to `PATH` makes a test's verdict
+depend on what happens to be INSTALLED, and the failure is silent in the worst direction: the
+test PASSES against a stale build and starts failing the day the machine is repaired, so the
+repair looks like the regression. Measured 2026-07-28: nine assertions across two suites still
+expected the pre-`WM-RCL-06b` filename locator and had been green only because an older binary
+was ahead of the tree build on `PATH`; the four benchmark gates, which DO pin, reported `no
+change` throughout — which is exactly how the stale expectations were distinguished from a real
+regression.
+
 ## WM-AUTH — the authoring contract
 
 `WM-AUTH-01` **route-through-a-verb** — `MUST`: do not hand-author wikimem markdown. Every

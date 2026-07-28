@@ -87,3 +87,41 @@ def test_one_heal_is_the_system_working_two_is_a_bug(tmp_path: Path, count: int,
     _ledger(tmp_path, [f"{NOW - 60 * i} rebuild-fts [MEMGREP-001] corrupt" for i in range(1, count + 1)] or ["# none"])
     heals = health.recent_heals(str(tmp_path), now=NOW)
     assert (len(heals) >= health._HEALS_BEFORE_TICKET) is expected
+
+
+# --------------------------------------------------------------------------- #
+# T-FATU6QPI — a CRITICAL ticket whose title was unreadable
+# --------------------------------------------------------------------------- #
+
+
+def test_shape_identifiers_lifts_the_table_and_column_out_of_a_real_message():
+    """The exact message from the incident. The template's slots are IDENTIFIERS; the detector used
+    to wedge this whole string into `table=` and pass `column=""`, producing a title reading
+    ``a migration left `schema validation: `atoms` is missing…` without column ` ``."""
+    msg = (
+        "schema validation: `atoms` is missing column `status` "
+        "(a migration failed to add it — recall on that column would silently return nothing)"
+    )
+    assert health.shape_identifiers(msg) == ("atoms", "status")
+
+
+def test_shape_identifiers_handles_every_shape_message_memgrep_emits():
+    """One message proving it is not enough — the detector sees whichever shape defect fires."""
+    cases = {
+        "schema validation: table `memories` is MISSING": ("memories", ""),
+        "schema validation: FTS index `memories_fts` is MISSING": ("memories_fts", ""),
+        "schema validation: FTS `atoms_fts` has no `keywords` column — it is STALE": (
+            "atoms_fts",
+            "keywords",
+        ),
+        "orphaned rows: `lessons` references memories that no longer exist": ("lessons", ""),
+    }
+    for msg, expected in cases.items():
+        assert health.shape_identifiers(msg) == expected, msg
+
+
+def test_an_unparsed_message_yields_EMPTY_not_the_whole_sentence():
+    """The failure mode must be a LOUD empty field (which renders as `<?table?>`), never the
+    sentence-in-a-noun-slot that produced the unreadable ticket."""
+    assert health.shape_identifiers("something entirely unexpected happened") == ("", "")
+    assert health.shape_identifiers("") == ("", "")

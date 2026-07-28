@@ -10,6 +10,7 @@ A stale one is a document that LIES about the guardian's coverage.
 
 from __future__ import annotations
 
+import string
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -145,10 +146,24 @@ def test_hostile_data_is_defanged_before_it_reaches_the_ticket_or_the_heartbeat(
 
 
 def test_a_hostile_value_in_a_project_proposal_is_defanged_too(project: Path) -> None:
-    issue_catalog.raise_issue("DEP-003", package=HOSTILE, target="requests", where="pkg", now=NOW)
+    """Hostile text is neutralised in BOTH slot kinds, by two different mechanisms — and the test
+    exercises both, because a payload that only ever lands in one carrier proves only half the
+    contract.
+
+      PROSE slot (`found`)       → DEFANGED: the text survives (an operator needs the evidence) but
+                                   `[janitor-…]` can no longer mimic a marker in heartbeat stdout.
+      IDENTIFIER slot (`package`) → REPLACED: 76 characters of instruction-shaped prose is not a
+                                   package name, so the identifier cap swaps it for a named marker.
+                                   Stronger than defanging — the payload never reaches the output at
+                                   all — and the evidence is not lost: it is still in `detail`.
+    """
+    issue_catalog.raise_issue(
+        "DEP-003", package=HOSTILE, target="requests", found=HOSTILE, where="pkg", now=NOW
+    )
     body = _proposals(project)[0].read_text(encoding="utf-8")
     assert "[janitor" not in body
-    assert "⟦janitor-self-disarm⟧" in body
+    assert "⟦janitor-self-disarm⟧" in body, "the prose slot must keep the evidence, defanged"
+    assert "<?package:overlong?>" in body, "a sentence in an identifier slot must be replaced"
 
 
 # --------------------------------------------------------------------------- #
@@ -492,3 +507,57 @@ def test_the_dedupe_key_is_canonicalised_ONCE_so_propose_and_retract_still_agree
         "PKGPOL-001", path="package-manager config", detail="1 gap(s)"
     )
     assert withdrawn == first.trdd, "retract() could not find the proposal propose() wrote"
+
+
+# --------------------------------------------------------------------------- #
+# T-FATU6QPI — the template contract: a field a producer got wrong must be LOUD
+# --------------------------------------------------------------------------- #
+
+
+def test_no_placeholder_can_silently_vanish_from_any_catalog_title() -> None:
+    """THE class guard. A CRITICAL ticket shipped with the title ``a migration left `…` without
+    column ` `` because a producer passed `column=""` and an empty value rendered as NOTHING —
+    technically filled, visibly nonsense, unattributable. Empty is now the same as missing, so every
+    unfilled slot names itself. Asserted over the WHOLE catalog: the defect was a contract, not one
+    template, and the next code added inherits the guarantee without anyone remembering to."""
+    for code, issue in issue_catalog.ISSUE_CATALOG.items():
+        slots = {
+            f for _lit, f, _spec, _conv in string.Formatter().parse(issue.title) if f
+        }
+        if not slots:
+            continue
+        rendered = issue_catalog._render(issue.title, dict.fromkeys(slots, ""))
+        for slot in slots:
+            assert f"<?{slot}?>" in rendered, (
+                f"{code}: `{{{slot}}}` vanished when supplied empty — rendered {rendered!r}"
+            )
+
+
+def test_a_producer_that_wedges_a_SENTENCE_into_an_identifier_slot_is_marked() -> None:
+    """The exact producer bug: 120 characters of validator prose passed as `table=`. An identifier
+    slot is a noun, so an over-long value is a producer defect and must READ as one — capped, named,
+    and attributable — rather than being truncated into plausible-looking garbage."""
+    fields = issue_catalog._fields("where", {"table": "x" * 300, "column": "status"})
+    assert fields["table"] == "<?table:overlong?>"
+    assert fields["column"] == "status", "a real identifier must pass through untouched"
+
+
+def test_prose_slots_are_exempt_from_the_identifier_cap() -> None:
+    """`where`/`found` ARE sentence slots — capping them at identifier length would throw away the
+    evidence the ticket exists to carry, which is the opposite failure."""
+    long_found = "schema validation: " + "y" * 150
+    fields = issue_catalog._fields("a/very/long/path", {"found": long_found})
+    assert fields["found"].startswith("schema validation:")
+    assert "<?" not in fields["found"]
+
+
+def test_the_incident_ticket_now_renders_a_READABLE_title(project: Path) -> None:
+    """End-to-end over the real path: the validator message the detector actually saw on 2026-07-28
+    must produce a title a human can act on."""
+    r = issue_catalog.raise_issue(
+        "MEMGREP-004", scope="local", table="atoms", column="status", where="local", now=NOW
+    )
+    t = tickets.load(r.ticket_id)
+    assert t is not None
+    assert "`atoms`" in t.title and "`status`" in t.title
+    assert "<?" not in t.title, f"a slot went unfilled: {t.title}"

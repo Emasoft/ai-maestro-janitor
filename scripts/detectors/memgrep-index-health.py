@@ -66,6 +66,29 @@ _HEAL_WINDOW_S = 86400
 # `FAIL <root> [MEMGREP-001] <prose>` — the CODE is the contract, the prose is free to change.
 _FAIL_RE = re.compile(r"^FAIL\s+(?P<root>.+?)\s+\[(?P<code>[A-Z][A-Z0-9]{1,9}-\d{3})\]\s*(?P<msg>.*)$")
 
+# memgrep names every SQL identifier it complains about in backticks — `atoms`, `status`, `memories`.
+# That is a stable convention across every shape message it emits, so the identifiers can be lifted
+# out of the prose without parsing the prose itself (which IS free to change, per the line above).
+_IDENT_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
+
+
+def shape_identifiers(msg: str) -> tuple[str, str]:
+    """`(table, column)` named by a validator message — `("", "")` when it names neither. PURE.
+
+    The catalog's shape templates have IDENTIFIER slots (`{table}`, `{column}`), and a detector that
+    does not fill them with identifiers produces a ticket nobody can read. This used to pass the
+    whole 120-char message as `table=` and an empty `column=`, which rendered a CRITICAL ticket
+    titled ``a migration left `schema validation: `atoms` is missing…` without column ` ``.
+
+    Returning `("", "")` on no match is deliberate and is NOT a silent failure: an empty field now
+    renders as the self-naming `<?table?>` marker, so an unparsed message announces itself in the
+    ticket title instead of quietly erasing half the sentence.
+    """
+    found = _IDENT_RE.findall(msg or "")
+    table = found[0] if found else ""
+    column = found[1] if len(found) > 1 else ""
+    return table, column
+
 
 def _load(path: Path) -> dict[str, int]:
     try:
@@ -162,14 +185,17 @@ def main() -> int:
             continue
 
         scope = by_root.get(root, "unknown")
+        table, column = shape_identifiers(msg)
         raised = issue_catalog.raise_issue(
             code,
             scope=scope,
             where=root,
             # The prose is UNTRUSTED (it embeds sqlite's message and a table name) — `raise_issue`
-            # sanitizes every value before it reaches the template.
-            table=msg[:120],
-            column="",
+            # sanitizes every value before it reaches the template. The template's slots are
+            # IDENTIFIERS, so lift the identifiers out rather than wedging the whole message in.
+            table=table,
+            column=column,
+            found=msg[:200],
             evidence=[f"{root}/.memgrep/index.db"],
             origin=_NAME,
         )
