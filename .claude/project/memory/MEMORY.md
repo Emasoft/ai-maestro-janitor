@@ -26,3 +26,4 @@ ONLY one that leaves the machine — it carries NO machine-private data (the
 - [janitor publish — gate cleared, v0.7.x shipped](project_janitor_publish_blocked_cpv_fps.md) — RESOLVED: CPV --strict exit 0, v0.7.0+v0.7.1 published. The unblock recipe (devitalize-or-remove, never exempt; tools/→scripts/ move).
 - [janitor CC-changelog currency](project_janitor_cc_changelog_currency.md) — triaged CC 2.1.98→2.1.173 vs the janitor: 0 BREAKS; rate-limit-survival + CronCreate floor re-verified; fixed the 1 stale fact; optional improvement backlog.
 - [rotator let a 429 happen (version skew)](project_rotator_let_429_happen_version_skew.md) — rotator deadlocks "all accounts maxed" while an account is fresh because the RUNNING daemon predated the CF-1010 fix → slots lapse. RESOLVED by the v0.7.x publish.
+- [wikimem — project overview](ai-maestro-janitor-overview.md) — the curated wiki that coexists with this file; recall by symptom: `memgrep recall "<symptom>" <memdir>`

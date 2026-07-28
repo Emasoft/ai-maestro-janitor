@@ -301,7 +301,11 @@ def sync_user_memory_mirror() -> str | None:
 
 
 def resolve_wiki_dir(scope_root: Path) -> Path:
-    """The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wiki``.
+    """The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wikimem``.
+
+    (The name is ``WIKI_SUBDIR``. This line said ``wiki`` — the pre-2026-07-08 name, kept
+    in the prose after the rename landed in the constant. A docstring naming a path that
+    does not exist is worse than none: it is the copy a reader trusts without checking.)
 
     The coexistence model (TRDD-ab232dbd): the harness BUFFER (MEMORY.md + raw
     notes) lives at the scope root; the janitor's CURATED wiki lives here. Harvest
