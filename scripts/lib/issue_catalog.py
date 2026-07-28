@@ -165,6 +165,15 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="Reported as MEMGREP-006 (which is what happened before this code existed), the prescribed repair rebuilds the index at the OLDER schema; the current binary then upgrades it again and the ticket returns on the next heartbeat. The loop cannot be broken by touching the database, because the database was never wrong. Meanwhile the older schema silently drops whatever the newer columns index.",
         fix="Do NOT migrate, rebuild, or downgrade the index — it is correct and NEWER. Find the stale binary (`which memgrep`) and reinstall it from this repo: `cargo install --path scripts/memgrep`. Then re-run `memgrep validate <root>` to confirm.",
     ),
+    "MEMGREP-011": Issue(
+        scanner="memgrep-validate",
+        kind="migration-failure",
+        severity="low",
+        title="the memgrep index in {scope} is BEHIND this build's schema and has not migrated yet",
+        what="The database is stamped at an OLDER schema version than the binary knows, so it does not have the newer columns. No migration failed — none has run on this root yet, because the query path opens the index without migrating it.",
+        why="It is NOT damage, and that is the point: reported as a shape failure (MEMGREP-004) it dispatched an unattended agent to 'rebuild the database from the notes' for every corpus after every schema bump — a healthy database, repaired on a loop. Recall stays correct meanwhile: an index below the current schema is never treated as fresh, so queries fall back to the live walk.",
+        fix="Nothing to repair. `memgrep reindex <root>` (or any open) runs the ladder transactionally; the librarian does it on its own cadence. If a root stays behind across many reindexes, the defect is in the ladder or in whatever keeps writing an old-schema index — not in the data.",
+    ),
     "DAEMON-001": Issue(
         scanner="daemon-supervisor",
         kind="daemon-crash-loop",
@@ -396,14 +405,41 @@ class _SafeDict(dict):
 
 
 def _render(template: str, data: dict[str, str]) -> str:
-    """Fill OUR template with the detector's ALREADY-SANITIZED data. Never formats the data itself."""
-    return string.Formatter().vformat(template, (), _SafeDict(data))
+    """Fill OUR template with the detector's ALREADY-SANITIZED data. Never formats the data itself.
+
+    A value supplied as the EMPTY STRING is treated exactly like a missing one, so it renders as the
+    self-naming `<?key?>` marker. That equivalence is the safeguard: an empty field used to render as
+    nothing at all, which turned a critical ticket's title into `a migration left `…` without column
+    `` ` — technically filled, visibly nonsense, and impossible to attribute to a producer. A
+    detector that does not KNOW a field must leave it out or say so; it must not be able to quietly
+    erase part of our sentence.
+    """
+    return string.Formatter().vformat(
+        template, (), _SafeDict({k: v for k, v in data.items() if v != ""})
+    )
+
+
+# A template field is an IDENTIFIER slot — a table, a column, a scope, a package. Not a sentence.
+# Measured 2026-07-28 (T-FATU6QPI): a detector passed an entire 120-char validator message as
+# `table=` and an empty `column=`, producing a CRITICAL ticket whose title was unreadable. Capping
+# short and marking the overflow makes that a LOUD producer bug instead of a quiet garbled string.
+# `where`, `detail` and `evidence` are deliberately exempt — those ARE prose slots.
+_FIELD_CAP = 200
+_IDENTIFIER_FIELD_CAP = 64
+_PROSE_FIELDS = frozenset({"where", "found", "detail", "advisory", "reason", "window"})
 
 
 def _fields(where: str, data: dict[str, object]) -> dict[str, str]:
     """Sanitize every value a detector interpolates. The ONE place untrusted text is defanged."""
-    fields = {k: tickets._clean(str(v), 200) for k, v in data.items()}
-    fields["where"] = tickets._clean(where, 200)
+    fields: dict[str, str] = {}
+    for k, v in data.items():
+        cleaned = tickets._clean(str(v), _FIELD_CAP)
+        if k not in _PROSE_FIELDS and len(cleaned) > _IDENTIFIER_FIELD_CAP:
+            # Loud, attributable, and still bounded — the reader sees WHICH field the producer
+            # over-filled instead of reading a sentence wedged into a noun slot.
+            cleaned = f"<?{k}:overlong?>"
+        fields[k] = cleaned
+    fields["where"] = tickets._clean(where, _FIELD_CAP)
     return fields
 
 

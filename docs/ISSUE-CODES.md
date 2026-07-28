@@ -20,7 +20,7 @@ unattended access to your repository.
 
 ## HARNESS — the janitor repairs itself (automatic)
 
-16 code(s).
+17 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
@@ -36,6 +36,7 @@ unattended access to your repository.
 | `MEMGREP-008` | memgrep-validate | critical | an FTS index is missing entirely from the memgrep database in {scope} |
 | `MEMGREP-009` | memgrep-index-health | high | the memgrep index in {scope} has needed self-repair {count} times in {window} |
 | `MEMGREP-010` | memgrep-validate | high | the memgrep binary is OLDER than the index it opened in {scope} |
+| `MEMGREP-011` | memgrep-validate | low | the memgrep index in {scope} is BEHIND this build's schema and has not migrated yet |
 | `SELFINT-001` | janitor-self-integrity | critical | a janitor file failed attestation against the shipped manifest: {path} |
 | `SELFINT-002` | janitor-self-integrity | high | the janitor's audit chain no longer verifies: {detail} |
 | `SELFINT-003` | janitor-self-integrity | medium | a janitor skill has lost its integrity notice: {path} |
@@ -124,6 +125,13 @@ unattended access to your repository.
 - **What it is:** The database is stamped at a schema version this build does not know. The DATABASE is not the fault — the binary on PATH is stale.
 - **Why it matters:** Reported as MEMGREP-006 (which is what happened before this code existed), the prescribed repair rebuilds the index at the OLDER schema; the current binary then upgrades it again and the ticket returns on the next heartbeat. The loop cannot be broken by touching the database, because the database was never wrong. Meanwhile the older schema silently drops whatever the newer columns index.
 - **Fix attempted:** Do NOT migrate, rebuild, or downgrade the index — it is correct and NEWER. Find the stale binary (`which memgrep`) and reinstall it from this repo: `cargo install --path scripts/memgrep`. Then re-run `memgrep validate <root>` to confirm.
+
+### `MEMGREP-011` — the memgrep index in {scope} is BEHIND this build's schema and has not migrated yet
+
+- **Scanner:** `memgrep-validate` · **Severity:** `low` · **Kind:** `migration-failure`
+- **What it is:** The database is stamped at an OLDER schema version than the binary knows, so it does not have the newer columns. No migration failed — none has run on this root yet, because the query path opens the index without migrating it.
+- **Why it matters:** It is NOT damage, and that is the point: reported as a shape failure (MEMGREP-004) it dispatched an unattended agent to 'rebuild the database from the notes' for every corpus after every schema bump — a healthy database, repaired on a loop. Recall stays correct meanwhile: an index below the current schema is never treated as fresh, so queries fall back to the live walk.
+- **Fix attempted:** Nothing to repair. `memgrep reindex <root>` (or any open) runs the ladder transactionally; the librarian does it on its own cadence. If a root stays behind across many reindexes, the defect is in the ladder or in whatever keeps writing an old-schema index — not in the data.
 
 ### `SELFINT-001` — a janitor file failed attestation against the shipped manifest: {path}
 

@@ -286,12 +286,20 @@ pub fn validate_existing(root: &Path) -> Result<bool> {
 /// line per root, so the detector never parses prose:
 ///
 /// ```text
-/// OK   /path/to/memory
-/// NONE /path/to/memory                       (no index built yet — nothing to validate)
-/// FAIL /path/to/memory [MEMGREP-001] FTS integrity check failed for notes_fts: …
+/// OK    /path/to/memory
+/// NONE  /path/to/memory                      (no index built yet — nothing to validate)
+/// STALE /path/to/memory [MEMGREP-011] behind the migration ladder — the next open migrates it
+/// FAIL  /path/to/memory [MEMGREP-001] FTS integrity check failed for notes_fts: …
 /// ```
 ///
 /// Exits non-zero iff any root FAILed. It repairs NOTHING — see [`validate_existing`].
+///
+/// `STALE` is deliberately NOT a failure. An index that is merely BEHIND this binary's schema is not
+/// damaged: no migration failed, none has run here yet, and the very next `open`/`reindex` runs the
+/// ladder (meanwhile [`is_fresh`] already refuses to answer from an out-of-date index, so recall
+/// falls back to the walk and stays correct). Reported as `FAIL`, it would ticket EVERY corpus after
+/// every schema bump and dispatch an unattended agent to "repair" a healthy database — the same
+/// false-ticket loop MEMGREP-010 exists to prevent on the other side of the version comparison.
 pub fn cmd_validate_cli(args: &[String]) -> Result<()> {
     let roots: Vec<PathBuf> = if args.is_empty() {
         vec![PathBuf::from(".")]
@@ -301,13 +309,20 @@ pub fn cmd_validate_cli(args: &[String]) -> Result<()> {
     let mut failed = 0usize;
     for root in &roots {
         match validate_existing(root) {
-            Ok(true) => println!("OK   {}", root.display()),
-            Ok(false) => println!("NONE {}", root.display()),
+            Ok(true) => println!("OK    {}", root.display()),
+            Ok(false) => println!("NONE  {}", root.display()),
             // `{:#}` renders anyhow's whole context chain on ONE line, which is what carries the
             // `[MEMGREP-NNN]` code out of `verify_fts`'s `.with_context(…)`.
             Err(e) => {
-                failed += 1;
-                println!("FAIL {} {:#}", root.display(), e);
+                let rendered = format!("{e:#}");
+                // The CODE is the contract (the janitor greps it), so it — not the prose — is what
+                // decides the status token here too.
+                if rendered.contains(BEHIND_LADDER_CODE) {
+                    println!("STALE {} {rendered}", root.display());
+                } else {
+                    failed += 1;
+                    println!("FAIL  {} {rendered}", root.display());
+                }
             }
         }
     }
@@ -707,6 +722,68 @@ const EXPECTED_FTS: &[(&str, &str, &[&str])] = &[
     ("atoms_fts", "atoms", &["keywords", "body"]),
 ];
 
+/// The issue code for "this index is BEHIND the migration ladder" — the mirror of MEMGREP-010.
+///
+/// It is a `const` because two places must agree on it exactly: [`validate_db`], which raises it, and
+/// [`cmd_validate_cli`], which must NOT print such a root as `FAIL`. A literal in both would drift.
+const BEHIND_LADDER_CODE: &str = "[MEMGREP-011]";
+
+/// The FIRST shape defect in the database — a missing base table/column or a stale FTS column set —
+/// as `(issue code, description WITHOUT a code)`, or `None` when the shape matches this binary's
+/// schema.
+///
+/// Split out of [`validate_db`] because a shape defect ALONE does not identify what went wrong: the
+/// same missing column means "a migration failed" on a DB stamped at our version and "the ladder has
+/// not run here yet" on a DB stamped below it. The caller pairs this with the version stamp.
+///
+/// The code is returned SEPARATELY, and the description carries none, because one message must carry
+/// exactly ONE `[MEMGREP-NNN]`: the janitor greps the code out of the line and routes the repair on
+/// it, so a description that smuggled a second code into a MEMGREP-011 message would hand the reader
+/// two contradictory prescriptions ("do not rebuild it" / "rebuild it from the notes").
+fn first_shape_defect(conn: &Connection) -> Result<Option<(&'static str, String)>> {
+    for (table, expected) in EXPECTED_TABLES {
+        let have = table_columns(conn, table)?;
+        if have.is_empty() {
+            return Ok(Some((
+                "[MEMGREP-007]",
+                format!("schema validation: table `{table}` is MISSING"),
+            )));
+        }
+        for col in *expected {
+            if !have.iter().any(|c| c == col) {
+                return Ok(Some((
+                    "[MEMGREP-004]",
+                    format!(
+                        "schema validation: `{table}` is missing column `{col}` \
+                         (recall on that column would silently return nothing)"
+                    ),
+                )));
+            }
+        }
+    }
+    for (fts, _content, expected) in EXPECTED_FTS {
+        let have = table_columns(conn, fts)?;
+        if have.is_empty() {
+            return Ok(Some((
+                "[MEMGREP-008]",
+                format!("schema validation: FTS index `{fts}` is MISSING"),
+            )));
+        }
+        for col in *expected {
+            if !have.iter().any(|c| c == col) {
+                return Ok(Some((
+                    "[MEMGREP-003]",
+                    format!(
+                        "schema validation: FTS `{fts}` has no `{col}` column — it is STALE \
+                         (an FTS5 column set cannot be ALTERed; it needs DROP + CREATE + 'rebuild')"
+                    ),
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// The columns a table actually has, per `PRAGMA table_info`. Empty when the table does not exist.
 fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
     let mut st = conn
@@ -732,7 +809,9 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
 ///    corruption: it returns `ok` for a database whose FTS index is completely desynced.
 /// 2. **Schema shape** — every expected table exists with every expected column. Catches a migration
 ///    that silently failed to add a column (the `notes.keywords` class of bug), which otherwise
-///    manifests as recall quietly returning nothing.
+///    manifests as recall quietly returning nothing. Read TOGETHER with the version stamp: the same
+///    missing column is a failed migration on a DB stamped at our version, and merely a PENDING one
+///    ([`BEHIND_LADDER_CODE`]) on a DB stamped below it.
 /// 3. **FTS shape** — every FTS index exposes the columns it is supposed to. An FTS5 column set
 ///    cannot be ALTERed, so a stale one is invisible until a query on the new column returns empty.
 /// 4. **FTS content parity** (`('integrity-check', 1)`) — the index MATCHES its content table. The
@@ -776,36 +855,37 @@ fn validate_db(conn: &Connection, expect_version: i64) -> Result<()> {
         anyhow::bail!("[MEMGREP-002] sqlite integrity_check failed: {integrity}");
     }
 
-    // 2. base-table shape
-    for (table, expected) in EXPECTED_TABLES {
-        let have = table_columns(conn, table)?;
-        if have.is_empty() {
-            anyhow::bail!("[MEMGREP-007] schema validation: table `{table}` is MISSING");
+    // 2 + 3. shape — base tables and FTS column sets. A defect here means one of two very different
+    // things, and the VERSION STAMP is the only thing that tells them apart:
+    //
+    //   ver == expect → the DB claims to be migrated and is not. A migration ladder step failed (or
+    //                   was never written) — a real defect, reported with its own shape code.
+    //   ver <  expect → the ladder simply has not run on this root yet, because nothing has OPENED
+    //                   the index since this binary learned a newer schema (`open_existing`, the
+    //                   query path, deliberately never migrates). NOTHING failed.
+    //
+    // Judging a behind-the-ladder DB by the newer schema is the same confident lie check 0 refuses on
+    // the other side of the comparison, and it has the same consequence: the non-healing observer
+    // reports `[MEMGREP-004] a migration failed to add it`, whose catalogued repair is "rebuild the
+    // database from the notes" — an unattended agent dispatched to repair a database that is not
+    // broken, for EVERY corpus, after EVERY schema bump. (Observed 2026-07-28 on the LOCAL corpus:
+    // a v5 index, a v6 binary, a critical ticket per heartbeat — janitor ticket T-FATU6QPI.)
+    // It is also self-correcting: the librarian's `memgrep reindex` opens the index, and `open` runs
+    // the ladder transactionally. Recall stays correct meanwhile because `is_fresh` refuses to answer
+    // from an index below SCHEMA_VERSION and falls back to the walk.
+    if let Some((code, detail)) = first_shape_defect(conn)? {
+        if ver < expect_version {
+            anyhow::bail!(
+                "{BEHIND_LADDER_CODE} this index is BEHIND the migration ladder (schema v{ver} on \
+                 disk < v{expect_version} in this binary), so it does not have the newer schema yet \
+                 ({detail}) — nothing failed and nothing is damaged; opening or reindexing this root \
+                 runs the ladder. Do NOT rebuild it."
+            );
         }
-        for col in *expected {
-            if !have.iter().any(|c| c == col) {
-                anyhow::bail!(
-                    "[MEMGREP-004] schema validation: `{table}` is missing column `{col}` \
-                     (a migration failed to add it — recall on that column would silently return nothing)"
-                );
-            }
-        }
-    }
-
-    // 3. FTS column sets
-    for (fts, _content, expected) in EXPECTED_FTS {
-        let have = table_columns(conn, fts)?;
-        if have.is_empty() {
-            anyhow::bail!("[MEMGREP-008] schema validation: FTS index `{fts}` is MISSING");
-        }
-        for col in *expected {
-            if !have.iter().any(|c| c == col) {
-                anyhow::bail!(
-                    "[MEMGREP-003] schema validation: FTS `{fts}` has no `{col}` column — it is STALE \
-                     (an FTS5 column set cannot be ALTERed; it needs DROP + CREATE + 'rebuild')"
-                );
-            }
-        }
+        anyhow::bail!(
+            "{code} {detail} — the database is stamped v{ver}, so the migration that owes it this \
+             shape claims to have run"
+        );
     }
 
     // 4. FTS index vs its content table
@@ -2003,6 +2083,80 @@ mod tests {
         assert!(
             err.contains("[MEMGREP-006]"),
             "an unearned (too-low) stamp is still MEMGREP-006: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_index_behind_the_ladder_is_not_a_failed_migration() {
+        // REGRESSION (janitor ticket T-FATU6QPI, 2026-07-28). An index built before v6 landed sat at
+        // `user_version = 5` without `atoms.status`, because the query path (`open_existing`) never
+        // migrates and nothing had OPENED that corpus since the binary learned v6. `validate` — the
+        // NON-healing observer — judged its shape against v6 and reported
+        // `[MEMGREP-004] a migration failed to add it`, a critical migration-failure whose catalogued
+        // repair is "rebuild the database from the notes". So the janitor dispatched an unattended
+        // repair agent, every heartbeat, for a database that was not broken — and would do so for
+        // EVERY corpus after EVERY schema bump. The mirror of the MEMGREP-010 incident.
+        let d = tmp("behind_ladder");
+        write(&d, "p.md", NOTE_PAGE);
+        reindex(&d, &[d.join("p.md")], false).unwrap();
+        let memories_before: i64 = {
+            let conn = open_existing(&d).unwrap();
+            // Simulate the pre-v6 shape: the two columns v6 adds are absent, and the stamp says v5 —
+            // which is the HONEST stamp for that shape, not an unearned one.
+            conn.execute_batch(
+                "ALTER TABLE atoms DROP COLUMN status;
+                 ALTER TABLE atoms DROP COLUMN superseded_by;",
+            )
+            .unwrap();
+            conn.query_row("SELECT count(*) FROM memories", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert!(memories_before > 0, "precondition: the index has rows");
+
+        let conn = open_existing(&d).unwrap();
+        conn.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION - 1))
+            .unwrap();
+        let err = format!("{:#}", validate_db(&conn, SCHEMA_VERSION).unwrap_err());
+        assert!(
+            err.contains(BEHIND_LADDER_CODE),
+            "an index behind the ladder must carry the pending-migration code: {err}"
+        );
+        assert!(
+            !err.contains("[MEMGREP-004]"),
+            "it must NOT wear the migration-FAILURE code — that code's repair rebuilds the DB: {err}"
+        );
+
+        // The SAME missing column on a DB that CLAIMS to be migrated IS a failed migration. The fix
+        // narrows the code by pairing shape with the version stamp; it does not retire it.
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
+            .unwrap();
+        let err = format!("{:#}", validate_db(&conn, SCHEMA_VERSION).unwrap_err());
+        assert!(
+            err.contains("[MEMGREP-004]"),
+            "a stamped-as-migrated DB missing a column is still MEMGREP-004: {err}"
+        );
+
+        // And the state the observer now calls STALE really is self-correcting: `open` runs the
+        // ladder and MIGRATES the index in place — it does not nuke it (the rows survive).
+        conn.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION - 1))
+            .unwrap();
+        drop(conn);
+        let conn = open(&d).expect("open migrates an index that is merely behind");
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+        assert!(
+            table_columns(&conn, "atoms")
+                .unwrap()
+                .iter()
+                .any(|c| c == "status"),
+            "the ladder must have added the v6 column"
+        );
+        let memories_after: i64 = conn
+            .query_row("SELECT count(*) FROM memories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            memories_after, memories_before,
+            "a behind-the-ladder index must be MIGRATED, not nuked and rebuilt"
         );
         let _ = std::fs::remove_dir_all(&d);
     }
