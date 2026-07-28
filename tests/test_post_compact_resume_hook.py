@@ -316,6 +316,38 @@ def _write_presence(home: Path, last_epoch: int) -> None:
     )
 
 
+_PANE_ENV_VARS = ("TMUX_PANE", "ITERM_SESSION_ID", "KITTY_WINDOW_ID", "WEZTERM_PANE")
+
+
+def _no_pane(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the NO-PER-PANE-ID world (Apple Terminal, plain xterm), where the gate documents a
+    fallback to the machine-global breadcrumb. Without this the test inherits the REAL pane id of
+    whatever terminal runs pytest, so it silently exercises the per-pane branch instead."""
+    for var in _PANE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
+def _in_pane(monkeypatch: pytest.MonkeyPatch, pane: str = "%7") -> str:
+    """Pin THIS process to a specific tmux pane and return its breadcrumb key."""
+    for var in _PANE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("TMUX_PANE", pane)
+    import state as _state
+
+    key = _state.terminal_pane_key()
+    assert key
+    return key
+
+
+def _write_pane_presence(home: Path, key: str, last_epoch: int) -> None:
+    p = home / ".aimaestro" / "state" / "user-presence-panes" / f"{key}.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps({"last_user_input_epoch": last_epoch, "written_at_epoch": last_epoch}),
+        encoding="utf-8",
+    )
+
+
 def test_user_recently_active_true_when_recent(
     state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -323,6 +355,7 @@ def test_user_recently_active_true_when_recent(
     hook = _import_hook()
     home = tmp_path / "home"
     home.mkdir()
+    _no_pane(monkeypatch)  # this test pins the machine-global FALLBACK world
     monkeypatch.setenv("HOME", str(home))
     now = int(time.time())
     _write_presence(home, now - 5)
@@ -367,6 +400,7 @@ def test_user_recently_active_attended_by_prompt_beyond_hid_grace(
     hook = _import_hook()
     home = tmp_path / "home"
     home.mkdir()
+    _no_pane(monkeypatch)  # this test pins the machine-global FALLBACK world
     monkeypatch.setenv("HOME", str(home))
     now = int(time.time())
     _write_presence(home, now - 120)  # last real prompt 2 min ago; reading since
@@ -423,6 +457,7 @@ def test_push_skips_when_attended(
     hook = _import_hook()
     home = tmp_path / "home"
     home.mkdir()
+    _no_pane(monkeypatch)  # this test pins the machine-global FALLBACK world
     monkeypatch.setenv("HOME", str(home))
     _write_presence(home, int(time.time()) - 5)  # attended
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
@@ -474,6 +509,7 @@ def test_push_skips_when_attended_but_reading(
     hook = _import_hook()
     home = tmp_path / "home"
     home.mkdir()
+    _no_pane(monkeypatch)  # this test pins the machine-global FALLBACK world
     monkeypatch.setenv("HOME", str(home))
     _write_presence(home, int(time.time()) - 120)  # attended-but-reading
     monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(_PROJECT_ROOT))
@@ -481,3 +517,60 @@ def test_push_skips_when_attended_but_reading(
     calls = _patch_popen(monkeypatch, hook)
     hook._maybe_push_resume(state)
     assert calls == [], "push must NOT fire for an attended-but-reading user (last prompt 2 min ago)"
+
+
+# --------------------------------------------------------------------------- #
+# THE FLEET REGRESSION (2026-07-28): a busy pane must not strand every other one
+# --------------------------------------------------------------------------- #
+
+
+def test_a_user_typing_in_ANOTHER_pane_does_not_suppress_this_pane_s_resume(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE bug that left sessions dead for days.
+
+    Measured on the live machine: five projects held an UNCONSUMED `resume-after-compact.flag`,
+    two of them **4.3 days** old. The flag is cleared only by a heartbeat fire, so those sessions
+    were woken by NEITHER path — and the push, the path that wakes them in seconds, had been
+    suppressed every single time because the gate read the MACHINE-GLOBAL presence breadcrumb. For
+    someone who works all day in one terminal, "a prompt somewhere in the last 5 minutes" is a
+    permanent state, so every other pane on the machine was permanently "attended" and never
+    resumed.
+
+    `user_intent.user_is_present` was fixed for exactly this on 2026-07-16; this gate had kept its
+    own machine-global read and so inherited the bug from next door.
+    """
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    now = int(time.time())
+
+    # The user is HERE on the machine and prompted 3 seconds ago — but in a DIFFERENT pane.
+    _write_presence(home, now - 3)
+    _write_pane_presence(home, "tmux-%1", now - 3)
+
+    # We are pane %7, where nobody has ever typed.
+    _in_pane(monkeypatch, "%7")
+    assert hook._user_recently_active(state, now, 20, 300) is False, (
+        "an unattended pane must resume even while the user is busy in another one"
+    )
+
+
+def test_this_pane_being_attended_still_suppresses_the_push(
+    state_mod, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the contract — the per-pane read must not become a licence to type into a
+    pane the user IS sitting in. Same machine, same instant, opposite verdict, and the only thing
+    that differs is which pane the breadcrumb belongs to."""
+    _project, state = state_mod
+    hook = _import_hook()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    now = int(time.time())
+
+    key = _in_pane(monkeypatch, "%7")
+    _write_pane_presence(home, key, now - 3)
+    assert hook._user_recently_active(state, now, 20, 300) is True

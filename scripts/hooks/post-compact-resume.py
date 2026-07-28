@@ -310,21 +310,52 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
     line. Fail-safe: any read problem returns False (treat as unattended) — the push
     itself still degrades to NO_ITERM when there is no automatable pane.
 
-    RUNG 0 — the REAL typing signal (TRDD-6Q0OYYYH, owner directive 2026-07-18): the
-    breadcrumb below is stamped only at prompt SUBMIT, so a user mid-typing whose last
-    Enter is older than the grace read as unattended and got the push typed under their
-    fingers. HID idle (any keystroke/mouse event, machine-wide) within the grace ⇒
-    attended. Fail-open: an unavailable probe falls through to the breadcrumb.
+    PRESENCE IS PER-PANE, and reading it machine-globally is what killed this feature.
+    Measured 2026-07-28 across the fleet: five projects held an UNCONSUMED
+    `resume-after-compact.flag`, two of them **4.3 days** old. The flag is only cleared by a
+    heartbeat fire, so those sessions were never woken by either path — and the push, the
+    path that wakes them in SECONDS, had been suppressed every time because the user was
+    typing in a DIFFERENT pane. `user_intent.user_is_present` was fixed for exactly this on
+    2026-07-16 ("a human typing in ANY session marked EVERY unattended pane present"); this
+    gate kept reading `state.user_presence_path()` — the machine-global breadcrumb — and so
+    inherited the bug that was already fixed next door. Now it goes through the same
+    per-pane reader as every other injection gate: a pane the user has never typed in is
+    correctly AWAY no matter how busy the rest of the machine is.
+
+    RUNG 0 (the HID typing signal) lives INSIDE `user_is_present` and is deliberately kept
+    there — it is the "do not type under their fingers" floor. Fails CLOSED: an unreadable
+    breadcrumb reports PRESENT, so a breadcrumb fault can never license typing into a live
+    input line.
     """
     try:
         from lib import user_intent  # noqa: PLC0415 - lazy: the hook's sys.path is set up in main()
-        hid = user_intent.hid_idle_seconds()
-        if hid is not None and hid <= grace_s:
+
+        if user_intent.user_is_present(idle_s=grace_s):
             return True
     except Exception:  # noqa: BLE001 -- the probe must never break the push gate
         pass
+    # The attended-SESSION window (TRDD-GRHP2YHP): a genuine prompt within `prompt_window_s`
+    # (minutes, NOT the 20 s HID grace) means the user is here — reading the reply — even with no
+    # recent keystroke. This is the fix for the push landing under an attended-but-reading user.
+    #
+    # It reads THIS PANE's breadcrumb, and only falls back to the machine-global one when the
+    # terminal exports no per-pane id (Apple Terminal, plain xterm) — the SAME ladder
+    # `user_intent.user_is_present` documents. Read globally it re-opened the whole bug the rung
+    # above closes: any prompt anywhere in the last 5 minutes suppressed the push in every
+    # unattended pane on the machine, which is a permanent state for someone who works all day.
+    path = state.user_presence_path()
     try:
-        data = json.loads(state.user_presence_path().read_text(encoding="utf-8"))
+        pane_key = state.terminal_pane_key()
+        if pane_key:
+            pane_path = state.per_pane_presence_path(pane_key)
+            if not pane_path.is_file():
+                # Never typed in THIS pane ⇒ unattended here, whatever is happening elsewhere.
+                return False
+            path = pane_path
+    except Exception:  # noqa: BLE001 -- never let pane resolution break the gate
+        pass
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, ValueError):
         return False
     if not isinstance(data, dict):
@@ -333,9 +364,6 @@ def _user_recently_active(state, now: int, grace_s: int, prompt_window_s: int) -
     # bool is an int subclass — reject it so a stray `true` doesn't read as 1.
     if not isinstance(last, int) or isinstance(last, bool) or last <= 0:
         return False
-    # The attended-SESSION window (TRDD-GRHP2YHP): a genuine prompt within `prompt_window_s`
-    # (minutes, NOT the 20 s HID grace) means the user is here — reading the reply — even with no
-    # recent keystroke. This is the fix for the push landing under an attended-but-reading user.
     return (now - last) < prompt_window_s
 
 
