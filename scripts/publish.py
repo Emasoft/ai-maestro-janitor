@@ -1629,6 +1629,81 @@ def _git_porcelain_clean(root: Path) -> bool:
     return r.returncode == 0 and not r.stdout.strip()
 
 
+# Exactly the files a version bump may put in a release commit. Enumerated, never
+# swept: step 1 proves the tree clean and step 10 runs ~10 minutes later, so anything
+# that appeared in between — test scratch, a generated report, an edit made in another
+# window while the suite ran — would otherwise ride into a commit titled "chore: bump
+# version" that nobody reviews. (~/.claude/rules/never-git-add-all.md.)
+_RELEASE_ARTIFACTS = frozenset({
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",   # Layout C
+    "marketplace.json",                  # Layout C, at the repo root
+    "pyproject.toml",
+    "uv.lock",                           # `uv run` re-resolves against the bumped version
+    "README.md",                         # the version badge
+    "CHANGELOG.md",
+    ".integrity/manifest-sha256.json",
+})
+
+
+def _is_version_only_change(root: Path, rel: str) -> bool:
+    """True iff `rel` is a .py whose ONLY changed lines mention `__version__`.
+
+    `update_python_versions` rewrites `__version__` across scripts/, so those files are
+    legitimate release artifacts — but only for that one line. Checking the diff rather
+    than allowlisting `scripts/**/*.py` keeps an unrelated edit to the same file out of
+    the release commit.
+    """
+    if not rel.endswith(".py"):
+        return False
+    try:
+        r = subprocess.run(
+            ["git", "diff", "--unified=0", "--", rel],
+            capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if r.returncode != 0:
+        return False
+    changed = [ln for ln in r.stdout.splitlines()
+               if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
+    return bool(changed) and all("__version__" in ln for ln in changed)
+
+
+def _release_paths(root: Path) -> tuple[list[str], list[str]]:
+    """Split the dirty tree into (release artifacts, everything else).
+
+    The second list is what step 1 guaranteed was absent. It is RETURNED rather than
+    ignored so the caller can refuse: silently dropping it publishes a bump whose tree
+    still carries uncommitted work, and silently staging it is the `git add -A` this
+    replaces. An unreadable status yields ([], []) so the caller refuses too — a
+    staging list we could not compute must never become "stage everything".
+    """
+    try:
+        r = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, cwd=str(root), check=False, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return [], []
+    if r.returncode != 0:
+        return [], []
+    artifacts: list[str] = []
+    unexpected: list[str] = []
+    for line in r.stdout.splitlines():
+        if not line.strip():
+            continue
+        rel = line[3:].strip()
+        if " -> " in rel:            # a rename is reported as "old -> new"
+            rel = rel.split(" -> ", 1)[1]
+        rel = rel.strip('"')
+        if rel in _RELEASE_ARTIFACTS or _is_version_only_change(root, rel):
+            artifacts.append(rel)
+        else:
+            unexpected.append(rel)
+    return artifacts, unexpected
+
+
 def _head_commit_message(root: Path) -> str:
     """Return the subject line of HEAD, or '' on failure."""
     try:
@@ -1879,7 +1954,12 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         if head_subject == expected_subject and tree_clean:
             cprint(f"  Would skip commit (HEAD already '{expected_subject}', tree clean)")
         else:
+            would_stage, would_refuse = _release_paths(root)
             cprint(f"  Would commit: {expected_subject}")
+            cprint(f"  Would stage: {', '.join(would_stage) or '(nothing)'}")
+            if would_refuse:
+                cprint(f"  {RED}Would REFUSE — not release artifacts: "
+                       f"{', '.join(would_refuse)}{NC}")
         if tag_exists:
             cprint(f"  Would skip tag (already exists locally): {tag}")
         else:
@@ -1897,7 +1977,21 @@ def stage_commit_and_push(root: Path, new_ver: str, dry_run: bool) -> None:
         cprint(f"  {YELLOW}HEAD is already '{expected_subject}' and tree is clean — "
                f"skipping commit (interrupted-publish recovery).{NC}")
     else:
-        run(["git", "add", "-A"], cwd=root)
+        to_stage, unexpected = _release_paths(root)
+        if unexpected:
+            cprint(f"  {RED}REFUSED: the tree carries files that are not release "
+                   f"artifacts:{NC}")
+            for rel in unexpected:
+                cprint(f"    {RED}{rel}{NC}")
+            cprint(f"  {RED}Step 1 proved the tree clean, so these appeared while the "
+                   f"pipeline ran. Commit or remove them and re-run — they will not be "
+                   f"folded into '{expected_subject}'.{NC}")
+            sys.exit(1)
+        if not to_stage:
+            cprint(f"  {RED}REFUSED: nothing to stage, yet HEAD is not "
+                   f"'{expected_subject}'. Refuse to guess what state this is.{NC}")
+            sys.exit(1)
+        run(["git", "add", "--", *to_stage], cwd=root)
         run(["git", "commit", "-m", expected_subject], cwd=root)
 
     if tag_exists:
