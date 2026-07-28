@@ -1387,55 +1387,70 @@ fn parse_block_props(props: &str) -> BTreeMap<String, Vec<String>> {
     map
 }
 
-/// Find the FIRST Obsidian block-property marker `^<block-id> [<props>]` on a line, returning
+/// Find the LINE-LEADING Obsidian block-property marker `^<block-id> [<props>]`, returning
 /// `(byte-offset-of-^, byte-offset-one-past-closing-], block_id, raw_props)`. The `end_exclusive` is the
 /// index ONE PAST the `]` that closes the props, so `line[end_exclusive..]` is whatever trails the marker
 /// on the same line (the start of a LEADING atom's body). The `[...]` is scanned with bracket-DEPTH
 /// tracking so a `[[wikilink]]` / `^ref` value inside the props cannot prematurely close it. Block-id
 /// charset is `[A-Za-z0-9_-]`. None when the line carries no marker. All slice boundaries are ASCII bytes
 /// (`^`, id chars, `[`, `]`), so UTF-8 content between/after them is never split on a non-boundary.
+///
+/// ANCHORED at the first non-whitespace byte (indent allowed). An atom marker is a BLOCK property: it
+/// OPENS the block, so it lives at the start of its line. Scanning the whole line instead made every
+/// PROSE MENTION of the grammar declare a real atom — the four `wikimem-atom-block-properties*` USER
+/// pages document `` `^id [key: value, …]` `` inside backticks, and the index held 13 phantom atoms
+/// because of it, four of them sharing the id `memory-DY12UB04`, i.e. a corpus-unique-id collision
+/// (WM-ATOM-06) that no author ever wrote. Measured 2026-07-28 across all three live scopes: every
+/// GENUINE marker is line-anchored and the only non-anchored occurrences are those prose examples, so
+/// anchoring drops nothing real. This is also what makes the parser and the lint ONE grammar
+/// (WM-ATOM-07): the lint's own `mangled_atom_marker` / `unclosed_atom_marker` already anchored, so
+/// until now the two disagreed about what an atom even is — and the parser's answer is the one that
+/// reaches the index.
 fn first_block_property_marker(line: &str) -> Option<(usize, usize, String, String)> {
     let b = line.as_bytes();
     let mut i = 0usize;
-    while i < b.len() {
-        if b[i] == b'^' {
-            let id_start = i + 1;
-            let mut j = id_start;
-            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_') {
-                j += 1;
-            }
-            if j > id_start {
-                let mut k = j;
-                while k < b.len() && b[k] == b' ' {
-                    k += 1;
-                }
-                if k < b.len() && b[k] == b'[' {
-                    let mut depth = 0i32;
-                    let mut m = k;
-                    while m < b.len() {
-                        match b[m] {
-                            b'[' => depth += 1,
-                            b']' => {
-                                depth -= 1;
-                                if depth == 0 {
-                                    // `m` is the closing `]`; `m + 1` is one-past it (the body start
-                                    // for a LEADING atom). Both are ASCII byte boundaries.
-                                    return Some((
-                                        i,
-                                        m + 1,
-                                        line[id_start..j].to_string(),
-                                        line[k + 1..m].to_string(),
-                                    ));
-                                }
-                            }
-                            _ => {}
-                        }
-                        m += 1;
-                    }
-                }
-            }
-        }
+    while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
         i += 1;
+    }
+    if i >= b.len() || b[i] != b'^' {
+        return None;
+    }
+    let id_start = i + 1;
+    let mut j = id_start;
+    while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_') {
+        j += 1;
+    }
+    if j == id_start {
+        return None;
+    }
+    let mut k = j;
+    while k < b.len() && b[k] == b' ' {
+        k += 1;
+    }
+    if k >= b.len() || b[k] != b'[' {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut m = k;
+    while m < b.len() {
+        match b[m] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    // `m` is the closing `]`; `m + 1` is one-past it (the body start for a LEADING
+                    // atom). Both are ASCII byte boundaries.
+                    return Some((
+                        i,
+                        m + 1,
+                        line[id_start..j].to_string(),
+                        line[k + 1..m].to_string(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+        m += 1;
     }
     None
 }
@@ -5641,6 +5656,32 @@ mod tests {
         assert_eq!(props.trim(), "keywords: x");
         assert_eq!(&line[end..], " trailing body text");
         assert!(first_block_property_marker("see ^plain-ref here").is_none());
+    }
+
+    #[test]
+    fn a_marker_mentioned_in_PROSE_does_not_declare_an_atom() {
+        // The bug this anchoring fixes: the four `wikimem-atom-block-properties*` USER pages
+        // DOCUMENT the grammar, and every mention of it was being indexed as a real atom — four of
+        // them sharing `^memory-DY12UB04`, a WM-ATOM-06 id collision nobody authored. Documenting a
+        // syntax must never be the same act as using it, or the corpus that explains the tool is the
+        // corpus the tool corrupts.
+        for prose in [
+            "In an atom's props block `^id [k: v, ...]` a COMMA separates FIELDS",
+            "- **whitespace is flexible** — `^id[k:v]`, `^id [ k : v ]` all parse",
+            "  consistently place the metadata block LEADING — `^memory-DY12UB04[…]` on its own line",
+            "the marker ^mid-line [k: v] is not at the start of its line",
+        ] {
+            assert!(
+                first_block_property_marker(prose).is_none(),
+                "prose declared an atom: {prose}"
+            );
+        }
+
+        // …while an INDENTED marker is still an atom: the anchor is the first non-whitespace byte,
+        // not column zero, so authoring an atom inside an indented block keeps working.
+        let (start, _end, id, _props) =
+            first_block_property_marker("  ^indented [keywords: k]").expect("indented marker");
+        assert_eq!((start, id.as_str()), (2, "indented"));
     }
 
     #[test]

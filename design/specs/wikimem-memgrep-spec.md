@@ -244,6 +244,18 @@ WM-LINT `oversized-atom` defect and a decomposition (WM-MIG / atomize) candidate
 ^<name> [desc:"<quoted prose ≤200 chars>", keywords:"<key_phrase> …", ocd:<date>, lmd:<date>, status:<valid|superseded>, superseded-by:<lesson-id>]
 ```
 
+`WM-ATOM-02a` **the-marker-is-LINE-ANCHORED-so-documenting-the-grammar-is-not-using-it** —
+`MUST`: an atom marker is recognised only at the FIRST NON-WHITESPACE position of its line (indent
+allowed), by the PARSER and the lint alike. A marker is a BLOCK property: it OPENS the block, so
+mid-line text is prose ABOUT the grammar, never an atom. Scanning the whole line instead makes
+every page that documents the syntax declare atoms — measured 2026-07-28, the four USER-scope
+`wikimem-atom-block-properties*` pages put `` `^id [key: value, …]` `` in backticks and the index
+held **13 phantom atoms** from it, four sharing the id `memory-DY12UB04`, a WM-ATOM-06 collision no
+author wrote. The corpus that EXPLAINS the tool must not be the corpus the tool corrupts. Anchoring
+is also what makes the parser and the lint ONE grammar (WM-ATOM-07): the lint's marker checks were
+already anchored, so the two disagreed about what an atom is — and the parser's answer is the one
+that reaches the index.
+
 `WM-ATOM-03` **desc-is-quoted** — `MUST`: a non-slug `desc:` value is DOUBLE-QUOTED. An
 unquoted prose desc breaks grep and the in-body filter (a WM-LINT `unquoted-desc` defect); a
 clean legacy snake_case slug is grandfathered.
