@@ -124,6 +124,11 @@ name, never literal paths or secrets).
 - `[[janitor-self-update-bootstrap-gap]]` — the OTHER half of a release: after publish.py
   succeeds, why the local cache can stay on the old version (the fast-updater can't
   accelerate its own first release; reload ≠ update).
+- `[[debugging-methodology]]` (USER scope) — owns the GENERAL method behind
+  `^ATOM-UHO6-Q99D`: separating a SLOW operation from a STUCK one before touching any
+  timeout (`^ATOM-KYV1-HR97` + its lesson). This page keeps only the CPV-specific facts;
+  the transferable technique belongs there, so it is findable from a hang that has
+  nothing to do with publishing.
 
 ^rc3-with-every-test-passing-is-the-write-guard [desc: publish_blocked_but_tests_green, keywords: publish exited 3 but every test passed pytest rc=3 nothing failed write guard mutation list heartbeat wrote fleet-attribution mid-gate, type: project, ocd: 2026-07-22, lmd: 2026-07-22]
 An `rc=3` from the test gate with **every test passing** is the suite's own write-guard
