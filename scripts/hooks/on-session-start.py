@@ -16,6 +16,59 @@ import sys
 from pathlib import Path
 
 
+def _early_log(message: str) -> None:
+    """Append ONE dated line to session-start.log WITHOUT importing the `lib` package.
+
+    The runtime half of the janitor#80 guardrail. `tests/test_hooks_execute.py` now
+    executes every hook, so an import-time death cannot pass as silence *in the repo* —
+    but it says nothing about a DEPLOYMENT where the import breaks: a half-written plugin
+    cache, a version skew, a partial update. That is the janitor's own domain, and it is
+    exactly how the original outage stayed invisible: from 2026-06-20 to 2026-07-11 a
+    missing `sys.path` entry raised ModuleNotFoundError before this hook's first statement,
+    Claude Code surfaced nothing, and the only symptom was the absence of things nobody
+    watches.
+
+    So this DELIBERATELY DUPLICATES `lib.state.log_dir()`'s resolution (JANITOR_LOG_DIR →
+    $CLAUDE_PROJECT_DIR → git toplevel → cwd, then `/.janitor/logs`) instead of calling it.
+    Calling it would import the very package whose failure this exists to report. The
+    duplication is the point, not an oversight — and it is the reason to keep the ladder
+    in step with `state.log_dir()` if that ever changes.
+
+    stdlib-only and best-effort BY CONTRACT: every path is wrapped and swallowed, because a
+    logging fault must never become the new way session start breaks. The line format
+    matches `state.log_line` so both writers interleave cleanly in one file.
+    """
+    try:
+        import subprocess  # stdlib -- local keeps module scope import-clean
+        from datetime import datetime  # stdlib
+
+        override = os.environ.get("JANITOR_LOG_DIR", "").strip()
+        if override:
+            logs = Path(override).expanduser()
+        else:
+            proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+            if proj:
+                root = Path(proj)
+            else:
+                try:
+                    out = subprocess.run(
+                        ["git", "rev-parse", "--show-toplevel"],
+                        capture_output=True, text=True, check=True, timeout=5,
+                    ).stdout.strip()
+                    root = Path(out) if out else Path.cwd()
+                except (OSError, subprocess.SubprocessError):
+                    root = Path.cwd()
+            logs = root / ".janitor" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+        sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+        prefix = f"[{ts}] [s:{sid[:8]}] " if sid else f"[{ts}] "
+        with (logs / "session-start.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"{prefix}{message}\n")
+    except Exception:  # noqa: BLE001,S110 -- a logging fault must never break session start
+        pass
+
+
 def _active_global_stop(gs) -> tuple[str, str, int] | None:
     """(kind, reason, since_epoch) for the active machine-wide stop, or None.
 
@@ -244,8 +297,19 @@ def main() -> int:
     # every hook, so an import-time death can never again pass as silence.
     sys.path.insert(0, str(Path(plugin_root) / "scripts"))
     sys.path.insert(0, str(Path(plugin_root) / "scripts" / "lib"))
-    from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
-    from lib import harness_backend, memory_scopes, rules_installer, settings_ensurer, state  # noqa: E402  -- local package, not PyPI
+    # The breadcrumb pair that makes an import death AUDIBLE on a broken deployment. The
+    # "entered" line is written BEFORE the import that can die, so a log holding "entered"
+    # with no "imports ok" after it names the fault precisely — that is the whole signal the
+    # 3-week silent outage lacked. Re-raise after logging: a hook that cannot import its own
+    # library must still fail, just not invisibly.
+    _early_log(f"entered (plugin_root={plugin_root})")
+    try:
+        from lib import global_state as gs  # noqa: E402  -- local package, not PyPI
+        from lib import harness_backend, memory_scopes, rules_installer, settings_ensurer, state  # noqa: E402  -- local package, not PyPI
+    except Exception as exc:  # noqa: BLE001 -- logged, then re-raised; never swallowed
+        _early_log(f"FATAL: lib import failed ({type(exc).__name__}: {exc}) — hook aborted")
+        raise
+    _early_log("imports ok")
 
     state.init_state()
 
