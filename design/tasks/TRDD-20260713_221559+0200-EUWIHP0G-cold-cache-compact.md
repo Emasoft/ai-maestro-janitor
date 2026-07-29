@@ -1,9 +1,9 @@
 ---
 trdd-id: EUWIHP0G
 title: Auto-compact a large context on resume after a cold-cache gap or login to save the 5h window
-column: testing
+column: ai_review
 created: 2026-07-13T22:15:59+0200
-updated: 2026-07-29T02:45:11+0200
+updated: 2026-07-29T03:02:50+0200
 current-owner: janitor-session
 task-type: feature
 severity: high

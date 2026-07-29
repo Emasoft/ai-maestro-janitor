@@ -1,9 +1,9 @@
 ---
 trdd-id: HI0BGQGJ
 title: Push the post-compact resume so an idle session wakes in seconds not up to 30 min
-column: testing
+column: ai_review
 created: 2026-07-13T20:53:29+0200
-updated: 2026-07-29T02:45:11+0200
+updated: 2026-07-29T03:02:50+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: high
