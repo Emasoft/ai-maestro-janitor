@@ -3,7 +3,7 @@ trdd-id: EUWIHP0G
 title: Auto-compact a large context on resume after a cold-cache gap or login to save the 5h window
 column: testing
 created: 2026-07-13T22:15:59+0200
-updated: 2026-07-13T22:43:58+0200
+updated: 2026-07-29T02:45:11+0200
 current-owner: janitor-session
 task-type: feature
 severity: high
@@ -23,7 +23,8 @@ resume so the large context is shrunk.
 CANNOT avoid the immediate cold write. It DOES make the rest of the window cheap (context → ~50k)
 and every FUTURE cold resume ~50k not ~600k. Worth it for a long, repeatedly-interrupted session.
 
-**User decisions:** (1) threshold **270k tokens**; (2) fire on the SessionStart resume path AND the
+**User decisions:** (1) threshold **270k tokens** — ⚠ **SUPERSEDED 2026-07-18**, do NOT act on this
+number; see the 2026-07-29 verification note below; (2) fire on the SessionStart resume path AND the
 heartbeat rate-limit path AND after a login/logout.
 
 **Design (refined after checking signals):**
@@ -53,10 +54,54 @@ rate-limit branch `_maybe_cold_compact_on_rate_limit` wired into `_phase_rate_li
 gates falsification-verified (lib both-conditions `and`→`or`; dispatch NO_ITERM stall-guard;
 SessionStart source gate) — each neuter failed its test, then reverted.
 
-**NEXT ACTION:** ships on the next `publish.py` release (rides with the other unpushed commits —
-do NOT push standalone). Then ONE manual end-to-end confirmation in an iTerm/tmux session: relaunch
-`--continue` on a >270k session and confirm `/compact` fires as the first action and the session
-auto-resumes afterward (via the HI0BGQGJ push). Then move to `complete`. Nothing forceable now.
+### 2026-07-29 — the e2e was RUN, and the acceptance criterion was found STALE
+
+**The criterion could not be run as written, and that is the finding.** `min_context_tokens()` is
+no longer the flat 270k above — the owner directive of **2026-07-18** made it **harness-relative**,
+so the janitor only ever fires ABOVE where Claude Code already auto-compacts:
+
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | resolved threshold | consequence |
+|---|---|---|
+| `700000` (this machine, in the Claude Code process) | **716_000** (`700000 − 34000 + 50000`) | reachable — the janitor is a backstop |
+| unset (e.g. a bare tmux pane) | **1_016_000** (`1000000 − 34000 + 50000`) | **exceeds the 1M window ⇒ unreachable by construction**; the harness owns compaction entirely |
+
+`should_compact_on_resume(270_000)` is therefore **False**, correctly. Running the old criterion
+produces a red whose meaning is "the spec rotted", not "the code is broken" — and the two ways a
+reader talks themselves out of that red are to patch working code, or to lower the threshold until
+270k passes, silently restoring the janitor/harness compaction race the directive removed.
+
+**What was actually verified** (real tmux pane I created and owned; no iTerm; production presence
+gate left INTACT — it passed on its own because the user was genuinely idle, so no bypass was used):
+
+1. **Threshold half.** A real transcript flows through `context_tokens_for` →
+   `latest_context_size` into the gate. Fires at `threshold+30k`, silent at `threshold−30k`, silent
+   at the retired 270k.
+2. **Injection half** (the part never exercised outside a human's terminal). Inside a real pane,
+   `state.terminal_kind()` resolved to `tmux` off **genuine process ancestry** (unforced — the
+   pre-existing `test_tmux_real_send_delivers_keystrokes` monkeypatches this, and is skipped unless
+   `JANITOR_TEST_REAL_TMUX=1`); the detached child survived the harness exit and the keystrokes
+   landed. Counted, not eyeballed: 2 fires → 2 `/compact` in the pane; the dry run sent nothing.
+3. **The join.** `_maybe_cold_compact_on_session_start(..., "resume", <real transcript>)` with a
+   real `compact_trigger.py` subprocess: above-threshold → fired, `resume-directive.txt` and
+   `cold-compact-fired.ts` written, **exactly one** `/compact` in the pane; below-threshold and
+   270k → no fire, no files, no keystroke. One landing for one fire is the assertion that a
+   pass-only test would have missed.
+
+**NOT verified, and not claimable:** that a genuine `claude --continue` hands the hook
+`source=resume` with a live `transcript_path` (harness behaviour — the hook gates on exactly those
+two, both supplied here), and step 3 of the original criterion, "the session auto-resumes"
+end-to-end. The resume half is covered at its seams by `test_post_compact_resume_hook.py` and
+`test_dispatch_cold_cache.py`; the directive-write side is confirmed above.
+
+**Regression guard:** `tests/test_cold_compact_threshold_contract.py` (8 tests) pins the
+harness-relative arithmetic, the backstop-above-harness invariant, the unreachable-when-unset
+invariant, and — as a tripwire — that **270k must not fire**. Mutation-checked: forcing the
+threshold to 270_000 turns 6 of the 8 red. This exists because the sibling wiring test stubs
+`context_tokens_for` *and* `run_subprocess` and deletes the auto-compact window, so nothing
+previously exercised the real resolution.
+
+**NEXT ACTION:** none blocking. The card's original acceptance criterion is retired; the mechanism
+is verified at the real threshold. Ready for `testing → ai_review` on the owner's call.
 
 **Knobs:** `CLAUDE_PLUGIN_OPTION_COLD_CACHE_COMPACT_ENABLED` (on), `..._MIN_CONTEXT_TOKENS`
 (270000), `..._MIN_IDLE_SECONDS` (3600), `..._COOLDOWN_SECONDS` (600).

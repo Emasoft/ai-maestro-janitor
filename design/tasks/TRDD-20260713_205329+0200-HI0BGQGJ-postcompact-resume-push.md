@@ -3,7 +3,7 @@ trdd-id: HI0BGQGJ
 title: Push the post-compact resume so an idle session wakes in seconds not up to 30 min
 column: testing
 created: 2026-07-13T20:53:29+0200
-updated: 2026-07-13T21:07:00+0200
+updated: 2026-07-29T02:45:11+0200
 current-owner: janitor-session
 task-type: bugfix
 severity: high
@@ -41,8 +41,28 @@ do NOT push standalone); (2) one manual end-to-end confirmation in an iTerm/tmux
 the directive matches the recorded flag. Falsification of the attended gate was verified
 (neuter → `test_push_skips_when_attended` fails; reverted).
 
-**NEXT ACTION:** await the next release for the e2e confirmation, then move to `complete`. Nothing
-forceable now.
+### 2026-07-29 — e2e run; the shared criterion was stale, the delivery mechanism is proven
+
+This card shared EUWIHP0G's acceptance test ("relaunch a >270k session; `/compact` fires; the
+session auto-resumes"). **Its 270k trigger is superseded** — the 2026-07-18 owner directive made
+the threshold harness-relative (716_000 here; unreachable-by-design when
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` is unset). Full table and reasoning in EUWIHP0G's STATE block —
+not restated here.
+
+**What this card actually needed proving was the PUSH, and it is proven.** The load-bearing gotcha
+below — "the hook-spawned child inherits the hook's env, so the detached child finds the right
+pane" — was reasoned from `$ITERM_SESSION_ID` being present, never executed. It now has been, in a
+real tmux pane: `state.terminal_kind()` resolved to `tmux` from **genuine process ancestry**
+(unforced), the detached child **survived its parent's exit**, and the keystrokes landed — counted,
+2 fires → 2 landings, dry-run → 0. The SessionStart join then produced **exactly one** landing for
+its one fire, with `resume-directive.txt` written only on that fire. Presence gate left intact
+throughout (it passed on its own; no bypass).
+
+**Still not claimable:** the final hop — cron fire → `[janitor-resume]` → the agent actually
+continuing — was not driven end-to-end here. It is covered at its seams by
+`test_post_compact_resume_hook.py` (flag write) and `test_dispatch_cold_cache.py` (emission).
+
+**NEXT ACTION:** none blocking. Ready for `testing → ai_review` on the owner's call.
 
 **Load-bearing facts / gotchas:**
 - The hook-spawned `resume_trigger.py` inherits the hook's env; the iTerm/tmux session was
