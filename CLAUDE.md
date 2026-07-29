@@ -427,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=62e16d97f14d digest=afbcdb33c175 generated=2026-07-28T15:55:58+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e34c7c459961 digest=b8bf42bea039 generated=2026-07-29T20:09:46+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -513,6 +513,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/detectors/mcp-rugpull.py` — MCP rug-pull detector — fingerprint-drift audit on installed MCP servers.
   · main() -> int
 `scripts/detectors/memgrep-index-health.py` — memgrep-index-health — the ticket system's motivating producer (TRDD-CGYMUKO6).
+  · shape_identifiers(msg) -> tuple[str, str] — `(table, column)` named by a validator message — `("", "")` when it names neither. PURE.
   · recent_heals(root, *, now, window_s) -> list[str] — The `<epoch> <stage> <why>` heal lines for `root` inside the window. PURE-ish (one file read).
   · main() -> int
 `scripts/detectors/memorize-nudge.py` — memorize-nudge — nudge the agent to MEMORIZE when code outran the wiki.
@@ -537,6 +538,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · slot_capture_stalled(has_refresh, has_session_key, refresh_failures) -> bool — PURE (B3): is this account LOGGED IN but its OAuth capture has NOT completed?
   · main() -> int
 `scripts/detectors/package-manager-policy.py` — Package-manager-policy detector — supply-chain hardening audit.
+  · present_lockfile_managers(root) -> set[str] — Filesystem wrapper around `_lockfile_managers`. Never raises.
+  · resolve_package_manager(*, package_manager_field, lockfiles, has_yarnrc_yml) -> str — Which manager installs this project: npm | yarn-classic | yarn-berry | pnpm | bun |
+  · detect_package_manager(root) -> str — Filesystem wrapper around `resolve_package_manager`. Never raises.
   · main() -> int
 `scripts/detectors/plugin-updates.py` — Plugin-updates detector — Python port of plugin-updates.sh.
   · should_signal_user_update(*, enabled, scope, is_self, is_fleet, user_scope_enabled, installed, latest) -> bool — True iff the detector should SIGNAL the daemon to update this USER-scope plugin
@@ -584,6 +588,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/detectors/trashcan-purge.py` — trashcan-purge — Python port of trashcan-purge.sh.
   · main() -> int
 `scripts/detectors/trdd-drift.py` — TRDD drift detector — Python port of trdd-drift.sh.
+  · review_after_epoch(head) -> int | None — The epoch of a TRDD's `review-after:` date, or None when it declares none. PURE.
   · main() -> int
 `scripts/detectors/trdd-reminder.py` — TRDD reminder — Python port of trdd-reminder.sh.
   · main() -> int
@@ -841,7 +846,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · command_injection_plan(terminal, command, *, esc_first) -> dict | None — PUBLIC raw-command channel builder — the single source of truth for typing an
   · build_relaunch(terminal) -> dict | None — rung 5 — resume a `dead` (pid-gone) session by typing ``claude --continue`` into
   · build_force_restart(pid, terminal) -> dict | None — rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
-  · build_resurrect(pid, project_root) -> dict — rung 7 — the pane is unreachable: spawn a DETACHED background ``claude`` (a new
+  · live_tmux_session() -> str — The id of an existing tmux session to hang a resurrect window on, or "" if none.
+  · recorded_terminal(project_root) -> dict[str, str] — The pane identity the SESSION recorded at start, or {} when there is none.
+  · build_resurrect(pid, project_root, *, session) -> dict — rung 7 — the pane is unreachable: spawn a background ``claude`` that, on launch,
   · live_cmdline(pid) -> str — The pid's CURRENT command line, read fresh (`ps -p PID -o args=`, POSIX-portable).
   · fire_restart(plan, *, enabled, killable, killer, spawner, cmdline_reader) -> str — Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
 `scripts/lib/fleet_scan.py` — Daemon-side fleet scanner (TRDD-324223a6) — find EVERY running claude instance
@@ -1065,6 +1072,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · has_bridge(text, overview) -> bool — True iff `text` already links to the overview page. PURE.
   · ensure_bridge_line(scope_root) -> str — VERIFY the bridge line is present in this scope's MEMORY.md; RE-ADD if absent.
 `scripts/lib/memory_content_precheck.py` — Cheap, zero-LLM filesystem prechecks for the memory-maintenance SCHEDULER
+  · oversized_mistiered_pages(root, *, max_bytes) -> list[tuple[Path, str]] — Over-cap pages the split skill MUST refuse — `(path, tier)`, cheapest possible check.
   · split_has_work(root, *, max_bytes) -> bool — True iff some committed page in `root` is strictly larger than `max_bytes`
   · corpus_fingerprint(root) -> str | None — A cheap, stat-only fingerprint of the candidate corpus under `root`.
   · consolidate_has_work(root, *, last_fingerprint, stamp_age_s, recheck_after_s) -> bool — True iff a CONSOLIDATE dispatch could plausibly do work on `root`.
@@ -1131,7 +1139,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · resolve_user_dir() -> Path — The USER scope (global) memory root: the janitor's FIXED plugin-DATA dir
   · resolve_user_mirror_dir() -> Path — The USER-memory BACKUP MIRROR ``~/.claude/ai-maestro-janitor-memory/`` (TRDD-GFT33HT9).
   · sync_user_memory_mirror() -> str | None — Keep the uninstall-surviving USER-memory MIRROR in step with the canonical store
-  · resolve_wiki_dir(scope_root) -> Path — The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wiki``.
+  · resolve_wiki_dir(scope_root) -> Path — The curated WIKI sub-namespace of a memory scope: ``<scope_root>/wikimem``.
   · is_curated_wiki_page(text) -> bool — True iff ``text`` is a CURATED wikimem page; False iff a RAW harness buffer note.
   · resolve_scope_dirs() -> list[tuple[str, Path]] — The three-scope roots that EXIST, most-specific first: LOCAL → PROJECT → USER.
 `scripts/lib/memory_settings.py` — Global wikimem-editor settings + scheduler-stamp primitives (TRDD-c1397102).
@@ -1673,7 +1681,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · cmd_live_email() -> int — Print the authoritative email of the CURRENTLY LIVE account, or empty.
   · cmd_known_emails() -> int — Print every known account email (live + all slots), one per line.
   · cmd_print_profiles_root() -> int — Print the canonical Chrome-profiles root (``_profiles_root()``).
-  · cmd_oauth_health(as_json) -> int — Print per-account OAuth health (has_refresh + expiry) read from the KEYCHAIN.
+  · build_oauth_health(emails, live, slot_blobs, denied, live_blob) -> dict[str, dict] — PURE assembly of per-account OAuth health from ALREADY-READ data — no keychain I/O.
+  · cmd_oauth_health(as_json) -> int — Print per-account OAuth health (has_refresh + expiry + status) read from the KEYCHAIN.
   · main(argv) -> int
 `scripts/oauth_rotator/safe_storage.py` — Cross-platform OS secret storage — the single abstraction for keeping rotator
   · SecurityRun — Outcome of ONE gated `security` invocation via ``run_security``.
