@@ -57,6 +57,11 @@ def _setup(monkeypatch, tmp_path: Path, *, fire: str = "1", hard: str | None = N
     for fn in (daemon.state.project_root, daemon.state.janitor_root,
                daemon.state.state_dir, daemon.state.log_dir):
         fn.cache_clear()
+    # The resurrect rung asks tmux which session to hang its window on. That is a REAL
+    # machine-touching call (the sandbox guard denies it, correctly), and these tests are
+    # about rung SELECTION, not tmux discovery — so pin it to "no session", which is the
+    # branch every test here expects anyway. A test that wants the tab branch overrides it.
+    monkeypatch.setattr(daemon.fleet_restart, "live_tmux_session", lambda: "")
     recorded: list = []
     monkeypatch.setattr(
         daemon.fleet_inject, "fire", lambda plan: bool(recorded.append(plan)) or True
@@ -146,6 +151,71 @@ def test_frozen_force_restart_falls_back_to_resurrect_without_a_pane(tmp_path, m
     assert "DRY_RUN:resurrect" in _log(tmp_path)
     rec = _audit_records(tmp_path)
     assert rec[0]["rung"] == "resurrect" and rec[0]["channel"] == "spawn"
+
+
+def _record_identity(root: str, ident: dict) -> None:
+    """Write the pane identity a session records at start (on-session-start.py)."""
+    d = Path(root) / ".janitor" / "state"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "terminal-identity.json").write_text(json.dumps(ident), encoding="utf-8")
+
+
+def test_recorded_pane_is_used_before_escalating_to_a_new_surface(tmp_path, monkeypatch) -> None:
+    """Live resolution found no channel, but the session RECORDED one → restart in that
+    ORIGINAL pane (rung 6) instead of opening a tab (rung 7).
+
+    This is the owner's "restart in the same original tab" (2026-07-29). Live TTY
+    resolution can fail on a perfectly reachable pane — the known case is iTerm automation
+    denied by TCC — and without this retry a healthy tab reads as unreachable.
+    """
+    root = str(tmp_path / "proj")
+    _setup(monkeypatch, tmp_path)
+    _record_identity(root, {"tmux_pane": "%9", "term_program": "iTerm.app"})
+    rec_dir = tmp_path / "recovery"
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    daemon._recovery_state_path(rec_dir, root).write_text(
+        json.dumps({"attempts": 3, "identity": "1:ttys1"}), encoding="utf-8"
+    )
+
+    daemon.task_session_liveness(fleet=[_inst("frozen", root, {})])
+
+    rec = _audit_records(tmp_path)
+    assert rec[0]["rung"] == "force_restart"      # NOT resurrect — no new surface
+    assert rec[0]["channel"] != "spawn"
+
+
+def test_live_pane_still_wins_over_a_stale_recording(tmp_path, monkeypatch) -> None:
+    """The recording is a FALLBACK, not a substitute: when live resolves, live is used.
+
+    Otherwise a pane that moved or was recycled since session start would be typed into
+    on the strength of a stale file.
+    """
+    root = str(tmp_path / "proj")
+    _setup(monkeypatch, tmp_path)
+    _record_identity(root, {"tmux_pane": "%9"})
+
+    plan = daemon._hard_restart_plan(_inst("dead", root, {"tmux_pane": "%1"}))
+
+    assert plan is not None and plan["rung"] == "relaunch"
+    # the pane is the `-t` target of each send-keys step
+    targets = [step[step.index("-t") + 1] for step in plan["steps"] if "-t" in step]
+    assert targets and set(targets) == {"%1"}      # the LIVE pane
+    assert "%9" not in str(plan["steps"])          # never the stale recording
+
+
+def test_no_recording_and_no_live_pane_still_escalates(tmp_path, monkeypatch) -> None:
+    """With neither channel, rung 7 must still fire — the last resort stays reachable."""
+    root = str(tmp_path / "proj")
+    _setup(monkeypatch, tmp_path)
+    rec_dir = tmp_path / "recovery"
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    daemon._recovery_state_path(rec_dir, root).write_text(
+        json.dumps({"attempts": 3, "identity": "1:ttys1"}), encoding="utf-8"
+    )
+
+    daemon.task_session_liveness(fleet=[_inst("frozen", root, {})])
+
+    assert _audit_records(tmp_path)[0]["rung"] == "resurrect"
 
 
 def test_enabled_but_not_killable_is_refused_before_any_kill(tmp_path, monkeypatch) -> None:

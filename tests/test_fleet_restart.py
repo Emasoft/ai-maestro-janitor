@@ -126,18 +126,65 @@ def test_build_force_restart_carries_kill_then_relaunch() -> None:
     assert fn.build_force_restart(9988, {}) is None
 
 
+def test_resurrect_prefers_a_TAB_in_an_existing_session() -> None:
+    """With a session available, resurrect opens a tmux WINDOW (a tab), not a new session.
+
+    Under iTerm2's tmux control mode the mapping is fixed — a tmux SESSION surfaces as an
+    iTerm WINDOW and a tmux WINDOW as a TAB — so `new-session` necessarily spawned a whole
+    window. `-d` creates the tab without switching to it, so a 3am resurrect is visible in
+    the tab bar without yanking the user's view away mid-task.
+    """
+    plan = fn.build_resurrect(555, "/work", session="$0")
+    argv = plan["spawn"]
+
+    assert argv[:2] == ["tmux", "new-window"]
+    assert "-d" in argv and "-t" in argv and "$0" in argv
+    assert "new-session" not in argv
+    assert "janitor-resurrect-555" in argv
+
+
+def test_resurrect_falls_back_to_a_session_when_none_exists() -> None:
+    """No tmux session → `new-session`. This rung must ALWAYS produce a plan.
+
+    It is the last resort for the no-channel case, so losing the fallback would mean a
+    wedged session with no reachable pane simply never gets recovered.
+    """
+    plan = fn.build_resurrect(555, "/work", session="")
+    argv = plan["spawn"]
+
+    assert argv[:3] == ["tmux", "new-session", "-d"]
+    assert "janitor-resurrect-555" in argv
+
+
+def test_resurrect_unusable_session_id_degrades_to_the_fallback() -> None:
+    """An empty OR whitespace-only session id must take the fallback, not build a bad target.
+
+    Whitespace is the trap: `"   "` is TRUTHY, so an unstripped id would build
+    `new-window -t "   "` — a target tmux cannot resolve — turning "no session" into a
+    silently failing spawn instead of the working fallback.
+    """
+    for bogus in ("", "   ", "\n"):
+        assert fn.build_resurrect(7, None, session=bogus)["spawn"][1] == "new-session"
+
+
 def test_build_resurrect_always_builds_and_quotes_cwd() -> None:
     """resurrect is the no-channel last resort: it always builds a detached-spawn plan,
     and shlex-quotes the cwd so a crafted project path can't break the command."""
-    plan = fn.build_resurrect(555, "/tmp/weird; rm -rf x")
+    # `session` passed explicitly: the builder is PURE, so the branch is chosen by the
+    # argument rather than by whether the machine running the suite has a tmux server up.
+    plan = fn.build_resurrect(555, "/tmp/weird; rm -rf x", session="")
     assert plan["rung"] == "resurrect" and plan["kill_pid"] == 555
     assert plan["spawn"][:3] == ["tmux", "new-session", "-d"]
     inner = plan["spawn"][-1]
     assert "kill 555" in inner
     assert "'/tmp/weird; rm -rf x'" in inner          # the cwd is single-quoted as ONE arg
     assert "claude --continue" in inner
+    # the cwd quoting is branch-independent — it lives in `inner`, which both spawn
+    # shapes carry verbatim
+    tab = fn.build_resurrect(555, "/tmp/weird; rm -rf x", session="$0")
+    assert tab["spawn"][-1] == inner
     # no project root → falls back to $HOME, still a valid plan
-    assert fn.build_resurrect(5, None)["spawn"][-1].startswith("kill 5")
+    assert fn.build_resurrect(5, None, session="")["spawn"][-1].startswith("kill 5")
 
 
 def test_fire_restart_dry_run_when_disabled_touches_nothing(monkeypatch) -> None:

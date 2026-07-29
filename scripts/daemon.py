@@ -873,12 +873,34 @@ def _hard_restart_plan(inst) -> dict | None:
       relaunch in its pane); when NO pane channel resolves, fall back to rung 7
       `resurrect` (detached background claude that kills + relaunches) — the
       documented no-channel escalation on ``build_force_restart``.
+
+    RESTART IN THE ORIGINAL TAB WHEREVER POSSIBLE (owner directive 2026-07-29). Rungs 5/6
+    already do — they type into the existing pane and create nothing. Before escalating to
+    the only rung that opens a new surface, retry with the pane the session RECORDED at
+    start (``fleet_restart.recorded_terminal``): live TTY resolution can fail on a pane that
+    is perfectly reachable (notably iTerm automation denied by TCC, which
+    ``fleet_scan.iterm_automation_blocked`` already detects), and without this retry that
+    healthy tab reads as unreachable and rung 7 opens one nobody needed.
     """
+    recorded = fleet_restart.recorded_terminal(inst.project_root)
     if inst.diagnosis == "dead":
-        return fleet_restart.build_relaunch(inst.terminal)
+        # `or`: the recorded pane is a FALLBACK, never a substitute — live wins when it
+        # resolves, so a moved/recycled pane is still preferred over a stale recording.
+        return fleet_restart.build_relaunch(inst.terminal) or fleet_restart.build_relaunch(
+            recorded
+        )
     plan = fleet_restart.build_force_restart(inst.pid, inst.terminal)
+    if plan is None and recorded:
+        plan = fleet_restart.build_force_restart(inst.pid, recorded)
     if plan is None:
-        plan = fleet_restart.build_resurrect(inst.pid, inst.project_root)
+        # The session id is resolved HERE, not inside the builder: `build_*` are pure by
+        # contract. A live session makes resurrect open a tmux WINDOW — a TAB under iTerm2's
+        # control mode, where a tmux SESSION would instead surface as a whole new WINDOW
+        # (owner directive 2026-07-29). "" falls back to a new session, so the rung still
+        # always produces a plan.
+        plan = fleet_restart.build_resurrect(
+            inst.pid, inst.project_root, session=fleet_restart.live_tmux_session()
+        )
     return plan
 
 

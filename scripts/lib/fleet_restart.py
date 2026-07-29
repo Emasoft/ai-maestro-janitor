@@ -9,9 +9,10 @@ THREE rungs, escalating:
   ``--continue`` preserves the transcript, so this is not data loss.
 - **force_restart** — the pid is alive but HARD-WEDGED (`frozen`, gentle ladder
   exhausted) → ``os.kill`` the stuck pid, then ``claude --continue`` in the pane.
-- **resurrect** — the pane itself is unreachable → spawn a DETACHED background
-  ``claude`` (``tmux new-session -d``) that kills + relaunches the stuck one. The
-  "launch a background claude to kill+restart a stuck one" the user demanded.
+- **resurrect** — the pane itself is unreachable → spawn a background ``claude``
+  (``tmux new-window -d`` in an existing session — a TAB; ``new-session`` only when no
+  session exists) that kills + relaunches the stuck one. The "launch a background claude
+  to kill+restart a stuck one" the user demanded.
 
 THE SAFETY MODEL (this module kills processes, so it is gated three ways):
 
@@ -36,6 +37,7 @@ process. This module is INTENTIONALLY not yet wired into the daemon's live loop
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -179,18 +181,105 @@ def build_force_restart(pid: int, terminal: dict) -> dict | None:
     return {"rung": "force_restart", "kill_pid": pid, "relaunch": relaunch}
 
 
-def build_resurrect(pid: int, project_root: str | None) -> dict:
-    """rung 7 — the pane is unreachable: spawn a DETACHED background ``claude`` (a new
-    tmux session) that, on launch, kills the stuck pid and resumes. The plan carries
-    the kill target + the detached-spawn argv; ``fire_restart`` runs it only when
-    enabled AND ``is_killable`` passes. Always builds a plan (no pane needed) — it is
-    the last resort precisely for the no-channel case."""
+def live_tmux_session() -> str:
+    """The id of an existing tmux session to hang a resurrect window on, or "" if none.
+
+    Session ID (``$3``) rather than name: a name may contain ``:``, which tmux parses as
+    ``session:window`` in a ``-t`` target, so a user session called ``work:api`` would
+    silently retarget. IDs have no such syntax. "" on any failure — the caller then falls
+    back to creating its own session.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["tmux", "list-sessions", "-F", "#{session_id}"],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    for line in (proc.stdout or "").splitlines():
+        sid = line.strip()
+        if sid.startswith("$"):
+            return sid
+    return ""
+
+
+def recorded_terminal(project_root: str | None) -> dict[str, str]:
+    """The pane identity the SESSION recorded at start, or {} when there is none.
+
+    THE POINT (owner directive 2026-07-29 — "restart in the same original tab"). Rungs 5
+    and 6 already restart in place; rung 7 is the only one that creates a surface, and it
+    fires exactly when no channel resolved. But ``fleet_scan`` resolves the terminal from
+    the LIVE TTY and deliberately never from a recorded id — correct, because that is what
+    lets it reach a zombie instance whose janitor predates ``terminal-identity.json``. The
+    gap is that live resolution can fail on a pane that is perfectly reachable: the known
+    case is iTerm automation denied by TCC, which the scanner itself flags
+    (``fleet_scan.iterm_automation_blocked`` — "iTerm is UP but the osascript enumerated
+    ZERO sessions"). Then a healthy tab reads as unreachable and we open one the user never
+    needed.
+
+    So: try live first (unchanged), and consult this only when live found nothing. Returns
+    ONLY the two injection keys — ``term_program`` is recorded for diagnostics and is not an
+    injection channel, so passing it through would put a non-channel key into a terminal
+    dict that callers test for truthiness.
+
+    Never raises: a missing/garbage file is simply "no recorded pane", and the caller
+    escalates to rung 7 exactly as before.
+    """
+    if not project_root:
+        return {}
+    path = Path(project_root) / ".janitor" / "state" / "terminal-identity.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key in ("iterm_session_id", "tmux_pane"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            out[key] = val.strip()
+    return out
+
+
+def build_resurrect(pid: int, project_root: str | None, *, session: str = "") -> dict:
+    """rung 7 — the pane is unreachable: spawn a background ``claude`` that, on launch,
+    kills the stuck pid and resumes. The plan carries the kill target + the spawn argv;
+    ``fire_restart`` runs it only when enabled AND ``is_killable`` passes. Always builds a
+    plan (no pane needed) — it is the last resort precisely for the no-channel case.
+
+    A WINDOW (i.e. a tab) in an existing session is preferred over a whole new session
+    (owner directive 2026-07-29). A detached ``new-session`` is INVISIBLE: it does not
+    appear in any tab bar, so a 3am resurrect leaves a running claude the user can only
+    find by knowing to run ``tmux attach -t janitor-resurrect-<pid>``. As a tab it shows up
+    where they are already looking, next to the session it replaced.
+
+    ``-d`` on ``new-window`` creates the tab WITHOUT switching to it — visible, but it does
+    not yank the user's current view away mid-task.
+
+    ``new-session`` remains the fallback for when no session exists at all, because this
+    rung must never fail to produce a plan.
+
+    ``session`` is DATA, not a lookup: this function stays PURE (the module contract — every
+    ``build_*`` returns a plan you can inspect and dry-run). Resolving it here by shelling
+    out to ``tmux`` would put an invisible machine-touching call inside a builder, which is
+    exactly what the suite's sandbox guard exists to surface. The caller with I/O rights
+    (the daemon) passes ``live_tmux_session()``.
+    """
     cwd = project_root or os.path.expanduser("~")
-    # A detached tmux session that kills the stuck pid then starts a fresh claude that
-    # resumes the transcript. shlex-quoted so a crafted cwd cannot break out of the
-    # single command string.
+    # shlex-quoted so a crafted cwd cannot break out of the single command string.
     inner = f"kill {int(pid)} 2>/dev/null; cd {shlex.quote(cwd)} && {_RELAUNCH_CMD}"
-    argv = ["tmux", "new-session", "-d", "-s", f"janitor-resurrect-{int(pid)}", "sh", "-c", inner]
+    name = f"janitor-resurrect-{int(pid)}"
+    # .strip(): a whitespace-only id is TRUTHY, so an unstripped value would build
+    # `new-window -t "   "` — a target tmux cannot resolve, turning "no session" into a
+    # silently failing spawn instead of the working fallback.
+    target = (session or "").strip()
+    if target:
+        argv = ["tmux", "new-window", "-d", "-t", target, "-n", name, "sh", "-c", inner]
+    else:
+        argv = ["tmux", "new-session", "-d", "-s", name, "sh", "-c", inner]
     return {"rung": "resurrect", "kill_pid": pid, "cwd": cwd, "spawn": argv}
 
 
@@ -277,7 +366,7 @@ def fire_restart(
 def _default_spawn(argv: list[str]) -> bool:
     """Spawn the resurrect argv fully detached; True iff launched. Best-effort."""
     try:
-        subprocess.Popen(  # noqa: S603 - fixed argv (tmux new-session), no shell
+        subprocess.Popen(  # noqa: S603 - fixed argv (tmux new-window/new-session), no shell
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, start_new_session=True,
         )
