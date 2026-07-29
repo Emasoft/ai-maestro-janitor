@@ -2,7 +2,7 @@
 name: janitor-fleet-guardian-reachability
 description: "the status table says a project is NOT armed but I armed it myself / did the plugin update reset the arming / daemon.log says UNREACHABLE ({}) — would rearm; skipped (no injection channel) / the guardian never rescues my frozen sessions / can the janitor send commands to other claude instances / I disarmed a project and the janitor re-armed it anyway / after a global disarm the other sessions keep firing at a missing file / every project's heartbeat broke after I disarmed one"
 ocd: 2026-07-09
-lmd: 2026-07-09
+lmd: 2026-07-29
 metadata:
   node_type: memory
   type: project
@@ -133,11 +133,51 @@ only channel that ENQUEUES: the entry persists server-side and drains when the
 agent is genuinely idle, so it reaches a hibernated agent that keystrokes cannot.
 Its limit is the correct one — `queue` maps to `send-command`, so the self-drive
 exemption lets an agent enqueue only on **itself**; a genuine fleet-wide arm runs
-from the MANAGER or the user. The ai-maestro server is not running on this machine
-yet, so no instance carries an `aimaestro_session` and this channel is inert.
+from the MANAGER or the user. This channel is live only where an ai-maestro server is
+running — check `~/.aimaestro/server-liveness.json` (30 s beat, 90 s staleness) via
+`harness_backend.server_is_alive()` rather than assuming either way.[^4]
 
 **Injection is not execution.** Keystrokes typed into a wedged pane sit in the pty
 buffer until the session unwedges. Nothing is lost; nothing is instant.
+
+## When NO channel resolves: prefer the ORIGINAL pane, and never open a window
+
+Only ONE rung creates a surface. `relaunch` (5) and `force_restart` (6) both type into
+the pane already in `inst.terminal`, so they restart in place — same tab, nothing new.
+`resurrect` (7) is the sole exception, and `daemon._hard_restart_plan` reaches it only
+when `build_force_restart` returned `None`, i.e. no channel resolved at all.
+
+That "unreachable" verdict is softer than it reads. `fleet_scan` resolves the terminal
+from the **live TTY and deliberately never from a recorded id** — correct, because that
+is what lets it reach a zombie instance whose janitor predates
+`terminal-identity.json`. But live resolution can fail on a pane that is perfectly
+reachable; the known case is the **iTerm TCC denial above**, which the scanner already
+flags (`fleet_scan.iterm_automation_blocked` — "iTerm is UP but the osascript enumerated
+ZERO sessions"). A healthy tab then reads as unreachable.
+
+So before escalating, `_hard_restart_plan` retries with `fleet_restart.recorded_terminal()`
+— the pane the SESSION wrote at its own start (`on-session-start.py`, which is the only
+process that can see `TMUX_PANE` / `ITERM_SESSION_ID`). It is a FALLBACK, never a
+substitute: live wins whenever it resolves, so a moved or recycled pane is still
+preferred over a stale recording.
+
+**The surface mapping that makes this matter.** Under iTerm2's tmux control mode the
+correspondence is fixed:
+
+| tmux | iTerm2 |
+|---|---|
+| session | **window** |
+| window | **tab** |
+| pane | split pane |
+
+So `tmux new-session` cannot help but open a whole WINDOW. `resurrect` now uses
+`tmux new-window -d -t <session>` (a TAB; `-d` creates it without switching, so a 3am
+recovery is visible without yanking the user's view), falling back to `new-session` only
+when no session exists — this rung must never fail to produce a plan.
+
+The session id is passed to the builder as **data**, not resolved inside it: every
+`build_*` is pure by contract, and the suite's sandbox guard rejects a machine-touching
+call hidden in one.[^5]
 
 ## Stale `rate-limited.flag` mislabels quiet projects as `frozen`
 
@@ -206,3 +246,20 @@ complete set of *harmful* cases — a flag in a dormant project is inert litter)
   than per-project — a fact one `ls` settles. Lesson: before writing the inverse of an
   operation, check the SCOPE of what it wrote. A project-scoped command that deletes a
   machine-wide file is a fleet-wide outage wearing the costume of a local cleanup.
+[^4]: [id:ATOM-MG05-0013, status:valid, keywords:"page_asserted_the_ai_maestro_server_is_not_running_yet machine_state_written_into_a_pushed_project_page channel_declared_inert_but_it_was_live probe_server_liveness_instead_of_asserting", ocd:2026-07-29, lmd:2026-07-29]
+  DO NOT record a MACHINE's current state as a fact in a PROJECT-scope page, BECAUSE this
+  page said "the ai-maestro server is not running on this machine yet, so this channel is
+  inert" — true on 2026-07-09, false by 2026-07-29 (a live server with a fresh
+  `server-liveness.json`), and PROJECT memory is pushed to every clone, so the claim was
+  wrong for other machines the day it was written. It also mattered: that same live server
+  absorbs the plugin-update chores, so "inert channel" was exactly backwards. DO write the
+  machine-agnostic form — name the PROBE (`harness_backend.server_is_alive()` /
+  `~/.aimaestro/server-liveness.json`) and let the reader resolve it — and put per-machine
+  state in LOCAL scope.
+[^5]: [id:ATOM-MG05-0014, status:valid, keywords:"put_a_live_tmux_call_inside_a_pure_builder sandbox_guard_denied_the_spawn build_star_functions_must_stay_inspectable resolve_io_at_the_caller", ocd:2026-07-29, lmd:2026-07-29]
+  DO NOT resolve live machine state inside a `build_*` planner, BECAUSE the first cut of the
+  resurrect tab fix called `tmux list-sessions` from within `build_resurrect`, and the suite's
+  sandbox guard denied it — correctly: these builders are pure by contract so a plan can be
+  inspected and dry-run, and an invisible subprocess in one is the "machine-touching call as
+  an invisible default" that guard exists to surface. DO pass the resolved value in as data
+  and let the layer that already owns I/O (the daemon) obtain it.
