@@ -80,6 +80,13 @@ The singleton move **cannot reuse this primitive**: it must hold the NEW lock
 ACROSS the retirement of the OLD one, whereas `_acquire_dual_flock` releases
 both halves on partial failure.
 
+## See also
+
+- [[janitor-daemon-handover-unowned-chores]] — this page owns the coordination
+  SUBSTRATE (which flags and locks a second chore owner must observe); that one
+  owns who actually EXECUTES, and what stops running when the janitor hands the
+  whole host to a live ai-maestro server.
+
 ## Notes and lessons learned
 
 [^1]: [id:ATOM-QK7M-0002, status:valid, keywords:"lock_moved_to_new_path dual_lock_self_deadlock same_inode_opened_twice chore_skips_forever flock_across_open_descriptions", ocd:2026-07-22, lmd:2026-07-22]

@@ -29,6 +29,9 @@ makes it due again immediately). marketplace-refresh default is now 3600 s.
 ## See also
 
 - [[janitor-per-project-channeling]] — the other v0.50.0 invariant
+- [[janitor-daemon-handover-unowned-chores]] — the OTHER cause of stale chore
+  stamps: the daemon is not blocked, it is deliberately absent because a live
+  ai-maestro server owns the host. Same symptom, opposite cause.
 - TRDD-H7NVKSAX (incident + fix), TRDD-FQXBURNR (burn-rate-aware rotation, open)
 
 ## Notes and lessons learned

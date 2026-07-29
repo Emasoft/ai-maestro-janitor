@@ -309,6 +309,10 @@ must report a crash.[^3]
   rule file, the pinned `aimaestro-*` overlay names, and the user-scope
   orphans that make an agent read two generations of one rule.
 
+- [[janitor-daemon-handover-unowned-chores]] — what happens to the two tiers
+  above when a live ai-maestro server owns the host: §7.2 withdraws the whole
+  daemon, so the six chores nobody absorbed belong to nobody.
+
 
 ^ATOM-DUXK-QD2D [desc:"why unattended sessions were stranded after a compaction — the resume push read machine-global presence", keywords: dead_claude_sessions_I_have_to_wake_by_hand session_stranded_after_compaction resume-after-compact_flag_never_consumed post-compact_resume_did_not_fire per-pane_user_presence, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
 
