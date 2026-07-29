@@ -140,7 +140,18 @@ def _is_truthy(v: Any) -> bool:
 
 # ---- project shape detection --------------------------------------------
 
-_NODE_LOCKFILES = ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock")
+# Must stay a SUPERSET of `_LOCKFILE_MANAGER`'s keys below: a lockfile this list omits makes
+# `_is_node_project` return False, so the detector exits before the manager resolution that
+# lockfile would have driven ever runs. `npm-shrinkwrap.json` was exactly that hole — mapped to
+# npm below, but invisible here, so a shrinkwrap-only repo was audited by nobody.
+_NODE_LOCKFILES = (
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+    "bun.lock",
+)
 
 # Dependency-block keys whose presence (with at least one entry) proves a
 # package.json describes a project that actually consumes npm packages. A
@@ -212,6 +223,18 @@ _LOCKFILE_MANAGER = {
 }
 
 
+def _lockfile_managers(lockfiles: Iterable[str]) -> set[str]:
+    """The distinct managers whose lockfiles are present. ONE source of truth, because two
+    callers ask the same question for different reasons: the resolver (to decide whether the
+    install path is knowable) and `main` (to report the conflict itself)."""
+    return {_LOCKFILE_MANAGER[f] for f in lockfiles if f in _LOCKFILE_MANAGER}
+
+
+def present_lockfile_managers(root: Path) -> set[str]:
+    """Filesystem wrapper around `_lockfile_managers`. Never raises."""
+    return _lockfile_managers([name for name in _LOCKFILE_MANAGER if (root / name).is_file()])
+
+
 def resolve_package_manager(
     *,
     package_manager_field: str = "",
@@ -243,11 +266,19 @@ def resolve_package_manager(
         name = name.strip()
         if name == "yarn":
             major = version.strip().split(".", 1)[0]
-            return "yarn-classic" if major == "1" else "yarn-berry"
+            if major:
+                return "yarn-classic" if major == "1" else "yarn-berry"
+            # An UNVERSIONED pin (`"yarn"`, or `"yarn@"`) names the family but not the major, so
+            # it cannot decide Classic-vs-Berry. Apply the SAME tiebreak the lockfile path uses
+            # rather than the empty string falling through `!= "1"` into Berry: that read is both
+            # unevidenced and the unsafe direction. Falling through to the lockfile block instead
+            # would be worse still — a bare `yarn` pin with no lockfile yet would land on
+            # `unknown`, which callers treat as npm, re-opening janitor#130 on a yarn repo.
+            return "yarn-berry" if has_yarnrc_yml else "yarn-classic"
         if name in ("npm", "pnpm", "bun"):
             return name
 
-    found = {_LOCKFILE_MANAGER[f] for f in lockfiles if f in _LOCKFILE_MANAGER}
+    found = _lockfile_managers(lockfiles)
     if len(found) > 1:
         return "ambiguous"
     if not found:
@@ -512,6 +543,14 @@ def _content_hash(root: Path) -> str:
             parts.append(f"{name}:absent")
         except OSError:
             parts.append(f"{name}:err")
+    # Lockfile PRESENCE is an input to the audit — it decides `detect_package_manager` (janitor#130)
+    # and the lockfile-conflict finding — so it MUST be in the cache key. It was not: a repo that
+    # migrated yarn→npm without touching package.json kept the yarn-era hash and stayed silent
+    # about its now-missing npm knobs forever (reproduced 2026-07-29). Presence ONLY, deliberately:
+    # a lockfile's mtime/size changes on every install, and hashing that would re-emit an unchanged
+    # finding after every `npm install`.
+    for name in _LOCKFILE_MANAGER:
+        parts.append(f"{name}:{'1' if (root / name).is_file() else '0'}")
     fw = "1" if (shutil.which("sfw") or shutil.which("safe-chain")) else "0"
     parts.append(f"firewall:{fw}")
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
@@ -545,7 +584,13 @@ def main() -> int:
     # Resolve WHO installs here before auditing manager-specific config (janitor#130): an
     # `.npmrc` policy proposal on a yarn repo enforces nothing while reading as enforcement.
     manager = detect_package_manager(project_root)
-    if manager == "ambiguous":
+    # Judge the lockfile conflict INDEPENDENTLY of `manager`. A `packageManager` pin makes the
+    # resolver authoritative, so it answers e.g. "yarn-classic" and NEVER "ambiguous" — which
+    # would have hidden the hazard the resolver's own docstring calls "a real problem" on exactly
+    # the repos disciplined enough to declare a pin. This check subsumes the old
+    # `manager == "ambiguous"` branch: that verdict is only ever reached when >1 manager's
+    # lockfiles are present.
+    if len(present_lockfile_managers(project_root)) > 1:
         issues.append(
             "two package managers' lockfiles are present — the install path is undecidable, "
             "so no supply-chain policy can be verified. Keep one lockfile."

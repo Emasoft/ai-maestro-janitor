@@ -307,6 +307,44 @@ def test_edit_invalidates_cache(tmp_path: Path) -> None:
     assert "[package-manager-policy]" in second.stdout
 
 
+def test_swapping_the_lockfile_invalidates_the_cache(tmp_path: Path) -> None:
+    """A yarn→npm migration that leaves package.json untouched MUST re-fire.
+
+    Lockfile presence decides which manager is audited (janitor#130), but it was absent from the
+    content hash, so the yarn-era "nothing to say" cache entry survived the migration and the
+    repo's now-missing npm knobs were never reported — a false negative created by the very
+    change that removed the yarn false positive.
+    """
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
+    (tmp_path / "yarn.lock").write_text("# yarn lockfile v1\n", encoding="utf-8")
+    first = _run(tmp_path, with_firewall=True)
+    assert "no .npmrc" not in first.stdout  # yarn ignores those keys — correctly silent
+
+    (tmp_path / "yarn.lock").unlink()
+    (tmp_path / "package-lock.json").write_text("{}\n", encoding="utf-8")
+
+    second = _run(tmp_path, with_firewall=True)
+    assert "no .npmrc" in second.stdout, \
+        f"npm knobs must be reported after the migration, got: {second.stdout!r}"
+
+
+def test_two_lockfiles_reported_even_with_a_packageManager_pin(tmp_path: Path) -> None:
+    """The pin resolves WHO installs, but two managers' lockfiles is a hazard in its own right —
+    reporting it must not depend on the resolver having returned 'ambiguous'."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "packageManager": "yarn@1.22.22",
+        "dependencies": {"lodash": "^4.0.0"},
+    }), encoding="utf-8")
+    (tmp_path / "yarn.lock").write_text("# yarn lockfile v1\n", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text("{}\n", encoding="utf-8")
+
+    r = _run(tmp_path, with_firewall=True)
+    assert r.returncode == 0
+    assert "Keep one lockfile" in r.stdout
+
+
 def test_disabled_env_silent(tmp_path: Path) -> None:
     """ENABLED=false silences the detector entirely."""
     (tmp_path / "package.json").write_text(json.dumps({

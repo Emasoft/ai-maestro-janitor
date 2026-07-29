@@ -91,6 +91,44 @@ def test_yarn_lock_plus_a_berry_config_reads_as_BERRY(pmp):
     assert got == "yarn-berry"
 
 
+@pytest.mark.parametrize("field", ["yarn", "yarn@"])
+def test_an_UNVERSIONED_yarn_pin_reads_as_CLASSIC_not_berry(pmp, field):
+    """An unversioned pin names the family but not the major, so it must land on the same safer
+    read the lockfile path uses. Letting the empty version fall through `!= "1"` made it Berry —
+    unevidenced, and in the unsafe direction."""
+    assert pmp.resolve_package_manager(package_manager_field=field) == "yarn-classic"
+
+
+def test_an_UNVERSIONED_yarn_pin_still_honours_the_berry_tiebreak(pmp):
+    """`.yarnrc.yml` is Berry-only evidence and outranks the default when the pin is silent."""
+    got = pmp.resolve_package_manager(package_manager_field="yarn", has_yarnrc_yml=True)
+
+    assert got == "yarn-berry"
+
+
+def test_a_shrinkwrap_only_repo_is_a_NODE_project(pmp, tmp_path):
+    """`npm-shrinkwrap.json` maps to npm in `_LOCKFILE_MANAGER`, so `_is_node_project` must
+    accept it too — otherwise the detector exits before the resolution that lockfile drives."""
+    (tmp_path / "npm-shrinkwrap.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
+
+    assert pmp._is_node_project(tmp_path) is True
+    assert pmp.detect_package_manager(tmp_path) == "npm"
+
+
+def test_a_PIN_does_not_hide_two_lockfiles(pmp, tmp_path):
+    """The pin decides WHO installs; it does not make a two-manager repo unambiguous. The
+    conflict is reported off the filesystem, not off the resolver's verdict."""
+    (tmp_path / "yarn.lock").write_text("# yarn lockfile v1\n", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "x", "packageManager": "yarn@1.22.22"}), encoding="utf-8",
+    )
+
+    assert pmp.detect_package_manager(tmp_path) == "yarn-classic"  # pin still wins
+    assert pmp.present_lockfile_managers(tmp_path) == {"yarn", "npm"}  # conflict still visible
+
+
 def test_two_managers_lockfiles_are_AMBIGUOUS_never_a_silent_pick(pmp):
     """Choosing a winner would hide a real problem behind whichever knob set we then proposed."""
     got = pmp.resolve_package_manager(lockfiles=["yarn.lock", "package-lock.json"])
