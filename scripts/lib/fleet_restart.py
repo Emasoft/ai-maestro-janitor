@@ -40,13 +40,63 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fleet_inject  # noqa: E402  (bare sibling import; lib/ is on sys.path)
 
+
+def _temp_dirs() -> list[str]:
+    """The temp directories a relaunched session must be allowed to touch, per-OS.
+
+    Two answers exist and they differ: POSIX `/tmp`, and the platform's own temp dir
+    (`$TMPDIR` on macOS — `/var/folders/…/T` — and `%TEMP%` on Windows). Scratch files get
+    written to BOTH depending on who created them, so an unattended session that can reach
+    only one still stalls on the other. `/tmp` is skipped where it does not exist (Windows),
+    which is also what keeps this list platform-correct without branching on the OS name.
+
+    Deduped by real path: on macOS `/tmp` is a symlink to `/private/tmp`, so the resolved
+    form is included too — a path handed to the session as `/private/tmp/…` (which is what
+    a resolved scratchpad path looks like) would otherwise fall outside the allowance.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for cand in ("/tmp", os.path.realpath("/tmp"), tempfile.gettempdir()):
+        if not cand or not os.path.isdir(cand) or cand in seen:
+            continue
+        seen.add(cand)
+        out.append(cand)
+    return out
+
+
 # The shell command that resumes a claude session in a pane that dropped to a shell.
-_RELAUNCH_CMD = "claude --continue"
+#
+# WHY THE BYPASS FLAG (owner directive 2026-07-29). Every rung here fires at a session that
+# is ALREADY unattended and wedged — that is the precondition for reaching a hard-restart
+# rung at all. A relaunch that comes back up and then parks on a permission prompt has not
+# recovered it: the process is running again, so the fleet scanner reads it as healthy while
+# the session is as stuck as before, and now invisible. Recovery has to leave the session
+# able to PROCEED, not merely alive.
+#
+# ONE flag, not two. `--dangerously-skip-permissions` performs the bypass.
+# `--allow-dangerously-skip-permissions` only makes the bypass AVAILABLE "without it being
+# enabled by default" (its own help text) — strictly weaker, and a no-op once the bypass is
+# already on, so passing it would be cargo cult. `--permission-mode bypassPermissions` is
+# likewise redundant here. Both are deliberately omitted.
+#
+# Blast radius is bounded by `hard_restart_enabled()` — DEFAULT-OFF, so no permission gate is
+# dropped anywhere until the user deliberately opts the killing rungs in.
+_TEMP_DIRS = _temp_dirs()
+# shlex.quote: this string is both TYPED into a pane and embedded in an `sh -c` (rung 7),
+# and a temp path can legally contain spaces on some platforms. The empty-list guard matters
+# — a bare trailing `--add-dir` with no values would swallow the next token or error out.
+_RELAUNCH_CMD = " ".join(
+    [
+        "claude --continue --dangerously-skip-permissions",
+        *(["--add-dir", *(shlex.quote(d) for d in _TEMP_DIRS)] if _TEMP_DIRS else []),
+    ]
+)
 
 
 def hard_restart_enabled() -> bool:

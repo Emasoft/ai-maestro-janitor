@@ -15,6 +15,7 @@ subprocess, no network.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -57,12 +58,63 @@ def test_build_relaunch_types_claude_continue() -> None:
     transcript), via the gated tmux/iTerm channel; None when no channel resolves."""
     tmux = fn.build_relaunch({"tmux_pane": "%7"})
     assert tmux is not None and tmux["rung"] == "relaunch"
-    assert tmux["channel"] == "tmux" and tmux["command"] == "claude --continue"
+    assert tmux["channel"] == "tmux" and tmux["command"].startswith("claude --continue")
     iterm = fn.build_relaunch({"iterm_session_id": "ttys4:4C4A-9B7"})
     assert iterm is not None and iterm["channel"] == "iterm"
     assert "claude --continue" in iterm["osascript"]
     assert fn.build_relaunch({}) is None                        # nowhere safe to type
     assert fn.build_relaunch({"tmux_pane": "-X"}) is None        # malformed pane rejected
+
+
+def test_relaunch_can_actually_proceed_unattended() -> None:
+    """The relaunch bypasses permission checks and can reach the temp dirs.
+
+    A rung only ever fires at an ALREADY-unattended wedged session, so a relaunch that
+    comes back up and then parks on a permission prompt has not recovered it — the process
+    is running again (so the scanner reads it healthy) while the session is as stuck as
+    before. Recovery must leave it able to PROCEED, not merely alive.
+    """
+    plan = fn.build_relaunch({"tmux_pane": "%7"})
+    assert plan is not None
+    cmd = plan["command"]
+
+    assert "--dangerously-skip-permissions" in cmd
+    for d in fn._TEMP_DIRS:
+        assert d in cmd
+    assert "--add-dir" in cmd
+
+
+def test_relaunch_omits_the_redundant_permission_flags() -> None:
+    """`--allow-dangerously-skip-permissions` and `--permission-mode` must NOT be passed.
+
+    The tripwire for a plausible-sounding regression. `--allow-…` only makes the bypass
+    AVAILABLE "without it being enabled by default" (its own help text) — it does not
+    perform one, so beside `--dangerously-skip-permissions` it is a no-op that reads as
+    belt-and-braces. It was added here once on exactly that misreading and removed the same
+    day; this keeps it removed.
+    """
+    plan = fn.build_relaunch({"tmux_pane": "%7"})
+    assert plan is not None
+    cmd = plan["command"]
+
+    assert "--allow-dangerously-skip-permissions" not in cmd
+    assert "--permission-mode" not in cmd
+
+
+def test_temp_dirs_are_real_deduped_directories() -> None:
+    """`_temp_dirs()` returns existing, de-duplicated paths — never a bare `--add-dir`.
+
+    Deduping is load-bearing on macOS, where `/tmp` is a symlink to `/private/tmp`: both
+    spellings are listed (a resolved scratchpad path arrives as `/private/tmp/…`) but each
+    only once. An empty result would emit a dangling `--add-dir` that swallows the next
+    token, so the builder guards on it.
+    """
+    dirs = fn._TEMP_DIRS
+
+    assert dirs, "no temp directory resolved on this platform"
+    assert len(dirs) == len(set(dirs))
+    for d in dirs:
+        assert os.path.isdir(d)
 
 
 def test_build_force_restart_carries_kill_then_relaunch() -> None:
