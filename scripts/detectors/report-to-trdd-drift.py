@@ -55,12 +55,34 @@ _DECISION_RE = re.compile(
 # decision report (one that actually merged/split and recommends follow-up) lacks that
 # marker and is STILL flagged.
 _MEMORY_CURATOR_DIR = "memory-subconscious-agent"
-# The curator opens its report with an `**Outcome:** <ABSTAINED|NOTHING DUE> …` line on
-# a no-op pass (verified across every real abstain/nothing-due report). Matching the
-# OUTCOME marker — not just the bare word — avoids excluding a real decision report that
-# merely *mentions* an abstained sub-candidate further down its body.
+# MEASURED CORRECTION 2026-07-29. The previous pattern matched ONLY an inline
+# `**Outcome:** ABSTAINED …` label, and its comment claimed that was "verified across
+# every real abstain/nothing-due report". It was not: across the 51 curator reports on
+# disk, **zero** carry that spelling, so this exclusion had never once fired since issue
+# #63 shipped. Every abstain was nagged forever and the list grew without bound — the
+# exact false positive the exclusion was written to end.
+#
+# What the curator ACTUALLY writes is a `## Outcome` SECTION HEADING with the verb on the
+# next non-empty line (`ABSTAINED — …`, `NOTHING DUE — …`, or `REPAIRED`/`SPLIT`/
+# `ATOMIZED` for a real pass), and on some passes only an H1 title carrying the word.
+#
+# All three anchored forms are accepted below. Anchoring is the whole safety argument and
+# is preserved from the original: a heading or a labelled line cannot be a passing
+# *mention* of an abstained sub-candidate buried in a decision report's prose, so a real
+# merge/split report is still flagged. Verified on the full 51-report corpus: 7 excluded,
+# 44 kept, and ZERO reports whose outcome verb is a mutation were silenced.
+#
+# Lesson, and it is why this comment is long: the dead guard was invisible precisely
+# because it FAILED OPEN — an exclusion that never matches just means more nagging, which
+# reads as a noisy detector rather than a broken one. Assert the producer's format against
+# real artifacts, never against the format you expect it to have.
 _MEMORY_NOOP_RE = re.compile(
-    r"^[\s\-\*>|]*\*\*outcome:\*\*.*?\b(abstain(?:ed)?|nothing\s+due)\b",
+    # 1. inline label: `**Outcome:** ABSTAINED …`  (the original form; kept for tolerance)
+    r"(?:^[\s\-\*>|]*\*\*outcome:\*\*[^\n]*?\b(?:abstain(?:ed)?|nothing\s+due)\b"
+    # 2. section heading `## Outcome`, verb on the next non-empty line (the REAL form)
+    r"|^#{1,4}[ \t]*outcome[ \t]*$\s*\n\s*[\s\-\*>|]*(?:abstain(?:ed)?|nothing\s+due)\b"
+    # 3. H1 title carrying the word: `# CONSOLIDATE pass — LOCAL scope — abstained`
+    r"|^#[ \t]+[^\n]*\b(?:abstain(?:ed)?|nothing\s+due)\b[^\n]*$)",
     re.IGNORECASE | re.MULTILINE,
 )
 _NOOP_SCAN_BYTES = 4096  # the outcome marker is always in the report's opening lines

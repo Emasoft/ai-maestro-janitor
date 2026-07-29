@@ -183,6 +183,106 @@ class TestReportToTrddDrift(unittest.TestCase):
             out = _run(root)
             self.assertEqual(out.strip(), "")
 
+    # --- the format the curator ACTUALLY writes (measured correction 2026-07-29) ------
+    #
+    # The three tests above synthesize an inline `**Outcome:** …` label. Across the 51
+    # real curator reports on disk, ZERO use that spelling — so they passed while the
+    # exclusion never once fired in production, and every abstain was nagged forever.
+    # That is the "a test that constructs its own precondition proves the reader is
+    # correct GIVEN a writer, and says nothing about whether a writer exists" trap, which
+    # this repo has already been bitten by once (disarmed.flag: four readers, no writer).
+    # These use the shapes taken verbatim from real reports.
+
+    def test_real_curator_outcome_heading_abstained_not_flagged(self):
+        """The REAL no-op shape: a `## Outcome` heading with the verb on the next line.
+
+        Copied from `20260729_051725+0200-consolidate-local.md`. This is the form that
+        was nagged every cadence because the detector only looked for an inline label.
+        """
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            rep = root / "reports/memory-subconscious-agent/20260729_051725+0200-consolidate-local.md"
+            rep.write_text(
+                "# CONSOLIDATE pass — LOCAL scope\n\n"
+                "Scope: LOCAL\n\n"
+                "## Verdict\n\n"
+                "NOT a duplicate by prior passes.\n\n"
+                "## Outcome\n\n"
+                "ABSTAINED — no aggregation candidates in LOCAL scope (librarian found none).\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertEqual(out.strip(), "")
+
+    def test_real_curator_outcome_heading_nothing_due_not_flagged(self):
+        """Same heading shape, `NOTHING DUE` verb — taken from a real harvest report."""
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            rep = root / "reports/memory-subconscious-agent/20260708_224524+0200-harvest-local-nothing-due-plan.md"
+            rep.write_text(
+                "# HARVEST pass — LOCAL scope\n\n"
+                "## Outcome\n\n"
+                "NOTHING DUE — clean no-op. Buffer (`MEMORY.md`) left untouched.\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertEqual(out.strip(), "")
+
+    def test_real_curator_h1_title_abstain_not_flagged(self):
+        """Some passes declare the no-op only in the H1 title and carry no Outcome section.
+
+        Copied from `20260727_100051+0200-consolidate-local-abstain.md`. An H1 is anchored,
+        so it cannot be a passing mention of an abstained sub-candidate in prose.
+        """
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            rep = root / "reports/memory-subconscious-agent/20260727_100051+0200-consolidate-local-abstain.md"
+            rep.write_text(
+                "# CONSOLIDATE pass — LOCAL scope — abstained\n\n"
+                "- **Scope**: LOCAL\n"
+                "- **Editor enabled**: yes\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertEqual(out.strip(), "")
+
+    def test_outcome_heading_with_a_MUTATING_verb_is_still_flagged(self):
+        """THE SAFETY CONTROL. A `## Outcome` section whose verb is a real mutation must
+        still be flagged — otherwise the widened pattern would silence genuine decisions,
+        which is far worse than the over-nagging it fixes.
+
+        The filename must itself trip `_DECISION_RE` ('consolidat'), or the report is
+        skipped one gate earlier and the test proves nothing about the no-op pattern —
+        which is exactly what the first cut of this test did.
+        """
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            rep = root / "reports/memory-subconscious-agent/20260728_160200+0200-consolidate-security-trio.md"
+            rep.write_text(
+                "# CONSOLIDATE pass — USER scope\n\n"
+                "## Outcome\n\n"
+                "MERGED the security-trio pages; recommend a follow-up TRDD.\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertIn("[report-to-trdd]", out)
+            self.assertIn("consolidate-security-trio.md", out)
+
+    def test_an_abstain_mentioned_in_PROSE_does_not_silence_a_decision(self):
+        """Anchoring proof: a real decision report that merely MENTIONS an abstained
+        sub-candidate mid-body is still flagged. This is the property the original
+        inline-label pattern was protecting, and widening must not lose it.
+        """
+        with TemporaryDirectory() as tmp:
+            root = self._mem_proj(tmp)
+            rep = root / "reports/memory-subconscious-agent/20260729_120000+0200-consolidate-merged-plan.md"
+            rep.write_text(
+                "# CONSOLIDATE pass — USER scope\n\n"
+                "Candidate A/B merged. A third candidate was abstained on for now, and\n"
+                "nothing was due for the LOCAL scope this pass.\n\n"
+                "## Outcome\n\n"
+                "MERGED two pages; recommend a follow-up TRDD.\n")
+            _aged(rep)
+            out = _run(root)
+            self.assertIn("[report-to-trdd]", out)
+            self.assertIn("consolidate-merged-plan.md", out)
+
     def test_memory_decision_report_still_flagged(self):
         """A GENUINE decision report under the SAME curator dir is still flagged.
 
