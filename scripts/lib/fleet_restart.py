@@ -42,63 +42,89 @@ import os
 import shlex
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fleet_inject  # noqa: E402  (bare sibling import; lib/ is on sys.path)
 
+# The last-resort relaunch. Deliberately the MINIMUM that resumes a transcript: every other
+# flag is MIRRORED from how the session was actually launched (see `relaunch_command`).
+_FALLBACK_RELAUNCH_CMD = "claude --continue"
+_RESUME_FLAGS = ("--continue", "-c", "--resume", "-r")
 
-def _temp_dirs() -> list[str]:
-    """The temp directories a relaunched session must be allowed to touch, per-OS.
 
-    Two answers exist and they differ: POSIX `/tmp`, and the platform's own temp dir
-    (`$TMPDIR` on macOS — `/var/folders/…/T` — and `%TEMP%` on Windows). Scratch files get
-    written to BOTH depending on who created them, so an unattended session that can reach
-    only one still stalls on the other. `/tmp` is skipped where it does not exist (Windows),
-    which is also what keeps this list platform-correct without branching on the OS name.
+def with_resume(argv: str) -> str:
+    """`argv` guaranteed to resume rather than start a fresh session.
 
-    Deduped by real path: on macOS `/tmp` is a symlink to `/private/tmp`, so the resolved
-    form is included too — a path handed to the session as `/private/tmp/…` (which is what
-    a resolved scratchpad path looks like) would otherwise fall outside the allowance.
+    A VERBATIM replay is wrong for the one case that matters: a session launched WITHOUT
+    `--continue` (the common case — you type `claude`, then work for hours). Replaying that
+    line starts an empty session in the recovered pane, and because the process is running
+    again the fleet scanner reads it HEALTHY while the entire transcript is gone. That is a
+    worse outcome than not recovering at all, because it is silent.
+
+    An existing resume flag is left alone — `--resume <id>` targets a specific session and
+    appending `--continue` would fight it.
     """
-    seen: set[str] = set()
-    out: list[str] = []
-    for cand in ("/tmp", os.path.realpath("/tmp"), tempfile.gettempdir()):
-        if not cand or not os.path.isdir(cand) or cand in seen:
-            continue
-        seen.add(cand)
-        out.append(cand)
-    return out
+    argv = (argv or "").strip()
+    if not argv:
+        return ""
+    if any(f in shlex.split(argv) for f in _RESUME_FLAGS):
+        return argv
+    return f"{argv} --continue"
 
 
-# The shell command that resumes a claude session in a pane that dropped to a shell.
-#
-# WHY THE BYPASS FLAG (owner directive 2026-07-29). Every rung here fires at a session that
-# is ALREADY unattended and wedged — that is the precondition for reaching a hard-restart
-# rung at all. A relaunch that comes back up and then parks on a permission prompt has not
-# recovered it: the process is running again, so the fleet scanner reads it as healthy while
-# the session is as stuck as before, and now invisible. Recovery has to leave the session
-# able to PROCEED, not merely alive.
-#
-# ONE flag, not two. `--dangerously-skip-permissions` performs the bypass.
-# `--allow-dangerously-skip-permissions` only makes the bypass AVAILABLE "without it being
-# enabled by default" (its own help text) — strictly weaker, and a no-op once the bypass is
-# already on, so passing it would be cargo cult. `--permission-mode bypassPermissions` is
-# likewise redundant here. Both are deliberately omitted.
-#
-# Blast radius is bounded by `hard_restart_enabled()` — DEFAULT-OFF, so no permission gate is
-# dropped anywhere until the user deliberately opts the killing rungs in.
-_TEMP_DIRS = _temp_dirs()
-# shlex.quote: this string is both TYPED into a pane and embedded in an `sh -c` (rung 7),
-# and a temp path can legally contain spaces on some platforms. The empty-list guard matters
-# — a bare trailing `--add-dir` with no values would swallow the next token or error out.
-_RELAUNCH_CMD = " ".join(
-    [
-        "claude --continue --dangerously-skip-permissions",
-        *(["--add-dir", *(shlex.quote(d) for d in _TEMP_DIRS)] if _TEMP_DIRS else []),
-    ]
-)
+def relaunch_command(pid: int = 0, project_root: str | None = None) -> str:
+    """The command that relaunches a session: MIRROR how it was actually launched.
+
+    WHY MIRRORING, NOT A HARDCODED LINE (owner directive 2026-07-29). The previous version
+    hardcoded a resume line carrying a permission-bypass flag plus a guessed set of
+    `--add-dir` temp paths. Two things were wrong with that, and the second is the important
+    one:
+
+    1. It shipped a literal permission-bypass invocation inside the plugin, which CPV's
+       security gate flags CRITICAL — correctly. Obfuscating the string to dodge the scanner
+       would hide a real capability while keeping it working, so the honest fix is to not
+       ship the capability at all. Mirroring means the bypass (if any) is the USER'S, present
+       only because they launched with it; the artifact contains nothing.
+    2. It GUESSED two flags and dropped every other one. A real launch line carries things
+       recovery must preserve — `--model`, `--add-dir`, `--mcp-config`, `--agent`,
+       `--settings`. Hardcoding silently relaunched the session as a DIFFERENT session.
+
+    Resolution ladder, most-authoritative first:
+      * the LIVE argv of `pid` (`ps -p … -o args=`) — exact, current, no staleness risk;
+      * the argv RECORDED at session start (`terminal-identity.json`) — required for rung 5,
+        where the pid is already gone and there is nothing left to read;
+      * `claude --continue` — better than refusing to recover.
+
+    Every rung is guarded so it can only ever relaunch something that IS claude
+    (`is_killable`, and the `argv_is_claude` filter here), so a recycled pid cannot make this
+    replay an unrelated command line.
+    """
+    if pid > 0:
+        live = live_cmdline(pid)
+        if argv_is_claude(live):
+            return with_resume(live)
+    recorded = recorded_argv(project_root)
+    if argv_is_claude(recorded):
+        return with_resume(recorded)
+    return _FALLBACK_RELAUNCH_CMD
+
+
+def argv_is_claude(argv: str) -> bool:
+    """True iff `argv` actually launches claude — the guard on every mirrored replay.
+
+    Matches the EXECUTABLE (argv[0]'s basename), never a substring of the whole line: a
+    session whose flags merely mention the word (`--add-dir /src/claude-plugins`) is not a
+    claude launch, and replaying a non-claude command line into a pane is exactly the class
+    of mistake that turns recovery into arbitrary command execution.
+    """
+    try:
+        parts = shlex.split(argv or "")
+    except ValueError:  # unbalanced quotes — untrusted-looking, refuse
+        return False
+    if not parts:
+        return False
+    return os.path.basename(parts[0]) in ("claude", "claude.exe")
 
 
 def hard_restart_enabled() -> bool:
@@ -160,22 +186,31 @@ def command_injection_plan(terminal: dict, command: str, *, esc_first: bool) -> 
     return _command_plan(terminal, command, esc_first=esc_first)
 
 
-def build_relaunch(terminal: dict) -> dict | None:
-    """rung 5 — resume a `dead` (pid-gone) session by typing ``claude --continue`` into
-    its still-living pane. No ESC (a dead pane sits at a shell prompt, no modal). None
-    when the pane/UUID can't be safely targeted."""
-    cmd = _command_plan(terminal, _RELAUNCH_CMD, esc_first=False)
+def build_relaunch(terminal: dict, *, command: str = "") -> dict | None:
+    """rung 5 — resume a `dead` (pid-gone) session by typing the relaunch line into its
+    still-living pane. No ESC (a dead pane sits at a shell prompt, no modal). None when
+    the pane/UUID can't be safely targeted.
+
+    ``command`` is DATA, exactly like ``session`` on ``build_resurrect``: resolving it here
+    would mean calling ``relaunch_command`` → ``live_cmdline`` → ``ps`` from inside a
+    ``build_*``, breaking the module's purity contract (and tripping the suite's sandbox
+    guard). The caller with I/O rights passes ``relaunch_command(pid, project_root)``.
+    Empty falls back to the minimum that resumes a transcript.
+    """
+    cmd = _command_plan(
+        terminal, (command or "").strip() or _FALLBACK_RELAUNCH_CMD, esc_first=False
+    )
     if cmd is None:
         return None
     return {"rung": "relaunch", **cmd}
 
 
-def build_force_restart(pid: int, terminal: dict) -> dict | None:
+def build_force_restart(pid: int, terminal: dict, *, command: str = "") -> dict | None:
     """rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
     DESCRIBES the kill (``kill_pid``) + the relaunch; ``fire_restart`` performs the
     kill ONLY after ``is_killable`` passes. None when no pane resolves (then the caller
-    escalates to resurrect)."""
-    relaunch = build_relaunch(terminal)
+    escalates to resurrect). ``command`` is passed through to ``build_relaunch``."""
+    relaunch = build_relaunch(terminal, command=command)
     if relaunch is None:
         return None
     return {"rung": "force_restart", "kill_pid": pid, "relaunch": relaunch}
@@ -244,7 +279,33 @@ def recorded_terminal(project_root: str | None) -> dict[str, str]:
     return out
 
 
-def build_resurrect(pid: int, project_root: str | None, *, session: str = "") -> dict:
+def recorded_argv(project_root: str | None) -> str:
+    """The claude argv the SESSION recorded at start, or "" when there is none.
+
+    Load-bearing for rung 5 (`dead`): the pid is already gone, so there is no live command
+    line left to mirror. Only the session itself can capture this — `on-session-start.py`
+    reads its own parent, which IS the claude process (verified: the hook's `getppid()`
+    resolves to `claude …`, not to a shell wrapper).
+
+    Same file as the pane identity, for the same reason: one artifact the session writes
+    once, that a detached daemon can read later. Never raises.
+    """
+    if not project_root:
+        return ""
+    path = Path(project_root) / ".janitor" / "state" / "terminal-identity.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    argv = data.get("argv")
+    return argv.strip() if isinstance(argv, str) else ""
+
+
+def build_resurrect(
+    pid: int, project_root: str | None, *, session: str = "", command: str = ""
+) -> dict:
     """rung 7 — the pane is unreachable: spawn a background ``claude`` that, on launch,
     kills the stuck pid and resumes. The plan carries the kill target + the spawn argv;
     ``fire_restart`` runs it only when enabled AND ``is_killable`` passes. Always builds a
@@ -262,15 +323,17 @@ def build_resurrect(pid: int, project_root: str | None, *, session: str = "") ->
     ``new-session`` remains the fallback for when no session exists at all, because this
     rung must never fail to produce a plan.
 
-    ``session`` is DATA, not a lookup: this function stays PURE (the module contract — every
-    ``build_*`` returns a plan you can inspect and dry-run). Resolving it here by shelling
-    out to ``tmux`` would put an invisible machine-touching call inside a builder, which is
-    exactly what the suite's sandbox guard exists to surface. The caller with I/O rights
-    (the daemon) passes ``live_tmux_session()``.
+    ``session`` and ``command`` are DATA, not lookups: this function stays PURE (the module
+    contract — every ``build_*`` returns a plan you can inspect and dry-run). Resolving them
+    here by shelling out to ``tmux``/``ps`` would put invisible machine-touching calls inside
+    a builder, which is exactly what the suite's sandbox guard exists to surface. The caller
+    with I/O rights (the daemon) passes ``live_tmux_session()`` and
+    ``relaunch_command(pid, project_root)``.
     """
     cwd = project_root or os.path.expanduser("~")
+    relaunch = (command or "").strip() or _FALLBACK_RELAUNCH_CMD
     # shlex-quoted so a crafted cwd cannot break out of the single command string.
-    inner = f"kill {int(pid)} 2>/dev/null; cd {shlex.quote(cwd)} && {_RELAUNCH_CMD}"
+    inner = f"kill {int(pid)} 2>/dev/null; cd {shlex.quote(cwd)} && {relaunch}"
     name = f"janitor-resurrect-{int(pid)}"
     # .strip(): a whitespace-only id is TRUTHY, so an unstripped value would build
     # `new-window -t "   "` — a target tmux cannot resolve, turning "no session" into a

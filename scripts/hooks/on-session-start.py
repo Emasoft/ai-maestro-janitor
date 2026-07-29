@@ -387,9 +387,19 @@ def main() -> int:
     # propagate to arbitrary subprocesses — only this hook, spawned by the session
     # at start, sees them. Best-effort; a failure must never break session start.
     try:
-        from lib import session_liveness  # noqa: E402  -- local package, not PyPI
+        from lib import fleet_restart, session_liveness  # noqa: E402  -- local package
 
         ident = session_liveness.capture_terminal_identity(os.environ)
+        # MIRROR-THE-LAUNCH (owner directive 2026-07-29): record the argv claude was
+        # ACTUALLY started with, so recovery replays THAT instead of a guessed line. This is
+        # load-bearing for rung 5 (`dead`), where the pid is already gone and there is no
+        # live command line left to read — only the session itself can capture it, and only
+        # here: our parent IS the claude process (verified — getppid() resolves to
+        # `claude …`, not to a shell wrapper). Recorded even when no pane resolved, because
+        # rung 7 (resurrect) needs no pane and would otherwise lose the flags too.
+        argv = fleet_restart.live_cmdline(os.getppid())
+        if fleet_restart.argv_is_claude(argv):
+            ident["argv"] = argv
         if ident:
             import time  # noqa: E402  -- stdlib
 

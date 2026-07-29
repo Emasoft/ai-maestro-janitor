@@ -883,15 +883,22 @@ def _hard_restart_plan(inst) -> dict | None:
     healthy tab reads as unreachable and rung 7 opens one nobody needed.
     """
     recorded = fleet_restart.recorded_terminal(inst.project_root)
+    # MIRROR the original launch line (owner directive 2026-07-29) — resolved HERE, not in
+    # the builders, which are pure by contract. A `dead` instance's pid is gone, so this
+    # falls through to the argv the session recorded at start; a `frozen` one is still
+    # running, so its LIVE argv wins. Preserves every user flag (--model, --add-dir,
+    # --mcp-config, a permission mode) instead of guessing a line and silently relaunching
+    # a DIFFERENT session.
+    command = fleet_restart.relaunch_command(inst.pid, inst.project_root)
     if inst.diagnosis == "dead":
         # `or`: the recorded pane is a FALLBACK, never a substitute — live wins when it
         # resolves, so a moved/recycled pane is still preferred over a stale recording.
-        return fleet_restart.build_relaunch(inst.terminal) or fleet_restart.build_relaunch(
-            recorded
-        )
-    plan = fleet_restart.build_force_restart(inst.pid, inst.terminal)
+        return fleet_restart.build_relaunch(
+            inst.terminal, command=command
+        ) or fleet_restart.build_relaunch(recorded, command=command)
+    plan = fleet_restart.build_force_restart(inst.pid, inst.terminal, command=command)
     if plan is None and recorded:
-        plan = fleet_restart.build_force_restart(inst.pid, recorded)
+        plan = fleet_restart.build_force_restart(inst.pid, recorded, command=command)
     if plan is None:
         # The session id is resolved HERE, not inside the builder: `build_*` are pure by
         # contract. A live session makes resurrect open a tmux WINDOW — a TAB under iTerm2's
@@ -899,7 +906,10 @@ def _hard_restart_plan(inst) -> dict | None:
         # (owner directive 2026-07-29). "" falls back to a new session, so the rung still
         # always produces a plan.
         plan = fleet_restart.build_resurrect(
-            inst.pid, inst.project_root, session=fleet_restart.live_tmux_session()
+            inst.pid,
+            inst.project_root,
+            session=fleet_restart.live_tmux_session(),
+            command=command,
         )
     return plan
 

@@ -15,9 +15,12 @@ subprocess, no network.
 
 from __future__ import annotations
 
-import os
+import json
+import re
 import sys
 from pathlib import Path
+
+import pytest
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "scripts" / "lib"))
@@ -67,54 +70,137 @@ def test_build_relaunch_types_claude_continue() -> None:
 
 
 def test_relaunch_can_actually_proceed_unattended() -> None:
-    """The relaunch bypasses permission checks and can reach the temp dirs.
+    """A relaunch REPLAYS the user's own launch flags, so it comes back able to PROCEED.
 
-    A rung only ever fires at an ALREADY-unattended wedged session, so a relaunch that
-    comes back up and then parks on a permission prompt has not recovered it — the process
-    is running again (so the scanner reads it healthy) while the session is as stuck as
-    before. Recovery must leave it able to PROCEED, not merely alive.
+    A rung only ever fires at an ALREADY-unattended wedged session, so a relaunch that comes
+    back up and then parks on a permission prompt has not recovered it — the process is
+    running again (so the scanner reads it healthy) while the session is as stuck as before.
+    The plugin must not SHIP a permission bypass to achieve that (CPV flags the literal
+    CRITICAL, correctly): it mirrors whatever the user launched with, so a session started
+    unattended relaunches unattended, and one started interactively does not.
     """
-    plan = fn.build_relaunch({"tmux_pane": "%7"})
+    launched = "claude --add-dir /tmp --dangerously-skip-permissions"
+    plan = fn.build_relaunch({"tmux_pane": "%7"}, command=fn.with_resume(launched))
     assert plan is not None
     cmd = plan["command"]
 
+    assert "--add-dir /tmp" in cmd  # every user flag survives, not just the ones we'd guess
     assert "--dangerously-skip-permissions" in cmd
-    for d in fn._TEMP_DIRS:
-        assert d in cmd
-    assert "--add-dir" in cmd
+    assert "--continue" in cmd  # …and the transcript is still resumed
 
 
-def test_relaunch_omits_the_redundant_permission_flags() -> None:
-    """`--allow-dangerously-skip-permissions` and `--permission-mode` must NOT be passed.
+def test_the_plugin_ships_no_permission_bypass_invocation() -> None:
+    """No janitor source may spell a `claude … --dangerously-skip-permissions` invocation.
 
-    The tripwire for a plausible-sounding regression. `--allow-…` only makes the bypass
-    AVAILABLE "without it being enabled by default" (its own help text) — it does not
-    perform one, so beside `--dangerously-skip-permissions` it is a no-op that reads as
-    belt-and-braces. It was added here once on exactly that misreading and removed the same
-    day; this keeps it removed.
+    The tripwire for the regression that shipped on 2026-07-29: the relaunch line was
+    hardcoded WITH the bypass, and CPV's security gate failed the publish CRITICAL. It was
+    right to. Obfuscating the string to slip past the scanner would hide a real capability
+    while keeping it working — strictly worse than the finding. The only honest fix is the
+    one implemented: mirror the user's argv, ship nothing.
+
+    It matches CPV's own shape — the flag on a line that INVOKES claude — rather than any
+    mention of the flag. Banning the mention outright would forbid documenting WHY this
+    module mirrors instead of hardcoding, and that WHY is the thing that stops the next
+    author from "helpfully" adding the flag back.
     """
-    plan = fn.build_relaunch({"tmux_pane": "%7"})
-    assert plan is not None
-    cmd = plan["command"]
+    invocation = re.compile(r"\bclaude\b[^\n]*--dangerously-skip-permissions")
+    root = Path(__file__).resolve().parent.parent / "scripts"
+    offenders = [
+        str(p.relative_to(root))
+        for p in root.rglob("*.py")
+        if invocation.search(p.read_text(encoding="utf-8"))
+    ]
 
-    assert "--allow-dangerously-skip-permissions" not in cmd
-    assert "--permission-mode" not in cmd
+    assert not offenders, f"permission-bypass invocation shipped in: {offenders}"
 
 
-def test_temp_dirs_are_real_deduped_directories() -> None:
-    """`_temp_dirs()` returns existing, de-duplicated paths — never a bare `--add-dir`.
+def test_with_resume_guarantees_the_transcript_is_resumed() -> None:
+    """`with_resume` adds `--continue` only when no resume flag is already present.
 
-    Deduping is load-bearing on macOS, where `/tmp` is a symlink to `/private/tmp`: both
-    spellings are listed (a resolved scratchpad path arrives as `/private/tmp/…`) but each
-    only once. An empty result would emit a dangling `--add-dir` that swallows the next
-    token, so the builder guards on it.
+    The failure this prevents is SILENT and total: most sessions are launched as a bare
+    `claude`, so a verbatim replay starts an EMPTY session in the recovered pane. The
+    process is running (the scanner reads it healthy) while hours of transcript are gone —
+    worse than not recovering. An existing `--resume <id>` is left alone: it targets one
+    specific session and `--continue` would fight it.
     """
-    dirs = fn._TEMP_DIRS
+    assert fn.with_resume("claude") == "claude --continue"
+    assert fn.with_resume("claude --model opus") == "claude --model opus --continue"
+    assert fn.with_resume("claude --continue") == "claude --continue"
+    assert fn.with_resume("claude --resume abc123") == "claude --resume abc123"
+    assert fn.with_resume("claude -c") == "claude -c"
+    assert fn.with_resume("   ") == ""  # whitespace is not a command
 
-    assert dirs, "no temp directory resolved on this platform"
-    assert len(dirs) == len(set(dirs))
-    for d in dirs:
-        assert os.path.isdir(d)
+
+def test_argv_is_claude_matches_the_executable_not_the_line() -> None:
+    """The replay guard matches argv[0]'s basename, never a substring of the whole line.
+
+    A session whose FLAGS merely mention the word (`--add-dir ~/Code/claude-plugins`) is not
+    a claude launch. A substring test would let a recycled pid — or a doctored
+    `terminal-identity.json` — turn recovery into arbitrary command execution in the user's
+    own pane, which is the whole reason this guard exists.
+    """
+    assert fn.argv_is_claude("claude --continue")
+    assert fn.argv_is_claude("/opt/homebrew/bin/claude --model opus")
+    assert not fn.argv_is_claude("bash -c 'claude --continue'")
+    assert not fn.argv_is_claude("rm -rf ~/Code/claude-plugins")
+    assert not fn.argv_is_claude("")
+    assert not fn.argv_is_claude("claude --add-dir 'unbalanced")  # unparseable ⇒ refuse
+
+
+def test_relaunch_command_ladder_live_then_recorded_then_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """live argv → recorded argv → `claude --continue`, and a non-claude line is skipped.
+
+    The recorded rung is not a nicety: rung 5 fires on a `dead` instance whose pid is
+    ALREADY GONE, so there is no live command line left to read. Without the recording that
+    rung has nothing to mirror and every user flag is lost.
+    """
+    state = tmp_path / ".janitor" / "state"
+    state.mkdir(parents=True)
+    ident = state / "terminal-identity.json"
+    ident.write_text(json.dumps({"argv": "claude --model opus"}), encoding="utf-8")
+
+    # No pid to read ⇒ the recorded argv is used, resume-guaranteed.
+    assert fn.relaunch_command(0, str(tmp_path)) == "claude --model opus --continue"
+
+    # A live pid outranks the recording — it is current, with no staleness risk.
+    monkeypatch.setattr(fn, "live_cmdline", lambda pid: "claude --add-dir /tmp --continue")
+    assert fn.relaunch_command(4242, str(tmp_path)) == "claude --add-dir /tmp --continue"
+
+    # A live line that is NOT claude (recycled pid) falls through to the recording.
+    monkeypatch.setattr(fn, "live_cmdline", lambda pid: "python -m http.server")
+    assert fn.relaunch_command(4242, str(tmp_path)) == "claude --model opus --continue"
+
+    # Nothing recorded at all ⇒ the minimum that still resumes a transcript.
+    assert fn.relaunch_command(0, str(tmp_path / "elsewhere")) == "claude --continue"
+    assert fn.relaunch_command(0, None) == "claude --continue"
+
+    # A garbage recording is "no recording", never a crash and never a replayed line.
+    ident.write_text("{ not json", encoding="utf-8")
+    assert fn.relaunch_command(0, str(tmp_path)) == "claude --continue"
+    ident.write_text(json.dumps({"argv": "sudo rm -rf /"}), encoding="utf-8")
+    assert fn.relaunch_command(0, str(tmp_path)) == "claude --continue"
+
+
+def test_builders_stay_pure_and_fall_back_on_an_empty_command(tmp_path: Path) -> None:
+    """Every `build_*` takes the command as DATA and defaults to the safe minimum.
+
+    Purity is the module contract — a plan must be inspectable and dry-runnable. Resolving
+    the argv inside a builder would mean a `ps` call fires merely from BUILDING a plan,
+    including in `--dry-run`; the same mistake `session` already documents for `tmux`.
+    """
+    relaunch = fn.build_relaunch({"tmux_pane": "%7"})
+    assert relaunch is not None and "claude --continue" in relaunch["command"]
+
+    forced = fn.build_force_restart(9988, {"tmux_pane": "%7"}, command="   ")
+    assert forced is not None and "claude --continue" in forced["relaunch"]["command"]
+
+    resurrect = fn.build_resurrect(9988, str(tmp_path))
+    assert "claude --continue" in resurrect["spawn"][-1]
+
+    mirrored = fn.build_resurrect(9988, str(tmp_path), command="claude --model opus -c")
+    assert "claude --model opus -c" in mirrored["spawn"][-1]
 
 
 def test_build_force_restart_carries_kill_then_relaunch() -> None:
