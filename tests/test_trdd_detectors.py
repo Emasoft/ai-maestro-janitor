@@ -155,6 +155,25 @@ class TestTrddDetectors(unittest.TestCase):
             self.assertIn("TRDD-12345678", out)
             # Title-case body value normalised to kebab-case for display.
             self.assertIn("in-progress", out)
+            # A genuine v1 card HAS no column, so the line names `status` — correctly.
+            self.assertIn("status='in-progress'", out)
+
+    def test_drift_line_names_the_field_it_actually_read(self):
+        """A v2 card's line says `column='dev'`, never `status='dev'` (#135, in miniature).
+
+        The message used to hardcode `status=` whatever it displayed, so a card whose
+        frontmatter says `column: dev` was reported as `status='dev'` — a field the file does
+        not carry. A reader who checks by grepping `^status:` finds nothing and concludes the
+        detector is lying, which is exactly the trust the #135 thread cost three round-trips
+        to rebuild.
+        """
+        with TemporaryDirectory() as tmp:
+            root = self._proj(tmp)
+            _write(root / "design/tasks", "abcdef12", _fm(column="dev"))
+            out = _run(DRIFT, root)
+
+            self.assertIn("column='dev'", out)
+            self.assertNotIn("status='dev'", out)
 
     def test_drift_malformed_frontmatter_is_surfaced(self):
         """A `# title` ABOVE the frontmatter makes column:/status: unparseable, so

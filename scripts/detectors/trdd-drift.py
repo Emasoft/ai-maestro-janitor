@@ -170,6 +170,11 @@ def main() -> int:
         # a v2 card, which is how `status='not-started'` was printed for a `column: complete`
         # TRDD whose frontmatter contains no `status:` at all (issue #135).
         active_label = column or status
+        # …and NAME that field, rather than hardcoding "status=". Printing `status='dev'` for
+        # a card whose frontmatter says `column: dev` is the same defect #135 was about in
+        # miniature: the line asserts a field the file does not carry, and a reader who greps
+        # `^status:` to check finds nothing and distrusts the detector.
+        active_field = "column" if column else "status"
 
         # PROJECT TRDDs are git-tracked, so their last-commit time is the honest "last
         # touched" (an mtime is churned by any checkout). A LOCAL TRDD lives OUTSIDE the
@@ -207,7 +212,8 @@ def main() -> int:
         line = dedupe.emit_once(
             seen,
             f"drift@{uuid}@bucket-{bucket}",
-            f"[trdd-drift] TRDD-{uuid[:8]}{tag} status='{display_status}' but file untouched for {age_days}d.",
+            f"[trdd-drift] TRDD-{uuid[:8]}{tag} {active_field}='{display_status}' "
+            f"but file untouched for {age_days}d.",
         )
         if line is not None:
             print(line)
