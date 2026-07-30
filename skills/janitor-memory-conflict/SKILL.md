@@ -103,6 +103,26 @@ candidate DEMOTE. **(F) Contradictory** (exactly one is correct now) → DEMOTE 
 superseded one, or DELETE only if the wrong one is provably FALSE *and* has
 provenance (→ the gates).
 
+**WRITE DOWN EVERY `skip`.** The librarian re-surfaces a pair every run, so a verdict
+you keep to yourself costs a full dispatch to re-derive next pass — the same "no", at
+~170k–260k tokens, forever. Record it:
+
+```bash
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/memory_refusal_cli.py" record \
+  --intervention conflict --scope <LOCAL|PROJECT|USER> --root <memdir> \
+  --page <a.md> --page <b.md> --reason "<why these two are NOT in conflict>"
+```
+
+The refusal re-arms by itself when either page changes, and after 7 days — so it is a
+verdict with an expiry, not a silence. `--reason` is the deliverable: the next reader
+has to be able to re-check it.
+
+**A ledger entry is the mechanism; a note on the page is the artifact.** When the
+confusion is one a human will hit too — two pages that *look* mergeable and are not —
+also write the verdict into the pages as a cross-linked See-also (the UPDATE this stage
+already allows). Then the answer lives at the point of confusion instead of in
+`.janitor/state/`.
+
 ### Stage 2 — source the WHY + resolve the repo (one agent, READ-ONLY)
 For the wrong/obsolete page, resolve provenance via the FIXED chain (never inferred):
 its `commits:`/`trdd:` → the TRDD's `implementation-commits:` → `git -C <repo> show
