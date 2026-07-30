@@ -349,6 +349,16 @@ _DETECTORS: list[tuple[str, int, str]] = [
     # to one nudge per interval, and auto-silences the instant a note is written.
     # 4h cadence; an idle fire is one bounded `git log`.
     ("memorize-nudge", 14400, "CLAUDE_PLUGIN_OPTION_MEMORIZE_NUDGE_INTERVAL"),
+    # orphaned-resume-flag closes the janitor's own SILENT failure mode (issue #125): an
+    # unconsumed `resume-after-compact.flag` means a compaction recorded a resume target
+    # that no heartbeat ever delivered, i.e. that session's cron is dead/expired/unarmed.
+    # Nothing noticed until now — the only detector was the human seeing their sessions
+    # stop moving. Runs PER-SESSION as well as (eventually) in the daemon, because on a
+    # host where a live ai-maestro server owns the machine the daemon is deliberately not
+    # running (§7.2) — exactly when nothing is watching. Findings are recorded into the
+    # AFFECTED project's ledger (per-project channeling, TRDD-X92VBFNF), so this prints
+    # only for our own project. Hourly; a fire is one `stat` per known project.
+    ("orphaned-resume-flag", 3600, "CLAUDE_PLUGIN_OPTION_ORPHANED_RESUME_INTERVAL"),
     # why-in-commits enforces the commit-discipline rule (TRDD-87935f21, priority #6):
     # when recent feat/fix/refactor/perf commits are subject-only (no body → no WHY),
     # it reminds the agent to record the WHY (rules/commit-discipline.md). ai-maestro
