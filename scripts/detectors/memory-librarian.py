@@ -155,6 +155,22 @@ _APPLIES_TO_RE = re.compile(r"^\s*#{2,}\s+applies\s+to\s*$", re.IGNORECASE)
 # be flagged as radiating; found by simulation S10b). memgrep's own link parser
 # is already fence-aware; this brings the line-wise shape scan to parity.
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# Any ATX heading, with its level — used to find where the lessons section ENDS
+# so a `[^N]:` definition can be located relative to it (issue #115 FP 1).
+_HEADING_RE = re.compile(r"^\s*(?P<hashes>#{1,6})\s+\S")
+# A `[[wikilink]]` target slug, up to an `|alias` or `#anchor`. Used for the
+# corpus-wide reference index (issue #115) — NOT for link resolution, which
+# stays memgrep's job.
+_WIKILINK_RE = re.compile(r"\[\[(?P<slug>[^\[\]|#]+?)\s*(?:\|[^\[\]]*)?\]\]")
+# The frontmatter `name:` key — a note's second resolvable slug (memgrep resolves
+# a `[[link]]` by filename stem OR by this, per its issue #49).
+_FM_NAME_VALUE_RE = re.compile(r"^name\s*:\s*[\"']?(?P<name>[^\"'\s]+)")
+
+# Scope ranks, mirroring memgrep's `ScopeLayer` (memory.rs): references run
+# strictly UPWARD (LOCAL → PROJECT → USER) and a DOWNWARD link is forbidden.
+# Kept in sync deliberately — the two must not disagree about which direction is
+# the violation, or the corpus gets contradictory repair advice.
+_SCOPE_RANK = {"LOCAL": 0, "PROJECT": 1, "USER": 2}
 
 # Bound the per-note shape read so a pathological note can't blow up the
 # heartbeat. Notes are small; 4000 lines is already absurd for a memory page.
@@ -816,6 +832,31 @@ def _split_frontmatter(text: str) -> tuple[list[str], list[str]]:
     return lines[1:], []
 
 
+def _lessons_span(body_lines: list[str]) -> tuple[int, int]:
+    """`(start, end)` line indices of the `## Notes and lessons learned` section.
+
+    `start` is the heading line itself; `end` is the first line of the NEXT
+    heading at the same or a shallower level (or `len(body_lines)` when the
+    section runs to EOF). Returns `(-1, -1)` when the section is absent.
+
+    This exists so the footnote check can tell a standalone LESSON ATOM from a
+    stray definition adrift in the body (issue #115 FP 1) — inside the section a
+    def with no inline reference is the MANDATED shape, outside it, it is a
+    botched correction. `end` is needed and not merely `start`: without it a
+    later section's stray def would inherit the exemption.
+    """
+    start = next((i for i, ln in enumerate(body_lines) if _LESSONS_SECTION_RE.match(ln)), -1)
+    if start < 0:
+        return -1, -1
+    m = _HEADING_RE.match(body_lines[start])
+    level = len(m.group("hashes")) if m else 2
+    for i in range(start + 1, len(body_lines)):
+        nxt = _HEADING_RE.match(body_lines[i])
+        if nxt and len(nxt.group("hashes")) <= level:
+            return start, i
+    return start, len(body_lines)
+
+
 def _scan_page_shape(note: str, text: str) -> list[str]:
     """Per-note structural-integrity checks → list of one-line issue strings.
 
@@ -891,10 +932,30 @@ def _scan_page_shape(note: str, text: str) -> list[str]:
     if undefined:
         joined = ", ".join(f"[^{n}]" for n in undefined)
         issues.append(f"{note}: footnote ref(s) with no definition: {joined}")
-    undefinedref = sorted(def_ns - ref_ns, key=int)
+    # The def→ref direction is only a defect OUTSIDE the lessons section (issue
+    # #115 FP 1). A lesson is an ATOM, not a footnote to prose: the protocol
+    # mandates the `## Notes and lessons learned` section on every page and
+    # specifies the lesson as a standalone `[^N]: [id:…] DO NOT … BECAUSE …`
+    # entry, deliberately NOT cited inline — the body states the current truth
+    # and the lesson records the superseded error. So an uncited def in that
+    # section is the CORRECT shape, and flagging it fired on essentially every
+    # well-formed page. memgrep's own lint agrees: it rates the same condition
+    # INFO with a conditional wording, not a defect. Outside the section an
+    # uncited def is still a real leftover (a botched correction or move).
+    lessons_start, lessons_end = _lessons_span(body_lines)
+    stray_defs = {
+        m.group("n")
+        for i, ln in enumerate(body_lines)
+        for m in [_FOOTNOTE_DEF_RE.match(ln)]
+        if m and not (lessons_start <= i < lessons_end)
+    }
+    undefinedref = sorted((def_ns - ref_ns) & stray_defs, key=int)
     if undefinedref:
         joined = ", ".join(f"[^{n}]" for n in undefinedref)
-        issues.append(f"{note}: footnote def(s) never referenced: {joined}")
+        issues.append(
+            f"{note}: footnote def(s) never referenced, outside the lessons "
+            f"section: {joined}"
+        )
 
     # (d) per-element dates — advisory (older notes predate the convention).
     # Depth-tolerant: a harness/normalizer write-path nests ocd/lmd under
@@ -952,15 +1013,149 @@ def _collect_shape_findings(memdir: Path) -> list[str]:
     return findings
 
 
-def _parse_broken_links(stdout: str, memdir: Path) -> list[str]:
-    """Parse `memgrep links --broken` → sorted findings of which page dangles.
+@dataclass
+class CorpusIndex:
+    """Where every slug LIVES and who REFERENCES it, across ALL scope roots.
+
+    The librarian asks memgrep about one root at a time (the per-scope invariant
+    of TRDD-c77dae09 — a LOCAL note and a USER note are different layers and must
+    never be clustered together). That is right for CLUSTERING and wrong for
+    LINKS: a `[[slug]]` naming a page in another scope is unresolvable inside one
+    root, so memgrep says `[BROKEN]` and the librarian used to report "target
+    file missing" — a diagnosis whose repair (CREATE the page) is the opposite of
+    the correct one (REMOVE the illegal downward link), and which fired on legal
+    upward links too. Issue #115: an agent acting faithfully on that label
+    duplicates existing pages across the boundary the scope rule exists to keep.
+
+    So: ask per-scope, but answer with corpus-wide knowledge.
+
+    * `slug_scope` — slug → the rank of the scope it resolves in (highest wins if
+      a slug exists in two). Both slug forms memgrep resolves are indexed: the
+      filename stem and the frontmatter `name:`.
+    * `referenced_from` — slug → the ranks of the scopes that `[[link]]` to it.
+      Used to spare a page from the ORPHAN finding when its only inbound link is
+      a legal cross-scope one memgrep could not see from inside one root.
+    """
+
+    slug_scope: dict[str, int]
+    referenced_from: dict[str, set[int]]
+
+
+def _index_corpus(scopes: list[tuple[str, Path]]) -> CorpusIndex:
+    """Build the corpus-wide `CorpusIndex` over every note in every scope root.
+
+    Pure filesystem + regex — no memgrep call, so it costs one read of each note
+    that the run is about to read anyway. Fence-aware for the same reason the
+    shape scan is: a `[[link]]` inside a fenced doc EXAMPLE is not an edge, and
+    memgrep's own parser already excludes fences from the link graph.
+    """
+    slug_scope: dict[str, int] = {}
+    referenced_from: dict[str, set[int]] = {}
+    for scope, memdir in scopes:
+        rank = _SCOPE_RANK.get(scope.upper())
+        if rank is None:
+            continue  # an unknown scope label cannot be ordered — index nothing
+        for path in memory_scopes.iter_note_files(memdir):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for slug in _note_slugs(path, text):
+                # Highest scope wins: a slug present in both LOCAL and USER is
+                # reachable from anywhere, so the upward (legal) reading is the
+                # one that must not be reported as a violation.
+                if slug_scope.get(slug, -1) < rank:
+                    slug_scope[slug] = rank
+            for slug in _referenced_slugs(text):
+                referenced_from.setdefault(slug, set()).add(rank)
+    return CorpusIndex(slug_scope=slug_scope, referenced_from=referenced_from)
+
+
+def _note_slugs(path: Path, text: str) -> set[str]:
+    """Every slug a `[[link]]` can resolve to this note by: stem + `name:`."""
+    slugs = {path.stem}
+    fm_lines, _ = _split_frontmatter(text)
+    for ln in fm_lines:
+        m = _FM_NAME_VALUE_RE.match(ln)
+        if m:
+            slugs.add(m.group("name"))
+    return slugs
+
+
+def _referenced_slugs(text: str) -> set[str]:
+    """Every `[[slug]]` this note references, ignoring fenced-code examples."""
+    _, body_lines = _split_frontmatter(text)
+    out: set[str] = set()
+    in_fence = False
+    for ln in body_lines:
+        if _FENCE_RE.match(ln):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        for m in _WIKILINK_RE.finditer(ln):
+            out.add(m.group("slug").strip())
+    return out
+
+
+def _downward_reason(target_rank: int) -> str:
+    """WHY a downward edge is forbidden — verbatim from memgrep's `downward_reason`.
+
+    The two reasons call for the same repair but describe different damage, and
+    only the TARGET layer decides which: anything pointing DOWN at LOCAL leaks
+    machine-private data, and the remaining case (USER → PROJECT) is portability.
+    """
+    if target_rank == _SCOPE_RANK["LOCAL"]:
+        return "PRIVACY: LOCAL pages are machine-private, and naming one from a shared scope publishes it"
+    return "PORTABILITY: USER memory is global, but a project can be deleted, moved or renamed"
+
+
+def _classify_broken_link(src: str, slug: str, rank: int, corpus: CorpusIndex) -> str | None:
+    """One `[BROKEN]` edge → the finding that names its ACTUAL repair, or None.
+
+    Three outcomes, because "memgrep could not resolve it inside this root" has
+    three causes with three different fixes (issue #115):
+
+    * resolves in a LOWER scope → an illegal DOWNWARD link. Repair: REMOVE it.
+    * resolves in a HIGHER scope → a legal UPWARD reference. Not a finding at
+      all; memgrep's lint blesses these explicitly ("unreciprocatable by design").
+      Reporting it was the librarian calling correct behaviour a defect.
+    * resolves nowhere → unresolved. ADVISORY, not "broken": the protocol says a
+      `[[name]]` with no target yet "is fine; it marks something worth writing
+      later, not an error". It may still be a rename casualty, so it is surfaced
+      — but worded so the reader is not told a file is missing that isn't.
+    """
+    target = corpus.slug_scope.get(slug)
+    if target is None:
+        return (
+            f"{src}: unresolved [[{slug}]] link — a forward reference (fine — it "
+            f"marks a page worth writing) or a rename casualty (advisory)"
+        )
+    if target > rank:
+        return None  # legal upward cross-scope reference
+    if target < rank:
+        name = next(s for s, r in _SCOPE_RANK.items() if r == target)
+        return (
+            f"{src}: downward cross-scope [[{slug}]] link — the target is a {name} "
+            f"page; REMOVE the link (do not create the page) — {_downward_reason(target)}"
+        )
+    return (
+        f"{src}: broken [[{slug}]] link — a same-scope page claims this slug but "
+        f"memgrep cannot resolve it (advisory)"
+    )
+
+
+def _parse_broken_links(stdout: str, memdir: Path, scope: str, corpus: CorpusIndex) -> list[str]:
+    """Parse `memgrep links --broken` → findings that name each edge's real repair.
 
     Each line is `<from>:LINE -> <slug>  [BROKEN]` (verified live — the target
     token is the literal `[BROKEN]` marker, NOT a path, so the plain-`links`
-    `_LINK_RE` cannot be reused). We surface "page X has a broken [[slug]] link"
-    so an agent can fix the dangling reference (a botched rename/move leaves
-    one). Deduped per (from, slug); non-note sources (MEMORY.md etc.) are skipped.
+    `_LINK_RE` cannot be reused). Every slug is then resolved against the WHOLE
+    corpus by `_classify_broken_link`, because `[BROKEN]` inside one root means
+    only "not in THIS root". Deduped per (from, slug); non-note sources
+    (MEMORY.md etc.) are skipped.
     """
+    rank = _SCOPE_RANK.get(scope.upper())
     out: set[str] = set()
     for raw in stdout.splitlines():
         m = _BROKEN_LINK_RE.match(raw)
@@ -969,11 +1164,18 @@ def _parse_broken_links(stdout: str, memdir: Path) -> list[str]:
         src = _rel_token(m.group("from"), memdir)  # F20: rel path, not basename
         if not memory_scopes.is_note_file(src):
             continue
-        out.add(f"{src}: broken [[{m.group('slug')}]] link (target file missing)")
+        if rank is None:
+            # Unknown scope label ⇒ no direction to reason about. Report the raw
+            # fact without a diagnosis rather than guessing one.
+            out.add(f"{src}: unresolved [[{m.group('slug')}]] link (advisory)")
+            continue
+        finding = _classify_broken_link(src, m.group("slug"), rank, corpus)
+        if finding:
+            out.add(finding)
     return sorted(out)[:_MAX_LINK_FINDINGS]
 
 
-def _parse_orphans(stdout: str, memdir: Path) -> list[str]:
+def _parse_orphans(stdout: str, memdir: Path, scope: str, corpus: CorpusIndex) -> list[str]:
     """Parse `memgrep links --orphans` → sorted findings of notes with no inbound links.
 
     Each line is a bare `.md` path. An orphan page is one nothing else links to —
@@ -988,6 +1190,7 @@ def _parse_orphans(stdout: str, memdir: Path) -> list[str]:
     whole standalone-note LOCAL corpus). Orphans are meaningful only relative to
     an existing link structure a page was left out of.
     """
+    rank = _SCOPE_RANK.get(scope.upper())
     out: set[str] = set()
     for raw in stdout.splitlines():
         m = _ORPHAN_RE.match(raw)
@@ -996,6 +1199,21 @@ def _parse_orphans(stdout: str, memdir: Path) -> list[str]:
         name = _rel_token(m.group("path"), memdir)  # F20: rel path, not basename
         if not memory_scopes.is_note_file(name):
             continue
+        # "Orphan" from memgrep means "no inbound edge INSIDE THIS ROOT" — but a
+        # page linked from a LOWER scope (a legal upward reference) is not
+        # orphaned, it is cited across a boundary memgrep could not see (issue
+        # #115 FP 2). Only a lower-ranked referrer spares it: a reference from a
+        # HIGHER scope is the illegal downward link, already reported as such,
+        # and letting it suppress the orphan finding would hide two defects at
+        # once. Slugs come from the same corpus index the link classifier uses.
+        if rank is not None:
+            path = memdir / name
+            try:
+                slugs = _note_slugs(path, path.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                slugs = {path.stem}
+            if any(r < rank for s in slugs for r in corpus.referenced_from.get(s, ())):
+                continue
         out.add(f"{name}: orphan page (no inbound [[links]]) (advisory)")
     return sorted(out)[:_MAX_LINK_FINDINGS]
 
@@ -1021,7 +1239,7 @@ def _collect_memory_sync_findings(_memdir: Path) -> list[str]:
 
 
 def _collect_link_findings(
-    binary: str, memdir: Path, linked: set[frozenset[str]]
+    binary: str, memdir: Path, linked: set[frozenset[str]], scope: str, corpus: CorpusIndex
 ) -> tuple[list[str], list[str], list[str]]:
     """Run the rank-4 link-graph + MEMORY.md-sync checks for ONE scope root.
 
@@ -1036,12 +1254,12 @@ def _collect_link_findings(
     detector never crashes the heartbeat just because one query failed).
     """
     broken_out = _run_memgrep(binary, ["links", "--broken"], memdir)
-    broken = _parse_broken_links(broken_out, memdir) if broken_out else []
+    broken = _parse_broken_links(broken_out, memdir, scope, corpus) if broken_out else []
 
     orphans: list[str] = []
     if linked:
         orphans_out = _run_memgrep(binary, ["links", "--orphans"], memdir)
-        orphans = _parse_orphans(orphans_out, memdir) if orphans_out else []
+        orphans = _parse_orphans(orphans_out, memdir, scope, corpus) if orphans_out else []
 
     index_sync = _collect_memory_sync_findings(memdir)
     return broken, orphans, index_sync
@@ -1061,7 +1279,7 @@ def _reindex_scope(binary: str, memdir: Path) -> None:
     _run_memgrep(binary, ["reindex"], memdir)
 
 
-def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
+def _analyze_scope(binary: str, memdir: Path, scope: str, corpus: CorpusIndex) -> ScopeReport:
     """Run the per-scope candidate + integrity analysis on ONE memory root.
 
     Returns a `ScopeReport` for this root alone — NEVER mixing notes across
@@ -1104,7 +1322,7 @@ def _analyze_scope(binary: str, memdir: Path) -> ScopeReport:
     # clustering (rank 4) — a broken link or a stale index line must surface even
     # when no two notes share a topic.
     report.broken, report.orphans, report.index_sync = _collect_link_findings(
-        binary, memdir, linked
+        binary, memdir, linked, scope, corpus
     )
 
     # The LINK LAW audit (rank 4, TRDD-bc16d602): every note→note link must have
@@ -1300,8 +1518,13 @@ def _run() -> int:
     total_conf = 0
     total_shape = 0
     total_link = 0  # broken-links + orphans + MEMORY.md-sync + one-sided (rank 4)
+    # Corpus-wide slug/reference index, built ONCE over every root. The link
+    # checks need it because a `[[slug]]` naming another scope is unresolvable
+    # inside one root, and the per-scope answer was being reported as a
+    # corpus-wide claim (issue #115).
+    corpus = _index_corpus(scopes)
     for scope, memdir in scopes:
-        report = _analyze_scope(binary, memdir)
+        report = _analyze_scope(binary, memdir, scope, corpus)
         report.scope = scope
         if report.has_findings():
             per_scope.append(report)

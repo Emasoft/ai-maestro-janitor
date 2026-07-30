@@ -673,8 +673,12 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
             self.assertIn("[^7]", shape)
             self.assertIn("no definition", shape)
 
-    def test_dangling_footnote_def_flagged(self):
-        """A `[^N]:` definition that no body `[^N]` references is surfaced."""
+    def test_dangling_footnote_def_outside_the_lessons_section_flagged(self):
+        """A `[^N]:` definition adrift in the BODY, referenced by nothing, is surfaced.
+
+        Outside the lessons section an uncited definition is a real leftover (a
+        botched correction or move), so this direction of the check stays.
+        """
         with TemporaryDirectory() as h, TemporaryDirectory() as p:
             home, project = Path(h), Path(p)
             memdir = _build(home, project)
@@ -682,7 +686,8 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
                 '---\nname: orphandef\ndescription: "topic"\nocd: 2026-06-09\n'
                 "lmd: 2026-06-09\nmetadata:\n  node_type: memory\n---\n"
                 "Facts with no reference to the lesson.\n\n"
-                "## Notes and lessons learned\n[^9]: a lesson nobody points at.\n"
+                "[^9]: a definition adrift in the body, pointed at by nothing.\n\n"
+                "## Notes and lessons learned\n"
             )
             (memdir / "orphandef.md").write_text(text)
             _run(home, project)
@@ -690,6 +695,54 @@ class TestMemoryLibrarianPageShape(unittest.TestCase):
             self.assertIn("orphandef.md", shape)
             self.assertIn("[^9]", shape)
             self.assertIn("never referenced", shape)
+
+    def test_issue115_uncited_lesson_atom_in_its_section_is_not_a_defect(self):
+        """A standalone `[^N]:` lesson UNDER the lessons section is the correct shape.
+
+        Issue #115 FP 1: the protocol mandates `## Notes and lessons learned` on
+        every page and specifies a lesson as a standalone atom, deliberately NOT
+        cited inline — the body states the current truth, the lesson records the
+        superseded error. Flagging it fired on essentially every well-formed page.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            text = (
+                '---\nname: lessonatom\ndescription: "topic"\nocd: 2026-06-09\n'
+                "lmd: 2026-06-09\nmetadata:\n  node_type: memory\n---\n"
+                "The current truth, stated plainly.\n\n"
+                "## Notes and lessons learned\n"
+                '[^1]: [id:ATOM-AAAA-BBBB, status:valid, keywords:"x", '
+                "ocd:2026-06-09, lmd:2026-06-09] DO NOT x, BECAUSE y. DO z instead.\n"
+            )
+            (memdir / "lessonatom.md").write_text(text)
+            _run(home, project)
+            self.assertNotIn("lessonatom.md", self._shape_section(memdir))
+
+    def test_issue115_stray_def_after_the_lessons_section_still_flagged(self):
+        """The section EXEMPTION ends at the next same-level heading, not at EOF.
+
+        Without an explicit section END a later section's stray definition would
+        inherit the lessons exemption and go silent forever.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            text = (
+                '---\nname: latestray\ndescription: "topic"\nocd: 2026-06-09\n'
+                "lmd: 2026-06-09\nmetadata:\n  node_type: memory\n---\n"
+                "Body.\n\n"
+                "## Notes and lessons learned\n"
+                '[^1]: [id:ATOM-CCCC-DDDD, status:valid, keywords:"y", '
+                "ocd:2026-06-09, lmd:2026-06-09] DO NOT a, BECAUSE b. DO c instead.\n\n"
+                "## Appendix\n[^7]: a stray def in a LATER section.\n"
+            )
+            (memdir / "latestray.md").write_text(text)
+            _run(home, project)
+            shape = self._shape_section(memdir)
+            self.assertIn("latestray.md", shape)
+            self.assertIn("[^7]", shape)
+            self.assertNotIn("[^1]", shape)
 
     def test_resolved_footnote_not_flagged(self):
         """A `[^N]` ref WITH a matching `[^N]:` def is clean (no footnote finding)."""
@@ -959,6 +1012,126 @@ class TestMemoryLibrarianLinksAndSync(unittest.TestCase):
 
 
 @unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
+@unittest.skipUnless(_HAVE_MEMGREP, "memgrep binary not installed")
+class TestMemoryLibrarianCrossScopeLinks(unittest.TestCase):
+    """Issue #115 — a `[[link]]` naming another SCOPE is not a missing file.
+
+    The librarian asks memgrep about one scope root at a time, so a link to a
+    page in another root is unresolvable there and comes back `[BROKEN]`. It used
+    to be reported as "target file missing", whose repair (CREATE the page) is
+    the OPPOSITE of the correct one (REMOVE the illegal downward link) — and it
+    fired on LEGAL upward links too. Verified against the live memgrep: all three
+    shapes (downward / upward / genuinely absent) are one indistinguishable
+    `[BROKEN]` line per root, so the classification must happen in the librarian.
+    """
+
+    def _scope_section(self, memdir: Path, scope: str, header: str) -> str:
+        """The `### <header>` block inside `## <scope> scope` of the proposal.
+
+        Scope-aware on purpose: with more than one scope reporting, the plain
+        first-match reader would silently return the WRONG scope's block and the
+        assertions would pass or fail for the wrong reason.
+        """
+        prop = memdir / PROPOSAL_NAME
+        if not prop.exists():
+            return ""
+        text = prop.read_text()
+        marker = f"## {scope} scope"
+        if marker not in text:
+            return ""
+        section = text.split(marker, 1)[1].split("\n## ", 1)[0]
+        sub = f"### {header}"
+        if sub not in section:
+            return ""
+        return section.split(sub, 1)[1].split("\n### ", 1)[0]
+
+    def _user_dir(self, home: Path) -> Path:
+        """The canonical USER memory root under a fake HOME (memory_scopes SSOT)."""
+        d = (home / ".claude" / "plugins" / "data"
+             / "ai-maestro-janitor-ai-maestro-plugins" / "memory")
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _two_scope_corpus(self, home: Path, project: Path) -> tuple[Path, Path]:
+        """LOCAL + USER roots wired with one link of every cross-scope shape."""
+        local = _build(home, project)
+        user = self._user_dir(home)
+        # USER: a resolved same-scope pair, so the corpus HAS a link graph (the
+        # orphan check stays silent in a linkless corpus by design).
+        (user / "user_hub.md").write_text(
+            _note("user_hub", "hub page about widget retries", [],
+                  body="See [[user_leaf]]."))
+        (user / "user_leaf.md").write_text(
+            _note("user_leaf", "leaf page about widget retries", []))
+        # USER: linked ONLY from LOCAL — a legal UPWARD reference.
+        (user / "user_target.md").write_text(
+            _note("user_target", "cited across a scope boundary", []))
+        # USER → LOCAL: the illegal DOWNWARD link.
+        (user / "user_down.md").write_text(
+            _note("user_down", "names a machine-private page", [],
+                  body="See [[local_secret]]."))
+        # LOCAL: the downward target, and the upward linker.
+        (local / "local_secret.md").write_text(
+            _note("local_secret", "machine private detail", []))
+        (local / "local_up.md").write_text(
+            _note("local_up", "links up to the user scope", [],
+                  body="See [[user_target]]."))
+        return local, user
+
+    def test_downward_cross_scope_link_named_as_such_not_as_a_missing_file(self):
+        """USER→LOCAL: report the direction violation and say REMOVE, not create."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            local, _user = self._two_scope_corpus(home, project)
+            _run(home, project)
+            broken = self._scope_section(local, "USER", "Broken links")
+            self.assertIn("user_down.md", broken)
+            self.assertIn("local_secret", broken)
+            self.assertIn("downward cross-scope", broken)
+            self.assertIn("LOCAL", broken)
+            self.assertIn("REMOVE", broken)
+            # The destructive label must be gone: it invites creating a page
+            # that already exists, one scope down.
+            self.assertNotIn("target file missing", broken)
+
+    def test_legal_upward_cross_scope_link_is_not_a_finding(self):
+        """LOCAL→USER resolves upward; memgrep's own lint blesses it. Stay silent."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            local, _user = self._two_scope_corpus(home, project)
+            _run(home, project)
+            broken = self._scope_section(local, "LOCAL", "Broken links")
+            self.assertNotIn("local_up.md", broken)
+            self.assertNotIn("user_target", broken)
+
+    def test_page_cited_only_from_a_lower_scope_is_not_an_orphan(self):
+        """An inbound UPWARD link is a citation memgrep cannot see from one root."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            local, _user = self._two_scope_corpus(home, project)
+            _run(home, project)
+            orphans = self._scope_section(local, "USER", "Orphan pages")
+            self.assertNotIn("user_target.md", orphans)
+            # The control: a page nothing anywhere links to IS still an orphan,
+            # so the fix narrows the check rather than silencing it.
+            self.assertIn("user_hub.md", orphans)
+
+    def test_unresolved_link_is_advisory_not_a_missing_file(self):
+        """A slug in NO scope may be a forward reference, which the protocol blesses."""
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "forward.md").write_text(
+                _note("forward", "topic about widgets and retries", [],
+                      body="See [[not-written-yet]]."))
+            _run(home, project)
+            broken = self._scope_section(memdir, "LOCAL", "Broken links")
+            self.assertIn("forward.md", broken)
+            self.assertIn("not-written-yet", broken)
+            self.assertIn("forward reference", broken)
+            self.assertNotIn("target file missing", broken)
+
+
 class TestMemoryLibrarianNoMutation(unittest.TestCase):
     """The load-bearing safety guarantee: ZERO mutation of the memory corpus."""
 
