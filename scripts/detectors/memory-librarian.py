@@ -51,7 +51,7 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -611,9 +611,15 @@ def _token_clusters(
     that share ≥ _MIN_SHARED_TOKENS significant tokens; notes are then grouped
     into the connected components of that graph (union-find), so each real topic
     is ONE cluster — not one bucket per token-subset (which over-fragments a
-    single topic into dozens of near-duplicate pairs). The cluster label is the
-    tokens shared by ALL members (the component's common topic words), falling
-    back to the most-frequent tokens when the strict intersection is empty.
+    single topic into dozens of near-duplicate pairs).
+
+    A component is then REDUCED to its coherent core (`_coherent_core`), because
+    connectivity is transitive but "same subject" is not: A-B share two tokens and
+    B-C share two OTHER tokens, so union-find fuses A-B-C even though A and C share
+    nothing at all. The pair bar (≥ _MIN_SHARED_TOKENS) is enforced on every EDGE,
+    so it must also be enforced on the GROUP — a cluster claims all its members
+    share a topic, and the only honest evidence for that claim is the strict
+    intersection.
 
     `already_clustered` carries the notes a tag-cluster already covers — a note
     in a strong tag cluster is not re-surfaced via the weaker token path, so the
@@ -657,33 +663,71 @@ def _token_clusters(
 
     clusters: dict[str, list[str]] = {}
     for members_idx in comps.values():
-        if not (2 <= len(members_idx) <= _MAX_CLUSTER_SIZE):
+        if len(members_idx) < 2:
             continue
-        members = sorted(items[k][0] for k in members_idx)
-        clusters[_component_label(items, members_idx)] = members
+        core = _coherent_core(items, members_idx)
+        if not (2 <= len(core) <= _MAX_CLUSTER_SIZE):
+            continue
+        members = sorted(items[k][0] for k in core)
+        clusters[_shared_topic_label(items, core)] = members
     return clusters
 
 
-def _component_label(items: list[tuple[str, NoteMeta]], members_idx: list[int]) -> str:
-    """Topic label for a component: the tokens shared by ALL members, else the top common ones.
+def _shared_topic(items: list[tuple[str, NoteMeta]], members_idx: Sequence[int]) -> frozenset[str]:
+    """The tokens EVERY member carries — the only honest topic a group can claim.
 
-    The strict intersection is the cleanest topic name; when it is empty (a chain
-    A-B-C where A and C share nothing directly) fall back to the tokens carried by
-    the most members. Capped to a few words so the label stays short.
+    Uses the FULL token set, not the df-gated `distinctive` one used for edges: a
+    token common to all K members has df ≥ K, so on a small corpus the df gate
+    would strip exactly the token a genuine K-member cluster is built on.
     """
-    token_sets = [items[k][1].tokens for k in members_idx]
-    common: frozenset[str] = token_sets[0]
-    for s in token_sets[1:]:
-        common = common & s
-    if common:
-        return "+".join(sorted(common)[:4])
-    # Fallback: most-frequent tokens across the component.
-    freq: dict[str, int] = {}
-    for s in token_sets:
-        for tok in s:
-            freq[tok] = freq.get(tok, 0) + 1
-    top = sorted(freq, key=lambda t: (-freq[t], t))[:4]
-    return "+".join(top) if top else "related"
+    common: frozenset[str] = items[members_idx[0]][1].tokens
+    for k in members_idx[1:]:
+        common = common & items[k][1].tokens
+    return common
+
+
+def _shared_topic_label(items: list[tuple[str, NoteMeta]], members_idx: Sequence[int]) -> str:
+    """Topic label for a coherent group: the tokens shared by ALL of its members."""
+    return "+".join(sorted(_shared_topic(items, members_idx))[:4])
+
+
+def _coherent_core(items: list[tuple[str, NoteMeta]], members_idx: list[int]) -> list[int]:
+    """Reduce a connected component to the largest subset that ALL share a topic.
+
+    Connectivity is transitive; "same subject" is not. A hub note that touches many
+    subjects bridges unrelated pages into one component — the failure the janitor's
+    own consumers measured (#140): a 4-note "cluster" whose label was carried in
+    full by ONE member and by a single word each for two others, dispatched to a
+    ~190k-token agent that could only ever answer "nothing to merge".
+
+    Returning the whole component when it shares nothing is the bug; returning
+    NOTHING would be an over-correction, because one topic-spanning page would then
+    silence clustering for the entire scope. So peel instead: for each token, the
+    members carrying it form a candidate subset, kept only when those members'
+    strict intersection still clears the same ≥ _MIN_SHARED_TOKENS bar every edge
+    had to clear. The largest surviving subset is the component's real topic.
+
+    Ties break on the sorted member list so the same corpus always yields the same
+    proposal — an unstable label would re-open a candidate a curator already
+    adjudicated.
+    """
+    if len(_shared_topic(items, members_idx)) >= _MIN_SHARED_TOKENS:
+        return members_idx  # already coherent — the common case, unchanged
+
+    best: list[int] = []
+    best_key: tuple[str, ...] = ()
+    seen: set[frozenset[int]] = set()
+    for tok in sorted({t for k in members_idx for t in items[k][1].tokens}):
+        subset = [k for k in members_idx if tok in items[k][1].tokens]
+        if len(subset) < 2 or frozenset(subset) in seen:
+            continue
+        seen.add(frozenset(subset))
+        if len(_shared_topic(items, subset)) < _MIN_SHARED_TOKENS:
+            continue
+        key = tuple(sorted(items[k][0] for k in subset))
+        if len(subset) > len(best) or (len(subset) == len(best) and key < best_key):
+            best, best_key = subset, key
+    return best
 
 
 def _build_clusters(notes: dict[str, NoteMeta]) -> dict[str, list[str]]:

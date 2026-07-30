@@ -315,6 +315,55 @@ class TestMemoryLibrarianDetection(unittest.TestCase):
             self.assertIn("oauth_rotator_beta.md", bullets[0])
             self.assertIn("oauth_rotator_gamma.md", bullets[0])
 
+    def test_issue140_a_hub_note_does_not_chain_unrelated_pages_into_one_cluster(self):
+        """Every member of a proposed cluster must carry the WHOLE topic label (#140).
+
+        Connectivity is transitive, "same subject" is not. A hub note touching many
+        subjects shares ≥2 tokens with each of several unrelated pages, so union-find
+        fuses them all — and the label was then invented from the most-FREQUENT
+        tokens, which the hub alone supplied. Consumers measured the cost: ~190k
+        subagent tokens per dispatch to be told there is nothing to merge, three
+        times over, because the candidate could never have been merged by anyone.
+
+        The corpus below is that exact shape — `hub` bridges three pages that share
+        NOTHING with each other. The invariant asserted is the one that makes a
+        cluster claim true: the label is the strict intersection, so every listed
+        member carries every label word.
+        """
+        with TemporaryDirectory() as h, TemporaryDirectory() as p:
+            home, project = Path(h), Path(p)
+            memdir = _build(home, project)
+            (memdir / "hub.md").write_text(_note(
+                "hub", "daemonize background task queue depth project telemetry", []))
+            (memdir / "detach_jobs.md").write_text(_note(
+                "detach_jobs", "daemonize background task lifecycle signals", []))
+            (memdir / "truncated_output.md").write_text(_note(
+                "truncated_output", "queue depth sigpipe capture stdout", []))
+            (memdir / "focus_tokens.md").write_text(_note(
+                "focus_tokens", "project telemetry budget accounting", []))
+            _run(home, project)
+
+            agg = ((memdir / PROPOSAL_NAME).read_text()
+                   .split("## Aggregation")[1].split("## Conflict")[0])
+            bullets = [ln for ln in agg.splitlines() if ln.startswith("- topic ")]
+            for bullet in bullets:
+                label = bullet.split("`")[1]
+                listed = [w.strip() for w in bullet.split("):")[1].split(",")]
+                for member in listed:
+                    text = (memdir / member).read_text().lower()
+                    missing = [w for w in label.split("+") if w not in text]
+                    self.assertEqual(
+                        missing, [],
+                        f"{member} was clustered under `{label}` but carries none of "
+                        f"{missing} — the group claims a topic this member lacks:\n{agg}",
+                    )
+            # And the three mutually-unrelated pages are never grouped together.
+            for bullet in bullets:
+                self.assertFalse(
+                    "detach_jobs.md" in bullet and "focus_tokens.md" in bullet,
+                    f"pages sharing no token were chained via the hub:\n{agg}",
+                )
+
     def test_issue35_generic_theme_notes_do_not_overcluster(self):
         """Issue #35: distinct subtopics that merely share a generic THEME word are
         NOT collapsed into one aggregation cluster. Five tagless notes whose only
