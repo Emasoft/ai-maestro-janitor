@@ -287,3 +287,82 @@ def test_disabled_by_env_flag(tmp_path: Path) -> None:
     )
     assert r.returncode == 0
     assert r.stdout == ""
+
+
+# ── janitor#110: capability, install-trigger and presence are DIFFERENT states ─
+#
+# The detector used to report all of them with the language and severity of the
+# most alarming one, so `playwright` — whose `scripts` is EMPTY, and whose agent
+# files are written only by an explicit `init-agents` command — was dispatched as
+# a `critical` compromise and burned a full agent run to be verified false.
+#
+# These run as a PAIR so the fix cannot be "downgrade everything": the
+# install-triggered package must still read as the serious case.
+
+_WRITES_AGENT_FILE = (
+    "const fs=require('fs');\n"
+    "fs.writeFileSync('.claude/agents/planner.md', body);\n"
+)
+
+
+def _set_scripts(pkg_dir: Path, scripts: dict[str, str]) -> None:
+    p = pkg_dir / "package.json"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    data["scripts"] = scripts
+    p.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_capability_without_install_hook_is_not_reported_as_install_time(tmp_path: Path) -> None:
+    """The playwright shape: can write, but nothing runs it on install.
+
+    `scripts: {}` means installing the package writes nothing, so the headline
+    must not claim install-time behaviour and must say what the real control is.
+    """
+    pkg = _seed_npm_pkg(tmp_path, "playwrightish", _WRITES_AGENT_FILE)
+    _set_scripts(pkg, {})
+    out = _run(tmp_path).stdout
+
+    assert "CAN write agent-context file" in out
+    assert "none at install time" in out
+    assert "AT INSTALL TIME" not in out
+    assert "no install hook" in out, "the per-finding line must name the state too"
+    assert "INVOCATION" in out, "a capability finding must point at the real control"
+
+
+def test_install_hook_is_still_reported_as_the_serious_case(tmp_path: Path) -> None:
+    """A postinstall that writes agent files IS the disclosed-attack shape.
+
+    The load-bearing half: if this went quiet, the fix would have traded a false
+    positive for a false negative on the state that actually matters.
+    """
+    pkg = _seed_npm_pkg(tmp_path, "evilish", _WRITES_AGENT_FILE)
+    _set_scripts(pkg, {"postinstall": "node ./index.js"})
+    out = _run(tmp_path).stdout
+
+    assert "AT INSTALL TIME" in out
+    assert "RUNS AT INSTALL via `postinstall`" in out
+    assert "supply-chain attacks" in out
+
+
+def test_every_install_hook_name_is_recognised(tmp_path: Path) -> None:
+    """preinstall/install/prepare are triggers too — not just postinstall."""
+    for hook in ("preinstall", "install", "prepare"):
+        proj = tmp_path / hook
+        proj.mkdir()
+        pkg = _seed_npm_pkg(proj, "p", _WRITES_AGENT_FILE)
+        _set_scripts(pkg, {hook: "node ./index.js"})
+        out = _run(proj).stdout
+        assert f"RUNS AT INSTALL via `{hook}`" in out, f"{hook} not recognised"
+
+
+def test_unreadable_package_json_degrades_to_capability_not_critical(tmp_path: Path) -> None:
+    """Unknown metadata must not be reported as an install trigger.
+
+    Claiming a trigger we could not observe is the same overstatement the whole
+    fix is about, so absence of evidence degrades DOWN, never up.
+    """
+    pkg = _seed_npm_pkg(tmp_path, "brokenmeta", _WRITES_AGENT_FILE)
+    (pkg / "package.json").write_text("{ not json", encoding="utf-8")
+    out = _run(tmp_path).stdout
+    assert "none at install time" in out
+    assert "AT INSTALL TIME" not in out

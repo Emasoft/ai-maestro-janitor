@@ -164,11 +164,12 @@ unattended access to your repository.
 
 ## PROJECT — your repo (proposed, never automatic)
 
-16 code(s).
+17 code(s).
 
 | Code | Scanner | Severity | Issue |
 |---|---|---|---|
 | `AICTX-001` | ai-context-poisoning | critical | an agent-context file may be poisoned: {path} |
+| `AICTX-002` | ai-context-poisoning | low | a dependency can write agent-context files: {path} |
 | `BRPROT-001` | branch-protection | high | the default branch of {slug} is unprotected |
 | `BRPROT-002` | branch-protection | high | the branch-protection baseline on {slug} has drifted: {detail} |
 | `CRED-001` | remote-credentials | critical | a credential appears to be exposed in {path} |
@@ -191,6 +192,13 @@ unattended access to your repository.
 - **What it is:** A file the AI reads as INSTRUCTIONS (CLAUDE.md, a skill, an agent definition, a rule) contains authority impersonation, invisible unicode, or a jailbreak pattern.
 - **Why it matters:** This is the highest-leverage attack on an agentic system: the payload does not exploit the code, it exploits the reader — and the reader has the user's full privileges.
 - **Fix attempted:** Do not 'clean it up' silently. Preserve the file, show the user the exact payload and where it came from, and strip the covert unicode only after they have seen it.
+
+### `AICTX-002` — a dependency can write agent-context files: {path}
+
+- **Scanner:** `ai-context-poisoning` · **Severity:** `low` · **Kind:** `security-workflow`
+- **What it is:** An installed package ships code that writes to an agent-context path (.claude/*, AGENTS.md, .cursorrules, .github/agents/*). This is a CAPABILITY, not evidence that anything was written or poisoned.
+- **Why it matters:** A dependency that generates the files the agent reads as instructions can shape agent behaviour — and one such CLI also writes a GitHub Actions workflow. Worth knowing about; not by itself an incident.
+- **Fix attempted:** Confirm whether the package triggers this at INSTALL time (a preinstall/install/postinstall/prepare script in its own package.json) or only from an explicit command. If install-triggered, treat it as an active supply-chain risk; if command-only, the realistic control is guarding the INVOCATION, since that is the only trigger. Then check whether the generated paths actually exist.
 
 ### `BRPROT-001` — the default branch of {slug} is unprotected
 

@@ -34,6 +34,7 @@ Heartbeat invariants:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -144,14 +145,45 @@ def _scan_source_file(path: Path) -> list[str]:
     return snips
 
 
-def _scan_node_modules(project_root: Path, budget: int) -> list[tuple[str, str]]:
+# npm lifecycle hooks that run WITHOUT the user asking. The presence of one is
+# what separates "this package can write agent-context files" from "this package
+# writes them when you install it" — the difference between a capability and an
+# active supply-chain risk (janitor#110). `playwright` is the motivating case:
+# its `scripts` is empty, so installing it writes nothing and the only trigger is
+# an explicit `playwright init-agents` command.
+_NPM_INSTALL_HOOKS = ("preinstall", "install", "postinstall", "prepare", "prepublish")
+
+
+def _install_time_trigger(pkg_dir: Path) -> str | None:
+    """The install hook that would run this package's code unasked, else None.
+
+    Reads the package's OWN package.json. Unreadable/absent metadata returns None
+    — a capability finding is still emitted, just at the lower severity, because
+    claiming an install trigger we could not observe is the exact overstatement
+    this function exists to prevent.
+    """
+    try:
+        data = json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    scripts = data.get("scripts")
+    if not isinstance(scripts, dict):
+        return None
+    for hook in _NPM_INSTALL_HOOKS:
+        val = scripts.get(hook)
+        if isinstance(val, str) and val.strip():
+            return hook
+    return None
+
+
+def _scan_node_modules(project_root: Path, budget: int) -> list[tuple[str, str, str | None]]:
     """Return (drift bullet, path) pairs for any node_modules package that
     writes to an agent-context file from its installable shipping code.
 
     The path is returned alongside the bullet (not re-parsed from it later)
     so the issue-catalog raise below has the finding's LOCATION without
     reaching back into a formatted string."""
-    issues: list[tuple[str, str]] = []
+    issues: list[tuple[str, str, str | None]] = []
     seen_pkgs: set[str] = set()
     for pkg_dir in _iter_node_packages(project_root):
         if budget <= 0:
@@ -176,19 +208,28 @@ def _scan_node_modules(project_root: Path, budget: int) -> list[tuple[str, str]]
                 continue
             seen_pkgs.add(pkg_name)
             rel = src.relative_to(project_root)
+            hook = _install_time_trigger(pkg_dir)
+            # Say which state this is. The old wording ("writes to agent-context
+            # file") read as an action already taken, for what is only a capability.
+            trigger = (
+                f"RUNS AT INSTALL via `{hook}`"
+                if hook
+                else "no install hook — reachable only by an explicit command"
+            )
             issues.append((
-                f"npm:{pkg_name} writes to agent-context file from {rel} — "
-                f"first hit: {snips[0]}",
+                f"npm:{pkg_name} CAN write agent-context files from {rel} "
+                f"({trigger}) — first hit: {snips[0]}",
                 str(rel),
+                hook,
             ))
             break  # one finding per package is enough
     return issues
 
 
-def _scan_site_packages(project_root: Path, budget: int) -> list[tuple[str, str]]:
+def _scan_site_packages(project_root: Path, budget: int) -> list[tuple[str, str, str | None]]:
     """Return (drift bullet, path) pairs for any installed Python package
     whose source writes to an agent-context file."""
-    issues: list[tuple[str, str]] = []
+    issues: list[tuple[str, str, str | None]] = []
     seen_pkgs: set[str] = set()
     for sp in _iter_site_packages(project_root):
         if budget <= 0:
@@ -214,9 +255,14 @@ def _scan_site_packages(project_root: Path, budget: int) -> list[tuple[str, str]
             seen_pkgs.add(pkg_name)
             rel = src.relative_to(project_root)
             issues.append((
-                f"py:{pkg_name} writes to agent-context file from {rel} — "
+                f"py:{pkg_name} CAN write agent-context files from {rel} — "
                 f"first hit: {snips[0]}",
                 str(rel),
+                # No install-hook probe for Python: a wheel install runs nothing,
+                # and a sdist's setup.py runs EVERYTHING, so presence of the file
+                # would not discriminate. Reported as capability-only rather than
+                # guessed either way.
+                None,
             ))
     return issues
 
@@ -275,7 +321,7 @@ def main() -> int:
             pass
 
     budget = _max_files()
-    findings: list[tuple[str, str]] = []
+    findings: list[tuple[str, str, str | None]] = []
     findings.extend(_scan_node_modules(project_root, budget))
     # Re-compute budget for python scan based on what node consumed:
     # cheap approximation — give each scan half the total budget if both
@@ -289,7 +335,7 @@ def main() -> int:
         # Clean now — withdraw every standing proposal. Reconciling ONLY when there is something to
         # report would leave the last proposal on the board forever, and that is exactly the one that
         # matters: the finding the user just fixed.
-        for uid in issue_catalog.reconcile("AICTX-001", []):
+        for uid in issue_catalog.reconcile("AICTX-002", []):
             state.log_line(_NAME, f"withdrew TRDD-{uid} — the poisoned package is gone")
         state.rotate_log_if_big(_NAME)
         return 0
@@ -304,43 +350,62 @@ def main() -> int:
         "skill-bundle",
         enabled=state.is_truthy_env(sh.SECURITY_AGENT_HINT_ENV, True),
     )
-    print(
-        f"[ai-context-poisoning] {len(issues)} installed package(s) write to "
-        f"agent-context file(s) (CLAUDE.md / .cursorrules / .claude/* / AGENTS.md / "
-        f"etc.). Review each — this is the shape of disclosed supply-chain attacks "
-        f"that silently modify agent behaviour at install time.\n{sample}"
-        + (f"\n{hint}" if hint else "")
-    )
+    # Count the states separately. The old line said every hit "writes … at
+    # install time", which is the CRITICAL claim, for findings that were mostly
+    # capability-only — so a documented opt-in CLI read as an active compromise.
+    at_install = sum(1 for _i, _p, hook in findings if hook)
+    if at_install:
+        headline = (
+            f"{at_install} of {len(issues)} installed package(s) write to "
+            f"agent-context file(s) AT INSTALL TIME — this is the shape of "
+            f"disclosed supply-chain attacks that silently modify agent behaviour."
+        )
+    else:
+        headline = (
+            f"{len(issues)} installed package(s) CAN write agent-context file(s) "
+            f"(CLAUDE.md / .cursorrules / .claude/* / AGENTS.md / etc.), none at "
+            f"install time — a capability to be aware of, not an incident. The "
+            f"realistic control is guarding the INVOCATION, since that is the only "
+            f"trigger."
+        )
+    print(f"[ai-context-poisoning] {headline}\n{sample}" + (f"\n{hint}" if hint else ""))
 
     # Route each finding into the issue catalog, capped per fire.
     raised = 0
     skipped = 0
-    for issue, path in findings:
+    for issue, path, hook in findings:
         if raised >= issue_catalog.MAX_RAISES_PER_FIRE:
             skipped += 1
             continue
+        # Severity is the STATE, not the shape: an install hook means the code
+        # runs unasked (state 2), no hook means the capability is only reachable
+        # by an explicit command (state 1). Reporting state 1 at state 2's
+        # severity is what produced a `critical` ticket for a documented opt-in
+        # feature, and what teaches the reader to discount the detector for the
+        # day a real state-2 package appears (janitor#110).
         r = issue_catalog.raise_issue(
-            "AICTX-001",
+            "AICTX-002",
             where=path,
             evidence=[path],
+            severity="critical" if hook else "low",
             path=path,
             found=issue,
         )
         if r.first_seen and r.line:
             print(r.line)
         elif not r.ok:
-            state.log_line(_NAME, f"could not raise AICTX-001: {r.why}")
+            state.log_line(_NAME, f"could not raise AICTX-002: {r.why}")
         raised += 1
     if skipped:
         state.log_line(
             _NAME,
-            f"{skipped} AICTX-001 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
+            f"{skipped} AICTX-002 raise(s) skipped by the {issue_catalog.MAX_RAISES_PER_FIRE}-per-fire cap",
         )
 
     # Withdraw the proposals whose finding is no longer in the scan. A detector cannot CLEAR what it
     # can no longer name — a scan yields the findings that EXIST, and the vanished ones are by
     # definition absent from the result — so the reconcile is driven by what IS here, not by what was.
-    for uid in issue_catalog.reconcile("AICTX-001", [p for _, p in findings]):
+    for uid in issue_catalog.reconcile("AICTX-002", [p for _, p, _h in findings]):
         state.log_line(_NAME, f"withdrew TRDD-{uid} — the poisoned package is gone")
 
     state.rotate_log_if_big(_NAME)

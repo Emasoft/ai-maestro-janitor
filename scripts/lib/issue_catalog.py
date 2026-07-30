@@ -373,6 +373,42 @@ ISSUE_CATALOG: dict[str, Issue] = {
         why="This is the highest-leverage attack on an agentic system: the payload does not exploit the code, it exploits the reader — and the reader has the user's full privileges.",
         fix="Do not 'clean it up' silently. Preserve the file, show the user the exact payload and where it came from, and strip the covert unicode only after they have seen it.",
     ),
+    # AICTX-002 exists because AICTX-001 above describes a file that CONTAINS a
+    # payload, while the `ai-context-poisoning` scanner finds a dependency whose
+    # code can WRITE such a file. Those are different claims, and raising the
+    # first for the second reported a documented opt-in CLI feature (playwright's
+    # `init-agents`) as a critical compromise — verified false, at the cost of a
+    # full agent dispatch (janitor#110, janitor#99 §4).
+    #
+    # The three states are distinct and only the middle one is an active risk:
+    #   1. the package CAN write agent-context files   → static scan  → this code
+    #   2. it DOES write them at install time          → its own `scripts`
+    #   3. the files are actually present in the repo  → paths on disk
+    # Severity is chosen per finding by the detector, since only it can see (2).
+    "AICTX-002": Issue(
+        scanner="ai-context-poisoning",
+        kind="security-workflow",
+        severity="low",
+        title="a dependency can write agent-context files: {path}",
+        what=(
+            "An installed package ships code that writes to an agent-context path "
+            "(.claude/*, AGENTS.md, .cursorrules, .github/agents/*). This is a "
+            "CAPABILITY, not evidence that anything was written or poisoned."
+        ),
+        why=(
+            "A dependency that generates the files the agent reads as instructions "
+            "can shape agent behaviour — and one such CLI also writes a GitHub "
+            "Actions workflow. Worth knowing about; not by itself an incident."
+        ),
+        fix=(
+            "Confirm whether the package triggers this at INSTALL time (a "
+            "preinstall/install/postinstall/prepare script in its own "
+            "package.json) or only from an explicit command. If install-triggered, "
+            "treat it as an active supply-chain risk; if command-only, the "
+            "realistic control is guarding the INVOCATION, since that is the only "
+            "trigger. Then check whether the generated paths actually exist."
+        ),
+    ),
     "MCPSEC-001": Issue(
         scanner="mcp-rugpull",
         kind="security-workflow",
