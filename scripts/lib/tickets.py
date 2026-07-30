@@ -78,7 +78,7 @@ KIND_REGISTRY: dict[str, Kind] = {
 
 SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0}
 
-# Statuses. `needs_human` and `cancelled` and `resolved` are TERMINAL for the scheduler.
+# Statuses. `resolved`, `cancelled`, `needs_human` and `invalid` are TERMINAL for the scheduler.
 OPEN = "open"
 DISPATCHED = "dispatched"
 IN_PROGRESS = "in_progress"
@@ -86,10 +86,16 @@ RESOLVED = "resolved"
 FAILED = "failed"
 NEEDS_HUMAN = "needs_human"
 CANCELLED = "cancelled"
+# INVALID — the finding was PROVEN not to be a defect. Terminal and non-retrying, and distinct from
+# every other close (issue #128): `resolved` would claim a fix that never happened and erase the fact
+# that the detector was wrong, while `failed` is not a close at all — it is a RETRY, so an agent that
+# correctly disproved a finding put it straight back in the dispatch pool at a full subagent dispatch
+# per rung. An agent that proves a finding false must be able to say so ONCE and be believed.
+INVALID = "invalid"
 
 DISPATCHABLE = {OPEN}
 IN_FLIGHT = {DISPATCHED, IN_PROGRESS}
-TERMINAL = {RESOLVED, CANCELLED, NEEDS_HUMAN}
+TERMINAL = {RESOLVED, CANCELLED, NEEDS_HUMAN, INVALID}
 
 TITLE_CAP = 160
 DETAIL_CAP = 2000
@@ -106,6 +112,7 @@ DEFAULTS = {
 }
 
 LEDGER_MAX_LINES = 500  # bounded append site (repo invariant S3/S4)
+REFUSALS_MAX = 200  # bounded: the refusal index is a fast path, the archive is the record
 DAY_S = 86400
 
 
@@ -258,6 +265,37 @@ def mark_failed(t: Ticket, *, now: int, backoff_s: int, why: str = "") -> Ticket
     return t
 
 
+def mark_invalid(t: Ticket, *, now: int, why: str) -> Ticket:
+    """The finding was PROVEN not to be a defect: close it, terminally, with the disproof.
+
+    Unlike `mark_failed` this does NOT increment attempts and does NOT re-queue — that is the whole
+    point (issue #128). `why` carries the proof and is required by the caller: a refusal with no
+    stated reason is indistinguishable from giving up, and the next reader has no way to re-check it.
+    """
+    t.status = INVALID
+    t.updated_at = now
+    t.resolution = _clean(why, 200)
+    return t
+
+
+def evidence_fingerprint(evidence: list[str] | None) -> str:
+    """A stable digest of a finding's INPUTS — what a refusal is conditioned on.
+
+    "This is not a defect" is a claim about the evidence that was examined, not about the dedupe key
+    forever. So a refusal holds only while the inputs are unchanged; different evidence under the same
+    key is a NEW finding and must re-open. Order-insensitive (a detector may emit the same facts in a
+    different order) and computed over the CLEANED strings, so it matches what was stored.
+
+    Empty evidence digests to a constant — the refusal then keys on the dedupe key alone, which is the
+    honest reading: with no inputs recorded there is no way to notice they changed, and `retry` is the
+    escape hatch.
+    """
+    import hashlib
+
+    joined = "\n".join(sorted(_clean(e, 200) for e in (evidence or [])))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+
 def budget_left(ledger: list[int], *, now: int, per_day: int) -> int:
     """Dispatches still allowed in the rolling 24h window."""
     recent = sum(1 for ts in ledger if now - ts < DAY_S)
@@ -332,6 +370,71 @@ def save(t: Ticket, state_dir: Path | None = None) -> None:
         pass
 
 
+def refusals_path(state_dir: Path | None = None) -> Path:
+    return tickets_dir(state_dir) / "refusals.json"
+
+
+def read_refusals(state_dir: Path | None = None) -> dict[str, dict]:
+    """The refusal index: `dedupe_key → {ticket, evidence, ts}`. Fail-open `{}`.
+
+    A FAST PATH, not the record — the archived INVALID ticket is the record (it outlives the incident
+    by design). Every hit is verified against that archive before it suppresses anything, so the two
+    can never drift into the index silently vetoing work the archive says was re-opened.
+    """
+    try:
+        data = json.loads(refusals_path(state_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_refusals(index: dict[str, dict], state_dir: Path | None = None) -> None:
+    """Persist the refusal index, newest-first and capped (bounded — repo invariant S3/S4)."""
+    items = sorted(index.items(), key=lambda kv: -int(kv[1].get("ts", 0)))[:REFUSALS_MAX]
+    p = refusals_path(state_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    state.atomic_write(p, json.dumps(dict(items), indent=2))
+
+
+def record_refusal(t: Ticket, *, now: int, state_dir: Path | None = None) -> None:
+    """Remember that THIS finding, with THESE inputs, was proven not to be a defect."""
+    index = read_refusals(state_dir)
+    index[t.dedupe_key] = {
+        "ticket": t.id,
+        "evidence": evidence_fingerprint(t.evidence),
+        "ts": int(now),
+    }
+    _write_refusals(index, state_dir)
+
+
+def clear_refusal(dedupe_key: str, state_dir: Path | None = None) -> None:
+    """Forget a refusal — the escape hatch `retry` uses so a disproof is never permanent."""
+    index = read_refusals(state_dir)
+    if index.pop(dedupe_key, None) is not None:
+        _write_refusals(index, state_dir)
+
+
+def refusal_for(dedupe_key: str, evidence: list[str] | None, state_dir: Path | None = None) -> str:
+    """The id of the ticket that disproved this exact finding, or `""` if it is not refused.
+
+    Two conditions, both required: the dedupe key matches AND the evidence fingerprint is unchanged.
+    The archived ticket is then re-read and must STILL be `invalid` — a `retry` that un-archived it
+    makes the index entry stale, and a stale entry must never suppress live work. A stale one is
+    dropped on the spot so it cannot mislead twice.
+    """
+    entry = read_refusals(state_dir).get(dedupe_key)
+    if not isinstance(entry, dict):
+        return ""
+    if entry.get("evidence") != evidence_fingerprint(evidence):
+        return ""  # the inputs changed ⇒ a NEW finding, not the refused one
+    tid = entry.get("ticket", "")
+    archived = load(tid, state_dir) if isinstance(tid, str) else None
+    if archived is None or archived.status != INVALID:
+        clear_refusal(dedupe_key, state_dir)
+        return ""
+    return archived.id
+
+
 def open_ticket(
     *,
     kind: str,
@@ -369,6 +472,18 @@ def open_ticket(
             existing.updated_at = ts
             save(existing, state_dir)
             return existing, f"already tracked as {existing.id} (seen {existing.seen_count}x)"
+
+    # THE REFUSAL GATE (issue #128). An agent already examined this exact finding, with these exact
+    # inputs, and PROVED it is not a defect. Re-opening it would re-spend a full subagent dispatch to
+    # re-derive the same "no" — the cost that made a false positive worse than a real one. An explicit
+    # human approval (`trdd`) overrides: a person deciding to work it anyway outranks a prior verdict.
+    if not trdd:
+        refused_by = refusal_for(key, evidence, state_dir)
+        if refused_by:
+            return None, (
+                f"refused: this finding was proven not to be a defect in {refused_by}, and its "
+                f"evidence is unchanged. `ticket_cli.py retry {refused_by}` to re-examine it."
+            )
 
     t = Ticket(
         id=new_id(),

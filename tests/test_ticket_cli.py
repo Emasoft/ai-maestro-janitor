@@ -276,3 +276,62 @@ def test_approve_refuses_a_TRDD_that_is_not_on_the_board(project: Path) -> None:
     assert rc == 1
     assert out.strip()
     assert tickets.load_all() == [], "a failed approval must not leave a ticket behind"
+
+
+# --------------------------------------------------------------------------- #
+# 4. AN AGENT MUST BE ABLE TO SAY "NOT A DEFECT" AND BE BELIEVED (#128)
+# --------------------------------------------------------------------------- #
+
+
+def test_close_invalid_is_terminal_and_says_so(project: Path) -> None:
+    """The missing option. Before this, proving a finding false had no honest close."""
+    t = _ticket(status=tickets.IN_PROGRESS)
+
+    rc, out = _cli(project, "close", t.id, "--status", "invalid",
+                   "--resolution", "the validator checks table shape before the version stamp")
+
+    assert rc == 0
+    assert "invalid" in out and "NOT re-queue" in out
+    after = _reload(t.id)
+    assert after.status == tickets.INVALID
+    assert after.attempts == 0, "a disproof is not a failed attempt"
+
+
+def test_close_invalid_REFUSES_without_the_proof(project: Path) -> None:
+    """A suppression with no stated reason is indistinguishable from giving up, and nobody can
+    re-check it. The disproof IS the deliverable."""
+    t = _ticket(status=tickets.IN_PROGRESS)
+
+    rc, out = _cli(project, "close", t.id, "--status", "invalid", "--resolution", "   ")
+
+    assert rc == 2 and "REFUSED" in out
+    assert _reload(t.id).status == tickets.IN_PROGRESS, "a refused close must not mutate the ticket"
+
+
+def test_close_failed_says_RE_QUEUED_not_closed(project: Path) -> None:
+    """The silent half of #128: an agent reported a ticket 'closed' that was still in the pool.
+
+    The subcommand is called `close`, so an agent that ran it reasonably believed it had closed the
+    ticket. The output must name what actually happened.
+    """
+    t = _ticket(status=tickets.IN_PROGRESS)
+
+    rc, out = _cli(project, "close", t.id, "--status", "failed", "--resolution", "could not repair")
+
+    assert rc == 0
+    assert "RE-QUEUED" in out and "not closed" in out
+    assert "--status invalid" in out, "point the agent at the option it actually needed"
+    assert _reload(t.id).status == tickets.OPEN
+
+
+def test_retry_lifts_the_refusal_a_disproof_created(project: Path) -> None:
+    """A disproof is never permanent — and a refusal left behind by a retry would silently swallow
+    the detector's next finding while the ticket sits open."""
+    t = _ticket(status=tickets.IN_PROGRESS, dedupe_key="k", evidence=["e"])
+    _cli(project, "close", t.id, "--status", "invalid", "--resolution", "not a defect")
+    assert tickets.refusal_for("k", ["e"]) == t.id
+
+    rc, out = _cli(project, "retry", t.id)
+
+    assert rc == 0 and "refusal lifted" in out
+    assert tickets.refusal_for("k", ["e"]) == ""

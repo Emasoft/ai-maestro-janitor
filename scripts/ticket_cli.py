@@ -15,8 +15,9 @@ the injection boundary are enforced.
     ticket_cli.py show    T-7QK2M4XZ
     ticket_cli.py start   T-7QK2M4XZ        # an agent claims it (open/dispatched → in_progress)
     ticket_cli.py close   T-7QK2M4XZ --status resolved --resolution "…" [--report PATH]
+    ticket_cli.py close   T-7QK2M4XZ --status invalid  --resolution "…"   # PROVEN not a defect
     ticket_cli.py cancel  T-7QK2M4XZ [--why …]
-    ticket_cli.py retry   T-7QK2M4XZ        # re-open a needs_human ticket for another attempt
+    ticket_cli.py retry   T-7QK2M4XZ        # re-open a needs_human/invalid ticket for another attempt
     ticket_cli.py stats
 """
 
@@ -70,7 +71,16 @@ def main() -> int:
 
     p = sub.add_parser("close")
     p.add_argument("ticket")
-    p.add_argument("--status", choices=[tickets.RESOLVED, tickets.FAILED], required=True)
+    p.add_argument(
+        "--status",
+        choices=[tickets.RESOLVED, tickets.INVALID, tickets.FAILED],
+        required=True,
+        help=(
+            "resolved = you FIXED it | invalid = you PROVED it is not a defect (terminal, "
+            "non-retrying; --resolution carries the proof) | failed = the attempt failed and the "
+            "ticket is RE-QUEUED for another try"
+        ),
+    )
     p.add_argument("--resolution", default="")
     p.add_argument("--report", default="")
 
@@ -159,9 +169,31 @@ def main() -> int:
             t.status = tickets.RESOLVED
             t.resolution = tickets._clean(args.resolution, 200)
             t.updated_at = now
+            tickets.save(t)
+        elif args.status == tickets.INVALID:
+            # The disproof IS the deliverable here — without it nobody can re-check the verdict, and
+            # a bare "invalid" is indistinguishable from giving up. Refuse rather than record a
+            # suppression with no stated reason.
+            if not args.resolution.strip():
+                print("REFUSED: --status invalid requires --resolution (state WHY it is not a defect)")
+                return 2
+            tickets.mark_invalid(t, now=now, why=args.resolution)
+            tickets.save(t)
+            tickets.record_refusal(t, now=now)
+            print(f"{t.id} invalid — closed, will NOT re-queue ({t.resolution})")
+            print(f"  the same finding with unchanged evidence is now suppressed; `retry {t.id}` to re-examine")
+            return 0
         else:
             tickets.mark_failed(t, now=now, backoff_s=int(tickets.config("TICKET_BACKOFF_S")), why=args.resolution)
-        tickets.save(t)
+            tickets.save(t)
+            # `failed` is a RETRY, not a close, and saying "closed" is how an agent came to report a
+            # ticket closed that the store still had in the dispatch pool (#128). Name the outcome.
+            if t.status == tickets.NEEDS_HUMAN:
+                print(f"{t.id} needs_human — {t.attempts}/{t.max_attempts} attempts spent, a human must look")
+            else:
+                print(f"{t.id} RE-QUEUED (not closed) — attempt {t.attempts}/{t.max_attempts}, retries after backoff")
+                print("  if you PROVED it is not a defect, use `--status invalid` instead")
+            return 0
         print(f"{t.id} {t.status}" + (f" ({t.resolution})" if t.resolution else ""))
         return 0
 
@@ -176,12 +208,18 @@ def main() -> int:
 
     if args.cmd == "retry":
         t = _load_or_die(args.ticket)
+        was_invalid = t.status == tickets.INVALID
         t.status = tickets.OPEN
         t.attempts = 0
         t.not_before = 0
         t.updated_at = now
         tickets.save(t)
-        print(f"{t.id} re-opened for another attempt")
+        # A disproof is never permanent: re-opening an `invalid` ticket must also lift the
+        # suppression it created, or the detector's next finding is silently swallowed while this
+        # ticket sits open — the failure mode the refusal gate exists to avoid, inverted.
+        if was_invalid:
+            tickets.clear_refusal(t.dedupe_key)
+        print(f"{t.id} re-opened for another attempt" + (" (refusal lifted)" if was_invalid else ""))
         return 0
 
     if args.cmd == "stats":

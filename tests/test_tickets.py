@@ -218,3 +218,96 @@ def test_a_trdd_ref_parses_in_both_forms() -> None:
     assert ticket_proposal.parse_trdd_ref("35ac8i8d") == "35AC8I8D"
     for bad in ("TRDD-!!", "", "TRDD-TOOLONGID", "; rm -rf /"):
         assert ticket_proposal.parse_trdd_ref(bad) is None
+
+
+# --------------------------------------------------------------------------- #
+# 5. THE REFUSAL LEDGER — a proven false positive must be believed once (#128)
+# --------------------------------------------------------------------------- #
+
+
+def test_invalid_is_terminal_and_does_NOT_requeue(sdir: Path) -> None:
+    """The whole defect: `failed` is a RETRY, so a disproved finding went straight back in the pool.
+
+    An agent that proved a finding false had no honest option — `resolved` claims a fix that never
+    happened, `failed` re-queues and then pages a human for a non-defect.
+    """
+    t, _ = _open(sdir)
+    tickets.mark_invalid(t, now=NOW, why="the validator checks table shape before the version stamp")
+    tickets.save(t, sdir)
+    assert t.status == tickets.INVALID
+    assert t.attempts == 0  # NOT an attempt — nothing was tried and failed
+    assert tickets.select_due(tickets.load_all(sdir), now=NOW, per_fire=2, budget_left=20, inflight=0) == []
+    # Archived, never deleted — the disproof is the record (RULE 0's spirit).
+    assert (tickets.closed_dir(sdir) / f"{t.id}.json").exists()
+    assert tickets.load(t.id, sdir).resolution.startswith("the validator checks")
+
+
+def test_a_refused_finding_does_not_reopen(sdir: Path) -> None:
+    """The cost this fixes: re-opening spends a full subagent dispatch to re-derive the same `no`."""
+    t, _ = _open(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=5"])
+    tickets.mark_invalid(t, now=NOW, why="an honest v5 DB, not corruption")
+    tickets.save(t, sdir)
+    tickets.record_refusal(t, now=NOW, state_dir=sdir)
+
+    again, why = _open(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=5"])
+    assert again is None
+    assert "proven not to be a defect" in why and t.id in why
+
+
+def test_changed_evidence_reopens_because_it_is_a_NEW_finding(sdir: Path) -> None:
+    """A refusal is a claim about the INPUTS examined, not about the key forever."""
+    t, _ = _open(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=5"])
+    tickets.mark_invalid(t, now=NOW, why="an honest v5 DB")
+    tickets.save(t, sdir)
+    tickets.record_refusal(t, now=NOW, state_dir=sdir)
+
+    fresh, why = _open(sdir, dedupe_key="memgrep:index:LOCAL", evidence=["user_version=9", "table missing"])
+    assert fresh is not None and fresh.id != t.id, why
+
+
+def test_evidence_fingerprint_ignores_order_not_content() -> None:
+    """Detectors may emit the same facts in a different order; that is not a new finding."""
+    assert tickets.evidence_fingerprint(["a", "b"]) == tickets.evidence_fingerprint(["b", "a"])
+    assert tickets.evidence_fingerprint(["a", "b"]) != tickets.evidence_fingerprint(["a", "c"])
+
+
+def test_a_stale_refusal_never_suppresses_live_work(sdir: Path) -> None:
+    """The index is a fast path; the ARCHIVED ticket is the record, and it wins.
+
+    Without this an entry left behind by a `retry` would silently veto every future finding under
+    that key — the failure the gate exists to prevent, inverted.
+    """
+    t, _ = _open(sdir, dedupe_key="k", evidence=["e"])
+    tickets.mark_invalid(t, now=NOW, why="not a defect")
+    tickets.save(t, sdir)
+    tickets.record_refusal(t, now=NOW, state_dir=sdir)
+    # Re-open it the way `retry` does, WITHOUT clearing the index.
+    t.status = tickets.OPEN
+    tickets.save(t, sdir)
+
+    assert tickets.refusal_for("k", ["e"], sdir) == ""
+    assert tickets.read_refusals(sdir) == {}  # and the stale entry is dropped, not left to mislead
+
+
+def test_an_explicit_human_approval_overrides_a_refusal(sdir: Path) -> None:
+    """A person choosing to work it anyway outranks a prior agent verdict."""
+    t, _ = _open(sdir, kind="security-workflow", trdd="ABC12345", dedupe_key="wf:1", evidence=["e"])
+    tickets.mark_invalid(t, now=NOW, why="the rule does not apply to this workflow")
+    tickets.save(t, sdir)
+    tickets.record_refusal(t, now=NOW, state_dir=sdir)
+
+    again, why = _open(sdir, kind="security-workflow", trdd="ABC12345", dedupe_key="wf:1", evidence=["e"])
+    assert again is not None, why
+
+
+def test_the_refusal_index_is_bounded(sdir: Path) -> None:
+    """Bounded append site (repo invariant S3/S4) — newest kept, oldest dropped."""
+    for i in range(tickets.REFUSALS_MAX + 25):
+        t, _ = _open(sdir, dedupe_key=f"k{i}", evidence=[f"e{i}"])
+        tickets.mark_invalid(t, now=NOW + i, why="not a defect")
+        tickets.save(t, sdir)
+        tickets.record_refusal(t, now=NOW + i, state_dir=sdir)
+    index = tickets.read_refusals(sdir)
+    assert len(index) == tickets.REFUSALS_MAX
+    assert f"k{tickets.REFUSALS_MAX + 24}" in index  # newest survives
+    assert "k0" not in index  # oldest evicted
