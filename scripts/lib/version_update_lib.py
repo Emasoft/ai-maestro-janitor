@@ -150,7 +150,11 @@ def detect_install_scopes() -> list[str]:
         seen: set[str] = {
             s for s in (r.get("scope") for r in records) if isinstance(s, str) and s
         }
-        ordered = [s for s in ("user", "local", "project") if s in seen]
+        # Annotated: inferred from the literal tuple this becomes
+        # list[Literal["user","local","project"]], and the unknown-scope append
+        # below is a plain str — which mypy rejects only in an environment
+        # without this project's venv (i.e. CI's, and CPV's preflight).
+        ordered: list[str] = [s for s in ("user", "local", "project") if s in seen]
         # An unknown scope name is still a real install; keep it rather than
         # silently dropping an install we would then never update.
         ordered += sorted(s for s in seen if s not in ("user", "local", "project"))
