@@ -82,12 +82,29 @@ def test_render_contains_sections():
     assert "Container/dev-box/sandbox" in out
 
 
+# The live probe shells out to a dozen external tools (ifconfig, scutil, lsof, gh, security, …),
+# so it is SLOW and its cost is dominated by the machine, not by this repo: measured 9.7 s cold and
+# ~1.5 s warm on an idle box, and this test pays it TWICE. A 30 s cap was therefore ~3x the cold
+# path on an idle machine and marginal on a loaded one — it went red once during a full-suite run
+# that itself took 624 s against a usual ~270-360 s, i.e. the timeout fired on load, not on a
+# defect. The cap exists to catch a HANG, and a hang is unbounded, not 40 s — so budget for the
+# slowest honest run and keep the backstop meaningful.
+_LIVE_PROBE_TIMEOUT_S = 120
+
+
 def test_live_run_human_and_json():
     # A real subprocess run: must exit 0 and emit valid JSON with --json.
-    human = subprocess.run([sys.executable, str(_SCRIPT)], capture_output=True, text=True, timeout=30)
+    human = subprocess.run(
+        [sys.executable, str(_SCRIPT)], capture_output=True, text=True, timeout=_LIVE_PROBE_TIMEOUT_S
+    )
     assert human.returncode == 0 and "## Environment" in human.stdout
 
-    js = subprocess.run([sys.executable, str(_SCRIPT), "--json"], capture_output=True, text=True, timeout=30)
+    js = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--json"],
+        capture_output=True,
+        text=True,
+        timeout=_LIVE_PROBE_TIMEOUT_S,
+    )
     assert js.returncode == 0
     data = json.loads(js.stdout)
     assert data["terminal"]["kind"]  # non-empty label
