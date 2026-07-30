@@ -2,7 +2,7 @@
 name: janitor-publish-pipeline
 description: "publish blocked / how do I release the janitor / CPV flagged a finding / can I skip a gate / push rejected by pre-push hook / version mismatch on publish / no changelog / publish exited 3 but every test passed / rc=3 with nothing failing — the janitor's fail-fast publish pipeline (a CPV plugin), its gate order, the write-guard, and the CPV-only validate policy"
 ocd: 2026-06-13
-lmd: 2026-07-22
+lmd: 2026-07-30
 metadata:
   node_type: memory
   type: project
@@ -150,17 +150,28 @@ reads the liveness file from `_REAL_ENV["HOME"]` directly. A probe that fails si
 degrades to "no other actor", i.e. it blames the suite.
 
 
-^ATOM-UHO6-Q99D [desc:"gate 4 timing out is CPV's worker-pool startup race, not a too-tight cap — retry, do not raise it", keywords: publish_hangs_at_gate_4_validating_plugin_remote_CPV Command_timed_out_after_300s publish_fails_but_every_test_passed REPO_LINT_never_finishes cpv-remote-validate_stuck, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
+^ATOM-UHO6-Q99D [desc:"gate 4 timing out has TWO causes with one symptom — a worker-pool HANG (retry) and a genuinely SLOW run (raise the cap); time a standalone run to tell them apart", keywords: publish_hangs_at_gate_4_validating_plugin_remote_CPV Command_timed_out_after_300s publish_fails_but_every_test_passed REPO_LINT_never_finishes cpv-remote-validate_stuck retry_did_not_clear_the_timeout, type: project, ocd: 2026-07-28, lmd: 2026-07-30]
 
-Gate 4 (`stage_validate`, remote CPV) can HANG, and its 300s cap is the thing that catches it — do
-not read a timeout there as "the cap is too tight". CPV`s `[REPO LINT]` stage fans out a worker pool;
-when the ~15 workers spawn it finishes in ~60s, but when they fail to spawn the parent blocks on a
-lock forever instead of raising `BrokenProcessPool`. It is a startup RACE, so it is intermittent: two
-consecutive publishes died at 300s and the very next run passed clean (EXIT=0, 0 blocking issues).
-Diagnose it in one step rather than guessing — `/usr/bin/sample <pid> 4` shows the main thread at
-3317/3317 samples in `lock_PyThread_acquire_lock -> acquire_timed -> __psynch_cvwait` with threads
-parked in `_queue_SimpleQueue_get`, and `ps` shows a `multiprocessing.resource_tracker` child with
-ZERO workers beside it. The remedy is to RETRY the publish; there is no `--jobs`/serial flag to pass. [^5]
+Gate 4 (`stage_validate`, remote CPV) times out for **two different reasons that print the same
+line**, and the remedies are opposites. Decide which one you have BEFORE acting, with one cheap
+measurement: run `cpv-remote-validate plugin . --strict` standalone under `time`.
+
+**(a) It COMPLETES (~237s measured 2026-07-30, EXIT=0).** The run is merely slow and the cap was too
+tight: `stage_validate` passed no `timeout=`, inheriting `run()`'s generic 300s — under 27% headroom,
+so it passed idle and failed under load. Retrying does NOT help; it failed twice and cleared only
+when the cap rose. Since `a168149` all three CPV call sites read `_CPV_TIMEOUT_SEC` (900s) — before
+it they used 600/300/none, one behaviour with three unstated numbers.
+
+**(b) It NEVER completes.** Then it is the worker-pool startup RACE: CPV's `[REPO LINT]` fans out a
+pool, and when the ~15 workers fail to spawn the parent blocks on a lock forever instead of raising
+`BrokenProcessPool`. Intermittent, so RETRY works — there is no `--jobs`/serial flag.
+`/usr/bin/sample <pid> 4` confirms it: main thread pinned in
+`lock_PyThread_acquire_lock -> acquire_timed -> __psynch_cvwait`, threads in
+`_queue_SimpleQueue_get`, `ps` showing a `multiprocessing.resource_tracker` child with ZERO workers.
+
+The discriminator is COMPLETION, not duration — a hang never finishes, so a standalone EXIT=0 rules
+(b) out. Accepted trade-off: a genuine hang now takes 900s to catch, the price of making (a)
+satisfiable at all. [^5] [^7]
 
 
 ^ATOM-0GXI-QA1C [desc:"the tree is frozen for the whole publish — an edit mid-run fails it and the message blames the tests", keywords: publish_exited_3_but_every_test_passed REAL-STATE_WRITE_GUARD_FAILED a_test_escaped_isolation_but_no_test_failed working_tree_is_dirty_commit_or_stash_first publish_keeps_failing_while_I_edit, type: project, ocd: 2026-07-28, lmd: 2026-07-28]
@@ -221,3 +232,4 @@ vs `[plugin-data]` prefix to tell which one you are looking at.
   actor", i.e. it blamed the suite.
 [^5]: [id:ATOM-RHYL-686X, status:valid, desc:"the cap was doing its job — measure the hang before touching the number", keywords:"raise_the_timeout_because_it_timed_out timeout_is_indistinguishable_from_a_hang sample_the_stuck_process_before_changing_the_cap cpu_time_flatlined_means_hang_not_slow", ocd:2026-07-28, lmd:2026-07-28] DO NOT raise a gate timeout because the gate timed out, BECAUSE a timeout is indistinguishable from a hang until you look, and the cap is often the only thing converting an unbounded hang into a bounded failure — raising it turns a 5-minute red into a wedged release. DO sample the stuck process first (`/usr/bin/sample <pid> 4`, `ps` for CPU-time growth, `lsof -a -i` for a socket) and let the stack name the cause.
 [^6]: [id:ATOM-BTNN-2OX0, status:valid, desc:"the publish freezes the tree; my own edit failed two runs and the message pointed at the suite", keywords:"edited_a_file_while_the_publish_was_running write_guard_blamed_the_tests_but_it_was_me tree_is_frozen_for_the_whole_publish commit_before_publishing_then_hands_off", ocd:2026-07-28, lmd:2026-07-28] DO NOT edit the working tree while a publish is running, BECAUSE the pipeline froze that tree at gate 1 and re-validates it at the test gate and again at the commit gate — so an edit twelve minutes in fails the run, and the write guard blames "a test escaped isolation" rather than the editor, which sends you hunting through a suite that is fine. DO commit everything first, start the publish, and keep hands off until EXIT prints.
+[^7]: [id:ATOM-4TQF-J8ND, status:valid, desc:"one symptom, two opposite remedies — a prescription that names only one cause sends the next reader in circles", keywords:"retry_the_publish_did_not_help timed_out_again_after_retrying same_error_two_different_causes memory_said_retry_but_retry_failed cap_too_tight_vs_genuine_hang", ocd:2026-07-30, lmd:2026-07-30] DO NOT record "symptom X means cause Y, do Z" when a second cause prints the identical line, BECAUSE the next reader applies Z, watches it fail, and has no way to tell a wrong diagnosis from bad luck — `^ATOM-UHO6-Q99D` said gate 4's timeout is "not a too-tight cap, retry, do not raise it", so I retried twice into a cap that was genuinely 27% over the real runtime. DO write the DISCRIMINATOR beside the causes (here: time a standalone run — a hang never completes, a slow run returns EXIT=0), so the reader tests rather than guesses.
