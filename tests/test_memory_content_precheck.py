@@ -742,9 +742,31 @@ def test_editing_a_judged_page_re_arms_the_chore(tmp_path, monkeypatch):
     memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="different subjects")
     assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is False
 
-    a.write_text("alpha body, now claiming something new\n", encoding="utf-8")
+    # SAME BYTE LENGTH, different content. A size-or-mtime fingerprint passes this test only by
+    # accident of the edit being longer; caught by mutation-checking the hash down to `st_size`,
+    # which survived until this line pinned the claim the module actually makes.
+    assert len("alpha body\n") == len("ALPHA BODY\n")
+    a.write_text("ALPHA BODY\n", encoding="utf-8")
 
     assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_a_touch_does_NOT_re_arm_a_refused_pair(tmp_path, monkeypatch):
+    """The other half of hashing CONTENT: metadata churn is not a new question.
+
+    The corpus fingerprint hashes size+mtime because it must stay free over a whole corpus. A
+    refusal covers two or three named files, so it can afford the truth — and must, or any tool
+    that rewrites a page byte-identically silently re-arms every refusal in the scope.
+    """
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    _proposal(tmp_path, [_bullet()])
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="different subjects")
+
+    os.utime(a, (2_000_000_000, 2_000_000_000))  # mtime moves, content does not
+    a.write_text(a.read_text(encoding="utf-8"), encoding="utf-8")  # rewritten, byte-identical
+
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is False
 
 
 def test_an_unrelated_edit_does_NOT_re_arm_a_refused_pair(tmp_path, monkeypatch):
