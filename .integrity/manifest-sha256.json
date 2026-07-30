@@ -1,7 +1,7 @@
 {
   "files": {
-    "CLAUDE.md": "b02c711ecb76557a1518a026dd70543ed358686c29f504b5445b0eccd11f2eda",
-    "README.md": "201066e406e39aef5e66aedbb05857e3f94fd00201cad6118d093f366e63aa68",
+    "CLAUDE.md": "9cec92ea1cc376c9c1c1ff5af1ddc3185c478acb7aebca1a1226ba340077a247",
+    "README.md": "1c716c27dbc4cca1bbb5b66d9e797993b234cee0a1c4db378fb7c181cf18aef1",
     "commands/janitor-memory-user-add.md": "7d9d059612ceff14768651d7d8fd089121792d20cb3fb32263a836c2ee9af7b5",
     "commands/janitor-memory-user-search.md": "6132cbf652db6496beb69e5225ddcea1151931166db1c8505d5352b56084e245",
     "commands/janitor-memory-user-share.md": "b47f2a66da18ed76d4e39fe3329983b70f2aae635a38bbf67d91e9263c14af25",
@@ -13,7 +13,7 @@
     "rules/references/markdown-memory-recall-full.md": "67641ab190df6b227392ca4abfed768f40a06c05c9f99c9a6b4b343616a56de0",
     "rules/references/prrd-design-rules-full.md": "123be2d635c3bb024fb922845824f70d66343ccc1baa3b4a5aec4684b1a52aad",
     "rules/references/trdd-design-tasks-full.md": "0d8e548daa131065ff7b47f0ae689f9dd21c84b6bd92bff3bbb825ac427dfbc7",
-    "rules/trdd-design-tasks.md": "dd2664e51b48434c6955832fd484777933190292184892226df33d5942c463f6",
+    "rules/trdd-design-tasks.md": "8e4432d0a2d8b2098b4ab679faf7e4469ed16da5be4d0a4c2a866ab05fb22044",
     "rules/universal-kanban.md": "70c6828b9048c97605734098de0ad43fa7c305a0cd28b3730f7a33d3126c9a36",
     "rules/use-safe-delete.md": "de9fcbe7727b82bea771b16dd3d420c98c360807dbb9bb282563adba39af7b95",
     "skills/janitor-actions-up/SKILL.md": "5e5eee79c5832c3c2b109ae4fa7b21c26a587502c954cc322e76719d3522c565",
