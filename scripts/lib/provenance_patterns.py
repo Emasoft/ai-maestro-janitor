@@ -101,6 +101,14 @@ class Rule(NamedTuple):
     # File-suffix filter (e.g. (".yml", ".yaml") for workflow files).
     # Empty tuple = any file. Suffixes are lowercased before comparison.
     file_suffixes: tuple[str, ...]
+    # Regex mitigations, for when a plain substring cannot express the
+    # difference between enabling a control and DISABLING it. `provenance:`
+    # is the motivating case: as a substring it also matches
+    # `provenance: false`, which would suppress the finding on a workflow
+    # that explicitly turned the attestation OFF — a false negative on a
+    # supply-chain control, strictly worse than the false positive being
+    # fixed. Defaulted so every existing rule is untouched.
+    negative_patterns: tuple[re.Pattern, ...] = ()  # noqa: UP006 — keep stdlib name
 
 
 def _re(pattern: str) -> re.Pattern:
@@ -222,6 +230,20 @@ _INTOTO_TOKENS = (
     "actions/attest@",
     "slsa-github-generator/.github/workflows/generator_",
     "cosign attest",
+)
+
+# BuildKit emits SLSA provenance natively, so `docker/build-push-action` with
+# `provenance:` enabled ALREADY attaches an in-toto attestation — no separate
+# attest step is needed, and demanding one was a false positive (janitor#99).
+#
+# Enumerating the ENABLING spellings is deliberate: the inverse (a substring
+# `provenance:`, or a negative lookahead for `false`) would also suppress the
+# finding on `provenance: false`, which is a workflow explicitly DISABLING the
+# attestation — precisely the case that most needs to be reported. `mode=max` is
+# the stronger setting of the two (full build steps + materials), not a weaker
+# variant of `true`.
+_PROV_BUILDKIT_ATTESTATION = _re(
+    r"""provenance:\s*["']?(?:true|mode\s*=\s*(?:min|max))"""
 )
 
 
@@ -440,6 +462,7 @@ RULES: tuple[Rule, ...] = (
         pattern=_PROV_INTOTO_MISSING,
         negative_substrings=_INTOTO_TOKENS,
         file_suffixes=(".yml", ".yaml"),
+        negative_patterns=(_PROV_BUILDKIT_ATTESTATION,),
     ),
     Rule(
         id="prov-slsa-level-declared",
@@ -564,6 +587,13 @@ def scan_file(path: Path) -> list[Finding]:
                 cl_cached = content.lower()
             if any(neg.lower() in cl_cached for neg in rule.negative_substrings):
                 continue
+        # Same suppression, for mitigations a substring cannot express (see
+        # `Rule.negative_patterns`). Searched against the ORIGINAL content, not
+        # the lowercased cache — the patterns carry their own IGNORECASE.
+        if rule.negative_patterns and any(
+            neg.search(content) for neg in rule.negative_patterns
+        ):
+            continue
         # FP-hardening (round 3): per-rule positive-required-substring
         # check. The reproducible-build rule fires N times per `npm
         # install` line — but reproducible builds only matter when the

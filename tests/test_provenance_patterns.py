@@ -304,6 +304,77 @@ jobs:
                  "prov-in-toto-attestation-missing-on-build") == []
 
 
+# ---------- janitor#99: BuildKit's native provenance IS an attestation ----
+#
+# `docker/build-push-action` with `provenance:` enabled makes BuildKit emit SLSA
+# provenance itself, so demanding a separate attest step was a false positive.
+# These run as a SET: the three enabling spellings must go silent AND the
+# disabling one must still fire, so the fix cannot be "stop reporting this rule".
+
+
+def test_intoto_suppressed_by_buildkit_provenance_mode_max(tmp_path: Path) -> None:
+    """The exact shape reported in #99 — `mode=max` is the STRONGER setting."""
+    body = """
+jobs:
+  build:
+    steps:
+      - uses: docker/build-push-action@v7
+        with:
+          provenance: mode=max
+          sbom: true
+"""
+    assert _hits(_scan_yaml(tmp_path, body),
+                 "prov-in-toto-attestation-missing-on-build") == []
+
+
+def test_intoto_suppressed_by_buildkit_provenance_true(tmp_path: Path) -> None:
+    body = """
+jobs:
+  build:
+    steps:
+      - uses: docker/build-push-action@v7
+        with:
+          provenance: true
+"""
+    assert _hits(_scan_yaml(tmp_path, body),
+                 "prov-in-toto-attestation-missing-on-build") == []
+
+
+def test_intoto_suppressed_by_quoted_provenance_mode_min(tmp_path: Path) -> None:
+    """YAML quoting must not defeat the suppression."""
+    body = """
+jobs:
+  build:
+    steps:
+      - uses: docker/build-push-action@v7
+        with:
+          provenance: "mode=min"
+"""
+    assert _hits(_scan_yaml(tmp_path, body),
+                 "prov-in-toto-attestation-missing-on-build") == []
+
+
+def test_intoto_STILL_FIRES_when_provenance_explicitly_disabled(tmp_path: Path) -> None:
+    """`provenance: false` turns the attestation OFF — it must NOT suppress.
+
+    This is the load-bearing half. A plain `provenance:` substring mitigation,
+    or a negative lookahead, would silence the finding on the one workflow that
+    most needs reporting: one that deliberately disabled its build provenance.
+    A false negative on a supply-chain control is worse than the false positive
+    being fixed.
+    """
+    body = """
+jobs:
+  build:
+    steps:
+      - uses: docker/build-push-action@v7
+        with:
+          provenance: false
+"""
+    assert _hits(_scan_yaml(tmp_path, body),
+                 "prov-in-toto-attestation-missing-on-build") != []
+
+
 # ---------- Rule 5: SLSA-level extraction --------------------------------
 
 
