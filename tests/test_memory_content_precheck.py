@@ -849,3 +849,54 @@ def test_the_refusal_ledger_is_bounded(tmp_path, monkeypatch):
     assert len(ledger) == memory_refusals.REFUSALS_MAX
     assert f"p{memory_refusals.REFUSALS_MAX + 14}.md" in ledger
     assert "p0.md" not in ledger
+
+
+# --------------------------------------------------------------------------- #
+# repair's per-PAGE refusal filter (issue #124, on the #131 ledger)
+# --------------------------------------------------------------------------- #
+
+def test_a_page_whose_defect_cannot_be_made_to_stick_stops_being_a_candidate(tmp_path, monkeypatch):
+    """The second-order cost in #124: an unfixable defect does not merely waste a pass.
+
+    The ranking is by defect count, so a page nothing can fix is picked AHEAD of pages that can
+    be — the unfixable defect starves the fixable ones. A recorded refusal takes it out of the
+    running until its own bytes change.
+    """
+    _isolate_gstate(monkeypatch, tmp_path)
+    p = _shaped(tmp_path, "a.md", notes=False)
+    assert mcp.repair_has_work(tmp_path, scope="LOCAL") is True
+
+    memory_refusals.record("repair", "LOCAL", tmp_path, [p], reason="an external writer re-imposes it")
+
+    assert mcp.repair_has_work(tmp_path, scope="LOCAL") is False
+
+
+def test_an_external_rewrite_re_arms_the_repair_question(tmp_path, monkeypatch):
+    """The re-ask condition is the page's OWN bytes — which is exactly when an external writer
+    touching it should re-open the question, without the janitor having to detect that writer."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    p = _shaped(tmp_path, "a.md", notes=False)
+    memory_refusals.record("repair", "LOCAL", tmp_path, [p], reason="an external writer re-imposes it")
+    assert mcp.repair_has_work(tmp_path, scope="LOCAL") is False
+
+    p.write_text(p.read_text(encoding="utf-8") + "\nrewritten by something else\n", encoding="utf-8")
+
+    assert mcp.repair_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_one_unrefused_broken_page_keeps_repair_due(tmp_path, monkeypatch):
+    """Suppression needs EVERY defective page ruled on — one open one is still work."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a = _shaped(tmp_path, "a.md", notes=False)
+    _shaped(tmp_path, "b.md", notes=False)
+    memory_refusals.record("repair", "LOCAL", tmp_path, [a], reason="unfixable")
+
+    assert mcp.repair_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_repair_without_a_scope_never_suppresses(tmp_path, monkeypatch):
+    """No scope ⇒ the ledger cannot be read ⇒ the gate keeps its old behavior."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    p = _shaped(tmp_path, "a.md", notes=False)
+    memory_refusals.record("repair", "LOCAL", tmp_path, [p], reason="unfixable")
+    assert mcp.repair_has_work(tmp_path) is True

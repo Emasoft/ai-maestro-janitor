@@ -312,7 +312,7 @@ def _page_needs_repair(text: str) -> bool:
     return False
 
 
-def repair_has_work(root: Path) -> bool:
+def repair_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
     """True iff some candidate page in `root` is STRUCTURALLY malformed per the
     janitor-memory-repair checklist (TRDD-3XS3PDCF follow-up).
 
@@ -325,14 +325,28 @@ def repair_has_work(root: Path) -> bool:
     so a corpus whose ONLY defects are semantic is suppressed until the librarian
     surfaces them or any structural defect appears — the same
     approximation-with-documented-residual trade split's size-only gate made.
-    Everything uncertain (unreadable page) fails OPEN."""
+    Everything uncertain (unreadable page) fails OPEN.
+
+    REFUSAL FILTER (issue #124, on the ledger from #131). A page can carry a defect this pass
+    cannot make STICK — the reported case is a frontmatter shape an external writer converges on,
+    but the class is general: anything a writer outside the janitor's control re-imposes. Such a
+    page re-flags every run, and because the ranking is by defect count it is picked ahead of pages
+    that CAN be fixed — so the unfixable defect does not merely waste a pass, it starves the
+    fixable ones. Once the agent records a refusal on that page, the page stops being a candidate
+    until its own bytes change — which is exactly when the question is worth re-asking, including
+    when the external writer rewrites it. `scope` is required to read the ledger; without it the
+    filter is not applied, never a suppression."""
     for p in _candidate_pages(root):
         try:
             text = p.read_text(encoding="utf-8")
         except OSError:
             return True  # FAIL-OPEN (libs audit L-11): unreadable → not provably idle
-        if _page_needs_repair(text):
-            return True
+        if not _page_needs_repair(text):
+            continue
+        if scope is None:
+            return True  # cannot read the ledger ⇒ never suppress
+        if not memory_refusals.is_refused("repair", scope, root, [p], now=now):
+            return True  # a defect nobody has ruled unfixable
     return False
 
 
@@ -529,7 +543,9 @@ def content_has_work(
         )
     if intervention == "repair":
         # STRUCTURAL page-shape gate (semantic residual documented on the function).
-        return repair_has_work(root)
+        # `scope` also unlocks the per-page refusal filter, so a defect proven unfixable
+        # stops out-ranking the fixable ones (#124).
+        return repair_has_work(root, scope=scope)
     if intervention == "atomize":
         # Free-prose curated pages without atom markers (the skill's own candidate scan).
         return atomize_has_work(root)
