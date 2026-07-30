@@ -390,51 +390,87 @@ def _audit_npmrc(root: Path, threshold: int, issues: list[str], manager: str = "
         issues.append(f".npmrc audit-level={al!r} below 'moderate' (raise to hide fewer advisories)")
 
 
-def _audit_pjson_pnpm(root: Path, threshold: int, issues: list[str]) -> None:
+# The pnpm policy keys, and the ONE file pnpm reads them from.
+#
+# VERIFIED against pnpm 11.11.0, not inferred (janitor#148). pnpm's docs are
+# categorical — "Only auth and registry settings are read from `.npmrc` files.
+# All other settings must be configured in `pnpm-workspace.yaml` or the global
+# `~/.config/pnpm/config.yaml`" — and an A/B of pnpm's own effective config
+# agrees: a `minimumReleaseAge` written to `pnpm-workspace.yaml` appears in
+# `pnpm config list`, the SAME key written to `package.json#pnpm` does not.
+_PNPM_POLICY_KEYS = ("minimumReleaseAge", "trustPolicy", "blockExoticSubdeps")
+_PNPM_SETTINGS_FILE = "pnpm-workspace.yaml"
+
+
+def _project_uses_pnpm(root: Path) -> bool:
+    return (root / "pnpm-lock.yaml").exists() or (root / _PNPM_SETTINGS_FILE).exists()
+
+
+def _audit_pjson_pnpm(root: Path, _threshold: int, issues: list[str]) -> None:
+    """Flag pnpm POLICY keys parked in `package.json#pnpm`, where pnpm ignores them.
+
+    This function used to PROPOSE that location and then read the keys back from it
+    to decide the repo was protected — so following our own advice produced a clean
+    report and no enforcement at all. That is worse than the false positive #130 was
+    about: a false positive costs attention, this manufactures false assurance on a
+    supply-chain control, and it is invisible to any test that only checks whether
+    the finding fires.
+
+    `package.json#pnpm` is still a REAL field — `overrides`, `packageExtensions` and
+    `patchedDependencies` genuinely live there — which is exactly why the near-miss
+    survived review. Only these three POLICY keys are misplaced, so only they are
+    flagged, and the remedy names the file that actually takes effect.
+    """
     p = root / "package.json"
     if not p.is_file():
         return
     j = _parse_json(_read_text(p))
     pnpm = j.get("pnpm", {})
     if not isinstance(pnpm, dict) or not pnpm:
-        # Only flag a missing pnpm block when the project demonstrably uses pnpm.
-        if (root / "pnpm-lock.yaml").exists() or (root / "pnpm-workspace.yaml").exists():
-            issues.append(
-                f"package.json lacks a `pnpm` settings block "
-                f"(add minimumReleaseAge: {threshold}, trustPolicy: 'no-downgrade', blockExoticSubdeps: true)"
-            )
         return
-    age = _as_int(pnpm.get("minimumReleaseAge"))
-    if age is None or age < threshold:
+    misplaced = [k for k in _PNPM_POLICY_KEYS if k in pnpm]
+    if misplaced:
         issues.append(
-            f"package.json#pnpm.minimumReleaseAge={age if age is not None else 'unset'} < {threshold}"
+            f"package.json#pnpm sets {', '.join(misplaced)} but pnpm does NOT read "
+            f"settings from package.json — move to {_PNPM_SETTINGS_FILE} (verified pnpm 11)"
         )
-    tp = str(pnpm.get("trustPolicy") or "").strip().lower()
-    if tp != "no-downgrade":
-        cur = tp if tp else "unset"
-        issues.append(f"package.json#pnpm.trustPolicy={cur!r} (require 'no-downgrade')")
-    bes = pnpm.get("blockExoticSubdeps")
-    if bes is None or not _is_truthy(bes):
-        issues.append("package.json#pnpm.blockExoticSubdeps unset/false (set true)")
 
 
 def _audit_pnpm_workspace(root: Path, threshold: int, issues: list[str]) -> None:
-    p = root / "pnpm-workspace.yaml"
-    if not p.is_file():
+    """Audit the file pnpm ACTUALLY reads — including the keys' ABSENCE.
+
+    Owns the missing-settings proposal now, because proposing a control belongs
+    wherever that control takes effect. Previously absence was only ever reported
+    against `package.json`, so a repo correctly configured in `pnpm-workspace.yaml`
+    was still told to add a `pnpm` block it did not need — a false positive and a
+    false-assurance path from the same split.
+    """
+    if not _project_uses_pnpm(root):
         return
-    y = _parse_yaml(_read_text(p))
-    age = _as_int(y.get("minimumReleaseAge"))
-    if age is not None and age < threshold:
+    p = root / _PNPM_SETTINGS_FILE
+    y = _parse_yaml(_read_text(p)) if p.is_file() else {}
+
+    if not any(k in y for k in _PNPM_POLICY_KEYS):
         issues.append(
-            f"pnpm-workspace.yaml minimumReleaseAge={age} < {threshold}"
+            f"{_PNPM_SETTINGS_FILE} lacks pnpm supply-chain settings "
+            f"(add minimumReleaseAge: {threshold}, trustPolicy: 'no-downgrade', "
+            f"blockExoticSubdeps: true)"
         )
+        return
+
+    age = _as_int(y.get("minimumReleaseAge"))
+    if age is None or age < threshold:
+        cur = age if age is not None else "unset"
+        issues.append(f"{_PNPM_SETTINGS_FILE} minimumReleaseAge={cur} < {threshold}")
     tp = str(y.get("trustPolicy") or "").strip().lower()
-    if "trustPolicy" in y and tp != "no-downgrade":
-        cur = tp if tp else "unset"
-        issues.append(f"pnpm-workspace.yaml trustPolicy={cur!r} (require 'no-downgrade')")
+    if tp != "no-downgrade":
+        cur_tp = tp if tp else "unset"
+        issues.append(
+            f"{_PNPM_SETTINGS_FILE} trustPolicy={cur_tp!r} (require 'no-downgrade')"
+        )
     bes = y.get("blockExoticSubdeps")
-    if bes is not None and not _is_truthy(bes):
-        issues.append("pnpm-workspace.yaml blockExoticSubdeps=false (set true)")
+    if bes is None or not _is_truthy(bes):
+        issues.append(f"{_PNPM_SETTINGS_FILE} blockExoticSubdeps unset/false (set true)")
 
 
 def _audit_yarnrc(root: Path, _threshold: int, issues: list[str]) -> None:

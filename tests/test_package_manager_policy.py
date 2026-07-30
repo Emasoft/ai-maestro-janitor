@@ -227,20 +227,81 @@ def test_silent_on_empty_dependencies_block(tmp_path: Path) -> None:
 
 
 def test_silent_on_hardened_node_project(tmp_path: Path) -> None:
-    """A fully-hardened project with sfw on PATH produces zero output."""
+    """A fully-hardened pnpm project with sfw on PATH produces zero output.
+
+    The settings live in `pnpm-workspace.yaml` because that is the only file pnpm
+    reads them from. This fixture previously put them in `package.json#pnpm` and
+    asserted silence — encoding the very false assurance of janitor#148, since
+    pnpm ignores that location and the project was NOT hardened at all.
+    """
     (tmp_path / "package.json").write_text(json.dumps({
         "name": "x", "version": "1.0.0",
-        "pnpm": {"minimumReleaseAge": 7200, "trustPolicy": "no-downgrade",
-                 "blockExoticSubdeps": True},
     }), encoding="utf-8")
-    (tmp_path / ".npmrc").write_text(
-        "minimum-release-age=7200\ntrust-policy=no-downgrade\nblock-exotic-subdeps=true\n",
+    (tmp_path / "pnpm-workspace.yaml").write_text(
+        "minimumReleaseAge: 7200\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\n",
         encoding="utf-8",
     )
     (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
     r = _run(tmp_path, with_firewall=True)
     assert r.returncode == 0
     assert r.stdout == ""
+
+
+# ── janitor#148: the remedy must name the file that actually takes effect ─────
+#
+# VERIFIED against pnpm 11.11.0, not inferred: a `minimumReleaseAge` written to
+# `pnpm-workspace.yaml` shows up in `pnpm config list`; the SAME key written to
+# `package.json#pnpm` does not. These run as a PAIR (the shape #130 established)
+# so neither can pass by the check simply going quiet.
+
+
+def test_pnpm_settings_in_package_json_are_flagged_as_misplaced(tmp_path: Path) -> None:
+    """Policy keys parked where pnpm ignores them must NOT read as protection.
+
+    This is the false-assurance half: a user who followed our old advice edited
+    package.json, watched the finding clear, and believed a release cooldown was
+    guarding them against a compromised publish. It was not.
+    """
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "pnpm": {"minimumReleaseAge": 7200, "trustPolicy": "no-downgrade",
+                 "blockExoticSubdeps": True},
+    }), encoding="utf-8")
+    (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+    out = _run(tmp_path, with_firewall=True).stdout
+    assert "does NOT read settings from package.json" in out
+    assert "pnpm-workspace.yaml" in out, "the remedy must name the file that works"
+
+
+def test_pnpm_block_for_non_policy_keys_is_left_alone(tmp_path: Path) -> None:
+    """`package.json#pnpm` is a REAL field — only the POLICY keys are misplaced.
+
+    `overrides` / `packageExtensions` / `patchedDependencies` genuinely live there,
+    which is why the near-miss survived review. Flagging the whole block would trade
+    one false assurance for a false positive.
+    """
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+        "pnpm": {"overrides": {"lodash": "4.17.21"}, "packageExtensions": {}},
+    }), encoding="utf-8")
+    (tmp_path / "pnpm-workspace.yaml").write_text(
+        "minimumReleaseAge: 7200\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+    out = _run(tmp_path, with_firewall=True).stdout
+    assert "does NOT read settings from package.json" not in out
+
+
+def test_pnpm_project_missing_workspace_settings_is_flagged_there(tmp_path: Path) -> None:
+    """Absence is proposed against the file that enforces it, not package.json."""
+    (tmp_path / "package.json").write_text(json.dumps({
+        "name": "x", "version": "1.0.0",
+    }), encoding="utf-8")
+    (tmp_path / "pnpm-lock.yaml").write_text("", encoding="utf-8")
+    out = _run(tmp_path, with_firewall=True).stdout
+    assert "pnpm-workspace.yaml lacks pnpm supply-chain settings" in out
+    assert "package.json lacks a `pnpm` settings block" not in out
 
 
 def test_flags_weak_npmrc(tmp_path: Path) -> None:
