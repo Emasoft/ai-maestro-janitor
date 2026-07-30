@@ -105,6 +105,40 @@ def test_an_explicit_frontmatter_status_still_wins_over_the_body():
     assert tc.parse_state_text(text) == ("in-progress", "")
 
 
+def test_is_pipeline_state_value_gates_on_the_VALUE_not_the_field_name():
+    """`status:` is a DISTINCT field; only a pipeline VALUE in it is v1 residue (3P-TRDD-09).
+
+    The field-NAME shape is what cost ai-maestro a data-loss bug: treating `status:` itself as
+    retired made its fixer delete the line whatever it held, or convert it into a `column:`
+    with an invented value. The 3-pillars spec documents carry `status: normative` — a live,
+    non-pipeline use that must be left strictly alone, not even warned about.
+    """
+    for v in ("not-started", "in-progress", "completed"):        # v1 pipeline spellings
+        assert tc.is_pipeline_state_value(v)
+    for v in ("todo", "dev", "complete", "blocked", "proposal"):  # v2 columns
+        assert tc.is_pipeline_state_value(v)
+    for v in ("normative", "draft", "ratified", "", "  "):        # NOT pipeline states
+        assert not tc.is_pipeline_state_value(v)
+    # Case/whitespace normalised, so a human's spelling cannot dodge the gate either way.
+    assert tc.is_pipeline_state_value("  Not Started \r")
+    assert not tc.is_pipeline_state_value(" Normative ")
+
+
+def test_v1_not_started_maps_to_todo_not_backburner():
+    """`todo` is v2's ready-to-start column; `backburner` is deliberately-deferred.
+
+    Mapping a v1 `not-started` onto `backburner` buried a card that was ready to be worked;
+    `todo` forces the next agent to evaluate it (3P-TRDD-11). `not-started` is not itself a
+    v2 state at all — v2 has exactly one ready-to-start column and it is `todo`.
+    """
+    assert tc.V1_PIPELINE_STATUS_TO_COLUMN["not-started"] == "todo"
+    assert tc.V1_PIPELINE_STATUS_TO_COLUMN["in-progress"] == "dev"
+    assert tc.V1_PIPELINE_STATUS_TO_COLUMN["completed"] == "complete"
+    # Every mapped target must be a real column, or the board grows a phantom lane.
+    for col in tc.V1_PIPELINE_STATUS_TO_COLUMN.values():
+        assert col in tc.ALL_COLUMNS
+
+
 def test_norm_state_collapses_and_lowercases():
     assert tc.norm_state("  Not Started \r") == "not-started"
 

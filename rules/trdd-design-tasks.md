@@ -54,8 +54,7 @@ machine-private) — see step 1.
    each force it). **Yes → PROJECT. UNSURE → LOCAL** — a leaked machine-private TRDD is
    already pushed, whereas promoting local→project later is deliberate. A task may SPLIT,
    cross-linked. A `scope:` field may appear (absent = `project`) but the **path is
-   authoritative** — it decides git-tracking — so on disagreement the path wins and the field
-   is a lint target.
+   authoritative** — it decides git-tracking — so the path wins and the field is a lint target.
 
 2. **Filename.** `TRDD-<YYYYMMDD_HHMMSS±HHMM>-<id8>-<slug>.md`. `<id8>` is an **8-char
    UPPERCASE base36** id (`A-Z0-9`) — this IS the canonical id (no UUID), unique across
@@ -90,12 +89,13 @@ machine-private) — see step 1.
    ---
    ```
 
-6. **`column:` is the state machine** (v2 replaced v1's `status:`). Lifecycle order:
-   `backburner → todo → design → dispatch → dev → testing → ai_review → (human_review) →
-   complete`, then `publish → published` (tools) or `deploy → live → (live_auditing)`
-   (services), per `release-via: publish|deploy|none`.
-   Orthogonal/terminal: `blocked` (whenever `blocked-by:` is non-empty — record
-   `pre-block-column:` and restore to it when it clears), `failed`, `superseded`.
+6. **`column:` is the state machine.** v2 moved the pipeline state here from v1's `status:`,
+   but `status:` is **not retired** (specs carry `status: normative`) — so the residue is a
+   **VALUE, never the field NAME**: never key on the name, `column:` wins, a missing field
+   gets no synthesized value, one pipeline claim per card. The 17-column vocabulary and its
+   order live in `universal-kanban.md`, not restated here; the terminal branch follows
+   `release-via: publish|deploy|none`, and `blocked` applies whenever `blocked-by:` is
+   non-empty (record `pre-block-column:`, restore to it when it clears).
 7. **BUMP `updated:` on every edit that CHANGES WHAT THE TRDD ASSERTS** — not just column
    changes. The board sorts on it, so a MECHANICAL repair (a format/syntax pass that changes
    no fact) must NOT bump it, or the repair silently reorders the whole board.
@@ -103,20 +103,20 @@ machine-private) — see step 1.
    backtracking field: how a bug found later is traced to the TRDD that introduced it.
 9. **NPT vs EHT.** `npt:` = Necessary Prerequisite Tasks — must finish BEFORE the parent
    proceeds past `dev`. `eht:` = Effects Handling Tasks — handle the CONSEQUENCES of the
-   parent's work; the parent may land its code but **cannot reach `complete` until every
-   EHT is terminal**. **Derived TRDDs are MANDATORY and depth-1**: a derived TRDD has
-   empty `npt:`/`eht:` and is never a `parent-trdd:`; siblings order via `blocked-by:`;
-   `created-by:` is set once; refusals archive `approved: false`. (Full: the reference.)
+   parent's work; the parent may land its code but **cannot reach `complete` until every EHT
+   is terminal**. **Derived TRDDs are MANDATORY and depth-1**: empty `npt:`/`eht:`, never a
+   `parent-trdd:`; siblings order via `blocked-by:`; `created-by:` set once; refusals archive
+   `approved: false`. (Full: the reference.)
 10. **STATE head block — MANDATORY once a TRDD spans more than one session.** A TRDD grows
-    append-only, so a reader (or a compaction summary) hits the OLDEST, often SUPERSEDED
-    facts first. Immediately after the title, before the first body section, add a heading:
+    append-only, so a reader (or a compaction summary) hits the OLDEST, often SUPERSEDED facts
+    first. Right after the title add:
     `## ⏵ STATE — READ THIS FIRST ON RESUME (authoritative; supersedes the body) — <date>`.
-    It is the single source of truth, kept current on every edit; it carries each component's
-    state, the **NEXT ACTION** (one step, runnable as written), the load-bearing gotchas, an
-    explicit **SUPERSEDED — do NOT carry forward** list, and the artifacts to read first.
-11. **Reports are evidence; decisions become TRDDs.** A report (audit, benchmark) presents
-    DATA and lives in gitignored `reports/`. The moment it leads to a DECISION, that decision
-    goes into a TRDD — a new one, or an existing TRDD's STATE block.
+    Single source of truth, kept current on every edit; carries each component's state, the
+    **NEXT ACTION** (one step, runnable as written), the load-bearing gotchas, an explicit
+    **SUPERSEDED — do NOT carry forward** list, and the artifacts to read first.
+11. **Reports are evidence; decisions become TRDDs.** A report (audit, benchmark) presents DATA
+    and lives in gitignored `reports/`. The moment it leads to a DECISION, that decision goes
+    into a TRDD — a new one, or an existing TRDD's STATE block.
 12. **Terminal columns are frozen — AFTER the transition that made them terminal.** Do not
     edit the body of a `complete` / `failed` / `superseded` / `published` / `live` TRDD. New
     work = new TRDD. (Only `updated:` and, when superseding, `superseded-by:` may change.)
@@ -146,11 +146,10 @@ one is in no repo — report the id + path.
 
 Resuming later: look the id up in BOTH roots with `find` (never an `ls` glob — step 2):
 `find design ~/.claude/projects/<slug>/design -iname 'TRDD-*-<id8>-*.md'` → read the **STATE
-block first**. (**`-iname`, NOT `-name`** — legacy LOWERCASE ids are permanently valid: they
-are cited in immutable commit subjects and cannot be renamed without destroying that
-provenance. Load-bearing indefinitely, not a migration aid; measured, 76% of one live board.)
-On disagreement the STATE block wins (hand-edits beat stale fields) — then fix
-the frontmatter.
+block first**. (**`-iname`, NOT `-name`** — legacy LOWERCASE ids are permanently valid: cited
+in immutable commit subjects, so they cannot be renamed without destroying that provenance.
+Load-bearing indefinitely, not a migration aid; measured, 76% of one live board.) On
+disagreement the STATE block wins (hand-edits beat stale fields) — then fix the frontmatter.
 
 ## Does NOT apply to
 

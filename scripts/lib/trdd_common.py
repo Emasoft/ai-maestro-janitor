@@ -245,6 +245,49 @@ ACTIVE_COLUMNS = frozenset(
     {"dev", "testing", "backburner", "todo", "dispatch", "ai_review", "human_review"}
 )
 
+# The ratified column vocabulary: 14 lifecycle + 3 exception (universal-kanban), plus the
+# `proposal`/`planned` intake pair and the terminal archive values that BRACKET the pipeline.
+# Any other value in a `column:`/`status:` is NOT a pipeline state.
+ALL_COLUMNS = frozenset(
+    {
+        "backburner", "todo", "design", "dispatch", "dev", "testing", "ai_review",
+        "human_review", "complete", "publish", "published", "deploy", "live",
+        "live_auditing",
+        "blocked", "failed", "superseded",
+        "proposal", "planned", "refused", "cancelled", "completed", "archived",
+    }
+)
+
+# The v1 `status:` spellings of a PIPELINE state, and their v2 column. This map is the ONLY
+# licence to read anything out of `status:` (3P-TRDD-09, spec 1.3.0).
+V1_PIPELINE_STATUS_TO_COLUMN = {
+    "not-started": "todo",
+    "in-progress": "dev",
+    "completed": "complete",
+}
+
+
+def is_pipeline_state_value(value: str) -> bool:
+    """True iff `value` names a PIPELINE state — in either the v1 or the v2 spelling.
+
+    THE PREDICATE EVERY `status:` READER MUST GATE ON (3P-TRDD-09). `status:` is a DISTINCT
+    field, not a retired alias of `column:`: v1 spelled the pipeline state in it, v2 moved
+    THAT ASPECT to `column:`, and the field itself stayed live for other aspects — the
+    3-pillars spec documents carry `status: normative` right now.
+
+    So the residue is a VALUE, never the field NAME. Keying on the name is the shape that
+    cost ai-maestro a data-loss bug in `trdd-doctor.ts` (issue #135): it treated `status:`
+    itself as retired and marked the rule autofixable, so its fixer deleted the line whatever
+    it held, or rewrote it into a `column:` with an invented value when no column was present.
+    Nothing was lost only because every live value happened to be a pipeline state.
+
+    Centralised deliberately: their linter and fixer each had their own idea of the vocabulary
+    and had already drifted, so the fixer repaired cases the report never mentioned — and the
+    report is the only thing a human reviews before `--fix`.
+    """
+    v = norm_state(value)
+    return v in V1_PIPELINE_STATUS_TO_COLUMN or v in ALL_COLUMNS
+
 # v2 `column:` values that mean the TRDD is DONE / closed — a TRDD here has
 # already shipped (or been abandoned/replaced), so Check 1 must NOT flag it.
 # Superset of the "terminal" columns across all three release-via pipelines plus

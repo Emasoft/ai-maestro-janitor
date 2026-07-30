@@ -338,7 +338,6 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
     HTML, raw body (for copy), and the file path. The source FOLDER pins the
     super-column; design/tasks/ uses each TRDD's own column (v1 ``status:`` mapped)."""
     top = _git_top(project_root)
-    v1map = {"not-started": "backburner", "in-progress": "dev", "completed": "complete"}
     board: dict[str, list[dict]] = {}
     # ONE board spanning BOTH design scopes, with `scope` as a per-card badge — not a second
     # board (the 3-pillars spec is explicit: columns and transitions are identical, scope is
@@ -356,7 +355,18 @@ def _gather_kanban(project_root: str) -> dict[str, list[dict]]:
                 raw = ""
             pairs, body = _split_frontmatter(raw)
             fm = dict(pairs)
-            col = forced or fm.get("column") or v1map.get(fm.get("status", ""), "backburner")
+            # `column:` wins; `status:` is consulted ONLY when it holds a v1 PIPELINE state
+            # (3P-TRDD-09, spec 1.3.0). It used to map any `status:` value through a v1 table
+            # whose `.get(…, "backburner")` default swallowed everything else — so a card
+            # with `status: normative` and no column rendered on the board as `backburner`,
+            # a state nobody chose. `status:` is a DISTINCT field, not a column alias.
+            #
+            # A genuinely MISSING column falls back to `todo`, not `backburner`: `todo` forces
+            # the next agent to evaluate the task, where `backburner` quietly buries it
+            # (3P-TRDD-11).
+            col = forced or fm.get("column") or trdd_common.V1_PIPELINE_STATUS_TO_COLUMN.get(
+                trdd_common.norm_state(fm.get("status", "")), "todo"
+            )
             # full uuid: prefer frontmatter trdd-id; else the 8-hex from the filename.
             uuid = fm.get("trdd-id") or ""
             if not uuid:
