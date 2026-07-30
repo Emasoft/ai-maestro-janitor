@@ -149,14 +149,29 @@ class BurnCause:
 
     ``cause`` — the classifier verdict (e.g. ``FORK_STORM``). ``share`` — its
     fraction of the window [0,1] or None. ``confidence`` — ``high``/``medium``/…
-    or None. ``workspace`` — the top-attributed workspace (``attribution[0]``) or
-    None.
+    or None. ``workspace`` — set ONLY when the finding itself names exactly one
+    location; ``multi_workspace`` marks a finding that spans several, which is a
+    fact worth reporting rather than a detail to collapse.
     """
 
     cause: str
     share: float | None
     confidence: str | None
     workspace: str | None
+    multi_workspace: bool = False
+
+
+def _is_workspace_path(value: object) -> bool:
+    """True iff ``value`` is a real workspace, i.e. a filesystem path.
+
+    agentlensPro puts NON-locations in the same slots and they must never be
+    rendered as one: a truncation marker (``… +2 more — use verbosity:"full"``)
+    and unattributable sentinels such as ``(subagent/no-env-block)``. A workspace
+    is always a path, so requiring a leading ``/`` or ``~`` rejects both with one
+    rule — and it is the sentinel, printed verbatim as a location, that a reader
+    reasonably mistakes for an identified culprit.
+    """
+    return isinstance(value, str) and value.startswith(("/", "~"))
 
 
 def parse_investigate_cause(data: object) -> BurnCause | None:
@@ -165,6 +180,17 @@ def parse_investigate_cause(data: object) -> BurnCause | None:
     None unless there is at least one ``findings`` entry with a non-empty
     ``cause`` — no finding means no attribution to add, and the caller's line is
     still worth emitting without it.
+
+    The location comes from the FINDING'S OWN ``evidence.workspaces`` and from
+    nowhere else. It used to be taken from ``attribution[0]``, which is a
+    SEPARATELY-ranked list: splicing the two produced a "<cause> in <workspace>"
+    claim that neither list makes, and a live payload shows exactly how wrong that
+    gets — a ``FORK_STORM`` spanning five workspaces was reported as happening in
+    the one workspace that happened to top the unrelated attribution ranking.
+    A consumer acted on such a line, throttling off agent launches and deferring
+    authorized work (janitor#121), so a confident wrong cause is more costly here
+    than no cause at all: when the finding does not name exactly one location, we
+    say it spans several and name none.
     """
     if not isinstance(data, dict):
         return None
@@ -177,16 +203,27 @@ def parse_investigate_cause(data: object) -> BurnCause | None:
         return None
     share = _num(top.get("shareOfWindow"))
     conf = top.get("confidence")
-    workspace: str | None = None
-    attrib = data.get("attribution")
-    if isinstance(attrib, list) and attrib and isinstance(attrib[0], dict):
-        ws = attrib[0].get("workspace")
-        workspace = ws if isinstance(ws, str) and ws else None
+
+    evidence = top.get("evidence")
+    listed = evidence.get("workspaces") if isinstance(evidence, dict) else None
+    listed = listed if isinstance(listed, list) else []
+    real = [w for w in listed if _is_workspace_path(w)]
+    # A non-path entry alongside real paths is the "+N more" marker, so the true
+    # count exceeds what we can see — still "several", just not a countable one.
+    truncated = len(real) != len(listed)
+    single = len(real) == 1 and not truncated
+    # With NO real path we know nothing: the entries are unattributable sentinels
+    # like `(subagent/no-env-block)`, which assert the opposite of a location.
+    # Reporting that as "several workspaces" would invent breadth from ignorance,
+    # which is the same error as inventing a single culprit — so stay silent.
+    multi = len(real) > 1 or (len(real) == 1 and truncated)
+
     return BurnCause(
         cause=cause.strip(),
         share=share if share is not None and 0.0 <= share <= 1.0 else None,
         confidence=conf.strip() if isinstance(conf, str) and conf.strip() else None,
-        workspace=workspace,
+        workspace=real[0] if single else None,
+        multi_workspace=multi,
     )
 
 
@@ -197,6 +234,9 @@ def format_cause_clause(cause: BurnCause) -> str:
     Untrusted-safe: the workspace/cause come from the CLI, but no user-controlled
     interpolation slot is opened — the fields are placed positionally into a fixed
     template, and the caller sanitizes before printing to a drift line.
+
+    A multi-workspace finding says so rather than naming one of them: the reader's
+    next action is "go look at X", so an invented X sends them to the wrong place.
     """
     parts: list[str] = [cause.cause]
     detail: list[str] = []
@@ -206,5 +246,10 @@ def format_cause_clause(cause: BurnCause) -> str:
         detail.append(cause.confidence)
     if detail:
         parts.append(f"({', '.join(detail)})")
-    tail = f" in {cause.workspace}" if cause.workspace else ""
+    if cause.workspace:
+        tail = f" in {cause.workspace}"
+    elif cause.multi_workspace:
+        tail = " spanning several workspaces"
+    else:
+        tail = ""
     return f" agentlensPro cause: {' '.join(parts)}{tail}."

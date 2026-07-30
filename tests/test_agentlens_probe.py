@@ -39,7 +39,17 @@ INVESTIGATE_BURN = {
     ],
     "findings": [
         {"equivTokens": 5069468, "shareOfWindow": 0.18244987215209763,
-         "cause": "FORK_STORM", "confidence": "high", "verdict": "12 full-prefix cache writes…"},
+         "cause": "FORK_STORM", "confidence": "high", "verdict": "12 full-prefix cache writes…",
+         # A finding carries its OWN locations, and the live tool routinely lists
+         # several plus a truncation marker. The fixture omitted `evidence`
+         # entirely, so the old test could not tell that the workspace was being
+         # borrowed from the unrelated `attribution` list above (janitor#121).
+         "evidence": {"workspaces": [
+             "/Users/x/Code/AgentlensPro",
+             "/Users/x/Code/AI-MAESTRO-PLUGIN/ai-maestro-plugin",
+             "/Users/x/ai-maestro",
+             '… +2 more — use verbosity:"full"',
+         ]}},
     ],
 }
 
@@ -123,13 +133,64 @@ def test_parse_burn_status_bool_cost_rejected() -> None:
 
 
 def test_parse_investigate_cause_full() -> None:
-    """The verified fixture yields the top culprit with share/confidence/workspace."""
+    """The verified fixture yields the top culprit with share/confidence.
+
+    Its finding spans several workspaces, so NO single one is named — and in
+    particular not `attribution[0]` (`~/Code/ANIME2SVG`), which ranks a different
+    list and has never been evidence for where this cause occurred.
+    """
     c = ap.parse_investigate_cause(INVESTIGATE_BURN)
     assert c is not None
     assert c.cause == "FORK_STORM"
     assert c.confidence == "high"
-    assert c.workspace == "~/Code/ANIME2SVG"
     assert c.share is not None and 0.18 < c.share < 0.19
+    assert c.workspace is None
+    assert c.multi_workspace is True
+
+
+def test_parse_investigate_cause_never_borrows_the_attribution_workspace() -> None:
+    """A cause is never located by `attribution[0]` — a separately-ranked list.
+
+    Splicing the two produced a claim neither makes. Here the finding names ONE
+    workspace and `attribution` names a different one; the finding's own evidence
+    must win, so a passing test cannot be satisfied by the old borrow.
+    """
+    c = ap.parse_investigate_cause({
+        "attribution": [{"workspace": "~/Code/UNRELATED"}],
+        "findings": [{"cause": "FORK_STORM", "evidence": {"workspaces": ["/Users/x/real"]}}],
+    })
+    assert c is not None
+    assert c.workspace == "/Users/x/real"
+    assert c.multi_workspace is False
+
+
+def test_parse_investigate_cause_unattributable_sentinel_is_not_a_location() -> None:
+    """`(subagent/no-env-block)` means "could not attribute" — never print it as a place.
+
+    This is the shape a consumer acted on (janitor#121): they read a confident
+    `PREMIUM_MODEL_FANOUT … in (subagent/no-env-block)`, throttled off agent
+    launches and deferred authorized chores, while the real spend was main-loop
+    work. A sentinel rendered as a location is a wrong mitigation, not a cosmetic
+    blemish.
+    """
+    c = ap.parse_investigate_cause({
+        "findings": [{"cause": "PREMIUM_MODEL_FANOUT",
+                      "evidence": {"workspaces": ["(subagent/no-env-block)"]}}],
+    })
+    assert c is not None
+    assert c.workspace is None
+    assert c.multi_workspace is False
+    assert "subagent/no-env-block" not in ap.format_cause_clause(c)
+
+
+def test_parse_investigate_cause_truncation_marker_is_not_a_workspace() -> None:
+    """One real path + a `+N more` marker is SEVERAL, not one — never name the one."""
+    c = ap.parse_investigate_cause({
+        "findings": [{"cause": "X", "evidence": {"workspaces": [
+            "/Users/x/only-one-shown", '… +4 more — use verbosity:"full"']}}],
+    })
+    assert c is not None
+    assert c.workspace is None and c.multi_workspace is True
 
 
 def test_parse_investigate_cause_none_on_nondict() -> None:
@@ -158,6 +219,8 @@ def test_parse_investigate_cause_missing_optional_fields() -> None:
     assert c is not None
     assert c.cause == "IMAGE_BLOB_RESIDENT"
     assert c.share is None and c.confidence is None and c.workspace is None
+    # No evidence at all is "unknown", not "several" — silence, not a hedge.
+    assert c.multi_workspace is False
 
 
 # ---------- format_cause_clause ----------
@@ -174,6 +237,19 @@ def test_format_cause_clause_minimal() -> None:
     """Cause only → no parenthetical, no workspace."""
     c = ap.BurnCause(cause="FAT_SESSION_REWRITES", share=None, confidence=None, workspace=None)
     assert ap.format_cause_clause(c) == " agentlensPro cause: FAT_SESSION_REWRITES."
+
+
+def test_format_cause_clause_multi_workspace_says_so_instead_of_naming_one() -> None:
+    """A cause spanning several places reports that, rather than picking one.
+
+    The reader's next action is "go look at X", so an invented X sends them
+    somewhere the burn did not happen.
+    """
+    c = ap.BurnCause(cause="FORK_STORM", share=0.18, confidence="high",
+                     workspace=None, multi_workspace=True)
+    assert ap.format_cause_clause(c) == (
+        " agentlensPro cause: FORK_STORM (18% of window, high) spanning several workspaces."
+    )
 
 
 # ---------- probe_json (real subprocess) ----------
