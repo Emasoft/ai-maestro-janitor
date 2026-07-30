@@ -100,14 +100,65 @@ def should_request_prompt_update(
     return _semver_tuple(installed) < _semver_tuple(published)
 
 
-def detect_install_scopes() -> list[str]:
-    """Return every scope where the plugin is referenced.
+def registry_path() -> Path:
+    """Claude Code's authoritative plugin-install registry."""
+    return Path.home() / ".claude" / "plugins" / "installed_plugins.json"
 
-    A plugin can be installed simultaneously in multiple scopes (e.g.
-    `user` AND `local`). The auto-updater iterates this list so a
-    `--scope user` update no longer leaves a `local` install on the
-    old version. Order matters: user → local → project, broadest first.
+
+def registry_install_records() -> list[dict]:
+    """Every install record the CLI itself obeys, or [] when unreadable.
+
+    `~/.claude/plugins/installed_plugins.json` maps `<name>@<marketplace>` to a
+    LIST of `{scope, version, projectPath, installPath}`. This is what
+    `claude plugin update --scope X` consults, so it is the only source that can
+    answer "where is this plugin actually installed".
+
+    Fail-open to []: the caller then falls back to the settings heuristic, which
+    is weaker but not worse than refusing to run at all.
     """
+    try:
+        data = json.loads(registry_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    recs = plugins.get(f"{PLUGIN_NAME}@{MARKETPLACE_NAME}") if isinstance(plugins, dict) else None
+    return [r for r in recs if isinstance(r, dict)] if isinstance(recs, list) else []
+
+
+def detect_install_scopes() -> list[str]:
+    """Return every scope where the plugin is actually INSTALLED.
+
+    Reads the registry first, because that is what the CLI obeys. The old
+    settings-only heuristic reported `user` on a host whose four installs were
+    all `local`, so every self-update ran `--scope user` and died with
+    "not installed at scope user" — silently, for six releases (janitor#147).
+
+    Two things made that inevitable and both are fixed by asking the registry:
+      * `enabledPlugins` records ENABLEMENT, not installation. They are
+        independent, and a bare substring match over the whole settings file
+        would equally match a `false` entry or a hook path that names the plugin.
+      * local/project scopes were only discoverable under `CLAUDE_PROJECT_DIR`,
+        which the DAEMON — the single writer that owns self-update — never has.
+        The one path responsible for updating could not see where the plugin
+        lived.
+
+    Order is broadest-first (user → local → project) and deduped, so a plugin
+    installed in several scopes is updated in each exactly once.
+    """
+    records = registry_install_records()
+    if records:
+        seen: set[str] = {
+            s for s in (r.get("scope") for r in records) if isinstance(s, str) and s
+        }
+        ordered = [s for s in ("user", "local", "project") if s in seen]
+        # An unknown scope name is still a real install; keep it rather than
+        # silently dropping an install we would then never update.
+        ordered += sorted(s for s in seen if s not in ("user", "local", "project"))
+        if ordered:
+            return ordered
+
+    # Fallback: the pre-registry heuristic, for a host whose registry is absent
+    # or unreadable. Kept deliberately — a weaker answer beats no self-update.
     scopes: list[str] = []
 
     # User scope.

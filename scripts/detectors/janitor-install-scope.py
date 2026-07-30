@@ -48,6 +48,18 @@ def _janitor_enabled_in(settings_file: Path) -> bool:
     if not isinstance(data, dict):
         return False
     plugins = data.get("enabledPlugins")
+    # `enabledPlugins` is a MAPPING of `"<name>@<marketplace>": bool` — the list
+    # form this once required does not exist, so the check returned False on every
+    # machine and the detector has never once fired (janitor#147: its `last-run`
+    # stamp is present with no finding ever emitted, while four local-scope
+    # installs sat on the host it was meant to warn about). Both shapes are
+    # accepted now: a mapping must also be ENABLED (`true`) to count, since a
+    # `false` entry is a disabled plugin, not an active install.
+    if isinstance(plugins, dict):
+        return any(
+            isinstance(p, str) and (p == _PLUGIN or p.startswith(_PLUGIN + "@")) and bool(on)
+            for p, on in plugins.items()
+        )
     if not isinstance(plugins, list):
         return False
     return any(

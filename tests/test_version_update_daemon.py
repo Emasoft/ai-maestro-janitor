@@ -18,6 +18,7 @@ in-process for precision.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -235,3 +236,90 @@ def test_auto_update_passes_exact_scope_per_detected_scope(
     assert update_calls[0][-2:] == ["--scope", "user"]
     assert update_calls[1][-2:] == ["--scope", "local"]
     assert all("--scope" in c for c in update_calls)
+
+
+# ── install scope comes from the REGISTRY, not from settings.json ─────────────
+#
+# THE INCIDENT (janitor#147). `detect_install_scopes` substring-matched
+# `~/.claude/settings.json` and reported `user` on a host whose four installs
+# were all `local`, so every self-update ran `--scope user`, died with "not
+# installed at scope user", and logged it at debug level. Six releases shipped
+# while the machine stayed on 0.60.1. `enabledPlugins` records ENABLEMENT;
+# `installed_plugins.json` records INSTALLATION, and only the latter governs
+# `claude plugin update`.
+
+
+def _registry(home: Path, records: list[dict]) -> None:
+    vu = _vu()
+    p = home / ".claude" / "plugins" / "installed_plugins.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "version": 1,
+        "plugins": {f"{vu.PLUGIN_NAME}@{vu.MARKETPLACE_NAME}": records},
+    }), encoding="utf-8")
+
+
+def _enabled_at_user(home: Path) -> None:
+    """The settings shape that misled the old heuristic: enabled, NOT installed."""
+    vu = _vu()
+    p = home / ".claude" / "settings.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "enabledPlugins": {f"{vu.PLUGIN_NAME}@{vu.MARKETPLACE_NAME}": True},
+    }), encoding="utf-8")
+
+
+def test_registry_wins_over_an_enabled_but_not_installed_user_entry(env, tmp_path, monkeypatch):
+    """Enabled at user + installed only at local → `local`, never `user`.
+
+    This is the exact live configuration that broke self-update: updating the
+    scope where the plugin is merely ENABLED fails, because nothing is installed
+    there to update.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    _enabled_at_user(tmp_path)
+    _registry(tmp_path, [
+        {"scope": "local", "version": "0.60.1", "projectPath": "/w/a"},
+        {"scope": "local", "version": "0.64.1", "projectPath": "/w/b"},
+    ])
+    assert _vu().detect_install_scopes() == ["local"]
+
+
+def test_registry_scopes_are_deduped_and_broadest_first(env, tmp_path, monkeypatch):
+    """Several installs per scope collapse to one entry each, user → local → project."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    _registry(tmp_path, [
+        {"scope": "project"}, {"scope": "local"}, {"scope": "local"}, {"scope": "user"},
+    ])
+    assert _vu().detect_install_scopes() == ["user", "local", "project"]
+
+
+def test_unknown_scope_name_is_kept_not_silently_dropped(env, tmp_path, monkeypatch):
+    """A scope we do not recognise is still a real install we must not skip."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    _registry(tmp_path, [{"scope": "user"}, {"scope": "enterprise"}])
+    assert _vu().detect_install_scopes() == ["user", "enterprise"]
+
+
+def test_falls_back_to_settings_when_the_registry_is_missing(env, tmp_path, monkeypatch):
+    """No registry → the old heuristic, because a weak answer beats no self-update."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    _enabled_at_user(tmp_path)
+    assert _vu().detect_install_scopes() == ["user"]
+
+
+def test_malformed_registry_degrades_and_never_raises(env, tmp_path, monkeypatch):
+    """A corrupt registry must not break the daemon's update beat."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    p = tmp_path / ".claude" / "plugins" / "installed_plugins.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{ not json", encoding="utf-8")
+    assert _vu().registry_install_records() == []
+    assert _vu().detect_install_scopes() == []
