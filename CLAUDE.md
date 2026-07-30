@@ -427,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=a7c426800546 digest=e57a4528317c generated=2026-07-30T17:23:09+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=4fb8956de814 digest=c81c14111ac1 generated=2026-07-30T18:21:43+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -1600,7 +1600,9 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/lib/version_update_lib.py` — Shared janitor self-update helpers — used by the daemon's
   · parse_semver(s) -> tuple[int, ...] — Public semver-ordering helper: '0.31.0' → (0, 31, 0), or (-1,) on
   · should_request_prompt_update(installed, published, auto, trigger_enabled) -> bool — True iff the version-update detector should RAISE the release-triggered self-update
-  · detect_install_scopes() -> list[str] — Return every scope where the plugin is referenced.
+  · registry_path() -> Path — Claude Code's authoritative plugin-install registry.
+  · registry_install_records() -> list[dict] — Every install record the CLI itself obeys, or [] when unreadable.
+  · detect_install_scopes() -> list[str] — Return every scope where the plugin is actually INSTALLED.
   · list_installed_versions(parent) -> list[str] — Semver-shaped subdir names of `parent`, sorted ascending.
   · resolve_latest_published(plugin_root) -> str | None — GitHub releases/latest tag for the repo declared in plugin.json.
   · attempt_auto_update(log_writer, update_log_path) -> bool — Refresh marketplace + run `claude plugin update` per scope.
