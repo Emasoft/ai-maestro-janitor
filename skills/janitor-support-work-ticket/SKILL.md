@@ -83,15 +83,30 @@ Run the project's own gates — the full test suite, the linter, the type checke
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" close T-XXXXXXXX \
   --status resolved --resolution "<one line: what was wrong, what you changed>" --report <path>
 
+# PROVED there is nothing to fix — the finding is a false positive
+uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" close T-XXXXXXXX \
+  --status invalid --resolution "<one line: the PROOF it is not a defect>" --report <path>
+
 # could not fix it — say why, honestly
 uv run --script --quiet "${CLAUDE_PLUGIN_ROOT}/scripts/ticket_cli.py" close T-XXXXXXXX \
   --status failed --resolution "<one line: what blocked you>" --report <path>
 ```
 
-A `failed` ticket retries with backoff and, once attempts are exhausted, becomes `needs_human` — which
-the heartbeat then surfaces on every fire, with the command to inspect it, until a person deals with
-it. **This is why walking away silently is not an option:** a ticket you abandon looks identical to a
-ticket that was fixed. Closing `failed` is the honest outcome and it keeps the finding alive.
+Pick by what you actually established, and note that only two of the three are closes:
+
+- **`resolved`** — you changed something and verified it. Never for a finding you merely disagree with.
+- **`invalid`** — you PROVED the finding is not a defect. Terminal, non-retrying, and it suppresses
+  that finding until its evidence changes, so `--resolution` must carry the proof, not the verdict:
+  a future reader has to be able to re-check it. This is the right close for a detector false
+  positive — do NOT reach for `resolved` (it claims a fix that never happened and erases the fact
+  that the detector was wrong).
+- **`failed`** — **not a close.** It retries with backoff and, once attempts are exhausted, becomes
+  `needs_human`, which the heartbeat surfaces on every fire until a person deals with it. Use it when
+  the work is real and you could not do it. Using it for a false positive pages a human about a
+  non-defect and re-spends a full dispatch per rung.
+
+**This is why walking away silently is not an option:** a ticket you abandon looks identical to a
+ticket that was fixed. Every one of the three above is honest; silence is not.
 
 ## 6. Report
 
