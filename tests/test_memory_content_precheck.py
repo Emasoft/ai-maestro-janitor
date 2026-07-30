@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
 
 import memory_content_precheck as mcp  # noqa: E402
+import memory_refusals  # noqa: E402
 
 _CAP = 36000
 
@@ -695,3 +696,134 @@ def test_a_component_UNDER_the_cap_is_not_a_mistier(tmp_path: Path) -> None:
     """Being a component is fine; being a component that outgrew one element is the finding."""
     _tiered_page(tmp_path, "small-component.md", "component", 10)
     assert mcp.oversized_mistiered_pages(tmp_path, max_bytes=1000) == []
+
+
+# --------------------------------------------------------------------------- #
+# the per-CANDIDATE refusal ledger (issue #131) — conflict_has_work's filter
+# --------------------------------------------------------------------------- #
+
+def _pair(d: Path) -> tuple[Path, Path]:
+    """Two real pages a conflict bullet can name, so the ledger can hash them."""
+    a, b = d / "alpha.md", d / "beta.md"
+    a.write_text("alpha body\n", encoding="utf-8")
+    b.write_text("beta body\n", encoding="utf-8")
+    return a, b
+
+
+def _bullet() -> str:
+    return "- topic `keychain`: alpha.md vs beta.md"
+
+
+def test_conflict_pairs_parses_the_librarian_render_shape(tmp_path):
+    """The pair identity — not just the bullet count — is what a refusal is keyed on."""
+    _proposal(tmp_path, [_bullet(), "- topic `x`: c.md vs d.md"])
+    assert mcp.conflict_pairs(tmp_path) == [("alpha.md", "beta.md"), ("c.md", "d.md")]
+
+
+def test_a_refused_pair_does_not_redispatch(tmp_path, monkeypatch):
+    """THE defect (#131/#106): the librarian re-lists a pair the agent already declined, and a
+    non-empty list was read as unfinished work — a full ~170k-token dispatch to re-derive one `no`."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    _proposal(tmp_path, [_bullet()])
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is True  # nobody has ruled yet
+
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="different subjects")
+
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is False
+
+
+def test_editing_a_judged_page_re_arms_the_chore(tmp_path, monkeypatch):
+    """The precision the corpus fingerprint lacks: a refusal expires on ITS OWN candidates' content,
+    so editing the very pages under judgement legitimately re-opens the question."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    _proposal(tmp_path, [_bullet()])
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="different subjects")
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is False
+
+    a.write_text("alpha body, now claiming something new\n", encoding="utf-8")
+
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_an_unrelated_edit_does_NOT_re_arm_a_refused_pair(tmp_path, monkeypatch):
+    """The whole reason this is keyed on the CANDIDATE: the fingerprint gate re-arms every refused
+    pair at once on any edit anywhere in the scope."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    _proposal(tmp_path, [_bullet()])
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="different subjects")
+
+    (tmp_path / "unrelated.md").write_text("a page nobody judged\n", encoding="utf-8")
+
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is False
+
+
+def test_one_unrefused_pair_keeps_the_chore_due(tmp_path, monkeypatch):
+    """Idle means EVERY surfaced pair is refused — one open question is still work."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    (tmp_path / "gamma.md").write_text("gamma\n", encoding="utf-8")
+    (tmp_path / "delta.md").write_text("delta\n", encoding="utf-8")
+    _proposal(tmp_path, [_bullet(), "- topic `x`: gamma.md vs delta.md"])
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="different subjects")
+
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_a_refusal_expires_after_the_ttl(tmp_path, monkeypatch):
+    """The backstop for a crashed agent and for LLM non-determinism — same 7 days the fingerprint
+    gate already uses, because two expiries for the same doubt would be a coin flip."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="x", now=1_000_000)
+    assert memory_refusals.is_refused("conflict", "LOCAL", tmp_path, [a, b], now=1_000_000) is True
+    later = 1_000_000 + memory_refusals.DEFAULT_TTL_S
+    assert memory_refusals.is_refused("conflict", "LOCAL", tmp_path, [a, b], now=later) is False
+
+
+def test_pair_order_does_not_matter(tmp_path, monkeypatch):
+    """`(a, b)` and `(b, a)` are the SAME candidate; a re-ordered listing must not walk past it."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="x")
+    assert memory_refusals.is_refused("conflict", "LOCAL", tmp_path, [b, a]) is True
+
+
+def test_an_unreadable_candidate_is_never_recorded_as_refused(tmp_path, monkeypatch):
+    """An entry that cannot say what it was looking at can never be invalidated by an edit — that is
+    a permanent silence, not a refusal."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    missing = tmp_path / "gone.md"
+    assert memory_refusals.record("conflict", "LOCAL", tmp_path, [missing], reason="x") is False
+    assert memory_refusals.is_refused("conflict", "LOCAL", tmp_path, [missing]) is False
+
+
+def test_without_a_scope_the_filter_never_suppresses(tmp_path, monkeypatch):
+    """The ledger is keyed per (intervention, scope, root); no scope ⇒ no read ⇒ no suppression."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    a, b = _pair(tmp_path)
+    _proposal(tmp_path, [_bullet()])
+    memory_refusals.record("conflict", "LOCAL", tmp_path, [a, b], reason="x")
+    assert mcp.conflict_has_work(tmp_path) is True
+
+
+def test_an_unparseable_bullet_is_not_a_refused_one(tmp_path, monkeypatch):
+    """A rendering change must degrade to dispatch, never to silence."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    _proposal(tmp_path, ["- some future bullet shape nobody parsed"])
+    assert mcp.conflict_has_work(tmp_path, scope="LOCAL") is True
+
+
+def test_the_refusal_ledger_is_bounded(tmp_path, monkeypatch):
+    """Bounded store (repo invariant S3/S4) — newest kept, oldest evicted."""
+    _isolate_gstate(monkeypatch, tmp_path)
+    for i in range(memory_refusals.REFUSALS_MAX + 15):
+        p = tmp_path / f"p{i}.md"
+        p.write_text(f"page {i}\n", encoding="utf-8")
+        memory_refusals.record("conflict", "LOCAL", tmp_path, [p], reason="x", now=1_000_000 + i)
+    ledger = memory_refusals.read("conflict", "LOCAL", tmp_path)
+    assert len(ledger) == memory_refusals.REFUSALS_MAX
+    assert f"p{memory_refusals.REFUSALS_MAX + 14}.md" in ledger
+    assert "p0.md" not in ledger

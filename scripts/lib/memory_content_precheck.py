@@ -55,6 +55,7 @@ from collections import Counter
 from pathlib import Path
 
 import memory_edit_verify  # sibling in scripts/lib/ — the SSOT for merge legality
+import memory_refusals  # sibling in scripts/lib/ — the per-candidate refusal ledger (#131)
 import memory_scopes  # sibling in scripts/lib/ (the caller puts lib on sys.path)
 import memory_settings  # sibling in scripts/lib/ — the harvest watermark SSOT
 
@@ -386,7 +387,41 @@ _CONFLICT_SECTION_HEADING = "### Conflict candidates"
 _NO_CANDIDATES_SENTINEL = "- (none)"
 
 
-def conflict_has_work(root: Path) -> bool:
+# A conflict bullet, as the librarian writes it: "- topic `<tag>`: <a> vs <b>" (writer/reader
+# parity with memory-librarian.py `_render_scope_section`). The two paths are the CANDIDATE, which
+# is what the refusal ledger is keyed on.
+_CONFLICT_PAIR_RE = re.compile(r"^-\s+topic\s+`[^`]*`:\s*(?P<a>\S+)\s+vs\s+(?P<b>\S+)\s*$")
+
+
+def conflict_pairs(root: Path) -> list[tuple[str, str]]:
+    """Every surfaced conflict candidate pair in the scope's proposal file, in order.
+
+    Split out of `conflict_has_work` so the pair identity — not just the bullet count — is available
+    to the refusal ledger (issue #131). A bullet that does not parse is deliberately returned as a
+    `("", "")` sentinel by the caller's logic rather than dropped: an unparseable candidate is not a
+    refused one, and dropping it would suppress the chore on a rendering change.
+    """
+    out: list[tuple[str, str]] = []
+    try:
+        text = (root / "memory-reorg-proposed.md").read_text(encoding="utf-8")
+    except OSError:
+        return out
+    in_section = False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s == _CONFLICT_SECTION_HEADING:
+            in_section = True
+            continue
+        if in_section and s.startswith("#"):
+            in_section = False
+            continue
+        if in_section and s.startswith("- ") and s != _NO_CANDIDATES_SENTINEL:
+            m = _CONFLICT_PAIR_RE.match(s)
+            out.append((m.group("a"), m.group("b")) if m else ("", ""))
+    return out
+
+
+def conflict_has_work(root: Path, *, scope: str | None = None, now: int | None = None) -> bool:
     """True iff the scope's `memory-reorg-proposed.md` carries at least one REAL
     conflict candidate (TRDD-3XS3PDCF follow-up — the last precheckable chore).
 
@@ -403,25 +438,27 @@ def conflict_has_work(root: Path) -> bool:
     - file present but UNREADABLE → True (fail-open — not provably idle).
 
     Live evidence: a heartbeat conflict pass on 2026-07-08 abstained on the empty
-    section at 260,931 tokens — the same no-op class as the other gates."""
+    section at 260,931 tokens — the same no-op class as the other gates.
+
+    REFUSAL FILTER (issue #131, #106). The librarian re-lists a pair every run, including one the
+    agent already judged and declined — so a non-empty list is not the same thing as unfinished
+    work. A pair carrying a live refusal (same two pages, byte-identical, inside the TTL) is skipped;
+    the chore is idle only when EVERY surfaced pair is refused. `scope` is required to read the
+    ledger, so without it the filter is simply not applied — never a suppression."""
     proposal = root / "memory-reorg-proposed.md"
     if not proposal.is_file():
         return False  # "Empty/absent → stop" — absence is the skill's own idle case
     try:
-        text = proposal.read_text(encoding="utf-8")
+        proposal.read_text(encoding="utf-8")
     except OSError:
         return True  # present but unreadable → FAIL-OPEN (libs audit L-11)
-    in_section = False
-    for ln in text.splitlines():
-        s = ln.strip()
-        if s == _CONFLICT_SECTION_HEADING:
-            in_section = True
-            continue
-        if in_section and s.startswith("#"):
-            in_section = False  # next heading ends the section (any level)
-            continue
-        if in_section and s.startswith("- ") and s != _NO_CANDIDATES_SENTINEL:
-            return True  # a real surfaced candidate pair
+    for a, b in conflict_pairs(root):
+        if not a or not b:
+            return True  # an unparseable bullet is NOT a refused one — fail open
+        if scope is None:
+            return True  # cannot read the ledger ⇒ never suppress
+        if not memory_refusals.is_refused("conflict", scope, root, [root / a, root / b], now=now):
+            return True  # a candidate nobody has ruled on yet
     return False
 
 
@@ -505,7 +542,8 @@ def content_has_work(
     if intervention == "conflict":
         # The pass consumes the librarian's surfaced candidates ("Empty/absent →
         # stop" is the skill's own precondition); discovery stays semantic and
-        # stays the librarian's job.
-        return conflict_has_work(root)
+        # stays the librarian's job. `scope` also unlocks the per-candidate refusal
+        # filter — without it the gate keeps its old bullet-count behavior (#131).
+        return conflict_has_work(root, scope=scope)
     # Unknown chores: fail-open by default.
     return True
