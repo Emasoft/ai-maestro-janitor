@@ -427,7 +427,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=e34c7c459961 digest=b8bf42bea039 generated=2026-07-29T20:09:46+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=a7c426800546 digest=e57a4528317c generated=2026-07-30T17:23:09+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -536,6 +536,8 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/detectors/oauth-login-needed.py` — OAuth one-time-login nudge (opt-in) — the reactive sibling of
   · slot_needs_login(has_refresh, token_days, has_session_key, grace_days, refresh_failures) -> bool — PURE: does this account need a ONE-TIME human login?
   · slot_capture_stalled(has_refresh, has_session_key, refresh_failures) -> bool — PURE (B3): is this account LOGGED IN but its OAuth capture has NOT completed?
+  · main() -> int
+`scripts/detectors/orphaned-resume-flag.py` — orphaned-resume-flag — notice a session whose wake-up chain silently failed (#125).
   · main() -> int
 `scripts/detectors/package-manager-policy.py` — Package-manager-policy detector — supply-chain hardening audit.
   · present_lockfile_managers(root) -> set[str] — Filesystem wrapper around `_lockfile_managers`. Never raises.
@@ -733,7 +735,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · oldest_claude_session_start(sessions, now) -> int | None — Return the START epoch of the OLDEST live Claude session, or None if none
   · prune_cutoff(*, now, min_age_s, oldest_session_start, session_margin_s) -> int — Versions whose dir mtime is STRICTLY OLDER than the returned epoch are old
   · plan_plugin_prune(*, versions, version_mtime, pinned, keep_recent, cutoff_epoch, now) -> tuple[list[str], list[str]] — Decide (prune, keep) for ONE plugin's version list. Pure.
-  · pinned_version_for(installed_plugins, plugin, marketplace) -> str | None — Best-effort: the version Claude Code currently pins for
+  · pinned_versions_for(installed_plugins, plugin, marketplace) -> set[str] — EVERY version of `<plugin>@<marketplace>` that some install record uses.
   · PrunePlan — The prune decision for one plugin dir.
   · plan_cache_prune(cache_root, installed_plugins, *, keep_recent, cutoff_epoch, now) -> list[PrunePlan] — Build a prune plan for every `<marketplace>/<plugin>/` under `cache_root`.
   · apply_prune_plan(plans) -> tuple[list[str], list[str]] — Delete the planned version dirs. Returns (removed, failed) as
@@ -841,14 +843,18 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · injection_is_hard(diagnosis) -> bool — Hard/soft policy for a gentle recovery injection (TRDD-0GPQROC1). PURE.
   · gate(*, last_ts, attempts, now) -> str — Decide whether to attempt recovery on an instance NOW. Returns:
 `scripts/lib/fleet_restart.py` — Hard-restart recovery rungs (TRDD-56d24c02 / TRDD-324223a6 A5) — the rungs that
+  · with_resume(argv) -> str — `argv` guaranteed to resume rather than start a fresh session.
+  · relaunch_command(pid, project_root) -> str — The command that relaunches a session: MIRROR how it was actually launched.
+  · argv_is_claude(argv) -> bool — True iff `argv` actually launches claude — the guard on every mirrored replay.
   · hard_restart_enabled() -> bool — Master opt-in for the process-killing rungs. DEFAULT-OFF — these rungs kill and
   · is_killable(*, pid, command, active, diagnosis, self_pid, daemon_pid) -> bool — The hard gate before any ``os.kill``. True ONLY when killing this pid is safe:
   · command_injection_plan(terminal, command, *, esc_first) -> dict | None — PUBLIC raw-command channel builder — the single source of truth for typing an
-  · build_relaunch(terminal) -> dict | None — rung 5 — resume a `dead` (pid-gone) session by typing ``claude --continue`` into
-  · build_force_restart(pid, terminal) -> dict | None — rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
+  · build_relaunch(terminal, *, command) -> dict | None — rung 5 — resume a `dead` (pid-gone) session by typing the relaunch line into its
+  · build_force_restart(pid, terminal, *, command) -> dict | None — rung 6 — kill the hard-wedged `frozen` pid, then relaunch in its pane. The plan
   · live_tmux_session() -> str — The id of an existing tmux session to hang a resurrect window on, or "" if none.
   · recorded_terminal(project_root) -> dict[str, str] — The pane identity the SESSION recorded at start, or {} when there is none.
-  · build_resurrect(pid, project_root, *, session) -> dict — rung 7 — the pane is unreachable: spawn a background ``claude`` that, on launch,
+  · recorded_argv(project_root) -> str — The claude argv the SESSION recorded at start, or "" when there is none.
+  · build_resurrect(pid, project_root, *, session, command) -> dict — rung 7 — the pane is unreachable: spawn a background ``claude`` that, on launch,
   · live_cmdline(pid) -> str — The pid's CURRENT command line, read fresh (`ps -p PID -o args=`, POSIX-portable).
   · fire_restart(plan, *, enabled, killable, killer, spawner, cmdline_reader) -> str — Execute a hard-restart plan — but ONLY when ``enabled`` (the opt-in) AND, for any
 `scripts/lib/fleet_scan.py` — Daemon-side fleet scanner (TRDD-324223a6) — find EVERY running claude instance
@@ -1177,6 +1183,17 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · webhook_url() -> str
   · build_message(*, sev, code, project, summary, hint) -> str — The one-line push body (ARCHITECTURE.md §5 shape): name the project so the human
   · push(*, sev, code, project, summary, hint, now, runner, opener) -> str — THE gated push. Returns the outcome constant (for the daemon log + tests).
+`scripts/lib/orphaned_resume.py` — Orphaned resume-flag detection (issue #125) — the PURE decision layer.
+  · project_root_from_transcript(transcript) -> str — The absolute project path a harness transcript belongs to, or "" when unknown.
+  · known_project_roots(projects_root) -> list[str] — Every project root the harness has a transcript for, deduped, sorted.
+  · cadence_seconds(cron) -> int | None — Seconds between fires for a `*/N * * * *` cron, or None when not that shape.
+  · stale_window(armed_cron, *, factor) -> int — The age past which an unconsumed flag is a FINDING, from that project's own cadence.
+  · read_armed_cron(state_dir) -> str — That project's last-armed cadence, or "" when it never recorded one.
+  · flag_age(state_dir, *, now) -> int | None — Seconds since the resume flag was written, or None when there is no flag.
+  · is_orphaned(age_s, armed_cron, *, factor) -> bool — PURE: is a flag of this age, on a project armed at this cadence, orphaned?
+  · scan(projects_root, *, now, factor) -> list[dict] — Every project holding an ORPHANED resume flag: `[{root, age_s, armed_cron}]`.
+  · format_finding(age_s, armed_cron) -> str — The one-line ledger message for ONE affected project. Carries no other project's
+  · project_slug(root) -> str — The trailing path component, for a log line that names the project without leaking
 `scripts/lib/output_formats.py` — Output formats — HMAC-signed scan badge, approval-gate protocol, FP-filters DSL.
   · make_badge(report_id, verdict, scanned_at, key, expiry_days) -> str — Build a signed badge token.
   · verify_badge(badge, key, *, now) -> tuple[bool, str] — Verify a signed badge token.
@@ -1192,7 +1209,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · directive_lines(now) -> list[str] — Resume-directive lines for the newest MAX_DIRECTIVE_AGENTS entries.
 `scripts/lib/plugin_freshness.py` — Plugin-freshness helper (issue #69, TRDD-YF4NDYYE) — verify cached-vs-live BEFORE
   · cached_version(plugin_root) -> str | None — The version of the plugin tree being audited (its own plugin.json).
-  · installed_pin(plugin_name, marketplace) -> str | None — The version Claude Code currently pins for this plugin, or None.
+  · installed_pins(plugin_name, marketplace) -> set[str] — EVERY version Claude Code has an install record for, or an empty set when unknown.
   · latest_published(plugin_root, *, now) -> str | None — Latest published release version, through the TTL cache. None when unknown
   · freshness(plugin_root, *, now) -> dict — The audit-header facts: what is being audited vs what is installed/published.
   · header(plugin_root, *, now) -> str — The one-line report header every cache-based audit prints first.
@@ -1516,6 +1533,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
   · trdd_files(folder, project_dir) -> list[tuple[str, Path]] — Every `TRDD-*.md` in `folder` across BOTH scopes, as `(scope, path)`.
   · ensure_local_design(project_dir) -> Path — Create the LOCAL design root + its four lifecycle folders. Returns the root.
   · extract_uid(filename) -> str | None — Return a TRDD filename's id (UPPERCASE base36 OR legacy UUID), or None.
+  · is_pipeline_state_value(value) -> bool — True iff `value` names a PIPELINE state — in either the v1 or the v2 spelling.
   · norm_state(value) -> str — Normalise a status/column token to lowercase kebab-case.
   · parse_trdd_state(path) -> tuple[str, str] — Return (status, column) for a TRDD, both normalised kebab-case or ''.
   · parse_state_text(head) -> tuple[str, str] — Pure variant of parse_trdd_state over already-read text (the file head).
