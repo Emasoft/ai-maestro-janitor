@@ -161,6 +161,21 @@ def cprint(msg: str) -> None:
 # wedged suite an order of magnitude below anything a human would wait out.
 _TEST_SUITE_TIMEOUT_SEC = 1800
 
+# Wall-clock bound for every remote-CPV invocation, for the same reason as above.
+# MEASURED: `cpv-remote-validate plugin . --strict` on this plugin takes ~237 s on
+# a quiet machine (437 files, a 15-language repo lint) — against the generic 300 s
+# default that `stage_validate` was silently inheriting. That is under 27% headroom
+# on a host that also runs an ai-maestro server and several Claude sessions, so the
+# gate failed on load and passed when idle: a coin flip, not a check. It blocked
+# two real publishes, each misread as a transient upstream fault.
+#
+# The drift is the actual defect: `run_gate` already used 600 s for the IDENTICAL
+# command while the publish path took the default, so one behaviour had two numbers
+# and the tighter one was never stated anywhere. Both now read this constant.
+# 900 s is ~3.8x the measured run — wider than the suite's ~2x because CPV also
+# fetches from GitHub, so its floor moves with the network.
+_CPV_TIMEOUT_SEC = 900
+
 
 def run(
     cmd: list[str], cwd: Path | None = None, *, check: bool = True, capture: bool = False,
@@ -1017,7 +1032,7 @@ def run_gate(root: Path) -> int:
          "git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0",
          "--with", "pyyaml",
          "cpv-remote-validate", "plugin", ".", "--strict"],
-        cwd=str(root), timeout=600).returncode
+        cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode
     # Exit codes: 0=pass, 1=CRITICAL, 2=MAJOR, 3=MINOR, 4=NIT, 5+=WARNING
     if ve != 0 and ve < 5:
         labels = {1: "CRITICAL", 2: "MAJOR", 3: "MINOR", 4: "NIT"}
@@ -1265,7 +1280,7 @@ def stage_validate(root: Path) -> None:
         "git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0",
         "--with", "pyyaml",
         "cpv-remote-validate", "plugin", ".", "--strict",
-    ], cwd=root)
+    ], cwd=root, timeout=_CPV_TIMEOUT_SEC)
     cprint(f"  {GREEN}Validation passed (0 blocking issues).{NC}")
 
 
@@ -1295,12 +1310,21 @@ def stage_ci_preflight(root: Path) -> None:
         cprint(f"  {RED}BLOCKED: uvx not found on PATH.{NC}")
         cprint(f"  {RED}Install via: brew install uv  or  pip install uv{NC}")
         sys.exit(1)
-    rc = subprocess.run([
-        "uvx", "--from",
-        "git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0",
-        "--with", "pyyaml",
-        "cpv-remote-validate", "ci-preflight", ".",
-    ], cwd=str(root)).returncode
+    # Bounded like every other CPV call: this one carried NO timeout at all, so a
+    # wedged preflight would hang the publish indefinitely with no diagnostic —
+    # the opposite failure from stage_validate's too-tight cap, from the same
+    # cause of nobody stating the number.
+    try:
+        rc = subprocess.run([
+            "uvx", "--from",
+            "git+https://github.com/Emasoft/claude-plugins-validation@v3.19.0",
+            "--with", "pyyaml",
+            "cpv-remote-validate", "ci-preflight", ".",
+        ], cwd=str(root), timeout=_CPV_TIMEOUT_SEC).returncode
+    except subprocess.TimeoutExpired:
+        cprint(f"  {RED}BLOCKED: CI-parity preflight timed out after "
+               f"{_CPV_TIMEOUT_SEC}s.{NC}")
+        sys.exit(1)
     if rc != 0:
         cprint(f"  {RED}BLOCKED: CI-parity preflight FAILED.{NC}")
         cprint(f"  {RED}The gates listed above would fail GitHub CI — and without this{NC}")

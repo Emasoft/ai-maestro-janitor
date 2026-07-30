@@ -18,6 +18,7 @@ REAL `git` — no mocks, because the whole behaviour under test is what `git sta
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -245,3 +246,67 @@ def test_a_missing_generator_warns_instead_of_blocking_the_release(tmp_path: Pat
     publish._refresh_integrity_manifest(root)  # must not raise
 
     assert not (root / ".integrity").exists()
+
+
+# ── every remote-CPV call is bounded, and by the SAME number ──────────────────
+#
+# THE INCIDENT (2026-07-30). `stage_validate` carried no explicit timeout, so it
+# inherited `run()`'s generic 300 s — sized for a lint invocation. The real run is
+# ~237 s on a quiet machine, so the gate passed when idle and failed under load,
+# blocking two publishes that were each misread as a transient upstream fault.
+# Meanwhile `run_gate` used 600 s for the IDENTICAL command and
+# `stage_ci_preflight` used none at all: one behaviour, three numbers, none of
+# them stated. These tests pin the invariant rather than any one value — the bug
+# was the disagreement, so a future edit that changes the constant is fine and a
+# future edit that reintroduces a second number is not.
+
+
+def _cpv_call_sites() -> list[ast.Call]:
+    """Every `subprocess.run`/`run` call in publish.py that invokes remote CPV."""
+    tree = ast.parse(Path(publish.__file__).read_text(encoding="utf-8"))
+    sites: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        first = node.args[0]
+        if not isinstance(first, ast.List):
+            continue
+        literals = [e.value for e in first.elts if isinstance(e, ast.Constant)]
+        if "cpv-remote-validate" in literals:
+            sites.append(node)
+    return sites
+
+
+def test_every_remote_cpv_call_is_bounded_by_the_shared_constant() -> None:
+    """No CPV invocation may inherit a default or invent its own number."""
+    sites = _cpv_call_sites()
+    # Guard the guard: if the call shape changes and this finds nothing, the test
+    # would pass vacuously while enforcing nothing.
+    assert len(sites) >= 3, f"expected to find the CPV call sites, found {len(sites)}"
+
+    for call in sites:
+        kw = {k.arg: k.value for k in call.keywords}
+        assert "timeout" in kw, (
+            f"a cpv-remote-validate call at line {call.lineno} has NO timeout — it "
+            f"either inherits a cap sized for something else or can hang forever"
+        )
+        value = kw["timeout"]
+        assert isinstance(value, ast.Name) and value.id == "_CPV_TIMEOUT_SEC", (
+            f"the cpv-remote-validate call at line {call.lineno} uses a literal or a "
+            f"different name instead of _CPV_TIMEOUT_SEC — that is exactly the drift "
+            f"that made one command carry three different caps"
+        )
+
+
+def test_cpv_timeout_has_real_headroom_over_the_measured_run() -> None:
+    """The cap must exceed the ~237 s measured run by enough to survive load.
+
+    A gate whose cap sits near its own runtime is a coin flip on a busy host, and a
+    timeout is indistinguishable from a genuine failure — so it asserts nothing
+    about the plugin while still blocking releases.
+    """
+    measured_seconds = 237
+    assert publish._CPV_TIMEOUT_SEC >= measured_seconds * 3, (
+        f"_CPV_TIMEOUT_SEC={publish._CPV_TIMEOUT_SEC}s is too close to the measured "
+        f"{measured_seconds}s run to survive a loaded machine"
+    )
