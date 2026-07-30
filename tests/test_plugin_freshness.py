@@ -41,8 +41,8 @@ def _cache_tree(base: Path, marketplace: str, name: str, version: str) -> Path:
 def _write_pin(home: Path, name: str, marketplace: str, version: str) -> None:
     p = home / ".claude" / "plugins" / "installed_plugins.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    # The shipped installed_plugins.json shape carries a `<plugin>/<version>` PATH token —
-    # exactly what cache_prune.pinned_version_for scans for.
+    # The legacy installed_plugins.json shape keys the version dir as `path`; the current one
+    # uses `installPath` + an explicit `version`. cache_prune.pinned_versions_for reads both.
     p.write_text(
         json.dumps(
             {"plugins": {f"{name}@{marketplace}": [{"path": f"cache/{marketplace}/{name}/{version}"}]}}
@@ -65,7 +65,7 @@ def test_stale_when_cache_diverges_from_pin(tmp_path, monkeypatch):
     _write_pin(home, "demo-plugin", "mkt", "1.2.0")
     f = pf.freshness(root, now=_NOW)
     assert f["cached_version"] == "1.0.0"
-    assert f["installed_pin"] == "1.2.0"
+    assert f["installed_pins"] == ["1.2.0"]
     assert f["is_stale"] is True
     assert "STALE" in pf.header(root, now=_NOW)
 
@@ -89,10 +89,41 @@ def test_offline_and_pinless_never_marks_stale(tmp_path, monkeypatch):
     assert f == {
         "plugin": "loose-plugin",
         "cached_version": "0.9.0",
-        "installed_pin": None,
+        "installed_pins": [],
         "latest_published": None,
         "is_stale": False,
     }
+
+
+def test_a_cache_matching_ANY_record_is_not_stale(tmp_path, monkeypatch):
+    """Multi-record host: the audited tree matches one of several pins → NOT stale (#137).
+
+    The scalar predecessor compared against whichever record was listed first, so on a host
+    spanning two versions this both false-alarmed and false-cleared depending on list order.
+    The audited code is live if ANY record loads it.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    root = _cache_tree(tmp_path, "mkt", "demo-plugin", "0.64.1")
+    p = tmp_path / ".claude" / "plugins" / "installed_plugins.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    "demo-plugin@mkt": [
+                        {"installPath": "/c/demo-plugin/0.60.1", "version": "0.60.1"},
+                        {"installPath": "/c/demo-plugin/0.64.1", "version": "0.64.1"},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    f = pf.freshness(root, now=_NOW)
+
+    assert f["installed_pins"] == ["0.60.1", "0.64.1"]   # sorted, both reported
+    assert f["is_stale"] is False                        # 0.64.1 IS in use
+    assert "pin 0.60.1, 0.64.1" in pf.header(root, now=_NOW)
 
 
 def test_stale_when_newer_release_published(tmp_path, monkeypatch):

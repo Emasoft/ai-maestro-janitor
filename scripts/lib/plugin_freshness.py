@@ -78,16 +78,22 @@ def _derive_identity(plugin_root: Path) -> tuple[str | None, str | None]:
     return name, marketplace
 
 
-def installed_pin(plugin_name: str | None, marketplace: str | None) -> str | None:
-    """The version Claude Code currently pins for this plugin, or None."""
+def installed_pins(plugin_name: str | None, marketplace: str | None) -> set[str]:
+    """EVERY version Claude Code has an install record for, or an empty set when unknown.
+
+    A SET, because a host holds one record per scope/agent-workdir and they may sit on
+    different versions. The scalar this replaced returned whichever record was listed first,
+    so on a real four-record host it reported 0.60.1 while three records were on 0.64.1 —
+    a confidently-wrong number that nearly reached a cross-repo diagnosis (issue #137).
+    """
     if not plugin_name or not marketplace:
-        return None
+        return set()
     ip_path = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
     try:
         installed = json.loads(ip_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    return cache_prune.pinned_version_for(installed, plugin_name, marketplace)
+        return set()
+    return cache_prune.pinned_versions_for(installed, plugin_name, marketplace)
 
 
 def _cache_path() -> Path:
@@ -131,13 +137,19 @@ def freshness(plugin_root: Path, *, now: int | None = None) -> dict:
     root = Path(plugin_root)
     cached = cached_version(root)
     name, marketplace = _derive_identity(root)
-    pin = installed_pin(name, marketplace)
+    pins = installed_pins(name, marketplace)
     latest = latest_published(root, now=now)
-    is_stale = bool(cached) and ((bool(pin) and pin != cached) or (bool(latest) and latest != cached))
+    # Stale iff the audited tree matches NO install record. Any record on `cached` means the
+    # audited code IS what something loads, so the audit is describing live code — with the
+    # old scalar this asked "does the first-listed record match", which on a multi-record host
+    # both false-alarmed and false-cleared depending on list order (issue #137).
+    is_stale = bool(cached) and (
+        (bool(pins) and cached not in pins) or (bool(latest) and latest != cached)
+    )
     return {
         "plugin": name,
         "cached_version": cached,
-        "installed_pin": pin,
+        "installed_pins": sorted(pins),
         "latest_published": latest,
         "is_stale": is_stale,
     }
@@ -148,7 +160,8 @@ def header(plugin_root: Path, *, now: int | None = None) -> str:
     f = freshness(plugin_root, now=now)
     line = (
         f"audited {f['plugin'] or Path(plugin_root).name}@{f['cached_version'] or 'unknown'} "
-        f"(pin {f['installed_pin'] or 'unknown'}; latest {f['latest_published'] or 'unknown'})"
+        f"(pin {', '.join(f['installed_pins']) or 'unknown'}; "
+        f"latest {f['latest_published'] or 'unknown'})"
     )
     if f["is_stale"]:
         line += (

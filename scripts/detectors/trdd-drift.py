@@ -143,11 +143,19 @@ def main() -> int:
                 if line is not None:
                     print(line)
             continue
-        # A TRDD is drift-eligible when its v1 status is not-started/in-progress
-        # OR its v2 column is one of the actively-in-flight columns. The column
-        # set is broader on purpose — a `backburner`/`todo` TRDD that hasn't
-        # moved in weeks is exactly the staleness we want to surface.
-        if status not in _DRIFT_ACTIVE_STATUSES and column not in _ACTIVE_COLUMNS:
+        # `column:` WINS whenever present (issue #135). A v2 card's column is its state, so
+        # a v1 `status:` alongside one is legacy residue, not a second opinion — and the OR
+        # this replaced let that residue override a TERMINAL column, reporting a frozen
+        # `complete` TRDD as drifting. That finding was unclearable by construction: §12
+        # forbids editing a terminal TRDD, so there was no action that could satisfy it.
+        #
+        # Only a card with NO column at all is judged by v1 status. The column set is broader
+        # than the v1 statuses on purpose — a `backburner`/`todo` TRDD that hasn't moved in
+        # weeks is exactly the staleness worth surfacing.
+        if column:
+            if column not in _ACTIVE_COLUMNS:
+                continue
+        elif status not in _DRIFT_ACTIVE_STATUSES:
             continue
 
         # A stated park is honoured until its own date, then expires on its own.
@@ -157,9 +165,11 @@ def main() -> int:
             review_after = None
         if review_after is not None and now < review_after:
             continue
-        # Prefer the explicit status for the drift line; fall back to the
-        # column label when only v2 frontmatter is present.
-        active_label = status or column
+        # Label from the field that DECIDED eligibility above, so the line can never assert a
+        # state the card does not hold. The old `status or column` preferred v1 status even on
+        # a v2 card, which is how `status='not-started'` was printed for a `column: complete`
+        # TRDD whose frontmatter contains no `status:` at all (issue #135).
+        active_label = column or status
 
         # PROJECT TRDDs are git-tracked, so their last-commit time is the honest "last
         # touched" (an mtime is churned by any checkout). A LOCAL TRDD lives OUTSIDE the

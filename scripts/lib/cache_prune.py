@@ -27,11 +27,17 @@ marketplace on demand), so a plain `rmtree` is correct (per use-safe-delete).
 
 from __future__ import annotations
 
-import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+
+# A plugin-cache version directory name: a dotted-int run, optionally with a pre-release /
+# build suffix (`1.2.3`, `0.65.0`, `1.0.0-rc1`). Used to decide whether a record's `version`
+# field or `installPath` leaf actually names a version, so a malformed record contributes
+# nothing rather than a wrong answer (issue #137).
+_SEMVERISH_RE = re.compile(r"\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.]+)?")
 
 
 def _is_claude_session(command: str) -> bool:
@@ -94,22 +100,25 @@ def plan_plugin_prune(
     *,
     versions: list[str],
     version_mtime: dict[str, int],
-    pinned: str | None,
+    pinned: set[str],
     keep_recent: int,
     cutoff_epoch: int,
     now: int,
 ) -> tuple[list[str], list[str]]:
     """Decide (prune, keep) for ONE plugin's version list. Pure.
 
-    KEEP = the newest `keep_recent` versions (the list is ascending semver) ∪ the
-    pinned version (belt-and-suspenders: pinned is normally the newest, but a
-    downgrade can pin an older one). Of the rest, a version is PRUNED only when
-    its dir mtime is strictly older than `cutoff_epoch`; anything younger is kept
-    (a live session may still hold it). An unknown mtime defaults to `now` → kept
-    (never prune what you can't date)."""
+    KEEP = the newest `keep_recent` versions (the list is ascending semver) ∪ EVERY pinned
+    version (belt-and-suspenders: a pin is normally the newest, but a downgrade can pin an
+    older one). Of the rest, a version is PRUNED only when its dir mtime is strictly older
+    than `cutoff_epoch`; anything younger is kept (a live session may still hold it). An
+    unknown mtime defaults to `now` → kept (never prune what you can't date).
+
+    `pinned` is a SET because one host holds several records for one plugin — a user-scope
+    install plus one per ai-maestro agent workdir — each free to sit on a different version.
+    It was a single `str | None`, which protected exactly one of them and left the rest
+    prunable while actively loaded (issue #137)."""
     protected: set[str] = set(versions[-keep_recent:]) if keep_recent > 0 else set()
-    if pinned:
-        protected.add(pinned)
+    protected |= set(pinned)
     prune: list[str] = []
     keep: list[str] = []
     for v in versions:
@@ -123,33 +132,59 @@ def plan_plugin_prune(
     return prune, keep
 
 
-def pinned_version_for(
+def pinned_versions_for(
     installed_plugins: dict, plugin: str, marketplace: str
-) -> str | None:
-    """Best-effort: the version Claude Code currently pins for
-    `<plugin>@<marketplace>`, read from a parsed installed_plugins.json. Returns
-    None when the entry/shape isn't found (the caller then relies on keep_recent,
-    which already protects the newest/current version in the normal case)."""
+) -> set[str]:
+    """EVERY version of `<plugin>@<marketplace>` that some install record uses.
+
+    A SET, not a scalar, because one host legitimately holds several records for one plugin —
+    a user-scope install plus one per ai-maestro agent workdir, each free to sit on a
+    different version. The predecessor returned the FIRST `<plugin>/<version>` token found in
+    the entry's JSON blob, which is "whichever record happens to be listed first": on a real
+    four-record host it reported 0.60.1 while three records were on 0.64.1 (issue #137).
+
+    That mattered for the one job this function exists to do. `plan_plugin_prune` protects
+    the pinned version from pruning, so learning about 1 of 4 left three ACTIVELY USED
+    version dirs unprotected — pruning a version out from under a running agent is precisely
+    the failure this is meant to prevent. Returning the set makes under-protection
+    impossible.
+
+    Read from the record FIELDS (`version`, else the `installPath` basename) rather than by
+    scanning the serialised blob. The blob scan was justified as "robust to schema drift", but
+    it bought tolerance of a hypothetical rename at the cost of silently mis-reading the
+    shipped shape — and a wrong version is worse than a missing one, because it is asserted
+    with confidence. An unparseable record contributes nothing; the empty set means "nothing
+    known to be in use", and the caller still has `keep_recent`.
+    """
     plugins = installed_plugins.get("plugins")
     if not isinstance(plugins, dict):
-        return None
+        return set()
     entry = plugins.get(f"{plugin}@{marketplace}")
-    # The shipped shape is a list with a dict carrying a `<plugin>/<version>`
-    # path; rather than over-fit that exact key, scan the entry's JSON for the
-    # first `<plugin>/<version>` token — robust to minor schema drift.
-    blob = json.dumps(entry)
-    needle = f"{plugin}/"
-    idx = blob.find(needle)
-    if idx < 0:
-        return None
-    tail = blob[idx + len(needle):]
-    version = ""
-    for ch in tail:
-        if ch.isdigit() or ch == ".":
-            version += ch
-        else:
-            break
-    return version or None
+    # The shipped shape is a LIST of records; tolerate a bare dict for a single one.
+    records = entry if isinstance(entry, list) else [entry]
+    found: set[str] = set()
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        version = rec.get("version")
+        if isinstance(version, str) and _SEMVERISH_RE.fullmatch(version.strip()):
+            found.add(version.strip())
+            continue
+        # No usable `version` key — fall back to the version DIRECTORY the record points at,
+        # which is what Claude Code actually loads (`…/<plugin>/<version>/`). BOTH spellings
+        # are real: the current schema writes `installPath` (verified on a live host), an
+        # older one wrote `path`. Reading a known key list keeps the blob-scan's tolerance of
+        # schema variety — the half of its rationale that was sound — without inheriting its
+        # first-match-wins blindness to multiple records.
+        for key in ("installPath", "path"):
+            raw = rec.get(key)
+            if not isinstance(raw, str):
+                continue
+            leaf = raw.rstrip("/").rsplit("/", 1)[-1]
+            if _SEMVERISH_RE.fullmatch(leaf):
+                found.add(leaf)
+                break
+    return found
 
 
 @dataclass(frozen=True)
@@ -159,7 +194,9 @@ class PrunePlan:
     plugin_dir: Path
     marketplace: str
     plugin: str
-    pinned: str | None
+    # EVERY version some install record uses — a host with N agent workdirs has N records
+    # and may legitimately span several versions (issue #137).
+    pinned: set[str]
     prune: list[str]
     keep: list[str]
 
@@ -210,7 +247,7 @@ def plan_cache_prune(
                     mtimes[v] = int((plugin_dir / v).stat().st_mtime)
                 except OSError:
                     mtimes[v] = now  # undateable → treat as now → never pruned
-            pinned = pinned_version_for(
+            pinned = pinned_versions_for(
                 installed_plugins, plugin_dir.name, market_dir.name
             )
             prune, keep = plan_plugin_prune(

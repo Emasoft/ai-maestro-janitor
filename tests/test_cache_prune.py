@@ -100,7 +100,7 @@ def test_plan_plugin_prune_keeps_recent_and_pinned() -> None:
     prune, keep = cp.plan_plugin_prune(
         versions=versions,
         version_mtime=mtimes,
-        pinned="2.0.1",          # a non-newest pinned version (a downgrade)
+        pinned={"2.0.1"},        # a non-newest pinned version (a downgrade)
         keep_recent=2,           # keep 2.0.3, 2.0.4
         cutoff_epoch=cutoff,
         now=now,
@@ -122,7 +122,7 @@ def test_plan_plugin_prune_spares_young_versions() -> None:
     prune, keep = cp.plan_plugin_prune(
         versions=versions,
         version_mtime=mtimes,
-        pinned=None,
+        pinned=set(),
         keep_recent=1,
         cutoff_epoch=now - 7 * _DAY,
         now=now,
@@ -138,7 +138,7 @@ def test_plan_plugin_prune_unknown_mtime_is_never_pruned() -> None:
     prune, keep = cp.plan_plugin_prune(
         versions=["9.9.9", "9.9.8"],
         version_mtime={},                # both undateable
-        pinned=None,
+        pinned=set(),
         keep_recent=0,
         cutoff_epoch=now - 7 * _DAY,
         now=now,
@@ -149,7 +149,8 @@ def test_plan_plugin_prune_unknown_mtime_is_never_pruned() -> None:
 
 # ---------- pinned-version parsing ---------------------------------------
 
-def test_pinned_version_for_parses_installed_plugins() -> None:
+def test_pinned_versions_for_parses_installed_plugins() -> None:
+    """The legacy `path`-keyed single-record shape still resolves, as a SET."""
     installed = {
         "version": 1,
         "plugins": {
@@ -158,12 +159,75 @@ def test_pinned_version_for_parses_installed_plugins() -> None:
             ],
         },
     }
-    assert (
-        cp.pinned_version_for(installed, "claude-plugins-validation", "emasoft-plugins")
-        == "2.137.0"
+    assert cp.pinned_versions_for(
+        installed, "claude-plugins-validation", "emasoft-plugins"
+    ) == {"2.137.0"}
+    assert cp.pinned_versions_for(installed, "nope", "emasoft-plugins") == set()
+    assert cp.pinned_versions_for({}, "x", "y") == set()
+
+
+def test_pinned_versions_for_returns_EVERY_record_not_just_the_first() -> None:
+    """A real multi-record host: 4 records spanning 2 versions (issue #137).
+
+    Verbatim shape from a live `installed_plugins.json` — one janitor record per ai-maestro
+    agent workdir, three on 0.64.1 and one left behind on 0.60.1. The predecessor scanned the
+    serialised entry for the FIRST `<plugin>/<version>` token, so it reported only 0.60.1 and
+    `plan_plugin_prune` protected only that one — leaving three version dirs that three
+    running agents were loading eligible for deletion.
+    """
+    installed = {
+        "version": 1,
+        "plugins": {
+            "ai-maestro-janitor@ai-maestro-plugins": [
+                {
+                    "scope": "local",
+                    "projectPath": "/Users/x/agents/scen001-manager",
+                    "installPath": "/Users/x/.claude/plugins/cache/ai-maestro-plugins/"
+                    "ai-maestro-janitor/0.60.1",
+                    "version": "0.60.1",
+                },
+                {"scope": "local", "installPath": "/c/ai-maestro-janitor/0.64.1",
+                 "version": "0.64.1", "auto": True},
+                {"scope": "local", "installPath": "/c/ai-maestro-janitor/0.64.1",
+                 "version": "0.64.1", "auto": True},
+                {"scope": "local", "installPath": "/c/ai-maestro-janitor/0.61.1"},
+            ],
+        },
+    }
+    pins = cp.pinned_versions_for(installed, "ai-maestro-janitor", "ai-maestro-plugins")
+
+    assert pins == {"0.60.1", "0.64.1", "0.61.1"}
+    # The load-bearing consequence: every in-use version survives a prune that would
+    # otherwise delete it.
+    now = 1_000_000
+    versions = ["0.60.1", "0.61.1", "0.64.1"]
+    prune, keep = cp.plan_plugin_prune(
+        versions=versions,
+        version_mtime={v: now - 30 * _DAY for v in versions},
+        pinned=pins,
+        keep_recent=0,                    # no newest-N cushion — pins are the only guard
+        cutoff_epoch=now - 7 * _DAY,
+        now=now,
     )
-    assert cp.pinned_version_for(installed, "nope", "emasoft-plugins") is None
-    assert cp.pinned_version_for({}, "x", "y") is None
+    assert prune == [] and set(keep) == set(versions)
+
+
+def test_a_record_with_no_parseable_version_contributes_nothing() -> None:
+    """A malformed record yields no version rather than a wrong one.
+
+    The empty set means "nothing known to be in use", which downgrades to `keep_recent`;
+    a fabricated version would be asserted with false confidence.
+    """
+    installed = {
+        "plugins": {
+            "p@m": [
+                {"scope": "local"},                       # no version, no path
+                {"installPath": "/cache/p/not-a-version"},  # leaf is not semver-ish
+                "a bare string, not a record",
+            ],
+        },
+    }
+    assert cp.pinned_versions_for(installed, "p", "m") == set()
 
 
 def test_semver_sorted_ascending() -> None:

@@ -303,8 +303,19 @@ def parse_state_text(head: str) -> tuple[str, str]:
         if cm:
             column = norm_state(cm.group(1))
 
-    # Legacy fallback only when the frontmatter carried no status: key.
-    if not status:
+    # Legacy fallback ONLY for a genuine v1 card — i.e. no `status:` key AND no `column:`.
+    #
+    # The `not column` half is load-bearing (issue #135). LEGACY_STATUS_RE scans the whole
+    # head, which includes BODY prose, so on a v2 card whose body happens to contain a
+    # `**Status:** …` line — a STATE block, a progress table, a quoted example — this
+    # fabricated a v1 status the file does not have. Because the drift gate treats v1 status
+    # as authoritative, a `column: complete` card was then reported as
+    # `status='not-started'`: a value present nowhere in the file, asserted about a TRDD that
+    # §12 forbids editing, so the finding could never be cleared.
+    #
+    # A card that declares a `column:` IS v2 by construction, and its own column is the only
+    # state it has. Body prose must never outrank it.
+    if not status and not column:
         lm = LEGACY_STATUS_RE.search(head)
         if lm:
             status = norm_state(lm.group(1))

@@ -73,6 +73,38 @@ def test_parse_state_text_legacy_status_fallback():
     assert tc.parse_state_text(text) == ("in-progress", "")
 
 
+def test_a_v2_column_suppresses_the_legacy_BODY_status_fallback():
+    """A card declaring `column:` is v2, so body prose may not fabricate a v1 status (#135).
+
+    LEGACY_STATUS_RE scans the whole 4 KiB head, which includes BODY text — so a v2 card
+    whose body merely CONTAINS a `**Status:** …` line (a STATE block, a progress table, a
+    quoted example) was handed a v1 status its frontmatter does not have. Downstream, v1
+    status outranked the column, so a frozen `column: complete` TRDD was reported as
+    `status='not-started'` — a value present nowhere in the file, and unclearable because
+    §12 forbids editing a terminal TRDD.
+    """
+    text = (
+        "---\ntrdd-id: X\ntitle: T\ncolumn: complete\n---\n\n"
+        "## STATE\n\n**Status:** Not started\n\nbody\n"
+    )
+    assert tc.parse_state_text(text) == ("", "complete")
+
+
+def test_a_genuine_v1_card_still_gets_its_body_status():
+    """The fallback must survive for real v1 cards — no `status:` AND no `column:`."""
+    text = "---\ntrdd-id: X\ntitle: T\n---\n\n**Status:** Not started\n\nbody\n"
+    assert tc.parse_state_text(text) == ("not-started", "")
+
+
+def test_an_explicit_frontmatter_status_still_wins_over_the_body():
+    """A real `status:` key is authoritative; the body line must not override it."""
+    text = (
+        "---\ntrdd-id: X\ntitle: T\nstatus: in-progress\n---\n\n"
+        "**Status:** Not started\n\nbody\n"
+    )
+    assert tc.parse_state_text(text) == ("in-progress", "")
+
+
 def test_norm_state_collapses_and_lowercases():
     assert tc.norm_state("  Not Started \r") == "not-started"
 
