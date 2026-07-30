@@ -130,6 +130,48 @@ def test_leading_whitespace_janitor_marker_is_still_skipped(tmp_path):
     assert not _breadcrumb_path(home).exists()
 
 
+def test_marker_below_a_PREPENDED_block_is_still_cron_not_presence(tmp_path):
+    """A cron fire whose prompt has text PREPENDED must not stamp presence (issue #113).
+
+    The offset-0 `startswith` assumed the janitor's text is the first thing in
+    `payload["prompt"]`. On a host where something prepends — another plugin's
+    UserPromptSubmit hook, or the ai-maestro CLI wrapping a delivered prompt — the marker
+    moves and every cron fire was recorded as GENUINE USER INPUT. Measured effect there:
+    `recent_activity` stuck True on an unattended session, so the TTL-aware cadence
+    oscillated SLOW↔MID and burned five re-arm turns in 2.5 h — the feature spending turns
+    instead of saving them.
+    """
+    home = tmp_path / "home"
+    path = _breadcrumb_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seeded = {"last_user_input_epoch": 12345, "source": "janitor", "written_at_epoch": 12345}
+    path.write_text(json.dumps(seeded))
+
+    prompt = (
+        "<pss-skills>\n  ops-next [skill] (HIGH, 1.00)\n</pss-skills>\n"
+        "[janitor-heartbeat]\n/path/to/dispatcher-stub.py\nHandle this fire's stdout.\n"
+    )
+    rc, _out, _err = _run_hook(prompt, home)
+
+    assert rc == 0
+    assert json.loads(path.read_text()) == seeded          # untouched — not presence
+
+
+def test_a_marker_buried_PAST_the_scan_window_is_treated_as_user_input(tmp_path):
+    """The scan is bounded, and that boundary is deliberate — assert where it lies.
+
+    Scanning the whole prompt would let any human message mentioning `[janitor-…]` at the
+    start of some later line silently suppress its own presence stamp. Five lines clears a
+    prepended context block without turning a long human prompt into a cron fire.
+    """
+    home = tmp_path / "home"
+    prompt = "\n".join(["human line"] * 8 + ["[janitor-heartbeat]"])
+    rc, _out, _err = _run_hook(prompt, home)
+
+    assert rc == 0
+    assert _breadcrumb_path(home).exists()                  # treated as genuine input
+
+
 # --------------------------------------------------------------------------
 # (c) heartbeat refresh updates written_at_epoch, leaves last_user_input_epoch
 # --------------------------------------------------------------------------

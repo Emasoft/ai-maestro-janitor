@@ -39,16 +39,43 @@ sys.path.insert(0, str(_HERE.parent / "lib"))
 state = importlib.import_module("state")
 
 
+# How many leading lines may precede the marker before we stop looking. Small on purpose:
+# enough to clear a prepended context block, far short of scanning a long human prompt.
+_CRON_MARKER_SCAN_LINES = 5
+
+
 def _is_cron_marker(prompt: str) -> bool:
     """True iff the prompt is a janitor cron/heartbeat injection, not user input.
 
-    The discriminator is the leading `[janitor-…]` marker (the only thing that
-    distinguishes a cron-injected prompt from genuine typing). Leading whitespace
-    is tolerated. Matching the `[janitor-` prefix covers every current and future
-    directive (`-heartbeat`, `-resume`, `-renew`, `-reload`, …) without an
-    enumerated list that could drift out of date.
+    The discriminator is a `[janitor-…]` marker (`-heartbeat`, `-resume`, `-renew`,
+    `-reload`, …) at the START OF A LINE within the first few lines — not, as before, at
+    offset 0 of the whole prompt.
+
+    WHY THE WIDENING (issue #113). The offset-0 form assumed the janitor's cron text is the
+    FIRST thing in `payload["prompt"]`. On a host where something prepends to that string —
+    another plugin's UserPromptSubmit hook, or the ai-maestro CLI wrapping a delivered
+    prompt — the marker moves off offset 0, `startswith` misses, and the fire is recorded as
+    GENUINE USER PRESENCE. Measured consequence there: `last_user_input_epoch` advancing on
+    cron-only windows, so `recent_activity` read True forever on an unattended session and
+    the TTL-aware cadence could never settle at SLOW — it oscillated SLOW↔MID, five
+    `[janitor-renew]` re-arms in 2.5 h, each one a full turn. The cadence feature spent turns
+    instead of saving them.
+
+    I could not reproduce it on a standalone host, so the exact prepending agent is unproven.
+    That is precisely why the fix is mechanism-independent: the chain is airtight without it
+    — only `bump_user_presence` writes the observed shape (both epochs equal, `source:
+    janitor`), and only this filter stands between a cron fire and that call, so the filter
+    failed however the text was mutated. Fixing the CAUSE would require knowing whose text it
+    is; fixing the DISCRIMINATOR does not.
+
+    Trade-off accepted: a human prompt that begins one of its first few lines with
+    `[janitor-` is read as a cron fire and does not stamp presence. That is one turn of lost
+    recency, self-inflicted, and the offset-0 version had the same hazard at line 0.
     """
-    return prompt.lstrip().startswith("[janitor-")
+    for line in prompt.splitlines()[:_CRON_MARKER_SCAN_LINES]:
+        if line.strip().startswith("[janitor-"):
+            return True
+    return False
 
 
 def main() -> int:
