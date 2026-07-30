@@ -78,13 +78,22 @@ PROJECT_MEM="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.claude/project
   editing is on, restrict the candidate scan to LOCAL + USER.
 
 Process exactly **ONE scope this run**: first read
-`.janitor/state/memory-maint-pending.json` — the scheduler records there the exact
-`(intervention, scope, root)` it stamped when it emitted the marker (F1: the stamp
+**`$CLAUDE_PROJECT_DIR/.janitor/state/memory-maint-pending.json`** — the scheduler records there
+the exact `(intervention, scope, root)` it stamped when it emitted the marker (F1: the stamp
 already advanced, so "due" is NOT re-derivable here; acting on a different scope
 skips the stamped one for a full cadence). Use that root when the file exists and
-its `intervention` is `split`; otherwise (user-named scope, or the file is
-missing/names another chore) default to the scope with the largest over-cap page.
-`$SCOPE_ROOT` below is that one root.
+its `intervention` is `split`. `$SCOPE_ROOT` below is that one root.
+
+The path is **ABSOLUTE on purpose**: you are a spawned agent and your cwd is not guaranteed to be
+the project root, so the relative spelling resolves somewhere else and the file reads as missing.
+
+**If the file is absent, unreadable, or names another chore: STOP and report that** — do not pick
+a scope yourself. Guessing is what the paragraph above warns about, and it is not hypothetical:
+on 2026-07-30 a dispatched `conflict` pass could not read this file, re-derived cadence, ran USER,
+and left the stamped LOCAL scope marked run-without-running for a full cadence — 378k tokens, zero
+mutations (#150). An abstain that says *"dispatched but could not read my assignment"* is cheap and
+actionable; a confident run on the wrong scope is neither. A USER-named scope is the one exception:
+a human asking for a specific scope IS the assignment.
 
 ## The algorithm
 

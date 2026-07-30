@@ -171,3 +171,30 @@ def test_installer_ships_the_protocol_rule(tmp_path, monkeypatch):
     assert str(dest) in copied
     assert dest.is_file()
     assert rules_installer.PROVENANCE_MARKER in dest.read_text(encoding="utf-8")
+
+
+def test_issue150_the_sidecar_path_is_absolute_and_has_no_silent_fallback():
+    """The agent must be told an ABSOLUTE path, and must STOP rather than guess a scope.
+
+    #150: one emit event writes two artifacts that contradict each other — the sidecar says
+    "do LOCAL", and the cadence stamp (advanced by `mark_ran` at EMIT time) says "LOCAL just
+    ran". The sidecar is the only tie-breaker, so if the agent cannot read it the stamp wins
+    and the assigned scope is marked run-without-running for a full cadence.
+
+    Two ways it could not read it, both fixed here: the rule named a RELATIVE path (a spawned
+    agent's cwd is not the project root), and it authorised a fallback ("use whichever is due")
+    that turns a lookup failure into a confident run on the wrong scope.
+    """
+    text = _rule_text()
+    assert "$CLAUDE_PROJECT_DIR/.janitor/state/memory-maint-pending.json" in text, (
+        "the sidecar must be named ABSOLUTELY — a spawned agent's cwd is not the project root"
+    )
+    row = next(ln for ln in text.splitlines() if "memory-maint-pending.json" in ln)
+    # Assert the semantics POSITIVELY. An "absence of `whichever is due`" check looks right and is
+    # not: the phrase legitimately appears inside the prohibition that fixes this, so it failed on
+    # the corrected rule and would have passed on any wording that merely dropped the words.
+    assert "STOP" in row, "an unreadable assignment must halt and report, not be guessed around"
+    assert "do NOT fall back" in row, (
+        "the fallback is the defect — it converts an unreadable assignment into a wrong-scope run, "
+        "so the rule must forbid it explicitly rather than just omit it"
+    )
