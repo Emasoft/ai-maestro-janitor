@@ -138,10 +138,15 @@ stop. Do NOT do more work: the next thing that must run is `/clear`.
 1. `/clear` starts a fresh session; `SessionStart` fires (`source: "clear"`), whose
    unconditional re-arm nudge tells the model to arm the cron — but a shell hook cannot
    call CronCreate, so on an unattended machine the **bootstrap keystroke is what drives
-   the re-arm turn**, not a human.
+   the re-arm turn**, not a human. That same hook stamps `clear-observed.ts`, which is
+   what ARMS the pre-clear marker below (see step 2) — `/clear` has no hook of its own,
+   so `source=clear` is the only unambiguous observation that it happened.
 2. The bootstrap types `/janitor-arm` (re-arms the destroyed cron) then `/janitor-resume`
    (runs the dispatcher stub → `dispatch.py::_phase_clear_resume` reads
-   `resume-after-clear.flag` → emits `[janitor-resume]` + the handoff directive).
+   `resume-after-clear.flag` → emits `[janitor-resume]` + the handoff directive). The
+   phase requires `clear-observed.ts` to be at or newer than the flag: the flag is
+   written BEFORE the clear, so presence alone would let a heartbeat firing in that gap
+   consume a resume for a clear that has not happened yet.
 3. The directive's FIRST instruction runs `handoff_clear_verify.py --phase after`,
    which reads the `before` snapshot (it survived `/clear`) and emits a PASS/FAIL table
    to `reports/continuity-build/` — proving the cron was destroyed+recreated, the
@@ -166,6 +171,11 @@ disarm the heartbeat, does NOT clear other sessions.
   skill writes; read FIRST on resume, then follow its links.
 - `${CLAUDE_PROJECT_DIR}/.janitor/state/resume-after-clear.flag` — the pre-clear resume
   marker `dispatch.py::_phase_clear_resume` consumes on the re-armed cron's first fire.
+  ONLY that phase may consume it; no other resume phase may treat it as subsumed, since
+  it describes an event that has not happened yet. An UNARMED flag older than
+  `clear_resume_max_age_s` (default 24h) is swept as an abandoned clear.
+- `${CLAUDE_PROJECT_DIR}/.janitor/state/clear-observed.ts` — written by `SessionStart`
+  on `source=clear`; the flag above is inert until this is at or newer than it.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/handoff_clear_verify.py` — the cross-/clear
   verification harness (`--phase before` snapshots ground truth; `--phase after`
   proves it and writes the PASS/FAIL report). The snapshot lives at
