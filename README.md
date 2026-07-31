@@ -526,6 +526,17 @@ with `CLAUDE_PLUGIN_OPTION_SECURITY_AGENT_HINT=false`.
 - `/janitor-credential-window-audit` — scans the repo, shell-env variable
   *names*, and CI config for the window during which credentials are live
   and reachable; reports findings without ever echoing secret values.
+- `/janitor-github-issues-monitor-on` ↔ `/janitor-github-issues-monitor-off`
+  — notifies you when someone **replies** to a thread THIS project's Claude
+  opened, on **any** repo. The filter is a per-project **registry** of what
+  this project opened, not GitHub's `reason` field: on a shared `gh` identity
+  the owner's own open-source traffic carries the same `reason: author`
+  (measured, 5 of 6 emitted threads were the owner's). A plugin
+  `PostToolUse(Bash)` hook fills the registry from the URLs that GitHub-
+  *creating* commands print; reading commands never register.
+  **Not the same as `/janitor-issues-watch-on`**, which reports NEW issues on
+  *this project's own repo* through the heartbeat — different question,
+  different mechanism, no shared state.
 
 ### Control commands
 

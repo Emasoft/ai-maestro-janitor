@@ -270,6 +270,30 @@ skill + `scripts/compact_trigger.py`) is DEFAULT-ON (advisory ≥80%, enforcing
 ≥85%; fail-open) via `CLAUDE_PLUGIN_OPTION_CONTEXT_WATCHDOG_ENABLED`
 (`…CONTEXT_HARDSTOP_PCT`, `…CONTEXT_AUTOCOMPACT_ENABLED`,
 `…CONTEXT_WINDOW_TOKENS`) — TRDD-SMZFJVZ3.
+Plus `scripts/gh_issues_monitor/gh_register_hook.py` (PostToolUse `Bash`) — see the
+GH-REPLY MONITOR below; it lives outside `scripts/hooks/` because it belongs to that
+subsystem, not to the heartbeat.
+
+**GH-REPLY MONITOR (`skills/janitor-github-issues-monitor-{on,off}` +
+`scripts/gh_issues_monitor/`)** — ported from the standalone `github-issues-monitor-*`
+user skills. Notifies when someone REPLIES to a thread THIS project opened, on ANY repo,
+via a persistent `Monitor` running `gh_notify_poll.py` every 120 s (GitHub's
+`X-Poll-Interval: 60` is the floor). **Distinct from the `github-issues-watch` DETECTOR
+above**, which reports NEW issues on this project's OWN repo via the heartbeat — different
+question, different mechanism, no shared state. The filter is a **registry intersection**,
+not a `reason` filter: on a shared `gh` identity the owner's personal open-source traffic
+carries the same `reason: author` (measured 5-of-6 emitted threads), so a thread is watched
+only because this project OPENED it. `gh_register_hook.py` fills that registry from
+GH-**creating** commands' printed URLs (`gh issue create`, `pr create|comment|review`,
+`api -X POST …/comments` — never `list`/`view`, which would watch everything merely READ).
+It ships as a PLUGIN hook, NOT installed into `~/.claude/settings.json` as the standalone
+skill did: that baked an ABSOLUTE path to the script, which inside a plugin is the
+EPHEMERAL versioned cache dir → the hook dies silently at the next update when the version
+dir is GC'd. It also drops the vendored 621-line transactional settings editor. State
+(`registry.json` = a RECORD OF WORK, `state.json` cursor) lives in
+`<DATA>/gh-issues-monitor/<project-slug>/` — DATA, not `.janitor/state/`, which is
+documented as regeneratable; the standalone skill's `~/.claude/state/github-issues-monitor/`
+is COPIED across on first use (copy, never move: a rollback must still find it).
 
 **USER-MEMORY subsystem (`commands/janitor-memory-user-{add,search,share}.md` +
 `scripts/hooks/on-prompt-submit-user-mem.py` + `scripts/lib/user_mem_lib.py`,
@@ -329,6 +353,8 @@ arm-time) → one-time manual `/janitor-disarm`. `janitor-memory-record-recent`
 `janitor-supply-chain-watcher`, `janitor-dependabot-doctor`,
 `janitor-credential-window-audit`, `janitor-github-workflow-doctor`,
 `janitor-github-workflow-create`, `janitor-fork-pr-cache-audit`,
+`janitor-github-issues-monitor-on` ↔ `-off` (the GH-REPLY MONITOR above — replies to
+threads THIS project opened, anywhere; not the same as `janitor-issues-watch-on`),
 `janitor-compact-context` (agent-invocable self-compact + auto-resume; backed by
 `scripts/compact_trigger.py`; SOFT/enqueue by default since TRDD-0GPQROC1 — `/compact`
 runs when the turn ends; `--hard` = ESC-interrupt for emergencies (the ≥85% enforcement
@@ -436,7 +462,7 @@ indicator), so a CC release can break or silently change it. Findings from the �
 - **2.1.198 — subagents run in the background by DEFAULT** (`run_in_background: true` on the
   `[janitor-memory-*]` spawn is now redundant but harmless — kept for explicitness).
 
-<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=2e6a3da5dcba digest=bda4bbd03966 generated=2026-07-31T20:29:45+0200
+<+-+-JANITOR-REPO-MAP-START-(do-not-modify)-+-+> v1 sha=50173005ce1a digest=7b36de1537e2 generated=2026-07-31T21:00:49+0200
 ## Project map (auto-generated — do not edit between the fences)
 `scripts/arm_prepare.py` — Everything /janitor-arm must do BEFORE it touches the cron (TRDD-DLI76AUC).
   · resolve_data_dir(env) -> Path — The janitor's persistent DATA dir. `CLAUDE_PLUGIN_DATA` is authoritative here (we ARE the
@@ -636,6 +662,26 @@ indicator), so a CC release can break or silently change it. Findings from the �
 `scripts/fleet_status.py` — Backing script for /janitor-show-global-status (TRDD-324223a6, Group F2).
   · main() -> int
 `scripts/generate_integrity_manifest.py` — generate_integrity_manifest — write .integrity/manifest-sha256.json.
+  · main() -> int
+`scripts/gh_issues_monitor/gh_notify_poll.py` — Watch for replies to the GitHub threads THIS project's Claude opened.
+  · project_slug(root) -> str
+  · state_dir() -> str — This project's registry + poll cursor, under the janitor's DATA dir.
+  · load_state() -> dict
+  · load_registry() -> dict
+  · key(repo, number) -> str
+  · parse_thread_ref(text) -> tuple[str, int, str] | None — Accept a browser URL, an API URL, or `owner/repo#123`. -> (repo, number, kind).
+  · subject_ref(subject) -> tuple[str, int, str] | None
+  · html_url(subject, repo_full) -> str — Browser URL, anchored at the latest comment when the payload allows it.
+  · gh_api(path) -> tuple[object | None, str | None] — Return (parsed_json, error_message). Never raises.
+  · fetch_comment(subject) -> tuple[str, str] — (author, one-line body) for the latest comment; ('','') when unavailable.
+  · squeeze(text, limit) -> str
+  · do_register(refs, note) -> int
+  · do_backfill(repos) -> int — Seed the registry with threads the authenticated user authored on `repos`.
+  · do_list() -> int
+  · do_poll(args) -> int
+  · main() -> int
+`scripts/gh_issues_monitor/gh_register_hook.py` — PostToolUse(Bash) hook: register GitHub threads THIS project's Claude opens.
+  · response_text(payload) -> str — Flatten a tool_response of unknown shape (str | dict | list) to text.
   · main() -> int
 `scripts/github_config_fix.py` — Backing script for /janitor-github-config-fix (TRDD-157OH2D7) — the on-demand FIX.
   · main() -> int
